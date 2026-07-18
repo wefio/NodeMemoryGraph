@@ -2,4 +2,6 @@ node_modules/
 dist/
 .nmg/
 evals/results/
+evals/longmemeval/data/
+evals/longmemeval/results/
 *.tsbuildinfo

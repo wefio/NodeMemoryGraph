@@ -102,6 +102,21 @@ policy behavior. Current cases cover explicit hot/cold memory, automatic stable
 preferences, project constraints, transient instructions, and synthetic
 secrets. Reports are written under ignored `evals/results/`.
 
+### LongMemEval
+
+The official cleaned LongMemEval-S and oracle datasets can be placed under
+`evals/longmemeval/data/`. The adapter supports deterministic, matched
+No-Memory, Oracle, and NMG-over-Oracle development runs:
+
+```powershell
+npm run eval:longmem -- no-memory 1
+npm run eval:longmem -- oracle 1
+npm run eval:longmem -- nmg-oracle 1
+```
+
+See [evals/longmemeval/README.md](evals/longmemeval/README.md) for methodology,
+limitations, and the initial seven-question smoke-test results.
+
 Example request to the agent:
 
 ```text

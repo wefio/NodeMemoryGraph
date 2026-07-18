@@ -7,6 +7,7 @@
   "scripts": {
     "check": "tsc --noEmit",
     "eval:agents": "node --experimental-strip-types evals/run.ts",
+    "eval:longmem": "node --experimental-strip-types evals/longmemeval/run.ts",
     "pi:prompt": "node --experimental-strip-types scripts/pi-control.ts prompt",
     "pi:state": "node --experimental-strip-types scripts/pi-control.ts state",
     "test": "node --experimental-strip-types --test src/core/store.test.ts"
