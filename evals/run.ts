@@ -10,16 +10,21 @@ import type { MemoryTier } from "../src/core/types.ts";
 interface EvalCase {
   id: string;
   description: string;
+  automaticWrite?: boolean;
+  expectRemember?: boolean;
+  writerPrompt?: string;
   memory: {
     statement: string;
     nodeName: string;
     evidence: string;
     tier: MemoryTier;
     importance: number;
+    scope?: Record<string, string>;
   };
   recall: {
     prompt: string;
     expectedTerms: string[];
+    forbiddenTerms?: string[];
     requireSearchTool: boolean;
   };
 }
@@ -28,6 +33,7 @@ interface EvalResult {
   id: string;
   passed: boolean;
   writerRemembered: boolean;
+  sessionArchived: boolean;
   databaseVerified: boolean;
   readerSearched: boolean;
   answerMatched: boolean;
@@ -65,6 +71,7 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
 
   const errors: string[] = [];
   let writerRemembered = false;
+  let sessionArchived = false;
   let databaseVerified = false;
   let readerSearched = false;
   let answerMatched = false;
@@ -72,30 +79,65 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
 
   try {
     const writer = createClient(dataDirectory);
+    let writerSessionId = "";
     try {
       await writer.start();
       await writer.setThinkingLevel("low");
+      writerSessionId = (await writer.getState()).sessionId;
       const events = await writer.promptAndWait(writerPrompt(testCase), undefined, 180_000);
       writerRemembered = successfulToolCall(events, "nmg_remember");
-      if (!writerRemembered) errors.push("Writer did not complete nmg_remember.");
+      if (writerRemembered !== (testCase.expectRemember ?? true)) {
+        errors.push(
+          writerRemembered
+            ? "Writer saved a memory that policy requires it to reject."
+            : "Writer did not complete the expected nmg_remember call.",
+        );
+      }
     } finally {
       await writer.stop();
     }
 
     const store = new NmgStore(resolve(dataDirectory, "nmg.sqlite"));
     try {
-      databaseVerified = store
-        .search(testCase.memory.statement, {
-          nodeName: testCase.memory.nodeName,
-          maxTier: 3,
-          limit: 10,
-        })
-        .some(
-          (result) =>
-            result.memory.statement === testCase.memory.statement &&
-            result.evidence.content === testCase.memory.evidence,
+      sessionArchived = store.getSessionArchive(writerSessionId) !== null;
+      if (!sessionArchived) errors.push("Writer session transcript was not archived.");
+      const memoryExists = testCase.automaticWrite
+        ? store
+            .search(
+              testCase.expectRemember === false
+                ? testCase.memory.statement
+                : testCase.recall.expectedTerms.join(" "),
+              { maxTier: 3, limit: 20, includeHistorical: true },
+            )
+            .some((result) =>
+              (testCase.expectRemember === false
+                ? [testCase.memory.statement]
+                : testCase.recall.expectedTerms
+              ).every((term) =>
+                result.memory.statement
+                  .toLocaleLowerCase()
+                  .includes(term.toLocaleLowerCase()),
+              ),
+            )
+        : store
+            .search(testCase.memory.statement, {
+              nodeName: testCase.memory.nodeName,
+              maxTier: 3,
+              limit: 10,
+            })
+            .some(
+              (result) =>
+                result.memory.statement === testCase.memory.statement &&
+                result.evidence.content === testCase.memory.evidence,
+            );
+      databaseVerified = memoryExists === (testCase.expectRemember ?? true);
+      if (!databaseVerified) {
+        errors.push(
+          memoryExists
+            ? "Forbidden semantic memory was persisted."
+            : "Expected statement/evidence was not persisted.",
         );
-      if (!databaseVerified) errors.push("Expected statement/evidence was not persisted.");
+      }
     } finally {
       store.close();
     }
@@ -109,7 +151,10 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
       answer = (await reader.getLastAssistantText())?.trim() ?? "";
       answerMatched = testCase.recall.expectedTerms.every((term) =>
         answer.toLocaleLowerCase().includes(term.toLocaleLowerCase()),
-      );
+      ) &&
+        (testCase.recall.forbiddenTerms ?? []).every(
+          (term) => !answer.toLocaleLowerCase().includes(term.toLocaleLowerCase()),
+        );
 
       if (testCase.recall.requireSearchTool && !readerSearched) {
         errors.push("Reader did not complete the required nmg_search call.");
@@ -125,11 +170,13 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
   return {
     id: testCase.id,
     passed:
-      writerRemembered &&
+      writerRemembered === (testCase.expectRemember ?? true) &&
+      sessionArchived &&
       databaseVerified &&
       answerMatched &&
       (!testCase.recall.requireSearchTool || readerSearched),
     writerRemembered,
+    sessionArchived,
     databaseVerified,
     readerSearched,
     answerMatched,
@@ -162,6 +209,7 @@ function createClient(dataDirectory: string): RpcClient {
 }
 
 function writerPrompt(testCase: EvalCase): string {
+  if (testCase.automaticWrite) return testCase.writerPrompt ?? testCase.memory.evidence;
   return [
     "You are the writer in an automated NMG evaluation.",
     "Call nmg_remember exactly once using these exact arguments:",
@@ -187,4 +235,3 @@ function definedEnvironment(): Record<string, string> {
     ),
   );
 }
-

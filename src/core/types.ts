@@ -1,4 +1,10 @@
-export type HistoryRole = "user" | "assistant" | "tool" | "system" | "explicit";
+export type HistoryRole =
+  | "user"
+  | "assistant"
+  | "tool"
+  | "system"
+  | "explicit"
+  | "session";
 
 export interface HistoryRecord {
   id: string;
@@ -30,12 +36,27 @@ export interface MemoryNode {
 }
 
 export type MemoryTier = 0 | 1 | 2 | 3;
+export type MemoryStatus = "active" | "disputed" | "inactive" | "superseded";
+export type EvidenceRole =
+  | "contradict"
+  | "example"
+  | "exception"
+  | "origin"
+  | "support"
+  | "update";
+export type MemoryScope = Record<string, string>;
 
 export interface MemoryRecord {
   id: string;
   nodeId: string;
   evidenceId: string;
   statement: string;
+  scope: MemoryScope;
+  validFrom: string | null;
+  validUntil: string | null;
+  status: MemoryStatus;
+  evidenceRole: EvidenceRole;
+  supersedesId: string | null;
   tier: MemoryTier;
   importance: number;
   accessCount: number;
@@ -52,6 +73,11 @@ export interface RememberInput {
   sourceRef?: string;
   tier?: MemoryTier;
   importance?: number;
+  scope?: MemoryScope;
+  validFrom?: string;
+  validUntil?: string;
+  evidenceRole?: EvidenceRole;
+  supersedesId?: string;
 }
 
 export interface RememberResult {
@@ -62,8 +88,16 @@ export interface RememberResult {
 
 export interface SearchOptions {
   nodeName?: string;
+  scope?: MemoryScope;
+  includeHistorical?: boolean;
   maxTier?: MemoryTier;
   limit?: number;
+}
+
+export interface SessionArchive {
+  sessionId: string;
+  historyId: string;
+  createdAt: string;
 }
 
 export interface MemorySearchResult {
@@ -72,4 +106,3 @@ export interface MemorySearchResult {
   evidence: HistoryRecord;
   lexicalScore: number;
 }
-

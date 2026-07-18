@@ -10,10 +10,13 @@ import type {
   MemoryNodeKind,
   MemoryRecord,
   MemorySearchResult,
+  MemoryScope,
+  MemoryStatus,
   MemoryTier,
   RememberInput,
   RememberResult,
   SearchOptions,
+  SessionArchive,
 } from "./types.ts";
 
 type Row = Record<string, string | number | null>;
@@ -113,31 +116,50 @@ export class NmgStore {
     statement: string;
     tier?: MemoryTier;
     importance?: number;
+    scope?: MemoryScope;
+    validFrom?: string;
+    validUntil?: string;
+    evidenceRole?: MemoryRecord["evidenceRole"];
+    supersedesId?: string;
   }): MemoryRecord {
+    const createdAt = new Date().toISOString();
     const memory: MemoryRecord = {
       id: randomUUID(),
       nodeId: input.nodeId,
       evidenceId: input.evidenceId,
       statement: requireText(input.statement, "memory statement"),
+      scope: input.scope ?? {},
+      validFrom: input.validFrom ?? createdAt,
+      validUntil: input.validUntil ?? null,
+      status: "active",
+      evidenceRole: input.evidenceRole ?? "support",
+      supersedesId: input.supersedesId ?? null,
       tier: input.tier ?? 1,
       importance: clamp(input.importance ?? 0.5, 0, 1),
       accessCount: 0,
       lastAccessedAt: null,
-      createdAt: new Date().toISOString(),
+      createdAt,
     };
 
     this.#db
       .prepare(
         `INSERT INTO memory_records
-          (id, node_id, evidence_id, statement, tier, importance,
+          (id, node_id, evidence_id, statement, scope_json, valid_from,
+           valid_until, status, evidence_role, supersedes_id, tier, importance,
            access_count, last_accessed_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)`,
       )
       .run(
         memory.id,
         memory.nodeId,
         memory.evidenceId,
         memory.statement,
+        JSON.stringify(memory.scope),
+        memory.validFrom,
+        memory.validUntil,
+        memory.status,
+        memory.evidenceRole,
+        memory.supersedesId,
         memory.tier,
         memory.importance,
         memory.createdAt,
@@ -159,12 +181,33 @@ export class NmgStore {
         canonicalName: input.nodeName,
         kind: input.nodeKind,
       });
+      if (input.supersedesId) {
+        const previous = this.#db
+          .prepare("SELECT node_id FROM memory_records WHERE id = ?")
+          .get(input.supersedesId) as Row | undefined;
+        if (!previous) throw new Error(`memory ${input.supersedesId} does not exist`);
+        if (String(previous.node_id) !== node.id) {
+          throw new Error("a memory can only supersede another memory in the same node");
+        }
+        this.#db
+          .prepare(
+            `UPDATE memory_records
+             SET status = 'superseded', valid_until = ?
+             WHERE id = ?`,
+          )
+          .run(input.validFrom ?? new Date().toISOString(), input.supersedesId);
+      }
       const memory = this.addMemory({
         nodeId: node.id,
         evidenceId: history.id,
         statement: input.statement,
         tier: input.tier,
         importance: input.importance,
+        scope: input.scope,
+        validFrom: input.validFrom,
+        validUntil: input.validUntil,
+        evidenceRole: input.evidenceRole,
+        supersedesId: input.supersedesId,
       });
       this.#db.exec("COMMIT");
       return { history, node, memory };
@@ -185,6 +228,10 @@ export class NmgStore {
         `SELECT
            m.id AS m_id, m.node_id AS m_node_id,
            m.evidence_id AS m_evidence_id, m.statement AS m_statement,
+           m.scope_json AS m_scope_json, m.valid_from AS m_valid_from,
+           m.valid_until AS m_valid_until, m.status AS m_status,
+           m.evidence_role AS m_evidence_role,
+           m.supersedes_id AS m_supersedes_id,
            m.tier AS m_tier, m.importance AS m_importance,
            m.access_count AS m_access_count,
            m.last_accessed_at AS m_last_accessed_at,
@@ -200,6 +247,7 @@ export class NmgStore {
          JOIN history_records h ON h.id = m.evidence_id
          WHERE m.tier <= ?
            AND (? IS NULL OR n.canonical_name = ?)
+           AND (? = 1 OR m.status IN ('active', 'disputed'))
          ORDER BY m.tier ASC, m.importance DESC,
                   m.access_count DESC, m.created_at DESC
          LIMIT ?`,
@@ -208,11 +256,13 @@ export class NmgStore {
         maxTier,
         options.nodeName ?? null,
         options.nodeName ?? null,
+        options.includeHistorical ? 1 : 0,
         MAX_SEARCH_CANDIDATES,
       ) as Row[];
 
     return rows
       .map((row) => mapSearchResult(row, lexicalScore(normalizedQuery, row)))
+      .filter((result) => matchesScope(result.memory.scope, options.scope))
       .filter((result) => result.lexicalScore > 0)
       .sort(
         (left, right) =>
@@ -244,6 +294,54 @@ export class NmgStore {
     }
   }
 
+  archiveSession(input: {
+    sessionId: string;
+    transcript: string;
+    sourceRef?: string;
+  }): SessionArchive {
+    const sessionId = requireText(input.sessionId, "session id");
+    const existing = this.getSessionArchive(sessionId);
+    if (existing) return existing;
+
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      const history = this.appendHistory({
+        content: input.transcript,
+        role: "session",
+        sessionId,
+        sourceRef: input.sourceRef,
+      });
+      const archive: SessionArchive = {
+        sessionId,
+        historyId: history.id,
+        createdAt: history.createdAt,
+      };
+      this.#db
+        .prepare(
+          `INSERT INTO session_archives (session_id, history_id, created_at)
+           VALUES (?, ?, ?)`,
+        )
+        .run(archive.sessionId, archive.historyId, archive.createdAt);
+      this.#db.exec("COMMIT");
+      return archive;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  getSessionArchive(sessionId: string): SessionArchive | null {
+    const row = this.#db
+      .prepare("SELECT * FROM session_archives WHERE session_id = ?")
+      .get(sessionId) as Row | undefined;
+    if (!row) return null;
+    return {
+      sessionId: String(row.session_id),
+      historyId: String(row.history_id),
+      createdAt: String(row.created_at),
+    };
+  }
+
   #migrate(): void {
     this.#db.exec(`
       CREATE TABLE IF NOT EXISTS history_records (
@@ -269,10 +367,22 @@ export class NmgStore {
         node_id TEXT NOT NULL REFERENCES memory_nodes(id),
         evidence_id TEXT NOT NULL REFERENCES history_records(id),
         statement TEXT NOT NULL,
+        scope_json TEXT NOT NULL DEFAULT '{}',
+        valid_from TEXT,
+        valid_until TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        evidence_role TEXT NOT NULL DEFAULT 'support',
+        supersedes_id TEXT REFERENCES memory_records(id),
         tier INTEGER NOT NULL CHECK (tier BETWEEN 0 AND 3),
         importance REAL NOT NULL CHECK (importance BETWEEN 0 AND 1),
         access_count INTEGER NOT NULL DEFAULT 0,
         last_accessed_at TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS session_archives (
+        session_id TEXT PRIMARY KEY,
+        history_id TEXT NOT NULL UNIQUE REFERENCES history_records(id),
         created_at TEXT NOT NULL
       );
 
@@ -281,6 +391,28 @@ export class NmgStore {
       CREATE INDEX IF NOT EXISTS idx_memory_records_tier_priority
         ON memory_records(tier, importance DESC, access_count DESC);
     `);
+    this.#ensureMemoryColumns();
+  }
+
+  #ensureMemoryColumns(): void {
+    const existing = new Set(
+      (this.#db.prepare("PRAGMA table_info(memory_records)").all() as Row[]).map(
+        (row) => String(row.name),
+      ),
+    );
+    const additions: Array<[string, string]> = [
+      ["scope_json", "TEXT NOT NULL DEFAULT '{}'"],
+      ["valid_from", "TEXT"],
+      ["valid_until", "TEXT"],
+      ["status", "TEXT NOT NULL DEFAULT 'active'"],
+      ["evidence_role", "TEXT NOT NULL DEFAULT 'support'"],
+      ["supersedes_id", "TEXT REFERENCES memory_records(id)"],
+    ];
+    for (const [name, definition] of additions) {
+      if (!existing.has(name)) {
+        this.#db.exec(`ALTER TABLE memory_records ADD COLUMN ${name} ${definition}`);
+      }
+    }
   }
 }
 
@@ -302,6 +434,12 @@ function mapSearchResult(row: Row, score: number): MemorySearchResult {
       nodeId: String(row.m_node_id),
       evidenceId: String(row.m_evidence_id),
       statement: String(row.m_statement),
+      scope: parseScope(row.m_scope_json),
+      validFrom: row.m_valid_from ? String(row.m_valid_from) : null,
+      validUntil: row.m_valid_until ? String(row.m_valid_until) : null,
+      status: String(row.m_status) as MemoryStatus,
+      evidenceRole: String(row.m_evidence_role) as MemoryRecord["evidenceRole"],
+      supersedesId: row.m_supersedes_id ? String(row.m_supersedes_id) : null,
       tier: Number(row.m_tier) as MemoryTier,
       importance: Number(row.m_importance),
       accessCount: Number(row.m_access_count),
@@ -363,4 +501,18 @@ function requireText(value: string, label: string): string {
 function clamp(value: number, minimum: number, maximum: number): number {
   if (!Number.isFinite(value)) return minimum;
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function parseScope(value: string | number | null): MemoryScope {
+  if (typeof value !== "string") return {};
+  try {
+    return JSON.parse(value) as MemoryScope;
+  } catch {
+    return {};
+  }
+}
+
+function matchesScope(memory: MemoryScope, requested?: MemoryScope): boolean {
+  if (!requested) return true;
+  return Object.entries(requested).every(([key, value]) => memory[key] === value);
 }

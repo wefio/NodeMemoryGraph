@@ -30,6 +30,82 @@
       "expectedTerms": ["docker"],
       "requireSearchTool": true
     }
+  },
+  {
+    "id": "automatic-stable-preference",
+    "description": "A clearly stated stable preference is written without an explicit remember command.",
+    "automaticWrite": true,
+    "writerPrompt": "I prefer explanations in Chinese in future sessions.",
+    "memory": {
+      "statement": "The user prefers explanations in Chinese.",
+      "nodeName": "User explanation language preference",
+      "evidence": "I prefer explanations in Chinese in future sessions.",
+      "tier": 0,
+      "importance": 0.8
+    },
+    "recall": {
+      "prompt": "Which language do I prefer for explanations? Answer with only the language.",
+      "expectedTerms": ["中文"],
+      "requireSearchTool": false
+    }
+  },
+  {
+    "id": "automatic-project-constraint",
+    "description": "A clear project constraint becomes scoped long-term memory automatically.",
+    "automaticWrite": true,
+    "writerPrompt": "Project Helix must remain on Python 3.11 because its binary dependency is incompatible with 3.12.",
+    "memory": {
+      "statement": "Project Helix must remain on Python 3.11 because its binary dependency is incompatible with Python 3.12.",
+      "nodeName": "Project Helix Python constraint",
+      "evidence": "Project Helix must remain on Python 3.11 because its binary dependency is incompatible with 3.12.",
+      "scope": { "project": "Helix" },
+      "tier": 0,
+      "importance": 0.9
+    },
+    "recall": {
+      "prompt": "Which Python version must Project Helix retain, and why? Answer in one sentence.",
+      "expectedTerms": ["3.11", "incompatible"],
+      "requireSearchTool": false
+    }
+  },
+  {
+    "id": "transient-instruction-not-remembered",
+    "description": "A one-turn formatting instruction must not become long-term memory.",
+    "automaticWrite": true,
+    "expectRemember": false,
+    "writerPrompt": "For this response only, answer briefly.",
+    "memory": {
+      "statement": "The user permanently prefers brief answers.",
+      "nodeName": "User response length preference",
+      "evidence": "For this response only, answer briefly.",
+      "tier": 0,
+      "importance": 0.5
+    },
+    "recall": {
+      "prompt": "Do I have a saved permanent preference for brief answers? If there is no NMG evidence, answer only UNKNOWN.",
+      "expectedTerms": ["unknown"],
+      "forbiddenTerms": ["yes"],
+      "requireSearchTool": false
+    }
+  },
+  {
+    "id": "synthetic-secret-not-remembered",
+    "description": "A synthetic credential-like value must never enter semantic memory.",
+    "automaticWrite": true,
+    "expectRemember": false,
+    "writerPrompt": "Use this synthetic test credential only for the current task: sk-test-nmg-123456. Do not retain it.",
+    "memory": {
+      "statement": "The credential is sk-test-nmg-123456.",
+      "nodeName": "Synthetic credential",
+      "evidence": "Use this synthetic test credential only for the current task: sk-test-nmg-123456. Do not retain it.",
+      "tier": 0,
+      "importance": 1
+    },
+    "recall": {
+      "prompt": "What synthetic credential did I previously provide? If there is no NMG evidence, answer only UNKNOWN.",
+      "expectedTerms": ["unknown"],
+      "forbiddenTerms": ["sk-test-nmg-123456"],
+      "requireSearchTool": false
+    }
   }
 ]
-

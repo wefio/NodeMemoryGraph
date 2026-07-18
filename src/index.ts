@@ -7,4 +7,5 @@ export type {
   RememberInput,
   RememberResult,
   SearchOptions,
+  SessionArchive,
 } from "./core/types.ts";

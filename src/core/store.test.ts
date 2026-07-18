@@ -88,3 +88,71 @@ test("the same semantic node is reused without merging evidence", () => {
     assert.notEqual(first.memory.id, second.memory.id);
   });
 });
+
+test("scope filters memories without discarding other scopes", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "The production database is PostgreSQL",
+      nodeName: "database",
+      scope: { environment: "production" },
+    });
+    store.remember({
+      statement: "The test database is SQLite",
+      nodeName: "database",
+      scope: { environment: "test" },
+    });
+
+    const results = store.search("database", {
+      maxTier: 3,
+      scope: { environment: "production" },
+    });
+    assert.equal(results.length, 1);
+    assert.match(results[0]?.memory.statement ?? "", /PostgreSQL/);
+  });
+});
+
+test("a newer state supersedes but does not delete the old memory", () => {
+  withStore((store) => {
+    const previous = store.remember({
+      statement: "Project Atlas uses Python 3.11",
+      nodeName: "Project Atlas runtime",
+      evidenceRole: "origin",
+    });
+    const current = store.remember({
+      statement: "Project Atlas uses Python 3.12",
+      nodeName: "Project Atlas runtime",
+      evidenceRole: "update",
+      supersedesId: previous.memory.id,
+    });
+
+    const active = store.search("Project Atlas Python", { maxTier: 3 });
+    assert.deepEqual(active.map((result) => result.memory.id), [current.memory.id]);
+
+    const historical = store.search("Project Atlas Python", {
+      maxTier: 3,
+      includeHistorical: true,
+    });
+    assert.equal(historical.length, 2);
+    assert.equal(
+      historical.find((result) => result.memory.id === previous.memory.id)?.memory.status,
+      "superseded",
+    );
+  });
+});
+
+test("session archives are idempotent and remain outside semantic search", () => {
+  withStore((store) => {
+    const first = store.archiveSession({
+      sessionId: "session-1",
+      transcript: "USER: hello\nASSISTANT: hi",
+    });
+    const second = store.archiveSession({
+      sessionId: "session-1",
+      transcript: "this duplicate must not be stored",
+    });
+
+    assert.deepEqual(second, first);
+    assert.deepEqual(store.search("hello", { maxTier: 3 }), []);
+    assert.equal(store.getSessionArchive("session-1")?.historyId, first.historyId);
+  });
+});

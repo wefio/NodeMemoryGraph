@@ -20,7 +20,8 @@ The primary integration target is Pi. Pi remains responsible for the model loop,
 | Node-local history | `MemoryRecord` references evidence and belongs to a local tier L0-L3. |
 | Retrieval | Route to a small candidate set, read shallow tiers first, then expand under a budget. |
 | Huffman idea | An optimization hypothesis: expected usefulness should affect depth. The MVP uses tiers rather than a literal Huffman tree. |
-| Write policy | Explicit confirmed memories only in the MVP. Raw Pi sessions remain Pi's responsibility. |
+| Write policy | Clear stable user-stated facts, preferences, and constraints are automatic. Ambiguous or inferred candidates require confirmation; secrets and transient instructions are rejected. |
+| Session evidence | Each completed Pi turn checkpoints its session transcript as cold evidence. Session archives do not automatically become semantic memories. |
 | Cloud | Optional coordination/sync backend later; never the only copy. |
 | Sandbox | Outside NMG core. Add an execution backend only when a real task requires untrusted execution. Docker is the first candidate. |
 | Learning | PyTorch may later learn routing, stopping, or priority; storage topology remains an external discrete system. |
@@ -50,11 +51,16 @@ The graph and access hierarchy are separate structures:
 The extension uses only public Pi extension surfaces:
 
 1. `before_agent_start` searches L0/L1 using the new prompt and appends a small memory block to the system prompt for that run.
-2. `nmg_remember` writes one explicit memory and its evidence.
-3. `nmg_search` performs budgeted retrieval and can include deeper tiers.
-4. A future feedback tool will record which injected records actually helped; exposure alone must not count as successful use.
+2. The injected write policy directs Pi to call `nmg_remember` automatically for stable user-stated facts, preferences, and constraints. Explicit writes use the same path.
+3. `nmg_remember` preserves scope, validity, evidence role, and optional supersession metadata rather than deleting earlier evidence.
+4. `nmg_search` performs budgeted retrieval and can include deeper tiers or historical states.
+5. `agent_end` checkpoints the current transcript; `session_shutdown` provides a final graceful checkpoint.
+6. Retrieval records successful tool use for priority statistics; richer answer-level feedback remains future work.
 
-Automatic extraction from every message is deliberately deferred because model-authored text is not reliable evidence and aggressive extraction would pollute the graph.
+Automatic extraction remains governed rather than universal: model-authored claims,
+casual conversation, transient instructions, credentials, and secrets are not
+semantic memories. The complete session is still retained separately as cold
+evidence, so later extractors can be improved without losing provenance.
 
 ## Local and cloud placement
 
@@ -123,4 +129,3 @@ Track evidence Recall@K, stale-memory error rate, average injected records/token
 - What feedback proves that a retrieved memory was useful?
 - When does a node split, merge, or regenerate its summary from evidence?
 - Which rare constraints must be pinned near the surface regardless of access frequency?
-

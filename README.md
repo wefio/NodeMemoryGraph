@@ -5,10 +5,15 @@ NMG is a local-first long-term memory layer for the [Pi agent harness](https://g
 The first prototype intentionally has a narrow scope:
 
 - SQLite is the local source of truth.
-- Memories are written explicitly through `nmg_remember`.
+- Stable user-stated facts, preferences, and constraints are automatically
+  written through `nmg_remember`; explicit writes remain available.
+- Completed Pi turns checkpoint the session transcript as cold, immutable
+  evidence without turning every message into semantic memory.
 - Pi automatically injects a few L0/L1 memories before each agent run.
 - `nmg_search` can search deeper tiers and returns evidence references.
-- Cloud sync, embeddings, automatic extraction, learned routing, and sandbox execution are deferred.
+- Scope, validity intervals, conflicts, and superseded states remain
+  traceable instead of deleting earlier evidence.
+- Cloud sync, embeddings, learned routing, and sandbox execution are deferred.
 
 ## Architecture
 
@@ -42,10 +47,23 @@ pi -e ./.pi/extensions/nmg/index.ts
 
 By default, the extension stores data in `.nmg/nmg.sqlite` under the current project. Set `NMG_DATA_DIR` to use another directory.
 
-In Pi, the model receives two tools:
+In Pi, the model receives two tools and a write policy:
 
-- `nmg_remember`: save a confirmed long-term memory with its evidence.
-- `nmg_search`: retrieve memories with a tier and result budget.
+- `nmg_remember`: save a long-term memory with scope, validity, evidence role,
+  and optional supersession metadata.
+- `nmg_search`: retrieve active memories with scope, tier, result, conflict,
+  and historical-state controls.
+
+The automatic-write rule is intentionally narrow:
+
+- Save a clear, stable user-stated fact, preference, or hard constraint that
+  is likely to help in a later session.
+- Ask before saving ambiguous, inferred, uncertain, or current-task-only
+  information.
+- Never save casual chatter, duplicates, unverified model claims, credentials,
+  secrets, or sensitive personal data as semantic memory.
+- When a confirmed state changes, retain the old evidence and link the new
+  memory with `evidenceRole=update` and `supersedesId`.
 
 ## Headless Pi control
 
@@ -70,17 +88,19 @@ Each invocation uses a new Pi session but shares the project's
 
 ## Agent evaluation
 
-The first Agent-to-Agent-style regression suite runs independent cases in
-parallel. Within each case, a Writer Pi process stores a memory and a fresh
-Reader Pi process attempts to recall it from the same isolated NMG database.
+The Agent-to-Agent-style regression suite runs independent cases in parallel.
+Within each case, a Writer Pi process receives a user turn and a fresh Reader
+Pi process attempts recall from the same isolated NMG database.
 
 ```powershell
 npm run eval:agents
 ```
 
 The suite pins `deepseek/deepseek-v4-flash`, uses low thinking, verifies actual
-tool completion and SQLite evidence, and writes ignored reports under
-`evals/results/`.
+tool completion, session archives, SQLite evidence, recall, and negative write
+policy behavior. Current cases cover explicit hot/cold memory, automatic stable
+preferences, project constraints, transient instructions, and synthetic
+secrets. Reports are written under ignored `evals/results/`.
 
 Example request to the agent:
 
