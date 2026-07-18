@@ -31,6 +31,7 @@ export interface AnnBuildResult {
 export class UsearchAnnIndex {
   readonly indexPath: string;
   readonly metadataPath: string;
+  #loaded: { index: NativeIndex; dimensions: number; memoryIds: string[] } | null = null;
 
   constructor(indexPath: string) {
     this.indexPath = indexPath;
@@ -84,21 +85,27 @@ export class UsearchAnnIndex {
     }));
     renameSync(temporaryIndex, this.indexPath);
     renameSync(temporaryMetadata, this.metadataPath);
+    this.#loaded = { index, dimensions, memoryIds };
     return { count: memoryIds.length, dimensions, model };
   }
 
   search(vector: readonly number[], count: number): string[] {
-    const metadata = JSON.parse(readFileSync(this.metadataPath, "utf8")) as {
-      model: string;
-      dimensions: number;
-      memoryIds: string[];
-    };
-    if (vector.length !== metadata.dimensions) {
-      throw new Error(`query has ${vector.length} dimensions; index expects ${metadata.dimensions}`);
+    if (!this.#loaded) {
+      const metadata = JSON.parse(readFileSync(this.metadataPath, "utf8")) as {
+        model: string;
+        dimensions: number;
+        memoryIds: string[];
+      };
+      const index = new Index({ dimensions: metadata.dimensions, metric: "cos" });
+      index.load(this.indexPath);
+      this.#loaded = { index, dimensions: metadata.dimensions, memoryIds: metadata.memoryIds };
     }
-    const index = new Index({ dimensions: metadata.dimensions, metric: "cos" });
-    index.load(this.indexPath);
-    const matches = index.search(new Float32Array(vector), Math.min(count, metadata.memoryIds.length));
-    return [...matches.keys].map((key) => metadata.memoryIds[Number(key) - 1]!).filter(Boolean);
+    const loaded = this.#loaded;
+    if (vector.length !== loaded.dimensions) {
+      throw new Error(`query has ${vector.length} dimensions; index expects ${loaded.dimensions}`);
+    }
+    const matches = loaded.index.search(
+      new Float32Array(vector), Math.min(count, loaded.memoryIds.length));
+    return [...matches.keys].map((key) => loaded.memoryIds[Number(key) - 1]!).filter(Boolean);
   }
 }

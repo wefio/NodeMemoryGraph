@@ -10,6 +10,7 @@
     "eval:longmem": "node --experimental-strip-types evals/longmemeval/run.ts",
     "eval:recall-compression": "node --experimental-strip-types evals/recall-compression.ts",
     "eval:scale": "node --experimental-strip-types evals/scale/run.ts",
+    "eval:hierarchy": "node --experimental-strip-types evals/hierarchy-scale/run.ts",
     "index:qwen3": "node --experimental-strip-types scripts/index-qwen3.ts",
     "index:ann": "node --experimental-strip-types scripts/build-ann.ts",
     "pi:prompt": "node --experimental-strip-types scripts/pi-control.ts prompt",

@@ -1078,20 +1078,22 @@ export class NmgStore {
   routeLeafBlocksByVector(
     queryVector: readonly number[],
     model: string,
-    nodeIds: string[],
+    nodeIds: string[] = [],
     limit = 8,
     candidateBlockIds: string[] = [],
   ): Array<{ block: LeafBlock; score: number }> {
     const nodes = [...new Set(nodeIds)].slice(0, 50);
-    if (nodes.length === 0) return [];
     const blocks = [...new Set(candidateBlockIds)].slice(0, 2_000);
+    const nodeClause = nodes.length > 0
+      ? `AND b.node_id IN (${nodes.map(() => "?").join(",")})`
+      : "";
     const blockClause = blocks.length > 0
       ? `AND b.id IN (${blocks.map(() => "?").join(",")})`
       : "";
     const rows = this.#db.prepare(
       `SELECT b.*, e.vector_json FROM memory_leaf_blocks b
        JOIN leaf_embeddings e ON e.block_id = b.id AND e.model = ?
-       WHERE b.node_id IN (${nodes.map(() => "?").join(",")}) ${blockClause}`,
+       WHERE 1 = 1 ${nodeClause} ${blockClause}`,
     ).all(model, ...nodes, ...blocks) as Row[];
     return rows.map((row) => ({
       block: mapLeafBlock(row),
@@ -1128,12 +1130,23 @@ export class NmgStore {
     options: SearchOptions & { nodeLimit?: number; blockLimit?: number } = {},
   ): MemorySearchResult[] {
     const nodes = this.routeNodesByVector(queryVector, model, options.nodeLimit ?? 5);
-    const leaves = this.routeLeafBlocksByVector(
+    const directLeaves = this.routeLeafBlocksByVector(
+      queryVector,
+      model,
+      [],
+      options.blockLimit ?? 8,
+    );
+    const routedLeaves = this.routeLeafBlocksByVector(
       queryVector,
       model,
       nodes.map((route) => route.node.id),
       options.blockLimit ?? 8,
     );
+    const leaves = [...directLeaves, ...routedLeaves]
+      .filter((route, index, all) =>
+        all.findIndex((candidate) => candidate.block.id === route.block.id) === index)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, options.blockLimit ?? 8);
     return this.searchLeafBlocks(
       query,
       queryVector,
@@ -1312,7 +1325,7 @@ export class NmgStore {
         result.vectorScore = retrievalMode === "fts5" ? 0 : vector;
         result.routeScore = route;
         result.combinedScore = retrievalMode === "fts5"
-          ? lexical
+          ? (lexical > 0 ? lexical : forcedCandidateIds.length > 0 ? 0.001 : 0)
           : retrievalMode === "hashing" || retrievalMode === "qwen3"
           ? vector
           : hybridScore(lexical, vector, route);
