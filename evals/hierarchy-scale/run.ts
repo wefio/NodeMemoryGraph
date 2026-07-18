@@ -2,13 +2,23 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { DatabaseSync } from "node:sqlite";
-import { HashingVectorEmbedder, NmgStore, UsearchAnnIndex } from "../../src/index.ts";
+import { HashingVectorEmbedder, NmgStore, OpenAIEmbeddingClient, UsearchAnnIndex } from "../../src/index.ts";
 
 const sizes = (process.env.NMG_HIERARCHY_SIZES?.split(",").map(Number) ?? [100, 1_000, 10_000])
   .filter((value) => Number.isInteger(value) && value >= 16);
 const outputDir = join(process.cwd(), "evals", "hierarchy-scale", ".tmp");
 const embedder = new HashingVectorEmbedder();
+const qwen = process.env.NMG_EMBED_BASE_URL ? new OpenAIEmbeddingClient({
+  baseUrl: process.env.NMG_EMBED_BASE_URL,
+  apiKey: process.env.NMG_EMBED_API_KEY,
+  model: process.env.NMG_EMBED_MODEL,
+}) : null;
+const vectorModel = qwen?.model ?? embedder.model;
 const annCandidates = Math.max(8, Math.min(Number(process.env.NMG_ANN_CANDIDATES ?? 64), 2_000));
+const blockLimit = Math.max(1, Math.min(Number(process.env.NMG_BLOCK_LIMIT ?? 8), 50));
+const defaultModes = ["full-record-scan", "node-only+fts", "node+leaf", "record-ann", "leaf-ann"];
+const selectedModes = new Set((process.env.NMG_HIERARCHY_MODES ?? defaultModes.join(","))
+  .split(",").map((mode) => mode.trim()));
 mkdirSync(outputDir, { recursive: true });
 
 const cases = [
@@ -23,6 +33,9 @@ const cases = [
 ] as const;
 
 const reports = [];
+const queryVectors = qwen
+  ? await qwen.embedQueries(cases.map((item) => item[2]))
+  : cases.map((item) => embedder.embed(item[2]));
 for (const size of sizes) {
   const databasePath = join(outputDir, `hierarchy-${size}.sqlite`);
   const annPath = join(outputDir, `hierarchy-${size}.usearch`);
@@ -60,86 +73,92 @@ for (const size of sizes) {
   const store = new NmgStore(databasePath, embedder);
 
   const recordBuildStarted = performance.now();
-  const recordVectorCount = store.rebuildVectorIndex();
+  const needsRecordVectors = selectedModes.has("full-record-scan") || selectedModes.has("record-ann");
+  const recordVectorCount = needsRecordVectors
+    ? qwen ? await indexRecordDocuments(store, qwen) : store.rebuildVectorIndex()
+    : 0;
   const recordBuildMs = performance.now() - recordBuildStarted;
 
   const nodeBuildStarted = performance.now();
   const nodeDocuments = allNodeDocuments(store);
-  store.upsertExternalNodeEmbeddings(embedder.model, nodeDocuments.map((document) => ({
+  const nodeVectors = qwen
+    ? await qwen.embed(nodeDocuments.map((document) => document.text))
+    : nodeDocuments.map((document) => embedder.embed(document.text));
+  store.upsertExternalNodeEmbeddings(vectorModel, nodeDocuments.map((document, index) => ({
     nodeId: document.nodeId,
-    vector: embedder.embed(document.text),
+    vector: nodeVectors[index]!,
   })));
   const nodeBuildMs = performance.now() - nodeBuildStarted;
 
   const leafBuildStarted = performance.now();
   store.rebuildLeafBlocks(undefined, 32);
   const leafDocuments = allLeafDocuments(store);
-  store.upsertExternalLeafEmbeddings(embedder.model, leafDocuments.map((document) => ({
+  const leafVectors = qwen ? await embedTexts(qwen, leafDocuments.map((document) => document.text))
+    : leafDocuments.map((document) => embedder.embed(document.text));
+  store.upsertExternalLeafEmbeddings(vectorModel, leafDocuments.map((document, index) => ({
     blockId: document.blockId,
-    vector: embedder.embed(document.text),
+    vector: leafVectors[index]!,
   })));
   const leafBuildMs = performance.now() - leafBuildStarted;
 
   const annBuildStarted = performance.now();
-  const ann = new UsearchAnnIndex(annPath);
-  const annResult = ann.buildBatches(embedder.model, recordEmbeddingBatches(store));
+  const ann = new UsearchAnnIndex(annPath, annCandidates);
+  const annResult = selectedModes.has("record-ann")
+    ? ann.buildBatches(vectorModel, recordEmbeddingBatches(store, vectorModel))
+    : { count: 0, dimensions: 0, model: vectorModel };
   const annBuildMs = performance.now() - annBuildStarted;
   const leafAnnBuildStarted = performance.now();
-  const leafAnn = new UsearchAnnIndex(leafAnnPath);
-  const leafAnnResult = leafAnn.buildBatches(embedder.model, leafDocuments.map((document) => [{
+  const leafAnn = new UsearchAnnIndex(leafAnnPath, annCandidates);
+  const leafAnnResult = leafAnn.buildBatches(vectorModel, leafDocuments.map((document, index) => [{
     memoryId: document.blockId,
-    vector: embedder.embed(document.text),
+    vector: leafVectors[index]!,
   }]));
   const leafAnnBuildMs = performance.now() - leafAnnBuildStarted;
 
   const modes = [
     {
       name: "full-record-scan",
-      search: (query: string) => store.searchByVector(query, embedder.embed(query), embedder.model,
+      search: (query: string, vector: number[]) => store.searchByVector(query, vector, vectorModel,
         { maxTier: 3, limit: 8, retrievalMode: "qwen3" }),
     },
     {
       name: "node-only+fts",
-      search: (query: string) => {
-        const vector = embedder.embed(query);
-        const routes = store.routeNodesByVector(vector, embedder.model, 4);
-        return store.searchNodeFirst(query, vector, embedder.model,
+      search: (query: string, vector: number[]) => {
+        const routes = store.routeNodesByVector(vector, vectorModel, 4);
+        return store.searchNodeFirst(query, vector, vectorModel,
           routes.map((route) => route.node.id), { maxTier: 3, limit: 8 });
       },
     },
     {
       name: "node+leaf",
-      search: (query: string) => store.searchHierarchyByVector(
-        query, embedder.embed(query), embedder.model,
-        { maxTier: 3, limit: 8, nodeLimit: 4, blockLimit: 8 },
+      search: (query: string, vector: number[]) => store.searchHierarchyByVector(
+        query, vector, vectorModel,
+        { maxTier: 3, limit: 8, nodeLimit: 4, blockLimit },
       ),
     },
     {
       name: "record-ann",
-      search: (query: string) => {
-        const vector = embedder.embed(query);
-        return store.searchByVectorCandidates(query, vector, embedder.model, ann.search(vector, annCandidates),
+      search: (query: string, vector: number[]) => {
+        return store.searchByVectorCandidates(query, vector, vectorModel, ann.search(vector, annCandidates),
           { maxTier: 3, limit: 8, retrievalMode: "qwen3" });
       },
     },
     {
       name: "leaf-ann",
-      search: (query: string) => {
-        const vector = embedder.embed(query);
+      search: (query: string, vector: number[]) => {
         const leaves = store.routeLeafBlocksByVector(
-          vector, embedder.model, [], 8, leafAnn.search(vector, annCandidates),
+          vector, vectorModel, [], blockLimit, leafAnn.search(vector, annCandidates),
         );
-        return store.searchLeafBlocks(query, vector, embedder.model,
-          leaves.map((route) => route.block.id), { maxTier: 3, limit: 8 });
+        return store.searchLeafBlocks(query, vector, vectorModel,
+          leaves.map((route) => route.block.id), { maxTier: 3, limit: 8 },
+          new Map(leaves.map((route) => [route.block.id, route.score])));
       },
     },
   ];
-  const selectedModes = new Set((process.env.NMG_HIERARCHY_MODES ?? modes.map((mode) => mode.name).join(","))
-    .split(",").map((mode) => mode.trim()));
   const results = modes.filter((mode) => selectedModes.has(mode.name)).map((mode) => {
-    const queries = cases.map(([id, , query]) => {
+    const queries = cases.map(([id, , query], caseIndex) => {
       const started = performance.now();
-      const found = mode.search(query);
+      const found = mode.search(query, queryVectors[caseIndex]!);
       return {
         id,
         hit: found.some((result) => result.memory.id === expected.get(id)),
@@ -171,7 +190,7 @@ for (const size of sizes) {
   });
   store.close();
 }
-console.log(JSON.stringify({ embedding: embedder.model, annCandidates, reports }, null, 2));
+console.log(JSON.stringify({ embedding: vectorModel, annCandidates, blockLimit, reports }, null, 2));
 
 function insertDistractors(path: string, count: number, nodeIds: string[]): void {
   const db = new DatabaseSync(path);
@@ -232,12 +251,36 @@ function allLeafDocuments(store: NmgStore) {
   }
 }
 
-function* recordEmbeddingBatches(store: NmgStore) {
+function* recordEmbeddingBatches(store: NmgStore, model: string) {
   let cursor = "";
   while (true) {
-    const batch = store.storedEmbeddings(embedder.model, cursor, 2_048);
+    const batch = store.storedEmbeddings(model, cursor, 2_048);
     if (batch.length === 0) return;
     yield batch;
     cursor = batch.at(-1)!.memoryId;
+  }
+}
+
+async function embedTexts(client: OpenAIEmbeddingClient, texts: string[], batchSize = 64) {
+  const vectors: number[][] = [];
+  for (let offset = 0; offset < texts.length; offset += batchSize) {
+    vectors.push(...await client.embed(texts.slice(offset, offset + batchSize)));
+  }
+  return vectors;
+}
+
+async function indexRecordDocuments(store: NmgStore, client: OpenAIEmbeddingClient) {
+  let cursor = "";
+  let count = 0;
+  while (true) {
+    const documents = store.embeddingDocuments(cursor, 64, client.model);
+    if (documents.length === 0) return count;
+    const vectors = await client.embed(documents.map((document) => document.text));
+    store.upsertExternalEmbeddings(client.model, documents.map((document, index) => ({
+      memoryId: document.memoryId,
+      vector: vectors[index]!,
+    })));
+    count += documents.length;
+    cursor = documents.at(-1)!.memoryId;
   }
 }

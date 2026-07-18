@@ -715,5 +715,9 @@ test("leaf summaries preserve distinctions hidden by one broad node summary", ()
       "Python 2", [0, 1], "leaf-test", { maxTier: 3, limit: 3 },
     );
     assert.equal(hierarchical[0]?.memory.id, python.memory.id);
+    const semantic = store.searchHierarchyByVector(
+      "legacy interpreter requirement", [0, 1], "leaf-test", { maxTier: 3, limit: 1 },
+    );
+    assert.equal(semantic[0]?.memory.id, python.memory.id);
   });
 });

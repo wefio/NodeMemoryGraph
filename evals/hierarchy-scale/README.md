@@ -7,6 +7,7 @@ routing, and record-level USearch ANN on the same wide-node workload.
 npm run eval:hierarchy
 $env:NMG_HIERARCHY_SIZES = "100,1000"
 $env:NMG_ANN_CANDIDATES = "64"
+$env:NMG_BLOCK_LIMIT = "8"
 ```
 
 The deterministic hashing embedder is a systems baseline, not a semantic-quality
@@ -27,3 +28,17 @@ leaf scanning reached roughly 62.5–75%; leaf ANN ranged from 25% at Top-64 to
 These are useful negative results: hierarchical indexing fixes scaling cost, but
 cannot compensate for a weak semantic representation. Qwen3 must be tested before
 choosing the production candidate budget or selective record fallback policy.
+
+## Qwen3 result
+
+Using `Qwen/Qwen3-Embedding-0.6B` through local vLLM, exact node-plus-leaf
+retrieval reached 100% on the same eight cases at 100, 1K, and 10K memories.
+At 10K it used 16 node vectors plus 328 leaf vectors instead of 10,000 record
+vectors. This supports node-plus-leaf headers as the default semantic index.
+
+The current USearch leaf ANN did not preserve that recall: Top-64/128/256 ranged
+from 62.5% to 75% on the near-duplicate workload, while nearly exhaustive
+Top-512 recovered 100%. Until ANN construction/search is calibrated separately,
+NMG should exact-scan a cached leaf-vector matrix at this scale and reserve
+record vectors for selective fallback. Do not treat the current ANN result as a
+Qwen embedding failure.

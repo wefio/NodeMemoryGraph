@@ -31,11 +31,13 @@ export interface AnnBuildResult {
 export class UsearchAnnIndex {
   readonly indexPath: string;
   readonly metadataPath: string;
+  readonly searchExpansion: number;
   #loaded: { index: NativeIndex; dimensions: number; memoryIds: string[] } | null = null;
 
-  constructor(indexPath: string) {
+  constructor(indexPath: string, searchExpansion = 64) {
     this.indexPath = indexPath;
     this.metadataPath = `${indexPath}.json`;
+    this.searchExpansion = Math.max(16, Math.min(searchExpansion, 2_048));
   }
 
   build(model: string, rows: ExternalEmbedding[]): AnnBuildResult {
@@ -57,7 +59,7 @@ export class UsearchAnnIndex {
       dimensions,
       connectivity: 16,
       expansion_add: 128,
-      expansion_search: 64,
+      expansion_search: this.searchExpansion,
     });
     const memoryIds: string[] = [];
     while (!current.done) {
@@ -96,7 +98,11 @@ export class UsearchAnnIndex {
         dimensions: number;
         memoryIds: string[];
       };
-      const index = new Index({ dimensions: metadata.dimensions, metric: "cos" });
+      const index = new Index({
+        dimensions: metadata.dimensions,
+        metric: "cos",
+        expansion_search: this.searchExpansion,
+      });
       index.load(this.indexPath);
       this.#loaded = { index, dimensions: metadata.dimensions, memoryIds: metadata.memoryIds };
     }

@@ -20,12 +20,13 @@ vllm serve Qwen/Qwen3-Embedding-0.6B \
   --dtype half \
   --host 0.0.0.0 \
   --port 8000 \
-  --gpu-memory-utilization 0.80
+  --gpu-memory-utilization 0.80 \
+  --max-model-len 8192
 ```
 
-The current development machine exposes an RTX 3060 Laptop GPU with 6 GB VRAM,
-but at the time this document was written WSL itself had no Linux distribution
-installed. Installing the distribution is deliberately not automated by NMG.
+The tested RTX 3060 Laptop GPU has 6 GB VRAM. The model's default 32K context
+could not reserve enough KV cache; 8K is sufficient for NMG node and leaf headers
+and started successfully under Ubuntu 26.04 WSL.
 
 ## Build or resume the index
 

@@ -1109,6 +1109,7 @@ export class NmgStore {
     model: string,
     blockIds: string[],
     options: SearchOptions = {},
+    blockScores?: ReadonlyMap<string, number>,
   ): MemorySearchResult[] {
     const blocks = [...new Set(blockIds)].slice(0, 50);
     if (blocks.length === 0) return [];
@@ -1117,10 +1118,27 @@ export class NmgStore {
        WHERE block_id IN (${blocks.map(() => "?").join(",")})
        ORDER BY block_id, ordinal LIMIT 2000`,
     ).all(...blocks) as Row[];
-    return this.#searchWithVector(query, queryVector, model, {
+    const requestedLimit = Math.max(1, Math.min(options.limit ?? 8, 50));
+    const results = this.#searchWithVector(query, queryVector, model, {
       ...options,
+      limit: blockScores ? 50 : requestedLimit,
       retrievalMode: "fts5",
     }, rows.map((row) => String(row.memory_id)));
+    if (!blockScores) return results;
+    const memberships = this.#db.prepare(
+      `SELECT memory_id, block_id FROM memory_leaf_members
+       WHERE block_id IN (${blocks.map(() => "?").join(",")})`,
+    ).all(...blocks) as Row[];
+    const memoryScores = new Map(memberships.map((row) => [
+      String(row.memory_id), blockScores.get(String(row.block_id)) ?? 0,
+    ]));
+    for (const result of results) {
+      const leafScore = memoryScores.get(result.memory.id) ?? 0;
+      result.routeScore = leafScore;
+      result.combinedScore = leafScore * 0.9 + result.lexicalScore * 0.1;
+    }
+    return results.sort((left, right) => right.combinedScore - left.combinedScore)
+      .slice(0, requestedLimit);
   }
 
   searchHierarchyByVector(
@@ -1153,6 +1171,7 @@ export class NmgStore {
       model,
       leaves.map((route) => route.block.id),
       options,
+      new Map(leaves.map((route) => [route.block.id, route.score])),
     );
   }
 
@@ -1239,7 +1258,9 @@ export class NmgStore {
     const ftsIds = retrievalMode === "fts5" || retrievalMode === "hybrid"
       ? this.#ftsCandidates(query, MAX_SEARCH_CANDIDATES)
       : [];
-    if (retrievalMode === "fts5" && ftsIds.length === 0) return [];
+    if (retrievalMode === "fts5" && ftsIds.length === 0 && forcedCandidateIds.length === 0) {
+      return [];
+    }
     const candidateIds = forcedCandidateIds.length > 0 ? forcedCandidateIds : ftsIds;
     const candidateClause = forcedCandidateIds.length > 0
       ? `AND m.id IN (${forcedCandidateIds.map(() => "?").join(",")})`
