@@ -103,7 +103,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     };
   }) => {
     if (!store) return;
-    const transcript = serializeSession(ctx.sessionManager.getBranch());
+    const branch = ctx.sessionManager.getBranch();
+    persistSessionMessages(store, ctx.sessionManager.getSessionId(), branch,
+      ctx.sessionManager.getSessionFile());
+    const transcript = serializeSession(branch);
     if (!transcript) return;
     store.archiveSession({
       sessionId: ctx.sessionManager.getSessionId(),
@@ -260,6 +263,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       evidence: Type.Optional(
         Type.String({ description: "Exact supporting text or source description" }),
       ),
+      evidenceHistoryId: Type.Optional(
+        Type.String({
+          description: "Exact NMG history ID when the source message was pre-ingested",
+        }),
+      ),
       tier: Type.Optional(
         Type.Union(
           [Type.Literal(0), Type.Literal(1), Type.Literal(2), Type.Literal(3)],
@@ -303,6 +311,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         sourceActor: params.sourceActor as MemoryActor | undefined,
         truthStatus: params.truthStatus as TruthStatus | undefined,
         evidence: params.evidence,
+        evidenceHistoryId: params.evidenceHistoryId,
         tier: params.tier as MemoryTier | undefined,
         importance: params.importance,
         scope: params.scope as MemoryScope | undefined,
@@ -573,21 +582,57 @@ function serializeSession(entries: readonly unknown[]): string {
   return lines.join("\n\n");
 }
 
+function persistSessionMessages(
+  memoryStore: NmgStore,
+  sessionId: string,
+  entries: readonly unknown[],
+  sourceRef?: string,
+): void {
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as { id?: unknown; type?: unknown; message?: unknown };
+    if (candidate.type !== "message" || typeof candidate.id !== "string") continue;
+    const content = rawMessageContent(candidate.message);
+    const role = historyRole(candidate.message);
+    if (!content || !role) continue;
+    memoryStore.appendHistory({
+      content,
+      role,
+      sessionId,
+      sourceMessageId: candidate.id,
+      sourceRef,
+    });
+  }
+}
+
+function historyRole(value: unknown): "user" | "assistant" | "tool" | "system" | null {
+  if (!value || typeof value !== "object") return null;
+  const role = (value as { role?: unknown }).role;
+  if (role === "user" || role === "assistant" || role === "system") return role;
+  if (role === "tool" || role === "toolResult") return "tool";
+  return null;
+}
+
+function rawMessageContent(value: unknown): string {
+  if (!value || typeof value !== "object") return "";
+  const content = (value as { content?: unknown }).content;
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  return content.flatMap((block) => {
+    if (!block || typeof block !== "object") return [];
+    const item = block as { type?: unknown; text?: unknown; name?: unknown; arguments?: unknown };
+    if (item.type === "text" && typeof item.text === "string") return [item.text];
+    if (item.type === "toolCall" && typeof item.name === "string") {
+      return [`[tool ${item.name} ${JSON.stringify(item.arguments ?? {})}]`];
+    }
+    return [];
+  }).join(" ").trim();
+}
+
 function messageText(value: unknown): string {
   if (!value || typeof value !== "object") return "";
   const message = value as { role?: unknown; content?: unknown };
   const role = typeof message.role === "string" ? message.role.toUpperCase() : "MESSAGE";
-  if (typeof message.content === "string") return `${role}: ${message.content}`;
-  if (!Array.isArray(message.content)) return "";
-
-  const parts = message.content.flatMap((block) => {
-    if (!block || typeof block !== "object") return [];
-    const content = block as { type?: unknown; text?: unknown; name?: unknown; arguments?: unknown };
-    if (content.type === "text" && typeof content.text === "string") return [content.text];
-    if (content.type === "toolCall" && typeof content.name === "string") {
-      return [`[tool ${content.name} ${JSON.stringify(content.arguments ?? {})}]`];
-    }
-    return [];
-  });
-  return parts.length > 0 ? `${role}: ${parts.join(" ")}` : "";
+  const content = rawMessageContent(message);
+  return content ? `${role}: ${content}` : "";
 }

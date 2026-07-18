@@ -9,6 +9,7 @@ export type HistoryRole =
 export interface HistoryRecord {
   id: string;
   sessionId: string | null;
+  sourceMessageId: string | null;
   role: HistoryRole;
   content: string;
   sourceRef: string | null;
@@ -113,6 +114,7 @@ export interface RememberInput {
   sourceActor?: MemoryActor;
   truthStatus?: TruthStatus;
   evidence?: string;
+  evidenceHistoryId?: string;
   sessionId?: string;
   sourceRef?: string;
   tier?: MemoryTier;
@@ -137,6 +139,21 @@ export interface SearchOptions {
   maxTier?: MemoryTier;
   limit?: number;
   graphHops?: number;
+  retrievalMode?: "legacy" | "fts5" | "hashing" | "qwen3" | "hybrid";
+}
+
+export interface EmbeddingDocument {
+  memoryId: string;
+  text: string;
+}
+
+export interface ExternalEmbedding {
+  memoryId: string;
+  vector: readonly number[];
+}
+
+export interface StoredEmbedding extends ExternalEmbedding {
+  model: string;
 }
 
 export interface SessionArchive {

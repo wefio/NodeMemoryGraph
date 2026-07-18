@@ -1,5 +1,7 @@
 export { NmgStore } from "./core/store.ts";
 export { HashingVectorEmbedder } from "./core/vector.ts";
+export { OpenAIEmbeddingClient } from "./core/openai-embedding.ts";
+export { UsearchAnnIndex } from "./core/ann.ts";
 export { decideMemoryLoad } from "./core/gate.ts";
 export type {
   HistoryRecord,

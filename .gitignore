@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .nmg/
+evals/scale/.tmp/
 evals/results/
 evals/longmemeval/data/
 evals/longmemeval/results/

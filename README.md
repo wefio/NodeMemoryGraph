@@ -160,6 +160,20 @@ npm run eval:longmem -- nmg-oracle 1
 See [evals/longmemeval/README.md](evals/longmemeval/README.md) for methodology,
 limitations, and the initial seven-question smoke-test results.
 
+### Scale and cache breakthrough
+
+`npm run eval:scale` runs the same queries at 100, 1K, 10K, and 100K memories,
+placing the answers before newer distractors so cold evidence falls outside the
+legacy 500-row working set. It reports accuracy, returned-token estimate,
+P50/P95 latency, tier hit rate, ingestion throughput, and index maintenance
+cost. See [evals/scale/README.md](evals/scale/README.md).
+
+The local retrieval controls are SQLite FTS5, deterministic hashing vectors,
+Qwen3 vectors served through an OpenAI-compatible endpoint, and their hybrid.
+Qwen3 uses a resumable batch indexer; USearch provides the persistent HNSW ANN
+index only after the scale test demonstrates scan cost. Setup is documented in
+[docs/qwen3-vllm.md](docs/qwen3-vllm.md).
+
 Example request to the agent:
 
 ```text

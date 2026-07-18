@@ -543,3 +543,87 @@ test("Huffman-like block rebalance promotes frequent memory only in batches", ()
     assert.equal(results.filter((result) => result.memory.tier === 3).length, 2);
   });
 });
+
+test("appends source messages idempotently within a session", () => {
+  withStore((store) => {
+    const input = {
+      content: "I prefer concise answers.",
+      role: "user" as const,
+      sessionId: "session-1",
+      sourceMessageId: "message-1",
+    };
+    const first = store.appendHistory(input);
+    const repeated = store.appendHistory(input);
+
+    assert.equal(repeated.id, first.id);
+    assert.equal(repeated.sourceMessageId, "message-1");
+    assert.throws(
+      () => store.appendHistory({ ...input, content: "Different content" }),
+      /already exists with different content/,
+    );
+  });
+});
+
+test("binds a semantic memory to an existing exact history message", () => {
+  withStore((store) => {
+    const history = store.appendHistory({
+      content: "For ROS Melodic keep Python 2, and do not upgrade this project to Python 3.",
+      role: "user",
+      sessionId: "session-2",
+      sourceMessageId: "message-7",
+    });
+    const saved = store.remember({
+      statement: "ROS Melodic requires Python 2",
+      nodeName: "ROS Melodic Python",
+      memoryType: "constraint",
+      evidenceHistoryId: history.id,
+    });
+
+    assert.equal(saved.history.id, history.id);
+    assert.equal(saved.memory.evidenceId, history.id);
+    assert.equal(saved.history.content, history.content);
+  });
+});
+
+test("FTS5 reaches exact cold evidence outside the hot candidate window", () => {
+  withStore((store) => {
+    for (let index = 0; index < 520; index += 1) {
+      store.remember({
+        statement: `Routine note ${index}`,
+        nodeName: `routine ${index}`,
+        tier: 0,
+      });
+    }
+    const target = store.remember({
+      statement: "Retired codename is lantern fern",
+      nodeName: "retired codename",
+      tier: 3,
+    });
+    for (let index = 520; index < 1_040; index += 1) {
+      store.remember({
+        statement: `Later routine note ${index}`,
+        nodeName: `routine ${index}`,
+        tier: 0,
+      });
+    }
+
+    const result = store.search("lantern fern", {
+      maxTier: 3,
+      retrievalMode: "fts5",
+      limit: 3,
+    });
+    assert.equal(result[0]?.memory.id, target.memory.id);
+
+    store.upsertExternalEmbeddings("qwen-test", [{
+      memoryId: target.memory.id,
+      vector: [0, 1, 0],
+    }]);
+    const semantic = store.searchByVector(
+      "What was the old internal project name?",
+      [0, 1, 0],
+      "qwen-test",
+      { maxTier: 3, retrievalMode: "qwen3", limit: 3 },
+    );
+    assert.equal(semantic[0]?.memory.id, target.memory.id);
+  });
+});

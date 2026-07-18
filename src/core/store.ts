@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 import type {
+  EmbeddingDocument,
+  ExternalEmbedding,
   DeriveMemoryInput,
   HistoryRecord,
   HistoryRole,
@@ -58,13 +60,32 @@ export class NmgStore {
     content: string;
     role: HistoryRole;
     sessionId?: string;
+    sourceMessageId?: string;
     sourceRef?: string;
   }): HistoryRecord {
+    const content = requireText(input.content, "history content");
+    const sourceMessageId = input.sourceMessageId?.trim() || null;
+    if (sourceMessageId) {
+      if (!input.sessionId?.trim()) {
+        throw new Error("sourceMessageId requires sessionId");
+      }
+      const existing = this.#db.prepare(
+        "SELECT * FROM history_records WHERE session_id = ? AND source_message_id = ?",
+      ).get(input.sessionId, sourceMessageId) as Row | undefined;
+      if (existing) {
+        const record = mapHistory(existing);
+        if (record.content !== content || record.role !== input.role) {
+          throw new Error(`source message ${sourceMessageId} already exists with different content`);
+        }
+        return record;
+      }
+    }
     const record: HistoryRecord = {
       id: randomUUID(),
       sessionId: input.sessionId ?? null,
+      sourceMessageId,
       role: input.role,
-      content: requireText(input.content, "history content"),
+      content,
       sourceRef: input.sourceRef ?? null,
       createdAt: new Date().toISOString(),
     };
@@ -72,12 +93,13 @@ export class NmgStore {
     this.#db
       .prepare(
         `INSERT INTO history_records
-          (id, session_id, role, content, source_ref, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+          (id, session_id, source_message_id, role, content, source_ref, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
         record.sessionId,
+        record.sourceMessageId,
         record.role,
         record.content,
         record.sourceRef,
@@ -222,6 +244,7 @@ export class NmgStore {
       )
       .run(memory.id, memory.evidenceId);
     this.#upsertEmbedding(memory.id, this.#memoryText(memory, input.nodeId));
+    this.#upsertFts(memory.id, memory.statement, input.nodeId, input.evidenceId);
 
     return memory;
   }
@@ -233,12 +256,14 @@ export class NmgStore {
     }
     this.#db.exec("BEGIN IMMEDIATE");
     try {
-      const history = this.appendHistory({
-        content: input.evidence ?? input.statement,
-        role: "explicit",
-        sessionId: input.sessionId,
-        sourceRef: input.sourceRef,
-      });
+      const history = input.evidenceHistoryId
+        ? this.#requireHistory(input.evidenceHistoryId)
+        : this.appendHistory({
+            content: input.evidence ?? input.statement,
+            role: "explicit",
+            sessionId: input.sessionId,
+            sourceRef: input.sourceRef,
+          });
       const node = this.upsertNode({
         canonicalName: input.nodeName,
         kind: input.nodeKind,
@@ -593,7 +618,7 @@ export class NmgStore {
     const upsert = this.#db.prepare(
       `INSERT INTO memory_embeddings (memory_id, model, dimensions, vector_json, updated_at)
        VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(memory_id) DO UPDATE SET model = excluded.model,
+       ON CONFLICT(memory_id, model) DO UPDATE SET
          dimensions = excluded.dimensions, vector_json = excluded.vector_json,
          updated_at = excluded.updated_at`,
     );
@@ -773,6 +798,105 @@ export class NmgStore {
   }
 
   search(query: string, options: SearchOptions = {}): MemorySearchResult[] {
+    return this.#searchWithVector(
+      query,
+      this.#embedder.embed(query),
+      this.#embedder.model,
+      options,
+    );
+  }
+
+  searchByVector(
+    query: string,
+    queryVector: readonly number[],
+    model: string,
+    options: SearchOptions = {},
+  ): MemorySearchResult[] {
+    return this.#searchWithVector(query, queryVector, model, {
+      ...options,
+      retrievalMode: options.retrievalMode ?? "qwen3",
+    });
+  }
+
+  searchByVectorCandidates(
+    query: string,
+    queryVector: readonly number[],
+    model: string,
+    candidateMemoryIds: string[],
+    options: SearchOptions = {},
+  ): MemorySearchResult[] {
+    return this.#searchWithVector(query, queryVector, model, {
+      ...options,
+      retrievalMode: options.retrievalMode ?? "qwen3",
+    }, [...new Set(candidateMemoryIds)].slice(0, 2_000));
+  }
+
+  embeddingDocuments(afterMemoryId = "", limit = 256, missingModel?: string): EmbeddingDocument[] {
+    const rows = this.#db.prepare(
+      `SELECT m.id, m.statement, n.canonical_name, n.summary
+       FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id
+       WHERE m.id > ?
+         AND (? IS NULL OR NOT EXISTS (
+           SELECT 1 FROM memory_embeddings e WHERE e.memory_id = m.id AND e.model = ?
+         ))
+       ORDER BY m.id LIMIT ?`,
+    ).all(
+      afterMemoryId,
+      missingModel ?? null,
+      missingModel ?? null,
+      Math.max(1, Math.min(limit, 2_048)),
+    ) as Row[];
+    return rows.map((row) => ({
+      memoryId: String(row.id),
+      text: `${row.statement} ${row.canonical_name} ${row.summary}`,
+    }));
+  }
+
+  upsertExternalEmbeddings(model: string, embeddings: ExternalEmbedding[]): number {
+    if (!model.trim()) throw new Error("embedding model is required");
+    if (embeddings.length === 0) return 0;
+    const dimensions = embeddings[0]!.vector.length;
+    if (dimensions === 0 || embeddings.some((item) => item.vector.length !== dimensions)) {
+      throw new Error("external embeddings must have one consistent non-zero dimension");
+    }
+    const upsert = this.#db.prepare(
+      `INSERT INTO memory_embeddings (memory_id, model, dimensions, vector_json, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(memory_id, model) DO UPDATE SET dimensions = excluded.dimensions,
+         vector_json = excluded.vector_json, updated_at = excluded.updated_at`,
+    );
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const item of embeddings) {
+        upsert.run(item.memoryId, model, dimensions, JSON.stringify(item.vector), now);
+      }
+      this.#db.exec("COMMIT");
+      return embeddings.length;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  storedEmbeddings(model: string, afterMemoryId = "", limit = 256): ExternalEmbedding[] {
+    const rows = this.#db.prepare(
+      `SELECT memory_id, vector_json FROM memory_embeddings
+       WHERE model = ? AND memory_id > ? ORDER BY memory_id LIMIT ?`,
+    ).all(model, afterMemoryId, Math.max(1, Math.min(limit, 2_048))) as Row[];
+    return rows.map((row) => ({
+      memoryId: String(row.memory_id),
+      vector: parseVector(row.vector_json),
+    }));
+  }
+
+  #searchWithVector(
+    query: string,
+    queryVector: readonly number[],
+    vectorModel: string,
+    options: SearchOptions,
+    forcedCandidateIds: string[] = [],
+  ): MemorySearchResult[] {
     const normalizedQuery = normalize(query);
     if (!normalizedQuery) return [];
 
@@ -781,6 +905,35 @@ export class NmgStore {
     const nodeName = options.nodeName
       ? this.#resolveActiveNodeName(options.nodeName)
       : null;
+    const retrievalMode = options.retrievalMode ?? "legacy";
+    const ftsIds = retrievalMode === "fts5" || retrievalMode === "hybrid"
+      ? this.#ftsCandidates(query, MAX_SEARCH_CANDIDATES)
+      : [];
+    if (retrievalMode === "fts5" && ftsIds.length === 0) return [];
+    const candidateIds = forcedCandidateIds.length > 0 ? forcedCandidateIds : ftsIds;
+    const candidateClause = forcedCandidateIds.length > 0
+      ? `AND m.id IN (${forcedCandidateIds.map(() => "?").join(",")})`
+      : retrievalMode === "qwen3"
+      ? "AND ve.vector_json IS NOT NULL"
+      : retrievalMode === "fts5"
+      ? `AND m.id IN (${ftsIds.map(() => "?").join(",")})`
+      : retrievalMode === "hybrid" && ftsIds.length > 0
+      ? `AND (m.id IN (${ftsIds.map(() => "?").join(",")}) OR m.id IN (
+           SELECT id FROM memory_records ORDER BY tier ASC, importance DESC,
+             access_count DESC, created_at DESC LIMIT ${MAX_SEARCH_CANDIDATES}
+         ))`
+      : "";
+    const candidateOrder = forcedCandidateIds.length === 0 &&
+        retrievalMode === "hybrid" && ftsIds.length > 0
+      ? `CASE WHEN m.id IN (${ftsIds.map(() => "?").join(",")}) THEN 0 ELSE 1 END,`
+      : "";
+    const rowLimit = forcedCandidateIds.length > 0
+      ? forcedCandidateIds.length
+      : retrievalMode === "qwen3"
+      ? 1_000_000
+      : retrievalMode === "fts5"
+      ? ftsIds.length
+      : MAX_SEARCH_CANDIDATES + ftsIds.length;
     const rows = this.#db
       .prepare(
         `SELECT
@@ -802,39 +955,50 @@ export class NmgStore {
            n.created_at AS n_created_at, n.updated_at AS n_updated_at,
            n.status AS n_status, ve.vector_json AS ve_vector_json,
            h.id AS h_id, h.session_id AS h_session_id, h.role AS h_role,
-           h.content AS h_content, h.source_ref AS h_source_ref,
+           h.content AS h_content, h.source_message_id AS h_source_message_id,
+           h.source_ref AS h_source_ref,
            h.created_at AS h_created_at
          FROM memory_records m
          JOIN memory_nodes n ON n.id = m.node_id
          JOIN history_records h ON h.id = m.evidence_id
-         LEFT JOIN memory_embeddings ve ON ve.memory_id = m.id
+         LEFT JOIN memory_embeddings ve ON ve.memory_id = m.id AND ve.model = ?
          WHERE m.tier <= ?
+           ${candidateClause}
            AND n.status = 'active'
            AND (? IS NULL OR n.canonical_name = ?)
            AND (? = 1 OR m.status IN ('active', 'disputed'))
-         ORDER BY m.tier ASC, m.importance DESC,
+         ORDER BY ${candidateOrder} m.tier ASC, m.importance DESC,
                   m.access_count DESC, m.created_at DESC
          LIMIT ?`,
       )
       .all(
+        vectorModel,
         maxTier,
+        ...candidateIds,
         nodeName,
         nodeName,
         options.includeHistorical ? 1 : 0,
-        MAX_SEARCH_CANDIDATES,
+        ...(forcedCandidateIds.length === 0 && retrievalMode === "hybrid" ? ftsIds : []),
+        rowLimit,
       ) as Row[];
 
-    const queryVector = this.#embedder.embed(query);
-    const routes = new Map(this.routeNodes(query, 20).map((route) => [route.node.id, route.score]));
+    const routes = retrievalMode === "fts5" || retrievalMode === "hashing" ||
+        retrievalMode === "qwen3"
+      ? new Map<string, number>()
+      : new Map(this.routeNodes(query, 20).map((route) => [route.node.id, route.score]));
     const results = rows
       .map((row) => {
         const lexical = lexicalScore(normalizedQuery, row);
         const vector = cosineSimilarity(queryVector, parseVector(row.ve_vector_json));
         const route = routes.get(String(row.m_node_id)) ?? 0;
         const result = mapSearchResult(row, lexical);
-        result.vectorScore = vector;
+        result.vectorScore = retrievalMode === "fts5" ? 0 : vector;
         result.routeScore = route;
-        result.combinedScore = hybridScore(lexical, vector, route);
+        result.combinedScore = retrievalMode === "fts5"
+          ? lexical
+          : retrievalMode === "hashing" || retrievalMode === "qwen3"
+          ? vector
+          : hybridScore(lexical, vector, route);
         return result;
       })
       .filter((result) => matchesScope(result.memory.scope, options.scope))
@@ -935,6 +1099,7 @@ export class NmgStore {
       CREATE TABLE IF NOT EXISTS history_records (
         id TEXT PRIMARY KEY,
         session_id TEXT,
+        source_message_id TEXT,
         role TEXT NOT NULL,
         content TEXT NOT NULL,
         source_ref TEXT,
@@ -1014,11 +1179,12 @@ export class NmgStore {
       );
 
       CREATE TABLE IF NOT EXISTS memory_embeddings (
-        memory_id TEXT PRIMARY KEY REFERENCES memory_records(id),
+        memory_id TEXT NOT NULL REFERENCES memory_records(id),
         model TEXT NOT NULL,
         dimensions INTEGER NOT NULL,
         vector_json TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (memory_id, model)
       );
 
       CREATE TABLE IF NOT EXISTS router_weights (
@@ -1028,6 +1194,18 @@ export class NmgStore {
         weights_json TEXT NOT NULL,
         examples INTEGER NOT NULL DEFAULT 0,
         updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS memory_fts_registry (
+        memory_id TEXT PRIMARY KEY REFERENCES memory_records(id) ON DELETE CASCADE
+      );
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+        memory_id UNINDEXED,
+        statement,
+        node_name,
+        evidence,
+        tokenize = 'unicode61'
       );
 
       CREATE TABLE IF NOT EXISTS state_key_aliases (
@@ -1054,12 +1232,26 @@ export class NmgStore {
         ON node_relations(target_node_id);
     `);
     this.#ensureMemoryColumns();
+    this.#ensureHistoryColumns();
+    this.#ensureEmbeddingTable();
     this.#ensureNodeColumns();
     this.#db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_history_source_message
+        ON history_records(session_id, source_message_id)
+        WHERE source_message_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_memory_records_state
         ON memory_records(memory_type, state_key, status);
       INSERT OR IGNORE INTO memory_evidence_links (memory_id, history_id)
       SELECT id, evidence_id FROM memory_records;
+      INSERT INTO memory_fts(memory_id, statement, node_name, evidence)
+      SELECT m.id, m.statement, n.canonical_name, h.content
+      FROM memory_records m
+      JOIN memory_nodes n ON n.id = m.node_id
+      JOIN history_records h ON h.id = m.evidence_id
+      LEFT JOIN memory_fts_registry r ON r.memory_id = m.id
+      WHERE r.memory_id IS NULL;
+      INSERT OR IGNORE INTO memory_fts_registry(memory_id)
+      SELECT id FROM memory_records;
     `);
   }
 
@@ -1088,6 +1280,68 @@ export class NmgStore {
         this.#db.exec(`ALTER TABLE memory_records ADD COLUMN ${name} ${definition}`);
       }
     }
+  }
+
+  #ensureHistoryColumns(): void {
+    const existing = new Set(
+      (this.#db.prepare("PRAGMA table_info(history_records)").all() as Row[]).map(
+        (row) => String(row.name),
+      ),
+    );
+    if (!existing.has("source_message_id")) {
+      this.#db.exec("ALTER TABLE history_records ADD COLUMN source_message_id TEXT");
+    }
+  }
+
+  #ensureEmbeddingTable(): void {
+    const columns = this.#db.prepare("PRAGMA table_info(memory_embeddings)").all() as Row[];
+    const primaryKeyColumns = columns
+      .filter((row) => Number(row.pk) > 0)
+      .sort((left, right) => Number(left.pk) - Number(right.pk))
+      .map((row) => String(row.name));
+    if (primaryKeyColumns.join(",") === "memory_id,model") return;
+    this.#db.exec(`
+      ALTER TABLE memory_embeddings RENAME TO memory_embeddings_legacy;
+      CREATE TABLE memory_embeddings (
+        memory_id TEXT NOT NULL REFERENCES memory_records(id),
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (memory_id, model)
+      );
+      INSERT OR REPLACE INTO memory_embeddings
+        (memory_id, model, dimensions, vector_json, updated_at)
+      SELECT memory_id, model, dimensions, vector_json, updated_at
+      FROM memory_embeddings_legacy;
+      DROP TABLE memory_embeddings_legacy;
+    `);
+  }
+
+  #requireHistory(historyId: string): HistoryRecord {
+    const row = this.#db.prepare("SELECT * FROM history_records WHERE id = ?").get(historyId) as
+      Row | undefined;
+    if (!row) throw new Error(`history ${historyId} does not exist`);
+    return mapHistory(row);
+  }
+
+  #upsertFts(memoryId: string, statement: string, nodeId: string, evidenceId: string): void {
+    const node = this.#requireNode(nodeId);
+    const evidence = this.#requireHistory(evidenceId);
+    this.#db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
+    this.#db.prepare(
+      "INSERT INTO memory_fts(memory_id, statement, node_name, evidence) VALUES (?, ?, ?, ?)",
+    ).run(memoryId, statement, node.canonicalName, evidence.content);
+    this.#db.prepare("INSERT OR IGNORE INTO memory_fts_registry(memory_id) VALUES (?)").run(memoryId);
+  }
+
+  #ftsCandidates(query: string, limit: number): string[] {
+    const expression = ftsExpression(query);
+    if (!expression) return [];
+    const rows = this.#db.prepare(
+      "SELECT memory_id FROM memory_fts WHERE memory_fts MATCH ? ORDER BY bm25(memory_fts) LIMIT ?",
+    ).all(expression, limit) as Row[];
+    return rows.map((row) => String(row.memory_id));
   }
 
   #ensureNodeColumns(): void {
@@ -1244,7 +1498,7 @@ export class NmgStore {
     this.#db.prepare(
       `INSERT INTO memory_embeddings (memory_id, model, dimensions, vector_json, updated_at)
        VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(memory_id) DO UPDATE SET model = excluded.model,
+       ON CONFLICT(memory_id, model) DO UPDATE SET
          dimensions = excluded.dimensions, vector_json = excluded.vector_json,
          updated_at = excluded.updated_at`,
     ).run(memoryId, this.#embedder.model, this.#embedder.dimensions,
@@ -1297,7 +1551,8 @@ export class NmgStore {
          n.created_at AS n_created_at, n.updated_at AS n_updated_at,
          n.status AS n_status,
          h.id AS h_id, h.session_id AS h_session_id, h.role AS h_role,
-         h.content AS h_content, h.source_ref AS h_source_ref,
+         h.content AS h_content, h.source_message_id AS h_source_message_id,
+         h.source_ref AS h_source_ref,
          h.created_at AS h_created_at
        FROM memory_records m
        JOIN memory_nodes n ON n.id = m.node_id
@@ -1367,6 +1622,7 @@ function mapSearchResult(row: Row, score: number): MemorySearchResult {
     evidence: {
       id: String(row.h_id),
       sessionId: row.h_session_id ? String(row.h_session_id) : null,
+      sourceMessageId: row.h_source_message_id ? String(row.h_source_message_id) : null,
       role: String(row.h_role) as HistoryRole,
       content: String(row.h_content),
       sourceRef: row.h_source_ref ? String(row.h_source_ref) : null,
@@ -1404,6 +1660,7 @@ function mapHistory(row: Row): HistoryRecord {
   return {
     id: String(row.id),
     sessionId: row.session_id ? String(row.session_id) : null,
+    sourceMessageId: row.source_message_id ? String(row.source_message_id) : null,
     role: String(row.role) as HistoryRole,
     content: String(row.content),
     sourceRef: row.source_ref ? String(row.source_ref) : null,
@@ -1433,6 +1690,14 @@ function lexicalScore(query: string, row: Row): number {
     (score, term) => score + (haystack.includes(term) ? term.length : 0),
     0,
   );
+}
+
+function ftsExpression(query: string): string {
+  const terms = normalize(query).match(/[\p{L}\p{N}][\p{L}\p{N}_-]*/gu) ?? [];
+  return [...new Set(terms)]
+    .filter((term) => term.length > 1)
+    .map((term) => `"${term.replaceAll('"', '""')}"`)
+    .join(" OR ");
 }
 
 function lexicalNodeScore(query: string, node: MemoryNode): number {
