@@ -47,6 +47,27 @@ In Pi, the model receives two tools:
 - `nmg_remember`: save a confirmed long-term memory with its evidence.
 - `nmg_search`: retrieve memories with a tier and result budget.
 
+## Headless Pi control
+
+NMG uses Pi's native RPC mode for automated Agent-to-Agent-style tests. This
+keeps the controller local and avoids adding an A2A server before cross-machine
+interoperability is needed.
+
+Inspect the configured model without making a model request:
+
+```powershell
+npm run pi:state
+```
+
+Send one prompt through a fresh headless Pi session:
+
+```powershell
+npm run pi:prompt -- "Remember that the RPC controller is used for NMG tests."
+```
+
+Each invocation uses a new Pi session but shares the project's
+`.nmg/nmg.sqlite`, which makes cross-session memory tests straightforward.
+
 Example request to the agent:
 
 ```text
@@ -56,4 +77,3 @@ Remember that NMG uses Pi as its agent harness and SQLite as its local source of
 ## Security boundary
 
 NMG is a memory component, not a sandbox. Pi extensions run with the permissions of the Pi process. The MVP does not execute arbitrary code and does not require Docker. If untrusted execution is added later, it belongs behind a separate `ExecutionBackend`; Docker is the initial candidate, not a core dependency.
-
