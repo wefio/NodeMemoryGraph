@@ -13,6 +13,8 @@ export type {
   MemoryLoadMode,
   MemoryNode,
   MemoryNodeKind,
+  NodeEmbeddingDocument,
+  ExternalNodeEmbedding,
   MemoryRecord,
   MemoryScope,
   MemorySearchResult,

@@ -627,3 +627,39 @@ test("FTS5 reaches exact cold evidence outside the hot candidate window", () => 
     assert.equal(semantic[0]?.memory.id, target.memory.id);
   });
 });
+
+test("node vectors route first and node-local search recovers leaf evidence", () => {
+  withStore((store) => {
+    const robotics = store.remember({
+      statement: "Gazebo started after switching to software rendering",
+      nodeName: "ROS rendering",
+      nodeSummary: "ROS simulator graphics and rendering incidents",
+      tier: 2,
+    });
+    const cooking = store.remember({
+      statement: "Use less salt in tomato soup",
+      nodeName: "cooking preferences",
+      nodeSummary: "Food preparation preferences",
+    });
+    const documents = store.nodeEmbeddingDocuments();
+    assert.equal(documents.length, 2);
+    store.upsertExternalNodeEmbeddings("node-test", documents.map((document) => ({
+      nodeId: document.nodeId,
+      vector: document.nodeId === robotics.node.id ? [1, 0] : [0, 1],
+    })));
+
+    const routes = store.routeNodesByVector([1, 0], "node-test", 1);
+    assert.equal(routes[0]?.node.id, robotics.node.id);
+    assert.equal(store.storedNodeEmbeddings("node-test").length, 2);
+
+    const results = store.searchNodeFirst(
+      "software rendering",
+      [1, 0],
+      "node-test",
+      [routes[0]!.node.id],
+      { maxTier: 3, limit: 3 },
+    );
+    assert.equal(results[0]?.memory.id, robotics.memory.id);
+    assert.notEqual(results[0]?.memory.id, cooking.memory.id);
+  });
+});

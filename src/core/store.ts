@@ -6,12 +6,14 @@ import { DatabaseSync } from "node:sqlite";
 import type {
   EmbeddingDocument,
   ExternalEmbedding,
+  ExternalNodeEmbedding,
   DeriveMemoryInput,
   HistoryRecord,
   HistoryRole,
   MemoryContext,
   MemoryNode,
   MemoryNodeKind,
+  NodeEmbeddingDocument,
   NodeRoute,
   NodeTransform,
   MemoryRecord,
@@ -583,6 +585,31 @@ export class NmgStore {
       .slice(0, Math.max(1, Math.min(limit, 50)));
   }
 
+  routeNodesByVector(
+    queryVector: readonly number[],
+    model: string,
+    limit = 5,
+    candidateNodeIds: string[] = [],
+  ): NodeRoute[] {
+    if (!model.trim()) throw new Error("embedding model is required");
+    if (queryVector.length === 0) throw new Error("query vector is required");
+    const candidates = [...new Set(candidateNodeIds)].slice(0, 2_000);
+    const clause = candidates.length > 0
+      ? `AND n.id IN (${candidates.map(() => "?").join(",")})`
+      : "";
+    const rows = this.#db.prepare(
+      `SELECT n.*, e.vector_json
+       FROM memory_nodes n JOIN node_embeddings e ON e.node_id = n.id AND e.model = ?
+       WHERE n.status = 'active' ${clause}`,
+    ).all(model, ...candidates) as Row[];
+    return rows.map((row) => ({
+      node: mapNode(row),
+      score: cosineSimilarity(queryVector, parseVector(row.vector_json)),
+    })).filter((route) => route.score > 0)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, Math.max(1, Math.min(limit, 50)));
+  }
+
   trainRouter(query: string, usefulNodeIds: string[], learningRate = 0.2): void {
     const uniqueIds = [...new Set(usefulNodeIds)];
     const upsert = this.#db.prepare(
@@ -850,6 +877,91 @@ export class NmgStore {
       memoryId: String(row.id),
       text: `${row.statement} ${row.canonical_name} ${row.summary}`,
     }));
+  }
+
+  nodeEmbeddingDocuments(afterNodeId = "", limit = 256, missingModel?: string): NodeEmbeddingDocument[] {
+    const rows = this.#db.prepare(
+      `SELECT n.id, n.canonical_name, n.kind, n.summary
+       FROM memory_nodes n
+       WHERE n.id > ? AND n.status = 'active'
+         AND (? IS NULL OR NOT EXISTS (
+           SELECT 1 FROM node_embeddings e WHERE e.node_id = n.id AND e.model = ?
+         ))
+       ORDER BY n.id LIMIT ?`,
+    ).all(
+      afterNodeId,
+      missingModel ?? null,
+      missingModel ?? null,
+      Math.max(1, Math.min(limit, 2_048)),
+    ) as Row[];
+    return rows.map((row) => ({
+      nodeId: String(row.id),
+      text: `${row.canonical_name} ${row.kind} ${row.summary}`,
+    }));
+  }
+
+  upsertExternalNodeEmbeddings(model: string, embeddings: ExternalNodeEmbedding[]): number {
+    if (!model.trim()) throw new Error("embedding model is required");
+    if (embeddings.length === 0) return 0;
+    const dimensions = embeddings[0]!.vector.length;
+    if (dimensions === 0 || embeddings.some((item) => item.vector.length !== dimensions)) {
+      throw new Error("external embeddings must have one consistent non-zero dimension");
+    }
+    const upsert = this.#db.prepare(
+      `INSERT INTO node_embeddings (node_id, model, dimensions, vector_json, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(node_id, model) DO UPDATE SET dimensions = excluded.dimensions,
+         vector_json = excluded.vector_json, updated_at = excluded.updated_at`,
+    );
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const item of embeddings) {
+        upsert.run(item.nodeId, model, dimensions, JSON.stringify(item.vector), now);
+      }
+      this.#db.exec("COMMIT");
+      return embeddings.length;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  storedNodeEmbeddings(model: string, afterNodeId = "", limit = 256): ExternalNodeEmbedding[] {
+    const rows = this.#db.prepare(
+      `SELECT node_id, vector_json FROM node_embeddings
+       WHERE model = ? AND node_id > ? ORDER BY node_id LIMIT ?`,
+    ).all(model, afterNodeId, Math.max(1, Math.min(limit, 2_048))) as Row[];
+    return rows.map((row) => ({
+      nodeId: String(row.node_id),
+      vector: parseVector(row.vector_json),
+    }));
+  }
+
+  searchNodeFirst(
+    query: string,
+    queryVector: readonly number[],
+    model: string,
+    nodeIds: string[],
+    options: SearchOptions = {},
+  ): MemorySearchResult[] {
+    const selected = [...new Set(nodeIds)].slice(0, 50);
+    if (selected.length === 0) return [];
+    const ftsIds = this.#ftsCandidatesInNodes(query, selected, MAX_SEARCH_CANDIDATES);
+    const candidateIds = ftsIds.length > 0
+      ? ftsIds
+      : (this.#db.prepare(
+        `SELECT id FROM memory_records
+         WHERE node_id IN (${selected.map(() => "?").join(",")})
+           AND tier <= ? AND status IN ('active', 'disputed')
+         ORDER BY tier ASC, importance DESC, access_count DESC, created_at DESC
+         LIMIT ?`,
+      ).all(...selected, options.maxTier ?? 1, MAX_SEARCH_CANDIDATES) as Row[])
+        .map((row) => String(row.id));
+    return this.#searchWithVector(query, queryVector, model, {
+      ...options,
+      retrievalMode: "fts5",
+    }, candidateIds);
   }
 
   upsertExternalEmbeddings(model: string, embeddings: ExternalEmbedding[]): number {
@@ -1187,6 +1299,15 @@ export class NmgStore {
         PRIMARY KEY (memory_id, model)
       );
 
+      CREATE TABLE IF NOT EXISTS node_embeddings (
+        node_id TEXT NOT NULL REFERENCES memory_nodes(id),
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (node_id, model)
+      );
+
       CREATE TABLE IF NOT EXISTS router_weights (
         node_id TEXT PRIMARY KEY REFERENCES memory_nodes(id),
         model TEXT NOT NULL,
@@ -1341,6 +1462,18 @@ export class NmgStore {
     const rows = this.#db.prepare(
       "SELECT memory_id FROM memory_fts WHERE memory_fts MATCH ? ORDER BY bm25(memory_fts) LIMIT ?",
     ).all(expression, limit) as Row[];
+    return rows.map((row) => String(row.memory_id));
+  }
+
+  #ftsCandidatesInNodes(query: string, nodeIds: string[], limit: number): string[] {
+    const expression = ftsExpression(query);
+    if (!expression || nodeIds.length === 0) return [];
+    const rows = this.#db.prepare(
+      `SELECT f.memory_id FROM memory_fts f
+       JOIN memory_records m ON m.id = f.memory_id
+       WHERE memory_fts MATCH ? AND m.node_id IN (${nodeIds.map(() => "?").join(",")})
+       ORDER BY bm25(memory_fts) LIMIT ?`,
+    ).all(expression, ...nodeIds, limit) as Row[];
     return rows.map((row) => String(row.memory_id));
   }
 

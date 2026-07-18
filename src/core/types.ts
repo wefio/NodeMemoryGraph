@@ -147,6 +147,16 @@ export interface EmbeddingDocument {
   text: string;
 }
 
+export interface NodeEmbeddingDocument {
+  nodeId: string;
+  text: string;
+}
+
+export interface ExternalNodeEmbedding {
+  nodeId: string;
+  vector: readonly number[];
+}
+
 export interface ExternalEmbedding {
   memoryId: string;
   vector: readonly number[];

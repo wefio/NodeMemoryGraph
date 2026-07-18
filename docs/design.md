@@ -21,7 +21,7 @@ The primary integration target is Pi. Pi remains responsible for the model loop,
 | Node-local history | `MemoryRecord` references evidence and belongs to a local block tier L0-L3. |
 | Retrieval | Hybrid lexical/vector/learned-route scoring, shallow tiers first, then graph expansion under a budget. |
 | Execution layers | Query-independent resident constraints; automatic evidence retrieval for explicit recall; compressed cues plus `nmg_search` for agent-directed recall. These are separate from storage tiers L0-L3. |
-| Vector index | Synchronous pluggable `VectorEmbedder`; deterministic hashing vectors are the offline baseline and the persisted index is rebuildable. |
+| Vector index | Two-stage, rebuildable index: node headers route broadly; leaf/block headers preserve local distinctions. Individual records are vectorized only as a measured fallback for broad/high-entropy leaves. |
 | Learned routing | Persisted online prototype router learns query-to-useful-node mappings from explicit feedback and contributes to hybrid ranking. |
 | Huffman idea | Implemented as standard weighted Huffman depths mapped into bounded L0-L3 blocks. Access events accumulate before batch rebuilding. |
 | Write policy | Clear stable user-stated facts, preferences, and constraints are automatic. Ambiguous or inferred candidates require confirmation; secrets and transient instructions are rejected. |
@@ -53,6 +53,30 @@ The graph and access hierarchy are separate structures:
 - Graph edges express semantics such as `part_of`, `depends_on`, `contradicts`, or `supersedes`.
 - Tiers express expected access cost inside one node.
 - Stable IDs are addresses. Tier or future Huffman codes must never be permanent IDs.
+
+## Two-stage semantic index
+
+A `MemoryNode` summary is intentionally compressed and therefore cannot be the
+only semantic index. NMG uses skill-like progressive disclosure:
+
+```text
+query
+  -> node header vectors (topic/entity/project routing)
+  -> leaf or block header vectors (event/scope/time/cause distinctions)
+  -> node-local FTS5 and tier search
+  -> exact MemoryRecord and immutable HistoryRecord evidence
+```
+
+A leaf header summarizes a bounded group of related records, not one raw message.
+It must retain the discriminators required to choose the block: entities, scope,
+time range, event/result, constraints, exceptions, and representative keywords.
+It must not pretend to be evidence; its members remain the source of truth.
+
+This makes the normal vector count proportional to nodes plus blocks rather than
+all historical records. Record-level vectors and ANN remain an optional selective
+fallback when a block is too broad for lexical search or measured recall degrades.
+SQLite remains authoritative; USearch is a rebuildable ANN index, so a separate
+vector database is not required for the local architecture.
 
 ## Node lifecycle
 
