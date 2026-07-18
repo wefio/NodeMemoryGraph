@@ -3,11 +3,12 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { NmgStore } from "../../../src/index.ts";
+import { decideMemoryLoad, NmgStore } from "../../../src/index.ts";
 import type {
   EvidenceRole,
   MemoryActor,
   MemoryContext,
+  RecallIndex,
   MemoryScope,
   MemoryTier,
   MemoryType,
@@ -25,12 +26,26 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const getStore = (): NmgStore => (store ??= new NmgStore(databasePath()));
 
   pi.on("before_agent_start", async (event) => {
-    const context = getStore().searchContext(event.prompt, {
-      maxTier: 1,
-      limit: 8,
-      graphHops: 1,
-    });
-    const memoryBlock = formatMemoryContext(context);
+    const memoryStore = getStore();
+    const kernelBlock = formatResidentKernel(memoryStore.residentKernel());
+    const decision = decideMemoryLoad(event.prompt);
+    let dynamicBlock = "";
+    if (decision.mode === "retrieve") {
+      const context = memoryStore.searchContext(event.prompt, {
+        maxTier: decision.maxTier,
+        limit: decision.limit,
+        graphHops: decision.graphHops,
+      });
+      memoryStore.recordUsage(context.results.map((result) => result.memory.id));
+      const formatted = formatMemoryContext(context);
+      if (formatted) {
+        dynamicBlock = `<nmg_automatic_recall>\n${formatted}\n</nmg_automatic_recall>`;
+      }
+    } else if (decision.mode === "cue") {
+      dynamicBlock = formatRecallIndex(memoryStore.recallCues(event.prompt, {
+        limit: decision.limit,
+      }));
+    }
 
     return {
       systemPrompt:
@@ -39,8 +54,18 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         `NMG is the user's long-term memory. Automatically call nmg_remember ` +
         `for stable facts, states, events, preferences, constraints, and reusable ` +
         `strategies. Use memoryType=state plus a stable stateKey for values that ` +
-        `can change; NMG automatically supersedes the prior state in the same ` +
-        `scope. Use memoryType=event and eventTime for things that happened. ` +
+        `can change, including current/latest versions, status, personal bests, ` +
+        `counts, and progress. Build stateKey from the semantic property and ` +
+        `scope, never from its value or date, so later values reuse the exact ` +
+        `same key. NMG automatically supersedes the prior state in the same ` +
+        `scope. Use memoryType=event and eventTime for things that happened; ` +
+        `when an event also establishes a new current value, save both the dated ` +
+        `event and an updated state. Preserve separately countable entities and ` +
+        `pending actions as separate memories; do not compress several pickups, ` +
+        `returns, obligations, or people into one statement when each may matter. ` +
+        `For user-stated facts, states, events, preferences, and constraints, set ` +
+        `evidence to the shortest exact source excerpt that supports the memory. ` +
+        `The statement is a retrieval summary; evidence preserves exact details. ` +
         `Preserve useful assistant output as conversation_evidence with ` +
         `sourceActor=assistant and truthStatus=unverified: remember that it was ` +
         `said without asserting it is true. Ask before saving ambiguous or ` +
@@ -50,14 +75,23 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         `record semantic relations. Call nmg_feedback after an explicit search ` +
         `when you can identify which returned nodes were actually useful.\n` +
         `</nmg_write_policy>\n` +
-        (memoryBlock
-          ? `\n<nmg_memory>\n` +
-            `Relevant typed memories follow. Apply each item according to its ` +
-            `TYPE and USAGE instruction; combine related evidence when the ` +
-            `question requires counting, comparison, updates, or time reasoning.\n` +
-            `${memoryBlock}\n` +
-            `</nmg_memory>`
-          : ""),
+        `\n<nmg_recall_policy>\n` +
+        `Resident kernel memories are directly usable hard constraints. ` +
+        `Automatic recall contains retrieved evidence and can be used directly. ` +
+        `Recall cues are only a compressed directory: call nmg_search before ` +
+        `using any specific remembered value from them. You may call nmg_search ` +
+        `even without a cue when the task later proves to depend on past user ` +
+        `information. Start shallow and expand only when evidence is insufficient. ` +
+        `Treat the latest active state as authoritative for its stateKey and scope; ` +
+        `older events are historical evidence. Use preferences to produce a newly ` +
+        `tailored answer, not merely to report that the preference exists. A ` +
+        `preference memory constrains generation; recommendations do not need to ` +
+        `have appeared verbatim in the remembered conversation.\n` +
+        `For counting, listing, comparison, or multi-session questions, inspect ` +
+        `all relevant retrieved events and states. If the automatic set appears ` +
+        `partial, call nmg_search with alternate subqueries before answering.\n` +
+        `</nmg_recall_policy>\n` +
+        [kernelBlock, dynamicBlock].filter(Boolean).join("\n"),
     };
   });
 
@@ -445,8 +479,30 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   });
 }
 
-function formatMemoryContext(context: MemoryContext): string {
-  const memories = context.results.map(({ memory, node }) => {
+export function formatRecallIndex(index: RecallIndex): string {
+  const cues = index.cues.map((cue) => [
+    `- node=${cue.nodeId}:${cue.canonicalName}`,
+    `types=${cue.memoryTypes.join(",") || "unknown"}`,
+    `active=${cue.activeCount}`,
+    `newest=${cue.newestAt ?? "unknown"}`,
+    `deep=${cue.hasDeepMemory ? "yes" : "no"}`,
+    `conflicts=${cue.hasConflicts ? "yes" : "no"}`,
+    `match=${cue.reason}`,
+  ].join("; "));
+  return cues.length > 0
+    ? `<nmg_recall_cues>\n${cues.join("\n")}\n</nmg_recall_cues>`
+    : "";
+}
+
+export function formatResidentKernel(context: MemoryContext): string {
+  const formatted = formatMemoryContext(context);
+  return formatted
+    ? `<nmg_resident_kernel>\n${formatted}\n</nmg_resident_kernel>`
+    : "";
+}
+
+export function formatMemoryContext(context: MemoryContext): string {
+  const memories = context.results.map(({ memory, node, evidence }) => {
     const metadata = [
       `TYPE=${memory.memoryType}`,
       `USAGE=${usageInstruction(memory.memoryType)}`,
@@ -462,7 +518,10 @@ function formatMemoryContext(context: MemoryContext): string {
       memory.validFrom ? `validFrom=${memory.validFrom}` : "",
       `scope=${JSON.stringify(memory.scope)}`,
     ].filter(Boolean).join("; ");
-    return `- ${memory.statement}\n  ${metadata}`;
+    const source = evidence.content.trim() !== memory.statement.trim()
+      ? `\n  SOURCE=${excerpt(evidence.content, 320)}`
+      : "";
+    return `- ${memory.statement}\n  ${metadata}${source}`;
   });
   const relations = context.relations.map(
     (relation) =>
@@ -472,6 +531,13 @@ function formatMemoryContext(context: MemoryContext): string {
     memories.length > 0 ? `MEMORIES\n${memories.join("\n")}` : "",
     relations.length > 0 ? `RELATIONS\n${relations.join("\n")}` : "",
   ].filter(Boolean).join("\n\n");
+}
+
+function excerpt(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized.length <= maxLength
+    ? normalized
+    : `${normalized.slice(0, maxLength - 1)}…`;
 }
 
 function usageInstruction(type: MemoryType): string {
@@ -485,9 +551,9 @@ function usageInstruction(type: MemoryType): string {
     case "event":
       return "use as a dated occurrence; preserve ordering and do not generalize";
     case "preference":
-      return "adapt the current response or recommendation when relevant";
+      return "generate the requested answer or recommendation tailored to this preference";
     case "state":
-      return "use the latest active value for this stateKey and scope";
+      return "treat this latest active value as authoritative for its stateKey and scope; older events are not competing current states";
     case "strategy":
       return "apply the reusable procedure when its situation matches";
     case "fact":

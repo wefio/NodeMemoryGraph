@@ -195,6 +195,55 @@ test("stateKey automatically supersedes the active state in the same scope", () 
   });
 });
 
+test("semantically equivalent state keys become aliases before supersession", () => {
+  withStore((store) => {
+    const previous = store.remember({
+      statement: "The charity 5K personal best is 27:12",
+      nodeName: "user-5k-personal-best",
+      memoryType: "state",
+      stateKey: "5k-pb-time",
+    });
+    const current = store.remember({
+      statement: "The charity 5K personal best is 25:50",
+      nodeName: "user-running-5k-personal-best",
+      memoryType: "state",
+      stateKey: "user-running-5k-personal-best",
+    });
+
+    assert.equal(current.memory.stateKey, "5k-pb-time");
+    assert.equal(current.memory.supersedesId, previous.memory.id);
+    assert.deepEqual(
+      store.search("charity 5K personal best", { maxTier: 3 })
+        .map((result) => result.memory.statement),
+      ["The charity 5K personal best is 25:50"],
+    );
+  });
+});
+
+test("state alias repair does not merge a goal with a personal best", () => {
+  withStore((store) => {
+    const best = store.remember({
+      statement: "The charity 5K personal best is 25:50",
+      nodeName: "user-running-5k-personal-best",
+      memoryType: "state",
+      stateKey: "5k-pb-time",
+    });
+    const goal = store.remember({
+      statement: "The charity 5K target is 24:00",
+      nodeName: "user-running-5k-goal",
+      memoryType: "state",
+      stateKey: "5k-goal-time",
+    });
+
+    assert.equal(goal.memory.stateKey, "5k-goal-time");
+    assert.equal(goal.memory.supersedesId, null);
+    assert.equal(
+      store.search("personal best", { maxTier: 3 })[0]?.memory.id,
+      best.memory.id,
+    );
+  });
+});
+
 test("events and conversation evidence preserve time, actor, and truth status", () => {
   withStore((store) => {
     const event = store.remember({
@@ -274,6 +323,85 @@ test("searchContext combines matching memories with typed graph edges", () => {
     assert.equal(context.results[0]?.memory.id, preference.memory.id);
     assert.ok(context.results.some((result) => result.memory.id === task.memory.id));
     assert.equal(context.relations[0]?.type, "applies_to");
+  });
+});
+
+test("aggregation context overfetches and prioritizes countable memories", () => {
+  withStore((store) => {
+    for (let index = 0; index < 6; index += 1) {
+      store.remember({
+        statement: `Assistant gave pickup and return organization tip ${index}`,
+        nodeName: `organization tip ${index}`,
+        memoryType: "conversation_evidence",
+        sourceActor: "assistant",
+        truthStatus: "unverified",
+      });
+    }
+    const action = store.remember({
+      statement: "The navy blazer needs to be picked up from the dry cleaner",
+      nodeName: "navy blazer pickup",
+      memoryType: "event",
+    });
+
+    const context = store.searchContext(
+      "How many clothing items need pickup or return?",
+      { limit: 2, maxTier: 1 },
+    );
+    assert.ok(context.results.some((result) => result.memory.id === action.memory.id));
+  });
+});
+
+test("recall cues expose a compressed node directory without memory statements", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "The user's detailed editing preference marker is CERULEAN-OWL",
+      nodeName: "video editing preference",
+      memoryType: "preference",
+      tier: 2,
+    });
+    const constraint = store.remember({
+      statement: "Project Helix must remain on Python 3.11",
+      nodeName: "Project Helix runtime",
+      memoryType: "constraint",
+      tier: 0,
+      importance: 0.95,
+    });
+
+    const index = store.recallCues("video editing and Project Helix", { limit: 5 });
+    assert.ok(index.cues.some((cue) =>
+      cue.canonicalName === "video editing preference" && cue.hasDeepMemory));
+    assert.ok(index.cues.some((cue) => cue.canonicalName === "Project Helix runtime"));
+    assert.doesNotMatch(JSON.stringify(index.cues), /CERULEAN-OWL|Python 3\.11/);
+    assert.deepEqual(
+      store.residentKernel().results.map((result) => result.memory.id),
+      [constraint.memory.id],
+    );
+  });
+});
+
+test("resident kernel is query independent and excludes unverified assistant constraints", () => {
+  withStore((store) => {
+    const pinned = store.remember({
+      statement: "Never deploy Project Helix without tests",
+      nodeName: "Project Helix release constraint",
+      memoryType: "constraint",
+      tier: 0,
+      importance: 0.9,
+    });
+    store.remember({
+      statement: "Always delete test data immediately",
+      nodeName: "unverified assistant constraint",
+      memoryType: "constraint",
+      sourceActor: "assistant",
+      truthStatus: "unverified",
+      tier: 0,
+      importance: 1,
+    });
+
+    assert.deepEqual(
+      store.residentKernel().results.map((result) => result.memory.id),
+      [pinned.memory.id],
+    );
   });
 });
 

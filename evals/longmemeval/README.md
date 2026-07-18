@@ -36,6 +36,7 @@ also ignored by Git.
 | NMG over oracle evidence, pre-semantic architecture | 2/7 | 28.6% |
 | NMG over oracle evidence, typed graph architecture | 6/7 | 85.7% |
 | NMG over oracle evidence, adaptive retrieval architecture | 6/7 | 85.7% |
+| NMG three-layer recall, corrected judge parser | 6/7 | 85.7% |
 
 The adaptive-retrieval run adds persisted vectors, learned-route scoring, and
 Huffman-derived block tiers. It retained the same aggregate score; the remaining
@@ -51,6 +52,24 @@ when the reference required three.
 The next engineering target exposed by this run is reliable aggregation across
 several sessions and memories. Larger full-haystack runs are still required to
 measure retrieval quality and scalability.
+
+The three-layer run added a resident kernel, deterministic `none/cue/retrieve`
+gate, automatic evidence recall, type-aware overfetch/reranking, and exact source
+excerpts. Preference recommendations and candidate coverage improved. The one
+remaining failure is an ingestion/provenance issue: a user turn containing both
+an old-item return and replacement pickup can still be summarized into one
+memory, and a model-selected "shortest quote" can omit the other action. The
+next data-model step is stable per-message raw-history IDs linked directly to
+every extracted memory.
+
+The judge parser now uses the last line-leading PASS/FAIL verdict. This fixes a
+case where the judge began with PASS, reconsidered, and ended with FAIL.
+
+On Windows, do not run independent Pi evaluation processes concurrently against
+the same global Pi configuration: they contend on `settings.json.lock`. Run
+them sequentially or give each process an isolated Pi agent directory with an
+appropriate credential strategy. Model requests within one evaluation may
+still be concurrent.
 
 The next fair comparison will ingest every LongMemEval-S haystack session into
 NMG and compare it with no-memory, full-history/windowed, and flat-retrieval

@@ -22,6 +22,8 @@ import type {
   RememberInput,
   RememberResult,
   RebalanceResult,
+  RecallCue,
+  RecallIndex,
   SearchOptions,
   SessionArchive,
   VectorEmbedder,
@@ -241,7 +243,10 @@ export class NmgStore {
         canonicalName: input.nodeName,
         kind: input.nodeKind,
       });
-      const automaticPrevious = memoryType === "state" && input.stateKey
+      const stateKey = memoryType === "state" && input.stateKey
+        ? this.#resolveStateKey(input.stateKey, input.scope ?? {}, node)
+        : input.stateKey;
+      const automaticPrevious = memoryType === "state" && stateKey
         ? this.#db
             .prepare(
               `SELECT id FROM memory_records
@@ -249,7 +254,7 @@ export class NmgStore {
                  AND status = 'active'
                ORDER BY created_at DESC LIMIT 1`,
             )
-            .get(input.stateKey, serializeScope(input.scope ?? {})) as Row | undefined
+            .get(stateKey, serializeScope(input.scope ?? {})) as Row | undefined
         : undefined;
       const supersedesId = input.supersedesId ??
         (automaticPrevious ? String(automaticPrevious.id) : undefined);
@@ -271,7 +276,7 @@ export class NmgStore {
         evidenceId: history.id,
         statement: input.statement,
         memoryType,
-        stateKey: input.stateKey,
+        stateKey,
         eventTime: input.eventTime,
         sourceActor: input.sourceActor,
         truthStatus: input.truthStatus,
@@ -666,7 +671,11 @@ export class NmgStore {
   }
 
   searchContext(query: string, options: SearchOptions = {}): MemoryContext {
-    const direct = this.search(query, options);
+    const limit = Math.max(1, Math.min(options.limit ?? 8, 50));
+    const direct = this.search(query, {
+      ...options,
+      limit: Math.min(50, Math.max(20, limit * 3)),
+    });
     const relations = this.getRelations(
       direct.map((result) => result.node.id),
       options.graphHops ?? 1,
@@ -678,14 +687,89 @@ export class NmgStore {
     const related = relatedNodeIds.flatMap(
       (nodeId) => this.#resultsForNode(nodeId, options.maxTier ?? 1, 2),
     );
-    const limit = Math.max(1, Math.min(options.limit ?? 8, 50));
+    const nodeCounts = new Map<string, number>();
     const results = [...direct, ...related]
       .filter(
         (result, index, all) =>
           all.findIndex((candidate) => candidate.memory.id === result.memory.id) === index,
       )
+      .sort((left, right) =>
+        contextUsefulness(query, right) - contextUsefulness(query, left))
+      .filter((result) => {
+        const count = nodeCounts.get(result.node.id) ?? 0;
+        if (count >= 2) return false;
+        nodeCounts.set(result.node.id, count + 1);
+        return true;
+      })
       .slice(0, limit);
     return { results, relations };
+  }
+
+  residentKernel(limit = 4): MemoryContext {
+    const rows = this.#db.prepare(
+      `SELECT m.id, m.node_id
+       FROM memory_records m
+       JOIN memory_nodes n ON n.id = m.node_id
+       WHERE m.memory_type = 'constraint'
+         AND m.tier = 0
+         AND m.importance >= 0.8
+         AND m.status = 'active'
+         AND m.truth_status IN ('asserted', 'verified')
+         AND m.source_actor IN ('user', 'tool', 'system')
+         AND n.status = 'active'
+       ORDER BY m.importance DESC, m.access_count DESC, m.created_at DESC
+       LIMIT ?`,
+    ).all(Math.max(0, Math.min(limit, 12))) as Row[];
+    const byNode = new Map<string, MemorySearchResult[]>();
+    const results = rows.flatMap((row) => {
+      const nodeId = String(row.node_id);
+      let nodeResults = byNode.get(nodeId);
+      if (!nodeResults) {
+        nodeResults = this.#resultsForNode(nodeId, 0, 50);
+        byNode.set(nodeId, nodeResults);
+      }
+      return nodeResults.filter((result) => result.memory.id === String(row.id));
+    });
+    return { results, relations: [] };
+  }
+
+  recallCues(query: string, options: SearchOptions = {}): RecallIndex {
+    const cueLimit = Math.max(1, Math.min(options.limit ?? 5, 12));
+    const candidates = this.search(query, {
+      ...options,
+      maxTier: 3,
+      limit: 50,
+    });
+    const nodeIds = [...new Set(candidates.map((result) => result.node.id))]
+      .slice(0, cueLimit);
+    const aggregate = this.#db.prepare(
+      `SELECT COUNT(*) AS active_count, MAX(created_at) AS newest_at,
+              MAX(tier) AS deepest_tier,
+              SUM(CASE WHEN status = 'disputed' THEN 1 ELSE 0 END) AS conflicts,
+              GROUP_CONCAT(DISTINCT memory_type) AS memory_types
+       FROM memory_records
+       WHERE node_id = ? AND status IN ('active', 'disputed')`,
+    );
+    const cues: RecallCue[] = nodeIds.map((nodeId) => {
+      const matches = candidates.filter((result) => result.node.id === nodeId);
+      const best = matches[0]!;
+      const row = aggregate.get(nodeId) as Row;
+      const deepestTier = Number(row.deepest_tier ?? 0) as MemoryTier;
+      return {
+        nodeId,
+        canonicalName: best.node.canonicalName,
+        memoryTypes: String(row.memory_types ?? "").split(",")
+          .filter(Boolean) as MemoryRecord["memoryType"][],
+        activeCount: Number(row.active_count ?? 0),
+        newestAt: row.newest_at ? String(row.newest_at) : null,
+        deepestTier,
+        hasConflicts: Number(row.conflicts ?? 0) > 0,
+        hasDeepMemory: deepestTier > 1,
+        score: best.combinedScore,
+        reason: recallReason(best),
+      };
+    });
+    return { cues };
   }
 
   search(query: string, options: SearchOptions = {}): MemorySearchResult[] {
@@ -946,6 +1030,14 @@ export class NmgStore {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS state_key_aliases (
+        alias_key TEXT NOT NULL,
+        scope_json TEXT NOT NULL,
+        canonical_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (alias_key, scope_json)
+      );
+
       CREATE TABLE IF NOT EXISTS session_archives (
         session_id TEXT PRIMARY KEY,
         history_id TEXT NOT NULL UNIQUE REFERENCES history_records(id),
@@ -1032,6 +1124,60 @@ export class NmgStore {
       throw new Error(`node ${canonicalName} was split; choose a more specific node`);
     }
     return canonicalName;
+  }
+
+  #resolveStateKey(
+    requestedKey: string,
+    scope: MemoryScope,
+    node: MemoryNode,
+  ): string {
+    const scopeJson = serializeScope(scope);
+    const alias = this.#db.prepare(
+      `SELECT canonical_key FROM state_key_aliases
+       WHERE alias_key = ? AND scope_json = ?`,
+    ).get(requestedKey, scopeJson) as Row | undefined;
+    if (alias) return String(alias.canonical_key);
+
+    const exact = this.#db.prepare(
+      `SELECT state_key FROM memory_records
+       WHERE memory_type = 'state' AND state_key = ? AND scope_json = ?
+         AND status = 'active' LIMIT 1`,
+    ).get(requestedKey, scopeJson) as Row | undefined;
+    if (exact) return requestedKey;
+
+    const candidates = this.#db.prepare(
+      `SELECT m.state_key, n.canonical_name
+       FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id
+       WHERE m.memory_type = 'state' AND m.scope_json = ?
+         AND m.status = 'active' AND m.state_key IS NOT NULL`,
+    ).all(scopeJson) as Row[];
+    const requestedIdentity = `${node.canonicalName} ${requestedKey}`;
+    const requestedTokens = identityTokens(requestedIdentity);
+    const matches = candidates.map((candidate) => {
+      const identity = `${candidate.canonical_name} ${candidate.state_key}`;
+      const candidateTokens = identityTokens(identity);
+      const overlap = requestedTokens.size === 0 ? 0 :
+        [...requestedTokens].filter((token) => candidateTokens.has(token)).length /
+          requestedTokens.size;
+      return {
+        key: String(candidate.state_key),
+        score: cosineSimilarity(
+          this.#embedder.embed(requestedIdentity),
+          this.#embedder.embed(identity),
+        ),
+        overlap,
+      };
+    }).filter((candidate) => candidate.score >= 0.65 && candidate.overlap >= 0.7)
+      .sort((left, right) => right.score - left.score);
+    if (matches.length === 0) return requestedKey;
+
+    const canonicalKey = matches[0]!.key;
+    this.#db.prepare(
+      `INSERT OR REPLACE INTO state_key_aliases
+        (alias_key, scope_json, canonical_key, created_at)
+       VALUES (?, ?, ?, ?)`,
+    ).run(requestedKey, scopeJson, canonicalKey, new Date().toISOString());
+    return canonicalKey;
   }
 
   #memoryIdsForNodes(nodeIds: string[]): string[] {
@@ -1234,6 +1380,26 @@ function mapSearchResult(row: Row, score: number): MemorySearchResult {
   };
 }
 
+function contextUsefulness(query: string, result: MemorySearchResult): number {
+  const normalized = normalize(query);
+  const type = result.memory.memoryType;
+  let bonus = 0;
+  if (/\b(?:how many|how much|list|all|count)\b|(?:多少|几个|列出|全部)/iu.test(normalized)) {
+    if (["derived", "event", "fact", "state"].includes(type)) bonus += 0.25;
+    if (type === "conversation_evidence") bonus -= 0.15;
+    if (type === "strategy") bonus -= 0.1;
+  }
+  if (/\b(?:recommend|suggest|preference)\b|(?:推荐|建议|偏好)/iu.test(normalized)) {
+    if (type === "preference") bonus += 0.3;
+    if (type === "constraint") bonus += 0.15;
+  }
+  if (/\b(?:assistant|you said|previous chat)\b|(?:你说过|助手|之前的对话)/iu.test(normalized) &&
+      type === "conversation_evidence") {
+    bonus += 0.25;
+  }
+  return result.combinedScore + bonus;
+}
+
 function mapHistory(row: Row): HistoryRecord {
   return {
     id: String(row.id),
@@ -1283,6 +1449,17 @@ function hybridScore(lexical: number, vector: number, route: number): number {
   return boundedLexical * 0.5 + Math.max(0, vector) * 0.35 + Math.max(0, route) * 0.15;
 }
 
+function recallReason(result: MemorySearchResult): RecallCue["reason"] {
+  const scores = [
+    ["lexical_match", result.lexicalScore > 0 ? result.lexicalScore / (result.lexicalScore + 10) : 0],
+    ["vector_match", Math.max(0, result.vectorScore)],
+    ["learned_route", Math.max(0, result.routeScore)],
+  ] as const;
+  const ordered = [...scores].sort((left, right) => right[1] - left[1]);
+  if ((ordered[0]?.[1] ?? 0) <= 0) return "hybrid_match";
+  return ordered[0]![0];
+}
+
 function hierarchyWeight(row: Row): number {
   const frequency = Math.log2(2 + Number(row.access_count ?? 0));
   const importance = 0.5 + Number(row.importance ?? 0);
@@ -1304,6 +1481,13 @@ function searchTerms(value: string): string[] {
     }
   }
   return [...terms];
+}
+
+function identityTokens(value: string): Set<string> {
+  return new Set(
+    normalize(value).split(/[^\p{L}\p{N}]+/u)
+      .filter((token) => token.length >= 2 && token !== "time"),
+  );
 }
 
 function normalize(value: string): string {

@@ -12,7 +12,11 @@ optimization:
   automatically; explicit writes remain available.
 - Completed Pi turns checkpoint the session transcript as cold, immutable
   evidence without turning every message into semantic memory.
-- Pi automatically injects a few L0/L1 memories before each agent run.
+- Pi uses three execution layers: a small query-independent resident kernel,
+  dynamic automatic recall for explicit memory questions, and compressed recall
+  cues that let the agent decide whether to call `nmg_search`.
+- Ordinary prompts load no dynamic long-term memory. Automatic retrieval
+  overfetches and type-reranks candidates before applying the final record budget.
 - Stable `stateKey` values identify replaceable state across sessions and
   automatically supersede the prior active value in the same scope.
 - Typed node relations and multi-evidence derived memories support graph-aware
@@ -92,6 +96,8 @@ The automatic-write rule is intentionally narrow:
   secrets, or sensitive personal data as semantic memory.
 - Give replaceable states a stable `stateKey`; a new value in the same canonical
   scope automatically supersedes the old state without deleting its evidence.
+- Preserve separately countable actions as separate memories and retain an exact
+  source excerpt: the statement is a retrieval summary, not the evidence itself.
 - Treat assistant-authored conversational evidence as unverified unless a user
   or tool confirms it.
 - Obey constraints, adapt to preferences, use only the newest active state,
@@ -134,6 +140,10 @@ tool completion, session archives, SQLite evidence, recall, and negative write
 policy behavior. Current cases cover explicit hot/cold memory, automatic stable
 preferences, project constraints, transient instructions, and synthetic
 secrets. Reports are written under ignored `evals/results/`.
+
+The local three-layer regression currently passes 6/6 cases. Dynamic-context
+measurement reports approximately 74% fewer characters for recall cues than a
+full eight-memory block; the resident kernel remains a separate fixed budget.
 
 ### LongMemEval
 

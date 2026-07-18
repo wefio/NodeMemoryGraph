@@ -1,11 +1,14 @@
 export { NmgStore } from "./core/store.ts";
 export { HashingVectorEmbedder } from "./core/vector.ts";
+export { decideMemoryLoad } from "./core/gate.ts";
 export type {
   HistoryRecord,
   EvidenceRole,
   DeriveMemoryInput,
   MemoryActor,
   MemoryContext,
+  MemoryGateDecision,
+  MemoryLoadMode,
   MemoryNode,
   MemoryNodeKind,
   MemoryRecord,
@@ -23,5 +26,7 @@ export type {
   SessionArchive,
   TruthStatus,
   RebalanceResult,
+  RecallCue,
+  RecallIndex,
   VectorEmbedder,
 } from "./core/types.ts";

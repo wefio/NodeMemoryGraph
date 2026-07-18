@@ -1,6 +1,6 @@
 # NMG design baseline
 
-**Status:** 0.3 / adaptive graph-memory baseline  
+**Status:** 0.4 / three-layer recall baseline  
 **Updated:** 2026-07-18
 
 ## Definition
@@ -20,6 +20,7 @@ The primary integration target is Pi. Pi remains responsible for the model loop,
 | Node lifecycle | Merge and split preserve records/evidence, mark source nodes inactive, and retain redirects. A split requires a complete, disjoint memory partition. |
 | Node-local history | `MemoryRecord` references evidence and belongs to a local block tier L0-L3. |
 | Retrieval | Hybrid lexical/vector/learned-route scoring, shallow tiers first, then graph expansion under a budget. |
+| Execution layers | Query-independent resident constraints; automatic evidence retrieval for explicit recall; compressed cues plus `nmg_search` for agent-directed recall. These are separate from storage tiers L0-L3. |
 | Vector index | Synchronous pluggable `VectorEmbedder`; deterministic hashing vectors are the offline baseline and the persisted index is rebuildable. |
 | Learned routing | Persisted online prototype router learns query-to-useful-node mappings from explicit feedback and contributes to hybrid ranking. |
 | Huffman idea | Implemented as standard weighted Huffman depths mapped into bounded L0-L3 blocks. Access events accumulate before batch rebuilding. |
@@ -71,18 +72,23 @@ Neither operation deletes history, evidence links, memories, or old nodes.
 
 The extension uses only public Pi extension surfaces:
 
-1. `before_agent_start` performs graph-aware L0/L1 retrieval using the new prompt and appends a small, typed memory block to the system prompt.
-2. The write policy directs Pi to call `nmg_remember` automatically for stable user-stated facts, preferences, constraints, and states. Explicit writes use the same path.
-3. `nmg_remember` preserves memory type, scope, actor, truth status, event time, evidence role, and state identity. A matching `stateKey` and canonical scope supersede the prior active state automatically.
-4. `nmg_search` performs budgeted hybrid retrieval, expands typed graph neighbors, hydrates evidence, and can include deeper tiers or historical states.
-5. `nmg_derive` creates a conclusion from multiple source memories and inherits their evidence chains. `nmg_link` creates typed node relations.
-6. The injected use policy distinguishes facts from unverified conversational evidence, uses only the newest active state, obeys constraints, adapts to preferences, preserves event time, and applies strategies as procedures rather than facts.
-7. `agent_end` checkpoints the current transcript; `session_shutdown` provides a final graceful checkpoint. Changed transcripts append a new immutable snapshot instead of mutating the old record.
-8. `nmg_organize` exposes guarded merge/split operations. `nmg_feedback` trains
+1. `before_agent_start` loads a small query-independent resident kernel of active,
+   high-importance user/tool/system constraints.
+2. A deterministic `MemoryGate` chooses `none`, `cue`, or `retrieve`. Ordinary
+   prompts load no dynamic memory; planning/recommendation prompts receive a
+   node-only directory; explicit historical/current-state questions receive a
+   bounded evidence block automatically.
+3. The write policy directs Pi to call `nmg_remember` automatically for stable user-stated facts, preferences, constraints, and states. Explicit writes use the same path.
+4. `nmg_remember` preserves memory type, scope, actor, truth status, event time, evidence role, and state identity. A matching or repaired alias of `stateKey` plus canonical scope supersedes the prior active state automatically.
+5. `nmg_search` performs budgeted hybrid retrieval, expands typed graph neighbors, hydrates evidence, and can include deeper tiers or historical states. Candidate generation overfetches before type-aware reranking and per-node diversity limits.
+6. `nmg_derive` creates a conclusion from multiple source memories and inherits their evidence chains. `nmg_link` creates typed node relations.
+7. The injected use policy distinguishes facts from unverified conversational evidence, uses only the newest active state, obeys constraints, adapts to preferences, preserves event time, and applies strategies as procedures rather than facts.
+8. `agent_end` checkpoints the current transcript; `session_shutdown` provides a final graceful checkpoint. Changed transcripts append a new immutable snapshot instead of mutating the old record.
+9. `nmg_organize` exposes guarded merge/split operations. `nmg_feedback` trains
    the persisted online router, while `nmg_rebalance` applies accumulated usage
    statistics in batches.
-9. Retrieval records exposure as usage statistics; explicit useful-node feedback
-   is kept separate so the router is not trained on every returned candidate.
+10. Retrieval records exposure as usage statistics; explicit useful-node feedback
+    is kept separate so the router is not trained on every returned candidate.
 
 Automatic extraction remains governed rather than universal: model-authored claims,
 casual conversation, transient instructions, credentials, and secrets are not
@@ -164,6 +170,9 @@ Track evidence Recall@K, stale-memory error rate, average injected records/token
 - Typed node edges support graph expansion at query time. The returned context
   includes matching memories, related-node memories, relations, and raw
   evidence records under a caller-supplied budget.
+- A memory statement is a retrieval summary. When available, Pi also returns a
+  bounded exact-source excerpt so generation can recover details lost to
+  summarization.
 
 ## Remaining design questions
 
@@ -174,6 +183,8 @@ Track evidence Recall@K, stale-memory error rate, average injected records/token
 - What feedback proves that a retrieved memory was useful?
 - When does a node split, merge, or regenerate its summary from evidence?
 - Which rare constraints must be pinned near the surface regardless of access frequency?
+- How should each semantic memory link to the exact raw source message rather
+  than only a model-selected excerpt or a whole-session archive?
 - Which semantic embedding model offers the best local quality/cost tradeoff?
 - At what scale should the persisted vector table be replaced with ANN search?
 - Should negative router feedback be explicit, inferred from skipped results, or

@@ -43,11 +43,17 @@ const selectedIds = stratifiedSample(canonicalExamples, perType)
 const examplesById = new Map(
   examples.map((example) => [example.question_id, example]),
 );
-const sample = selectedIds.map((id) => {
+const selectedSample = selectedIds.map((id) => {
   const example = examplesById.get(id);
   if (!example) throw new Error(`${sourceFile} is missing question ${id}`);
   return example;
 });
+const sample = process.env.NMG_LONGMEM_QUESTION
+  ? selectedSample.filter((example) => example.question_id === process.env.NMG_LONGMEM_QUESTION)
+  : selectedSample;
+if (sample.length === 0) {
+  throw new Error("NMG_LONGMEM_QUESTION did not match the selected sample");
+}
 const runId = new Date().toISOString().replaceAll(":", "-");
 const outputDirectory = resolve(import.meta.dirname, "results", runId);
 mkdirSync(outputDirectory, { recursive: true });
@@ -100,7 +106,7 @@ async function runExample(example: LongMemExample) {
     reference: example.answer,
     hypothesis,
     judgement,
-    passed: /^PASS\b/i.test(judgement),
+    passed: judgementPassed(judgement),
     remembered,
     durationMs: Math.round(performance.now() - startedAt),
   };
@@ -167,6 +173,9 @@ function answerPrompt(example: LongMemExample): string {
   return [
     "Answer the question concisely using only information available to you.",
     "If the requested past information is unavailable, say that you do not know.",
+    "For a recommendation question, use remembered preferences to generate useful",
+    "new recommendations. The exact recommended resources need not have appeared",
+    "in the past conversation; do not confuse preference recall with item recall.",
     history,
     `Question date: ${example.question_date}`,
     `Question: ${example.question}`,
@@ -179,6 +188,10 @@ function ingestionPrompt(session: Turn[], date: string): string {
     "Use nmg_remember as many times as needed to preserve durable user facts,",
     "preferences, constraints, timestamped events, updates, and useful assistant",
     "statements. Assistant statements are conversational evidence, not verified truth.",
+    "Store separately countable entities and pending actions as separate memories.",
+    "For example, an item to return and its replacement to pick up are two actions.",
+    "For each user-stated memory, pass evidence as the shortest exact quote from",
+    "the user turn that supports it; do not replace evidence with a paraphrase.",
     "Preserve the date and narrow scope. Do not answer the conversation itself.",
     `Session date: ${date}`,
     session.map((turn) => `${turn.role}: ${turn.content}`).join("\n"),
@@ -198,6 +211,14 @@ function judgePrompt(example: LongMemExample, hypothesis: string): string {
     `Reference answer: ${example.answer}`,
     `Candidate answer: ${hypothesis}`,
   ].join("\n");
+}
+
+function judgementPassed(judgement: string): boolean {
+  const verdicts = judgement.split(/\r?\n/u).flatMap((line) => {
+    const match = line.trim().match(/^(PASS|FAIL)\b/i);
+    return match ? [match[1]!.toUpperCase()] : [];
+  });
+  return verdicts.at(-1) === "PASS";
 }
 
 function formatHistory(example: LongMemExample): string {

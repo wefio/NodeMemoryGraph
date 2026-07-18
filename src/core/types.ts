@@ -166,6 +166,34 @@ export interface MemoryContext {
   relations: NodeRelation[];
 }
 
+export interface RecallCue {
+  nodeId: string;
+  canonicalName: string;
+  memoryTypes: MemoryType[];
+  activeCount: number;
+  newestAt: string | null;
+  deepestTier: MemoryTier;
+  hasConflicts: boolean;
+  hasDeepMemory: boolean;
+  score: number;
+  reason: "hybrid_match" | "learned_route" | "lexical_match" | "vector_match";
+}
+
+export interface RecallIndex {
+  cues: RecallCue[];
+}
+
+export type MemoryLoadMode = "none" | "cue" | "retrieve";
+
+export interface MemoryGateDecision {
+  mode: MemoryLoadMode;
+  confidence: number;
+  reason: "explicit_recall" | "memory_may_help" | "memory_not_needed";
+  maxTier: MemoryTier;
+  limit: number;
+  graphHops: number;
+}
+
 export interface NodeRoute {
   node: MemoryNode;
   score: number;

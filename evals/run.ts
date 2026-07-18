@@ -4,8 +4,8 @@ import { resolve } from "node:path";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
-import { NmgStore } from "../src/index.ts";
-import type { MemoryTier } from "../src/core/types.ts";
+import { decideMemoryLoad, NmgStore } from "../src/index.ts";
+import type { MemoryLoadMode, MemoryTier } from "../src/core/types.ts";
 
 interface EvalCase {
   id: string;
@@ -36,6 +36,7 @@ interface EvalResult {
   writerRemembered: boolean;
   sessionArchived: boolean;
   databaseVerified: boolean;
+  readerLoadMode: MemoryLoadMode;
   readerSearched: boolean;
   answerMatched: boolean;
   answer: string;
@@ -82,6 +83,7 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
   let writerRemembered = false;
   let sessionArchived = false;
   let databaseVerified = false;
+  const readerLoadMode = decideMemoryLoad(testCase.recall.prompt).mode;
   let readerSearched = false;
   let answerMatched = false;
   let answer = "";
@@ -171,7 +173,8 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
           (term) => !answer.toLocaleLowerCase().includes(term.toLocaleLowerCase()),
         );
 
-      if (testCase.recall.requireSearchTool && !readerSearched) {
+      if (testCase.recall.requireSearchTool &&
+          readerLoadMode !== "retrieve" && !readerSearched) {
         errors.push("Reader did not complete the required nmg_search call.");
       }
       if (!answerMatched) errors.push("Reader answer did not contain all expected terms.");
@@ -189,10 +192,11 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
       sessionArchived &&
       databaseVerified &&
       answerMatched &&
-      (!testCase.recall.requireSearchTool || readerSearched),
+      (!testCase.recall.requireSearchTool || readerLoadMode === "retrieve" || readerSearched),
     writerRemembered,
     sessionArchived,
     databaseVerified,
+    readerLoadMode,
     readerSearched,
     answerMatched,
     answer,

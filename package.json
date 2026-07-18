@@ -8,9 +8,10 @@
     "check": "tsc --noEmit",
     "eval:agents": "node --experimental-strip-types evals/run.ts",
     "eval:longmem": "node --experimental-strip-types evals/longmemeval/run.ts",
+    "eval:recall-compression": "node --experimental-strip-types evals/recall-compression.ts",
     "pi:prompt": "node --experimental-strip-types scripts/pi-control.ts prompt",
     "pi:state": "node --experimental-strip-types scripts/pi-control.ts state",
-    "test": "node --experimental-strip-types --test src/core/store.test.ts"
+    "test": "node --experimental-strip-types --test src/core/store.test.ts src/core/gate.test.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.80.10",
