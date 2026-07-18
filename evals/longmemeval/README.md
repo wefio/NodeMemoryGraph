@@ -35,8 +35,12 @@ also ignored by Git.
 | Oracle evidence | 5/7 | 71.4% |
 | NMG over oracle evidence, pre-semantic architecture | 2/7 | 28.6% |
 | NMG over oracle evidence, typed graph architecture | 6/7 | 85.7% |
+| NMG over oracle evidence, adaptive retrieval architecture | 6/7 | 85.7% |
 
-The sample is too small and model execution is stochastic, so this is not a
+The adaptive-retrieval run adds persisted vectors, learned-route scoring, and
+Huffman-derived block tiers. It retained the same aggregate score; the remaining
+multi-session failure returned one item instead of the required three. The
+sample is too small and model execution is stochastic, so this is not a
 benchmark claim. The second NMG run used the same seven fixed question IDs after
 adding stable state identity, typed memories, multi-evidence derivation,
 graph-aware context composition, and typed usage instructions. It resolved the

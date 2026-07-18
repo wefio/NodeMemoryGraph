@@ -10,6 +10,8 @@ import type {
   MemoryContext,
   MemoryNode,
   MemoryNodeKind,
+  NodeRoute,
+  NodeTransform,
   MemoryRecord,
   MemorySearchResult,
   MemoryScope,
@@ -19,9 +21,14 @@ import type {
   NodeRelationType,
   RememberInput,
   RememberResult,
+  RebalanceResult,
   SearchOptions,
   SessionArchive,
+  VectorEmbedder,
 } from "./types.ts";
+import { blockTiers, huffmanDepths } from "./hierarchy.ts";
+import { OnlineNodeRouter } from "./router.ts";
+import { cosineSimilarity, HashingVectorEmbedder } from "./vector.ts";
 
 type Row = Record<string, string | number | null>;
 
@@ -29,10 +36,14 @@ const MAX_SEARCH_CANDIDATES = 500;
 
 export class NmgStore {
   readonly #db: DatabaseSync;
+  readonly #embedder: VectorEmbedder;
+  readonly #router: OnlineNodeRouter;
 
-  constructor(databasePath: string) {
+  constructor(databasePath: string, embedder: VectorEmbedder = new HashingVectorEmbedder()) {
     mkdirSync(dirname(databasePath), { recursive: true });
     this.#db = new DatabaseSync(databasePath);
+    this.#embedder = embedder;
+    this.#router = new OnlineNodeRouter(embedder);
     this.#db.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");
     this.#migrate();
   }
@@ -84,7 +95,22 @@ export class NmgStore {
       .prepare("SELECT * FROM memory_nodes WHERE canonical_name = ?")
       .get(canonicalName) as Row | undefined;
 
-    if (existing) return mapNode(existing);
+    if (existing) {
+      const node = mapNode(existing);
+      if (node.status === "active") return node;
+      const redirects = this.#db.prepare(
+        `SELECT n.* FROM node_redirects r
+         JOIN memory_nodes n ON n.id = r.target_node_id
+         WHERE r.source_node_id = ? AND n.status = 'active'`,
+      ).all(node.id) as Row[];
+      const unique = [...new Map(redirects.map((row) => [String(row.id), row])).values()];
+      if (unique.length === 1) return mapNode(unique[0]!);
+      throw new Error(
+        unique.length > 1
+          ? `node ${canonicalName} was split; choose a more specific node`
+          : `node ${canonicalName} is inactive and has no active redirect`,
+      );
+    }
 
     const now = new Date().toISOString();
     const node: MemoryNode = {
@@ -94,13 +120,14 @@ export class NmgStore {
       summary: input.summary?.trim() || canonicalName,
       createdAt: now,
       updatedAt: now,
+      status: "active",
     };
 
     this.#db
       .prepare(
         `INSERT INTO memory_nodes
-          (id, canonical_name, kind, summary, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+          (id, canonical_name, kind, summary, created_at, updated_at, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         node.id,
@@ -109,6 +136,7 @@ export class NmgStore {
         node.summary,
         node.createdAt,
         node.updatedAt,
+        node.status,
       );
 
     return node;
@@ -191,6 +219,7 @@ export class NmgStore {
          VALUES (?, ?)`,
       )
       .run(memory.id, memory.evidenceId);
+    this.#upsertEmbedding(memory.id, this.#memoryText(memory, input.nodeId));
 
     return memory;
   }
@@ -327,7 +356,16 @@ export class NmgStore {
          WHERE source_node_id = ? AND target_node_id = ? AND relation_type = ?`,
       )
       .get(input.sourceNodeId, input.targetNodeId, input.type) as Row | undefined;
-    if (existing) return mapRelation(existing);
+    if (existing) {
+      const relation = mapRelation(existing);
+      const evidenceIds = [...new Set([...relation.evidenceIds, ...(input.evidenceIds ?? [])])];
+      if (evidenceIds.length !== relation.evidenceIds.length) {
+        this.#db.prepare("UPDATE node_relations SET evidence_ids_json = ? WHERE id = ?")
+          .run(JSON.stringify(evidenceIds), relation.id);
+        relation.evidenceIds = evidenceIds;
+      }
+      return relation;
+    }
 
     const relation: NodeRelation = {
       id: randomUUID(),
@@ -384,6 +422,249 @@ export class NmgStore {
     return [...relations.values()];
   }
 
+  mergeNodes(input: {
+    sourceNodeIds: string[];
+    targetName: string;
+    targetKind?: MemoryNodeKind;
+    summary?: string;
+  }): NodeTransform {
+    const sourceNodeIds = [...new Set(input.sourceNodeIds)];
+    if (sourceNodeIds.length < 2) throw new Error("merge requires at least two nodes");
+    const sources = sourceNodeIds.map((id) => this.#requireNode(id));
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      const target = this.upsertNode({
+        canonicalName: input.targetName,
+        kind: input.targetKind ?? sources[0]!.kind,
+        summary: input.summary,
+      });
+      if (sourceNodeIds.includes(target.id)) {
+        throw new Error("merge target must be distinct from every source node");
+      }
+      const movedMemoryIds = this.#memoryIdsForNodes(sourceNodeIds);
+      const operation = this.#createTransform("merge", sourceNodeIds, [target.id], movedMemoryIds);
+      for (const sourceId of sourceNodeIds) {
+        this.#db.prepare("UPDATE memory_records SET node_id = ? WHERE node_id = ?")
+          .run(target.id, sourceId);
+        this.#redirectRelations(sourceId, target.id);
+        this.#db.prepare("UPDATE memory_nodes SET status = 'merged', updated_at = ? WHERE id = ?")
+          .run(operation.createdAt, sourceId);
+        this.#db.prepare(
+          `INSERT INTO node_redirects (source_node_id, target_node_id, transform_id)
+           VALUES (?, ?, ?)`,
+        ).run(sourceId, target.id, operation.id);
+      }
+      this.#db.exec("COMMIT");
+      this.#refreshEmbeddings(movedMemoryIds);
+      return operation;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  splitNode(input: {
+    sourceNodeId: string;
+    partitions: Array<{
+      nodeName: string;
+      nodeKind?: MemoryNodeKind;
+      summary?: string;
+      memoryIds: string[];
+    }>;
+  }): NodeTransform {
+    const source = this.#requireNode(input.sourceNodeId);
+    if (input.partitions.length < 2) throw new Error("split requires at least two partitions");
+    const assigned = input.partitions.flatMap((partition) => partition.memoryIds);
+    if (new Set(assigned).size !== assigned.length) {
+      throw new Error("a memory cannot belong to two split partitions");
+    }
+    const available = new Set(this.#memoryIdsForNodes([source.id]));
+    if (assigned.some((id) => !available.has(id))) {
+      throw new Error("split partitions may contain only memories from the source node");
+    }
+    if (assigned.length !== available.size) {
+      throw new Error("split partitions must assign every source memory exactly once");
+    }
+
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      const targets = input.partitions.map((partition) => this.upsertNode({
+        canonicalName: partition.nodeName,
+        kind: partition.nodeKind ?? source.kind,
+        summary: partition.summary,
+      }));
+      if (new Set(targets.map((node) => node.id)).size !== targets.length ||
+          targets.some((node) => node.id === source.id)) {
+        throw new Error("split targets must be new, distinct semantic nodes");
+      }
+      const operation = this.#createTransform(
+        "split", [source.id], targets.map((node) => node.id), assigned,
+      );
+      for (let index = 0; index < input.partitions.length; index += 1) {
+        const partition = input.partitions[index]!;
+        const target = targets[index]!;
+        const update = this.#db.prepare("UPDATE memory_records SET node_id = ? WHERE id = ?");
+        for (const memoryId of partition.memoryIds) update.run(target.id, memoryId);
+        this.linkNodes({ sourceNodeId: target.id, targetNodeId: source.id, type: "is_a" });
+        this.#db.prepare(
+          `INSERT INTO node_redirects (source_node_id, target_node_id, transform_id)
+           VALUES (?, ?, ?)`,
+        ).run(source.id, target.id, operation.id);
+      }
+      this.#db.prepare("UPDATE memory_nodes SET status = 'split', updated_at = ? WHERE id = ?")
+        .run(operation.createdAt, source.id);
+      this.#db.exec("COMMIT");
+      this.#refreshEmbeddings(assigned);
+      return operation;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  getNodeTransform(transformId: string): NodeTransform | null {
+    const row = this.#db.prepare("SELECT * FROM node_transforms WHERE id = ?")
+      .get(transformId) as Row | undefined;
+    if (!row) return null;
+    return {
+      id: String(row.id),
+      type: String(row.transform_type) as NodeTransform["type"],
+      sourceNodeIds: parseStringArray(row.source_node_ids_json),
+      targetNodeIds: parseStringArray(row.target_node_ids_json),
+      movedMemoryIds: parseStringArray(row.moved_memory_ids_json),
+      createdAt: String(row.created_at),
+    };
+  }
+
+  routeNodes(query: string, limit = 5): NodeRoute[] {
+    const rows = this.#db.prepare(
+      `SELECT n.*, r.weights_json
+       FROM memory_nodes n LEFT JOIN router_weights r ON r.node_id = n.id
+       WHERE n.status = 'active'`,
+    ).all() as Row[];
+    const normalized = normalize(query);
+    return rows.map((row) => {
+      const node = mapNode(row);
+      const learned = this.#router.score(query, parseVector(row.weights_json));
+      const lexical = lexicalNodeScore(normalized, node);
+      return { node, score: learned * 0.7 + lexical * 0.3 };
+    }).filter((route) => route.score > 0)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, Math.max(1, Math.min(limit, 50)));
+  }
+
+  trainRouter(query: string, usefulNodeIds: string[], learningRate = 0.2): void {
+    const uniqueIds = [...new Set(usefulNodeIds)];
+    const upsert = this.#db.prepare(
+      `INSERT INTO router_weights (node_id, model, dimensions, weights_json, examples, updated_at)
+       VALUES (?, ?, ?, ?, 1, ?)
+       ON CONFLICT(node_id) DO UPDATE SET weights_json = excluded.weights_json,
+         examples = router_weights.examples + 1, updated_at = excluded.updated_at`,
+    );
+    const select = this.#db.prepare("SELECT weights_json FROM router_weights WHERE node_id = ?");
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const nodeId of uniqueIds) {
+        this.#requireNode(nodeId);
+        const row = select.get(nodeId) as Row | undefined;
+        const weights = this.#router.update(query, row ? parseVector(row.weights_json) : undefined,
+          clamp(learningRate, 0.001, 1));
+        upsert.run(nodeId, this.#embedder.model, this.#embedder.dimensions,
+          JSON.stringify(weights), now);
+      }
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  rebuildVectorIndex(): number {
+    const rows = this.#db.prepare(
+      `SELECT m.id, m.statement, m.node_id, n.canonical_name, n.summary
+       FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id`,
+    ).all() as Row[];
+    const upsert = this.#db.prepare(
+      `INSERT INTO memory_embeddings (memory_id, model, dimensions, vector_json, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(memory_id) DO UPDATE SET model = excluded.model,
+         dimensions = excluded.dimensions, vector_json = excluded.vector_json,
+         updated_at = excluded.updated_at`,
+    );
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const row of rows) {
+        const text = `${row.statement} ${row.canonical_name} ${row.summary}`;
+        upsert.run(row.id, this.#embedder.model, this.#embedder.dimensions,
+          JSON.stringify(this.#embedder.embed(text)), now);
+      }
+      this.#db.exec("COMMIT");
+      return rows.length;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  rebalanceNode(
+    nodeId: string,
+    capacities: readonly [number, number, number] = [16, 64, 256],
+  ): RebalanceResult {
+    this.#requireNode(nodeId);
+    const rows = this.#db.prepare(
+      `SELECT id, tier, importance, access_count, pending_access_count,
+              last_accessed_at, status
+       FROM memory_records WHERE node_id = ?`,
+    ).all(nodeId) as Row[];
+    const active = rows.filter((row) => ["active", "disputed"].includes(String(row.status)));
+    const weighted = active.map((row) => ({
+      id: String(row.id),
+      weight: hierarchyWeight(row),
+    }));
+    const depths = huffmanDepths(weighted);
+    const tiers = blockTiers(depths, capacities);
+    const totalWeight = weighted.reduce((sum, item) => sum + item.weight, 0) || 1;
+    const expectedDepth = weighted.reduce(
+      (sum, item) => sum + item.weight / totalWeight * (depths.get(item.id) ?? 0), 0,
+    );
+    const changedMemoryIds: string[] = [];
+    const update = this.#db.prepare(
+      "UPDATE memory_records SET tier = ?, pending_access_count = 0 WHERE id = ?",
+    );
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const row of active) {
+        const id = String(row.id);
+        const tier = tiers.get(id) ?? 3;
+        if (tier !== Number(row.tier)) changedMemoryIds.push(id);
+        update.run(tier, id);
+      }
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return {
+      nodeId,
+      changedMemoryIds,
+      expectedDepth,
+      pendingAccesses: rows.reduce((sum, row) => sum + Number(row.pending_access_count ?? 0), 0),
+    };
+  }
+
+  rebalanceDueNodes(
+    threshold = 32,
+    capacities: readonly [number, number, number] = [16, 64, 256],
+  ): RebalanceResult[] {
+    const rows = this.#db.prepare(
+      `SELECT node_id, SUM(pending_access_count) AS pending
+       FROM memory_records GROUP BY node_id HAVING pending >= ?`,
+    ).all(Math.max(1, threshold)) as Row[];
+    return rows.map((row) => this.rebalanceNode(String(row.node_id), capacities));
+  }
+
   searchContext(query: string, options: SearchOptions = {}): MemoryContext {
     const direct = this.search(query, options);
     const relations = this.getRelations(
@@ -413,6 +694,9 @@ export class NmgStore {
 
     const maxTier = options.maxTier ?? 1;
     const limit = Math.max(1, Math.min(options.limit ?? 8, 50));
+    const nodeName = options.nodeName
+      ? this.#resolveActiveNodeName(options.nodeName)
+      : null;
     const rows = this.#db
       .prepare(
         `SELECT
@@ -432,13 +716,16 @@ export class NmgStore {
            n.id AS n_id, n.canonical_name AS n_canonical_name,
            n.kind AS n_kind, n.summary AS n_summary,
            n.created_at AS n_created_at, n.updated_at AS n_updated_at,
+           n.status AS n_status, ve.vector_json AS ve_vector_json,
            h.id AS h_id, h.session_id AS h_session_id, h.role AS h_role,
            h.content AS h_content, h.source_ref AS h_source_ref,
            h.created_at AS h_created_at
          FROM memory_records m
          JOIN memory_nodes n ON n.id = m.node_id
          JOIN history_records h ON h.id = m.evidence_id
+         LEFT JOIN memory_embeddings ve ON ve.memory_id = m.id
          WHERE m.tier <= ?
+           AND n.status = 'active'
            AND (? IS NULL OR n.canonical_name = ?)
            AND (? = 1 OR m.status IN ('active', 'disputed'))
          ORDER BY m.tier ASC, m.importance DESC,
@@ -447,19 +734,30 @@ export class NmgStore {
       )
       .all(
         maxTier,
-        options.nodeName ?? null,
-        options.nodeName ?? null,
+        nodeName,
+        nodeName,
         options.includeHistorical ? 1 : 0,
         MAX_SEARCH_CANDIDATES,
       ) as Row[];
 
+    const queryVector = this.#embedder.embed(query);
+    const routes = new Map(this.routeNodes(query, 20).map((route) => [route.node.id, route.score]));
     const results = rows
-      .map((row) => mapSearchResult(row, lexicalScore(normalizedQuery, row)))
+      .map((row) => {
+        const lexical = lexicalScore(normalizedQuery, row);
+        const vector = cosineSimilarity(queryVector, parseVector(row.ve_vector_json));
+        const route = routes.get(String(row.m_node_id)) ?? 0;
+        const result = mapSearchResult(row, lexical);
+        result.vectorScore = vector;
+        result.routeScore = route;
+        result.combinedScore = hybridScore(lexical, vector, route);
+        return result;
+      })
       .filter((result) => matchesScope(result.memory.scope, options.scope))
-      .filter((result) => result.lexicalScore > 0)
+      .filter((result) => result.combinedScore > 0)
       .sort(
         (left, right) =>
-          right.lexicalScore - left.lexicalScore ||
+          right.combinedScore - left.combinedScore ||
           left.memory.tier - right.memory.tier ||
           right.memory.importance - left.memory.importance,
       )
@@ -477,7 +775,9 @@ export class NmgStore {
 
     const statement = this.#db.prepare(
       `UPDATE memory_records
-       SET access_count = access_count + 1, last_accessed_at = ?
+       SET access_count = access_count + 1,
+           pending_access_count = pending_access_count + 1,
+           last_accessed_at = ?
        WHERE id = ?`,
     );
     const now = new Date().toISOString();
@@ -563,7 +863,8 @@ export class NmgStore {
         kind TEXT NOT NULL,
         summary TEXT NOT NULL,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active'
       );
 
       CREATE TABLE IF NOT EXISTS memory_records (
@@ -585,6 +886,7 @@ export class NmgStore {
         tier INTEGER NOT NULL CHECK (tier BETWEEN 0 AND 3),
         importance REAL NOT NULL CHECK (importance BETWEEN 0 AND 1),
         access_count INTEGER NOT NULL DEFAULT 0,
+        pending_access_count INTEGER NOT NULL DEFAULT 0,
         last_accessed_at TEXT,
         created_at TEXT NOT NULL
       );
@@ -611,6 +913,39 @@ export class NmgStore {
         UNIQUE (source_node_id, target_node_id, relation_type)
       );
 
+      CREATE TABLE IF NOT EXISTS node_transforms (
+        id TEXT PRIMARY KEY,
+        transform_type TEXT NOT NULL,
+        source_node_ids_json TEXT NOT NULL,
+        target_node_ids_json TEXT NOT NULL,
+        moved_memory_ids_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS node_redirects (
+        source_node_id TEXT NOT NULL REFERENCES memory_nodes(id),
+        target_node_id TEXT NOT NULL REFERENCES memory_nodes(id),
+        transform_id TEXT NOT NULL REFERENCES node_transforms(id),
+        PRIMARY KEY (source_node_id, target_node_id, transform_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS memory_embeddings (
+        memory_id TEXT PRIMARY KEY REFERENCES memory_records(id),
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS router_weights (
+        node_id TEXT PRIMARY KEY REFERENCES memory_nodes(id),
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        weights_json TEXT NOT NULL,
+        examples INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS session_archives (
         session_id TEXT PRIMARY KEY,
         history_id TEXT NOT NULL UNIQUE REFERENCES history_records(id),
@@ -627,6 +962,7 @@ export class NmgStore {
         ON node_relations(target_node_id);
     `);
     this.#ensureMemoryColumns();
+    this.#ensureNodeColumns();
     this.#db.exec(`
       CREATE INDEX IF NOT EXISTS idx_memory_records_state
         ON memory_records(memory_type, state_key, status);
@@ -653,11 +989,131 @@ export class NmgStore {
       ["event_time", "TEXT"],
       ["source_actor", "TEXT NOT NULL DEFAULT 'user'"],
       ["truth_status", "TEXT NOT NULL DEFAULT 'asserted'"],
+      ["pending_access_count", "INTEGER NOT NULL DEFAULT 0"],
     ];
     for (const [name, definition] of additions) {
       if (!existing.has(name)) {
         this.#db.exec(`ALTER TABLE memory_records ADD COLUMN ${name} ${definition}`);
       }
+    }
+  }
+
+  #ensureNodeColumns(): void {
+    const existing = new Set(
+      (this.#db.prepare("PRAGMA table_info(memory_nodes)").all() as Row[]).map(
+        (row) => String(row.name),
+      ),
+    );
+    if (!existing.has("status")) {
+      this.#db.exec("ALTER TABLE memory_nodes ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
+    }
+  }
+
+  #requireNode(nodeId: string): MemoryNode {
+    const row = this.#db.prepare("SELECT * FROM memory_nodes WHERE id = ?").get(nodeId) as
+      Row | undefined;
+    if (!row) throw new Error(`node ${nodeId} does not exist`);
+    return mapNode(row);
+  }
+
+  #resolveActiveNodeName(canonicalName: string): string {
+    const row = this.#db.prepare("SELECT * FROM memory_nodes WHERE canonical_name = ?")
+      .get(canonicalName) as Row | undefined;
+    if (!row) return canonicalName;
+    const node = mapNode(row);
+    if (node.status === "active") return node.canonicalName;
+    const targets = this.#db.prepare(
+      `SELECT DISTINCT n.canonical_name FROM node_redirects r
+       JOIN memory_nodes n ON n.id = r.target_node_id
+       WHERE r.source_node_id = ? AND n.status = 'active'`,
+    ).all(node.id) as Row[];
+    if (targets.length === 1) return String(targets[0]!.canonical_name);
+    if (targets.length > 1) {
+      throw new Error(`node ${canonicalName} was split; choose a more specific node`);
+    }
+    return canonicalName;
+  }
+
+  #memoryIdsForNodes(nodeIds: string[]): string[] {
+    const select = this.#db.prepare("SELECT id FROM memory_records WHERE node_id = ?");
+    return nodeIds.flatMap((nodeId) =>
+      (select.all(nodeId) as Row[]).map((row) => String(row.id)));
+  }
+
+  #createTransform(
+    type: NodeTransform["type"],
+    sourceNodeIds: string[],
+    targetNodeIds: string[],
+    movedMemoryIds: string[],
+  ): NodeTransform {
+    const transform: NodeTransform = {
+      id: randomUUID(),
+      type,
+      sourceNodeIds,
+      targetNodeIds,
+      movedMemoryIds,
+      createdAt: new Date().toISOString(),
+    };
+    this.#db.prepare(
+      `INSERT INTO node_transforms
+        (id, transform_type, source_node_ids_json, target_node_ids_json,
+         moved_memory_ids_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(transform.id, transform.type, JSON.stringify(transform.sourceNodeIds),
+      JSON.stringify(transform.targetNodeIds), JSON.stringify(transform.movedMemoryIds),
+      transform.createdAt);
+    return transform;
+  }
+
+  #redirectRelations(sourceNodeId: string, targetNodeId: string): void {
+    const rows = this.#db.prepare(
+      `SELECT * FROM node_relations
+       WHERE source_node_id = ? OR target_node_id = ?`,
+    ).all(sourceNodeId, sourceNodeId) as Row[];
+    const remove = this.#db.prepare("DELETE FROM node_relations WHERE id = ?");
+    for (const row of rows) {
+      const relation = mapRelation(row);
+      remove.run(relation.id);
+      const nextSource = relation.sourceNodeId === sourceNodeId
+        ? targetNodeId : relation.sourceNodeId;
+      const nextTarget = relation.targetNodeId === sourceNodeId
+        ? targetNodeId : relation.targetNodeId;
+      if (nextSource !== nextTarget) {
+        this.linkNodes({
+          sourceNodeId: nextSource,
+          targetNodeId: nextTarget,
+          type: relation.type,
+          evidenceIds: relation.evidenceIds,
+        });
+      }
+    }
+  }
+
+  #memoryText(memory: Pick<MemoryRecord, "statement">, nodeId: string): string {
+    const node = this.#requireNode(nodeId);
+    return `${memory.statement} ${node.canonicalName} ${node.summary}`;
+  }
+
+  #upsertEmbedding(memoryId: string, text: string): void {
+    this.#db.prepare(
+      `INSERT INTO memory_embeddings (memory_id, model, dimensions, vector_json, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(memory_id) DO UPDATE SET model = excluded.model,
+         dimensions = excluded.dimensions, vector_json = excluded.vector_json,
+         updated_at = excluded.updated_at`,
+    ).run(memoryId, this.#embedder.model, this.#embedder.dimensions,
+      JSON.stringify(this.#embedder.embed(text)), new Date().toISOString());
+  }
+
+  #refreshEmbeddings(memoryIds: string[]): void {
+    const select = this.#db.prepare(
+      `SELECT m.id, m.statement, m.node_id, n.canonical_name, n.summary
+       FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id WHERE m.id = ?`,
+    );
+    for (const memoryId of memoryIds) {
+      const row = select.get(memoryId) as Row | undefined;
+      if (row) this.#upsertEmbedding(memoryId,
+        `${row.statement} ${row.canonical_name} ${row.summary}`);
     }
   }
 
@@ -693,13 +1149,14 @@ export class NmgStore {
          n.id AS n_id, n.canonical_name AS n_canonical_name,
          n.kind AS n_kind, n.summary AS n_summary,
          n.created_at AS n_created_at, n.updated_at AS n_updated_at,
+         n.status AS n_status,
          h.id AS h_id, h.session_id AS h_session_id, h.role AS h_role,
          h.content AS h_content, h.source_ref AS h_source_ref,
          h.created_at AS h_created_at
        FROM memory_records m
        JOIN memory_nodes n ON n.id = m.node_id
        JOIN history_records h ON h.id = m.evidence_id
-       WHERE m.node_id = ? AND m.tier <= ?
+       WHERE m.node_id = ? AND m.tier <= ? AND n.status = 'active'
          AND m.status IN ('active', 'disputed')
        ORDER BY m.tier ASC, m.importance DESC, m.created_at DESC
        LIMIT ?`,
@@ -729,6 +1186,7 @@ function mapNode(row: Row, prefix = ""): MemoryNode {
     summary: String(row[`${prefix}summary`]),
     createdAt: String(row[`${prefix}created_at`]),
     updatedAt: String(row[`${prefix}updated_at`]),
+    status: String(row[`${prefix}status`] ?? "active") as MemoryNode["status"],
   };
 }
 
@@ -770,6 +1228,9 @@ function mapSearchResult(row: Row, score: number): MemorySearchResult {
     },
     evidenceRecords: [],
     lexicalScore: score,
+    vectorScore: 0,
+    routeScore: 0,
+    combinedScore: score,
   };
 }
 
@@ -806,6 +1267,29 @@ function lexicalScore(query: string, row: Row): number {
     (score, term) => score + (haystack.includes(term) ? term.length : 0),
     0,
   );
+}
+
+function lexicalNodeScore(query: string, node: MemoryNode): number {
+  if (!query) return 0;
+  const haystack = normalize(`${node.canonicalName} ${node.summary}`);
+  if (haystack.includes(query)) return 1;
+  const terms = searchTerms(query);
+  if (terms.length === 0) return 0;
+  return terms.filter((term) => haystack.includes(term)).length / terms.length;
+}
+
+function hybridScore(lexical: number, vector: number, route: number): number {
+  const boundedLexical = lexical <= 0 ? 0 : lexical / (lexical + 10);
+  return boundedLexical * 0.5 + Math.max(0, vector) * 0.35 + Math.max(0, route) * 0.15;
+}
+
+function hierarchyWeight(row: Row): number {
+  const frequency = Math.log2(2 + Number(row.access_count ?? 0));
+  const importance = 0.5 + Number(row.importance ?? 0);
+  const lastAccessed = row.last_accessed_at ? Date.parse(String(row.last_accessed_at)) : 0;
+  const ageDays = lastAccessed > 0 ? Math.max(0, (Date.now() - lastAccessed) / 86_400_000) : 365;
+  const recency = 1 / (1 + ageDays / 30);
+  return Math.max(Number.EPSILON, frequency * importance * (0.5 + recency));
 }
 
 function searchTerms(value: string): string[] {
@@ -852,6 +1336,18 @@ function parseStringArray(value: string | number | null): string[] {
     const parsed = JSON.parse(value) as unknown;
     return Array.isArray(parsed)
       ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseVector(value: string | number | null | undefined): number[] {
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is number => typeof item === "number" && Number.isFinite(item))
       : [];
   } catch {
     return [];

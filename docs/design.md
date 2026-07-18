@@ -1,6 +1,6 @@
 # NMG design baseline
 
-**Status:** 0.2 / typed semantic-memory baseline  
+**Status:** 0.3 / adaptive graph-memory baseline  
 **Updated:** 2026-07-18
 
 ## Definition
@@ -17,14 +17,17 @@ The primary integration target is Pi. Pi remains responsible for the model loop,
 | Source of truth | Local SQLite database. Offline use must remain complete. |
 | Historical evidence | Append-only during normal maintenance and referenced by stable IDs. Privacy deletion remains possible by an explicit future operation. |
 | Semantic layer | Mutable `MemoryNode` objects connected by typed relations; general semantic relations may cycle, while derivation and supersession must remain acyclic. |
-| Node-local history | `MemoryRecord` references evidence and belongs to a local tier L0-L3. |
-| Retrieval | Route to a small candidate set, read shallow tiers first, then expand under a budget. |
-| Huffman idea | An optimization hypothesis: expected usefulness should affect depth. The MVP uses tiers rather than a literal Huffman tree. |
+| Node lifecycle | Merge and split preserve records/evidence, mark source nodes inactive, and retain redirects. A split requires a complete, disjoint memory partition. |
+| Node-local history | `MemoryRecord` references evidence and belongs to a local block tier L0-L3. |
+| Retrieval | Hybrid lexical/vector/learned-route scoring, shallow tiers first, then graph expansion under a budget. |
+| Vector index | Synchronous pluggable `VectorEmbedder`; deterministic hashing vectors are the offline baseline and the persisted index is rebuildable. |
+| Learned routing | Persisted online prototype router learns query-to-useful-node mappings from explicit feedback and contributes to hybrid ranking. |
+| Huffman idea | Implemented as standard weighted Huffman depths mapped into bounded L0-L3 blocks. Access events accumulate before batch rebuilding. |
 | Write policy | Clear stable user-stated facts, preferences, and constraints are automatic. Ambiguous or inferred candidates require confirmation; secrets and transient instructions are rejected. |
 | Session evidence | Each completed Pi turn checkpoints its session transcript as cold evidence. Session archives do not automatically become semantic memories. |
 | Cloud | Optional coordination/sync backend later; never the only copy. |
 | Sandbox | Outside NMG core. Add an execution backend only when a real task requires untrusted execution. Docker is the first candidate. |
-| Learning | PyTorch may later learn routing, stopping, or priority; storage topology remains an external discrete system. |
+| Learning | The first learned router is an online local prototype model. PyTorch remains optional for a later, richer router; storage topology stays discrete. |
 
 ## Core model
 
@@ -50,6 +53,20 @@ The graph and access hierarchy are separate structures:
 - Tiers express expected access cost inside one node.
 - Stable IDs are addresses. Tier or future Huffman codes must never be permanent IDs.
 
+## Node lifecycle
+
+`mergeNodes` moves all records from at least two source nodes into one active
+target, rewrites typed relations, marks the sources `merged`, and records a
+transform plus redirects. Writing through an old merged name resolves to its
+single active target.
+
+`splitNode` requires at least two disjoint partitions that collectively assign
+every source memory exactly once. It creates active targets, marks the source
+`split`, records redirects, and links each target back to the old semantic
+address. Writing through an old split name is rejected as ambiguous.
+
+Neither operation deletes history, evidence links, memories, or old nodes.
+
 ## Pi integration
 
 The extension uses only public Pi extension surfaces:
@@ -57,11 +74,15 @@ The extension uses only public Pi extension surfaces:
 1. `before_agent_start` performs graph-aware L0/L1 retrieval using the new prompt and appends a small, typed memory block to the system prompt.
 2. The write policy directs Pi to call `nmg_remember` automatically for stable user-stated facts, preferences, constraints, and states. Explicit writes use the same path.
 3. `nmg_remember` preserves memory type, scope, actor, truth status, event time, evidence role, and state identity. A matching `stateKey` and canonical scope supersede the prior active state automatically.
-4. `nmg_search` performs budgeted retrieval, expands typed graph neighbors, hydrates evidence, and can include deeper tiers or historical states.
+4. `nmg_search` performs budgeted hybrid retrieval, expands typed graph neighbors, hydrates evidence, and can include deeper tiers or historical states.
 5. `nmg_derive` creates a conclusion from multiple source memories and inherits their evidence chains. `nmg_link` creates typed node relations.
 6. The injected use policy distinguishes facts from unverified conversational evidence, uses only the newest active state, obeys constraints, adapts to preferences, preserves event time, and applies strategies as procedures rather than facts.
 7. `agent_end` checkpoints the current transcript; `session_shutdown` provides a final graceful checkpoint. Changed transcripts append a new immutable snapshot instead of mutating the old record.
-8. Retrieval records successful tool use for priority statistics; richer answer-level feedback remains future work.
+8. `nmg_organize` exposes guarded merge/split operations. `nmg_feedback` trains
+   the persisted online router, while `nmg_rebalance` applies accumulated usage
+   statistics in batches.
+9. Retrieval records exposure as usage statistics; explicit useful-node feedback
+   is kept separate so the router is not trained on every returned candidate.
 
 Automatic extraction remains governed rather than universal: model-authored claims,
 casual conversation, transient instructions, credentials, and secrets are not
@@ -113,17 +134,20 @@ The first milestone is complete when:
 4. Every returned memory identifies its immutable evidence record.
 5. Total history can grow without increasing the number of records injected into a normal turn.
 
-The MVP does not claim semantic scalability yet. Its lexical retrieval exists to validate lifecycle and interfaces before embeddings are introduced.
+The current implementation does not claim semantic scalability yet. Its default
+hashing vectors remove external setup but are not a substitute for a trained
+semantic embedding model. The database scan is bounded and suitable for the
+prototype; an ANN backend remains a scale optimization.
 
 ## Experiments after the MVP
 
 Run ablations in this order:
 
-1. Flat lexical/vector retrieval versus node-routed retrieval.
-2. Fixed local tiers versus no local tiers.
-3. Frequency-only priority versus frequency + recency + importance + conflict protection.
-4. Fixed tiers versus block-based Huffman-like depth allocation.
-5. Rule-based routing versus a learned router.
+1. Hashing vectors versus a trained semantic embedding provider.
+2. Hybrid retrieval with and without learned-route score.
+3. Fixed tiers versus Huffman-derived block tiers.
+4. Frequency-only weight versus frequency + recency + importance.
+5. Online prototype routing versus a PyTorch reranker/router.
 
 Track evidence Recall@K, stale-memory error rate, average injected records/tokens, deepest tier, and P50/P95 latency as history grows.
 
@@ -150,3 +174,7 @@ Track evidence Recall@K, stale-memory error rate, average injected records/token
 - What feedback proves that a retrieved memory was useful?
 - When does a node split, merge, or regenerate its summary from evidence?
 - Which rare constraints must be pinned near the surface regardless of access frequency?
+- Which semantic embedding model offers the best local quality/cost tradeoff?
+- At what scale should the persisted vector table be replaced with ANN search?
+- Should negative router feedback be explicit, inferred from skipped results, or
+  learned only from task outcomes?

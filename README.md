@@ -17,10 +17,16 @@ optimization:
   automatically supersede the prior active value in the same scope.
 - Typed node relations and multi-evidence derived memories support graph-aware
   retrieval instead of treating every memory as an isolated chunk.
-- `nmg_search` can expand related nodes and returns the underlying evidence.
+- Duplicate nodes can be merged and over-broad nodes split without deleting
+  memories or evidence; source-to-target redirects preserve old addresses.
+- `nmg_search` combines lexical, vector, and learned node-route scores, expands
+  related nodes, and returns the underlying evidence.
+- Node-local access counts are accumulated and periodically rebuilt into
+  Huffman-derived block tiers, keeping likely memories shallow without deleting
+  cold history.
 - Scope, validity intervals, conflicts, and superseded states remain
   traceable instead of deleting earlier evidence.
-- Cloud sync, embeddings, learned routing, and sandbox execution are deferred.
+- Cloud sync, external embedding models, and sandbox execution are deferred.
 
 ## Architecture
 
@@ -32,9 +38,11 @@ Pi agent harness
 NMG Pi extension
       │
       ▼
-NMG core ── MemoryNode ── tiered MemoryRecord
-      │                         │
-      └──────── SQLite ─────────┘
+NMG core ── MemoryNode graph ── tiered MemoryRecord
+      │          │                    │
+      │     online router       vector embedding
+      │          └──────┬─────────────┘
+      └────────────── SQLite ──────────┘
                     │
              immutable HistoryRecord
 ```
@@ -54,7 +62,7 @@ pi -e ./.pi/extensions/nmg/index.ts
 
 By default, the extension stores data in `.nmg/nmg.sqlite` under the current project. Set `NMG_DATA_DIR` to use another directory.
 
-In Pi, the model receives four tools and a typed write/use policy:
+In Pi, the model receives seven tools and a typed write/use policy:
 
 - `nmg_remember`: save a typed long-term memory with scope, truth status,
   event time, stable state identity, evidence role, and provenance.
@@ -63,6 +71,16 @@ In Pi, the model receives four tools and a typed write/use policy:
 - `nmg_derive`: form a new conclusion from at least two existing memories while
   retaining every transitive evidence reference.
 - `nmg_link`: add a typed semantic relation between two memory nodes.
+- `nmg_organize`: merge duplicate nodes or split an over-broad node using an
+  explicit, complete memory partition.
+- `nmg_feedback`: train the local online node router from useful-query feedback.
+- `nmg_rebalance`: batch-rebuild node-local block tiers from accumulated access
+  probability statistics.
+
+The built-in `HashingVectorEmbedder` is deterministic, offline, and intended as
+the zero-configuration baseline. `NmgStore` accepts any synchronous
+`VectorEmbedder`, so a semantic embedding provider can replace it; call
+`rebuildVectorIndex()` after changing models.
 
 The automatic-write rule is intentionally narrow:
 

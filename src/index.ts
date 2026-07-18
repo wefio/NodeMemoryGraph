@@ -1,13 +1,20 @@
 export { NmgStore } from "./core/store.ts";
+export { HashingVectorEmbedder } from "./core/vector.ts";
 export type {
   HistoryRecord,
+  EvidenceRole,
   DeriveMemoryInput,
   MemoryActor,
   MemoryContext,
   MemoryNode,
+  MemoryNodeKind,
   MemoryRecord,
+  MemoryScope,
   MemorySearchResult,
+  MemoryTier,
   MemoryType,
+  NodeRoute,
+  NodeTransform,
   NodeRelation,
   NodeRelationType,
   RememberInput,
@@ -15,4 +22,6 @@ export type {
   SearchOptions,
   SessionArchive,
   TruthStatus,
+  RebalanceResult,
+  VectorEmbedder,
 } from "./core/types.ts";

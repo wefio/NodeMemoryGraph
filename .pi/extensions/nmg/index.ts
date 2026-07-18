@@ -47,7 +47,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         `sensitive information. Do not save casual conversation, temporary ` +
         `instructions, duplicates, credentials, or secrets. Use nmg_derive when ` +
         `a durable conclusion combines two or more memories, and nmg_link to ` +
-        `record semantic relations.\n` +
+        `record semantic relations. Call nmg_feedback after an explicit search ` +
+        `when you can identify which returned nodes were actually useful.\n` +
         `</nmg_write_policy>\n` +
         (memoryBlock
           ? `\n<nmg_memory>\n` +
@@ -289,6 +290,99 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           },
         ],
         details: result,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "nmg_organize",
+    label: "Organize NMG nodes",
+    description:
+      "Merge duplicate semantic nodes or split an over-broad node. This preserves " +
+      "all memories and evidence and records source-to-target mappings.",
+    parameters: Type.Object({
+      action: Type.Union([Type.Literal("merge"), Type.Literal("split")]),
+      sourceNodeIds: Type.Optional(Type.Array(Type.String(), { minItems: 2 })),
+      targetName: Type.Optional(Type.String()),
+      summary: Type.Optional(Type.String()),
+      sourceNodeId: Type.Optional(Type.String()),
+      partitions: Type.Optional(Type.Array(Type.Object({
+        nodeName: Type.String(),
+        memoryIds: Type.Array(Type.String(), { minItems: 1 }),
+      }), { minItems: 2 })),
+    }),
+    async execute(_toolCallId, params) {
+      let transform;
+      if (params.action === "merge") {
+        if (!params.sourceNodeIds || !params.targetName) {
+          throw new Error("merge requires sourceNodeIds and targetName");
+        }
+        transform = getStore().mergeNodes({
+          sourceNodeIds: params.sourceNodeIds,
+          targetName: params.targetName,
+          summary: params.summary,
+        });
+      } else {
+        if (!params.sourceNodeId || !params.partitions) {
+          throw new Error("split requires sourceNodeId and partitions");
+        }
+        transform = getStore().splitNode({
+          sourceNodeId: params.sourceNodeId,
+          partitions: params.partitions,
+        });
+      }
+      return {
+        content: [{
+          type: "text",
+          text: `${transform.type} transform ${transform.id} moved ` +
+            `${transform.movedMemoryIds.length} memories without deleting evidence.`,
+        }],
+        details: transform,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "nmg_feedback",
+    label: "Train NMG router",
+    description:
+      "Report which semantic nodes were useful for a query so the local online " +
+      "router can improve future node ranking.",
+    parameters: Type.Object({
+      query: Type.String(),
+      usefulNodeIds: Type.Array(Type.String(), { minItems: 1 }),
+    }),
+    async execute(_toolCallId, params) {
+      getStore().trainRouter(params.query, params.usefulNodeIds);
+      return {
+        content: [{ type: "text", text: `Trained router on ${params.usefulNodeIds.length} nodes.` }],
+        details: { query: params.query, usefulNodeIds: params.usefulNodeIds },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "nmg_rebalance",
+    label: "Rebalance NMG memory tiers",
+    description:
+      "Batch-rebuild Huffman-like block tiers from accumulated access statistics.",
+    parameters: Type.Object({
+      nodeId: Type.Optional(Type.String()),
+      pendingThreshold: Type.Optional(Type.Number({ minimum: 1 })),
+    }),
+    async execute(_toolCallId, params) {
+      const results = params.nodeId
+        ? [getStore().rebalanceNode(params.nodeId)]
+        : getStore().rebalanceDueNodes(params.pendingThreshold ?? 32);
+      return {
+        content: [{
+          type: "text",
+          text: results.length === 0
+            ? "No node has enough pending accesses for batch rebalancing."
+            : `Rebalanced ${results.length} nodes; changed ` +
+              `${results.reduce((sum, result) => sum + result.changedMemoryIds.length, 0)} tiers.`,
+        }],
+        details: results,
       };
     },
   });

@@ -5,10 +5,14 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { NmgStore } from "./store.ts";
+import type { VectorEmbedder } from "./types.ts";
 
-function withStore(run: (store: NmgStore) => void): void {
+function withStore(
+  run: (store: NmgStore) => void,
+  embedder?: VectorEmbedder,
+): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-test-"));
-  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"), embedder);
   try {
     run(store);
   } finally {
@@ -270,5 +274,144 @@ test("searchContext combines matching memories with typed graph edges", () => {
     assert.equal(context.results[0]?.memory.id, preference.memory.id);
     assert.ok(context.results.some((result) => result.memory.id === task.memory.id));
     assert.equal(context.relations[0]?.type, "applies_to");
+  });
+});
+
+test("node merge preserves memories, evidence, relations, and redirects", () => {
+  withStore((store) => {
+    const first = store.remember({ statement: "Uses TypeScript", nodeName: "NMG language" });
+    const second = store.remember({ statement: "Uses SQLite", nodeName: "NMG database" });
+    const host = store.remember({ statement: "Pi hosts NMG", nodeName: "Pi host" });
+    store.linkNodes({ sourceNodeId: first.node.id, targetNodeId: host.node.id, type: "applies_to" });
+
+    const transform = store.mergeNodes({
+      sourceNodeIds: [first.node.id, second.node.id],
+      targetName: "NMG implementation",
+      targetKind: "project",
+    });
+    const typescript = store.search("TypeScript", { maxTier: 3 })[0];
+    const sqlite = store.search("SQLite", { maxTier: 3 })[0];
+
+    assert.equal(transform.type, "merge");
+    assert.equal(transform.movedMemoryIds.length, 2);
+    assert.deepEqual(store.getNodeTransform(transform.id), transform);
+    assert.equal(typescript?.node.id, transform.targetNodeIds[0]);
+    assert.equal(sqlite?.node.id, transform.targetNodeIds[0]);
+    assert.equal(typescript?.evidence.id, first.history.id);
+    assert.ok(store.getRelations([transform.targetNodeIds[0]!], 1)
+      .some((relation) => relation.targetNodeId === host.node.id));
+    const later = store.remember({ statement: "Uses Node.js", nodeName: "NMG language" });
+    assert.equal(later.node.id, transform.targetNodeIds[0]);
+    assert.equal(store.search("Node.js", { nodeName: "NMG language", maxTier: 3 })[0]?.memory.id,
+      later.memory.id);
+  });
+});
+
+test("node split requires a complete partition and preserves every memory", () => {
+  withStore((store) => {
+    const first = store.remember({ statement: "Python 2 for ROS", nodeName: "Python environment" });
+    const second = store.remember({ statement: "Python 3.12 for Windows", nodeName: "Python environment" });
+    const transform = store.splitNode({
+      sourceNodeId: first.node.id,
+      partitions: [
+        { nodeName: "ROS Python", memoryIds: [first.memory.id] },
+        { nodeName: "Windows Python", memoryIds: [second.memory.id] },
+      ],
+    });
+
+    assert.equal(transform.type, "split");
+    assert.equal(transform.targetNodeIds.length, 2);
+    assert.equal(store.search("Python 2 ROS", { maxTier: 3 })[0]?.node.canonicalName, "ROS Python");
+    assert.equal(store.search("Python 3.12 Windows", { maxTier: 3 })[0]?.node.canonicalName,
+      "Windows Python");
+    assert.throws(
+      () => store.remember({ statement: "Ambiguous Python", nodeName: "Python environment" }),
+      /choose a more specific node/,
+    );
+  });
+});
+
+test("vector retrieval finds a semantic synonym without lexical overlap", () => {
+  const synonymEmbedder: VectorEmbedder = {
+    dimensions: 3,
+    model: "test-synonyms",
+    embed(text) {
+      const value = text.toLowerCase();
+      if (value.includes("automobile") || value.includes("car")) return [1, 0, 0];
+      if (value.includes("bicycle") || value.includes("bike")) return [0, 1, 0];
+      return [0, 0, 1];
+    },
+  };
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "The automobile needs a service",
+      nodeName: "vehicle maintenance",
+    });
+    const result = store.search("car", { maxTier: 3 })[0];
+    assert.equal(result?.memory.id, saved.memory.id);
+    assert.equal(result?.lexicalScore, 0);
+    assert.equal(result?.vectorScore, 1);
+  }, synonymEmbedder);
+});
+
+test("learning router changes node ranking from explicit feedback", () => {
+  withStore((store) => {
+    const first = store.remember({ statement: "One", nodeName: "first project" });
+    store.remember({ statement: "Two", nodeName: "second project" });
+    assert.deepEqual(store.routeNodes("alpha signal"), []);
+
+    store.trainRouter("alpha signal", [first.node.id], 1);
+    const routes = store.routeNodes("alpha signal");
+    assert.equal(routes[0]?.node.id, first.node.id);
+    assert.ok((routes[0]?.score ?? 0) > 0.6);
+  });
+});
+
+test("vector index and learned router persist across restart", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-test-"));
+  const database = join(directory, "nmg.sqlite");
+  const embedder: VectorEmbedder = {
+    dimensions: 3,
+    model: "persistent-test",
+    embed(text) {
+      return /car|automobile/i.test(text) ? [1, 0, 0] :
+        /alpha/i.test(text) ? [0, 1, 0] : [0, 0, 1];
+    },
+  };
+  const writer = new NmgStore(database, embedder);
+  const saved = writer.remember({ statement: "Automobile service", nodeName: "vehicle" });
+  writer.trainRouter("alpha", [saved.node.id], 1);
+  writer.close();
+
+  const reader = new NmgStore(database, embedder);
+  try {
+    assert.equal(reader.search("car", { maxTier: 3 })[0]?.memory.id, saved.memory.id);
+    assert.equal(reader.routeNodes("alpha")[0]?.node.id, saved.node.id);
+  } finally {
+    reader.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Huffman-like block rebalance promotes frequent memory only in batches", () => {
+  withStore((store) => {
+    const memories = Array.from({ length: 5 }, (_, index) => store.remember({
+      statement: `Shared topic memory ${index}`,
+      nodeName: "shared topic",
+      tier: 1,
+    }));
+    const hot = memories[4]!.memory.id;
+    store.recordUsage([hot]);
+    store.recordUsage([hot]);
+    assert.deepEqual(store.rebalanceDueNodes(3), []);
+    store.recordUsage([hot]);
+    const [rebalanced] = store.rebalanceDueNodes(3, [1, 1, 1]);
+
+    assert.equal(rebalanced?.pendingAccesses, 3);
+    assert.ok((rebalanced?.expectedDepth ?? 99) > 0);
+    const results = store.search("Shared topic", { maxTier: 3, limit: 10 });
+    assert.equal(results.length, 5);
+    assert.equal(results.find((result) => result.memory.id === hot)?.memory.tier, 0);
+    assert.equal(results.filter((result) => result.memory.tier === 3).length, 2);
   });
 });

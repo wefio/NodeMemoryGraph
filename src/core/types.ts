@@ -33,6 +33,7 @@ export interface MemoryNode {
   summary: string;
   createdAt: string;
   updatedAt: string;
+  status: "active" | "merged" | "split";
 }
 
 export type MemoryTier = 0 | 1 | 2 | 3;
@@ -150,6 +151,9 @@ export interface MemorySearchResult {
   evidence: HistoryRecord;
   evidenceRecords: HistoryRecord[];
   lexicalScore: number;
+  vectorScore: number;
+  routeScore: number;
+  combinedScore: number;
 }
 
 export interface DeriveMemoryInput extends Omit<RememberInput, "evidence"> {
@@ -160,4 +164,31 @@ export interface DeriveMemoryInput extends Omit<RememberInput, "evidence"> {
 export interface MemoryContext {
   results: MemorySearchResult[];
   relations: NodeRelation[];
+}
+
+export interface NodeRoute {
+  node: MemoryNode;
+  score: number;
+}
+
+export interface NodeTransform {
+  id: string;
+  type: "merge" | "split";
+  sourceNodeIds: string[];
+  targetNodeIds: string[];
+  movedMemoryIds: string[];
+  createdAt: string;
+}
+
+export interface RebalanceResult {
+  nodeId: string;
+  changedMemoryIds: string[];
+  expectedDepth: number;
+  pendingAccesses: number;
+}
+
+export interface VectorEmbedder {
+  readonly dimensions: number;
+  readonly model: string;
+  embed(text: string): readonly number[];
 }
