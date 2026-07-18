@@ -46,6 +46,7 @@
     "recall": {
       "prompt": "Which language do I prefer for explanations? Answer with only the language.",
       "expectedTerms": ["中文"],
+      "expectedTermGroups": [["中文", "chinese"]],
       "requireSearchTool": false
     }
   },

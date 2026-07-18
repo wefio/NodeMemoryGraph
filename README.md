@@ -2,15 +2,22 @@
 
 NMG is a local-first long-term memory layer for the [Pi agent harness](https://github.com/earendil-works/pi). It stores mutable semantic memory over immutable evidence and retrieves a small, progressively deeper subset instead of flattening all history into one global prompt.
 
-The first prototype intentionally has a narrow scope:
+The current prototype focuses on the semantic memory contract before storage
+optimization:
 
 - SQLite is the local source of truth.
-- Stable user-stated facts, preferences, and constraints are automatically
-  written through `nmg_remember`; explicit writes remain available.
+- Facts, preferences, constraints, states, events, strategies, and
+  conversational evidence have distinct types and usage rules.
+- Stable user-stated facts, preferences, constraints, and states are written
+  automatically; explicit writes remain available.
 - Completed Pi turns checkpoint the session transcript as cold, immutable
   evidence without turning every message into semantic memory.
 - Pi automatically injects a few L0/L1 memories before each agent run.
-- `nmg_search` can search deeper tiers and returns evidence references.
+- Stable `stateKey` values identify replaceable state across sessions and
+  automatically supersede the prior active value in the same scope.
+- Typed node relations and multi-evidence derived memories support graph-aware
+  retrieval instead of treating every memory as an isolated chunk.
+- `nmg_search` can expand related nodes and returns the underlying evidence.
 - Scope, validity intervals, conflicts, and superseded states remain
   traceable instead of deleting earlier evidence.
 - Cloud sync, embeddings, learned routing, and sandbox execution are deferred.
@@ -47,23 +54,31 @@ pi -e ./.pi/extensions/nmg/index.ts
 
 By default, the extension stores data in `.nmg/nmg.sqlite` under the current project. Set `NMG_DATA_DIR` to use another directory.
 
-In Pi, the model receives two tools and a write policy:
+In Pi, the model receives four tools and a typed write/use policy:
 
-- `nmg_remember`: save a long-term memory with scope, validity, evidence role,
-  and optional supersession metadata.
-- `nmg_search`: retrieve active memories with scope, tier, result, conflict,
-  and historical-state controls.
+- `nmg_remember`: save a typed long-term memory with scope, truth status,
+  event time, stable state identity, evidence role, and provenance.
+- `nmg_search`: retrieve composed context from matching and graph-adjacent
+  nodes, with tier, scope, conflict, and historical-state controls.
+- `nmg_derive`: form a new conclusion from at least two existing memories while
+  retaining every transitive evidence reference.
+- `nmg_link`: add a typed semantic relation between two memory nodes.
 
 The automatic-write rule is intentionally narrow:
 
-- Save a clear, stable user-stated fact, preference, or hard constraint that
-  is likely to help in a later session.
+- Save clear, stable user-stated facts, preferences, constraints, and states
+  that are likely to help in a later session.
 - Ask before saving ambiguous, inferred, uncertain, or current-task-only
   information.
 - Never save casual chatter, duplicates, unverified model claims, credentials,
   secrets, or sensitive personal data as semantic memory.
-- When a confirmed state changes, retain the old evidence and link the new
-  memory with `evidenceRole=update` and `supersedesId`.
+- Give replaceable states a stable `stateKey`; a new value in the same canonical
+  scope automatically supersedes the old state without deleting its evidence.
+- Treat assistant-authored conversational evidence as unverified unless a user
+  or tool confirms it.
+- Obey constraints, adapt to preferences, use only the newest active state,
+  preserve event time, and describe conversational evidence as something that
+  was said rather than as independently verified truth.
 
 ## Headless Pi control
 

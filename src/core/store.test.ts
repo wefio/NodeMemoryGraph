@@ -140,7 +140,7 @@ test("a newer state supersedes but does not delete the old memory", () => {
   });
 });
 
-test("session archives are idempotent and remain outside semantic search", () => {
+test("session archives checkpoint changes without entering semantic search", () => {
   withStore((store) => {
     const first = store.archiveSession({
       sessionId: "session-1",
@@ -148,11 +148,127 @@ test("session archives are idempotent and remain outside semantic search", () =>
     });
     const second = store.archiveSession({
       sessionId: "session-1",
-      transcript: "this duplicate must not be stored",
+      transcript: "USER: hello\nASSISTANT: hi",
+    });
+    const updated = store.archiveSession({
+      sessionId: "session-1",
+      transcript: "USER: hello\nASSISTANT: hi\nUSER: next turn",
     });
 
     assert.deepEqual(second, first);
+    assert.notEqual(updated.historyId, first.historyId);
     assert.deepEqual(store.search("hello", { maxTier: 3 }), []);
-    assert.equal(store.getSessionArchive("session-1")?.historyId, first.historyId);
+    assert.equal(store.getSessionArchive("session-1")?.historyId, updated.historyId);
+  });
+});
+
+test("stateKey automatically supersedes the active state in the same scope", () => {
+  withStore((store) => {
+    const previous = store.remember({
+      statement: "Charity 5K personal best is 27:12",
+      nodeName: "running personal best",
+      memoryType: "state",
+      stateKey: "running.charity_5k.personal_best",
+      scope: { project: "fitness", user: "primary" },
+      validFrom: "2023-05-25T00:00:00Z",
+    });
+    const current = store.remember({
+      statement: "Charity 5K personal best is 25:50",
+      nodeName: "running personal best",
+      memoryType: "state",
+      stateKey: "running.charity_5k.personal_best",
+      scope: { user: "primary", project: "fitness" },
+      validFrom: "2023-05-27T00:00:00Z",
+    });
+
+    assert.equal(current.memory.supersedesId, previous.memory.id);
+    assert.equal(current.memory.evidenceRole, "update");
+    assert.deepEqual(
+      store.search("Charity 5K personal best", { maxTier: 3 })
+        .map((result) => result.memory.statement),
+      ["Charity 5K personal best is 25:50"],
+    );
+  });
+});
+
+test("events and conversation evidence preserve time, actor, and truth status", () => {
+  withStore((store) => {
+    const event = store.remember({
+      statement: "User visited MoMA",
+      nodeName: "MoMA visit",
+      memoryType: "event",
+      eventTime: "2023-01-08T00:00:00Z",
+    });
+    const assistantEvidence = store.remember({
+      statement: "Assistant assigned Admon the Sunday day shift",
+      nodeName: "GM Sunday rotation",
+      memoryType: "conversation_evidence",
+      sourceActor: "assistant",
+      truthStatus: "unverified",
+    });
+
+    assert.equal(event.memory.eventTime, "2023-01-08T00:00:00Z");
+    assert.equal(assistantEvidence.memory.sourceActor, "assistant");
+    assert.equal(assistantEvidence.memory.truthStatus, "unverified");
+  });
+});
+
+test("derived memories retain every source evidence and graph relation", () => {
+  withStore((store) => {
+    const first = store.remember({
+      statement: "The blazer must be picked up",
+      nodeName: "blazer pickup",
+      memoryType: "event",
+    });
+    const second = store.remember({
+      statement: "The boots must be picked up",
+      nodeName: "boots pickup",
+      memoryType: "event",
+    });
+    const derived = store.deriveMemory({
+      statement: "Two store pickups remain",
+      nodeName: "pending clothing errands",
+      memoryType: "derived",
+      sourceMemoryIds: [first.memory.id, second.memory.id],
+      derivation: "Counted two active store pickup events.",
+    });
+
+    const [result] = store.search("store pickups", { maxTier: 3 });
+    assert.equal(result?.memory.id, derived.memory.id);
+    assert.deepEqual(
+      new Set(result?.memory.evidenceIds),
+      new Set([first.history.id, second.history.id, derived.history.id]),
+    );
+    assert.equal(result?.evidenceRecords.length, 3);
+    assert.equal(store.getRelations([derived.node.id], 1).length, 2);
+  });
+});
+
+test("searchContext combines matching memories with typed graph edges", () => {
+  withStore((store) => {
+    const preference = store.remember({
+      statement: "User prefers Adobe Premiere Pro advanced tutorials",
+      nodeName: "video editing preference",
+      memoryType: "preference",
+    });
+    const task = store.remember({
+      statement: "Recommend video editing learning resources",
+      nodeName: "video editing recommendations",
+      memoryType: "strategy",
+    });
+    store.linkNodes({
+      sourceNodeId: preference.node.id,
+      targetNodeId: task.node.id,
+      type: "applies_to",
+      evidenceIds: [preference.history.id],
+    });
+
+    const context = store.searchContext("Adobe Premiere video editing", {
+      maxTier: 3,
+      graphHops: 1,
+    });
+    assert.equal(context.results[0]?.memory.id, preference.memory.id);
+    assert.ok(context.results.some((result) => result.memory.id === task.memory.id));
+    assert.equal(context.relations[0]?.type, "applies_to");
   });
 });

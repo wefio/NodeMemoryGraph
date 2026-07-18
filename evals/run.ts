@@ -24,6 +24,7 @@ interface EvalCase {
   recall: {
     prompt: string;
     expectedTerms: string[];
+    expectedTermGroups?: string[][];
     forbiddenTerms?: string[];
     requireSearchTool: boolean;
   };
@@ -106,7 +107,7 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
             .search(
               testCase.expectRemember === false
                 ? testCase.memory.statement
-                : testCase.recall.expectedTerms.join(" "),
+                : expectedGroups(testCase).flat().join(" "),
               { maxTier: 3, limit: 20, includeHistorical: true },
             )
             .some((result) =>
@@ -117,7 +118,7 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
                 result.memory.statement
                   .toLocaleLowerCase()
                   .includes(term.toLocaleLowerCase()),
-              ),
+              ) || matchesExpected(result.memory.statement, expectedGroups(testCase)),
             )
         : store
             .search(testCase.memory.statement, {
@@ -149,9 +150,7 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
       const events = await reader.promptAndWait(testCase.recall.prompt, undefined, 180_000);
       readerSearched = successfulToolCall(events, "nmg_search");
       answer = (await reader.getLastAssistantText())?.trim() ?? "";
-      answerMatched = testCase.recall.expectedTerms.every((term) =>
-        answer.toLocaleLowerCase().includes(term.toLocaleLowerCase()),
-      ) &&
+      answerMatched = matchesExpected(answer, expectedGroups(testCase)) &&
         (testCase.recall.forbiddenTerms ?? []).every(
           (term) => !answer.toLocaleLowerCase().includes(term.toLocaleLowerCase()),
         );
@@ -183,6 +182,18 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
     answer,
     errors,
   };
+}
+
+function expectedGroups(testCase: EvalCase): string[][] {
+  return testCase.recall.expectedTermGroups ??
+    testCase.recall.expectedTerms.map((term) => [term]);
+}
+
+function matchesExpected(value: string, groups: string[][]): boolean {
+  const normalized = value.toLocaleLowerCase();
+  return groups.every((group) =>
+    group.some((term) => normalized.includes(term.toLocaleLowerCase())),
+  );
 }
 
 function createClient(dataDirectory: string): RpcClient {

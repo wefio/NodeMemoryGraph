@@ -1,6 +1,6 @@
 # NMG design baseline
 
-**Status:** 0.1 / MVP baseline  
+**Status:** 0.2 / typed semantic-memory baseline  
 **Updated:** 2026-07-18
 
 ## Definition
@@ -16,7 +16,7 @@ The primary integration target is Pi. Pi remains responsible for the model loop,
 | Agent host | Pi extension; do not fork or modify Pi core. |
 | Source of truth | Local SQLite database. Offline use must remain complete. |
 | Historical evidence | Append-only during normal maintenance and referenced by stable IDs. Privacy deletion remains possible by an explicit future operation. |
-| Semantic layer | Mutable `MemoryNode` objects connected by typed relations. |
+| Semantic layer | Mutable `MemoryNode` objects connected by typed relations; general semantic relations may cycle, while derivation and supersession must remain acyclic. |
 | Node-local history | `MemoryRecord` references evidence and belongs to a local tier L0-L3. |
 | Retrieval | Route to a small candidate set, read shallow tiers first, then expand under a budget. |
 | Huffman idea | An optimization hypothesis: expected usefulness should affect depth. The MVP uses tiers rather than a literal Huffman tree. |
@@ -29,14 +29,18 @@ The primary integration target is Pi. Pi remains responsible for the model loop,
 ## Core model
 
 ```text
-HistoryRecord (evidence, append-only)
+HistoryRecord (evidence, append-only during normal maintenance)
        ▲
-       │ evidence_id
-MemoryRecord (statement, scope, tier, priority statistics)
+       │ evidence links, including inherited/transitive evidence
+MemoryRecord
+  ├── type: fact | state | event | preference | constraint
+  │         | strategy | conversation_evidence | derived
+  ├── stateKey / eventTime / actor / truthStatus / scope
+  ├── derivation links to source MemoryRecord objects
+  └── local tier and priority statistics
        │
        ▼
-MemoryNode (semantic concept, state, project, preference, strategy...)
-       │
+MemoryNode (stable semantic address)
        └── typed relations to other MemoryNode objects
 ```
 
@@ -50,12 +54,14 @@ The graph and access hierarchy are separate structures:
 
 The extension uses only public Pi extension surfaces:
 
-1. `before_agent_start` searches L0/L1 using the new prompt and appends a small memory block to the system prompt for that run.
-2. The injected write policy directs Pi to call `nmg_remember` automatically for stable user-stated facts, preferences, and constraints. Explicit writes use the same path.
-3. `nmg_remember` preserves scope, validity, evidence role, and optional supersession metadata rather than deleting earlier evidence.
-4. `nmg_search` performs budgeted retrieval and can include deeper tiers or historical states.
-5. `agent_end` checkpoints the current transcript; `session_shutdown` provides a final graceful checkpoint.
-6. Retrieval records successful tool use for priority statistics; richer answer-level feedback remains future work.
+1. `before_agent_start` performs graph-aware L0/L1 retrieval using the new prompt and appends a small, typed memory block to the system prompt.
+2. The write policy directs Pi to call `nmg_remember` automatically for stable user-stated facts, preferences, constraints, and states. Explicit writes use the same path.
+3. `nmg_remember` preserves memory type, scope, actor, truth status, event time, evidence role, and state identity. A matching `stateKey` and canonical scope supersede the prior active state automatically.
+4. `nmg_search` performs budgeted retrieval, expands typed graph neighbors, hydrates evidence, and can include deeper tiers or historical states.
+5. `nmg_derive` creates a conclusion from multiple source memories and inherits their evidence chains. `nmg_link` creates typed node relations.
+6. The injected use policy distinguishes facts from unverified conversational evidence, uses only the newest active state, obeys constraints, adapts to preferences, preserves event time, and applies strategies as procedures rather than facts.
+7. `agent_end` checkpoints the current transcript; `session_shutdown` provides a final graceful checkpoint. Changed transcripts append a new immutable snapshot instead of mutating the old record.
+8. Retrieval records successful tool use for priority statistics; richer answer-level feedback remains future work.
 
 Automatic extraction remains governed rather than universal: model-authored claims,
 casual conversation, transient instructions, credentials, and secrets are not
@@ -121,10 +127,25 @@ Run ablations in this order:
 
 Track evidence Recall@K, stale-memory error rate, average injected records/tokens, deepest tier, and P50/P95 latency as history grows.
 
-## Open design questions
+## Implemented semantic invariants
+
+- `state` memories require a stable `stateKey` and supersede only a prior active
+  state with the same key and canonical scope.
+- `eventTime` records when an event happened; it is distinct from write and
+  validity timestamps.
+- `conversation_evidence` records who said something and its truth status; an
+  assistant statement is not silently promoted to verified fact.
+- A `derived` memory requires at least two source memories and remains
+  traceable to their complete evidence chains.
+- Typed node edges support graph expansion at query time. The returned context
+  includes matching memories, related-node memories, relations, and raw
+  evidence records under a caller-supplied budget.
+
+## Remaining design questions
 
 - What semantic granularity should create a `MemoryNode` rather than a `MemoryRecord`?
-- Which graph relations must remain acyclic, and which general semantic edges may form cycles?
+- How should acyclicity of derivation and supersession be enforced beyond the
+  current application-level contract?
 - How should conflicting scope and time intervals be represented?
 - What feedback proves that a retrieved memory was useful?
 - When does a node split, merge, or regenerate its summary from evidence?

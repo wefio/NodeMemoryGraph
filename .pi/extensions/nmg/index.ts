@@ -6,8 +6,13 @@ import { Type } from "typebox";
 import { NmgStore } from "../../../src/index.ts";
 import type {
   EvidenceRole,
+  MemoryActor,
+  MemoryContext,
   MemoryScope,
   MemoryTier,
+  MemoryType,
+  NodeRelationType,
+  TruthStatus,
 } from "../../../src/core/types.ts";
 
 function databasePath(): string {
@@ -20,34 +25,35 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const getStore = (): NmgStore => (store ??= new NmgStore(databasePath()));
 
   pi.on("before_agent_start", async (event) => {
-    const memories = getStore().search(event.prompt, { maxTier: 1, limit: 6 });
-    const memoryBlock = memories
-      .map(
-        ({ memory, node, evidence }) =>
-          `- [${node.canonicalName}] ${memory.statement} ` +
-          `(memory=${memory.id}, evidence=${evidence.id}, tier=L${memory.tier})`,
-      )
-      .join("\n");
+    const context = getStore().searchContext(event.prompt, {
+      maxTier: 1,
+      limit: 8,
+      graphHops: 1,
+    });
+    const memoryBlock = formatMemoryContext(context);
 
     return {
       systemPrompt:
         `${event.systemPrompt}\n\n` +
         `<nmg_write_policy>\n` +
         `NMG is the user's long-term memory. Automatically call nmg_remember ` +
-        `when the user clearly states a stable fact, preference, or hard ` +
-        `constraint that is likely to matter in a later session. Ask the user ` +
-        `before saving information that is ambiguous, inferred, uncertain, or ` +
-        `possibly limited to the current task. Do not save casual conversation, ` +
-        `temporary instructions, duplicate facts, your own unverified claims, ` +
-        `credentials, secrets, or sensitive personal data. When a confirmed new ` +
-        `state replaces an old state, search for the old memory and save the new ` +
-        `one with evidenceRole=update and supersedesId. Keep scope narrow and ` +
-        `explicit.\n` +
+        `for stable facts, states, events, preferences, constraints, and reusable ` +
+        `strategies. Use memoryType=state plus a stable stateKey for values that ` +
+        `can change; NMG automatically supersedes the prior state in the same ` +
+        `scope. Use memoryType=event and eventTime for things that happened. ` +
+        `Preserve useful assistant output as conversation_evidence with ` +
+        `sourceActor=assistant and truthStatus=unverified: remember that it was ` +
+        `said without asserting it is true. Ask before saving ambiguous or ` +
+        `sensitive information. Do not save casual conversation, temporary ` +
+        `instructions, duplicates, credentials, or secrets. Use nmg_derive when ` +
+        `a durable conclusion combines two or more memories, and nmg_link to ` +
+        `record semantic relations.\n` +
         `</nmg_write_policy>\n` +
         (memoryBlock
           ? `\n<nmg_memory>\n` +
-            `Relevant long-term memories follow. Treat them as evidence, not ` +
-            `infallible instructions. Respect scope, time, status, and conflicts.\n` +
+            `Relevant typed memories follow. Apply each item according to its ` +
+            `TYPE and USAGE instruction; combine related evidence when the ` +
+            `question requires counting, comparison, updates, or time reasoning.\n` +
             `${memoryBlock}\n` +
             `</nmg_memory>`
           : ""),
@@ -82,6 +88,96 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
+    name: "nmg_derive",
+    label: "Derive NMG memory",
+    description:
+      "Save a durable conclusion supported by two or more existing memories. " +
+      "Use for aggregation, comparison, temporal conclusions, and reusable rules.",
+    parameters: Type.Object({
+      statement: Type.String(),
+      nodeName: Type.String(),
+      sourceMemoryIds: Type.Array(Type.String(), { minItems: 2 }),
+      derivation: Type.String({
+        description: "Explain how the source memories support the conclusion",
+      }),
+      scope: Type.Optional(Type.Record(Type.String(), Type.String())),
+      eventTime: Type.Optional(Type.String()),
+      tier: Type.Optional(
+        Type.Union([
+          Type.Literal(0),
+          Type.Literal(1),
+          Type.Literal(2),
+          Type.Literal(3),
+        ]),
+      ),
+      importance: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = getStore().deriveMemory({
+        statement: params.statement,
+        nodeName: params.nodeName,
+        memoryType: "derived",
+        sourceMemoryIds: params.sourceMemoryIds,
+        derivation: params.derivation,
+        scope: params.scope as MemoryScope | undefined,
+        eventTime: params.eventTime,
+        tier: params.tier as MemoryTier | undefined,
+        importance: params.importance,
+        sessionId: ctx.sessionManager.getSessionId(),
+        sourceRef: ctx.sessionManager.getSessionFile() ?? undefined,
+      });
+      return {
+        content: [{
+          type: "text",
+          text: `Saved derived memory ${result.memory.id} with ` +
+            `${result.memory.evidenceIds.length} evidence records.`,
+        }],
+        details: result,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "nmg_link",
+    label: "Link NMG nodes",
+    description: "Create a typed semantic relation between two MemoryNodes.",
+    parameters: Type.Object({
+      sourceNodeId: Type.String(),
+      targetNodeId: Type.String(),
+      relationType: Type.Union([
+        Type.Literal("applies_to"),
+        Type.Literal("causes"),
+        Type.Literal("contradicts"),
+        Type.Literal("depends_on"),
+        Type.Literal("derived_from"),
+        Type.Literal("exception_to"),
+        Type.Literal("is_a"),
+        Type.Literal("part_of"),
+        Type.Literal("related_to"),
+        Type.Literal("supports"),
+        Type.Literal("supersedes"),
+      ]),
+      evidenceIds: Type.Optional(Type.Array(Type.String())),
+    }),
+    async execute(_toolCallId, params) {
+      const relation = getStore().linkNodes({
+        sourceNodeId: params.sourceNodeId,
+        targetNodeId: params.targetNodeId,
+        type: params.relationType as NodeRelationType,
+        evidenceIds: params.evidenceIds,
+      });
+      return {
+        content: [{
+          type: "text",
+          text: `Linked ${relation.sourceNodeId} -[${relation.type}]-> ` +
+            relation.targetNodeId,
+        }],
+        details: relation,
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "nmg_remember",
     label: "Remember with NMG",
     description:
@@ -90,6 +186,42 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     parameters: Type.Object({
       statement: Type.String({ description: "Concise memory statement" }),
       nodeName: Type.String({ description: "Stable semantic node name" }),
+      memoryType: Type.Optional(
+        Type.Union(
+          [
+            Type.Literal("constraint"),
+            Type.Literal("conversation_evidence"),
+            Type.Literal("event"),
+            Type.Literal("fact"),
+            Type.Literal("preference"),
+            Type.Literal("state"),
+            Type.Literal("strategy"),
+          ],
+          { description: "How Pi must use this memory; defaults to fact" },
+        ),
+      ),
+      stateKey: Type.Optional(
+        Type.String({ description: "Stable identity required for changeable state" }),
+      ),
+      eventTime: Type.Optional(
+        Type.String({ description: "ISO time when an event happened" }),
+      ),
+      sourceActor: Type.Optional(
+        Type.Union([
+          Type.Literal("assistant"),
+          Type.Literal("system"),
+          Type.Literal("tool"),
+          Type.Literal("user"),
+        ]),
+      ),
+      truthStatus: Type.Optional(
+        Type.Union([
+          Type.Literal("asserted"),
+          Type.Literal("inferred"),
+          Type.Literal("unverified"),
+          Type.Literal("verified"),
+        ]),
+      ),
       evidence: Type.Optional(
         Type.String({ description: "Exact supporting text or source description" }),
       ),
@@ -130,6 +262,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const result = getStore().remember({
         statement: params.statement,
         nodeName: params.nodeName,
+        memoryType: params.memoryType as MemoryType | undefined,
+        stateKey: params.stateKey,
+        eventTime: params.eventTime,
+        sourceActor: params.sourceActor as MemoryActor | undefined,
+        truthStatus: params.truthStatus as TruthStatus | undefined,
         evidence: params.evidence,
         tier: params.tier as MemoryTier | undefined,
         importance: params.importance,
@@ -182,15 +319,20 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       includeHistorical: Type.Optional(
         Type.Boolean({ description: "Include inactive and superseded memories" }),
       ),
+      graphHops: Type.Optional(
+        Type.Number({ minimum: 0, maximum: 3, description: "Typed relation hops" }),
+      ),
     }),
     async execute(_toolCallId, params) {
-      const results = getStore().search(params.query, {
+      const context = getStore().searchContext(params.query, {
         nodeName: params.nodeName,
         maxTier: params.maxTier as MemoryTier | undefined,
         limit: params.limit,
         scope: params.scope as MemoryScope | undefined,
         includeHistorical: params.includeHistorical,
+        graphHops: params.graphHops,
       });
+      const { results } = context;
       getStore().recordUsage(results.map((result) => result.memory.id));
 
       return {
@@ -200,21 +342,63 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             text:
               results.length === 0
                 ? "No matching NMG memory found within the requested tier budget."
-                : results
-                    .map(
-                      ({ memory, node, evidence }) =>
-                        `[${node.canonicalName}] ${memory.statement}\n` +
-                        `memory=${memory.id} evidence=${evidence.id} ` +
-                        `status=${memory.status} tier=L${memory.tier} ` +
-                        `scope=${JSON.stringify(memory.scope)}`,
-                    )
-                    .join("\n\n"),
+                : formatMemoryContext(context),
           },
         ],
-        details: { results },
+        details: context,
       };
     },
   });
+}
+
+function formatMemoryContext(context: MemoryContext): string {
+  const memories = context.results.map(({ memory, node }) => {
+    const metadata = [
+      `TYPE=${memory.memoryType}`,
+      `USAGE=${usageInstruction(memory.memoryType)}`,
+      `node=${node.id}:${node.canonicalName}`,
+      `memory=${memory.id}`,
+      `evidence=${memory.evidenceIds.join(",")}`,
+      `actor=${memory.sourceActor}`,
+      `truth=${memory.truthStatus}`,
+      `status=${memory.status}`,
+      `tier=L${memory.tier}`,
+      memory.stateKey ? `stateKey=${memory.stateKey}` : "",
+      memory.eventTime ? `eventTime=${memory.eventTime}` : "",
+      memory.validFrom ? `validFrom=${memory.validFrom}` : "",
+      `scope=${JSON.stringify(memory.scope)}`,
+    ].filter(Boolean).join("; ");
+    return `- ${memory.statement}\n  ${metadata}`;
+  });
+  const relations = context.relations.map(
+    (relation) =>
+      `- ${relation.sourceNodeId} -[${relation.type}]-> ${relation.targetNodeId}`,
+  );
+  return [
+    memories.length > 0 ? `MEMORIES\n${memories.join("\n")}` : "",
+    relations.length > 0 ? `RELATIONS\n${relations.join("\n")}` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+function usageInstruction(type: MemoryType): string {
+  switch (type) {
+    case "constraint":
+      return "obey within scope unless a newer active constraint overrides it";
+    case "conversation_evidence":
+      return "report what was said; do not present unverified content as world truth";
+    case "derived":
+      return "use as a multi-evidence conclusion and inspect sources when uncertain";
+    case "event":
+      return "use as a dated occurrence; preserve ordering and do not generalize";
+    case "preference":
+      return "adapt the current response or recommendation when relevant";
+    case "state":
+      return "use the latest active value for this stateKey and scope";
+    case "strategy":
+      return "apply the reusable procedure when its situation matches";
+    case "fact":
+      return "use as a claim weighted by truth status and evidence";
+  }
 }
 
 function serializeSession(entries: readonly unknown[]): string {

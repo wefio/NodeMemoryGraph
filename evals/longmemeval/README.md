@@ -33,16 +33,20 @@ also ignored by Git.
 |---|---:|---:|
 | No memory | 1/7 | 14.3% |
 | Oracle evidence | 5/7 | 71.4% |
-| NMG over oracle evidence | 2/7 | 28.6% |
+| NMG over oracle evidence, pre-semantic architecture | 2/7 | 28.6% |
+| NMG over oracle evidence, typed graph architecture | 6/7 | 85.7% |
 
-The sample is too small for a benchmark claim. Its purpose is to expose the
-next engineering failures before paying for a larger run:
+The sample is too small and model execution is stochastic, so this is not a
+benchmark claim. The second NMG run used the same seven fixed question IDs after
+adding stable state identity, typed memories, multi-evidence derivation,
+graph-aware context composition, and typed usage instructions. It resolved the
+previous state-update, assistant-detail, preference, and temporal failures. The
+remaining failure was multi-session aggregation: the reader counted two items
+when the reference required three.
 
-1. updated values need explicit state identity and supersession;
-2. multi-session questions require aggregation across retrieved records;
-3. structured assistant output needs finer-grained conversational evidence;
-4. recalled preferences must influence the generated response;
-5. event timestamps must survive extraction and participate in reasoning.
+The next engineering target exposed by this run is reliable aggregation across
+several sessions and memories. Larger full-haystack runs are still required to
+measure retrieval quality and scalability.
 
 The next fair comparison will ingest every LongMemEval-S haystack session into
 NMG and compare it with no-memory, full-history/windowed, and flat-retrieval
