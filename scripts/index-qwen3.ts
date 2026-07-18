@@ -13,23 +13,53 @@ const client = new OpenAIEmbeddingClient({
     : undefined,
 });
 const store = new NmgStore(databasePath);
-let indexed = 0;
-let cursor = "";
+const targets = new Set((process.env.NMG_EMBED_TARGETS ?? "nodes,leaves")
+  .split(",").map((target) => target.trim()).filter(Boolean));
+const indexed = { nodes: 0, leaves: 0, records: 0 };
 const started = performance.now();
 
 try {
-  while (true) {
-    const documents = store.embeddingDocuments(cursor, batchSize, client.model);
-    if (documents.length === 0) break;
-    const vectors = await client.embed(documents.map((document) => document.text));
-    store.upsertExternalEmbeddings(client.model, documents.map((document, index) => ({
-      memoryId: document.memoryId,
-      vector: vectors[index]!,
-    })));
-    indexed += documents.length;
-    cursor = documents.at(-1)!.memoryId;
-    if (indexed % (batchSize * 10) === 0) {
-      console.error(`indexed ${indexed} memories`);
+  if (targets.has("nodes")) {
+    let cursor = "";
+    while (true) {
+      const documents = store.nodeEmbeddingDocuments(cursor, batchSize, client.model);
+      if (documents.length === 0) break;
+      const vectors = await client.embed(documents.map((document) => document.text));
+      store.upsertExternalNodeEmbeddings(client.model, documents.map((document, index) => ({
+        nodeId: document.nodeId,
+        vector: vectors[index]!,
+      })));
+      indexed.nodes += documents.length;
+      cursor = documents.at(-1)!.nodeId;
+    }
+  }
+  if (targets.has("leaves")) {
+    for (const nodeId of store.dirtyLeafNodeIds()) store.rebuildLeafBlocks(nodeId);
+    let cursor = "";
+    while (true) {
+      const documents = store.leafEmbeddingDocuments(cursor, batchSize, client.model);
+      if (documents.length === 0) break;
+      const vectors = await client.embed(documents.map((document) => document.text));
+      store.upsertExternalLeafEmbeddings(client.model, documents.map((document, index) => ({
+        blockId: document.blockId,
+        vector: vectors[index]!,
+      })));
+      indexed.leaves += documents.length;
+      cursor = documents.at(-1)!.blockId;
+    }
+  }
+  if (targets.has("records")) {
+    let cursor = "";
+    while (true) {
+      const documents = store.embeddingDocuments(cursor, batchSize, client.model);
+      if (documents.length === 0) break;
+      const vectors = await client.embed(documents.map((document) => document.text));
+      store.upsertExternalEmbeddings(client.model, documents.map((document, index) => ({
+        memoryId: document.memoryId,
+        vector: vectors[index]!,
+      })));
+      indexed.records += documents.length;
+      cursor = documents.at(-1)!.memoryId;
     }
   }
 } finally {
@@ -40,7 +70,10 @@ const elapsedMs = performance.now() - started;
 console.log(JSON.stringify({
   databasePath,
   model: client.model,
+  targets: [...targets],
   indexed,
   elapsedMs,
-  recordsPerSecond: elapsedMs > 0 ? indexed / (elapsedMs / 1_000) : 0,
+  vectorsPerSecond: elapsedMs > 0
+    ? Object.values(indexed).reduce((sum, count) => sum + count, 0) / (elapsedMs / 1_000)
+    : 0,
 }, null, 2));

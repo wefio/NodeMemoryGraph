@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import type {
   EmbeddingDocument,
   ExternalEmbedding,
+  ExternalLeafEmbedding,
   ExternalNodeEmbedding,
   DeriveMemoryInput,
   HistoryRecord,
@@ -13,6 +14,8 @@ import type {
   MemoryContext,
   MemoryNode,
   MemoryNodeKind,
+  LeafBlock,
+  LeafEmbeddingDocument,
   NodeEmbeddingDocument,
   NodeRoute,
   NodeTransform,
@@ -247,6 +250,10 @@ export class NmgStore {
       .run(memory.id, memory.evidenceId);
     this.#upsertEmbedding(memory.id, this.#memoryText(memory, input.nodeId));
     this.#upsertFts(memory.id, memory.statement, input.nodeId, input.evidenceId);
+    this.#db.prepare(
+      `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 1, ?)
+       ON CONFLICT(node_id) DO UPDATE SET dirty = 1, updated_at = excluded.updated_at`,
+    ).run(input.nodeId, createdAt);
 
     return memory;
   }
@@ -269,6 +276,7 @@ export class NmgStore {
       const node = this.upsertNode({
         canonicalName: input.nodeName,
         kind: input.nodeKind,
+        summary: input.nodeSummary,
       });
       const stateKey = memoryType === "state" && input.stateKey
         ? this.#resolveStateKey(input.stateKey, input.scope ?? {}, node)
@@ -938,6 +946,203 @@ export class NmgStore {
     }));
   }
 
+  rebuildLeafBlocks(nodeId?: string, blockSize = 32): LeafBlock[] {
+    const size = Math.max(4, Math.min(blockSize, 128));
+    if (nodeId) this.#requireNode(nodeId);
+    const nodeClause = nodeId ? "AND m.node_id = ?" : "";
+    const rows = this.#db.prepare(
+      `SELECT m.id, m.node_id, m.statement, m.memory_type, m.scope_json, m.tier,
+              m.event_time, m.valid_from, m.valid_until, m.status, n.canonical_name
+       FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id
+       WHERE n.status = 'active' AND m.status IN ('active', 'disputed') ${nodeClause}
+       ORDER BY m.node_id, m.tier, m.memory_type, m.scope_json, m.created_at DESC`,
+    ).all(...(nodeId ? [nodeId] : [])) as Row[];
+    const groups = new Map<string, Row[]>();
+    for (const row of rows) {
+      const key = `${row.node_id}\u0000${row.tier}\u0000${row.memory_type}\u0000${row.scope_json}`;
+      const group = groups.get(key) ?? [];
+      group.push(row);
+      groups.set(key, group);
+    }
+    const blocks: LeafBlock[] = [];
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      if (nodeId) this.#db.prepare("DELETE FROM memory_leaf_blocks WHERE node_id = ?").run(nodeId);
+      else this.#db.exec("DELETE FROM memory_leaf_blocks");
+      const insertBlock = this.#db.prepare(
+        `INSERT INTO memory_leaf_blocks
+          (id, node_id, tier, summary, memory_count, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      );
+      const insertMember = this.#db.prepare(
+        "INSERT INTO memory_leaf_members (block_id, memory_id, ordinal) VALUES (?, ?, ?)",
+      );
+      for (const group of groups.values()) {
+        for (let offset = 0; offset < group.length; offset += size) {
+          const members = group.slice(offset, offset + size);
+          const block: LeafBlock = {
+            id: randomUUID(),
+            nodeId: String(members[0]!.node_id),
+            tier: Number(members[0]!.tier) as MemoryTier,
+            summary: leafBlockSummary(members),
+            memoryCount: members.length,
+            createdAt: now,
+            updatedAt: now,
+          };
+          insertBlock.run(block.id, block.nodeId, block.tier, block.summary,
+            block.memoryCount, block.createdAt, block.updatedAt);
+          members.forEach((member, ordinal) => insertMember.run(block.id, member.id, ordinal));
+          blocks.push(block);
+        }
+      }
+      if (nodeId) {
+        this.#db.prepare(
+          `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 0, ?)
+           ON CONFLICT(node_id) DO UPDATE SET dirty = 0, updated_at = excluded.updated_at`,
+        ).run(nodeId, now);
+      } else {
+        this.#db.prepare("UPDATE leaf_block_status SET dirty = 0, updated_at = ?").run(now);
+      }
+      this.#db.exec("COMMIT");
+      return blocks;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  dirtyLeafNodeIds(): string[] {
+    const rows = this.#db.prepare(
+      "SELECT node_id FROM leaf_block_status WHERE dirty = 1 ORDER BY node_id",
+    ).all() as Row[];
+    return rows.map((row) => String(row.node_id));
+  }
+
+  leafEmbeddingDocuments(afterBlockId = "", limit = 256, missingModel?: string): LeafEmbeddingDocument[] {
+    const rows = this.#db.prepare(
+      `SELECT b.id, b.node_id, b.summary, n.canonical_name, n.summary AS node_summary
+       FROM memory_leaf_blocks b JOIN memory_nodes n ON n.id = b.node_id
+       WHERE b.id > ?
+         AND (? IS NULL OR NOT EXISTS (
+           SELECT 1 FROM leaf_embeddings e WHERE e.block_id = b.id AND e.model = ?
+         ))
+       ORDER BY b.id LIMIT ?`,
+    ).all(afterBlockId, missingModel ?? null, missingModel ?? null,
+      Math.max(1, Math.min(limit, 2_048))) as Row[];
+    return rows.map((row) => ({
+      blockId: String(row.id),
+      nodeId: String(row.node_id),
+      text: `${row.canonical_name} ${row.node_summary} ${row.summary}`,
+    }));
+  }
+
+  upsertExternalLeafEmbeddings(model: string, embeddings: ExternalLeafEmbedding[]): number {
+    if (!model.trim()) throw new Error("embedding model is required");
+    if (embeddings.length === 0) return 0;
+    const dimensions = embeddings[0]!.vector.length;
+    if (dimensions === 0 || embeddings.some((item) => item.vector.length !== dimensions)) {
+      throw new Error("external embeddings must have one consistent non-zero dimension");
+    }
+    const upsert = this.#db.prepare(
+      `INSERT INTO leaf_embeddings (block_id, model, dimensions, vector_json, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(block_id, model) DO UPDATE SET dimensions = excluded.dimensions,
+         vector_json = excluded.vector_json, updated_at = excluded.updated_at`,
+    );
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const item of embeddings) {
+        upsert.run(item.blockId, model, dimensions, JSON.stringify(item.vector), now);
+      }
+      this.#db.exec("COMMIT");
+      return embeddings.length;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  storedLeafEmbeddings(model: string, afterBlockId = "", limit = 256): ExternalLeafEmbedding[] {
+    const rows = this.#db.prepare(
+      `SELECT block_id, vector_json FROM leaf_embeddings
+       WHERE model = ? AND block_id > ? ORDER BY block_id LIMIT ?`,
+    ).all(model, afterBlockId, Math.max(1, Math.min(limit, 2_048))) as Row[];
+    return rows.map((row) => ({
+      blockId: String(row.block_id),
+      vector: parseVector(row.vector_json),
+    }));
+  }
+
+  routeLeafBlocksByVector(
+    queryVector: readonly number[],
+    model: string,
+    nodeIds: string[],
+    limit = 8,
+    candidateBlockIds: string[] = [],
+  ): Array<{ block: LeafBlock; score: number }> {
+    const nodes = [...new Set(nodeIds)].slice(0, 50);
+    if (nodes.length === 0) return [];
+    const blocks = [...new Set(candidateBlockIds)].slice(0, 2_000);
+    const blockClause = blocks.length > 0
+      ? `AND b.id IN (${blocks.map(() => "?").join(",")})`
+      : "";
+    const rows = this.#db.prepare(
+      `SELECT b.*, e.vector_json FROM memory_leaf_blocks b
+       JOIN leaf_embeddings e ON e.block_id = b.id AND e.model = ?
+       WHERE b.node_id IN (${nodes.map(() => "?").join(",")}) ${blockClause}`,
+    ).all(model, ...nodes, ...blocks) as Row[];
+    return rows.map((row) => ({
+      block: mapLeafBlock(row),
+      score: cosineSimilarity(queryVector, parseVector(row.vector_json)),
+    })).filter((route) => route.score > 0)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, Math.max(1, Math.min(limit, 50)));
+  }
+
+  searchLeafBlocks(
+    query: string,
+    queryVector: readonly number[],
+    model: string,
+    blockIds: string[],
+    options: SearchOptions = {},
+  ): MemorySearchResult[] {
+    const blocks = [...new Set(blockIds)].slice(0, 50);
+    if (blocks.length === 0) return [];
+    const rows = this.#db.prepare(
+      `SELECT memory_id FROM memory_leaf_members
+       WHERE block_id IN (${blocks.map(() => "?").join(",")})
+       ORDER BY block_id, ordinal LIMIT 2000`,
+    ).all(...blocks) as Row[];
+    return this.#searchWithVector(query, queryVector, model, {
+      ...options,
+      retrievalMode: "fts5",
+    }, rows.map((row) => String(row.memory_id)));
+  }
+
+  searchHierarchyByVector(
+    query: string,
+    queryVector: readonly number[],
+    model: string,
+    options: SearchOptions & { nodeLimit?: number; blockLimit?: number } = {},
+  ): MemorySearchResult[] {
+    const nodes = this.routeNodesByVector(queryVector, model, options.nodeLimit ?? 5);
+    const leaves = this.routeLeafBlocksByVector(
+      queryVector,
+      model,
+      nodes.map((route) => route.node.id),
+      options.blockLimit ?? 8,
+    );
+    return this.searchLeafBlocks(
+      query,
+      queryVector,
+      model,
+      leaves.map((route) => route.block.id),
+      options,
+    );
+  }
+
   searchNodeFirst(
     query: string,
     queryVector: readonly number[],
@@ -1308,6 +1513,38 @@ export class NmgStore {
         PRIMARY KEY (node_id, model)
       );
 
+      CREATE TABLE IF NOT EXISTS memory_leaf_blocks (
+        id TEXT PRIMARY KEY,
+        node_id TEXT NOT NULL REFERENCES memory_nodes(id),
+        tier INTEGER NOT NULL CHECK (tier BETWEEN 0 AND 3),
+        summary TEXT NOT NULL,
+        memory_count INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS memory_leaf_members (
+        block_id TEXT NOT NULL REFERENCES memory_leaf_blocks(id) ON DELETE CASCADE,
+        memory_id TEXT NOT NULL REFERENCES memory_records(id),
+        ordinal INTEGER NOT NULL,
+        PRIMARY KEY (block_id, memory_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS leaf_embeddings (
+        block_id TEXT NOT NULL REFERENCES memory_leaf_blocks(id) ON DELETE CASCADE,
+        model TEXT NOT NULL,
+        dimensions INTEGER NOT NULL,
+        vector_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (block_id, model)
+      );
+
+      CREATE TABLE IF NOT EXISTS leaf_block_status (
+        node_id TEXT PRIMARY KEY REFERENCES memory_nodes(id),
+        dirty INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS router_weights (
         node_id TEXT PRIMARY KEY REFERENCES memory_nodes(id),
         model TEXT NOT NULL,
@@ -1373,6 +1610,8 @@ export class NmgStore {
       WHERE r.memory_id IS NULL;
       INSERT OR IGNORE INTO memory_fts_registry(memory_id)
       SELECT id FROM memory_records;
+      INSERT OR IGNORE INTO leaf_block_status(node_id, dirty, updated_at)
+      SELECT id, 1, updated_at FROM memory_nodes WHERE status = 'active';
     `);
   }
 
@@ -1722,6 +1961,38 @@ function mapNode(row: Row, prefix = ""): MemoryNode {
     updatedAt: String(row[`${prefix}updated_at`]),
     status: String(row[`${prefix}status`] ?? "active") as MemoryNode["status"],
   };
+}
+
+function mapLeafBlock(row: Row): LeafBlock {
+  return {
+    id: String(row.id),
+    nodeId: String(row.node_id),
+    tier: Number(row.tier) as MemoryTier,
+    summary: String(row.summary),
+    memoryCount: Number(row.memory_count),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function leafBlockSummary(rows: Row[]): string {
+  const first = rows[0]!;
+  const scope = parseScope(first.scope_json);
+  const scopeText = Object.entries(scope).map(([key, value]) => `${key}=${value}`).join(", ");
+  const times = rows.flatMap((row) => [row.event_time, row.valid_from, row.valid_until])
+    .filter((value): value is string | number => value !== null)
+    .map(String).sort();
+  const sample = rows.slice(0, 8).map((row) => String(row.statement).trim())
+    .filter(Boolean).join("; ").slice(0, 1_500);
+  return [
+    `node=${first.canonical_name}`,
+    `type=${first.memory_type}`,
+    `tier=${first.tier}`,
+    scopeText ? `scope=${scopeText}` : "",
+    times.length > 0 ? `time=${times[0]}..${times[times.length - 1]}` : "",
+    `count=${rows.length}`,
+    `examples=${sample}`,
+  ].filter(Boolean).join(" | ");
 }
 
 function mapSearchResult(row: Row, score: number): MemorySearchResult {

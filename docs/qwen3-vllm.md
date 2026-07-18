@@ -38,6 +38,22 @@ $env:NMG_EMBED_BATCH_SIZE = "64"
 npm run index:qwen3
 ```
 
+By default this embeds only the progressive-disclosure index: node headers and
+leaf/block headers. To compare against full per-record vectorization:
+
+```powershell
+$env:NMG_EMBED_TARGETS = "nodes,leaves,records"
+npm run index:qwen3
+```
+
+ANN is built per index granularity. Leaf blocks are the default:
+
+```powershell
+$env:NMG_ANN_TARGET = "leaves" # or "nodes" / "records"
+$env:NMG_ANN_PATH = ".nmg/indexes/qwen3-leaves.usearch"
+npm run index:ann
+```
+
 The command only requests memories missing that model's vector, commits each
 batch transactionally, and can be restarted. Hashing and Qwen3 vectors coexist
 under `(memory_id, model)`.

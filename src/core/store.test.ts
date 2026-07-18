@@ -663,3 +663,57 @@ test("node vectors route first and node-local search recovers leaf evidence", ()
     assert.notEqual(results[0]?.memory.id, cooking.memory.id);
   });
 });
+
+test("leaf summaries preserve distinctions hidden by one broad node summary", () => {
+  withStore((store) => {
+    const rendering = store.remember({
+      statement: "Gazebo recovered after enabling software rendering",
+      nodeName: "ROS project",
+      nodeSummary: "General ROS project memory",
+      memoryType: "fact",
+      scope: { component: "gazebo" },
+      tier: 2,
+    });
+    const python = store.remember({
+      statement: "ROS Melodic must remain on Python 2",
+      nodeName: "ROS project",
+      nodeSummary: "General ROS project memory",
+      memoryType: "constraint",
+      scope: { component: "python" },
+      tier: 2,
+    });
+
+    assert.deepEqual(store.dirtyLeafNodeIds(), [rendering.node.id]);
+    const blocks = store.rebuildLeafBlocks(rendering.node.id, 16);
+    assert.deepEqual(store.dirtyLeafNodeIds(), []);
+    assert.equal(blocks.length, 2);
+    const documents = store.leafEmbeddingDocuments();
+    const renderingDocument = documents.find((document) =>
+      document.text.includes("software rendering"));
+    const pythonDocument = documents.find((document) => document.text.includes("Python 2"));
+    assert.ok(renderingDocument);
+    assert.ok(pythonDocument);
+    store.upsertExternalLeafEmbeddings("leaf-test", [
+      { blockId: renderingDocument.blockId, vector: [1, 0] },
+      { blockId: pythonDocument.blockId, vector: [0, 1] },
+    ]);
+    store.upsertExternalNodeEmbeddings("leaf-test", [{
+      nodeId: rendering.node.id,
+      vector: [0, 1],
+    }]);
+
+    const routes = store.routeLeafBlocksByVector(
+      [0, 1], "leaf-test", [rendering.node.id], 1,
+    );
+    assert.equal(routes[0]?.block.id, pythonDocument.blockId);
+    const results = store.searchLeafBlocks(
+      "Python 2", [0, 1], "leaf-test", [routes[0]!.block.id],
+      { maxTier: 3, limit: 3 },
+    );
+    assert.equal(results[0]?.memory.id, python.memory.id);
+    const hierarchical = store.searchHierarchyByVector(
+      "Python 2", [0, 1], "leaf-test", { maxTier: 3, limit: 3 },
+    );
+    assert.equal(hierarchical[0]?.memory.id, python.memory.id);
+  });
+});

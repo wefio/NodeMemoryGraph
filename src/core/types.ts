@@ -107,6 +107,7 @@ export interface MemoryRecord {
 export interface RememberInput {
   statement: string;
   nodeName: string;
+  nodeSummary?: string;
   nodeKind?: MemoryNodeKind;
   memoryType?: MemoryType;
   stateKey?: string;
@@ -154,6 +155,27 @@ export interface NodeEmbeddingDocument {
 
 export interface ExternalNodeEmbedding {
   nodeId: string;
+  vector: readonly number[];
+}
+
+export interface LeafBlock {
+  id: string;
+  nodeId: string;
+  tier: MemoryTier;
+  summary: string;
+  memoryCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LeafEmbeddingDocument {
+  blockId: string;
+  nodeId: string;
+  text: string;
+}
+
+export interface ExternalLeafEmbedding {
+  blockId: string;
   vector: readonly number[];
 }
 
