@@ -1,0 +1,190 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { RpcClient } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+
+import { NmgStore } from "../src/index.ts";
+import type { MemoryTier } from "../src/core/types.ts";
+
+interface EvalCase {
+  id: string;
+  description: string;
+  memory: {
+    statement: string;
+    nodeName: string;
+    evidence: string;
+    tier: MemoryTier;
+    importance: number;
+  };
+  recall: {
+    prompt: string;
+    expectedTerms: string[];
+    requireSearchTool: boolean;
+  };
+}
+
+interface EvalResult {
+  id: string;
+  passed: boolean;
+  writerRemembered: boolean;
+  databaseVerified: boolean;
+  readerSearched: boolean;
+  answerMatched: boolean;
+  answer: string;
+  errors: string[];
+}
+
+const root = resolve(import.meta.dirname, "..");
+const cases = JSON.parse(
+  readFileSync(resolve(import.meta.dirname, "cases/core.json"), "utf8"),
+) as EvalCase[];
+const runId = new Date().toISOString().replaceAll(":", "-");
+const runDirectory = resolve(import.meta.dirname, "results", runId);
+mkdirSync(runDirectory, { recursive: true });
+
+const results = await Promise.all(cases.map((testCase) => runCase(testCase)));
+const report = {
+  runId,
+  model: "deepseek/deepseek-v4-flash",
+  passed: results.filter((result) => result.passed).length,
+  total: results.length,
+  results,
+};
+
+writeFileSync(
+  resolve(runDirectory, "report.json"),
+  `${JSON.stringify(report, null, 2)}\n`,
+);
+process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+if (report.passed !== report.total) process.exitCode = 1;
+
+async function runCase(testCase: EvalCase): Promise<EvalResult> {
+  const dataDirectory = resolve(runDirectory, testCase.id);
+  mkdirSync(dataDirectory, { recursive: true });
+
+  const errors: string[] = [];
+  let writerRemembered = false;
+  let databaseVerified = false;
+  let readerSearched = false;
+  let answerMatched = false;
+  let answer = "";
+
+  try {
+    const writer = createClient(dataDirectory);
+    try {
+      await writer.start();
+      await writer.setThinkingLevel("low");
+      const events = await writer.promptAndWait(writerPrompt(testCase), undefined, 180_000);
+      writerRemembered = successfulToolCall(events, "nmg_remember");
+      if (!writerRemembered) errors.push("Writer did not complete nmg_remember.");
+    } finally {
+      await writer.stop();
+    }
+
+    const store = new NmgStore(resolve(dataDirectory, "nmg.sqlite"));
+    try {
+      databaseVerified = store
+        .search(testCase.memory.statement, {
+          nodeName: testCase.memory.nodeName,
+          maxTier: 3,
+          limit: 10,
+        })
+        .some(
+          (result) =>
+            result.memory.statement === testCase.memory.statement &&
+            result.evidence.content === testCase.memory.evidence,
+        );
+      if (!databaseVerified) errors.push("Expected statement/evidence was not persisted.");
+    } finally {
+      store.close();
+    }
+
+    const reader = createClient(dataDirectory);
+    try {
+      await reader.start();
+      await reader.setThinkingLevel("low");
+      const events = await reader.promptAndWait(testCase.recall.prompt, undefined, 180_000);
+      readerSearched = successfulToolCall(events, "nmg_search");
+      answer = (await reader.getLastAssistantText())?.trim() ?? "";
+      answerMatched = testCase.recall.expectedTerms.every((term) =>
+        answer.toLocaleLowerCase().includes(term.toLocaleLowerCase()),
+      );
+
+      if (testCase.recall.requireSearchTool && !readerSearched) {
+        errors.push("Reader did not complete the required nmg_search call.");
+      }
+      if (!answerMatched) errors.push("Reader answer did not contain all expected terms.");
+    } finally {
+      await reader.stop();
+    }
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+
+  return {
+    id: testCase.id,
+    passed:
+      writerRemembered &&
+      databaseVerified &&
+      answerMatched &&
+      (!testCase.recall.requireSearchTool || readerSearched),
+    writerRemembered,
+    databaseVerified,
+    readerSearched,
+    answerMatched,
+    answer,
+    errors,
+  };
+}
+
+function createClient(dataDirectory: string): RpcClient {
+  return new RpcClient({
+    cliPath: resolve(
+      root,
+      "node_modules/@earendil-works/pi-coding-agent/dist/cli.js",
+    ),
+    cwd: root,
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    env: {
+      ...definedEnvironment(),
+      NMG_DATA_DIR: dataDirectory,
+    },
+    args: [
+      "--offline",
+      "--approve",
+      "--no-session",
+      "--extension",
+      resolve(root, ".pi/extensions/nmg/index.ts"),
+    ],
+  });
+}
+
+function writerPrompt(testCase: EvalCase): string {
+  return [
+    "You are the writer in an automated NMG evaluation.",
+    "Call nmg_remember exactly once using these exact arguments:",
+    JSON.stringify(testCase.memory),
+    "Do not alter, translate, or summarize any value.",
+    "After the tool succeeds, answer only SAVED.",
+  ].join("\n");
+}
+
+function successfulToolCall(events: AgentSessionEvent[], toolName: string): boolean {
+  return events.some(
+    (event) =>
+      event.type === "tool_execution_end" &&
+      event.toolName === toolName &&
+      !event.isError,
+  );
+}
+
+function definedEnvironment(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] => entry[1] !== undefined,
+    ),
+  );
+}
+

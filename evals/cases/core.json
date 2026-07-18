@@ -1,0 +1,35 @@
+[
+  {
+    "id": "cross-session-hot-recall",
+    "description": "A hot memory written by one Pi process is automatically injected for a fresh Pi process.",
+    "memory": {
+      "statement": "Project Aurora uses SQLite as its local storage engine.",
+      "nodeName": "Project Aurora storage",
+      "evidence": "The Project Aurora team explicitly selected SQLite for local storage.",
+      "tier": 0,
+      "importance": 0.9
+    },
+    "recall": {
+      "prompt": "What local storage engine does Project Aurora use? Answer with only the engine name.",
+      "expectedTerms": ["sqlite"],
+      "requireSearchTool": false
+    }
+  },
+  {
+    "id": "explicit-cold-tier-expansion",
+    "description": "A cold memory is found only after the reader explicitly searches through L2.",
+    "memory": {
+      "statement": "Project Borealis selected Docker as its optional sandbox backend.",
+      "nodeName": "Project Borealis sandbox",
+      "evidence": "Docker was selected only as an optional execution backend for Project Borealis.",
+      "tier": 2,
+      "importance": 0.7
+    },
+    "recall": {
+      "prompt": "For Project Borealis, which optional sandbox backend was selected? You must call nmg_search with maxTier 2 before answering. Answer with only the backend name.",
+      "expectedTerms": ["docker"],
+      "requireSearchTool": true
+    }
+  }
+]
+

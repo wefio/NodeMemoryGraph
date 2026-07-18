@@ -68,6 +68,20 @@ npm run pi:prompt -- "Remember that the RPC controller is used for NMG tests."
 Each invocation uses a new Pi session but shares the project's
 `.nmg/nmg.sqlite`, which makes cross-session memory tests straightforward.
 
+## Agent evaluation
+
+The first Agent-to-Agent-style regression suite runs independent cases in
+parallel. Within each case, a Writer Pi process stores a memory and a fresh
+Reader Pi process attempts to recall it from the same isolated NMG database.
+
+```powershell
+npm run eval:agents
+```
+
+The suite pins `deepseek/deepseek-v4-flash`, uses low thinking, verifies actual
+tool completion and SQLite evidence, and writes ignored reports under
+`evals/results/`.
+
 Example request to the agent:
 
 ```text

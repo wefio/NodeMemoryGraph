@@ -6,6 +6,7 @@
   "description": "Local-first long-term memory for the Pi agent harness",
   "scripts": {
     "check": "tsc --noEmit",
+    "eval:agents": "node --experimental-strip-types evals/run.ts",
     "pi:prompt": "node --experimental-strip-types scripts/pi-control.ts prompt",
     "pi:state": "node --experimental-strip-types scripts/pi-control.ts state",
     "test": "node --experimental-strip-types --test src/core/store.test.ts"
