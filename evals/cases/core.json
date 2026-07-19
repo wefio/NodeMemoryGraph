@@ -26,9 +26,10 @@
       "importance": 0.7
     },
     "recall": {
-      "prompt": "For Project Borealis, which optional sandbox backend was selected? You must call nmg_search with maxTier 2 before answering. Answer with only the backend name.",
+      "prompt": "For Project Borealis, which optional sandbox backend was selected? You must call nmg_search with maxTier 2, then nmg_get for the selected memory ID before answering. Answer with only the backend name.",
       "expectedTerms": ["docker"],
-      "requireSearchTool": true
+      "requireSearchTool": true,
+      "requireGetTool": true
     }
   },
   {

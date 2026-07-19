@@ -765,6 +765,25 @@ export class NmgStore {
     return { results, relations };
   }
 
+  getContext(memoryIds: readonly string[], graphHops = 0): MemoryContext {
+    const ids = [...new Set(memoryIds)].slice(0, 50);
+    const findNode = this.#db.prepare(
+      "SELECT node_id FROM memory_records WHERE id = ?",
+    );
+    const results = ids.flatMap((memoryId) => {
+      const row = findNode.get(memoryId) as Row | undefined;
+      if (!row) return [];
+      return this.#resultsForNode(String(row.node_id), 3, 1, memoryId);
+    });
+    return {
+      results,
+      relations: this.getRelations(
+        [...new Set(results.map((result) => result.node.id))],
+        graphHops,
+      ),
+    };
+  }
+
   residentKernel(limit = 4): MemoryContext {
     const rows = this.#db.prepare(
       `SELECT m.id, m.node_id
@@ -1936,6 +1955,7 @@ export class NmgStore {
     nodeId: string,
     maxTier: MemoryTier,
     limit: number,
+    memoryId?: string,
   ): MemorySearchResult[] {
     const rows = this.#db.prepare(
       `SELECT
@@ -1964,10 +1984,11 @@ export class NmgStore {
        JOIN memory_nodes n ON n.id = m.node_id
        JOIN history_records h ON h.id = m.evidence_id
        WHERE m.node_id = ? AND m.tier <= ? AND n.status = 'active'
+         AND (? IS NULL OR m.id = ?)
          AND m.status IN ('active', 'disputed')
        ORDER BY m.tier ASC, m.importance DESC, m.created_at DESC
        LIMIT ?`,
-    ).all(nodeId, maxTier, limit) as Row[];
+    ).all(nodeId, maxTier, memoryId ?? null, memoryId ?? null, limit) as Row[];
     return rows.map((row) => {
       const result = mapSearchResult(row, 0);
       result.memory.evidenceIds = this.#evidenceIds(result.memory.id);

@@ -4,6 +4,24 @@
   "private": true,
   "type": "module",
   "description": "Local-first long-term memory for the Pi agent harness",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/nmg.ts"
+    ]
+  },
+  "files": [
+    "extensions/nmg.ts",
+    ".pi/extensions/nmg/index.ts",
+    "src/core/gate.ts",
+    "src/core/hierarchy.ts",
+    "src/core/router.ts",
+    "src/core/store.ts",
+    "src/core/types.ts",
+    "src/core/vector.ts"
+  ],
   "scripts": {
     "check": "tsc --noEmit",
     "eval:agents": "node --experimental-strip-types evals/run.ts",
@@ -15,7 +33,7 @@
     "index:ann": "node --experimental-strip-types scripts/build-ann.ts",
     "pi:prompt": "node --experimental-strip-types scripts/pi-control.ts prompt",
     "pi:state": "node --experimental-strip-types scripts/pi-control.ts state",
-    "test": "node --experimental-strip-types --test src/core/store.test.ts src/core/gate.test.ts src/core/openai-embedding.test.ts src/core/ann.test.ts"
+    "test": "node --experimental-strip-types --test src/core/store.test.ts src/core/gate.test.ts src/core/openai-embedding.test.ts src/core/ann.test.ts .pi/extensions/nmg/index.test.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.80.10",
@@ -23,10 +41,14 @@
     "typebox": "1.1.38",
     "typescript": "5.9.3"
   },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
   "engines": {
     "node": ">=22.19.0"
   },
-  "dependencies": {
+  "optionalDependencies": {
     "usearch": "2.26.0"
   }
 }

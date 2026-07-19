@@ -3,7 +3,8 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { decideMemoryLoad, NmgStore } from "../../../src/index.ts";
+import { decideMemoryLoad } from "../../../src/core/gate.ts";
+import { NmgStore } from "../../../src/core/store.ts";
 import type {
   EvidenceRole,
   MemoryActor,
@@ -22,6 +23,7 @@ function databasePath(): string {
 }
 
 export default function nmgExtension(pi: ExtensionAPI): void {
+  const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
   let store: NmgStore | undefined;
   const getStore = (): NmgStore => (store ??= new NmgStore(databasePath()));
 
@@ -70,16 +72,19 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         `sourceActor=assistant and truthStatus=unverified: remember that it was ` +
         `said without asserting it is true. Ask before saving ambiguous or ` +
         `sensitive information. Do not save casual conversation, temporary ` +
-        `instructions, duplicates, credentials, or secrets. Use nmg_derive when ` +
-        `a durable conclusion combines two or more memories, and nmg_link to ` +
-        `record semantic relations. Call nmg_feedback after an explicit search ` +
-        `when you can identify which returned nodes were actually useful.\n` +
+        `instructions, duplicates, credentials, or secrets.` +
+        (labToolsEnabled
+          ? ` Lab tools are enabled: use nmg_derive for multi-memory conclusions, ` +
+            `nmg_link for semantic relations, and nmg_feedback after explicit ` +
+            `searches when useful nodes are known.`
+          : "") + `\n` +
         `</nmg_write_policy>\n` +
         `\n<nmg_recall_policy>\n` +
         `Resident kernel memories are directly usable hard constraints. ` +
         `Automatic recall contains retrieved evidence and can be used directly. ` +
-        `Recall cues are only a compressed directory: call nmg_search before ` +
-        `using any specific remembered value from them. You may call nmg_search ` +
+        `Recall cues are only a compressed directory: call nmg_search, then ` +
+        `nmg_get for the selected IDs before using specific remembered values. ` +
+        `You may call nmg_search ` +
         `even without a cue when the task later proves to depend on past user ` +
         `information. Start shallow and expand only when evidence is insufficient. ` +
         `Treat the latest active state as authoritative for its stateKey and scope; ` +
@@ -125,7 +130,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     store = undefined;
   });
 
-  pi.registerTool({
+  if (labToolsEnabled) pi.registerTool({
     name: "nmg_derive",
     label: "Derive NMG memory",
     description:
@@ -175,7 +180,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerTool({
+  if (labToolsEnabled) pi.registerTool({
     name: "nmg_link",
     label: "Link NMG nodes",
     description: "Create a typed semantic relation between two MemoryNodes.",
@@ -337,7 +342,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerTool({
+  if (labToolsEnabled) pi.registerTool({
     name: "nmg_organize",
     label: "Organize NMG nodes",
     description:
@@ -385,7 +390,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerTool({
+  if (labToolsEnabled) pi.registerTool({
     name: "nmg_feedback",
     label: "Train NMG router",
     description:
@@ -404,7 +409,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerTool({
+  if (labToolsEnabled) pi.registerTool({
     name: "nmg_rebalance",
     label: "Rebalance NMG memory tiers",
     description:
@@ -426,6 +431,42 @@ export default function nmgExtension(pi: ExtensionAPI): void {
               `${results.reduce((sum, result) => sum + result.changedMemoryIds.length, 0)} tiers.`,
         }],
         details: results,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "nmg_get",
+    label: "Get NMG evidence",
+    description:
+      "Load exact long-term memory records and their source evidence by IDs " +
+      "returned from nmg_search. Use before relying on a specific recalled value.",
+    parameters: Type.Object({
+      memoryIds: Type.Array(Type.String(), {
+        minItems: 1,
+        maxItems: 20,
+        description: "Stable memory IDs returned by nmg_search",
+      }),
+      graphHops: Type.Optional(
+        Type.Number({ minimum: 0, maximum: 2, description: "Related node hops" }),
+      ),
+    }),
+    async execute(_toolCallId, params) {
+      const context = getStore().getContext(params.memoryIds, params.graphHops ?? 0);
+      getStore().recordUsage(context.results.map((result) => result.memory.id));
+      const missing = params.memoryIds.filter(
+        (id) => !context.results.some((result) => result.memory.id === id),
+      );
+      const text = formatMemoryContext(context);
+      return {
+        content: [{
+          type: "text",
+          text: [
+            text || "No active NMG memory found for the requested IDs.",
+            missing.length > 0 ? `Missing or inactive IDs: ${missing.join(", ")}` : "",
+          ].filter(Boolean).join("\n\n"),
+        }],
+        details: { ...context, missingMemoryIds: missing },
       };
     },
   });
@@ -470,8 +511,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         graphHops: params.graphHops,
       });
       const { results } = context;
-      getStore().recordUsage(results.map((result) => result.memory.id));
-
       return {
         content: [
           {
@@ -479,13 +518,31 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             text:
               results.length === 0
                 ? "No matching NMG memory found within the requested tier budget."
-                : formatMemoryContext(context),
+                : formatSearchHeaders(context),
           },
         ],
         details: context,
       };
     },
   });
+}
+
+export function formatSearchHeaders(context: MemoryContext): string {
+  const headers = context.results.map(({ memory, node }) => [
+    `- memory=${memory.id}`,
+    `node=${node.id}:${node.canonicalName}`,
+    `type=${memory.memoryType}`,
+    `tier=L${memory.tier}`,
+    `created=${memory.createdAt}`,
+    `truth=${memory.truthStatus}`,
+    `status=${memory.status}`,
+    `preview=${excerpt(node.summary, 120)}`,
+  ].join("; "));
+  return [
+    "NMG SEARCH HEADERS",
+    ...headers,
+    "Use nmg_get with selected memory IDs to load exact statements and source evidence.",
+  ].join("\n");
 }
 
 export function formatRecallIndex(index: RecallIndex): string {

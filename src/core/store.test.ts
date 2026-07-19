@@ -326,6 +326,27 @@ test("searchContext combines matching memories with typed graph edges", () => {
   });
 });
 
+test("getContext expands selected memory IDs without searching", () => {
+  withStore((store) => {
+    const wanted = store.remember({
+      statement: "The selected memory keeps its exact statement",
+      nodeName: "progressive disclosure",
+      evidence: "Exact source evidence for progressive disclosure.",
+    });
+    store.remember({
+      statement: "An unrelated memory must not be returned",
+      nodeName: "unrelated",
+    });
+
+    const context = store.getContext([wanted.memory.id, "missing-memory"]);
+
+    assert.deepEqual(context.results.map((result) => result.memory.id), [wanted.memory.id]);
+    assert.equal(context.results[0]?.evidence.content,
+      "Exact source evidence for progressive disclosure.");
+    assert.deepEqual(context.relations, []);
+  });
+});
+
 test("aggregation context overfetches and prioritizes countable memories", () => {
   withStore((store) => {
     for (let index = 0; index < 6; index += 1) {

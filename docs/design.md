@@ -89,10 +89,10 @@ Automatic extraction may use the same write path. Privacy deletion, reindexing,
 graph editing, feedback inspection, and maintenance belong in CLI/UI/background
 operations rather than ordinary model tools.
 
-The current prototype exposes seven tools. `nmg_derive`, `nmg_link`,
-`nmg_organize`, `nmg_feedback`, and `nmg_rebalance` are useful Lab APIs, but the
-default plugin should hide them once equivalent background or administrative
-paths exist.
+The default Pi package now exposes these three tools. `nmg_derive`, `nmg_link`,
+`nmg_organize`, `nmg_feedback`, and `nmg_rebalance` remain available only when
+`NMG_ENABLE_LAB_TOOLS=1`; future versions should move equivalent maintenance to
+background or administrative paths.
 
 ## 5. Core data model
 
@@ -382,6 +382,9 @@ matched evaluation.
 
 Implemented and verified in the current prototype:
 
+- a normal Pi package manifest, stable extension entry, and the three-tool Lite
+  surface with optional Lab tools;
+- progressive `nmg_search` headers followed by exact `nmg_get` evidence loading;
 - local SQLite history, semantic memory, typed relations, evidence links, and
   session checkpoints;
 - state supersession, event time, actor/truth status, scope, merge/split, and
@@ -395,8 +398,6 @@ Implemented and verified in the current prototype:
 
 Important gaps between the prototype and the target plugin:
 
-- the repository is not yet packaged for one-command Pi installation;
-- the current Pi extension exposes seven tools rather than the target three;
 - the Qwen node/leaf hierarchy is benchmarked in core but is not yet the normal
   Pi extension retrieval path;
 - semantic leaf maintenance is not yet a complete stable-ID incremental

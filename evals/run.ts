@@ -27,6 +27,7 @@ interface EvalCase {
     expectedTermGroups?: string[][];
     forbiddenTerms?: string[];
     requireSearchTool: boolean;
+    requireGetTool?: boolean;
   };
 }
 
@@ -38,6 +39,7 @@ interface EvalResult {
   databaseVerified: boolean;
   readerLoadMode: MemoryLoadMode;
   readerSearched: boolean;
+  readerGot: boolean;
   answerMatched: boolean;
   answer: string;
   errors: string[];
@@ -85,6 +87,7 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
   let databaseVerified = false;
   const readerLoadMode = decideMemoryLoad(testCase.recall.prompt).mode;
   let readerSearched = false;
+  let readerGot = false;
   let answerMatched = false;
   let answer = "";
 
@@ -163,6 +166,7 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
       await reader.setThinkingLevel("low");
       const events = await reader.promptAndWait(testCase.recall.prompt, undefined, 180_000);
       readerSearched = successfulToolCall(events, "nmg_search");
+      readerGot = successfulToolCall(events, "nmg_get");
       answer = (await reader.getLastAssistantText())?.trim() ?? "";
       if (!answer) {
         errors.push(`Reader returned no assistant text; events=${summarizeEvents(events)}; ` +
@@ -176,6 +180,9 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
       if (testCase.recall.requireSearchTool &&
           readerLoadMode !== "retrieve" && !readerSearched) {
         errors.push("Reader did not complete the required nmg_search call.");
+      }
+      if (testCase.recall.requireGetTool && !readerGot) {
+        errors.push("Reader did not complete the required nmg_get call.");
       }
       if (!answerMatched) errors.push("Reader answer did not contain all expected terms.");
     } finally {
@@ -192,12 +199,14 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
       sessionArchived &&
       databaseVerified &&
       answerMatched &&
-      (!testCase.recall.requireSearchTool || readerLoadMode === "retrieve" || readerSearched),
+      (!testCase.recall.requireSearchTool || readerLoadMode === "retrieve" || readerSearched) &&
+      (!testCase.recall.requireGetTool || readerGot),
     writerRemembered,
     sessionArchived,
     databaseVerified,
     readerLoadMode,
     readerSearched,
+    readerGot,
     answerMatched,
     answer,
     errors,
