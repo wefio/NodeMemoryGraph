@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import nmgExtension from "./index.ts";
-import { formatSearchHeaders } from "./index.ts";
+import { configuredGraphHops, formatSearchHeaders } from "./index.ts";
 import type { MemoryContext } from "../../../src/core/types.ts";
 
 function registeredTools(lab = false): string[] {
@@ -65,4 +65,19 @@ test("search headers disclose IDs but not source evidence", () => {
   assert.doesNotMatch(output, /A compact searchable preview/);
   assert.doesNotMatch(output, /SECRET EXACT SOURCE/);
   assert.match(output, /nmg_get/);
+});
+
+test("graph-hop environment override clamps model-requested expansion", () => {
+  const previous = process.env.NMG_GRAPH_HOPS;
+  try {
+    process.env.NMG_GRAPH_HOPS = "0";
+    assert.equal(configuredGraphHops(3), 0);
+    process.env.NMG_GRAPH_HOPS = "1";
+    assert.equal(configuredGraphHops(0), 1);
+    delete process.env.NMG_GRAPH_HOPS;
+    assert.equal(configuredGraphHops(2), 2);
+  } finally {
+    if (previous === undefined) delete process.env.NMG_GRAPH_HOPS;
+    else process.env.NMG_GRAPH_HOPS = previous;
+  }
 });

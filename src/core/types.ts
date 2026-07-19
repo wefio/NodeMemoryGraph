@@ -257,6 +257,31 @@ export interface NodeTransform {
   createdAt: string;
 }
 
+export interface RetrievalTraceInput {
+  query: string;
+  resultMemoryIds: string[];
+  resultNodeIds: string[];
+  expandedNodeIds?: string[];
+  ambiguity?: number;
+  fallbackUsed?: boolean;
+  conflictObserved?: boolean;
+  usefulMemoryIds?: string[];
+}
+
+export interface TopologyProposal {
+  id: string;
+  proposalKey: string;
+  type: "link" | "split";
+  sourceNodeIds: string[];
+  relationType: NodeRelationType | null;
+  partitions: Array<{ label: string; memoryIds: string[] }>;
+  evidenceTraceIds: string[];
+  observations: number;
+  estimatedGain: number;
+  status: "accepted" | "pending" | "rejected";
+  createdAt: string;
+}
+
 export interface RebalanceResult {
   nodeId: string;
   changedMemoryIds: string[];

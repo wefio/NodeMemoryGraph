@@ -31,6 +31,12 @@ optimization:
 - New or moved memories enter a persistent SQLite Delta and remain searchable
   before leaf compaction. Dirty nodes rebuild locally; unchanged content-derived
   leaf IDs retain their existing external embeddings.
+- Persisted vectors use Float32 BLOBs and are loaded into disposable contiguous
+  in-memory caches with geometric append capacity; SQLite remains authoritative.
+- Retrieval traces accumulate ambiguity, fallback, conflict, and co-retrieval
+  signals. Lab maintenance can propose evidence-backed links or node splits;
+  proposals require repeated observations and explicit acceptance before the
+  semantic graph changes.
 - Scope, validity intervals, conflicts, and superseded states remain
   traceable instead of deleting earlier evidence.
 - Cloud sync, external embedding models, and sandbox execution are deferred.
@@ -117,6 +123,10 @@ The automatic-write rule is intentionally narrow:
   preserve event time, and describe conversational evidence as something that
   was said rather than as independently verified truth.
 
+The prompt guides semantic selection, while the extension independently blocks
+high-confidence credential patterns, explicit do-not-retain requests, and
+current-turn-only instructions. This boundary does not depend on model quality.
+
 ## Headless Pi control
 
 NMG uses Pi's native RPC mode for automated Agent-to-Agent-style tests. This
@@ -161,17 +171,34 @@ full eight-memory block; the resident kernel remains a separate fixed budget.
 ### LongMemEval
 
 The official cleaned LongMemEval-S and oracle datasets can be placed under
-`evals/longmemeval/data/`. The adapter supports deterministic, matched
-No-Memory, Oracle, and NMG-over-Oracle development runs:
+`evals/longmemeval/data/`. The adapter supports deterministic development runs
+and a matched full-haystack comparison:
 
 ```powershell
 npm run eval:longmem -- no-memory 1
 npm run eval:longmem -- oracle 1
 npm run eval:longmem -- nmg-oracle 1
+npm run eval:longmem -- matched 1
 ```
 
 See [evals/longmemeval/README.md](evals/longmemeval/README.md) for methodology,
 limitations, and the initial seven-question smoke-test results.
+
+The first fixed seven-category matched run scored 1/7, 1/7, 5/7, 5/7, and 6/7
+for no memory, raw session, flat hybrid, NMG Lite, and NMG Graph respectively.
+It is a small development sample, not a benchmark claim.
+
+An expanded two-per-category run scored 2/14, 4/14, 8/14, 10/14, and 9/14.
+Lite beat flat on five paired questions and lost on three; Graph beat Lite on
+one and lost on two. Consequently graph expansion remains a Lab feature rather
+than the default path.
+
+Run deterministic P1 memory invariants and P2 topology ablation with:
+
+```powershell
+npm run eval:quality
+npm run eval:adaptive
+```
 
 ### Scale and cache breakthrough
 

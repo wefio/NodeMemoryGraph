@@ -2,6 +2,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { RpcClient } from "@earendil-works/pi-coding-agent";
+import { NmgStore } from "../../src/core/store.ts";
+import { HashingVectorEmbedder, cosineSimilarity } from "../../src/core/vector.ts";
 
 type Role = "assistant" | "user";
 
@@ -20,7 +22,10 @@ interface LongMemExample {
   haystack_sessions: Turn[][];
 }
 
-type Mode = "nmg-oracle" | "no-memory" | "oracle";
+type Mode = "flat-hybrid" | "matched" | "nmg-graph" | "nmg-lite" |
+  "nmg-oracle" | "no-memory" | "oracle" | "raw-session";
+type MatchedMode = "flat-hybrid" | "nmg-graph" | "nmg-lite" |
+  "no-memory" | "raw-session";
 
 const root = resolve(import.meta.dirname, "../..");
 const dataDirectory = resolve(import.meta.dirname, "data");
@@ -58,14 +63,27 @@ const runId = new Date().toISOString().replaceAll(":", "-");
 const outputDirectory = resolve(import.meta.dirname, "results", runId);
 mkdirSync(outputDirectory, { recursive: true });
 
-const results = await Promise.all(sample.map(runExample));
+const results = mode === "matched"
+  ? (await mapConcurrent(sample, evalConcurrency(), runMatchedExample)).flat()
+  : await mapConcurrent(sample, evalConcurrency(), (example) => runExample(example, mode));
 const report = {
   runId,
   mode,
   model: "deepseek/deepseek-v4-flash",
+  concurrency: evalConcurrency(),
   sampleSize: results.length,
   passed: results.filter((result) => result.passed).length,
   accuracy: results.filter((result) => result.passed).length / results.length,
+  byMode: Object.fromEntries([...new Set(results.map((result) => result.mode))].map(
+    (resultMode) => {
+      const rows = results.filter((result) => result.mode === resultMode);
+      return [resultMode, {
+        passed: rows.filter((result) => result.passed).length,
+        total: rows.length,
+        accuracy: rows.filter((result) => result.passed).length / rows.length,
+      }];
+    },
+  )),
   results,
 };
 
@@ -75,24 +93,48 @@ writeFileSync(
 );
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 
-async function runExample(example: LongMemExample) {
-  const startedAt = performance.now();
+async function runMatchedExample(example: LongMemExample) {
   const nmgDirectory = resolve(outputDirectory, "nmg", example.question_id);
-  let remembered = 0;
-  if (mode === "nmg-oracle") {
+  mkdirSync(nmgDirectory, { recursive: true });
+  const remembered = ingestRawEvidence(example, nmgDirectory);
+  const modes: MatchedMode[] = [
+    "no-memory", "raw-session", "flat-hybrid", "nmg-lite", "nmg-graph",
+  ];
+  const results = [];
+  for (const matchedMode of modes) {
+    results.push(await runExample(example, matchedMode, nmgDirectory, remembered));
+  }
+  return results;
+}
+
+async function runExample(
+  example: LongMemExample,
+  runMode: Exclude<Mode, "matched">,
+  sharedNmgDirectory?: string,
+  sharedRemembered = 0,
+) {
+  const startedAt = performance.now();
+  const nmgDirectory = sharedNmgDirectory ??
+    resolve(outputDirectory, "nmg", example.question_id);
+  let remembered = sharedRemembered;
+  if (runMode === "nmg-oracle" && !sharedNmgDirectory) {
     mkdirSync(nmgDirectory, { recursive: true });
     remembered = await ingestEvidence(example, nmgDirectory);
   }
 
   const answerClient = createClient(
-    mode === "nmg-oracle" ? nmgDirectory : undefined,
+    runMode.startsWith("nmg-") ? nmgDirectory : undefined,
+    runMode,
   );
   let hypothesis = "";
+  let answerError: string | null = null;
   try {
     await answerClient.start();
     await answerClient.setThinkingLevel("low");
-    await answerClient.promptAndWait(answerPrompt(example), undefined, 180_000);
+    await answerClient.promptAndWait(answerPrompt(example, runMode), undefined, modelTimeout());
     hypothesis = (await answerClient.getLastAssistantText())?.trim() ?? "";
+  } catch (error) {
+    answerError = error instanceof Error ? error.message : String(error);
   } finally {
     await answerClient.stop();
   }
@@ -101,10 +143,12 @@ async function runExample(example: LongMemExample) {
 
   return {
     questionId: example.question_id,
+    mode: runMode,
     questionType: benchmarkType(example),
     question: example.question,
     reference: example.answer,
     hypothesis,
+    answerError,
     judgement,
     passed: judgementPassed(judgement),
     remembered,
@@ -128,7 +172,7 @@ async function ingestEvidence(
           example.haystack_dates[index] ?? "unknown date",
         ),
         undefined,
-        180_000,
+        modelTimeout(),
       );
       remembered += events.filter(
         (event) =>
@@ -143,6 +187,53 @@ async function ingestEvidence(
   return remembered;
 }
 
+function ingestRawEvidence(example: LongMemExample, nmgDirectory: string): number {
+  const store = new NmgStore(resolve(nmgDirectory, "nmg.sqlite"));
+  let remembered = 0;
+  let previousNodeId: string | undefined;
+  try {
+    for (let sessionIndex = 0;
+      sessionIndex < example.haystack_sessions.length;
+      sessionIndex += 1) {
+      const session = example.haystack_sessions[sessionIndex]!;
+      const date = example.haystack_dates[sessionIndex] ?? "unknown date";
+      const nodeName = `LongMem session ${sessionIndex} ${date}`;
+      const nodeSummary = session.map((turn) => turn.content).join(" ").slice(0, 1_500);
+      let currentNodeId: string | undefined;
+      for (let turnIndex = 0; turnIndex < session.length; turnIndex += 1) {
+        const turn = session[turnIndex]!;
+        const saved = store.remember({
+          statement: turn.content,
+          nodeName,
+          nodeSummary,
+          memoryType: "conversation_evidence",
+          sourceActor: turn.role,
+          truthStatus: turn.role === "user" ? "asserted" : "unverified",
+          evidence: turn.content,
+          eventTime: date,
+          sourceRef: `longmemeval:${example.question_id}:${sessionIndex}:${turnIndex}`,
+          tier: 2,
+          importance: 0.5,
+          scope: { benchmark: "LongMemEval", session: String(sessionIndex) },
+        });
+        currentNodeId = saved.node.id;
+        remembered += 1;
+      }
+      if (previousNodeId && currentNodeId) {
+        store.linkNodes({
+          sourceNodeId: previousNodeId,
+          targetNodeId: currentNodeId,
+          type: "related_to",
+        });
+      }
+      previousNodeId = currentNodeId;
+    }
+  } finally {
+    store.close();
+  }
+  return remembered;
+}
+
 async function judgeAnswer(
   example: LongMemExample,
   hypothesis: string,
@@ -152,13 +243,18 @@ async function judgeAnswer(
     try {
       await client.start();
       await client.setThinkingLevel("low");
-      await client.promptAndWait(
-        judgePrompt(example, hypothesis),
-        undefined,
-        180_000,
-      );
-      const judgement = (await client.getLastAssistantText())?.trim() ?? "";
-      if (judgement) return judgement;
+      try {
+        await client.promptAndWait(
+          judgePrompt(example, hypothesis),
+          undefined,
+          modelTimeout(),
+        );
+        const judgement = (await client.getLastAssistantText())?.trim() ?? "";
+        if (judgement) return judgement;
+      } catch {
+        // A failed judge attempt is retried with a fresh Pi process. The final
+        // report remains usable even when the model provider has a transient.
+      }
     } finally {
       await client.stop();
     }
@@ -166,16 +262,23 @@ async function judgeAnswer(
   return "FAIL - Judge returned no response after two attempts.";
 }
 
-function answerPrompt(example: LongMemExample): string {
-  const history = mode === "oracle"
+function answerPrompt(example: LongMemExample, runMode: Exclude<Mode, "matched">): string {
+  const history = runMode === "oracle"
     ? `\nRelevant conversation history:\n${formatHistory(example)}\n`
-    : "\nNo conversation history is available.\n";
+    : runMode === "raw-session"
+    ? `\nRetrieved raw sessions:\n${retrieveRawSessions(example)}\n`
+    : runMode === "flat-hybrid"
+    ? `\nRetrieved flat hybrid turns:\n${retrieveFlatTurns(example)}\n`
+    : "\nNo conversation history is directly injected; use available memory tools.\n";
   return [
     "Answer the question concisely using only information available to you.",
     "If the requested past information is unavailable, say that you do not know.",
     "For a recommendation question, use remembered preferences to generate useful",
     "new recommendations. The exact recommended resources need not have appeared",
     "in the past conversation; do not confuse preference recall with item recall.",
+    ...(runMode.startsWith("nmg-")
+      ? ["Search NMG through maxTier 3 and call nmg_get for selected evidence before answering."]
+      : []),
     history,
     `Question date: ${example.question_date}`,
     `Question: ${example.question}`,
@@ -230,6 +333,63 @@ function formatHistory(example: LongMemExample): string {
   }).join("\n\n");
 }
 
+function retrieveRawSessions(example: LongMemExample): string {
+  const budget = contextBudget();
+  const ranked = example.haystack_sessions.map((session, index) => {
+    const text = `[${example.haystack_dates[index] ?? "unknown date"}]\n` +
+      session.map((turn) => `${turn.role}: ${turn.content}`).join("\n");
+    return { text, score: lexicalOverlap(example.question, text) };
+  }).sort((left, right) => right.score - left.score);
+  return takeWithinBudget(ranked.map((item) => item.text), budget);
+}
+
+function retrieveFlatTurns(example: LongMemExample): string {
+  const embedder = new HashingVectorEmbedder(256);
+  const queryVector = embedder.embed(example.question);
+  const ranked = example.haystack_sessions.flatMap((session, sessionIndex) =>
+    session.map((turn) => {
+      const text = `[${example.haystack_dates[sessionIndex] ?? "unknown date"}] ` +
+        `${turn.role}: ${turn.content}`;
+      return {
+        text,
+        score: lexicalOverlap(example.question, text) * 0.55 +
+          cosineSimilarity(queryVector, embedder.embed(text)) * 0.45,
+      };
+    }))
+    .sort((left, right) => right.score - left.score);
+  return takeWithinBudget(ranked.map((item) => item.text), contextBudget());
+}
+
+function lexicalOverlap(query: string, text: string): number {
+  const queryTokens = new Set(tokens(query));
+  const textTokens = new Set(tokens(text));
+  if (queryTokens.size === 0) return 0;
+  return [...queryTokens].filter((token) => textTokens.has(token)).length / queryTokens.size;
+}
+
+function tokens(value: string): string[] {
+  return value.toLocaleLowerCase().match(/[\p{L}\p{N}_+.#-]+/gu) ?? [];
+}
+
+function contextBudget(): number {
+  return Math.max(2_000, Number.parseInt(
+    process.env.NMG_LONGMEM_CONTEXT_CHARS ?? "12000",
+    10,
+  ));
+}
+
+function takeWithinBudget(values: string[], budget: number): string {
+  const selected: string[] = [];
+  let used = 0;
+  for (const value of values) {
+    if (selected.length > 0 && used + value.length > budget) continue;
+    selected.push(value);
+    used += value.length;
+    if (used >= budget) break;
+  }
+  return selected.join("\n\n");
+}
+
 function stratifiedSample(
   examples: LongMemExample[],
   count: number,
@@ -252,7 +412,7 @@ function benchmarkType(example: LongMemExample): string {
     : example.question_type;
 }
 
-function createClient(nmgDirectory?: string): RpcClient {
+function createClient(nmgDirectory?: string, runMode?: Exclude<Mode, "matched">): RpcClient {
   return new RpcClient({
     cliPath: resolve(
       root,
@@ -264,6 +424,11 @@ function createClient(nmgDirectory?: string): RpcClient {
     env: {
       ...definedEnvironment(),
       ...(nmgDirectory ? { NMG_DATA_DIR: nmgDirectory } : {}),
+      ...(runMode === "nmg-lite"
+        ? { NMG_GRAPH_HOPS: "0" }
+        : runMode === "nmg-graph"
+        ? { NMG_GRAPH_HOPS: "1" }
+        : {}),
     },
     args: [
       "--offline",
@@ -280,8 +445,14 @@ function parseMode(value: string | undefined): Mode {
   if (value === undefined || value === "no-memory") return "no-memory";
   if (value === "oracle") return "oracle";
   if (value === "nmg-oracle") return "nmg-oracle";
+  if (value === "raw-session") return "raw-session";
+  if (value === "flat-hybrid") return "flat-hybrid";
+  if (value === "nmg-lite") return "nmg-lite";
+  if (value === "nmg-graph") return "nmg-graph";
+  if (value === "matched") return "matched";
   throw new Error(
-    `Unknown mode: ${value}. Use no-memory, oracle, or nmg-oracle.`,
+    `Unknown mode: ${value}. Use matched, no-memory, raw-session, ` +
+      `flat-hybrid, nmg-lite, nmg-graph, oracle, or nmg-oracle.`,
   );
 }
 
@@ -291,6 +462,41 @@ function positiveInteger(value: string): number {
     throw new Error(`Expected a positive sample count, received: ${value}`);
   }
   return parsed;
+}
+
+function evalConcurrency(): number {
+  return Math.max(1, Math.min(
+    positiveInteger(process.env.NMG_LONGMEM_CONCURRENCY ?? "4"),
+    16,
+  ));
+}
+
+function modelTimeout(): number {
+  return Math.max(30_000, Number.parseInt(
+    process.env.NMG_LONGMEM_TIMEOUT_MS ?? "300000",
+    10,
+  ) || 300_000);
+}
+
+async function mapConcurrent<Input, Output>(
+  values: readonly Input[],
+  concurrency: number,
+  worker: (value: Input) => Promise<Output>,
+): Promise<Output[]> {
+  const results = new Array<Output>(values.length);
+  let cursor = 0;
+  await Promise.all(Array.from(
+    { length: Math.min(concurrency, values.length) },
+    async () => {
+      while (true) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= values.length) return;
+        results[index] = await worker(values[index]!);
+      }
+    },
+  ));
+  return results;
 }
 
 function definedEnvironment(): Record<string, string> {

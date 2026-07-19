@@ -20,11 +20,15 @@
     "src/core/router.ts",
     "src/core/store.ts",
     "src/core/types.ts",
-    "src/core/vector.ts"
+    "src/core/vector-cache.ts",
+    "src/core/vector.ts",
+    "src/core/write-policy.ts"
   ],
   "scripts": {
     "check": "tsc --noEmit",
     "eval:agents": "node --experimental-strip-types evals/run.ts",
+    "eval:adaptive": "node --experimental-strip-types evals/adaptive-topology/run.ts",
+    "eval:quality": "node --experimental-strip-types evals/memory-quality/run.ts",
     "eval:longmem": "node --experimental-strip-types evals/longmemeval/run.ts",
     "eval:recall-compression": "node --experimental-strip-types evals/recall-compression.ts",
     "eval:scale": "node --experimental-strip-types evals/scale/run.ts",
@@ -33,7 +37,7 @@
     "index:ann": "node --experimental-strip-types scripts/build-ann.ts",
     "pi:prompt": "node --experimental-strip-types scripts/pi-control.ts prompt",
     "pi:state": "node --experimental-strip-types scripts/pi-control.ts state",
-    "test": "node --experimental-strip-types --test src/core/store.test.ts src/core/gate.test.ts src/core/openai-embedding.test.ts src/core/ann.test.ts .pi/extensions/nmg/index.test.ts"
+    "test": "node --experimental-strip-types --test src/core/store.test.ts src/core/gate.test.ts src/core/openai-embedding.test.ts src/core/ann.test.ts src/core/vector-cache.test.ts src/core/write-policy.test.ts .pi/extensions/nmg/index.test.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.80.10",

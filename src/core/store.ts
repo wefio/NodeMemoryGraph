@@ -29,17 +29,20 @@ import type {
   RememberInput,
   RememberResult,
   RebalanceResult,
+  RetrievalTraceInput,
   RecallCue,
   RecallIndex,
   SearchOptions,
   SessionArchive,
+  TopologyProposal,
   VectorEmbedder,
 } from "./types.ts";
 import { blockTiers, huffmanDepths } from "./hierarchy.ts";
 import { OnlineNodeRouter } from "./router.ts";
 import { cosineSimilarity, HashingVectorEmbedder } from "./vector.ts";
+import { Float32VectorCache } from "./vector-cache.ts";
 
-type Row = Record<string, string | number | null>;
+type Row = Record<string, string | number | Uint8Array | null>;
 
 const MAX_SEARCH_CANDIDATES = 500;
 
@@ -47,6 +50,7 @@ export class NmgStore {
   readonly #db: DatabaseSync;
   readonly #embedder: VectorEmbedder;
   readonly #router: OnlineNodeRouter;
+  readonly #vectorCaches = new Map<string, Float32VectorCache>();
 
   constructor(databasePath: string, embedder: VectorEmbedder = new HashingVectorEmbedder()) {
     mkdirSync(dirname(databasePath), { recursive: true });
@@ -613,15 +617,15 @@ export class NmgStore {
       ? `AND n.id IN (${candidates.map(() => "?").join(",")})`
       : "";
     const rows = this.#db.prepare(
-      `SELECT n.*, e.vector_json
+      `SELECT n.*
        FROM memory_nodes n JOIN node_embeddings e ON e.node_id = n.id AND e.model = ?
        WHERE n.status = 'active' ${clause}`,
     ).all(model, ...candidates) as Row[];
-    return rows.map((row) => ({
-      node: mapNode(row),
-      score: cosineSimilarity(queryVector, parseVector(row.vector_json)),
-    })).filter((route) => route.score > 0)
-      .sort((left, right) => right.score - left.score)
+    const byId = new Map(rows.map((row) => [String(row.id), row]));
+    const cache = this.#embeddingCache("node", model);
+    if (!cache) return [];
+    return cache.score(queryVector, new Set(byId.keys()))
+      .map(({ id, score }) => ({ node: mapNode(byId.get(id)!), score }))
       .slice(0, Math.max(1, Math.min(limit, 50)));
   }
 
@@ -658,10 +662,12 @@ export class NmgStore {
        FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id`,
     ).all() as Row[];
     const upsert = this.#db.prepare(
-      `INSERT INTO memory_embeddings (memory_id, model, dimensions, vector_json, updated_at)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO memory_embeddings
+        (memory_id, model, dimensions, vector_json, vector_blob, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(memory_id, model) DO UPDATE SET
          dimensions = excluded.dimensions, vector_json = excluded.vector_json,
+         vector_blob = excluded.vector_blob,
          updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
@@ -669,8 +675,9 @@ export class NmgStore {
     try {
       for (const row of rows) {
         const text = `${row.statement} ${row.canonical_name} ${row.summary}`;
+        const vector = this.#embedder.embed(text);
         upsert.run(row.id, this.#embedder.model, this.#embedder.dimensions,
-          JSON.stringify(this.#embedder.embed(text)), now);
+          JSON.stringify(vector), encodeVector(vector), now);
       }
       this.#db.exec("COMMIT");
       return rows.length;
@@ -769,6 +776,20 @@ export class NmgStore {
         return true;
       })
       .slice(0, limit);
+    const topScores = direct.slice(0, 2).map((result) => result.combinedScore);
+    const ambiguity = topScores.length < 2
+      ? 0
+      : 1 - clamp(topScores[0]! - topScores[1]!, 0, 1);
+    this.recordRetrievalTrace({
+      query,
+      resultMemoryIds: results.map((result) => result.memory.id),
+      resultNodeIds: results.map((result) => result.node.id),
+      expandedNodeIds: relatedNodeIds,
+      ambiguity,
+      fallbackUsed: direct.length === 0 || related.length > 0,
+      conflictObserved: results.some((result) => result.memory.status === "disputed") ||
+        relations.some((relation) => relation.type === "contradicts"),
+    });
     return { results, relations };
   }
 
@@ -789,6 +810,202 @@ export class NmgStore {
         graphHops,
       ),
     };
+  }
+
+  recordRetrievalTrace(input: RetrievalTraceInput): string {
+    const id = randomUUID();
+    const createdAt = new Date().toISOString();
+    const nodeIds = [...new Set(input.resultNodeIds)].sort();
+    const usefulNodeIds = new Set(this.#nodeIdsForMemories(input.usefulMemoryIds ?? []));
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db.prepare(
+        `INSERT INTO retrieval_traces
+          (id, query, result_memory_ids_json, result_node_ids_json,
+           expanded_node_ids_json, useful_memory_ids_json, ambiguity,
+           fallback_used, conflict_observed, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        input.query,
+        JSON.stringify([...new Set(input.resultMemoryIds)]),
+        JSON.stringify(nodeIds),
+        JSON.stringify([...new Set(input.expandedNodeIds ?? [])]),
+        JSON.stringify([...new Set(input.usefulMemoryIds ?? [])]),
+        clamp(input.ambiguity ?? 0, 0, 1),
+        input.fallbackUsed ? 1 : 0,
+        input.conflictObserved ? 1 : 0,
+        createdAt,
+      );
+      const updateNode = this.#db.prepare(
+        `INSERT INTO node_retrieval_signals
+          (node_id, query_count, ambiguity_sum, fallback_count,
+           conflict_count, updated_at)
+         VALUES (?, 1, ?, ?, ?, ?)
+         ON CONFLICT(node_id) DO UPDATE SET
+           query_count = query_count + 1,
+           ambiguity_sum = ambiguity_sum + excluded.ambiguity_sum,
+           fallback_count = fallback_count + excluded.fallback_count,
+           conflict_count = conflict_count + excluded.conflict_count,
+           updated_at = excluded.updated_at`,
+      );
+      for (const nodeId of nodeIds) {
+        updateNode.run(nodeId, clamp(input.ambiguity ?? 0, 0, 1),
+          input.fallbackUsed ? 1 : 0, input.conflictObserved ? 1 : 0, createdAt);
+      }
+      const updatePair = this.#db.prepare(
+        `INSERT INTO node_pair_signals
+          (left_node_id, right_node_id, co_retrieval_count, useful_count,
+           evidence_trace_ids_json, updated_at)
+         VALUES (?, ?, 1, ?, ?, ?)
+         ON CONFLICT(left_node_id, right_node_id) DO UPDATE SET
+           co_retrieval_count = co_retrieval_count + 1,
+           useful_count = useful_count + excluded.useful_count,
+           evidence_trace_ids_json = excluded.evidence_trace_ids_json,
+           updated_at = excluded.updated_at`,
+      );
+      for (let left = 0; left < nodeIds.length; left += 1) {
+        for (let right = left + 1; right < nodeIds.length; right += 1) {
+          const pair = [nodeIds[left]!, nodeIds[right]!] as const;
+          const previous = this.#db.prepare(
+            `SELECT evidence_trace_ids_json FROM node_pair_signals
+             WHERE left_node_id = ? AND right_node_id = ?`,
+          ).get(...pair) as Row | undefined;
+          const evidence = [...parseStringArray(previous?.evidence_trace_ids_json ?? null), id]
+            .slice(-32);
+          updatePair.run(...pair,
+            usefulNodeIds.has(pair[0]) && usefulNodeIds.has(pair[1]) ? 1 : 0,
+            JSON.stringify(evidence), createdAt);
+        }
+      }
+      this.#db.exec("COMMIT");
+      return id;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  proposeTopologyChanges(options: {
+    minObservations?: number;
+    minGain?: number;
+    cooldownMs?: number;
+  } = {}): TopologyProposal[] {
+    const minObservations = Math.max(2, options.minObservations ?? 3);
+    const minGain = clamp(options.minGain ?? 0.6, 0, 1);
+    const cooldownMs = Math.max(0, options.cooldownMs ?? 7 * 24 * 60 * 60 * 1_000);
+    const proposals: TopologyProposal[] = [];
+    const pairRows = this.#db.prepare(
+      `SELECT p.*, l.query_count AS left_queries, r.query_count AS right_queries
+       FROM node_pair_signals p
+       JOIN node_retrieval_signals l ON l.node_id = p.left_node_id
+       JOIN node_retrieval_signals r ON r.node_id = p.right_node_id
+       JOIN memory_nodes ln ON ln.id = p.left_node_id AND ln.status = 'active'
+       JOIN memory_nodes rn ON rn.id = p.right_node_id AND rn.status = 'active'
+       WHERE p.co_retrieval_count >= ?`,
+    ).all(minObservations) as Row[];
+    for (const row of pairRows) {
+      const sourceNodeIds = [String(row.left_node_id), String(row.right_node_id)];
+      const proposalKey = `link:${sourceNodeIds.join(":")}`;
+      // Co-retrieval is only a candidate signal. Requiring both nodes to have
+      // been marked useful avoids turning the retriever's own accidental
+      // co-results into self-reinforcing graph edges.
+      const gain = Number(row.useful_count) /
+        Math.max(Number(row.left_queries), Number(row.right_queries), 1);
+      if (gain < minGain || this.#proposalCoolingDown(proposalKey, cooldownMs)) continue;
+      const relation = this.#db.prepare(
+        `SELECT 1 FROM node_relations WHERE
+         (source_node_id = ? AND target_node_id = ?) OR
+         (source_node_id = ? AND target_node_id = ?) LIMIT 1`,
+      ).get(sourceNodeIds[0], sourceNodeIds[1], sourceNodeIds[1], sourceNodeIds[0]);
+      if (relation) continue;
+      proposals.push(this.#insertTopologyProposal({
+        proposalKey,
+        type: "link",
+        sourceNodeIds,
+        relationType: "related_to",
+        partitions: [],
+        evidenceTraceIds: parseStringArray(row.evidence_trace_ids_json),
+        observations: Number(row.co_retrieval_count),
+        estimatedGain: gain,
+      }));
+    }
+    const nodeRows = this.#db.prepare(
+      `SELECT s.* FROM node_retrieval_signals s
+       JOIN memory_nodes n ON n.id = s.node_id AND n.status = 'active'
+       WHERE s.query_count >= ?`,
+    ).all(minObservations) as Row[];
+    for (const row of nodeRows) {
+      const nodeId = String(row.node_id);
+      const ambiguity = Number(row.ambiguity_sum) / Math.max(Number(row.query_count), 1);
+      const fallback = Number(row.fallback_count) / Math.max(Number(row.query_count), 1);
+      const gain = Math.max(ambiguity, fallback);
+      const proposalKey = `split:${nodeId}`;
+      if (gain < minGain || this.#proposalCoolingDown(proposalKey, cooldownMs)) continue;
+      const partitions = this.#candidatePartitions(nodeId);
+      if (partitions.length < 2) continue;
+      const traces = this.#db.prepare(
+        `SELECT id FROM retrieval_traces
+         WHERE result_node_ids_json LIKE ? ORDER BY created_at DESC LIMIT 16`,
+      ).all(`%${nodeId}%`) as Row[];
+      proposals.push(this.#insertTopologyProposal({
+        proposalKey,
+        type: "split",
+        sourceNodeIds: [nodeId],
+        relationType: null,
+        partitions,
+        evidenceTraceIds: traces.map((trace) => String(trace.id)),
+        observations: Number(row.query_count),
+        estimatedGain: gain,
+      }));
+    }
+    return proposals;
+  }
+
+  topologyProposals(status: TopologyProposal["status"] = "pending"): TopologyProposal[] {
+    return (this.#db.prepare(
+      "SELECT * FROM topology_proposals WHERE status = ? ORDER BY created_at, id",
+    ).all(status) as Row[]).map(mapTopologyProposal);
+  }
+
+  reviewTopologyProposal(
+    proposalId: string,
+    decision: "accept" | "reject",
+  ): TopologyProposal {
+    const row = this.#db.prepare(
+      "SELECT * FROM topology_proposals WHERE id = ?",
+    ).get(proposalId) as Row | undefined;
+    if (!row) throw new Error(`topology proposal ${proposalId} does not exist`);
+    const proposal = mapTopologyProposal(row);
+    if (proposal.status !== "pending") {
+      throw new Error(`topology proposal ${proposalId} is already ${proposal.status}`);
+    }
+    if (decision === "reject") {
+      this.#db.prepare(
+        "UPDATE topology_proposals SET status = 'rejected' WHERE id = ?",
+      ).run(proposalId);
+      return { ...proposal, status: "rejected" };
+    }
+    if (proposal.type === "link") {
+      this.linkNodes({
+        sourceNodeId: proposal.sourceNodeIds[0]!,
+        targetNodeId: proposal.sourceNodeIds[1]!,
+        type: proposal.relationType ?? "related_to",
+      });
+    } else {
+      const source = this.#requireNode(proposal.sourceNodeIds[0]!);
+      this.splitNode({
+        sourceNodeId: source.id,
+        partitions: proposal.partitions.map((partition, index) => ({
+          nodeName: `${source.canonicalName} / ${partitionLabel(partition.label, index)}`,
+          memoryIds: partition.memoryIds,
+        })),
+      });
+    }
+    this.#db.prepare(
+      "UPDATE topology_proposals SET status = 'accepted' WHERE id = ?",
+    ).run(proposalId);
+    return { ...proposal, status: "accepted" };
   }
 
   residentKernel(limit = 4): MemoryContext {
@@ -942,18 +1159,24 @@ export class NmgStore {
       throw new Error("external embeddings must have one consistent non-zero dimension");
     }
     const upsert = this.#db.prepare(
-      `INSERT INTO node_embeddings (node_id, model, dimensions, vector_json, updated_at)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO node_embeddings
+        (node_id, model, dimensions, vector_json, vector_blob, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(node_id, model) DO UPDATE SET dimensions = excluded.dimensions,
-         vector_json = excluded.vector_json, updated_at = excluded.updated_at`,
+         vector_json = excluded.vector_json, vector_blob = excluded.vector_blob,
+         updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
     this.#db.exec("BEGIN IMMEDIATE");
     try {
       for (const item of embeddings) {
-        upsert.run(item.nodeId, model, dimensions, JSON.stringify(item.vector), now);
+        upsert.run(item.nodeId, model, dimensions, JSON.stringify(item.vector),
+          encodeVector(item.vector), now);
       }
       this.#db.exec("COMMIT");
+      for (const item of embeddings) {
+        this.#updateVectorCache("node", model, item.nodeId, item.vector);
+      }
       return embeddings.length;
     } catch (error) {
       this.#db.exec("ROLLBACK");
@@ -963,12 +1186,12 @@ export class NmgStore {
 
   storedNodeEmbeddings(model: string, afterNodeId = "", limit = 256): ExternalNodeEmbedding[] {
     const rows = this.#db.prepare(
-      `SELECT node_id, vector_json FROM node_embeddings
+      `SELECT node_id, vector_blob, vector_json FROM node_embeddings
        WHERE model = ? AND node_id > ? ORDER BY node_id LIMIT ?`,
     ).all(model, afterNodeId, Math.max(1, Math.min(limit, 2_048))) as Row[];
     return rows.map((row) => ({
       nodeId: String(row.node_id),
-      vector: parseVector(row.vector_json),
+      vector: storedVector(row),
     }));
   }
 
@@ -1019,6 +1242,7 @@ export class NmgStore {
       }
     }
     const desiredIds = new Set(blocks.map((block) => block.id));
+    const staleIds = [...existing.keys()].filter((id) => !desiredIds.has(id));
     this.#db.exec("BEGIN IMMEDIATE");
     try {
       const insertBlock = this.#db.prepare(
@@ -1048,9 +1272,7 @@ export class NmgStore {
         );
       }
       const removeBlock = this.#db.prepare("DELETE FROM memory_leaf_blocks WHERE id = ?");
-      for (const id of existing.keys()) {
-        if (!desiredIds.has(id)) removeBlock.run(id);
-      }
+      for (const id of staleIds) removeBlock.run(id);
       this.#db.prepare(
         `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 0, ?)
          ON CONFLICT(node_id) DO UPDATE SET dirty = 0, updated_at = excluded.updated_at`,
@@ -1059,6 +1281,7 @@ export class NmgStore {
         "UPDATE memory_index_delta SET compacted = 1 WHERE node_id = ?",
       ).run(nodeId);
       this.#db.exec("COMMIT");
+      if (staleIds.length > 0) this.#invalidateVectorCaches("leaf");
       return blocks;
     } catch (error) {
       this.#db.exec("ROLLBACK");
@@ -1141,18 +1364,24 @@ export class NmgStore {
       throw new Error("external embeddings must have one consistent non-zero dimension");
     }
     const upsert = this.#db.prepare(
-      `INSERT INTO leaf_embeddings (block_id, model, dimensions, vector_json, updated_at)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO leaf_embeddings
+        (block_id, model, dimensions, vector_json, vector_blob, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(block_id, model) DO UPDATE SET dimensions = excluded.dimensions,
-         vector_json = excluded.vector_json, updated_at = excluded.updated_at`,
+         vector_json = excluded.vector_json, vector_blob = excluded.vector_blob,
+         updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
     this.#db.exec("BEGIN IMMEDIATE");
     try {
       for (const item of embeddings) {
-        upsert.run(item.blockId, model, dimensions, JSON.stringify(item.vector), now);
+        upsert.run(item.blockId, model, dimensions, JSON.stringify(item.vector),
+          encodeVector(item.vector), now);
       }
       this.#db.exec("COMMIT");
+      for (const item of embeddings) {
+        this.#updateVectorCache("leaf", model, item.blockId, item.vector);
+      }
       return embeddings.length;
     } catch (error) {
       this.#db.exec("ROLLBACK");
@@ -1162,12 +1391,12 @@ export class NmgStore {
 
   storedLeafEmbeddings(model: string, afterBlockId = "", limit = 256): ExternalLeafEmbedding[] {
     const rows = this.#db.prepare(
-      `SELECT block_id, vector_json FROM leaf_embeddings
+      `SELECT block_id, vector_blob, vector_json FROM leaf_embeddings
        WHERE model = ? AND block_id > ? ORDER BY block_id LIMIT ?`,
     ).all(model, afterBlockId, Math.max(1, Math.min(limit, 2_048))) as Row[];
     return rows.map((row) => ({
       blockId: String(row.block_id),
-      vector: parseVector(row.vector_json),
+      vector: storedVector(row),
     }));
   }
 
@@ -1187,16 +1416,16 @@ export class NmgStore {
       ? `AND b.id IN (${blocks.map(() => "?").join(",")})`
       : "";
     const rows = this.#db.prepare(
-      `SELECT b.*, e.vector_json FROM memory_leaf_blocks b
+      `SELECT b.* FROM memory_leaf_blocks b
        JOIN memory_nodes n ON n.id = b.node_id AND n.status = 'active'
        JOIN leaf_embeddings e ON e.block_id = b.id AND e.model = ?
        WHERE 1 = 1 ${nodeClause} ${blockClause}`,
     ).all(model, ...nodes, ...blocks) as Row[];
-    return rows.map((row) => ({
-      block: mapLeafBlock(row),
-      score: cosineSimilarity(queryVector, parseVector(row.vector_json)),
-    })).filter((route) => route.score > 0)
-      .sort((left, right) => right.score - left.score)
+    const byId = new Map(rows.map((row) => [String(row.id), row]));
+    const cache = this.#embeddingCache("leaf", model);
+    if (!cache) return [];
+    return cache.score(queryVector, new Set(byId.keys()))
+      .map(({ id, score }) => ({ block: mapLeafBlock(byId.get(id)!), score }))
       .slice(0, Math.max(1, Math.min(limit, 50)));
   }
 
@@ -1325,16 +1554,19 @@ export class NmgStore {
       throw new Error("external embeddings must have one consistent non-zero dimension");
     }
     const upsert = this.#db.prepare(
-      `INSERT INTO memory_embeddings (memory_id, model, dimensions, vector_json, updated_at)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO memory_embeddings
+        (memory_id, model, dimensions, vector_json, vector_blob, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(memory_id, model) DO UPDATE SET dimensions = excluded.dimensions,
-         vector_json = excluded.vector_json, updated_at = excluded.updated_at`,
+         vector_json = excluded.vector_json, vector_blob = excluded.vector_blob,
+         updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
     this.#db.exec("BEGIN IMMEDIATE");
     try {
       for (const item of embeddings) {
-        upsert.run(item.memoryId, model, dimensions, JSON.stringify(item.vector), now);
+        upsert.run(item.memoryId, model, dimensions, JSON.stringify(item.vector),
+          encodeVector(item.vector), now);
       }
       this.#db.exec("COMMIT");
       return embeddings.length;
@@ -1346,12 +1578,12 @@ export class NmgStore {
 
   storedEmbeddings(model: string, afterMemoryId = "", limit = 256): ExternalEmbedding[] {
     const rows = this.#db.prepare(
-      `SELECT memory_id, vector_json FROM memory_embeddings
+      `SELECT memory_id, vector_blob, vector_json FROM memory_embeddings
        WHERE model = ? AND memory_id > ? ORDER BY memory_id LIMIT ?`,
     ).all(model, afterMemoryId, Math.max(1, Math.min(limit, 2_048))) as Row[];
     return rows.map((row) => ({
       memoryId: String(row.memory_id),
-      vector: parseVector(row.vector_json),
+      vector: storedVector(row),
     }));
   }
 
@@ -1421,6 +1653,7 @@ export class NmgStore {
            n.kind AS n_kind, n.summary AS n_summary,
            n.created_at AS n_created_at, n.updated_at AS n_updated_at,
            n.status AS n_status, ve.vector_json AS ve_vector_json,
+           ve.vector_blob AS ve_vector_blob,
            h.id AS h_id, h.session_id AS h_session_id, h.role AS h_role,
            h.content AS h_content, h.source_message_id AS h_source_message_id,
            h.source_ref AS h_source_ref,
@@ -1456,7 +1689,7 @@ export class NmgStore {
     const results = rows
       .map((row) => {
         const lexical = lexicalScore(normalizedQuery, row);
-        const vector = cosineSimilarity(queryVector, parseVector(row.ve_vector_json));
+        const vector = cosineSimilarity(queryVector, storedVector(row, "ve_"));
         const route = routes.get(String(row.m_node_id)) ?? 0;
         const result = mapSearchResult(row, lexical);
         result.vectorScore = retrievalMode === "fts5" ? 0 : vector;
@@ -1650,6 +1883,7 @@ export class NmgStore {
         model TEXT NOT NULL,
         dimensions INTEGER NOT NULL,
         vector_json TEXT NOT NULL,
+        vector_blob BLOB,
         updated_at TEXT NOT NULL,
         PRIMARY KEY (memory_id, model)
       );
@@ -1659,6 +1893,7 @@ export class NmgStore {
         model TEXT NOT NULL,
         dimensions INTEGER NOT NULL,
         vector_json TEXT NOT NULL,
+        vector_blob BLOB,
         updated_at TEXT NOT NULL,
         PRIMARY KEY (node_id, model)
       );
@@ -1685,6 +1920,7 @@ export class NmgStore {
         model TEXT NOT NULL,
         dimensions INTEGER NOT NULL,
         vector_json TEXT NOT NULL,
+        vector_blob BLOB,
         updated_at TEXT NOT NULL,
         PRIMARY KEY (block_id, model)
       );
@@ -1700,6 +1936,52 @@ export class NmgStore {
         node_id TEXT NOT NULL REFERENCES memory_nodes(id),
         operation TEXT NOT NULL CHECK (operation IN ('move', 'upsert')),
         compacted INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS retrieval_traces (
+        id TEXT PRIMARY KEY,
+        query TEXT NOT NULL,
+        result_memory_ids_json TEXT NOT NULL,
+        result_node_ids_json TEXT NOT NULL,
+        expanded_node_ids_json TEXT NOT NULL,
+        useful_memory_ids_json TEXT NOT NULL,
+        ambiguity REAL NOT NULL,
+        fallback_used INTEGER NOT NULL,
+        conflict_observed INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS node_retrieval_signals (
+        node_id TEXT PRIMARY KEY REFERENCES memory_nodes(id),
+        query_count INTEGER NOT NULL DEFAULT 0,
+        ambiguity_sum REAL NOT NULL DEFAULT 0,
+        fallback_count INTEGER NOT NULL DEFAULT 0,
+        conflict_count INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS node_pair_signals (
+        left_node_id TEXT NOT NULL REFERENCES memory_nodes(id),
+        right_node_id TEXT NOT NULL REFERENCES memory_nodes(id),
+        co_retrieval_count INTEGER NOT NULL DEFAULT 0,
+        useful_count INTEGER NOT NULL DEFAULT 0,
+        evidence_trace_ids_json TEXT NOT NULL DEFAULT '[]',
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (left_node_id, right_node_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS topology_proposals (
+        id TEXT PRIMARY KEY,
+        proposal_key TEXT NOT NULL,
+        proposal_type TEXT NOT NULL CHECK (proposal_type IN ('link', 'split')),
+        source_node_ids_json TEXT NOT NULL,
+        relation_type TEXT,
+        partitions_json TEXT NOT NULL,
+        evidence_trace_ids_json TEXT NOT NULL,
+        observations INTEGER NOT NULL,
+        estimated_gain REAL NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT NOT NULL
       );
 
@@ -1748,12 +2030,15 @@ export class NmgStore {
         ON node_relations(target_node_id);
       CREATE INDEX IF NOT EXISTS idx_memory_index_delta_node
         ON memory_index_delta(node_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_topology_proposals_key_created
+        ON topology_proposals(proposal_key, created_at);
     `);
     this.#ensureMemoryColumns();
     this.#ensureHistoryColumns();
     this.#ensureEmbeddingTable();
     this.#ensureNodeColumns();
     this.#ensureDeltaColumns();
+    this.#ensureBinaryVectors();
     this.#db.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_history_source_message
         ON history_records(session_id, source_message_id)
@@ -1812,6 +2097,33 @@ export class NmgStore {
       this.#db.exec(
         "ALTER TABLE memory_index_delta ADD COLUMN compacted INTEGER NOT NULL DEFAULT 0",
       );
+    }
+  }
+
+  #ensureBinaryVectors(): void {
+    const tables: Array<[string, string]> = [
+      ["memory_embeddings", "memory_id"],
+      ["node_embeddings", "node_id"],
+      ["leaf_embeddings", "block_id"],
+    ];
+    for (const [table, idColumn] of tables) {
+      const columns = new Set(
+        (this.#db.prepare(`PRAGMA table_info(${table})`).all() as Row[])
+          .map((row) => String(row.name)),
+      );
+      if (!columns.has("vector_blob")) {
+        this.#db.exec(`ALTER TABLE ${table} ADD COLUMN vector_blob BLOB`);
+      }
+      const rows = this.#db.prepare(
+        `SELECT ${idColumn} AS id, model, vector_json FROM ${table}
+         WHERE vector_blob IS NULL`,
+      ).all() as Row[];
+      const update = this.#db.prepare(
+        `UPDATE ${table} SET vector_blob = ? WHERE ${idColumn} = ? AND model = ?`,
+      );
+      for (const row of rows) {
+        update.run(encodeVector(parseVector(row.vector_json)), row.id, row.model);
+      }
     }
   }
 
@@ -2054,14 +2366,17 @@ export class NmgStore {
   }
 
   #upsertEmbedding(memoryId: string, text: string): void {
+    const vector = this.#embedder.embed(text);
     this.#db.prepare(
-      `INSERT INTO memory_embeddings (memory_id, model, dimensions, vector_json, updated_at)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO memory_embeddings
+        (memory_id, model, dimensions, vector_json, vector_blob, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(memory_id, model) DO UPDATE SET
          dimensions = excluded.dimensions, vector_json = excluded.vector_json,
+         vector_blob = excluded.vector_blob,
          updated_at = excluded.updated_at`,
     ).run(memoryId, this.#embedder.model, this.#embedder.dimensions,
-      JSON.stringify(this.#embedder.embed(text)), new Date().toISOString());
+      JSON.stringify(vector), encodeVector(vector), new Date().toISOString());
   }
 
   #refreshEmbeddings(memoryIds: string[]): void {
@@ -2073,6 +2388,94 @@ export class NmgStore {
       const row = select.get(memoryId) as Row | undefined;
       if (row) this.#upsertEmbedding(memoryId,
         `${row.statement} ${row.canonical_name} ${row.summary}`);
+    }
+  }
+
+  #nodeIdsForMemories(memoryIds: readonly string[]): string[] {
+    const ids = [...new Set(memoryIds)];
+    if (ids.length === 0) return [];
+    return (this.#db.prepare(
+      `SELECT DISTINCT node_id FROM memory_records
+       WHERE id IN (${ids.map(() => "?").join(",")})`,
+    ).all(...ids) as Row[]).map((row) => String(row.node_id));
+  }
+
+  #proposalCoolingDown(proposalKey: string, cooldownMs: number): boolean {
+    const row = this.#db.prepare(
+      `SELECT created_at FROM topology_proposals
+       WHERE proposal_key = ? ORDER BY created_at DESC LIMIT 1`,
+    ).get(proposalKey) as Row | undefined;
+    return Boolean(row) && Date.now() - Date.parse(String(row!.created_at)) < cooldownMs;
+  }
+
+  #candidatePartitions(nodeId: string): Array<{ label: string; memoryIds: string[] }> {
+    const rows = this.#db.prepare(
+      `SELECT id, memory_type, scope_json FROM memory_records
+       WHERE node_id = ?
+       ORDER BY memory_type, scope_json, id`,
+    ).all(nodeId) as Row[];
+    const groups = new Map<string, string[]>();
+    for (const row of rows) {
+      const key = `${row.memory_type}|${row.scope_json}`;
+      const group = groups.get(key) ?? [];
+      group.push(String(row.id));
+      groups.set(key, group);
+    }
+    return [...groups].map(([label, memoryIds]) => ({ label, memoryIds }));
+  }
+
+  #insertTopologyProposal(
+    proposal: Omit<TopologyProposal, "createdAt" | "id" | "status">,
+  ): TopologyProposal {
+    const result: TopologyProposal = {
+      ...proposal,
+      id: randomUUID(),
+      status: "pending",
+      createdAt: new Date().toISOString(),
+    };
+    this.#db.prepare(
+      `INSERT INTO topology_proposals
+        (id, proposal_key, proposal_type, source_node_ids_json, relation_type,
+         partitions_json, evidence_trace_ids_json, observations,
+         estimated_gain, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(result.id, result.proposalKey, result.type,
+      JSON.stringify(result.sourceNodeIds), result.relationType,
+      JSON.stringify(result.partitions), JSON.stringify(result.evidenceTraceIds),
+      result.observations, result.estimatedGain, result.status, result.createdAt);
+    return result;
+  }
+
+  #embeddingCache(kind: "leaf" | "node", model: string): Float32VectorCache | null {
+    const key = `${kind}:${model}`;
+    const existing = this.#vectorCaches.get(key);
+    if (existing) return existing;
+    const table = kind === "node" ? "node_embeddings" : "leaf_embeddings";
+    const idColumn = kind === "node" ? "node_id" : "block_id";
+    const rows = this.#db.prepare(
+      `SELECT ${idColumn} AS id, dimensions, vector_blob, vector_json
+       FROM ${table} WHERE model = ? ORDER BY ${idColumn}`,
+    ).all(model) as Row[];
+    if (rows.length === 0) return null;
+    const dimensions = Number(rows[0]!.dimensions);
+    const cache = new Float32VectorCache(dimensions, rows.length);
+    for (const row of rows) cache.upsert(String(row.id), storedVector(row));
+    this.#vectorCaches.set(key, cache);
+    return cache;
+  }
+
+  #updateVectorCache(
+    kind: "leaf" | "node",
+    model: string,
+    id: string,
+    vector: readonly number[],
+  ): void {
+    this.#vectorCaches.get(`${kind}:${model}`)?.upsert(id, vector);
+  }
+
+  #invalidateVectorCaches(kind: "leaf" | "node"): void {
+    for (const key of this.#vectorCaches.keys()) {
+      if (key.startsWith(`${kind}:`)) this.#vectorCaches.delete(key);
     }
   }
 
@@ -2182,6 +2585,55 @@ function mapLeafBlock(row: Row): LeafBlock {
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
   };
+}
+
+function mapTopologyProposal(row: Row): TopologyProposal {
+  let partitions: TopologyProposal["partitions"] = [];
+  try {
+    const parsed = JSON.parse(String(row.partitions_json)) as unknown;
+    if (Array.isArray(parsed)) {
+      partitions = parsed.flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const candidate = item as { label?: unknown; memoryIds?: unknown };
+        return typeof candidate.label === "string" && Array.isArray(candidate.memoryIds)
+          ? [{
+              label: candidate.label,
+              memoryIds: candidate.memoryIds.filter(
+                (id): id is string => typeof id === "string",
+              ),
+            }]
+          : [];
+      });
+    }
+  } catch {
+    partitions = [];
+  }
+  return {
+    id: String(row.id),
+    proposalKey: String(row.proposal_key),
+    type: String(row.proposal_type) as TopologyProposal["type"],
+    sourceNodeIds: parseStringArray(row.source_node_ids_json),
+    relationType: row.relation_type
+      ? String(row.relation_type) as NodeRelationType
+      : null,
+    partitions,
+    evidenceTraceIds: parseStringArray(row.evidence_trace_ids_json),
+    observations: Number(row.observations),
+    estimatedGain: Number(row.estimated_gain),
+    status: String(row.status) as TopologyProposal["status"],
+    createdAt: String(row.created_at),
+  };
+}
+
+function partitionLabel(label: string, index: number): string {
+  const [memoryType, scope = ""] = label.split("|", 2);
+  try {
+    const parsed = JSON.parse(scope) as Record<string, unknown>;
+    const scopeLabel = Object.values(parsed).filter((value) => typeof value === "string").join(" ");
+    return [memoryType, scopeLabel].filter(Boolean).join(" ") || `partition ${index + 1}`;
+  } catch {
+    return memoryType || `partition ${index + 1}`;
+  }
 }
 
 function leafBlockSummary(rows: Row[]): string {
@@ -2397,7 +2849,7 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-function parseScope(value: string | number | null): MemoryScope {
+function parseScope(value: string | number | Uint8Array | null): MemoryScope {
   if (typeof value !== "string") return {};
   try {
     return JSON.parse(value) as MemoryScope;
@@ -2406,7 +2858,7 @@ function parseScope(value: string | number | null): MemoryScope {
   }
 }
 
-function parseStringArray(value: string | number | null): string[] {
+function parseStringArray(value: string | number | Uint8Array | null): string[] {
   if (typeof value !== "string") return [];
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -2418,7 +2870,28 @@ function parseStringArray(value: string | number | null): string[] {
   }
 }
 
-function parseVector(value: string | number | null | undefined): number[] {
+function encodeVector(vector: readonly number[]): Buffer {
+  const buffer = Buffer.allocUnsafe(vector.length * Float32Array.BYTES_PER_ELEMENT);
+  vector.forEach((value, index) => buffer.writeFloatLE(value, index * 4));
+  return buffer;
+}
+
+function storedVector(row: Row, prefix = ""): number[] {
+  const blob = row[`${prefix}vector_blob`];
+  return blob instanceof Uint8Array
+    ? parseVector(blob)
+    : parseVector(row[`${prefix}vector_json`] as string | undefined);
+}
+
+function parseVector(value: string | number | Uint8Array | null | undefined): number[] {
+  if (value instanceof Uint8Array) {
+    const buffer = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+    const vector: number[] = [];
+    for (let offset = 0; offset + 4 <= buffer.byteLength; offset += 4) {
+      vector.push(buffer.readFloatLE(offset));
+    }
+    return vector;
+  }
   if (typeof value !== "string") return [];
   try {
     const parsed = JSON.parse(value) as unknown;

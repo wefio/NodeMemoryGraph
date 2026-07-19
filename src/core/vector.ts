@@ -24,8 +24,8 @@ export class HashingVectorEmbedder implements VectorEmbedder {
 }
 
 export function cosineSimilarity(
-  left: readonly number[],
-  right: readonly number[],
+  left: ArrayLike<number>,
+  right: ArrayLike<number>,
 ): number {
   if (left.length !== right.length) return 0;
   let score = 0;

@@ -5,6 +5,7 @@ import { Type } from "typebox";
 
 import { decideMemoryLoad } from "../../../src/core/gate.ts";
 import { NmgStore } from "../../../src/core/store.ts";
+import { assessMemoryWrite } from "../../../src/core/write-policy.ts";
 import type {
   EvidenceRole,
   MemoryActor,
@@ -22,6 +23,11 @@ function databasePath(): string {
   return join(dataDirectory, "nmg.sqlite");
 }
 
+export function configuredGraphHops(fallback: number): number {
+  const configured = Number.parseInt(process.env.NMG_GRAPH_HOPS ?? "", 10);
+  return Number.isInteger(configured) ? Math.max(0, Math.min(configured, 3)) : fallback;
+}
+
 export default function nmgExtension(pi: ExtensionAPI): void {
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
   let store: NmgStore | undefined;
@@ -36,7 +42,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const context = memoryStore.searchContext(event.prompt, {
         maxTier: decision.maxTier,
         limit: decision.limit,
-        graphHops: decision.graphHops,
+        graphHops: configuredGraphHops(decision.graphHops),
       });
       memoryStore.recordUsage(context.results.map((result) => result.memory.id));
       const formatted = formatMemoryContext(context);
@@ -307,6 +313,20 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const assessment = assessMemoryWrite({
+        statement: params.statement,
+        evidence: params.evidence,
+        memoryType: params.memoryType as MemoryType | undefined,
+      });
+      if (!assessment.allowed) {
+        return {
+          content: [{
+            type: "text",
+            text: `NMG rejected this long-term write: ${assessment.reason}.`,
+          }],
+          details: { saved: false, reason: assessment.reason },
+        };
+      }
       const result = getStore().remember({
         statement: params.statement,
         nodeName: params.nodeName,
@@ -452,7 +472,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ),
     }),
     async execute(_toolCallId, params) {
-      const context = getStore().getContext(params.memoryIds, params.graphHops ?? 0);
+      const context = getStore().getContext(
+        params.memoryIds,
+        configuredGraphHops(params.graphHops ?? 0),
+      );
       getStore().recordUsage(context.results.map((result) => result.memory.id));
       const missing = params.memoryIds.filter(
         (id) => !context.results.some((result) => result.memory.id === id),
@@ -508,7 +531,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         limit: params.limit,
         scope: params.scope as MemoryScope | undefined,
         includeHistorical: params.includeHistorical,
-        graphHops: params.graphHops,
+        // An explicit environment override is useful for controlled Lite/Graph
+        // experiments. Without it the model can silently defeat a Lite run by
+        // choosing graphHops in the tool call.
+        graphHops: configuredGraphHops(params.graphHops ?? 1),
       });
       const { results } = context;
       return {

@@ -1,6 +1,6 @@
 # NMG design baseline
 
-**Status:** 0.6 / persistent Delta and incremental leaf compaction
+**Status:** 0.7 / P1 incremental storage and P2 adaptive-graph experiments
 **Updated:** 2026-07-19
 
 ## 1. Definition
@@ -390,6 +390,8 @@ Implemented and verified in the current prototype:
   embeddings finish;
 - dirty-node threshold scheduling and node-local leaf rebuilding with stable
   content-derived block IDs that preserve unchanged embedding cache entries;
+- Float32 BLOB persistence with backward-compatible JSON migration and
+  disposable contiguous vector caches that support geometric append/update;
 - local SQLite history, semantic memory, typed relations, evidence links, and
   session checkpoints;
 - state supersession, event time, actor/truth status, scope, merge/split, and
@@ -398,6 +400,11 @@ Implemented and verified in the current prototype:
 - FTS5, hashing vectors, Qwen3 external embeddings, node/leaf indexing, and a
   rebuildable USearch experiment;
 - L0-L3 local tiers, accumulated access statistics, and batch rebalancing;
+- persisted ambiguity, fallback, contradiction, usefulness, and node-pair
+  co-retrieval telemetry;
+- delayed evidence-backed link/split proposals with observation thresholds,
+  gain thresholds, cooldown hysteresis, persistent review state, and explicit
+  accept/reject application;
 - Pi RPC regression tests, initial LongMemEval development runs, and scale
   experiments.
 
@@ -405,11 +412,12 @@ Important gaps between the prototype and the target plugin:
 
 - the Qwen node/leaf hierarchy is benchmarked in core but is not yet the normal
   Pi extension retrieval path;
-- semantic leaf maintenance is not yet a complete stable-ID incremental
-  compactor;
 - the ANN experiment has unacceptable recall on the near-duplicate workload;
-- the automatic extraction and full-history baseline comparisons are not yet
-  large enough to make a product-quality claim.
+- automatic extraction evaluation and the matched full-history sample are not
+  yet large enough to make a product-quality claim;
+- accepted topology proposals are an offline/Lab maintenance operation, not an
+  unattended production mutation policy;
+- explicit privacy deletion and dependency cleanup remain P3 work.
 
 ## 14. Evaluation and falsifiable claims
 
@@ -437,14 +445,39 @@ product value. If Graph does not beat Lite, graph adaptation remains a Lab
 feature. If a learned router does not beat deterministic routing, it remains
 optional.
 
+Current development evidence (2026-07-19):
+
+- matched LongMemEval, one fixed case from seven categories: no-memory 1/7,
+  raw-session 1/7, flat hybrid 5/7, Lite 5/7, Graph 6/7;
+- expanded matched LongMemEval, two fixed cases from seven categories:
+  no-memory 2/14, raw-session 4/14, flat hybrid 8/14, Lite 10/14, Graph 9/14;
+- controlled 30-case topology ablation: flat 0%, fixed unlinked graph 0%,
+  accepted evidence-backed link 100% recall by construction;
+- controlled labelled routing: heuristic 0%, online router after three explicit
+  useful-node labels 100% by construction;
+- 10K near-duplicate hierarchy workload: node+leaf exact scan 100% accuracy at
+  10.6 ms P50, leaf ANN 87.5% at 8.1 ms P50, full record scan 75% at 779 ms P50.
+
+The topology and router cases isolate whether the mechanisms can learn and
+apply a missing relation; they are not natural-distribution quality estimates.
+The scale result shows why leaf granularity matters and why the current ANN
+configuration must not replace exact local scan yet.
+
+The 14-question paired outcomes are more important for product gating than the
+controlled topology result: Lite uniquely won five versus flat's three, while
+Graph uniquely won one versus Lite's two. The sample is still too small for a
+capability claim, and it explicitly keeps graph expansion in Lab.
+
 Track evidence Recall@K, stale-memory error, wrong-scope error, false-memory
 injection, answer accuracy, unrelated-task regression, injected tokens, deepest
 tier, index/maintenance cost, and end-to-end P50/P95 latency including query
 embedding.
 
-The current six-case Pi regression and seven-question LongMemEval development
-sample prove integration mechanisms, not general capability improvement. Full
-haystack and larger matched runs are required before claiming that NMG improves
+The current Pi regression, seven-category invariant suite, controlled topology
+ablation, and seven-question LongMemEval matched sample prove integration and
+mechanism behaviour, not general capability improvement. The matched sample did
+ingest every haystack session for each selected question, but a larger fixed
+sample with repeated model runs is required before claiming that NMG improves
 agent performance.
 
 ## 15. Cloud and sandbox boundaries
@@ -470,20 +503,25 @@ first local candidate. Sandbox lifecycle is not part of the memory model.
 
 ### P1: incremental correctness and fair evaluation
 
-1. ~~Add Inbox/Delta retrieval and dirty-node local rebuild scheduling.~~
-2. Stable leaf identities are implemented; binary vector storage and a
-   disposable contiguous in-memory cache remain.
-3. Complete matched no-memory, raw-session, flat-hybrid, Lite, and Graph
-   LongMemEval runs.
-4. Add temporal, aggregation, conflict, multi-hop, exact-detail, privacy, and
-   memory-pollution cases.
+1. **Complete:** Inbox/Delta retrieval and dirty-node local rebuild scheduling.
+2. **Complete:** stable leaf identities, Float32 binary vector storage, and a
+   disposable contiguous appendable in-memory cache.
+3. **Complete for the development sample:** matched no-memory, raw-session,
+   flat-hybrid, Lite, and Graph LongMemEval on one fixed example from every
+   category. Larger statistical evaluation remains ongoing benchmark work.
+4. **Complete:** deterministic temporal, aggregation, conflict, multi-hop,
+   exact-detail, privacy, and memory-pollution cases.
 
 ### P2: adaptive semantic graph experiments
 
-1. Record ambiguity, fallback, contradiction, and co-retrieval signals.
-2. Propose delayed links and node refinements with evidence and hysteresis.
-3. Compare adaptive topology with fixed nodes and flat retrieval.
-4. Test a framework-independent learnable router only after useful labels exist.
+1. **Complete:** record ambiguity, fallback, contradiction, usefulness, and
+   co-retrieval signals.
+2. **Complete:** propose delayed links and scoped refinements with evidence,
+   thresholds, cooldown hysteresis, and explicit review.
+3. **Complete as a controlled mechanism ablation:** compare adaptive topology
+   with fixed nodes and flat retrieval over 30 deterministic cases.
+4. **Complete as a controlled label test:** the framework-independent online
+   router is updated only from explicit useful-node labels.
 
 ### P3: optional platform capabilities
 
@@ -502,8 +540,6 @@ first local candidate. Sandbox lifecycle is not part of the memory model.
   router's own prior selections?
 - Which rare safety/user constraints must remain pinned regardless of access
   frequency?
-- What stable leaf identity permits local rebuilds without changing unrelated
-  addresses?
 - At what measured node/leaf count does exact contiguous vector scan stop
   meeting the end-to-end latency budget?
 - What privacy/delete interface can remove raw evidence and every dependent

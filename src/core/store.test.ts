@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { NmgStore } from "./store.ts";
@@ -542,6 +543,40 @@ test("vector index and learned router persist across restart", () => {
   }
 });
 
+test("embeddings persist as Float32 blobs and a warm node cache accepts appends", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-test-"));
+  const database = join(directory, "nmg.sqlite");
+  const store = new NmgStore(database);
+  const alpha = store.remember({ statement: "Alpha memory", nodeName: "Alpha node" });
+  store.upsertExternalNodeEmbeddings("binary-test", [{
+    nodeId: alpha.node.id,
+    vector: [1, 0, 0],
+  }]);
+  assert.equal(store.routeNodesByVector([1, 0, 0], "binary-test")[0]?.node.id,
+    alpha.node.id);
+  const beta = store.remember({ statement: "Beta memory", nodeName: "Beta node" });
+  store.upsertExternalNodeEmbeddings("binary-test", [{
+    nodeId: beta.node.id,
+    vector: [0, 1, 0],
+  }]);
+  assert.equal(store.routeNodesByVector([0, 1, 0], "binary-test")[0]?.node.id,
+    beta.node.id);
+  store.close();
+
+  const databaseReader = new DatabaseSync(database, { readOnly: true });
+  try {
+    const row = databaseReader.prepare(
+      `SELECT dimensions, length(vector_blob) AS bytes
+       FROM node_embeddings WHERE node_id = ? AND model = ?`,
+    ).get(beta.node.id, "binary-test") as { dimensions: number; bytes: number };
+    assert.equal(row.dimensions, 3);
+    assert.equal(row.bytes, 12);
+  } finally {
+    databaseReader.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("Huffman-like block rebalance promotes frequent memory only in batches", () => {
   withStore((store) => {
     const memories = Array.from({ length: 5 }, (_, index) => store.remember({
@@ -795,4 +830,121 @@ test("due leaf rebuild compacts only nodes that cross the Delta threshold", () =
     assert.equal(store.pendingIndexDelta().length, 1);
     assert.deepEqual(store.dirtyLeafNodeIds().length, 1);
   });
+});
+
+test("co-retrieval produces delayed link proposals with evidence and cooldown", () => {
+  withStore((store) => {
+    const alpha = store.remember({ statement: "Alpha detail", nodeName: "Alpha" });
+    const beta = store.remember({ statement: "Beta detail", nodeName: "Beta" });
+    for (let index = 0; index < 3; index += 1) {
+      store.recordRetrievalTrace({
+        query: `combined query ${index}`,
+        resultMemoryIds: [alpha.memory.id, beta.memory.id],
+        resultNodeIds: [alpha.node.id, beta.node.id],
+        usefulMemoryIds: [alpha.memory.id, beta.memory.id],
+      });
+    }
+
+    const proposals = store.proposeTopologyChanges({
+      minObservations: 3,
+      minGain: 0.8,
+      cooldownMs: 60_000,
+    });
+    const link = proposals.find((proposal) => proposal.type === "link");
+    assert.ok(link);
+    assert.deepEqual(new Set(link.sourceNodeIds), new Set([alpha.node.id, beta.node.id]));
+    assert.equal(link.relationType, "related_to");
+    assert.equal(link.evidenceTraceIds.length, 3);
+    assert.equal(store.reviewTopologyProposal(link.id, "accept").status, "accepted");
+    assert.equal(store.getRelations([alpha.node.id], 1)[0]?.type, "related_to");
+    assert.equal(store.proposeTopologyChanges({
+      minObservations: 3,
+      minGain: 0.8,
+      cooldownMs: 60_000,
+    }).filter((proposal) => proposal.type === "link").length, 0);
+  });
+});
+
+test("repeated ambiguity proposes an evidence-preserving scoped split", () => {
+  withStore((store) => {
+    const python = store.remember({
+      statement: "ROS uses Python 2",
+      nodeName: "Broad project node",
+      memoryType: "constraint",
+      scope: { component: "python" },
+    });
+    const gazebo = store.remember({
+      statement: "Gazebo uses software rendering",
+      nodeName: "Broad project node",
+      memoryType: "fact",
+      scope: { component: "gazebo" },
+    });
+    for (let index = 0; index < 4; index += 1) {
+      store.recordRetrievalTrace({
+        query: `ambiguous project question ${index}`,
+        resultMemoryIds: [python.memory.id, gazebo.memory.id],
+        resultNodeIds: [python.node.id],
+        ambiguity: 0.9,
+        fallbackUsed: true,
+      });
+    }
+
+    const split = store.proposeTopologyChanges({
+      minObservations: 4,
+      minGain: 0.8,
+      cooldownMs: 0,
+    }).find((proposal) => proposal.type === "split");
+    assert.ok(split);
+    assert.equal(split.sourceNodeIds[0], python.node.id);
+    assert.equal(split.partitions.length, 2);
+    assert.deepEqual(new Set(split.partitions.flatMap((part) => part.memoryIds)),
+      new Set([python.memory.id, gazebo.memory.id]));
+    assert.equal(store.topologyProposals()[0]?.status, "pending");
+    assert.equal(store.reviewTopologyProposal(split.id, "accept").status, "accepted");
+    assert.equal(store.topologyProposals("accepted")[0]?.id, split.id);
+    assert.equal(store.search("Python 2", { maxTier: 3 })[0]?.memory.id, python.memory.id);
+  });
+});
+
+test("topology proposals persist review decisions and ignore weak signals", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-test-"));
+  const database = join(directory, "nmg.sqlite");
+  const writer = new NmgStore(database);
+  const alpha = writer.remember({ statement: "Alpha evidence", nodeName: "Alpha" });
+  const beta = writer.remember({ statement: "Beta evidence", nodeName: "Beta" });
+  writer.recordRetrievalTrace({
+    query: "one accidental co-result",
+    resultMemoryIds: [alpha.memory.id, beta.memory.id],
+    resultNodeIds: [alpha.node.id, beta.node.id],
+  });
+  assert.equal(writer.proposeTopologyChanges({
+    minObservations: 3,
+    minGain: 0.8,
+    cooldownMs: 0,
+  }).length, 0);
+  for (let index = 0; index < 3; index += 1) {
+    writer.recordRetrievalTrace({
+      query: `confirmed co-result ${index}`,
+      resultMemoryIds: [alpha.memory.id, beta.memory.id],
+      resultNodeIds: [alpha.node.id, beta.node.id],
+      usefulMemoryIds: [alpha.memory.id, beta.memory.id],
+    });
+  }
+  const proposal = writer.proposeTopologyChanges({
+    minObservations: 3,
+    minGain: 0.7,
+    cooldownMs: 0,
+  }).find((candidate) => candidate.type === "link");
+  assert.ok(proposal);
+  assert.equal(writer.reviewTopologyProposal(proposal.id, "reject").status, "rejected");
+  writer.close();
+
+  const reader = new NmgStore(database);
+  try {
+    assert.equal(reader.topologyProposals("rejected")[0]?.id, proposal.id);
+    assert.equal(reader.getRelations([alpha.node.id], 1).length, 0);
+  } finally {
+    reader.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

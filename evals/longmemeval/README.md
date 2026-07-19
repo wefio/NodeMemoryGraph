@@ -9,12 +9,18 @@ Run one deterministic example from each of the seven benchmark categories:
 npm run eval:longmem -- no-memory 1
 npm run eval:longmem -- oracle 1
 npm run eval:longmem -- nmg-oracle 1
+npm run eval:longmem -- matched 1
 ```
 
 The final argument is the number of examples per category. Selection always
 comes from the ordering in `longmemeval_s_cleaned.json`, so every mode uses the
 same question IDs. Each answer is judged by a fresh DeepSeek V4 Flash session;
 an empty judge response is retried once.
+
+The runner defaults to four concurrent questions and a five-minute model-call
+timeout. Override these with `NMG_LONGMEM_CONCURRENCY` and
+`NMG_LONGMEM_TIMEOUT_MS`. A single answer timeout is recorded on that row rather
+than discarding the whole experiment; judge failures receive one fresh retry.
 
 ## Modes
 
@@ -23,6 +29,20 @@ an empty judge response is retried once.
 - `nmg-oracle`: Pi imports the official evidence sessions into an isolated NMG
   database, then a fresh Pi session answers using NMG retrieval. This is an
   ingestion/retrieval smoke test, not a full-haystack score.
+- `matched`: runs five controls on the same fixed IDs and full cleaned haystack:
+  `no-memory`, `raw-session`, `flat-hybrid`, `nmg-lite`, and `nmg-graph`.
+- `raw-session`: lexical session ranking under the shared context-character
+  budget.
+- `flat-hybrid`: lexical plus deterministic hashing-vector ranking over
+  individual turns under the same budget.
+- `nmg-lite`: the same turn-level evidence imported into NMG, with graph hops
+  forcibly disabled by `NMG_GRAPH_HOPS=0`.
+- `nmg-graph`: the same NMG import with one-hop typed relation expansion.
+
+Matched import is deterministic: every source turn becomes immutable
+`conversation_evidence`, and adjacent session nodes receive a temporal
+`related_to` edge. This isolates retrieval from stochastic memory extraction.
+It does not test the quality of automatic extraction or learned topology.
 
 Reports and per-question NMG databases are written under `results/`, which is
 also ignored by Git.
@@ -71,6 +91,42 @@ them sequentially or give each process an isolated Pi agent directory with an
 appropriate credential strategy. Model requests within one evaluation may
 still be concurrent.
 
-The next fair comparison will ingest every LongMemEval-S haystack session into
-NMG and compare it with no-memory, full-history/windowed, and flat-retrieval
-baselines on the same fixed question IDs.
+## First full-haystack matched development run
+
+Run ID: `2026-07-19T10-34-21.919Z`. One fixed example from each of the seven
+question categories was evaluated with DeepSeek V4 Flash.
+
+| Control | Correct | Accuracy |
+|---|---:|---:|
+| No memory | 1/7 | 14.3% |
+| Raw-session retrieval | 1/7 | 14.3% |
+| Flat hybrid turn retrieval | 5/7 | 71.4% |
+| NMG Lite, no graph expansion | 5/7 | 71.4% |
+| NMG Graph | 6/7 | 85.7% |
+
+Graph expansion recovered the three-item multi-session answer that Lite and
+both non-NMG retrieval controls missed. Flat hybrid alone won one
+single-session-user case that both NMG modes missed. With only seven questions
+and a stochastic reader/judge, these numbers establish a reproducible
+development signal, not statistical superiority. The next benchmark step is a
+larger fixed sample with repeated model runs and confidence intervals.
+
+## Expanded 14-question development run
+
+Run ID: `2026-07-19T10-49-26.309Z`. Two fixed examples from every category,
+four-way question concurrency, and no answer timeouts:
+
+| Control | Correct | Accuracy |
+|---|---:|---:|
+| No memory | 2/14 | 14.3% |
+| Raw-session retrieval | 4/14 | 28.6% |
+| Flat hybrid turn retrieval | 8/14 | 57.1% |
+| NMG Lite, no graph expansion | 10/14 | 71.4% |
+| NMG Graph | 9/14 | 64.3% |
+
+On paired questions, Lite uniquely passed five cases that flat missed, while
+flat uniquely passed three. Graph uniquely passed one case that Lite missed and
+uniquely failed two that Lite passed. The larger sample therefore does not
+support enabling graph expansion by default. One Graph-only miss also produced
+an empty final model answer despite no RPC error, illustrating why repeated
+reader runs are still needed to separate retrieval effects from model variance.
