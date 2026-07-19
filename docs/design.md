@@ -1,6 +1,6 @@
 # NMG design baseline
 
-**Status:** 0.5 / slim plugin boundary and adaptive semantic coding
+**Status:** 0.6 / persistent Delta and incremental leaf compaction
 **Updated:** 2026-07-19
 
 ## 1. Definition
@@ -385,6 +385,11 @@ Implemented and verified in the current prototype:
 - a normal Pi package manifest, stable extension entry, and the three-tool Lite
   surface with optional Lab tools;
 - progressive `nmg_search` headers followed by exact `nmg_get` evidence loading;
+- a persistent Inbox/Delta path that survives restart, participates in hierarchy
+  retrieval before compaction, and is acknowledged only after external leaf
+  embeddings finish;
+- dirty-node threshold scheduling and node-local leaf rebuilding with stable
+  content-derived block IDs that preserve unchanged embedding cache entries;
 - local SQLite history, semantic memory, typed relations, evidence links, and
   session checkpoints;
 - state supersession, event time, actor/truth status, scope, merge/split, and
@@ -465,9 +470,9 @@ first local candidate. Sandbox lifecycle is not part of the memory model.
 
 ### P1: incremental correctness and fair evaluation
 
-1. Add Inbox/Delta retrieval and dirty-node local rebuild scheduling.
-2. Introduce stable leaf identities, binary vector storage, and a disposable
-   contiguous in-memory cache.
+1. ~~Add Inbox/Delta retrieval and dirty-node local rebuild scheduling.~~
+2. Stable leaf identities are implemented; binary vector storage and a
+   disposable contiguous in-memory cache remain.
 3. Complete matched no-memory, raw-session, flat-hybrid, Lite, and Graph
    LongMemEval runs.
 4. Add temporal, aggregation, conflict, multi-hop, exact-detail, privacy, and

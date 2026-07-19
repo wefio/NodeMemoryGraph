@@ -28,6 +28,9 @@ optimization:
 - Node-local access counts are accumulated and periodically rebuilt into
   Huffman-derived block tiers, keeping likely memories shallow without deleting
   cold history.
+- New or moved memories enter a persistent SQLite Delta and remain searchable
+  before leaf compaction. Dirty nodes rebuild locally; unchanged content-derived
+  leaf IDs retain their existing external embeddings.
 - Scope, validity intervals, conflicts, and superseded states remain
   traceable instead of deleting earlier evidence.
 - Cloud sync, external embedding models, and sandbox execution are deferred.

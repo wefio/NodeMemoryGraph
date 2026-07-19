@@ -16,6 +16,7 @@ const store = new NmgStore(databasePath);
 const targets = new Set((process.env.NMG_EMBED_TARGETS ?? "nodes,leaves")
   .split(",").map((target) => target.trim()).filter(Boolean));
 const indexed = { nodes: 0, leaves: 0, records: 0 };
+let acknowledgedDelta = 0;
 const started = performance.now();
 
 try {
@@ -34,7 +35,8 @@ try {
     }
   }
   if (targets.has("leaves")) {
-    for (const nodeId of store.dirtyLeafNodeIds()) store.rebuildLeafBlocks(nodeId);
+    const dirtyNodeIds = store.dirtyLeafNodeIds();
+    for (const nodeId of dirtyNodeIds) store.rebuildLeafBlocks(nodeId);
     let cursor = "";
     while (true) {
       const documents = store.leafEmbeddingDocuments(cursor, batchSize, client.model);
@@ -47,6 +49,7 @@ try {
       indexed.leaves += documents.length;
       cursor = documents.at(-1)!.blockId;
     }
+    acknowledgedDelta = store.acknowledgeIndexDelta(dirtyNodeIds);
   }
   if (targets.has("records")) {
     let cursor = "";
@@ -72,6 +75,7 @@ console.log(JSON.stringify({
   model: client.model,
   targets: [...targets],
   indexed,
+  acknowledgedDelta,
   elapsedMs,
   vectorsPerSecond: elapsedMs > 0
     ? Object.values(indexed).reduce((sum, count) => sum + count, 0) / (elapsedMs / 1_000)

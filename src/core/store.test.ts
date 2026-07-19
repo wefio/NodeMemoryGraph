@@ -705,8 +705,11 @@ test("leaf summaries preserve distinctions hidden by one broad node summary", ()
     });
 
     assert.deepEqual(store.dirtyLeafNodeIds(), [rendering.node.id]);
+    assert.deepEqual(new Set(store.pendingIndexDelta()),
+      new Set([rendering.memory.id, python.memory.id]));
     const blocks = store.rebuildLeafBlocks(rendering.node.id, 16);
     assert.deepEqual(store.dirtyLeafNodeIds(), []);
+    assert.equal(store.pendingIndexDelta().length, 2);
     assert.equal(blocks.length, 2);
     const documents = store.leafEmbeddingDocuments();
     const renderingDocument = documents.find((document) =>
@@ -718,6 +721,12 @@ test("leaf summaries preserve distinctions hidden by one broad node summary", ()
       { blockId: renderingDocument.blockId, vector: [1, 0] },
       { blockId: pythonDocument.blockId, vector: [0, 1] },
     ]);
+    const rebuilt = store.rebuildLeafBlocks(rendering.node.id, 16);
+    assert.deepEqual(rebuilt.map((block) => block.id).sort(),
+      blocks.map((block) => block.id).sort());
+    assert.equal(store.storedLeafEmbeddings("leaf-test").length, 2);
+    assert.equal(store.acknowledgeIndexDelta([rendering.node.id]), 2);
+    assert.deepEqual(store.pendingIndexDelta(), []);
     store.upsertExternalNodeEmbeddings("leaf-test", [{
       nodeId: rendering.node.id,
       vector: [0, 1],
@@ -740,5 +749,50 @@ test("leaf summaries preserve distinctions hidden by one broad node summary", ()
       "legacy interpreter requirement", [0, 1], "leaf-test", { maxTier: 3, limit: 1 },
     );
     assert.equal(semantic[0]?.memory.id, python.memory.id);
+  });
+});
+
+test("uncompacted Delta survives restart and participates in hierarchy search", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-test-"));
+  const database = join(directory, "nmg.sqlite");
+  const writer = new NmgStore(database);
+  const saved = writer.remember({
+    statement: "Project Delta uses DuckDB for analytical storage",
+    nodeName: "Project Delta storage",
+    tier: 2,
+  });
+  writer.close();
+
+  const reader = new NmgStore(database);
+  try {
+    assert.deepEqual(reader.pendingIndexDelta(), [saved.memory.id]);
+    const results = reader.searchHierarchyByVector(
+      "Which project uses DuckDB analytical storage?",
+      [1, 0],
+      "external-model-not-yet-indexed",
+      { maxTier: 3, limit: 3 },
+    );
+    assert.equal(results[0]?.memory.id, saved.memory.id);
+  } finally {
+    reader.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("due leaf rebuild compacts only nodes that cross the Delta threshold", () => {
+  withStore((store) => {
+    const first = store.remember({ statement: "Alpha fact one", nodeName: "Alpha" });
+    store.remember({ statement: "Beta fact one", nodeName: "Beta" });
+    assert.equal(store.rebuildDueLeafBlocks({ deltaThreshold: 2 }).length, 0);
+
+    store.remember({ statement: "Alpha fact two", nodeName: "Alpha" });
+    const rebuilt = store.rebuildDueLeafBlocks({ deltaThreshold: 2, blockSize: 16 });
+
+    assert.ok(rebuilt.length > 0);
+    assert.equal(store.rebuildDueLeafBlocks({ deltaThreshold: 2 }).length, 0);
+    assert.equal(store.acknowledgeIndexDelta([first.node.id]), 2);
+    assert.deepEqual(store.pendingIndexDelta(first.node.id), []);
+    assert.equal(store.pendingIndexDelta().length, 1);
+    assert.deepEqual(store.dirtyLeafNodeIds().length, 1);
   });
 });

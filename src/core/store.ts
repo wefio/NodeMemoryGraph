@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 import type {
@@ -254,6 +254,7 @@ export class NmgStore {
       `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 1, ?)
        ON CONFLICT(node_id) DO UPDATE SET dirty = 1, updated_at = excluded.updated_at`,
     ).run(input.nodeId, createdAt);
+    this.#markIndexDelta(memory.id, input.nodeId, "upsert", createdAt);
 
     return memory;
   }
@@ -494,6 +495,9 @@ export class NmgStore {
            VALUES (?, ?, ?)`,
         ).run(sourceId, target.id, operation.id);
       }
+      for (const memoryId of movedMemoryIds) {
+        this.#markIndexDelta(memoryId, target.id, "move", operation.createdAt);
+      }
       this.#db.exec("COMMIT");
       this.#refreshEmbeddings(movedMemoryIds);
       return operation;
@@ -544,7 +548,10 @@ export class NmgStore {
         const partition = input.partitions[index]!;
         const target = targets[index]!;
         const update = this.#db.prepare("UPDATE memory_records SET node_id = ? WHERE id = ?");
-        for (const memoryId of partition.memoryIds) update.run(target.id, memoryId);
+        for (const memoryId of partition.memoryIds) {
+          update.run(target.id, memoryId);
+          this.#markIndexDelta(memoryId, target.id, "move", operation.createdAt);
+        }
         this.linkNodes({ sourceNodeId: target.id, targetNodeId: source.id, type: "is_a" });
         this.#db.prepare(
           `INSERT INTO node_redirects (source_node_id, target_node_id, transform_id)
@@ -967,15 +974,21 @@ export class NmgStore {
 
   rebuildLeafBlocks(nodeId?: string, blockSize = 32): LeafBlock[] {
     const size = Math.max(4, Math.min(blockSize, 128));
-    if (nodeId) this.#requireNode(nodeId);
-    const nodeClause = nodeId ? "AND m.node_id = ?" : "";
+    if (!nodeId) {
+      const rows = this.#db.prepare(
+        "SELECT id FROM memory_nodes WHERE status = 'active' ORDER BY id",
+      ).all() as Row[];
+      return rows.flatMap((row) => this.rebuildLeafBlocks(String(row.id), size));
+    }
+    this.#requireNode(nodeId);
     const rows = this.#db.prepare(
       `SELECT m.id, m.node_id, m.statement, m.memory_type, m.scope_json, m.tier,
               m.event_time, m.valid_from, m.valid_until, m.status, n.canonical_name
        FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id
-       WHERE n.status = 'active' AND m.status IN ('active', 'disputed') ${nodeClause}
+       WHERE n.status = 'active' AND m.status IN ('active', 'disputed')
+         AND m.node_id = ?
        ORDER BY m.node_id, m.tier, m.memory_type, m.scope_json, m.created_at DESC`,
-    ).all(...(nodeId ? [nodeId] : [])) as Row[];
+    ).all(nodeId) as Row[];
     const groups = new Map<string, Row[]>();
     for (const row of rows) {
       const key = `${row.node_id}\u0000${row.tier}\u0000${row.memory_type}\u0000${row.scope_json}`;
@@ -985,44 +998,66 @@ export class NmgStore {
     }
     const blocks: LeafBlock[] = [];
     const now = new Date().toISOString();
+    const existing = new Map(
+      (this.#db.prepare(
+        "SELECT id, created_at FROM memory_leaf_blocks WHERE node_id = ?",
+      ).all(nodeId) as Row[]).map((row) => [String(row.id), String(row.created_at)]),
+    );
+    for (const group of groups.values()) {
+      for (let offset = 0; offset < group.length; offset += size) {
+        const members = group.slice(offset, offset + size);
+        const id = stableLeafBlockId(members);
+        blocks.push({
+          id,
+          nodeId,
+          tier: Number(members[0]!.tier) as MemoryTier,
+          summary: leafBlockSummary(members),
+          memoryCount: members.length,
+          createdAt: existing.get(id) ?? now,
+          updatedAt: now,
+        });
+      }
+    }
+    const desiredIds = new Set(blocks.map((block) => block.id));
     this.#db.exec("BEGIN IMMEDIATE");
     try {
-      if (nodeId) this.#db.prepare("DELETE FROM memory_leaf_blocks WHERE node_id = ?").run(nodeId);
-      else this.#db.exec("DELETE FROM memory_leaf_blocks");
       const insertBlock = this.#db.prepare(
         `INSERT INTO memory_leaf_blocks
           (id, node_id, tier, summary, memory_count, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET tier = excluded.tier,
+           summary = excluded.summary, memory_count = excluded.memory_count,
+           updated_at = excluded.updated_at`,
       );
       const insertMember = this.#db.prepare(
-        "INSERT INTO memory_leaf_members (block_id, memory_id, ordinal) VALUES (?, ?, ?)",
+        `INSERT OR IGNORE INTO memory_leaf_members
+          (block_id, memory_id, ordinal) VALUES (?, ?, ?)`,
       );
+      const membersById = new Map<string, Row[]>();
       for (const group of groups.values()) {
         for (let offset = 0; offset < group.length; offset += size) {
           const members = group.slice(offset, offset + size);
-          const block: LeafBlock = {
-            id: randomUUID(),
-            nodeId: String(members[0]!.node_id),
-            tier: Number(members[0]!.tier) as MemoryTier,
-            summary: leafBlockSummary(members),
-            memoryCount: members.length,
-            createdAt: now,
-            updatedAt: now,
-          };
-          insertBlock.run(block.id, block.nodeId, block.tier, block.summary,
-            block.memoryCount, block.createdAt, block.updatedAt);
-          members.forEach((member, ordinal) => insertMember.run(block.id, member.id, ordinal));
-          blocks.push(block);
+          membersById.set(stableLeafBlockId(members), members);
         }
       }
-      if (nodeId) {
-        this.#db.prepare(
-          `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 0, ?)
-           ON CONFLICT(node_id) DO UPDATE SET dirty = 0, updated_at = excluded.updated_at`,
-        ).run(nodeId, now);
-      } else {
-        this.#db.prepare("UPDATE leaf_block_status SET dirty = 0, updated_at = ?").run(now);
+      for (const block of blocks) {
+        insertBlock.run(block.id, block.nodeId, block.tier, block.summary,
+          block.memoryCount, block.createdAt, block.updatedAt);
+        membersById.get(block.id)!.forEach(
+          (member, ordinal) => insertMember.run(block.id, member.id, ordinal),
+        );
       }
+      const removeBlock = this.#db.prepare("DELETE FROM memory_leaf_blocks WHERE id = ?");
+      for (const id of existing.keys()) {
+        if (!desiredIds.has(id)) removeBlock.run(id);
+      }
+      this.#db.prepare(
+        `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 0, ?)
+         ON CONFLICT(node_id) DO UPDATE SET dirty = 0, updated_at = excluded.updated_at`,
+      ).run(nodeId, now);
+      this.#db.prepare(
+        "UPDATE memory_index_delta SET compacted = 1 WHERE node_id = ?",
+      ).run(nodeId);
       this.#db.exec("COMMIT");
       return blocks;
     } catch (error) {
@@ -1036,6 +1071,48 @@ export class NmgStore {
       "SELECT node_id FROM leaf_block_status WHERE dirty = 1 ORDER BY node_id",
     ).all() as Row[];
     return rows.map((row) => String(row.node_id));
+  }
+
+  pendingIndexDelta(nodeId?: string, limit = 512): string[] {
+    const rows = nodeId
+      ? this.#db.prepare(
+          `SELECT memory_id FROM memory_index_delta
+           WHERE node_id = ? ORDER BY created_at, memory_id LIMIT ?`,
+        ).all(nodeId, Math.max(1, Math.min(limit, 2_048))) as Row[]
+      : this.#db.prepare(
+          `SELECT memory_id FROM memory_index_delta
+           ORDER BY created_at, memory_id LIMIT ?`,
+        ).all(Math.max(1, Math.min(limit, 2_048))) as Row[];
+    return rows.map((row) => String(row.memory_id));
+  }
+
+  rebuildDueLeafBlocks(options: {
+    deltaThreshold?: number;
+    nodeLimit?: number;
+    blockSize?: number;
+  } = {}): LeafBlock[] {
+    const threshold = Math.max(1, options.deltaThreshold ?? 16);
+    const nodeLimit = Math.max(1, Math.min(options.nodeLimit ?? 32, 256));
+    const rows = this.#db.prepare(
+      `SELECT d.node_id, COUNT(*) AS delta_count, MIN(d.created_at) AS oldest
+       FROM memory_index_delta d
+       JOIN memory_nodes n ON n.id = d.node_id
+       WHERE n.status = 'active' AND d.compacted = 0
+       GROUP BY d.node_id HAVING delta_count >= ?
+       ORDER BY oldest, d.node_id LIMIT ?`,
+    ).all(threshold, nodeLimit) as Row[];
+    return rows.flatMap((row) =>
+      this.rebuildLeafBlocks(String(row.node_id), options.blockSize ?? 32));
+  }
+
+  acknowledgeIndexDelta(nodeIds: readonly string[]): number {
+    const ids = [...new Set(nodeIds)];
+    if (ids.length === 0) return 0;
+    const result = this.#db.prepare(
+      `DELETE FROM memory_index_delta
+       WHERE node_id IN (${ids.map(() => "?").join(",")}) AND compacted = 1`,
+    ).run(...ids);
+    return Number(result.changes);
   }
 
   leafEmbeddingDocuments(afterBlockId = "", limit = 256, missingModel?: string): LeafEmbeddingDocument[] {
@@ -1111,6 +1188,7 @@ export class NmgStore {
       : "";
     const rows = this.#db.prepare(
       `SELECT b.*, e.vector_json FROM memory_leaf_blocks b
+       JOIN memory_nodes n ON n.id = b.node_id AND n.status = 'active'
        JOIN leaf_embeddings e ON e.block_id = b.id AND e.model = ?
        WHERE 1 = 1 ${nodeClause} ${blockClause}`,
     ).all(model, ...nodes, ...blocks) as Row[];
@@ -1184,7 +1262,7 @@ export class NmgStore {
         all.findIndex((candidate) => candidate.block.id === route.block.id) === index)
       .sort((left, right) => right.score - left.score)
       .slice(0, options.blockLimit ?? 8);
-    return this.searchLeafBlocks(
+    const indexed = this.searchLeafBlocks(
       query,
       queryVector,
       model,
@@ -1192,6 +1270,25 @@ export class NmgStore {
       options,
       new Map(leaves.map((route) => [route.block.id, route.score])),
     );
+    const deltaIds = this.#deltaCandidateIds(query, 2_048);
+    const delta = deltaIds.length === 0
+      ? []
+      : this.#searchWithVector(
+          query,
+          this.#embedder.embed(query),
+          this.#embedder.model,
+          {
+            ...options,
+            limit: Math.min(50, Math.max(options.limit ?? 8, 20)),
+            retrievalMode: "hashing",
+          },
+          deltaIds,
+        );
+    return [...indexed, ...delta]
+      .filter((result, index, all) =>
+        all.findIndex((candidate) => candidate.memory.id === result.memory.id) === index)
+      .sort((left, right) => contextUsefulness(query, right) - contextUsefulness(query, left))
+      .slice(0, Math.max(1, Math.min(options.limit ?? 8, 50)));
   }
 
   searchNodeFirst(
@@ -1598,6 +1695,14 @@ export class NmgStore {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS memory_index_delta (
+        memory_id TEXT PRIMARY KEY REFERENCES memory_records(id) ON DELETE CASCADE,
+        node_id TEXT NOT NULL REFERENCES memory_nodes(id),
+        operation TEXT NOT NULL CHECK (operation IN ('move', 'upsert')),
+        compacted INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS router_weights (
         node_id TEXT PRIMARY KEY REFERENCES memory_nodes(id),
         model TEXT NOT NULL,
@@ -1641,11 +1746,14 @@ export class NmgStore {
         ON node_relations(source_node_id);
       CREATE INDEX IF NOT EXISTS idx_node_relations_target
         ON node_relations(target_node_id);
+      CREATE INDEX IF NOT EXISTS idx_memory_index_delta_node
+        ON memory_index_delta(node_id, created_at);
     `);
     this.#ensureMemoryColumns();
     this.#ensureHistoryColumns();
     this.#ensureEmbeddingTable();
     this.#ensureNodeColumns();
+    this.#ensureDeltaColumns();
     this.#db.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_history_source_message
         ON history_records(session_id, source_message_id)
@@ -1692,6 +1800,18 @@ export class NmgStore {
       if (!existing.has(name)) {
         this.#db.exec(`ALTER TABLE memory_records ADD COLUMN ${name} ${definition}`);
       }
+    }
+  }
+
+  #ensureDeltaColumns(): void {
+    const columns = new Set(
+      (this.#db.prepare("PRAGMA table_info(memory_index_delta)").all() as Row[])
+        .map((row) => String(row.name)),
+    );
+    if (!columns.has("compacted")) {
+      this.#db.exec(
+        "ALTER TABLE memory_index_delta ADD COLUMN compacted INTEGER NOT NULL DEFAULT 0",
+      );
     }
   }
 
@@ -1755,6 +1875,20 @@ export class NmgStore {
       "SELECT memory_id FROM memory_fts WHERE memory_fts MATCH ? ORDER BY bm25(memory_fts) LIMIT ?",
     ).all(expression, limit) as Row[];
     return rows.map((row) => String(row.memory_id));
+  }
+
+  #deltaCandidateIds(query: string, limit: number): string[] {
+    const bounded = Math.max(1, Math.min(limit, 2_048));
+    const recent = (this.#db.prepare(
+      `SELECT memory_id FROM memory_index_delta
+       ORDER BY created_at DESC, memory_id DESC LIMIT ?`,
+    ).all(bounded) as Row[]).map((row) => String(row.memory_id));
+    const isDelta = this.#db.prepare(
+      "SELECT 1 FROM memory_index_delta WHERE memory_id = ?",
+    );
+    const exact = this.#ftsCandidates(query, MAX_SEARCH_CANDIDATES)
+      .filter((memoryId) => Boolean(isDelta.get(memoryId)));
+    return [...new Set([...exact, ...recent])].slice(0, bounded);
   }
 
   #ftsCandidatesInNodes(query: string, nodeIds: string[], limit: number): string[] {
@@ -1942,6 +2076,26 @@ export class NmgStore {
     }
   }
 
+  #markIndexDelta(
+    memoryId: string,
+    nodeId: string,
+    operation: "move" | "upsert",
+    createdAt = new Date().toISOString(),
+  ): void {
+    this.#db.prepare(
+      `INSERT INTO memory_index_delta
+        (memory_id, node_id, operation, compacted, created_at)
+       VALUES (?, ?, ?, 0, ?)
+       ON CONFLICT(memory_id) DO UPDATE SET node_id = excluded.node_id,
+         operation = excluded.operation, compacted = 0,
+         created_at = excluded.created_at`,
+    ).run(memoryId, nodeId, operation, createdAt);
+    this.#db.prepare(
+      `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 1, ?)
+       ON CONFLICT(node_id) DO UPDATE SET dirty = 1, updated_at = excluded.updated_at`,
+    ).run(nodeId, createdAt);
+  }
+
   #evidenceIds(memoryId: string): string[] {
     return (this.#db
       .prepare(
@@ -2048,6 +2202,20 @@ function leafBlockSummary(rows: Row[]): string {
     `count=${rows.length}`,
     `examples=${sample}`,
   ].filter(Boolean).join(" | ");
+}
+
+function stableLeafBlockId(rows: Row[]): string {
+  const identity = rows.map((row) => [
+    row.id,
+    row.statement,
+    row.memory_type,
+    row.scope_json,
+    row.tier,
+    row.event_time,
+    row.valid_from,
+    row.valid_until,
+  ]).join("\u0000");
+  return `leaf_${createHash("sha256").update(identity).digest("hex").slice(0, 24)}`;
 }
 
 function mapSearchResult(row: Row, score: number): MemorySearchResult {
