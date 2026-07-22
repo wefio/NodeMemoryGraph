@@ -23,10 +23,7 @@ export class HashingVectorEmbedder implements VectorEmbedder {
   }
 }
 
-export function cosineSimilarity(
-  left: ArrayLike<number>,
-  right: ArrayLike<number>,
-): number {
+export function cosineSimilarity(left: ArrayLike<number>, right: ArrayLike<number>): number {
   if (left.length !== right.length) return 0;
   let score = 0;
   let leftNorm = 0;

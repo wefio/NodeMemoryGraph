@@ -1,10 +1,4 @@
-export type HistoryRole =
-  | "user"
-  | "assistant"
-  | "tool"
-  | "system"
-  | "explicit"
-  | "session";
+export type HistoryRole = "user" | "assistant" | "tool" | "system" | "explicit" | "session";
 
 export interface HistoryRecord {
   id: string;
@@ -35,9 +29,11 @@ export interface MemoryNode {
   createdAt: string;
   updatedAt: string;
   status: "active" | "merged" | "split";
+  residence: MemoryResidence;
 }
 
 export type MemoryTier = 0 | 1 | 2 | 3;
+export type MemoryResidence = "ltg" | "stg";
 export type MemoryType =
   | "constraint"
   | "conversation_evidence"
@@ -50,13 +46,7 @@ export type MemoryType =
 export type MemoryActor = "assistant" | "system" | "tool" | "user";
 export type TruthStatus = "asserted" | "inferred" | "unverified" | "verified";
 export type MemoryStatus = "active" | "disputed" | "inactive" | "superseded";
-export type EvidenceRole =
-  | "contradict"
-  | "example"
-  | "exception"
-  | "origin"
-  | "support"
-  | "update";
+export type EvidenceRole = "contradict" | "example" | "exception" | "origin" | "support" | "update";
 export type MemoryScope = Record<string, string>;
 export type NodeRelationType =
   | "applies_to"
@@ -77,6 +67,11 @@ export interface NodeRelation {
   targetNodeId: string;
   type: NodeRelationType;
   evidenceIds: string[];
+  residence: "ltg";
+  status: "consolidated" | "demoted";
+  stability: number;
+  consolidationSource: "explicit" | "stability";
+  consolidatedAt: string;
   createdAt: string;
 }
 
@@ -95,6 +90,9 @@ export interface MemoryRecord {
   validFrom: string | null;
   validUntil: string | null;
   status: MemoryStatus;
+  residence: MemoryResidence;
+  promotedAt: string | null;
+  expiresAt: string | null;
   evidenceRole: EvidenceRole;
   supersedesId: string | null;
   tier: MemoryTier;
@@ -125,6 +123,8 @@ export interface RememberInput {
   validUntil?: string;
   evidenceRole?: EvidenceRole;
   supersedesId?: string;
+  residence?: MemoryResidence;
+  expiresAt?: string;
 }
 
 export interface RememberResult {
@@ -141,6 +141,8 @@ export interface SearchOptions {
   limit?: number;
   graphHops?: number;
   retrievalMode?: "legacy" | "fts5" | "hashing" | "qwen3" | "hybrid";
+  taskId?: string;
+  activeGraphBudget?: Partial<ActiveGraphBudget>;
 }
 
 export interface EmbeddingDocument {
@@ -213,6 +215,49 @@ export interface DeriveMemoryInput extends Omit<RememberInput, "evidence"> {
 export interface MemoryContext {
   results: MemorySearchResult[];
   relations: NodeRelation[];
+  activeGraph?: ActiveGraph;
+}
+
+export interface ActiveGraphBudget {
+  maxNodes: number;
+  maxEdges: number;
+  maxEvidence: number;
+  maxTokens: number;
+  maxGraphHops: number;
+  maxLocalTier: MemoryTier;
+  maxLatencyMs: number;
+}
+
+export interface ActiveGraphBudgetUsage {
+  nodes: number;
+  edges: number;
+  evidence: number;
+  estimatedTokens: number;
+  graphHops: number;
+  deepestTier: MemoryTier;
+  latencyMs: number;
+  exhausted: Array<"edges" | "evidence" | "latency" | "nodes" | "tokens">;
+}
+
+export interface ActiveGraphEdge {
+  id: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  type: NodeRelationType | "query_association";
+  persistence: "persistent" | "temporary";
+  stability: number;
+}
+
+export interface ActiveGraph {
+  id: string;
+  query: string;
+  taskId: string;
+  nodeIds: string[];
+  memoryIds: string[];
+  edges: ActiveGraphEdge[];
+  budget: ActiveGraphBudget;
+  usage: ActiveGraphBudgetUsage;
+  createdAt: string;
 }
 
 export interface RecallCue {
@@ -259,13 +304,55 @@ export interface NodeTransform {
 
 export interface RetrievalTraceInput {
   query: string;
+  taskId?: string;
   resultMemoryIds: string[];
   resultNodeIds: string[];
   expandedNodeIds?: string[];
+  relationIds?: string[];
   ambiguity?: number;
   fallbackUsed?: boolean;
   conflictObserved?: boolean;
   usefulMemoryIds?: string[];
+  contradictedMemoryIds?: string[];
+  rejectedMemoryIds?: string[];
+  activeGraphBudget?: ActiveGraphBudget;
+  activeGraphUsage?: ActiveGraphBudgetUsage;
+}
+
+export interface EdgeStability {
+  leftNodeId: string;
+  rightNodeId: string;
+  independentTasks: number;
+  usefulTasks: number;
+  contradictedTasks: number;
+  score: number;
+  updatedAt: string;
+}
+
+export interface ActivationSignal {
+  selectedCount: number;
+  expandedCount: number;
+  usedCount: number;
+  contradictedCount: number;
+  rejectedCount: number;
+  updatedAt: string;
+}
+
+export interface ConsolidationEvent {
+  id: string;
+  action: "consolidate" | "demote" | "promote_memory" | "demote_memory" | "expire_memory";
+  targetId: string;
+  previousState: string;
+  nextState: string;
+  reason: string;
+  evidenceTraceIds: string[];
+  createdAt: string;
+}
+
+export interface ConsolidationResult {
+  consolidatedRelations: NodeRelation[];
+  demotedRelations: NodeRelation[];
+  events: ConsolidationEvent[];
 }
 
 export interface TopologyProposal {

@@ -33,11 +33,21 @@ export function blockTiers(
     ([leftId, leftDepth], [rightId, rightDepth]) =>
       leftDepth - rightDepth || leftId.localeCompare(rightId),
   );
-  const boundaries = [capacities[0], capacities[0] + capacities[1],
-    capacities[0] + capacities[1] + capacities[2]];
-  return new Map(ordered.map(([id], index) => [
-    id,
-    (index < boundaries[0]! ? 0 : index < boundaries[1]! ? 1 :
-      index < boundaries[2]! ? 2 : 3) as MemoryTier,
-  ]));
+  const boundaries = [
+    capacities[0],
+    capacities[0] + capacities[1],
+    capacities[0] + capacities[1] + capacities[2],
+  ];
+  return new Map(
+    ordered.map(([id], index) => [
+      id,
+      (index < boundaries[0]!
+        ? 0
+        : index < boundaries[1]!
+          ? 1
+          : index < boundaries[2]!
+            ? 2
+            : 3) as MemoryTier,
+    ]),
+  );
 }

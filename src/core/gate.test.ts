@@ -12,6 +12,8 @@ test("explicit questions about past or current user state trigger automatic reca
   );
   assert.equal(decideMemoryLoad("When was my last museum visit?").mode, "retrieve");
   assert.equal(decideMemoryLoad("Do you remember what we decided last time?").mode, "retrieve");
+  assert.equal(decideMemoryLoad("What did Caroline research?").mode, "retrieve");
+  assert.equal(decideMemoryLoad("What did Caroline research?").maxTier, 3);
 });
 
 test("planning and recommendation prompts receive recall cues", () => {

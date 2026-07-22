@@ -4,6 +4,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 import type {
+  ActivationSignal,
+  ActiveGraph,
+  ActiveGraphBudget,
+  ActiveGraphBudgetUsage,
+  ConsolidationEvent,
+  ConsolidationResult,
+  EdgeStability,
   EmbeddingDocument,
   ExternalEmbedding,
   ExternalLeafEmbedding,
@@ -20,6 +27,7 @@ import type {
   NodeRoute,
   NodeTransform,
   MemoryRecord,
+  MemoryResidence,
   MemorySearchResult,
   MemoryScope,
   MemoryStatus,
@@ -45,6 +53,15 @@ import { Float32VectorCache } from "./vector-cache.ts";
 type Row = Record<string, string | number | Uint8Array | null>;
 
 const MAX_SEARCH_CANDIDATES = 500;
+const DEFAULT_ACTIVE_GRAPH_BUDGET: ActiveGraphBudget = {
+  maxNodes: 8,
+  maxEdges: 12,
+  maxEvidence: 8,
+  maxTokens: 2_000,
+  maxGraphHops: 1,
+  maxLocalTier: 1,
+  maxLatencyMs: 250,
+};
 
 export class NmgStore {
   readonly #db: DatabaseSync;
@@ -57,7 +74,14 @@ export class NmgStore {
     this.#db = new DatabaseSync(databasePath);
     this.#embedder = embedder;
     this.#router = new OnlineNodeRouter(embedder);
-    this.#db.exec("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");
+    this.#db.exec(`
+      PRAGMA foreign_keys = ON;
+      PRAGMA journal_mode = WAL;
+      PRAGMA synchronous = NORMAL;
+      PRAGMA cache_size = -64000;
+      PRAGMA temp_store = MEMORY;
+      PRAGMA mmap_size = 268435456;
+    `);
     this.#migrate();
   }
 
@@ -78,13 +102,15 @@ export class NmgStore {
       if (!input.sessionId?.trim()) {
         throw new Error("sourceMessageId requires sessionId");
       }
-      const existing = this.#db.prepare(
-        "SELECT * FROM history_records WHERE session_id = ? AND source_message_id = ?",
-      ).get(input.sessionId, sourceMessageId) as Row | undefined;
+      const existing = this.#db
+        .prepare("SELECT * FROM history_records WHERE session_id = ? AND source_message_id = ?")
+        .get(input.sessionId, sourceMessageId) as Row | undefined;
       if (existing) {
         const record = mapHistory(existing);
         if (record.content !== content || record.role !== input.role) {
-          throw new Error(`source message ${sourceMessageId} already exists with different content`);
+          throw new Error(
+            `source message ${sourceMessageId} already exists with different content`,
+          );
         }
         return record;
       }
@@ -131,11 +157,13 @@ export class NmgStore {
     if (existing) {
       const node = mapNode(existing);
       if (node.status === "active") return node;
-      const redirects = this.#db.prepare(
-        `SELECT n.* FROM node_redirects r
+      const redirects = this.#db
+        .prepare(
+          `SELECT n.* FROM node_redirects r
          JOIN memory_nodes n ON n.id = r.target_node_id
          WHERE r.source_node_id = ? AND n.status = 'active'`,
-      ).all(node.id) as Row[];
+        )
+        .all(node.id) as Row[];
       const unique = [...new Map(redirects.map((row) => [String(row.id), row])).values()];
       if (unique.length === 1) return mapNode(unique[0]!);
       throw new Error(
@@ -154,13 +182,14 @@ export class NmgStore {
       createdAt: now,
       updatedAt: now,
       status: "active",
+      residence: "stg",
     };
 
     this.#db
       .prepare(
         `INSERT INTO memory_nodes
-          (id, canonical_name, kind, summary, created_at, updated_at, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          (id, canonical_name, kind, summary, created_at, updated_at, status, residence)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         node.id,
@@ -170,6 +199,7 @@ export class NmgStore {
         node.createdAt,
         node.updatedAt,
         node.status,
+        node.residence,
       );
 
     return node;
@@ -191,8 +221,11 @@ export class NmgStore {
     validUntil?: string;
     evidenceRole?: MemoryRecord["evidenceRole"];
     supersedesId?: string;
+    residence?: MemoryResidence;
+    expiresAt?: string;
   }): MemoryRecord {
     const createdAt = new Date().toISOString();
+    const residence = input.residence ?? defaultResidence(input);
     const memory: MemoryRecord = {
       id: randomUUID(),
       nodeId: input.nodeId,
@@ -208,6 +241,9 @@ export class NmgStore {
       validFrom: input.validFrom ?? createdAt,
       validUntil: input.validUntil ?? null,
       status: "active",
+      residence,
+      promotedAt: residence === "ltg" ? createdAt : null,
+      expiresAt: input.expiresAt ?? null,
       evidenceRole: input.evidenceRole ?? "support",
       supersedesId: input.supersedesId ?? null,
       tier: input.tier ?? 1,
@@ -222,9 +258,10 @@ export class NmgStore {
         `INSERT INTO memory_records
           (id, node_id, evidence_id, statement, memory_type, state_key,
            event_time, source_actor, truth_status, scope_json, valid_from,
-           valid_until, status, evidence_role, supersedes_id, tier, importance,
+           valid_until, status, residence, promoted_at, expires_at,
+           evidence_role, supersedes_id, tier, importance,
            access_count, last_accessed_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)`,
       )
       .run(
         memory.id,
@@ -240,12 +277,20 @@ export class NmgStore {
         memory.validFrom,
         memory.validUntil,
         memory.status,
+        memory.residence,
+        memory.promotedAt,
+        memory.expiresAt,
         memory.evidenceRole,
         memory.supersedesId,
         memory.tier,
         memory.importance,
         memory.createdAt,
       );
+    if (memory.residence === "ltg") {
+      this.#db
+        .prepare("UPDATE memory_nodes SET residence = 'ltg', updated_at = ? WHERE id = ?")
+        .run(createdAt, memory.nodeId);
+    }
     this.#db
       .prepare(
         `INSERT OR IGNORE INTO memory_evidence_links (memory_id, history_id)
@@ -254,10 +299,12 @@ export class NmgStore {
       .run(memory.id, memory.evidenceId);
     this.#upsertEmbedding(memory.id, this.#memoryText(memory, input.nodeId));
     this.#upsertFts(memory.id, memory.statement, input.nodeId, input.evidenceId);
-    this.#db.prepare(
-      `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 1, ?)
+    this.#db
+      .prepare(
+        `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 1, ?)
        ON CONFLICT(node_id) DO UPDATE SET dirty = 1, updated_at = excluded.updated_at`,
-    ).run(input.nodeId, createdAt);
+      )
+      .run(input.nodeId, createdAt);
     this.#markIndexDelta(memory.id, input.nodeId, "upsert", createdAt);
 
     return memory;
@@ -283,26 +330,30 @@ export class NmgStore {
         kind: input.nodeKind,
         summary: input.nodeSummary,
       });
-      const stateKey = memoryType === "state" && input.stateKey
-        ? this.#resolveStateKey(input.stateKey, input.scope ?? {}, node)
-        : input.stateKey;
-      const automaticPrevious = memoryType === "state" && stateKey
-        ? this.#db
-            .prepare(
-              `SELECT id FROM memory_records
+      const stateKey =
+        memoryType === "state" && input.stateKey
+          ? this.#resolveStateKey(input.stateKey, input.scope ?? {}, node)
+          : input.stateKey;
+      const automaticPrevious =
+        memoryType === "state" && stateKey
+          ? (this.#db
+              .prepare(
+                `SELECT id FROM memory_records
                WHERE memory_type = 'state' AND state_key = ? AND scope_json = ?
                  AND status = 'active'
                ORDER BY created_at DESC LIMIT 1`,
-            )
-            .get(stateKey, serializeScope(input.scope ?? {})) as Row | undefined
-        : undefined;
-      const supersedesId = input.supersedesId ??
-        (automaticPrevious ? String(automaticPrevious.id) : undefined);
+              )
+              .get(stateKey, serializeScope(input.scope ?? {})) as Row | undefined)
+          : undefined;
+      const supersedesId =
+        input.supersedesId ?? (automaticPrevious ? String(automaticPrevious.id) : undefined);
+      let supersededNodeId: string | undefined;
       if (supersedesId) {
         const previous = this.#db
           .prepare("SELECT node_id FROM memory_records WHERE id = ?")
           .get(supersedesId) as Row | undefined;
         if (!previous) throw new Error(`memory ${supersedesId} does not exist`);
+        supersededNodeId = String(previous.node_id);
         this.#db
           .prepare(
             `UPDATE memory_records
@@ -327,13 +378,124 @@ export class NmgStore {
         validUntil: input.validUntil,
         evidenceRole: input.evidenceRole ?? (supersedesId ? "update" : undefined),
         supersedesId,
+        residence: input.residence,
+        expiresAt: input.expiresAt,
       });
+      if (memory.residence === "ltg") node.residence = "ltg";
+      if (supersededNodeId && supersededNodeId !== node.id) {
+        this.#refreshNodeResidence(supersededNodeId, memory.createdAt);
+      }
       this.#db.exec("COMMIT");
       return { history, node, memory };
     } catch (error) {
       this.#db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  promoteMemory(
+    memoryId: string,
+    reason: string,
+    evidenceTraceIds: readonly string[] = [],
+  ): MemoryRecord {
+    const memory = this.#requireActiveMemory(memoryId);
+    if (memory.residence === "ltg") return memory;
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db
+        .prepare(
+          `UPDATE memory_records
+           SET residence = 'ltg', promoted_at = ?, expires_at = NULL
+           WHERE id = ?`,
+        )
+        .run(now, memoryId);
+      this.#db
+        .prepare("UPDATE memory_nodes SET residence = 'ltg', updated_at = ? WHERE id = ?")
+        .run(now, memory.nodeId);
+      this.#recordConsolidationEvent(
+        "promote_memory",
+        memoryId,
+        "stg",
+        "ltg",
+        requireText(reason, "promotion reason"),
+        evidenceTraceIds,
+        now,
+      );
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return { ...memory, residence: "ltg", promotedAt: now, expiresAt: null };
+  }
+
+  demoteMemory(memoryId: string, reason: string, expiresAt?: string): MemoryRecord {
+    const memory = this.#requireActiveMemory(memoryId);
+    if (memory.residence === "stg") return memory;
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db
+        .prepare(
+          `UPDATE memory_records
+           SET residence = 'stg', promoted_at = NULL, expires_at = ?
+           WHERE id = ?`,
+        )
+        .run(expiresAt ?? null, memoryId);
+      this.#refreshNodeResidence(memory.nodeId, now);
+      this.#recordConsolidationEvent(
+        "demote_memory",
+        memoryId,
+        "ltg",
+        "stg",
+        requireText(reason, "demotion reason"),
+        [],
+        now,
+      );
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return { ...memory, residence: "stg", promotedAt: null, expiresAt: expiresAt ?? null };
+  }
+
+  expireShortTermMemories(at = new Date().toISOString()): string[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT id, node_id FROM memory_records
+         WHERE residence = 'stg' AND status IN ('active', 'disputed')
+           AND expires_at IS NOT NULL AND expires_at <= ?`,
+      )
+      .all(at) as Row[];
+    if (rows.length === 0) return [];
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      const update = this.#db.prepare("UPDATE memory_records SET status = 'inactive' WHERE id = ?");
+      for (const row of rows) {
+        const id = String(row.id);
+        update.run(id);
+        this.#recordConsolidationEvent(
+          "expire_memory",
+          id,
+          "stg:active",
+          "stg:inactive",
+          `expired at ${at}`,
+          [],
+          now,
+        );
+      }
+      for (const nodeId of new Set(rows.map((row) => String(row.node_id)))) {
+        this.#refreshNodeResidence(nodeId, now);
+      }
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    return rows.map((row) => String(row.id));
   }
 
   deriveMemory(input: DeriveMemoryInput): RememberResult {
@@ -394,6 +556,8 @@ export class NmgStore {
     targetNodeId: string;
     type: NodeRelationType;
     evidenceIds?: string[];
+    stability?: number;
+    consolidationSource?: NodeRelation["consolidationSource"];
   }): NodeRelation {
     const existing = this.#db
       .prepare(
@@ -405,27 +569,49 @@ export class NmgStore {
       const relation = mapRelation(existing);
       const evidenceIds = [...new Set([...relation.evidenceIds, ...(input.evidenceIds ?? [])])];
       if (evidenceIds.length !== relation.evidenceIds.length) {
-        this.#db.prepare("UPDATE node_relations SET evidence_ids_json = ? WHERE id = ?")
+        this.#db
+          .prepare("UPDATE node_relations SET evidence_ids_json = ? WHERE id = ?")
           .run(JSON.stringify(evidenceIds), relation.id);
         relation.evidenceIds = evidenceIds;
+      }
+      if (relation.status === "demoted") {
+        const consolidatedAt = new Date().toISOString();
+        this.#db
+          .prepare(
+            "UPDATE node_relations SET status = 'consolidated', stability = ?, consolidated_at = ? WHERE id = ?",
+          )
+          .run(clamp(input.stability ?? 1, 0, 1), consolidatedAt, relation.id);
+        relation.status = "consolidated";
+        relation.stability = clamp(input.stability ?? 1, 0, 1);
+        relation.consolidatedAt = consolidatedAt;
+        this.#db
+          .prepare("UPDATE memory_nodes SET residence = 'ltg', updated_at = ? WHERE id IN (?, ?)")
+          .run(consolidatedAt, relation.sourceNodeId, relation.targetNodeId);
       }
       return relation;
     }
 
+    const now = new Date().toISOString();
     const relation: NodeRelation = {
       id: randomUUID(),
       sourceNodeId: input.sourceNodeId,
       targetNodeId: input.targetNodeId,
       type: input.type,
       evidenceIds: [...new Set(input.evidenceIds ?? [])],
-      createdAt: new Date().toISOString(),
+      residence: "ltg",
+      status: "consolidated",
+      stability: clamp(input.stability ?? 1, 0, 1),
+      consolidationSource: input.consolidationSource ?? "explicit",
+      consolidatedAt: now,
+      createdAt: now,
     };
     this.#db
       .prepare(
         `INSERT INTO node_relations
           (id, source_node_id, target_node_id, relation_type,
-           evidence_ids_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+           evidence_ids_json, residence, status, stability,
+           consolidation_source, consolidated_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         relation.id,
@@ -433,8 +619,16 @@ export class NmgStore {
         relation.targetNodeId,
         relation.type,
         JSON.stringify(relation.evidenceIds),
+        relation.residence,
+        relation.status,
+        relation.stability,
+        relation.consolidationSource,
+        relation.consolidatedAt,
         relation.createdAt,
       );
+    this.#db
+      .prepare("UPDATE memory_nodes SET residence = 'ltg', updated_at = ? WHERE id IN (?, ?)")
+      .run(now, relation.sourceNodeId, relation.targetNodeId);
     return relation;
   }
 
@@ -448,7 +642,8 @@ export class NmgStore {
         const rows = this.#db
           .prepare(
             `SELECT * FROM node_relations
-             WHERE source_node_id = ? OR target_node_id = ?`,
+             WHERE status = 'consolidated'
+               AND (source_node_id = ? OR target_node_id = ?)`,
           )
           .all(nodeId, nodeId) as Row[];
         for (const row of rows) {
@@ -489,19 +684,24 @@ export class NmgStore {
       const movedMemoryIds = this.#memoryIdsForNodes(sourceNodeIds);
       const operation = this.#createTransform("merge", sourceNodeIds, [target.id], movedMemoryIds);
       for (const sourceId of sourceNodeIds) {
-        this.#db.prepare("UPDATE memory_records SET node_id = ? WHERE node_id = ?")
+        this.#db
+          .prepare("UPDATE memory_records SET node_id = ? WHERE node_id = ?")
           .run(target.id, sourceId);
         this.#redirectRelations(sourceId, target.id);
-        this.#db.prepare("UPDATE memory_nodes SET status = 'merged', updated_at = ? WHERE id = ?")
+        this.#db
+          .prepare("UPDATE memory_nodes SET status = 'merged', updated_at = ? WHERE id = ?")
           .run(operation.createdAt, sourceId);
-        this.#db.prepare(
-          `INSERT INTO node_redirects (source_node_id, target_node_id, transform_id)
+        this.#db
+          .prepare(
+            `INSERT INTO node_redirects (source_node_id, target_node_id, transform_id)
            VALUES (?, ?, ?)`,
-        ).run(sourceId, target.id, operation.id);
+          )
+          .run(sourceId, target.id, operation.id);
       }
       for (const memoryId of movedMemoryIds) {
         this.#markIndexDelta(memoryId, target.id, "move", operation.createdAt);
       }
+      this.#refreshNodeResidence(target.id, operation.createdAt);
       this.#db.exec("COMMIT");
       this.#refreshEmbeddings(movedMemoryIds);
       return operation;
@@ -536,17 +736,24 @@ export class NmgStore {
 
     this.#db.exec("BEGIN IMMEDIATE");
     try {
-      const targets = input.partitions.map((partition) => this.upsertNode({
-        canonicalName: partition.nodeName,
-        kind: partition.nodeKind ?? source.kind,
-        summary: partition.summary,
-      }));
-      if (new Set(targets.map((node) => node.id)).size !== targets.length ||
-          targets.some((node) => node.id === source.id)) {
+      const targets = input.partitions.map((partition) =>
+        this.upsertNode({
+          canonicalName: partition.nodeName,
+          kind: partition.nodeKind ?? source.kind,
+          summary: partition.summary,
+        }),
+      );
+      if (
+        new Set(targets.map((node) => node.id)).size !== targets.length ||
+        targets.some((node) => node.id === source.id)
+      ) {
         throw new Error("split targets must be new, distinct semantic nodes");
       }
       const operation = this.#createTransform(
-        "split", [source.id], targets.map((node) => node.id), assigned,
+        "split",
+        [source.id],
+        targets.map((node) => node.id),
+        assigned,
       );
       for (let index = 0; index < input.partitions.length; index += 1) {
         const partition = input.partitions[index]!;
@@ -557,12 +764,15 @@ export class NmgStore {
           this.#markIndexDelta(memoryId, target.id, "move", operation.createdAt);
         }
         this.linkNodes({ sourceNodeId: target.id, targetNodeId: source.id, type: "is_a" });
-        this.#db.prepare(
-          `INSERT INTO node_redirects (source_node_id, target_node_id, transform_id)
+        this.#db
+          .prepare(
+            `INSERT INTO node_redirects (source_node_id, target_node_id, transform_id)
            VALUES (?, ?, ?)`,
-        ).run(source.id, target.id, operation.id);
+          )
+          .run(source.id, target.id, operation.id);
       }
-      this.#db.prepare("UPDATE memory_nodes SET status = 'split', updated_at = ? WHERE id = ?")
+      this.#db
+        .prepare("UPDATE memory_nodes SET status = 'split', updated_at = ? WHERE id = ?")
         .run(operation.createdAt, source.id);
       this.#db.exec("COMMIT");
       this.#refreshEmbeddings(assigned);
@@ -574,8 +784,8 @@ export class NmgStore {
   }
 
   getNodeTransform(transformId: string): NodeTransform | null {
-    const row = this.#db.prepare("SELECT * FROM node_transforms WHERE id = ?")
-      .get(transformId) as Row | undefined;
+    const row = this.#db.prepare("SELECT * FROM node_transforms WHERE id = ?").get(transformId) as
+      Row | undefined;
     if (!row) return null;
     return {
       id: String(row.id),
@@ -588,18 +798,22 @@ export class NmgStore {
   }
 
   routeNodes(query: string, limit = 5): NodeRoute[] {
-    const rows = this.#db.prepare(
-      `SELECT n.*, r.weights_json
+    const rows = this.#db
+      .prepare(
+        `SELECT n.*, r.weights_json
        FROM memory_nodes n LEFT JOIN router_weights r ON r.node_id = n.id
        WHERE n.status = 'active'`,
-    ).all() as Row[];
+      )
+      .all() as Row[];
     const normalized = normalize(query);
-    return rows.map((row) => {
-      const node = mapNode(row);
-      const learned = this.#router.score(query, parseVector(row.weights_json));
-      const lexical = lexicalNodeScore(normalized, node);
-      return { node, score: learned * 0.7 + lexical * 0.3 };
-    }).filter((route) => route.score > 0)
+    return rows
+      .map((row) => {
+        const node = mapNode(row);
+        const learned = this.#router.score(query, parseVector(row.weights_json));
+        const lexical = lexicalNodeScore(normalized, node);
+        return { node, score: learned * 0.7 + lexical * 0.3 };
+      })
+      .filter((route) => route.score > 0)
       .sort((left, right) => right.score - left.score)
       .slice(0, Math.max(1, Math.min(limit, 50)));
   }
@@ -613,18 +827,20 @@ export class NmgStore {
     if (!model.trim()) throw new Error("embedding model is required");
     if (queryVector.length === 0) throw new Error("query vector is required");
     const candidates = [...new Set(candidateNodeIds)].slice(0, 2_000);
-    const clause = candidates.length > 0
-      ? `AND n.id IN (${candidates.map(() => "?").join(",")})`
-      : "";
-    const rows = this.#db.prepare(
-      `SELECT n.*
+    const clause =
+      candidates.length > 0 ? `AND n.id IN (${candidates.map(() => "?").join(",")})` : "";
+    const rows = this.#db
+      .prepare(
+        `SELECT n.*
        FROM memory_nodes n JOIN node_embeddings e ON e.node_id = n.id AND e.model = ?
        WHERE n.status = 'active' ${clause}`,
-    ).all(model, ...candidates) as Row[];
+      )
+      .all(model, ...candidates) as Row[];
     const byId = new Map(rows.map((row) => [String(row.id), row]));
     const cache = this.#embeddingCache("node", model);
     if (!cache) return [];
-    return cache.score(queryVector, new Set(byId.keys()))
+    return cache
+      .score(queryVector, new Set(byId.keys()))
       .map(({ id, score }) => ({ node: mapNode(byId.get(id)!), score }))
       .slice(0, Math.max(1, Math.min(limit, 50)));
   }
@@ -644,10 +860,18 @@ export class NmgStore {
       for (const nodeId of uniqueIds) {
         this.#requireNode(nodeId);
         const row = select.get(nodeId) as Row | undefined;
-        const weights = this.#router.update(query, row ? parseVector(row.weights_json) : undefined,
-          clamp(learningRate, 0.001, 1));
-        upsert.run(nodeId, this.#embedder.model, this.#embedder.dimensions,
-          JSON.stringify(weights), now);
+        const weights = this.#router.update(
+          query,
+          row ? parseVector(row.weights_json) : undefined,
+          clamp(learningRate, 0.001, 1),
+        );
+        upsert.run(
+          nodeId,
+          this.#embedder.model,
+          this.#embedder.dimensions,
+          JSON.stringify(weights),
+          now,
+        );
       }
       this.#db.exec("COMMIT");
     } catch (error) {
@@ -657,10 +881,12 @@ export class NmgStore {
   }
 
   rebuildVectorIndex(): number {
-    const rows = this.#db.prepare(
-      `SELECT m.id, m.statement, m.node_id, n.canonical_name, n.summary
+    const rows = this.#db
+      .prepare(
+        `SELECT m.id, m.statement, m.node_id, n.canonical_name, n.summary
        FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id`,
-    ).all() as Row[];
+      )
+      .all() as Row[];
     const upsert = this.#db.prepare(
       `INSERT INTO memory_embeddings
         (memory_id, model, dimensions, vector_json, vector_blob, updated_at)
@@ -674,10 +900,16 @@ export class NmgStore {
     this.#db.exec("BEGIN IMMEDIATE");
     try {
       for (const row of rows) {
-        const text = `${row.statement} ${row.canonical_name} ${row.summary}`;
+        const text = memoryEmbeddingText(row.statement, row.canonical_name);
         const vector = this.#embedder.embed(text);
-        upsert.run(row.id, this.#embedder.model, this.#embedder.dimensions,
-          JSON.stringify(vector), encodeVector(vector), now);
+        upsert.run(
+          row.id,
+          this.#embedder.model,
+          this.#embedder.dimensions,
+          JSON.stringify(vector),
+          encodeVector(vector),
+          now,
+        );
       }
       this.#db.exec("COMMIT");
       return rows.length;
@@ -692,11 +924,13 @@ export class NmgStore {
     capacities: readonly [number, number, number] = [16, 64, 256],
   ): RebalanceResult {
     this.#requireNode(nodeId);
-    const rows = this.#db.prepare(
-      `SELECT id, tier, importance, access_count, pending_access_count,
+    const rows = this.#db
+      .prepare(
+        `SELECT id, tier, importance, access_count, pending_access_count,
               last_accessed_at, status
        FROM memory_records WHERE node_id = ?`,
-    ).all(nodeId) as Row[];
+      )
+      .all(nodeId) as Row[];
     const active = rows.filter((row) => ["active", "disputed"].includes(String(row.status)));
     const weighted = active.map((row) => ({
       id: String(row.id),
@@ -706,7 +940,8 @@ export class NmgStore {
     const tiers = blockTiers(depths, capacities);
     const totalWeight = weighted.reduce((sum, item) => sum + item.weight, 0) || 1;
     const expectedDepth = weighted.reduce(
-      (sum, item) => sum + item.weight / totalWeight * (depths.get(item.id) ?? 0), 0,
+      (sum, item) => sum + (item.weight / totalWeight) * (depths.get(item.id) ?? 0),
+      0,
     );
     const changedMemoryIds: string[] = [];
     const update = this.#db.prepare(
@@ -737,67 +972,161 @@ export class NmgStore {
     threshold = 32,
     capacities: readonly [number, number, number] = [16, 64, 256],
   ): RebalanceResult[] {
-    const rows = this.#db.prepare(
-      `SELECT node_id, SUM(pending_access_count) AS pending
+    const rows = this.#db
+      .prepare(
+        `SELECT node_id, SUM(pending_access_count) AS pending
        FROM memory_records GROUP BY node_id HAVING pending >= ?`,
-    ).all(Math.max(1, threshold)) as Row[];
+      )
+      .all(Math.max(1, threshold)) as Row[];
     return rows.map((row) => this.rebalanceNode(String(row.node_id), capacities));
   }
 
   searchContext(query: string, options: SearchOptions = {}): MemoryContext {
-    const limit = Math.max(1, Math.min(options.limit ?? 8, 50));
+    const startedAt = Date.now();
+    const budget = activeGraphBudget(options);
+    const limit = Math.max(1, Math.min(options.limit ?? 8, budget.maxEvidence, 50));
     const direct = this.search(query, {
       ...options,
+      maxTier: Math.min(options.maxTier ?? budget.maxLocalTier, budget.maxLocalTier) as MemoryTier,
       limit: Math.min(50, Math.max(20, limit * 3)),
     });
+    const graphHops = Math.min(options.graphHops ?? 1, budget.maxGraphHops);
     const relations = this.getRelations(
       direct.map((result) => result.node.id),
-      options.graphHops ?? 1,
+      graphHops,
     );
     const directNodeIds = new Set(direct.map((result) => result.node.id));
-    const relatedNodeIds = [...new Set(relations.flatMap(
-      (relation) => [relation.sourceNodeId, relation.targetNodeId],
-    ))].filter((id) => !directNodeIds.has(id));
-    const related = relatedNodeIds.flatMap(
-      (nodeId) => this.#resultsForNode(nodeId, options.maxTier ?? 1, 2),
+    const relatedNodeIds = [
+      ...new Set(relations.flatMap((relation) => [relation.sourceNodeId, relation.targetNodeId])),
+    ].filter((id) => !directNodeIds.has(id));
+    const related = relatedNodeIds.flatMap((nodeId) =>
+      this.#resultsForNode(
+        nodeId,
+        Math.min(options.maxTier ?? budget.maxLocalTier, budget.maxLocalTier) as MemoryTier,
+        2,
+      ),
     );
     const nodeCounts = new Map<string, number>();
-    const results = [...direct, ...related]
+    const candidates = [...direct, ...related]
       .filter(
         (result, index, all) =>
           all.findIndex((candidate) => candidate.memory.id === result.memory.id) === index,
       )
-      .sort((left, right) =>
-        contextUsefulness(query, right) - contextUsefulness(query, left))
+      .sort((left, right) => contextUsefulness(query, right) - contextUsefulness(query, left))
       .filter((result) => {
         const count = nodeCounts.get(result.node.id) ?? 0;
         if (count >= 2) return false;
         nodeCounts.set(result.node.id, count + 1);
         return true;
-      })
-      .slice(0, limit);
+      });
+    const selectedNodes = new Set<string>();
+    const results: MemorySearchResult[] = [];
+    let estimatedTokens = 0;
+    const exhausted = new Set<ActiveGraphBudgetUsage["exhausted"][number]>();
+    for (const candidate of candidates) {
+      if (results.length >= limit) {
+        exhausted.add("evidence");
+        break;
+      }
+      if (!selectedNodes.has(candidate.node.id) && selectedNodes.size >= budget.maxNodes) {
+        exhausted.add("nodes");
+        continue;
+      }
+      const candidateTokens = estimateResultTokens(candidate);
+      if (results.length > 0 && estimatedTokens + candidateTokens > budget.maxTokens) {
+        exhausted.add("tokens");
+        continue;
+      }
+      results.push(candidate);
+      selectedNodes.add(candidate.node.id);
+      estimatedTokens += candidateTokens;
+    }
+    const persistentEdges = relations
+      .filter(
+        (relation) =>
+          selectedNodes.has(relation.sourceNodeId) && selectedNodes.has(relation.targetNodeId),
+      )
+      .slice(0, budget.maxEdges)
+      .map((relation) => ({
+        id: relation.id,
+        sourceNodeId: relation.sourceNodeId,
+        targetNodeId: relation.targetNodeId,
+        type: relation.type,
+        persistence: "persistent" as const,
+        stability: relation.stability,
+      }));
+    const directSelectedNodeIds = [
+      ...new Set(
+        results
+          .filter((result) => direct.some((item) => item.memory.id === result.memory.id))
+          .map((result) => result.node.id),
+      ),
+    ];
+    const temporaryEdges = queryAssociationEdges(
+      directSelectedNodeIds,
+      persistentEdges,
+      budget.maxEdges - persistentEdges.length,
+    );
+    const edges = [...persistentEdges, ...temporaryEdges];
+    if (relations.length > persistentEdges.length || edges.length >= budget.maxEdges) {
+      exhausted.add("edges");
+    }
     const topScores = direct.slice(0, 2).map((result) => result.combinedScore);
-    const ambiguity = topScores.length < 2
-      ? 0
-      : 1 - clamp(topScores[0]! - topScores[1]!, 0, 1);
-    this.recordRetrievalTrace({
+    const ambiguity = topScores.length < 2 ? 0 : 1 - clamp(topScores[0]! - topScores[1]!, 0, 1);
+    const latencyMs = Date.now() - startedAt;
+    if (latencyMs > budget.maxLatencyMs) exhausted.add("latency");
+    const usage: ActiveGraphBudgetUsage = {
+      nodes: selectedNodes.size,
+      edges: edges.length,
+      evidence: results.length,
+      estimatedTokens,
+      graphHops,
+      deepestTier: results.reduce<MemoryTier>(
+        (deepest, result) => Math.max(deepest, result.memory.tier) as MemoryTier,
+        0,
+      ),
+      latencyMs,
+      exhausted: [...exhausted].sort(),
+    };
+    const taskId = options.taskId?.trim() || stableTaskId(query);
+    const traceId = this.recordRetrievalTrace({
       query,
+      taskId,
       resultMemoryIds: results.map((result) => result.memory.id),
       resultNodeIds: results.map((result) => result.node.id),
       expandedNodeIds: relatedNodeIds,
+      relationIds: persistentEdges.map((edge) => edge.id),
       ambiguity,
       fallbackUsed: direct.length === 0 || related.length > 0,
-      conflictObserved: results.some((result) => result.memory.status === "disputed") ||
+      conflictObserved:
+        results.some((result) => result.memory.status === "disputed") ||
         relations.some((relation) => relation.type === "contradicts"),
+      activeGraphBudget: budget,
+      activeGraphUsage: usage,
     });
-    return { results, relations };
+    const activeGraph: ActiveGraph = {
+      id: traceId,
+      query,
+      taskId,
+      nodeIds: [...selectedNodes],
+      memoryIds: results.map((result) => result.memory.id),
+      edges,
+      budget,
+      usage,
+      createdAt: new Date().toISOString(),
+    };
+    return {
+      results,
+      relations: persistentEdges.flatMap((edge) =>
+        relations.filter((relation) => relation.id === edge.id),
+      ),
+      activeGraph,
+    };
   }
 
   getContext(memoryIds: readonly string[], graphHops = 0): MemoryContext {
     const ids = [...new Set(memoryIds)].slice(0, 50);
-    const findNode = this.#db.prepare(
-      "SELECT node_id FROM memory_records WHERE id = ?",
-    );
+    const findNode = this.#db.prepare("SELECT node_id FROM memory_records WHERE id = ?");
     const results = ids.flatMap((memoryId) => {
       const row = findNode.get(memoryId) as Row | undefined;
       if (!row) return [];
@@ -817,26 +1146,41 @@ export class NmgStore {
     const createdAt = new Date().toISOString();
     const nodeIds = [...new Set(input.resultNodeIds)].sort();
     const usefulNodeIds = new Set(this.#nodeIdsForMemories(input.usefulMemoryIds ?? []));
+    const contradictedNodeIds = new Set(
+      this.#nodeIdsForMemories(input.contradictedMemoryIds ?? []),
+    );
+    const taskId = input.taskId?.trim() || stableTaskId(input.query);
     this.#db.exec("BEGIN IMMEDIATE");
     try {
-      this.#db.prepare(
-        `INSERT INTO retrieval_traces
+      this.#db
+        .prepare(
+          `INSERT INTO retrieval_traces
           (id, query, result_memory_ids_json, result_node_ids_json,
-           expanded_node_ids_json, useful_memory_ids_json, ambiguity,
+           expanded_node_ids_json, useful_memory_ids_json,
+           contradicted_memory_ids_json, rejected_memory_ids_json,
+           relation_ids_json, task_id, active_graph_budget_json,
+           active_graph_usage_json, ambiguity,
            fallback_used, conflict_observed, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        id,
-        input.query,
-        JSON.stringify([...new Set(input.resultMemoryIds)]),
-        JSON.stringify(nodeIds),
-        JSON.stringify([...new Set(input.expandedNodeIds ?? [])]),
-        JSON.stringify([...new Set(input.usefulMemoryIds ?? [])]),
-        clamp(input.ambiguity ?? 0, 0, 1),
-        input.fallbackUsed ? 1 : 0,
-        input.conflictObserved ? 1 : 0,
-        createdAt,
-      );
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id,
+          input.query,
+          JSON.stringify([...new Set(input.resultMemoryIds)]),
+          JSON.stringify(nodeIds),
+          JSON.stringify([...new Set(input.expandedNodeIds ?? [])]),
+          JSON.stringify([...new Set(input.usefulMemoryIds ?? [])]),
+          JSON.stringify([...new Set(input.contradictedMemoryIds ?? [])]),
+          JSON.stringify([...new Set(input.rejectedMemoryIds ?? [])]),
+          JSON.stringify([...new Set(input.relationIds ?? [])]),
+          taskId,
+          JSON.stringify(input.activeGraphBudget ?? {}),
+          JSON.stringify(input.activeGraphUsage ?? {}),
+          clamp(input.ambiguity ?? 0, 0, 1),
+          input.fallbackUsed ? 1 : 0,
+          input.conflictObserved ? 1 : 0,
+          createdAt,
+        );
       const updateNode = this.#db.prepare(
         `INSERT INTO node_retrieval_signals
           (node_id, query_count, ambiguity_sum, fallback_count,
@@ -850,32 +1194,58 @@ export class NmgStore {
            updated_at = excluded.updated_at`,
       );
       for (const nodeId of nodeIds) {
-        updateNode.run(nodeId, clamp(input.ambiguity ?? 0, 0, 1),
-          input.fallbackUsed ? 1 : 0, input.conflictObserved ? 1 : 0, createdAt);
+        updateNode.run(
+          nodeId,
+          clamp(input.ambiguity ?? 0, 0, 1),
+          input.fallbackUsed ? 1 : 0,
+          input.conflictObserved ? 1 : 0,
+          createdAt,
+        );
       }
+      this.#recordNodeSelections(nodeIds, input.expandedNodeIds ?? [], createdAt);
+      this.#recordEdgeSelections(input.relationIds ?? [], createdAt);
       const updatePair = this.#db.prepare(
         `INSERT INTO node_pair_signals
           (left_node_id, right_node_id, co_retrieval_count, useful_count,
            evidence_trace_ids_json, updated_at)
-         VALUES (?, ?, 1, ?, ?, ?)
+         VALUES (?, ?, 1, 0, ?, ?)
          ON CONFLICT(left_node_id, right_node_id) DO UPDATE SET
            co_retrieval_count = co_retrieval_count + 1,
-           useful_count = useful_count + excluded.useful_count,
            evidence_trace_ids_json = excluded.evidence_trace_ids_json,
            updated_at = excluded.updated_at`,
+      );
+      const observeTask = this.#db.prepare(
+        `INSERT INTO edge_task_observations
+          (left_node_id, right_node_id, task_id, trace_id, useful,
+           contradicted, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(left_node_id, right_node_id, task_id) DO UPDATE SET
+           useful = MAX(useful, excluded.useful),
+           contradicted = MAX(contradicted, excluded.contradicted)`,
       );
       for (let left = 0; left < nodeIds.length; left += 1) {
         for (let right = left + 1; right < nodeIds.length; right += 1) {
           const pair = [nodeIds[left]!, nodeIds[right]!] as const;
-          const previous = this.#db.prepare(
-            `SELECT evidence_trace_ids_json FROM node_pair_signals
+          const previous = this.#db
+            .prepare(
+              `SELECT evidence_trace_ids_json FROM node_pair_signals
              WHERE left_node_id = ? AND right_node_id = ?`,
-          ).get(...pair) as Row | undefined;
-          const evidence = [...parseStringArray(previous?.evidence_trace_ids_json ?? null), id]
-            .slice(-32);
-          updatePair.run(...pair,
+            )
+            .get(...pair) as Row | undefined;
+          const evidence = [
+            ...parseStringArray(previous?.evidence_trace_ids_json ?? null),
+            id,
+          ].slice(-32);
+          updatePair.run(...pair, JSON.stringify(evidence), createdAt);
+          observeTask.run(
+            ...pair,
+            taskId,
+            id,
             usefulNodeIds.has(pair[0]) && usefulNodeIds.has(pair[1]) ? 1 : 0,
-            JSON.stringify(evidence), createdAt);
+            contradictedNodeIds.has(pair[0]) || contradictedNodeIds.has(pair[1]) ? 1 : 0,
+            createdAt,
+          );
+          this.#refreshPairUsefulness(pair[0], pair[1]);
         }
       }
       this.#db.exec("COMMIT");
@@ -886,55 +1256,323 @@ export class NmgStore {
     }
   }
 
-  proposeTopologyChanges(options: {
-    minObservations?: number;
-    minGain?: number;
-    cooldownMs?: number;
-  } = {}): TopologyProposal[] {
+  recordActiveGraphUse(
+    activeGraphId: string,
+    input: {
+      usedMemoryIds: readonly string[];
+      contradictedMemoryIds?: readonly string[];
+      rejectedMemoryIds?: readonly string[];
+    },
+  ): void {
+    const row = this.#db
+      .prepare("SELECT * FROM retrieval_traces WHERE id = ?")
+      .get(activeGraphId) as Row | undefined;
+    if (!row) throw new Error(`active graph ${activeGraphId} does not exist`);
+    const resultMemoryIds = new Set(parseStringArray(row.result_memory_ids_json));
+    const observedUsedMemoryIds = [...new Set(input.usedMemoryIds)].filter((id) =>
+      resultMemoryIds.has(id),
+    );
+    const observedContradictedMemoryIds = [...new Set(input.contradictedMemoryIds ?? [])].filter(
+      (id) => resultMemoryIds.has(id),
+    );
+    const observedRejectedMemoryIds = [...new Set(input.rejectedMemoryIds ?? [])].filter((id) =>
+      resultMemoryIds.has(id),
+    );
+    const usedMemoryIds = [
+      ...new Set([...parseStringArray(row.useful_memory_ids_json), ...observedUsedMemoryIds]),
+    ];
+    const contradictedMemoryIds = [
+      ...new Set([
+        ...parseStringArray(row.contradicted_memory_ids_json),
+        ...observedContradictedMemoryIds,
+      ]),
+    ];
+    const rejectedMemoryIds = [
+      ...new Set([...parseStringArray(row.rejected_memory_ids_json), ...observedRejectedMemoryIds]),
+    ];
+    const usedNodeIds = new Set(this.#nodeIdsForMemories(usedMemoryIds));
+    const contradictedNodeIds = new Set(this.#nodeIdsForMemories(contradictedMemoryIds));
+    const observedUsedNodeIds = new Set(this.#nodeIdsForMemories(observedUsedMemoryIds));
+    const observedContradictedNodeIds = new Set(
+      this.#nodeIdsForMemories(observedContradictedMemoryIds),
+    );
+    const observedRejectedNodeIds = new Set(this.#nodeIdsForMemories(observedRejectedMemoryIds));
+    const resultNodeIds = parseStringArray(row.result_node_ids_json).sort();
+    const relationIds = parseStringArray(row.relation_ids_json);
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db
+        .prepare(
+          `UPDATE retrieval_traces SET useful_memory_ids_json = ?,
+           contradicted_memory_ids_json = ?, rejected_memory_ids_json = ?
+           WHERE id = ?`,
+        )
+        .run(
+          JSON.stringify(usedMemoryIds),
+          JSON.stringify(contradictedMemoryIds),
+          JSON.stringify(rejectedMemoryIds),
+          activeGraphId,
+        );
+      this.#recordNodeOutcomes(
+        observedUsedNodeIds,
+        observedContradictedNodeIds,
+        observedRejectedNodeIds,
+        now,
+      );
+      this.#recordEdgeOutcomes(
+        relationIds,
+        observedUsedNodeIds,
+        observedContradictedNodeIds,
+        observedRejectedNodeIds,
+        now,
+      );
+      const taskId = String(row.task_id) || stableTaskId(String(row.query));
+      for (let left = 0; left < resultNodeIds.length; left += 1) {
+        for (let right = left + 1; right < resultNodeIds.length; right += 1) {
+          const pair = [resultNodeIds[left]!, resultNodeIds[right]!] as const;
+          this.#db
+            .prepare(
+              `UPDATE edge_task_observations
+               SET useful = MAX(useful, ?), contradicted = MAX(contradicted, ?)
+               WHERE left_node_id = ? AND right_node_id = ? AND task_id = ?`,
+            )
+            .run(
+              usedNodeIds.has(pair[0]) && usedNodeIds.has(pair[1]) ? 1 : 0,
+              contradictedNodeIds.has(pair[0]) || contradictedNodeIds.has(pair[1]) ? 1 : 0,
+              ...pair,
+              taskId,
+            );
+          this.#refreshPairUsefulness(pair[0], pair[1]);
+        }
+      }
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    this.recordUsage(observedUsedMemoryIds);
+    if (usedNodeIds.size > 0) this.trainRouter(String(row.query), [...usedNodeIds]);
+  }
+
+  edgeStability(leftNodeId: string, rightNodeId: string): EdgeStability {
+    const [left, right] = [leftNodeId, rightNodeId].sort();
+    const row = this.#db
+      .prepare(
+        `SELECT COUNT(*) AS independent_tasks,
+                SUM(useful) AS useful_tasks,
+                SUM(contradicted) AS contradicted_tasks,
+                MAX(created_at) AS updated_at
+         FROM edge_task_observations
+         WHERE left_node_id = ? AND right_node_id = ?`,
+      )
+      .get(left, right) as Row;
+    const independentTasks = Number(row.independent_tasks ?? 0);
+    const usefulTasks = Number(row.useful_tasks ?? 0);
+    const contradictedTasks = Number(row.contradicted_tasks ?? 0);
+    const updatedAt = row.updated_at ? String(row.updated_at) : new Date(0).toISOString();
+    const ageDays = Math.max(0, (Date.now() - Date.parse(updatedAt)) / 86_400_000);
+    const decay = Math.pow(0.5, ageDays / 180);
+    const evidenceScore =
+      independentTasks === 0
+        ? 0
+        : usefulTasks / independentTasks - (0.5 * contradictedTasks) / independentTasks;
+    return {
+      leftNodeId: left,
+      rightNodeId: right,
+      independentTasks,
+      usefulTasks,
+      contradictedTasks,
+      score: clamp(evidenceScore * decay, 0, 1),
+      updatedAt,
+    };
+  }
+
+  nodeActivation(nodeId: string): ActivationSignal {
+    const row = this.#db
+      .prepare("SELECT * FROM node_activation_signals WHERE node_id = ?")
+      .get(nodeId) as Row | undefined;
+    return mapActivation(row, true);
+  }
+
+  relationActivation(relationId: string): ActivationSignal {
+    const row = this.#db
+      .prepare("SELECT * FROM edge_activation_signals WHERE relation_id = ?")
+      .get(relationId) as Row | undefined;
+    return mapActivation(row, false);
+  }
+
+  reconcileConsolidation(
+    options: {
+      minIndependentTasks?: number;
+      promoteThreshold?: number;
+      demoteThreshold?: number;
+      cooldownMs?: number;
+    } = {},
+  ): ConsolidationResult {
+    const minIndependentTasks = Math.max(2, options.minIndependentTasks ?? 3);
+    const promoteThreshold = clamp(options.promoteThreshold ?? 0.75, 0, 1);
+    const demoteThreshold = clamp(options.demoteThreshold ?? 0.45, 0, promoteThreshold);
+    const cooldownMs = Math.max(0, options.cooldownMs ?? 7 * 24 * 60 * 60 * 1_000);
+    const consolidatedRelations: NodeRelation[] = [];
+    const demotedRelations: NodeRelation[] = [];
+    const eventIds: string[] = [];
+    const pairs = this.#db
+      .prepare(
+        `SELECT DISTINCT left_node_id, right_node_id FROM edge_task_observations
+         ORDER BY left_node_id, right_node_id`,
+      )
+      .all() as Row[];
+    for (const row of pairs) {
+      const stability = this.edgeStability(String(row.left_node_id), String(row.right_node_id));
+      const relationRow = this.#db
+        .prepare(
+          `SELECT * FROM node_relations WHERE consolidation_source = 'stability'
+           AND ((source_node_id = ? AND target_node_id = ?)
+             OR (source_node_id = ? AND target_node_id = ?))
+           ORDER BY created_at DESC LIMIT 1`,
+        )
+        .get(
+          stability.leftNodeId,
+          stability.rightNodeId,
+          stability.rightNodeId,
+          stability.leftNodeId,
+        ) as Row | undefined;
+      const relation = relationRow ? mapRelation(relationRow) : null;
+      if (
+        stability.independentTasks >= minIndependentTasks &&
+        stability.score >= promoteThreshold &&
+        (!relation || relation.status === "demoted") &&
+        !this.#consolidationCoolingDown(
+          relation?.id ?? `pair:${stability.leftNodeId}:${stability.rightNodeId}`,
+          cooldownMs,
+        )
+      ) {
+        const evidenceTraceIds = this.#edgeEvidenceTraceIds(
+          stability.leftNodeId,
+          stability.rightNodeId,
+        );
+        const promoted = this.linkNodes({
+          sourceNodeId: stability.leftNodeId,
+          targetNodeId: stability.rightNodeId,
+          type: "related_to",
+          evidenceIds: [],
+          stability: stability.score,
+          consolidationSource: "stability",
+        });
+        this.#db
+          .prepare("UPDATE node_relations SET consolidation_source = 'stability' WHERE id = ?")
+          .run(promoted.id);
+        promoted.consolidationSource = "stability";
+        eventIds.push(
+          this.#recordConsolidationEvent(
+            "consolidate",
+            promoted.id,
+            relation?.status ?? "candidate",
+            "consolidated",
+            `stability=${stability.score.toFixed(3)} tasks=${stability.independentTasks}`,
+            evidenceTraceIds,
+          ),
+        );
+        consolidatedRelations.push(promoted);
+      } else if (
+        relation?.status === "consolidated" &&
+        stability.score <= demoteThreshold &&
+        !this.#consolidationCoolingDown(relation.id, cooldownMs)
+      ) {
+        this.#db
+          .prepare("UPDATE node_relations SET status = 'demoted', stability = ? WHERE id = ?")
+          .run(stability.score, relation.id);
+        relation.status = "demoted";
+        relation.stability = stability.score;
+        const now = new Date().toISOString();
+        this.#refreshNodeResidence(relation.sourceNodeId, now);
+        this.#refreshNodeResidence(relation.targetNodeId, now);
+        eventIds.push(
+          this.#recordConsolidationEvent(
+            "demote",
+            relation.id,
+            "consolidated",
+            "demoted",
+            `stability=${stability.score.toFixed(3)} threshold=${demoteThreshold}`,
+            this.#edgeEvidenceTraceIds(stability.leftNodeId, stability.rightNodeId),
+          ),
+        );
+        demotedRelations.push(relation);
+      }
+    }
+    return {
+      consolidatedRelations,
+      demotedRelations,
+      events: eventIds.map((id) => this.#requireConsolidationEvent(id)),
+    };
+  }
+
+  consolidationEvents(): ConsolidationEvent[] {
+    return (
+      this.#db.prepare("SELECT * FROM consolidation_events ORDER BY rowid").all() as Row[]
+    ).map(mapConsolidationEvent);
+  }
+
+  proposeTopologyChanges(
+    options: {
+      minObservations?: number;
+      minGain?: number;
+      cooldownMs?: number;
+    } = {},
+  ): TopologyProposal[] {
     const minObservations = Math.max(2, options.minObservations ?? 3);
     const minGain = clamp(options.minGain ?? 0.6, 0, 1);
     const cooldownMs = Math.max(0, options.cooldownMs ?? 7 * 24 * 60 * 60 * 1_000);
     const proposals: TopologyProposal[] = [];
-    const pairRows = this.#db.prepare(
-      `SELECT p.*, l.query_count AS left_queries, r.query_count AS right_queries
+    const pairRows = this.#db
+      .prepare(
+        `SELECT p.*, l.query_count AS left_queries, r.query_count AS right_queries
        FROM node_pair_signals p
        JOIN node_retrieval_signals l ON l.node_id = p.left_node_id
        JOIN node_retrieval_signals r ON r.node_id = p.right_node_id
        JOIN memory_nodes ln ON ln.id = p.left_node_id AND ln.status = 'active'
        JOIN memory_nodes rn ON rn.id = p.right_node_id AND rn.status = 'active'
        WHERE p.co_retrieval_count >= ?`,
-    ).all(minObservations) as Row[];
+      )
+      .all(minObservations) as Row[];
     for (const row of pairRows) {
       const sourceNodeIds = [String(row.left_node_id), String(row.right_node_id)];
       const proposalKey = `link:${sourceNodeIds.join(":")}`;
       // Co-retrieval is only a candidate signal. Requiring both nodes to have
       // been marked useful avoids turning the retriever's own accidental
       // co-results into self-reinforcing graph edges.
-      const gain = Number(row.useful_count) /
-        Math.max(Number(row.left_queries), Number(row.right_queries), 1);
+      const gain =
+        Number(row.useful_count) / Math.max(Number(row.left_queries), Number(row.right_queries), 1);
       if (gain < minGain || this.#proposalCoolingDown(proposalKey, cooldownMs)) continue;
-      const relation = this.#db.prepare(
-        `SELECT 1 FROM node_relations WHERE
+      const relation = this.#db
+        .prepare(
+          `SELECT 1 FROM node_relations WHERE
          (source_node_id = ? AND target_node_id = ?) OR
          (source_node_id = ? AND target_node_id = ?) LIMIT 1`,
-      ).get(sourceNodeIds[0], sourceNodeIds[1], sourceNodeIds[1], sourceNodeIds[0]);
+        )
+        .get(sourceNodeIds[0], sourceNodeIds[1], sourceNodeIds[1], sourceNodeIds[0]);
       if (relation) continue;
-      proposals.push(this.#insertTopologyProposal({
-        proposalKey,
-        type: "link",
-        sourceNodeIds,
-        relationType: "related_to",
-        partitions: [],
-        evidenceTraceIds: parseStringArray(row.evidence_trace_ids_json),
-        observations: Number(row.co_retrieval_count),
-        estimatedGain: gain,
-      }));
+      proposals.push(
+        this.#insertTopologyProposal({
+          proposalKey,
+          type: "link",
+          sourceNodeIds,
+          relationType: "related_to",
+          partitions: [],
+          evidenceTraceIds: parseStringArray(row.evidence_trace_ids_json),
+          observations: Number(row.co_retrieval_count),
+          estimatedGain: gain,
+        }),
+      );
     }
-    const nodeRows = this.#db.prepare(
-      `SELECT s.* FROM node_retrieval_signals s
+    const nodeRows = this.#db
+      .prepare(
+        `SELECT s.* FROM node_retrieval_signals s
        JOIN memory_nodes n ON n.id = s.node_id AND n.status = 'active'
        WHERE s.query_count >= ?`,
-    ).all(minObservations) as Row[];
+      )
+      .all(minObservations) as Row[];
     for (const row of nodeRows) {
       const nodeId = String(row.node_id);
       const ambiguity = Number(row.ambiguity_sum) / Math.max(Number(row.query_count), 1);
@@ -944,46 +1582,49 @@ export class NmgStore {
       if (gain < minGain || this.#proposalCoolingDown(proposalKey, cooldownMs)) continue;
       const partitions = this.#candidatePartitions(nodeId);
       if (partitions.length < 2) continue;
-      const traces = this.#db.prepare(
-        `SELECT id FROM retrieval_traces
+      const traces = this.#db
+        .prepare(
+          `SELECT id FROM retrieval_traces
          WHERE result_node_ids_json LIKE ? ORDER BY created_at DESC LIMIT 16`,
-      ).all(`%${nodeId}%`) as Row[];
-      proposals.push(this.#insertTopologyProposal({
-        proposalKey,
-        type: "split",
-        sourceNodeIds: [nodeId],
-        relationType: null,
-        partitions,
-        evidenceTraceIds: traces.map((trace) => String(trace.id)),
-        observations: Number(row.query_count),
-        estimatedGain: gain,
-      }));
+        )
+        .all(`%${nodeId}%`) as Row[];
+      proposals.push(
+        this.#insertTopologyProposal({
+          proposalKey,
+          type: "split",
+          sourceNodeIds: [nodeId],
+          relationType: null,
+          partitions,
+          evidenceTraceIds: traces.map((trace) => String(trace.id)),
+          observations: Number(row.query_count),
+          estimatedGain: gain,
+        }),
+      );
     }
     return proposals;
   }
 
   topologyProposals(status: TopologyProposal["status"] = "pending"): TopologyProposal[] {
-    return (this.#db.prepare(
-      "SELECT * FROM topology_proposals WHERE status = ? ORDER BY created_at, id",
-    ).all(status) as Row[]).map(mapTopologyProposal);
+    return (
+      this.#db
+        .prepare("SELECT * FROM topology_proposals WHERE status = ? ORDER BY created_at, id")
+        .all(status) as Row[]
+    ).map(mapTopologyProposal);
   }
 
-  reviewTopologyProposal(
-    proposalId: string,
-    decision: "accept" | "reject",
-  ): TopologyProposal {
-    const row = this.#db.prepare(
-      "SELECT * FROM topology_proposals WHERE id = ?",
-    ).get(proposalId) as Row | undefined;
+  reviewTopologyProposal(proposalId: string, decision: "accept" | "reject"): TopologyProposal {
+    const row = this.#db
+      .prepare("SELECT * FROM topology_proposals WHERE id = ?")
+      .get(proposalId) as Row | undefined;
     if (!row) throw new Error(`topology proposal ${proposalId} does not exist`);
     const proposal = mapTopologyProposal(row);
     if (proposal.status !== "pending") {
       throw new Error(`topology proposal ${proposalId} is already ${proposal.status}`);
     }
     if (decision === "reject") {
-      this.#db.prepare(
-        "UPDATE topology_proposals SET status = 'rejected' WHERE id = ?",
-      ).run(proposalId);
+      this.#db
+        .prepare("UPDATE topology_proposals SET status = 'rejected' WHERE id = ?")
+        .run(proposalId);
       return { ...proposal, status: "rejected" };
     }
     if (proposal.type === "link") {
@@ -1002,15 +1643,16 @@ export class NmgStore {
         })),
       });
     }
-    this.#db.prepare(
-      "UPDATE topology_proposals SET status = 'accepted' WHERE id = ?",
-    ).run(proposalId);
+    this.#db
+      .prepare("UPDATE topology_proposals SET status = 'accepted' WHERE id = ?")
+      .run(proposalId);
     return { ...proposal, status: "accepted" };
   }
 
   residentKernel(limit = 4): MemoryContext {
-    const rows = this.#db.prepare(
-      `SELECT m.id, m.node_id
+    const rows = this.#db
+      .prepare(
+        `SELECT m.id, m.node_id
        FROM memory_records m
        JOIN memory_nodes n ON n.id = m.node_id
        WHERE m.memory_type = 'constraint'
@@ -1022,7 +1664,8 @@ export class NmgStore {
          AND n.status = 'active'
        ORDER BY m.importance DESC, m.access_count DESC, m.created_at DESC
        LIMIT ?`,
-    ).all(Math.max(0, Math.min(limit, 12))) as Row[];
+      )
+      .all(Math.max(0, Math.min(limit, 12))) as Row[];
     const byNode = new Map<string, MemorySearchResult[]>();
     const results = rows.flatMap((row) => {
       const nodeId = String(row.node_id);
@@ -1043,8 +1686,7 @@ export class NmgStore {
       maxTier: 3,
       limit: 50,
     });
-    const nodeIds = [...new Set(candidates.map((result) => result.node.id))]
-      .slice(0, cueLimit);
+    const nodeIds = [...new Set(candidates.map((result) => result.node.id))].slice(0, cueLimit);
     const aggregate = this.#db.prepare(
       `SELECT COUNT(*) AS active_count, MAX(created_at) AS newest_at,
               MAX(tier) AS deepest_tier,
@@ -1061,7 +1703,8 @@ export class NmgStore {
       return {
         nodeId,
         canonicalName: best.node.canonicalName,
-        memoryTypes: String(row.memory_types ?? "").split(",")
+        memoryTypes: String(row.memory_types ?? "")
+          .split(",")
           .filter(Boolean) as MemoryRecord["memoryType"][],
         activeCount: Number(row.active_count ?? 0),
         newestAt: row.newest_at ? String(row.newest_at) : null,
@@ -1103,48 +1746,62 @@ export class NmgStore {
     candidateMemoryIds: string[],
     options: SearchOptions = {},
   ): MemorySearchResult[] {
-    return this.#searchWithVector(query, queryVector, model, {
-      ...options,
-      retrievalMode: options.retrievalMode ?? "qwen3",
-    }, [...new Set(candidateMemoryIds)].slice(0, 2_000));
+    return this.#searchWithVector(
+      query,
+      queryVector,
+      model,
+      {
+        ...options,
+        retrievalMode: options.retrievalMode ?? "qwen3",
+      },
+      [...new Set(candidateMemoryIds)].slice(0, 2_000),
+    );
   }
 
   embeddingDocuments(afterMemoryId = "", limit = 256, missingModel?: string): EmbeddingDocument[] {
-    const rows = this.#db.prepare(
-      `SELECT m.id, m.statement, n.canonical_name, n.summary
+    const rows = this.#db
+      .prepare(
+        `SELECT m.id, m.statement, n.canonical_name, n.summary
        FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id
        WHERE m.id > ?
          AND (? IS NULL OR NOT EXISTS (
            SELECT 1 FROM memory_embeddings e WHERE e.memory_id = m.id AND e.model = ?
          ))
        ORDER BY m.id LIMIT ?`,
-    ).all(
-      afterMemoryId,
-      missingModel ?? null,
-      missingModel ?? null,
-      Math.max(1, Math.min(limit, 2_048)),
-    ) as Row[];
+      )
+      .all(
+        afterMemoryId,
+        missingModel ?? null,
+        missingModel ?? null,
+        Math.max(1, Math.min(limit, 2_048)),
+      ) as Row[];
     return rows.map((row) => ({
       memoryId: String(row.id),
-      text: `${row.statement} ${row.canonical_name} ${row.summary}`,
+      text: memoryEmbeddingText(row.statement, row.canonical_name),
     }));
   }
 
-  nodeEmbeddingDocuments(afterNodeId = "", limit = 256, missingModel?: string): NodeEmbeddingDocument[] {
-    const rows = this.#db.prepare(
-      `SELECT n.id, n.canonical_name, n.kind, n.summary
+  nodeEmbeddingDocuments(
+    afterNodeId = "",
+    limit = 256,
+    missingModel?: string,
+  ): NodeEmbeddingDocument[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT n.id, n.canonical_name, n.kind, n.summary
        FROM memory_nodes n
        WHERE n.id > ? AND n.status = 'active'
          AND (? IS NULL OR NOT EXISTS (
            SELECT 1 FROM node_embeddings e WHERE e.node_id = n.id AND e.model = ?
          ))
        ORDER BY n.id LIMIT ?`,
-    ).all(
-      afterNodeId,
-      missingModel ?? null,
-      missingModel ?? null,
-      Math.max(1, Math.min(limit, 2_048)),
-    ) as Row[];
+      )
+      .all(
+        afterNodeId,
+        missingModel ?? null,
+        missingModel ?? null,
+        Math.max(1, Math.min(limit, 2_048)),
+      ) as Row[];
     return rows.map((row) => ({
       nodeId: String(row.id),
       text: `${row.canonical_name} ${row.kind} ${row.summary}`,
@@ -1170,8 +1827,14 @@ export class NmgStore {
     this.#db.exec("BEGIN IMMEDIATE");
     try {
       for (const item of embeddings) {
-        upsert.run(item.nodeId, model, dimensions, JSON.stringify(item.vector),
-          encodeVector(item.vector), now);
+        upsert.run(
+          item.nodeId,
+          model,
+          dimensions,
+          JSON.stringify(item.vector),
+          encodeVector(item.vector),
+          now,
+        );
       }
       this.#db.exec("COMMIT");
       for (const item of embeddings) {
@@ -1185,10 +1848,12 @@ export class NmgStore {
   }
 
   storedNodeEmbeddings(model: string, afterNodeId = "", limit = 256): ExternalNodeEmbedding[] {
-    const rows = this.#db.prepare(
-      `SELECT node_id, vector_blob, vector_json FROM node_embeddings
+    const rows = this.#db
+      .prepare(
+        `SELECT node_id, vector_blob, vector_json FROM node_embeddings
        WHERE model = ? AND node_id > ? ORDER BY node_id LIMIT ?`,
-    ).all(model, afterNodeId, Math.max(1, Math.min(limit, 2_048))) as Row[];
+      )
+      .all(model, afterNodeId, Math.max(1, Math.min(limit, 2_048))) as Row[];
     return rows.map((row) => ({
       nodeId: String(row.node_id),
       vector: storedVector(row),
@@ -1198,20 +1863,22 @@ export class NmgStore {
   rebuildLeafBlocks(nodeId?: string, blockSize = 32): LeafBlock[] {
     const size = Math.max(4, Math.min(blockSize, 128));
     if (!nodeId) {
-      const rows = this.#db.prepare(
-        "SELECT id FROM memory_nodes WHERE status = 'active' ORDER BY id",
-      ).all() as Row[];
+      const rows = this.#db
+        .prepare("SELECT id FROM memory_nodes WHERE status = 'active' ORDER BY id")
+        .all() as Row[];
       return rows.flatMap((row) => this.rebuildLeafBlocks(String(row.id), size));
     }
     this.#requireNode(nodeId);
-    const rows = this.#db.prepare(
-      `SELECT m.id, m.node_id, m.statement, m.memory_type, m.scope_json, m.tier,
+    const rows = this.#db
+      .prepare(
+        `SELECT m.id, m.node_id, m.statement, m.memory_type, m.scope_json, m.tier,
               m.event_time, m.valid_from, m.valid_until, m.status, n.canonical_name
        FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id
        WHERE n.status = 'active' AND m.status IN ('active', 'disputed')
          AND m.node_id = ?
        ORDER BY m.node_id, m.tier, m.memory_type, m.scope_json, m.created_at DESC`,
-    ).all(nodeId) as Row[];
+      )
+      .all(nodeId) as Row[];
     const groups = new Map<string, Row[]>();
     for (const row of rows) {
       const key = `${row.node_id}\u0000${row.tier}\u0000${row.memory_type}\u0000${row.scope_json}`;
@@ -1222,9 +1889,11 @@ export class NmgStore {
     const blocks: LeafBlock[] = [];
     const now = new Date().toISOString();
     const existing = new Map(
-      (this.#db.prepare(
-        "SELECT id, created_at FROM memory_leaf_blocks WHERE node_id = ?",
-      ).all(nodeId) as Row[]).map((row) => [String(row.id), String(row.created_at)]),
+      (
+        this.#db
+          .prepare("SELECT id, created_at FROM memory_leaf_blocks WHERE node_id = ?")
+          .all(nodeId) as Row[]
+      ).map((row) => [String(row.id), String(row.created_at)]),
     );
     for (const group of groups.values()) {
       for (let offset = 0; offset < group.length; offset += size) {
@@ -1265,21 +1934,28 @@ export class NmgStore {
         }
       }
       for (const block of blocks) {
-        insertBlock.run(block.id, block.nodeId, block.tier, block.summary,
-          block.memoryCount, block.createdAt, block.updatedAt);
-        membersById.get(block.id)!.forEach(
-          (member, ordinal) => insertMember.run(block.id, member.id, ordinal),
+        insertBlock.run(
+          block.id,
+          block.nodeId,
+          block.tier,
+          block.summary,
+          block.memoryCount,
+          block.createdAt,
+          block.updatedAt,
         );
+        membersById
+          .get(block.id)!
+          .forEach((member, ordinal) => insertMember.run(block.id, member.id, ordinal));
       }
       const removeBlock = this.#db.prepare("DELETE FROM memory_leaf_blocks WHERE id = ?");
       for (const id of staleIds) removeBlock.run(id);
-      this.#db.prepare(
-        `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 0, ?)
+      this.#db
+        .prepare(
+          `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 0, ?)
          ON CONFLICT(node_id) DO UPDATE SET dirty = 0, updated_at = excluded.updated_at`,
-      ).run(nodeId, now);
-      this.#db.prepare(
-        "UPDATE memory_index_delta SET compacted = 1 WHERE node_id = ?",
-      ).run(nodeId);
+        )
+        .run(nodeId, now);
+      this.#db.prepare("UPDATE memory_index_delta SET compacted = 1 WHERE node_id = ?").run(nodeId);
       this.#db.exec("COMMIT");
       if (staleIds.length > 0) this.#invalidateVectorCaches("leaf");
       return blocks;
@@ -1290,69 +1966,90 @@ export class NmgStore {
   }
 
   dirtyLeafNodeIds(): string[] {
-    const rows = this.#db.prepare(
-      "SELECT node_id FROM leaf_block_status WHERE dirty = 1 ORDER BY node_id",
-    ).all() as Row[];
+    const rows = this.#db
+      .prepare("SELECT node_id FROM leaf_block_status WHERE dirty = 1 ORDER BY node_id")
+      .all() as Row[];
     return rows.map((row) => String(row.node_id));
   }
 
   pendingIndexDelta(nodeId?: string, limit = 512): string[] {
     const rows = nodeId
-      ? this.#db.prepare(
-          `SELECT memory_id FROM memory_index_delta
+      ? (this.#db
+          .prepare(
+            `SELECT memory_id FROM memory_index_delta
            WHERE node_id = ? ORDER BY created_at, memory_id LIMIT ?`,
-        ).all(nodeId, Math.max(1, Math.min(limit, 2_048))) as Row[]
-      : this.#db.prepare(
-          `SELECT memory_id FROM memory_index_delta
+          )
+          .all(nodeId, Math.max(1, Math.min(limit, 2_048))) as Row[])
+      : (this.#db
+          .prepare(
+            `SELECT memory_id FROM memory_index_delta
            ORDER BY created_at, memory_id LIMIT ?`,
-        ).all(Math.max(1, Math.min(limit, 2_048))) as Row[];
+          )
+          .all(Math.max(1, Math.min(limit, 2_048))) as Row[]);
     return rows.map((row) => String(row.memory_id));
   }
 
-  rebuildDueLeafBlocks(options: {
-    deltaThreshold?: number;
-    nodeLimit?: number;
-    blockSize?: number;
-  } = {}): LeafBlock[] {
+  rebuildDueLeafBlocks(
+    options: {
+      deltaThreshold?: number;
+      nodeLimit?: number;
+      blockSize?: number;
+    } = {},
+  ): LeafBlock[] {
     const threshold = Math.max(1, options.deltaThreshold ?? 16);
     const nodeLimit = Math.max(1, Math.min(options.nodeLimit ?? 32, 256));
-    const rows = this.#db.prepare(
-      `SELECT d.node_id, COUNT(*) AS delta_count, MIN(d.created_at) AS oldest
+    const rows = this.#db
+      .prepare(
+        `SELECT d.node_id, COUNT(*) AS delta_count, MIN(d.created_at) AS oldest
        FROM memory_index_delta d
        JOIN memory_nodes n ON n.id = d.node_id
        WHERE n.status = 'active' AND d.compacted = 0
        GROUP BY d.node_id HAVING delta_count >= ?
        ORDER BY oldest, d.node_id LIMIT ?`,
-    ).all(threshold, nodeLimit) as Row[];
+      )
+      .all(threshold, nodeLimit) as Row[];
     return rows.flatMap((row) =>
-      this.rebuildLeafBlocks(String(row.node_id), options.blockSize ?? 32));
+      this.rebuildLeafBlocks(String(row.node_id), options.blockSize ?? 32),
+    );
   }
 
   acknowledgeIndexDelta(nodeIds: readonly string[]): number {
     const ids = [...new Set(nodeIds)];
     if (ids.length === 0) return 0;
-    const result = this.#db.prepare(
-      `DELETE FROM memory_index_delta
+    const result = this.#db
+      .prepare(
+        `DELETE FROM memory_index_delta
        WHERE node_id IN (${ids.map(() => "?").join(",")}) AND compacted = 1`,
-    ).run(...ids);
+      )
+      .run(...ids);
     return Number(result.changes);
   }
 
-  leafEmbeddingDocuments(afterBlockId = "", limit = 256, missingModel?: string): LeafEmbeddingDocument[] {
-    const rows = this.#db.prepare(
-      `SELECT b.id, b.node_id, b.summary, n.canonical_name, n.summary AS node_summary
+  leafEmbeddingDocuments(
+    afterBlockId = "",
+    limit = 256,
+    missingModel?: string,
+  ): LeafEmbeddingDocument[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT b.id, b.node_id, b.summary, n.canonical_name, n.summary AS node_summary
        FROM memory_leaf_blocks b JOIN memory_nodes n ON n.id = b.node_id
        WHERE b.id > ?
          AND (? IS NULL OR NOT EXISTS (
            SELECT 1 FROM leaf_embeddings e WHERE e.block_id = b.id AND e.model = ?
          ))
        ORDER BY b.id LIMIT ?`,
-    ).all(afterBlockId, missingModel ?? null, missingModel ?? null,
-      Math.max(1, Math.min(limit, 2_048))) as Row[];
+      )
+      .all(
+        afterBlockId,
+        missingModel ?? null,
+        missingModel ?? null,
+        Math.max(1, Math.min(limit, 2_048)),
+      ) as Row[];
     return rows.map((row) => ({
       blockId: String(row.id),
       nodeId: String(row.node_id),
-      text: `${row.canonical_name} ${row.node_summary} ${row.summary}`,
+      text: `${row.canonical_name}: ${row.summary}`,
     }));
   }
 
@@ -1375,8 +2072,14 @@ export class NmgStore {
     this.#db.exec("BEGIN IMMEDIATE");
     try {
       for (const item of embeddings) {
-        upsert.run(item.blockId, model, dimensions, JSON.stringify(item.vector),
-          encodeVector(item.vector), now);
+        upsert.run(
+          item.blockId,
+          model,
+          dimensions,
+          JSON.stringify(item.vector),
+          encodeVector(item.vector),
+          now,
+        );
       }
       this.#db.exec("COMMIT");
       for (const item of embeddings) {
@@ -1390,10 +2093,12 @@ export class NmgStore {
   }
 
   storedLeafEmbeddings(model: string, afterBlockId = "", limit = 256): ExternalLeafEmbedding[] {
-    const rows = this.#db.prepare(
-      `SELECT block_id, vector_blob, vector_json FROM leaf_embeddings
+    const rows = this.#db
+      .prepare(
+        `SELECT block_id, vector_blob, vector_json FROM leaf_embeddings
        WHERE model = ? AND block_id > ? ORDER BY block_id LIMIT ?`,
-    ).all(model, afterBlockId, Math.max(1, Math.min(limit, 2_048))) as Row[];
+      )
+      .all(model, afterBlockId, Math.max(1, Math.min(limit, 2_048))) as Row[];
     return rows.map((row) => ({
       blockId: String(row.block_id),
       vector: storedVector(row),
@@ -1409,22 +2114,22 @@ export class NmgStore {
   ): Array<{ block: LeafBlock; score: number }> {
     const nodes = [...new Set(nodeIds)].slice(0, 50);
     const blocks = [...new Set(candidateBlockIds)].slice(0, 2_000);
-    const nodeClause = nodes.length > 0
-      ? `AND b.node_id IN (${nodes.map(() => "?").join(",")})`
-      : "";
-    const blockClause = blocks.length > 0
-      ? `AND b.id IN (${blocks.map(() => "?").join(",")})`
-      : "";
-    const rows = this.#db.prepare(
-      `SELECT b.* FROM memory_leaf_blocks b
+    const nodeClause =
+      nodes.length > 0 ? `AND b.node_id IN (${nodes.map(() => "?").join(",")})` : "";
+    const blockClause = blocks.length > 0 ? `AND b.id IN (${blocks.map(() => "?").join(",")})` : "";
+    const rows = this.#db
+      .prepare(
+        `SELECT b.* FROM memory_leaf_blocks b
        JOIN memory_nodes n ON n.id = b.node_id AND n.status = 'active'
        JOIN leaf_embeddings e ON e.block_id = b.id AND e.model = ?
        WHERE 1 = 1 ${nodeClause} ${blockClause}`,
-    ).all(model, ...nodes, ...blocks) as Row[];
+      )
+      .all(model, ...nodes, ...blocks) as Row[];
     const byId = new Map(rows.map((row) => [String(row.id), row]));
     const cache = this.#embeddingCache("leaf", model);
     if (!cache) return [];
-    return cache.score(queryVector, new Set(byId.keys()))
+    return cache
+      .score(queryVector, new Set(byId.keys()))
       .map(({ id, score }) => ({ block: mapLeafBlock(byId.get(id)!), score }))
       .slice(0, Math.max(1, Math.min(limit, 50)));
   }
@@ -1439,31 +2144,42 @@ export class NmgStore {
   ): MemorySearchResult[] {
     const blocks = [...new Set(blockIds)].slice(0, 50);
     if (blocks.length === 0) return [];
-    const rows = this.#db.prepare(
-      `SELECT memory_id FROM memory_leaf_members
+    const rows = this.#db
+      .prepare(
+        `SELECT memory_id FROM memory_leaf_members
        WHERE block_id IN (${blocks.map(() => "?").join(",")})
        ORDER BY block_id, ordinal LIMIT 2000`,
-    ).all(...blocks) as Row[];
+      )
+      .all(...blocks) as Row[];
     const requestedLimit = Math.max(1, Math.min(options.limit ?? 8, 50));
-    const results = this.#searchWithVector(query, queryVector, model, {
-      ...options,
-      limit: blockScores ? 50 : requestedLimit,
-      retrievalMode: "fts5",
-    }, rows.map((row) => String(row.memory_id)));
+    const results = this.#searchWithVector(
+      query,
+      queryVector,
+      model,
+      {
+        ...options,
+        limit: blockScores ? 50 : requestedLimit,
+        retrievalMode: "fts5",
+      },
+      rows.map((row) => String(row.memory_id)),
+    );
     if (!blockScores) return results;
-    const memberships = this.#db.prepare(
-      `SELECT memory_id, block_id FROM memory_leaf_members
+    const memberships = this.#db
+      .prepare(
+        `SELECT memory_id, block_id FROM memory_leaf_members
        WHERE block_id IN (${blocks.map(() => "?").join(",")})`,
-    ).all(...blocks) as Row[];
-    const memoryScores = new Map(memberships.map((row) => [
-      String(row.memory_id), blockScores.get(String(row.block_id)) ?? 0,
-    ]));
+      )
+      .all(...blocks) as Row[];
+    const memoryScores = new Map(
+      memberships.map((row) => [String(row.memory_id), blockScores.get(String(row.block_id)) ?? 0]),
+    );
     for (const result of results) {
       const leafScore = memoryScores.get(result.memory.id) ?? 0;
       result.routeScore = leafScore;
       result.combinedScore = leafScore * 0.9 + result.lexicalScore * 0.1;
     }
-    return results.sort((left, right) => right.combinedScore - left.combinedScore)
+    return results
+      .sort((left, right) => right.combinedScore - left.combinedScore)
       .slice(0, requestedLimit);
   }
 
@@ -1487,8 +2203,10 @@ export class NmgStore {
       options.blockLimit ?? 8,
     );
     const leaves = [...directLeaves, ...routedLeaves]
-      .filter((route, index, all) =>
-        all.findIndex((candidate) => candidate.block.id === route.block.id) === index)
+      .filter(
+        (route, index, all) =>
+          all.findIndex((candidate) => candidate.block.id === route.block.id) === index,
+      )
       .sort((left, right) => right.score - left.score)
       .slice(0, options.blockLimit ?? 8);
     const indexed = this.searchLeafBlocks(
@@ -1500,22 +2218,25 @@ export class NmgStore {
       new Map(leaves.map((route) => [route.block.id, route.score])),
     );
     const deltaIds = this.#deltaCandidateIds(query, 2_048);
-    const delta = deltaIds.length === 0
-      ? []
-      : this.#searchWithVector(
-          query,
-          this.#embedder.embed(query),
-          this.#embedder.model,
-          {
-            ...options,
-            limit: Math.min(50, Math.max(options.limit ?? 8, 20)),
-            retrievalMode: "hashing",
-          },
-          deltaIds,
-        );
+    const delta =
+      deltaIds.length === 0
+        ? []
+        : this.#searchWithVector(
+            query,
+            this.#embedder.embed(query),
+            this.#embedder.model,
+            {
+              ...options,
+              limit: Math.min(50, Math.max(options.limit ?? 8, 20)),
+              retrievalMode: "hashing",
+            },
+            deltaIds,
+          );
     return [...indexed, ...delta]
-      .filter((result, index, all) =>
-        all.findIndex((candidate) => candidate.memory.id === result.memory.id) === index)
+      .filter(
+        (result, index, all) =>
+          all.findIndex((candidate) => candidate.memory.id === result.memory.id) === index,
+      )
       .sort((left, right) => contextUsefulness(query, right) - contextUsefulness(query, left))
       .slice(0, Math.max(1, Math.min(options.limit ?? 8, 50)));
   }
@@ -1530,20 +2251,30 @@ export class NmgStore {
     const selected = [...new Set(nodeIds)].slice(0, 50);
     if (selected.length === 0) return [];
     const ftsIds = this.#ftsCandidatesInNodes(query, selected, MAX_SEARCH_CANDIDATES);
-    const candidateIds = ftsIds.length > 0
-      ? ftsIds
-      : (this.#db.prepare(
-        `SELECT id FROM memory_records
+    const candidateIds =
+      ftsIds.length > 0
+        ? ftsIds
+        : (
+            this.#db
+              .prepare(
+                `SELECT id FROM memory_records
          WHERE node_id IN (${selected.map(() => "?").join(",")})
            AND tier <= ? AND status IN ('active', 'disputed')
          ORDER BY tier ASC, importance DESC, access_count DESC, created_at DESC
          LIMIT ?`,
-      ).all(...selected, options.maxTier ?? 1, MAX_SEARCH_CANDIDATES) as Row[])
-        .map((row) => String(row.id));
-    return this.#searchWithVector(query, queryVector, model, {
-      ...options,
-      retrievalMode: "fts5",
-    }, candidateIds);
+              )
+              .all(...selected, options.maxTier ?? 1, MAX_SEARCH_CANDIDATES) as Row[]
+          ).map((row) => String(row.id));
+    return this.#searchWithVector(
+      query,
+      queryVector,
+      model,
+      {
+        ...options,
+        retrievalMode: "fts5",
+      },
+      candidateIds,
+    );
   }
 
   upsertExternalEmbeddings(model: string, embeddings: ExternalEmbedding[]): number {
@@ -1565,8 +2296,14 @@ export class NmgStore {
     this.#db.exec("BEGIN IMMEDIATE");
     try {
       for (const item of embeddings) {
-        upsert.run(item.memoryId, model, dimensions, JSON.stringify(item.vector),
-          encodeVector(item.vector), now);
+        upsert.run(
+          item.memoryId,
+          model,
+          dimensions,
+          JSON.stringify(item.vector),
+          encodeVector(item.vector),
+          now,
+        );
       }
       this.#db.exec("COMMIT");
       return embeddings.length;
@@ -1577,10 +2314,12 @@ export class NmgStore {
   }
 
   storedEmbeddings(model: string, afterMemoryId = "", limit = 256): ExternalEmbedding[] {
-    const rows = this.#db.prepare(
-      `SELECT memory_id, vector_blob, vector_json FROM memory_embeddings
+    const rows = this.#db
+      .prepare(
+        `SELECT memory_id, vector_blob, vector_json FROM memory_embeddings
        WHERE model = ? AND memory_id > ? ORDER BY memory_id LIMIT ?`,
-    ).all(model, afterMemoryId, Math.max(1, Math.min(limit, 2_048))) as Row[];
+      )
+      .all(model, afterMemoryId, Math.max(1, Math.min(limit, 2_048))) as Row[];
     return rows.map((row) => ({
       memoryId: String(row.memory_id),
       vector: storedVector(row),
@@ -1599,40 +2338,41 @@ export class NmgStore {
 
     const maxTier = options.maxTier ?? 1;
     const limit = Math.max(1, Math.min(options.limit ?? 8, 50));
-    const nodeName = options.nodeName
-      ? this.#resolveActiveNodeName(options.nodeName)
-      : null;
+    const nodeName = options.nodeName ? this.#resolveActiveNodeName(options.nodeName) : null;
     const retrievalMode = options.retrievalMode ?? "legacy";
-    const ftsIds = retrievalMode === "fts5" || retrievalMode === "hybrid"
-      ? this.#ftsCandidates(query, MAX_SEARCH_CANDIDATES)
-      : [];
+    const ftsIds =
+      retrievalMode === "fts5" || retrievalMode === "hybrid"
+        ? this.#ftsCandidates(query, MAX_SEARCH_CANDIDATES)
+        : [];
     if (retrievalMode === "fts5" && ftsIds.length === 0 && forcedCandidateIds.length === 0) {
       return [];
     }
     const candidateIds = forcedCandidateIds.length > 0 ? forcedCandidateIds : ftsIds;
-    const candidateClause = forcedCandidateIds.length > 0
-      ? `AND m.id IN (${forcedCandidateIds.map(() => "?").join(",")})`
-      : retrievalMode === "qwen3"
-      ? "AND ve.vector_json IS NOT NULL"
-      : retrievalMode === "fts5"
-      ? `AND m.id IN (${ftsIds.map(() => "?").join(",")})`
-      : retrievalMode === "hybrid" && ftsIds.length > 0
-      ? `AND (m.id IN (${ftsIds.map(() => "?").join(",")}) OR m.id IN (
+    const candidateClause =
+      forcedCandidateIds.length > 0
+        ? `AND m.id IN (${forcedCandidateIds.map(() => "?").join(",")})`
+        : retrievalMode === "qwen3"
+          ? "AND ve.vector_json IS NOT NULL"
+          : retrievalMode === "fts5"
+            ? `AND m.id IN (${ftsIds.map(() => "?").join(",")})`
+            : retrievalMode === "hybrid" && ftsIds.length > 0
+              ? `AND (m.id IN (${ftsIds.map(() => "?").join(",")}) OR m.id IN (
            SELECT id FROM memory_records ORDER BY tier ASC, importance DESC,
              access_count DESC, created_at DESC LIMIT ${MAX_SEARCH_CANDIDATES}
          ))`
-      : "";
-    const candidateOrder = forcedCandidateIds.length === 0 &&
-        retrievalMode === "hybrid" && ftsIds.length > 0
-      ? `CASE WHEN m.id IN (${ftsIds.map(() => "?").join(",")}) THEN 0 ELSE 1 END,`
-      : "";
-    const rowLimit = forcedCandidateIds.length > 0
-      ? forcedCandidateIds.length
-      : retrievalMode === "qwen3"
-      ? 1_000_000
-      : retrievalMode === "fts5"
-      ? ftsIds.length
-      : MAX_SEARCH_CANDIDATES + ftsIds.length;
+              : "";
+    const candidateOrder =
+      forcedCandidateIds.length === 0 && retrievalMode === "hybrid" && ftsIds.length > 0
+        ? `CASE WHEN m.id IN (${ftsIds.map(() => "?").join(",")}) THEN 0 ELSE 1 END,`
+        : "";
+    const rowLimit =
+      forcedCandidateIds.length > 0
+        ? forcedCandidateIds.length
+        : retrievalMode === "qwen3"
+          ? 1_000_000
+          : retrievalMode === "fts5"
+            ? ftsIds.length
+            : MAX_SEARCH_CANDIDATES + ftsIds.length;
     const rows = this.#db
       .prepare(
         `SELECT
@@ -1643,6 +2383,8 @@ export class NmgStore {
            m.truth_status AS m_truth_status,
            m.scope_json AS m_scope_json, m.valid_from AS m_valid_from,
            m.valid_until AS m_valid_until, m.status AS m_status,
+           m.residence AS m_residence, m.promoted_at AS m_promoted_at,
+           m.expires_at AS m_expires_at,
            m.evidence_role AS m_evidence_role,
            m.supersedes_id AS m_supersedes_id,
            m.tier AS m_tier, m.importance AS m_importance,
@@ -1652,7 +2394,8 @@ export class NmgStore {
            n.id AS n_id, n.canonical_name AS n_canonical_name,
            n.kind AS n_kind, n.summary AS n_summary,
            n.created_at AS n_created_at, n.updated_at AS n_updated_at,
-           n.status AS n_status, ve.vector_json AS ve_vector_json,
+           n.status AS n_status, n.residence AS n_residence,
+           ve.vector_json AS ve_vector_json,
            ve.vector_blob AS ve_vector_blob,
            h.id AS h_id, h.session_id AS h_session_id, h.role AS h_role,
            h.content AS h_content, h.source_message_id AS h_source_message_id,
@@ -1667,6 +2410,7 @@ export class NmgStore {
            AND n.status = 'active'
            AND (? IS NULL OR n.canonical_name = ?)
            AND (? = 1 OR m.status IN ('active', 'disputed'))
+           AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
          ORDER BY ${candidateOrder} m.tier ASC, m.importance DESC,
                   m.access_count DESC, m.created_at DESC
          LIMIT ?`,
@@ -1682,10 +2426,10 @@ export class NmgStore {
         rowLimit,
       ) as Row[];
 
-    const routes = retrievalMode === "fts5" || retrievalMode === "hashing" ||
-        retrievalMode === "qwen3"
-      ? new Map<string, number>()
-      : new Map(this.routeNodes(query, 20).map((route) => [route.node.id, route.score]));
+    const routes =
+      retrievalMode === "fts5" || retrievalMode === "hashing" || retrievalMode === "qwen3"
+        ? new Map<string, number>()
+        : new Map(this.routeNodes(query, 20).map((route) => [route.node.id, route.score]));
     const results = rows
       .map((row) => {
         const lexical = lexicalScore(normalizedQuery, row);
@@ -1694,11 +2438,16 @@ export class NmgStore {
         const result = mapSearchResult(row, lexical);
         result.vectorScore = retrievalMode === "fts5" ? 0 : vector;
         result.routeScore = route;
-        result.combinedScore = retrievalMode === "fts5"
-          ? (lexical > 0 ? lexical : forcedCandidateIds.length > 0 ? 0.001 : 0)
-          : retrievalMode === "hashing" || retrievalMode === "qwen3"
-          ? vector
-          : hybridScore(lexical, vector, route);
+        result.combinedScore =
+          retrievalMode === "fts5"
+            ? lexical > 0
+              ? lexical
+              : forcedCandidateIds.length > 0
+                ? 0.001
+                : 0
+            : retrievalMode === "hashing" || retrievalMode === "qwen3"
+              ? vector
+              : hybridScore(lexical, vector, route);
         return result;
       })
       .filter((result) => matchesScope(result.memory.scope, options.scope))
@@ -1767,13 +2516,15 @@ export class NmgStore {
         historyId: history.id,
         createdAt: history.createdAt,
       };
-      this.#db.prepare(
-        `INSERT INTO session_archives (session_id, history_id, created_at)
+      this.#db
+        .prepare(
+          `INSERT INTO session_archives (session_id, history_id, created_at)
          VALUES (?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
            history_id = excluded.history_id,
            created_at = excluded.created_at`,
-      ).run(archive.sessionId, archive.historyId, archive.createdAt);
+        )
+        .run(archive.sessionId, archive.historyId, archive.createdAt);
       this.#db.exec("COMMIT");
       return archive;
     } catch (error) {
@@ -1792,6 +2543,199 @@ export class NmgStore {
       historyId: String(row.history_id),
       createdAt: String(row.created_at),
     };
+  }
+
+  #requireActiveMemory(memoryId: string): MemoryRecord {
+    const row = this.#db
+      .prepare("SELECT node_id FROM memory_records WHERE id = ?")
+      .get(memoryId) as Row | undefined;
+    if (!row) throw new Error(`memory ${memoryId} does not exist`);
+    const result = this.#resultsForNode(String(row.node_id), 3, 1, memoryId)[0];
+    if (!result) throw new Error(`memory ${memoryId} is not active`);
+    return result.memory;
+  }
+
+  #refreshNodeResidence(nodeId: string, updatedAt: string): void {
+    const hasLongTermMemory = this.#db
+      .prepare(
+        `SELECT 1 FROM memory_records
+         WHERE node_id = ? AND residence = 'ltg'
+           AND status IN ('active', 'disputed') LIMIT 1`,
+      )
+      .get(nodeId);
+    const hasLongTermRelation = this.#db
+      .prepare(
+        `SELECT 1 FROM node_relations
+         WHERE status = 'consolidated'
+           AND (source_node_id = ? OR target_node_id = ?) LIMIT 1`,
+      )
+      .get(nodeId, nodeId);
+    this.#db
+      .prepare("UPDATE memory_nodes SET residence = ?, updated_at = ? WHERE id = ?")
+      .run(hasLongTermMemory || hasLongTermRelation ? "ltg" : "stg", updatedAt, nodeId);
+  }
+
+  #recordNodeSelections(nodeIds: string[], expandedNodeIds: string[], updatedAt: string): void {
+    const selected = new Set(nodeIds);
+    const expanded = new Set(expandedNodeIds);
+    const upsert = this.#db.prepare(
+      `INSERT INTO node_activation_signals
+        (node_id, selected_count, expanded_count, used_count,
+         contradicted_count, rejected_count, updated_at)
+       VALUES (?, ?, ?, 0, 0, 0, ?)
+       ON CONFLICT(node_id) DO UPDATE SET
+         selected_count = selected_count + excluded.selected_count,
+         expanded_count = expanded_count + excluded.expanded_count,
+         updated_at = excluded.updated_at`,
+    );
+    for (const nodeId of new Set([...selected, ...expanded])) {
+      upsert.run(nodeId, selected.has(nodeId) ? 1 : 0, expanded.has(nodeId) ? 1 : 0, updatedAt);
+    }
+  }
+
+  #recordEdgeSelections(relationIds: readonly string[], updatedAt: string): void {
+    const upsert = this.#db.prepare(
+      `INSERT INTO edge_activation_signals
+        (relation_id, selected_count, used_count, contradicted_count,
+         rejected_count, updated_at)
+       VALUES (?, 1, 0, 0, 0, ?)
+       ON CONFLICT(relation_id) DO UPDATE SET
+         selected_count = selected_count + 1,
+         updated_at = excluded.updated_at`,
+    );
+    for (const relationId of new Set(relationIds)) upsert.run(relationId, updatedAt);
+  }
+
+  #recordNodeOutcomes(
+    used: Set<string>,
+    contradicted: Set<string>,
+    rejected: Set<string>,
+    updatedAt: string,
+  ): void {
+    const upsert = this.#db.prepare(
+      `INSERT INTO node_activation_signals
+        (node_id, selected_count, expanded_count, used_count,
+         contradicted_count, rejected_count, updated_at)
+       VALUES (?, 0, 0, ?, ?, ?, ?)
+       ON CONFLICT(node_id) DO UPDATE SET
+         used_count = used_count + excluded.used_count,
+         contradicted_count = contradicted_count + excluded.contradicted_count,
+         rejected_count = rejected_count + excluded.rejected_count,
+         updated_at = excluded.updated_at`,
+    );
+    for (const nodeId of new Set([...used, ...contradicted, ...rejected])) {
+      upsert.run(
+        nodeId,
+        used.has(nodeId) ? 1 : 0,
+        contradicted.has(nodeId) ? 1 : 0,
+        rejected.has(nodeId) ? 1 : 0,
+        updatedAt,
+      );
+    }
+  }
+
+  #recordEdgeOutcomes(
+    relationIds: readonly string[],
+    used: Set<string>,
+    contradicted: Set<string>,
+    rejected: Set<string>,
+    updatedAt: string,
+  ): void {
+    const find = this.#db.prepare("SELECT * FROM node_relations WHERE id = ?");
+    const upsert = this.#db.prepare(
+      `INSERT INTO edge_activation_signals
+        (relation_id, selected_count, used_count, contradicted_count,
+         rejected_count, updated_at)
+       VALUES (?, 0, ?, ?, ?, ?)
+       ON CONFLICT(relation_id) DO UPDATE SET
+         used_count = used_count + excluded.used_count,
+         contradicted_count = contradicted_count + excluded.contradicted_count,
+         rejected_count = rejected_count + excluded.rejected_count,
+         updated_at = excluded.updated_at`,
+    );
+    for (const relationId of new Set(relationIds)) {
+      const row = find.get(relationId) as Row | undefined;
+      if (!row) continue;
+      const relation = mapRelation(row);
+      const endpoints = [relation.sourceNodeId, relation.targetNodeId];
+      upsert.run(
+        relationId,
+        endpoints.every((nodeId) => used.has(nodeId)) ? 1 : 0,
+        endpoints.some((nodeId) => contradicted.has(nodeId)) ? 1 : 0,
+        endpoints.some((nodeId) => rejected.has(nodeId)) ? 1 : 0,
+        updatedAt,
+      );
+    }
+  }
+
+  #refreshPairUsefulness(leftNodeId: string, rightNodeId: string): void {
+    this.#db
+      .prepare(
+        `UPDATE node_pair_signals SET useful_count = (
+           SELECT COUNT(*) FROM edge_task_observations
+           WHERE left_node_id = ? AND right_node_id = ? AND useful = 1
+         ) WHERE left_node_id = ? AND right_node_id = ?`,
+      )
+      .run(leftNodeId, rightNodeId, leftNodeId, rightNodeId);
+  }
+
+  #edgeEvidenceTraceIds(leftNodeId: string, rightNodeId: string): string[] {
+    return (
+      this.#db
+        .prepare(
+          `SELECT trace_id FROM edge_task_observations
+           WHERE left_node_id = ? AND right_node_id = ? AND useful = 1
+           ORDER BY created_at DESC LIMIT 32`,
+        )
+        .all(leftNodeId, rightNodeId) as Row[]
+    ).map((row) => String(row.trace_id));
+  }
+
+  #recordConsolidationEvent(
+    action: ConsolidationEvent["action"],
+    targetId: string,
+    previousState: string,
+    nextState: string,
+    reason: string,
+    evidenceTraceIds: readonly string[],
+    createdAt = new Date().toISOString(),
+  ): string {
+    const id = randomUUID();
+    this.#db
+      .prepare(
+        `INSERT INTO consolidation_events
+          (id, action, target_id, previous_state, next_state, reason,
+           evidence_trace_ids_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        action,
+        targetId,
+        previousState,
+        nextState,
+        reason,
+        JSON.stringify([...new Set(evidenceTraceIds)]),
+        createdAt,
+      );
+    return id;
+  }
+
+  #requireConsolidationEvent(id: string): ConsolidationEvent {
+    const row = this.#db.prepare("SELECT * FROM consolidation_events WHERE id = ?").get(id) as
+      Row | undefined;
+    if (!row) throw new Error(`consolidation event ${id} does not exist`);
+    return mapConsolidationEvent(row);
+  }
+
+  #consolidationCoolingDown(targetId: string, cooldownMs: number): boolean {
+    const row = this.#db
+      .prepare(
+        `SELECT created_at FROM consolidation_events
+         WHERE target_id = ? ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(targetId) as Row | undefined;
+    return Boolean(row) && Date.now() - Date.parse(String(row!.created_at)) < cooldownMs;
   }
 
   #migrate(): void {
@@ -1813,7 +2757,8 @@ export class NmgStore {
         summary TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'active'
+        status TEXT NOT NULL DEFAULT 'active',
+        residence TEXT NOT NULL DEFAULT 'ltg' CHECK (residence IN ('stg', 'ltg'))
       );
 
       CREATE TABLE IF NOT EXISTS memory_records (
@@ -1830,6 +2775,9 @@ export class NmgStore {
         valid_from TEXT,
         valid_until TEXT,
         status TEXT NOT NULL DEFAULT 'active',
+        residence TEXT NOT NULL DEFAULT 'ltg' CHECK (residence IN ('stg', 'ltg')),
+        promoted_at TEXT,
+        expires_at TEXT,
         evidence_role TEXT NOT NULL DEFAULT 'support',
         supersedes_id TEXT REFERENCES memory_records(id),
         tier INTEGER NOT NULL CHECK (tier BETWEEN 0 AND 3),
@@ -1858,6 +2806,11 @@ export class NmgStore {
         target_node_id TEXT NOT NULL REFERENCES memory_nodes(id),
         relation_type TEXT NOT NULL,
         evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+        residence TEXT NOT NULL DEFAULT 'ltg',
+        status TEXT NOT NULL DEFAULT 'consolidated',
+        stability REAL NOT NULL DEFAULT 1,
+        consolidation_source TEXT NOT NULL DEFAULT 'explicit',
+        consolidated_at TEXT NOT NULL,
         created_at TEXT NOT NULL,
         UNIQUE (source_node_id, target_node_id, relation_type)
       );
@@ -1946,6 +2899,12 @@ export class NmgStore {
         result_node_ids_json TEXT NOT NULL,
         expanded_node_ids_json TEXT NOT NULL,
         useful_memory_ids_json TEXT NOT NULL,
+        contradicted_memory_ids_json TEXT NOT NULL DEFAULT '[]',
+        rejected_memory_ids_json TEXT NOT NULL DEFAULT '[]',
+        relation_ids_json TEXT NOT NULL DEFAULT '[]',
+        task_id TEXT NOT NULL DEFAULT '',
+        active_graph_budget_json TEXT NOT NULL DEFAULT '{}',
+        active_graph_usage_json TEXT NOT NULL DEFAULT '{}',
         ambiguity REAL NOT NULL,
         fallback_used INTEGER NOT NULL,
         conflict_observed INTEGER NOT NULL,
@@ -1969,6 +2928,47 @@ export class NmgStore {
         evidence_trace_ids_json TEXT NOT NULL DEFAULT '[]',
         updated_at TEXT NOT NULL,
         PRIMARY KEY (left_node_id, right_node_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS edge_task_observations (
+        left_node_id TEXT NOT NULL REFERENCES memory_nodes(id),
+        right_node_id TEXT NOT NULL REFERENCES memory_nodes(id),
+        task_id TEXT NOT NULL,
+        trace_id TEXT NOT NULL REFERENCES retrieval_traces(id),
+        useful INTEGER NOT NULL DEFAULT 0,
+        contradicted INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (left_node_id, right_node_id, task_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS node_activation_signals (
+        node_id TEXT PRIMARY KEY REFERENCES memory_nodes(id),
+        selected_count INTEGER NOT NULL DEFAULT 0,
+        expanded_count INTEGER NOT NULL DEFAULT 0,
+        used_count INTEGER NOT NULL DEFAULT 0,
+        contradicted_count INTEGER NOT NULL DEFAULT 0,
+        rejected_count INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS edge_activation_signals (
+        relation_id TEXT PRIMARY KEY REFERENCES node_relations(id) ON DELETE CASCADE,
+        selected_count INTEGER NOT NULL DEFAULT 0,
+        used_count INTEGER NOT NULL DEFAULT 0,
+        contradicted_count INTEGER NOT NULL DEFAULT 0,
+        rejected_count INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS consolidation_events (
+        id TEXT PRIMARY KEY,
+        action TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        previous_state TEXT NOT NULL,
+        next_state TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        evidence_trace_ids_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS topology_proposals (
@@ -2032,11 +3032,15 @@ export class NmgStore {
         ON memory_index_delta(node_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_topology_proposals_key_created
         ON topology_proposals(proposal_key, created_at);
+      CREATE INDEX IF NOT EXISTS idx_edge_task_observations_pair
+        ON edge_task_observations(left_node_id, right_node_id, created_at);
     `);
     this.#ensureMemoryColumns();
     this.#ensureHistoryColumns();
     this.#ensureEmbeddingTable();
     this.#ensureNodeColumns();
+    this.#ensureRelationColumns();
+    this.#ensureRetrievalTraceColumns();
     this.#ensureDeltaColumns();
     this.#ensureBinaryVectors();
     this.#db.exec(`
@@ -2045,6 +3049,10 @@ export class NmgStore {
         WHERE source_message_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_memory_records_state
         ON memory_records(memory_type, state_key, status);
+      CREATE INDEX IF NOT EXISTS idx_memory_records_residence_expiry
+        ON memory_records(residence, expires_at, status);
+      UPDATE memory_records SET promoted_at = created_at
+        WHERE residence = 'ltg' AND promoted_at IS NULL;
       INSERT OR IGNORE INTO memory_evidence_links (memory_id, history_id)
       SELECT id, evidence_id FROM memory_records;
       INSERT INTO memory_fts(memory_id, statement, node_name, evidence)
@@ -2063,8 +3071,8 @@ export class NmgStore {
 
   #ensureMemoryColumns(): void {
     const existing = new Set(
-      (this.#db.prepare("PRAGMA table_info(memory_records)").all() as Row[]).map(
-        (row) => String(row.name),
+      (this.#db.prepare("PRAGMA table_info(memory_records)").all() as Row[]).map((row) =>
+        String(row.name),
       ),
     );
     const additions: Array<[string, string]> = [
@@ -2080,6 +3088,9 @@ export class NmgStore {
       ["source_actor", "TEXT NOT NULL DEFAULT 'user'"],
       ["truth_status", "TEXT NOT NULL DEFAULT 'asserted'"],
       ["pending_access_count", "INTEGER NOT NULL DEFAULT 0"],
+      ["residence", "TEXT NOT NULL DEFAULT 'ltg'"],
+      ["promoted_at", "TEXT"],
+      ["expires_at", "TEXT"],
     ];
     for (const [name, definition] of additions) {
       if (!existing.has(name)) {
@@ -2090,8 +3101,9 @@ export class NmgStore {
 
   #ensureDeltaColumns(): void {
     const columns = new Set(
-      (this.#db.prepare("PRAGMA table_info(memory_index_delta)").all() as Row[])
-        .map((row) => String(row.name)),
+      (this.#db.prepare("PRAGMA table_info(memory_index_delta)").all() as Row[]).map((row) =>
+        String(row.name),
+      ),
     );
     if (!columns.has("compacted")) {
       this.#db.exec(
@@ -2108,16 +3120,19 @@ export class NmgStore {
     ];
     for (const [table, idColumn] of tables) {
       const columns = new Set(
-        (this.#db.prepare(`PRAGMA table_info(${table})`).all() as Row[])
-          .map((row) => String(row.name)),
+        (this.#db.prepare(`PRAGMA table_info(${table})`).all() as Row[]).map((row) =>
+          String(row.name),
+        ),
       );
       if (!columns.has("vector_blob")) {
         this.#db.exec(`ALTER TABLE ${table} ADD COLUMN vector_blob BLOB`);
       }
-      const rows = this.#db.prepare(
-        `SELECT ${idColumn} AS id, model, vector_json FROM ${table}
+      const rows = this.#db
+        .prepare(
+          `SELECT ${idColumn} AS id, model, vector_json FROM ${table}
          WHERE vector_blob IS NULL`,
-      ).all() as Row[];
+        )
+        .all() as Row[];
       const update = this.#db.prepare(
         `UPDATE ${table} SET vector_blob = ? WHERE ${idColumn} = ? AND model = ?`,
       );
@@ -2129,8 +3144,8 @@ export class NmgStore {
 
   #ensureHistoryColumns(): void {
     const existing = new Set(
-      (this.#db.prepare("PRAGMA table_info(history_records)").all() as Row[]).map(
-        (row) => String(row.name),
+      (this.#db.prepare("PRAGMA table_info(history_records)").all() as Row[]).map((row) =>
+        String(row.name),
       ),
     );
     if (!existing.has("source_message_id")) {
@@ -2174,55 +3189,111 @@ export class NmgStore {
     const node = this.#requireNode(nodeId);
     const evidence = this.#requireHistory(evidenceId);
     this.#db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
-    this.#db.prepare(
-      "INSERT INTO memory_fts(memory_id, statement, node_name, evidence) VALUES (?, ?, ?, ?)",
-    ).run(memoryId, statement, node.canonicalName, evidence.content);
-    this.#db.prepare("INSERT OR IGNORE INTO memory_fts_registry(memory_id) VALUES (?)").run(memoryId);
+    this.#db
+      .prepare(
+        "INSERT INTO memory_fts(memory_id, statement, node_name, evidence) VALUES (?, ?, ?, ?)",
+      )
+      .run(memoryId, statement, node.canonicalName, evidence.content);
+    this.#db
+      .prepare("INSERT OR IGNORE INTO memory_fts_registry(memory_id) VALUES (?)")
+      .run(memoryId);
   }
 
   #ftsCandidates(query: string, limit: number): string[] {
     const expression = ftsExpression(query);
     if (!expression) return [];
-    const rows = this.#db.prepare(
-      "SELECT memory_id FROM memory_fts WHERE memory_fts MATCH ? ORDER BY bm25(memory_fts) LIMIT ?",
-    ).all(expression, limit) as Row[];
+    const rows = this.#db
+      .prepare(
+        "SELECT memory_id FROM memory_fts WHERE memory_fts MATCH ? ORDER BY bm25(memory_fts) LIMIT ?",
+      )
+      .all(expression, limit) as Row[];
     return rows.map((row) => String(row.memory_id));
   }
 
   #deltaCandidateIds(query: string, limit: number): string[] {
     const bounded = Math.max(1, Math.min(limit, 2_048));
-    const recent = (this.#db.prepare(
-      `SELECT memory_id FROM memory_index_delta
+    const recent = (
+      this.#db
+        .prepare(
+          `SELECT memory_id FROM memory_index_delta
        ORDER BY created_at DESC, memory_id DESC LIMIT ?`,
-    ).all(bounded) as Row[]).map((row) => String(row.memory_id));
-    const isDelta = this.#db.prepare(
-      "SELECT 1 FROM memory_index_delta WHERE memory_id = ?",
+        )
+        .all(bounded) as Row[]
+    ).map((row) => String(row.memory_id));
+    const isDelta = this.#db.prepare("SELECT 1 FROM memory_index_delta WHERE memory_id = ?");
+    const exact = this.#ftsCandidates(query, MAX_SEARCH_CANDIDATES).filter((memoryId) =>
+      Boolean(isDelta.get(memoryId)),
     );
-    const exact = this.#ftsCandidates(query, MAX_SEARCH_CANDIDATES)
-      .filter((memoryId) => Boolean(isDelta.get(memoryId)));
     return [...new Set([...exact, ...recent])].slice(0, bounded);
   }
 
   #ftsCandidatesInNodes(query: string, nodeIds: string[], limit: number): string[] {
     const expression = ftsExpression(query);
     if (!expression || nodeIds.length === 0) return [];
-    const rows = this.#db.prepare(
-      `SELECT f.memory_id FROM memory_fts f
+    const rows = this.#db
+      .prepare(
+        `SELECT f.memory_id FROM memory_fts f
        JOIN memory_records m ON m.id = f.memory_id
        WHERE memory_fts MATCH ? AND m.node_id IN (${nodeIds.map(() => "?").join(",")})
        ORDER BY bm25(memory_fts) LIMIT ?`,
-    ).all(expression, ...nodeIds, limit) as Row[];
+      )
+      .all(expression, ...nodeIds, limit) as Row[];
     return rows.map((row) => String(row.memory_id));
   }
 
   #ensureNodeColumns(): void {
     const existing = new Set(
-      (this.#db.prepare("PRAGMA table_info(memory_nodes)").all() as Row[]).map(
-        (row) => String(row.name),
+      (this.#db.prepare("PRAGMA table_info(memory_nodes)").all() as Row[]).map((row) =>
+        String(row.name),
       ),
     );
     if (!existing.has("status")) {
       this.#db.exec("ALTER TABLE memory_nodes ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
+    }
+    if (!existing.has("residence")) {
+      this.#db.exec("ALTER TABLE memory_nodes ADD COLUMN residence TEXT NOT NULL DEFAULT 'ltg'");
+    }
+  }
+
+  #ensureRelationColumns(): void {
+    const existing = new Set(
+      (this.#db.prepare("PRAGMA table_info(node_relations)").all() as Row[]).map((row) =>
+        String(row.name),
+      ),
+    );
+    const additions: Array<[string, string]> = [
+      ["residence", "TEXT NOT NULL DEFAULT 'ltg'"],
+      ["status", "TEXT NOT NULL DEFAULT 'consolidated'"],
+      ["stability", "REAL NOT NULL DEFAULT 1"],
+      ["consolidation_source", "TEXT NOT NULL DEFAULT 'explicit'"],
+      ["consolidated_at", "TEXT"],
+    ];
+    for (const [name, definition] of additions) {
+      if (!existing.has(name))
+        this.#db.exec(`ALTER TABLE node_relations ADD COLUMN ${name} ${definition}`);
+    }
+    this.#db.exec(
+      "UPDATE node_relations SET consolidated_at = created_at WHERE consolidated_at IS NULL",
+    );
+  }
+
+  #ensureRetrievalTraceColumns(): void {
+    const existing = new Set(
+      (this.#db.prepare("PRAGMA table_info(retrieval_traces)").all() as Row[]).map((row) =>
+        String(row.name),
+      ),
+    );
+    const additions: Array<[string, string]> = [
+      ["contradicted_memory_ids_json", "TEXT NOT NULL DEFAULT '[]'"],
+      ["rejected_memory_ids_json", "TEXT NOT NULL DEFAULT '[]'"],
+      ["relation_ids_json", "TEXT NOT NULL DEFAULT '[]'"],
+      ["task_id", "TEXT NOT NULL DEFAULT ''"],
+      ["active_graph_budget_json", "TEXT NOT NULL DEFAULT '{}'"],
+      ["active_graph_usage_json", "TEXT NOT NULL DEFAULT '{}'"],
+    ];
+    for (const [name, definition] of additions) {
+      if (!existing.has(name))
+        this.#db.exec(`ALTER TABLE retrieval_traces ADD COLUMN ${name} ${definition}`);
     }
   }
 
@@ -2234,16 +3305,19 @@ export class NmgStore {
   }
 
   #resolveActiveNodeName(canonicalName: string): string {
-    const row = this.#db.prepare("SELECT * FROM memory_nodes WHERE canonical_name = ?")
+    const row = this.#db
+      .prepare("SELECT * FROM memory_nodes WHERE canonical_name = ?")
       .get(canonicalName) as Row | undefined;
     if (!row) return canonicalName;
     const node = mapNode(row);
     if (node.status === "active") return node.canonicalName;
-    const targets = this.#db.prepare(
-      `SELECT DISTINCT n.canonical_name FROM node_redirects r
+    const targets = this.#db
+      .prepare(
+        `SELECT DISTINCT n.canonical_name FROM node_redirects r
        JOIN memory_nodes n ON n.id = r.target_node_id
        WHERE r.source_node_id = ? AND n.status = 'active'`,
-    ).all(node.id) as Row[];
+      )
+      .all(node.id) as Row[];
     if (targets.length === 1) return String(targets[0]!.canonical_name);
     if (targets.length > 1) {
       throw new Error(`node ${canonicalName} was split; choose a more specific node`);
@@ -2251,64 +3325,71 @@ export class NmgStore {
     return canonicalName;
   }
 
-  #resolveStateKey(
-    requestedKey: string,
-    scope: MemoryScope,
-    node: MemoryNode,
-  ): string {
+  #resolveStateKey(requestedKey: string, scope: MemoryScope, node: MemoryNode): string {
     const scopeJson = serializeScope(scope);
-    const alias = this.#db.prepare(
-      `SELECT canonical_key FROM state_key_aliases
+    const alias = this.#db
+      .prepare(
+        `SELECT canonical_key FROM state_key_aliases
        WHERE alias_key = ? AND scope_json = ?`,
-    ).get(requestedKey, scopeJson) as Row | undefined;
+      )
+      .get(requestedKey, scopeJson) as Row | undefined;
     if (alias) return String(alias.canonical_key);
 
-    const exact = this.#db.prepare(
-      `SELECT state_key FROM memory_records
+    const exact = this.#db
+      .prepare(
+        `SELECT state_key FROM memory_records
        WHERE memory_type = 'state' AND state_key = ? AND scope_json = ?
          AND status = 'active' LIMIT 1`,
-    ).get(requestedKey, scopeJson) as Row | undefined;
+      )
+      .get(requestedKey, scopeJson) as Row | undefined;
     if (exact) return requestedKey;
 
-    const candidates = this.#db.prepare(
-      `SELECT m.state_key, n.canonical_name
+    const candidates = this.#db
+      .prepare(
+        `SELECT m.state_key, n.canonical_name
        FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id
        WHERE m.memory_type = 'state' AND m.scope_json = ?
          AND m.status = 'active' AND m.state_key IS NOT NULL`,
-    ).all(scopeJson) as Row[];
+      )
+      .all(scopeJson) as Row[];
     const requestedIdentity = `${node.canonicalName} ${requestedKey}`;
     const requestedTokens = identityTokens(requestedIdentity);
-    const matches = candidates.map((candidate) => {
-      const identity = `${candidate.canonical_name} ${candidate.state_key}`;
-      const candidateTokens = identityTokens(identity);
-      const overlap = requestedTokens.size === 0 ? 0 :
-        [...requestedTokens].filter((token) => candidateTokens.has(token)).length /
-          requestedTokens.size;
-      return {
-        key: String(candidate.state_key),
-        score: cosineSimilarity(
-          this.#embedder.embed(requestedIdentity),
-          this.#embedder.embed(identity),
-        ),
-        overlap,
-      };
-    }).filter((candidate) => candidate.score >= 0.65 && candidate.overlap >= 0.7)
+    const matches = candidates
+      .map((candidate) => {
+        const identity = `${candidate.canonical_name} ${candidate.state_key}`;
+        const candidateTokens = identityTokens(identity);
+        const overlap =
+          requestedTokens.size === 0
+            ? 0
+            : [...requestedTokens].filter((token) => candidateTokens.has(token)).length /
+              requestedTokens.size;
+        return {
+          key: String(candidate.state_key),
+          score: cosineSimilarity(
+            this.#embedder.embed(requestedIdentity),
+            this.#embedder.embed(identity),
+          ),
+          overlap,
+        };
+      })
+      .filter((candidate) => candidate.score >= 0.65 && candidate.overlap >= 0.7)
       .sort((left, right) => right.score - left.score);
     if (matches.length === 0) return requestedKey;
 
     const canonicalKey = matches[0]!.key;
-    this.#db.prepare(
-      `INSERT OR REPLACE INTO state_key_aliases
+    this.#db
+      .prepare(
+        `INSERT OR REPLACE INTO state_key_aliases
         (alias_key, scope_json, canonical_key, created_at)
        VALUES (?, ?, ?, ?)`,
-    ).run(requestedKey, scopeJson, canonicalKey, new Date().toISOString());
+      )
+      .run(requestedKey, scopeJson, canonicalKey, new Date().toISOString());
     return canonicalKey;
   }
 
   #memoryIdsForNodes(nodeIds: string[]): string[] {
     const select = this.#db.prepare("SELECT id FROM memory_records WHERE node_id = ?");
-    return nodeIds.flatMap((nodeId) =>
-      (select.all(nodeId) as Row[]).map((row) => String(row.id)));
+    return nodeIds.flatMap((nodeId) => (select.all(nodeId) as Row[]).map((row) => String(row.id)));
   }
 
   #createTransform(
@@ -2325,30 +3406,39 @@ export class NmgStore {
       movedMemoryIds,
       createdAt: new Date().toISOString(),
     };
-    this.#db.prepare(
-      `INSERT INTO node_transforms
+    this.#db
+      .prepare(
+        `INSERT INTO node_transforms
         (id, transform_type, source_node_ids_json, target_node_ids_json,
          moved_memory_ids_json, created_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(transform.id, transform.type, JSON.stringify(transform.sourceNodeIds),
-      JSON.stringify(transform.targetNodeIds), JSON.stringify(transform.movedMemoryIds),
-      transform.createdAt);
+      )
+      .run(
+        transform.id,
+        transform.type,
+        JSON.stringify(transform.sourceNodeIds),
+        JSON.stringify(transform.targetNodeIds),
+        JSON.stringify(transform.movedMemoryIds),
+        transform.createdAt,
+      );
     return transform;
   }
 
   #redirectRelations(sourceNodeId: string, targetNodeId: string): void {
-    const rows = this.#db.prepare(
-      `SELECT * FROM node_relations
+    const rows = this.#db
+      .prepare(
+        `SELECT * FROM node_relations
        WHERE source_node_id = ? OR target_node_id = ?`,
-    ).all(sourceNodeId, sourceNodeId) as Row[];
+      )
+      .all(sourceNodeId, sourceNodeId) as Row[];
     const remove = this.#db.prepare("DELETE FROM node_relations WHERE id = ?");
     for (const row of rows) {
       const relation = mapRelation(row);
       remove.run(relation.id);
-      const nextSource = relation.sourceNodeId === sourceNodeId
-        ? targetNodeId : relation.sourceNodeId;
-      const nextTarget = relation.targetNodeId === sourceNodeId
-        ? targetNodeId : relation.targetNodeId;
+      const nextSource =
+        relation.sourceNodeId === sourceNodeId ? targetNodeId : relation.sourceNodeId;
+      const nextTarget =
+        relation.targetNodeId === sourceNodeId ? targetNodeId : relation.targetNodeId;
       if (nextSource !== nextTarget) {
         this.linkNodes({
           sourceNodeId: nextSource,
@@ -2362,21 +3452,29 @@ export class NmgStore {
 
   #memoryText(memory: Pick<MemoryRecord, "statement">, nodeId: string): string {
     const node = this.#requireNode(nodeId);
-    return `${memory.statement} ${node.canonicalName} ${node.summary}`;
+    return memoryEmbeddingText(memory.statement, node.canonicalName);
   }
 
   #upsertEmbedding(memoryId: string, text: string): void {
     const vector = this.#embedder.embed(text);
-    this.#db.prepare(
-      `INSERT INTO memory_embeddings
+    this.#db
+      .prepare(
+        `INSERT INTO memory_embeddings
         (memory_id, model, dimensions, vector_json, vector_blob, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(memory_id, model) DO UPDATE SET
          dimensions = excluded.dimensions, vector_json = excluded.vector_json,
          vector_blob = excluded.vector_blob,
          updated_at = excluded.updated_at`,
-    ).run(memoryId, this.#embedder.model, this.#embedder.dimensions,
-      JSON.stringify(vector), encodeVector(vector), new Date().toISOString());
+      )
+      .run(
+        memoryId,
+        this.#embedder.model,
+        this.#embedder.dimensions,
+        JSON.stringify(vector),
+        encodeVector(vector),
+        new Date().toISOString(),
+      );
   }
 
   #refreshEmbeddings(memoryIds: string[]): void {
@@ -2386,34 +3484,42 @@ export class NmgStore {
     );
     for (const memoryId of memoryIds) {
       const row = select.get(memoryId) as Row | undefined;
-      if (row) this.#upsertEmbedding(memoryId,
-        `${row.statement} ${row.canonical_name} ${row.summary}`);
+      if (row)
+        this.#upsertEmbedding(memoryId, memoryEmbeddingText(row.statement, row.canonical_name));
     }
   }
 
   #nodeIdsForMemories(memoryIds: readonly string[]): string[] {
     const ids = [...new Set(memoryIds)];
     if (ids.length === 0) return [];
-    return (this.#db.prepare(
-      `SELECT DISTINCT node_id FROM memory_records
+    return (
+      this.#db
+        .prepare(
+          `SELECT DISTINCT node_id FROM memory_records
        WHERE id IN (${ids.map(() => "?").join(",")})`,
-    ).all(...ids) as Row[]).map((row) => String(row.node_id));
+        )
+        .all(...ids) as Row[]
+    ).map((row) => String(row.node_id));
   }
 
   #proposalCoolingDown(proposalKey: string, cooldownMs: number): boolean {
-    const row = this.#db.prepare(
-      `SELECT created_at FROM topology_proposals
+    const row = this.#db
+      .prepare(
+        `SELECT created_at FROM topology_proposals
        WHERE proposal_key = ? ORDER BY created_at DESC LIMIT 1`,
-    ).get(proposalKey) as Row | undefined;
+      )
+      .get(proposalKey) as Row | undefined;
     return Boolean(row) && Date.now() - Date.parse(String(row!.created_at)) < cooldownMs;
   }
 
   #candidatePartitions(nodeId: string): Array<{ label: string; memoryIds: string[] }> {
-    const rows = this.#db.prepare(
-      `SELECT id, memory_type, scope_json FROM memory_records
+    const rows = this.#db
+      .prepare(
+        `SELECT id, memory_type, scope_json FROM memory_records
        WHERE node_id = ?
        ORDER BY memory_type, scope_json, id`,
-    ).all(nodeId) as Row[];
+      )
+      .all(nodeId) as Row[];
     const groups = new Map<string, string[]>();
     for (const row of rows) {
       const key = `${row.memory_type}|${row.scope_json}`;
@@ -2433,16 +3539,27 @@ export class NmgStore {
       status: "pending",
       createdAt: new Date().toISOString(),
     };
-    this.#db.prepare(
-      `INSERT INTO topology_proposals
+    this.#db
+      .prepare(
+        `INSERT INTO topology_proposals
         (id, proposal_key, proposal_type, source_node_ids_json, relation_type,
          partitions_json, evidence_trace_ids_json, observations,
          estimated_gain, status, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(result.id, result.proposalKey, result.type,
-      JSON.stringify(result.sourceNodeIds), result.relationType,
-      JSON.stringify(result.partitions), JSON.stringify(result.evidenceTraceIds),
-      result.observations, result.estimatedGain, result.status, result.createdAt);
+      )
+      .run(
+        result.id,
+        result.proposalKey,
+        result.type,
+        JSON.stringify(result.sourceNodeIds),
+        result.relationType,
+        JSON.stringify(result.partitions),
+        JSON.stringify(result.evidenceTraceIds),
+        result.observations,
+        result.estimatedGain,
+        result.status,
+        result.createdAt,
+      );
     return result;
   }
 
@@ -2452,10 +3569,12 @@ export class NmgStore {
     if (existing) return existing;
     const table = kind === "node" ? "node_embeddings" : "leaf_embeddings";
     const idColumn = kind === "node" ? "node_id" : "block_id";
-    const rows = this.#db.prepare(
-      `SELECT ${idColumn} AS id, dimensions, vector_blob, vector_json
+    const rows = this.#db
+      .prepare(
+        `SELECT ${idColumn} AS id, dimensions, vector_blob, vector_json
        FROM ${table} WHERE model = ? ORDER BY ${idColumn}`,
-    ).all(model) as Row[];
+      )
+      .all(model) as Row[];
     if (rows.length === 0) return null;
     const dimensions = Number(rows[0]!.dimensions);
     const cache = new Float32VectorCache(dimensions, rows.length);
@@ -2485,27 +3604,33 @@ export class NmgStore {
     operation: "move" | "upsert",
     createdAt = new Date().toISOString(),
   ): void {
-    this.#db.prepare(
-      `INSERT INTO memory_index_delta
+    this.#db
+      .prepare(
+        `INSERT INTO memory_index_delta
         (memory_id, node_id, operation, compacted, created_at)
        VALUES (?, ?, ?, 0, ?)
        ON CONFLICT(memory_id) DO UPDATE SET node_id = excluded.node_id,
          operation = excluded.operation, compacted = 0,
          created_at = excluded.created_at`,
-    ).run(memoryId, nodeId, operation, createdAt);
-    this.#db.prepare(
-      `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 1, ?)
+      )
+      .run(memoryId, nodeId, operation, createdAt);
+    this.#db
+      .prepare(
+        `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 1, ?)
        ON CONFLICT(node_id) DO UPDATE SET dirty = 1, updated_at = excluded.updated_at`,
-    ).run(nodeId, createdAt);
+      )
+      .run(nodeId, createdAt);
   }
 
   #evidenceIds(memoryId: string): string[] {
-    return (this.#db
-      .prepare(
-        `SELECT history_id FROM memory_evidence_links
+    return (
+      this.#db
+        .prepare(
+          `SELECT history_id FROM memory_evidence_links
          WHERE memory_id = ? ORDER BY history_id`,
-      )
-      .all(memoryId) as Row[]).map((row) => String(row.history_id));
+        )
+        .all(memoryId) as Row[]
+    ).map((row) => String(row.history_id));
   }
 
   #resultsForNode(
@@ -2514,8 +3639,9 @@ export class NmgStore {
     limit: number,
     memoryId?: string,
   ): MemorySearchResult[] {
-    const rows = this.#db.prepare(
-      `SELECT
+    const rows = this.#db
+      .prepare(
+        `SELECT
          m.id AS m_id, m.node_id AS m_node_id,
          m.evidence_id AS m_evidence_id, m.statement AS m_statement,
          m.memory_type AS m_memory_type, m.state_key AS m_state_key,
@@ -2523,6 +3649,8 @@ export class NmgStore {
          m.truth_status AS m_truth_status,
          m.scope_json AS m_scope_json, m.valid_from AS m_valid_from,
          m.valid_until AS m_valid_until, m.status AS m_status,
+         m.residence AS m_residence, m.promoted_at AS m_promoted_at,
+         m.expires_at AS m_expires_at,
          m.evidence_role AS m_evidence_role,
          m.supersedes_id AS m_supersedes_id,
          m.tier AS m_tier, m.importance AS m_importance,
@@ -2532,7 +3660,7 @@ export class NmgStore {
          n.id AS n_id, n.canonical_name AS n_canonical_name,
          n.kind AS n_kind, n.summary AS n_summary,
          n.created_at AS n_created_at, n.updated_at AS n_updated_at,
-         n.status AS n_status,
+         n.status AS n_status, n.residence AS n_residence,
          h.id AS h_id, h.session_id AS h_session_id, h.role AS h_role,
          h.content AS h_content, h.source_message_id AS h_source_message_id,
          h.source_ref AS h_source_ref,
@@ -2543,9 +3671,11 @@ export class NmgStore {
        WHERE m.node_id = ? AND m.tier <= ? AND n.status = 'active'
          AND (? IS NULL OR m.id = ?)
          AND m.status IN ('active', 'disputed')
+         AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
        ORDER BY m.tier ASC, m.importance DESC, m.created_at DESC
        LIMIT ?`,
-    ).all(nodeId, maxTier, memoryId ?? null, memoryId ?? null, limit) as Row[];
+      )
+      .all(nodeId, maxTier, memoryId ?? null, memoryId ?? null, limit) as Row[];
     return rows.map((row) => {
       const result = mapSearchResult(row, 0);
       result.memory.evidenceIds = this.#evidenceIds(result.memory.id);
@@ -2572,6 +3702,7 @@ function mapNode(row: Row, prefix = ""): MemoryNode {
     createdAt: String(row[`${prefix}created_at`]),
     updatedAt: String(row[`${prefix}updated_at`]),
     status: String(row[`${prefix}status`] ?? "active") as MemoryNode["status"],
+    residence: String(row[`${prefix}residence`] ?? "ltg") as MemoryResidence,
   };
 }
 
@@ -2596,12 +3727,12 @@ function mapTopologyProposal(row: Row): TopologyProposal {
         if (!item || typeof item !== "object") return [];
         const candidate = item as { label?: unknown; memoryIds?: unknown };
         return typeof candidate.label === "string" && Array.isArray(candidate.memoryIds)
-          ? [{
-              label: candidate.label,
-              memoryIds: candidate.memoryIds.filter(
-                (id): id is string => typeof id === "string",
-              ),
-            }]
+          ? [
+              {
+                label: candidate.label,
+                memoryIds: candidate.memoryIds.filter((id): id is string => typeof id === "string"),
+              },
+            ]
           : [];
       });
     }
@@ -2613,9 +3744,7 @@ function mapTopologyProposal(row: Row): TopologyProposal {
     proposalKey: String(row.proposal_key),
     type: String(row.proposal_type) as TopologyProposal["type"],
     sourceNodeIds: parseStringArray(row.source_node_ids_json),
-    relationType: row.relation_type
-      ? String(row.relation_type) as NodeRelationType
-      : null,
+    relationType: row.relation_type ? (String(row.relation_type) as NodeRelationType) : null,
     partitions,
     evidenceTraceIds: parseStringArray(row.evidence_trace_ids_json),
     observations: Number(row.observations),
@@ -2629,7 +3758,9 @@ function partitionLabel(label: string, index: number): string {
   const [memoryType, scope = ""] = label.split("|", 2);
   try {
     const parsed = JSON.parse(scope) as Record<string, unknown>;
-    const scopeLabel = Object.values(parsed).filter((value) => typeof value === "string").join(" ");
+    const scopeLabel = Object.values(parsed)
+      .filter((value) => typeof value === "string")
+      .join(" ");
     return [memoryType, scopeLabel].filter(Boolean).join(" ") || `partition ${index + 1}`;
   } catch {
     return memoryType || `partition ${index + 1}`;
@@ -2639,12 +3770,20 @@ function partitionLabel(label: string, index: number): string {
 function leafBlockSummary(rows: Row[]): string {
   const first = rows[0]!;
   const scope = parseScope(first.scope_json);
-  const scopeText = Object.entries(scope).map(([key, value]) => `${key}=${value}`).join(", ");
-  const times = rows.flatMap((row) => [row.event_time, row.valid_from, row.valid_until])
+  const scopeText = Object.entries(scope)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(", ");
+  const times = rows
+    .flatMap((row) => [row.event_time, row.valid_from, row.valid_until])
     .filter((value): value is string | number => value !== null)
-    .map(String).sort();
-  const sample = rows.slice(0, 8).map((row) => String(row.statement).trim())
-    .filter(Boolean).join("; ").slice(0, 1_500);
+    .map(String)
+    .sort();
+  const sample = rows
+    .slice(0, 8)
+    .map((row) => String(row.statement).trim())
+    .filter(Boolean)
+    .join("; ")
+    .slice(0, 1_500);
   return [
     `node=${first.canonical_name}`,
     `type=${first.memory_type}`,
@@ -2653,20 +3792,24 @@ function leafBlockSummary(rows: Row[]): string {
     times.length > 0 ? `time=${times[0]}..${times[times.length - 1]}` : "",
     `count=${rows.length}`,
     `examples=${sample}`,
-  ].filter(Boolean).join(" | ");
+  ]
+    .filter(Boolean)
+    .join(" | ");
 }
 
 function stableLeafBlockId(rows: Row[]): string {
-  const identity = rows.map((row) => [
-    row.id,
-    row.statement,
-    row.memory_type,
-    row.scope_json,
-    row.tier,
-    row.event_time,
-    row.valid_from,
-    row.valid_until,
-  ]).join("\u0000");
+  const identity = rows
+    .map((row) => [
+      row.id,
+      row.statement,
+      row.memory_type,
+      row.scope_json,
+      row.tier,
+      row.event_time,
+      row.valid_from,
+      row.valid_until,
+    ])
+    .join("\u0000");
   return `leaf_${createHash("sha256").update(identity).digest("hex").slice(0, 24)}`;
 }
 
@@ -2687,14 +3830,15 @@ function mapSearchResult(row: Row, score: number): MemorySearchResult {
       validFrom: row.m_valid_from ? String(row.m_valid_from) : null,
       validUntil: row.m_valid_until ? String(row.m_valid_until) : null,
       status: String(row.m_status) as MemoryStatus,
+      residence: String(row.m_residence ?? "ltg") as MemoryResidence,
+      promotedAt: row.m_promoted_at ? String(row.m_promoted_at) : null,
+      expiresAt: row.m_expires_at ? String(row.m_expires_at) : null,
       evidenceRole: String(row.m_evidence_role) as MemoryRecord["evidenceRole"],
       supersedesId: row.m_supersedes_id ? String(row.m_supersedes_id) : null,
       tier: Number(row.m_tier) as MemoryTier,
       importance: Number(row.m_importance),
       accessCount: Number(row.m_access_count),
-      lastAccessedAt: row.m_last_accessed_at
-        ? String(row.m_last_accessed_at)
-        : null,
+      lastAccessedAt: row.m_last_accessed_at ? String(row.m_last_accessed_at) : null,
       createdAt: String(row.m_created_at),
     },
     node: mapNode(row, "n_"),
@@ -2728,8 +3872,10 @@ function contextUsefulness(query: string, result: MemorySearchResult): number {
     if (type === "preference") bonus += 0.3;
     if (type === "constraint") bonus += 0.15;
   }
-  if (/\b(?:assistant|you said|previous chat)\b|(?:你说过|助手|之前的对话)/iu.test(normalized) &&
-      type === "conversation_evidence") {
+  if (
+    /\b(?:assistant|you said|previous chat)\b|(?:你说过|助手|之前的对话)/iu.test(normalized) &&
+    type === "conversation_evidence"
+  ) {
     bonus += 0.25;
   }
   return result.combinedScore + bonus;
@@ -2754,21 +3900,51 @@ function mapRelation(row: Row): NodeRelation {
     targetNodeId: String(row.target_node_id),
     type: String(row.relation_type) as NodeRelationType,
     evidenceIds: parseStringArray(row.evidence_ids_json),
+    residence: "ltg",
+    status: String(row.status ?? "consolidated") as NodeRelation["status"],
+    stability: Number(row.stability ?? 1),
+    consolidationSource: String(
+      row.consolidation_source ?? "explicit",
+    ) as NodeRelation["consolidationSource"],
+    consolidatedAt: String(row.consolidated_at ?? row.created_at),
     createdAt: String(row.created_at),
   };
 }
 
+function mapConsolidationEvent(row: Row): ConsolidationEvent {
+  return {
+    id: String(row.id),
+    action: String(row.action) as ConsolidationEvent["action"],
+    targetId: String(row.target_id),
+    previousState: String(row.previous_state),
+    nextState: String(row.next_state),
+    reason: String(row.reason),
+    evidenceTraceIds: parseStringArray(row.evidence_trace_ids_json),
+    createdAt: String(row.created_at),
+  };
+}
+
+function mapActivation(row: Row | undefined, hasExpanded: boolean): ActivationSignal {
+  return {
+    selectedCount: Number(row?.selected_count ?? 0),
+    expandedCount: hasExpanded ? Number(row?.expanded_count ?? 0) : 0,
+    usedCount: Number(row?.used_count ?? 0),
+    contradictedCount: Number(row?.contradicted_count ?? 0),
+    rejectedCount: Number(row?.rejected_count ?? 0),
+    updatedAt: row?.updated_at ? String(row.updated_at) : new Date(0).toISOString(),
+  };
+}
+
 function lexicalScore(query: string, row: Row): number {
-  const haystack = normalize(
-    `${row.m_statement} ${row.n_canonical_name} ${row.n_summary}`,
-  );
+  const haystack = normalize(`${row.m_statement} ${row.n_canonical_name} ${row.n_summary}`);
   if (haystack.includes(query)) return 10 + query.length;
 
   const terms = searchTerms(query);
-  return terms.reduce(
-    (score, term) => score + (haystack.includes(term) ? term.length : 0),
-    0,
-  );
+  return terms.reduce((score, term) => score + (haystack.includes(term) ? term.length : 0), 0);
+}
+
+function memoryEmbeddingText(statement: unknown, canonicalName: unknown): string {
+  return `${String(canonicalName)}: ${String(statement)}`;
 }
 
 function ftsExpression(query: string): string {
@@ -2795,7 +3971,10 @@ function hybridScore(lexical: number, vector: number, route: number): number {
 
 function recallReason(result: MemorySearchResult): RecallCue["reason"] {
   const scores = [
-    ["lexical_match", result.lexicalScore > 0 ? result.lexicalScore / (result.lexicalScore + 10) : 0],
+    [
+      "lexical_match",
+      result.lexicalScore > 0 ? result.lexicalScore / (result.lexicalScore + 10) : 0,
+    ],
     ["vector_match", Math.max(0, result.vectorScore)],
     ["learned_route", Math.max(0, result.routeScore)],
   ] as const;
@@ -2829,7 +4008,8 @@ function searchTerms(value: string): string[] {
 
 function identityTokens(value: string): Set<string> {
   return new Set(
-    normalize(value).split(/[^\p{L}\p{N}]+/u)
+    normalize(value)
+      .split(/[^\p{L}\p{N}]+/u)
       .filter((token) => token.length >= 2 && token !== "time"),
   );
 }
@@ -2847,6 +4027,98 @@ function requireText(value: string, label: string): string {
 function clamp(value: number, minimum: number, maximum: number): number {
   if (!Number.isFinite(value)) return minimum;
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function defaultResidence(input: {
+  memoryType?: MemoryRecord["memoryType"];
+  sourceActor?: MemoryRecord["sourceActor"];
+  truthStatus?: MemoryRecord["truthStatus"];
+}): MemoryResidence {
+  const type = input.memoryType ?? "fact";
+  if (type === "derived" || input.truthStatus === "inferred") return "stg";
+  if (input.sourceActor === "assistant" && input.truthStatus === "unverified") return "stg";
+  return "ltg";
+}
+
+function activeGraphBudget(options: SearchOptions): ActiveGraphBudget {
+  const requested = options.activeGraphBudget ?? {};
+  return {
+    maxNodes: Math.max(1, Math.min(requested.maxNodes ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxNodes, 50)),
+    maxEdges: Math.max(
+      0,
+      Math.min(requested.maxEdges ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxEdges, 100),
+    ),
+    maxEvidence: Math.max(
+      1,
+      Math.min(
+        requested.maxEvidence ?? options.limit ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxEvidence,
+        50,
+      ),
+    ),
+    maxTokens: Math.max(
+      64,
+      Math.min(requested.maxTokens ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxTokens, 100_000),
+    ),
+    maxGraphHops: Math.max(
+      0,
+      Math.min(
+        requested.maxGraphHops ?? options.graphHops ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxGraphHops,
+        3,
+      ),
+    ),
+    maxLocalTier: Math.max(
+      0,
+      Math.min(
+        requested.maxLocalTier ?? options.maxTier ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxLocalTier,
+        3,
+      ),
+    ) as MemoryTier,
+    maxLatencyMs: Math.max(
+      1,
+      Math.min(requested.maxLatencyMs ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxLatencyMs, 60_000),
+    ),
+  };
+}
+
+function stableTaskId(query: string): string {
+  return `query:${createHash("sha256").update(normalize(query)).digest("hex").slice(0, 16)}`;
+}
+
+function estimateResultTokens(result: MemorySearchResult): number {
+  const characters =
+    result.memory.statement.length +
+    result.node.canonicalName.length +
+    result.node.summary.length +
+    result.evidence.content.length;
+  return Math.max(1, Math.ceil(characters / 4));
+}
+
+function queryAssociationEdges(
+  nodeIds: string[],
+  persistentEdges: ActiveGraph["edges"],
+  limit: number,
+): ActiveGraph["edges"] {
+  if (limit <= 0) return [];
+  const connected = new Set(
+    persistentEdges.map((edge) => [edge.sourceNodeId, edge.targetNodeId].sort().join(":")),
+  );
+  const edges: ActiveGraph["edges"] = [];
+  for (let left = 0; left < nodeIds.length && edges.length < limit; left += 1) {
+    for (let right = left + 1; right < nodeIds.length && edges.length < limit; right += 1) {
+      const pair = [nodeIds[left]!, nodeIds[right]!].sort();
+      const key = pair.join(":");
+      if (connected.has(key)) continue;
+      edges.push({
+        id: `temp:${createHash("sha256").update(key).digest("hex").slice(0, 16)}`,
+        sourceNodeId: pair[0]!,
+        targetNodeId: pair[1]!,
+        type: "query_association",
+        persistence: "temporary",
+        stability: 0,
+      });
+    }
+  }
+  return edges;
 }
 
 function parseScope(value: string | number | Uint8Array | null): MemoryScope {
@@ -2910,7 +4182,6 @@ function matchesScope(memory: MemoryScope, requested?: MemoryScope): boolean {
 
 function serializeScope(scope: MemoryScope): string {
   return JSON.stringify(
-    Object.fromEntries(Object.entries(scope).sort(([left], [right]) =>
-      left.localeCompare(right))),
+    Object.fromEntries(Object.entries(scope).sort(([left], [right]) => left.localeCompare(right))),
   );
 }

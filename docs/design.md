@@ -1,7 +1,7 @@
 # NMG design baseline
 
-**Status:** 0.7 / P1 incremental storage and P2 adaptive-graph experiments
-**Updated:** 2026-07-19
+**Status:** 0.9 / P3 runtime memory model implemented
+**Updated:** 2026-07-22
 
 ## 1. Definition
 
@@ -9,6 +9,21 @@ Node Memory Graph (NMG) is a local-first long-term memory component for
 long-running agents. It preserves immutable historical evidence, derives mutable
 semantic memory from that evidence, and progressively discloses only the context
 needed by the current task.
+
+NMG separates physical memory residence from runtime exposure:
+
+- the **Short-Term Graph (STG)** holds new, provisional, task-local, or
+  not-yet-consolidated semantic information;
+- the **Long-Term Graph (LTG)** holds durable atomic memories and consolidated
+  semantic structure;
+- the **Active Graph (AG)** is a budget-constrained runtime projection selected
+  from STG and LTG for the current task, with optional temporary cross-graph
+  relations.
+
+AG is not a third authoritative memory graph. It is the virtual memory space
+presented to the model. STG and LTG are different logical/physical storage
+classes behind that projection, while immutable history remains the evidence
+source beneath both.
 
 The primary integration target is the Pi agent harness. Pi owns the model loop,
 session lifecycle, tools, and UI. NMG owns durable memory, provenance, retrieval,
@@ -46,15 +61,23 @@ NMG follows these principles:
 6. **The simplest measured implementation wins.** A graph, ANN, adaptive tree,
    or learned router is optional until it improves quality or cost against a
    simpler control.
+7. **Residence, activation, and consolidation are different decisions.** STG or
+   LTG determines persistence; AG determines current visibility; activation
+   describes current use; stability determines whether provisional structure
+   should be consolidated.
+8. **Facts may persist before structure stabilizes.** A confirmed fact,
+   preference, constraint, or replaceable state can enter LTG directly with
+   provenance. Inferred relations, derived concepts, and reusable strategies
+   require stronger cross-task evidence before becoming LTG structure.
 
 ## 3. Responsibility boundaries
 
 | Component | Responsibilities |
 |---|---|
 | Base model | Identify candidate facts/preferences/constraints, summarize, reformulate queries, decide whether more evidence is needed, propose semantic relations or splits, and synthesize an answer. |
-| Pi harness | Run the model/tool loop, expose session lifecycle events, preserve current-session state, and provide context/tool integration points. |
-| NMG Pi plugin | Capture sessions, enforce memory policy, inject resident/cue context, expose the small memory API, and schedule background maintenance. |
-| NMG core | Maintain stable IDs, provenance, time/scope/state invariants, retrieval budgets, semantic organization, and rebuildable indexes. |
+| Pi harness | Run the model/tool loop, expose session lifecycle events, preserve current-turn execution state, and provide context/tool integration points. |
+| NMG Pi plugin | Capture sessions, enforce memory policy, request an Active Graph projection, inject resident/cue/selected context, expose the small memory API, and schedule background maintenance. |
+| NMG core | Maintain stable IDs, provenance, STG/LTG lifecycle, time/scope/state invariants, Active Graph budgets, semantic organization, consolidation signals, and rebuildable indexes. |
 | SQLite/index backend | Provide transactions, WAL/crash recovery, FTS, versioned records, dirty queues, content hashes, and physical index/cache persistence. |
 | Optional learner | Learn query-to-node/leaf scores, edge usefulness, expansion depth, or stopping policy from labelled retrieval outcomes. It does not own persistent topology. |
 
@@ -69,7 +92,7 @@ responsibilities.
 The target default plugin should install as a normal Pi package and require only
 Node.js, Pi, and SQLite. FTS search must work without an embedding server. A
 semantic embedding provider may be enabled by configuration, but local Qwen,
-vLLM, CUDA, USearch, PyTorch, Cloudflare, and Docker are not default
+vLLM, CUDA, USearch, PyTorch, and Cloudflare are not default
 dependencies.
 
 The target model-facing surface is three tools:
@@ -101,28 +124,45 @@ HistoryRecord
   - immutable evidence during normal maintenance
   - stable session/message/tool source identity
   - exact content and timestamp
-       |
-       | evidence link (mandatory)
+       | mandatory provenance
        v
-MemoryRecord
-  - fact | state | event | preference | constraint
-  - strategy | conversation_evidence | derived
-  - scope, actor, truth status, event/valid time, state identity
+Semantic memory store
+  |- STG
+  |    - provisional/task-local MemoryRecord and MemoryNode
+  |    - observed/candidate relations and pending structure
+  |    - persistent when crash recovery is required; short-term is a
+  |      semantic lifecycle, not necessarily volatile RAM
+  |
+  `- LTG
+       - durable atomic fact | state | event | preference | constraint
+       - consolidated strategy | derived concept | typed relation
+       - stable semantic addresses and bounded leaf/block hierarchies
+
+STG + LTG + current query/task state
        |
-       | zero or more semantic memberships
+       | budgeted selection and temporary relation construction
        v
-MemoryNode
-  - stable semantic address and compact header
-  - bounded leaf/block hierarchy
-  - typed relations to other nodes
+Active Graph (virtual, ephemeral)
+  - selected nodes, relations, and bounded local record/evidence content
+  - temporary cross-STG/LTG edges and query-local reasoning nodes
+  - per-projection token/node/edge/depth/latency budget ledger
 ```
 
-A `MemoryRecord` is a durable retrievable statement. A `MemoryNode` is a stable
-semantic address for a coherent group of records. Creating one permanent node
-for every new memory would reproduce a flat store with extra graph overhead and
-is not the target model.
+A `MemoryRecord` is a retrievable semantic statement with provenance and an STG
+or LTG lifecycle. A `MemoryNode` is a stable semantic address for a coherent
+group of records. Creating one permanent node for every new memory would
+reproduce a flat store with extra graph overhead and is not the target model.
 
-## 6. Connectivity and provisional memory
+STG and LTG describe semantic residence, not separate truth systems. Promotion
+should preserve the same stable record/node identity and provenance rather than
+copying content into a second graph. Demotion or expiry changes normal
+visibility but never rewrites the underlying `HistoryRecord`.
+
+AG contains references and query-local annotations, not authoritative copies.
+When AG is released, temporary nodes and edges disappear; only explicitly
+recorded usage outcomes, stability observations, and accepted writes survive.
+
+## 6. STG/LTG connectivity and provisional memory
 
 The semantic graph is not required to be connected. Its connected components
 may represent unrelated projects, preferences, people, or historical topics.
@@ -138,20 +178,35 @@ Connections are established in three classes:
    merge, and split proposals require accumulated evidence or explicit
    confirmation.
 
-New durable records first enter a searchable Inbox/Delta:
+New semantic candidates first enter STG unless a governed rule can safely
+promote the atomic memory immediately:
 
 ```text
 HistoryRecord
   -> governed extraction
-  -> Memory Inbox / Delta
-       |- high-confidence match -> attach to existing node
-       |- explicit new concept  -> create provisional/new node
-       `- ambiguous             -> remain globally searchable and unassigned
+  -> STG semantic inbox
+       |- confirmed durable atom -> preserve ID and promote to LTG
+       |- high-confidence match  -> attach to an existing STG/LTG node
+       |- explicit new concept   -> create provisional STG node
+       `- ambiguous              -> remain globally searchable and unassigned
 ```
 
-Inbox records and isolated/provisional nodes must participate in global FTS,
+Confirmed user facts, preferences, constraints, replaceable states, explicit
+remember requests, and tool-verified facts may take the immediate promotion
+path. Their atomic content can be durable without committing speculative graph
+structure. Relations inferred from co-occurrence, reasoning, or one task remain
+in STG as observations or candidates until consolidation criteria are met.
+
+STG records and isolated/provisional nodes must participate in global FTS,
 exact, recency, and optional vector search. Graph traversal is a candidate
-expansion mechanism, never the only retrieval entry point.
+expansion mechanism, never the only retrieval entry point. STG entries may be
+persisted in SQLite for crash recovery and cross-turn continuity; expiry is a
+policy decision, not an implication that short-term data must live only in RAM.
+
+The semantic STG is distinct from the existing index `Inbox/Delta`. STG tracks
+memory lifecycle and provisional meaning. Index Delta tracks records whose
+derived leaf/vector index has not yet been compacted. A long-term memory may be
+in index Delta, and a short-term memory may already have a compacted index.
 
 An isolated node may later be merged as an alias, refined under a parent,
 linked to another independent concept, or remain isolated. Adding an edge does
@@ -161,7 +216,109 @@ General semantic relations may cycle. Derivation and supersession dependencies
 must remain acyclic. Each query may materialize a bounded, visited-set-protected
 local expansion DAG even when the persistent semantic graph contains cycles.
 
-## 7. Adaptive semantic granularity
+## 7. Active Graph, activation, stability, and consolidation
+
+### 7.1 Active Graph construction
+
+For query `q_t` and current task state `task_t`, NMG constructs:
+
+```text
+AG_t = Project_B(STG, LTG, q_t, task_t)
+```
+
+`B` is a hard multidimensional budget over injected tokens, nodes, edges,
+records/evidence excerpts, local tier/depth, graph expansion, and latency. The
+projection may contain:
+
+- resident critical LTG constraints;
+- newly active STG observations and task state;
+- retrieved LTG nodes and bounded local content;
+- selected persistent relations;
+- temporary STG-to-LTG, LTG-to-LTG, or query-local relations used only for the
+  current task.
+
+AG construction is query planning, not graph copying. It should first identify
+candidate nodes, then allocate local-content and relation budgets according to
+expected usefulness. The model can request progressive expansion, but the
+harness enforces the total budget and provenance boundary.
+
+### 7.2 Node and edge activation
+
+Node activation manages current working memory. A target scoring family is:
+
+```text
+A_v(t) = w_q * query_relevance
+       + w_t * task_relevance
+       + w_r * recency
+       + w_i * importance
+       + w_p * learned_prior
+       - w_c * retrieval_cost
+```
+
+Edge activation records the current cognitive/retrieval path:
+
+```text
+A_e(t) = f(A_source, A_target, relation_type, q_t, task_t, path_cost)
+```
+
+Activation is fast-changing and query-local. A highly active node or edge is
+not thereby true, durable, or stable. Conversely, a stable LTG constraint may
+remain inactive in an unrelated task. AG should record which nodes and edges
+were selected, expanded, actually used, contradicted, or rejected so later
+maintenance can distinguish retrieval from utility.
+
+### 7.3 Edge stability and structural consolidation
+
+Edge stability changes more slowly than activation and estimates whether a
+relation has repeatedly helped across independent contexts:
+
+```text
+S_e(t+1) = decay * S_e(t)
+         + alpha * cross_task_usefulness
+         + beta  * independent_recurrence
+         + gamma * user_or_tool_verification
+         - delta * contradiction_or_failure
+```
+
+Repeated retrieval alone must not increase stability. Otherwise an accidental
+retrieval edge creates a feedback loop: it causes co-retrieval, which strengthens
+the same edge, which causes more co-retrieval. Useful observations should be
+deduplicated by session/task/source lineage and discounted when they are caused
+only by the candidate edge being evaluated.
+
+Temporary and inferred edges follow an explicit lifecycle:
+
+```text
+ephemeral -> observed -> candidate -> consolidated
+                         |             |
+                         `-> rejected  `-> LTG typed relation
+```
+
+A local subgraph is eligible for LTG materialization only when it satisfies
+minimum independent evidence, usefulness, scope consistency, provenance
+coverage, conflict, and stability thresholds:
+
+```text
+consolidate(G') iff
+  stability(G')       >= high_threshold
+  independent_tasks   >= min_tasks
+  evidence_coverage   >= min_coverage
+  observed_utility    >= min_utility
+  unresolved_conflict <= max_conflict
+```
+
+Consolidation uses hysteresis: demotion or reopening requires a lower threshold
+than promotion, preventing repeated promote/demote oscillation. The operation is
+versioned and auditable, preserves evidence, and must be reversible by rebuilding
+the semantic projection from history. Stable co-activation supports a relation;
+it does not by itself prove a factual claim.
+
+Atomic-memory promotion and structural consolidation remain separate. A clear
+fact, preference, constraint, state, or explicit remember request may enter LTG
+immediately. New relations, derived concepts, aggregated strategies, and node
+merges/splits require the stronger stability process above.
+
+### 7.4 Adaptive semantic granularity
 
 A node represents an observational equivalence class under current evidence:
 records stay together while the system lacks reliable information to distinguish
@@ -200,16 +357,26 @@ requirement to implement a literal codec:
 
 ```text
 Historical stream       information source
-Memory extraction       source encoder
-Node/leaf headers       hierarchical codebook
+Memory extraction       source encoder into STG
+LTG nodes/relations     consolidated semantic codebook
+Node/leaf headers       progressive access codes
 SQLite/index            storage channel
 Query/current context   decoder side information
-Retriever               decoder
+Active Graph builder    query-conditioned decoder
 Raw evidence            lossless fallback and error check
 ```
 
-Node headers are short lossy codes. Leaf headers add discriminating bits. Typed
-relations provide side information. Raw history prevents irreversible loss.
+STG retains recent or provisional symbols before structural coding is stable.
+LTG stores durable atomic memories and consolidated relations. The Active Graph
+decodes only the bounded projection needed by the current task. Node headers are
+short lossy codes, leaf headers add discriminating bits, typed relations provide
+side information, and raw history prevents irreversible loss.
+
+This interpretation supplies vocabulary and measurable objectives; it does not
+claim that the implementation is a literal communications channel or that
+semantic errors are independent bit flips. The distinction between implemented
+mathematics and structural analogy is maintained in
+[`math-physics-foundations.md`](./math-physics-foundations.md).
 
 The topology can be evaluated with a minimum-description/rate-distortion
 objective:
@@ -247,15 +414,20 @@ Session storage and semantic extraction are separate:
 Pi message/turn
   -> immediate HistoryRecord append
   -> extraction queue
-  -> zero or more governed MemoryRecord writes
+  -> zero or more governed MemoryRecord writes into STG
+  -> optional immediate atomic promotion into LTG
+  -> later evidence-backed structural consolidation
 ```
 
 Clear, stable user-stated facts, preferences, constraints, and replaceable
-states may become long-term memories automatically. Ambiguous, inferred,
-sensitive, or current-task-only candidates require confirmation. Casual chatter,
-credentials, secrets, and unverified model claims do not become verified
-semantic memory. Assistant content may be retained as unverified conversation
-evidence when it is useful to remember that it was said.
+states may become atomic LTG memories automatically. They do not need to wait for
+a stable local subgraph. Ambiguous, inferred, sensitive, or current-task-only
+candidates remain in STG, require confirmation, or expire according to policy.
+Inferred relations and derived concepts require repeated independent evidence
+before structural consolidation. Casual chatter, credentials, secrets, and
+unverified model claims do not become verified semantic memory. Assistant
+content may be retained as unverified conversation evidence when it is useful to
+remember that it was said.
 
 Replaceable state uses a stable semantic `stateKey` plus canonical scope. A new
 active value supersedes the prior value without deleting historical evidence.
@@ -272,6 +444,11 @@ new MemoryRecord
   -> query Base + Delta immediately
   -> compact/rebuild affected regions later
 ```
+
+`STG/LTG` and `Base/Delta` are orthogonal dimensions. STG/LTG describe semantic
+lifecycle and consolidation status. Base/Delta describe physical index
+maintenance. An LTG fact can be in Delta immediately after insertion, and an STG
+candidate can already be compacted into Base without becoming long-term memory.
 
 Maintenance has three scopes:
 
@@ -294,14 +471,16 @@ prototype USearch path by default.
 
 ## 11. Progressive retrieval
 
-Execution-time memory exposure is separate from storage tiers:
+Progressive retrieval constructs and expands the Active Graph; it is separate
+from both storage tiers and the STG/LTG lifecycle:
 
-1. **Resident layer:** a very small query-independent block of active critical
-   constraints and stable profile information.
-2. **Automatic recall layer:** bounded dynamic evidence for explicit historical
-   or current-state questions.
+1. **Resident layer:** a very small query-independent seed of critical
+   constraints and stable profile information placed into every relevant AG.
+2. **Automatic recall layer:** bounded dynamic selection from STG and LTG based
+   on the current query, task, scope, time, and available budget.
 3. **Agent-directed recall layer:** compact headers/cues that let the model call
-   `nmg_search`, inspect costs, and fetch details with `nmg_get`.
+   `nmg_search`, inspect costs, and expand the AG with exact details through
+   `nmg_get`.
 
 Candidate generation should compose independent signals:
 
@@ -310,8 +489,8 @@ Inbox/Delta + global FTS/exact + node/leaf semantic routing
   -> optional graph expansion
   -> scope/time/truth filtering
   -> type-aware reranking and diversity
-  -> compact headers
-  -> selected exact evidence
+  -> bounded Active Graph projection
+  -> compact headers and selected exact evidence
 ```
 
 Search modes are ordered by purpose:
@@ -334,16 +513,21 @@ NMG does not require PyTorch. It requires only that a routing implementation can
 be compared against deterministic baselines and, if learnable, receive useful
 credit from retrieval outcomes.
 
-The persistent semantic graph and a differentiable computation graph are
-different objects:
+The persistent semantic graphs, the Active Graph, and a differentiable
+computation graph are different objects:
 
 ```text
-persistent NMG graph in SQLite
-  -> retrieve a bounded local candidate subgraph
+persistent STG + LTG in SQLite
+  -> construct a bounded Active Graph
   -> materialize query/node/edge tensors
   -> score nodes, edges, STOP, and EXPAND
   -> select evidence through the discrete backend
 ```
+
+The Active Graph is the query-scoped semantic projection. Tensor materialization
+is only an optional scoring representation of that projection. Updating tensor
+parameters must not directly mutate authoritative history or silently
+consolidate STG relations into LTG.
 
 An optional differentiable router may optimize a loss such as:
 
@@ -397,6 +581,22 @@ Implemented and verified in the current prototype:
 - state supersession, event time, actor/truth status, scope, merge/split, and
   redirects;
 - resident/automatic/cue execution layers;
+- a bounded `searchContext` result that approximates an early Active Graph by
+  combining resident, automatic, and agent-directed recall;
+- explicit STG/LTG residence on memories and nodes, governed immediate atomic
+  LTG writes, ID-preserving promotion/demotion, STG expiry, and append-only
+  lifecycle audit events;
+- a first-class Active Graph returned by `searchContext`, with persistent and
+  temporary edges plus a shared node/edge/evidence/token/hop/tier/latency budget
+  and measured usage ledger;
+- Pi propagation of Active Graph IDs from `nmg_search` to `nmg_get`, so exact
+  expansion acts as the current operational signal that a recalled memory was
+  actually selected for use;
+- query/task-deduplicated edge observations, separate selection/use/
+  contradiction/rejection activation statistics, time-decayed edge stability,
+  and protection against increasing stability from retrieval alone;
+- auditable stability-driven relation consolidation and hysteretic demotion,
+  with explicit relations protected from automatic demotion;
 - FTS5, hashing vectors, Qwen3 external embeddings, node/leaf indexing, and a
   rebuildable USearch experiment;
 - L0-L3 local tiers, accumulated access statistics, and batch rebalancing;
@@ -407,17 +607,26 @@ Implemented and verified in the current prototype:
   accept/reject application;
 - Pi RPC regression tests, initial LongMemEval development runs, and scale
   experiments.
+- local quality automation for type checking, ESLint, Prettier verification,
+  Node test execution, and C8 coverage, with a matching GitHub Actions workflow.
 
 Important gaps between the prototype and the target plugin:
 
-- the Qwen node/leaf hierarchy is benchmarked in core but is not yet the normal
-  Pi extension retrieval path;
+- the external node/leaf hierarchy is available to the normal Pi extension when
+  `NMG_EMBED_BASE_URL` is configured; hashing remains the offline fallback;
 - the ANN experiment has unacceptable recall on the near-duplicate workload;
 - automatic extraction evaluation and the matched full-history sample are not
   yet large enough to make a product-quality claim;
 - accepted topology proposals are an offline/Lab maintenance operation, not an
   unattended production mutation policy;
-- explicit privacy deletion and dependency cleanup remain P3 work.
+- explicit privacy deletion and dependency cleanup remain P4 work.
+- automatic recall exposure is recorded as selection, not usefulness; without
+  answer-level citations the harness cannot prove that injected memory changed
+  the final answer. Agent-directed `nmg_get(activeGraphId=...)` is the current
+  conservative usefulness signal.
+- stability currently consolidates a pairwise local subgraph as a typed
+  `related_to` relation. Larger multi-edge motif consolidation remains an
+  experiment rather than a P3 requirement.
 
 ## 14. Evaluation and falsifiable claims
 
@@ -439,14 +648,26 @@ Core hypotheses:
   conflict, or multi-hop questions enough to pay for its cost.
 - **Learning:** a learned router improves recall/cost over cosine, lexical, and
   simple hybrid controls.
+- **Active projection:** an explicit budgeted AG improves evidence coverage per
+  token over ordinary Top-K context injection.
+- **Consolidation:** stability-gated structural promotion improves future
+  multi-hop retrieval without increasing false relations or stale-memory errors.
 
 If Lite does not beat the flat hybrid control, its hierarchy has no demonstrated
 product value. If Graph does not beat Lite, graph adaptation remains a Lab
 feature. If a learned router does not beat deterministic routing, it remains
 optional.
 
-Current development evidence (2026-07-19):
+Current development evidence (updated 2026-07-22):
 
+- 56 local automated tests pass, including P3 lifecycle, budget enforcement,
+  actual-use activation, independent-task deduplication, reversible
+  consolidation, and migration from the pre-P3 schema; C8 reports 86.16% total
+  statement/line coverage and 93.21% for `store.ts`;
+- a clean DeepSeek V4 Flash Pi process wrote a unique LTG fact, a second process
+  recovered it through `nmg_search -> activeGraphId -> nmg_get`, and the store
+  recorded one selection and one actual use; isolated test data was removed
+  afterwards and `PRAGMA foreign_key_check` remained clean;
 - matched LongMemEval, one fixed case from seven categories: no-memory 1/7,
   raw-session 1/7, flat hybrid 5/7, Lite 5/7, Graph 6/7;
 - expanded matched LongMemEval, two fixed cases from seven categories:
@@ -457,6 +678,10 @@ Current development evidence (2026-07-19):
   useful-node labels 100% by construction;
 - 10K near-duplicate hierarchy workload: node+leaf exact scan 100% accuracy at
   10.6 ms P50, leaf ANN 87.5% at 8.1 ms P50, full record scan 75% at 779 ms P50.
+- after isolating Pi extension loading, a five-category LoCoMo development run
+  with BGE-small scored 3/5 for automatic recall and 1/5 for agent-directed
+  search. This is a single stochastic run, not a capability claim; it motivates
+  keeping automatic and agent-directed retrieval as separate evaluation arms.
 
 The topology and router cases isolate whether the mechanisms can learn and
 apply a missing relation; they are not natural-distribution quality estimates.
@@ -471,7 +696,10 @@ capability claim, and it explicitly keeps graph expansion in Lab.
 Track evidence Recall@K, stale-memory error, wrong-scope error, false-memory
 injection, answer accuracy, unrelated-task regression, injected tokens, deepest
 tier, index/maintenance cost, and end-to-end P50/P95 latency including query
-embedding.
+embedding. For STG/LTG/AG experiments also track STG residence time, atomic
+promotion latency, relation precision, false-consolidation rate, consolidated
+subgraph reuse, AG node/edge/evidence counts, budget utilization, expansion
+steps, and marginal evidence gain per added token.
 
 The current Pi regression, seven-category invariant suite, controlled topology
 ablation, and seven-question LongMemEval matched sample prove integration and
@@ -480,16 +708,35 @@ ingest every haystack session for each selected question, but a larger fixed
 sample with repeated model runs is required before claiming that NMG improves
 agent performance.
 
-## 15. Cloud and sandbox boundaries
+The public evaluation portfolio is deliberately complementary rather than a
+single composite leaderboard:
+
+- LongMemEval remains the main development gate for extraction, multi-session
+  reasoning, updates, temporal reasoning, and abstention;
+- PersonaMem evaluates automatic fact/preference/constraint writes, evolving
+  user profiles, scope, and current-state selection;
+- LoCoMo evaluates temporal/causal relations, multi-hop evidence, and expansion
+  from semantic nodes to leaf evidence;
+- BEAM is the late-stage scale and cache-pressure test, beginning at 128K and
+  500K before any 1M or 10M run.
+
+These suites must be reported separately. Matched arms share the same reader,
+prompt, question IDs, source history, evidence-token budget, and judge. Answer
+quality is reported together with evidence recall, injected tokens, backend
+records read, graph/tier depth, end-to-end latency, and index/maintenance work.
+The complete adapter contract and rollout order live in `evals/README.md`.
+
+## 15. Cloud and execution boundaries
 
 Cloud sync is optional and never authoritative. A future backend may exchange
 immutable operations and content-addressed encrypted objects rather than copying
 a live SQLite file. Cloudflare coordination is not part of NMG Lite.
 
-NMG stores and retrieves memory; it does not execute remembered commands. Pi
-extensions run with the Pi process permissions. If untrusted execution becomes
-necessary, it belongs behind a separate `ExecutionBackend`, with Docker as the
-first local candidate. Sandbox lifecycle is not part of the memory model.
+NMG stores and retrieves memory; it does not execute remembered commands or
+provide an `ExecutionBackend`. Pi can obtain execution isolation through its
+own sandbox plugins, independently of NMG. NMG may preserve a sandboxed tool
+result as provenance-bearing evidence, but sandbox selection, permissions,
+lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 
 ## 16. Revised implementation order
 
@@ -511,6 +758,10 @@ first local candidate. Sandbox lifecycle is not part of the memory model.
    category. Larger statistical evaluation remains ongoing benchmark work.
 4. **Complete:** deterministic temporal, aggregation, conflict, multi-hop,
    exact-detail, privacy, and memory-pollution cases.
+5. **Complete at adapter level:** LongMemEval, PersonaMem, LoCoMo, and BEAM have
+   official-format loaders, stratified validation, shared matched experiment
+   arms, ignored local data/results, and fixture coverage. Larger repeated
+   capability runs remain benchmark work rather than implementation work.
 
 ### P2: adaptive semantic graph experiments
 
@@ -523,11 +774,28 @@ first local candidate. Sandbox lifecycle is not part of the memory model.
 4. **Complete as a controlled label test:** the framework-independent online
    router is updated only from explicit useful-node labels.
 
-### P3: optional platform capabilities
+### P3: runtime memory model and consolidation
+
+1. **Complete:** add explicit STG/LTG lifecycle state, provenance-preserving promotion,
+   expiry, and demotion; keep immediate atomic LTG promotion for governed facts,
+   preferences, constraints, and replaceable states.
+2. **Complete:** introduce a first-class `ActiveGraph` runtime object with selected nodes,
+   relations, local evidence, temporary cross-graph edges, and a unified budget
+   ledger.
+3. **Complete with conservative attribution:** record node and edge activation
+   from retrieval traces and agent-directed exact-memory use, not from retrieval
+   frequency alone.
+4. **Complete:** estimate edge stability from independent tasks, evidence coverage, verified
+   usefulness, contradiction, and time decay while preventing self-reinforcing
+   retrieval loops.
+5. **Complete for pairwise local subgraphs:** add auditable, reversible
+   local-subgraph consolidation into LTG with minimum
+   evidence, hysteresis, cooldown, and explicit evaluation gates.
+
+### P4: optional platform capabilities
 
 1. Explicit privacy deletion and dependency cleanup.
 2. Optional encrypted cloud synchronization.
-3. A sandbox adapter only if an execution use case appears.
 
 ## 17. Remaining design questions
 
@@ -538,6 +806,17 @@ first local candidate. Sandbox lifecycle is not part of the memory model.
 - How should interval conflicts and partial scope overlap be represented?
 - What feedback proves a retrieved memory was useful without reinforcing the
   router's own prior selections?
+- What STG retention, expiry, and demotion policy preserves useful provisional
+  information without turning STG into a second unbounded archive?
+- What counts as an independent task or source when estimating edge stability,
+  and how should repeated evidence from the same session be discounted?
+- Which stability threshold, evidence coverage, and hysteresis margin justify
+  consolidating a local subgraph into LTG?
+- How should an Active Graph allocate token, node, edge, evidence, graph-hop,
+  local-tier, and latency budgets, and what marginal-gain rule should stop its
+  expansion?
+- Can a consolidated LTG relation be demoted or reopened when later evidence
+  changes its scope, and how is that transition audited?
 - Which rare safety/user constraints must remain pinned regardless of access
   frequency?
 - At what measured node/leaf count does exact contiguous vector scan stop
@@ -549,6 +828,26 @@ first local candidate. Sandbox lifecycle is not part of the memory model.
 
 > NMG is an adaptive semantic coding system for agent memory. It encodes
 > immutable historical evidence into mutable, variably granular semantic nodes
-> and relations; uses the current query as decoder side information; retrieves
-> evidence through budgeted progressive disclosure; and preserves exact history
-> as a lossless fallback against semantic retrieval error.
+> and relations across a short-term graph and a long-term graph; constructs a
+> budgeted Active Graph as the model's query-scoped virtual memory space;
+> consolidates stable evidence-backed structure while allowing governed atomic
+> memories to persist immediately; and preserves exact history as a lossless
+> fallback against semantic retrieval error.
+
+## 19. Companion engineering notes
+
+This document defines the architectural contract. The supporting notes explore
+implementation choices without making all of them core requirements:
+
+- [`math-physics-foundations.md`](./math-physics-foundations.md) distinguishes
+  implemented mathematics from useful analogy and proposes measurable models.
+- [`structural-analogies.md`](./structural-analogies.md) relates NMG to LSM,
+  event sourcing, content addressing, association learning, and graph methods.
+- [`function-signatures-from-structures.md`](./function-signatures-from-structures.md)
+  derives possible API boundaries from those structural analogies.
+- [`sqlite-assessment.md`](./sqlite-assessment.md) records why SQLite remains the
+  correct authoritative store for the current scale and plugin boundary.
+- [`improvement-areas.md`](./improvement-areas.md) tracks unresolved engineering
+  risks and should not be read as implemented design.
+- [`ci-cd-and-quality.md`](./ci-cd-and-quality.md) describes the current local
+  quality checks and CI automation.

@@ -44,8 +44,7 @@ export function assessMemoryWrite(input: {
   if (DO_NOT_RETAIN_PATTERNS.some((pattern) => pattern.test(text))) {
     return { allowed: false, reason: "non_persistent_instruction" };
   }
-  if (input.memoryType !== "event" &&
-      TRANSIENT_PATTERNS.some((pattern) => pattern.test(text))) {
+  if (input.memoryType !== "event" && TRANSIENT_PATTERNS.some((pattern) => pattern.test(text))) {
     return { allowed: false, reason: "non_persistent_instruction" };
   }
   return { allowed: true, reason: "allowed" };

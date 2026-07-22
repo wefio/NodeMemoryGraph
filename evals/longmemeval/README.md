@@ -6,6 +6,7 @@ files and is intentionally ignored by Git.
 Run one deterministic example from each of the seven benchmark categories:
 
 ```powershell
+npm run eval:longmem -- validate 1
 npm run eval:longmem -- no-memory 1
 npm run eval:longmem -- oracle 1
 npm run eval:longmem -- nmg-oracle 1
@@ -25,12 +26,15 @@ than discarding the whole experiment; judge failures receive one fresh retry.
 ## Modes
 
 - `no-memory`: the reader receives only the question and date.
+- `nmg-auto`: the natural question relies on automatic budgeted recall without
+  forcing a memory tool call.
 - `oracle`: the reader receives only the official evidence sessions.
 - `nmg-oracle`: Pi imports the official evidence sessions into an isolated NMG
   database, then a fresh Pi session answers using NMG retrieval. This is an
   ingestion/retrieval smoke test, not a full-haystack score.
-- `matched`: runs five controls on the same fixed IDs and full cleaned haystack:
-  `no-memory`, `raw-session`, `flat-hybrid`, `nmg-lite`, and `nmg-graph`.
+- `matched`: runs six controls on the same fixed IDs and full cleaned haystack:
+  `no-memory`, `raw-session`, `flat-hybrid`, `nmg-auto`, `nmg-lite`, and
+  `nmg-graph`.
 - `raw-session`: lexical session ranking under the shared context-character
   budget.
 - `flat-hybrid`: lexical plus deterministic hashing-vector ranking over

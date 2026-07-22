@@ -3,11 +3,9 @@ import { resolve } from "node:path";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 
 const root = resolve(import.meta.dirname, "..");
-const cliPath = resolve(
-  root,
-  "node_modules/@earendil-works/pi-coding-agent/dist/cli.js",
-);
+const cliPath = resolve(root, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
 const extensionPath = resolve(root, ".pi/extensions/nmg/index.ts");
+const testModel = process.env.NMG_PI_MODEL || "deepseek/deepseek-v4-flash";
 
 const [command, ...args] = process.argv.slice(2);
 if (command !== "state" && command !== "prompt") {
@@ -22,6 +20,13 @@ const client = new RpcClient({
     "--offline",
     "--approve",
     "--no-session",
+    "--no-extensions",
+    "--tools",
+    "nmg_remember,nmg_search,nmg_get",
+    "--model",
+    testModel,
+    "--thinking",
+    "off",
     "--extension",
     extensionPath,
   ],
@@ -35,15 +40,10 @@ try {
     process.stdout.write(
       `${JSON.stringify(
         {
-          model: state.model
-            ? { provider: state.model.provider, id: state.model.id }
-            : null,
+          model: state.model ? { provider: state.model.provider, id: state.model.id } : null,
           thinkingLevel: state.thinkingLevel,
           sessionId: state.sessionId,
-          nmgDatabase: resolve(
-            process.env.NMG_DATA_DIR || resolve(root, ".nmg"),
-            "nmg.sqlite",
-          ),
+          nmgDatabase: resolve(process.env.NMG_DATA_DIR || resolve(root, ".nmg"), "nmg.sqlite"),
         },
         null,
         2,
@@ -77,4 +77,3 @@ function fail(message: string): never {
   process.stderr.write(`${message}\n`);
   process.exit(1);
 }
-

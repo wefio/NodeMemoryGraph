@@ -12,5 +12,8 @@ test("Float32VectorCache appends, updates, filters, and grows geometrically", ()
   assert.equal(cache.size, 2);
   assert.equal(cache.byteLength, 4 * 2 * 2);
   assert.equal(cache.score([0, 1])[0]?.id, "b");
-  assert.deepEqual(cache.score([1, 0], new Set(["a"])).map((item) => item.id), ["a"]);
+  assert.deepEqual(
+    cache.score([1, 0], new Set(["a"])).map((item) => item.id),
+    ["a"],
+  );
 });

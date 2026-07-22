@@ -26,24 +26,38 @@
   ],
   "scripts": {
     "check": "tsc --noEmit",
+    "lint": "eslint src/ .pi/extensions/",
+    "lint:fix": "eslint --fix src/ .pi/extensions/",
+    "format": "prettier --write \"src/**/*.ts\" \".pi/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \".pi/**/*.ts\"",
+    "test:coverage": "c8 node --experimental-strip-types --test src/core/*.test.ts .pi/extensions/nmg/index.test.ts",
     "eval:agents": "node --experimental-strip-types evals/run.ts",
     "eval:adaptive": "node --experimental-strip-types evals/adaptive-topology/run.ts",
     "eval:quality": "node --experimental-strip-types evals/memory-quality/run.ts",
     "eval:longmem": "node --experimental-strip-types evals/longmemeval/run.ts",
+    "eval:locomo": "node --experimental-strip-types evals/benchmarks/run.ts locomo",
+    "eval:personamem": "node --experimental-strip-types evals/benchmarks/run.ts personamem",
+    "eval:beam": "node --experimental-strip-types evals/benchmarks/run.ts beam",
     "eval:recall-compression": "node --experimental-strip-types evals/recall-compression.ts",
     "eval:scale": "node --experimental-strip-types evals/scale/run.ts",
     "eval:hierarchy": "node --experimental-strip-types evals/hierarchy-scale/run.ts",
     "index:qwen3": "node --experimental-strip-types scripts/index-qwen3.ts",
+    "index:embeddings": "node --experimental-strip-types scripts/index-qwen3.ts",
     "index:ann": "node --experimental-strip-types scripts/build-ann.ts",
     "pi:prompt": "node --experimental-strip-types scripts/pi-control.ts prompt",
     "pi:state": "node --experimental-strip-types scripts/pi-control.ts state",
-    "test": "node --experimental-strip-types --test src/core/store.test.ts src/core/gate.test.ts src/core/openai-embedding.test.ts src/core/ann.test.ts src/core/vector-cache.test.ts src/core/write-policy.test.ts .pi/extensions/nmg/index.test.ts"
+    "test": "node --experimental-strip-types --test src/core/store.test.ts src/core/gate.test.ts src/core/openai-embedding.test.ts src/core/ann.test.ts src/core/vector-cache.test.ts src/core/write-policy.test.ts .pi/extensions/nmg/index.test.ts evals/benchmarks/loaders.test.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.80.10",
+    "@eslint/js": "^10.0.1",
     "@types/node": "24.12.4",
+    "c8": "^12.0.0",
+    "eslint": "^10.7.0",
+    "prettier": "^3.9.5",
     "typebox": "1.1.38",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.64.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

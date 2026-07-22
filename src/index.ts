@@ -4,6 +4,14 @@ export { OpenAIEmbeddingClient } from "./core/openai-embedding.ts";
 export { UsearchAnnIndex } from "./core/ann.ts";
 export { decideMemoryLoad } from "./core/gate.ts";
 export type {
+  ActivationSignal,
+  ActiveGraph,
+  ActiveGraphBudget,
+  ActiveGraphBudgetUsage,
+  ActiveGraphEdge,
+  ConsolidationEvent,
+  ConsolidationResult,
+  EdgeStability,
   HistoryRecord,
   EvidenceRole,
   DeriveMemoryInput,
@@ -19,6 +27,7 @@ export type {
   LeafBlock,
   LeafEmbeddingDocument,
   MemoryRecord,
+  MemoryResidence,
   MemoryScope,
   MemorySearchResult,
   MemoryTier,

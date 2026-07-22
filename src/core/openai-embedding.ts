@@ -18,13 +18,20 @@ export class OpenAIEmbeddingClient {
     this.apiKey = options.apiKey;
     this.model = options.model ?? "Qwen/Qwen3-Embedding-0.6B";
     this.dimensions = options.dimensions;
-    this.queryInstruction = options.queryInstruction ??
+    this.queryInstruction =
+      options.queryInstruction ??
       "Given a memory recall query, retrieve relevant personal history passages that answer it";
   }
 
   embedQueries(inputs: string[]): Promise<number[][]> {
-    return this.embed(inputs.map((input) =>
-      `Instruct: ${this.queryInstruction}\nQuery:${input}`));
+    return this.embed(inputs.map((input) => this.queryText(input)));
+  }
+
+  private queryText(input: string): string {
+    if (/^BAAI\/bge-(?:base|large|small)-en(?:-|$)/iu.test(this.model)) {
+      return `Represent this sentence for searching relevant passages: ${input}`;
+    }
+    return `Instruct: ${this.queryInstruction}\nQuery:${input}`;
   }
 
   async embed(inputs: string[]): Promise<number[][]> {
@@ -44,12 +51,14 @@ export class OpenAIEmbeddingClient {
     if (!response.ok) {
       throw new Error(`embedding server returned ${response.status}: ${await response.text()}`);
     }
-    const payload = await response.json() as {
+    const payload = (await response.json()) as {
       data?: Array<{ index: number; embedding: number[] }>;
     };
     const rows = payload.data ?? [];
     if (rows.length !== inputs.length) {
-      throw new Error(`embedding server returned ${rows.length} vectors for ${inputs.length} inputs`);
+      throw new Error(
+        `embedding server returned ${rows.length} vectors for ${inputs.length} inputs`,
+      );
     }
     return rows.sort((left, right) => left.index - right.index).map((row) => row.embedding);
   }

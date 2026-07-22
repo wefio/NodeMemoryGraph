@@ -16,7 +16,7 @@ interface NativeIndex {
 }
 
 interface NativeIndexConstructor {
-  new(options: Record<string, unknown>): NativeIndex;
+  new (options: Record<string, unknown>): NativeIndex;
 }
 
 const require = createRequire(import.meta.url);
@@ -48,7 +48,7 @@ export class UsearchAnnIndex {
     const iterator = batches[Symbol.iterator]();
     let current = iterator.next();
     while (!current.done && current.value.length === 0) current = iterator.next();
-    const dimensions = current.done ? 0 : current.value[0]?.vector.length ?? 0;
+    const dimensions = current.done ? 0 : (current.value[0]?.vector.length ?? 0);
     if (dimensions === 0) {
       throw new Error("ANN build requires consistent non-empty vectors");
     }
@@ -80,11 +80,14 @@ export class UsearchAnnIndex {
     const temporaryIndex = `${this.indexPath}.tmp`;
     const temporaryMetadata = `${this.metadataPath}.tmp`;
     index.save(temporaryIndex);
-    writeFileSync(temporaryMetadata, JSON.stringify({
-      model,
-      dimensions,
-      memoryIds,
-    }));
+    writeFileSync(
+      temporaryMetadata,
+      JSON.stringify({
+        model,
+        dimensions,
+        memoryIds,
+      }),
+    );
     renameSync(temporaryIndex, this.indexPath);
     renameSync(temporaryMetadata, this.metadataPath);
     this.#loaded = { index, dimensions, memoryIds };
@@ -111,7 +114,9 @@ export class UsearchAnnIndex {
       throw new Error(`query has ${vector.length} dimensions; index expects ${loaded.dimensions}`);
     }
     const matches = loaded.index.search(
-      new Float32Array(vector), Math.min(count, loaded.memoryIds.length));
+      new Float32Array(vector),
+      Math.min(count, loaded.memoryIds.length),
+    );
     return [...matches.keys].map((key) => loaded.memoryIds[Number(key) - 1]!).filter(Boolean);
   }
 }

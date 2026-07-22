@@ -1,0 +1,365 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { RpcClient } from "@earendil-works/pi-coding-agent";
+
+import { NmgStore } from "../../src/core/store.ts";
+import { HashingVectorEmbedder, cosineSimilarity } from "../../src/core/vector.ts";
+import { indexExternalEmbeddings } from "../external-embeddings.ts";
+import { loadBeam, loadLocomo, loadPersonaMem, stratifiedSample } from "./loaders.ts";
+import type { BenchmarkCase, BenchmarkSession } from "./types.ts";
+
+type Benchmark = "beam" | "locomo" | "personamem";
+type Mode = "flat-hybrid" | "matched" | "nmg-auto" | "nmg-graph" | "nmg-nodes" |
+  "no-memory" | "raw-session" | "validate";
+type EvaluationMode = Exclude<Mode, "matched" | "validate">;
+
+const root = resolve(import.meta.dirname, "../..");
+const benchmark = parseBenchmark(process.argv[2]);
+const mode = parseMode(process.argv[3]);
+const perCategory = positiveInteger(process.argv[4] ?? "1");
+const allCases = loadCases(benchmark);
+const stratified = stratifiedSample(allCases, perCategory);
+const selected = process.env.NMG_BENCH_CASE
+  ? stratified.filter((item) => item.id === process.env.NMG_BENCH_CASE)
+  : stratified;
+if (selected.length === 0) {
+  throw new Error("NMG_BENCH_CASE did not match the selected stratified sample");
+}
+
+if (mode === "validate") {
+  const summary = {
+    benchmark,
+    cases: allCases.length,
+    selected: selected.length,
+    selectedIds: selected.map((item) => item.id),
+    categories: Object.fromEntries([...new Set(allCases.map((item) => item.category))]
+      .sort().map((category) => [category, allCases.filter((item) => item.category === category).length])),
+    caseSessionReferences: allCases.reduce((sum, item) => sum + item.sessions.length, 0),
+    caseTurnReferences: allCases.reduce((sum, item) =>
+      sum + item.sessions.reduce((count, session) => count + session.turns.length, 0), 0),
+  };
+  process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+  process.exit(0);
+}
+
+const runId = new Date().toISOString().replaceAll(":", "-");
+const outputDirectory = resolve(root, "evals", benchmark, "results", runId);
+mkdirSync(outputDirectory, { recursive: true });
+const modes: EvaluationMode[] = mode === "matched"
+  ? ["no-memory", "raw-session", "flat-hybrid", "nmg-auto", "nmg-nodes", "nmg-graph"]
+  : [mode];
+
+const results = (await mapConcurrent(selected, concurrency(), async (item) => {
+  const dataDirectory = resolve(outputDirectory, "nmg", safeName(item.id));
+  const needsNmg = modes.some((itemMode) => itemMode.startsWith("nmg-"));
+  const remembered = needsNmg ? ingest(item, dataDirectory) : 0;
+  if (needsNmg && process.env.NMG_EMBED_BASE_URL) await indexExternalEmbeddings(dataDirectory);
+  const rows = [];
+  for (const itemMode of modes) {
+    process.stderr.write(`[${benchmark}] ${item.id} ${itemMode}: start\n`);
+    rows.push(await evaluate(item, itemMode, dataDirectory, remembered));
+    process.stderr.write(`[${benchmark}] ${item.id} ${itemMode}: done\n`);
+  }
+  return rows;
+})).flat();
+
+const report = {
+  runId,
+  benchmark,
+  model: "deepseek/deepseek-v4-flash",
+  perCategory,
+  contextCharacterBudget: contextBudget(),
+  results,
+  byMode: Object.fromEntries(modes.map((itemMode) => {
+    const rows = results.filter((row) => row.mode === itemMode);
+    const passed = rows.filter((row) => row.passed).length;
+    return [itemMode, { passed, total: rows.length, accuracy: passed / rows.length }];
+  })),
+};
+writeFileSync(resolve(outputDirectory, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
+process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+
+async function evaluate(
+  item: BenchmarkCase,
+  itemMode: EvaluationMode,
+  dataDirectory: string,
+  remembered: number,
+) {
+  const startedAt = performance.now();
+  const injectedContext = contextFor(item, itemMode);
+  const client = createClient(itemMode.startsWith("nmg-") ? dataDirectory : undefined, itemMode);
+  let hypothesis = "";
+  let answerError: string | null = null;
+  try {
+    await client.start();
+    await client.setThinkingLevel("low");
+    await client.promptAndWait(answerPrompt(item, itemMode, injectedContext), undefined, timeout());
+    hypothesis = (await client.getLastAssistantText())?.trim() ?? "";
+  } catch (error) {
+    answerError = error instanceof Error ? error.message : String(error);
+  } finally {
+    await client.stop();
+  }
+  const judgement = await judge(item, hypothesis);
+  return {
+    id: item.id,
+    category: item.category,
+    mode: itemMode,
+    reference: item.reference,
+    hypothesis,
+    judgement,
+    passed: passed(judgement),
+    answerError,
+    remembered,
+    injectedCharacters: injectedContext.length,
+    sourceTurns: item.sessions.reduce((sum, session) => sum + session.turns.length, 0),
+    durationMs: Math.round(performance.now() - startedAt),
+  };
+}
+
+function ingest(item: BenchmarkCase, dataDirectory: string): number {
+  mkdirSync(dataDirectory, { recursive: true });
+  const store = new NmgStore(resolve(dataDirectory, "nmg.sqlite"));
+  let count = 0;
+  let previousNodeId: string | undefined;
+  try {
+    for (const session of item.sessions) {
+      const nodeName = `${item.benchmark} ${item.id} ${session.id}`;
+      const nodeSummary = session.turns
+        .map((turn) => `${turn.speaker ?? turn.role}: ${turn.content}`)
+        .join(" ")
+        .slice(0, 1_500);
+      let nodeId: string | undefined;
+      for (const turn of session.turns) {
+        const saved = store.remember({
+          statement: `${turn.speaker ?? turn.role}: ${turn.content}`,
+          nodeName,
+          nodeSummary,
+          memoryType: "conversation_evidence",
+          sourceActor: turn.role,
+          truthStatus: turn.role === "user" ? "asserted" : "unverified",
+          evidence: turn.content,
+          eventTime: session.date,
+          sourceRef: `${item.benchmark.toLocaleLowerCase()}:${item.id}:${turn.sourceId}`,
+          tier: 2,
+          importance: item.evidenceIds?.includes(turn.sourceId) ? 0.9 : 0.5,
+          scope: {
+            benchmark: item.benchmark,
+            case: item.id,
+          },
+        });
+        nodeId = saved.node.id;
+        count += 1;
+      }
+      if (previousNodeId && nodeId) {
+        store.linkNodes({ sourceNodeId: previousNodeId, targetNodeId: nodeId, type: "related_to" });
+      }
+      previousNodeId = nodeId;
+    }
+  } finally {
+    store.close();
+  }
+  return count;
+}
+
+function contextFor(item: BenchmarkCase, itemMode: EvaluationMode): string {
+  if (itemMode === "no-memory" || itemMode.startsWith("nmg-")) return "";
+  if (itemMode === "raw-session") {
+    const ranked = item.sessions.map((session) => ({
+      text: formatSession(session),
+      score: lexicalOverlap(item.question, formatSession(session)),
+    })).sort((left, right) => right.score - left.score);
+    return withinBudget(ranked.map((value) => value.text));
+  }
+  const embedder = new HashingVectorEmbedder(256);
+  const query = embedder.embed(item.question);
+  const turns = item.sessions.flatMap((session) => session.turns.map((turn) => {
+    const text = `[${session.date ?? session.id}] ${turn.speaker ?? turn.role}: ${turn.content}`;
+    return {
+      text,
+      score: lexicalOverlap(item.question, text) * 0.55 +
+        cosineSimilarity(query, embedder.embed(text)) * 0.45,
+    };
+  })).sort((left, right) => right.score - left.score);
+  return withinBudget(turns.map((value) => value.text));
+}
+
+function answerPrompt(item: BenchmarkCase, itemMode: EvaluationMode, context: string): string {
+  if (itemMode === "nmg-auto") {
+    return [item.options?.length ? `Options:\n${item.options.join("\n")}` : "", item.question]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  return [
+    "Answer concisely using only the available conversation evidence.",
+    "If the evidence is missing, explicitly say you do not know.",
+    ...(itemMode === "nmg-nodes" || itemMode === "nmg-graph"
+      ? ["Search NMG through maxTier 3 and call nmg_get for selected evidence before answering."]
+      : []),
+    item.options?.length ? `Options:\n${item.options.join("\n")}` : "",
+    context ? `Retrieved conversation evidence:\n${context}` : "",
+    `Question: ${item.question}`,
+  ].filter(Boolean).join("\n\n");
+}
+
+async function judge(item: BenchmarkCase, hypothesis: string): Promise<string> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const client = createClient();
+    try {
+      await client.start();
+      await client.setThinkingLevel("low");
+      await client.promptAndWait([
+        "Judge whether the candidate is semantically correct under the reference.",
+        "For multiple choice, require the same option letter. For rubric-style",
+        "references, require the candidate to satisfy the essential claims.",
+        "Respond with exactly PASS or FAIL followed by one short reason.",
+        `Question: ${item.question}`,
+        `Reference: ${item.reference}`,
+        `Candidate: ${hypothesis}`,
+      ].join("\n"), undefined, timeout());
+      const result = (await client.getLastAssistantText())?.trim() ?? "";
+      if (result) return result;
+    } catch {
+      // Retry transient provider failures with a fresh Pi process.
+    } finally {
+      await client.stop();
+    }
+  }
+  return "FAIL - Judge returned no response.";
+}
+
+function createClient(dataDirectory?: string, itemMode?: EvaluationMode): RpcClient {
+  return new RpcClient({
+    cliPath: resolve(root, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js"),
+    cwd: root,
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    env: {
+      ...definedEnvironment(),
+      ...(dataDirectory ? { NMG_DATA_DIR: dataDirectory } : {}),
+      ...(itemMode === "nmg-nodes" ? { NMG_GRAPH_HOPS: "0" } : {}),
+      ...(itemMode === "nmg-graph" ? { NMG_GRAPH_HOPS: "1" } : {}),
+    },
+    args: [
+      "--offline", "--approve", "--no-session", "--no-extensions",
+      "--model", "deepseek/deepseek-v4-flash", "--thinking", "off",
+      ...(dataDirectory
+        ? [
+            "--tools", "nmg_remember,nmg_search,nmg_get",
+            "--extension", resolve(root, ".pi/extensions/nmg/index.ts"),
+          ]
+        : ["--tools", "read"]),
+    ],
+  });
+}
+
+function loadCases(value: Benchmark): BenchmarkCase[] {
+  if (value === "locomo") {
+    return loadLocomo(process.env.NMG_LOCOMO_DATA ??
+      resolve(root, "evals/locomo/data/locomo10.json"));
+  }
+  if (value === "personamem") {
+    const size = process.env.NMG_PERSONAMEM_SIZE ?? "32k";
+    return loadPersonaMem(
+      process.env.NMG_PERSONAMEM_QUESTIONS ??
+        resolve(root, `evals/personamem/data/questions_${size}.csv`),
+      process.env.NMG_PERSONAMEM_CONTEXTS ??
+        resolve(root, `evals/personamem/data/shared_contexts_${size}.jsonl`),
+    );
+  }
+  return loadBeam(process.env.NMG_BEAM_DATA ?? resolve(root, "evals/beam/data/chats/100K"));
+}
+
+function formatSession(session: BenchmarkSession): string {
+  return `[${session.date ?? session.id}]\n` +
+    session.turns.map((turn) => `${turn.speaker ?? turn.role}: ${turn.content}`).join("\n");
+}
+
+function withinBudget(values: string[]): string {
+  const selected: string[] = [];
+  let used = 0;
+  for (const value of values) {
+    if (selected.length > 0 && used + value.length > contextBudget()) continue;
+    selected.push(value);
+    used += value.length;
+    if (used >= contextBudget()) break;
+  }
+  return selected.join("\n\n");
+}
+
+function lexicalOverlap(query: string, text: string): number {
+  const queryTokens = new Set(tokens(query));
+  const textTokens = new Set(tokens(text));
+  if (queryTokens.size === 0) return 0;
+  return [...queryTokens].filter((token) => textTokens.has(token)).length / queryTokens.size;
+}
+
+function tokens(value: string): string[] {
+  return value.toLocaleLowerCase().match(/[\p{L}\p{N}_+.#-]+/gu) ?? [];
+}
+
+function passed(judgement: string): boolean {
+  const verdicts = judgement.split(/\r?\n/u).flatMap((line) => {
+    const match = line.trim().match(/^(PASS|FAIL)\b/iu);
+    return match ? [match[1]!.toUpperCase()] : [];
+  });
+  return verdicts.at(-1) === "PASS";
+}
+
+function parseBenchmark(value: string | undefined): Benchmark {
+  if (value === "beam" || value === "locomo" || value === "personamem") return value;
+  throw new Error("Benchmark must be beam, locomo, or personamem.");
+}
+
+function parseMode(value: string | undefined): Mode {
+  const candidate = value ?? "validate";
+  if (["flat-hybrid", "matched", "nmg-auto", "nmg-graph", "nmg-nodes", "no-memory",
+    "raw-session", "validate"].includes(candidate)) return candidate as Mode;
+  throw new Error(`Unknown benchmark mode: ${candidate}`);
+}
+
+function positiveInteger(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`Expected positive integer: ${value}`);
+  return parsed;
+}
+
+function contextBudget(): number {
+  return Math.max(2_000, Number.parseInt(process.env.NMG_BENCH_CONTEXT_CHARS ?? "12000", 10));
+}
+
+function concurrency(): number {
+  return Math.max(1, Math.min(positiveInteger(process.env.NMG_BENCH_CONCURRENCY ?? "4"), 16));
+}
+
+function timeout(): number {
+  return Math.max(30_000, Number.parseInt(process.env.NMG_BENCH_TIMEOUT_MS ?? "300000", 10));
+}
+
+function safeName(value: string): string {
+  return value.replace(/[^a-z0-9._-]+/giu, "_").slice(0, 120);
+}
+
+async function mapConcurrent<Input, Output>(
+  values: readonly Input[],
+  limit: number,
+  worker: (value: Input) => Promise<Output>,
+): Promise<Output[]> {
+  const results = new Array<Output>(values.length);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, async () => {
+    while (cursor < values.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(values[index]!);
+    }
+  }));
+  return results;
+}
+
+function definedEnvironment(): Record<string, string> {
+  return Object.fromEntries(Object.entries(process.env).filter(
+    (entry): entry is [string, string] => entry[1] !== undefined,
+  ));
+}

@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder, cosineSimilarity } from "../../src/core/vector.ts";
+import { indexExternalEmbeddings } from "../external-embeddings.ts";
 
 type Role = "assistant" | "user";
 
@@ -22,9 +23,9 @@ interface LongMemExample {
   haystack_sessions: Turn[][];
 }
 
-type Mode = "flat-hybrid" | "matched" | "nmg-graph" | "nmg-lite" |
-  "nmg-oracle" | "no-memory" | "oracle" | "raw-session";
-type MatchedMode = "flat-hybrid" | "nmg-graph" | "nmg-lite" |
+type Mode = "flat-hybrid" | "matched" | "nmg-auto" | "nmg-graph" | "nmg-lite" |
+  "nmg-oracle" | "no-memory" | "oracle" | "raw-session" | "validate";
+type MatchedMode = "flat-hybrid" | "nmg-auto" | "nmg-graph" | "nmg-lite" |
   "no-memory" | "raw-session";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -58,6 +59,20 @@ const sample = process.env.NMG_LONGMEM_QUESTION
   : selectedSample;
 if (sample.length === 0) {
   throw new Error("NMG_LONGMEM_QUESTION did not match the selected sample");
+}
+if (mode === "validate") {
+  process.stdout.write(`${JSON.stringify({
+    benchmark: "longmemeval",
+    cases: canonicalExamples.length,
+    selected: sample.length,
+    selectedIds: sample.map((example) => example.question_id),
+    categories: Object.fromEntries([...new Set(canonicalExamples.map(benchmarkType))]
+      .sort().map((type) => [
+        type,
+        canonicalExamples.filter((example) => benchmarkType(example) === type).length,
+      ])),
+  }, null, 2)}\n`);
+  process.exit(0);
 }
 const runId = new Date().toISOString().replaceAll(":", "-");
 const outputDirectory = resolve(import.meta.dirname, "results", runId);
@@ -97,8 +112,9 @@ async function runMatchedExample(example: LongMemExample) {
   const nmgDirectory = resolve(outputDirectory, "nmg", example.question_id);
   mkdirSync(nmgDirectory, { recursive: true });
   const remembered = ingestRawEvidence(example, nmgDirectory);
+  await indexExternalEmbeddings(nmgDirectory);
   const modes: MatchedMode[] = [
-    "no-memory", "raw-session", "flat-hybrid", "nmg-lite", "nmg-graph",
+    "no-memory", "raw-session", "flat-hybrid", "nmg-auto", "nmg-lite", "nmg-graph",
   ];
   const results = [];
   for (const matchedMode of modes) {
@@ -120,6 +136,7 @@ async function runExample(
   if (runMode === "nmg-oracle" && !sharedNmgDirectory) {
     mkdirSync(nmgDirectory, { recursive: true });
     remembered = await ingestEvidence(example, nmgDirectory);
+    await indexExternalEmbeddings(nmgDirectory);
   }
 
   const answerClient = createClient(
@@ -263,6 +280,9 @@ async function judgeAnswer(
 }
 
 function answerPrompt(example: LongMemExample, runMode: Exclude<Mode, "matched">): string {
+  if (runMode === "nmg-auto") {
+    return `Question date: ${example.question_date}\nQuestion: ${example.question}`;
+  }
   const history = runMode === "oracle"
     ? `\nRelevant conversation history:\n${formatHistory(example)}\n`
     : runMode === "raw-session"
@@ -276,7 +296,7 @@ function answerPrompt(example: LongMemExample, runMode: Exclude<Mode, "matched">
     "For a recommendation question, use remembered preferences to generate useful",
     "new recommendations. The exact recommended resources need not have appeared",
     "in the past conversation; do not confuse preference recall with item recall.",
-    ...(runMode.startsWith("nmg-")
+    ...(runMode === "nmg-lite" || runMode === "nmg-graph" || runMode === "nmg-oracle"
       ? ["Search NMG through maxTier 3 and call nmg_get for selected evidence before answering."]
       : []),
     history,
@@ -434,9 +454,19 @@ function createClient(nmgDirectory?: string, runMode?: Exclude<Mode, "matched">)
       "--offline",
       "--approve",
       "--no-session",
+      "--no-extensions",
+      "--model",
+      "deepseek/deepseek-v4-flash",
+      "--thinking",
+      "off",
       ...(nmgDirectory
-        ? ["--extension", resolve(root, ".pi/extensions/nmg/index.ts")]
-        : []),
+        ? [
+            "--tools",
+            "nmg_remember,nmg_search,nmg_get",
+            "--extension",
+            resolve(root, ".pi/extensions/nmg/index.ts"),
+          ]
+        : ["--tools", "read"]),
     ],
   });
 }
@@ -445,13 +475,15 @@ function parseMode(value: string | undefined): Mode {
   if (value === undefined || value === "no-memory") return "no-memory";
   if (value === "oracle") return "oracle";
   if (value === "nmg-oracle") return "nmg-oracle";
+  if (value === "nmg-auto") return "nmg-auto";
   if (value === "raw-session") return "raw-session";
   if (value === "flat-hybrid") return "flat-hybrid";
   if (value === "nmg-lite") return "nmg-lite";
   if (value === "nmg-graph") return "nmg-graph";
   if (value === "matched") return "matched";
+  if (value === "validate") return "validate";
   throw new Error(
-    `Unknown mode: ${value}. Use matched, no-memory, raw-session, ` +
+    `Unknown mode: ${value}. Use validate, matched, no-memory, raw-session, nmg-auto, ` +
       `flat-hybrid, nmg-lite, nmg-graph, oracle, or nmg-oracle.`,
   );
 }

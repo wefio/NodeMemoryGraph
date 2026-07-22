@@ -43,7 +43,10 @@ export class Float32VectorCache {
     this.#matrix.set(vector, index * this.dimensions);
   }
 
-  score(query: readonly number[], candidateIds?: ReadonlySet<string>): Array<{
+  score(
+    query: readonly number[],
+    candidateIds?: ReadonlySet<string>,
+  ): Array<{
     id: string;
     score: number;
   }> {
@@ -53,10 +56,7 @@ export class Float32VectorCache {
       const id = this.#ids[index]!;
       if (candidateIds && !candidateIds.has(id)) continue;
       const start = index * this.dimensions;
-      const score = cosineSimilarity(
-        query,
-        this.#matrix.subarray(start, start + this.dimensions),
-      );
+      const score = cosineSimilarity(query, this.#matrix.subarray(start, start + this.dimensions));
       if (score > 0) results.push({ id, score });
     }
     return results.sort((left, right) => right.score - left.score);

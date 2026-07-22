@@ -1,4 +1,4 @@
-# Qwen3 embedding through vLLM
+# External embeddings through vLLM
 
 NMG treats embeddings as an optional service. The default endpoint is the
 OpenAI-compatible `http://127.0.0.1:8000/v1/embeddings`; SQLite, FTS5, and the
@@ -8,6 +8,12 @@ The selected model is `Qwen/Qwen3-Embedding-0.6B`: 0.6B parameters, up to 1024
 dimensions, multilingual, and a 32K context window. Query strings receive an
 instruction while stored documents do not, following the model's retrieval
 usage contract.
+
+For the English benchmark development loop, the smaller
+`BAAI/bge-small-en-v1.5` (384 dimensions) is a useful low-cost control. NMG
+automatically applies its retrieval query prefix while leaving stored node and
+leaf documents unprefixed. Qwen3 remains the better default candidate when one
+model must cover both Chinese and English.
 
 ## WSL service
 
@@ -24,6 +30,16 @@ vllm serve Qwen/Qwen3-Embedding-0.6B \
   --max-model-len 8192
 ```
 
+Small English BGE alternative:
+
+```bash
+vllm serve BAAI/bge-small-en-v1.5 \
+  --runner pooling \
+  --dtype half \
+  --host 0.0.0.0 \
+  --port 8000
+```
+
 The tested RTX 3060 Laptop GPU has 6 GB VRAM. The model's default 32K context
 could not reserve enough KV cache; 8K is sufficient for NMG node and leaf headers
 and started successfully under Ubuntu 26.04 WSL.
@@ -38,6 +54,9 @@ $env:NMG_EMBED_MODEL = "Qwen/Qwen3-Embedding-0.6B"
 $env:NMG_EMBED_BATCH_SIZE = "64"
 npm run index:qwen3
 ```
+
+`npm run index:embeddings` is the model-neutral alias. For BGE set
+`NMG_EMBED_MODEL=BAAI/bge-small-en-v1.5` before running it.
 
 By default this embeds only the progressive-disclosure index: node headers and
 leaf/block headers. To compare against full per-record vectorization:

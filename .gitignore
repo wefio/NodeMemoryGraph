@@ -1,9 +1,16 @@
 node_modules/
 dist/
+coverage/
 .nmg/
 evals/scale/.tmp/
 evals/hierarchy-scale/.tmp/
 evals/results/
 evals/longmemeval/data/
 evals/longmemeval/results/
+evals/locomo/data/
+evals/locomo/results/
+evals/personamem/data/
+evals/personamem/results/
+evals/beam/data/
+evals/beam/results/
 *.tsbuildinfo

@@ -39,7 +39,8 @@ optimization:
   semantic graph changes.
 - Scope, validity intervals, conflicts, and superseded states remain
   traceable instead of deleting earlier evidence.
-- Cloud sync, external embedding models, and sandbox execution are deferred.
+- Cloud sync is deferred. External embeddings are optional and served through
+  an OpenAI-compatible endpoint; execution isolation remains a Pi plugin concern.
 
 ## Architecture
 
@@ -97,13 +98,20 @@ maintenance surface:
 - `nmg_rebalance`: batch-rebuild node-local block tiers from accumulated access
   probability statistics.
 
-For one-off development inside this repository, run
-`pi -e ./.pi/extensions/nmg/index.ts`; Pi deduplicates this project-local entry.
+For one-off development inside this repository, disable automatic extension
+discovery and load NMG exactly once:
 
-The built-in `HashingVectorEmbedder` is deterministic, offline, and intended as
-the zero-configuration baseline. `NmgStore` accepts any synchronous
-`VectorEmbedder`, so a semantic embedding provider can replace it; call
-`rebuildVectorIndex()` after changing models.
+```powershell
+pi --no-extensions --extension ./.pi/extensions/nmg/index.ts
+```
+
+Loading the package manifest, project-local extension, and an explicit
+`--extension` together can register duplicate tools and stall tool loops.
+
+The built-in `HashingVectorEmbedder` is deterministic, offline, and remains the
+zero-configuration fallback. Set `NMG_EMBED_BASE_URL` and `NMG_EMBED_MODEL` to
+enable the external node/leaf hierarchy in normal Pi recall. The resumable
+`npm run index:embeddings` command builds that model's index.
 
 The automatic-write rule is intentionally narrow:
 
@@ -147,6 +155,11 @@ npm run pi:prompt -- "Remember that the RPC controller is used for NMG tests."
 
 Each invocation uses a new Pi session but shares the project's
 `.nmg/nmg.sqlite`, which makes cross-session memory tests straightforward.
+The controller defaults to `deepseek/deepseek-v4-flash` with thinking disabled,
+uses `--no-extensions`, and explicitly loads only the NMG extension and its
+three stable tools. This prevents unrelated global permission extensions from
+blocking non-interactive RPC tool calls. Set `NMG_PI_MODEL` to override the
+test model when needed.
 
 ## Agent evaluation
 
@@ -184,6 +197,26 @@ npm run eval:longmem -- matched 1
 See [evals/longmemeval/README.md](evals/longmemeval/README.md) for methodology,
 limitations, and the initial seven-question smoke-test results.
 
+### Complementary memory benchmarks
+
+LoCoMo, PersonaMem, and BEAM use one shared runner and the same matched modes as
+the LongMemEval development comparison:
+
+```powershell
+npm run eval:locomo -- validate 1
+npm run eval:personamem -- validate 1
+npm run eval:beam -- validate 1
+
+npm run eval:locomo -- matched 1
+npm run eval:personamem -- matched 1
+npm run eval:beam -- matched 1
+```
+
+`validate` parses official local data and reports stratified samples without a
+model call. Dataset placement and overrides are documented in each adapter's
+README. The common experiment contract, metrics, and ablations are documented
+in [evals/README.md](evals/README.md).
+
 The first fixed seven-category matched run scored 1/7, 1/7, 5/7, 5/7, and 6/7
 for no memory, raw session, flat hybrid, NMG Lite, and NMG Graph respectively.
 It is a small development sample, not a benchmark claim.
@@ -209,8 +242,8 @@ P50/P95 latency, tier hit rate, ingestion throughput, and index maintenance
 cost. See [evals/scale/README.md](evals/scale/README.md).
 
 The local retrieval controls are SQLite FTS5, deterministic hashing vectors,
-Qwen3 vectors served through an OpenAI-compatible endpoint, and their hybrid.
-Qwen3 uses a resumable batch indexer; USearch provides the persistent HNSW ANN
+external vectors served through an OpenAI-compatible endpoint, and their hybrid.
+The external provider uses a resumable batch indexer; USearch provides the persistent HNSW ANN
 index only after the scale test demonstrates scan cost. Setup is documented in
 [docs/qwen3-vllm.md](docs/qwen3-vllm.md).
 
@@ -222,4 +255,7 @@ Remember that NMG uses Pi as its agent harness and SQLite as its local source of
 
 ## Security boundary
 
-NMG is a memory component, not a sandbox. Pi extensions run with the permissions of the Pi process. The MVP does not execute arbitrary code and does not require Docker. If untrusted execution is added later, it belongs behind a separate `ExecutionBackend`; Docker is the initial candidate, not a core dependency.
+NMG is a memory component, not a sandbox. It does not execute arbitrary code or
+provide an execution backend. When isolation is needed, install and configure a
+Pi sandbox plugin independently; NMG only records provenance and results that Pi
+chooses to submit as memory evidence.

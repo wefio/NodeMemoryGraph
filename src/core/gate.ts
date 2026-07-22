@@ -9,6 +9,7 @@ const EXPLICIT_RECALL_PATTERNS = [
   /\b(?:what|how many|how long)\b.{0,32}\b(?:i|we)\b/i,
   /^(?:what|when|where|who|which|how many|how long)\b.{0,32}\bmy\b/i,
   /\bmy (?:current|latest|previous|last|preference|preferences|history)\b/i,
+  /\b(?:what|when|where|which|how)\s+did\s+[\p{L}][\p{L}'-]*\b/iu,
 ];
 
 const OPTIONAL_RECALL_PATTERNS = [
@@ -29,7 +30,7 @@ export function decideMemoryLoad(query: string): MemoryGateDecision {
       mode: "retrieve",
       confidence: 0.95,
       reason: "explicit_recall",
-      maxTier: 1,
+      maxTier: 3,
       limit: 12,
       graphHops: 1,
     };

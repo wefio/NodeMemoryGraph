@@ -36,6 +36,7 @@ test("NMG Lab tools require an explicit environment switch", () => {
     "nmg_organize",
     "nmg_feedback",
     "nmg_rebalance",
+    "nmg_consolidate",
     "nmg_get",
     "nmg_search",
   ]);
@@ -43,20 +44,29 @@ test("NMG Lab tools require an explicit environment switch", () => {
 
 test("search headers disclose IDs but not source evidence", () => {
   const context = {
-    results: [{
-      memory: {
-        id: "memory-1",
-        statement: "A compact searchable preview",
-        memoryType: "fact",
-        tier: 1,
-        createdAt: "2026-07-19T00:00:00.000Z",
-        truthStatus: "asserted",
-        status: "active",
+    results: [
+      {
+        memory: {
+          id: "memory-1",
+          statement: "A compact searchable preview",
+          memoryType: "fact",
+          tier: 1,
+          createdAt: "2026-07-19T00:00:00.000Z",
+          truthStatus: "asserted",
+          status: "active",
+          residence: "ltg",
+        },
+        node: { id: "node-1", canonicalName: "test node", summary: "Compact node header" },
+        evidence: { content: "SECRET EXACT SOURCE" },
       },
-      node: { id: "node-1", canonicalName: "test node", summary: "Compact node header" },
-      evidence: { content: "SECRET EXACT SOURCE" },
-    }],
+    ],
     relations: [],
+    activeGraph: {
+      id: "ag-1",
+      taskId: "task-1",
+      usage: { evidence: 1, estimatedTokens: 42 },
+      budget: { maxEvidence: 4, maxTokens: 500 },
+    },
   } as unknown as MemoryContext;
 
   const output = formatSearchHeaders(context);
@@ -65,6 +75,8 @@ test("search headers disclose IDs but not source evidence", () => {
   assert.doesNotMatch(output, /A compact searchable preview/);
   assert.doesNotMatch(output, /SECRET EXACT SOURCE/);
   assert.match(output, /nmg_get/);
+  assert.match(output, /active_graph=ag-1/);
+  assert.match(output, /activeGraphId/);
 });
 
 test("graph-hop environment override clamps model-requested expansion", () => {

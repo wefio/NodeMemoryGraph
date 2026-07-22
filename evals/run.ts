@@ -57,10 +57,10 @@ const runId = new Date().toISOString().replaceAll(":", "-");
 const runDirectory = resolve(import.meta.dirname, "results", runId);
 mkdirSync(runDirectory, { recursive: true });
 
-const concurrency = Math.max(1, Math.min(
-  Number.parseInt(process.env.NMG_EVAL_CONCURRENCY ?? "3", 10) || 3,
-  cases.length,
-));
+const concurrency = Math.max(
+  1,
+  Math.min(Number.parseInt(process.env.NMG_EVAL_CONCURRENCY ?? "3", 10) || 3, cases.length),
+);
 const results = await mapConcurrent(cases, concurrency, runCase);
 const report = {
   runId,
@@ -70,10 +70,7 @@ const report = {
   results,
 };
 
-writeFileSync(
-  resolve(runDirectory, "report.json"),
-  `${JSON.stringify(report, null, 2)}\n`,
-);
+writeFileSync(resolve(runDirectory, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 if (report.passed !== report.total) process.exitCode = 1;
 
@@ -101,8 +98,10 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
       const events = await writer.promptAndWait(writerPrompt(testCase), undefined, 180_000);
       writerRemembered = successfulToolCall(events, "nmg_remember");
       if (!writerRemembered && !(await writer.getLastAssistantText())?.trim()) {
-        errors.push(`Writer returned no assistant text; events=${summarizeEvents(events)}; ` +
-          `stderr=${writer.getStderr().trim() || "<empty>"}`);
+        errors.push(
+          `Writer returned no assistant text; events=${summarizeEvents(events)}; ` +
+            `stderr=${writer.getStderr().trim() || "<empty>"}`,
+        );
       }
       if (writerRemembered !== (testCase.expectRemember ?? true)) {
         errors.push(
@@ -127,15 +126,14 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
                 : expectedGroups(testCase).flat().join(" "),
               { maxTier: 3, limit: 20, includeHistorical: true },
             )
-            .some((result) =>
-              (testCase.expectRemember === false
-                ? [testCase.memory.statement]
-                : testCase.recall.expectedTerms
-              ).every((term) =>
-                result.memory.statement
-                  .toLocaleLowerCase()
-                  .includes(term.toLocaleLowerCase()),
-              ) || matchesExpected(result.memory.statement, expectedGroups(testCase)),
+            .some(
+              (result) =>
+                (testCase.expectRemember === false
+                  ? [testCase.memory.statement]
+                  : testCase.recall.expectedTerms
+                ).every((term) =>
+                  result.memory.statement.toLocaleLowerCase().includes(term.toLocaleLowerCase()),
+                ) || matchesExpected(result.memory.statement, expectedGroups(testCase)),
             )
         : store
             .search(testCase.memory.statement, {
@@ -169,16 +167,18 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
       readerGot = successfulToolCall(events, "nmg_get");
       answer = (await reader.getLastAssistantText())?.trim() ?? "";
       if (!answer) {
-        errors.push(`Reader returned no assistant text; events=${summarizeEvents(events)}; ` +
-          `stderr=${reader.getStderr().trim() || "<empty>"}`);
+        errors.push(
+          `Reader returned no assistant text; events=${summarizeEvents(events)}; ` +
+            `stderr=${reader.getStderr().trim() || "<empty>"}`,
+        );
       }
-      answerMatched = matchesExpected(answer, expectedGroups(testCase)) &&
+      answerMatched =
+        matchesExpected(answer, expectedGroups(testCase)) &&
         (testCase.recall.forbiddenTerms ?? []).every(
           (term) => !answer.toLocaleLowerCase().includes(term.toLocaleLowerCase()),
         );
 
-      if (testCase.recall.requireSearchTool &&
-          readerLoadMode !== "retrieve" && !readerSearched) {
+      if (testCase.recall.requireSearchTool && readerLoadMode !== "retrieve" && !readerSearched) {
         errors.push("Reader did not complete the required nmg_search call.");
       }
       if (testCase.recall.requireGetTool && !readerGot) {
@@ -214,8 +214,7 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
 }
 
 function expectedGroups(testCase: EvalCase): string[][] {
-  return testCase.recall.expectedTermGroups ??
-    testCase.recall.expectedTerms.map((term) => [term]);
+  return testCase.recall.expectedTermGroups ?? testCase.recall.expectedTerms.map((term) => [term]);
 }
 
 function matchesExpected(value: string, groups: string[][]): boolean {
@@ -227,10 +226,7 @@ function matchesExpected(value: string, groups: string[][]): boolean {
 
 function createClient(dataDirectory: string): RpcClient {
   return new RpcClient({
-    cliPath: resolve(
-      root,
-      "node_modules/@earendil-works/pi-coding-agent/dist/cli.js",
-    ),
+    cliPath: resolve(root, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js"),
     cwd: root,
     provider: "deepseek",
     model: "deepseek-v4-flash",
@@ -242,6 +238,9 @@ function createClient(dataDirectory: string): RpcClient {
       "--offline",
       "--approve",
       "--no-session",
+      "--no-extensions",
+      "--tools",
+      "nmg_remember,nmg_search,nmg_get",
       "--extension",
       resolve(root, ".pi/extensions/nmg/index.ts"),
     ],
@@ -264,25 +263,40 @@ function successfulToolCall(events: AgentSessionEvent[], toolName: string): bool
     (event) =>
       event.type === "tool_execution_end" &&
       event.toolName === toolName &&
-      !event.isError,
+      !event.isError &&
+      !(
+        toolName === "nmg_remember" &&
+        (event.result as { details?: { saved?: boolean } } | undefined)?.details?.saved === false
+      ),
   );
 }
 
 function summarizeEvents(events: AgentSessionEvent[]): string {
-  return events.map((event) => {
-    const candidate = event as AgentSessionEvent & {
-      error?: unknown;
-      reason?: unknown;
-      message?: { role?: unknown; content?: unknown; stopReason?: unknown; errorMessage?: unknown };
-    };
-    const message = candidate.message
-      ? `:${String(candidate.message.role ?? "")}:${String(candidate.message.stopReason ?? "")}` +
-        `:${String(candidate.message.errorMessage ?? "")}:` +
-        `${JSON.stringify(candidate.message.content ?? "").slice(0, 240)}`
-      : "";
-    return `${event.type}${candidate.error ? `:${String(candidate.error)}` : ""}` +
-      `${candidate.reason ? `:${String(candidate.reason)}` : ""}${message}`;
-  }).join(",") || "<none>";
+  return (
+    events
+      .map((event) => {
+        const candidate = event as AgentSessionEvent & {
+          error?: unknown;
+          reason?: unknown;
+          message?: {
+            role?: unknown;
+            content?: unknown;
+            stopReason?: unknown;
+            errorMessage?: unknown;
+          };
+        };
+        const message = candidate.message
+          ? `:${String(candidate.message.role ?? "")}:${String(candidate.message.stopReason ?? "")}` +
+            `:${String(candidate.message.errorMessage ?? "")}:` +
+            `${JSON.stringify(candidate.message.content ?? "").slice(0, 240)}`
+          : "";
+        return (
+          `${event.type}${candidate.error ? `:${String(candidate.error)}` : ""}` +
+          `${candidate.reason ? `:${String(candidate.reason)}` : ""}${message}`
+        );
+      })
+      .join(",") || "<none>"
+  );
 }
 
 function definedEnvironment(): Record<string, string> {
@@ -300,11 +314,13 @@ async function mapConcurrent<T, R>(
 ): Promise<R[]> {
   const results = new Array<R>(values.length);
   let nextIndex = 0;
-  await Promise.all(Array.from({ length: concurrency }, async () => {
-    while (nextIndex < values.length) {
-      const index = nextIndex++;
-      results[index] = await worker(values[index]!);
-    }
-  }));
+  await Promise.all(
+    Array.from({ length: concurrency }, async () => {
+      while (nextIndex < values.length) {
+        const index = nextIndex++;
+        results[index] = await worker(values[index]!);
+      }
+    }),
+  );
   return results;
 }

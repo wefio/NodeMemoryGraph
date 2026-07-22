@@ -4,12 +4,14 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { decideMemoryLoad } from "../../../src/core/gate.ts";
+import { OpenAIEmbeddingClient } from "../../../src/core/openai-embedding.ts";
 import { NmgStore } from "../../../src/core/store.ts";
 import { assessMemoryWrite } from "../../../src/core/write-policy.ts";
 import type {
   EvidenceRole,
   MemoryActor,
   MemoryContext,
+  MemoryResidence,
   RecallIndex,
   MemoryScope,
   MemoryTier,
@@ -32,27 +34,60 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
   let store: NmgStore | undefined;
   const getStore = (): NmgStore => (store ??= new NmgStore(databasePath()));
+  const embeddingClient = process.env.NMG_EMBED_BASE_URL
+    ? new OpenAIEmbeddingClient({
+        baseUrl: process.env.NMG_EMBED_BASE_URL,
+        apiKey: process.env.NMG_EMBED_API_KEY,
+        model: process.env.NMG_EMBED_MODEL,
+        dimensions: process.env.NMG_EMBED_DIMENSIONS
+          ? Number(process.env.NMG_EMBED_DIMENSIONS)
+          : undefined,
+      })
+    : undefined;
+  const searchMemory = async (
+    query: string,
+    options: Parameters<NmgStore["searchContext"]>[1],
+  ): Promise<MemoryContext> => {
+    const memoryStore = getStore();
+    if (!embeddingClient) return memoryStore.searchContext(query, options);
+    const [queryVector] = await embeddingClient.embedQueries([query]);
+    const results = memoryStore.searchHierarchyByVector(
+      query,
+      queryVector!,
+      embeddingClient.model,
+      options,
+    );
+    return {
+      results,
+      relations: memoryStore.getRelations(
+        [...new Set(results.map((result) => result.node.id))],
+        configuredGraphHops(options?.graphHops ?? 0),
+      ),
+    };
+  };
 
   pi.on("before_agent_start", async (event) => {
     const memoryStore = getStore();
+    memoryStore.expireShortTermMemories();
     const kernelBlock = formatResidentKernel(memoryStore.residentKernel());
     const decision = decideMemoryLoad(event.prompt);
     let dynamicBlock = "";
     if (decision.mode === "retrieve") {
-      const context = memoryStore.searchContext(event.prompt, {
+      const context = await searchMemory(event.prompt, {
         maxTier: decision.maxTier,
         limit: decision.limit,
         graphHops: configuredGraphHops(decision.graphHops),
       });
-      memoryStore.recordUsage(context.results.map((result) => result.memory.id));
       const formatted = formatMemoryContext(context);
       if (formatted) {
         dynamicBlock = `<nmg_automatic_recall>\n${formatted}\n</nmg_automatic_recall>`;
       }
     } else if (decision.mode === "cue") {
-      dynamicBlock = formatRecallIndex(memoryStore.recallCues(event.prompt, {
-        limit: decision.limit,
-      }));
+      dynamicBlock = formatRecallIndex(
+        memoryStore.recallCues(event.prompt, {
+          limit: decision.limit,
+        }),
+      );
     }
 
     return {
@@ -83,7 +118,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           ? ` Lab tools are enabled: use nmg_derive for multi-memory conclusions, ` +
             `nmg_link for semantic relations, and nmg_feedback after explicit ` +
             `searches when useful nodes are known.`
-          : "") + `\n` +
+          : "") +
+        `\n` +
         `</nmg_write_policy>\n` +
         `\n<nmg_recall_policy>\n` +
         `Resident kernel memories are directly usable hard constraints. ` +
@@ -115,8 +151,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   }) => {
     if (!store) return;
     const branch = ctx.sessionManager.getBranch();
-    persistSessionMessages(store, ctx.sessionManager.getSessionId(), branch,
-      ctx.sessionManager.getSessionFile());
+    persistSessionMessages(
+      store,
+      ctx.sessionManager.getSessionId(),
+      branch,
+      ctx.sessionManager.getSessionFile(),
+    );
     const transcript = serializeSession(branch);
     if (!transcript) return;
     store.archiveSession({
@@ -136,95 +176,97 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     store = undefined;
   });
 
-  if (labToolsEnabled) pi.registerTool({
-    name: "nmg_derive",
-    label: "Derive NMG memory",
-    description:
-      "Save a durable conclusion supported by two or more existing memories. " +
-      "Use for aggregation, comparison, temporal conclusions, and reusable rules.",
-    parameters: Type.Object({
-      statement: Type.String(),
-      nodeName: Type.String(),
-      sourceMemoryIds: Type.Array(Type.String(), { minItems: 2 }),
-      derivation: Type.String({
-        description: "Explain how the source memories support the conclusion",
+  if (labToolsEnabled)
+    pi.registerTool({
+      name: "nmg_derive",
+      label: "Derive NMG memory",
+      description:
+        "Save a durable conclusion supported by two or more existing memories. " +
+        "Use for aggregation, comparison, temporal conclusions, and reusable rules.",
+      parameters: Type.Object({
+        statement: Type.String(),
+        nodeName: Type.String(),
+        sourceMemoryIds: Type.Array(Type.String(), { minItems: 2 }),
+        derivation: Type.String({
+          description: "Explain how the source memories support the conclusion",
+        }),
+        scope: Type.Optional(Type.Record(Type.String(), Type.String())),
+        eventTime: Type.Optional(Type.String()),
+        tier: Type.Optional(
+          Type.Union([Type.Literal(0), Type.Literal(1), Type.Literal(2), Type.Literal(3)]),
+        ),
+        importance: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
       }),
-      scope: Type.Optional(Type.Record(Type.String(), Type.String())),
-      eventTime: Type.Optional(Type.String()),
-      tier: Type.Optional(
-        Type.Union([
-          Type.Literal(0),
-          Type.Literal(1),
-          Type.Literal(2),
-          Type.Literal(3),
-        ]),
-      ),
-      importance: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = getStore().deriveMemory({
-        statement: params.statement,
-        nodeName: params.nodeName,
-        memoryType: "derived",
-        sourceMemoryIds: params.sourceMemoryIds,
-        derivation: params.derivation,
-        scope: params.scope as MemoryScope | undefined,
-        eventTime: params.eventTime,
-        tier: params.tier as MemoryTier | undefined,
-        importance: params.importance,
-        sessionId: ctx.sessionManager.getSessionId(),
-        sourceRef: ctx.sessionManager.getSessionFile() ?? undefined,
-      });
-      return {
-        content: [{
-          type: "text",
-          text: `Saved derived memory ${result.memory.id} with ` +
-            `${result.memory.evidenceIds.length} evidence records.`,
-        }],
-        details: result,
-      };
-    },
-  });
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const result = getStore().deriveMemory({
+          statement: params.statement,
+          nodeName: params.nodeName,
+          memoryType: "derived",
+          sourceMemoryIds: params.sourceMemoryIds,
+          derivation: params.derivation,
+          scope: params.scope as MemoryScope | undefined,
+          eventTime: params.eventTime,
+          tier: params.tier as MemoryTier | undefined,
+          importance: params.importance,
+          sessionId: ctx.sessionManager.getSessionId(),
+          sourceRef: ctx.sessionManager.getSessionFile() ?? undefined,
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `Saved derived memory ${result.memory.id} with ` +
+                `${result.memory.evidenceIds.length} evidence records.`,
+            },
+          ],
+          details: result,
+        };
+      },
+    });
 
-  if (labToolsEnabled) pi.registerTool({
-    name: "nmg_link",
-    label: "Link NMG nodes",
-    description: "Create a typed semantic relation between two MemoryNodes.",
-    parameters: Type.Object({
-      sourceNodeId: Type.String(),
-      targetNodeId: Type.String(),
-      relationType: Type.Union([
-        Type.Literal("applies_to"),
-        Type.Literal("causes"),
-        Type.Literal("contradicts"),
-        Type.Literal("depends_on"),
-        Type.Literal("derived_from"),
-        Type.Literal("exception_to"),
-        Type.Literal("is_a"),
-        Type.Literal("part_of"),
-        Type.Literal("related_to"),
-        Type.Literal("supports"),
-        Type.Literal("supersedes"),
-      ]),
-      evidenceIds: Type.Optional(Type.Array(Type.String())),
-    }),
-    async execute(_toolCallId, params) {
-      const relation = getStore().linkNodes({
-        sourceNodeId: params.sourceNodeId,
-        targetNodeId: params.targetNodeId,
-        type: params.relationType as NodeRelationType,
-        evidenceIds: params.evidenceIds,
-      });
-      return {
-        content: [{
-          type: "text",
-          text: `Linked ${relation.sourceNodeId} -[${relation.type}]-> ` +
-            relation.targetNodeId,
-        }],
-        details: relation,
-      };
-    },
-  });
+  if (labToolsEnabled)
+    pi.registerTool({
+      name: "nmg_link",
+      label: "Link NMG nodes",
+      description: "Create a typed semantic relation between two MemoryNodes.",
+      parameters: Type.Object({
+        sourceNodeId: Type.String(),
+        targetNodeId: Type.String(),
+        relationType: Type.Union([
+          Type.Literal("applies_to"),
+          Type.Literal("causes"),
+          Type.Literal("contradicts"),
+          Type.Literal("depends_on"),
+          Type.Literal("derived_from"),
+          Type.Literal("exception_to"),
+          Type.Literal("is_a"),
+          Type.Literal("part_of"),
+          Type.Literal("related_to"),
+          Type.Literal("supports"),
+          Type.Literal("supersedes"),
+        ]),
+        evidenceIds: Type.Optional(Type.Array(Type.String())),
+      }),
+      async execute(_toolCallId, params) {
+        const relation = getStore().linkNodes({
+          sourceNodeId: params.sourceNodeId,
+          targetNodeId: params.targetNodeId,
+          type: params.relationType as NodeRelationType,
+          evidenceIds: params.evidenceIds,
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `Linked ${relation.sourceNodeId} -[${relation.type}]-> ` + relation.targetNodeId,
+            },
+          ],
+          details: relation,
+        };
+      },
+    });
 
   pi.registerTool({
     name: "nmg_remember",
@@ -252,9 +294,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       stateKey: Type.Optional(
         Type.String({ description: "Stable identity required for changeable state" }),
       ),
-      eventTime: Type.Optional(
-        Type.String({ description: "ISO time when an event happened" }),
-      ),
+      eventTime: Type.Optional(Type.String({ description: "ISO time when an event happened" })),
       sourceActor: Type.Optional(
         Type.Union([
           Type.Literal("assistant"),
@@ -280,10 +320,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         }),
       ),
       tier: Type.Optional(
-        Type.Union(
-          [Type.Literal(0), Type.Literal(1), Type.Literal(2), Type.Literal(3)],
-          { description: "Initial tier; defaults to L1" },
-        ),
+        Type.Union([Type.Literal(0), Type.Literal(1), Type.Literal(2), Type.Literal(3)], {
+          description: "Initial tier; defaults to L1",
+        }),
       ),
       importance: Type.Optional(
         Type.Number({ minimum: 0, maximum: 1, description: "Importance from 0 to 1" }),
@@ -311,6 +350,15 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       supersedesId: Type.Optional(
         Type.String({ description: "Older memory replaced by this confirmed state" }),
       ),
+      residence: Type.Optional(
+        Type.Union([Type.Literal("stg"), Type.Literal("ltg")], {
+          description:
+            "Semantic lifecycle; durable governed memories default to LTG, provisional inferences to STG",
+        }),
+      ),
+      expiresAt: Type.Optional(
+        Type.String({ description: "Optional ISO expiry for an STG memory" }),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const assessment = assessMemoryWrite({
@@ -320,10 +368,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       });
       if (!assessment.allowed) {
         return {
-          content: [{
-            type: "text",
-            text: `NMG rejected this long-term write: ${assessment.reason}.`,
-          }],
+          content: [
+            {
+              type: "text",
+              text: `NMG rejected this long-term write: ${assessment.reason}.`,
+            },
+          ],
           details: { saved: false, reason: assessment.reason },
         };
       }
@@ -344,6 +394,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         validUntil: params.validUntil,
         evidenceRole: params.evidenceRole as EvidenceRole | undefined,
         supersedesId: params.supersedesId,
+        residence: params.residence as MemoryResidence | undefined,
+        expiresAt: params.expiresAt,
         sessionId: ctx.sessionManager.getSessionId(),
         sourceRef: ctx.sessionManager.getSessionFile() ?? undefined,
       });
@@ -362,98 +414,141 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     },
   });
 
-  if (labToolsEnabled) pi.registerTool({
-    name: "nmg_organize",
-    label: "Organize NMG nodes",
-    description:
-      "Merge duplicate semantic nodes or split an over-broad node. This preserves " +
-      "all memories and evidence and records source-to-target mappings.",
-    parameters: Type.Object({
-      action: Type.Union([Type.Literal("merge"), Type.Literal("split")]),
-      sourceNodeIds: Type.Optional(Type.Array(Type.String(), { minItems: 2 })),
-      targetName: Type.Optional(Type.String()),
-      summary: Type.Optional(Type.String()),
-      sourceNodeId: Type.Optional(Type.String()),
-      partitions: Type.Optional(Type.Array(Type.Object({
-        nodeName: Type.String(),
-        memoryIds: Type.Array(Type.String(), { minItems: 1 }),
-      }), { minItems: 2 })),
-    }),
-    async execute(_toolCallId, params) {
-      let transform;
-      if (params.action === "merge") {
-        if (!params.sourceNodeIds || !params.targetName) {
-          throw new Error("merge requires sourceNodeIds and targetName");
+  if (labToolsEnabled)
+    pi.registerTool({
+      name: "nmg_organize",
+      label: "Organize NMG nodes",
+      description:
+        "Merge duplicate semantic nodes or split an over-broad node. This preserves " +
+        "all memories and evidence and records source-to-target mappings.",
+      parameters: Type.Object({
+        action: Type.Union([Type.Literal("merge"), Type.Literal("split")]),
+        sourceNodeIds: Type.Optional(Type.Array(Type.String(), { minItems: 2 })),
+        targetName: Type.Optional(Type.String()),
+        summary: Type.Optional(Type.String()),
+        sourceNodeId: Type.Optional(Type.String()),
+        partitions: Type.Optional(
+          Type.Array(
+            Type.Object({
+              nodeName: Type.String(),
+              memoryIds: Type.Array(Type.String(), { minItems: 1 }),
+            }),
+            { minItems: 2 },
+          ),
+        ),
+      }),
+      async execute(_toolCallId, params) {
+        let transform;
+        if (params.action === "merge") {
+          if (!params.sourceNodeIds || !params.targetName) {
+            throw new Error("merge requires sourceNodeIds and targetName");
+          }
+          transform = getStore().mergeNodes({
+            sourceNodeIds: params.sourceNodeIds,
+            targetName: params.targetName,
+            summary: params.summary,
+          });
+        } else {
+          if (!params.sourceNodeId || !params.partitions) {
+            throw new Error("split requires sourceNodeId and partitions");
+          }
+          transform = getStore().splitNode({
+            sourceNodeId: params.sourceNodeId,
+            partitions: params.partitions,
+          });
         }
-        transform = getStore().mergeNodes({
-          sourceNodeIds: params.sourceNodeIds,
-          targetName: params.targetName,
-          summary: params.summary,
-        });
-      } else {
-        if (!params.sourceNodeId || !params.partitions) {
-          throw new Error("split requires sourceNodeId and partitions");
-        }
-        transform = getStore().splitNode({
-          sourceNodeId: params.sourceNodeId,
-          partitions: params.partitions,
-        });
-      }
-      return {
-        content: [{
-          type: "text",
-          text: `${transform.type} transform ${transform.id} moved ` +
-            `${transform.movedMemoryIds.length} memories without deleting evidence.`,
-        }],
-        details: transform,
-      };
-    },
-  });
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `${transform.type} transform ${transform.id} moved ` +
+                `${transform.movedMemoryIds.length} memories without deleting evidence.`,
+            },
+          ],
+          details: transform,
+        };
+      },
+    });
 
-  if (labToolsEnabled) pi.registerTool({
-    name: "nmg_feedback",
-    label: "Train NMG router",
-    description:
-      "Report which semantic nodes were useful for a query so the local online " +
-      "router can improve future node ranking.",
-    parameters: Type.Object({
-      query: Type.String(),
-      usefulNodeIds: Type.Array(Type.String(), { minItems: 1 }),
-    }),
-    async execute(_toolCallId, params) {
-      getStore().trainRouter(params.query, params.usefulNodeIds);
-      return {
-        content: [{ type: "text", text: `Trained router on ${params.usefulNodeIds.length} nodes.` }],
-        details: { query: params.query, usefulNodeIds: params.usefulNodeIds },
-      };
-    },
-  });
+  if (labToolsEnabled)
+    pi.registerTool({
+      name: "nmg_feedback",
+      label: "Train NMG router",
+      description:
+        "Report which semantic nodes were useful for a query so the local online " +
+        "router can improve future node ranking.",
+      parameters: Type.Object({
+        query: Type.String(),
+        usefulNodeIds: Type.Array(Type.String(), { minItems: 1 }),
+      }),
+      async execute(_toolCallId, params) {
+        getStore().trainRouter(params.query, params.usefulNodeIds);
+        return {
+          content: [
+            { type: "text", text: `Trained router on ${params.usefulNodeIds.length} nodes.` },
+          ],
+          details: { query: params.query, usefulNodeIds: params.usefulNodeIds },
+        };
+      },
+    });
 
-  if (labToolsEnabled) pi.registerTool({
-    name: "nmg_rebalance",
-    label: "Rebalance NMG memory tiers",
-    description:
-      "Batch-rebuild Huffman-like block tiers from accumulated access statistics.",
-    parameters: Type.Object({
-      nodeId: Type.Optional(Type.String()),
-      pendingThreshold: Type.Optional(Type.Number({ minimum: 1 })),
-    }),
-    async execute(_toolCallId, params) {
-      const results = params.nodeId
-        ? [getStore().rebalanceNode(params.nodeId)]
-        : getStore().rebalanceDueNodes(params.pendingThreshold ?? 32);
-      return {
-        content: [{
-          type: "text",
-          text: results.length === 0
-            ? "No node has enough pending accesses for batch rebalancing."
-            : `Rebalanced ${results.length} nodes; changed ` +
-              `${results.reduce((sum, result) => sum + result.changedMemoryIds.length, 0)} tiers.`,
-        }],
-        details: results,
-      };
-    },
-  });
+  if (labToolsEnabled)
+    pi.registerTool({
+      name: "nmg_rebalance",
+      label: "Rebalance NMG memory tiers",
+      description: "Batch-rebuild Huffman-like block tiers from accumulated access statistics.",
+      parameters: Type.Object({
+        nodeId: Type.Optional(Type.String()),
+        pendingThreshold: Type.Optional(Type.Number({ minimum: 1 })),
+      }),
+      async execute(_toolCallId, params) {
+        const results = params.nodeId
+          ? [getStore().rebalanceNode(params.nodeId)]
+          : getStore().rebalanceDueNodes(params.pendingThreshold ?? 32);
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                results.length === 0
+                  ? "No node has enough pending accesses for batch rebalancing."
+                  : `Rebalanced ${results.length} nodes; changed ` +
+                    `${results.reduce((sum, result) => sum + result.changedMemoryIds.length, 0)} tiers.`,
+            },
+          ],
+          details: results,
+        };
+      },
+    });
+
+  if (labToolsEnabled)
+    pi.registerTool({
+      name: "nmg_consolidate",
+      label: "Consolidate stable NMG relations",
+      description:
+        "Materialize or demote LTG relations from independent actual-use evidence with hysteresis.",
+      parameters: Type.Object({
+        minIndependentTasks: Type.Optional(Type.Number({ minimum: 2 })),
+        promoteThreshold: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+        demoteThreshold: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+        cooldownMs: Type.Optional(Type.Number({ minimum: 0 })),
+      }),
+      async execute(_toolCallId, params) {
+        const result = getStore().reconcileConsolidation(params);
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `Consolidated ${result.consolidatedRelations.length} relations and ` +
+                `demoted ${result.demotedRelations.length}; ${result.events.length} audit events.`,
+            },
+          ],
+          details: result,
+        };
+      },
+    });
 
   pi.registerTool({
     name: "nmg_get",
@@ -470,25 +565,39 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       graphHops: Type.Optional(
         Type.Number({ minimum: 0, maximum: 2, description: "Related node hops" }),
       ),
+      activeGraphId: Type.Optional(
+        Type.String({
+          description: "Active Graph ID returned by nmg_search; enables actual-use feedback",
+        }),
+      ),
     }),
     async execute(_toolCallId, params) {
       const context = getStore().getContext(
         params.memoryIds,
         configuredGraphHops(params.graphHops ?? 0),
       );
-      getStore().recordUsage(context.results.map((result) => result.memory.id));
+      const usedMemoryIds = context.results.map((result) => result.memory.id);
+      if (params.activeGraphId) {
+        getStore().recordActiveGraphUse(params.activeGraphId, { usedMemoryIds });
+      } else {
+        getStore().recordUsage(usedMemoryIds);
+      }
       const missing = params.memoryIds.filter(
         (id) => !context.results.some((result) => result.memory.id === id),
       );
       const text = formatMemoryContext(context);
       return {
-        content: [{
-          type: "text",
-          text: [
-            text || "No active NMG memory found for the requested IDs.",
-            missing.length > 0 ? `Missing or inactive IDs: ${missing.join(", ")}` : "",
-          ].filter(Boolean).join("\n\n"),
-        }],
+        content: [
+          {
+            type: "text",
+            text: [
+              text || "No active NMG memory found for the requested IDs.",
+              missing.length > 0 ? `Missing or inactive IDs: ${missing.join(", ")}` : "",
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
+          },
+        ],
         details: { ...context, missingMemoryIds: missing },
       };
     },
@@ -504,10 +613,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       query: Type.String({ description: "What to recall" }),
       nodeName: Type.Optional(Type.String({ description: "Exact semantic node name" })),
       maxTier: Type.Optional(
-        Type.Union(
-          [Type.Literal(0), Type.Literal(1), Type.Literal(2), Type.Literal(3)],
-          { description: "Deepest tier to read; defaults to L1" },
-        ),
+        Type.Union([Type.Literal(0), Type.Literal(1), Type.Literal(2), Type.Literal(3)], {
+          description: "Deepest tier to read; defaults to L1",
+        }),
       ),
       limit: Type.Optional(
         Type.Number({ minimum: 1, maximum: 50, description: "Maximum returned records" }),
@@ -524,8 +632,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         Type.Number({ minimum: 0, maximum: 3, description: "Typed relation hops" }),
       ),
     }),
-    async execute(_toolCallId, params) {
-      const context = getStore().searchContext(params.query, {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const context = await searchMemory(params.query, {
         nodeName: params.nodeName,
         maxTier: params.maxTier as MemoryTier | undefined,
         limit: params.limit,
@@ -535,6 +643,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         // experiments. Without it the model can silently defeat a Lite run by
         // choosing graphHops in the tool call.
         graphHops: configuredGraphHops(params.graphHops ?? 1),
+        taskId: `${ctx.sessionManager.getSessionId()}:${params.query.trim().toLocaleLowerCase()}`,
       });
       const { results } = context;
       return {
@@ -554,43 +663,52 @@ export default function nmgExtension(pi: ExtensionAPI): void {
 }
 
 export function formatSearchHeaders(context: MemoryContext): string {
-  const headers = context.results.map(({ memory, node }) => [
-    `- memory=${memory.id}`,
-    `node=${node.id}:${node.canonicalName}`,
-    `type=${memory.memoryType}`,
-    `tier=L${memory.tier}`,
-    `created=${memory.createdAt}`,
-    `truth=${memory.truthStatus}`,
-    `status=${memory.status}`,
-    `preview=${excerpt(node.summary, 120)}`,
-  ].join("; "));
+  const headers = context.results.map(({ memory, node }) =>
+    [
+      `- memory=${memory.id}`,
+      `node=${node.id}:${node.canonicalName}`,
+      `type=${memory.memoryType}`,
+      `tier=L${memory.tier}`,
+      `created=${memory.createdAt}`,
+      `truth=${memory.truthStatus}`,
+      `status=${memory.status}`,
+      `residence=${memory.residence.toUpperCase()}`,
+      `preview=${excerpt(node.summary, 120)}`,
+    ].join("; "),
+  );
   return [
     "NMG SEARCH HEADERS",
+    context.activeGraph
+      ? `active_graph=${context.activeGraph.id}; task=${context.activeGraph.taskId}; ` +
+        `budget=${context.activeGraph.usage.evidence}/${context.activeGraph.budget.maxEvidence} evidence, ` +
+        `${context.activeGraph.usage.estimatedTokens}/${context.activeGraph.budget.maxTokens} tokens`
+      : "",
     ...headers,
-    "Use nmg_get with selected memory IDs to load exact statements and source evidence.",
-  ].join("\n");
+    "Use nmg_get with selected memory IDs and activeGraphId to load exact statements, " +
+      "source evidence, and record which recalled memories were actually used.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function formatRecallIndex(index: RecallIndex): string {
-  const cues = index.cues.map((cue) => [
-    `- node=${cue.nodeId}:${cue.canonicalName}`,
-    `types=${cue.memoryTypes.join(",") || "unknown"}`,
-    `active=${cue.activeCount}`,
-    `newest=${cue.newestAt ?? "unknown"}`,
-    `deep=${cue.hasDeepMemory ? "yes" : "no"}`,
-    `conflicts=${cue.hasConflicts ? "yes" : "no"}`,
-    `match=${cue.reason}`,
-  ].join("; "));
-  return cues.length > 0
-    ? `<nmg_recall_cues>\n${cues.join("\n")}\n</nmg_recall_cues>`
-    : "";
+  const cues = index.cues.map((cue) =>
+    [
+      `- node=${cue.nodeId}:${cue.canonicalName}`,
+      `types=${cue.memoryTypes.join(",") || "unknown"}`,
+      `active=${cue.activeCount}`,
+      `newest=${cue.newestAt ?? "unknown"}`,
+      `deep=${cue.hasDeepMemory ? "yes" : "no"}`,
+      `conflicts=${cue.hasConflicts ? "yes" : "no"}`,
+      `match=${cue.reason}`,
+    ].join("; "),
+  );
+  return cues.length > 0 ? `<nmg_recall_cues>\n${cues.join("\n")}\n</nmg_recall_cues>` : "";
 }
 
 export function formatResidentKernel(context: MemoryContext): string {
   const formatted = formatMemoryContext(context);
-  return formatted
-    ? `<nmg_resident_kernel>\n${formatted}\n</nmg_resident_kernel>`
-    : "";
+  return formatted ? `<nmg_resident_kernel>\n${formatted}\n</nmg_resident_kernel>` : "";
 }
 
 export function formatMemoryContext(context: MemoryContext): string {
@@ -600,6 +718,7 @@ export function formatMemoryContext(context: MemoryContext): string {
       `USAGE=${usageInstruction(memory.memoryType)}`,
       `node=${node.id}:${node.canonicalName}`,
       `memory=${memory.id}`,
+      `residence=${memory.residence.toUpperCase()}`,
       `evidence=${memory.evidenceIds.join(",")}`,
       `actor=${memory.sourceActor}`,
       `truth=${memory.truthStatus}`,
@@ -609,27 +728,29 @@ export function formatMemoryContext(context: MemoryContext): string {
       memory.eventTime ? `eventTime=${memory.eventTime}` : "",
       memory.validFrom ? `validFrom=${memory.validFrom}` : "",
       `scope=${JSON.stringify(memory.scope)}`,
-    ].filter(Boolean).join("; ");
-    const source = evidence.content.trim() !== memory.statement.trim()
-      ? `\n  SOURCE=${excerpt(evidence.content, 320)}`
-      : "";
+    ]
+      .filter(Boolean)
+      .join("; ");
+    const source =
+      evidence.content.trim() !== memory.statement.trim()
+        ? `\n  SOURCE=${excerpt(evidence.content, 320)}`
+        : "";
     return `- ${memory.statement}\n  ${metadata}${source}`;
   });
   const relations = context.relations.map(
-    (relation) =>
-      `- ${relation.sourceNodeId} -[${relation.type}]-> ${relation.targetNodeId}`,
+    (relation) => `- ${relation.sourceNodeId} -[${relation.type}]-> ${relation.targetNodeId}`,
   );
   return [
     memories.length > 0 ? `MEMORIES\n${memories.join("\n")}` : "",
     relations.length > 0 ? `RELATIONS\n${relations.join("\n")}` : "",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function excerpt(value: string, maxLength: number): string {
   const normalized = value.replace(/\s+/gu, " ").trim();
-  return normalized.length <= maxLength
-    ? normalized
-    : `${normalized.slice(0, maxLength - 1)}…`;
+  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}…`;
 }
 
 function usageInstruction(type: MemoryType): string {
@@ -701,15 +822,18 @@ function rawMessageContent(value: unknown): string {
   const content = (value as { content?: unknown }).content;
   if (typeof content === "string") return content.trim();
   if (!Array.isArray(content)) return "";
-  return content.flatMap((block) => {
-    if (!block || typeof block !== "object") return [];
-    const item = block as { type?: unknown; text?: unknown; name?: unknown; arguments?: unknown };
-    if (item.type === "text" && typeof item.text === "string") return [item.text];
-    if (item.type === "toolCall" && typeof item.name === "string") {
-      return [`[tool ${item.name} ${JSON.stringify(item.arguments ?? {})}]`];
-    }
-    return [];
-  }).join(" ").trim();
+  return content
+    .flatMap((block) => {
+      if (!block || typeof block !== "object") return [];
+      const item = block as { type?: unknown; text?: unknown; name?: unknown; arguments?: unknown };
+      if (item.type === "text" && typeof item.text === "string") return [item.text];
+      if (item.type === "toolCall" && typeof item.name === "string") {
+        return [`[tool ${item.name} ${JSON.stringify(item.arguments ?? {})}]`];
+      }
+      return [];
+    })
+    .join(" ")
+    .trim();
 }
 
 function messageText(value: unknown): string {
