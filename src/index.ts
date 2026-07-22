@@ -8,6 +8,12 @@ export {
   CONTROLLER_BUDGET_DIMENSIONS,
   DifferentiableController,
 } from "./core/differentiable-controller.ts";
+export {
+  CONTROLLER_FEATURE_COUNT,
+  CONTROLLER_FEATURE_NAMES,
+  CONTROLLER_FEATURE_PROTOCOL_VERSION,
+  controllerSampleFromTrace,
+} from "./core/controller-protocol.ts";
 export type {
   BinaryRouteExample,
   ControllerAction,
@@ -16,6 +22,7 @@ export type {
   ControllerTrainingResult,
   DifferentiableControllerState,
 } from "./core/differentiable-controller.ts";
+export type { ControllerProtocolSample } from "./core/controller-protocol.ts";
 export type {
   ActivationSignal,
   ActiveGraph,

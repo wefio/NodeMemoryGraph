@@ -589,11 +589,32 @@ matched evaluation.
 
 Current implementation status: the experimental controller has independent
 heads for node selection, edge selection, STOP/EXPAND, and the seven Active
-Graph budget dimensions. Unit tests cover lazy UOp evaluation, matrix and shared
-path gradients, softmax cross-entropy, multi-head convergence, input validation,
-and exact state round-tripping. It is not yet connected to the default Pi
-retrieval path; that requires a fixed feature contract and matched evaluation,
-not more autodiff machinery.
+Graph budget dimensions. A versioned 32-value protocol now combines query
+shape, STG/LTG composition, Active Graph budget usage, and candidate node/edge
+signals. Trace labels are generated only after explicit useful, rejected, or
+contradicted-memory feedback. Node and edge supervision keeps every positive
+and a bounded set of high-ranked hard negatives so large traces do not turn the
+binary objectives into an all-negative classifier.
+
+Unit tests cover lazy UOp evaluation, matrix and shared-path gradients, softmax
+cross-entropy, feature bounds, trace-to-label conversion, multi-head
+convergence, input validation, and exact state round-tripping. Matched,
+model-free controller experiments use official evidence IDs and report
+candidate recall separately from ranking quality and runtime cost. Initial
+LoCoMo and BEAM diagnostics found non-degraded learned ranking with sub-
+millisecond inference, but candidate recall was only 0.300 and 0.278. Therefore
+the controller remains disconnected from the default Pi path: candidate
+generation must first reach the 0.8 gate, followed by a larger repeated matched
+evaluation. See `evals/controller/README.md`.
+
+Using local `BAAI/bge-small-en-v1.5` embeddings on the identical LoCoMo split
+raised candidate recall to 0.700 and learned Top-2 recall from 0.400 to 0.700,
+while learned inference remained about 0.071 ms. The same setup reached only
+0.111 candidate recall on the small BEAM split. This result supports retaining
+the external embedding interface and the learned ranker experiment, but rejects
+both a blanket BGE default and premature Pi integration. Candidate generation
+must be evaluated per benchmark and question type, not selected from one
+aggregate result.
 
 ## 13. Current implementation versus target
 

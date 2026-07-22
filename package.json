@@ -16,6 +16,7 @@
     "extensions/nmg.ts",
     ".pi/extensions/nmg/index.ts",
     "src/core/autodiff.ts",
+    "src/core/controller-protocol.ts",
     "src/core/differentiable-controller.ts",
     "src/core/gate.ts",
     "src/core/hierarchy.ts",
@@ -35,6 +36,7 @@
     "test:coverage": "c8 node --experimental-strip-types --test src/core/*.test.ts .pi/extensions/nmg/index.test.ts",
     "eval:agents": "node --experimental-strip-types evals/run.ts",
     "eval:adaptive": "node --experimental-strip-types evals/adaptive-topology/run.ts",
+    "eval:controller": "node --experimental-strip-types evals/controller/run.ts",
     "eval:quality": "node --experimental-strip-types evals/memory-quality/run.ts",
     "eval:longmem": "node --experimental-strip-types evals/longmemeval/run.ts",
     "eval:locomo": "node --experimental-strip-types evals/benchmarks/run.ts locomo",
@@ -53,7 +55,7 @@
     "index:ann": "node --experimental-strip-types scripts/build-ann.ts",
     "pi:prompt": "node --experimental-strip-types scripts/pi-control.ts prompt",
     "pi:state": "node --experimental-strip-types scripts/pi-control.ts state",
-    "test": "node --experimental-strip-types --test src/core/store.test.ts src/core/gate.test.ts src/core/openai-embedding.test.ts src/core/ann.test.ts src/core/autodiff.test.ts src/core/differentiable-controller.test.ts src/core/vector-cache.test.ts src/core/write-policy.test.ts .pi/extensions/nmg/index.test.ts evals/benchmarks/loaders.test.ts evals/official/protocol.test.ts evals/official/reproducibility.test.ts evals/longmemeval/official.test.ts evals/longmemeval/report.test.ts"
+    "test": "node --experimental-strip-types --test src/core/store.test.ts src/core/gate.test.ts src/core/openai-embedding.test.ts src/core/ann.test.ts src/core/autodiff.test.ts src/core/controller-protocol.test.ts src/core/differentiable-controller.test.ts src/core/vector-cache.test.ts src/core/write-policy.test.ts .pi/extensions/nmg/index.test.ts evals/benchmarks/loaders.test.ts evals/official/protocol.test.ts evals/official/reproducibility.test.ts evals/longmemeval/official.test.ts evals/longmemeval/report.test.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.80.10",
