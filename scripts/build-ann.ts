@@ -1,9 +1,18 @@
 import { performance } from "node:perf_hooks";
 import { resolve } from "node:path";
-import { NmgStore, UsearchAnnIndex } from "../src/index.ts";
+import { NmgStore, OpenAIEmbeddingClient, UsearchAnnIndex } from "../src/index.ts";
 
 const databasePath = resolve(process.env.NMG_DB_PATH ?? ".nmg/nmg.sqlite");
-const model = process.env.NMG_EMBED_MODEL ?? "Qwen/Qwen3-Embedding-0.6B";
+const embeddingClient = new OpenAIEmbeddingClient({
+  model: process.env.NMG_EMBED_MODEL,
+  profile: process.env.NMG_EMBED_PROFILE as "bge-en" | "plain" | "qwen3" | undefined,
+  queryTemplate: process.env.NMG_EMBED_QUERY_TEMPLATE,
+  documentTemplate: process.env.NMG_EMBED_DOCUMENT_TEMPLATE,
+  dimensions: process.env.NMG_EMBED_DIMENSIONS
+    ? Number(process.env.NMG_EMBED_DIMENSIONS)
+    : undefined,
+});
+const model = embeddingClient.indexId;
 const indexPath = resolve(process.env.NMG_ANN_PATH ?? ".nmg/indexes/qwen3.usearch");
 const batchSize = Math.max(1, Math.min(Number(process.env.NMG_ANN_BATCH_SIZE ?? 512), 2_048));
 const target = process.env.NMG_ANN_TARGET ?? "leaves";

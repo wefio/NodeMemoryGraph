@@ -43,6 +43,7 @@
     "eval:hierarchy": "node --experimental-strip-types evals/hierarchy-scale/run.ts",
     "index:qwen3": "node --experimental-strip-types scripts/index-qwen3.ts",
     "index:embeddings": "node --experimental-strip-types scripts/index-qwen3.ts",
+    "index:status": "node --experimental-strip-types scripts/embedding-status.ts",
     "index:ann": "node --experimental-strip-types scripts/build-ann.ts",
     "pi:prompt": "node --experimental-strip-types scripts/pi-control.ts prompt",
     "pi:state": "node --experimental-strip-types scripts/pi-control.ts state",

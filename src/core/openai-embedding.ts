@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export type EmbeddingProfileName = "bge-en" | "plain" | "qwen3";
 
 export interface OpenAIEmbeddingClientOptions {
@@ -34,6 +36,7 @@ export class OpenAIEmbeddingClient {
   readonly baseUrl: string;
   readonly apiKey?: string;
   readonly model: string;
+  readonly indexId: string;
   readonly dimensions?: number;
   readonly profile: EmbeddingProfileName;
   readonly queryInstruction: string;
@@ -56,6 +59,20 @@ export class OpenAIEmbeddingClient {
     this.documentTemplate = requireTextTemplate(
       options.documentTemplate ?? profile.documentTemplate,
     );
+    this.indexId = `${this.model}@${createHash("sha256")
+      .update(
+        JSON.stringify({
+          dimensions: this.dimensions ?? null,
+          documentTemplate: this.documentTemplate,
+          profile: this.profile,
+          queryInstruction: this.queryTemplate.includes("{instruction}")
+            ? this.queryInstruction
+            : null,
+          queryTemplate: this.queryTemplate,
+        }),
+      )
+      .digest("hex")
+      .slice(0, 12)}`;
     this.timeoutMs = Math.max(1, options.timeoutMs ?? 10_000);
   }
 

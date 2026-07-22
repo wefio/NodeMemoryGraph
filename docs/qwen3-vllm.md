@@ -83,9 +83,14 @@ $env:NMG_ANN_PATH = ".nmg/indexes/qwen3-leaves.usearch"
 npm run index:ann
 ```
 
-The command only requests memories missing that model's vector, commits each
-batch transactionally, and can be restarted. Hashing and Qwen3 vectors coexist
-under `(memory_id, model)`.
+The command requests only missing or stale vectors, commits each batch
+transactionally, and can be restarted. The persisted index identity includes
+the server model and query/document preprocessing contract, so changing the
+profile, templates, or dimensions cannot silently reuse incompatible vectors.
+SQLite missing/stale queries act as the durable work queue. The command reports
+pending and indexed counts plus the last success or retryable failure.
+Use `npm run index:status` with the same profile variables to inspect the
+persisted state without starting vLLM or contacting another provider.
 
 To include Qwen3 in the scale matrix, leave the same environment variables set
 and run `npm run eval:scale`. Without an endpoint, the evaluation still runs the

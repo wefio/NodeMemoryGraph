@@ -16,6 +16,7 @@ import type {
   ExternalLeafEmbedding,
   ExternalNodeEmbedding,
   DeriveMemoryInput,
+  EmbeddingIndexHealth,
   HistoryRecord,
   HistoryRole,
   MemoryContext,
@@ -1800,6 +1801,7 @@ export class NmgStore {
        WHERE n.id > ? AND n.status = 'active'
          AND (? IS NULL OR NOT EXISTS (
            SELECT 1 FROM node_embeddings e WHERE e.node_id = n.id AND e.model = ?
+             AND e.updated_at >= n.updated_at
          ))
        ORDER BY n.id LIMIT ?`,
       )
@@ -1898,9 +1900,12 @@ export class NmgStore {
     const existing = new Map(
       (
         this.#db
-          .prepare("SELECT id, created_at FROM memory_leaf_blocks WHERE node_id = ?")
+          .prepare("SELECT id, created_at, updated_at FROM memory_leaf_blocks WHERE node_id = ?")
           .all(nodeId) as Row[]
-      ).map((row) => [String(row.id), String(row.created_at)]),
+      ).map((row) => [
+        String(row.id),
+        { createdAt: String(row.created_at), updatedAt: String(row.updated_at) },
+      ]),
     );
     for (const group of groups.values()) {
       for (let offset = 0; offset < group.length; offset += size) {
@@ -1912,8 +1917,8 @@ export class NmgStore {
           tier: Number(members[0]!.tier) as MemoryTier,
           summary: leafBlockSummary(members),
           memoryCount: members.length,
-          createdAt: existing.get(id) ?? now,
-          updatedAt: now,
+          createdAt: existing.get(id)?.createdAt ?? now,
+          updatedAt: existing.get(id)?.updatedAt ?? now,
         });
       }
     }
@@ -1996,6 +2001,108 @@ export class NmgStore {
     return rows.map((row) => String(row.memory_id));
   }
 
+  beginEmbeddingIndex(input: {
+    indexId: string;
+    model: string;
+    profile: string;
+    targets: Array<"leaves" | "nodes" | "records">;
+  }): void {
+    const now = new Date().toISOString();
+    const targets = [...new Set(input.targets)].sort();
+    if (targets.length === 0) throw new Error("embedding index requires at least one target");
+    this.#db
+      .prepare(
+        `INSERT INTO embedding_index_state
+          (index_id, model, profile, targets_json, status, last_started_at, updated_at)
+         VALUES (?, ?, ?, ?, 'running', ?, ?)
+         ON CONFLICT(index_id) DO UPDATE SET model = excluded.model,
+           profile = excluded.profile, targets_json = excluded.targets_json,
+           status = 'running',
+           last_started_at = excluded.last_started_at, last_error = NULL,
+           updated_at = excluded.updated_at`,
+      )
+      .run(input.indexId, input.model, input.profile, JSON.stringify(targets), now, now);
+  }
+
+  completeEmbeddingIndex(indexId: string): void {
+    const now = new Date().toISOString();
+    const result = this.#db
+      .prepare(
+        `UPDATE embedding_index_state SET status = 'ready',
+           last_succeeded_at = ?, last_error = NULL, updated_at = ?
+         WHERE index_id = ?`,
+      )
+      .run(now, now, indexId);
+    if (Number(result.changes) === 0) throw new Error(`embedding index ${indexId} was not started`);
+  }
+
+  failEmbeddingIndex(indexId: string, error: unknown): void {
+    const now = new Date().toISOString();
+    const message = (error instanceof Error ? error.message : String(error)).slice(0, 2_000);
+    const result = this.#db
+      .prepare(
+        `UPDATE embedding_index_state SET status = 'failed',
+           last_failed_at = ?, last_error = ?, updated_at = ?
+         WHERE index_id = ?`,
+      )
+      .run(now, message, now, indexId);
+    if (Number(result.changes) === 0) throw new Error(`embedding index ${indexId} was not started`);
+  }
+
+  embeddingIndexHealth(indexId: string): EmbeddingIndexHealth | null {
+    const row = this.#db
+      .prepare("SELECT * FROM embedding_index_state WHERE index_id = ?")
+      .get(indexId) as Row | undefined;
+    if (!row) return null;
+    const targets = parseStringArray(row.targets_json) as EmbeddingIndexHealth["targets"];
+    const includes = (target: EmbeddingIndexHealth["targets"][number]): boolean =>
+      targets.includes(target);
+    const count = (sql: string): number =>
+      Number((this.#db.prepare(sql).get(indexId) as Row).count ?? 0);
+    return {
+      indexId,
+      model: String(row.model),
+      profile: String(row.profile),
+      targets,
+      status: String(row.status) as EmbeddingIndexHealth["status"],
+      pending: {
+        nodes: includes("nodes")
+          ? count(`SELECT COUNT(*) AS count FROM memory_nodes n
+              LEFT JOIN node_embeddings e ON e.node_id = n.id AND e.model = ?
+              WHERE n.status = 'active' AND (e.node_id IS NULL OR e.updated_at < n.updated_at)`)
+          : 0,
+        leaves: includes("leaves")
+          ? count(`SELECT COUNT(*) AS count FROM memory_leaf_blocks b
+              LEFT JOIN leaf_embeddings e ON e.block_id = b.id AND e.model = ?
+              WHERE e.block_id IS NULL OR e.updated_at < b.updated_at`)
+          : 0,
+        records: includes("records")
+          ? count(`SELECT COUNT(*) AS count FROM memory_records m
+              LEFT JOIN memory_embeddings e ON e.memory_id = m.id AND e.model = ?
+              WHERE e.memory_id IS NULL`)
+          : 0,
+        dirtyNodes: includes("leaves")
+          ? Number(
+              (
+                this.#db
+                  .prepare("SELECT COUNT(*) AS count FROM leaf_block_status WHERE dirty = 1")
+                  .get() as Row
+              ).count ?? 0,
+            )
+          : 0,
+      },
+      indexed: {
+        nodes: count("SELECT COUNT(*) AS count FROM node_embeddings WHERE model = ?"),
+        leaves: count("SELECT COUNT(*) AS count FROM leaf_embeddings WHERE model = ?"),
+        records: count("SELECT COUNT(*) AS count FROM memory_embeddings WHERE model = ?"),
+      },
+      lastStartedAt: row.last_started_at ? String(row.last_started_at) : null,
+      lastSucceededAt: row.last_succeeded_at ? String(row.last_succeeded_at) : null,
+      lastFailedAt: row.last_failed_at ? String(row.last_failed_at) : null,
+      lastError: row.last_error ? String(row.last_error) : null,
+    };
+  }
+
   rebuildDueLeafBlocks(
     options: {
       deltaThreshold?: number;
@@ -2044,6 +2151,7 @@ export class NmgStore {
        WHERE b.id > ?
          AND (? IS NULL OR NOT EXISTS (
            SELECT 1 FROM leaf_embeddings e WHERE e.block_id = b.id AND e.model = ?
+             AND e.updated_at >= b.updated_at
          ))
        ORDER BY b.id LIMIT ?`,
       )
@@ -2887,6 +2995,19 @@ export class NmgStore {
         operation TEXT NOT NULL CHECK (operation IN ('move', 'upsert')),
         compacted INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS embedding_index_state (
+        index_id TEXT PRIMARY KEY,
+        model TEXT NOT NULL,
+        profile TEXT NOT NULL,
+        targets_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('failed', 'ready', 'running')),
+        last_started_at TEXT,
+        last_succeeded_at TEXT,
+        last_failed_at TEXT,
+        last_error TEXT,
+        updated_at TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS retrieval_traces (

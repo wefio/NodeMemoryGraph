@@ -12,6 +12,7 @@ export type {
   ConsolidationEvent,
   ConsolidationResult,
   EdgeStability,
+  EmbeddingIndexHealth,
   HistoryRecord,
   EvidenceRole,
   DeriveMemoryInput,

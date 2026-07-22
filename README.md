@@ -122,6 +122,17 @@ encoding contract from the model name. Custom providers can instead set
 `NMG_EMBED_QUERY_TEMPLATE` and `NMG_EMBED_DOCUMENT_TEMPLATE`; each template must
 contain `{text}`.
 
+The preprocessing contract is part of the persisted embedding index identity.
+Changing the profile, templates, dimensions, or relevant query instruction
+creates a new index instead of silently reusing incompatible vectors. The batch
+indexer uses SQLite missing/stale rows as a durable queue and reports pending
+node/leaf/record counts, dirty nodes, last success, and retryable failures.
+Run `npm run index:status` with the same embedding environment variables to
+inspect that state without contacting the provider.
+Pi activates a new semantic index only after its first successful complete
+build. Until then it remains on FTS5 and reports
+`reason=embedding_index_not_ready`, preventing partial profile/model switches.
+
 The automatic-write rule is intentionally narrow:
 
 - Save clear, stable user-stated facts, preferences, constraints, and states

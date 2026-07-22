@@ -28,7 +28,7 @@ function databasePath(): string {
   return join(dataDirectory, "nmg.sqlite");
 }
 
-type QueryEmbeddingClient = Pick<OpenAIEmbeddingClient, "embedQueries" | "model">;
+type QueryEmbeddingClient = Pick<OpenAIEmbeddingClient, "embedQueries" | "indexId">;
 
 export async function searchMemoryContext(
   memoryStore: NmgStore,
@@ -40,6 +40,17 @@ export async function searchMemoryContext(
     return {
       ...memoryStore.searchContext(query, { ...options, retrievalMode: "fts5" }),
       retrieval: { mode: "lexical", degraded: false },
+    };
+  }
+  const indexHealth = memoryStore.embeddingIndexHealth(embeddingClient.indexId);
+  if (!indexHealth?.lastSucceededAt) {
+    return {
+      ...memoryStore.searchContext(query, { ...options, retrievalMode: "fts5" }),
+      retrieval: {
+        mode: "lexical",
+        degraded: true,
+        reason: "embedding_index_not_ready",
+      },
     };
   }
   let queryVector: number[];
@@ -60,7 +71,7 @@ export async function searchMemoryContext(
   return {
     ...memoryStore.searchContext(query, options, {
       queryVector,
-      model: embeddingClient.model,
+      model: embeddingClient.indexId,
     }),
     retrieval: { mode: "hybrid", degraded: false },
   };

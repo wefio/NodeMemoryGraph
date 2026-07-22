@@ -16,7 +16,7 @@ const qwen = process.env.NMG_EMBED_BASE_URL ? new OpenAIEmbeddingClient({
   queryTemplate: process.env.NMG_EMBED_QUERY_TEMPLATE,
   documentTemplate: process.env.NMG_EMBED_DOCUMENT_TEMPLATE,
 }) : null;
-const vectorModel = qwen?.model ?? embedder.model;
+const vectorModel = qwen?.indexId ?? embedder.model;
 const annCandidates = Math.max(8, Math.min(Number(process.env.NMG_ANN_CANDIDATES ?? 64), 2_000));
 const blockLimit = Math.max(1, Math.min(Number(process.env.NMG_BLOCK_LIMIT ?? 8), 50));
 const defaultModes = ["full-record-scan", "node-only+fts", "node+leaf", "record-ann", "leaf-ann"];
@@ -276,10 +276,10 @@ async function indexRecordDocuments(store: NmgStore, client: OpenAIEmbeddingClie
   let cursor = "";
   let count = 0;
   while (true) {
-    const documents = store.embeddingDocuments(cursor, 64, client.model);
+    const documents = store.embeddingDocuments(cursor, 64, client.indexId);
     if (documents.length === 0) return count;
     const vectors = await client.embed(documents.map((document) => document.text));
-    store.upsertExternalEmbeddings(client.model, documents.map((document, index) => ({
+    store.upsertExternalEmbeddings(client.indexId, documents.map((document, index) => ({
       memoryId: document.memoryId,
       vector: vectors[index]!,
     })));

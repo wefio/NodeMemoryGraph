@@ -71,7 +71,7 @@ for (const size of sizes) {
     const queries = cases.map((item, caseIndex) => {
       const started = performance.now();
       const results = (mode === "qwen3" || (mode === "hybrid" && qwenClient))
-        ? store.searchByVector(item.query, qwenQueries[caseIndex]!, qwenClient!.model, {
+        ? store.searchByVector(item.query, qwenQueries[caseIndex]!, qwenClient!.indexId, {
             maxTier: 3,
             limit: 8,
             retrievalMode: mode,
@@ -193,10 +193,10 @@ async function indexWithClient(
   let cursor = "";
   let indexed = 0;
   while (true) {
-    const documents = store.embeddingDocuments(cursor, batchSize, client.model);
+    const documents = store.embeddingDocuments(cursor, batchSize, client.indexId);
     if (documents.length === 0) return indexed;
     const vectors = await client.embed(documents.map((document) => document.text));
-    store.upsertExternalEmbeddings(client.model, documents.map((document, index) => ({
+    store.upsertExternalEmbeddings(client.indexId, documents.map((document, index) => ({
       memoryId: document.memoryId,
       vector: vectors[index]!,
     })));

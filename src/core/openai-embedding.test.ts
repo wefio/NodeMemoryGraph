@@ -143,6 +143,15 @@ test("embedding templates require a text placeholder", () => {
   );
 });
 
+test("embedding index identity includes the preprocessing contract", () => {
+  const qwen = new OpenAIEmbeddingClient({ model: "shared-model", profile: "qwen3" });
+  const plain = new OpenAIEmbeddingClient({ model: "shared-model", profile: "plain" });
+  const repeated = new OpenAIEmbeddingClient({ model: "shared-model", profile: "qwen3" });
+  assert.notEqual(qwen.indexId, plain.indexId);
+  assert.equal(qwen.indexId, repeated.indexId);
+  assert.match(qwen.indexId, /^shared-model@[0-9a-f]{12}$/);
+});
+
 test("embedding requests stop at the configured timeout", async () => {
   const server = createServer(() => {});
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

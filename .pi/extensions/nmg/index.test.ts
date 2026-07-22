@@ -106,10 +106,17 @@ test("embedding failure degrades to FTS while preserving an Active Graph", async
       statement: "Project Atlas stores analytics in DuckDB",
       nodeName: "Project Atlas storage",
     });
+    store.beginEmbeddingIndex({
+      indexId: "unavailable-model@index",
+      model: "unavailable-model",
+      profile: "plain",
+      targets: ["nodes", "leaves"],
+    });
+    store.completeEmbeddingIndex("unavailable-model@index");
     const context = await searchMemoryContext(
       store,
       {
-        model: "unavailable-model",
+        indexId: "unavailable-model@index",
         async embedQueries() {
           throw new Error("service offline");
         },
@@ -126,6 +133,33 @@ test("embedding failure degrades to FTS while preserving an Active Graph", async
       reason: "embedding_unavailable",
     });
     assert.match(formatSearchHeaders(context), /reason=embedding_unavailable/);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("an unbuilt embedding index degrades without contacting the provider", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-extension-test-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  let calls = 0;
+  try {
+    const saved = store.remember({ statement: "Atlas uses DuckDB", nodeName: "Atlas storage" });
+    const context = await searchMemoryContext(
+      store,
+      {
+        indexId: "new-profile@index",
+        async embedQueries() {
+          calls += 1;
+          return [[1, 0]];
+        },
+      },
+      "Atlas DuckDB",
+      { limit: 2, graphHops: 0 },
+    );
+    assert.equal(calls, 0);
+    assert.equal(context.results[0]?.memory.id, saved.memory.id);
+    assert.equal(context.retrieval?.reason, "embedding_index_not_ready");
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });

@@ -632,6 +632,50 @@ test("embeddings persist as Float32 blobs and a warm node cache accepts appends"
   }
 });
 
+test("embedding index health tracks pending, success, and retryable failure", () => {
+  withStore((store) => {
+    const first = store.remember({ statement: "Alpha memory", nodeName: "Alpha node" });
+    store.beginEmbeddingIndex({
+      indexId: "provider@index-a",
+      model: "provider-model",
+      profile: "plain",
+      targets: ["nodes", "leaves"],
+    });
+    let health = store.embeddingIndexHealth("provider@index-a");
+    assert.equal(health?.status, "running");
+    assert.deepEqual(health?.targets, ["leaves", "nodes"]);
+    assert.deepEqual(health?.pending, { nodes: 1, leaves: 0, records: 0, dirtyNodes: 1 });
+
+    const [block] = store.rebuildLeafBlocks(first.node.id, 16);
+    assert.ok(block);
+    store.upsertExternalNodeEmbeddings("provider@index-a", [
+      { nodeId: first.node.id, vector: [1, 0] },
+    ]);
+    store.upsertExternalLeafEmbeddings("provider@index-a", [{ blockId: block.id, vector: [1, 0] }]);
+    store.completeEmbeddingIndex("provider@index-a");
+    health = store.embeddingIndexHealth("provider@index-a");
+    assert.equal(health?.status, "ready");
+    assert.deepEqual(health?.pending, { nodes: 0, leaves: 0, records: 0, dirtyNodes: 0 });
+    assert.deepEqual(health?.indexed, { nodes: 1, leaves: 1, records: 0 });
+    assert.ok(health?.lastSucceededAt);
+
+    store.remember({ statement: "Second Alpha memory", nodeName: "Alpha node" });
+    store.rebuildLeafBlocks(first.node.id, 16);
+    store.beginEmbeddingIndex({
+      indexId: "provider@index-a",
+      model: "provider-model",
+      profile: "plain",
+      targets: ["nodes", "leaves"],
+    });
+    store.failEmbeddingIndex("provider@index-a", new Error("provider offline"));
+    health = store.embeddingIndexHealth("provider@index-a");
+    assert.equal(health?.status, "failed");
+    assert.equal(health?.pending.leaves, 1);
+    assert.equal(health?.lastError, "provider offline");
+    assert.ok(health?.lastFailedAt);
+  });
+});
+
 test("Huffman-like block rebalance promotes frequent memory only in batches", () => {
   withStore((store) => {
     const memories = Array.from({ length: 5 }, (_, index) =>

@@ -190,6 +190,29 @@ export interface StoredEmbedding extends ExternalEmbedding {
   model: string;
 }
 
+export interface EmbeddingIndexHealth {
+  indexId: string;
+  model: string;
+  profile: string;
+  targets: Array<"leaves" | "nodes" | "records">;
+  status: "failed" | "ready" | "running";
+  pending: {
+    nodes: number;
+    leaves: number;
+    records: number;
+    dirtyNodes: number;
+  };
+  indexed: {
+    nodes: number;
+    leaves: number;
+    records: number;
+  };
+  lastStartedAt: string | null;
+  lastSucceededAt: string | null;
+  lastFailedAt: string | null;
+  lastError: string | null;
+}
+
 export interface SessionArchive {
   sessionId: string;
   historyId: string;
@@ -219,7 +242,7 @@ export interface MemoryContext {
   retrieval?: {
     mode: "hybrid" | "lexical";
     degraded: boolean;
-    reason?: "embedding_unavailable";
+    reason?: "embedding_index_not_ready" | "embedding_unavailable";
   };
 }
 

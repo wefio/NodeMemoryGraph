@@ -617,6 +617,13 @@ Important gaps between the prototype and the target plugin:
   `NMG_EMBED_BASE_URL` is configured and now feeds the same budgeted Active Graph
   pipeline; provider failure degrades explicitly to FTS5, while hashing remains
   an evaluation-only baseline;
+- external index identities include the model and preprocessing contract;
+  SQLite missing/stale rows provide a resumable incremental queue, while
+  persistent health records expose pending/indexed counts and the last
+  success/failure without adding a separate queue service;
+- Pi does not activate a new model/profile index until it has a recorded
+  successful complete build; initial partial indexes degrade to FTS5, while
+  later incremental refreshes may continue serving the last successful index;
 - the ANN experiment has unacceptable recall on the near-duplicate workload;
 - automatic extraction evaluation and the matched full-history sample are not
   yet large enough to make a product-quality claim;

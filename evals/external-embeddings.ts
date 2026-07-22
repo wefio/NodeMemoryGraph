@@ -19,15 +19,15 @@ export async function indexExternalEmbeddings(dataDirectory: string): Promise<vo
   const store = new NmgStore(resolve(dataDirectory, "nmg.sqlite"));
   try {
     store.rebuildLeafBlocks();
-    const nodes = store.nodeEmbeddingDocuments("", 2_048, client.model);
+    const nodes = store.nodeEmbeddingDocuments("", 2_048, client.indexId);
     const nodeVectors = await client.embed(nodes.map((document) => document.text));
-    store.upsertExternalNodeEmbeddings(client.model, nodes.map((document, index) => ({
+    store.upsertExternalNodeEmbeddings(client.indexId, nodes.map((document, index) => ({
       nodeId: document.nodeId,
       vector: nodeVectors[index]!,
     })));
-    const leaves = store.leafEmbeddingDocuments("", 2_048, client.model);
+    const leaves = store.leafEmbeddingDocuments("", 2_048, client.indexId);
     const leafVectors = await client.embed(leaves.map((document) => document.text));
-    store.upsertExternalLeafEmbeddings(client.model, leaves.map((document, index) => ({
+    store.upsertExternalLeafEmbeddings(client.indexId, leaves.map((document, index) => ({
       blockId: document.blockId,
       vector: leafVectors[index]!,
     })));
