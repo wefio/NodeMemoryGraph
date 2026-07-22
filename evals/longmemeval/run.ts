@@ -5,6 +5,12 @@ import { RpcClient } from "@earendil-works/pi-coding-agent";
 import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder, cosineSimilarity } from "../../src/core/vector.ts";
 import { indexExternalEmbeddings } from "../external-embeddings.ts";
+import {
+  pairedAgainst,
+  summarizeAccuracy,
+  summarizeByMode,
+  summarizeLatencyByMode,
+} from "./report.ts";
 
 type Role = "assistant" | "user";
 
@@ -21,6 +27,12 @@ interface LongMemExample {
   question_date: string;
   haystack_dates: string[];
   haystack_sessions: Turn[][];
+}
+
+interface SampleManifest {
+  name: string;
+  description?: string;
+  questionIds: string[];
 }
 
 type Mode = "flat-hybrid" | "matched" | "nmg-auto" | "nmg-graph" | "nmg-lite" |
@@ -44,7 +56,8 @@ const canonicalExamples = JSON.parse(
     "utf8",
   ),
 ) as LongMemExample[];
-const selectedIds = stratifiedSample(canonicalExamples, perType)
+const manifest = loadSampleManifest();
+const selectedIds = manifest?.questionIds ?? stratifiedSample(canonicalExamples, perType)
   .map((example) => example.question_id);
 const examplesById = new Map(
   examples.map((example) => [example.question_id, example]),
@@ -66,6 +79,8 @@ if (mode === "validate") {
     cases: canonicalExamples.length,
     selected: sample.length,
     selectedIds: sample.map((example) => example.question_id),
+    sampleManifest: manifest?.name ?? null,
+    repeats: evalRepeats(),
     categories: Object.fromEntries([...new Set(canonicalExamples.map(benchmarkType))]
       .sort().map((type) => [
         type,
@@ -78,27 +93,34 @@ const runId = new Date().toISOString().replaceAll(":", "-");
 const outputDirectory = resolve(import.meta.dirname, "results", runId);
 mkdirSync(outputDirectory, { recursive: true });
 
+const trials = sample.flatMap((example) =>
+  Array.from({ length: evalRepeats() }, (_, repeat) => ({ example, repeat }))
+);
+const matchedRuns = mode === "matched"
+  ? await mapConcurrent(trials, evalConcurrency(), ({ example, repeat }) =>
+    runMatchedExample(example, repeat))
+  : [];
 const results = mode === "matched"
-  ? (await mapConcurrent(sample, evalConcurrency(), runMatchedExample)).flat()
-  : await mapConcurrent(sample, evalConcurrency(), (example) => runExample(example, mode));
+  ? matchedRuns.flatMap((run) => run.results)
+  : await mapConcurrent(trials, evalConcurrency(), ({ example, repeat }) =>
+    runExample(example, mode, undefined, 0, repeat));
 const report = {
   runId,
   mode,
   model: "deepseek/deepseek-v4-flash",
   concurrency: evalConcurrency(),
+  sampleManifest: manifest?.name ?? null,
+  questionCount: sample.length,
+  repeats: evalRepeats(),
+  trialCount: trials.length,
   sampleSize: results.length,
-  passed: results.filter((result) => result.passed).length,
-  accuracy: results.filter((result) => result.passed).length / results.length,
-  byMode: Object.fromEntries([...new Set(results.map((result) => result.mode))].map(
-    (resultMode) => {
-      const rows = results.filter((result) => result.mode === resultMode);
-      return [resultMode, {
-        passed: rows.filter((result) => result.passed).length,
-        total: rows.length,
-        accuracy: rows.filter((result) => result.passed).length / rows.length,
-      }];
-    },
-  )),
+  ...summarizeAccuracy(results),
+  byMode: summarizeByMode(results),
+  latencyByMode: summarizeLatencyByMode(results),
+  preparations: matchedRuns.map((run) => run.preparation),
+  pairedAgainstFlatHybrid: mode === "matched"
+    ? pairedAgainst(results, "flat-hybrid")
+    : {},
   results,
 };
 
@@ -108,19 +130,37 @@ writeFileSync(
 );
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 
-async function runMatchedExample(example: LongMemExample) {
-  const nmgDirectory = resolve(outputDirectory, "nmg", example.question_id);
+async function runMatchedExample(example: LongMemExample, repeat: number) {
+  const nmgDirectory = resolve(
+    outputDirectory, "nmg", example.question_id, `repeat-${repeat}`,
+  );
   mkdirSync(nmgDirectory, { recursive: true });
+  const ingestStartedAt = performance.now();
   const remembered = ingestRawEvidence(example, nmgDirectory);
+  const ingestMs = Math.round(performance.now() - ingestStartedAt);
+  const indexStartedAt = performance.now();
   await indexExternalEmbeddings(nmgDirectory);
+  const indexMs = Math.round(performance.now() - indexStartedAt);
   const modes: MatchedMode[] = [
     "no-memory", "raw-session", "flat-hybrid", "nmg-auto", "nmg-lite", "nmg-graph",
   ];
   const results = [];
   for (const matchedMode of modes) {
-    results.push(await runExample(example, matchedMode, nmgDirectory, remembered));
+    results.push(await runExample(
+      example, matchedMode, nmgDirectory, remembered, repeat,
+    ));
   }
-  return results;
+  return {
+    results,
+    preparation: {
+      questionId: example.question_id,
+      repeat,
+      remembered,
+      ingestMs,
+      indexMs,
+      totalMs: ingestMs + indexMs,
+    },
+  };
 }
 
 async function runExample(
@@ -128,6 +168,7 @@ async function runExample(
   runMode: Exclude<Mode, "matched">,
   sharedNmgDirectory?: string,
   sharedRemembered = 0,
+  repeat = 0,
 ) {
   const startedAt = performance.now();
   const nmgDirectory = sharedNmgDirectory ??
@@ -160,6 +201,7 @@ async function runExample(
 
   return {
     questionId: example.question_id,
+    repeat,
     mode: runMode,
     questionType: benchmarkType(example),
     question: example.question,
@@ -426,6 +468,20 @@ function stratifiedSample(
   );
 }
 
+function loadSampleManifest(): SampleManifest | null {
+  const configuredPath = process.env.NMG_LONGMEM_SAMPLE_FILE;
+  if (!configuredPath) return null;
+  const manifestPath = resolve(root, configuredPath);
+  const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as SampleManifest;
+  if (!parsed.name || !Array.isArray(parsed.questionIds) || parsed.questionIds.length === 0) {
+    throw new Error(`Invalid LongMemEval sample manifest: ${manifestPath}`);
+  }
+  if (new Set(parsed.questionIds).size !== parsed.questionIds.length) {
+    throw new Error(`LongMemEval sample manifest contains duplicate question IDs: ${manifestPath}`);
+  }
+  return parsed;
+}
+
 function benchmarkType(example: LongMemExample): string {
   return example.question_id.endsWith("_abs")
     ? "abstention"
@@ -503,6 +559,10 @@ function evalConcurrency(): number {
   ));
 }
 
+function evalRepeats(): number {
+  return Math.min(positiveInteger(process.env.NMG_LONGMEM_REPEATS ?? "1"), 20);
+}
+
 function modelTimeout(): number {
   return Math.max(30_000, Number.parseInt(
     process.env.NMG_LONGMEM_TIMEOUT_MS ?? "300000",
@@ -538,3 +598,4 @@ function definedEnvironment(): Record<string, string> {
     ),
   );
 }
+

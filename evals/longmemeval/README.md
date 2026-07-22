@@ -18,6 +18,23 @@ comes from the ordering in `longmemeval_s_cleaned.json`, so every mode uses the
 same question IDs. Each answer is judged by a fresh DeepSeek V4 Flash session;
 an empty judge response is retried once.
 
+For a checked-in, order-independent sample and repeated reader trials, use:
+
+```powershell
+$env:NMG_LONGMEM_SAMPLE_FILE = "evals/longmemeval/samples/development-v1.json"
+$env:NMG_LONGMEM_REPEATS = "3"
+npm run eval:longmem -- validate 1
+npm run eval:longmem -- matched 1
+```
+
+The manifest takes precedence over the positional per-category count. Every
+repeat gets an isolated NMG database so access statistics from an earlier trial
+cannot change a later trial. Reports include Wilson 95% accuracy intervals and
+paired win/loss/tie counts against `flat-hybrid`, matched by question and repeat.
+They also separate per-mode answer latency from deterministic NMG ingestion and
+embedding-index preparation time; preparation is shared by the three NMG modes
+within one matched trial.
+
 The runner defaults to four concurrent questions and a five-minute model-call
 timeout. Override these with `NMG_LONGMEM_CONCURRENCY` and
 `NMG_LONGMEM_TIMEOUT_MS`. A single answer timeout is recorded on that row rather
@@ -134,3 +151,4 @@ uniquely failed two that Lite passed. The larger sample therefore does not
 support enabling graph expansion by default. One Graph-only miss also produced
 an empty final model answer despite no RPC error, illustrating why repeated
 reader runs are still needed to separate retrieval effects from model variance.
+

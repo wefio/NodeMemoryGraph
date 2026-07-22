@@ -47,7 +47,7 @@
     "index:ann": "node --experimental-strip-types scripts/build-ann.ts",
     "pi:prompt": "node --experimental-strip-types scripts/pi-control.ts prompt",
     "pi:state": "node --experimental-strip-types scripts/pi-control.ts state",
-    "test": "node --experimental-strip-types --test src/core/store.test.ts src/core/gate.test.ts src/core/openai-embedding.test.ts src/core/ann.test.ts src/core/vector-cache.test.ts src/core/write-policy.test.ts .pi/extensions/nmg/index.test.ts evals/benchmarks/loaders.test.ts"
+    "test": "node --experimental-strip-types --test src/core/store.test.ts src/core/gate.test.ts src/core/openai-embedding.test.ts src/core/ann.test.ts src/core/vector-cache.test.ts src/core/write-policy.test.ts .pi/extensions/nmg/index.test.ts evals/benchmarks/loaders.test.ts evals/longmemeval/report.test.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.80.10",

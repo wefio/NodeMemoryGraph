@@ -1,0 +1,20 @@
+{
+  "name": "development-v1",
+  "description": "Two fixed LongMemEval-S questions from each benchmark category.",
+  "questionIds": [
+    "0862e8bf_abs",
+    "15745da0_abs",
+    "6a1eabeb",
+    "6aeb4375",
+    "0a995998",
+    "6d550036",
+    "7161e7e2",
+    "c4f10528",
+    "8a2466db",
+    "06878be2",
+    "e47becba",
+    "118b2229",
+    "gpt4_59149c77",
+    "gpt4_f49edff3"
+  ]
+}
