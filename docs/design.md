@@ -509,11 +509,16 @@ catastrophic-backtracking risk.
 
 ## 12. Learnable routing and minimal differentiable query graphs
 
-NMG does not depend on a general-purpose machine-learning framework. Its design
-requires only a small, backend-independent differentiable controller that can be
-compared against deterministic baselines and receive useful credit from
-retrieval outcomes. The intended implementation follows the tinygrad principle:
-build only the computation graph and operators that NMG actually uses.
+NMG does not depend on a general-purpose machine-learning framework. It contains
+a small, backend-independent differentiable controller that can be compared
+against deterministic baselines and receive useful credit from retrieval
+outcomes. Its implementation follows tinygrad's mature separation of concerns:
+Tensor is a graph-building frontend over a unified UOp DAG, evaluation is lazy,
+and gradient construction is separate from graph execution. NMG deliberately
+omits tinygrad's scheduler, kernel lowering, code generation, JIT, and device
+runtime because the controller workload does not justify them. See the
+[tinygrad developer overview](https://docs.tinygrad.org/developer/developer/)
+and [UOp reference](https://docs.tinygrad.org/developer/uop/).
 
 The persistent semantic graphs, the Active Graph, and a differentiable
 computation graph are different objects:
@@ -531,7 +536,7 @@ is only an optional scoring representation of that projection. Updating tensor
 parameters must not directly mutate authoritative history or silently
 consolidate STG relations into LTG.
 
-The first differentiable implementation should support only the required
+The first differentiable implementation supports only the required
 `Float32Array` operations:
 
 ```text
@@ -557,13 +562,14 @@ L = route_loss
   + eta    * evidence_miss_cost
 ```
 
-A minimal custom autodiff engine is the planned implementation. Its interfaces
-must remain backend-neutral so it can be replaced if future scale measurements
-justify doing so, but NMG will not carry a large tensor framework merely for
-automatic differentiation. If only black-box task success is available, a
-contextual bandit or other discrete online learner may be more appropriate than
-autodiff. A remote Pi model API is not differentiable; backpropagation therefore
-needs evidence labels, useful-node feedback, or a separate teacher signal.
+A minimal custom UOp autodiff engine is implemented with serializable controller
+parameters. Its interfaces remain backend-neutral so it can be replaced if
+future scale measurements justify doing so, but NMG will not carry a large
+tensor framework merely for automatic differentiation. If only black-box task
+success is available, a contextual bandit or other discrete online learner may
+be more appropriate than autodiff. A remote Pi model API is not differentiable;
+backpropagation therefore needs evidence labels, useful-node feedback, or a
+separate teacher signal.
 
 Suggested interface boundary:
 
@@ -580,6 +586,14 @@ interface RouteTrainer {
 The zero-configuration default remains heuristic/hybrid routing. A learned
 router becomes default only if it improves evidence recall or retrieval cost in
 matched evaluation.
+
+Current implementation status: the experimental controller has independent
+heads for node selection, edge selection, STOP/EXPAND, and the seven Active
+Graph budget dimensions. Unit tests cover lazy UOp evaluation, matrix and shared
+path gradients, softmax cross-entropy, multi-head convergence, input validation,
+and exact state round-tripping. It is not yet connected to the default Pi
+retrieval path; that requires a fixed feature contract and matched evaluation,
+not more autodiff machinery.
 
 ## 13. Current implementation versus target
 
@@ -697,10 +711,10 @@ optional.
 
 Current development evidence (updated 2026-07-22):
 
-- 81 local automated tests pass, including P3 lifecycle, budget enforcement,
+- 87 local automated tests pass, including P3 lifecycle, budget enforcement,
   actual-use activation, independent-task deduplication, reversible
   consolidation, write-policy audit, Active Graph path/selection/budget traces,
-  and migration from the pre-P3 schema; C8 reports 86.52% total statement/line
+  and migration from the pre-P3 schema; C8 reports 87.49% total statement/line
   coverage and 93.62% for `store.ts`;
 - a clean DeepSeek V4 Flash Pi process wrote a unique LTG fact, a second process
   recovered it through `nmg_search -> activeGraphId -> nmg_get`, and the store
@@ -831,6 +845,10 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
    local-subgraph consolidation into LTG with minimum
    evidence, hysteresis, cooldown, and explicit evaluation gates. Pi runs this
    conservative maintenance policy automatically after completed turns.
+6. **Complete as an isolated Lab primitive:** implement a tinygrad-inspired
+   UOp autodiff engine and serializable multi-head controller for node, edge,
+   STOP/EXPAND, and budget decisions. Activation in the Pi retrieval path remains
+   gated on a fixed feature contract and matched evidence-recall/cost evaluation.
 
 ### P4: optional platform capabilities
 

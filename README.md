@@ -41,6 +41,9 @@ optimization:
   traceable instead of deleting earlier evidence.
 - Cloud sync is deferred. External embeddings are optional and served through
   an OpenAI-compatible endpoint; execution isolation remains a Pi plugin concern.
+- An experimental framework-free differentiable controller uses a small lazy
+  UOp graph for node, edge, STOP/EXPAND, and Active Graph budget learning. It is
+  a Lab primitive and does not replace deterministic routing by default.
 
 ## Architecture
 
