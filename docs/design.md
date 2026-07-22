@@ -92,8 +92,8 @@ responsibilities.
 The target default plugin should install as a normal Pi package and require only
 Node.js, Pi, and SQLite. FTS search must work without an embedding server. A
 semantic embedding provider may be enabled by configuration, but local Qwen,
-vLLM, CUDA, USearch, PyTorch, and Cloudflare are not default
-dependencies.
+vLLM, CUDA, USearch, general-purpose ML frameworks, and Cloudflare are not
+default dependencies.
 
 The target model-facing surface is three tools:
 
@@ -507,11 +507,13 @@ entire store by default. Exact literal search is the first precision feature to
 add because it covers most code-agent identifiers without regex escaping or
 catastrophic-backtracking risk.
 
-## 12. Learnable routing and differentiable query graphs
+## 12. Learnable routing and minimal differentiable query graphs
 
-NMG does not require PyTorch. It requires only that a routing implementation can
-be compared against deterministic baselines and, if learnable, receive useful
-credit from retrieval outcomes.
+NMG does not depend on a general-purpose machine-learning framework. Its design
+requires only a small, backend-independent differentiable controller that can be
+compared against deterministic baselines and receive useful credit from
+retrieval outcomes. The intended implementation follows the tinygrad principle:
+build only the computation graph and operators that NMG actually uses.
 
 The persistent semantic graphs, the Active Graph, and a differentiable
 computation graph are different objects:
@@ -529,6 +531,22 @@ is only an optional scoring representation of that projection. Updating tensor
 parameters must not directly mutate authoritative history or silently
 consolidate STG relations into LTG.
 
+The first differentiable implementation should support only the required
+`Float32Array` operations:
+
+```text
+add / multiply / dot / matrix multiply
+sum / mean
+sigmoid / softmax / log / exp
+reverse-mode backward and parameter update
+```
+
+Its trainable surface is deliberately narrow: query-to-node routing,
+query-and-node-to-edge routing, STOP/EXPAND selection, and budget allocation.
+The computation graph is ephemeral and exists only while scoring or learning;
+SQLite, the semantic graph, provenance, consolidation, and discrete Top-K
+selection remain ordinary deterministic system components.
+
 An optional differentiable router may optimize a loss such as:
 
 ```text
@@ -539,12 +557,13 @@ L = route_loss
   + eta    * evidence_miss_cost
 ```
 
-PyTorch, JAX, a small custom autodiff engine, or a closed-form linear update are
-implementation choices. If only black-box task success is available, a
+A minimal custom autodiff engine is the planned implementation. Its interfaces
+must remain backend-neutral so it can be replaced if future scale measurements
+justify doing so, but NMG will not carry a large tensor framework merely for
+automatic differentiation. If only black-box task success is available, a
 contextual bandit or other discrete online learner may be more appropriate than
-automatic differentiation. A remote Pi model API is not differentiable; normal
-backpropagation therefore needs evidence labels, useful-node feedback, or a
-separate teacher signal.
+autodiff. A remote Pi model API is not differentiable; backpropagation therefore
+needs evidence labels, useful-node feedback, or a separate teacher signal.
 
 Suggested interface boundary:
 
