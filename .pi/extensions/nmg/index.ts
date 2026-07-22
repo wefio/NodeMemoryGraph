@@ -152,6 +152,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         `For user-stated facts, states, events, preferences, and constraints, set ` +
         `evidence to the shortest exact source excerpt that supports the memory. ` +
         `The statement is a retrieval summary; evidence preserves exact details. ` +
+        `Set writeReason to a concise explanation of why the information will ` +
+        `remain useful beyond the current turn. ` +
         `Preserve useful assistant output as conversation_evidence with ` +
         `sourceActor=assistant and truthStatus=unverified: remember that it was ` +
         `said without asserting it is true. Ask before saving ambiguous or ` +
@@ -209,12 +211,23 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     });
   };
 
+  const maintainMemory = () => {
+    if (!store) return;
+    store.expireShortTermMemories();
+    store.rebalanceDueNodes();
+    store.reconcileConsolidation();
+  };
+
   // RPC clients may terminate Pi without emitting a graceful shutdown event.
   // Checkpoint after each completed turn; archives are idempotent per session.
-  pi.on("agent_end", async (_event, ctx) => archiveCurrentSession(ctx));
+  pi.on("agent_end", async (_event, ctx) => {
+    archiveCurrentSession(ctx);
+    maintainMemory();
+  });
 
   pi.on("session_shutdown", async (_event, ctx) => {
     archiveCurrentSession(ctx);
+    maintainMemory();
     store?.close();
     store = undefined;
   });
@@ -357,6 +370,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       evidence: Type.Optional(
         Type.String({ description: "Exact supporting text or source description" }),
       ),
+      writeReason: Type.Optional(
+        Type.String({
+          description: "Why this information should remain useful beyond the current turn",
+        }),
+      ),
       evidenceHistoryId: Type.Optional(
         Type.String({
           description: "Exact NMG history ID when the source message was pre-ingested",
@@ -410,6 +428,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         memoryType: params.memoryType as MemoryType | undefined,
       });
       if (!assessment.allowed) {
+        getStore().recordRejectedWrite({
+          policyReason: assessment.reason,
+          writeReason: params.writeReason?.trim() || `rejected_${params.memoryType ?? "fact"}`,
+          writeSource: "agent",
+          memoryType: (params.memoryType as MemoryType | undefined) ?? "fact",
+          requestedResidence: (params.residence as MemoryResidence | undefined) ?? "ltg",
+          sessionId: ctx.sessionManager.getSessionId(),
+        });
         return {
           content: [
             {
@@ -439,6 +465,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         supersedesId: params.supersedesId,
         residence: params.residence as MemoryResidence | undefined,
         expiresAt: params.expiresAt,
+        writeReason:
+          params.writeReason?.trim() || `agent_confirmed_durable_${params.memoryType ?? "fact"}`,
+        writeSource: "agent",
         sessionId: ctx.sessionManager.getSessionId(),
         sourceRef: ctx.sessionManager.getSessionFile() ?? undefined,
       });
@@ -728,7 +757,10 @@ export function formatSearchHeaders(context: MemoryContext): string {
     context.activeGraph
       ? `active_graph=${context.activeGraph.id}; task=${context.activeGraph.taskId}; ` +
         `budget=${context.activeGraph.usage.evidence}/${context.activeGraph.budget.maxEvidence} evidence, ` +
-        `${context.activeGraph.usage.estimatedTokens}/${context.activeGraph.budget.maxTokens} tokens`
+        `${context.activeGraph.usage.estimatedTokens}/${context.activeGraph.budget.maxTokens} tokens; ` +
+        `selections=${context.activeGraph.selections?.length ?? context.results.length}; ` +
+        `expansions=${context.activeGraph.expansions?.length ?? 0}; ` +
+        `exhausted=${context.activeGraph.usage.exhausted?.join(",") || "none"}`
       : "",
     ...headers,
     "Use nmg_get with selected memory IDs and activeGraphId to load exact statements, " +

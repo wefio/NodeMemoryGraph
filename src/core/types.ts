@@ -34,6 +34,7 @@ export interface MemoryNode {
 
 export type MemoryTier = 0 | 1 | 2 | 3;
 export type MemoryResidence = "ltg" | "stg";
+export type MemoryWriteSource = "agent" | "automatic" | "core" | "derived" | "import" | "user";
 export type MemoryType =
   | "constraint"
   | "conversation_evidence"
@@ -99,6 +100,8 @@ export interface MemoryRecord {
   importance: number;
   accessCount: number;
   lastAccessedAt: string | null;
+  writeReason: string;
+  writeSource: MemoryWriteSource;
   createdAt: string;
 }
 
@@ -125,6 +128,8 @@ export interface RememberInput {
   supersedesId?: string;
   residence?: MemoryResidence;
   expiresAt?: string;
+  writeReason?: string;
+  writeSource?: MemoryWriteSource;
 }
 
 export interface RememberResult {
@@ -267,6 +272,40 @@ export interface ActiveGraphBudgetUsage {
   exhausted: Array<"edges" | "evidence" | "latency" | "nodes" | "tokens">;
 }
 
+export type ActiveGraphBudgetDimension =
+  "edges" | "evidence" | "graphHops" | "latencyMs" | "localTier" | "nodes" | "tokens";
+
+export interface ActiveGraphBudgetLedgerEntry {
+  dimension: ActiveGraphBudgetDimension;
+  limit: number;
+  used: number;
+  exhausted: boolean;
+}
+
+export interface ActiveGraphSelection {
+  memoryId: string;
+  nodeId: string;
+  source: "direct" | "graph_expansion";
+  reason: RecallCue["reason"];
+  rank: number;
+  tier: MemoryTier;
+  estimatedTokens: number;
+  scores: {
+    lexical: number;
+    vector: number;
+    route: number;
+    combined: number;
+    usefulness: number;
+  };
+}
+
+export interface ActiveGraphExpansion {
+  relationId: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  hop: number;
+}
+
 export interface ActiveGraphEdge {
   id: string;
   sourceNodeId: string;
@@ -283,6 +322,9 @@ export interface ActiveGraph {
   nodeIds: string[];
   memoryIds: string[];
   edges: ActiveGraphEdge[];
+  selections: ActiveGraphSelection[];
+  expansions: ActiveGraphExpansion[];
+  budgetLedger: ActiveGraphBudgetLedgerEntry[];
   budget: ActiveGraphBudget;
   usage: ActiveGraphBudgetUsage;
   createdAt: string;
@@ -345,6 +387,28 @@ export interface RetrievalTraceInput {
   rejectedMemoryIds?: string[];
   activeGraphBudget?: ActiveGraphBudget;
   activeGraphUsage?: ActiveGraphBudgetUsage;
+  selections?: ActiveGraphSelection[];
+  expansions?: ActiveGraphExpansion[];
+  budgetLedger?: ActiveGraphBudgetLedgerEntry[];
+}
+
+export interface RetrievalTrace extends RetrievalTraceInput {
+  id: string;
+  taskId: string;
+  expandedNodeIds: string[];
+  relationIds: string[];
+  usefulMemoryIds: string[];
+  contradictedMemoryIds: string[];
+  rejectedMemoryIds: string[];
+  ambiguity: number;
+  fallbackUsed: boolean;
+  conflictObserved: boolean;
+  activeGraphBudget: ActiveGraphBudget;
+  activeGraphUsage: ActiveGraphBudgetUsage;
+  selections: ActiveGraphSelection[];
+  expansions: ActiveGraphExpansion[];
+  budgetLedger: ActiveGraphBudgetLedgerEntry[];
+  createdAt: string;
 }
 
 export interface EdgeStability {
@@ -363,7 +427,22 @@ export interface ActivationSignal {
   usedCount: number;
   contradictedCount: number;
   rejectedCount: number;
+  score: number;
   updatedAt: string;
+}
+
+export interface MemoryWriteEvent {
+  id: string;
+  memoryId: string | null;
+  historyId: string | null;
+  sessionId: string | null;
+  decision: "accepted" | "rejected";
+  policyReason: string;
+  writeReason: string;
+  writeSource: MemoryWriteSource;
+  memoryType: MemoryType;
+  requestedResidence: MemoryResidence;
+  createdAt: string;
 }
 
 export interface ConsolidationEvent {

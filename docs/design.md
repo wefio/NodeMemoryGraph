@@ -588,7 +588,9 @@ Implemented and verified in the current prototype:
   lifecycle audit events;
 - a first-class Active Graph returned by `searchContext`, with persistent and
   temporary edges plus a shared node/edge/evidence/token/hop/tier/latency budget
-  and measured usage ledger;
+  and a per-dimension measured usage ledger;
+- durable per-memory selection explanations, score components, estimated token
+  cost, and relation expansion paths, all recoverable from one retrieval trace;
 - Pi propagation of Active Graph IDs from `nmg_search` to `nmg_get`, so exact
   expansion acts as the current operational signal that a recalled memory was
   actually selected for use;
@@ -597,6 +599,12 @@ Implemented and verified in the current prototype:
   and protection against increasing stability from retrieval alone;
 - auditable stability-driven relation consolidation and hysteretic demotion,
   with explicit relations protected from automatic demotion;
+- automatic turn-end maintenance in the Pi harness: session checkpointing, STG
+  expiry, due-node batch rebalancing, and conservative stability-driven
+  consolidation/demotion;
+- accepted and rejected write-policy audit events, including durable write
+  reason and source while deliberately excluding rejected statement/evidence
+  content;
 - FTS5, hashing evaluation vectors, model-neutral external embeddings with
   explicit query/document profiles, node/leaf indexing, and a
   rebuildable USearch experiment;
@@ -670,10 +678,11 @@ optional.
 
 Current development evidence (updated 2026-07-22):
 
-- 56 local automated tests pass, including P3 lifecycle, budget enforcement,
+- 81 local automated tests pass, including P3 lifecycle, budget enforcement,
   actual-use activation, independent-task deduplication, reversible
-  consolidation, and migration from the pre-P3 schema; C8 reports 86.16% total
-  statement/line coverage and 93.21% for `store.ts`;
+  consolidation, write-policy audit, Active Graph path/selection/budget traces,
+  and migration from the pre-P3 schema; C8 reports 86.52% total statement/line
+  coverage and 93.62% for `store.ts`;
 - a clean DeepSeek V4 Flash Pi process wrote a unique LTG fact, a second process
   recovered it through `nmg_search -> activeGraphId -> nmg_get`, and the store
   recorded one selection and one actual use; isolated test data was removed
@@ -792,15 +801,17 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 2. **Complete:** introduce a first-class `ActiveGraph` runtime object with selected nodes,
    relations, local evidence, temporary cross-graph edges, and a unified budget
    ledger.
-3. **Complete with conservative attribution:** record node and edge activation
-   from retrieval traces and agent-directed exact-memory use, not from retrieval
-   frequency alone.
+3. **Complete with conservative attribution:** record scored node and edge
+   activation from retrieval traces and agent-directed exact-memory use, with
+   durable selection reasons, expansion paths, and budget accounting; retrieval
+   frequency alone does not establish usefulness.
 4. **Complete:** estimate edge stability from independent tasks, evidence coverage, verified
    usefulness, contradiction, and time decay while preventing self-reinforcing
    retrieval loops.
 5. **Complete for pairwise local subgraphs:** add auditable, reversible
    local-subgraph consolidation into LTG with minimum
-   evidence, hysteresis, cooldown, and explicit evaluation gates.
+   evidence, hysteresis, cooldown, and explicit evaluation gates. Pi runs this
+   conservative maintenance policy automatically after completed turns.
 
 ### P4: optional platform capabilities
 

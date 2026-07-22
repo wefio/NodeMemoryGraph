@@ -7,7 +7,10 @@ import type {
   ActivationSignal,
   ActiveGraph,
   ActiveGraphBudget,
+  ActiveGraphBudgetLedgerEntry,
   ActiveGraphBudgetUsage,
+  ActiveGraphExpansion,
+  ActiveGraphSelection,
   ConsolidationEvent,
   ConsolidationResult,
   EdgeStability,
@@ -29,6 +32,7 @@ import type {
   NodeTransform,
   MemoryRecord,
   MemoryResidence,
+  MemoryWriteEvent,
   MemorySearchResult,
   MemoryScope,
   MemoryStatus,
@@ -39,6 +43,7 @@ import type {
   RememberResult,
   RebalanceResult,
   RetrievalTraceInput,
+  RetrievalTrace,
   RecallCue,
   RecallIndex,
   SearchOptions,
@@ -224,9 +229,13 @@ export class NmgStore {
     supersedesId?: string;
     residence?: MemoryResidence;
     expiresAt?: string;
+    writeReason?: string;
+    writeSource?: MemoryRecord["writeSource"];
   }): MemoryRecord {
     const createdAt = new Date().toISOString();
     const residence = input.residence ?? defaultResidence(input);
+    const writeSource = input.writeSource ?? (input.memoryType === "derived" ? "derived" : "core");
+    const writeReason = input.writeReason?.trim() || defaultWriteReason(input, residence);
     const memory: MemoryRecord = {
       id: randomUUID(),
       nodeId: input.nodeId,
@@ -251,6 +260,8 @@ export class NmgStore {
       importance: clamp(input.importance ?? 0.5, 0, 1),
       accessCount: 0,
       lastAccessedAt: null,
+      writeReason,
+      writeSource,
       createdAt,
     };
 
@@ -261,8 +272,8 @@ export class NmgStore {
            event_time, source_actor, truth_status, scope_json, valid_from,
            valid_until, status, residence, promoted_at, expires_at,
            evidence_role, supersedes_id, tier, importance,
-           access_count, last_accessed_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)`,
+           access_count, last_accessed_at, write_reason, write_source, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
       )
       .run(
         memory.id,
@@ -285,6 +296,8 @@ export class NmgStore {
         memory.supersedesId,
         memory.tier,
         memory.importance,
+        memory.writeReason,
+        memory.writeSource,
         memory.createdAt,
       );
     if (memory.residence === "ltg") {
@@ -381,6 +394,19 @@ export class NmgStore {
         supersedesId,
         residence: input.residence,
         expiresAt: input.expiresAt,
+        writeReason: input.writeReason,
+        writeSource: input.writeSource,
+      });
+      this.#recordMemoryWriteEvent({
+        memoryId: memory.id,
+        historyId: history.id,
+        sessionId: input.sessionId ?? null,
+        decision: "accepted",
+        policyReason: "allowed",
+        writeReason: memory.writeReason,
+        writeSource: memory.writeSource,
+        memoryType: memory.memoryType,
+        requestedResidence: memory.residence,
       });
       if (memory.residence === "ltg") node.residence = "ltg";
       if (supersededNodeId && supersededNodeId !== node.id) {
@@ -392,6 +418,40 @@ export class NmgStore {
       this.#db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  recordRejectedWrite(input: {
+    policyReason: string;
+    writeReason: string;
+    writeSource?: MemoryWriteEvent["writeSource"];
+    memoryType?: MemoryRecord["memoryType"];
+    requestedResidence?: MemoryResidence;
+    sessionId?: string;
+  }): MemoryWriteEvent {
+    return this.#recordMemoryWriteEvent({
+      memoryId: null,
+      historyId: null,
+      sessionId: input.sessionId ?? null,
+      decision: "rejected",
+      policyReason: requireText(input.policyReason, "write policy reason"),
+      writeReason: requireText(input.writeReason, "write reason"),
+      writeSource: input.writeSource ?? "agent",
+      memoryType: input.memoryType ?? "fact",
+      requestedResidence: input.requestedResidence ?? "ltg",
+    });
+  }
+
+  memoryWriteEvents(memoryId?: string): MemoryWriteEvent[] {
+    const rows = memoryId
+      ? (this.#db
+          .prepare(
+            "SELECT * FROM memory_write_events WHERE memory_id = ? ORDER BY created_at, rowid",
+          )
+          .all(memoryId) as Row[])
+      : (this.#db
+          .prepare("SELECT * FROM memory_write_events ORDER BY created_at, rowid")
+          .all() as Row[]);
+    return rows.map(mapMemoryWriteEvent);
   }
 
   promoteMemory(
@@ -1096,6 +1156,26 @@ export class NmgStore {
       latencyMs,
       exhausted: [...exhausted].sort(),
     };
+    const selections: ActiveGraphSelection[] = results.map((result, index) => ({
+      memoryId: result.memory.id,
+      nodeId: result.node.id,
+      source: direct.some((item) => item.memory.id === result.memory.id)
+        ? "direct"
+        : "graph_expansion",
+      reason: recallReason(result),
+      rank: index + 1,
+      tier: result.memory.tier,
+      estimatedTokens: estimateResultTokens(result),
+      scores: {
+        lexical: result.lexicalScore,
+        vector: result.vectorScore,
+        route: result.routeScore,
+        combined: result.combinedScore,
+        usefulness: contextUsefulness(query, result),
+      },
+    }));
+    const expansions = activeGraphExpansions(directSelectedNodeIds, persistentEdges, graphHops);
+    const budgetLedger = activeGraphBudgetLedger(budget, usage);
     const taskId = options.taskId?.trim() || stableTaskId(query);
     const traceId = this.recordRetrievalTrace({
       query,
@@ -1111,6 +1191,9 @@ export class NmgStore {
         relations.some((relation) => relation.type === "contradicts"),
       activeGraphBudget: budget,
       activeGraphUsage: usage,
+      selections,
+      expansions,
+      budgetLedger,
     });
     const activeGraph: ActiveGraph = {
       id: traceId,
@@ -1119,6 +1202,9 @@ export class NmgStore {
       nodeIds: [...selectedNodes],
       memoryIds: results.map((result) => result.memory.id),
       edges,
+      selections,
+      expansions,
+      budgetLedger,
       budget,
       usage,
       createdAt: new Date().toISOString(),
@@ -1167,9 +1253,10 @@ export class NmgStore {
            expanded_node_ids_json, useful_memory_ids_json,
            contradicted_memory_ids_json, rejected_memory_ids_json,
            relation_ids_json, task_id, active_graph_budget_json,
-           active_graph_usage_json, ambiguity,
+           active_graph_usage_json, selections_json, expansions_json,
+           budget_ledger_json, ambiguity,
            fallback_used, conflict_observed, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -1184,6 +1271,9 @@ export class NmgStore {
           taskId,
           JSON.stringify(input.activeGraphBudget ?? {}),
           JSON.stringify(input.activeGraphUsage ?? {}),
+          JSON.stringify(input.selections ?? []),
+          JSON.stringify(input.expansions ?? []),
+          JSON.stringify(input.budgetLedger ?? []),
           clamp(input.ambiguity ?? 0, 0, 1),
           input.fallbackUsed ? 1 : 0,
           input.conflictObserved ? 1 : 0,
@@ -1262,6 +1352,42 @@ export class NmgStore {
       this.#db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  retrievalTrace(id: string): RetrievalTrace | null {
+    const row = this.#db.prepare("SELECT * FROM retrieval_traces WHERE id = ?").get(id) as
+      Row | undefined;
+    if (!row) return null;
+    return {
+      id: String(row.id),
+      query: String(row.query),
+      taskId: String(row.task_id),
+      resultMemoryIds: parseStringArray(row.result_memory_ids_json),
+      resultNodeIds: parseStringArray(row.result_node_ids_json),
+      expandedNodeIds: parseStringArray(row.expanded_node_ids_json),
+      relationIds: parseStringArray(row.relation_ids_json),
+      usefulMemoryIds: parseStringArray(row.useful_memory_ids_json),
+      contradictedMemoryIds: parseStringArray(row.contradicted_memory_ids_json),
+      rejectedMemoryIds: parseStringArray(row.rejected_memory_ids_json),
+      ambiguity: Number(row.ambiguity),
+      fallbackUsed: Boolean(row.fallback_used),
+      conflictObserved: Boolean(row.conflict_observed),
+      activeGraphBudget: parseStoredJson(row.active_graph_budget_json, activeGraphBudget({})),
+      activeGraphUsage: parseStoredJson(row.active_graph_usage_json, {
+        nodes: 0,
+        edges: 0,
+        evidence: 0,
+        estimatedTokens: 0,
+        graphHops: 0,
+        deepestTier: 0,
+        latencyMs: 0,
+        exhausted: [],
+      }),
+      selections: parseStoredJson(row.selections_json, []),
+      expansions: parseStoredJson(row.expansions_json, []),
+      budgetLedger: parseStoredJson(row.budget_ledger_json, []),
+      createdAt: String(row.created_at),
+    };
   }
 
   recordActiveGraphUse(
@@ -2826,6 +2952,35 @@ export class NmgStore {
     return id;
   }
 
+  #recordMemoryWriteEvent(input: Omit<MemoryWriteEvent, "createdAt" | "id">): MemoryWriteEvent {
+    const event: MemoryWriteEvent = {
+      id: randomUUID(),
+      ...input,
+      createdAt: new Date().toISOString(),
+    };
+    this.#db
+      .prepare(
+        `INSERT INTO memory_write_events
+          (id, memory_id, history_id, session_id, decision, policy_reason,
+           write_reason, write_source, memory_type, requested_residence, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        event.id,
+        event.memoryId,
+        event.historyId,
+        event.sessionId,
+        event.decision,
+        event.policyReason,
+        event.writeReason,
+        event.writeSource,
+        event.memoryType,
+        event.requestedResidence,
+        event.createdAt,
+      );
+    return event;
+  }
+
   #requireConsolidationEvent(id: string): ConsolidationEvent {
     const row = this.#db.prepare("SELECT * FROM consolidation_events WHERE id = ?").get(id) as
       Row | undefined;
@@ -2890,6 +3045,22 @@ export class NmgStore {
         access_count INTEGER NOT NULL DEFAULT 0,
         pending_access_count INTEGER NOT NULL DEFAULT 0,
         last_accessed_at TEXT,
+        write_reason TEXT NOT NULL DEFAULT 'legacy_write',
+        write_source TEXT NOT NULL DEFAULT 'core',
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS memory_write_events (
+        id TEXT PRIMARY KEY,
+        memory_id TEXT REFERENCES memory_records(id) ON DELETE SET NULL,
+        history_id TEXT REFERENCES history_records(id) ON DELETE SET NULL,
+        session_id TEXT,
+        decision TEXT NOT NULL CHECK (decision IN ('accepted', 'rejected')),
+        policy_reason TEXT NOT NULL,
+        write_reason TEXT NOT NULL,
+        write_source TEXT NOT NULL,
+        memory_type TEXT NOT NULL,
+        requested_residence TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
 
@@ -3023,6 +3194,9 @@ export class NmgStore {
         task_id TEXT NOT NULL DEFAULT '',
         active_graph_budget_json TEXT NOT NULL DEFAULT '{}',
         active_graph_usage_json TEXT NOT NULL DEFAULT '{}',
+        selections_json TEXT NOT NULL DEFAULT '[]',
+        expansions_json TEXT NOT NULL DEFAULT '[]',
+        budget_ledger_json TEXT NOT NULL DEFAULT '[]',
         ambiguity REAL NOT NULL,
         fallback_used INTEGER NOT NULL,
         conflict_observed INTEGER NOT NULL,
@@ -3209,6 +3383,8 @@ export class NmgStore {
       ["residence", "TEXT NOT NULL DEFAULT 'ltg'"],
       ["promoted_at", "TEXT"],
       ["expires_at", "TEXT"],
+      ["write_reason", "TEXT NOT NULL DEFAULT 'legacy_write'"],
+      ["write_source", "TEXT NOT NULL DEFAULT 'core'"],
     ];
     for (const [name, definition] of additions) {
       if (!existing.has(name)) {
@@ -3391,6 +3567,9 @@ export class NmgStore {
       ["task_id", "TEXT NOT NULL DEFAULT ''"],
       ["active_graph_budget_json", "TEXT NOT NULL DEFAULT '{}'"],
       ["active_graph_usage_json", "TEXT NOT NULL DEFAULT '{}'"],
+      ["selections_json", "TEXT NOT NULL DEFAULT '[]'"],
+      ["expansions_json", "TEXT NOT NULL DEFAULT '[]'"],
+      ["budget_ledger_json", "TEXT NOT NULL DEFAULT '[]'"],
     ];
     for (const [name, definition] of additions) {
       if (!existing.has(name))
@@ -3940,6 +4119,8 @@ function mapSearchResult(row: Row, score: number): MemorySearchResult {
       importance: Number(row.m_importance),
       accessCount: Number(row.m_access_count),
       lastAccessedAt: row.m_last_accessed_at ? String(row.m_last_accessed_at) : null,
+      writeReason: String(row.m_write_reason ?? "legacy_write"),
+      writeSource: String(row.m_write_source ?? "core") as MemoryRecord["writeSource"],
       createdAt: String(row.m_created_at),
     },
     node: mapNode(row, "n_"),
@@ -4025,14 +4206,42 @@ function mapConsolidationEvent(row: Row): ConsolidationEvent {
   };
 }
 
-function mapActivation(row: Row | undefined, hasExpanded: boolean): ActivationSignal {
+function mapMemoryWriteEvent(row: Row): MemoryWriteEvent {
   return {
-    selectedCount: Number(row?.selected_count ?? 0),
-    expandedCount: hasExpanded ? Number(row?.expanded_count ?? 0) : 0,
-    usedCount: Number(row?.used_count ?? 0),
-    contradictedCount: Number(row?.contradicted_count ?? 0),
-    rejectedCount: Number(row?.rejected_count ?? 0),
-    updatedAt: row?.updated_at ? String(row.updated_at) : new Date(0).toISOString(),
+    id: String(row.id),
+    memoryId: row.memory_id ? String(row.memory_id) : null,
+    historyId: row.history_id ? String(row.history_id) : null,
+    sessionId: row.session_id ? String(row.session_id) : null,
+    decision: String(row.decision) as MemoryWriteEvent["decision"],
+    policyReason: String(row.policy_reason),
+    writeReason: String(row.write_reason),
+    writeSource: String(row.write_source) as MemoryWriteEvent["writeSource"],
+    memoryType: String(row.memory_type) as MemoryWriteEvent["memoryType"],
+    requestedResidence: String(row.requested_residence) as MemoryWriteEvent["requestedResidence"],
+    createdAt: String(row.created_at),
+  };
+}
+
+function mapActivation(row: Row | undefined, hasExpanded: boolean): ActivationSignal {
+  const selectedCount = Number(row?.selected_count ?? 0);
+  const expandedCount = hasExpanded ? Number(row?.expanded_count ?? 0) : 0;
+  const usedCount = Number(row?.used_count ?? 0);
+  const contradictedCount = Number(row?.contradicted_count ?? 0);
+  const rejectedCount = Number(row?.rejected_count ?? 0);
+  const updatedAt = row?.updated_at ? String(row.updated_at) : new Date(0).toISOString();
+  const positive = selectedCount * 0.1 + expandedCount * 0.15 + usedCount;
+  const negative = contradictedCount * 0.8 + rejectedCount * 0.4;
+  const normalized = clamp((positive - negative) / (1 + positive + negative), 0, 1);
+  const ageDays = Math.max(0, (Date.now() - Date.parse(updatedAt)) / 86_400_000);
+  const score = normalized * 0.5 ** (ageDays / 30);
+  return {
+    selectedCount,
+    expandedCount,
+    usedCount,
+    contradictedCount,
+    rejectedCount,
+    score,
+    updatedAt,
   };
 }
 
@@ -4141,6 +4350,15 @@ function defaultResidence(input: {
   return "ltg";
 }
 
+function defaultWriteReason(
+  input: { memoryType?: MemoryRecord["memoryType"]; truthStatus?: MemoryRecord["truthStatus"] },
+  residence: MemoryResidence,
+): string {
+  const type = input.memoryType ?? "fact";
+  if (residence === "stg") return `provisional_${type}:${input.truthStatus ?? "asserted"}`;
+  return `governed_durable_${type}`;
+}
+
 function activeGraphBudget(options: SearchOptions): ActiveGraphBudget {
   const requested = options.activeGraphBudget ?? {};
   return {
@@ -4222,6 +4440,68 @@ function queryAssociationEdges(
   return edges;
 }
 
+function activeGraphExpansions(
+  seedNodeIds: readonly string[],
+  edges: ActiveGraph["edges"],
+  maxHops: number,
+): ActiveGraphExpansion[] {
+  const visited = new Set(seedNodeIds);
+  const traversedRelations = new Set<string>();
+  let frontier = [...visited];
+  const expansions: ActiveGraphExpansion[] = [];
+  for (let hop = 1; hop <= maxHops && frontier.length > 0; hop += 1) {
+    const next: string[] = [];
+    for (const edge of edges) {
+      const sourceInFrontier = frontier.includes(edge.sourceNodeId);
+      const targetInFrontier = frontier.includes(edge.targetNodeId);
+      const target = sourceInFrontier
+        ? edge.targetNodeId
+        : targetInFrontier
+          ? edge.sourceNodeId
+          : null;
+      if (!target || traversedRelations.has(edge.id)) continue;
+      traversedRelations.add(edge.id);
+      expansions.push({
+        relationId: edge.id,
+        sourceNodeId: sourceInFrontier ? edge.sourceNodeId : edge.targetNodeId,
+        targetNodeId: target,
+        hop,
+      });
+      if (!visited.has(target)) {
+        visited.add(target);
+        next.push(target);
+      }
+    }
+    frontier = next;
+  }
+  return expansions;
+}
+
+function activeGraphBudgetLedger(
+  budget: ActiveGraphBudget,
+  usage: ActiveGraphBudgetUsage,
+): ActiveGraphBudgetLedgerEntry[] {
+  const exhausted = new Set(usage.exhausted);
+  const entries: Array<Omit<ActiveGraphBudgetLedgerEntry, "exhausted">> = [
+    { dimension: "nodes", limit: budget.maxNodes, used: usage.nodes },
+    { dimension: "edges", limit: budget.maxEdges, used: usage.edges },
+    { dimension: "evidence", limit: budget.maxEvidence, used: usage.evidence },
+    { dimension: "tokens", limit: budget.maxTokens, used: usage.estimatedTokens },
+    { dimension: "graphHops", limit: budget.maxGraphHops, used: usage.graphHops },
+    { dimension: "localTier", limit: budget.maxLocalTier, used: usage.deepestTier },
+    { dimension: "latencyMs", limit: budget.maxLatencyMs, used: usage.latencyMs },
+  ];
+  return entries.map((entry) => ({
+    ...entry,
+    exhausted:
+      exhausted.has(
+        entry.dimension === "latencyMs"
+          ? "latency"
+          : (entry.dimension as "edges" | "evidence" | "nodes" | "tokens"),
+      ) || entry.used >= entry.limit,
+  }));
+}
+
 function parseScope(value: string | number | Uint8Array | null): MemoryScope {
   if (typeof value !== "string") return {};
   try {
@@ -4240,6 +4520,15 @@ function parseStringArray(value: string | number | Uint8Array | null): string[] 
       : [];
   } catch {
     return [];
+  }
+}
+
+function parseStoredJson<T>(value: string | number | Uint8Array | null, fallback: T): T {
+  if (typeof value !== "string") return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
   }
 }
 

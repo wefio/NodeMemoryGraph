@@ -38,6 +38,39 @@ test("remember persists a memory with traceable evidence", () => {
   });
 });
 
+test("memory writes retain accepted and privacy-safe rejected policy decisions", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "The user prefers compact technical explanations",
+      nodeName: "response preference",
+      memoryType: "preference",
+      writeReason: "stable preference that should shape future answers",
+      writeSource: "agent",
+      sessionId: "session-audit",
+    });
+    store.recordRejectedWrite({
+      policyReason: "credential_like_content",
+      writeReason: "requested durable fact",
+      writeSource: "agent",
+      memoryType: "fact",
+      requestedResidence: "ltg",
+      sessionId: "session-audit",
+    });
+
+    assert.equal(saved.memory.writeReason, "stable preference that should shape future answers");
+    assert.equal(saved.memory.writeSource, "agent");
+    const [accepted, rejected] = store.memoryWriteEvents();
+    assert.equal(accepted?.decision, "accepted");
+    assert.equal(accepted?.memoryId, saved.memory.id);
+    assert.equal(accepted?.historyId, saved.history.id);
+    assert.equal(rejected?.decision, "rejected");
+    assert.equal(rejected?.memoryId, null);
+    assert.equal(rejected?.historyId, null);
+    assert.equal(rejected?.policyReason, "credential_like_content");
+    assert.equal("statement" in (rejected ?? {}), false);
+  });
+});
+
 test("semantic searchContext preserves Active Graph budgets and tracing", () => {
   withStore((store) => {
     const saved = store.remember({
@@ -1155,10 +1188,57 @@ test("Active Graph enforces a shared budget and records actual memory use", () =
     assert.ok(context.activeGraph.edges.every((edge) => edge.persistence === "temporary"));
     const selected = context.results[0]!;
     assert.equal(store.nodeActivation(selected.node.id).usedCount, 0);
+    const beforeUse = store.nodeActivation(selected.node.id).score;
+
+    assert.equal(context.activeGraph.selections.length, context.results.length);
+    assert.ok(context.activeGraph.selections.every((selection) => selection.estimatedTokens > 0));
+    assert.deepEqual(
+      context.activeGraph.budgetLedger.map((entry) => entry.dimension),
+      ["nodes", "edges", "evidence", "tokens", "graphHops", "localTier", "latencyMs"],
+    );
+    const trace = store.retrievalTrace(context.activeGraph.id);
+    assert.deepEqual(trace?.selections, context.activeGraph.selections);
+    assert.deepEqual(trace?.budgetLedger, context.activeGraph.budgetLedger);
 
     store.recordActiveGraphUse(context.activeGraph.id, { usedMemoryIds: [selected.memory.id] });
     assert.equal(store.nodeActivation(selected.node.id).usedCount, 1);
     assert.equal(store.nodeActivation(selected.node.id).selectedCount, 1);
+    assert.ok(store.nodeActivation(selected.node.id).score > beforeUse);
+    assert.deepEqual(store.retrievalTrace(context.activeGraph.id)?.usefulMemoryIds, [
+      selected.memory.id,
+    ]);
+  });
+});
+
+test("Active Graph records graph expansion paths separately from selected memories", () => {
+  withStore((store) => {
+    const seed = store.remember({ statement: "LANTERN seed detail", nodeName: "LANTERN seed" });
+    const related = store.remember({
+      statement: "Related implementation uses SQLite",
+      nodeName: "persistence backend",
+    });
+    const relation = store.linkNodes({
+      sourceNodeId: seed.node.id,
+      targetNodeId: related.node.id,
+      type: "applies_to",
+      evidenceIds: [seed.history.id],
+    });
+
+    const context = store.searchContext("LANTERN seed", { graphHops: 1, maxTier: 3 });
+    assert.ok(context.activeGraph);
+    assert.ok(
+      context.activeGraph.expansions.some(
+        (expansion) =>
+          expansion.relationId === relation.id &&
+          expansion.sourceNodeId === seed.node.id &&
+          expansion.targetNodeId === related.node.id &&
+          expansion.hop === 1,
+      ),
+    );
+    assert.deepEqual(
+      store.retrievalTrace(context.activeGraph.id)?.expansions,
+      context.activeGraph.expansions,
+    );
   });
 });
 
