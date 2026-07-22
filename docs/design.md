@@ -597,7 +597,8 @@ Implemented and verified in the current prototype:
   and protection against increasing stability from retrieval alone;
 - auditable stability-driven relation consolidation and hysteretic demotion,
   with explicit relations protected from automatic demotion;
-- FTS5, hashing vectors, Qwen3 external embeddings, node/leaf indexing, and a
+- FTS5, hashing evaluation vectors, model-neutral external embeddings with
+  explicit query/document profiles, node/leaf indexing, and a
   rebuildable USearch experiment;
 - L0-L3 local tiers, accumulated access statistics, and batch rebalancing;
 - persisted ambiguity, fallback, contradiction, usefulness, and node-pair

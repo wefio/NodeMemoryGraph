@@ -12,6 +12,9 @@ const qwen = process.env.NMG_EMBED_BASE_URL ? new OpenAIEmbeddingClient({
   baseUrl: process.env.NMG_EMBED_BASE_URL,
   apiKey: process.env.NMG_EMBED_API_KEY,
   model: process.env.NMG_EMBED_MODEL,
+  profile: process.env.NMG_EMBED_PROFILE as "bge-en" | "plain" | "qwen3" | undefined,
+  queryTemplate: process.env.NMG_EMBED_QUERY_TEMPLATE,
+  documentTemplate: process.env.NMG_EMBED_DOCUMENT_TEMPLATE,
 }) : null;
 const vectorModel = qwen?.model ?? embedder.model;
 const annCandidates = Math.max(8, Math.min(Number(process.env.NMG_ANN_CANDIDATES ?? 64), 2_000));

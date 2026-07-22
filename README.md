@@ -116,6 +116,12 @@ kept only as an evaluation baseline. `NMG_EMBED_TIMEOUT_MS` controls the request
 timeout (10 seconds by default). The resumable `npm run index:embeddings`
 command builds that model's index.
 
+Set `NMG_EMBED_PROFILE` explicitly to `qwen3`, `bge-en`, or `plain`. The profile
+defines independent query and document templates, so NMG never infers an
+encoding contract from the model name. Custom providers can instead set
+`NMG_EMBED_QUERY_TEMPLATE` and `NMG_EMBED_DOCUMENT_TEMPLATE`; each template must
+contain `{text}`.
+
 The automatic-write rule is intentionally narrow:
 
 - Save clear, stable user-stated facts, preferences, constraints, and states

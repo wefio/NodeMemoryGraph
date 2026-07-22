@@ -13,6 +13,9 @@ const qwenClient = process.env.NMG_EMBED_BASE_URL
       baseUrl: process.env.NMG_EMBED_BASE_URL,
       apiKey: process.env.NMG_EMBED_API_KEY,
       model: process.env.NMG_EMBED_MODEL,
+      profile: process.env.NMG_EMBED_PROFILE as "bge-en" | "plain" | "qwen3" | undefined,
+      queryTemplate: process.env.NMG_EMBED_QUERY_TEMPLATE,
+      documentTemplate: process.env.NMG_EMBED_DOCUMENT_TEMPLATE,
     })
   : null;
 const modes = qwenClient

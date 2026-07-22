@@ -87,6 +87,7 @@ test("English BGE query embedding uses the model's retrieval prefix", async () =
     const client = new OpenAIEmbeddingClient({
       baseUrl: `http://127.0.0.1:${address.port}/v1`,
       model: "BAAI/bge-small-en-v1.5",
+      profile: "bge-en",
     });
     await client.embedQueries(["What did Caroline research?"]);
     assert.equal(
@@ -98,6 +99,48 @@ test("English BGE query embedding uses the model's retrieval prefix", async () =
       server.close((error) => (error ? reject(error) : resolve())),
     );
   }
+});
+
+test("document and query templates are explicit and independent of model names", async () => {
+  const received: string[] = [];
+  const server = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => (body += chunk));
+    request.on("end", () => {
+      const inputs = (JSON.parse(body) as { input: string[] }).input;
+      received.push(...inputs);
+      response.setHeader("content-type", "application/json");
+      response.end(
+        JSON.stringify({ data: inputs.map((_input, index) => ({ index, embedding: [index] })) }),
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const client = new OpenAIEmbeddingClient({
+      baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      model: "a-model-name-with-no-client-meaning",
+      queryTemplate: "Q::{text}",
+      documentTemplate: "D::{text}",
+    });
+    await client.embedQueries(["question"]);
+    await client.embedDocuments(["passage"]);
+    assert.deepEqual(received, ["Q::question", "D::passage"]);
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+test("embedding templates require a text placeholder", () => {
+  assert.throws(
+    () => new OpenAIEmbeddingClient({ queryTemplate: "missing placeholder" }),
+    /must include "\{text\}"/,
+  );
 });
 
 test("embedding requests stop at the configured timeout", async () => {

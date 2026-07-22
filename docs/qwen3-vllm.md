@@ -13,10 +13,10 @@ instruction while stored documents do not, following the model's retrieval
 usage contract.
 
 For the English benchmark development loop, the smaller
-`BAAI/bge-small-en-v1.5` (384 dimensions) is a useful low-cost control. NMG
-automatically applies its retrieval query prefix while leaving stored node and
-leaf documents unprefixed. Qwen3 remains the better default candidate when one
-model must cover both Chinese and English.
+`BAAI/bge-small-en-v1.5` (384 dimensions) is a useful low-cost control. Select
+the explicit `bge-en` profile to apply its retrieval query prefix while leaving
+stored node and leaf documents unprefixed. Qwen3 remains the better default
+candidate when one model must cover both Chinese and English.
 
 ## WSL service
 
@@ -54,13 +54,18 @@ From Windows PowerShell:
 ```powershell
 $env:NMG_EMBED_BASE_URL = "http://127.0.0.1:8000/v1"
 $env:NMG_EMBED_MODEL = "Qwen/Qwen3-Embedding-0.6B"
+$env:NMG_EMBED_PROFILE = "qwen3"
 $env:NMG_EMBED_BATCH_SIZE = "64"
 $env:NMG_EMBED_TIMEOUT_MS = "10000"
 npm run index:qwen3
 ```
 
-`npm run index:embeddings` is the model-neutral alias. For BGE set
-`NMG_EMBED_MODEL=BAAI/bge-small-en-v1.5` before running it.
+`npm run index:embeddings` is the model-neutral alias. For BGE set both
+`NMG_EMBED_MODEL=BAAI/bge-small-en-v1.5` and `NMG_EMBED_PROFILE=bge-en` before
+running it. Model names never select preprocessing implicitly. The `plain`
+profile applies no query prefix. Custom profiles can be expressed with
+`NMG_EMBED_QUERY_TEMPLATE` and `NMG_EMBED_DOCUMENT_TEMPLATE`; both must contain
+`{text}`.
 
 By default this embeds only the progressive-disclosure index: node headers and
 leaf/block headers. To compare against full per-record vectorization:

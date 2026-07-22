@@ -4,7 +4,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { decideMemoryLoad } from "../../../src/core/gate.ts";
-import { OpenAIEmbeddingClient } from "../../../src/core/openai-embedding.ts";
+import {
+  OpenAIEmbeddingClient,
+  type EmbeddingProfileName,
+} from "../../../src/core/openai-embedding.ts";
 import { NmgStore } from "../../../src/core/store.ts";
 import { assessMemoryWrite } from "../../../src/core/write-policy.ts";
 import type {
@@ -77,6 +80,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         baseUrl: process.env.NMG_EMBED_BASE_URL,
         apiKey: process.env.NMG_EMBED_API_KEY,
         model: process.env.NMG_EMBED_MODEL,
+        profile: process.env.NMG_EMBED_PROFILE as EmbeddingProfileName | undefined,
+        queryTemplate: process.env.NMG_EMBED_QUERY_TEMPLATE,
+        documentTemplate: process.env.NMG_EMBED_DOCUMENT_TEMPLATE,
         dimensions: process.env.NMG_EMBED_DIMENSIONS
           ? Number(process.env.NMG_EMBED_DIMENSIONS)
           : undefined,
