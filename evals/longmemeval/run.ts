@@ -14,23 +14,8 @@ import {
   summarizePipelineByMode,
   summarizeRetrievalByMode,
 } from "./report.ts";
-
-type Role = "assistant" | "user";
-
-interface Turn {
-  role: Role;
-  content: string;
-}
-
-interface LongMemExample {
-  question_id: string;
-  question_type: string;
-  question: string;
-  answer: string;
-  question_date: string;
-  haystack_dates: string[];
-  haystack_sessions: Turn[][];
-}
+import { loadLongMemEval } from "./official.ts";
+import type { LongMemExample, LongMemTurn } from "./official.ts";
 
 interface SampleManifest {
   name: string;
@@ -50,15 +35,10 @@ const perType = positiveInteger(process.argv[3] ?? "1");
 const sourceFile = mode === "oracle" || mode === "nmg-oracle"
   ? "longmemeval_oracle.json"
   : "longmemeval_s_cleaned.json";
-const examples = JSON.parse(
-  readFileSync(resolve(dataDirectory, sourceFile), "utf8"),
-) as LongMemExample[];
-const canonicalExamples = JSON.parse(
-  readFileSync(
-    resolve(dataDirectory, "longmemeval_s_cleaned.json"),
-    "utf8",
-  ),
-) as LongMemExample[];
+const examples = loadLongMemEval(resolve(dataDirectory, sourceFile));
+const canonicalExamples = loadLongMemEval(
+  resolve(dataDirectory, "longmemeval_s_cleaned.json"),
+);
 const manifest = loadSampleManifest();
 const selectedIds = manifest?.questionIds ?? stratifiedSample(canonicalExamples, perType)
   .map((example) => example.question_id);
@@ -295,7 +275,8 @@ function ingestRawEvidence(example: LongMemExample, nmgDirectory: string): numbe
           truthStatus: turn.role === "user" ? "asserted" : "unverified",
           evidence: turn.content,
           eventTime: date,
-          sourceRef: `longmemeval:${example.question_id}:${sessionIndex}:${turnIndex}`,
+          sourceRef: `longmemeval:${example.question_id}:` +
+            `${example.haystack_session_ids[sessionIndex] ?? sessionIndex}:${turnIndex}`,
           tier: 2,
           importance: 0.5,
           scope: { benchmark: "LongMemEval", session: String(sessionIndex) },
@@ -431,7 +412,7 @@ function answerPrompt(example: LongMemExample, runMode: Exclude<Mode, "matched">
   ].join("\n");
 }
 
-function ingestionPrompt(session: Turn[], date: string): string {
+function ingestionPrompt(session: LongMemTurn[], date: string): string {
   return [
     "The following is a past conversation session being imported into NMG.",
     "Use nmg_remember as many times as needed to preserve durable user facts,",

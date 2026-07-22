@@ -5,6 +5,7 @@ export interface BenchmarkTurn {
   speaker?: string;
   content: string;
   sourceId: string;
+  officialMetadata?: Record<string, unknown>;
 }
 
 export interface BenchmarkSession {
@@ -21,5 +22,7 @@ export interface BenchmarkCase {
   reference: string;
   options?: string[];
   evidenceIds?: string[];
+  rubric?: string[];
+  officialMetadata: Record<string, unknown>;
   sessions: BenchmarkSession[];
 }

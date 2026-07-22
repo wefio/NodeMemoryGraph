@@ -27,6 +27,7 @@ test("loads LoCoMo sessions, evidence ids, and QA categories", () => {
     assert.equal(item?.sessions[0]?.turns[0]?.role, "user");
     assert.equal(item?.sessions[0]?.turns[0]?.speaker, "Alex");
     assert.deepEqual(item?.evidenceIds, ["d1"]);
+    assert.equal(item?.officialMetadata.sampleId, "conv-1");
   });
 });
 
@@ -50,6 +51,7 @@ test("joins PersonaMem CSV questions to sliced JSONL contexts", () => {
     assert.equal(item?.sessions[0]?.turns.length, 2);
     assert.deepEqual(item?.options, ["(a) coffee", "(b) tea"]);
     assert.equal(item?.reference, "(b)");
+    assert.equal(item?.officialMetadata.endIndexInSharedContext, 2);
   });
 });
 
@@ -77,7 +79,29 @@ test("loads BEAM directory chats and probing categories", () => {
     assert.equal(cases.length, 2);
     assert.equal(cases[0]?.sessions[0]?.turns[0]?.sourceId, "7");
     assert.deepEqual(cases[0]?.evidenceIds, ["7"]);
+    assert.deepEqual(cases[0]?.rubric, []);
+    assert.equal(cases[0]?.officialMetadata.ideal_answer, "Friday");
     assert.equal(stratifiedSample(cases, 1).length, 2);
+  });
+});
+
+test("BEAM only treats official source_chat_ids as retrieval evidence", () => {
+  withTempDirectory((directory) => {
+    const caseDirectory = join(directory, "1");
+    const probingDirectory = join(caseDirectory, "probing_questions");
+    mkdirSync(probingDirectory, { recursive: true });
+    writeFileSync(join(caseDirectory, "chat.json"), JSON.stringify([]));
+    writeFileSync(join(probingDirectory, "probing_questions.json"), JSON.stringify({
+      abstention: [{
+        question: "Unknown?",
+        ideal_response: "Unknown",
+        conversation_references: ["Session 99"],
+        rubric: ["The response abstains"],
+      }],
+    }));
+    const [item] = loadBeam(directory);
+    assert.equal(item?.evidenceIds, undefined);
+    assert.deepEqual(item?.rubric, ["The response abstains"]);
   });
 });
 

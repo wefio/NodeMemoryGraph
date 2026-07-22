@@ -42,6 +42,12 @@ export function loadLocomo(path: string): BenchmarkCase[] {
         question: requiredString(value.question, "qa.question"),
         reference: answerText(value.answer ?? value.adversarial_answer),
         evidenceIds: asArray(value.evidence).map(String),
+        officialMetadata: {
+          sampleId,
+          category: value.category,
+          evidence: value.evidence,
+          adversarialAnswer: value.adversarial_answer,
+        },
         sessions,
       };
     });
@@ -67,6 +73,13 @@ export function loadPersonaMem(
       question: requiredString(row.user_question_or_message, "user_question_or_message"),
       reference: requiredString(row.correct_answer, "correct_answer"),
       options,
+      officialMetadata: {
+        personaId: row.persona_id,
+        sharedContextId: contextId,
+        endIndexInSharedContext: endIndex,
+        topic: row.topic,
+        correctAnswer: row.correct_answer,
+      },
       sessions: [{
         id: contextId,
         turns: selected.map((message, index) => toTurn(message, `${contextId}:${index}`)),
@@ -103,7 +116,9 @@ export function loadBeam(chatsDirectory: string): BenchmarkCase[] {
           category,
           question: requiredString(value.question, `${category}.question`),
           reference: answerText(value.ideal_answer ?? value.ideal_response ?? value.rubric),
-          evidenceIds: beamEvidenceIds(value),
+          evidenceIds: sourceChatIds(value.source_chat_ids),
+          rubric: asArray(value.rubric).map(String),
+          officialMetadata: { ...value },
           sessions,
         };
       }),
@@ -169,6 +184,7 @@ function toTurn(value: unknown, sourceId: string): BenchmarkTurn {
         return stringValue(item.text) ?? "";
       }).join("\n"),
     sourceId: stringValue(object.id ?? object.index) ?? sourceId,
+    officialMetadata: { ...object },
   };
 }
 
@@ -227,11 +243,9 @@ function parseOptions(value: string): string[] | undefined {
   }
 }
 
-function beamEvidenceIds(value: JsonObject): string[] | undefined {
+function sourceChatIds(value: unknown): string[] | undefined {
   const ids = new Set<string>();
-  for (const candidate of [value.source_chat_ids, value.chat_ids, value.evidence]) {
-    collectScalars(candidate, ids);
-  }
+  collectScalars(value, ids);
   return ids.size > 0 ? [...ids] : undefined;
 }
 
