@@ -35,6 +35,20 @@ They also separate per-mode answer latency from deterministic NMG ingestion and
 embedding-index preparation time; preparation is shared by the three NMG modes
 within one matched trial.
 
+Answer correctness and retrieval sufficiency are scored independently. The
+retrieval judge sees only the context actually injected by `raw-session`,
+`flat-hybrid`, or `oracle`, or the successful `nmg_get` output for explicit NMG
+modes. Reports include `retrievalByMode` and a pipeline matrix that distinguishes
+"sufficient evidence, wrong answer" from a true retrieval miss. Pi does not
+currently expose automatically injected recall through RPC, so `nmg-auto`
+retrieval is reported as unavailable instead of being inferred from its answer.
+`durationMs` measures the answer call only; `evaluationDurationMs` also includes
+the two independent judge calls.
+
+The retrieval judge is enabled by default. Set
+`NMG_LONGMEM_RETRIEVAL_JUDGE=off` for lower-cost throughput runs; retrieval and
+pipeline summaries will then be unavailable while answer scoring remains intact.
+
 The runner defaults to four concurrent questions and a five-minute model-call
 timeout. Override these with `NMG_LONGMEM_CONCURRENCY` and
 `NMG_LONGMEM_TIMEOUT_MS`. A single answer timeout is recorded on that row rather
@@ -151,4 +165,3 @@ uniquely failed two that Lite passed. The larger sample therefore does not
 support enabling graph expansion by default. One Graph-only miss also produced
 an empty final model answer despite no RPC error, illustrating why repeated
 reader runs are still needed to separate retrieval effects from model variance.
-

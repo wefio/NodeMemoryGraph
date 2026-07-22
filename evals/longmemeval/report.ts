@@ -4,6 +4,7 @@ export interface EvaluationResult {
   passed: boolean;
   repeat: number;
   durationMs?: number;
+  retrievalPassed?: boolean | null;
 }
 
 export interface AccuracySummary {
@@ -29,6 +30,15 @@ export interface LatencySummary {
   meanMs: number;
   p50Ms: number;
   p95Ms: number;
+}
+
+export interface PipelineSummary {
+  evaluated: number;
+  retrievalPassed: number;
+  sufficientAnswerCorrect: number;
+  sufficientAnswerWrong: number;
+  insufficientAnswerCorrect: number;
+  insufficientAnswerWrong: number;
 }
 
 export function summarizeAccuracy(results: readonly EvaluationResult[]): AccuracySummary {
@@ -114,6 +124,61 @@ export function summarizeLatencyByMode(
               : Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length),
           p50Ms: percentile(durations, 0.5),
           p95Ms: percentile(durations, 0.95),
+        },
+      ];
+    }),
+  );
+}
+
+export function summarizeRetrievalByMode(
+  results: readonly EvaluationResult[],
+): Record<string, AccuracySummary | null> {
+  return Object.fromEntries(
+    [...new Set(results.map((result) => result.mode))].sort().map((mode) => {
+      const evaluated = results.filter(
+        (result) => result.mode === mode && typeof result.retrievalPassed === "boolean",
+      );
+      return [
+        mode,
+        evaluated.length === 0
+          ? null
+          : summarizeAccuracy(
+              evaluated.map((result) => ({
+                ...result,
+                passed: result.retrievalPassed === true,
+              })),
+            ),
+      ];
+    }),
+  );
+}
+
+export function summarizePipelineByMode(
+  results: readonly EvaluationResult[],
+): Record<string, PipelineSummary | null> {
+  return Object.fromEntries(
+    [...new Set(results.map((result) => result.mode))].sort().map((mode) => {
+      const evaluated = results.filter(
+        (result) => result.mode === mode && typeof result.retrievalPassed === "boolean",
+      );
+      if (evaluated.length === 0) return [mode, null];
+      return [
+        mode,
+        {
+          evaluated: evaluated.length,
+          retrievalPassed: evaluated.filter((result) => result.retrievalPassed).length,
+          sufficientAnswerCorrect: evaluated.filter(
+            (result) => result.retrievalPassed && result.passed,
+          ).length,
+          sufficientAnswerWrong: evaluated.filter(
+            (result) => result.retrievalPassed && !result.passed,
+          ).length,
+          insufficientAnswerCorrect: evaluated.filter(
+            (result) => !result.retrievalPassed && result.passed,
+          ).length,
+          insufficientAnswerWrong: evaluated.filter(
+            (result) => !result.retrievalPassed && !result.passed,
+          ).length,
         },
       ];
     }),

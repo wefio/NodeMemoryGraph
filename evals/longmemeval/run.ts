@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { RpcClient } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder, cosineSimilarity } from "../../src/core/vector.ts";
 import { indexExternalEmbeddings } from "../external-embeddings.ts";
@@ -10,6 +11,8 @@ import {
   summarizeAccuracy,
   summarizeByMode,
   summarizeLatencyByMode,
+  summarizePipelineByMode,
+  summarizeRetrievalByMode,
 } from "./report.ts";
 
 type Role = "assistant" | "user";
@@ -81,6 +84,7 @@ if (mode === "validate") {
     selectedIds: sample.map((example) => example.question_id),
     sampleManifest: manifest?.name ?? null,
     repeats: evalRepeats(),
+    retrievalJudge: retrievalJudgeEnabled(),
     categories: Object.fromEntries([...new Set(canonicalExamples.map(benchmarkType))]
       .sort().map((type) => [
         type,
@@ -112,10 +116,13 @@ const report = {
   sampleManifest: manifest?.name ?? null,
   questionCount: sample.length,
   repeats: evalRepeats(),
+  retrievalJudge: retrievalJudgeEnabled(),
   trialCount: trials.length,
   sampleSize: results.length,
   ...summarizeAccuracy(results),
   byMode: summarizeByMode(results),
+  retrievalByMode: summarizeRetrievalByMode(results),
+  pipelineByMode: summarizePipelineByMode(results),
   latencyByMode: summarizeLatencyByMode(results),
   preparations: matchedRuns.map((run) => run.preparation),
   pairedAgainstFlatHybrid: mode === "matched"
@@ -186,17 +193,27 @@ async function runExample(
   );
   let hypothesis = "";
   let answerError: string | null = null;
+  let answerEvents: AgentSessionEvent[] = [];
   try {
     await answerClient.start();
     await answerClient.setThinkingLevel("low");
-    await answerClient.promptAndWait(answerPrompt(example, runMode), undefined, modelTimeout());
+    answerEvents = await answerClient.promptAndWait(
+      answerPrompt(example, runMode), undefined, modelTimeout(),
+    );
     hypothesis = (await answerClient.getLastAssistantText())?.trim() ?? "";
   } catch (error) {
     answerError = error instanceof Error ? error.message : String(error);
   } finally {
     await answerClient.stop();
   }
+  const answerDurationMs = Math.round(performance.now() - startedAt);
 
+  const retrievalContext = retrievalJudgeEnabled()
+    ? retrievalEvidence(example, runMode, answerEvents)
+    : null;
+  const retrievalJudgement = retrievalContext === null
+    ? null
+    : await judgeRetrieval(example, retrievalContext.text);
   const judgement = await judgeAnswer(example, hypothesis);
 
   return {
@@ -208,10 +225,18 @@ async function runExample(
     reference: example.answer,
     hypothesis,
     answerError,
+    retrievalAvailable: retrievalContext !== null,
+    retrievalContextChars: retrievalContext?.text.length ?? 0,
+    retrievalToolCalls: retrievalContext?.toolCalls ?? 0,
+    retrievalJudgement,
+    retrievalPassed: retrievalJudgement === null
+      ? null
+      : judgementPassed(retrievalJudgement),
     judgement,
     passed: judgementPassed(judgement),
     remembered,
-    durationMs: Math.round(performance.now() - startedAt),
+    durationMs: answerDurationMs,
+    evaluationDurationMs: Math.round(performance.now() - startedAt),
   };
 }
 
@@ -321,6 +346,65 @@ async function judgeAnswer(
   return "FAIL - Judge returned no response after two attempts.";
 }
 
+async function judgeRetrieval(
+  example: LongMemExample,
+  retrievedContext: string,
+): Promise<string> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const client = createClient();
+    try {
+      await client.start();
+      await client.setThinkingLevel("low");
+      try {
+        await client.promptAndWait(
+          retrievalJudgePrompt(example, retrievedContext),
+          undefined,
+          modelTimeout(),
+        );
+        const judgement = (await client.getLastAssistantText())?.trim() ?? "";
+        if (judgement) return judgement;
+      } catch {
+        // Keep retrieval evaluation independent from transient judge failures.
+      }
+    } finally {
+      await client.stop();
+    }
+  }
+  return "FAIL - Retrieval judge returned no response after two attempts.";
+}
+
+function retrievalEvidence(
+  example: LongMemExample,
+  runMode: Exclude<Mode, "matched">,
+  events: AgentSessionEvent[],
+): { text: string; toolCalls: number } | null {
+  if (runMode === "oracle") {
+    return { text: formatHistory(example), toolCalls: 0 };
+  }
+  if (runMode === "raw-session") {
+    return { text: retrieveRawSessions(example), toolCalls: 0 };
+  }
+  if (runMode === "flat-hybrid") {
+    return { text: retrieveFlatTurns(example), toolCalls: 0 };
+  }
+  if (runMode === "nmg-lite" || runMode === "nmg-graph" || runMode === "nmg-oracle") {
+    const outputs = events.flatMap((event) => {
+      if (event.type !== "tool_execution_end" || event.toolName !== "nmg_get" || event.isError) {
+        return [];
+      }
+      const result = event.result as {
+        content?: Array<{ type?: string; text?: string }>;
+      } | undefined;
+      return result?.content?.flatMap((content) =>
+        content.type === "text" && content.text ? [content.text] : []) ?? [];
+    });
+    return { text: outputs.join("\n\n"), toolCalls: outputs.length };
+  }
+  // Automatic recall is injected before the model call and is not exposed by
+  // Pi's RPC event stream. Report it as unavailable instead of guessing.
+  return null;
+}
+
 function answerPrompt(example: LongMemExample, runMode: Exclude<Mode, "matched">): string {
   if (runMode === "nmg-auto") {
     return `Question date: ${example.question_date}\nQuestion: ${example.question}`;
@@ -375,6 +459,19 @@ function judgePrompt(example: LongMemExample, hypothesis: string): string {
     `Question: ${example.question}`,
     `Reference answer: ${example.answer}`,
     `Candidate answer: ${hypothesis}`,
+  ].join("\n");
+}
+
+function retrievalJudgePrompt(example: LongMemExample, retrievedContext: string): string {
+  return [
+    "Judge only whether the retrieved context contains enough evidence to produce",
+    "the reference answer. Ignore any candidate answer and do not penalize uncertainty",
+    "wording if the required fact is present. For an abstention reference, PASS only",
+    "when the retrieved context contains no conflicting answer to the question.",
+    "Respond with exactly PASS or FAIL followed by one short reason.",
+    `Question: ${example.question}`,
+    `Reference answer: ${example.answer}`,
+    `Retrieved context:\n${retrievedContext || "<empty>"}`,
   ].join("\n");
 }
 
@@ -563,6 +660,11 @@ function evalRepeats(): number {
   return Math.min(positiveInteger(process.env.NMG_LONGMEM_REPEATS ?? "1"), 20);
 }
 
+function retrievalJudgeEnabled(): boolean {
+  const configured = process.env.NMG_LONGMEM_RETRIEVAL_JUDGE?.trim().toLocaleLowerCase();
+  return configured !== "0" && configured !== "false" && configured !== "off";
+}
+
 function modelTimeout(): number {
   return Math.max(30_000, Number.parseInt(
     process.env.NMG_LONGMEM_TIMEOUT_MS ?? "300000",
@@ -598,4 +700,3 @@ function definedEnvironment(): Record<string, string> {
     ),
   );
 }
-
