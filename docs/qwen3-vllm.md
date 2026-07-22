@@ -1,8 +1,11 @@
 # External embeddings through vLLM
 
-NMG treats embeddings as an optional service. The default endpoint is the
-OpenAI-compatible `http://127.0.0.1:8000/v1/embeddings`; SQLite, FTS5, and the
-hashing fallback continue to work when the service is offline.
+NMG treats embeddings as an optional provider, not as part of the memory
+architecture. The default endpoint is the OpenAI-compatible
+`http://127.0.0.1:8000/v1/embeddings`. Normal Pi retrieval always preserves the
+same Active Graph budget and trace. If the provider fails or exceeds
+`NMG_EMBED_TIMEOUT_MS`, the request explicitly degrades to SQLite FTS5. Hashing
+remains an evaluation baseline rather than a production fallback.
 
 The selected model is `Qwen/Qwen3-Embedding-0.6B`: 0.6B parameters, up to 1024
 dimensions, multilingual, and a 32K context window. Query strings receive an
@@ -52,6 +55,7 @@ From Windows PowerShell:
 $env:NMG_EMBED_BASE_URL = "http://127.0.0.1:8000/v1"
 $env:NMG_EMBED_MODEL = "Qwen/Qwen3-Embedding-0.6B"
 $env:NMG_EMBED_BATCH_SIZE = "64"
+$env:NMG_EMBED_TIMEOUT_MS = "10000"
 npm run index:qwen3
 ```
 

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import nmgExtension from "./index.ts";
-import { configuredGraphHops, formatSearchHeaders } from "./index.ts";
+import { configuredGraphHops, formatSearchHeaders, searchMemoryContext } from "./index.ts";
+import { NmgStore } from "../../../src/core/store.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { MemoryContext } from "../../../src/core/types.ts";
 
 function registeredTools(lab = false): string[] {
@@ -91,5 +95,39 @@ test("graph-hop environment override clamps model-requested expansion", () => {
   } finally {
     if (previous === undefined) delete process.env.NMG_GRAPH_HOPS;
     else process.env.NMG_GRAPH_HOPS = previous;
+  }
+});
+
+test("embedding failure degrades to FTS while preserving an Active Graph", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-extension-test-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    const saved = store.remember({
+      statement: "Project Atlas stores analytics in DuckDB",
+      nodeName: "Project Atlas storage",
+    });
+    const context = await searchMemoryContext(
+      store,
+      {
+        model: "unavailable-model",
+        async embedQueries() {
+          throw new Error("service offline");
+        },
+      },
+      "Which project stores analytics in DuckDB?",
+      { limit: 2, graphHops: 0 },
+    );
+
+    assert.equal(context.results[0]?.memory.id, saved.memory.id);
+    assert.ok(context.activeGraph);
+    assert.deepEqual(context.retrieval, {
+      mode: "lexical",
+      degraded: true,
+      reason: "embedding_unavailable",
+    });
+    assert.match(formatSearchHeaders(context), /reason=embedding_unavailable/);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
   }
 });

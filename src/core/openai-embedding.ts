@@ -4,6 +4,7 @@ export interface OpenAIEmbeddingClientOptions {
   model?: string;
   dimensions?: number;
   queryInstruction?: string;
+  timeoutMs?: number;
 }
 
 export class OpenAIEmbeddingClient {
@@ -12,6 +13,7 @@ export class OpenAIEmbeddingClient {
   readonly model: string;
   readonly dimensions?: number;
   readonly queryInstruction: string;
+  readonly timeoutMs: number;
 
   constructor(options: OpenAIEmbeddingClientOptions = {}) {
     this.baseUrl = (options.baseUrl ?? "http://127.0.0.1:8000/v1").replace(/\/$/u, "");
@@ -21,6 +23,7 @@ export class OpenAIEmbeddingClient {
     this.queryInstruction =
       options.queryInstruction ??
       "Given a memory recall query, retrieve relevant personal history passages that answer it";
+    this.timeoutMs = Math.max(1, options.timeoutMs ?? 10_000);
   }
 
   embedQueries(inputs: string[]): Promise<number[][]> {
@@ -47,6 +50,7 @@ export class OpenAIEmbeddingClient {
         input: inputs,
         ...(this.dimensions ? { dimensions: this.dimensions } : {}),
       }),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) {
       throw new Error(`embedding server returned ${response.status}: ${await response.text()}`);

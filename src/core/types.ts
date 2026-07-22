@@ -216,6 +216,11 @@ export interface MemoryContext {
   results: MemorySearchResult[];
   relations: NodeRelation[];
   activeGraph?: ActiveGraph;
+  retrieval?: {
+    mode: "hybrid" | "lexical";
+    degraded: boolean;
+    reason?: "embedding_unavailable";
+  };
 }
 
 export interface ActiveGraphBudget {

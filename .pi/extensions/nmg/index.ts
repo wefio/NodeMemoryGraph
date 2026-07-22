@@ -25,6 +25,44 @@ function databasePath(): string {
   return join(dataDirectory, "nmg.sqlite");
 }
 
+type QueryEmbeddingClient = Pick<OpenAIEmbeddingClient, "embedQueries" | "model">;
+
+export async function searchMemoryContext(
+  memoryStore: NmgStore,
+  embeddingClient: QueryEmbeddingClient | undefined,
+  query: string,
+  options: Parameters<NmgStore["searchContext"]>[1],
+): Promise<MemoryContext> {
+  if (!embeddingClient) {
+    return {
+      ...memoryStore.searchContext(query, { ...options, retrievalMode: "fts5" }),
+      retrieval: { mode: "lexical", degraded: false },
+    };
+  }
+  let queryVector: number[];
+  try {
+    const vectors = await embeddingClient.embedQueries([query]);
+    if (!vectors[0]?.length) throw new Error("embedding provider returned no query vector");
+    queryVector = vectors[0];
+  } catch {
+    return {
+      ...memoryStore.searchContext(query, { ...options, retrievalMode: "fts5" }),
+      retrieval: {
+        mode: "lexical",
+        degraded: true,
+        reason: "embedding_unavailable",
+      },
+    };
+  }
+  return {
+    ...memoryStore.searchContext(query, options, {
+      queryVector,
+      model: embeddingClient.model,
+    }),
+    retrieval: { mode: "hybrid", degraded: false },
+  };
+}
+
 export function configuredGraphHops(fallback: number): number {
   const configured = Number.parseInt(process.env.NMG_GRAPH_HOPS ?? "", 10);
   return Number.isInteger(configured) ? Math.max(0, Math.min(configured, 3)) : fallback;
@@ -42,28 +80,16 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         dimensions: process.env.NMG_EMBED_DIMENSIONS
           ? Number(process.env.NMG_EMBED_DIMENSIONS)
           : undefined,
+        timeoutMs: process.env.NMG_EMBED_TIMEOUT_MS
+          ? Number(process.env.NMG_EMBED_TIMEOUT_MS)
+          : undefined,
       })
     : undefined;
   const searchMemory = async (
     query: string,
     options: Parameters<NmgStore["searchContext"]>[1],
   ): Promise<MemoryContext> => {
-    const memoryStore = getStore();
-    if (!embeddingClient) return memoryStore.searchContext(query, options);
-    const [queryVector] = await embeddingClient.embedQueries([query]);
-    const results = memoryStore.searchHierarchyByVector(
-      query,
-      queryVector!,
-      embeddingClient.model,
-      options,
-    );
-    return {
-      results,
-      relations: memoryStore.getRelations(
-        [...new Set(results.map((result) => result.node.id))],
-        configuredGraphHops(options?.graphHops ?? 0),
-      ),
-    };
+    return searchMemoryContext(getStore(), embeddingClient, query, options);
   };
 
   pi.on("before_agent_start", async (event) => {
@@ -678,6 +704,10 @@ export function formatSearchHeaders(context: MemoryContext): string {
   );
   return [
     "NMG SEARCH HEADERS",
+    context.retrieval
+      ? `retrieval=${context.retrieval.mode}; degraded=${context.retrieval.degraded}` +
+        (context.retrieval.reason ? `; reason=${context.retrieval.reason}` : "")
+      : "",
     context.activeGraph
       ? `active_graph=${context.activeGraph.id}; task=${context.activeGraph.taskId}; ` +
         `budget=${context.activeGraph.usage.evidence}/${context.activeGraph.budget.maxEvidence} evidence, ` +

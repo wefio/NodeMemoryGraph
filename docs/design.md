@@ -613,7 +613,9 @@ Implemented and verified in the current prototype:
 Important gaps between the prototype and the target plugin:
 
 - the external node/leaf hierarchy is available to the normal Pi extension when
-  `NMG_EMBED_BASE_URL` is configured; hashing remains the offline fallback;
+  `NMG_EMBED_BASE_URL` is configured and now feeds the same budgeted Active Graph
+  pipeline; provider failure degrades explicitly to FTS5, while hashing remains
+  an evaluation-only baseline;
 - the ANN experiment has unacceptable recall on the near-duplicate workload;
 - automatic extraction evaluation and the matched full-history sample are not
   yet large enough to make a product-quality claim;

@@ -38,6 +38,37 @@ test("remember persists a memory with traceable evidence", () => {
   });
 });
 
+test("semantic searchContext preserves Active Graph budgets and tracing", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "Project Atlas stores analytics in DuckDB",
+      nodeName: "Project Atlas storage",
+    });
+    const [nodeDocument] = store.nodeEmbeddingDocuments();
+    const blocks = store.rebuildLeafBlocks(saved.node.id, 16);
+    assert.ok(nodeDocument);
+    assert.ok(blocks[0]);
+    store.upsertExternalNodeEmbeddings("semantic-test", [
+      { nodeId: nodeDocument.nodeId, vector: [1, 0] },
+    ]);
+    store.upsertExternalLeafEmbeddings("semantic-test", [
+      { blockId: blocks[0]!.id, vector: [1, 0] },
+    ]);
+
+    const context = store.searchContext(
+      "What is the persistence decision?",
+      { limit: 2, graphHops: 0 },
+      { queryVector: [1, 0], model: "semantic-test" },
+    );
+
+    assert.equal(context.results[0]?.memory.id, saved.memory.id);
+    assert.ok((context.results[0]?.routeScore ?? 0) > 0);
+    assert.ok(context.activeGraph);
+    assert.deepEqual(context.activeGraph.memoryIds, [saved.memory.id]);
+    assert.equal(context.activeGraph.usage.evidence, 1);
+  });
+});
+
 test("memory survives closing and reopening the local database", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-test-"));
   const database = join(directory, "nmg.sqlite");
@@ -848,6 +879,8 @@ test("uncompacted Delta survives restart and participates in hierarchy search", 
       { maxTier: 3, limit: 3 },
     );
     assert.equal(results[0]?.memory.id, saved.memory.id);
+    assert.equal(results[0]?.vectorScore, 0);
+    assert.ok((results[0]?.lexicalScore ?? 0) > 0);
   } finally {
     reader.close();
     rmSync(directory, { recursive: true, force: true });

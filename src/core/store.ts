@@ -981,15 +981,22 @@ export class NmgStore {
     return rows.map((row) => this.rebalanceNode(String(row.node_id), capacities));
   }
 
-  searchContext(query: string, options: SearchOptions = {}): MemoryContext {
+  searchContext(
+    query: string,
+    options: SearchOptions = {},
+    semantic?: { queryVector: readonly number[]; model: string },
+  ): MemoryContext {
     const startedAt = Date.now();
     const budget = activeGraphBudget(options);
     const limit = Math.max(1, Math.min(options.limit ?? 8, budget.maxEvidence, 50));
-    const direct = this.search(query, {
+    const directOptions = {
       ...options,
       maxTier: Math.min(options.maxTier ?? budget.maxLocalTier, budget.maxLocalTier) as MemoryTier,
       limit: Math.min(50, Math.max(20, limit * 3)),
-    });
+    };
+    const direct = semantic
+      ? this.searchHierarchyByVector(query, semantic.queryVector, semantic.model, directOptions)
+      : this.search(query, directOptions);
     const graphHops = Math.min(options.graphHops ?? 1, budget.maxGraphHops);
     const relations = this.getRelations(
       direct.map((result) => result.node.id),
@@ -2217,22 +2224,12 @@ export class NmgStore {
       options,
       new Map(leaves.map((route) => [route.block.id, route.score])),
     );
-    const deltaIds = this.#deltaCandidateIds(query, 2_048);
-    const delta =
-      deltaIds.length === 0
-        ? []
-        : this.#searchWithVector(
-            query,
-            this.#embedder.embed(query),
-            this.#embedder.model,
-            {
-              ...options,
-              limit: Math.min(50, Math.max(options.limit ?? 8, 20)),
-              retrievalMode: "hashing",
-            },
-            deltaIds,
-          );
-    return [...indexed, ...delta]
+    const lexical = this.#searchWithVector(query, queryVector, model, {
+      ...options,
+      limit: Math.min(50, Math.max(options.limit ?? 8, 20)),
+      retrievalMode: "fts5",
+    });
+    return [...indexed, ...lexical]
       .filter(
         (result, index, all) =>
           all.findIndex((candidate) => candidate.memory.id === result.memory.id) === index,
@@ -3208,23 +3205,6 @@ export class NmgStore {
       )
       .all(expression, limit) as Row[];
     return rows.map((row) => String(row.memory_id));
-  }
-
-  #deltaCandidateIds(query: string, limit: number): string[] {
-    const bounded = Math.max(1, Math.min(limit, 2_048));
-    const recent = (
-      this.#db
-        .prepare(
-          `SELECT memory_id FROM memory_index_delta
-       ORDER BY created_at DESC, memory_id DESC LIMIT ?`,
-        )
-        .all(bounded) as Row[]
-    ).map((row) => String(row.memory_id));
-    const isDelta = this.#db.prepare("SELECT 1 FROM memory_index_delta WHERE memory_id = ?");
-    const exact = this.#ftsCandidates(query, MAX_SEARCH_CANDIDATES).filter((memoryId) =>
-      Boolean(isDelta.get(memoryId)),
-    );
-    return [...new Set([...exact, ...recent])].slice(0, bounded);
   }
 
   #ftsCandidatesInNodes(query: string, nodeIds: string[], limit: number): string[] {

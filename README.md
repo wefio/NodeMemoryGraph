@@ -108,10 +108,13 @@ pi --no-extensions --extension ./.pi/extensions/nmg/index.ts
 Loading the package manifest, project-local extension, and an explicit
 `--extension` together can register duplicate tools and stall tool loops.
 
-The built-in `HashingVectorEmbedder` is deterministic, offline, and remains the
-zero-configuration fallback. Set `NMG_EMBED_BASE_URL` and `NMG_EMBED_MODEL` to
-enable the external node/leaf hierarchy in normal Pi recall. The resumable
-`npm run index:embeddings` command builds that model's index.
+SQLite FTS5 is the zero-configuration Pi retrieval path. Set
+`NMG_EMBED_BASE_URL` and `NMG_EMBED_MODEL` to add the external node/leaf semantic
+signal to the same budgeted Active Graph pipeline. If the endpoint fails or
+times out, Pi reports a degraded retrieval and continues with FTS5; hashing is
+kept only as an evaluation baseline. `NMG_EMBED_TIMEOUT_MS` controls the request
+timeout (10 seconds by default). The resumable `npm run index:embeddings`
+command builds that model's index.
 
 The automatic-write rule is intentionally narrow:
 

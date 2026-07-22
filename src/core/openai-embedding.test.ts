@@ -99,3 +99,22 @@ test("English BGE query embedding uses the model's retrieval prefix", async () =
     );
   }
 });
+
+test("embedding requests stop at the configured timeout", async () => {
+  const server = createServer(() => {});
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const client = new OpenAIEmbeddingClient({
+      baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      timeoutMs: 20,
+    });
+    await assert.rejects(client.embedQueries(["timeout test"]));
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
