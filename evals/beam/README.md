@@ -12,7 +12,12 @@ discovers cases containing:
 ```powershell
 npm run eval:beam -- validate 1
 npm run eval:beam -- matched 1
+npm run benchmark:score -- beam <result-directory>
 ```
+
+The separate scorer uses the official rubric semantics with DeepSeek V4 Flash.
+`event_ordering` uses normalized Kendall tau-b, matching BEAM's primary report
+aggregation. The judge substitution is explicitly not leaderboard-comparable.
 
 The adapter flattens chat batches into timestamp-preserving sessions, retains
 source chat IDs when supplied, and samples independently across all probing

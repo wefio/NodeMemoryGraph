@@ -6,7 +6,11 @@ Place the official `locomo10.json` at `evals/locomo/data/locomo10.json`, or set
 ```powershell
 npm run eval:locomo -- validate 1
 npm run eval:locomo -- matched 1
+npm run benchmark:score -- locomo <result-directory>
 ```
+
+The scoring step invokes LoCoMo's pinned official QA and evidence-recall code.
+Run `npm run benchmark:setup` once before scoring.
 
 The adapter preserves session timestamps and `dia_id` evidence references. A
 matched run compares no memory, ranked raw sessions, flat hybrid turns, NMG

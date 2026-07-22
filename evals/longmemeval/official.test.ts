@@ -40,3 +40,18 @@ test("scores LongMemEval retrieval from official session IDs", () => {
   });
   assert.equal(scoreLongMemRetrieval(["x"], []), null);
 });
+
+test("normalizes official numeric LongMemEval answers", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-longmem-number-"));
+  try {
+    const path = join(directory, "data.json");
+    writeFileSync(path, JSON.stringify([{
+      question_id: "q-number", question_type: "multi-session", question: "How many?",
+      answer: 3, question_date: "2026-01-01", haystack_session_ids: ["s1"],
+      haystack_dates: ["2026-01-01"], haystack_sessions: [[]], answer_session_ids: ["s1"],
+    }]));
+    assert.equal(loadLongMemEval(path)[0]?.answer, "3");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

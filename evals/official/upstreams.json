@@ -1,0 +1,18 @@
+{
+  "LongMemEval": {
+    "repository": "https://github.com/xiaowu0162/LongMemEval.git",
+    "commit": "9e0b455f4ef0e2ab8f2e582289761153549043fc"
+  },
+  "LoCoMo": {
+    "repository": "https://github.com/snap-research/locomo.git",
+    "commit": "3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376"
+  },
+  "PersonaMem": {
+    "repository": "https://github.com/bowen-upenn/PersonaMem.git",
+    "commit": "caaae44b3f236b8751d499a770e94e5aecffcff1"
+  },
+  "BEAM": {
+    "repository": "https://github.com/mohammadtavakoli78/BEAM.git",
+    "commit": "3e12035532eb85768f1a7cd779832b650c4b2ef9"
+  }
+}

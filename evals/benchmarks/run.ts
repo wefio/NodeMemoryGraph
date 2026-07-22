@@ -6,6 +6,7 @@ import { RpcClient } from "@earendil-works/pi-coding-agent";
 import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder, cosineSimilarity } from "../../src/core/vector.ts";
 import { indexExternalEmbeddings } from "../external-embeddings.ts";
+import { gitRevision, sampleFingerprint } from "../official/reproducibility.ts";
 import { loadBeam, loadLocomo, loadPersonaMem, stratifiedSample } from "./loaders.ts";
 import type { BenchmarkCase, BenchmarkSession } from "./types.ts";
 
@@ -68,16 +69,27 @@ const report = {
   runId,
   benchmark,
   model: "deepseek/deepseek-v4-flash",
+  codeRevision: gitRevision(root),
+  sampleFingerprint: sampleFingerprint(selected.map((item) => ({
+    id: item.id,
+    category: item.category,
+    question: item.question,
+    reference: item.reference,
+  }))),
+  protocolScoring: "separate",
+  scoringCommand: `npm run benchmark:score -- ${benchmark} ${outputDirectory}`,
+  leaderboardComparable: false,
   perCategory,
   contextCharacterBudget: contextBudget(),
   results,
   byMode: Object.fromEntries(modes.map((itemMode) => {
     const rows = results.filter((row) => row.mode === itemMode);
-    const passed = rows.filter((row) => row.passed).length;
-    return [itemMode, { passed, total: rows.length, accuracy: passed / rows.length }];
+    return [itemMode, { total: rows.length }];
   })),
 };
 writeFileSync(resolve(outputDirectory, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
+writeFileSync(resolve(outputDirectory, "predictions.jsonl"),
+  `${results.map((row) => JSON.stringify(row)).join("\n")}\n`);
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 
 async function evaluate(
@@ -87,32 +99,34 @@ async function evaluate(
   remembered: number,
 ) {
   const startedAt = performance.now();
-  const injectedContext = contextFor(item, itemMode);
+  const retrieval = contextFor(item, itemMode);
   const client = createClient(itemMode.startsWith("nmg-") ? dataDirectory : undefined, itemMode);
   let hypothesis = "";
   let answerError: string | null = null;
   try {
     await client.start();
     await client.setThinkingLevel("low");
-    await client.promptAndWait(answerPrompt(item, itemMode, injectedContext), undefined, timeout());
+    await client.promptAndWait(answerPrompt(item, itemMode, retrieval.text), undefined, timeout());
     hypothesis = (await client.getLastAssistantText())?.trim() ?? "";
   } catch (error) {
     answerError = error instanceof Error ? error.message : String(error);
   } finally {
     await client.stop();
   }
-  const judgement = await judge(item, hypothesis);
   return {
     id: item.id,
     category: item.category,
     mode: itemMode,
+    question: item.question,
     reference: item.reference,
     hypothesis,
-    judgement,
-    passed: passed(judgement),
+    rubric: item.rubric,
+    evidenceIds: item.evidenceIds,
+    retrievedEvidenceIds: retrieval.sourceIds,
+    officialMetadata: item.officialMetadata,
     answerError,
     remembered,
-    injectedCharacters: injectedContext.length,
+    injectedCharacters: retrieval.text.length,
     sourceTurns: item.sessions.reduce((sum, session) => sum + session.turns.length, 0),
     durationMs: Math.round(performance.now() - startedAt),
   };
@@ -163,14 +177,20 @@ function ingest(item: BenchmarkCase, dataDirectory: string): number {
   return count;
 }
 
-function contextFor(item: BenchmarkCase, itemMode: EvaluationMode): string {
-  if (itemMode === "no-memory" || itemMode.startsWith("nmg-")) return "";
+function contextFor(
+  item: BenchmarkCase,
+  itemMode: EvaluationMode,
+): { text: string; sourceIds: string[] | null } {
+  if (itemMode === "no-memory" || itemMode.startsWith("nmg-")) {
+    return { text: "", sourceIds: itemMode === "no-memory" ? [] : null };
+  }
   if (itemMode === "raw-session") {
     const ranked = item.sessions.map((session) => ({
       text: formatSession(session),
+      sourceIds: session.turns.map((turn) => turn.sourceId),
       score: lexicalOverlap(item.question, formatSession(session)),
     })).sort((left, right) => right.score - left.score);
-    return withinBudget(ranked.map((value) => value.text));
+    return withinBudget(ranked);
   }
   const embedder = new HashingVectorEmbedder(256);
   const query = embedder.embed(item.question);
@@ -178,11 +198,12 @@ function contextFor(item: BenchmarkCase, itemMode: EvaluationMode): string {
     const text = `[${session.date ?? session.id}] ${turn.speaker ?? turn.role}: ${turn.content}`;
     return {
       text,
+      sourceIds: [turn.sourceId],
       score: lexicalOverlap(item.question, text) * 0.55 +
         cosineSimilarity(query, embedder.embed(text)) * 0.45,
     };
   })).sort((left, right) => right.score - left.score);
-  return withinBudget(turns.map((value) => value.text));
+  return withinBudget(turns);
 }
 
 function answerPrompt(item: BenchmarkCase, itemMode: EvaluationMode, context: string): string {
@@ -201,32 +222,6 @@ function answerPrompt(item: BenchmarkCase, itemMode: EvaluationMode, context: st
     context ? `Retrieved conversation evidence:\n${context}` : "",
     `Question: ${item.question}`,
   ].filter(Boolean).join("\n\n");
-}
-
-async function judge(item: BenchmarkCase, hypothesis: string): Promise<string> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const client = createClient();
-    try {
-      await client.start();
-      await client.setThinkingLevel("low");
-      await client.promptAndWait([
-        "Judge whether the candidate is semantically correct under the reference.",
-        "For multiple choice, require the same option letter. For rubric-style",
-        "references, require the candidate to satisfy the essential claims.",
-        "Respond with exactly PASS or FAIL followed by one short reason.",
-        `Question: ${item.question}`,
-        `Reference: ${item.reference}`,
-        `Candidate: ${hypothesis}`,
-      ].join("\n"), undefined, timeout());
-      const result = (await client.getLastAssistantText())?.trim() ?? "";
-      if (result) return result;
-    } catch {
-      // Retry transient provider failures with a fresh Pi process.
-    } finally {
-      await client.stop();
-    }
-  }
-  return "FAIL - Judge returned no response.";
 }
 
 function createClient(dataDirectory?: string, itemMode?: EvaluationMode): RpcClient {
@@ -276,16 +271,20 @@ function formatSession(session: BenchmarkSession): string {
     session.turns.map((turn) => `${turn.speaker ?? turn.role}: ${turn.content}`).join("\n");
 }
 
-function withinBudget(values: string[]): string {
+function withinBudget(values: Array<{ text: string; sourceIds: string[] }>): {
+  text: string; sourceIds: string[];
+} {
   const selected: string[] = [];
+  const sourceIds: string[] = [];
   let used = 0;
   for (const value of values) {
-    if (selected.length > 0 && used + value.length > contextBudget()) continue;
-    selected.push(value);
-    used += value.length;
+    if (selected.length > 0 && used + value.text.length > contextBudget()) continue;
+    selected.push(value.text);
+    sourceIds.push(...value.sourceIds);
+    used += value.text.length;
     if (used >= contextBudget()) break;
   }
-  return selected.join("\n\n");
+  return { text: selected.join("\n\n"), sourceIds };
 }
 
 function lexicalOverlap(query: string, text: string): number {
@@ -297,14 +296,6 @@ function lexicalOverlap(query: string, text: string): number {
 
 function tokens(value: string): string[] {
   return value.toLocaleLowerCase().match(/[\p{L}\p{N}_+.#-]+/gu) ?? [];
-}
-
-function passed(judgement: string): boolean {
-  const verdicts = judgement.split(/\r?\n/u).flatMap((line) => {
-    const match = line.trim().match(/^(PASS|FAIL)\b/iu);
-    return match ? [match[1]!.toUpperCase()] : [];
-  });
-  return verdicts.at(-1) === "PASS";
 }
 
 function parseBenchmark(value: string | undefined): Benchmark {

@@ -51,12 +51,31 @@ export function scoreLongMemRetrieval(
   return { recallAny, recallAll, ndcg: ideal === 0 ? 0 : dcg / ideal };
 }
 
+export function longMemEvalJudgePrompt(
+  task: string,
+  question: string,
+  answer: string,
+  response: string,
+  abstention: boolean,
+): string {
+  if (abstention) {
+    return `I will give you an unanswerable question, an explanation, and a response from a model. Please answer yes if the model correctly identifies the question as unanswerable. The model could say that the information is incomplete, or some other information is given but the asked information is not.\n\nQuestion: ${question}\n\nExplanation: ${answer}\n\nModel Response: ${response}\n\nDoes the model correctly identify the question as unanswerable? Answer yes or no only.`;
+  }
+  if (task === "single-session-preference") {
+    return `I will give you a question, a rubric for desired personalized response, and a response from a model. Please answer yes if the response satisfies the desired response. Otherwise, answer no. The model does not need to reflect all the points in the rubric. The response is correct as long as it recalls and utilizes the user's personal information correctly.\n\nQuestion: ${question}\n\nRubric: ${answer}\n\nModel Response: ${response}\n\nIs the model response correct? Answer yes or no only.`;
+  }
+  const updateRule = task === "knowledge-update"
+    ? " If the response contains some previous information along with an updated answer, the response should be considered as correct as long as the updated answer is the required answer."
+    : " If the response is equivalent to the correct answer or contains all the intermediate steps to get the correct answer, you should also answer yes. If the response only contains a subset of the information required by the answer, answer no.";
+  return `I will give you a question, a correct answer, and a response from a model. Please answer yes if the response contains the correct answer. Otherwise, answer no.${updateRule}\n\nQuestion: ${question}\n\nCorrect Answer: ${answer}\n\nModel Response: ${response}\n\nIs the model response correct? Answer yes or no only.`;
+}
+
 function validateExample(value: unknown, index: number): LongMemExample {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`LongMemEval row ${index} must be an object`);
   }
   const row = value as Record<string, unknown>;
-  for (const field of ["question_id", "question_type", "question", "answer"] as const) {
+  for (const field of ["question_id", "question_type", "question"] as const) {
     if (typeof row[field] !== "string") {
       throw new Error(`LongMemEval row ${index} is missing ${field}`);
     }
@@ -64,5 +83,8 @@ function validateExample(value: unknown, index: number): LongMemExample {
   if (!Array.isArray(row.haystack_sessions) || !Array.isArray(row.haystack_session_ids)) {
     throw new Error(`LongMemEval row ${index} is missing haystack sessions or IDs`);
   }
-  return row as unknown as LongMemExample;
+  if (typeof row.answer !== "string" && typeof row.answer !== "number") {
+    throw new Error(`LongMemEval row ${index} is missing answer`);
+  }
+  return { ...row, answer: String(row.answer) } as unknown as LongMemExample;
 }

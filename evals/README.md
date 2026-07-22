@@ -22,6 +22,38 @@ exceeding its retrieval budget, or rebuilding an index unnecessarily.
 The suites are reported separately. Their scores must not be averaged into one
 number because they measure different distributions and failure modes.
 
+## Reproducible official-protocol workflow
+
+NMG keeps prediction generation separate from benchmark scoring. A reader run
+writes `report.json` and `predictions.jsonl`; a later scoring command writes
+`official-score.json` without rerunning the reader model.
+
+```powershell
+npm run benchmark:setup
+npm run benchmark:validate
+
+npm run eval:locomo -- matched 1
+npm run benchmark:score -- locomo <result-directory>
+
+npm run eval:longmem -- matched 1
+npm run benchmark:score:longmem -- <result-directory>
+```
+
+`benchmark:setup` checks out the four official repositories at the commits in
+`evals/official/upstreams.json` under ignored `.benchmarks/official`. It also
+creates an isolated uv-managed Python 3.11 environment for official scorers;
+benchmark code is not copied into NMG core.
+
+Judge-backed protocols currently use `deepseek/deepseek-v4-flash` in place of
+the upstream proprietary judge. Those outputs are labelled
+`official-protocol/deepseek-judge`; LoCoMo and PersonaMem are labelled
+`official-protocol/deterministic`. All experimental outputs retain
+`leaderboardComparable: false`. LoCoMo uses its official deterministic QA and
+retrieval functions, PersonaMem uses its official option-extraction rule, and
+BEAM uses its rubric scale. BEAM
+`event_ordering` uses the official normalized Kendall tau-b aggregation rather
+than rubric-score averaging.
+
 ## Common experiment arms
 
 Every adapter should expose as many of the following matched arms as the source

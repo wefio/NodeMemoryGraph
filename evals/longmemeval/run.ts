@@ -6,6 +6,7 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder, cosineSimilarity } from "../../src/core/vector.ts";
 import { indexExternalEmbeddings } from "../external-embeddings.ts";
+import { gitRevision, sampleFingerprint } from "../official/reproducibility.ts";
 import {
   pairedAgainst,
   summarizeAccuracy,
@@ -92,6 +93,17 @@ const report = {
   runId,
   mode,
   model: "deepseek/deepseek-v4-flash",
+  codeRevision: gitRevision(root),
+  sampleFingerprint: sampleFingerprint(sample.map((example) => ({
+    id: example.question_id,
+    type: benchmarkType(example),
+    question: example.question,
+    answer: example.answer,
+  }))),
+  diagnosticJudgeModel: "deepseek/deepseek-v4-flash",
+  protocolScoring: "separate",
+  scoringCommand: `npm run benchmark:score:longmem -- ${outputDirectory}`,
+  leaderboardComparable: false,
   concurrency: evalConcurrency(),
   sampleManifest: manifest?.name ?? null,
   questionCount: sample.length,
@@ -115,6 +127,12 @@ writeFileSync(
   resolve(outputDirectory, "report.json"),
   `${JSON.stringify(report, null, 2)}\n`,
 );
+writeFileSync(resolve(outputDirectory, "predictions.jsonl"),
+  `${results.map((row) => JSON.stringify({
+    question_id: row.questionId,
+    hypothesis: row.hypothesis,
+    mode: row.mode,
+  })).join("\n")}\n`);
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 
 async function runMatchedExample(example: LongMemExample, repeat: number) {

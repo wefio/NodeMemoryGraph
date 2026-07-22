@@ -11,7 +11,12 @@ npm run eval:longmem -- no-memory 1
 npm run eval:longmem -- oracle 1
 npm run eval:longmem -- nmg-oracle 1
 npm run eval:longmem -- matched 1
+npm run benchmark:score:longmem -- <result-directory>
 ```
+
+The final command scores existing predictions with LongMemEval's task-specific
+official prompt semantics using DeepSeek V4 Flash as the temporary judge. It
+does not rerun the reader and is labelled non-leaderboard-comparable.
 
 The final argument is the number of examples per category. Selection always
 comes from the ordering in `longmemeval_s_cleaned.json`, so every mode uses the
