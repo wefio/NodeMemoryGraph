@@ -547,46 +547,13 @@ the controller workload (~280 KFLOPs/query) does not justify them.
 
 ### 12.2 Performance optimisations
 
-Every element-wise op uses raw `for` loops instead of `Float32Array.from()`,
-avoiding callback allocation and V8 deopt (Add, Multiply, Exp, Log, Reciprocal,
-Sigmoid, Softmax, SoftmaxGradient).
+Element-wise ops use raw `for` loops. Matmul uses ikj loop order for cache
+locality. `Negate` is compile-time folded from `multiply(x, Constant(-1))`.
+`SumN` fuses chain-add sequences into a single N-input op. `Tensor.fromBuffer()`
+enables zero-copy constant construction. Controller auto-batches inputs into
+`[F,B]` matrices at threshold B≥8.
 
-**Matmul ikj loop order.** The inner loop iterates contiguous columns of the
-right-hand matrix, maximising L1 cache reuse:
-```
-for row: for k: for col: result[row·Rc+col] += left[row·K+k] * right[k·Rc+col]
-```
-
-**Negate compile-time folding.** `multiply(x, Constant(-1))` is rewritten to
-`negate(x)` at graph construction, pruning ~20% of the backward DAG for
-negative-weight paths.
-
-**SumN op.** Chain-add sequences (`a.add(b).add(c).add(d).add(e)`) are fused
-into a single N-input SumN op. One allocation for all inputs, one element-wise
-pass, one backward node. Saves N−1 intermediate allocations and N−1 loop passes.
-Used in g₃ vector fusion (5→1) and blended scoring (13→8 ops).
-
-**Tensor.fromBuffer()**. Zero-copy factory that takes ownership of a
-Float32Array. Enables batched-matrix construction without the copy that
-`Tensor.matrix()` performs.
-
-**Auto-batching in DifferentiableController.train().** Input vectors are
-stacked into a [F,B] matrix when B ≥ 8, executing one batched matmul instead of
-B separate vector matmuls. Power-of-2 padding applied only at F ≥ 192.
-
-### 12.3 Current benchmarks
-
-```text
-│ d  │ n   │ propagate │ train     │ controller │
-├─────┼──────┼───────────┼───────────┼────────────┤
-│  64 │   50 │    0.25ms │    0.44ms │     0.21ms │
-│ 128 │  200 │    1.47ms │    2.43ms │     0.56ms │
-```
-
-Propagate: full HierarchicalActivation forward pass (g₁/g₂/g₃ + h₁/h₂/h₃ +
-7-way scoring). Train: forward + reverse-mode backward + gradient step.
-
-### 12.4 Architecture
+### 12.3 Architecture
 
 The persistent semantic graphs, the Active Graph, and the differentiable
 computation graph are distinct objects:
@@ -606,78 +573,9 @@ persistent STG + LTG in SQLite
   → discrete Top-K selection → Active Graph expansion
 ```
 
-### 12.5 Trainable parameters
-
-```text
-Component              Parameters      Count
-────────────────────────────────────────────
-DifferentiableController  node head       F+1
-                          edge head       F+1
-                          control head    F+1
-                          budget head     7×(F+1)
-HierarchicalActivation    #temperature      1
-                          #scoreWeights     7
-                          #temporalAlpha    1
-────────────────────────────────────────────
-Total (F=64)                              ~711
-Total (F=128)                            ~1351
-```
-
-All parameters are `Parameter` UOps registered in the autodiff DAG, trainable
-via joint `train()` that flows loss gradients through both HA and the
-controller simultaneously.
-
 The computation graph is ephemeral — created per propagate/train call and
 discarded. SQLite, the semantic graph, provenance, consolidation, and discrete
 Top-K selection remain ordinary deterministic system components.
-
-### 12.6 Interface
-
-```ts
-interface RouteModel {
-  score(query: QueryFeatures, graph: LocalGraphFeatures): RouteDecision;
-}
-
-interface RouteTrainer {
-  observe(trace: RetrievalTrace, outcome: RetrievalOutcome): void;
-}
-```
-
-The zero-configuration default is heuristic/hybrid routing. The learned router
-becomes default only if it improves evidence recall or retrieval cost in
-matched evaluation.
-
-### 12.7 Training objectives
-
-An optional differentiable router may optimise:
-
-```text
-L = route_loss
-  + λ · expected_tokens
-  + μ · expected_depth
-  + γ · false_memory_cost
-  + η · evidence_miss_cost
-```
-
-Backpropagation requires evidence labels, useful-node feedback, or a separate
-teacher signal. A contextual bandit is more appropriate than autodiff when only
-black-box task success is available.
-
-### 12.8 Current status
-
-Unit tests cover lazy UOp evaluation, matrix and shared-path gradients, softmax
-cross-entropy, feature bounds, trace-to-label conversion, multi-head
-convergence, input validation, and exact state round-tripping. The controller
-has independent heads for node selection, edge selection, STOP/EXPAND, and
-Active Graph budget dimensions.
-
-Using local `BAAI/bge-small-en-v1.5` embeddings on the LoCoMo split raised
-candidate recall to 0.700 and learned Top-2 recall to 0.700, with inference at
-~0.071 ms. On BEAM, candidate recall reached 0.111. This supports retaining the
-external embedding interface and learned ranker experiment, but rejects
-both a blanket BGE default and premature Pi integration. Candidate generation
-must be evaluated per benchmark and question type, not selected from one
-aggregate result.
 
 A granularity ablation further showed that merely widening hierarchical routing
 from 5/8 node/leaf candidates to 20/50 did not improve BEAM. Full record vectors
@@ -700,49 +598,38 @@ traversal. The traversal path itself is the computation graph—gradients flow
 through every visited node back to per-node parameters.
 
 ```text
-q₀ ──→ [node A: g=σ(v·q+b), q'=g·v+(1-g)·q] ──→ q₁
-  ──→ [node B: g=σ(v·q+b), q'=g·v+(1-g)·q] ──→ q₂
-    ──→ [node C] ──→ q₃ → path loss
+q₀ ──→ [node A] ──→ q₁ ──→ [node B] ──→ q₂ ──→ [node C] ──→ q₃ → path loss
 ```
 
-### Node operator (v2 — KDA-inspired)
+### Node operator
 
 The state update has three named degrees of freedom, inspired by Kimi Delta
 Attention (FlashKDA, MoonshotAI):
 
 ```text
-g = σ(v^T @ q + b_log)     absorption — how much of THIS node to take in
-A = σ(a_log)                decay — global forgetting rate (0=wipe, 1=keep)
-β = σ(β_log)                retention — old state vs new state blend
+g = σ(v^T @ q + b_log)       absorption — how much of THIS node to take in
+A = σ(a_log)                  decay — global forgetting rate (0=wipe, 1=keep)
+β = σ(β_log)                  retention — old state vs new state blend
 
-q_tmp = A·q_old + g·v       decay old context, absorb new memory
+q_tmp = A·q_old + g·v         decay old context, absorb new memory
 q'    = β·q_tmp + (1−β)·query  output blend with original query anchor
-r     = q'^T @ v            local relevance score
+r     = q'^T @ v              local relevance score
 ```
 
-| Parameter | Scope | Default | Meaning |
-|-----------|-------|---------|---------|
-| `b_log` | per-node | 0 → g≈0.5 | Higher = more absorption from this memory |
-| `a_log` | global | 0 → A=0.5 | Higher = retain more past context across steps |
-| `β_log` | per-node | 0 → β=0.5 | Higher = output favours accumulated state over original query |
-
-The v1 design (`g=σ(v^T@q+b)`, `q'=g·v+(1-g)·q`) is the special case where
-a_log=0 and β_log=0 (all sigmoid, so A=0.5 and β=0.5 — not identical to v1
-but architecturally backward-compatible).
-
-Performance: 16μs per node-step regardless of dimension (d=64 or d=128).
-3-step traversal over 20 nodes: 0.96ms; over 200 nodes: 9.64ms.
+| Parameter | Scope | Meaning |
+|-----------|-------|---------|
+| `b_log` | per-node | Higher = more absorption from this memory |
+| `a_log` | global | Higher = retain more past context across steps |
+| `β_log` | per-node | Higher = output favours accumulated state over original query |
 
 ### Relationship to HierarchicalActivation
 
 |                         | HA                           | MGR                           |
 |-------------------------|------------------------------|-------------------------------|
 | Node role               | passive data, scored         | active operator, transforms   |
-| State update DOF        | n/a                          | 3 (absorption, decay, retain) |
 | Scoring                 | 7-way similarity blend       | single gate + local relevance |
 | Graph structure         | fixed (g₁→g₂→g₃)            | dynamic, follows edges        |
 | Parameters              | 9 global                     | 2/node + 1 global             |
-| Per-step cost (d=64)    | 0.12ms                       | 0.016ms (per node-step)       |
 | Best for                | batch ranking over pool      | multi-step path reasoning     |
 
 They are complementary: HA scores a candidate pool globally, MGR refines
@@ -753,32 +640,26 @@ a query by walking a knowledge-graph path.
 ```ts
 const mgr = new MemoryGraphReasoner(64);
 
-// Greedy traversal: at each step, evaluate all candidates, pick best
+// Greedy traversal
 const result = mgr.traverse(queryVector, graph, maxSteps);
-// → { path: TraversalStep[], finalQuery, pathScore }
+
+// What-if simulation: inject hypothetical node, compare traversals
+const impact = mgr.whatIf(queryVec, graph, hypotheticalNode, maxSteps);
+const summary = mgr.impactSummary(impact, "task-x"); // compact LLM-ready text
 
 // Train on labeled paths (gradient flows through entire DAG)
-const loss = mgr.trainPath({
-  queryVector,
-  pathNodeIds: ["api-design", "L-meeting", "conclusion"],
-  graph,
-}, 0.1);
+mgr.trainPath({ queryVector, pathNodeIds, graph }, learningRate);
+
+// State round-trip
+const json = mgr.toJSON();
+const clone = MemoryGraphReasoner.fromJSON(json);
 ```
-
-### Demo result (d=64, 7 nodes, 4 steps)
-
-- Before training: traversal picks random first node, path score 2.93
-- After 22 training iterations: correctly follows labeled path
-  `api-design → L-meeting → conclusion`, path score 3.18
-- Per-step query refinement: cosine(q, target) grows from 0.61→0.96
-- Performance: 0.53ms / traversal (0.02ms per node-step)
-- State round-trip deterministic via toJSON/fromJSON
 
 ### External reasoning module
 
-MGR can serve as an LLM-offloaded reasoning engine. The what-if simulation
-runs entirely inside MGR; only a compact impact summary is returned to the
-LLM, consuming minimal context tokens.
+MGR serves as an LLM-offloaded reasoning engine. The what-if simulation runs
+entirely inside MGR; only a compact impact summary is returned to the LLM,
+consuming minimal context tokens.
 
 ```text
 LLM context                    MGR (external)
@@ -787,36 +668,14 @@ User: "What if we add task X?"
                                ┌────────────────────────┐
 LLM → MGR.whatIf(              │ baseline: A→B→C→D      │
   query, graph,                │ with X:   A→B→C→X      │
-  hypoNode=X, steps=4          │ D: ↓0.645 [exited]     │
-)                              │ pathScore: +0.24       │
-         ← impactSummary()     └────────────────────────┘
-         ← "X enters at step 4,
-            D exits, score +0.24"
+  hypoNode=X, steps=4          │ D: exited, score +0.24 │
+)                              └────────────────────────┘
+         ← impactSummary()
+         ← "X enters at step 4, D exits, path +0.24"
 
 LLM: "Adding X pushes D off the
-      critical path. Consider
-      parallelising D."
+      critical path."
 ```
-
-```ts
-// What-if simulation
-const result = mgr.whatIf(queryVec, graph, hypotheticalNode, 4);
-// → { baseline, withNode, impacted[] }
-
-// Compact summary for LLM (3-5 lines)
-const summary = mgr.impactSummary(result, "task-x");
-// "Inserting node "task-x":\n  → enters path at step 4 (score 0.881)\n  → docs: ↓0.645 [exited]\n  path score: 3.304 → 3.539 (+0.236)"
-```
-
-### Training
-
-`trainPath()` builds a single DAG spanning all steps. Backward flows from the
-final path score through every intermediate `#reasonStep` call to every
-per-node gate bias `b`. The loss is simply the negative path score—training
-maximises cumulative relevance along the labeled path.
-
-Only the gate biases of visited nodes receive gradients, and only those
-parameters are updated. Unvisited nodes remain unchanged.
 
 ## 13. Current implementation versus target
 
