@@ -223,7 +223,7 @@ export class HierarchicalActivation {
 
     const g3 = g1.add(g2).add(h1).add(h2).add(h3).l2Normalize();
 
-    // Blended scores
+    // Blended scores (reuse simQ from g₁ step)
     const sw = this.#scoreWeights.softmax();
     const blended = simQ.multiply(sw.at(0))
       .add(g1.transpose().matmul(C).multiply(sw.at(1)))

@@ -451,6 +451,14 @@ export class Tensor {
     );
   }
 
+  /** Takes ownership of the buffer (no copy). Caller must not mutate after. */
+  static fromBuffer(data: Float32Array, rows: number, columns: number): Tensor {
+    if (rows < 1 || columns < 1 || rows * columns !== data.length) {
+      throw new Error("tensor shape does not match its data");
+    }
+    return new Tensor(new UOp(Op.Constant, [rows, columns], [], data));
+  }
+
   get data(): Float32Array {
     return evaluate(this.#operation);
   }
