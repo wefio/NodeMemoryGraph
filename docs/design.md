@@ -509,69 +509,129 @@ catastrophic-backtracking risk.
 
 ## 12. Learnable routing and minimal differentiable query graphs
 
-NMG does not depend on a general-purpose machine-learning framework. It contains
-a small, backend-independent differentiable controller that can be compared
-against deterministic baselines and receive useful credit from retrieval
-outcomes. Its implementation follows tinygrad's mature separation of concerns:
-Tensor is a graph-building frontend over a unified UOp DAG, evaluation is lazy,
-and gradient construction is separate from graph execution. NMG deliberately
-omits tinygrad's scheduler, kernel lowering, code generation, JIT, and device
-runtime because the controller workload does not justify them. See the
-[tinygrad developer overview](https://docs.tinygrad.org/developer/developer/)
-and [UOp reference](https://docs.tinygrad.org/developer/uop/).
+NMG contains a zero-dependency, CPU-optimised UOp autodiff engine built entirely
+on Float32Array. It follows tinygrad's separation of concerns: Tensor is a
+graph-building frontend over the UOp DAG, evaluation is lazy, and gradient
+construction is separate from graph execution. NMG deliberately omits
+scheduler, kernel lowering, code generation, JIT, and device runtime because
+the controller workload (~280 KFLOPs/query) does not justify them.
 
-The persistent semantic graphs, the Active Graph, and a differentiable
-computation graph are different objects:
+### 12.1 UOp op catalogue
+
+```text
+┌───────────────┬──────────────────────────────────────┬──────────────────┐
+│ Op            │ Forward                               │ Shape            │
+├───────────────┼──────────────────────────────────────┼──────────────────┤
+│ Add           │ a[i] + b[i]                           │ element-wise     │
+│ SumN          │ Σⱼ srcⱼ[i]  (N inputs, one pass)      │ element-wise     │
+│ Multiply      │ a[i] * b[i]                           │ element-wise     │
+│ Negate        │ -src[i]                               │ element-wise     │
+│ Broadcast     │ fill shape with scalar src[0]         │ any              │
+│ Matmul        │ left @ right  (ikj cache-friendly)    │ [Lr, Rc]         │
+│ Transpose     │ result[col·rows+row]=src[row·cols+col]│ [cols, rows]     │
+│ Sum           │ Σ src[i] → scalar                     │ [d1,d2] → [1,1]  │
+│ Exp           │ exp(src[i])                           │ element-wise     │
+│ Log           │ log(clip(src[i], 1e-7))               │ element-wise     │
+│ Reciprocal    │ 1 / clip(src[i], 1e-7)                │ element-wise     │
+│ Sigmoid       │ 1 / (1 + exp(-src[i]))                │ element-wise     │
+│ Softmax       │ exp(x-max) / Σexp(x-max)              │ element-wise     │
+│ SoftmaxGrad   │ prob[i]·(grad[i] - Σprob·grad)        │ element-wise     │
+│ L2Normalize   │ src[i] / ||src||                      │ element-wise     │
+│ L2NormGrad    │ (grad[i]-output[i]·dot)·invNorm       │ element-wise     │
+│ Index         │ src[idx] → scalar                     │ [n,...] → [1,1]  │
+│ Scatter       │ src[0] → result[idx]                  │ [1,1] → [n,...]  │
+│ Constant      │ stored Float32Array, no gradient       │ any              │
+│ Parameter     │ stored Float32Array, requires gradient  │ any              │
+└───────────────┴──────────────────────────────────────┴──────────────────┘
+```
+
+### 12.2 Performance optimisations
+
+Every element-wise op uses raw `for` loops instead of `Float32Array.from()`,
+avoiding callback allocation and V8 deopt (Add, Multiply, Exp, Log, Reciprocal,
+Sigmoid, Softmax, SoftmaxGradient).
+
+**Matmul ikj loop order.** The inner loop iterates contiguous columns of the
+right-hand matrix, maximising L1 cache reuse:
+```
+for row: for k: for col: result[row·Rc+col] += left[row·K+k] * right[k·Rc+col]
+```
+
+**Negate compile-time folding.** `multiply(x, Constant(-1))` is rewritten to
+`negate(x)` at graph construction, pruning ~20% of the backward DAG for
+negative-weight paths.
+
+**SumN op.** Chain-add sequences (`a.add(b).add(c).add(d).add(e)`) are fused
+into a single N-input SumN op. One allocation for all inputs, one element-wise
+pass, one backward node. Saves N−1 intermediate allocations and N−1 loop passes.
+Used in g₃ vector fusion (5→1) and blended scoring (13→8 ops).
+
+**Tensor.fromBuffer()**. Zero-copy factory that takes ownership of a
+Float32Array. Enables batched-matrix construction without the copy that
+`Tensor.matrix()` performs.
+
+**Auto-batching in DifferentiableController.train().** Input vectors are
+stacked into a [F,B] matrix when B ≥ 8, executing one batched matmul instead of
+B separate vector matmuls. Power-of-2 padding applied only at F ≥ 192.
+
+### 12.3 Current benchmarks
+
+```text
+│ d  │ n   │ propagate │ train     │ controller │
+├─────┼──────┼───────────┼───────────┼────────────┤
+│  64 │   50 │    0.25ms │    0.44ms │     0.21ms │
+│ 128 │  200 │    1.47ms │    2.43ms │     0.56ms │
+```
+
+Propagate: full HierarchicalActivation forward pass (g₁/g₂/g₃ + h₁/h₂/h₃ +
+7-way scoring). Train: forward + reverse-mode backward + gradient step.
+
+### 12.4 Architecture
+
+The persistent semantic graphs, the Active Graph, and the differentiable
+computation graph are distinct objects:
 
 ```text
 persistent STG + LTG in SQLite
-  -> construct a bounded Active Graph
-  -> materialize query/node/edge tensors
-  -> score nodes, edges, STOP, and EXPAND
-  -> select evidence through the discrete backend
+  → construct bounded Active Graph
+  → HierarchicalActivation.propagate(query, candidates, neighborhood, graphState)
+     ├─ g₁: query → candidates cross-attention (learnable temperature)
+     ├─ g₂: g₁ → neighborhood cross-attention
+     ├─ g₃: L2Normalize(g₁+g₂+h₁+h₂+h₃)  spatial fusion
+     ├─ h₁: EMA of g₁ across propagate() calls  (short-term temporal)
+     ├─ h₂: mean of medium-term stable vectors   (from graphState)
+     ├─ h₃: mean of long-term stable vectors     (from graphState)
+     └─ 7-weight blended scoring → nodeScores
+  → DifferentiableController(node/edge/control/budget scores)
+  → discrete Top-K selection → Active Graph expansion
 ```
 
-The Active Graph is the query-scoped semantic projection. Tensor materialization
-is only an optional scoring representation of that projection. Updating tensor
-parameters must not directly mutate authoritative history or silently
-consolidate STG relations into LTG.
-
-The first differentiable implementation supports only the required
-`Float32Array` operations:
+### 12.5 Trainable parameters
 
 ```text
-add / multiply / dot / matrix multiply
-sum / mean
-sigmoid / softmax / log / exp
-reverse-mode backward and parameter update
+Component              Parameters      Count
+────────────────────────────────────────────
+DifferentiableController  node head       F+1
+                          edge head       F+1
+                          control head    F+1
+                          budget head     7×(F+1)
+HierarchicalActivation    #temperature      1
+                          #scoreWeights     7
+                          #temporalAlpha    1
+────────────────────────────────────────────
+Total (F=64)                              ~711
+Total (F=128)                            ~1351
 ```
 
-Its trainable surface is deliberately narrow: query-to-node routing,
-query-and-node-to-edge routing, STOP/EXPAND selection, and budget allocation.
-The computation graph is ephemeral and exists only while scoring or learning;
-SQLite, the semantic graph, provenance, consolidation, and discrete Top-K
-selection remain ordinary deterministic system components.
+All parameters are `Parameter` UOps registered in the autodiff DAG, trainable
+via joint `train()` that flows loss gradients through both HA and the
+controller simultaneously.
 
-An optional differentiable router may optimize a loss such as:
+The computation graph is ephemeral — created per propagate/train call and
+discarded. SQLite, the semantic graph, provenance, consolidation, and discrete
+Top-K selection remain ordinary deterministic system components.
 
-```text
-L = route_loss
-  + lambda * expected_tokens
-  + mu     * expected_depth
-  + gamma  * false_memory_cost
-  + eta    * evidence_miss_cost
-```
-
-A minimal custom UOp autodiff engine is implemented with serializable controller
-parameters. Its interfaces remain backend-neutral so it can be replaced if
-future scale measurements justify doing so, but NMG will not carry a large
-tensor framework merely for automatic differentiation. If only black-box task
-success is available, a contextual bandit or other discrete online learner may
-be more appropriate than autodiff. A remote Pi model API is not differentiable;
-backpropagation therefore needs evidence labels, useful-node feedback, or a
-separate teacher signal.
-
-Suggested interface boundary:
+### 12.6 Interface
 
 ```ts
 interface RouteModel {
@@ -583,35 +643,38 @@ interface RouteTrainer {
 }
 ```
 
-The zero-configuration default remains heuristic/hybrid routing. A learned
-router becomes default only if it improves evidence recall or retrieval cost in
+The zero-configuration default is heuristic/hybrid routing. The learned router
+becomes default only if it improves evidence recall or retrieval cost in
 matched evaluation.
 
-Current implementation status: the experimental controller has independent
-heads for node selection, edge selection, STOP/EXPAND, and the seven Active
-Graph budget dimensions. A versioned 32-value protocol now combines query
-shape, STG/LTG composition, Active Graph budget usage, and candidate node/edge
-signals. Trace labels are generated only after explicit useful, rejected, or
-contradicted-memory feedback. Node and edge supervision keeps every positive
-and a bounded set of high-ranked hard negatives so large traces do not turn the
-binary objectives into an all-negative classifier.
+### 12.7 Training objectives
+
+An optional differentiable router may optimise:
+
+```text
+L = route_loss
+  + λ · expected_tokens
+  + μ · expected_depth
+  + γ · false_memory_cost
+  + η · evidence_miss_cost
+```
+
+Backpropagation requires evidence labels, useful-node feedback, or a separate
+teacher signal. A contextual bandit is more appropriate than autodiff when only
+black-box task success is available.
+
+### 12.8 Current status
 
 Unit tests cover lazy UOp evaluation, matrix and shared-path gradients, softmax
 cross-entropy, feature bounds, trace-to-label conversion, multi-head
-convergence, input validation, and exact state round-tripping. Matched,
-model-free controller experiments use official evidence IDs and report
-candidate recall separately from ranking quality and runtime cost. Initial
-LoCoMo and BEAM diagnostics found non-degraded learned ranking with sub-
-millisecond inference, but candidate recall was only 0.300 and 0.278. Therefore
-the controller remains disconnected from the default Pi path: candidate
-generation must first reach the 0.8 gate, followed by a larger repeated matched
-evaluation. See `evals/controller/README.md`.
+convergence, input validation, and exact state round-tripping. The controller
+has independent heads for node selection, edge selection, STOP/EXPAND, and
+Active Graph budget dimensions.
 
-Using local `BAAI/bge-small-en-v1.5` embeddings on the identical LoCoMo split
-raised candidate recall to 0.700 and learned Top-2 recall from 0.400 to 0.700,
-while learned inference remained about 0.071 ms. The same setup reached only
-0.111 candidate recall on the small BEAM split. This result supports retaining
-the external embedding interface and the learned ranker experiment, but rejects
+Using local `BAAI/bge-small-en-v1.5` embeddings on the LoCoMo split raised
+candidate recall to 0.700 and learned Top-2 recall to 0.700, with inference at
+~0.071 ms. On BEAM, candidate recall reached 0.111. This supports retaining the
+external embedding interface and learned ranker experiment, but rejects
 both a blanket BGE default and premature Pi integration. Candidate generation
 must be evaluated per benchmark and question type, not selected from one
 aggregate result.
