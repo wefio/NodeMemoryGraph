@@ -43,6 +43,17 @@ export class Float32VectorCache {
     this.#matrix.set(vector, index * this.dimensions);
   }
 
+  has(id: string): boolean {
+    return this.#indices.has(id);
+  }
+
+  vector(id: string): Float32Array | undefined {
+    const index = this.#indices.get(id);
+    if (index === undefined) return undefined;
+    const start = index * this.dimensions;
+    return this.#matrix.subarray(start, start + this.dimensions);
+  }
+
   score(
     query: readonly number[],
     candidateIds?: ReadonlySet<string>,

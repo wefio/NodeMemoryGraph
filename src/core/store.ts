@@ -52,7 +52,7 @@ import type {
   VectorEmbedder,
 } from "./types.ts";
 import { blockTiers, huffmanDepths } from "./hierarchy.ts";
-import { OnlineNodeRouter } from "./router.ts";
+import { Router } from "./router.ts";
 import { cosineSimilarity, HashingVectorEmbedder } from "./vector.ts";
 import { Float32VectorCache } from "./vector-cache.ts";
 
@@ -72,14 +72,14 @@ const DEFAULT_ACTIVE_GRAPH_BUDGET: ActiveGraphBudget = {
 export class NmgStore {
   readonly #db: DatabaseSync;
   readonly #embedder: VectorEmbedder;
-  readonly #router: OnlineNodeRouter;
+  readonly #router: Router;
   readonly #vectorCaches = new Map<string, Float32VectorCache>();
 
   constructor(databasePath: string, embedder: VectorEmbedder = new HashingVectorEmbedder()) {
     mkdirSync(dirname(databasePath), { recursive: true });
     this.#db = new DatabaseSync(databasePath);
     this.#embedder = embedder;
-    this.#router = new OnlineNodeRouter(embedder);
+    this.#router = new Router(embedder);
     this.#db.exec(`
       PRAGMA foreign_keys = ON;
       PRAGMA journal_mode = WAL;
@@ -900,6 +900,32 @@ export class NmgStore {
     const byId = new Map(rows.map((row) => [String(row.id), row]));
     const cache = this.#embeddingCache("node", model);
     if (!cache) return [];
+
+    // Use hierarchical activation for batch scoring when available
+    const ha = this.#router.ensureHA(queryVector.length);
+    if (byId.size > 0) {
+      const candidateList: Array<{ id: string; vector: Float32Array }> = [];
+      for (const id of byId.keys()) {
+        const vec = cache.vector(id);
+        if (vec) candidateList.push({ id, vector: vec });
+      }
+      if (candidateList.length > 0) {
+        const out = ha.propagate(
+          new Float32Array(queryVector),
+          candidateList.map((c) => ({ nodeId: c.id, vector: c.vector })),
+        );
+        const scored = candidateList.map((c, i) => ({
+          node: mapNode(byId.get(c.id)!),
+          score: out.nodeScores[i]!,
+        }));
+        return scored
+          .filter((r) => r.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, Math.max(1, Math.min(limit, 50)));
+      }
+    }
+
+    // Fallback: Float32VectorCache cosine scoring
     return cache
       .score(queryVector, new Set(byId.keys()))
       .map(({ id, score }) => ({ node: mapNode(byId.get(id)!), score }))
