@@ -1,17 +1,18 @@
-# MiniMind-NMG Encoder — 专用向量模型设计 v2
+# MiniMind-NMG Encoder — 专用向量模型设计 v3（最终）
 
-## 1. 核心判断
+## 1. 核心判断与设计原则
 
-```
-直接取 MiniMind 最后一层做向量 → ❌ 不够（生成模型≠向量模型）
-用 MiniMind 骨干改造成 NMG 专用编码器 → ✅ 适合
-```
-
-MiniMind 对 NMG 的价值不在于它"现在是好向量模型"，而在于：
+MiniMind 对 NMG 的价值不在于"现在是好向量模型"，而在于：
 - 足够小（可反复消融实验）
 - 结构透明（causal → bidirectional，LM head → embedding heads）
 - 完整训练链路（pretrain → SFT → RL 全流程代码）
 - 小词表优势（不像 multilingual 模型把大量参数浪费在词嵌入）
+
+三条设计原则（分别借鉴 FlashKDA、FlashMLA、DeepEP 的架构思路）：
+
+1. **状态更新应有明确的自由度设计。** 每个"状态从旧到新"的转变都应显式建模：吸收多少、保留多少、衰减多快。
+2. **存储和计算可以不对称。** 持久化维度 < 计算维度，存小算大。
+3. **最小资源占用是核心竞争力。** 图侧的资源消耗必须远小于 LLM 推理，让真正的瓶颈拥有尽可能多的资源。
 
 ## 2. 总览：三层架构
 
@@ -24,28 +25,17 @@ MiniMind 对 NMG 的价值不在于它"现在是好向量模型"，而在于：
                                │  Float32[256] L2
 ┌─ DifferentiableAdapter (TypeScript autodiff, 可训练) ────────────┐
 │  Linear(256→128) → L2 normalize                                  │
-│  #projection: Tensor([128, 256])   #bias: Tensor([128])          │
-│  ~33K 参数                                                        │
-│  训练: 与 Controller 联合 backward，同一个 UOp DAG                   │
+│  ~33K 参数，与 Controller 联合 backward，同一个 UOp DAG              │
 └──────────────────────────────┬───────────────────────────────────┘
                                │  Float32[128] L2
          ┌─────────────────────┼─────────────────────┐
          ↓                     ↓                     ↓
-   ANN (usearch)      Float32VectorCache      Controller (autodiff)
+   HA (Hierarchical    MGR (MemoryGraph      Differentiable
+    Activation)          Reasoner)             Controller
+   g₁/g₂/g₃ + h₁/h₂/h₃  traverse / whatIf    expand/stop/budget
 ```
 
-三层职责分明：
-
-| 层 | 运行环境 | 可训练 | 输入→输出 | 说明 |
-|----|---------|--------|-----------|------|
-| MiniMind-NMG Encoder | ONNX Runtime (Node.js 进程内) | 否（部署时冻结） | text → 256-dim L2 | 语义编码，离线蒸馏 |
-| DifferentiableAdapter | Node.js / UOp autodiff | **是** | 256-dim → 128-dim L2 | 与 Controller 联合训练 |
-| ANN + Controller | Node.js | Controller 可训 | 向量 → 检索/路由 | 图操作 |
-
-**为什么保留适配层？**
-
-适配层不是简单的降维，它是 UOp autodiff 图中的可训练组件：
-
+适配层保留的原因：
 ```ts
 // 一次 backward 同时更新适配层和 controller
 L_total = L_retrieval + λ * L_contrastive
@@ -54,157 +44,156 @@ gradientStep(embedderParams, lr_e);
 gradientStep(controllerParams, lr_c);
 ```
 
-- 适配层约 33K 参数，TypeScript autodiff 完全能处理
-- Controller 的路径偏好（哪些维度重要）可以反向塑造适配层的投影
-- MiniMind 编码器作为 ONNX 冻结，不参与梯度——语义提取和策略投影职责分离
+## 3. 图侧决定编码器需求
 
-**为什么两边都是 L2？**
+编码器输出被三个消费者使用，它们都依赖 L2 归一化向量：
 
-可微计算图（router.ts、Float32VectorCache、ANN usearch）全部基于 L2 归一化向量和余弦相似度。编码器输出 L2、适配器输出 L2，中间不破坏归一化。
+```
+编码器输出: Float32[256] L2
+         │
+         ├─→ HA (HierarchicalActivation)
+         │     query·candidate cosine → g₁ cross-attention
+         │     7-way blended scoring → nodeScores
+         │     ★ 基础信号是余弦相似度，编码器质量决定一切下游
+         │
+         ├─→ MGR (MemoryGraphReasoner)
+         │     g = σ(v^T @ q + b)    gate 依赖 v^T @ q
+         │     q' = g·v + (1-g)·q   残差混合
+         │     r = q'^T @ v          局部相关性
+         │     ★ gate 门控依赖余弦相似度，编码器偏了 gate 就偏了
+         │
+         └─→ DifferentiableController
+               node/edge/control/budget heads
+               ★ 不直接消费编码器输出，消费 HA 的 nodeScores
+```
 
-## 3. 模型配置
+**结论**：编码器只有一个核心任务——**把语义相近的文本映射到相近的 L2 方向**。
+所有"选择性关注"、"多尺度聚合"、"时序记忆"都在图侧完成。
+编码器越简单，越容易验证、导出、加速。
 
-### 3.1 推荐：Small（甜点位）
+### 3.1 Attention 最终选择：双向 Full Attention
+
+| 方案 | 判定 | 原因 |
+|------|------|------|
+| **双向 Full Attention** | ✅ 选定 | 短序列（32-256 tokens），每条 token 看全序列，ONNX 友好 |
+| KDA 式状态化 | ❌ | 跨节点状态 = MGR gate biases + h₁ EMA 职责，冗余且冲突 |
+| MLA 式压缩 | ❌（当前） | 存储压缩的价值在百万节点后才明显，先做正确再做省 |
+| 稀疏 Attention | ❌ | 256 tokens 全 attention = 64K 次比较，完全不需要稀疏 |
+| causal Attention | ❌ | 生成模型的遗产，对编码是纯负债（前向 token 看不到后文） |
+
+## 4. 模型配置
+
+### 4.1 推荐：Small（甜点位）
 
 ```
 参数量：     ~30M
 层数：       6
-hidden：     448 或 512
+hidden：     512
 heads：      8 (q_heads=8, kv_heads=4, GQA)
-ffn：        1280～1536
-max_length： 192 tokens
-输出维度：   256
-activation： 1 个标量
+head_dim：   64
+ffn：        1536 (SwiGLU)
+max_length： 256 tokens（NMG 节点短文本绰绰有余）
+
+编码器输出：  256-dim L2 → 适配层 → 128-dim L2 → HA / MGR / Controller
+activation： 1 个标量（节点激活先验，可选）
 ```
 
-原因：
 - NMG 节点文本通常 32～256 tokens，不需要长上下文
-- 100 万节点 × 256 维 × FP16 ≈ 512 MB，可接受
-- 6 层 + 双向 attention 语义容量充足
+- 适配层 Linear(256→128) 约 33K 参数，TypeScript autodiff 轻量可控
 - 比 BGE-small (~118M) 轻 4 倍，比 Qwen3-0.5B (~500M) 轻 16 倍
 
-### 3.2 可选档位
+### 4.2 可选档位
 
-| 档位 | 层数 | hidden | 输出 | 参数量 | 用途 |
-|------|------|--------|------|--------|------|
-| Tiny | 4 | 384 | 128 | ~15M | 粗召回 / 极低延迟 |
-| **Small** | **6** | **448-512** | **256** | **~30M** | **主模型** |
-| Medium | 8 | 512 | 256 | ~55M | 质量兜底 |
+| 档位 | 层数 | hidden | 编码器输出 | 适配层输出 | 参数量 | 用途 |
+|------|------|--------|-----------|-----------|--------|------|
+| Tiny | 4 | 384 | 128 | 64 | ~15M | 粗召回 / 极低延迟 |
+| **Small** | **6** | **512** | **256** | **128** | **~30M** | **主模型** |
+| Medium | 8 | 512 | 256 | 128 | ~55M | 质量兜底 |
 
-### 3.3 为什么不用完整 MiniMind-3 (64M)
+### 4.3 完整结构
 
-- 64M 参数中去掉 LM head（6400×768 ≈ 5M）后主体约 59M
-- 生成模型为 next-token prediction 优化，encoder 不需要这个复杂度
-- 6 层 + 双向 attention 对短文本编码通常够用
-- 小 batch 推理延迟更重要：batch=1 和 batch=16 都要快
+```
+MiniMind-NMG Encoder
+├── Token Embedding (Qwen vocab, 初始完整, 后续裁剪至 24-32k)
+├── 6× Transformer Block
+│   ├── RMSNorm (pre-norm)
+│   ├── Bidirectional Full Attention (GQA: 8 q_heads / 4 kv_heads)
+│   │   ├── Q/K/V projections (no bias, Qwen3 style)
+│   │   ├── QK RMSNorm (Qwen3 style)
+│   │   ├── RoPE (max 512, 不需要 YaRN 长文本外推)
+│   │   └── Flash Attention / manual softmax (ONNX 兼容)
+│   ├── Residual
+│   ├── RMSNorm (pre-norm)
+│   ├── SwiGLU FFN (gate + up + down, no bias)
+│   └── Residual
+├── Final RMSNorm
+├── Masked Mean Pooling (over valid tokens, ignoring padding)
+├── Embedding Head: Linear(hidden, 256) → L2Normalize
+└── Activation Head (v2): Linear(hidden, 1) → Sigmoid
+```
 
-## 4. 架构改造（相比原生 MiniMind）
+## 5. 架构改造（相比原生 MiniMind）
 
-### 4.1 三处必须改
+### 5.1 必须改
 
 ```
 1. causal mask → bidirectional attention（借 dLM 思路）
    取消因果掩码，每个 token 看完整序列
-   这对否定、转折、关系表达至关重要
 
-2. LM head → multi-head
-   embedding head：   Linear(hidden, 256) → L2
-   activation head：  Linear(hidden, 1) → sigmoid
-   （后续扩展 Q/K/V heads）
+2. LM head → encoder heads
+   embedding head：   Linear(hidden, 256) → L2Normalize
+   activation head：  Linear(hidden, 1) → Sigmoid
 
-3. CE loss → retrieval + ranking + distillation loss
+3. max_position_embeddings: 32768 → 512（不需要长文本外推）
+
+4. CE loss → ranking + distillation loss
    InfoNCE + pairwise ranking + teacher score MSE
 ```
 
-### 4.2 三处尽量保留
+### 5.2 尽量保留
 
 ```
 RMSNorm  — 比 LayerNorm 更快
-RoPE     — 相对位置编码，YaRN 外推保留
 GQA      — 8 q_heads / 4 kv_heads，推理更快
 SwiGLU   — 比 ReLU FFN 更好
 Pre-Norm — 训练更稳定
+QK Norm  — Qwen3 风格，训练更稳定
+no bias  — Qwen3 风格，参数更少
 ```
 
-### 4.3 Pooling 选择
+### 5.3 Pooling
 
-不推荐 last-token pooling（decoder-only 最后一个 token 有位置偏差）。
+- **masked mean pooling**（默认）：对有效 token 求均值，忽略 padding
+- attention pooling（可选实验）：可学习权重
+- 多层加权混合（可选实验）：如第 2、4、6 层的加权和
 
-推荐实验：
-- **masked mean pooling**（默认首选）
-- attention pooling（可学习权重）
-- 多层加权混合（不是只用最后一层）
+不推荐 last-token pooling：decoder-only 的最后一个 token 有位置偏差。
 
-MiniMind-O 的经验：中间层可能保留比最后一层更合适的语义（最后一层更贴近 next-token prediction）。
+## 6. Tokenizer 策略
 
-```
-h = Σ α_l · Pool(H_l),  l ∈ {2, 4, 6}
-```
+| 阶段 | 方案 | 词表 | 说明 |
+|------|------|------|------|
+| Phase 1 | 完整 Qwen tokenizer | ~152k | 最快验证蒸馏效果 |
+| Phase 2 | Qwen 兼容裁剪 | 24k-32k | 统计 NMG 语料 token 频率后裁剪 |
 
-### 4.4 Q/K/V 多向量（后续版本）
-
-```
-query  = W_q h    # 这个节点倾向寻找什么
-key    = W_k h    # 这个节点容易被什么激活
-value  = W_v h    # 被激活后传播什么信息
-```
-
-边权不再只靠对称余弦相似度：
-
-```
-e_ij = (q_i^T k_j) / sqrt(d)
-```
-
-天然有向（e_ij ≠ e_ji），匹配 NMG 的有向记忆关系。
-
-## 5. Tokenizer 策略
-
-### 5.1 不推荐完整 Qwen 词表
-
-Qwen3 词表约 152k。hidden=384 时：
-```
-152064 × 384 ≈ 58.4M 参数（仅 embedding 层）
-```
-而骨干本身只有 ~25M——大部分参数浪费在永远不会用的 token 上。
-
-### 5.2 不推荐 MiniMind 原始 6.4k 词表
-
-太小，技术词（SQLite、AG、STG/LTG）被切太碎，影响：
-- 推理速度（序列变长）
-- 技术词表示质量
-- 与 Qwen 教师蒸馏难度
-
-### 5.3 推荐：Qwen 兼容裁剪词表（20k～40k）
-
-从 NMG 真实语料统计 Qwen token 频率：
-```
-NMG 历史节点 + 用户查询 + 工具调用 + 代码/配置 + 技术文档
-```
-
-保留高频 token，裁剪到 20k～40k。
-
-不同规模的代价（hidden=384, FP16）：
+不同规模的代价（hidden=512, FP16）：
 
 | 词表 | Embedding 参数 | 约占内存 |
 |------|--------------|---------|
-| 6,400 | 2.5M | 5 MB |
-| 16,000 | 6.1M | 12 MB |
-| 24,000 | 9.2M | 18 MB |
-| 32,000 | 12.3M | 25 MB |
-| 64,000 | 24.6M | 49 MB |
-| 152,064 | 58.4M | 117 MB |
+| 6,400 (MiniMind) | 3.3M | 6.5 MB |
+| 24,000 | 12.3M | 24 MB |
+| 32,000 | 16.4M | 32 MB |
+| 152,064 (Qwen) | 77.9M | 156 MB |
 
-**第一版建议：先用完整 Qwen tokenizer 验证蒸馏效果，确认有效后再裁剪到 24k～32k。**
+Tokenizer 与模型分开部署——ONNX 只收 `input_ids` + `attention_mask`。
 
-Tokenizer 与模型分开，ONNX 模型只收 `input_ids` + `attention_mask`。
+## 7. 训练策略
 
-## 6. 训练策略
-
-### 6.1 教师：Qwen3-0.5B
+### 7.1 教师：Qwen3-0.5B
 
 已验证 Qwen3-0.5B > bge-small。不蒸馏"通用语义"，而是蒸馏"Qwen 在 NMG 上的排序行为"。
 
-### 6.2 训练数据：NMG 真实检索轨迹
+### 7.2 训练数据：NMG 真实检索轨迹
 
 每次检索保存：
 ```
@@ -213,31 +202,21 @@ query
 Qwen3 分数
 最终进入 AG 的节点
 后续真正被使用的节点
-未被使用的高相似节点
+未被使用的高相似节点（hard negative）
 ```
 
-构造：
-```
-query → positive node（进入 AG 且被使用）
-query → hard negative node（高分但未被使用）
-```
-
-### 6.3 损失函数
-
-不要只复制 Qwen 向量，优先复制它的**排序**：
+### 7.3 损失函数
 
 ```
 L = α·L_contrastive + β·L_rank + γ·L_teacher + δ·L_behavior
+
+L_contrastive: InfoNCE（used > unused）
+L_rank:        pairwise ranking loss（保留 Qwen 的排序）
+L_teacher:     MSE（student score ≈ teacher score）
+L_behavior:    交叉熵（预测"是否被使用"）
 ```
 
-| 损失 | 公式 | 目的 |
-|------|------|------|
-| InfoNCE | 标准对比损失 | 语义区分 |
-| Pairwise Ranking | max(0, m - s(q,p+) + s(q,p-)) | 排序一致性 |
-| Teacher MSE | (s_student - s_teacher)² | 分数校准 |
-| Behavior | 交叉熵（是否被使用） | NMG 行为拟合 |
-
-### 6.4 训练流程
+### 7.4 训练流程
 
 ```
 步骤 1：MiniMind 预训练权重 → 改成双向 attention → MLM/去噪适配
@@ -246,20 +225,18 @@ L = α·L_contrastive + β·L_rank + γ·L_teacher + δ·L_behavior
 步骤 4：导出 ONNX → Node.js 部署
 ```
 
-### 6.5 消融实验矩阵（第一批）
+### 7.5 消融实验矩阵
 
 | 版本 | Attention | 层数 | 输出 | 目的 |
 |------|-----------|------|------|------|
-| A | causal | 原配置 8 | 256 | 最小修改基线 |
+| A | causal | 8 | 256 | 最小修改基线 |
 | B | bidirectional | 8 | 256 | 测双向收益 |
 | C | bidirectional | 6 | 256 | 测缩小后质量 |
 | D | bidirectional | 4 | 128 | 测极限轻量 |
 
-统一使用同一批训练样本、hard negative、教师分数、测试 query。
+## 8. 部署：ONNX Runtime Node.js
 
-## 7. 部署：ONNX Runtime Node.js
-
-### 7.1 导出接口
+### 8.1 导出接口
 
 ```python
 # PyTorch → ONNX
@@ -269,13 +246,13 @@ torch.onnx.export(
     "minimind_nmg_encoder.onnx",
     input_names=["input_ids", "attention_mask"],
     output_names=["embedding", "activation"],
-    dynamic_axes={"input_ids": {0: "batch"}, ...}
+    dynamic_axes={"input_ids": {0: "batch"}}
 )
 # embedding: [batch, 256] L2-normalized
 # activation: [batch, 1]  sigmoid
 ```
 
-### 7.2 Node.js 调用
+### 8.2 Node.js 调用
 
 ```ts
 // ONNX 编码器 → L2 向量
@@ -284,82 +261,58 @@ const outputs = await session.run({
   input_ids: encoded.inputIds,
   attention_mask: encoded.attentionMask
 });
-// outputs.embedding: Float32Array[batch * 256] L2
-// outputs.activation: Float32Array[batch * 1]
 
 // 适配层投影 → 图空间
 const graphVector = adapter.project(outputs.embedding);
-// Float32Array[128] L2 → 进入 ANN / VectorCache / Controller
+// Float32Array[128] L2 → 进入 HA / MGR / Controller
 ```
 
-### 7.3 DifferentiableAdapter 接口
+### 8.3 DifferentiableAdapter 接口
 
 ```ts
-// src/core/differentiable-embedder.ts
-
 class DifferentiableAdapter {
   readonly inputDim: number;   // 256（编码器输出）
   readonly outputDim: number;  // 128（图空间）
 
-  // 可训练参数（UOp autodiff）
   readonly #projection: Tensor;  // [128, 256]
   readonly #bias: Tensor;        // [128]
 
-  // 前向推理（无梯度）
   project(encoderOutput: Float32Array): Float32Array;
   // → Linear(256→128) → L2 normalize → Float32Array(128)
 
-  // 训练（有梯度，与 Controller 同一个 DAG）
   train(batch: AdapterBatch, learningRate?: number): TrainingResult;
+  // 与 Controller 同一个 DAG 的 backward
 
-  // 序列化
   toJSON(): DifferentiableAdapterState;
   static fromJSON(state: DifferentiableAdapterState): DifferentiableAdapter;
 }
 ```
 
-### 7.4 多输出头（后续版本）
-
-```text
-embedding       [batch, 256]  L2  → 进入适配层
-graph_vector    [batch, 128]  L2  → 适配层输出（等价于 embedding + adapter）
-activation      [batch, 1]    sigmoid
-```
-
-Q/K/V 多向量（后续）：
-```text
-q               [batch, 64]   L2
-k               [batch, 64]   L2
-v               [batch, 128]  L2
-```
-
-第一版先做 embedding + activation，后续再加 Q/K/V。
-
-### 7.4 性能优化顺序
+### 8.4 性能优化顺序
 
 ```
 双向小 Encoder
-→ 固定 max_length (192)
+→ 固定 max_length (256)
 → 动态批处理（微批窗口合并）
 → ONNX Runtime Node.js
 → FP16 / INT8 量化
-→ 缓存不变节点向量（最大优化）
+→ 缓存不变节点向量 ★ 最大优化
 ```
 
-**缓存节点向量是最重要的优化**：NMG 中绝大部分长期节点不会变化，每轮只需编码当前 query + 新增/修改节点。
+**缓存节点向量**：NMG 中绝大部分长期节点不会变化，每轮只需编码 query + 新增/修改节点。
 
-### 7.5 批处理策略
+### 8.5 批处理策略
 
 Agent 单轮常见场景：
 ```
-batch=1:  当前 query
+batch=1:  当前 query (~1-3ms)
 batch=4:  query + 3 个候选节点
 batch=16: query + 15 个新增节点
 ```
 
-确保 batch=1 和 batch=4 延迟不成为瓶颈。可在同一事件循环内做极短批合并。
+小 batch 延迟是关键——不要只测 batch=200。
 
-## 8. 评价指标
+## 9. 评价指标
 
 不只记录通用 Recall@K，记录 NMG 专用指标：
 
@@ -375,121 +328,64 @@ AG 最终有效节点召回率
 
 最关键指标：**在固定上下文预算下，进入 AG 的节点中最终真正被使用的比例。**
 
-## 9. 五种 MiniMind 变体的取舍
+## 10. MiniMind 变体取舍
 
-| 变体 | 对 NMG 的价值 | 取什么 | 舍什么 |
-|------|--------------|--------|--------|
-| **dLM** | ⭐⭐⭐ 最高 | 双向 attention、mask corruption 训练、AR→dLM 权重迁移 | 多步去噪、扩散生成、词表级输出头 |
-| **主线 Dense** | ⭐⭐⭐ 主体 | RMSNorm、RoPE、GQA、SwiGLU、完整训练链路 | causal mask、LM head、CE loss |
-| **V (视觉)** | ⭐⭐ | Projector 思想：不同模态→统一隐空间 | 视觉编码器本身 |
-| **O (Omni)** | ⭐⭐ | 共享主干+多头、中间层桥接 | 语音/视觉模块 |
-| **Linear** | ⭐（后续） | 长序列/流式状态更新思路 | 不用于节点编码（短序列下 full attention 更快） |
+| 变体 | 取什么 | 舍什么 |
+|------|--------|--------|
+| **dLM** | 双向 attention、mask corruption 训练、AR→dLM 权重迁移 | 多步去噪、扩散生成 |
+| **主线 Dense** | RMSNorm、RoPE、GQA、SwiGLU、完整训练链路 | causal mask、LM head、CE loss |
+| **V (视觉)** | Projector 思想：不同模态→统一隐空间 | 视觉编码器 |
+| **O (Omni)** | 共享主干+多头、中间层桥接 | 语音/视觉模块 |
+| **Linear** | 长序列/流式状态（Phase 6 考虑） | 不用于当前节点编码 |
 
-## 10. 与现有系统的对接
+## 11. 与现有系统的对接
 
-### 10.1 替换路径
+### 11.1 替换路径
 
 ```
 现有：OpenAIEmbeddingClient → Qwen3-0.6B（HTTP API）
                     ↓
-过渡：OpenAIEmbeddingClient → localhost（MiniMind ONNX 兼容 /embeddings 格式）
+过渡：OpenAIEmbeddingClient → localhost（MiniMind ONNX 兼容格式）
                     ↓
-最终：onnxruntime-node → MiniMind-NMG Encoder
-         → DifferentiableAdapter.project()  → 128-dim L2
-         → ANN / VectorCache / Controller
+最终：onnxruntime-node → Encoder → Adapter → 128-dim L2 → HA/MGR/Controller
 ```
 
-### 10.2 接口兼容
+### 11.2 接口兼容
 
 ```ts
-// 对外暴露 VectorEmbedder 接口
-// 内部串联 ONNX 推理 + 适配层投影
 class MiniMindNMGEmbedder implements VectorEmbedder {
   readonly dimensions = 128;  // 适配层输出 = 图空间维度
   readonly model = "minimind-nmg-v1";
 
-  #encoder: OnnxSession;              // onnxruntime-node
-  #adapter: DifferentiableAdapter;    // autodiff 可训练参数
-
   embed(text: string): readonly number[] {
-    const l2_256 = this.#encoder.encode(text);   // ONNX → 256-dim L2
-    const l2_128 = this.#adapter.project(l2_256); // Linear → 128-dim L2
+    const l2_256 = session.run(...);              // ONNX → 256-dim L2
+    const l2_128 = adapter.project(l2_256);       // Linear → 128-dim L2
     return l2_128;
   }
 }
 ```
 
-### 10.3 联合训练流程
+### 11.3 联合训练
 
 ```ts
-// 适配层和 Controller 在同一个 UOp DAG 中
-// 这是保留适配层作为独立组件的核心原因
+const encoderVec = session.run(...);              // Float32Array[256] L2，不参与梯度
+const adapterOut = adapter.forward(encoderVec);   // UOp[128] L2，参与梯度
+const haOutput = ha.propagate(adapterOut, ...);
+const loss = controller.computeLoss(haOutput, labels);
 
-const encoderVec = session.run(...);       // Float32Array[256] L2，不参与梯度
-const adapterOut = adapter.forward(encoderVec);  // UOp[128] L2，参与梯度
-const routeScores = controller.route(adapterOut); // UOp
-const loss = controller.computeLoss(routeScores, labels);
-
-loss.backward();  // 梯度流过 adapter.#projection 和 adapter.#bias
-gradientStep(adapter.#projection, lr_e);
-gradientStep(adapter.#bias, lr_e);
+loss.backward();  // 梯度流过 adapter + HA + controller
+gradientStep(adapter.params, lr_a);
+gradientStep(ha.params, lr_ha);
 gradientStep(controller.params, lr_c);
 ```
 
-### 10.4 索引迁移
+## 12. 不在第一版做的
 
-旧索引（Qwen3 或其他维度）与新索引（MiniMind-NMG 128 维）不兼容，需要重建。
-通过 `scripts/index-qwen3.ts` 同样的流程，指向新模型 + 适配层即可。
-
-## 11. 不在第一版做的
-
-- ❌ Q/K/V 多向量（先验证 embedding + activation 足够）
-- ❌ 完整联合训练（先独立训练 encoder，再联合 controller）
-- ❌ Linear Attention（短序列下 full attention 更快更简单）
+- ❌ Tokenizer 裁剪（先用完整 Qwen 验证效果）
+- ❌ Q/K/V 多向量（先验证 embedding + activation）
 - ❌ 多类型节点 Projector（先用统一文本编码）
-- ❌ Tokenizer 裁剪（先用完整 Qwen tokenizer 验证效果）
+- ❌ Linear Attention（短序列 full attention 更快更简单）
 - ❌ int8 量化（先 FP16 验证质量）
-
-## 12. 实施路线 v2
-
-```
-Phase 1 ─ 结构验证（1-2 周）
-  □ 从 MiniMind-dLM 提取双向 attention 实现
-  □ 搭建 PyTorch 训练脚本：6 层 + hidden 448 + 输出 256
-  □ causal vs bidirectional 消融实验
-  □ 用 NMG 真实数据跑第一轮对比学习
-
-Phase 2 ─ 教师蒸馏（1-2 周）
-  □ Qwen3-0.5B 作为教师，标注 NMG 检索排序
-  □ 实现 ranking loss + InfoNCE + teacher MSE
-  □ 与 bge-small 基线对比
-  □ 确定最终模型配置（层数、hidden、输出维度）
-
-Phase 3 ─ ONNX 部署（1 周）
-  □ PyTorch → ONNX 导出
-  □ onnxruntime-node 集成
-  □ Tokenizer 独立部署（JS 侧）
-  □ batch=1/4/16 延迟测试
-
-Phase 4 ─ 训练闭环（2-4 周）
-  □ NMG 检索轨迹自动收集
-  □ 在线 hard negative mining
-  □ activation head 多任务训练
-  □ 周期性重训练流程
-
-Phase 5 ─ Tokenizer 裁剪（1 周）
-  □ NMG 语料 token 频率统计
-  □ Qwen 词表裁剪到 24k～32k
-  □ 质量/速度对比
-  □ 最终词表确定
-
-Phase 6 ─ 高级特性（按需）
-  □ Q/K/V 多向量编码
-  □ 多类型节点 Projector
-  □ 与 Controller 联合训练
-  □ int8 量化
-  □ Linear Attention 长序列分支
-```
 
 ## 13. 文件规划
 
@@ -497,8 +393,8 @@ Phase 6 ─ 高级特性（按需）
 minimind-nmg/                       # Python 训练侧
   model/
     minimind_encoder.py             # 双向 MiniMind Encoder
-    pooling.py                      # mean / attention / 多层混合 pooling
-    heads.py                        # embedding / activation / QKV heads
+    pooling.py                      # masked mean / attention / 多层混合 pooling
+    heads.py                        # embedding / activation heads
   trainer/
     train_encoder.py                # 训练主脚本
     data.py                         # NMG 轨迹 → 训练样本
@@ -510,9 +406,41 @@ minimind-nmg/                       # Python 训练侧
 src/core/
   minimind-embedder.ts              # ONNX 推理 + 适配层（实现 VectorEmbedder）
   minimind-embedder.test.ts         # 测试
-  differentiable-embedder.ts        # DifferentiableAdapter（UOp autodiff 可训练层）
+  differentiable-embedder.ts        # DifferentiableAdapter（UOp autodiff）
   differentiable-embedder.test.ts   # 测试（含联合 backward 验证）
 
 docs/
   minimind-embedder.md              # 本文档
+  hierarchical-activation.md        # HA + MGR 推演设计
+```
+
+## 14. 实施路线
+
+```
+Phase 1 ─ 结构验证（当前）
+  □ 从 MiniMind-dLM 提取双向 attention 实现
+  □ 搭建 PyTorch 训练脚本：6 层 + hidden 512 + 输出 256
+  □ 从 MiniMind-3 预训练权重初始化 + MLM 适配
+  □ causal vs bidirectional 消融实验
+
+Phase 2 ─ 教师蒸馏
+  □ Qwen3-0.5B 标注 NMG 检索排序
+  □ ranking loss + InfoNCE + teacher MSE
+  □ 与 bge-small 基线对比
+
+Phase 3 ─ ONNX 部署
+  □ PyTorch → ONNX 导出
+  □ onnxruntime-node 集成
+  □ batch=1/4/16 延迟测试
+
+Phase 4 ─ 训练闭环
+  □ NMG 检索轨迹自动收集
+  □ activation head 多任务训练
+  □ 适配层 + HA + Controller 联合训练
+
+Phase 5 ─ Tokenizer 裁剪
+  □ NMG 语料 token 频率统计 → 裁剪至 24k-32k
+
+Phase 6 ─ 高级特性（按需）
+  □ Q/K/V 多向量、多类型节点 Projector、int8 量化
 ```

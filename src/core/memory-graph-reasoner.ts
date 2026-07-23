@@ -4,9 +4,19 @@ import { Tensor, gradientStep } from "./autodiff.ts";
  * Memory-Graph Reasoner — each memory node is a micro-operator that
  * transforms the query state during graph traversal.
  *
- * g  = σ(v^T @ q + b)     gate: how much this memory influences the query
- * q' = g·v + (1−g)·q      state update: memory-tinged query
- * r  = q'^T @ v           local relevance score
+ * State-update design (KDA-inspired degrees of freedom):
+ *
+ *   g     = σ(v^T @ q + b_log)     absorption — how much of this node to take in
+ *   A     = σ(a_log)                decay — global forgetting rate (0=wipe, 1=keep)
+ *   β     = σ(β_log)                retention — how much old state vs new state
+ *
+ *   q_tmp = A·q_old + g·v          decay old context, absorb new memory
+ *   q'    = β·q_tmp + (1−β)·query   output blend: new state vs original query
+ *   r     = q'^T @ v                local relevance score
+ *
+ * Old design (v1): g = σ(v^T@q + b), q' = g·v + (1−g)·q.
+ * This is the special case where A_log = 0 (no decay) and β_log = 0
+ * (output = q_tmp only, no original-query anchor).
  *
  * The traversal path is the computation graph. Gradients flow through
  * every visited node back to the per-node gate biases.
@@ -59,28 +69,43 @@ export interface PathTrainingSample {
 }
 
 export interface MemoryGraphReasonerState {
-  version: 1;
+  version: 2;
   dimensions: number;
   trainingSteps: number;
-  /** gate bias per node, keyed by node ID */
-  gateBiases: Record<string, number>;
+  /** Global decay log-rate: A = exp(A_log). 0 = no decay. */
+  aLog: number;
+  /** Per-node absorption logit, keyed by node ID. g = σ(b_log). */
+  nodeBiasLogits: Record<string, number>;
+  /** Per-node retention logit, keyed by node ID. β = σ(β_log). */
+  nodeBetaLogits: Record<string, number>;
 }
 
 export class MemoryGraphReasoner {
   readonly dimensions: number;
   #trainingSteps: number;
-  /** Per-node learnable gate bias. Lazily created as nodes are visited. */
-  readonly #gateBiases: Map<string, Tensor>;
+  /** Global decay: A = σ(a_log). 0 = full wipe, 1 = keep all context. */
+  readonly #aLog: Tensor;
+  /** Per-node absorption logit b_log → gate = σ(v^T@q + b_log). */
+  readonly #nodeBiasLogits: Map<string, Tensor>;
+  /** Per-node retention logit β_log → β = σ(β_log). */
+  readonly #nodeBetaLogits: Map<string, Tensor>;
   /** Shared scalar (1) for arithmetic. */
   readonly #one: Tensor;
 
   constructor(dimensions: number, state?: MemoryGraphReasonerState) {
     this.dimensions = dimensions;
     this.#trainingSteps = state?.trainingSteps ?? 0;
-    this.#gateBiases = new Map();
-    if (state?.gateBiases) {
-      for (const [id, bias] of Object.entries(state.gateBiases)) {
-        this.#gateBiases.set(id, Tensor.scalar(bias, true));
+    this.#aLog = Tensor.scalar(state?.aLog ?? 0, true); // 0 = no decay (backward compat)
+    this.#nodeBiasLogits = new Map();
+    this.#nodeBetaLogits = new Map();
+    if (state?.nodeBiasLogits) {
+      for (const [id, b] of Object.entries(state.nodeBiasLogits)) {
+        this.#nodeBiasLogits.set(id, Tensor.scalar(b, true));
+      }
+    }
+    if (state?.nodeBetaLogits) {
+      for (const [id, b] of Object.entries(state.nodeBetaLogits)) {
+        this.#nodeBetaLogits.set(id, Tensor.scalar(b, true));
       }
     }
     this.#one = Tensor.scalar(1);
@@ -93,39 +118,66 @@ export class MemoryGraphReasoner {
   // ── single-step operator ──
 
   /**
-   * Apply one reasoning step: query passes through a memory node.
-   * Returns refined query and relevance score as Tensors (for DAG chaining).
+   * Apply one reasoning step with KDA-inspired state update:
+   *
+   *   g     = σ(v^T@q + b_log)    absorption — how much of this node to take in
+   *   A     = exp(A_log)           decay — global forgetting rate
+   *   β     = σ(β_log)             retention — old state vs new state blend
+   *
+   *   q_tmp = A·q + g·v           decay old + absorb new
+   *   q'    = β·q_tmp + (1-β)·q   output blend: state vs original
+   *   r     = q'^T @ v            local relevance
    */
   #reasonStep(
     q: Tensor,
+    queryOriginal: Tensor, // the original, unmodified query (anchor)
     v: Float32Array,
     nodeId: string,
-  ): { nextQuery: Tensor; score: Tensor; gate: Tensor } {
+  ): { nextQuery: Tensor; score: Tensor; gate: Tensor; retention: Tensor } {
     const vTensor = Tensor.vector(v);
 
-    // g = σ(v^T @ q + b)  — learnable per-node gate
+    // ── absorption gate: g = σ(v^T @ q + b_log) ──
     const similarity = vTensor.transpose().matmul(q); // [1,1]
-    const bias = this.#getOrCreateBias(nodeId);
-    const gate = similarity.add(bias).sigmoid();
+    const bLog = this.#getOrCreateBiasLogit(nodeId);
+    const gate = similarity.add(bLog).sigmoid();
 
-    // q' = g·v + (1−g)·q  — residual blend
+    // ── A = σ(a_log): global decay, naturally bounded in (0,1) ──
+    const A = this.#aLog.sigmoid();
+
+    // ── β = σ(β_log): per-node retention ──
+    const betaLog = this.#getOrCreateBetaLogit(nodeId);
+    const beta = betaLog.sigmoid();
+
+    // ── q_tmp = A·q + g·v: decay old + absorb new ──
+    const decayedQ = q.multiply(A);
     const gatedV = vTensor.multiply(gate);
-    const gatedQ = q.multiply(this.#one.add(gate.negate()));
-    const nextQuery = gatedV.add(gatedQ);
+    const qTmp = decayedQ.add(gatedV);
 
-    // r = q'^T @ v  — local relevance
-    const score = nextQuery.transpose().matmul(vTensor);
+    // ── q' = β·q_tmp + (1−β)·queryOriginal: output blend ──
+    const qNew = qTmp.multiply(beta).add(queryOriginal.multiply(this.#one.add(beta.negate())));
 
-    return { nextQuery, score, gate };
+    // ── r = q'^T @ v: local relevance ──
+    const score = qNew.transpose().matmul(vTensor);
+
+    return { nextQuery: qNew, score, gate, retention: beta };
   }
 
-  #getOrCreateBias(nodeId: string): Tensor {
-    let bias = this.#gateBiases.get(nodeId);
-    if (!bias) {
-      bias = Tensor.scalar(0, true); // init at 0 = sigmoid(cosine) ~ 0.5 for cos=0
-      this.#gateBiases.set(nodeId, bias);
+  #getOrCreateBiasLogit(nodeId: string): Tensor {
+    let b = this.#nodeBiasLogits.get(nodeId);
+    if (!b) {
+      b = Tensor.scalar(0, true);
+      this.#nodeBiasLogits.set(nodeId, b);
     }
-    return bias;
+    return b;
+  }
+
+  #getOrCreateBetaLogit(nodeId: string): Tensor {
+    let b = this.#nodeBetaLogits.get(nodeId);
+    if (!b) {
+      b = Tensor.scalar(0, true); // 0 → β = σ(0) = 0.5 (neutral)
+      this.#nodeBetaLogits.set(nodeId, b);
+    }
+    return b;
   }
 
   // ── traversal ──
@@ -140,7 +192,8 @@ export class MemoryGraphReasoner {
     maxSteps: number,
   ): TraversalResult {
     const path: TraversalStep[] = [];
-    let q = Tensor.vector(queryVector);
+    const queryOriginal = Tensor.vector(queryVector); // anchor — never modified
+    let q = queryOriginal;
     let currentQuery = Float32Array.from(queryVector);
     let pathScore = 0;
 
@@ -153,7 +206,7 @@ export class MemoryGraphReasoner {
       let bestGate = 0;
 
       for (const node of candidates) {
-        const { nextQuery, score, gate } = this.#reasonStep(q, node.vector, node.id);
+        const { nextQuery, score, gate } = this.#reasonStep(q, queryOriginal, node.vector, node.id);
         const s = score.scalarValue;
         if (s > bestScore) {
           bestScore = s;
@@ -166,7 +219,7 @@ export class MemoryGraphReasoner {
       if (!bestNode) break;
       pathScore += bestScore;
       // Rebuild q as Tensor for the next step (from the winning node's output)
-      const { nextQuery: winningQ } = this.#reasonStep(q, bestNode.vector, bestNode.id);
+      const { nextQuery: winningQ } = this.#reasonStep(q, queryOriginal, bestNode.vector, bestNode.id);
 
       path.push({
         nodeId: bestNode.id,
@@ -303,13 +356,14 @@ export class MemoryGraphReasoner {
       throw new Error("trainPath requires at least one node in path");
     }
 
-    let q = Tensor.vector(sample.queryVector);
+    const queryOriginal = Tensor.vector(sample.queryVector);
+    let q = queryOriginal;
     let totalScore: Tensor | null = null;
 
     for (const nodeId of sample.pathNodeIds) {
       const node = sample.graph.get(nodeId);
       if (!node) throw new Error(`node not in graph: ${nodeId}`);
-      const { nextQuery, score } = this.#reasonStep(q, node.vector, nodeId);
+      const { nextQuery, score } = this.#reasonStep(q, queryOriginal, node.vector, nodeId);
       totalScore = totalScore ? totalScore.add(score) : score;
       q = nextQuery;
     }
@@ -317,11 +371,13 @@ export class MemoryGraphReasoner {
     // Loss: negative path score (maximize sum of per-step relevance)
     const loss = totalScore!.multiply(Tensor.scalar(-1));
 
-    // Gather all parameters used along the path
-    const params: Tensor[] = [];
+    // Gather all parameters: global A_log + per-node b_log + per-node β_log
+    const params: Tensor[] = [this.#aLog];
     for (const nodeId of sample.pathNodeIds) {
-      const bias = this.#gateBiases.get(nodeId);
-      if (bias) params.push(bias);
+      const bLog = this.#nodeBiasLogits.get(nodeId);
+      if (bLog) params.push(bLog);
+      const betaLog = this.#nodeBetaLogits.get(nodeId);
+      if (betaLog) params.push(betaLog);
     }
 
     params.forEach((p) => p.zeroGrad());
@@ -336,15 +392,21 @@ export class MemoryGraphReasoner {
   // ── persistence ──
 
   toJSON(): MemoryGraphReasonerState {
-    const biases: Record<string, number> = {};
-    for (const [id, bias] of this.#gateBiases) {
-      biases[id] = bias.scalarValue;
+    const nodeBiasLogits: Record<string, number> = {};
+    for (const [id, b] of this.#nodeBiasLogits) {
+      nodeBiasLogits[id] = b.scalarValue;
+    }
+    const nodeBetaLogits: Record<string, number> = {};
+    for (const [id, b] of this.#nodeBetaLogits) {
+      nodeBetaLogits[id] = b.scalarValue;
     }
     return {
-      version: 1,
+      version: 2,
       dimensions: this.dimensions,
       trainingSteps: this.#trainingSteps,
-      gateBiases: biases,
+      aLog: this.#aLog.scalarValue,
+      nodeBiasLogits,
+      nodeBetaLogits,
     };
   }
 
