@@ -6,6 +6,8 @@ const Op = {
   Constant: "constant",
   Exp: "exp",
   Index: "index",
+  L2Normalize: "l2_normalize",
+  L2NormalizeGradient: "l2_normalize_gradient",
   Log: "log",
   Matmul: "matmul",
   Multiply: "multiply",
@@ -42,6 +44,7 @@ class UOp {
 }
 
 const gradients = new WeakMap<UOp, Float32Array>();
+const l2InvNorms = new WeakMap<UOp, number>();
 
 function sizeOf(shape: Shape): number {
   return shape[0] * shape[1];
@@ -102,6 +105,10 @@ function multiply(left: UOp, right: UOp): UOp {
 
 function negate(source: UOp): UOp {
   return unary(Op.Negate, source);
+}
+
+function l2Normalize(source: UOp): UOp {
+  return unary(Op.L2Normalize, source);
 }
 
 function broadcast(source: UOp, shape: Shape): UOp {
@@ -203,8 +210,31 @@ function evaluate(root: UOp, cache = new Map<UOp, Float32Array>()): Float32Array
       const src = values[0]!;
       result = new Float32Array(src.length);
       for (let i = 0; i < src.length; i++) result[i] = 1 / (1 + Math.exp(-src[i]!));
-    }
       break;
+    }
+    case Op.L2Normalize: {
+      const src = values[0]!;
+      let sumSq = 0;
+      for (let i = 0; i < src.length; i++) sumSq += src[i]! * src[i]!;
+      const norm = Math.sqrt(sumSq);
+      const invNorm = norm === 0 ? 0 : 1 / norm;
+      result = new Float32Array(src.length);
+      for (let i = 0; i < src.length; i++) result[i] = src[i]! * invNorm;
+      l2InvNorms.set(root, invNorm);
+      break;
+    }
+    case Op.L2NormalizeGradient: {
+      const output = values[0]!;
+      const grad = values[1]!;
+      const invNorm = root.argument as number;
+      let dot = 0;
+      for (let i = 0; i < output.length; i++) dot += output[i]! * grad[i]!;
+      result = new Float32Array(output.length);
+      for (let i = 0; i < output.length; i++) {
+        result[i] = (grad[i]! - output[i]! * dot) * invNorm;
+      }
+      break;
+    }
     case Op.Softmax:
       result = evaluateSoftmax(values[0]!);
       break;
@@ -302,6 +332,18 @@ function localGradients(operation: UOp, gradient: UOp): Array<readonly [UOp, UOp
       ];
     case Op.Negate:
       return [[left!, negate(gradient)]];
+    case Op.L2Normalize:
+      return [
+        [
+          left!,
+          new UOp(
+            Op.L2NormalizeGradient,
+            left!.shape,
+            [operation, gradient],
+            l2InvNorms.get(operation) ?? 0,
+          ),
+        ],
+      ];
     case Op.Broadcast:
       return [[left!, reduceToShape(gradient, left!.shape)]];
     case Op.Matmul:
@@ -473,6 +515,10 @@ export class Tensor {
     return new Tensor(negate(this.#operation));
   }
 
+  l2Normalize(): Tensor {
+    return new Tensor(l2Normalize(this.#operation));
+  }
+
   at(index: number): Tensor {
     if (!Number.isInteger(index) || index < 0 || index >= sizeOf(this.shape)) {
       throw new Error("tensor index is out of bounds");
@@ -496,6 +542,8 @@ export class Tensor {
 
   backward(): void {
     if (sizeOf(this.shape) !== 1) throw new Error("backward requires a scalar output");
+    // Ensure forward pass populates any lazy caches (e.g., L2Normalize invNorm)
+    this.data;
     const gradientGraph = computeGradients(this.#operation);
     const cache = new Map<UOp, Float32Array>();
     for (const [operation, gradient] of gradientGraph) {
