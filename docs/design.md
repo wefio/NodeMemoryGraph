@@ -705,28 +705,44 @@ q₀ ──→ [node A: g=σ(v·q+b), q'=g·v+(1-g)·q] ──→ q₁
     ──→ [node C] ──→ q₃ → path loss
 ```
 
-### Node operator
+### Node operator (v2 — KDA-inspired)
+
+The state update has three named degrees of freedom, inspired by Kimi Delta
+Attention (FlashKDA, MoonshotAI):
 
 ```text
-g  = σ(v^T @ q + b)       gate: how much this memory influences the query
-q' = g·v + (1−g)·q         residual blend: memory-tinged query
-r  = q'^T @ v              local relevance score
+g = σ(v^T @ q + b_log)     absorption — how much of THIS node to take in
+A = σ(a_log)                decay — global forgetting rate (0=wipe, 1=keep)
+β = σ(β_log)                retention — old state vs new state blend
+
+q_tmp = A·q_old + g·v       decay old context, absorb new memory
+q'    = β·q_tmp + (1−β)·query  output blend with original query anchor
+r     = q'^T @ v            local relevance score
 ```
 
-- `b` is a single learnable scalar per node (not a matrix—one parameter per
-  node is sufficient because `v^T @ q` already captures cosine similarity).
-- The gate decides how much the query should absorb from this memory.
-- State update is a residual blend: gate·memory + (1−gate)·current.
+| Parameter | Scope | Default | Meaning |
+|-----------|-------|---------|---------|
+| `b_log` | per-node | 0 → g≈0.5 | Higher = more absorption from this memory |
+| `a_log` | global | 0 → A=0.5 | Higher = retain more past context across steps |
+| `β_log` | per-node | 0 → β=0.5 | Higher = output favours accumulated state over original query |
+
+The v1 design (`g=σ(v^T@q+b)`, `q'=g·v+(1-g)·q`) is the special case where
+a_log=0 and β_log=0 (all sigmoid, so A=0.5 and β=0.5 — not identical to v1
+but architecturally backward-compatible).
+
+Performance: 16μs per node-step regardless of dimension (d=64 or d=128).
+3-step traversal over 20 nodes: 0.96ms; over 200 nodes: 9.64ms.
 
 ### Relationship to HierarchicalActivation
 
 |                         | HA                           | MGR                           |
 |-------------------------|------------------------------|-------------------------------|
 | Node role               | passive data, scored         | active operator, transforms   |
+| State update DOF        | n/a                          | 3 (absorption, decay, retain) |
 | Scoring                 | 7-way similarity blend       | single gate + local relevance |
 | Graph structure         | fixed (g₁→g₂→g₃)            | dynamic, follows edges        |
-| Parameters              | 9 global                     | 1 per node + 9 global         |
-| Per-step cost (d=64)    | 0.12ms                       | 0.02ms                        |
+| Parameters              | 9 global                     | 2/node + 1 global             |
+| Per-step cost (d=64)    | 0.12ms                       | 0.016ms (per node-step)       |
 | Best for                | batch ranking over pool      | multi-step path reasoning     |
 
 They are complementary: HA scores a candidate pool globally, MGR refines
