@@ -19,6 +19,7 @@ const Op = {
   Softmax: "softmax",
   SoftmaxGradient: "softmax_gradient",
   Sum: "sum",
+  SumN: "sum_n",
   Transpose: "transpose",
 } as const;
 
@@ -73,6 +74,15 @@ function add(left: UOp, right: UOp): UOp {
   if (sizeOf(right.shape) === 1)
     return binary(Op.Add, left, broadcast(right, left.shape), left.shape);
   throw new Error("add requires equal shapes or a scalar operand");
+}
+
+function sumN(inputs: UOp[]): UOp {
+  if (inputs.length < 2) throw new Error("sumN requires at least two operands");
+  const shape = inputs[0]!.shape;
+  for (let i = 1; i < inputs.length; i++) {
+    if (!sameShape(inputs[i]!.shape, shape)) throw new Error("sumN requires equal shapes");
+  }
+  return new UOp(Op.SumN, shape, inputs, undefined);
 }
 
 function multiply(left: UOp, right: UOp): UOp {
@@ -186,6 +196,15 @@ function evaluate(root: UOp, cache = new Map<UOp, Float32Array>()): Float32Array
       let total = 0;
       for (let i = 0; i < src.length; i++) total += src[i]!;
       result = Float32Array.of(total);
+    }
+      break;
+    case Op.SumN: {
+      const n = values.length;
+      result = new Float32Array(values[0]!.length);
+      for (let j = 0; j < n; j++) {
+        const src = values[j]!;
+        for (let i = 0; i < src.length; i++) result[i] += src[i]!;
+      }
     }
       break;
     case Op.Exp: {
@@ -325,6 +344,8 @@ function localGradients(operation: UOp, gradient: UOp): Array<readonly [UOp, UOp
         [left!, reduceToShape(gradient, left!.shape)],
         [right!, reduceToShape(gradient, right!.shape)],
       ];
+    case Op.SumN:
+      return operation.sources.map((s) => [s, reduceToShape(gradient, s.shape)] as const);
     case Op.Multiply:
       return [
         [left!, reduceToShape(multiply(gradient, right!), left!.shape)],
@@ -482,6 +503,10 @@ export class Tensor {
 
   add(other: Tensor): Tensor {
     return new Tensor(add(this.#operation, other.#operation));
+  }
+
+  static sumN(inputs: Tensor[]): Tensor {
+    return new Tensor(sumN(inputs.map((t) => t.#operation)));
   }
 
   multiply(other: Tensor): Tensor {

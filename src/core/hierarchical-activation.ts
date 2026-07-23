@@ -152,7 +152,7 @@ export class HierarchicalActivation {
     const h1T = Tensor.vector(h1);
     const h2T = Tensor.vector(h2);
     const h3T = Tensor.vector(h3);
-    const g3 = g1.add(g2).add(h1T).add(h2T).add(h3T).l2Normalize();
+    const g3 = Tensor.sumN([g1, g2, h1T, h2T, h3T]).l2Normalize();
 
     // ── Blended scores ──
     const sw = this.#scoreWeights.softmax();
@@ -163,13 +163,15 @@ export class HierarchicalActivation {
     const simH2 = h2T.transpose().matmul(C);
     const simH3 = h3T.transpose().matmul(C);
 
-    const blended = simQ.multiply(sw.at(0))
-      .add(simG1.multiply(sw.at(1)))
-      .add(simG2.multiply(sw.at(2)))
-      .add(simG3.multiply(sw.at(3)))
-      .add(simH1.multiply(sw.at(4)))
-      .add(simH2.multiply(sw.at(5)))
-      .add(simH3.multiply(sw.at(6)));
+    const blended = Tensor.sumN([
+      simQ.multiply(sw.at(0)),
+      simG1.multiply(sw.at(1)),
+      simG2.multiply(sw.at(2)),
+      simG3.multiply(sw.at(3)),
+      simH1.multiply(sw.at(4)),
+      simH2.multiply(sw.at(5)),
+      simH3.multiply(sw.at(6)),
+    ]);
 
     return {
       g1Context: g1Data,
@@ -221,17 +223,19 @@ export class HierarchicalActivation {
       this.#meanVector(sample.graphState?.longTermVectors),
     );
 
-    const g3 = g1.add(g2).add(h1).add(h2).add(h3).l2Normalize();
+    const g3 = Tensor.sumN([g1, g2, h1, h2, h3]).l2Normalize();
 
     // Blended scores (reuse simQ from g₁ step)
     const sw = this.#scoreWeights.softmax();
-    const blended = simQ.multiply(sw.at(0))
-      .add(g1.transpose().matmul(C).multiply(sw.at(1)))
-      .add(g2.transpose().matmul(C).multiply(sw.at(2)))
-      .add(g3.transpose().matmul(C).multiply(sw.at(3)))
-      .add(h1.transpose().matmul(C).multiply(sw.at(4)))
-      .add(h2.transpose().matmul(C).multiply(sw.at(5)))
-      .add(h3.transpose().matmul(C).multiply(sw.at(6)));
+    const blended = Tensor.sumN([
+      simQ.multiply(sw.at(0)),
+      g1.transpose().matmul(C).multiply(sw.at(1)),
+      g2.transpose().matmul(C).multiply(sw.at(2)),
+      g3.transpose().matmul(C).multiply(sw.at(3)),
+      h1.transpose().matmul(C).multiply(sw.at(4)),
+      h2.transpose().matmul(C).multiply(sw.at(5)),
+      h3.transpose().matmul(C).multiply(sw.at(6)),
+    ]);
 
     const probs = blended.softmax();
 
