@@ -519,6 +519,10 @@ export class Tensor {
     return new Tensor(l2Normalize(this.#operation));
   }
 
+  transpose(): Tensor {
+    return new Tensor(unary(Op.Transpose, this.#operation, [this.shape[1], this.shape[0]]));
+  }
+
   at(index: number): Tensor {
     if (!Number.isInteger(index) || index < 0 || index >= sizeOf(this.shape)) {
       throw new Error("tensor index is out of bounds");
