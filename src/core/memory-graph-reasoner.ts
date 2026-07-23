@@ -31,6 +31,25 @@ export interface TraversalResult {
   pathScore: number; // sum of per-step scores
 }
 
+/** Impact of inserting a hypothetical node into the graph. */
+export interface WhatIfResult {
+  /** Traversal WITHOUT the hypothetical node. */
+  baseline: TraversalResult;
+  /** Traversal WITH the hypothetical node injected. */
+  withNode: TraversalResult;
+  /** Nodes whose scores changed significantly (|Δ| > threshold). */
+  impacted: ImpactedNode[];
+}
+
+export interface ImpactedNode {
+  nodeId: string;
+  scoreBefore: number;
+  scoreAfter: number;
+  delta: number;
+  /** Whether this node entered or exited the top-k path. */
+  pathChange: "entered" | "exited" | "none";
+}
+
 export interface PathTrainingSample {
   queryVector: Float32Array;
   /** Ordered path of visited node IDs. Last node must be a target. */
@@ -163,6 +182,111 @@ export class MemoryGraphReasoner {
     }
 
     return { path, finalQuery: currentQuery, pathScore };
+  }
+
+  // ── what-if reasoning ──
+
+  /**
+   * What-if simulation: inject a hypothetical node and compare traversal
+   * before/after. Returns impact analysis suitable for LLM consumption.
+   *
+   * Use case: "If I add constraint X, how does it affect decisions Y and Z?"
+   */
+  whatIf(
+    queryVector: Float32Array,
+    graph: Map<string, MemoryNode>,
+    hypotheticalNode: MemoryNode,
+    maxSteps: number,
+    impactThreshold = 0.05,
+  ): WhatIfResult {
+    // Baseline: traversal without the new node
+    const baseline = this.traverse(queryVector, graph, maxSteps);
+
+    // Inject hypothetical node and re-traverse
+    const augmentedGraph = new Map(graph);
+    augmentedGraph.set(hypotheticalNode.id, hypotheticalNode);
+    const withNode = this.traverse(queryVector, augmentedGraph, maxSteps);
+
+    // Compute per-node impact
+    const allNodeIds = new Set<string>();
+    for (const step of baseline.path) allNodeIds.add(step.nodeId);
+    for (const step of withNode.path) allNodeIds.add(step.nodeId);
+
+    const baselineScoreMap = new Map<string, number>();
+    for (const step of baseline.path) baselineScoreMap.set(step.nodeId, step.score);
+    const withScoreMap = new Map<string, number>();
+    for (const step of withNode.path) withScoreMap.set(step.nodeId, step.score);
+
+    const baselinePathSet = new Set(baseline.path.map((s) => s.nodeId));
+    const withPathSet = new Set(withNode.path.map((s) => s.nodeId));
+
+    const impacted: ImpactedNode[] = [];
+    for (const nodeId of allNodeIds) {
+      const before = baselineScoreMap.get(nodeId) ?? 0;
+      const after = withScoreMap.get(nodeId) ?? 0;
+      const delta = after - before;
+      if (Math.abs(delta) >= impactThreshold || before === 0 || after === 0) {
+        let pathChange: ImpactedNode["pathChange"] = "none";
+        const inBaseline = baselinePathSet.has(nodeId);
+        const inWith = withPathSet.has(nodeId);
+        if (!inBaseline && inWith) pathChange = "entered";
+        if (inBaseline && !inWith) pathChange = "exited";
+        impacted.push({ nodeId, scoreBefore: before, scoreAfter: after, delta, pathChange });
+      }
+    }
+    impacted.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+    return { baseline, withNode, impacted };
+  }
+
+  /**
+   * Compact impact summary for LLM consumption (fits in limited context).
+   *
+   * Returns a short text summary like:
+   * "Adding 'X' enters the path at step 1, shifts 'Y' score -0.12, 'Z' exits path."
+   */
+  impactSummary(result: WhatIfResult, hypotheticalNodeId: string): string {
+    const lines: string[] = [];
+    lines.push(`Inserting node "${hypotheticalNodeId}":`);
+
+    // Is the hypothetical node itself picked?
+    const hypoInPath = result.withNode.path.some(
+      (s) => s.nodeId === hypotheticalNodeId,
+    );
+    if (hypoInPath) {
+      const step = result.withNode.path.findIndex(
+        (s) => s.nodeId === hypotheticalNodeId,
+      );
+      const score =
+        result.withNode.path[step]!.score;
+      lines.push(`  → enters path at step ${step + 1} (score ${score.toFixed(3)})`);
+    } else {
+      lines.push(`  → does NOT enter path`);
+    }
+
+    // Top impacts on existing nodes
+    const others = result.impacted.filter(
+      (i) => i.nodeId !== hypotheticalNodeId,
+    );
+    const top = others.slice(0, 5);
+    if (top.length === 0) {
+      lines.push(`  → no significant impact on existing nodes`);
+    } else {
+      for (const imp of top) {
+        const dir = imp.delta > 0 ? "↑" : "↓";
+        const flag = imp.pathChange !== "none" ? ` [${imp.pathChange}]` : "";
+        lines.push(
+          `  → ${imp.nodeId}: ${dir}${Math.abs(imp.delta).toFixed(3)}${flag}`,
+        );
+      }
+    }
+
+    const pathDelta = result.withNode.pathScore - result.baseline.pathScore;
+    lines.push(
+      `  path score: ${result.baseline.pathScore.toFixed(3)} → ${result.withNode.pathScore.toFixed(3)} (${pathDelta >= 0 ? "+" : ""}${pathDelta.toFixed(3)})`,
+    );
+
+    return lines.join("\n");
   }
 
   // ── training ──
