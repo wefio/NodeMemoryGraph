@@ -758,6 +758,40 @@ const loss = mgr.trainPath({
 - Performance: 0.53ms / traversal (0.02ms per node-step)
 - State round-trip deterministic via toJSON/fromJSON
 
+### External reasoning module
+
+MGR can serve as an LLM-offloaded reasoning engine. The what-if simulation
+runs entirely inside MGR; only a compact impact summary is returned to the
+LLM, consuming minimal context tokens.
+
+```text
+LLM context                    MGR (external)
+───────────                    ─────────────
+User: "What if we add task X?"
+                               ┌────────────────────────┐
+LLM → MGR.whatIf(              │ baseline: A→B→C→D      │
+  query, graph,                │ with X:   A→B→C→X      │
+  hypoNode=X, steps=4          │ D: ↓0.645 [exited]     │
+)                              │ pathScore: +0.24       │
+         ← impactSummary()     └────────────────────────┘
+         ← "X enters at step 4,
+            D exits, score +0.24"
+
+LLM: "Adding X pushes D off the
+      critical path. Consider
+      parallelising D."
+```
+
+```ts
+// What-if simulation
+const result = mgr.whatIf(queryVec, graph, hypotheticalNode, 4);
+// → { baseline, withNode, impacted[] }
+
+// Compact summary for LLM (3-5 lines)
+const summary = mgr.impactSummary(result, "task-x");
+// "Inserting node "task-x":\n  → enters path at step 4 (score 0.881)\n  → docs: ↓0.645 [exited]\n  path score: 3.304 → 3.539 (+0.236)"
+```
+
 ### Training
 
 `trainPath()` builds a single DAG spanning all steps. Backward flows from the
