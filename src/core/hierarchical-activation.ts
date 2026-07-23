@@ -32,6 +32,20 @@ export interface HierarchicalActivationOutput {
   nodeScores: Float32Array;
 }
 
+/** Previous step output for multi-step reasoning. */
+export interface ReasoningStep {
+  g3Context: Float32Array;
+}
+
+export interface ReasoningSequence {
+  queryVector: Float32Array;
+  candidates: NodeActivationInput[];
+  neighborhood?: NodeActivationInput[];
+  graphState?: GraphStateSnapshot;
+  /** Nodes used at this step (for training). */
+  usedNodeIds?: Set<string>;
+}
+
 export interface ActivationTrainingSample {
   queryVector: Float32Array;
   candidates: NodeActivationInput[];
@@ -52,6 +66,7 @@ export interface HierarchicalActivationState {
   temperature: number;
   scoreWeights: number[]; // [w_sim, w_g1, w_g2, w_g3, w_h1, w_h2, w_h3]
   temporalAlpha: number; // h₁ update rate
+  reasoningBeta: number; // prev-step blend ratio
   h1State: number[] | null;
 }
 
@@ -63,6 +78,7 @@ export class HierarchicalActivation {
   readonly #temperature: Tensor;
   readonly #scoreWeights: Tensor; // [7]
   readonly #temporalAlpha: Tensor; // scalar, h₁ EMA rate
+  readonly #reasoningBeta: Tensor; // scalar, prev-step blend ratio
   #h1State: Float32Array | null;
 
   constructor(dimensions: number, state?: HierarchicalActivationState) {
@@ -75,6 +91,7 @@ export class HierarchicalActivation {
     const weights = state?.scoreWeights ?? Array<number>(SCORE_WEIGHT_COUNT).fill(1);
     this.#scoreWeights = Tensor.vector(weights, true);
     this.#temporalAlpha = Tensor.scalar(state?.temporalAlpha ?? 0.3, true);
+    this.#reasoningBeta = Tensor.scalar(state?.reasoningBeta ?? 0.5, true);
     this.#h1State = state?.h1State
       ? new Float32Array(state.h1State)
       : null;
@@ -91,6 +108,7 @@ export class HierarchicalActivation {
     candidates: NodeActivationInput[],
     neighborhood: NodeActivationInput[] = [],
     graphState?: GraphStateSnapshot,
+    prev?: ReasoningStep,
   ): HierarchicalActivationOutput {
     const n = candidates.length;
     const zeroOut = {
@@ -106,7 +124,12 @@ export class HierarchicalActivation {
     };
     if (n === 0) return zeroOut;
 
-    const q = Tensor.vector(queryVector);
+    // Multi-step reasoning: blend previous g₃ into query
+    const beta = this.#reasoningBeta.scalarValue;
+    const qRaw = prev?.g3Context
+      ? this.#blendVectors(queryVector, prev.g3Context, beta)
+      : queryVector;
+    const q = Tensor.vector(qRaw);
     const C = this.#stack(candidates, n);
 
     // ── g₁: query → candidates cross-attention ──
@@ -269,6 +292,98 @@ export class HierarchicalActivation {
     return { loss: lossValue, trainingSteps: this.#trainingSteps };
   }
 
+  /**
+   * Multi-step reasoning training. All steps share one DAG —
+   * gradients flow from the final step back through every intermediate step.
+   */
+  trainSequence(
+    sequence: ReasoningSequence[],
+    learningRate = 0.05,
+  ): ActivationTrainingResult {
+    if (sequence.length === 0) throw new Error("trainSequence requires at least one step");
+
+    let loss: Tensor | null = null;
+    let prevG3: Tensor | null = null;
+    let totalLoss = 0;
+
+    for (const step of sequence) {
+      const n = step.candidates.length;
+      if (n === 0) continue;
+
+      // Multi-step: blend previous g₃ into query
+      const qVec = prevG3
+        ? this.#blendTensors(Tensor.vector(step.queryVector), prevG3)
+        : Tensor.vector(step.queryVector);
+      const C = this.#stack(step.candidates, n);
+
+      const simQ = qVec.transpose().matmul(C);
+      const attnG1 = simQ.multiply(this.#temperature).softmax();
+      const g1 = C.matmul(attnG1.transpose());
+
+      const neighborhood = step.neighborhood ?? [];
+      const m = neighborhood.length;
+      let g2: Tensor;
+      if (m > 0) {
+        const N = this.#stack(neighborhood, m);
+        const simG2 = g1.transpose().matmul(N).multiply(this.#temperature);
+        g2 = N.matmul(simG2.softmax().transpose());
+      } else {
+        g2 = g1;
+      }
+
+      const h1 = Tensor.vector(this.#h1State ?? new Float32Array(this.dimensions));
+      const h2 = Tensor.vector(this.#meanVector(step.graphState?.mediumTermVectors));
+      const h3 = Tensor.vector(this.#meanVector(step.graphState?.longTermVectors));
+
+      const g3 = Tensor.sumN([g1, g2, h1, h2, h3]).l2Normalize();
+
+      // Score and compute NLL loss if labels provided
+      if (step.usedNodeIds && step.usedNodeIds.size > 0) {
+        const sw = this.#scoreWeights.softmax();
+        const blended = Tensor.sumN([
+          simQ.multiply(sw.at(0)),
+          g1.transpose().matmul(C).multiply(sw.at(1)),
+          g2.transpose().matmul(C).multiply(sw.at(2)),
+          g3.transpose().matmul(C).multiply(sw.at(3)),
+          h1.transpose().matmul(C).multiply(sw.at(4)),
+          h2.transpose().matmul(C).multiply(sw.at(5)),
+          h3.transpose().matmul(C).multiply(sw.at(6)),
+        ]);
+        const probs = blended.softmax();
+
+        let stepLoss: Tensor | null = null;
+        const usedCount = step.candidates.filter(
+          (c) => step.usedNodeIds!.has(c.nodeId),
+        ).length;
+        for (let i = 0; i < n; i++) {
+          if (step.usedNodeIds.has(step.candidates[i]!.nodeId)) {
+            const term = probs.at(i);
+            stepLoss = stepLoss ? stepLoss.add(term) : term;
+          }
+        }
+        const stepLossVal = stepLoss!
+          .multiply(Tensor.scalar(1 / usedCount))
+          .log()
+          .multiply(Tensor.scalar(-1));
+
+        loss = loss ? loss.add(stepLossVal) : stepLossVal;
+        totalLoss += stepLossVal.scalarValue;
+      }
+
+      prevG3 = g3; // flow to next step
+    }
+
+    if (!loss) throw new Error("trainSequence requires at least one step with usedNodeIds");
+
+    const params = this.#parameters();
+    params.forEach((p) => p.zeroGrad());
+    loss.backward();
+    gradientStep(params, learningRate);
+    this.#trainingSteps += sequence.length;
+
+    return { loss: totalLoss, trainingSteps: this.#trainingSteps };
+  }
+
   // ── persistence ──
 
   toJSON(): HierarchicalActivationState {
@@ -280,6 +395,7 @@ export class HierarchicalActivation {
       temperature: this.#temperature.scalarValue,
       scoreWeights: Array.from(weights),
       temporalAlpha: this.#temporalAlpha.scalarValue,
+      reasoningBeta: this.#reasoningBeta.scalarValue,
       h1State: this.#h1State ? Array.from(this.#h1State) : null,
     };
   }
@@ -299,6 +415,21 @@ export class HierarchicalActivation {
       }
     }
     return Tensor.matrix(data, this.dimensions, count);
+  }
+
+  #blendVectors(a: Float32Array, b: Float32Array, beta: number): Float32Array {
+    const d = this.dimensions;
+    const result = new Float32Array(d);
+    for (let i = 0; i < d; i++) result[i] = a[i]! * (1 - beta) + b[i]! * beta;
+    return result;
+  }
+
+  /** Tensor-level blend for multi-step DAG (gradients flow through). */
+  #blendTensors(query: Tensor, prevG3: Tensor): Tensor {
+    const beta = this.#reasoningBeta;
+    return query.multiply(Tensor.scalar(1).add(beta.negate())).add(
+      prevG3.multiply(beta),
+    );
   }
 
   #meanVector(vectors: Float32Array[] | undefined): Float32Array {
@@ -321,6 +452,11 @@ export class HierarchicalActivation {
   }
 
   #parameters(): Tensor[] {
-    return [this.#temperature, this.#scoreWeights, this.#temporalAlpha];
+    return [
+      this.#temperature,
+      this.#scoreWeights,
+      this.#temporalAlpha,
+      this.#reasoningBeta,
+    ];
   }
 }
