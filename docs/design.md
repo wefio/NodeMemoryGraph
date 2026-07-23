@@ -690,6 +690,84 @@ This supports variable semantic granularity, but the storage and indexing cost
 means record vectors remain an experimental target rather than a mandatory NMG
 representation.
 
+## 12bis. Memory-Graph Reasoner — nodes as micro-operators
+
+### Concept
+
+Instead of treating memory nodes as passive data scored by a fixed function,
+each node is a **micro-operator** that transforms the query state during graph
+traversal. The traversal path itself is the computation graph—gradients flow
+through every visited node back to per-node parameters.
+
+```text
+q₀ ──→ [node A: g=σ(v·q+b), q'=g·v+(1-g)·q] ──→ q₁
+  ──→ [node B: g=σ(v·q+b), q'=g·v+(1-g)·q] ──→ q₂
+    ──→ [node C] ──→ q₃ → path loss
+```
+
+### Node operator
+
+```text
+g  = σ(v^T @ q + b)       gate: how much this memory influences the query
+q' = g·v + (1−g)·q         residual blend: memory-tinged query
+r  = q'^T @ v              local relevance score
+```
+
+- `b` is a single learnable scalar per node (not a matrix—one parameter per
+  node is sufficient because `v^T @ q` already captures cosine similarity).
+- The gate decides how much the query should absorb from this memory.
+- State update is a residual blend: gate·memory + (1−gate)·current.
+
+### Relationship to HierarchicalActivation
+
+|                         | HA                           | MGR                           |
+|-------------------------|------------------------------|-------------------------------|
+| Node role               | passive data, scored         | active operator, transforms   |
+| Scoring                 | 7-way similarity blend       | single gate + local relevance |
+| Graph structure         | fixed (g₁→g₂→g₃)            | dynamic, follows edges        |
+| Parameters              | 9 global                     | 1 per node + 9 global         |
+| Per-step cost (d=64)    | 0.12ms                       | 0.02ms                        |
+| Best for                | batch ranking over pool      | multi-step path reasoning     |
+
+They are complementary: HA scores a candidate pool globally, MGR refines
+a query by walking a knowledge-graph path.
+
+### API
+
+```ts
+const mgr = new MemoryGraphReasoner(64);
+
+// Greedy traversal: at each step, evaluate all candidates, pick best
+const result = mgr.traverse(queryVector, graph, maxSteps);
+// → { path: TraversalStep[], finalQuery, pathScore }
+
+// Train on labeled paths (gradient flows through entire DAG)
+const loss = mgr.trainPath({
+  queryVector,
+  pathNodeIds: ["api-design", "L-meeting", "conclusion"],
+  graph,
+}, 0.1);
+```
+
+### Demo result (d=64, 7 nodes, 4 steps)
+
+- Before training: traversal picks random first node, path score 2.93
+- After 22 training iterations: correctly follows labeled path
+  `api-design → L-meeting → conclusion`, path score 3.18
+- Per-step query refinement: cosine(q, target) grows from 0.61→0.96
+- Performance: 0.53ms / traversal (0.02ms per node-step)
+- State round-trip deterministic via toJSON/fromJSON
+
+### Training
+
+`trainPath()` builds a single DAG spanning all steps. Backward flows from the
+final path score through every intermediate `#reasonStep` call to every
+per-node gate bias `b`. The loss is simply the negative path score—training
+maximises cumulative relevance along the labeled path.
+
+Only the gate biases of visited nodes receive gradients, and only those
+parameters are updated. Unvisited nodes remain unchanged.
+
 ## 13. Current implementation versus target
 
 Implemented and verified in the current prototype:
