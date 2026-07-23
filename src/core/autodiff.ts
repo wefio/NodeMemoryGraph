@@ -9,6 +9,7 @@ const Op = {
   Log: "log",
   Matmul: "matmul",
   Multiply: "multiply",
+  Negate: "negate",
   Parameter: "parameter",
   Reciprocal: "reciprocal",
   Scatter: "scatter",
@@ -72,6 +73,23 @@ function add(left: UOp, right: UOp): UOp {
 }
 
 function multiply(left: UOp, right: UOp): UOp {
+  // Fold: x * (-1) → negate(x)
+  if (
+    right.op === Op.Constant &&
+    right.argument instanceof Float32Array &&
+    right.argument.length === 1 &&
+    right.argument[0] === -1
+  ) {
+    return negate(left);
+  }
+  if (
+    left.op === Op.Constant &&
+    left.argument instanceof Float32Array &&
+    left.argument.length === 1 &&
+    left.argument[0] === -1
+  ) {
+    return negate(right);
+  }
   if (sameShape(left.shape, right.shape)) return binary(Op.Multiply, left, right, left.shape);
   if (sizeOf(left.shape) === 1) {
     return binary(Op.Multiply, broadcast(left, right.shape), right, right.shape);
@@ -80,6 +98,10 @@ function multiply(left: UOp, right: UOp): UOp {
     return binary(Op.Multiply, left, broadcast(right, left.shape), left.shape);
   }
   throw new Error("multiply requires equal shapes or a scalar operand");
+}
+
+function negate(source: UOp): UOp {
+  return unary(Op.Negate, source);
 }
 
 function broadcast(source: UOp, shape: Shape): UOp {
@@ -117,14 +139,32 @@ function evaluate(root: UOp, cache = new Map<UOp, Float32Array>()): Float32Array
     case Op.Parameter:
       result = root.argument as Float32Array;
       break;
-    case Op.Add:
-      result = Float32Array.from(values[0]!, (value, index) => value + values[1]![index]!);
+    case Op.Add: {
+      const a = values[0]!;
+      const b = values[1]!;
+      result = new Float32Array(a.length);
+      for (let i = 0; i < a.length; i++) result[i] = a[i]! + b[i]!;
       break;
-    case Op.Multiply:
-      result = Float32Array.from(values[0]!, (value, index) => value * values[1]![index]!);
+    }
+    case Op.Multiply: {
+      const a = values[0]!;
+      const b = values[1]!;
+      result = new Float32Array(a.length);
+      for (let i = 0; i < a.length; i++) result[i] = a[i]! * b[i]!;
       break;
-    case Op.Broadcast:
-      result = new Float32Array(sizeOf(root.shape)).fill(values[0]![0]!);
+    }
+    case Op.Negate: {
+      const src = values[0]!;
+      result = new Float32Array(src.length);
+      for (let i = 0; i < src.length; i++) result[i] = -src[i]!;
+      break;
+    }
+      break;
+    case Op.Broadcast: {
+      result = new Float32Array(sizeOf(root.shape));
+      const fill = values[0]![0]!;
+      for (let i = 0; i < result.length; i++) result[i] = fill;
+    }
       break;
     case Op.Matmul:
       result = evaluateMatmul(
@@ -134,35 +174,47 @@ function evaluate(root: UOp, cache = new Map<UOp, Float32Array>()): Float32Array
         root.sources[1]!.shape,
       );
       break;
-    case Op.Sum:
-      result = Float32Array.of(values[0]!.reduce((total, value) => total + value, 0));
+    case Op.Sum: {
+      const src = values[0]!;
+      let total = 0;
+      for (let i = 0; i < src.length; i++) total += src[i]!;
+      result = Float32Array.of(total);
+    }
       break;
-    case Op.Exp:
-      result = Float32Array.from(values[0]!, (value) => Math.exp(value));
+    case Op.Exp: {
+      const src = values[0]!;
+      result = new Float32Array(src.length);
+      for (let i = 0; i < src.length; i++) result[i] = Math.exp(src[i]!);
       break;
-    case Op.Log:
-      result = Float32Array.from(values[0]!, (value) => Math.log(Math.max(1e-7, value)));
+    }
+    case Op.Log: {
+      const src = values[0]!;
+      result = new Float32Array(src.length);
+      for (let i = 0; i < src.length; i++) result[i] = Math.log(src[i]! < 1e-7 ? 1e-7 : src[i]!);
       break;
-    case Op.Reciprocal:
-      result = Float32Array.from(values[0]!, (value) => 1 / Math.max(1e-7, value));
+    }
+    case Op.Reciprocal: {
+      const src = values[0]!;
+      result = new Float32Array(src.length);
+      for (let i = 0; i < src.length; i++) result[i] = 1 / (src[i]! < 1e-7 ? 1e-7 : src[i]!);
       break;
-    case Op.Sigmoid:
-      result = Float32Array.from(values[0]!, (value) => 1 / (1 + Math.exp(-value)));
+    }
+    case Op.Sigmoid: {
+      const src = values[0]!;
+      result = new Float32Array(src.length);
+      for (let i = 0; i < src.length; i++) result[i] = 1 / (1 + Math.exp(-src[i]!));
+    }
       break;
     case Op.Softmax:
       result = evaluateSoftmax(values[0]!);
       break;
     case Op.SoftmaxGradient: {
-      const probability = values[0]!;
-      const gradient = values[1]!;
-      const weighted = probability.reduce(
-        (total, value, index) => total + value * gradient[index]!,
-        0,
-      );
-      result = Float32Array.from(
-        probability,
-        (value, index) => value * (gradient[index]! - weighted),
-      );
+      const prob = values[0]!;
+      const grad = values[1]!;
+      let weighted = 0;
+      for (let i = 0; i < prob.length; i++) weighted += prob[i]! * grad[i]!;
+      result = new Float32Array(prob.length);
+      for (let i = 0; i < prob.length; i++) result[i] = prob[i]! * (grad[i]! - weighted);
       break;
     }
     case Op.Index:
@@ -191,12 +243,14 @@ function evaluateMatmul(
   const [, rightColumns] = rightShape;
   const result = new Float32Array(leftRows * rightColumns);
   for (let row = 0; row < leftRows; row += 1) {
-    for (let column = 0; column < rightColumns; column += 1) {
-      let value = 0;
-      for (let index = 0; index < shared; index += 1) {
-        value += left[row * shared + index]! * right[index * rightColumns + column]!;
+    const leftOffset = row * shared;
+    const resultOffset = row * rightColumns;
+    for (let k = 0; k < shared; k += 1) {
+      const a = left[leftOffset + k]!;
+      const rightOffset = k * rightColumns;
+      for (let col = 0; col < rightColumns; col += 1) {
+        result[resultOffset + col] += a * right[rightOffset + col]!;
       }
-      result[row * rightColumns + column] = value;
     }
   }
   return result;
@@ -214,10 +268,19 @@ function evaluateTranspose(value: Float32Array, shape: Shape): Float32Array {
 }
 
 function evaluateSoftmax(value: Float32Array): Float32Array {
-  const maximum = Math.max(...value);
-  const exponentials = Float32Array.from(value, (item) => Math.exp(item - maximum));
-  const denominator = exponentials.reduce((total, item) => total + item, 0);
-  return Float32Array.from(exponentials, (item) => item / denominator);
+  let maximum = -Infinity;
+  for (let i = 0; i < value.length; i++) {
+    if (value[i]! > maximum) maximum = value[i]!;
+  }
+  const result = new Float32Array(value.length);
+  let denominator = 0;
+  for (let i = 0; i < value.length; i++) {
+    result[i] = Math.exp(value[i]! - maximum);
+    denominator += result[i]!;
+  }
+  const invDenom = 1 / denominator;
+  for (let i = 0; i < value.length; i++) result[i]! *= invDenom;
+  return result;
 }
 
 function accumulate(target: Map<UOp, UOp>, operation: UOp, gradient: UOp): void {
@@ -237,6 +300,8 @@ function localGradients(operation: UOp, gradient: UOp): Array<readonly [UOp, UOp
         [left!, reduceToShape(multiply(gradient, right!), left!.shape)],
         [right!, reduceToShape(multiply(gradient, left!), right!.shape)],
       ];
+    case Op.Negate:
+      return [[left!, negate(gradient)]];
     case Op.Broadcast:
       return [[left!, reduceToShape(gradient, left!.shape)]];
     case Op.Matmul:
@@ -404,11 +469,29 @@ export class Tensor {
     return new Tensor(unary(Op.Softmax, this.#operation));
   }
 
+  negate(): Tensor {
+    return new Tensor(negate(this.#operation));
+  }
+
   at(index: number): Tensor {
     if (!Number.isInteger(index) || index < 0 || index >= sizeOf(this.shape)) {
       throw new Error("tensor index is out of bounds");
     }
     return new Tensor(unary(Op.Index, this.#operation, [1, 1], index));
+  }
+
+  static stack(vectors: readonly Tensor[]): Tensor {
+    if (vectors.length === 0) throw new Error("cannot stack empty tensor list");
+    const rows = vectors[0]!.shape[0];
+    if (vectors[0]!.shape[1] !== 1) throw new Error("stack requires column vectors [n, 1]");
+    const cols = vectors.length;
+    const data = new Float32Array(rows * cols);
+    for (let col = 0; col < cols; col++) {
+      const src = vectors[col]!.data;
+      if (src.length !== rows) throw new Error("all stacked tensors must have the same shape");
+      for (let row = 0; row < rows; row++) data[row + col * rows] = src[row]!;
+    }
+    return Tensor.matrix(data, rows, cols);
   }
 
   backward(): void {

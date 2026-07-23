@@ -148,6 +148,12 @@ export interface SearchOptions {
   retrievalMode?: "legacy" | "fts5" | "hashing" | "qwen3" | "hybrid";
   taskId?: string;
   activeGraphBudget?: Partial<ActiveGraphBudget>;
+  /** Maximum semantic nodes considered by hierarchical vector routing. */
+  nodeCandidateLimit?: number;
+  /** Maximum leaf blocks considered by hierarchical vector routing. */
+  leafCandidateLimit?: number;
+  /** Selects compressed node/leaf routing or a full record-vector diagnostic path. */
+  vectorGranularity?: "hierarchy" | "records" | "union";
 }
 
 export interface EmbeddingDocument {

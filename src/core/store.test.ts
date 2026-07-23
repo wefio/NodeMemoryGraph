@@ -912,6 +912,10 @@ test("leaf summaries preserve distinctions hidden by one broad node summary", ()
         vector: [0, 1],
       },
     ]);
+    store.upsertExternalEmbeddings("leaf-test", [
+      { memoryId: rendering.memory.id, vector: [1, 0] },
+      { memoryId: python.memory.id, vector: [0, 1] },
+    ]);
 
     const routes = store.routeLeafBlocksByVector([0, 1], "leaf-test", [rendering.node.id], 1);
     assert.equal(routes[0]?.block.id, pythonDocument.blockId);
@@ -932,6 +936,22 @@ test("leaf summaries preserve distinctions hidden by one broad node summary", ()
       { maxTier: 3, limit: 1 },
     );
     assert.equal(semantic[0]?.memory.id, python.memory.id);
+    const recordContext = store.searchContext(
+      "legacy interpreter requirement",
+      { maxTier: 3, limit: 1, vectorGranularity: "records" },
+      { queryVector: [0, 1], model: "leaf-test" },
+    );
+    assert.equal(recordContext.results[0]?.memory.id, python.memory.id);
+    const unionContext = store.searchContext(
+      "legacy interpreter requirement",
+      { maxTier: 3, limit: 2, vectorGranularity: "union" },
+      { queryVector: [0, 1], model: "leaf-test" },
+    );
+    assert.equal(unionContext.results[0]?.memory.id, python.memory.id);
+    assert.equal(
+      new Set(unionContext.results.map((result) => result.memory.id)).size,
+      unionContext.results.length,
+    );
   });
 });
 

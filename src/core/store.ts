@@ -1056,7 +1056,34 @@ export class NmgStore {
       limit: Math.min(50, Math.max(20, limit * 3)),
     };
     const direct = semantic
-      ? this.searchHierarchyByVector(query, semantic.queryVector, semantic.model, directOptions)
+      ? options.vectorGranularity === "union"
+        ? mergeSemanticCandidates(
+            query,
+            [
+              ...this.searchHierarchyByVector(
+                query,
+                semantic.queryVector,
+                semantic.model,
+                directOptions,
+              ),
+              ...this.searchByVector(query, semantic.queryVector, semantic.model, {
+                ...directOptions,
+                retrievalMode: "qwen3",
+              }),
+            ],
+            directOptions.limit,
+          )
+        : options.vectorGranularity === "records"
+          ? this.searchByVector(query, semantic.queryVector, semantic.model, {
+              ...directOptions,
+              retrievalMode: "qwen3",
+            })
+          : this.searchHierarchyByVector(
+              query,
+              semantic.queryVector,
+              semantic.model,
+              directOptions,
+            )
       : this.search(query, directOptions);
     const graphHops = Math.min(options.graphHops ?? 1, budget.maxGraphHops);
     const relations = this.getRelations(
@@ -2428,20 +2455,22 @@ export class NmgStore {
     query: string,
     queryVector: readonly number[],
     model: string,
-    options: SearchOptions & { nodeLimit?: number; blockLimit?: number } = {},
+    options: SearchOptions = {},
   ): MemorySearchResult[] {
-    const nodes = this.routeNodesByVector(queryVector, model, options.nodeLimit ?? 5);
+    const nodeLimit = Math.max(1, Math.min(options.nodeCandidateLimit ?? 5, 50));
+    const blockLimit = Math.max(1, Math.min(options.leafCandidateLimit ?? 8, 50));
+    const nodes = this.routeNodesByVector(queryVector, model, nodeLimit);
     const directLeaves = this.routeLeafBlocksByVector(
       queryVector,
       model,
       [],
-      options.blockLimit ?? 8,
+      blockLimit,
     );
     const routedLeaves = this.routeLeafBlocksByVector(
       queryVector,
       model,
       nodes.map((route) => route.node.id),
-      options.blockLimit ?? 8,
+      blockLimit,
     );
     const leaves = [...directLeaves, ...routedLeaves]
       .filter(
@@ -2449,7 +2478,7 @@ export class NmgStore {
           all.findIndex((candidate) => candidate.block.id === route.block.id) === index,
       )
       .sort((left, right) => right.score - left.score)
-      .slice(0, options.blockLimit ?? 8);
+      .slice(0, blockLimit);
     const indexed = this.searchLeafBlocks(
       query,
       queryVector,
@@ -4277,6 +4306,20 @@ function lexicalNodeScore(query: string, node: MemoryNode): number {
 function hybridScore(lexical: number, vector: number, route: number): number {
   const boundedLexical = lexical <= 0 ? 0 : lexical / (lexical + 10);
   return boundedLexical * 0.5 + Math.max(0, vector) * 0.35 + Math.max(0, route) * 0.15;
+}
+
+function mergeSemanticCandidates(
+  query: string,
+  values: MemorySearchResult[],
+  limit = 8,
+): MemorySearchResult[] {
+  return values
+    .filter(
+      (result, index, all) =>
+        all.findIndex((candidate) => candidate.memory.id === result.memory.id) === index,
+    )
+    .sort((left, right) => contextUsefulness(query, right) - contextUsefulness(query, left))
+    .slice(0, Math.max(1, Math.min(limit, 50)));
 }
 
 function recallReason(result: MemorySearchResult): RecallCue["reason"] {

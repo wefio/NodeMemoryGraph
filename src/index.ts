@@ -4,6 +4,7 @@ export { OpenAIEmbeddingClient } from "./core/openai-embedding.ts";
 export { UsearchAnnIndex } from "./core/ann.ts";
 export { decideMemoryLoad } from "./core/gate.ts";
 export { Tensor, gradientStep } from "./core/autodiff.ts";
+export { ControllerRuntime } from "./core/controller-runtime.ts";
 export {
   CONTROLLER_BUDGET_DIMENSIONS,
   DifferentiableController,
@@ -23,6 +24,10 @@ export type {
   DifferentiableControllerState,
 } from "./core/differentiable-controller.ts";
 export type { ControllerProtocolSample } from "./core/controller-protocol.ts";
+export type {
+  ControllerRuntimeState,
+  ControllerShadowDecision,
+} from "./core/controller-runtime.ts";
 export type {
   ActivationSignal,
   ActiveGraph,

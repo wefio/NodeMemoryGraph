@@ -616,6 +616,17 @@ both a blanket BGE default and premature Pi integration. Candidate generation
 must be evaluated per benchmark and question type, not selected from one
 aggregate result.
 
+A granularity ablation further showed that merely widening hierarchical routing
+from 5/8 node/leaf candidates to 20/50 did not improve BEAM. Full record vectors
+raised its candidate recall from 0.111 to 0.426 but required many more vectors.
+A naive lexical/vector weighted fusion regressed LoCoMo and was removed. The
+remaining diagnostic `union` mode merges independently ranked hierarchy and
+record candidates; it preserved LoCoMo candidate recall at 0.700 and allowed
+the learned controller to improve held-out Top-2 recall from 0.200 to 0.700.
+This supports variable semantic granularity, but the storage and indexing cost
+means record vectors remain an experimental target rather than a mandatory NMG
+representation.
+
 ## 13. Current implementation versus target
 
 Implemented and verified in the current prototype:

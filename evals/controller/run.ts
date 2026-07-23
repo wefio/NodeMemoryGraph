@@ -28,6 +28,14 @@ interface PreparedCase {
   embeddedTexts: number;
 }
 
+interface PreparedCorpus {
+  directory: string;
+  sourceByMemoryId: Map<string, string>;
+  preparationMs: number;
+  embeddingRequests: number;
+  embeddedTexts: number;
+}
+
 const root = resolve(import.meta.dirname, "../..");
 const benchmark = parseBenchmark(process.argv[2]);
 const perCategory = positiveInteger(process.argv[3] ?? "4");
@@ -47,9 +55,16 @@ if (selected.length < 2) throw new Error("controller evaluation needs at least t
 const workspace = join(tmpdir(), `nmg-controller-eval-${process.pid}`);
 mkdirSync(workspace, { recursive: true });
 let prepared: PreparedCase[] = [];
+const corpora = new Map<string, PreparedCorpus>();
 try {
   for (const [index, item] of selected.entries()) {
-    prepared.push(await prepareCase(item, join(workspace, String(index))));
+    const key = corpusKey(item);
+    let corpus = corpora.get(key);
+    if (!corpus) {
+      corpus = await prepareCorpus(item, join(workspace, `corpus-${index}`));
+      corpora.set(key, corpus);
+    }
+    prepared.push(await prepareCase(item, corpus));
   }
 } finally {
   rmSync(workspace, { recursive: true, force: true });
@@ -102,20 +117,30 @@ const report = {
     supervision: "official evidence IDs intersected with retrieved candidates",
     split: "last labelled case per category held out",
     topNodes,
+    nodeCandidateLimit: candidateLimit("NMG_CONTROLLER_NODE_CANDIDATES", 5),
+    leafCandidateLimit: candidateLimit("NMG_CONTROLLER_LEAF_CANDIDATES", 8),
+    vectorGranularity: vectorGranularity(),
+    leafBlockSize: candidateLimit("NMG_CONTROLLER_LEAF_BLOCK_SIZE", 32),
+    learnedResidualWeight: residualWeight(),
   },
   cases: { total: prepared.length, train: train.length, test: test.length },
   candidateRecall,
   baseline,
   learned,
   costs: {
-    preparationMs: sum(prepared.map((item) => item.preparationMs)),
+    corpusPreparationMs: sum([...corpora.values()].map((item) => item.preparationMs)),
+    queryPreparationMs: sum(prepared.map((item) => item.preparationMs)),
     featureExtractionMs: sum(prepared.map((item) => item.featureMs)),
     trainingMs,
     trainingSteps: controller.trainingSteps,
     finalTrainingLoss: losses.at(-1) ?? null,
     serializedControllerBytes: Buffer.byteLength(JSON.stringify(controller.toJSON())),
-    embeddingRequests: sum(prepared.map((item) => item.embeddingRequests)),
-    embeddedTexts: sum(prepared.map((item) => item.embeddedTexts)),
+    embeddingRequests:
+      sum([...corpora.values()].map((item) => item.embeddingRequests)) +
+      sum(prepared.map((item) => item.embeddingRequests)),
+    embeddedTexts:
+      sum([...corpora.values()].map((item) => item.embeddedTexts)) +
+      sum(prepared.map((item) => item.embeddedTexts)),
     languageModelCalls: 0,
   },
   gate,
@@ -125,7 +150,7 @@ const report = {
 writeFileSync(resolve(runDirectory, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 
-async function prepareCase(item: BenchmarkCase, directory: string): Promise<PreparedCase> {
+async function prepareCorpus(item: BenchmarkCase, directory: string): Promise<PreparedCorpus> {
   const startedAt = performance.now();
   mkdirSync(directory, { recursive: true });
   const store = new NmgStore(resolve(directory, "nmg.sqlite"));
@@ -136,7 +161,7 @@ async function prepareCase(item: BenchmarkCase, directory: string): Promise<Prep
   try {
     for (const session of item.sessions) {
       let currentNodeId: string | undefined;
-      const nodeName = `${item.benchmark} ${item.id} ${session.id}`;
+      const nodeName = `${item.benchmark} ${corpusKey(item)} ${session.id}`;
       const nodeSummary = session.turns
         .map((turn) => turn.content)
         .join(" ")
@@ -150,11 +175,11 @@ async function prepareCase(item: BenchmarkCase, directory: string): Promise<Prep
           sourceActor: turn.role,
           truthStatus: turn.role === "user" ? "asserted" : "unverified",
           evidence: turn.content,
-          sourceRef: `${item.benchmark.toLowerCase()}:${item.id}:${turn.sourceId}`,
+          sourceRef: `${item.benchmark.toLowerCase()}:${corpusKey(item)}:${turn.sourceId}`,
           eventTime: session.date,
           tier: 2,
-          importance: item.evidenceIds?.includes(turn.sourceId) ? 0.9 : 0.5,
-          scope: { benchmark: item.benchmark, case: item.id },
+          importance: 0.5,
+          scope: { benchmark: item.benchmark, corpus: corpusKey(item) },
         });
         sourceByMemoryId.set(saved.memory.id, turn.sourceId);
         currentNodeId = saved.node.id;
@@ -168,10 +193,9 @@ async function prepareCase(item: BenchmarkCase, directory: string): Promise<Prep
       }
       previousNodeId = currentNodeId;
     }
-    let semantic: { queryVector: readonly number[]; model: string } | undefined;
     if (process.env.NMG_EMBED_BASE_URL) {
       const client = embeddingClient();
-      store.rebuildLeafBlocks();
+      store.rebuildLeafBlocks(undefined, candidateLimit("NMG_CONTROLLER_LEAF_BLOCK_SIZE", 32));
       const nodes = store.nodeEmbeddingDocuments("", 2_048, client.indexId);
       const nodeVectors = await client.embedDocuments(nodes.map((document) => document.text));
       embeddingRequests += Number(nodes.length > 0);
@@ -194,12 +218,47 @@ async function prepareCase(item: BenchmarkCase, directory: string): Promise<Prep
           vector: leafVectors[index]!,
         })),
       );
+      if (vectorGranularity() !== "hierarchy") {
+        const records = store.embeddingDocuments("", 2_048, client.indexId);
+        const recordVectors = await client.embedDocuments(records.map((document) => document.text));
+        embeddingRequests += Number(records.length > 0);
+        embeddedTexts += records.length;
+        store.upsertExternalEmbeddings(
+          client.indexId,
+          records.map((document, index) => ({
+            memoryId: document.memoryId,
+            vector: recordVectors[index]!,
+          })),
+        );
+      }
+    }
+    return {
+      directory,
+      sourceByMemoryId,
+      preparationMs: performance.now() - startedAt,
+      embeddingRequests,
+      embeddedTexts,
+    };
+  } finally {
+    store.close();
+  }
+}
+
+async function prepareCase(item: BenchmarkCase, corpus: PreparedCorpus): Promise<PreparedCase> {
+  const startedAt = performance.now();
+  const store = new NmgStore(resolve(corpus.directory, "nmg.sqlite"));
+  let embeddingRequests = 0;
+  let embeddedTexts = 0;
+  try {
+    let semantic: { queryVector: readonly number[]; model: string } | undefined;
+    if (process.env.NMG_EMBED_BASE_URL) {
+      const client = embeddingClient();
       semantic = {
         queryVector: (await client.embedQueries([item.question]))[0]!,
         model: client.indexId,
       };
-      embeddingRequests += 1;
-      embeddedTexts += 1;
+      embeddingRequests = 1;
+      embeddedTexts = 1;
     }
     const context = store.searchContext(
       item.question,
@@ -208,6 +267,9 @@ async function prepareCase(item: BenchmarkCase, directory: string): Promise<Prep
         graphHops: 1,
         maxTier: 3,
         retrievalMode: "hybrid",
+        nodeCandidateLimit: candidateLimit("NMG_CONTROLLER_NODE_CANDIDATES", 5),
+        leafCandidateLimit: candidateLimit("NMG_CONTROLLER_LEAF_CANDIDATES", 8),
+        vectorGranularity: vectorGranularity(),
         activeGraphBudget: {
           maxNodes: 50,
           maxEdges: 50,
@@ -223,7 +285,7 @@ async function prepareCase(item: BenchmarkCase, directory: string): Promise<Prep
     if (!context.activeGraph) throw new Error("searchContext did not produce an Active Graph");
     const official = new Set(item.evidenceIds ?? []);
     const usefulMemoryIds = context.results
-      .filter((result) => official.has(sourceByMemoryId.get(result.memory.id) ?? ""))
+      .filter((result) => official.has(corpus.sourceByMemoryId.get(result.memory.id) ?? ""))
       .map((result) => result.memory.id);
     const rejectedMemoryIds = context.results
       .map((result) => result.memory.id)
@@ -241,7 +303,7 @@ async function prepareCase(item: BenchmarkCase, directory: string): Promise<Prep
       item,
       sample,
       context,
-      sourceByMemoryId,
+      sourceByMemoryId: corpus.sourceByMemoryId,
       preparationMs: performance.now() - startedAt,
       featureMs,
       embeddingRequests,
@@ -250,6 +312,12 @@ async function prepareCase(item: BenchmarkCase, directory: string): Promise<Prep
   } finally {
     store.close();
   }
+}
+
+function corpusKey(item: BenchmarkCase): string {
+  const sampleId = item.officialMetadata.sampleId;
+  if (typeof sampleId === "string" && sampleId) return `${item.benchmark}:${sampleId}`;
+  return `${item.benchmark}:${item.id.split(":")[0]}`;
 }
 
 function embeddingClient(): OpenAIEmbeddingClient {
@@ -275,8 +343,14 @@ function compare(item: PreparedCase, controller: DifferentiableController, limit
   const baselineNodes = rankBaseline(item).slice(0, limit);
   const baselineMs = performance.now() - baselineStartedAt;
   const learnedStartedAt = performance.now();
+  const deterministicScores = baselineScores(item);
   const learnedNodes = Object.entries(item.sample.nodeFeatures)
-    .map(([nodeId, features]) => ({ nodeId, score: controller.scoreNode(features) }))
+    .map(([nodeId, features]) => ({
+      nodeId,
+      score:
+        (deterministicScores.get(nodeId) ?? 0) +
+        residualWeight() * (controller.scoreNode(features) - 0.5),
+    }))
     .sort((left, right) => right.score - left.score || left.nodeId.localeCompare(right.nodeId))
     .slice(0, limit)
     .map((value) => value.nodeId);
@@ -292,6 +366,14 @@ function compare(item: PreparedCase, controller: DifferentiableController, limit
 }
 
 function rankBaseline(item: PreparedCase): string[] {
+  const scores = baselineScores(item);
+  return Object.keys(item.sample.nodeFeatures).sort(
+    (left, right) =>
+      (scores.get(right) ?? 0) - (scores.get(left) ?? 0) || left.localeCompare(right),
+  );
+}
+
+function baselineScores(item: PreparedCase): Map<string, number> {
   const scores = new Map<string, number>();
   for (const selection of item.context.activeGraph?.selections ?? []) {
     scores.set(
@@ -299,9 +381,7 @@ function rankBaseline(item: PreparedCase): string[] {
       Math.max(scores.get(selection.nodeId) ?? 0, selection.scores.usefulness),
     );
   }
-  return Object.keys(item.sample.nodeFeatures).sort(
-    (left, right) => (scores.get(right) ?? 0) - (scores.get(left) ?? 0),
-  );
+  return scores;
 }
 
 function selectionMetrics(
@@ -373,6 +453,21 @@ function positiveInteger(value: string): number {
   if (!Number.isInteger(parsed) || parsed < 1)
     throw new Error(`expected positive integer: ${value}`);
   return parsed;
+}
+
+function candidateLimit(name: string, fallback: number): number {
+  const configured = process.env[name];
+  return configured ? positiveInteger(configured) : fallback;
+}
+
+function vectorGranularity(): "hierarchy" | "records" | "union" {
+  const value = process.env.NMG_CONTROLLER_VECTOR_GRANULARITY;
+  return value === "records" || value === "union" ? value : "hierarchy";
+}
+
+function residualWeight(): number {
+  const value = Number.parseFloat(process.env.NMG_CONTROLLER_RESIDUAL_WEIGHT ?? "0.1");
+  return Math.max(0, Math.min(Number.isFinite(value) ? value : 0.1, 1));
 }
 
 function average(values: number[]): number {

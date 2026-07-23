@@ -4,6 +4,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { decideMemoryLoad } from "../../../src/core/gate.ts";
+import { ControllerRuntime } from "../../../src/core/controller-runtime.ts";
 import {
   OpenAIEmbeddingClient,
   type EmbeddingProfileName,
@@ -24,8 +25,11 @@ import type {
 } from "../../../src/core/types.ts";
 
 function databasePath(): string {
-  const dataDirectory = process.env.NMG_DATA_DIR || join(process.cwd(), ".nmg");
-  return join(dataDirectory, "nmg.sqlite");
+  return join(dataDirectory(), "nmg.sqlite");
+}
+
+function dataDirectory(): string {
+  return process.env.NMG_DATA_DIR || join(process.cwd(), ".nmg");
 }
 
 type QueryEmbeddingClient = Pick<OpenAIEmbeddingClient, "embedQueries" | "indexId">;
@@ -86,6 +90,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
   let store: NmgStore | undefined;
   const getStore = (): NmgStore => (store ??= new NmgStore(databasePath()));
+  const controller = new ControllerRuntime(join(dataDirectory(), "controller.json"));
+  const searchContexts = new Map<string, MemoryContext>();
   const embeddingClient = process.env.NMG_EMBED_BASE_URL
     ? new OpenAIEmbeddingClient({
         baseUrl: process.env.NMG_EMBED_BASE_URL,
@@ -106,7 +112,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     query: string,
     options: Parameters<NmgStore["searchContext"]>[1],
   ): Promise<MemoryContext> => {
-    return searchMemoryContext(getStore(), embeddingClient, query, options);
+    const context = await searchMemoryContext(getStore(), embeddingClient, query, options);
+    if (context.activeGraph) {
+      searchContexts.set(context.activeGraph.id, context);
+      controller.shadow(context);
+      while (searchContexts.size > 128) searchContexts.delete(searchContexts.keys().next().value!);
+    }
+    return context;
   };
 
   pi.on("before_agent_start", async (event) => {
@@ -651,6 +663,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const usedMemoryIds = context.results.map((result) => result.memory.id);
       if (params.activeGraphId) {
         getStore().recordActiveGraphUse(params.activeGraphId, { usedMemoryIds });
+        const searched = searchContexts.get(params.activeGraphId);
+        const trace = getStore().retrievalTrace(params.activeGraphId);
+        if (searched && trace) controller.observe(searched, trace);
+        searchContexts.delete(params.activeGraphId);
       } else {
         getStore().recordUsage(usedMemoryIds);
       }

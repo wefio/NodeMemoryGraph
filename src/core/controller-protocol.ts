@@ -256,7 +256,10 @@ function balancedBinaryExamples(
 ): Array<{ features: number[]; target: boolean }> {
   const positives = values.filter((value) => value.target);
   const negatives = values.filter((value) => !value.target);
-  if (positives.length === 0) return negatives.slice(0, 3);
+  // A trace with no positive says candidate generation missed, not how to rank
+  // the returned nodes. Training its ranking head would create an all-negative
+  // classifier and incorrectly punish every candidate.
+  if (positives.length === 0) return [];
   return [...positives, ...negatives.slice(0, Math.max(3, positives.length * 3))];
 }
 

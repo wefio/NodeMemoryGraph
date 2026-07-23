@@ -54,3 +54,20 @@ isolation. Its roughly 47 seconds of preparation is diagnostic overhead, not a
 production estimate: a persistent NMG store would index new nodes and leaf
 blocks incrementally instead of rebuilding identical conversation histories
 for every benchmark question.
+
+Granularity ablation showed why one global vector policy is insufficient:
+
+- increasing hierarchical routing from 5 nodes / 8 leaves to 20 / 50 did not
+  change BEAM candidate recall (0.111), so early routing width was not the
+  bottleneck on this sample;
+- full record vectors raised BEAM candidate recall to 0.426, but encoded 3,582
+  texts and took roughly 230 seconds in the deliberately isolated runner;
+- a naive record-vector/lexical weighted score reduced LoCoMo recall to 0.300
+  and was removed rather than retained as another fallback;
+- unioning independently ranked hierarchy and record candidates preserved
+  LoCoMo candidate recall at 0.700, while the learned controller raised held-out
+  Top-2 recall from 0.200 to 0.700.
+
+The union path is an experiment, not the default. Production evaluation should
+reuse one indexed corpus across questions; rebuilding a corpus for every case is
+useful for isolation but substantially overstates steady-state indexing cost.
