@@ -216,13 +216,12 @@ export class MemoryGraphReasoner {
             if (!factCache.has(factId)) {
               const factNode = graph.get(factId);
               if (factNode) {
-                // activation = cosine similarity between fact vector and current query
                 let dot = 0;
                 const fv = factNode.vector;
                 for (let i = 0; i < this.dimensions; i++) dot += currentQuery[i]! * fv[i]!;
-                factCache.set(factId, Math.max(0, dot)); // ReLU: negative cos = inactive
+                factCache.set(factId, Math.max(0, dot));
               } else {
-                factCache.set(factId, 0); // missing fact = precondition fails
+                factCache.set(factId, 0);
               }
             }
           }
