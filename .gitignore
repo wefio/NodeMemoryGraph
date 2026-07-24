@@ -16,3 +16,12 @@ evals/beam/data/
 evals/beam/results/
 evals/controller/results/
 *.tsbuildinfo
+
+# Large binary artifacts (should never be tracked)
+*.sqlite
+*.safetensors
+*.onnx
+*.bin
+*.gguf
+*.pt
+*.pth

@@ -1,0 +1,2 @@
+# Don't use Git LFS for this project — it caused 1.3GB of stale objects
+# All large binary files (*.sqlite, *.safetensors, *.onnx, *.pt) are gitignored
