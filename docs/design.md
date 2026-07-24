@@ -798,11 +798,13 @@ optional.
 
 Current development evidence (updated 2026-07-22):
 
-- 87 local automated tests pass, including P3 lifecycle, budget enforcement,
-  actual-use activation, independent-task deduplication, reversible
-  consolidation, write-policy audit, Active Graph path/selection/budget traces,
-  and migration from the pre-P3 schema; C8 reports 87.49% total statement/line
-  coverage and 93.62% for `store.ts`;
+- 120 automated tests pass, spanning: UOp autodiff (3), differentiable
+  controller (3), hierarchical activation (14), memory-graph reasoner (16),
+  P3 lifecycle, budget enforcement, actual-use activation, independent-task
+  deduplication, reversible consolidation, write-policy audit, Active Graph
+  path/selection/budget traces, and migration from the pre-P3 schema.
+  Test files live in `tests/core/`, `tests/evals/`, `tests/extensions/nmg/`.
+  Fast subset: `npm run test:cg` (36 tests, ~250ms).
 - a clean DeepSeek V4 Flash Pi process wrote a unique LTG fact, a second process
   recovered it through `nmg_search -> activeGraphId -> nmg_get`, and the store
   recorded one selection and one actual use; isolated test data was removed
