@@ -18,6 +18,7 @@ const Op = {
   Sigmoid: "sigmoid",
   Softmax: "softmax",
   SoftmaxGradient: "softmax_gradient",
+  Sqrt: "sqrt",
   Sum: "sum",
   SumN: "sum_n",
   Transpose: "transpose",
@@ -277,6 +278,12 @@ function evaluate(root: UOp, cache = new Map<UOp, Float32Array>()): Float32Array
     case Op.Transpose:
       result = evaluateTranspose(values[0]!, root.sources[0]!.shape);
       break;
+    case Op.Sqrt: {
+      const src = values[0]!;
+      result = new Float32Array(src.length);
+      for (let i = 0; i < src.length; i++) result[i] = Math.sqrt(Math.max(0, src[i]!));
+      break;
+    }
   }
   cache.set(root, result);
   return result;
@@ -411,6 +418,11 @@ function localGradients(operation: UOp, gradient: UOp): Array<readonly [UOp, UOp
       return [[left!, unary(Op.Index, gradient, [1, 1], operation.argument as number)]];
     case Op.Transpose:
       return [[left!, unary(Op.Transpose, gradient, left!.shape)]];
+    case Op.Sqrt: {
+      // y = sqrt(x), dy/dx = 1/(2*sqrt(x)) = 1/(2*y)
+      const halfGrad = multiply(gradient, scalar(0.5));
+      return [[left!, multiply(halfGrad, unary(Op.Reciprocal, operation))]];
+    }
     case Op.Constant:
     case Op.Parameter:
     case Op.SoftmaxGradient:
@@ -530,6 +542,14 @@ export class Tensor {
     return this.sum().multiply(Tensor.scalar(1 / sizeOf(this.shape)));
   }
 
+  dot(other: Tensor): Tensor {
+    return this.multiply(other).sum();
+  }
+
+  norm(): Tensor {
+    return this.dot(this).sqrt();
+  }
+
   exp(): Tensor {
     return new Tensor(unary(Op.Exp, this.#operation));
   }
@@ -548,6 +568,22 @@ export class Tensor {
 
   negate(): Tensor {
     return new Tensor(negate(this.#operation));
+  }
+
+  sqrt(): Tensor {
+    return new Tensor(unary(Op.Sqrt, this.#operation));
+  }
+
+  subtract(other: Tensor): Tensor {
+    return this.add(other.negate());
+  }
+
+  divide(other: Tensor): Tensor {
+    return this.multiply(new Tensor(unary(Op.Reciprocal, other.#operation)));
+  }
+
+  multiplyScalar(value: number): Tensor {
+    return this.multiply(Tensor.scalar(value));
   }
 
   l2Normalize(): Tensor {

@@ -458,4 +458,71 @@ export class HierarchicalActivation {
       this.#reasoningBeta,
     ];
   }
+
+  /** Public: expose parameter tensors for external optimisers (e.g. ForkMerge). */
+  parameters(): Tensor[] {
+    return this.#parameters();
+  }
+
+  /**
+   * Build a single-branch forward graph and return the raw score Tensor.
+   * Exposed for ForkMerge so two branches can be wired into one DAG.
+   *
+   * This is intentionally coupled to ForkMerge; not part of the stable public API.
+   */
+  buildGraph(
+    q: Tensor,
+    candidates: NodeActivationInput[],
+    neighborhood: NodeActivationInput[],
+    graphState: GraphStateSnapshot | undefined,
+  ): { scores: Tensor } {
+    const n = candidates.length;
+    if (n === 0) {
+      return { scores: Tensor.vector(new Float32Array()) };
+    }
+
+    const C = this.#stack(candidates, n);
+
+    // g₁: query-candidate attention
+    const simQ = q.transpose().matmul(C);
+    const attnG1 = simQ.multiply(this.#temperature).softmax();
+    const g1 = C.matmul(attnG1.transpose());
+
+    // g₂: neighbourhood context
+    const m = neighborhood.length;
+    let g2: Tensor;
+    if (m > 0) {
+      const N = this.#stack(neighborhood, m);
+      const simG2 = g1.transpose().matmul(N).multiply(this.#temperature);
+      g2 = N.matmul(simG2.softmax().transpose());
+    } else {
+      g2 = g1;
+    }
+
+    // Temporal state
+    const h1 = Tensor.vector(this.#h1State ?? new Float32Array(this.dimensions));
+    const h2 = Tensor.vector(
+      this.#meanVector(graphState?.mediumTermVectors),
+    );
+    const h3 = Tensor.vector(
+      this.#meanVector(graphState?.longTermVectors),
+    );
+
+    // g₃: fused context
+    const g3 = Tensor.sumN([g1, g2, h1, h2, h3]).l2Normalize();
+
+    // Blended scores
+    const sw = this.#scoreWeights.softmax();
+    const scores = Tensor.sumN([
+      simQ.multiply(sw.at(0)),
+      g1.transpose().matmul(C).multiply(sw.at(1)),
+      g2.transpose().matmul(C).multiply(sw.at(2)),
+      g3.transpose().matmul(C).multiply(sw.at(3)),
+      h1.transpose().matmul(C).multiply(sw.at(4)),
+      h2.transpose().matmul(C).multiply(sw.at(5)),
+      h3.transpose().matmul(C).multiply(sw.at(6)),
+    ]);
+
+    return { scores };
+  }
 }
