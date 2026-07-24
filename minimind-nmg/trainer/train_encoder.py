@@ -113,16 +113,32 @@ class PreTokenizedDataset(Dataset):
 # Loss functions
 # ═══════════════════════════════════════════════════════════════════
 
-def info_nce_loss(query_emb, pos_emb, neg_emb, temperature=0.05):
-    """InfoNCE: in-batch negatives + explicit hard negatives."""
+def info_nce_loss(query_emb, pos_emb, neg_emb, temperature=0.05, online_hnm_k=0):
+    """InfoNCE: in-batch negatives + explicit hard negatives + optional online HNM.
+
+    When online_hnm_k > 0: for each query, select the K hardest in-batch
+    negatives (highest cosine similarity, excluding self) as additional
+    hard negatives. This adapts to the model's current embedding quality.
+    """
     B = query_emb.shape[0]
     pos_scores = (query_emb * pos_emb).sum(dim=-1) / temperature      # [B]
     neg_in_batch = (query_emb @ pos_emb.T) / temperature               # [B, B]
     neg_hard = (query_emb * neg_emb).sum(dim=-1).unsqueeze(1) / temperature  # [B, 1]
-    all_scores = torch.cat([neg_in_batch, neg_hard], dim=1)            # [B, B+1]
+
+    if online_hnm_k > 0:
+        # Find hardest in-batch negatives (excluding self, excluding positive)
+        mask = torch.eye(B, device=query_emb.device)
+        masked_scores = neg_in_batch.masked_fill(mask.bool(), float("-inf"))
+        _, hard_idx = masked_scores.topk(online_hnm_k, dim=1)  # [B, K]
+        neg_online = torch.gather(neg_in_batch, 1, hard_idx)   # [B, K]
+        all_scores = torch.cat([neg_in_batch, neg_hard, neg_online], dim=1)  # [B, B+1+K]
+    else:
+        hard_idx = None
+        all_scores = torch.cat([neg_in_batch, neg_hard], dim=1)  # [B, B+1]
+
     mask = torch.eye(B, device=query_emb.device)
     all_scores[:, :B] = all_scores[:, :B].masked_fill(mask.bool(), float("-inf"))
-    logits = torch.cat([pos_scores.unsqueeze(1), all_scores], dim=1)   # [B, B+1]
+    logits = torch.cat([pos_scores.unsqueeze(1), all_scores], dim=1)   # [B, N]
     return F.cross_entropy(logits, torch.zeros(B, dtype=torch.long, device=query_emb.device))
 
 def ranking_loss(query_emb, pos_emb, neg_emb, margin=0.2):
@@ -241,7 +257,8 @@ def train(args):
                 p_out = model(p_ids, p_mask)
                 n_out = model(n_ids, n_mask)
                 loss_ctr = info_nce_loss(q_out["embedding"], p_out["embedding"],
-                                          n_out["embedding"], args.temperature)
+                                          n_out["embedding"], args.temperature,
+                                          args.online_hnm_k)
                 loss_rank = ranking_loss(q_out["embedding"], p_out["embedding"],
                                           n_out["embedding"], args.margin)
                 loss = (loss_ctr + args.ranking_weight * loss_rank) / args.grad_accum
@@ -352,6 +369,8 @@ if __name__ == "__main__":
     tr.add_argument("--temperature", type=float, default=0.05)
     tr.add_argument("--margin", type=float, default=0.2)
     tr.add_argument("--ranking_weight", type=float, default=0.3)
+    tr.add_argument("--online_hnm_k", type=int, default=0,
+                    help="Online hard negative mining: extra K hardest in-batch negatives (0=off)")
 
     # Checkpoint
     chk = parser.add_argument_group("Checkpoint")
