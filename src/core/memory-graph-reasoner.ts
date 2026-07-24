@@ -135,18 +135,17 @@ export class MemoryGraphReasoner {
     queryOriginal: Tensor, // the original, unmodified query (anchor)
     v: Float32Array,
     nodeId: string,
-    precondScore?: number,
+    precond?: Tensor, // optional precondition scalar (connected to DAG)
   ): { nextQuery: Tensor; score: Tensor; gate: Tensor; retention: Tensor } {
-    // Pre-scale vector by precondition (avoids extra DAG multiply on gate)
-    const vScaled = precondScore !== undefined && precondScore < 1
-      ? this.#scaleVector(v, precondScore)
-      : v;
-    const vTensor = Tensor.vector(vScaled);
+    const vTensor = Tensor.vector(v);
 
     // ── absorption gate: g = σ(v^T @ q + b_log) ──
     const similarity = vTensor.transpose().matmul(q); // [1,1]
     const bLog = this.#getOrCreateBiasLogit(nodeId);
-    const gate = similarity.add(bLog).sigmoid();
+    const rawGate = similarity.add(bLog).sigmoid();
+
+    // ── logical precondition: soft-AND gate via DAG multiply ──
+    const gate = precond ? rawGate.multiply(precond) : rawGate;
 
     // ── A = σ(a_log): global decay, naturally bounded in (0,1) ──
     const A = this.#aLog.sigmoid();
@@ -214,47 +213,55 @@ export class MemoryGraphReasoner {
     // Step 0: find best starting node by evaluating all nodes
     let candidates = Array.from(graph.values());
     for (let step = 0; step < maxSteps && candidates.length > 0; step++) {
-      // Fast path: inline precondition check + skip DAG if structurally excluded
-      const factDotCache = new Map<string, number>();
+      // ── Build precondition DAG: one matmul for all fact activations ──
+      // Collect unique fact IDs → stack vectors → [K,d] @ q = [K,1] → sigmoid
+      let factIds: string[] | null = null;
+      for (const node of candidates) {
+        if (node.requires) {
+          for (const factId of node.requires) {
+            if (!factIds) factIds = [];
+            if (!factIds.includes(factId)) factIds.push(factId);
+          }
+        }
+      }
+      let factActsTensor: Tensor | null = null;
+      const factIndex = new Map<string, number>();
+      if (factIds && factIds.length > 0) {
+        const factData = new Float32Array(factIds.length * this.dimensions);
+        for (let fi = 0; fi < factIds.length; fi++) {
+          const fn = graph.get(factIds[fi]!);
+          factData.set(fn?.vector ?? new Float32Array(this.dimensions), fi * this.dimensions);
+          factIndex.set(factIds[fi]!, fi);
+        }
+        const Fmat = Tensor.fromBuffer(factData, factIds.length, this.dimensions);
+        factActsTensor = Fmat.matmul(q).sigmoid(); // [K,1] connected to DAG
+      }
 
       let bestScore = -Infinity;
       let bestNode: MemoryNode | null = null;
       let bestNextQ = currentQuery;
       let bestGate = 0;
-      let bestPrecond: number | undefined;
+      let bestPrecond: Tensor | undefined;
 
       for (const node of candidates) {
-        let precondScore: number | undefined;
-        if (node.requires && node.requires.length > 0) {
-          precondScore = 1;
+        // Build precondition Tensor: Π factActs[i] (soft-AND, connected to DAG)
+        let precondTensor: Tensor | undefined;
+        if (node.requires && factActsTensor) {
           for (const factId of node.requires) {
-            let act = factDotCache.get(factId);
-            if (act === undefined) {
-              const factNode = graph.get(factId);
-              if (!factNode) { precondScore = 0; break; }
-              let dot = 0;
-              const fv = factNode.vector;
-              for (let i = 0; i < this.dimensions; i++) dot += currentQuery[i]! * fv[i]!;
-              if (dot <= 0) { act = 0; } else { act = dot; }
-              factDotCache.set(factId, act);
-            }
-            if (act <= 0) { precondScore = 0; break; }
-            precondScore *= act;
+            const idx = factIndex.get(factId);
+            if (idx === undefined) { precondTensor = Tensor.scalar(0); break; }
+            const act = factActsTensor.at(idx); // Index op, stays in DAG
+            precondTensor = precondTensor ? precondTensor.multiply(act) : act;
           }
         }
-        // Skip DAG entirely if precondition fails — no computation needed
-        if (precondScore !== undefined && precondScore === 0) {
-          // gate=0, score = baseline (just cosine with no absorption)
-          continue;
-        }
-        const { nextQuery, score, gate } = this.#reasonStep(q, queryOriginal, node.vector, node.id, precondScore);
+        const { nextQuery, score, gate } = this.#reasonStep(q, queryOriginal, node.vector, node.id, precondTensor);
         const s = score.scalarValue;
         if (s > bestScore) {
           bestScore = s;
           bestNode = node;
           bestNextQ = Float32Array.from(nextQuery.data);
           bestGate = gate.scalarValue;
-          bestPrecond = precondScore;
+          bestPrecond = precondTensor;
         }
       }
 
