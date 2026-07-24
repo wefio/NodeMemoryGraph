@@ -1,0 +1,14 @@
+# Python venv
+.venv/
+__pycache__/
+*.pyc
+
+# Downloaded pretrained models (large binaries)
+minimind-3-weights/
+qwen3-embedding/
+
+# Training outputs (checkpoints, ONNX, data, tokenizer artifacts)
+out/
+
+# Except: keep the vocab mapping (small JSON, needed at runtime)
+!out/tokenizer/old_to_new.json
