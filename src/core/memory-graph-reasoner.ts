@@ -25,6 +25,8 @@ import { Tensor, gradientStep } from "./autodiff.ts";
 export interface MemoryNode {
   id: string;
   vector: Float32Array; // L2-normalized [d]
+  /** Fact node IDs that must be active for this node's gate to open. */
+  requires?: string[];
 }
 
 export interface TraversalStep {
@@ -133,13 +135,19 @@ export class MemoryGraphReasoner {
     queryOriginal: Tensor, // the original, unmodified query (anchor)
     v: Float32Array,
     nodeId: string,
+    precondScore?: number,
   ): { nextQuery: Tensor; score: Tensor; gate: Tensor; retention: Tensor } {
     const vTensor = Tensor.vector(v);
 
     // ── absorption gate: g = σ(v^T @ q + b_log) ──
     const similarity = vTensor.transpose().matmul(q); // [1,1]
     const bLog = this.#getOrCreateBiasLogit(nodeId);
-    const gate = similarity.add(bLog).sigmoid();
+    let gate = similarity.add(bLog).sigmoid();
+
+    // ── logical precondition: close gate unless required facts are active ──
+    if (precondScore !== undefined) {
+      gate = gate.multiply(Tensor.scalar(precondScore));
+    }
 
     // ── A = σ(a_log): global decay, naturally bounded in (0,1) ──
     const A = this.#aLog.sigmoid();
@@ -200,26 +208,57 @@ export class MemoryGraphReasoner {
     // Step 0: find best starting node by evaluating all nodes
     let candidates = Array.from(graph.values());
     for (let step = 0; step < maxSteps && candidates.length > 0; step++) {
+      // Pre-evaluate fact nodes referenced by any candidate
+      const factCache = new Map<string, number>();
+      for (const node of candidates) {
+        if (node.requires) {
+          for (const factId of node.requires) {
+            if (!factCache.has(factId)) {
+              const factNode = graph.get(factId);
+              if (factNode) {
+                // activation = cosine similarity between fact vector and current query
+                let dot = 0;
+                const fv = factNode.vector;
+                for (let i = 0; i < this.dimensions; i++) dot += currentQuery[i]! * fv[i]!;
+                factCache.set(factId, Math.max(0, dot)); // ReLU: negative cos = inactive
+              } else {
+                factCache.set(factId, 0); // missing fact = precondition fails
+              }
+            }
+          }
+        }
+      }
+
       let bestScore = -Infinity;
       let bestNode: MemoryNode | null = null;
       let bestNextQ = currentQuery;
       let bestGate = 0;
+      let bestPrecond: number | undefined;
 
       for (const node of candidates) {
-        const { nextQuery, score, gate } = this.#reasonStep(q, queryOriginal, node.vector, node.id);
+        // Compute precondition score: product of fact activations (soft-AND)
+        let precondScore: number | undefined;
+        if (node.requires && node.requires.length > 0) {
+          precondScore = 1;
+          for (const factId of node.requires) {
+            precondScore *= factCache.get(factId) ?? 0;
+          }
+        }
+        const { nextQuery, score, gate } = this.#reasonStep(q, queryOriginal, node.vector, node.id, precondScore);
         const s = score.scalarValue;
         if (s > bestScore) {
           bestScore = s;
           bestNode = node;
           bestNextQ = Float32Array.from(nextQuery.data);
           bestGate = gate.scalarValue;
+          bestPrecond = precondScore;
         }
       }
 
       if (!bestNode) break;
       pathScore += bestScore;
-      // Rebuild q as Tensor for the next step (from the winning node's output)
-      const { nextQuery: winningQ } = this.#reasonStep(q, queryOriginal, bestNode.vector, bestNode.id);
+      // Rebuild q for the next step (same precondition as evaluation)
+      const { nextQuery: winningQ } = this.#reasonStep(q, queryOriginal, bestNode.vector, bestNode.id, bestPrecond);
 
       path.push({
         nodeId: bestNode.id,
