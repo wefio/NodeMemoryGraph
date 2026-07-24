@@ -387,13 +387,12 @@ export class HierarchicalActivation {
   // ── persistence ──
 
   toJSON(): HierarchicalActivationState {
-    const weights = this.#scoreWeights.softmax().data;
     return {
       version: 3,
       dimensions: this.dimensions,
       trainingSteps: this.#trainingSteps,
       temperature: this.#temperature.scalarValue,
-      scoreWeights: Array.from(weights),
+      scoreWeights: Array.from(this.#scoreWeights.data),
       temporalAlpha: this.#temporalAlpha.scalarValue,
       reasoningBeta: this.#reasoningBeta.scalarValue,
       h1State: this.#h1State ? Array.from(this.#h1State) : null,
