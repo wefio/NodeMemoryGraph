@@ -415,6 +415,8 @@ function localGradients(operation: UOp, gradient: UOp): Array<readonly [UOp, UOp
     case Op.Parameter:
     case Op.SoftmaxGradient:
       return [];
+    default:
+      return [];
   }
 }
 
