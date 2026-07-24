@@ -137,17 +137,16 @@ export class MemoryGraphReasoner {
     nodeId: string,
     precondScore?: number,
   ): { nextQuery: Tensor; score: Tensor; gate: Tensor; retention: Tensor } {
-    const vTensor = Tensor.vector(v);
+    // Pre-scale vector by precondition (avoids extra DAG multiply on gate)
+    const vScaled = precondScore !== undefined && precondScore < 1
+      ? this.#scaleVector(v, precondScore)
+      : v;
+    const vTensor = Tensor.vector(vScaled);
 
     // ── absorption gate: g = σ(v^T @ q + b_log) ──
     const similarity = vTensor.transpose().matmul(q); // [1,1]
     const bLog = this.#getOrCreateBiasLogit(nodeId);
-    let gate = similarity.add(bLog).sigmoid();
-
-    // ── logical precondition: close gate unless required facts are active ──
-    if (precondScore !== undefined) {
-      gate = gate.multiply(Tensor.scalar(precondScore));
-    }
+    const gate = similarity.add(bLog).sigmoid();
 
     // ── A = σ(a_log): global decay, naturally bounded in (0,1) ──
     const A = this.#aLog.sigmoid();
@@ -168,6 +167,13 @@ export class MemoryGraphReasoner {
     const score = qNew.transpose().matmul(vTensor);
 
     return { nextQuery: qNew, score, gate, retention: beta };
+  }
+
+  #scaleVector(v: Float32Array, s: number): Float32Array {
+    const d = this.dimensions;
+    const result = new Float32Array(d);
+    for (let i = 0; i < d; i++) result[i] = v[i]! * s;
+    return result;
   }
 
   #getOrCreateBiasLogit(nodeId: string): Tensor {
@@ -208,25 +214,8 @@ export class MemoryGraphReasoner {
     // Step 0: find best starting node by evaluating all nodes
     let candidates = Array.from(graph.values());
     for (let step = 0; step < maxSteps && candidates.length > 0; step++) {
-      // Pre-evaluate fact nodes referenced by any candidate
-      const factCache = new Map<string, number>();
-      for (const node of candidates) {
-        if (node.requires) {
-          for (const factId of node.requires) {
-            if (!factCache.has(factId)) {
-              const factNode = graph.get(factId);
-              if (factNode) {
-                let dot = 0;
-                const fv = factNode.vector;
-                for (let i = 0; i < this.dimensions; i++) dot += currentQuery[i]! * fv[i]!;
-                factCache.set(factId, Math.max(0, dot));
-              } else {
-                factCache.set(factId, 0);
-              }
-            }
-          }
-        }
-      }
+      // Fast path: inline precondition check + skip DAG if structurally excluded
+      const factDotCache = new Map<string, number>();
 
       let bestScore = -Infinity;
       let bestNode: MemoryNode | null = null;
@@ -235,13 +224,28 @@ export class MemoryGraphReasoner {
       let bestPrecond: number | undefined;
 
       for (const node of candidates) {
-        // Compute precondition score: product of fact activations (soft-AND)
         let precondScore: number | undefined;
         if (node.requires && node.requires.length > 0) {
           precondScore = 1;
           for (const factId of node.requires) {
-            precondScore *= factCache.get(factId) ?? 0;
+            let act = factDotCache.get(factId);
+            if (act === undefined) {
+              const factNode = graph.get(factId);
+              if (!factNode) { precondScore = 0; break; }
+              let dot = 0;
+              const fv = factNode.vector;
+              for (let i = 0; i < this.dimensions; i++) dot += currentQuery[i]! * fv[i]!;
+              if (dot <= 0) { act = 0; } else { act = dot; }
+              factDotCache.set(factId, act);
+            }
+            if (act <= 0) { precondScore = 0; break; }
+            precondScore *= act;
           }
+        }
+        // Skip DAG entirely if precondition fails — no computation needed
+        if (precondScore !== undefined && precondScore === 0) {
+          // gate=0, score = baseline (just cosine with no absorption)
+          continue;
         }
         const { nextQuery, score, gate } = this.#reasonStep(q, queryOriginal, node.vector, node.id, precondScore);
         const s = score.scalarValue;
