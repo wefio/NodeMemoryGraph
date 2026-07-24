@@ -622,6 +622,11 @@ r     = q'^T @ v              local relevance score
 | `a_log` | global | Higher = retain more past context across steps |
 | `β_log` | per-node | Higher = output favours accumulated state over original query |
 
+Nodes may declare `requires: string[]` — fact node IDs that must be active
+for the gate to open. Precondition score is the product of fact activations
+(soft-AND). Inactive facts close the gate, structurally excluding the node
+from the traversal path.
+
 ### Relationship to HierarchicalActivation
 
 |                         | HA                           | MGR                           |
