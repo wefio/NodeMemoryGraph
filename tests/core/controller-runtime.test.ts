@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ControllerRuntime } from "./controller-runtime.ts";
-import { NmgStore } from "./store.ts";
+import { ControllerRuntime } from "../../src/core/controller-runtime.ts";
+import { NmgStore } from "../../src/core/store.ts";
 
 test("controller runtime learns from actual-use traces and persists exact state", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-controller-runtime-"));

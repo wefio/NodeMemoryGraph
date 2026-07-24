@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import nmgExtension from "./index.ts";
-import { configuredGraphHops, formatSearchHeaders, searchMemoryContext } from "./index.ts";
+import nmgExtension from "../../../.pi/extensions/nmg/index.ts";
+import { configuredGraphHops, formatSearchHeaders, searchMemoryContext } from "../../../.pi/extensions/nmg/index.ts";
 import { NmgStore } from "../../../src/core/store.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

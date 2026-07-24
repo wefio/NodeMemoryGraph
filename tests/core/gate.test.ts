@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { decideMemoryLoad } from "./gate.ts";
+import { decideMemoryLoad } from "../../src/core/gate.ts";
 
 test("explicit questions about past or current user state trigger automatic recall", () => {
   assert.equal(decideMemoryLoad("我之前使用过什么视频软件？").mode, "retrieve");

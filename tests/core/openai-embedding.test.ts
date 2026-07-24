@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
-import { OpenAIEmbeddingClient } from "./openai-embedding.ts";
+import { OpenAIEmbeddingClient } from "../../src/core/openai-embedding.ts";
 
 test("OpenAI embedding client preserves server result order", async () => {
   const server = createServer((request, response) => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Float32VectorCache } from "./vector-cache.ts";
+import { Float32VectorCache } from "../../src/core/vector-cache.ts";
 
 test("Float32VectorCache appends, updates, filters, and grows geometrically", () => {
   const cache = new Float32VectorCache(2, 1);

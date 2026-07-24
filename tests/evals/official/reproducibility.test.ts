@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { sampleFingerprint } from "./reproducibility.ts";
+import { sampleFingerprint } from "../../../evals/official/reproducibility.ts";
 
 test("sample fingerprints are deterministic and content sensitive", () => {
   assert.equal(sampleFingerprint({ id: 1 }), sampleFingerprint({ id: 1 }));

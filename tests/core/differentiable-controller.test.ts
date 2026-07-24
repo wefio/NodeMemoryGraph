@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   CONTROLLER_BUDGET_DIMENSIONS,
   DifferentiableController,
-} from "./differentiable-controller.ts";
+} from "../../src/core/differentiable-controller.ts";
 
 test("differentiable controller learns node, edge, control, and budget targets", () => {
   const controller = new DifferentiableController(2);

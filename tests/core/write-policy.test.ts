@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assessMemoryWrite } from "./write-policy.ts";
+import { assessMemoryWrite } from "../../src/core/write-policy.ts";
 
 test("blocks credential-like values before semantic memory storage", () => {
   assert.deepEqual(

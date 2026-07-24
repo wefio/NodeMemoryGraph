@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { loadLongMemEval, scoreLongMemRetrieval } from "./official.ts";
+import { loadLongMemEval, scoreLongMemRetrieval } from "../../../evals/longmemeval/official.ts";
 
 test("loads official LongMemEval evidence labels without deriving them", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-longmem-official-"));

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { HierarchicalActivation } from "./hierarchical-activation.ts";
+import { HierarchicalActivation } from "../../src/core/hierarchical-activation.ts";
 
 function rvec(d: number): Float32Array {
   const v = new Float32Array(d);

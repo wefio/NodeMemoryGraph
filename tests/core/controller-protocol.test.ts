@@ -8,9 +8,9 @@ import {
   CONTROLLER_FEATURE_COUNT,
   CONTROLLER_FEATURE_NAMES,
   controllerSampleFromTrace,
-} from "./controller-protocol.ts";
-import { NmgStore } from "./store.ts";
-import type { VectorEmbedder } from "./types.ts";
+} from "../../src/core/controller-protocol.ts";
+import { NmgStore } from "../../src/core/store.ts";
+import type { VectorEmbedder } from "../../src/core/types.ts";
 
 test("trace protocol joins STG, LTG and Active Graph into fixed bounded features", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-controller-protocol-"));

@@ -4,13 +4,13 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 
-import { longMemEvalJudgePrompt } from "../longmemeval/official.ts";
+import { longMemEvalJudgePrompt } from "../../../evals/longmemeval/official.ts";
 import {
   beamEventAlignmentPrompt,
   beamJudgePrompt,
   normalizedKendallTauB,
   personaMemCorrect,
-} from "./protocol.ts";
+} from "../../../evals/official/protocol.ts";
 
 test("PersonaMem uses the official single-option extraction rule", () => {
   assert.equal(personaMemCorrect("<final_answer>(b)</final_answer>", "(b)"), true);

@@ -56,8 +56,8 @@
     "index:ann": "node --experimental-strip-types scripts/build-ann.ts",
     "pi:prompt": "node --experimental-strip-types scripts/pi-control.ts prompt",
     "pi:state": "node --experimental-strip-types scripts/pi-control.ts state",
-    "test": "node --experimental-strip-types --test src/core/store.test.ts src/core/gate.test.ts src/core/openai-embedding.test.ts src/core/ann.test.ts src/core/autodiff.test.ts src/core/controller-protocol.test.ts src/core/controller-runtime.test.ts src/core/differentiable-controller.test.ts src/core/hierarchical-activation.test.ts src/core/memory-graph-reasoner.test.ts src/core/vector-cache.test.ts src/core/write-policy.test.ts .pi/extensions/nmg/index.test.ts evals/benchmarks/loaders.test.ts evals/official/protocol.test.ts evals/official/reproducibility.test.ts evals/longmemeval/official.test.ts evals/longmemeval/report.test.ts",
-    "test:cg": "node --experimental-strip-types --test src/core/autodiff.test.ts src/core/differentiable-controller.test.ts src/core/hierarchical-activation.test.ts src/core/memory-graph-reasoner.test.ts"
+    "test": "node --experimental-strip-types --test tests/core/store.test.ts tests/core/gate.test.ts tests/core/openai-embedding.test.ts tests/core/ann.test.ts tests/core/autodiff.test.ts tests/core/controller-protocol.test.ts tests/core/controller-runtime.test.ts tests/core/differentiable-controller.test.ts tests/core/hierarchical-activation.test.ts tests/core/memory-graph-reasoner.test.ts tests/core/vector-cache.test.ts tests/core/write-policy.test.ts tests/extensions/nmg/index.test.ts tests/evals/benchmarks/loaders.test.ts tests/evals/official/protocol.test.ts tests/evals/official/reproducibility.test.ts tests/evals/longmemeval/official.test.ts tests/evals/longmemeval/report.test.ts",
+    "test:cg": "node --experimental-strip-types --test tests/core/autodiff.test.ts tests/core/differentiable-controller.test.ts tests/core/hierarchical-activation.test.ts tests/core/memory-graph-reasoner.test.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.80.10",

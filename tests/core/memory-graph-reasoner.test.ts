@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MemoryGraphReasoner } from "./memory-graph-reasoner.ts";
-import type { MemoryNode } from "./memory-graph-reasoner.ts";
+import { MemoryGraphReasoner } from "../../src/core/memory-graph-reasoner.ts";
+import type { MemoryNode } from "../../src/core/memory-graph-reasoner.ts";
 
 function rvec(d: number): Float32Array {
   const v = new Float32Array(d);

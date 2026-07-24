@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { loadBeam, loadLocomo, loadPersonaMem, stratifiedSample } from "./loaders.ts";
+import { loadBeam, loadLocomo, loadPersonaMem, stratifiedSample } from "../../../evals/benchmarks/loaders.ts";
 
 test("loads LoCoMo sessions, evidence ids, and QA categories", () => {
   withTempDirectory((directory) => {

@@ -8,7 +8,7 @@ import {
   summarizeLatencyByMode,
   summarizePipelineByMode,
   summarizeRetrievalByMode,
-} from "./report.ts";
+} from "../../../evals/longmemeval/report.ts";
 
 const rows = [
   {

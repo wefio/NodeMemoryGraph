@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { UsearchAnnIndex } from "./ann.ts";
+import { UsearchAnnIndex } from "../../src/core/ann.ts";
 
 test("USearch ANN persists stable memory ID mappings", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-ann-"));

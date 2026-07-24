@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import { NmgStore } from "./store.ts";
-import type { VectorEmbedder } from "./types.ts";
+import { NmgStore } from "../../src/core/store.ts";
+import type { VectorEmbedder } from "../../src/core/types.ts";
 
 function withStore(run: (store: NmgStore) => void, embedder?: VectorEmbedder): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-test-"));
