@@ -39,6 +39,20 @@ const DEFAULT_CONFIG: ForkMergeConfig = {
   divergenceWeight: 1.0,
 };
 
+/**
+ * Cosine distance is mathematically bounded to [0, 2], but it is computed here
+ * from float32 score tensors. When both branches carry identical parameters the
+ * similarity should be exactly 1.0; float32 rounding can instead yield values a
+ * few ULPs above 1.0, making `1 - cos` a small negative number (observed down to
+ * -1.2e-7 in roughly 20% of identical-parameter forwards). Callers treat
+ * divergence as a non-negative magnitude, so clamp to the true range rather than
+ * leaking rounding noise.
+ */
+function clampDivergence(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(2, Math.max(0, value));
+}
+
 // ── ForkMerge ──
 
 export class ForkMerge {
@@ -107,9 +121,12 @@ export class ForkMerge {
     // Execute
     const leftData = Float32Array.from(branchL.scores.data);
     const rightData = Float32Array.from(branchR.scores.data);
-    const divValue = divergence.scalarValue;
 
-    return { leftScores: leftData, rightScores: rightData, divergence: divValue };
+    return {
+      leftScores: leftData,
+      rightScores: rightData,
+      divergence: clampDivergence(divergence.scalarValue),
+    };
   }
 
   // ── training ──
@@ -167,7 +184,7 @@ export class ForkMerge {
     ];
     gradientStep(allParams, learningRate);
 
-    return { loss: lossValue, divergence: 1 - cos.scalarValue };
+    return { loss: lossValue, divergence: clampDivergence(1 - cos.scalarValue) };
   }
 
   /**
@@ -223,7 +240,7 @@ export class ForkMerge {
     ];
     gradientStep(allParams, learningRate);
 
-    return { loss: lossValue, divergence: 1 - cos.scalarValue };
+    return { loss: lossValue, divergence: clampDivergence(1 - cos.scalarValue) };
   }
 
   // ── serialisation ──
