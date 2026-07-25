@@ -6,6 +6,7 @@ import { RpcClient } from "@earendil-works/pi-coding-agent";
 import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder, cosineSimilarity } from "../../src/core/vector.ts";
 import { indexExternalEmbeddings } from "../external-embeddings.ts";
+import { computeCitationSignal } from "../official/citation.ts";
 import { gitRevision, sampleFingerprint } from "../official/reproducibility.ts";
 import { loadBeam, loadLocomo, loadPersonaMem, stratifiedSample } from "./loaders.ts";
 import type { BenchmarkCase, BenchmarkSession } from "./types.ts";
@@ -129,6 +130,12 @@ async function evaluate(
     injectedCharacters: retrieval.text.length,
     sourceTurns: item.sessions.reduce((sum, session) => sum + session.turns.length, 0),
     durationMs: Math.round(performance.now() - startedAt),
+    citation: retrieval.sourceIds
+      ? {
+          citedCount: computeCitationSignal(hypothesis, retrieval.evidenceById).citedCount,
+          totalRetrieved: retrieval.sourceIds.length,
+        }
+      : null,
   };
 }
 
@@ -180,14 +187,18 @@ function ingest(item: BenchmarkCase, dataDirectory: string): number {
 function contextFor(
   item: BenchmarkCase,
   itemMode: EvaluationMode,
-): { text: string; sourceIds: string[] | null } {
+): { text: string; sourceIds: string[] | null; evidenceById: Map<string, string> } {
   if (itemMode === "no-memory" || itemMode.startsWith("nmg-")) {
-    return { text: "", sourceIds: itemMode === "no-memory" ? [] : null };
+    return {
+      text: "",
+      sourceIds: itemMode === "no-memory" ? [] : null,
+      evidenceById: new Map(),
+    };
   }
   if (itemMode === "raw-session") {
     const ranked = item.sessions.map((session) => ({
       text: formatSession(session),
-      sourceIds: session.turns.map((turn) => turn.sourceId),
+      sourceText: session.turns.map((turn) => `${turn.speaker ?? turn.role}: ${turn.content}`).join(" "),
       score: lexicalOverlap(item.question, formatSession(session)),
     })).sort((left, right) => right.score - left.score);
     return withinBudget(ranked);
@@ -199,6 +210,7 @@ function contextFor(
     return {
       text,
       sourceIds: [turn.sourceId],
+      textForCitation: `${turn.speaker ?? turn.role}: ${turn.content}`,
       score: lexicalOverlap(item.question, text) * 0.55 +
         cosineSimilarity(query, embedder.embed(text)) * 0.45,
     };
@@ -276,15 +288,19 @@ function withinBudget(values: Array<{ text: string; sourceIds: string[] }>): {
 } {
   const selected: string[] = [];
   const sourceIds: string[] = [];
+  const evidenceById = new Map<string, string>();
   let used = 0;
   for (const value of values) {
     if (selected.length > 0 && used + value.text.length > contextBudget()) continue;
     selected.push(value.text);
     sourceIds.push(...value.sourceIds);
+    for (let i = 0; i < value.sourceIds.length; i += 1) {
+      evidenceById.set(value.sourceIds[i]!, value.textForCitation ?? value.text);
+    }
     used += value.text.length;
     if (used >= contextBudget()) break;
   }
-  return { text: selected.join("\n\n"), sourceIds };
+  return { text: selected.join("\n\n"), sourceIds, evidenceById };
 }
 
 function lexicalOverlap(query: string, text: string): number {

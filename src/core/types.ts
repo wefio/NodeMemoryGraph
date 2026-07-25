@@ -46,7 +46,7 @@ export type MemoryType =
   | "strategy";
 export type MemoryActor = "assistant" | "system" | "tool" | "user";
 export type TruthStatus = "asserted" | "inferred" | "unverified" | "verified";
-export type MemoryStatus = "active" | "disputed" | "inactive" | "superseded";
+export type MemoryStatus = "active" | "deleted" | "disputed" | "inactive" | "superseded";
 export type EvidenceRole = "contradict" | "example" | "exception" | "origin" | "support" | "update";
 export type MemoryScope = Record<string, string>;
 export type NodeRelationType =

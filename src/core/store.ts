@@ -104,6 +104,115 @@ export class NmgStore {
     this.#db.close();
   }
 
+  /**
+   * Soft-delete a memory and all its dependent artifacts.
+   *
+   * Marks the memory record as deleted so every existing query filters it out
+   * automatically. Removes FTS, embeddings, leaf-block membership, index
+   * deltas and vector cache entries so stale data does not leak through
+   * alternative lookup paths. History records are left intact: raw evidence
+   * is immutable regardless of whether the interpreted memories built on it
+   * are retained.
+   */
+  deleteMemory(memoryId: string): MemoryRecord | null {
+    const row = this.#db
+      .prepare(
+        "SELECT id, node_id, status, statement, memory_type, state_key, event_time, " +
+        "source_actor, truth_status, scope_json, valid_from, valid_until, " +
+        "residence, promoted_at, expires_at, evidence_role, supersedes_id, " +
+        "tier, importance, access_count, last_accessed_at, evidence_id, " +
+        "write_reason, write_source, created_at " +
+        "FROM memory_records WHERE id = ?",
+      )
+      .get(memoryId) as Row | undefined;
+    if (!row) return null;
+    const memory: MemoryRecord = {
+      id: String(row.id),
+      nodeId: String(row.node_id),
+      evidenceId: String(row.evidence_id),
+      evidenceIds: [String(row.evidence_id)],
+      statement: String(row.statement),
+      memoryType: String(row.memory_type) as MemoryRecord["memoryType"],
+      stateKey: row.state_key ? String(row.state_key) : null,
+      eventTime: row.event_time ? String(row.event_time) : null,
+      sourceActor: String(row.source_actor) as MemoryRecord["sourceActor"],
+      truthStatus: String(row.truth_status) as MemoryRecord["truthStatus"],
+      scope: parseScope(row.scope_json),
+      validFrom: row.valid_from ? String(row.valid_from) : null,
+      validUntil: row.valid_until ? String(row.valid_until) : null,
+      status: String(row.status) as MemoryStatus,
+      residence: String(row.residence ?? "ltg") as MemoryResidence,
+      promotedAt: row.promoted_at ? String(row.promoted_at) : null,
+      expiresAt: row.expires_at ? String(row.expires_at) : null,
+      evidenceRole: String(row.evidence_role) as MemoryRecord["evidenceRole"],
+      supersedesId: row.supersedes_id ? String(row.supersedes_id) : null,
+      tier: Number(row.tier) as MemoryTier,
+      importance: Number(row.importance),
+      accessCount: Number(row.access_count),
+      lastAccessedAt: row.last_accessed_at ? String(row.last_accessed_at) : null,
+      writeReason: String(row.write_reason ?? "legacy_write"),
+      writeSource: String(row.write_source ?? "core") as MemoryRecord["writeSource"],
+      createdAt: String(row.created_at),
+    };
+    const now = new Date().toISOString();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db
+        .prepare("UPDATE memory_records SET status = 'deleted' WHERE id = ?")
+        .run(memoryId);
+      this.#db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
+      this.#db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(memoryId);
+      this.#db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(memoryId);
+      this.#db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(memoryId);
+      this.#db.prepare("DELETE FROM memory_evidence_links WHERE memory_id = ?").run(memoryId);
+      this.#db.prepare("DELETE FROM memory_leaf_members WHERE memory_id = ?").run(memoryId);
+      this.#db
+        .prepare(
+          `INSERT INTO leaf_block_status (node_id, dirty, updated_at)
+           VALUES (?, 1, ?)
+           ON CONFLICT(node_id) DO UPDATE SET dirty = 1, updated_at = excluded.updated_at`,
+        )
+        .run(memory.nodeId, now);
+      for (const key of this.#vectorCaches.keys()) {
+        this.#vectorCaches.get(key)?.remove(memoryId);
+      }
+      this.#cascadeDerivedMemories(memoryId);
+      this.#db.exec("COMMIT");
+      return memory;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  #cascadeDerivedMemories(sourceMemoryId: string): void {
+    const derivations = this.#db
+      .prepare("SELECT derived_memory_id FROM memory_derivations WHERE source_memory_id = ?")
+      .all(sourceMemoryId) as Row[];
+    this.#db.prepare("DELETE FROM memory_derivations WHERE source_memory_id = ?").run(sourceMemoryId);
+    for (const row of derivations) {
+      const derivedId = String(row.derived_memory_id);
+      const remaining = this.#db
+        .prepare("SELECT 1 FROM memory_derivations WHERE derived_memory_id = ?")
+        .get(derivedId);
+      if (!remaining) {
+        this.#db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(derivedId);
+        this.#db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(derivedId);
+        this.#db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(derivedId);
+        this.#db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(derivedId);
+        this.#db.prepare("DELETE FROM memory_evidence_links WHERE memory_id = ?").run(derivedId);
+        this.#db.prepare("DELETE FROM memory_leaf_members WHERE memory_id = ?").run(derivedId);
+        this.#db
+          .prepare("UPDATE memory_records SET status = 'deleted' WHERE id = ?")
+          .run(derivedId);
+        for (const key of this.#vectorCaches.keys()) {
+          this.#vectorCaches.get(key)?.remove(derivedId);
+        }
+        this.#cascadeDerivedMemories(derivedId);
+      }
+    }
+  }
+
   appendHistory(input: {
     content: string;
     role: HistoryRole;
@@ -3320,6 +3429,12 @@ export class NmgStore {
     vector: readonly number[],
   ): void {
     this.#vectorCaches.get(`${kind}:${model}`)?.upsert(id, vector);
+  }
+
+  #invalidateVectorCacheEntry(kind: "leaf" | "node", model: string, id: string): void {
+    const key = `${kind}:${model}`;
+    const cache = this.#vectorCaches.get(key);
+    if (cache && cache.has(id)) cache.remove(id);
   }
 
   #invalidateVectorCaches(kind: "leaf" | "node"): void {

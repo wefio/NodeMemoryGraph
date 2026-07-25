@@ -54,6 +54,34 @@ export class Float32VectorCache {
     return this.#matrix.subarray(start, start + this.dimensions);
   }
 
+  /**
+   * Remove a single entry from the cache without invalidating the whole kind.
+   *
+   * Because the matrix is a contiguous Float32Array, a non-terminal removal
+   * shifts the last entry into the freed slot so the matrix stays dense.
+   * Idempotent: does nothing when the id is not present.
+   */
+  remove(id: string): void {
+    const index = this.#indices.get(id);
+    if (index === undefined) return;
+    const last = this.#length - 1;
+    if (index < last) {
+      // Move the last entry into the freed slot.
+      const lastId = this.#ids[last]!;
+      this.#indices.set(lastId, index);
+      this.#ids[index] = lastId;
+      this.#matrix.copyWithin(
+        index * this.dimensions,
+        last * this.dimensions,
+        this.#length * this.dimensions,
+      );
+    }
+    this.#indices.delete(id);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    this.#ids[last] = undefined as unknown as string;
+    this.#length = last;
+  }
+
   score(
     query: readonly number[],
     candidateIds?: ReadonlySet<string>,
