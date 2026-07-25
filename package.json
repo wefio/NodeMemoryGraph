@@ -34,7 +34,7 @@
     "lint:fix": "eslint --fix src/ .pi/extensions/",
     "format": "prettier --write \"src/**/*.ts\" \".pi/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \".pi/**/*.ts\"",
-    "test:coverage": "c8 node --experimental-strip-types --test src/core/*.test.ts .pi/extensions/nmg/index.test.ts",
+    "test:coverage": "c8 node --experimental-strip-types --test \"tests/**/*.test.ts\"",
     "eval:agents": "node --experimental-strip-types evals/run.ts",
     "eval:adaptive": "node --experimental-strip-types evals/adaptive-topology/run.ts",
     "eval:controller": "node --experimental-strip-types evals/controller/run.ts",
@@ -56,7 +56,7 @@
     "index:ann": "node --experimental-strip-types scripts/build-ann.ts",
     "pi:prompt": "node --experimental-strip-types scripts/pi-control.ts prompt",
     "pi:state": "node --experimental-strip-types scripts/pi-control.ts state",
-    "test": "node --experimental-strip-types --test tests/core/store.test.ts tests/core/gate.test.ts tests/core/openai-embedding.test.ts tests/core/ann.test.ts tests/core/autodiff.test.ts tests/core/controller-protocol.test.ts tests/core/controller-runtime.test.ts tests/core/differentiable-controller.test.ts tests/core/hierarchical-activation.test.ts tests/core/memory-graph-reasoner.test.ts tests/core/fork-merge.test.ts tests/core/robustness.test.ts tests/core/vector-cache.test.ts tests/core/write-policy.test.ts tests/extensions/nmg/index.test.ts tests/evals/benchmarks/loaders.test.ts tests/evals/official/protocol.test.ts tests/evals/official/reproducibility.test.ts tests/evals/longmemeval/official.test.ts tests/evals/longmemeval/report.test.ts",
+    "test": "node --experimental-strip-types --test \"tests/**/*.test.ts\"",
     "test:cg": "node --experimental-strip-types --test tests/core/autodiff.test.ts tests/core/differentiable-controller.test.ts tests/core/hierarchical-activation.test.ts tests/core/memory-graph-reasoner.test.ts tests/core/fork-merge.test.ts tests/core/robustness.test.ts"
   },
   "devDependencies": {
