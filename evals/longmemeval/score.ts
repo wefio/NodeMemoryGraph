@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 
 import { longMemEvalJudgePrompt } from "./official.ts";
+import { buildSnapshot, writeSnapshot } from "../official/snapshot.ts";
 
 interface Row {
   questionId: string;
@@ -18,6 +19,8 @@ const root = resolve(import.meta.dirname, "../..");
 const directory = resolve(process.argv[2] ?? "");
 const report = JSON.parse(readFileSync(resolve(directory, "report.json"), "utf8")) as {
   results: Row[];
+  codeRevision?: string | null;
+  sampleFingerprint?: string | null;
 };
 const rows = [];
 for (const row of report.results) {
@@ -42,7 +45,17 @@ const output = {
   results: rows,
 };
 writeFileSync(resolve(directory, "official-score.json"), `${JSON.stringify(output, null, 2)}\n`);
+const snapshotPath = writeSnapshot(root, buildSnapshot({
+  benchmark: output.benchmark,
+  protocol: output.protocol,
+  judgeModel: output.judgeModel,
+  upstream: output.upstream,
+  byMode: output.byMode,
+  codeRevision: report.codeRevision ?? null,
+  sampleFingerprint: report.sampleFingerprint ?? null,
+}));
 process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+process.stderr.write(`snapshot: ${snapshotPath}\n`);
 
 async function judge(row: Row): Promise<number> {
   const client = new RpcClient({

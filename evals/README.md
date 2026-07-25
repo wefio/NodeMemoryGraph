@@ -39,6 +39,20 @@ npm run eval:longmem -- matched 1
 npm run benchmark:score:longmem -- <result-directory>
 ```
 
+### Committed score snapshots
+
+Run directories are ignored, so scoring also writes a small snapshot under
+`evals/snapshots/<benchmark>/<timestamp>_<revision>.json`. These are committed.
+
+Each snapshot holds per-mode scores plus the provenance needed to interpret
+them: code revision, sample fingerprint, judge model, protocol and sample size.
+Two snapshots are only comparable when their `sampleFingerprint` matches; a
+differing fingerprint means the runs covered different cases, not that quality
+changed.
+
+Snapshots exist to make regressions visible across commits. They remain
+development signal: sample sizes are small and `leaderboardComparable` is false.
+
 `benchmark:setup` checks out the four official repositories at the commits in
 `evals/official/upstreams.json` under ignored `.benchmarks/official`. It also
 creates an isolated uv-managed Python 3.11 environment for official scorers;
