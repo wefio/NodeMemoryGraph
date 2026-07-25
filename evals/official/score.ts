@@ -9,6 +9,7 @@ import {
   normalizedKendallTauB,
   personaMemCorrect,
 } from "./protocol.ts";
+import { buildSnapshot, writeSnapshot } from "./snapshot.ts";
 
 type Benchmark = "beam" | "locomo" | "personamem";
 interface Prediction {
@@ -29,6 +30,8 @@ const benchmark = parseBenchmark(process.argv[2]);
 const runDirectory = resolve(process.argv[3] ?? "");
 const report = JSON.parse(readFileSync(resolve(runDirectory, "report.json"), "utf8")) as {
   results: Prediction[];
+  codeRevision?: string | null;
+  sampleFingerprint?: string | null;
 };
 const scored = benchmark === "locomo"
   ? scoreLocomo(report.results)
@@ -47,7 +50,17 @@ const output = {
   results: scored,
 };
 writeFileSync(resolve(runDirectory, "official-score.json"), `${JSON.stringify(output, null, 2)}\n`);
+const snapshotPath = writeSnapshot(root, buildSnapshot({
+  benchmark,
+  protocol: output.protocol,
+  judgeModel: output.judgeModel,
+  upstream: output.upstream,
+  byMode: output.byMode,
+  codeRevision: report.codeRevision ?? null,
+  sampleFingerprint: report.sampleFingerprint ?? null,
+}));
 process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+process.stderr.write(`snapshot: ${snapshotPath}\n`);
 
 function scorePersonaMem(rows: Prediction[]) {
   return rows.map((row) => ({ ...row, officialScore: personaMemCorrect(

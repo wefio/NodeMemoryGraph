@@ -53,14 +53,18 @@ test("BEAM event ordering uses normalized Kendall tau-b", () => {
 });
 
 test("LoCoMo bridge invokes the pinned official scorer when bootstrapped", (context) => {
-  const root = resolve(import.meta.dirname, "../..");
+  // This file lives at tests/evals/official/, so the repository root is three
+  // levels up. Resolving only two levels pointed at tests/ and made the
+  // bootstrap probe fail even on a fully bootstrapped checkout, so this test
+  // silently skipped instead of ever exercising the official scorer.
+  const root = resolve(import.meta.dirname, "../../..");
   const python = resolve(root, ".benchmarks/python/Scripts/python.exe");
   const upstream = resolve(root, ".benchmarks/official/LoCoMo/task_eval/evaluation.py");
   if (!existsSync(python) || !existsSync(upstream)) {
     context.skip("run npm run benchmark:setup to enable official scorer parity");
     return;
   }
-  const result = spawnSync(python, [resolve(import.meta.dirname, "locomo_score.py")], {
+  const result = spawnSync(python, [resolve(root, "evals/official/locomo_score.py")], {
     cwd: root,
     input: JSON.stringify({ qas: [{
       answer: "tea",

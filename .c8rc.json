@@ -1,0 +1,7 @@
+{
+  "all": true,
+  "include": ["src/core/**/*.ts", ".pi/extensions/nmg/**/*.ts", "evals/official/**/*.ts", "evals/benchmarks/**/*.ts"],
+  "exclude": ["**/*.test.ts", "tests/**"],
+  "reporter": ["text", "json-summary", "lcov"],
+  "reports-dir": "coverage"
+}

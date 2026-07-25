@@ -44,6 +44,24 @@ test("ForkMerge forward: returns left/right scores and divergence", () => {
   );
 });
 
+test("ForkMerge forward: divergence stays in range under float32 rounding", () => {
+  // Regression: divergence is computed as 1 - cos over float32 score tensors.
+  // Identical branch parameters should give cos == 1 exactly, but float32
+  // rounding pushed cos slightly above 1.0 in ~20% of random forwards, leaking a
+  // small negative divergence. Many trials because the flake is data-dependent.
+  for (let trial = 0; trial < 300; trial++) {
+    const fm = new ForkMerge(
+      new HierarchicalActivation(D),
+      new HierarchicalActivation(D),
+    );
+    const { divergence } = fm.forward(rvec(D), cands(D, 10));
+    assert.ok(
+      divergence >= 0 && divergence <= 2,
+      `divergence out of range on trial ${trial}: ${divergence}`,
+    );
+  }
+});
+
 test("ForkMerge forward: empty candidates returns empty", () => {
   const left = new HierarchicalActivation(D);
   const right = new HierarchicalActivation(D);
