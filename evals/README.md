@@ -68,11 +68,13 @@ sample fingerprint and protocol; raw run output is never committed.
 creates an isolated uv-managed Python 3.11 environment for official scorers;
 benchmark code is not copied into NMG core.
 
-These local runners remain migration fixtures until an OmniMemEval NMG adapter
-reproduces the same samples and official scores. After parity is established,
-the local runners should be reduced to deterministic smoke/regression fixtures;
-benchmark parsing, replay, checkpointing and report generation should remain
-owned by OmniMemEval.
+OmniMemEval and the local Pi runner measure different boundaries. OmniMemEval's
+user-memory track always invokes the backend's `search()` method, so it is the
+preferred backend-retrieval harness and should own public-dataset parsing,
+replay, checkpointing and report generation. The local matched runner remains
+the Pi integration gate because it measures whether the harness triggers recall
+and whether the agent uses the returned evidence. It is not retired when
+OmniMemEval parity passes.
 
 Judge-backed protocols currently use `deepseek/deepseek-v4-flash` in place of
 the upstream proprietary judge. Those outputs are labelled
@@ -144,17 +146,40 @@ the runner writes per-case/per-mode progress to stderr.
 
 ## Rollout order
 
-1. Add a thin NMG client to OmniMemEval's user-memory client registry. It must
+1. **Complete:** add a thin NMG client to OmniMemEval's user-memory client registry. It must
    implement only the harness contract (`add`, `search`, and per-user cleanup)
    and call a stable NMG service/CLI boundary.
-2. Reproduce the current fixed LongMemEval matched sample through OmniMemEval
-   before changing retrieval behaviour. This is the migration parity gate.
+2. **Smoke complete:** replay the current fixed LongMemEval sample through
+   OmniMemEval search-only before changing retrieval behaviour. This is the
+   backend parity gate; it does not replace the Pi matched gate.
 3. Run PersonaMem v2, LoCoMo and BEAM through the same adapter. Add HaluMem
    only after the first four suites are reproducible.
 4. Keep BEAM scale runs staged: 128K, then 500K, then 1M/10M only when smaller
    tiers have not already exposed the same failure.
-5. Retire duplicated local benchmark orchestration only after score, sample,
-   provenance and cost telemetry parity is demonstrated.
+5. Retire only duplicated public-dataset parsing and scoring after score,
+   sample, provenance and cost telemetry parity is demonstrated. Preserve the
+   small local Pi end-to-end runner.
+
+### July 2026 LongMemEval search-only smoke
+
+The pinned OmniMemEval checkout successfully exercised the NMG adapter on the
+same seven fixed LongMemEval questions as the Pi development run. Forced
+backend search made five of seven cases plausibly answerable. It retrieved both
+old and new personal-best evidence for the update case, but still missed
+required evidence for the multi-session clothing count and the MoMA/Met
+temporal comparison. Typical search latency was about 137–152 ms with roughly
+2.3–4.2k context characters.
+
+A controlled change from the default legacy path to hybrid FTS was rejected.
+On the two deficient cases it did not recover the missing evidence, expanded
+contexts to 7.2–7.9k characters, and increased the temporal query to 2.04 s.
+This indicates that indiscriminate candidate expansion is not the next fix;
+multi-evidence aggregation and temporal coverage need targeted work.
+
+On Windows, set `PYTHONUTF8=1` because upstream progress output includes emoji.
+The adapter installer must patch OmniMemEval's central client registry, generic
+text-search dispatcher, and conversation-ID allowlist; those registrations are
+currently maintained separately upstream.
 
 OmniMemEval's agent-memory track is not the initial integration target. It is
 currently coupled to AgentBench/OpenClaw lifecycle plugins, whereas NMG's

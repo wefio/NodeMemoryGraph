@@ -9,9 +9,23 @@ import { installOmniMemEvalAdapter } from "../../evals/omnimemeval/install-adapt
 test("OmniMemEval adapter installer patches the registry idempotently", () => {
   const checkout = mkdtempSync(join(tmpdir(), "omnimemeval-checkout-"));
   const factory = join(checkout, "scripts", "client_factory");
+  const utils = join(checkout, "scripts", "utils");
   mkdirSync(factory, { recursive: true });
+  mkdirSync(utils, { recursive: true });
   const registry = join(factory, "registry.py");
   writeFileSync(registry, "_LIB_CLIENT_REGISTRY = {\n}\n", "utf8");
+  const searchHelpers = join(utils, "search_helpers.py");
+  writeFileSync(
+    searchHelpers,
+    'DEFAULT_SEARCH_DISPATCH = {\n    "memos": generic_text_search,\n}\n',
+    "utf8",
+  );
+  const ingestHelpers = join(utils, "ingest_helpers.py");
+  writeFileSync(
+    ingestHelpers,
+    '_CONV_ID_LIBS = frozenset({"memos", "everos"})\n',
+    "utf8",
+  );
 
   try {
     installOmniMemEvalAdapter(checkout);
@@ -19,6 +33,11 @@ test("OmniMemEval adapter installer patches the registry idempotently", () => {
     const source = readFileSync(registry, "utf8");
     assert.equal(source.match(/"nmg": \("nmg_client", "NmgClient"\)/g)?.length, 1);
     assert.equal(existsSync(join(factory, "nmg_client.py")), true);
+    assert.equal(
+      readFileSync(searchHelpers, "utf8").match(/"nmg": generic_text_search/g)?.length,
+      1,
+    );
+    assert.match(readFileSync(ingestHelpers, "utf8"), /"memos", "everos", "nmg"/);
   } finally {
     rmSync(checkout, { recursive: true, force: true });
   }

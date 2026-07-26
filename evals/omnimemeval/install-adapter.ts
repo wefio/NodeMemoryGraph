@@ -8,16 +8,41 @@ export function installOmniMemEvalAdapter(checkout: string): void {
   const target = resolve(checkout, "scripts", "client_factory");
   const registry = resolve(target, "registry.py");
   const adapter = resolve(import.meta.dirname, "nmg_client.py");
-  const source = readFileSync(registry, "utf8");
 
   copyFileSync(adapter, resolve(target, "nmg_client.py"));
-  if (source.includes('"nmg": ("nmg_client", "NmgClient")')) return;
+  insertAfter(
+    registry,
+    "_LIB_CLIENT_REGISTRY = {",
+    registryEntry,
+    '"nmg": ("nmg_client", "NmgClient")',
+  );
 
-  const marker = "_LIB_CLIENT_REGISTRY = {";
-  if (!source.includes(marker)) {
-    throw new Error(`Unsupported OmniMemEval registry format: ${registry}`);
-  }
-  writeFileSync(registry, source.replace(marker, `${marker}\n${registryEntry}`), "utf8");
+  insertAfter(
+    resolve(checkout, "scripts", "utils", "search_helpers.py"),
+    '    "memos": generic_text_search,',
+    '    "nmg": generic_text_search,',
+    '"nmg": generic_text_search',
+  );
+  replaceOnce(
+    resolve(checkout, "scripts", "utils", "ingest_helpers.py"),
+    '_CONV_ID_LIBS = frozenset({"memos", "everos"})',
+    '_CONV_ID_LIBS = frozenset({"memos", "everos", "nmg"})',
+    '"nmg"',
+  );
+}
+
+function insertAfter(path: string, marker: string, line: string, present: string): void {
+  const source = readFileSync(path, "utf8");
+  if (source.includes(present)) return;
+  if (!source.includes(marker)) throw new Error(`Unsupported OmniMemEval format: ${path}`);
+  writeFileSync(path, source.replace(marker, `${marker}\n${line}`), "utf8");
+}
+
+function replaceOnce(path: string, marker: string, replacement: string, present: string): void {
+  const source = readFileSync(path, "utf8");
+  if (source.includes(present)) return;
+  if (!source.includes(marker)) throw new Error(`Unsupported OmniMemEval format: ${path}`);
+  writeFileSync(path, source.replace(marker, replacement), "utf8");
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

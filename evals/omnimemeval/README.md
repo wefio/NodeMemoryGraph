@@ -41,18 +41,28 @@ Then use `--lib nmg` in OmniMemEval's user-memory commands. OmniMemEval declares
 its own Python 3.12 environment; NMG's smaller Python 3.11 official-scorer
 environment is deliberately not reused.
 
-## Migration gate
+The installer also registers NMG with OmniMemEval's generic text-search
+dispatcher and conversation-ID helper. OmniMemEval currently keeps these
+allowlists separately from its central client registry, so copying only
+`nmg_client.py` is insufficient.
 
-Before adopting OmniMemEval results as authoritative:
+## Two evaluation boundaries
 
-1. use the same fixed LongMemEval question IDs as the current matched run;
-2. use the same reader and judge configuration;
-3. compare answer score, evidence recall, token injection and latency;
+OmniMemEval's user-memory runner forcibly calls the selected backend's
+`search()`. It therefore measures NMG ingestion, retrieval, deletion, evidence
+coverage and cost. It does not test whether Pi decides to recall memory or uses
+the result correctly. The local matched Pi runner remains the end-to-end
+harness gate.
+
+For comparable backend runs:
+
+1. use the same fixed LongMemEval question IDs as the local matched run;
+2. use the same reader and judge configuration when answer stages are enabled;
+3. compare evidence recall, token injection and latency;
 4. verify per-user isolation and cleanup;
 5. verify that every returned memory remains traceable to NMG evidence.
 
-Until parity passes, the existing TypeScript runners remain local migration
-fixtures. Afterwards they should shrink to fast deterministic regression tests.
+On Windows, set `PYTHONUTF8=1` before invoking the upstream runner.
 
 ## Deliberate non-goals
 

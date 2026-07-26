@@ -954,9 +954,10 @@ single composite leaderboard:
   500K before any 1M or 10M run.
 - OmniMemEval is the preferred external user-memory evaluation harness because
   it unifies those suites (plus HaluMem) behind one `add`/`search` client
-  contract. NMG should maintain one thin OmniMemEval adapter; the existing
-  per-suite runners remain migration fixtures until score and telemetry parity
-  is demonstrated.
+  contract. NMG maintains one thin OmniMemEval adapter. OmniMemEval measures the
+  backend under forced search; the local matched Pi runner remains necessary to
+  measure recall triggering and actual evidence use. Only duplicated
+  public-dataset parsing, replay, and scoring should be retired after parity.
 - OmniMemEval's AgentBench/OpenClaw agent-memory track is not adopted for Pi at
   this stage. Pi runtime behaviour remains covered by local extension and RPC
   tests, avoiding a second agent harness unless comparative evidence justifies
@@ -967,6 +968,16 @@ prompt, question IDs, source history, evidence-token budget, and judge. Answer
 quality is reported together with evidence recall, injected tokens, backend
 records read, graph/tier depth, end-to-end latency, and index/maintenance work.
 The complete adapter contract and rollout order live in `evals/README.md`.
+
+The first pinned OmniMemEval LongMemEval search-only smoke used the same seven
+fixed questions as the Pi run. Forced NMG search made five cases plausibly
+answerable, while multi-session aggregation and temporal coverage remained
+incomplete. Search was typically about 137–152 ms and returned 2.3–4.2k
+characters. Enabling hybrid FTS on the two deficient cases recovered no
+additional required evidence, expanded context to 7.2–7.9k characters, and
+raised one temporal search to 2.04 s, so that change was rejected. This is
+evidence for targeted aggregation/temporal retrieval work, not broader
+candidate expansion.
 
 ## 15. Cloud and execution boundaries
 
