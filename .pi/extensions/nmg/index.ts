@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 
@@ -16,6 +18,13 @@ import {
   type ShadowRetrievalOrigin,
 } from "../../../src/core/shadow-evaluation.ts";
 import { assessMemoryWrite } from "../../../src/core/write-policy.ts";
+import {
+  ReasoningWorkspace,
+  type ReasoningEdgeKind,
+  type ReasoningNodeKind,
+  type ReasoningStatus,
+  type ReasoningWorkspaceState,
+} from "../../../src/core/reasoning-workspace.ts";
 import type {
   EvidenceRole,
   MemoryActor,
@@ -35,6 +44,27 @@ function databasePath(): string {
 
 function dataDirectory(): string {
   return process.env.NMG_DATA_DIR || join(process.cwd(), ".nmg");
+}
+
+function reasoningWorkspacePath(sessionId: string): string {
+  const safeId = createHash("sha256").update(sessionId).digest("hex").slice(0, 24);
+  return join(dataDirectory(), "reasoning", `${safeId}.json`);
+}
+
+function loadReasoningWorkspace(sessionId: string): ReasoningWorkspace {
+  const path = reasoningWorkspacePath(sessionId);
+  if (!existsSync(path)) return new ReasoningWorkspace(sessionId);
+  return ReasoningWorkspace.fromJSON(
+    JSON.parse(readFileSync(path, "utf8")) as ReasoningWorkspaceState,
+  );
+}
+
+function saveReasoningWorkspace(workspace: ReasoningWorkspace): void {
+  const path = reasoningWorkspacePath(workspace.sessionId);
+  mkdirSync(join(dataDirectory(), "reasoning"), { recursive: true });
+  const temporaryPath = `${path}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(workspace.toJSON(), null, 2)}\n`);
+  renameSync(temporaryPath, path);
 }
 
 type QueryEmbeddingClient = Pick<OpenAIEmbeddingClient, "embedQueries" | "indexId">;
@@ -103,6 +133,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const searchContexts = new Map<string, MemoryContext>();
   const turnGraphIds = new Map<string, Set<string>>();
   const latestGraphBySession = new Map<string, string>();
+  const reasoningWorkspaces = new Map<string, ReasoningWorkspace>();
+  const getReasoningWorkspace = (sessionId: string): ReasoningWorkspace => {
+    const cached = reasoningWorkspaces.get(sessionId);
+    if (cached) return cached;
+    const workspace = loadReasoningWorkspace(sessionId);
+    reasoningWorkspaces.set(sessionId, workspace);
+    return workspace;
+  };
   const embeddingClient = process.env.NMG_EMBED_BASE_URL
     ? new OpenAIEmbeddingClient({
         baseUrl: process.env.NMG_EMBED_BASE_URL,
@@ -184,6 +222,16 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         }),
       );
     }
+    let reasoningBlock = "";
+    if (labToolsEnabled) {
+      const checkpoint = getReasoningWorkspace(ctx.sessionManager.getSessionId()).checkpoint();
+      if (checkpoint.nodes.length > 0) {
+        reasoningBlock =
+          `<nmg_reasoning_checkpoint>\n${checkpoint.text}\n` +
+          `Update this scratchpad with nmg_reason when evidence changes. ` +
+          `Do not treat hypotheses as facts.\n</nmg_reasoning_checkpoint>`;
+      }
+    }
 
     return {
       systemPrompt:
@@ -214,7 +262,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         (labToolsEnabled
           ? ` Lab tools are enabled: use nmg_derive for multi-memory conclusions, ` +
             `nmg_link for semantic relations, and nmg_feedback after explicit ` +
-            `searches when useful nodes are known.`
+            `searches when useful nodes are known. Use nmg_reason to preserve ` +
+            `concise, auditable goals, hypotheses, evidence, decisions, and next ` +
+            `actions across context compaction; never store private chain-of-thought.`
           : "") +
         `\n` +
         `</nmg_write_policy>\n` +
@@ -235,8 +285,15 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         `all relevant retrieved events and states. If the automatic set appears ` +
         `partial, call nmg_search with alternate subqueries before answering.\n` +
         `</nmg_recall_policy>\n` +
-        [kernelBlock, dynamicBlock].filter(Boolean).join("\n"),
+        [kernelBlock, dynamicBlock, reasoningBlock].filter(Boolean).join("\n"),
     };
+  });
+
+  pi.on("session_compact", async (_event, ctx) => {
+    if (!labToolsEnabled) return;
+    const sessionId = ctx.sessionManager.getSessionId();
+    const workspace = reasoningWorkspaces.get(sessionId);
+    if (workspace) saveReasoningWorkspace(workspace);
   });
 
   const archiveCurrentSession = (ctx: {
@@ -291,11 +348,109 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    const reasoningWorkspace = reasoningWorkspaces.get(ctx.sessionManager.getSessionId());
+    if (reasoningWorkspace) saveReasoningWorkspace(reasoningWorkspace);
     archiveCurrentSession(ctx);
     maintainMemory();
     store?.close();
     store = undefined;
   });
+
+  if (labToolsEnabled)
+    pi.registerTool({
+      name: "nmg_reason",
+      label: "Update NMG reasoning workspace",
+      description:
+        "Maintain a concise, auditable session scratchpad across context compaction. " +
+        "Record goals, observations, hypotheses, evidence, conclusions, decisions, " +
+        "open questions, and next actions; do not record private chain-of-thought.",
+      parameters: Type.Object({
+        action: Type.Union([
+          Type.Literal("add"),
+          Type.Literal("link"),
+          Type.Literal("update"),
+          Type.Literal("checkpoint"),
+        ]),
+        kind: Type.Optional(
+          Type.Union([
+            Type.Literal("goal"),
+            Type.Literal("observation"),
+            Type.Literal("hypothesis"),
+            Type.Literal("evidence"),
+            Type.Literal("conclusion"),
+            Type.Literal("decision"),
+            Type.Literal("open_question"),
+            Type.Literal("next_action"),
+          ]),
+        ),
+        content: Type.Optional(Type.String()),
+        status: Type.Optional(
+          Type.Union([
+            Type.Literal("active"),
+            Type.Literal("supported"),
+            Type.Literal("rejected"),
+            Type.Literal("resolved"),
+            Type.Literal("superseded"),
+          ]),
+        ),
+        importance: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+        evidenceRefs: Type.Optional(Type.Array(Type.String())),
+        nodeId: Type.Optional(Type.String()),
+        sourceId: Type.Optional(Type.String()),
+        targetId: Type.Optional(Type.String()),
+        relation: Type.Optional(
+          Type.Union([
+            Type.Literal("supports"),
+            Type.Literal("contradicts"),
+            Type.Literal("derived_from"),
+            Type.Literal("tests"),
+            Type.Literal("rejects"),
+            Type.Literal("depends_on"),
+            Type.Literal("next_step"),
+          ]),
+        ),
+      }),
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const workspace = getReasoningWorkspace(ctx.sessionManager.getSessionId());
+        let details: unknown;
+        if (params.action === "add") {
+          if (!params.kind || !params.content) {
+            throw new Error("add requires kind and content");
+          }
+          details = workspace.addNode({
+            kind: params.kind as ReasoningNodeKind,
+            content: params.content,
+            status: params.status as ReasoningStatus | undefined,
+            importance: params.importance,
+            evidenceRefs: params.evidenceRefs,
+          });
+        } else if (params.action === "link") {
+          if (!params.sourceId || !params.targetId || !params.relation) {
+            throw new Error("link requires sourceId, targetId, and relation");
+          }
+          details = workspace.link(
+            params.sourceId,
+            params.targetId,
+            params.relation as ReasoningEdgeKind,
+          );
+        } else if (params.action === "update") {
+          if (!params.nodeId) throw new Error("update requires nodeId");
+          details = workspace.updateNode(params.nodeId, {
+            content: params.content,
+            status: params.status as ReasoningStatus | undefined,
+            importance: params.importance,
+          });
+        } else {
+          details = workspace.checkpoint();
+        }
+        saveReasoningWorkspace(workspace);
+        const checkpoint = workspace.checkpoint();
+        return {
+          content: [{ type: "text", text: checkpoint.text }],
+          details,
+        };
+      },
+    });
 
   if (labToolsEnabled)
     pi.registerTool({

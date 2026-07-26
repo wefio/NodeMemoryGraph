@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import nmgExtension from "../../../.pi/extensions/nmg/index.ts";
-import { configuredGraphHops, formatSearchHeaders, searchMemoryContext } from "../../../.pi/extensions/nmg/index.ts";
+import {
+  configuredGraphHops,
+  formatSearchHeaders,
+  searchMemoryContext,
+} from "../../../.pi/extensions/nmg/index.ts";
 import { NmgStore } from "../../../src/core/store.ts";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MemoryContext } from "../../../src/core/types.ts";
@@ -34,6 +38,7 @@ test("NMG Lite exposes only the stable three-tool surface", () => {
 
 test("NMG Lab tools require an explicit environment switch", () => {
   assert.deepEqual(registeredTools(true), [
+    "nmg_reason",
     "nmg_derive",
     "nmg_link",
     "nmg_remember",
@@ -44,6 +49,61 @@ test("NMG Lab tools require an explicit environment switch", () => {
     "nmg_get",
     "nmg_search",
   ]);
+});
+
+test("Lab reasoning state persists and is injected after reloading the extension", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-reasoning-extension-test-"));
+  const previousLab = process.env.NMG_ENABLE_LAB_TOOLS;
+  const previousData = process.env.NMG_DATA_DIR;
+  process.env.NMG_ENABLE_LAB_TOOLS = "1";
+  process.env.NMG_DATA_DIR = directory;
+  const sessionManager = {
+    getSessionId: () => "reasoning-session",
+    getSessionFile: () => undefined,
+    getBranch: () => [],
+  };
+
+  try {
+    const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
+    nmgExtension({
+      on() {},
+      registerTool(tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) {
+        tools.set(tool.name, tool);
+      },
+    } as never);
+    await tools
+      .get("nmg_reason")!
+      .execute(
+        "call-1",
+        { action: "add", kind: "goal", content: "Preserve this goal across compaction" },
+        undefined,
+        undefined,
+        { sessionManager },
+      );
+    assert.equal(readdirSync(join(directory, "reasoning")).length, 1);
+
+    const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+    nmgExtension({
+      on(event: string, handler: (...args: unknown[]) => Promise<unknown>) {
+        handlers.set(event, handler);
+      },
+      registerTool() {},
+    } as never);
+    const result = (await handlers.get("before_agent_start")!(
+      { prompt: "Continue the task", systemPrompt: "base" },
+      { sessionManager },
+    )) as { systemPrompt: string };
+
+    assert.match(result.systemPrompt, /<nmg_reasoning_checkpoint>/);
+    assert.match(result.systemPrompt, /Preserve this goal across compaction/);
+    await handlers.get("session_shutdown")!({}, { sessionManager });
+  } finally {
+    if (previousLab === undefined) delete process.env.NMG_ENABLE_LAB_TOOLS;
+    else process.env.NMG_ENABLE_LAB_TOOLS = previousLab;
+    if (previousData === undefined) delete process.env.NMG_DATA_DIR;
+    else process.env.NMG_DATA_DIR = previousData;
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("search headers disclose IDs but not source evidence", () => {

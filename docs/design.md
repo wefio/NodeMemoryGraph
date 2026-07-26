@@ -72,14 +72,14 @@ NMG follows these principles:
 
 ## 3. Responsibility boundaries
 
-| Component | Responsibilities |
-|---|---|
-| Base model | Identify candidate facts/preferences/constraints, summarize, reformulate queries, decide whether more evidence is needed, propose semantic relations or splits, and synthesize an answer. |
-| Pi harness | Run the model/tool loop, expose session lifecycle events, preserve current-turn execution state, and provide context/tool integration points. |
-| NMG Pi plugin | Capture sessions, enforce memory policy, request an Active Graph projection, inject resident/cue/selected context, expose the small memory API, and schedule background maintenance. |
-| NMG core | Maintain stable IDs, provenance, STG/LTG lifecycle, time/scope/state invariants, Active Graph budgets, semantic organization, consolidation signals, and rebuildable indexes. |
-| SQLite/index backend | Provide transactions, WAL/crash recovery, FTS, versioned records, dirty queues, content hashes, and physical index/cache persistence. |
-| Optional learner | Learn query-to-node/leaf scores, edge usefulness, expansion depth, or stopping policy from labelled retrieval outcomes. It does not own persistent topology. |
+| Component            | Responsibilities                                                                                                                                                                          |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Base model           | Identify candidate facts/preferences/constraints, summarize, reformulate queries, decide whether more evidence is needed, propose semantic relations or splits, and synthesize an answer. |
+| Pi harness           | Run the model/tool loop, expose session lifecycle events, preserve current-turn execution state, and provide context/tool integration points.                                             |
+| NMG Pi plugin        | Capture sessions, enforce memory policy, request an Active Graph projection, inject resident/cue/selected context, expose the small memory API, and schedule background maintenance.      |
+| NMG core             | Maintain stable IDs, provenance, STG/LTG lifecycle, time/scope/state invariants, Active Graph budgets, semantic organization, consolidation signals, and rebuildable indexes.             |
+| SQLite/index backend | Provide transactions, WAL/crash recovery, FTS, versioned records, dirty queues, content hashes, and physical index/cache persistence.                                                     |
+| Optional learner     | Learn query-to-node/leaf scores, edge usefulness, expansion depth, or stopping policy from labelled retrieval outcomes. It does not own persistent topology.                              |
 
 Stronger models can improve extraction, summarization, query planning, conflict
 interpretation, and topology proposals. They cannot naturally provide
@@ -582,7 +582,14 @@ record-vector, and independently ranked union retrieval are retained as
 diagnostic modes, but none is a mandatory NMG representation until a matched,
 fingerprinted, repeated benchmark demonstrates a quality/cost advantage.
 
-## 12bis. Memory-Graph Reasoner — nodes as micro-operators
+## 12bis. Memory-Graph Reasoner — retained numerical Lab prototype
+
+`MemoryGraphReasoner` is retained unchanged as a numerical experiment. It is
+not part of NMG Lite and is not the session reasoning scratchpad described
+below. The current implementation repeatedly scores all unvisited nodes; it
+does not yet constrain the next step to outgoing semantic edges. Consequently,
+its path must not be described as knowledge-graph traversal or used as evidence
+that NMG can perform logical inference.
 
 ### Concept
 
@@ -610,11 +617,11 @@ q'    = β·q_tmp + (1−β)·query  output blend with original query anchor
 r     = q'^T @ v              local relevance score
 ```
 
-| Parameter | Scope | Meaning |
-|-----------|-------|---------|
-| `b_log` | per-node | Higher = more absorption from this memory |
-| `a_log` | global | Higher = retain more past context across steps |
-| `β_log` | per-node | Higher = output favours accumulated state over original query |
+| Parameter | Scope    | Meaning                                                       |
+| --------- | -------- | ------------------------------------------------------------- |
+| `b_log`   | per-node | Higher = more absorption from this memory                     |
+| `a_log`   | global   | Higher = retain more past context across steps                |
+| `β_log`   | per-node | Higher = output favours accumulated state over original query |
 
 Nodes may declare `requires: string[]` — fact node IDs that must be active
 for the gate to open. Precondition score is the product of fact activations
@@ -623,16 +630,17 @@ from the traversal path.
 
 ### Relationship to HierarchicalActivation
 
-|                         | HA                           | MGR                           |
-|-------------------------|------------------------------|-------------------------------|
-| Node role               | passive data, scored         | active operator, transforms   |
-| Scoring                 | 7-way similarity blend       | single gate + local relevance |
-| Graph structure         | fixed (g₁→g₂→g₃)            | dynamic, follows edges        |
-| Parameters              | 9 global                     | 2/node + 1 global             |
-| Best for                | batch ranking over pool      | multi-step path reasoning     |
+|                 | HA                        | MGR                            |
+| --------------- | ------------------------- | ------------------------------ |
+| Node role       | passive data, scored      | active operator, transforms    |
+| Scoring         | 7-way similarity blend    | single gate + local relevance  |
+| Graph structure | fixed candidate hierarchy | global unvisited candidate set |
+| Parameters      | 9 global                  | 2/node + 1 global              |
+| Best for        | batch ranking over pool   | multi-step path reasoning      |
 
-They are complementary: HA scores a candidate pool globally, MGR refines
-a query by walking a knowledge-graph path.
+They remain separate Lab experiments. MGR currently refines a query through a
+sequence of selected node operators; graph-constrained traversal is future
+work that requires its own correctness benchmark.
 
 ### API
 
@@ -646,7 +654,7 @@ const result = mgr.traverse(queryVector, graph, maxSteps);
 const impact = mgr.whatIf(queryVec, graph, hypotheticalNode, maxSteps);
 const summary = mgr.impactSummary(impact, "task-x"); // compact LLM-ready text
 
-// Train on labeled paths (gradient flows through entire DAG)
+// Train on labelled operator sequences
 mgr.trainPath({ queryVector, pathNodeIds, graph }, learningRate);
 
 // State round-trip
@@ -654,11 +662,12 @@ const json = mgr.toJSON();
 const clone = MemoryGraphReasoner.fromJSON(json);
 ```
 
-### External reasoning module
+### Experimental status
 
-MGR serves as an LLM-offloaded reasoning engine. The what-if simulation runs
-entirely inside MGR; only a compact impact summary is returned to the LLM,
-consuming minimal context tokens.
+MGR can produce deterministic traversal and what-if summaries for experiments,
+but it is not currently integrated into Pi and is not a verified
+LLM-offloaded reasoning engine. Correctness and graph-edge adherence must be
+demonstrated before such an integration is considered.
 
 ```text
 LLM context                    MGR (external)
@@ -675,6 +684,54 @@ LLM → MGR.whatIf(              │ baseline: A→B→C→D      │
 LLM: "Adding X pushes D off the
       critical path."
 ```
+
+## 12ter. Session reasoning workspace and compaction checkpoint
+
+Long sessions need a small, explicit scratchpad because ordinary context
+compaction can preserve conclusions while losing the evidence path, rejected
+hypotheses, and next action. NMG Lab therefore provides a
+`ReasoningWorkspace`. It is not another persistent memory graph and it is not
+raw hidden chain-of-thought. It is session-local, auditable state projected
+through the Active Graph boundary.
+
+The workspace records only concise typed items:
+
+```text
+goal | observation | hypothesis | evidence | conclusion
+decision | open_question | next_action
+```
+
+and explicit relations:
+
+```text
+supports | contradicts | derived_from | tests
+rejects | depends_on | next_step
+```
+
+Pi integration follows a narrow lifecycle:
+
+```text
+model or tool result
+  -> nmg_reason add/update/link
+  -> local .nmg/reasoning/<session>.json
+  -> bounded ReasoningCheckpoint
+  -> before_agent_start injection after normal Pi compaction
+```
+
+NMG does not replace Pi's compactor. `session_compact` only checkpoints the
+workspace, while `before_agent_start` injects at most a fixed node and character
+budget. Hypotheses retain their status and must not be treated as facts.
+Rejected paths are kept when useful so the model does not repeat disproven
+work.
+
+Only supported, high-importance conclusions or decisions with traceable
+evidence are eligible for later LTG consolidation. The current prototype merely
+reports those candidates; it does not automatically promote scratch state into
+long-term memory.
+
+The tool is Lab-only (`NMG_ENABLE_LAB_TOOLS=1`). NMG Lite keeps its stable
+three-tool surface, and the existing numerical MGR prototype remains available
+for independent experiments.
 
 ## 13. Current implementation versus target
 
@@ -695,6 +752,8 @@ Implemented and verified in the current prototype:
 - state supersession, event time, actor/truth status, scope, merge/split, and
   redirects;
 - resident/automatic/cue execution layers;
+- a Lab-only, file-backed session reasoning workspace with bounded compaction
+  checkpoints and explicit hypothesis/evidence status;
 - a bounded `searchContext` result that approximates an early Active Graph by
   combining resident, automatic, and agent-directed recall;
 - explicit STG/LTG residence on memories and nodes, governed immediate atomic
@@ -813,10 +872,10 @@ Current development evidence (updated 2026-07-22):
   useful-node labels 100% by construction;
 - 10K near-duplicate hierarchy workload: node+leaf exact scan 100% accuracy at
   10.6 ms P50, leaf ANN 87.5% at 8.1 ms P50, full record scan 75% at 779 ms P50.
-The topology and router cases isolate whether the mechanisms can learn and
-apply a missing relation; they are not natural-distribution quality estimates.
-The scale result shows why leaf granularity matters and why the current ANN
-configuration must not replace exact local scan yet.
+  The topology and router cases isolate whether the mechanisms can learn and
+  apply a missing relation; they are not natural-distribution quality estimates.
+  The scale result shows why leaf granularity matters and why the current ANN
+  configuration must not replace exact local scan yet.
 
 The 14-question paired outcomes are more important for product gating than the
 controlled topology result: Lite uniquely won five versus flat's three, while

@@ -6,6 +6,12 @@ export { decideMemoryLoad } from "./core/gate.ts";
 export { Tensor, gradientStep } from "./core/autodiff.ts";
 export { ControllerRuntime } from "./core/controller-runtime.ts";
 export {
+  REASONING_EDGE_KINDS,
+  REASONING_NODE_KINDS,
+  REASONING_STATUSES,
+  ReasoningWorkspace,
+} from "./core/reasoning-workspace.ts";
+export {
   CONTROLLER_BUDGET_DIMENSIONS,
   DifferentiableController,
 } from "./core/differentiable-controller.ts";
@@ -24,6 +30,16 @@ export type {
   DifferentiableControllerState,
 } from "./core/differentiable-controller.ts";
 export type { ControllerProtocolSample } from "./core/controller-protocol.ts";
+export type {
+  AddReasoningNodeInput,
+  ReasoningCheckpoint,
+  ReasoningEdge,
+  ReasoningEdgeKind,
+  ReasoningNode,
+  ReasoningNodeKind,
+  ReasoningStatus,
+  ReasoningWorkspaceState,
+} from "./core/reasoning-workspace.ts";
 export type {
   ControllerRuntimeState,
   ControllerShadowDecision,
