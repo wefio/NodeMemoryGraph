@@ -13,6 +13,7 @@ import { OpenAIEmbeddingClient } from "../../src/core/openai-embedding.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import type { MemoryContext } from "../../src/core/types.ts";
 import { gitRevision, sampleFingerprint } from "../official/reproducibility.ts";
+import { resolveBenchmarkData } from "../official/data-path.ts";
 import { loadBeam, loadLocomo, stratifiedSample } from "../benchmarks/loaders.ts";
 import type { BenchmarkCase } from "../benchmarks/types.ts";
 
@@ -449,8 +450,18 @@ function recall(found: Set<string>, expected: Set<string>): number {
 
 function loadCases(value: SupportedBenchmark): BenchmarkCase[] {
   return value === "locomo"
-    ? loadLocomo(resolve(root, "evals/locomo/data/locomo10.json"))
-    : loadBeam(resolve(root, "evals/beam/data/chats/100K"));
+    ? loadLocomo(
+        resolveBenchmarkData("LoCoMo", process.env.NMG_LOCOMO_DATA, [
+          resolve(root, "evals/locomo/data/locomo10.json"),
+          resolve(root, ".benchmarks/official/LoCoMo/data/locomo10.json"),
+        ]),
+      )
+    : loadBeam(
+        resolveBenchmarkData("BEAM", process.env.NMG_BEAM_DATA, [
+          resolve(root, "evals/beam/data/chats/100K"),
+          resolve(root, ".benchmarks/official/BEAM/chats/100K"),
+        ]),
+      );
 }
 
 function parseBenchmark(value: string | undefined): SupportedBenchmark {

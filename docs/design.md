@@ -577,16 +577,10 @@ The computation graph is ephemeral — created per propagate/train call and
 discarded. SQLite, the semantic graph, provenance, consolidation, and discrete
 Top-K selection remain ordinary deterministic system components.
 
-A granularity ablation further showed that merely widening hierarchical routing
-from 5/8 node/leaf candidates to 20/50 did not improve BEAM. Full record vectors
-raised its candidate recall from 0.111 to 0.426 but required many more vectors.
-A naive lexical/vector weighted fusion regressed LoCoMo and was removed. The
-remaining diagnostic `union` mode merges independently ranked hierarchy and
-record candidates; it preserved LoCoMo candidate recall at 0.700 and allowed
-the learned controller to improve held-out Top-2 recall from 0.200 to 0.700.
-This supports variable semantic granularity, but the storage and indexing cost
-means record vectors remain an experimental target rather than a mandatory NMG
-representation.
+Variable semantic granularity remains an experimental question. Hierarchy-only,
+record-vector, and independently ranked union retrieval are retained as
+diagnostic modes, but none is a mandatory NMG representation until a matched,
+fingerprinted, repeated benchmark demonstrates a quality/cost advantage.
 
 ## 12bis. Memory-Graph Reasoner — nodes as micro-operators
 
@@ -819,11 +813,6 @@ Current development evidence (updated 2026-07-22):
   useful-node labels 100% by construction;
 - 10K near-duplicate hierarchy workload: node+leaf exact scan 100% accuracy at
   10.6 ms P50, leaf ANN 87.5% at 8.1 ms P50, full record scan 75% at 779 ms P50.
-- after isolating Pi extension loading, a five-category LoCoMo development run
-  with BGE-small scored 3/5 for automatic recall and 1/5 for agent-directed
-  search. This is a single stochastic run, not a capability claim; it motivates
-  keeping automatic and agent-directed retrieval as separate evaluation arms.
-
 The topology and router cases isolate whether the mechanisms can learn and
 apply a missing relation; they are not natural-distribution quality estimates.
 The scale result shows why leaf granularity matters and why the current ANN

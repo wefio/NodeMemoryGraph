@@ -8,6 +8,7 @@ import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder, cosineSimilarity } from "../../src/core/vector.ts";
 import { indexExternalEmbeddings } from "../external-embeddings.ts";
 import { computeCitationSignal } from "../official/citation.ts";
+import { resolveBenchmarkData } from "../official/data-path.ts";
 import { gitRevision, sampleFingerprint } from "../official/reproducibility.ts";
 import { loadBeam, loadLocomo, loadPersonaMem, stratifiedSample } from "./loaders.ts";
 import {
@@ -334,19 +335,29 @@ function createClient(dataDirectory?: string, itemMode?: EvaluationMode): RpcCli
 function loadCases(value: Benchmark): BenchmarkCase[] {
   if (value === "locomo") {
     return loadLocomo(
-      process.env.NMG_LOCOMO_DATA ?? resolve(root, "evals/locomo/data/locomo10.json"),
+      resolveBenchmarkData("LoCoMo", process.env.NMG_LOCOMO_DATA, [
+        resolve(root, "evals/locomo/data/locomo10.json"),
+        resolve(root, ".benchmarks/official/LoCoMo/data/locomo10.json"),
+      ]),
     );
   }
   if (value === "personamem") {
     const size = process.env.NMG_PERSONAMEM_SIZE ?? "32k";
     return loadPersonaMem(
-      process.env.NMG_PERSONAMEM_QUESTIONS ??
+      resolveBenchmarkData("PersonaMem questions", process.env.NMG_PERSONAMEM_QUESTIONS, [
         resolve(root, `evals/personamem/data/questions_${size}.csv`),
-      process.env.NMG_PERSONAMEM_CONTEXTS ??
+      ]),
+      resolveBenchmarkData("PersonaMem contexts", process.env.NMG_PERSONAMEM_CONTEXTS, [
         resolve(root, `evals/personamem/data/shared_contexts_${size}.jsonl`),
+      ]),
     );
   }
-  return loadBeam(process.env.NMG_BEAM_DATA ?? resolve(root, "evals/beam/data/chats/100K"));
+  return loadBeam(
+    resolveBenchmarkData("BEAM", process.env.NMG_BEAM_DATA, [
+      resolve(root, "evals/beam/data/chats/100K"),
+      resolve(root, ".benchmarks/official/BEAM/chats/100K"),
+    ]),
+  );
 }
 
 function formatSession(session: BenchmarkSession): string {
