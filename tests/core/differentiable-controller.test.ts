@@ -63,3 +63,34 @@ test("differentiable controller rejects malformed features and empty feedback", 
     /budget target count/,
   );
 });
+
+test("scalar and batched binary heads match the analytical zero-state gradient", () => {
+  const learningRate = 0.1;
+  const allExamples = Array.from({ length: 8 }, (_, index) => ({
+    features: [(index + 1) / 10, ((index * 3) % 7) / 7, index % 2 === 0 ? 1 : -1],
+    target: index % 3 === 0,
+  }));
+
+  for (const count of [7, 8]) {
+    const examples = allExamples.slice(0, count);
+    const controller = new DifferentiableController(3);
+    const result = controller.train({ nodes: examples }, learningRate);
+    const state = controller.toJSON();
+    const expectedGradient = [0, 0, 0];
+    let expectedBiasGradient = 0;
+    for (const example of examples) {
+      const residual = 0.5 - Number(example.target);
+      expectedBiasGradient += residual / count;
+      example.features.forEach((feature, index) => {
+        expectedGradient[index]! += (residual * feature) / count;
+      });
+    }
+
+    assert.equal(result.observations, count);
+    assert.ok(Math.abs(result.loss - Math.log(2)) < 2e-7);
+    expectedGradient.forEach((gradient, index) => {
+      assert.ok(Math.abs(state.parameters.nodeWeights[index]! + learningRate * gradient) < 1e-7);
+    });
+    assert.ok(Math.abs(state.parameters.nodeBias[0]! + learningRate * expectedBiasGradient) < 1e-7);
+  }
+});

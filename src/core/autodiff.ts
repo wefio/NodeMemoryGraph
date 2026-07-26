@@ -618,7 +618,7 @@ export class Tensor {
   backward(): void {
     if (sizeOf(this.shape) !== 1) throw new Error("backward requires a scalar output");
     // Ensure forward pass populates any lazy caches (e.g., L2Normalize invNorm)
-    this.data;
+    void this.data;
     const gradientGraph = computeGradients(this.#operation);
     const cache = new Map<UOp, Float32Array>();
     for (const [operation, gradient] of gradientGraph) {

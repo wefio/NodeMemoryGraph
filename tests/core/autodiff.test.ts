@@ -40,3 +40,31 @@ test("shared UOps accumulate gradients from multiple graph paths", () => {
   loss.backward();
   approximately(value.grad[0]!, 7);
 });
+
+test("L2 normalization gradient agrees with finite differences", () => {
+  const values = [0.3, -0.4, 0.5];
+  const weights = Tensor.vector([0.2, 0.7, -0.1]);
+  const input = Tensor.vector(values, true);
+  input.l2Normalize().dot(weights).backward();
+
+  const epsilon = 1e-3;
+  const evaluate = (items: number[]) => Tensor.vector(items).l2Normalize().dot(weights).scalarValue;
+  values.forEach((_, index) => {
+    const above = [...values];
+    const below = [...values];
+    above[index]! += epsilon;
+    below[index]! -= epsilon;
+    const numerical = (evaluate(above) - evaluate(below)) / (2 * epsilon);
+    approximately(input.grad[index]!, numerical, 2e-4);
+  });
+});
+
+test("SumN accumulates gradients when an input is shared", () => {
+  const shared = Tensor.vector([1, 2, 3], true);
+  const other = Tensor.vector([4, 5, 6], true);
+
+  Tensor.sumN([shared, shared, other]).sum().backward();
+
+  assert.deepEqual([...shared.grad], [2, 2, 2]);
+  assert.deepEqual([...other.grad], [1, 1, 1]);
+});
