@@ -142,6 +142,41 @@ index construction does create a P99 latency spike (about 2.3 seconds), so
 production indexing should remain asynchronous or incremental rather than
 occurring on the first user query.
 
+## BEAM 100K retrieval experiment
+
+The official OmniMemEval streaming runner completed all 20 BEAM 100K
+conversations and 400 probing questions at K=20. The auxiliary audit matches
+the benchmark's `source_chat_ids` against exact normalized source messages;
+it is a retrieval diagnostic, not the official Nugget Score.
+
+| Retrieval path | Any evidence | All evidence | Evidence recall | Mean context chars | First query | Steady P50 / P95 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| FTS5, user-first actor policy | 58.3% | 27.9% | 26.2% | 3,451 | 146 ms | 9 / 15 ms |
+| BGE record vectors, same policy | **65.9%** | **34.4%** | **32.9%** | 3,099 | 2,102 ms | 41 / 62 ms |
+
+Record vectors therefore generalize beyond LoCoMo: they gain 6.7 evidence
+recall points on BEAM while returning slightly less text. They are retained.
+The current exact vector scan is still adequate at 100K scale, but lazy
+per-user construction is not: first-query latency averages 2.1 seconds.
+Indexing must move to incremental write-time or background maintenance before
+the embedding path is treated as production-ready.
+
+BEAM also exposed an actor-routing trade-off. Of 1,094 labelled evidence
+messages, 253 are assistant messages. Searching all actors in one shared K=20
+pool reduced evidence recall to 13.3% and expanded mean context to 8,176
+characters. Reserving 4/20 slots for assistant messages produced 26.1% recall,
+essentially no gain over the 26.2% baseline, while nearly doubling context and
+steady latency. Both variants were rejected; the experimental routing code was
+removed rather than added to NMG.
+
+Run the audit with:
+
+```powershell
+npm run benchmark:audit:beam -- `
+  .benchmarks/official/OmniMemEval/data/beam/beam_100k.json `
+  <one-or-more-search-result.json>
+```
+
 Reproduce the exact-text evidence audit with:
 
 ```powershell

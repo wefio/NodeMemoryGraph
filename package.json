@@ -36,6 +36,7 @@
     "benchmark:install:omni-adapter": "node --experimental-strip-types evals/omnimemeval/install-adapter.ts",
     "benchmark:prepare:no-memory": "node --experimental-strip-types evals/omnimemeval/prepare-no-memory.ts",
     "benchmark:audit:locomo": "node --experimental-strip-types evals/omnimemeval/audit-locomo-retrieval.ts",
+    "benchmark:audit:beam": "python evals/omnimemeval/audit-beam-retrieval.py",
     "benchmark:validate": "npm run eval:longmem -- validate 1 && npm run eval:locomo -- validate 1 && npm run eval:personamem -- validate 1 && npm run eval:beam -- validate 1",
     "benchmark:score": "node --experimental-strip-types evals/official/score.ts",
     "benchmark:score:longmem": "node --experimental-strip-types evals/longmemeval/score.ts",
