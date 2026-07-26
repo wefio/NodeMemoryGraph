@@ -66,16 +66,25 @@ test("LoCoMo bridge invokes the pinned official scorer when bootstrapped", (cont
   }
   const result = spawnSync(python, [resolve(root, "evals/official/locomo_score.py")], {
     cwd: root,
-    input: JSON.stringify({ qas: [{
-      answer: "tea",
-      category: 2,
-      evidence: ["d1"],
-      prediction: "Tea",
-      prediction_context: ["d1"],
-    }] }),
+    input: JSON.stringify({ qas: [
+      {
+        answer: "tea",
+        category: 2,
+        evidence: ["d1"],
+        prediction: "Tea",
+        prediction_context: ["d1"],
+      },
+      {
+        answer: "coffee",
+        category: 2,
+        evidence: ["d2"],
+        prediction: "Coffee",
+        prediction_context: [],
+      },
+    ] }),
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout.slice(result.stdout.lastIndexOf("\n{") + 1));
-  assert.deepEqual(output, { scores: [1], recalls: [1] });
+  assert.deepEqual(output, { scores: [1, 1], recalls: [1, 0] });
 });
