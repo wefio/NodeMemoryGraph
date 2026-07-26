@@ -14,5 +14,9 @@
   "BEAM": {
     "repository": "https://github.com/mohammadtavakoli78/BEAM.git",
     "commit": "3e12035532eb85768f1a7cd779832b650c4b2ef9"
+  },
+  "OmniMemEval": {
+    "repository": "https://github.com/MemTensor/OmniMemEval.git",
+    "commit": "0b1ea8d28aa2d3e03ac4a6aee17b3006a131da7d"
   }
 }

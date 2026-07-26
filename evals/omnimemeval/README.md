@@ -28,6 +28,19 @@ The adapter should call a stable local NMG HTTP or CLI boundary. It must not
 reach into SQLite tables, duplicate graph logic in Python, or make benchmark
 semantics part of NMG core.
 
+The current adapter uses a persistent NDJSON subprocess rather than an HTTP
+service. Install it into the pinned ignored checkout with:
+
+```powershell
+npm run benchmark:setup
+npm run benchmark:install:omni-adapter
+$env:NMG_ROOT = (Get-Location).Path
+```
+
+Then use `--lib nmg` in OmniMemEval's user-memory commands. OmniMemEval declares
+its own Python 3.12 environment; NMG's smaller Python 3.11 official-scorer
+environment is deliberately not reused.
+
 ## Migration gate
 
 Before adopting OmniMemEval results as authoritative:
