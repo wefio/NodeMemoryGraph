@@ -11,13 +11,14 @@ exceeding its retrieval budget, or rebuilding an index unnecessarily.
 
 ## Benchmark roles
 
-| Suite          | Primary role                  | NMG mechanisms under test                                                                         |
-| -------------- | ----------------------------- | ------------------------------------------------------------------------------------------------- |
-| NMG core cases | Fast deterministic regression | storage, provenance, STG/LTG lifecycle, Active Graph budgets, deletion and cache invalidation     |
-| LongMemEval    | Main development gate         | extraction, multi-session reasoning, updates, temporal reasoning and abstention                   |
-| PersonaMem     | User-memory gate              | automatic fact/preference/constraint writes, evolving profiles, scope and current-state selection |
-| LoCoMo         | Relational-memory gate        | temporal and causal links, multi-hop evidence, node-to-leaf expansion and event summarization     |
-| BEAM           | Scale and cache-pressure gate | progressive retrieval, cache misses, maintenance cost and growth from 128K through 10M tokens     |
+| Suite               | Primary role                  | NMG mechanisms under test                                                                          |
+| ------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------- |
+| NMG core cases      | Fast deterministic regression | storage, provenance, STG/LTG lifecycle, Active Graph budgets, deletion and cache invalidation      |
+| LongMemEval         | Main development gate         | extraction, multi-session reasoning, updates, temporal reasoning and abstention                    |
+| PersonaMem          | User-memory gate              | automatic fact/preference/constraint writes, evolving profiles, scope and current-state selection  |
+| LoCoMo              | Relational-memory gate        | temporal and causal links, multi-hop evidence, node-to-leaf expansion and event summarization      |
+| BEAM                | Scale and cache-pressure gate | progressive retrieval, cache misses, maintenance cost and growth from 128K through 10M tokens      |
+| Reasoning workspace | Lab scratchpad gate           | explicit task-state retention, Pi compaction recovery, overhead, and unsupported scratchpad claims |
 
 The suites are reported separately. Their scores must not be averaged into one
 number because they measure different distributions and failure modes.

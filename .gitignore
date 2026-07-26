@@ -15,6 +15,7 @@ evals/personamem/results/
 evals/beam/data/
 evals/beam/results/
 evals/controller/results/
+evals/reasoning-workspace/results/
 evals/snapshots/
 *.tsbuildinfo
 

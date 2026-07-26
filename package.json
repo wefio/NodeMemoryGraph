@@ -37,6 +37,7 @@
     "benchmark:score": "node --experimental-strip-types evals/official/score.ts",
     "benchmark:score:longmem": "node --experimental-strip-types evals/longmemeval/score.ts",
     "eval:recall-compression": "node --experimental-strip-types evals/recall-compression.ts",
+    "eval:reasoning-workspace": "node --experimental-strip-types evals/reasoning-workspace/run.ts",
     "eval:scale": "node --experimental-strip-types evals/scale/run.ts",
     "eval:hierarchy": "node --experimental-strip-types evals/hierarchy-scale/run.ts",
     "index:qwen3": "node --experimental-strip-types scripts/index-qwen3.ts",
