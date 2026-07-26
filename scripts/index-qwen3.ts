@@ -18,7 +18,7 @@ const client = new OpenAIEmbeddingClient({
 const store = new NmgStore(databasePath);
 type EmbeddingTarget = "leaves" | "nodes" | "records";
 const validTargets = new Set<EmbeddingTarget>(["nodes", "leaves", "records"]);
-const targets = new Set<EmbeddingTarget>((process.env.NMG_EMBED_TARGETS ?? "nodes,leaves")
+const targets = new Set<EmbeddingTarget>((process.env.NMG_EMBED_TARGETS ?? "records")
   .split(",").map((target) => target.trim())
   .filter((target): target is EmbeddingTarget => validTargets.has(target as EmbeddingTarget)));
 if (targets.size === 0) throw new Error("NMG_EMBED_TARGETS must include nodes, leaves, or records");

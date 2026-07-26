@@ -75,6 +75,7 @@ export async function searchMemoryContext(
   query: string,
   options: Parameters<NmgStore["searchContext"]>[1],
 ): Promise<MemoryContext> {
+  const vectorGranularity = options?.vectorGranularity ?? "records";
   if (!embeddingClient) {
     return {
       ...memoryStore.searchContext(query, { ...options, retrievalMode: "fts5" }),
@@ -89,6 +90,22 @@ export async function searchMemoryContext(
         mode: "lexical",
         degraded: true,
         reason: "embedding_index_not_ready",
+      },
+    };
+  }
+  const requiredTargets: Array<"nodes" | "leaves" | "records"> =
+    vectorGranularity === "records"
+      ? ["records"]
+      : vectorGranularity === "hierarchy"
+        ? ["nodes", "leaves"]
+        : ["nodes", "leaves", "records"];
+  if (requiredTargets.some((target) => !indexHealth.targets.includes(target))) {
+    return {
+      ...memoryStore.searchContext(query, { ...options, retrievalMode: "fts5" }),
+      retrieval: {
+        mode: "lexical",
+        degraded: true,
+        reason: "embedding_index_missing_targets",
       },
     };
   }
@@ -108,7 +125,7 @@ export async function searchMemoryContext(
     };
   }
   return {
-    ...memoryStore.searchContext(query, options, {
+    ...memoryStore.searchContext(query, { ...options, vectorGranularity }, {
       queryVector,
       model: embeddingClient.indexId,
     }),

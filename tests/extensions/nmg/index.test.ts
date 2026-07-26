@@ -170,7 +170,7 @@ test("embedding failure degrades to FTS while preserving an Active Graph", async
       indexId: "unavailable-model@index",
       model: "unavailable-model",
       profile: "plain",
-      targets: ["nodes", "leaves"],
+      targets: ["records"],
     });
     store.completeEmbeddingIndex("unavailable-model@index");
     const context = await searchMemoryContext(
@@ -220,6 +220,86 @@ test("an unbuilt embedding index degrades without contacting the provider", asyn
     assert.equal(calls, 0);
     assert.equal(context.results[0]?.memory.id, saved.memory.id);
     assert.equal(context.retrieval?.reason, "embedding_index_not_ready");
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("a ready index without record vectors degrades without contacting the provider", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-extension-test-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  let calls = 0;
+  try {
+    const saved = store.remember({ statement: "Atlas uses DuckDB", nodeName: "Atlas storage" });
+    store.beginEmbeddingIndex({
+      indexId: "hierarchy-only@index",
+      model: "hierarchy-only",
+      profile: "plain",
+      targets: ["nodes", "leaves"],
+    });
+    store.completeEmbeddingIndex("hierarchy-only@index");
+
+    const context = await searchMemoryContext(
+      store,
+      {
+        indexId: "hierarchy-only@index",
+        async embedQueries() {
+          calls += 1;
+          return [[1, 0]];
+        },
+      },
+      "Atlas DuckDB",
+      { limit: 2, graphHops: 0 },
+    );
+
+    assert.equal(calls, 0);
+    assert.equal(context.results[0]?.memory.id, saved.memory.id);
+    assert.equal(context.retrieval?.reason, "embedding_index_missing_targets");
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("a ready record index is used by Pi's default semantic retrieval path", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-extension-test-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    const lexical = store.remember({
+      statement: "Project Atlas stores analytics in DuckDB",
+      nodeName: "Atlas storage",
+    });
+    const semantic = store.remember({
+      statement: "Project Borealis keeps reports in an embedded columnar database",
+      nodeName: "Borealis storage",
+    });
+    store.upsertExternalEmbeddings("record-model@index", [
+      { memoryId: lexical.memory.id, vector: [0, 1] },
+      { memoryId: semantic.memory.id, vector: [1, 0] },
+    ]);
+    store.beginEmbeddingIndex({
+      indexId: "record-model@index",
+      model: "record-model",
+      profile: "plain",
+      targets: ["records"],
+    });
+    store.completeEmbeddingIndex("record-model@index");
+
+    const context = await searchMemoryContext(
+      store,
+      {
+        indexId: "record-model@index",
+        async embedQueries() {
+          return [[1, 0]];
+        },
+      },
+      "Where does Atlas store analytics?",
+      { limit: 2, graphHops: 0 },
+    );
+
+    assert.equal(context.results[0]?.memory.id, semantic.memory.id);
+    assert.deepEqual(context.retrieval, { mode: "hybrid", degraded: false });
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });

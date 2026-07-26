@@ -67,22 +67,24 @@ profile applies no query prefix. Custom profiles can be expressed with
 `NMG_EMBED_QUERY_TEMPLATE` and `NMG_EMBED_DOCUMENT_TEMPLATE`; both must contain
 `{text}`.
 
-By default this embeds only the progressive-disclosure index: node headers and
-leaf/block headers. To compare against full per-record vectorization:
+By default this embeds records, which is the retrieval path used by the Pi
+extension. To additionally build the experimental progressive-disclosure
+indexes:
 
 ```powershell
 $env:NMG_EMBED_TARGETS = "nodes,leaves,records"
 npm run index:qwen3
 ```
 
-That storage default is not a claim that compressed headers can replace
-fine-grained evidence retrieval. A matched LoCoMo ablation with
+This default follows a matched LoCoMo ablation with
 `BAAI/bge-small-en-v1.5` measured 18.0% exact evidence recall for node/leaf
 summaries versus 52.9% for record vectors and 45.1% for FTS5. Until a better
 coarse-to-fine ranker is demonstrated, production recall should keep FTS5 or
 record vectors in the evidence stage; node/leaf vectors are a directory and
-large-scale routing optimization only. The benchmark bridge therefore defaults
-to record granularity whenever an embedding provider is enabled.
+large-scale routing optimization only. Both the Pi extension and benchmark
+bridge therefore default to record granularity whenever an embedding provider
+is enabled. An existing node/leaf-only index is rejected for that path and Pi
+falls back to FTS5 until record vectors are indexed.
 
 ANN is built per index granularity. Leaf blocks are the default:
 

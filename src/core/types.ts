@@ -255,7 +255,10 @@ export interface MemoryContext {
   retrieval?: {
     mode: "hybrid" | "lexical";
     degraded: boolean;
-    reason?: "embedding_index_not_ready" | "embedding_unavailable";
+    reason?:
+      | "embedding_index_missing_targets"
+      | "embedding_index_not_ready"
+      | "embedding_unavailable";
   };
 }
 
