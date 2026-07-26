@@ -23,9 +23,16 @@ The report separates candidate recall from ranking recall. This distinction is
 essential: the controller cannot recover an evidence item that candidate
 generation never returned.
 
-The default-Pi gate requires enough labelled training cases, candidate recall
-of at least 0.8, non-degraded recall and precision, and bounded inference cost.
-The runner reports the gate but never changes the Pi extension configuration.
+The report uses two independent gates:
+
+- `controllerGate` checks labelled training volume, held-out recall and
+  precision non-degradation, and bounded inference cost;
+- `retrievalGate` checks whether upstream candidate recall is at least 0.8.
+
+A passed controller gate permits shadow evaluation even when candidate
+generation is still weak. Active/default Pi eligibility requires both gates.
+The runner reports these states but never changes the Pi extension
+configuration.
 
 ## Initial diagnostic run (2026-07-22)
 

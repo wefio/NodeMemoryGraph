@@ -17,6 +17,7 @@
     ".pi/extensions/nmg/index.ts",
     "src/core/autodiff.ts",
     "src/core/controller-protocol.ts",
+    "src/core/controller-gate.ts",
     "src/core/controller-runtime.ts",
     "src/core/differentiable-controller.ts",
     "src/core/gate.ts",

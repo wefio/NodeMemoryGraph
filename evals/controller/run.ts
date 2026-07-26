@@ -7,6 +7,7 @@ import {
   CONTROLLER_FEATURE_COUNT,
   controllerSampleFromTrace,
 } from "../../src/core/controller-protocol.ts";
+import { evaluateControllerGate } from "../../src/core/controller-gate.ts";
 import { DifferentiableController } from "../../src/core/differentiable-controller.ts";
 import { OpenAIEmbeddingClient } from "../../src/core/openai-embedding.ts";
 import { NmgStore } from "../../src/core/store.ts";
@@ -54,7 +55,7 @@ if (selected.length < 2) throw new Error("controller evaluation needs at least t
 
 const workspace = join(tmpdir(), `nmg-controller-eval-${process.pid}`);
 mkdirSync(workspace, { recursive: true });
-let prepared: PreparedCase[] = [];
+const prepared: PreparedCase[] = [];
 const corpora = new Map<string, PreparedCorpus>();
 try {
   for (const [index, item] of selected.entries()) {
@@ -88,15 +89,22 @@ const learned = summarize(rows.map((row) => row.learned));
 const candidateRecall = average(rows.map((row) => row.candidateRecall));
 const latencyTolerance = Number.parseFloat(process.env.NMG_CONTROLLER_LATENCY_FACTOR ?? "4");
 const recallTolerance = Number.parseFloat(process.env.NMG_CONTROLLER_RECALL_TOLERANCE ?? "0.01");
-const gate = {
-  enoughTrainingCases: train.length >= 8,
-  candidateRecallAdequate: candidateRecall >= 0.8,
-  recallNotDegraded: learned.recall + recallTolerance >= baseline.recall,
-  precisionNotDegraded: learned.precision + recallTolerance >= baseline.precision,
-  inferenceCostBounded:
-    learned.inferenceMs <= Math.max(0.25, baseline.inferenceMs * latencyTolerance),
-};
-const eligibleForDefaultPi = Object.values(gate).every(Boolean);
+const gate = evaluateControllerGate(
+  {
+    trainingCases: train.length,
+    candidateRecall,
+    baselineRecall: baseline.recall,
+    learnedRecall: learned.recall,
+    baselinePrecision: baseline.precision,
+    learnedPrecision: learned.precision,
+    baselineInferenceMs: baseline.inferenceMs,
+    learnedInferenceMs: learned.inferenceMs,
+  },
+  {
+    latencyFactor: latencyTolerance,
+    qualityTolerance: recallTolerance,
+  },
+);
 const report = {
   benchmark,
   runAt: new Date().toISOString(),
@@ -144,7 +152,9 @@ const report = {
     languageModelCalls: 0,
   },
   gate,
-  eligibleForDefaultPi,
+  eligibleForShadowPi: gate.eligibility.shadow,
+  eligibleForActivePi: gate.eligibility.active,
+  eligibleForDefaultPi: gate.eligibility.defaultPi,
   rows,
 };
 writeFileSync(resolve(runDirectory, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
