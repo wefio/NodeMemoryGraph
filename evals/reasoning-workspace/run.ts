@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { RpcClient } from "@earendil-works/pi-coding-agent";
+import { RpcClient, type AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 interface Case {
   id: string;
@@ -108,6 +108,13 @@ const grouped = Object.fromEntries(
           meanWorkspaceNodes: rows.reduce((sum, row) => sum + row.workspaceNodes, 0) / rows.length,
           meanUnsupportedWorkspaceClaims:
             rows.reduce((sum, row) => sum + row.unsupportedWorkspaceClaims, 0) / rows.length,
+          meanAssistantMessages:
+            rows.reduce((sum, row) => sum + row.assistantMessages, 0) / rows.length,
+          meanToolCalls: rows.reduce((sum, row) => sum + row.toolCalls, 0) / rows.length,
+          meanReasoningToolMs:
+            rows.reduce((sum, row) => sum + row.reasoningToolMs, 0) / rows.length,
+          meanInputTokens: rows.reduce((sum, row) => sum + row.inputTokens, 0) / rows.length,
+          meanOutputTokens: rows.reduce((sum, row) => sum + row.outputTokens, 0) / rows.length,
         },
       ];
     }),
@@ -140,6 +147,15 @@ async function runTrial(trial: {
   );
   mkdirSync(trialDirectory, { recursive: true });
   const client = createClient(trial.arm, trialDirectory);
+  const telemetry = {
+    assistantMessages: 0,
+    toolCalls: 0,
+    reasoningToolMs: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+  };
+  const toolStarts = new Map<string, number>();
+  const unsubscribe = client.onEvent((event) => observeEvent(event, telemetry, toolStarts));
   const startedAt = performance.now();
   let answer = "";
   let error: string | null = null;
@@ -176,6 +192,7 @@ async function runTrial(trial: {
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
   } finally {
+    unsubscribe();
     await client.stop();
   }
   const foldedAnswer = answer.toLocaleLowerCase();
@@ -197,6 +214,7 @@ async function runTrial(trial: {
     latencyMs: Math.round(performance.now() - startedAt),
     workspaceNodes: workspace.nodeCount,
     unsupportedWorkspaceClaims,
+    ...telemetry,
     answer,
     error,
   };
@@ -226,6 +244,33 @@ function createClient(arm: "baseline" | "workspace", dataDirectory: string): Rpc
         : ["--no-tools"]),
     ],
   });
+}
+
+function observeEvent(
+  event: AgentSessionEvent,
+  telemetry: {
+    assistantMessages: number;
+    toolCalls: number;
+    reasoningToolMs: number;
+    inputTokens: number;
+    outputTokens: number;
+  },
+  toolStarts: Map<string, number>,
+): void {
+  if (event.type === "message_end" && event.message.role === "assistant") {
+    telemetry.assistantMessages += 1;
+    telemetry.inputTokens += event.message.usage.input;
+    telemetry.outputTokens += event.message.usage.output;
+  } else if (event.type === "tool_execution_start") {
+    telemetry.toolCalls += 1;
+    toolStarts.set(event.toolCallId, performance.now());
+  } else if (event.type === "tool_execution_end") {
+    const startedAt = toolStarts.get(event.toolCallId);
+    if (startedAt !== undefined && event.toolName === "nmg_reason") {
+      telemetry.reasoningToolMs += performance.now() - startedAt;
+    }
+    toolStarts.delete(event.toolCallId);
+  }
 }
 
 function readWorkspace(dataDirectory: string): { nodeCount: number; contents: string[] } {

@@ -733,6 +733,23 @@ The tool is Lab-only (`NMG_ENABLE_LAB_TOOLS=1`). NMG Lite keeps its stable
 three-tool surface, and the existing numerical MGR prototype remains available
 for independent experiments.
 
+An automatic input-capture and checkpoint-injection variant was implemented and
+rejected in July 2026. In a matched DeepSeek V4 Flash development run (three
+tasks, three repeats), the full-context baseline and automatic variant both
+scored 100%, but mean latency increased from 7.0 s to 9.8 s. After normal Pi
+compaction, the baseline scored 100% while automatic injection scored 77.8% and
+increased mean latency from 11.9 s to 15.7 s. Explicit `nmg_reason` calls were
+slower still; local tool execution accounted for only about 0.1--0.2 s, showing
+that extra model rounds, not local graph operations, dominated the cost.
+
+Therefore NMG does not automatically parse every user turn into the reasoning
+workspace and does not inject that workspace on ordinary turns. The scratchpad
+remains an explicit Lab capability for tasks that need an auditable reasoning
+checkpoint. One-call correctness should instead come from the stable harness
+layers: bounded resident context, gated long-term recall, provenance-aware
+retrieval, and progressive evidence expansion only when the first retrieval is
+insufficient.
+
 ## 13. Current implementation versus target
 
 Implemented and verified in the current prototype:
@@ -1012,16 +1029,17 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 1. **Complete as a Lab prototype:** typed session reasoning nodes and edges,
    atomic local persistence, bounded checkpoints, Pi compaction lifecycle
    integration, and a matched full/compacted development benchmark.
-2. Add an activation gate based on task complexity, unresolved hypotheses,
-   accumulated tool evidence, interruption risk, and context pressure.
+2. **Rejected after experiment:** automatic user-input capture and ordinary-turn
+   checkpoint injection. It added latency and regressed compacted-task accuracy.
+   Do not restore it without a new benchmark and a materially different design.
 3. Require stronger provenance for evidence/conclusion nodes and prevent
    unsupported hypotheses from being promoted or presented as established
    facts.
 4. Add update deduplication, stale-node retirement, task-completion archival,
    and explicit workspace reset/resume semantics.
-5. Compare autonomous, gated, and forced workspace policies over larger
-   repeated tasks, tracking answer quality, dead-path repetition, token/tool
-   cost, latency, and scratchpad contamination.
+5. Keep measuring the explicit workspace on tasks with real interruption or
+   compaction risk; do not treat synthetic success as justification for default
+   activation.
 6. Only then define reviewed STG/LTG promotion of supported conclusions and
    decisions.
 
@@ -1034,8 +1052,8 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 
 ## 17. Remaining design questions
 
-- What deterministic signals should activate and stop the reasoning workspace
-  without requiring another model call?
+- Can a future deterministic gate identify the narrow tasks that benefit from
+  an explicit reasoning workspace without injecting it into ordinary turns?
 - Which reasoning-node kinds require direct evidence references, and how should
   unsupported hypotheses be labelled, expired, or excluded from checkpoints?
 - When a task ends, should its workspace be deleted, archived as an event, or
