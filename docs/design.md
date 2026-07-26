@@ -892,6 +892,13 @@ Current development evidence (updated 2026-07-26):
   recovered it through `nmg_search -> activeGraphId -> nmg_get`, and the store
   recorded one selection and one actual use; isolated test data was removed
   afterwards and `PRAGMA foreign_key_check` remained clean;
+- strict three-arm LongMemEval development gate over one fixed question from
+  each of seven categories, scored separately with the pinned official protocol:
+  no-memory 1/7, deterministic NMG 2/7, and identical deterministic NMG with
+  non-ranking shadow logging 3/7. No external embedding provider was enabled.
+  Deterministic retrieval was sufficient in 2/7 cases and both answers were
+  correct; all five retrieval misses were wrong. The shadow difference is model
+  or judge variance because shadow decisions cannot affect ranking;
 - historical pre-gate LongMemEval diagnostic, one fixed case from seven categories: no-memory 1/7,
   raw-session 1/7, flat hybrid 5/7, Lite 5/7, Graph 6/7;
 - historical pre-gate LongMemEval diagnostic, two fixed cases from seven categories:
@@ -927,11 +934,12 @@ subgraph reuse, AG node/edge/evidence counts, budget utilization, expansion
 steps, and marginal evidence gain per added token.
 
 The current Pi regression, seven-category invariant suite, controlled topology
-ablation, and historical seven-question LongMemEval diagnostic sample prove integration and
-mechanism behaviour, not general capability improvement. The matched sample did
-ingest every haystack session for each selected question, but a larger fixed
-sample with repeated model runs is required before claiming that NMG improves
-agent performance.
+ablation, and strict seven-question LongMemEval matched sample prove integration
+and mechanism behaviour, not general capability improvement. The matched sample
+did ingest every haystack session for each selected question, but its
+zero-configuration FTS/hashing path missed five of seven required evidence sets.
+A matched external-embedding run and a larger fixed sample with repeated model
+runs are required before claiming that NMG improves agent performance.
 
 The public evaluation portfolio is deliberately complementary rather than a
 single composite leaderboard:
@@ -944,6 +952,15 @@ single composite leaderboard:
   from semantic nodes to leaf evidence;
 - BEAM is the late-stage scale and cache-pressure test, beginning at 128K and
   500K before any 1M or 10M run.
+- OmniMemEval is the preferred external user-memory evaluation harness because
+  it unifies those suites (plus HaluMem) behind one `add`/`search` client
+  contract. NMG should maintain one thin OmniMemEval adapter; the existing
+  per-suite runners remain migration fixtures until score and telemetry parity
+  is demonstrated.
+- OmniMemEval's AgentBench/OpenClaw agent-memory track is not adopted for Pi at
+  this stage. Pi runtime behaviour remains covered by local extension and RPC
+  tests, avoiding a second agent harness unless comparative evidence justifies
+  it.
 
 These suites must be reported separately. Matched arms share the same reader,
 prompt, question IDs, source history, evidence-token budget, and judge. Answer

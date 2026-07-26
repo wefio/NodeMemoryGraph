@@ -5,6 +5,13 @@ NMG uses two complementary kinds of tests:
 - deterministic engineering cases detect implementation regressions;
 - public memory benchmarks measure whether the system improves agent behaviour.
 
+For public user-memory evaluation, NMG prefers
+[OmniMemEval](https://github.com/MemTensor/OmniMemEval) as the upstream
+multi-benchmark harness. Its user-memory track already provides one ingestion,
+search, answer and scoring pipeline for LongMemEval, LoCoMo, BEAM, PersonaMem
+v2 and HaluMem. NMG should integrate through one thin client adapter rather
+than permanently maintaining one execution pipeline per benchmark.
+
 Public benchmark scores do not replace the deterministic core suite. A memory
 system can answer benchmark questions correctly while corrupting provenance,
 exceeding its retrieval budget, or rebuilding an index unnecessarily.
@@ -60,6 +67,12 @@ sample fingerprint and protocol; raw run output is never committed.
 `evals/official/upstreams.json` under ignored `.benchmarks/official`. It also
 creates an isolated uv-managed Python 3.11 environment for official scorers;
 benchmark code is not copied into NMG core.
+
+These local runners remain migration fixtures until an OmniMemEval NMG adapter
+reproduces the same samples and official scores. After parity is established,
+the local runners should be reduced to deterministic smoke/regression fixtures;
+benchmark parsing, replay, checkpointing and report generation should remain
+owned by OmniMemEval.
 
 Judge-backed protocols currently use `deepseek/deepseek-v4-flash` in place of
 the upstream proprietary judge. Those outputs are labelled
@@ -131,15 +144,22 @@ the runner writes per-case/per-mode progress to stderr.
 
 ## Rollout order
 
-1. Keep LongMemEval as the fast public development gate and expand its fixed
-   paired sample with repeated runs.
-2. Add PersonaMem next, initially as a deterministic ingestion and current
-   preference/profile selection adapter.
-3. Add LoCoMo after the shared evidence contract exists; use its evidence IDs
-   to evaluate graph routing separately from answer generation.
-4. Add BEAM last. Start at 128K, then 500K. Run 1M and 10M only if retrieval
-   work grows materially slower than history size and the smaller tiers do not
-   already expose the same failure.
+1. Add a thin NMG client to OmniMemEval's user-memory client registry. It must
+   implement only the harness contract (`add`, `search`, and per-user cleanup)
+   and call a stable NMG service/CLI boundary.
+2. Reproduce the current fixed LongMemEval matched sample through OmniMemEval
+   before changing retrieval behaviour. This is the migration parity gate.
+3. Run PersonaMem v2, LoCoMo and BEAM through the same adapter. Add HaluMem
+   only after the first four suites are reproducible.
+4. Keep BEAM scale runs staged: 128K, then 500K, then 1M/10M only when smaller
+   tiers have not already exposed the same failure.
+5. Retire duplicated local benchmark orchestration only after score, sample,
+   provenance and cost telemetry parity is demonstrated.
+
+OmniMemEval's agent-memory track is not the initial integration target. It is
+currently coupled to AgentBench/OpenClaw lifecycle plugins, whereas NMG's
+runtime integration target is Pi. Pi end-to-end tests therefore remain local
+until a small runtime-neutral plugin protocol is justified by evidence.
 
 Adapters should translate official data into a small shared case/result schema,
 not copy benchmark-specific assumptions into NMG core.

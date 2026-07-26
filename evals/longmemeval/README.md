@@ -92,6 +92,41 @@ It does not test the quality of automatic extraction or learned topology.
 Reports and per-question NMG databases are written under `results/`, which is
 also ignored by Git.
 
+## Strict matched development run
+
+Run ID: `2026-07-26T09-47-30.923Z`. One fixed example from each of the seven
+question categories used the same DeepSeek V4 Flash reader, prompt, question,
+and deterministic full-haystack import in all arms. No external embedding
+provider was configured, so this run measures the zero-configuration
+FTS/hashing path rather than BGE or Qwen semantic retrieval.
+
+The separate LongMemEval protocol scorer produced:
+
+| Arm | Correct | Accuracy | Mean answer latency |
+|---|---:|---:|---:|
+| No memory | 1/7 | 14.3% | 4.1 s |
+| Deterministic NMG | 2/7 | 28.6% | 6.9 s |
+| NMG with non-ranking shadow logging | 3/7 | 42.9% | 6.7 s |
+
+The shadow controller could not change ranking. Its one-answer difference is
+reader/judge variance and is not evidence that the controller improves
+retrieval. The independent retrieval diagnostic found sufficient evidence in
+2/7 deterministic and 3/7 shadow trials. When deterministic retrieval was
+sufficient, the answer was correct in 2/2 cases; all five deterministic
+retrieval misses produced wrong answers.
+
+The dominant failures were semantic and coverage misses: personal-best state,
+multi-session aggregation, Premiere Pro preference, degree, and two-event
+temporal evidence. A one-question experiment that changed recommendation
+requests from cue-only to automatic retrieval still returned unrelated nodes
+and scored 0/1, so that gate change was reverted. The next fair experiment is
+the same fixed sample with a working external node-and-leaf embedding provider.
+Until then, changing graph topology, the controller, or answer prompts would
+confound the diagnosed retrieval bottleneck.
+
+This seven-question, one-repeat result is a development diagnostic, not a
+general capability or leaderboard claim.
+
 ## First seven-question development run
 
 | Mode | Correct | Accuracy |
