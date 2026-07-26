@@ -461,13 +461,14 @@ Maintenance has three scopes:
 SQLite is authoritative and should own transactions, content hashes, version
 markers, dirty queues, FTS, and crash recovery. NMG decides semantic grouping,
 summary invalidation, and topology changes. A process-local contiguous
-`Float32` matrix may cache active node/leaf embeddings; it is disposable and
-rebuildable from versioned binary vectors in storage.
+`Float32` matrix may cache active record, node, or leaf embeddings; it is
+disposable and rebuildable from versioned binary vectors in storage.
 
-ANN is optional. It must not replace exact node/leaf scanning until exact-vs-ANN
+ANN is optional. It must not replace exact vector scanning until exact-vs-ANN
 recall audits show acceptable quality at a scale where exact scanning violates
-the latency budget. Current near-duplicate tests do not justify enabling the
-prototype USearch path by default.
+the latency budget. Current near-duplicate tests and the LoCoMo record-vector
+run do not justify enabling the prototype USearch path or a separate vector
+database by default.
 
 ## 11. Progressive retrieval
 
@@ -485,7 +486,8 @@ from both storage tiers and the STG/LTG lifecycle:
 Candidate generation should compose independent signals:
 
 ```text
-Inbox/Delta + global FTS/exact + node/leaf semantic routing
+Inbox/Delta + global FTS/exact + fine-grained record semantics
+  -> optional node/leaf semantic routing at measured large scale
   -> optional graph expansion
   -> scope/time/truth filtering
   -> type-aware reranking and diversity
@@ -881,7 +883,7 @@ optional.
 
 Current development evidence (updated 2026-07-26):
 
-- 203 automated tests cover UOp autodiff, the differentiable controller,
+- 209 automated tests cover UOp autodiff, the differentiable controller,
   hierarchical activation, the retained memory-graph reasoner prototype,
   reasoning-workspace persistence and checkpoint injection, P3 lifecycle,
   budget enforcement, actual-use activation, independent-task deduplication,
@@ -909,6 +911,13 @@ Current development evidence (updated 2026-07-26):
   useful-node labels 100% by construction;
 - 10K near-duplicate hierarchy workload: node+leaf exact scan 100% accuracy at
   10.6 ms P50, leaf ANN 87.5% at 8.1 ms P50, full record scan 75% at 779 ms P50.
+- full 1,540-question LoCoMo K=20 retrieval ablation with local
+  `BAAI/bge-small-en-v1.5`: FTS5 exact-evidence recall 45.1%, node/leaf summaries
+  18.0%, record vectors 52.9%, and node/leaf+record union 17.7%. Record vectors
+  also kept mean latency and context size near the lexical baseline. This
+  rejects compressed hierarchy as the sole evidence index and rejects the
+  current union ranker; node/leaf routing remains a directory/scale
+  optimization, not a substitute for detailed evidence candidates.
 - reasoning-workspace development benchmark, three tasks with three repeats per
   condition using DeepSeek V4 Flash: full-context baseline and workspace both
   achieved 100% exact task success, while mean latency rose from 5.79 s to
@@ -1035,8 +1044,10 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 1. Add a Pi package manifest and stable installable extension entry.
 2. Reduce the default model-facing API to search, get, and remember.
 3. Keep SQLite + FTS/exact retrieval as the zero-configuration path.
-4. Wire the measured node/leaf semantic path behind an optional embedding
-   provider with a reliable fallback.
+4. **Complete at benchmark boundary:** wire optional fine-grained record
+   embeddings behind the same SQLite store and retain FTS/exact as the
+   zero-configuration path. Node/leaf-only and the current union ranker are
+   explicitly gated off after the LoCoMo ablation.
 
 ### P1: incremental correctness and fair evaluation
 

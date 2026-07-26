@@ -101,6 +101,55 @@ average to those questions and zero to the rest (about 297 characters averaged
 over the complete benchmark). This restores information already present in NMG
 without globally expanding context.
 
+## Embedding-granularity ablation
+
+A matched LoCoMo K=20 retrieval ablation used the locally cached
+`BAAI/bge-small-en-v1.5` model (384 dimensions) through the small offline
+benchmark server in `bge_server.py`. Vectors remained in each user's SQLite
+database; no vector database or vLLM server was introduced.
+
+With the model already present in the Hugging Face cache, the local server is:
+
+```bash
+uv run --offline evals/omnimemeval/bge_server.py
+```
+
+Set `NMG_EMBED_BASE_URL=http://127.0.0.1:8000/v1`,
+`NMG_EMBED_MODEL=BAAI/bge-small-en-v1.5`, and
+`NMG_EMBED_PROFILE=bge-en` in the OmniMemEval environment file.
+
+| Retrieval path | Any evidence | All evidence | Evidence recall | Mean context chars | Mean / P95 latency |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| FTS5 lexical | 61.8% | 49.4% | 45.1% | 4,450 | 327 / 637 ms |
+| Node + leaf summaries (5 nodes) | 23.8% | 17.9% | 16.4% | 3,335 | 281 / 342 ms |
+| Node + leaf summaries (10 nodes) | 26.1% | 19.7% | 18.0% | 3,359 | 312 / 371 ms |
+| Record vectors | **68.0%** | **54.1%** | **52.9%** | 4,458 | 314 / 361 ms |
+| Node + leaf + record union | 25.7% | 19.4% | 17.7% | 3,358 | 568 / 647 ms |
+
+The compressed hierarchy is therefore not accepted as the sole evidence
+retrieval index. Its summaries discard distinctions needed by LoCoMo, and the
+current union ranking lets coarse routes crowd out stronger record candidates.
+For the benchmark bridge, an enabled embedding provider defaults to record
+granularity. Node and leaf vectors remain useful as a bounded directory or a
+future large-scale routing stage, but they must not replace fine-grained
+evidence retrieval until a matched experiment demonstrates equal or better
+recall.
+
+The record-vector path improves overall evidence recall by 7.8 points without
+increasing mean context size or mean latency. Category 1 and 3 recall rises
+from 26.9% to 40.4% and from 14.7% to 28.4%, respectively. Initial per-user
+index construction does create a P99 latency spike (about 2.3 seconds), so
+production indexing should remain asynchronous or incremental rather than
+occurring on the first user query.
+
+Reproduce the exact-text evidence audit with:
+
+```powershell
+npm run benchmark:audit:locomo -- `
+  .benchmarks/official/OmniMemEval/data/locomo/locomo10.json `
+  <one-or-more-search-result.json>
+```
+
 OmniMemEval does not ship a user-memory `no-memory` backend. For an internal
 matched lower bound, transform an existing search artifact while preserving its
 questions and ordering:
