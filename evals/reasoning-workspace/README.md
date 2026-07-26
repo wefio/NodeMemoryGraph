@@ -35,3 +35,24 @@ Reports are written under ignored `results/` directories. This is a small
 development signal, not a public benchmark or leaderboard result. Inspect
 individual outputs and workspace files: exact recall can improve while latency
 or unsupported scratchpad claims regress.
+
+## Initial development signal
+
+On 2026-07-26, DeepSeek V4 Flash ran three tasks with three repeats per
+condition:
+
+| Context   | Arm       | Exact success | Expected-detail recall | Mean latency |
+| --------- | --------- | ------------: | ---------------------: | -----------: |
+| Full      | Baseline  |          100% |                   100% |       5.79 s |
+| Full      | Workspace |          100% |                   100% |      15.15 s |
+| Compacted | Baseline  |         88.9% |                  88.9% |       9.83 s |
+| Compacted | Workspace |          100% |                   100% |      23.41 s |
+
+One of nine compacted workspace trials persisted an unsupported hypothesis
+marker. The sample is too small for a capability claim, but it establishes two
+product requirements:
+
+- activate the workspace only when task complexity or context pressure
+  justifies its cost;
+- distinguish model-proposed hypotheses from observed evidence and prevent
+  unsupported scratch state from automatic LTG consolidation.

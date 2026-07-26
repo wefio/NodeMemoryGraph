@@ -92,6 +92,9 @@ By default, the model receives three tools and a typed write/use policy:
 Set `NMG_ENABLE_LAB_TOOLS=1` before starting Pi to expose the experimental
 maintenance surface:
 
+- `nmg_reason`: maintain a session-local, auditable task scratchpad of goals,
+  observations, hypotheses, evidence, conclusions, decisions, open questions,
+  and next actions across ordinary turns and Pi context compaction.
 - `nmg_derive`: form a new conclusion from at least two existing memories while
   retaining every transitive evidence reference.
 - `nmg_link`: add a typed semantic relation between two memory nodes.
@@ -100,6 +103,15 @@ maintenance surface:
 - `nmg_feedback`: train the local online node router from useful-query feedback.
 - `nmg_rebalance`: batch-rebuild node-local block tiers from accumulated access
   probability statistics.
+- `nmg_consolidate`: reconcile evidence-backed relation stability with
+  hysteretic promotion and demotion.
+
+The reasoning workspace is not hidden chain-of-thought and does not
+automatically become long-term memory. Its files live under
+`.nmg/reasoning/`. Current evidence supports keeping it selective rather than
+always-on: it can recover task state after compaction, but unnecessary tool
+calls add substantial latency and model-proposed hypotheses can pollute the
+scratchpad.
 
 For one-off development inside this repository, disable automatic extension
 discovery and load NMG exactly once:

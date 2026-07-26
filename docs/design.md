@@ -794,23 +794,34 @@ Implemented and verified in the current prototype:
 
 Important gaps between the prototype and the target plugin:
 
-- the external node/leaf hierarchy is available to the normal Pi extension when
-  `NMG_EMBED_BASE_URL` is configured and now feeds the same budgeted Active Graph
-  pipeline; provider failure degrades explicitly to FTS5, while hashing remains
-  an evaluation-only baseline;
-- external index identities include the model and preprocessing contract;
-  SQLite missing/stale rows provide a resumable incremental queue, while
-  persistent health records expose pending/indexed counts and the last
-  success/failure without adding a separate queue service;
-- Pi does not activate a new model/profile index until it has a recorded
-  successful complete build; initial partial indexes degrade to FTS5, while
-  later incremental refreshes may continue serving the last successful index;
+- the reasoning workspace has no learned or deterministic activation gate yet;
+  when exposed, the model may update it every turn even when the full transcript
+  is already sufficient;
+- reasoning nodes distinguish type and status, but hypothesis writes are not
+  yet required to cite evidence, and the system does not independently detect
+  unsupported scratchpad claims;
+- reasoning checkpoints are bounded and session-persistent, but scratchpad
+  expiry, archive policy, cross-session task continuation, and explicit
+  promotion into STG/LTG remain undesigned or manual;
+- the workspace exposes consolidation candidates in core code, but Pi does not
+  automatically review or promote them; this is intentional until provenance
+  and false-promotion evaluation are stronger;
+- `MemoryGraphReasoner` remains a numerical Lab prototype that scores the
+  global unvisited candidate set rather than following graph edges;
+- the differentiable controller is trained and evaluated as a shadow primitive;
+  it has not passed the matched quality/cost gate required to affect production
+  retrieval;
 - the ANN experiment has unacceptable recall on the near-duplicate workload;
 - automatic extraction evaluation and the matched full-history sample are not
   yet large enough to make a product-quality claim;
+- the four official benchmark adapters validate and use official-format parsing,
+  but larger repeated official-protocol runs have not yet established NMG's
+  general capability improvement;
 - accepted topology proposals are an offline/Lab maintenance operation, not an
   unattended production mutation policy;
-- explicit privacy deletion and dependency cleanup remain P4 work.
+- store-level deletion and dependency cleanup exist, but a user-facing privacy
+  deletion/export interface and erasure of every derived learned signal remain
+  P5 work;
 - automatic recall exposure is recorded as selection, not usefulness; without
   answer-level citations the harness cannot prove that injected memory changed
   the final answer. Agent-directed `nmg_get(activeGraphId=...)` is the current
@@ -818,6 +829,8 @@ Important gaps between the prototype and the target plugin:
 - stability currently consolidates a pairwise local subgraph as a typed
   `related_to` relation. Larger multi-edge motif consolidation remains an
   experiment rather than a P3 requirement.
+- optional encrypted synchronization and multi-device conflict handling are
+  design-only; Cloudflare is not a runtime dependency.
 
 ## 14. Evaluation and falsifiable claims
 
@@ -849,15 +862,15 @@ product value. If Graph does not beat Lite, graph adaptation remains a Lab
 feature. If a learned router does not beat deterministic routing, it remains
 optional.
 
-Current development evidence (updated 2026-07-22):
+Current development evidence (updated 2026-07-26):
 
-- 120 automated tests pass, spanning: UOp autodiff (3), differentiable
-  controller (3), hierarchical activation (14), memory-graph reasoner (16),
-  P3 lifecycle, budget enforcement, actual-use activation, independent-task
-  deduplication, reversible consolidation, write-policy audit, Active Graph
-  path/selection/budget traces, and migration from the pre-P3 schema.
-  Test files live in `tests/core/`, `tests/evals/`, `tests/extensions/nmg/`.
-  Fast subset: `npm run test:cg` (36 tests, ~250ms).
+- 203 automated tests cover UOp autodiff, the differentiable controller,
+  hierarchical activation, the retained memory-graph reasoner prototype,
+  reasoning-workspace persistence and checkpoint injection, P3 lifecycle,
+  budget enforcement, actual-use activation, independent-task deduplication,
+  reversible consolidation, write-policy audit, Active Graph traces, official
+  benchmark adapters, and schema migration. Test files live in `tests/core/`,
+  `tests/evals/`, and `tests/extensions/nmg/`.
 - a clean DeepSeek V4 Flash Pi process wrote a unique LTG fact, a second process
   recovered it through `nmg_search -> activeGraphId -> nmg_get`, and the store
   recorded one selection and one actual use; isolated test data was removed
@@ -872,6 +885,12 @@ Current development evidence (updated 2026-07-22):
   useful-node labels 100% by construction;
 - 10K near-duplicate hierarchy workload: node+leaf exact scan 100% accuracy at
   10.6 ms P50, leaf ANN 87.5% at 8.1 ms P50, full record scan 75% at 779 ms P50.
+- reasoning-workspace development benchmark, three tasks with three repeats per
+  condition using DeepSeek V4 Flash: full-context baseline and workspace both
+  achieved 100% exact task success, while mean latency rose from 5.79 s to
+  15.15 s; after ordinary Pi compaction, baseline achieved 88.9% and workspace
+  100%, while latency rose from 9.83 s to 23.41 s. One of nine compacted
+  workspace trials persisted an unsupported hypothesis marker.
   The topology and router cases isolate whether the mechanisms can learn and
   apply a missing relation; they are not natural-distribution quality estimates.
   The scale result shows why leaf granularity matters and why the current ANN
@@ -988,13 +1007,41 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
    STOP/EXPAND, and budget decisions. Activation in the Pi retrieval path remains
    gated on a fixed feature contract and matched evidence-recall/cost evaluation.
 
-### P4: optional platform capabilities
+### P4: selective reasoning workspace
 
-1. Explicit privacy deletion and dependency cleanup.
-2. Optional encrypted cloud synchronization.
+1. **Complete as a Lab prototype:** typed session reasoning nodes and edges,
+   atomic local persistence, bounded checkpoints, Pi compaction lifecycle
+   integration, and a matched full/compacted development benchmark.
+2. Add an activation gate based on task complexity, unresolved hypotheses,
+   accumulated tool evidence, interruption risk, and context pressure.
+3. Require stronger provenance for evidence/conclusion nodes and prevent
+   unsupported hypotheses from being promoted or presented as established
+   facts.
+4. Add update deduplication, stale-node retirement, task-completion archival,
+   and explicit workspace reset/resume semantics.
+5. Compare autonomous, gated, and forced workspace policies over larger
+   repeated tasks, tracking answer quality, dead-path repetition, token/tool
+   cost, latency, and scratchpad contamination.
+6. Only then define reviewed STG/LTG promotion of supported conclusions and
+   decisions.
+
+### P5: optional platform capabilities
+
+1. Add a user-facing privacy deletion/export workflow over existing store-level
+   deletion and dependency cleanup, including learned-signal erasure.
+2. Add optional encrypted cloud synchronization only after the local protocol
+   and multi-device conflict semantics are specified.
 
 ## 17. Remaining design questions
 
+- What deterministic signals should activate and stop the reasoning workspace
+  without requiring another model call?
+- Which reasoning-node kinds require direct evidence references, and how should
+  unsupported hypotheses be labelled, expired, or excluded from checkpoints?
+- When a task ends, should its workspace be deleted, archived as an event, or
+  reviewed for selective STG/LTG promotion?
+- How should a task resume across a new Pi session without treating every prior
+  session scratchpad as globally active?
 - What measured ambiguity/coverage thresholds justify node creation or
   refinement?
 - Which deterministic relation types are safe to establish immediately, and
