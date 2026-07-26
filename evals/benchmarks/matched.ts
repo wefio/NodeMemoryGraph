@@ -3,8 +3,9 @@ export const MATCHED_MODES = ["no-memory", "nmg-deterministic", "nmg-shadow"] as
 export type MatchedMode = (typeof MATCHED_MODES)[number];
 
 export function matchedUserPrompt(input: {
-  benchmark?: "BEAM" | "LoCoMo" | "PersonaMem";
+  benchmark?: "BEAM" | "LoCoMo" | "LongMemEval" | "PersonaMem";
   question: string;
+  questionDate?: string;
   options?: readonly string[];
 }): string {
   if (input.benchmark === "PersonaMem") {
@@ -19,6 +20,7 @@ export function matchedUserPrompt(input: {
   return [
     "Answer concisely. If the required information is unavailable, explicitly say you do not know.",
     input.options?.length ? `Options:\n${input.options.join("\n")}` : "",
+    input.questionDate ? `Question date: ${input.questionDate}` : "",
     `Question: ${input.question}`,
   ]
     .filter(Boolean)

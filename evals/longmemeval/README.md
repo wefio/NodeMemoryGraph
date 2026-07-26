@@ -35,10 +35,10 @@ npm run eval:longmem -- matched 1
 The manifest takes precedence over the positional per-category count. Every
 repeat gets an isolated NMG database so access statistics from an earlier trial
 cannot change a later trial. Reports include Wilson 95% accuracy intervals and
-paired win/loss/tie counts against `flat-hybrid`, matched by question and repeat.
+paired win/loss/tie counts against `no-memory`, matched by question and repeat.
 They also separate per-mode answer latency from deterministic NMG ingestion and
-embedding-index preparation time; preparation is shared by the three NMG modes
-within one matched trial.
+embedding-index preparation time. Each NMG arm receives an independent copy of
+the same deterministic seed corpus.
 
 Answer correctness and retrieval sufficiency are scored independently. The
 retrieval judge sees only the context actually injected by `raw-session`,
@@ -68,9 +68,10 @@ than discarding the whole experiment; judge failures receive one fresh retry.
 - `nmg-oracle`: Pi imports the official evidence sessions into an isolated NMG
   database, then a fresh Pi session answers using NMG retrieval. This is an
   ingestion/retrieval smoke test, not a full-haystack score.
-- `matched`: runs six controls on the same fixed IDs and full cleaned haystack:
-  `no-memory`, `raw-session`, `flat-hybrid`, `nmg-auto`, `nmg-lite`, and
-  `nmg-graph`.
+- `matched`: runs the strict three-arm gate on the same fixed IDs, prompt,
+  reader configuration, and full cleaned haystack: `no-memory`,
+  `nmg-deterministic`, and `nmg-shadow`. Shadow scoring is recorded but cannot
+  affect retrieval ranking.
 - `raw-session`: lexical session ranking under the shared context-character
   budget.
 - `flat-hybrid`: lexical plus deterministic hashing-vector ranking over
@@ -78,6 +79,10 @@ than discarding the whole experiment; judge failures receive one fresh retry.
 - `nmg-lite`: the same turn-level evidence imported into NMG, with graph hops
   forcibly disabled by `NMG_GRAPH_HOPS=0`.
 - `nmg-graph`: the same NMG import with one-hop typed relation expansion.
+
+`raw-session`, `flat-hybrid`, `nmg-auto`, `nmg-lite`, and `nmg-graph` remain
+separately runnable diagnostic ablations; they are not members of the strict
+matched gate.
 
 Matched import is deterministic: every source turn becomes immutable
 `conversation_evidence`, and adjacent session nodes receive a temporal
@@ -131,7 +136,13 @@ them sequentially or give each process an isolated Pi agent directory with an
 appropriate credential strategy. Model requests within one evaluation may
 still be concurrent.
 
-## First full-haystack matched development run
+## Historical pre-gate development runs
+
+The results below predate the strict three-arm matched protocol and are retained
+only as diagnostic history. They must not be compared as current matched-gate
+results.
+
+### First full-haystack diagnostic run
 
 Run ID: `2026-07-19T10-34-21.919Z`. One fixed example from each of the seven
 question categories was evaluated with DeepSeek V4 Flash.
@@ -151,7 +162,7 @@ and a stochastic reader/judge, these numbers establish a reproducible
 development signal, not statistical superiority. The next benchmark step is a
 larger fixed sample with repeated model runs and confidence intervals.
 
-## Expanded 14-question development run
+### Expanded 14-question diagnostic run
 
 Run ID: `2026-07-19T10-49-26.309Z`. Two fixed examples from every category,
 four-way question concurrency, and no answer timeouts:

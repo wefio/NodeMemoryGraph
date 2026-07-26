@@ -803,9 +803,9 @@ Current development evidence (updated 2026-07-22):
   recovered it through `nmg_search -> activeGraphId -> nmg_get`, and the store
   recorded one selection and one actual use; isolated test data was removed
   afterwards and `PRAGMA foreign_key_check` remained clean;
-- matched LongMemEval, one fixed case from seven categories: no-memory 1/7,
+- historical pre-gate LongMemEval diagnostic, one fixed case from seven categories: no-memory 1/7,
   raw-session 1/7, flat hybrid 5/7, Lite 5/7, Graph 6/7;
-- expanded matched LongMemEval, two fixed cases from seven categories:
+- historical pre-gate LongMemEval diagnostic, two fixed cases from seven categories:
   no-memory 2/14, raw-session 4/14, flat hybrid 8/14, Lite 10/14, Graph 9/14;
 - controlled 30-case topology ablation: flat 0%, fixed unlinked graph 0%,
   accepted evidence-backed link 100% recall by construction;
@@ -832,7 +832,7 @@ subgraph reuse, AG node/edge/evidence counts, budget utilization, expansion
 steps, and marginal evidence gain per added token.
 
 The current Pi regression, seven-category invariant suite, controlled topology
-ablation, and seven-question LongMemEval matched sample prove integration and
+ablation, and historical seven-question LongMemEval diagnostic sample prove integration and
 mechanism behaviour, not general capability improvement. The matched sample did
 ingest every haystack session for each selected question, but a larger fixed
 sample with repeated model runs is required before claiming that NMG improves
@@ -883,9 +883,10 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 1. **Complete:** Inbox/Delta retrieval and dirty-node local rebuild scheduling.
 2. **Complete:** stable leaf identities, Float32 binary vector storage, and a
    disposable contiguous appendable in-memory cache.
-3. **Complete for the development sample:** matched no-memory, raw-session,
-   flat-hybrid, Lite, and Graph LongMemEval on one fixed example from every
-   category. Larger statistical evaluation remains ongoing benchmark work.
+3. **Complete at runner level:** the strict LongMemEval matched gate compares
+   no-memory, deterministic NMG, and NMG with a non-ranking shadow controller
+   using identical prompts and independent copies of one seed corpus. Larger
+   repeated capability runs remain ongoing benchmark work.
 4. **Complete:** deterministic temporal, aggregation, conflict, multi-hop,
    exact-detail, privacy, and memory-pollution cases.
 5. **Complete at adapter level:** LongMemEval, PersonaMem, LoCoMo, and BEAM have

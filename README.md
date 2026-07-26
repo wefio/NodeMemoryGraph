@@ -257,14 +257,10 @@ model call. Dataset placement and overrides are documented in each adapter's
 README. The common experiment contract, metrics, and ablations are documented
 in [evals/README.md](evals/README.md).
 
-The first fixed seven-category matched run scored 1/7, 1/7, 5/7, 5/7, and 6/7
-for no memory, raw session, flat hybrid, NMG Lite, and NMG Graph respectively.
-It is a small development sample, not a benchmark claim.
-
-An expanded two-per-category run scored 2/14, 4/14, 8/14, 10/14, and 9/14.
-Lite beat flat on five paired questions and lost on three; Graph beat Lite on
-one and lost on two. Consequently graph expansion remains a Lab feature rather
-than the default path.
+Older LongMemEval diagnostic ablations compared raw-session, flat-hybrid, Lite,
+and Graph variants. They predate the strict three-arm protocol and remain
+documented only as historical mechanism evidence, not as current matched-gate
+or benchmark claims.
 
 Run deterministic P1 memory invariants and P2 topology ablation with:
 

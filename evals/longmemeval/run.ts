@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { RpcClient } from "@earendil-works/pi-coding-agent";
@@ -6,6 +7,12 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder, cosineSimilarity } from "../../src/core/vector.ts";
 import { indexExternalEmbeddings } from "../external-embeddings.ts";
+import {
+  controllerShadowEnvironment,
+  isMatchedMode,
+  matchedUserPrompt,
+  MATCHED_MODES,
+} from "../benchmarks/matched.ts";
 import { gitRevision, sampleFingerprint } from "../official/reproducibility.ts";
 import {
   pairedAgainst,
@@ -25,9 +32,8 @@ interface SampleManifest {
 }
 
 type Mode = "flat-hybrid" | "matched" | "nmg-auto" | "nmg-graph" | "nmg-lite" |
-  "nmg-oracle" | "no-memory" | "oracle" | "raw-session" | "validate";
-type MatchedMode = "flat-hybrid" | "nmg-auto" | "nmg-graph" | "nmg-lite" |
-  "no-memory" | "raw-session";
+  "nmg-deterministic" | "nmg-oracle" | "nmg-shadow" | "no-memory" | "oracle" |
+  "raw-session" | "validate";
 
 const root = resolve(import.meta.dirname, "../..");
 const dataDirectory = resolve(import.meta.dirname, "data");
@@ -117,9 +123,18 @@ const report = {
   pipelineByMode: summarizePipelineByMode(results),
   latencyByMode: summarizeLatencyByMode(results),
   preparations: matchedRuns.map((run) => run.preparation),
-  pairedAgainstFlatHybrid: mode === "matched"
-    ? pairedAgainst(results, "flat-hybrid")
+  pairedAgainstNoMemory: mode === "matched"
+    ? pairedAgainst(results, "no-memory")
     : {},
+  matchedProtocol: mode === "matched"
+    ? {
+        arms: MATCHED_MODES,
+        invariant: "same case, model, thinking level, user prompt, and initial NMG corpus",
+        onlyDifference:
+          "no extension vs deterministic NMG vs deterministic NMG with controller shadow logging",
+        controllerAffectsRanking: false,
+      }
+    : null,
   results,
 };
 
@@ -136,23 +151,30 @@ writeFileSync(resolve(outputDirectory, "predictions.jsonl"),
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 
 async function runMatchedExample(example: LongMemExample, repeat: number) {
-  const nmgDirectory = resolve(
-    outputDirectory, "nmg", example.question_id, `repeat-${repeat}`,
+  const seedDirectory = resolve(
+    outputDirectory, "nmg-seed", example.question_id, `repeat-${repeat}`,
   );
-  mkdirSync(nmgDirectory, { recursive: true });
+  mkdirSync(seedDirectory, { recursive: true });
   const ingestStartedAt = performance.now();
-  const remembered = ingestRawEvidence(example, nmgDirectory);
+  const remembered = ingestRawEvidence(example, seedDirectory);
   const ingestMs = Math.round(performance.now() - ingestStartedAt);
   const indexStartedAt = performance.now();
-  await indexExternalEmbeddings(nmgDirectory);
+  await indexExternalEmbeddings(seedDirectory);
   const indexMs = Math.round(performance.now() - indexStartedAt);
-  const modes: MatchedMode[] = [
-    "no-memory", "raw-session", "flat-hybrid", "nmg-auto", "nmg-lite", "nmg-graph",
-  ];
   const results = [];
-  for (const matchedMode of modes) {
+  for (const matchedMode of MATCHED_MODES) {
+    const armDirectory = matchedMode.startsWith("nmg-")
+      ? resolve(
+        outputDirectory,
+        "arms",
+        example.question_id,
+        matchedMode,
+        `repeat-${repeat}`,
+      )
+      : undefined;
+    if (armDirectory) cpSync(seedDirectory, armDirectory, { recursive: true });
     results.push(await runExample(
-      example, matchedMode, nmgDirectory, remembered, repeat,
+      example, matchedMode, armDirectory, remembered, repeat,
     ));
   }
   return {
@@ -233,6 +255,9 @@ async function runExample(
     judgement,
     passed: judgementPassed(judgement),
     remembered,
+    userPromptHash: createHash("sha256")
+      .update(answerPrompt(example, runMode))
+      .digest("hex"),
     durationMs: answerDurationMs,
     evaluationDurationMs: Math.round(performance.now() - startedAt),
   };
@@ -386,7 +411,13 @@ function retrievalEvidence(
   if (runMode === "flat-hybrid") {
     return { text: retrieveFlatTurns(example), toolCalls: 0 };
   }
-  if (runMode === "nmg-lite" || runMode === "nmg-graph" || runMode === "nmg-oracle") {
+  if (
+    runMode === "nmg-lite" ||
+    runMode === "nmg-graph" ||
+    runMode === "nmg-oracle" ||
+    runMode === "nmg-deterministic" ||
+    runMode === "nmg-shadow"
+  ) {
     const outputs = events.flatMap((event) => {
       if (event.type !== "tool_execution_end" || event.toolName !== "nmg_get" || event.isError) {
         return [];
@@ -405,6 +436,13 @@ function retrievalEvidence(
 }
 
 function answerPrompt(example: LongMemExample, runMode: Exclude<Mode, "matched">): string {
+  if (isMatchedMode(runMode)) {
+    return matchedUserPrompt({
+      benchmark: "LongMemEval",
+      question: example.question,
+      questionDate: example.question_date,
+    });
+  }
   if (runMode === "nmg-auto") {
     return `Question date: ${example.question_date}\nQuestion: ${example.question}`;
   }
@@ -596,6 +634,7 @@ function createClient(nmgDirectory?: string, runMode?: Exclude<Mode, "matched">)
     env: {
       ...definedEnvironment(),
       ...(nmgDirectory ? { NMG_DATA_DIR: nmgDirectory } : {}),
+      ...(isMatchedMode(runMode) ? controllerShadowEnvironment(runMode) : {}),
       ...(runMode === "nmg-lite"
         ? { NMG_GRAPH_HOPS: "0" }
         : runMode === "nmg-graph"
@@ -628,6 +667,8 @@ function parseMode(value: string | undefined): Mode {
   if (value === "oracle") return "oracle";
   if (value === "nmg-oracle") return "nmg-oracle";
   if (value === "nmg-auto") return "nmg-auto";
+  if (value === "nmg-deterministic") return "nmg-deterministic";
+  if (value === "nmg-shadow") return "nmg-shadow";
   if (value === "raw-session") return "raw-session";
   if (value === "flat-hybrid") return "flat-hybrid";
   if (value === "nmg-lite") return "nmg-lite";
@@ -636,7 +677,8 @@ function parseMode(value: string | undefined): Mode {
   if (value === "validate") return "validate";
   throw new Error(
     `Unknown mode: ${value}. Use validate, matched, no-memory, raw-session, nmg-auto, ` +
-      `flat-hybrid, nmg-lite, nmg-graph, oracle, or nmg-oracle.`,
+    `flat-hybrid, nmg-deterministic, nmg-shadow, nmg-lite, nmg-graph, oracle, ` +
+      `or nmg-oracle.`,
   );
 }
 
