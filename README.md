@@ -184,6 +184,23 @@ three stable tools. This prevents unrelated global permission extensions from
 blocking non-interactive RPC tool calls. Set `NMG_PI_MODEL` to override the
 test model when needed.
 
+The learned retrieval controller remains in shadow mode until matched
+evaluation gates pass. Shadow events are written locally to
+`.nmg/evaluation/controller-shadow.jsonl` (or under `NMG_DATA_DIR`) with bounded
+size and rotation. They record deterministic and learned node order, candidate
+exposure, explicit `nmg_get` use, retrieval/controller latency, estimated
+context tokens, and completed-run token usage. These runtime files are ignored
+by Git.
+
+Optional human-labelled feedback can be attached to the latest retrieval:
+
+```text
+/nmg-shadow-feedback last success uncorrected
+```
+
+Use `failure`, `corrected`, or `unknown` as appropriate. NMG does not infer
+correctness from fluent model output.
+
 ## Agent evaluation
 
 The Agent-to-Agent-style regression suite runs independent cases in parallel.

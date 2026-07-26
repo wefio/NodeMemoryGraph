@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -10,6 +11,10 @@ import {
   type EmbeddingProfileName,
 } from "../../../src/core/openai-embedding.ts";
 import { NmgStore } from "../../../src/core/store.ts";
+import {
+  ShadowEvaluationLog,
+  type ShadowRetrievalOrigin,
+} from "../../../src/core/shadow-evaluation.ts";
 import { assessMemoryWrite } from "../../../src/core/write-policy.ts";
 import type {
   EvidenceRole,
@@ -91,7 +96,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   let store: NmgStore | undefined;
   const getStore = (): NmgStore => (store ??= new NmgStore(databasePath()));
   const controller = new ControllerRuntime(join(dataDirectory(), "controller.json"));
+  const shadowLog = new ShadowEvaluationLog(
+    join(dataDirectory(), "evaluation", "controller-shadow.jsonl"),
+  );
   const searchContexts = new Map<string, MemoryContext>();
+  const turnGraphIds = new Map<string, Set<string>>();
+  const latestGraphBySession = new Map<string, string>();
   const embeddingClient = process.env.NMG_EMBED_BASE_URL
     ? new OpenAIEmbeddingClient({
         baseUrl: process.env.NMG_EMBED_BASE_URL,
@@ -111,28 +121,54 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const searchMemory = async (
     query: string,
     options: Parameters<NmgStore["searchContext"]>[1],
+    sessionId: string,
+    origin: ShadowRetrievalOrigin,
   ): Promise<MemoryContext> => {
     const context = await searchMemoryContext(getStore(), embeddingClient, query, options);
     if (context.activeGraph) {
       searchContexts.set(context.activeGraph.id, context);
-      controller.shadow(context);
+      const controllerStartedAt = performance.now();
+      const decision = controller.shadow(context);
+      const controllerLatencyMs = performance.now() - controllerStartedAt;
+      if (decision) {
+        shadowLog.retrieval({
+          graphId: context.activeGraph.id,
+          sessionId,
+          origin,
+          query,
+          candidateMemoryIds: context.results.map((result) => result.memory.id),
+          candidateNodeIds: context.activeGraph.nodeIds,
+          decision,
+          usage: context.activeGraph.usage,
+          controllerLatencyMs,
+        });
+      }
+      const graphIds = turnGraphIds.get(sessionId) ?? new Set<string>();
+      graphIds.add(context.activeGraph.id);
+      turnGraphIds.set(sessionId, graphIds);
+      latestGraphBySession.set(sessionId, context.activeGraph.id);
       while (searchContexts.size > 128) searchContexts.delete(searchContexts.keys().next().value!);
     }
     return context;
   };
 
-  pi.on("before_agent_start", async (event) => {
+  pi.on("before_agent_start", async (event, ctx) => {
     const memoryStore = getStore();
     memoryStore.expireShortTermMemories();
     const kernelBlock = formatResidentKernel(memoryStore.residentKernel());
     const decision = decideMemoryLoad(event.prompt);
     let dynamicBlock = "";
     if (decision.mode === "retrieve") {
-      const context = await searchMemory(event.prompt, {
-        maxTier: decision.maxTier,
-        limit: decision.limit,
-        graphHops: configuredGraphHops(decision.graphHops),
-      });
+      const context = await searchMemory(
+        event.prompt,
+        {
+          maxTier: decision.maxTier,
+          limit: decision.limit,
+          graphHops: configuredGraphHops(decision.graphHops),
+        },
+        ctx.sessionManager.getSessionId(),
+        "automatic",
+      );
       const formatted = formatMemoryContext(context);
       if (formatted) {
         dynamicBlock = `<nmg_automatic_recall>\n${formatted}\n</nmg_automatic_recall>`;
@@ -232,7 +268,20 @@ export default function nmgExtension(pi: ExtensionAPI): void {
 
   // RPC clients may terminate Pi without emitting a graceful shutdown event.
   // Checkpoint after each completed turn; archives are idempotent per session.
-  pi.on("agent_end", async (_event, ctx) => {
+  pi.on("agent_end", async (event, ctx) => {
+    const sessionId = ctx.sessionManager.getSessionId();
+    const usage = summarizeMessageUsage(event.messages);
+    for (const graphId of turnGraphIds.get(sessionId) ?? []) {
+      shadowLog.outcome({
+        graphId,
+        sessionId,
+        messageCount: event.messages.length,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+      });
+      searchContexts.delete(graphId);
+    }
+    turnGraphIds.delete(sessionId);
     archiveCurrentSession(ctx);
     maintainMemory();
   });
@@ -655,7 +704,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         }),
       ),
     }),
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const context = getStore().getContext(
         params.memoryIds,
         configuredGraphHops(params.graphHops ?? 0),
@@ -663,6 +712,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const usedMemoryIds = context.results.map((result) => result.memory.id);
       if (params.activeGraphId) {
         getStore().recordActiveGraphUse(params.activeGraphId, { usedMemoryIds });
+        shadowLog.use({
+          graphId: params.activeGraphId,
+          sessionId: ctx.sessionManager.getSessionId(),
+          requestedMemoryIds: params.memoryIds,
+          usedMemoryIds,
+        });
         const searched = searchContexts.get(params.activeGraphId);
         const trace = getStore().retrievalTrace(params.activeGraphId);
         if (searched && trace) controller.observe(searched, trace);
@@ -721,18 +776,23 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const context = await searchMemory(params.query, {
-        nodeName: params.nodeName,
-        maxTier: params.maxTier as MemoryTier | undefined,
-        limit: params.limit,
-        scope: params.scope as MemoryScope | undefined,
-        includeHistorical: params.includeHistorical,
-        // An explicit environment override is useful for controlled Lite/Graph
-        // experiments. Without it the model can silently defeat a Lite run by
-        // choosing graphHops in the tool call.
-        graphHops: configuredGraphHops(params.graphHops ?? 1),
-        taskId: `${ctx.sessionManager.getSessionId()}:${params.query.trim().toLocaleLowerCase()}`,
-      });
+      const context = await searchMemory(
+        params.query,
+        {
+          nodeName: params.nodeName,
+          maxTier: params.maxTier as MemoryTier | undefined,
+          limit: params.limit,
+          scope: params.scope as MemoryScope | undefined,
+          includeHistorical: params.includeHistorical,
+          // An explicit environment override is useful for controlled Lite/Graph
+          // experiments. Without it the model can silently defeat a Lite run by
+          // choosing graphHops in the tool call.
+          graphHops: configuredGraphHops(params.graphHops ?? 1),
+          taskId: `${ctx.sessionManager.getSessionId()}:${params.query.trim().toLocaleLowerCase()}`,
+        },
+        ctx.sessionManager.getSessionId(),
+        "tool",
+      );
       const { results } = context;
       return {
         content: [
@@ -748,6 +808,88 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       };
     },
   });
+
+  if (typeof pi.registerCommand === "function")
+    pi.registerCommand("nmg-shadow-feedback", {
+      description:
+        "Record explicit evaluation feedback: [graph-id|last] success|failure|unknown corrected|uncorrected|unknown [note]",
+      handler: async (args, ctx) => {
+        const [requestedGraphId, successValue, correctionValue, ...noteParts] = args
+          .trim()
+          .split(/\s+/);
+        const sessionId = ctx.sessionManager.getSessionId();
+        const graphId =
+          requestedGraphId === "last"
+            ? latestGraphBySession.get(sessionId)
+            : requestedGraphId || undefined;
+        const taskSuccess = parseOptionalBoolean(successValue, "success", "failure");
+        const userCorrection = parseOptionalBoolean(correctionValue, "corrected", "uncorrected");
+        if (!graphId || taskSuccess === undefined || userCorrection === undefined) {
+          ctx.ui.notify(
+            "Usage: /nmg-shadow-feedback [graph-id|last] " +
+              "success|failure|unknown corrected|uncorrected|unknown [note]",
+            "warning",
+          );
+          return;
+        }
+        shadowLog.feedback({
+          graphId,
+          sessionId,
+          taskSuccess,
+          userCorrection,
+          note: noteParts.join(" "),
+        });
+        ctx.ui.notify(`Recorded NMG shadow feedback for ${graphId}.`, "info");
+      },
+    });
+}
+
+function summarizeMessageUsage(messages: readonly unknown[]): {
+  inputTokens?: number;
+  outputTokens?: number;
+} {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let observedInput = false;
+  let observedOutput = false;
+  for (const message of messages) {
+    if (!message || typeof message !== "object" || !("usage" in message)) continue;
+    const usage = message.usage;
+    if (!usage || typeof usage !== "object") continue;
+    const input = numericField(usage, ["input", "inputTokens"]);
+    const output = numericField(usage, ["output", "outputTokens"]);
+    if (input !== undefined) {
+      inputTokens += input;
+      observedInput = true;
+    }
+    if (output !== undefined) {
+      outputTokens += output;
+      observedOutput = true;
+    }
+  }
+  return {
+    inputTokens: observedInput ? inputTokens : undefined,
+    outputTokens: observedOutput ? outputTokens : undefined,
+  };
+}
+
+function numericField(value: object, names: readonly string[]): number | undefined {
+  for (const name of names) {
+    const candidate = (value as Record<string, unknown>)[name];
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+function parseOptionalBoolean(
+  value: string | undefined,
+  trueValue: string,
+  falseValue: string,
+): boolean | null | undefined {
+  if (value === "unknown") return null;
+  if (value === trueValue) return true;
+  if (value === falseValue) return false;
+  return undefined;
 }
 
 export function formatSearchHeaders(context: MemoryContext): string {
