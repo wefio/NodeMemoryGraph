@@ -45,10 +45,29 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", () => {
     }) as { text: string };
 
     assert.match(alice.text, /Kepler/);
+    assert.doesNotMatch(alice.text, /2026-07-20/);
     assert.equal(bob.text, "");
 
-    const assistantRecall = bridge.handle({
+    const temporalRecall = bridge.handle({
       id: 4,
+      op: "search",
+      userId: "alice",
+      query: "When did I name my telescope?",
+      topK: 4,
+    }) as { text: string };
+    assert.match(temporalRecall.text, /\[2026-07-20\] My telescope is named Kepler/);
+
+    const datedRecall = bridge.handle({
+      id: 5,
+      op: "search",
+      userId: "alice",
+      query: "What telescope did I have in July 2026?",
+      topK: 4,
+    }) as { text: string };
+    assert.match(datedRecall.text, /\[2026-07-20\] My telescope is named Kepler/);
+
+    const assistantRecall = bridge.handle({
+      id: 6,
       op: "search",
       userId: "alice",
       query: "What did you say in our previous chat about Admon's Sunday shift?",
@@ -56,9 +75,9 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", () => {
     }) as { text: string };
     assert.match(assistantRecall.text, /Admon the Sunday day shift/);
 
-    bridge.handle({ id: 5, op: "delete", userId: "alice" });
+    bridge.handle({ id: 7, op: "delete", userId: "alice" });
     const deleted = bridge.handle({
-      id: 6,
+      id: 8,
       op: "search",
       userId: "alice",
       query: "Kepler telescope",

@@ -1006,6 +1006,16 @@ open-domain recall remain low even at the larger budget. This rejects broader
 default context expansion and points subsequent work toward evidence
 composition and query-aware ranking.
 
+The same smoke exposed a representation loss at the adapter boundary: NMG
+stored each LoCoMo turn's event time, but the text returned to the reader
+discarded it. Temporal evidence containing relative expressions was therefore
+not sufficient to derive dated answers. The Omni bridge now includes event time
+only for temporally signalled queries. In a fresh K=20 run, every one of the 450
+retrieved labelled evidence turns in that subset had a date anchor; evidence
+ranking was unchanged. The added cost was 691 characters for the 663 affected
+questions and zero for the other 877. This is retained as lossless
+query-dependent rendering, not a larger retrieval budget.
+
 ## 15. Cloud and execution boundaries
 
 Cloud sync is optional and never authoritative. A future backend may exchange

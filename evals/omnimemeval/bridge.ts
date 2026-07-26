@@ -133,6 +133,7 @@ export class OmniMemEvalBridge {
       memoryId: string;
       nodeId: string;
       statement: string;
+      eventTime: string | null;
       score: number;
       sourceRef: string | null;
     }>;
@@ -153,11 +154,19 @@ export class OmniMemEvalBridge {
       memoryId: result.memory.id,
       nodeId: result.node.id,
       statement: result.memory.statement,
+      eventTime: result.memory.eventTime,
       score: result.combinedScore,
       sourceRef: result.evidence.sourceRef,
     }));
+    const includeTime = needsTemporalContext(query);
     return {
-      text: memories.map((memory) => memory.statement).join("\n"),
+      text: memories
+        .map((memory) =>
+          includeTime && memory.eventTime
+            ? `[${memory.eventTime}] ${memory.statement}`
+            : memory.statement
+        )
+        .join("\n"),
       memories,
     };
   }
@@ -179,6 +188,11 @@ export class OmniMemEvalBridge {
 
 function prefersAssistantEvidence(query: string): boolean {
   return /\b(?:assistant|you said|previous chat)\b/iu.test(query);
+}
+
+function needsTemporalContext(query: string): boolean {
+  return /\b(?:when|date|days?|weeks?|months?|years?|before|after|first|last|recent|recently|ago|long|yesterday|today|tomorrow|since|until|during|between|january|february|march|april|may|june|july|august|september|october|november|december)\b|(?:19|20)\d{2}/iu
+    .test(query);
 }
 
 function userKey(userId: string): string {

@@ -90,6 +90,17 @@ artifacts. Budget ablations must therefore use a fresh version for both
 ingestion and search; changing only the search version queries an empty
 namespace, while reusing a failed version replays its cached results.
 
+The initial LoCoMo rendering dropped NMG's stored `eventTime`. A retrieved turn
+such as "I went ... yesterday" therefore lacked the session date needed to
+derive the official answer. The bridge now prefixes event time only for
+queries containing temporal language or an explicit year. On a fresh K=20 run,
+all 450 retrieved labelled evidence turns for those queries carried their date
+anchor. Retrieval ordering and exact evidence recall were unchanged. The
+selective rendering affected 663/1,540 questions, adding 691 characters on
+average to those questions and zero to the rest (about 297 characters averaged
+over the complete benchmark). This restores information already present in NMG
+without globally expanding context.
+
 OmniMemEval does not ship a user-memory `no-memory` backend. For an internal
 matched lower bound, transform an existing search artifact while preserving its
 questions and ordering:
