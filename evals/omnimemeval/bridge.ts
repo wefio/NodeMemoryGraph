@@ -143,6 +143,7 @@ export class OmniMemEvalBridge {
       limit,
       maxTier: 3,
       graphHops: 1,
+      sourceActor: prefersAssistantEvidence(query) ? undefined : "user",
       activeGraphBudget: {
         maxEvidence: limit,
         maxTokens: Math.max(1_000, limit * 300),
@@ -174,6 +175,10 @@ export class OmniMemEvalBridge {
   #databasePath(key: string): string {
     return resolve(this.#root, `${key}.sqlite`);
   }
+}
+
+function prefersAssistantEvidence(query: string): boolean {
+  return /\b(?:assistant|you said|previous chat)\b/iu.test(query);
 }
 
 function userKey(userId: string): string {

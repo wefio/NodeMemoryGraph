@@ -330,6 +330,35 @@ test("events and conversation evidence preserve time, actor, and truth status", 
   });
 });
 
+test("searchContext can restrict evidence to the requested source actor", () => {
+  withStore((store) => {
+    const userMemory = store.remember({
+      statement: "User requested the Sunday rotation",
+      nodeName: "Sunday rotation request",
+      memoryType: "conversation_evidence",
+      sourceActor: "user",
+    });
+    store.remember({
+      statement: "Assistant proposed a different Sunday rotation",
+      nodeName: "Sunday rotation proposal",
+      memoryType: "conversation_evidence",
+      sourceActor: "assistant",
+      truthStatus: "unverified",
+      importance: 1,
+    });
+
+    const context = store.searchContext("Sunday rotation", {
+      maxTier: 3,
+      sourceActor: "user",
+    });
+
+    assert.deepEqual(
+      context.results.map((result) => result.memory.id),
+      [userMemory.memory.id],
+    );
+  });
+});
+
 test("derived memories retain every source evidence and graph relation", () => {
   withStore((store) => {
     const first = store.remember({
@@ -438,6 +467,36 @@ test("aggregation context overfetches and prioritizes countable memories", () =>
       maxTier: 1,
     });
     assert.ok(context.results.some((result) => result.memory.id === action.memory.id));
+  });
+});
+
+test("lexical ranking ignores English question words that crowd out countable evidence", () => {
+  withStore((store) => {
+    for (let index = 0; index < 12; index += 1) {
+      store.remember({
+        statement: `How many of the ideas are in the guide and what is it for ${index}?`,
+        nodeName: `question-word distractor ${index}`,
+        memoryType: "conversation_evidence",
+        sourceActor: "user",
+      });
+    }
+    const blazer = store.remember({
+      statement: "I need to pick up my dry cleaning for the navy blue blazer",
+      nodeName: "blazer errand",
+      memoryType: "conversation_evidence",
+      sourceActor: "user",
+    });
+
+    const context = store.searchContext(
+      "How many items of clothing do I need to pick up or return from a store?",
+      {
+        limit: 4,
+        maxTier: 3,
+        sourceActor: "user",
+      },
+    );
+
+    assert.ok(context.results.some((result) => result.memory.id === blazer.memory.id));
   });
 });
 

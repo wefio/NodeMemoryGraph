@@ -23,6 +23,7 @@ import type {
   HistoryRecord,
   HistoryRole,
   MemoryContext,
+  MemoryActor,
   MemoryNode,
   MemoryNodeKind,
   LeafBlock,
@@ -1245,6 +1246,8 @@ export class NmgStore {
         nodeId,
         Math.min(options.maxTier ?? budget.maxLocalTier, budget.maxLocalTier) as MemoryTier,
         2,
+        undefined,
+        options.sourceActor,
       ),
     );
     const nodeCounts = new Map<string, number>();
@@ -2734,6 +2737,7 @@ export class NmgStore {
            ${candidateClause}
            AND n.status = 'active'
            AND (? IS NULL OR n.canonical_name = ?)
+           AND (? IS NULL OR m.source_actor = ?)
            AND (? = 1 OR m.status IN ('active', 'disputed'))
            AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
          ORDER BY ${candidateOrder} m.tier ASC, m.importance DESC,
@@ -2746,6 +2750,8 @@ export class NmgStore {
         ...candidateIds,
         nodeName,
         nodeName,
+        options.sourceActor ?? null,
+        options.sourceActor ?? null,
         options.includeHistorical ? 1 : 0,
         ...(forcedCandidateIds.length === 0 && retrievalMode === "hybrid" ? ftsIds : []),
         rowLimit,
@@ -3485,6 +3491,7 @@ export class NmgStore {
     maxTier: MemoryTier,
     limit: number,
     memoryId?: string,
+    sourceActor?: MemoryActor,
   ): MemorySearchResult[] {
     const rows = this.#db
       .prepare(
@@ -3517,12 +3524,21 @@ export class NmgStore {
        JOIN history_records h ON h.id = m.evidence_id
        WHERE m.node_id = ? AND m.tier <= ? AND n.status = 'active'
          AND (? IS NULL OR m.id = ?)
+         AND (? IS NULL OR m.source_actor = ?)
          AND m.status IN ('active', 'disputed')
          AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
        ORDER BY m.tier ASC, m.importance DESC, m.created_at DESC
        LIMIT ?`,
       )
-      .all(nodeId, maxTier, memoryId ?? null, memoryId ?? null, limit) as Row[];
+      .all(
+        nodeId,
+        maxTier,
+        memoryId ?? null,
+        memoryId ?? null,
+        sourceActor ?? null,
+        sourceActor ?? null,
+        limit,
+      ) as Row[];
     return rows.map((row) => {
       const result = mapSearchResult(row, 0);
       result.memory.evidenceIds = this.#evidenceIds(result.memory.id);
@@ -3825,9 +3841,7 @@ function memoryEmbeddingText(statement: unknown, canonicalName: unknown): string
 }
 
 function ftsExpression(query: string): string {
-  const terms = normalize(query).match(/[\p{L}\p{N}][\p{L}\p{N}_-]*/gu) ?? [];
-  return [...new Set(terms)]
-    .filter((term) => term.length > 1)
+  return searchTerms(normalize(query))
     .map((term) => `"${term.replaceAll('"', '""')}"`)
     .join(" OR ");
 }
@@ -3887,7 +3901,7 @@ function searchTerms(value: string): string[] {
   const tokens = value.match(/[\p{L}\p{N}_+.#-]+/gu) ?? [];
   const terms = new Set<string>();
   for (const token of tokens) {
-    if (token.length >= 2) terms.add(token);
+    if (token.length >= 2 && !ENGLISH_SEARCH_STOP_WORDS.has(token)) terms.add(token);
     if (/\p{Script=Han}/u.test(token) && token.length > 4) {
       for (let index = 0; index < token.length - 1; index += 1) {
         terms.add(token.slice(index, index + 2));
@@ -3896,6 +3910,51 @@ function searchTerms(value: string): string[] {
   }
   return [...terms];
 }
+
+const ENGLISH_SEARCH_STOP_WORDS = new Set([
+  "an",
+  "and",
+  "are",
+  "at",
+  "be",
+  "been",
+  "being",
+  "between",
+  "but",
+  "by",
+  "did",
+  "do",
+  "does",
+  "for",
+  "from",
+  "had",
+  "has",
+  "have",
+  "how",
+  "if",
+  "in",
+  "into",
+  "is",
+  "many",
+  "much",
+  "of",
+  "on",
+  "or",
+  "the",
+  "then",
+  "to",
+  "was",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "whom",
+  "whose",
+  "why",
+  "with",
+]);
 
 function identityTokens(value: string): Set<string> {
   return new Set(

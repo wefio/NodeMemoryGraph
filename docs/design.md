@@ -970,14 +970,22 @@ records read, graph/tier depth, end-to-end latency, and index/maintenance work.
 The complete adapter contract and rollout order live in `evals/README.md`.
 
 The first pinned OmniMemEval LongMemEval search-only smoke used the same seven
-fixed questions as the Pi run. Forced NMG search made five cases plausibly
-answerable, while multi-session aggregation and temporal coverage remained
-incomplete. Search was typically about 137–152 ms and returned 2.3–4.2k
-characters. Enabling hybrid FTS on the two deficient cases recovered no
-additional required evidence, expanded context to 7.2–7.9k characters, and
-raised one temporal search to 2.04 s, so that change was rejected. This is
-evidence for targeted aggregation/temporal retrieval work, not broader
-candidate expansion.
+fixed questions as the Pi run. Forced NMG search initially made five cases
+plausibly answerable. The failure trace showed two simple ranking faults:
+unverified assistant replies competed with user facts, and English
+question/function words inflated irrelevant lexical scores. An optional
+source-actor filter plus stop-word-aware lexical terms recovered both temporal
+records, preserved the update, preference, and assistant evidence, and changed
+the count result from duplicate boot mentions to complementary boot and blazer
+evidence. The count case remains 2/3 against the official evidence list.
+Search stayed around 126–166 ms; ordinary contexts were 2.8–4.1k characters,
+with one long assistant schedule at 7.5k.
+
+Enabling hybrid FTS on the two deficient cases recovered no additional
+required evidence, expanded context to 7.2–7.9k characters, and raised one
+temporal search to 2.04 s, so that change was rejected. This supports targeted
+source/provenance filtering and aggregation rather than broader candidate
+expansion.
 
 ## 15. Cloud and execution boundaries
 

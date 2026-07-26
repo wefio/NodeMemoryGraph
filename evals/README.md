@@ -163,12 +163,20 @@ the runner writes per-case/per-mode progress to stderr.
 ### July 2026 LongMemEval search-only smoke
 
 The pinned OmniMemEval checkout successfully exercised the NMG adapter on the
-same seven fixed LongMemEval questions as the Pi development run. Forced
-backend search made five of seven cases plausibly answerable. It retrieved both
-old and new personal-best evidence for the update case, but still missed
-required evidence for the multi-session clothing count and the MoMA/Met
-temporal comparison. Typical search latency was about 137–152 ms with roughly
-2.3–4.2k context characters.
+same seven fixed LongMemEval questions as the Pi development run. The first
+forced-search pass made five of seven cases plausibly answerable. Diagnosis
+showed that unverified assistant replies and English question words were
+crowding out user evidence. NMG now exposes an optional source-actor filter;
+the adapter defaults user-memory questions to user assertions and falls back
+to both actors for explicit assistant/previous-chat recall. Lexical ranking
+also ignores common English question/function words.
+
+On the fixed sample this recovered both temporal evidence records (2/2),
+preserved both update records (2/2), preference evidence (1/1), and assistant
+evidence (1/1). The clothing count improved from two duplicate boot mentions
+to complementary boot and blazer evidence, but remains only 2/3 against the
+official evidence list. Search latency stayed around 126–166 ms. Context was
+usually 2.8–4.1k characters; the long assistant schedule case reached 7.5k.
 
 A controlled change from the default legacy path to hybrid FTS was rejected.
 On the two deficient cases it did not recover the missing evidence, expanded

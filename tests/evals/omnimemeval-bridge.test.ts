@@ -21,7 +21,10 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", () => {
           content: "My telescope is named Kepler.",
           chat_time: "2026-07-20",
         },
-        { role: "assistant", content: "I will remember that." },
+        {
+          role: "assistant",
+          content: "In the previous chat, I assigned Admon the Sunday day shift.",
+        },
       ],
     }) as { added: number };
     assert.equal(added.added, 2);
@@ -44,9 +47,18 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", () => {
     assert.match(alice.text, /Kepler/);
     assert.equal(bob.text, "");
 
-    bridge.handle({ id: 4, op: "delete", userId: "alice" });
+    const assistantRecall = bridge.handle({
+      id: 4,
+      op: "search",
+      userId: "alice",
+      query: "What did you say in our previous chat about Admon's Sunday shift?",
+      topK: 4,
+    }) as { text: string };
+    assert.match(assistantRecall.text, /Admon the Sunday day shift/);
+
+    bridge.handle({ id: 5, op: "delete", userId: "alice" });
     const deleted = bridge.handle({
-      id: 5,
+      id: 6,
       op: "search",
       userId: "alice",
       query: "Kepler telescope",

@@ -28,6 +28,12 @@ The adapter should call a stable local NMG HTTP or CLI boundary. It must not
 reach into SQLite tables, duplicate graph logic in Python, or make benchmark
 semantics part of NMG core.
 
+For user-memory questions, the bridge requests user-attributed evidence by
+default so long unverified assistant replies do not crowd out the user's
+history. Queries that explicitly ask about the assistant or a previous chat
+use both actors, preserving LongMemEval's assistant-memory category. This uses
+the generic `SearchOptions.sourceActor` boundary rather than SQL access.
+
 The current adapter uses a persistent NDJSON subprocess rather than an HTTP
 service. Install it into the pinned ignored checkout with:
 

@@ -141,6 +141,8 @@ export interface RememberResult {
 export interface SearchOptions {
   nodeName?: string;
   scope?: MemoryScope;
+  /** Restrict retrieval to memories attributed to one actor. */
+  sourceActor?: MemoryActor;
   includeHistorical?: boolean;
   maxTier?: MemoryTier;
   limit?: number;
