@@ -998,6 +998,14 @@ present for at least one official evidence ID in 61.8% of questions and for all
 IDs in 49.6%. These are search diagnostics, not answer-quality claims; the
 official answer/scorer stages and a matched no-NMG baseline remain required.
 
+A fresh-namespace LoCoMo budget ablation found 32.7%, 39.0%, 45.0%, and 46.6%
+exact labelled-evidence recall at K=5, 10, 20, and 40 respectively. Mean context
+grew from 1.0k to 2.1k, 4.2k, and 4.9k characters. K=20 is therefore retained
+as the default knee point: K=40 adds only 1.6 recall points, while multi-hop and
+open-domain recall remain low even at the larger budget. This rejects broader
+default context expansion and points subsequent work toward evidence
+composition and query-aware ranking.
+
 ## 15. Cloud and execution boundaries
 
 Cloud sync is optional and never authoritative. A future backend may exchange

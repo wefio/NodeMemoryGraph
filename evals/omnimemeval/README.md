@@ -69,6 +69,27 @@ multiple turns or inference. The next comparable result must therefore run
 OmniMemEval's official answer and scoring stages with a fixed reader model and
 matched baseline, rather than optimizing to this auxiliary audit.
 
+A matched retrieval-budget ablation rebuilt an isolated benchmark namespace for
+each setting:
+
+| Top K | Any evidence | All evidence | Evidence recall | Mean context chars | Mean / P95 latency |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 5 | 48.1% | 40.6% | 32.7% | 1,042 | 233 / 496 ms |
+| 10 | 55.7% | 46.0% | 39.0% | 2,064 | 256 / 548 ms |
+| 20 | 61.8% | 49.6% | 45.0% | 4,152 | 329 / 619 ms |
+| 40 | 63.6% | 51.0% | 46.6% | 4,877 | 325 / 609 ms |
+
+`top_k=20` remains the default knee point. Doubling to 40 recovers only 1.6
+additional evidence-recall points while increasing context by 17.5%. Multi-hop
+and open-domain evidence recall at K=40 remains only 28.8% and 15.5%, so their
+main limitation is ranking/composition rather than an undersized output budget.
+The larger default was rejected.
+
+OmniMemEval includes `version` in benchmark user IDs and resumes existing search
+artifacts. Budget ablations must therefore use a fresh version for both
+ingestion and search; changing only the search version queries an empty
+namespace, while reusing a failed version replays its cached results.
+
 OmniMemEval does not ship a user-memory `no-memory` backend. For an internal
 matched lower bound, transform an existing search artifact while preserving its
 questions and ordering:
