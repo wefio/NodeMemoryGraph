@@ -15,19 +15,7 @@
   "files": [
     "extensions/nmg.ts",
     ".pi/extensions/nmg/index.ts",
-    "src/core/autodiff.ts",
-    "src/core/controller-protocol.ts",
-    "src/core/controller-gate.ts",
-    "src/core/controller-runtime.ts",
-    "src/core/differentiable-controller.ts",
-    "src/core/gate.ts",
-    "src/core/hierarchy.ts",
-    "src/core/router.ts",
-    "src/core/store.ts",
-    "src/core/types.ts",
-    "src/core/vector-cache.ts",
-    "src/core/vector.ts",
-    "src/core/write-policy.ts"
+    "src/core/"
   ],
   "scripts": {
     "check": "tsc --noEmit",
@@ -55,6 +43,7 @@
     "index:embeddings": "node --experimental-strip-types scripts/index-qwen3.ts",
     "index:status": "node --experimental-strip-types scripts/embedding-status.ts",
     "index:ann": "node --experimental-strip-types scripts/build-ann.ts",
+    "package:check": "node --experimental-strip-types tools/verify-package.ts",
     "pi:prompt": "node --experimental-strip-types scripts/pi-control.ts prompt",
     "pi:state": "node --experimental-strip-types scripts/pi-control.ts state",
     "bench:autodiff": "node --experimental-strip-types tools/autodiff-benchmark.ts",
