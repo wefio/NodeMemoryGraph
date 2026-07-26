@@ -859,6 +859,36 @@ test("node vectors route first and node-local search recovers leaf evidence", ()
   });
 });
 
+test("node vector routing is deterministic unless hierarchical activation is explicit", () => {
+  withStore((store) => {
+    const alpha = store.remember({ statement: "Alpha memory", nodeName: "Alpha node" });
+    const beta = store.remember({ statement: "Beta memory", nodeName: "Beta node" });
+    store.upsertExternalNodeEmbeddings("stable-routing", [
+      { nodeId: alpha.node.id, vector: [1, 0] },
+      { nodeId: beta.node.id, vector: [0.8, 0.6] },
+    ]);
+
+    const first = store
+      .routeNodesByVector([1, 0], "stable-routing")
+      .map((route) => [route.node.id, route.score]);
+    const experimental = store.routeNodesByVector(
+      [0, 1],
+      "stable-routing",
+      5,
+      [],
+      "hierarchical-activation",
+    );
+    const second = store
+      .routeNodesByVector([1, 0], "stable-routing")
+      .map((route) => [route.node.id, route.score]);
+
+    assert.deepEqual(second, first);
+    assert.equal(first[0]?.[0], alpha.node.id);
+    assert.equal(first[0]?.[1], 1);
+    assert.equal(experimental.length, 2);
+  });
+});
+
 test("leaf summaries preserve distinctions hidden by one broad node summary", () => {
   withStore((store) => {
     const rendering = store.remember({

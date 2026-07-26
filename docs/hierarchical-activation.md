@@ -1,5 +1,10 @@
 # Hierarchical Activation Propagation — NMG 图侧设计
 
+> **启用状态：实验性、默认关闭。** 常规节点向量路由使用确定性的余弦相似度。
+> 只有显式向 `routeNodesByVector` 传入
+> `activationMode = "hierarchical-activation"` 才会运行 HA。只有当持久化训练状态可用，
+> 且严格匹配 benchmark 证明收益后，HA 才能进入 active 排序路径。
+
 ## 1. 动机
 
 当前 NMG 的激活传播是平面的：

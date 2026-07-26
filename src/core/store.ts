@@ -1002,6 +1002,7 @@ export class NmgStore {
     model: string,
     limit = 5,
     candidateNodeIds: string[] = [],
+    activationMode: "cosine" | "hierarchical-activation" = "cosine",
   ): NodeRoute[] {
     if (!model.trim()) throw new Error("embedding model is required");
     if (queryVector.length === 0) throw new Error("query vector is required");
@@ -1019,15 +1020,16 @@ export class NmgStore {
     const cache = this.#embeddingCache("node", model);
     if (!cache) return [];
 
-    // Use hierarchical activation for batch scoring when available
-    const ha = this.#router.ensureHA(queryVector.length);
-    if (byId.size > 0) {
+    // HA is a stateful experimental controller. It must not silently replace
+    // deterministic retrieval before a trained state has passed rollout gates.
+    if (activationMode === "hierarchical-activation" && byId.size > 0) {
       const candidateList: Array<{ id: string; vector: Float32Array }> = [];
       for (const id of byId.keys()) {
         const vec = cache.vector(id);
         if (vec) candidateList.push({ id, vector: vec });
       }
       if (candidateList.length > 0) {
+        const ha = this.#router.ensureHA(queryVector.length);
         const out = ha.propagate(
           new Float32Array(queryVector),
           candidateList.map((c) => ({ nodeId: c.id, vector: c.vector })),
@@ -1043,7 +1045,7 @@ export class NmgStore {
       }
     }
 
-    // Fallback: Float32VectorCache cosine scoring
+    // Default: deterministic Float32VectorCache cosine scoring.
     return cache
       .score(queryVector, new Set(byId.keys()))
       .map(({ id, score }) => ({ node: mapNode(byId.get(id)!), score }))
