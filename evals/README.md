@@ -11,13 +11,13 @@ exceeding its retrieval budget, or rebuilding an index unnecessarily.
 
 ## Benchmark roles
 
-| Suite | Primary role | NMG mechanisms under test |
-|---|---|---|
-| NMG core cases | Fast deterministic regression | storage, provenance, STG/LTG lifecycle, Active Graph budgets, deletion and cache invalidation |
-| LongMemEval | Main development gate | extraction, multi-session reasoning, updates, temporal reasoning and abstention |
-| PersonaMem | User-memory gate | automatic fact/preference/constraint writes, evolving profiles, scope and current-state selection |
-| LoCoMo | Relational-memory gate | temporal and causal links, multi-hop evidence, node-to-leaf expansion and event summarization |
-| BEAM | Scale and cache-pressure gate | progressive retrieval, cache misses, maintenance cost and growth from 128K through 10M tokens |
+| Suite          | Primary role                  | NMG mechanisms under test                                                                         |
+| -------------- | ----------------------------- | ------------------------------------------------------------------------------------------------- |
+| NMG core cases | Fast deterministic regression | storage, provenance, STG/LTG lifecycle, Active Graph budgets, deletion and cache invalidation     |
+| LongMemEval    | Main development gate         | extraction, multi-session reasoning, updates, temporal reasoning and abstention                   |
+| PersonaMem     | User-memory gate              | automatic fact/preference/constraint writes, evolving profiles, scope and current-state selection |
+| LoCoMo         | Relational-memory gate        | temporal and causal links, multi-hop evidence, node-to-leaf expansion and event summarization     |
+| BEAM           | Scale and cache-pressure gate | progressive retrieval, cache misses, maintenance cost and growth from 128K through 10M tokens     |
 
 The suites are reported separately. Their scores must not be averaged into one
 number because they measure different distributions and failure modes.
@@ -39,10 +39,11 @@ npm run eval:longmem -- matched 1
 npm run benchmark:score:longmem -- <result-directory>
 ```
 
-### Committed score snapshots
+### Local score snapshots
 
 Run directories are ignored, so scoring also writes a small snapshot under
-`evals/snapshots/<benchmark>/<timestamp>_<revision>.json`. These are committed.
+`evals/snapshots/<benchmark>/<timestamp>_<revision>.json`. Snapshots and raw
+logs are local runtime artifacts and are ignored by Git.
 
 Each snapshot holds per-mode scores plus the provenance needed to interpret
 them: code revision, sample fingerprint, judge model, protocol and sample size.
@@ -50,8 +51,9 @@ Two snapshots are only comparable when their `sampleFingerprint` matches; a
 differing fingerprint means the runs covered different cases, not that quality
 changed.
 
-Snapshots exist to make regressions visible across commits. They remain
-development signal: sample sizes are small and `leaderboardComparable` is false.
+Snapshots support local regression comparisons. Any result selected for a
+design document must be copied into a small, manually reviewed summary with its
+sample fingerprint and protocol; raw run output is never committed.
 
 `benchmark:setup` checks out the four official repositories at the commits in
 `evals/official/upstreams.json` under ignored `.benchmarks/official`. It also
@@ -68,25 +70,23 @@ BEAM uses its rubric scale. BEAM
 `event_ordering` uses the official normalized Kendall tau-b aggregation rather
 than rubric-score averaging.
 
-## Common experiment arms
+## Matched capability gate
 
-Every adapter should expose as many of the following matched arms as the source
-dataset permits:
+The default `matched` command runs exactly three arms:
 
-1. `no-memory`: question and current date only;
-2. `oracle`: official evidence only;
-3. `raw-session`: ranked complete sessions under the shared context budget;
-4. `flat-lexical`: flat FTS/BM25-style retrieval;
-5. `flat-hybrid`: flat lexical plus vector retrieval;
-6. `nmg-auto`: natural question with automatic budgeted recall only;
-7. `nmg-nodes`: agent-directed node and leaf retrieval without graph expansion;
-8. `nmg-active-graph`: budgeted STG/LTG Active Graph projection;
-9. `nmg-full`: Active Graph plus feedback and consolidation, when the benchmark
-   contains a genuine incremental write phase.
+1. `no-memory`: Pi without the NMG extension;
+2. `nmg-deterministic`: deterministic NMG with controller shadow disabled;
+3. `nmg-shadow`: the same deterministic NMG retrieval with controller scoring
+   and telemetry enabled, but without changing ranking.
 
-All matched arms use the same reader model, prompt, answer limit, source
-history, retrieval token budget, question IDs and judge. An arm that receives
-more evidence tokens must be reported as a different budget condition.
+Every NMG arm starts from an independent copy of the same seeded database. All
+three arms use the same reader model, thinking level, user prompt, question IDs
+and official scorer. The runner records a prompt hash per row. Set
+`NMG_BENCH_REPEATS` for repeated stochastic trials; one repeat is only a smoke
+signal.
+
+Other modes (`raw-session`, `flat-hybrid`, `nmg-nodes`, and `nmg-graph`) remain
+diagnostic ablations rather than members of the strict three-arm gate.
 
 ## Required measurements
 
@@ -125,7 +125,7 @@ stratified sample. `NMG_BENCH_CONCURRENCY`, `NMG_BENCH_TIMEOUT_MS`, and
 `NMG_BENCH_CONTEXT_CHARS` control the shared runner.
 
 `validate` performs parsing and sampling without model calls. A matched run
-performs six reader/judge experiments per selected case and can take minutes;
+performs three reader experiments per selected case and can take minutes;
 the runner writes per-case/per-mode progress to stderr.
 
 ## Rollout order
@@ -158,20 +158,10 @@ At minimum, capability experiments should isolate:
 The purpose is to attribute gains to mechanisms. A larger NMG configuration is
 not considered better when the same result comes from a smaller retrieval arm.
 
-## Current adapter verification
+## Adapter verification
 
-On 2026-07-22 the loaders validated the locally downloaded official data:
-
-- LongMemEval cleaned: 500 cases across seven categories;
-- LoCoMo: 1,986 cases across five categories;
-- PersonaMem 32K: 589 cases across seven categories;
-- BEAM official 100K case 1: 20 cases across ten categories.
-
-The original official-data smoke runs timed out because the benchmark allowed
-Pi to auto-discover both the package and project extension, then explicitly
-loaded NMG again. Every benchmark client now uses `--no-extensions` and loads at
-most one explicit NMG instance; the no-memory controls load none. On a five-case
-LoCoMo development sample, BGE-small automatic recall scored 3/5 and
-agent-directed node recall scored 1/5. These single-run results are diagnostic,
-not benchmark claims; they show that automatic and agent-directed retrieval must
-remain separate arms.
+Use `npm run benchmark:validate` as the authoritative check for locally
+available official data. Do not preserve ad-hoc model scores in this document:
+they become stale when sampling, prompts, retrieval policy, or model versions
+change. Every benchmark client uses `--no-extensions` and loads at most one
+explicit NMG instance; the no-memory control loads none.

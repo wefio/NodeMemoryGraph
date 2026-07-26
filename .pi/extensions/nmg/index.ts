@@ -93,6 +93,7 @@ export function configuredGraphHops(fallback: number): number {
 
 export default function nmgExtension(pi: ExtensionAPI): void {
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
+  const controllerShadowEnabled = process.env.NMG_CONTROLLER_SHADOW !== "0";
   let store: NmgStore | undefined;
   const getStore = (): NmgStore => (store ??= new NmgStore(databasePath()));
   const controller = new ControllerRuntime(join(dataDirectory(), "controller.json"));
@@ -126,28 +127,31 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   ): Promise<MemoryContext> => {
     const context = await searchMemoryContext(getStore(), embeddingClient, query, options);
     if (context.activeGraph) {
-      searchContexts.set(context.activeGraph.id, context);
-      const controllerStartedAt = performance.now();
-      const decision = controller.shadow(context);
-      const controllerLatencyMs = performance.now() - controllerStartedAt;
-      if (decision) {
-        shadowLog.retrieval({
-          graphId: context.activeGraph.id,
-          sessionId,
-          origin,
-          query,
-          candidateMemoryIds: context.results.map((result) => result.memory.id),
-          candidateNodeIds: context.activeGraph.nodeIds,
-          decision,
-          usage: context.activeGraph.usage,
-          controllerLatencyMs,
-        });
+      if (controllerShadowEnabled) {
+        searchContexts.set(context.activeGraph.id, context);
+        const controllerStartedAt = performance.now();
+        const decision = controller.shadow(context);
+        const controllerLatencyMs = performance.now() - controllerStartedAt;
+        if (decision) {
+          shadowLog.retrieval({
+            graphId: context.activeGraph.id,
+            sessionId,
+            origin,
+            query,
+            candidateMemoryIds: context.results.map((result) => result.memory.id),
+            candidateNodeIds: context.activeGraph.nodeIds,
+            decision,
+            usage: context.activeGraph.usage,
+            controllerLatencyMs,
+          });
+        }
+        const graphIds = turnGraphIds.get(sessionId) ?? new Set<string>();
+        graphIds.add(context.activeGraph.id);
+        turnGraphIds.set(sessionId, graphIds);
+        latestGraphBySession.set(sessionId, context.activeGraph.id);
+        while (searchContexts.size > 128)
+          searchContexts.delete(searchContexts.keys().next().value!);
       }
-      const graphIds = turnGraphIds.get(sessionId) ?? new Set<string>();
-      graphIds.add(context.activeGraph.id);
-      turnGraphIds.set(sessionId, graphIds);
-      latestGraphBySession.set(sessionId, context.activeGraph.id);
-      while (searchContexts.size > 128) searchContexts.delete(searchContexts.keys().next().value!);
     }
     return context;
   };
@@ -712,15 +716,16 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const usedMemoryIds = context.results.map((result) => result.memory.id);
       if (params.activeGraphId) {
         getStore().recordActiveGraphUse(params.activeGraphId, { usedMemoryIds });
-        shadowLog.use({
-          graphId: params.activeGraphId,
-          sessionId: ctx.sessionManager.getSessionId(),
-          requestedMemoryIds: params.memoryIds,
-          usedMemoryIds,
-        });
+        if (controllerShadowEnabled)
+          shadowLog.use({
+            graphId: params.activeGraphId,
+            sessionId: ctx.sessionManager.getSessionId(),
+            requestedMemoryIds: params.memoryIds,
+            usedMemoryIds,
+          });
         const searched = searchContexts.get(params.activeGraphId);
         const trace = getStore().retrievalTrace(params.activeGraphId);
-        if (searched && trace) controller.observe(searched, trace);
+        if (controllerShadowEnabled && searched && trace) controller.observe(searched, trace);
         searchContexts.delete(params.activeGraphId);
       } else {
         getStore().recordUsage(usedMemoryIds);

@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 
 import { RpcClient } from "@earendil-works/pi-coding-agent";
@@ -9,11 +10,26 @@ import { indexExternalEmbeddings } from "../external-embeddings.ts";
 import { computeCitationSignal } from "../official/citation.ts";
 import { gitRevision, sampleFingerprint } from "../official/reproducibility.ts";
 import { loadBeam, loadLocomo, loadPersonaMem, stratifiedSample } from "./loaders.ts";
+import {
+  controllerShadowEnvironment,
+  isMatchedMode,
+  matchedUserPrompt,
+  MATCHED_MODES,
+} from "./matched.ts";
 import type { BenchmarkCase, BenchmarkSession } from "./types.ts";
 
 type Benchmark = "beam" | "locomo" | "personamem";
-type Mode = "flat-hybrid" | "matched" | "nmg-auto" | "nmg-graph" | "nmg-nodes" |
-  "no-memory" | "raw-session" | "validate";
+type Mode =
+  | "flat-hybrid"
+  | "matched"
+  | "nmg-auto"
+  | "nmg-deterministic"
+  | "nmg-graph"
+  | "nmg-nodes"
+  | "nmg-shadow"
+  | "no-memory"
+  | "raw-session"
+  | "validate";
 type EvaluationMode = Exclude<Mode, "matched" | "validate">;
 
 const root = resolve(import.meta.dirname, "../..");
@@ -35,11 +51,20 @@ if (mode === "validate") {
     cases: allCases.length,
     selected: selected.length,
     selectedIds: selected.map((item) => item.id),
-    categories: Object.fromEntries([...new Set(allCases.map((item) => item.category))]
-      .sort().map((category) => [category, allCases.filter((item) => item.category === category).length])),
+    categories: Object.fromEntries(
+      [...new Set(allCases.map((item) => item.category))]
+        .sort()
+        .map((category) => [
+          category,
+          allCases.filter((item) => item.category === category).length,
+        ]),
+    ),
     caseSessionReferences: allCases.reduce((sum, item) => sum + item.sessions.length, 0),
-    caseTurnReferences: allCases.reduce((sum, item) =>
-      sum + item.sessions.reduce((count, session) => count + session.turns.length, 0), 0),
+    caseTurnReferences: allCases.reduce(
+      (sum, item) =>
+        sum + item.sessions.reduce((count, session) => count + session.turns.length, 0),
+      0,
+    ),
   };
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
   process.exit(0);
@@ -48,66 +73,91 @@ if (mode === "validate") {
 const runId = new Date().toISOString().replaceAll(":", "-");
 const outputDirectory = resolve(root, "evals", benchmark, "results", runId);
 mkdirSync(outputDirectory, { recursive: true });
-const modes: EvaluationMode[] = mode === "matched"
-  ? ["no-memory", "raw-session", "flat-hybrid", "nmg-auto", "nmg-nodes", "nmg-graph"]
-  : [mode];
+const modes: EvaluationMode[] = mode === "matched" ? [...MATCHED_MODES] : [mode];
 
-const results = (await mapConcurrent(selected, concurrency(), async (item) => {
-  const dataDirectory = resolve(outputDirectory, "nmg", safeName(item.id));
-  const needsNmg = modes.some((itemMode) => itemMode.startsWith("nmg-"));
-  const remembered = needsNmg ? ingest(item, dataDirectory) : 0;
-  if (needsNmg && process.env.NMG_EMBED_BASE_URL) await indexExternalEmbeddings(dataDirectory);
-  const rows = [];
-  for (const itemMode of modes) {
-    process.stderr.write(`[${benchmark}] ${item.id} ${itemMode}: start\n`);
-    rows.push(await evaluate(item, itemMode, dataDirectory, remembered));
-    process.stderr.write(`[${benchmark}] ${item.id} ${itemMode}: done\n`);
-  }
-  return rows;
-})).flat();
+const results = (
+  await mapConcurrent(selected, concurrency(), async (item) => {
+    const seedDirectory = resolve(outputDirectory, "nmg-seed", safeName(item.id));
+    const needsNmg = modes.some((itemMode) => itemMode.startsWith("nmg-"));
+    const remembered = needsNmg ? ingest(item, seedDirectory) : 0;
+    if (needsNmg && process.env.NMG_EMBED_BASE_URL) await indexExternalEmbeddings(seedDirectory);
+    const rows = [];
+    for (let repeat = 0; repeat < repeats(); repeat += 1) {
+      for (const itemMode of modes) {
+        const dataDirectory = itemMode.startsWith("nmg-")
+          ? resolve(outputDirectory, "arms", safeName(item.id), itemMode, String(repeat))
+          : undefined;
+        if (dataDirectory) cpSync(seedDirectory, dataDirectory, { recursive: true });
+        process.stderr.write(`[${benchmark}] ${item.id} ${itemMode} repeat=${repeat}: start\n`);
+        rows.push(await evaluate(item, itemMode, dataDirectory, remembered, repeat));
+        process.stderr.write(`[${benchmark}] ${item.id} ${itemMode} repeat=${repeat}: done\n`);
+      }
+    }
+    return rows;
+  })
+).flat();
 
 const report = {
   runId,
   benchmark,
   model: "deepseek/deepseek-v4-flash",
   codeRevision: gitRevision(root),
-  sampleFingerprint: sampleFingerprint(selected.map((item) => ({
-    id: item.id,
-    category: item.category,
-    question: item.question,
-    reference: item.reference,
-  }))),
+  sampleFingerprint: sampleFingerprint(
+    selected.map((item) => ({
+      id: item.id,
+      category: item.category,
+      question: item.question,
+      reference: item.reference,
+    })),
+  ),
   protocolScoring: "separate",
   scoringCommand: `npm run benchmark:score -- ${benchmark} ${outputDirectory}`,
   leaderboardComparable: false,
   perCategory,
+  repeats: repeats(),
   contextCharacterBudget: contextBudget(),
+  matchedProtocol:
+    mode === "matched"
+      ? {
+          arms: modes,
+          invariant: "same case, model, thinking level, user prompt, and initial NMG corpus",
+          onlyDifference:
+            "no extension vs deterministic NMG vs deterministic NMG with controller shadow logging",
+          controllerAffectsRanking: false,
+        }
+      : null,
   results,
-  byMode: Object.fromEntries(modes.map((itemMode) => {
-    const rows = results.filter((row) => row.mode === itemMode);
-    return [itemMode, { total: rows.length }];
-  })),
+  byMode: Object.fromEntries(
+    modes.map((itemMode) => {
+      const rows = results.filter((row) => row.mode === itemMode);
+      return [itemMode, { total: rows.length }];
+    }),
+  ),
 };
 writeFileSync(resolve(outputDirectory, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
-writeFileSync(resolve(outputDirectory, "predictions.jsonl"),
-  `${results.map((row) => JSON.stringify(row)).join("\n")}\n`);
+writeFileSync(
+  resolve(outputDirectory, "predictions.jsonl"),
+  `${results.map((row) => JSON.stringify(row)).join("\n")}\n`,
+);
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 
 async function evaluate(
   item: BenchmarkCase,
   itemMode: EvaluationMode,
-  dataDirectory: string,
+  dataDirectory: string | undefined,
   remembered: number,
+  repeat: number,
 ) {
   const startedAt = performance.now();
   const retrieval = contextFor(item, itemMode);
-  const client = createClient(itemMode.startsWith("nmg-") ? dataDirectory : undefined, itemMode);
+  const client = createClient(dataDirectory, itemMode);
+  const prompt = answerPrompt(item, itemMode, retrieval.text);
   let hypothesis = "";
   let answerError: string | null = null;
   try {
     await client.start();
     await client.setThinkingLevel("low");
-    await client.promptAndWait(answerPrompt(item, itemMode, retrieval.text), undefined, timeout());
+    await client.promptAndWait(prompt, undefined, timeout());
     hypothesis = (await client.getLastAssistantText())?.trim() ?? "";
   } catch (error) {
     answerError = error instanceof Error ? error.message : String(error);
@@ -118,6 +168,7 @@ async function evaluate(
     id: item.id,
     category: item.category,
     mode: itemMode,
+    repeat,
     question: item.question,
     reference: item.reference,
     hypothesis,
@@ -128,6 +179,7 @@ async function evaluate(
     answerError,
     remembered,
     injectedCharacters: retrieval.text.length,
+    userPromptHash: createHash("sha256").update(prompt).digest("hex"),
     sourceTurns: item.sessions.reduce((sum, session) => sum + session.turns.length, 0),
     durationMs: Math.round(performance.now() - startedAt),
     citation: retrieval.sourceIds
@@ -196,33 +248,40 @@ function contextFor(
     };
   }
   if (itemMode === "raw-session") {
-    const ranked = item.sessions.map((session) => ({
-      text: formatSession(session),
-      sourceText: session.turns.map((turn) => `${turn.speaker ?? turn.role}: ${turn.content}`).join(" "),
-      score: lexicalOverlap(item.question, formatSession(session)),
-    })).sort((left, right) => right.score - left.score);
+    const ranked = item.sessions
+      .map((session) => ({
+        text: formatSession(session),
+        sourceText: session.turns
+          .map((turn) => `${turn.speaker ?? turn.role}: ${turn.content}`)
+          .join(" "),
+        score: lexicalOverlap(item.question, formatSession(session)),
+      }))
+      .sort((left, right) => right.score - left.score);
     return withinBudget(ranked);
   }
   const embedder = new HashingVectorEmbedder(256);
   const query = embedder.embed(item.question);
-  const turns = item.sessions.flatMap((session) => session.turns.map((turn) => {
-    const text = `[${session.date ?? session.id}] ${turn.speaker ?? turn.role}: ${turn.content}`;
-    return {
-      text,
-      sourceIds: [turn.sourceId],
-      textForCitation: `${turn.speaker ?? turn.role}: ${turn.content}`,
-      score: lexicalOverlap(item.question, text) * 0.55 +
-        cosineSimilarity(query, embedder.embed(text)) * 0.45,
-    };
-  })).sort((left, right) => right.score - left.score);
+  const turns = item.sessions
+    .flatMap((session) =>
+      session.turns.map((turn) => {
+        const text = `[${session.date ?? session.id}] ${turn.speaker ?? turn.role}: ${turn.content}`;
+        return {
+          text,
+          sourceIds: [turn.sourceId],
+          textForCitation: `${turn.speaker ?? turn.role}: ${turn.content}`,
+          score:
+            lexicalOverlap(item.question, text) * 0.55 +
+            cosineSimilarity(query, embedder.embed(text)) * 0.45,
+        };
+      }),
+    )
+    .sort((left, right) => right.score - left.score);
   return withinBudget(turns);
 }
 
 function answerPrompt(item: BenchmarkCase, itemMode: EvaluationMode, context: string): string {
-  if (itemMode === "nmg-auto") {
-    return [item.options?.length ? `Options:\n${item.options.join("\n")}` : "", item.question]
-      .filter(Boolean)
-      .join("\n\n");
+  if (isMatchedMode(itemMode) || itemMode === "nmg-auto") {
+    return matchedUserPrompt(item);
   }
   return [
     "Answer concisely using only the available conversation evidence.",
@@ -233,7 +292,9 @@ function answerPrompt(item: BenchmarkCase, itemMode: EvaluationMode, context: st
     item.options?.length ? `Options:\n${item.options.join("\n")}` : "",
     context ? `Retrieved conversation evidence:\n${context}` : "",
     `Question: ${item.question}`,
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function createClient(dataDirectory?: string, itemMode?: EvaluationMode): RpcClient {
@@ -245,16 +306,25 @@ function createClient(dataDirectory?: string, itemMode?: EvaluationMode): RpcCli
     env: {
       ...definedEnvironment(),
       ...(dataDirectory ? { NMG_DATA_DIR: dataDirectory } : {}),
+      ...(isMatchedMode(itemMode) ? controllerShadowEnvironment(itemMode) : {}),
       ...(itemMode === "nmg-nodes" ? { NMG_GRAPH_HOPS: "0" } : {}),
       ...(itemMode === "nmg-graph" ? { NMG_GRAPH_HOPS: "1" } : {}),
     },
     args: [
-      "--offline", "--approve", "--no-session", "--no-extensions",
-      "--model", "deepseek/deepseek-v4-flash", "--thinking", "off",
+      "--offline",
+      "--approve",
+      "--no-session",
+      "--no-extensions",
+      "--model",
+      "deepseek/deepseek-v4-flash",
+      "--thinking",
+      "off",
       ...(dataDirectory
         ? [
-            "--tools", "nmg_remember,nmg_search,nmg_get",
-            "--extension", resolve(root, ".pi/extensions/nmg/index.ts"),
+            "--tools",
+            "nmg_remember,nmg_search,nmg_get",
+            "--extension",
+            resolve(root, ".pi/extensions/nmg/index.ts"),
           ]
         : ["--tools", "read"]),
     ],
@@ -263,8 +333,9 @@ function createClient(dataDirectory?: string, itemMode?: EvaluationMode): RpcCli
 
 function loadCases(value: Benchmark): BenchmarkCase[] {
   if (value === "locomo") {
-    return loadLocomo(process.env.NMG_LOCOMO_DATA ??
-      resolve(root, "evals/locomo/data/locomo10.json"));
+    return loadLocomo(
+      process.env.NMG_LOCOMO_DATA ?? resolve(root, "evals/locomo/data/locomo10.json"),
+    );
   }
   if (value === "personamem") {
     const size = process.env.NMG_PERSONAMEM_SIZE ?? "32k";
@@ -279,12 +350,15 @@ function loadCases(value: Benchmark): BenchmarkCase[] {
 }
 
 function formatSession(session: BenchmarkSession): string {
-  return `[${session.date ?? session.id}]\n` +
-    session.turns.map((turn) => `${turn.speaker ?? turn.role}: ${turn.content}`).join("\n");
+  return (
+    `[${session.date ?? session.id}]\n` +
+    session.turns.map((turn) => `${turn.speaker ?? turn.role}: ${turn.content}`).join("\n")
+  );
 }
 
 function withinBudget(values: Array<{ text: string; sourceIds: string[] }>): {
-  text: string; sourceIds: string[];
+  text: string;
+  sourceIds: string[];
 } {
   const selected: string[] = [];
   const sourceIds: string[] = [];
@@ -321,14 +395,28 @@ function parseBenchmark(value: string | undefined): Benchmark {
 
 function parseMode(value: string | undefined): Mode {
   const candidate = value ?? "validate";
-  if (["flat-hybrid", "matched", "nmg-auto", "nmg-graph", "nmg-nodes", "no-memory",
-    "raw-session", "validate"].includes(candidate)) return candidate as Mode;
+  if (
+    [
+      "flat-hybrid",
+      "matched",
+      "nmg-auto",
+      "nmg-deterministic",
+      "nmg-graph",
+      "nmg-nodes",
+      "nmg-shadow",
+      "no-memory",
+      "raw-session",
+      "validate",
+    ].includes(candidate)
+  )
+    return candidate as Mode;
   throw new Error(`Unknown benchmark mode: ${candidate}`);
 }
 
 function positiveInteger(value: string): number {
   const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`Expected positive integer: ${value}`);
+  if (!Number.isInteger(parsed) || parsed < 1)
+    throw new Error(`Expected positive integer: ${value}`);
   return parsed;
 }
 
@@ -344,6 +432,10 @@ function timeout(): number {
   return Math.max(30_000, Number.parseInt(process.env.NMG_BENCH_TIMEOUT_MS ?? "300000", 10));
 }
 
+function repeats(): number {
+  return Math.max(1, Math.min(positiveInteger(process.env.NMG_BENCH_REPEATS ?? "1"), 20));
+}
+
 function safeName(value: string): string {
   return value.replace(/[^a-z0-9._-]+/giu, "_").slice(0, 120);
 }
@@ -355,18 +447,22 @@ async function mapConcurrent<Input, Output>(
 ): Promise<Output[]> {
   const results = new Array<Output>(values.length);
   let cursor = 0;
-  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, async () => {
-    while (cursor < values.length) {
-      const index = cursor;
-      cursor += 1;
-      results[index] = await worker(values[index]!);
-    }
-  }));
+  await Promise.all(
+    Array.from({ length: Math.min(limit, values.length) }, async () => {
+      while (cursor < values.length) {
+        const index = cursor;
+        cursor += 1;
+        results[index] = await worker(values[index]!);
+      }
+    }),
+  );
   return results;
 }
 
 function definedEnvironment(): Record<string, string> {
-  return Object.fromEntries(Object.entries(process.env).filter(
-    (entry): entry is [string, string] => entry[1] !== undefined,
-  ));
+  return Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] => entry[1] !== undefined,
+    ),
+  );
 }
