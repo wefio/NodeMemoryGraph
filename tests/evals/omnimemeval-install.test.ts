@@ -10,8 +10,10 @@ test("OmniMemEval adapter installer patches the registry idempotently", () => {
   const checkout = mkdtempSync(join(tmpdir(), "omnimemeval-checkout-"));
   const factory = join(checkout, "scripts", "client_factory");
   const utils = join(checkout, "scripts", "utils");
+  const locomo = join(checkout, "scripts", "locomo");
   mkdirSync(factory, { recursive: true });
   mkdirSync(utils, { recursive: true });
+  mkdirSync(locomo, { recursive: true });
   const registry = join(factory, "registry.py");
   writeFileSync(registry, "_LIB_CLIENT_REGISTRY = {\n}\n", "utf8");
   const searchHelpers = join(utils, "search_helpers.py");
@@ -26,6 +28,12 @@ test("OmniMemEval adapter installer patches the registry idempotently", () => {
     '_CONV_ID_LIBS = frozenset({"memos", "everos"})\n',
     "utf8",
   );
+  const locomoSearch = join(locomo, "locomo_search.py");
+  writeFileSync(
+    locomoSearch,
+    '_search_dispatch = {\n        "memos": generic_text_search,\n}\n',
+    "utf8",
+  );
 
   try {
     installOmniMemEvalAdapter(checkout);
@@ -38,6 +46,10 @@ test("OmniMemEval adapter installer patches the registry idempotently", () => {
       1,
     );
     assert.match(readFileSync(ingestHelpers, "utf8"), /"memos", "everos", "nmg"/);
+    assert.equal(
+      readFileSync(locomoSearch, "utf8").match(/"nmg": generic_text_search/g)?.length,
+      1,
+    );
   } finally {
     rmSync(checkout, { recursive: true, force: true });
   }

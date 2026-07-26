@@ -23,6 +23,12 @@ export function installOmniMemEvalAdapter(checkout: string): void {
     '    "nmg": generic_text_search,',
     '"nmg": generic_text_search',
   );
+  insertAfter(
+    resolve(checkout, "scripts", "locomo", "locomo_search.py"),
+    '        "memos": generic_text_search,',
+    '        "nmg": generic_text_search,',
+    '"nmg": generic_text_search',
+  );
   replaceOnce(
     resolve(checkout, "scripts", "utils", "ingest_helpers.py"),
     '_CONV_ID_LIBS = frozenset({"memos", "everos"})',

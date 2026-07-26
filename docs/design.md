@@ -987,6 +987,17 @@ temporal search to 2.04 s, so that change was rejected. This supports targeted
 source/provenance filtering and aggregation rather than broader candidate
 expansion.
 
+The first pinned OmniMemEval LoCoMo smoke exposed an upstream integration
+detail: LoCoMo maintains a benchmark-local search dispatch table instead of
+using the shared dispatcher. The idempotent adapter installer now patches both.
+After that fix, the official ingestion and search stages completed all 272
+sessions and 1,540 category 1--4 questions without failure. Ten-worker search
+took 54 seconds; individual backend latency was 329 ms mean and 619 ms P95,
+with 4.15k returned characters on average. Exact normalized evidence text was
+present for at least one official evidence ID in 61.8% of questions and for all
+IDs in 49.6%. These are search diagnostics, not answer-quality claims; the
+official answer/scorer stages and a matched no-NMG baseline remain required.
+
 ## 15. Cloud and execution boundaries
 
 Cloud sync is optional and never authoritative. A future backend may exchange

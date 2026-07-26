@@ -48,9 +48,26 @@ its own Python 3.12 environment; NMG's smaller Python 3.11 official-scorer
 environment is deliberately not reused.
 
 The installer also registers NMG with OmniMemEval's generic text-search
-dispatcher and conversation-ID helper. OmniMemEval currently keeps these
-allowlists separately from its central client registry, so copying only
-`nmg_client.py` is insufficient.
+dispatcher, LoCoMo's benchmark-local search dispatcher, and the conversation-ID
+helper. OmniMemEval currently keeps these allowlists separately from its
+central client registry, so copying only `nmg_client.py` is insufficient.
+
+## Current official smoke results
+
+The pinned LoCoMo search-only smoke ingested all 272 sessions for the ten
+official conversations in about 3 seconds, then completed all 1,540 category
+1--4 queries in 54 seconds with ten workers and no search failures. Per-query
+backend latency was 329 ms mean, 267 ms P50, 619 ms P95, and 670 ms P99. The
+returned context averaged 4,152 characters (5,054 at P95).
+
+An exact normalized-text audit against LoCoMo's official evidence IDs found at
+least one labelled evidence turn for 952/1,540 questions (61.8%), all labelled
+turns for 764/1,540 (49.6%), and 1,059/2,355 labelled turns overall (45.0%).
+This is a retrieval diagnostic rather than an official answer score: paraphrased
+memories can be useful without exact text, while categories 1 and 3 often need
+multiple turns or inference. The next comparable result must therefore run
+OmniMemEval's official answer and scoring stages with a fixed reader model and
+matched baseline, rather than optimizing to this auxiliary audit.
 
 ## Two evaluation boundaries
 
