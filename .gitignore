@@ -15,9 +15,16 @@ evals/personamem/results/
 evals/beam/data/
 evals/beam/results/
 evals/controller/results/
+evals/snapshots/
 *.tsbuildinfo
 
-# Large binary artifacts (should never be tracked)
+# Local runtime state and generated reports
+*.log
+*.sqlite-shm
+*.sqlite-wal
+.wrangler/
+
+# Large/generated binary artifacts (should never be tracked)
 *.sqlite
 *.safetensors
 *.onnx
@@ -25,3 +32,6 @@ evals/controller/results/
 *.gguf
 *.pt
 *.pth
+*.tar
+*.tar.gz
+*.zip
