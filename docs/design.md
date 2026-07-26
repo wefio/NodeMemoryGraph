@@ -883,7 +883,7 @@ optional.
 
 Current development evidence (updated 2026-07-26):
 
-- 209 automated tests cover UOp autodiff, the differentiable controller,
+- 213 automated tests cover UOp autodiff, the differentiable controller,
   hierarchical activation, the retained memory-graph reasoner prototype,
   reasoning-workspace persistence and checkpoint injection, P3 lifecycle,
   budget enforcement, actual-use activation, independent-task deduplication,
@@ -918,6 +918,13 @@ Current development evidence (updated 2026-07-26):
   rejects compressed hierarchy as the sole evidence index and rejects the
   current union ranker; node/leaf routing remains a directory/scale
   optimization, not a substitute for detailed evidence candidates.
+- full 20-conversation, 400-question BEAM 100K K=20 retrieval ablation:
+  FTS5 exact labelled-evidence recall was 26.2% and BGE record vectors reached
+  32.9% with slightly less returned text. Incremental add-time indexing kept
+  32.8% recall while reducing mean first-query latency from 2,102 to 193 ms
+  and total add-plus-search time from 73.0 to 68.9 seconds. Shared all-actor
+  ranking and fixed actor quotas were rejected because they added context and
+  latency without improving recall.
 - reasoning-workspace development benchmark, three tasks with three repeats per
   condition using DeepSeek V4 Flash: full-context baseline and workspace both
   achieved 100% exact task success, while mean latency rose from 5.79 s to
@@ -1044,10 +1051,11 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 1. Add a Pi package manifest and stable installable extension entry.
 2. Reduce the default model-facing API to search, get, and remember.
 3. Keep SQLite + FTS/exact retrieval as the zero-configuration path.
-4. **Complete at benchmark boundary:** wire optional fine-grained record
-   embeddings behind the same SQLite store and retain FTS/exact as the
-   zero-configuration path. Node/leaf-only and the current union ranker are
-   explicitly gated off after the LoCoMo ablation.
+4. **Complete at benchmark and Pi boundaries:** wire optional fine-grained
+   record embeddings behind the same SQLite store, synchronize only missing
+   records at add/turn boundaries, and retain FTS/exact as the
+   zero-configuration and not-yet-ready fallback. Node/leaf-only and the
+   current union ranker are explicitly gated off after the LoCoMo ablation.
 
 ### P1: incremental correctness and fair evaluation
 

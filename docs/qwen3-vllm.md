@@ -103,6 +103,13 @@ pending and indexed counts plus the last success or retryable failure.
 Use `npm run index:status` with the same profile variables to inspect the
 persisted state without starting vLLM or contacting another provider.
 
+When the Pi extension has an embedding endpoint configured, it also performs
+the same missing-record synchronization in the background at turn boundaries.
+The current turn does not wait for a cold rebuild: Pi uses FTS5 until a complete
+record index is ready, then switches to hybrid retrieval on a later turn.
+`npm run index:embeddings` remains useful for an explicit bulk prebuild or
+offline maintenance.
+
 To include Qwen3 in the scale matrix, leave the same environment variables set
 and run `npm run eval:scale`. Without an endpoint, the evaluation still runs the
 legacy, FTS5, hashing, and hashing-hybrid controls.

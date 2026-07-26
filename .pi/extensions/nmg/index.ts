@@ -8,6 +8,7 @@ import { Type } from "typebox";
 
 import { decideMemoryLoad } from "../../../src/core/gate.ts";
 import { ControllerRuntime } from "../../../src/core/controller-runtime.ts";
+import { syncRecordEmbeddings } from "../../../src/core/embedding-sync.ts";
 import {
   OpenAIEmbeddingClient,
   type EmbeddingProfileName,
@@ -174,6 +175,31 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           : undefined,
       })
     : undefined;
+  const embeddingBatchSize = Math.max(
+    1,
+    Math.min(Number(process.env.NMG_EMBED_BATCH_SIZE ?? 64), 2_048),
+  );
+  let embeddingSync: Promise<void> = Promise.resolve();
+  const scheduleEmbeddingSync = (): Promise<void> => {
+    if (!embeddingClient) return embeddingSync;
+    const memoryStore = getStore();
+    embeddingSync = embeddingSync.then(async () => {
+      const health = memoryStore.embeddingIndexHealth(embeddingClient.indexId);
+      if (
+        health?.status === "ready" &&
+        health.targets.includes("records") &&
+        health.pending.records === 0
+      ) {
+        return;
+      }
+      try {
+        await syncRecordEmbeddings(memoryStore, embeddingClient, embeddingBatchSize);
+      } catch {
+        // Index health records the retryable failure. Lexical recall remains available.
+      }
+    });
+    return embeddingSync;
+  };
   const searchMemory = async (
     query: string,
     options: Parameters<NmgStore["searchContext"]>[1],
@@ -214,6 +240,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (event, ctx) => {
     const memoryStore = getStore();
     memoryStore.expireShortTermMemories();
+    void scheduleEmbeddingSync();
     const kernelBlock = formatResidentKernel(memoryStore.residentKernel());
     const decision = decideMemoryLoad(event.prompt);
     let dynamicBlock = "";
@@ -362,6 +389,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     turnGraphIds.delete(sessionId);
     archiveCurrentSession(ctx);
     maintainMemory();
+    void scheduleEmbeddingSync();
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
@@ -369,6 +397,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     if (reasoningWorkspace) saveReasoningWorkspace(reasoningWorkspace);
     archiveCurrentSession(ctx);
     maintainMemory();
+    await scheduleEmbeddingSync();
     store?.close();
     store = undefined;
   });

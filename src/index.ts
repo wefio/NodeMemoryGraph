@@ -1,6 +1,11 @@
 export { NmgStore } from "./core/store.ts";
 export { HashingVectorEmbedder } from "./core/vector.ts";
 export { OpenAIEmbeddingClient } from "./core/openai-embedding.ts";
+export { syncRecordEmbeddings } from "./core/embedding-sync.ts";
+export type {
+  RecordEmbeddingClient,
+  RecordEmbeddingSyncResult,
+} from "./core/embedding-sync.ts";
 export { UsearchAnnIndex } from "./core/ann.ts";
 export { decideMemoryLoad } from "./core/gate.ts";
 export { Tensor, gradientStep } from "./core/autodiff.ts";

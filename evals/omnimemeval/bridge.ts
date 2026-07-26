@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
 import { OpenAIEmbeddingClient } from "../../src/core/openai-embedding.ts";
+import { syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import type { HistoryRole, MemoryActor } from "../../src/core/types.ts";
 
@@ -106,9 +107,11 @@ export class OmniMemEvalBridge {
     for (const suffix of ["", "-shm", "-wal"]) rmSync(`${database}${suffix}`, { force: true });
   }
 
-  #add(userId: string, messages: readonly OmniMessage[], conversationId?: string): {
-    added: number;
-  } {
+  async #add(
+    userId: string,
+    messages: readonly OmniMessage[],
+    conversationId?: string,
+  ): Promise<{ added: number }> {
     if (!Array.isArray(messages)) throw new Error("messages must be an array");
     const store = this.#store(userId);
     const conversation = conversationId?.trim() || batchIdentity(messages);
@@ -143,6 +146,13 @@ export class OmniMemEvalBridge {
       added += 1;
     });
 
+    if (this.#embeddingClient) {
+      await syncRecordEmbeddings(
+        store,
+        this.#embeddingClient,
+        this.#embeddingBatchSize,
+      );
+    }
     return { added };
   }
 
@@ -206,25 +216,15 @@ export class OmniMemEvalBridge {
   async #syncSemanticIndex(store: NmgStore): Promise<void> {
     const client = this.#embeddingClient;
     if (!client) return;
-
-    let cursor = "";
-    while (true) {
-      const documents = store.embeddingDocuments(
-        cursor,
-        this.#embeddingBatchSize,
-        client.indexId,
-      );
-      if (documents.length === 0) break;
-      const vectors = await client.embedDocuments(documents.map((document) => document.text));
-      store.upsertExternalEmbeddings(
-        client.indexId,
-        documents.map((document, index) => ({
-          memoryId: document.memoryId,
-          vector: requireVector(vectors[index], "record"),
-        })),
-      );
-      cursor = documents.at(-1)!.memoryId;
+    const health = store.embeddingIndexHealth(client.indexId);
+    if (
+      health?.status === "ready" &&
+      health.targets.includes("records") &&
+      health.pending.records === 0
+    ) {
+      return;
     }
+    await syncRecordEmbeddings(store, client, this.#embeddingBatchSize);
   }
 
   #store(userId: string): NmgStore {
@@ -272,11 +272,6 @@ function historyRole(role?: string): HistoryRole {
 
 function memoryActor(role: HistoryRole): MemoryActor {
   return role === "system" ? "agent" : role;
-}
-
-function requireVector(vector: number[] | undefined, target: string): number[] {
-  if (!vector?.length) throw new Error(`embedding client returned no ${target} vector`);
-  return vector;
 }
 
 async function run(): Promise<void> {
