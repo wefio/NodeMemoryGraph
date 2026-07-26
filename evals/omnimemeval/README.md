@@ -69,6 +69,22 @@ multiple turns or inference. The next comparable result must therefore run
 OmniMemEval's official answer and scoring stages with a fixed reader model and
 matched baseline, rather than optimizing to this auxiliary audit.
 
+OmniMemEval does not ship a user-memory `no-memory` backend. For an internal
+matched lower bound, transform an existing search artifact while preserving its
+questions and ordering:
+
+```powershell
+npm run benchmark:prepare:no-memory -- `
+  .benchmarks/official/OmniMemEval/results/locomo/nmg-nmg_smoke/nmg_locomo_search_results.json `
+  .benchmarks/official/OmniMemEval/results/locomo/nmg-no_memory/nmg_locomo_search_results.json
+```
+
+Run the official response and scoring stages with `--lib nmg --version
+no_memory`. This baseline changes only the retrieved context and search cost;
+the official question set, answer prompt, reader, and judge remain identical.
+It is an internal lower bound, not an OmniMemEval memory-backend leaderboard
+entry.
+
 ## Two evaluation boundaries
 
 OmniMemEval's user-memory runner forcibly calls the selected backend's
