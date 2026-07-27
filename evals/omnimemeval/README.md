@@ -145,6 +145,15 @@ the retrieval audit's finding that multi-hop evidence recall is limited by
 ranking/composition rather than budget. Open-domain questions gain only 6.7
 points because many are answerable from parametric knowledge.
 
+A full-pipeline rerun (`records_k20_r2`, all six steps, fresh namespace)
+after the polarity-metadata schema change (`confidence`, `polarity`,
+`predicate_key`, `extract_method` columns on `memory_records`) confirmed no
+regression: LLM-as-Judge 0.6480 overall (single hop 0.6908, temporal 0.6875,
+multi hop 0.5179, open domain 0.5208; 1,537/1,540 judged, 3 judge skips).
+The delta over `timefinal` partly reflects regenerated search results rather
+than code changes, so it is read as "no regression, positive direction", not
+as a measured improvement.
+
 Reproduce with (Python 3.12 venv at `.benchmarks/omni-venv`, `PYTHONUTF8=1`):
 
 ```powershell
