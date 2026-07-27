@@ -101,6 +101,62 @@ average to those questions and zero to the rest (about 297 characters averaged
 over the complete benchmark). This restores information already present in NMG
 without globally expanding context.
 
+## Official LoCoMo answer-stage results
+
+Evaluation discipline for all NMG answer-stage runs:
+
+1. **Fixed weak reader/judge.** All comparable scores use `deepseek-chat`
+   (v4-flash) at temperature 0 for both answering and judging. A weak reader
+   keeps attribution clean — it cannot compensate for missing evidence from
+   parametric knowledge — and matches the cheap-model reality of Pi users.
+2. **Always run the matched no-memory baseline.** Report the delta over
+   `no_memory`, not the absolute score. Absolute scores drift with judge and
+   harness versions; the delta is the memory system's actual contribution.
+3. **External leaderboards are context only.** OmniMemEval's reproduced table
+   and vendor self-reports use different readers, judges, prompts, and budgets
+   (vendors' own numbers run 15--30 points above OmniMemEval's reproduction).
+   We do not tune to them or reproduce them.
+
+The first official answer and scoring pass compared the K=20 record-vector
+NMG run (`timefinal`) against the matched no-memory baseline
+(`no_memory_timefinal`). Both used the same fixed reader and judge:
+`deepseek-chat` (DeepSeek API, currently `deepseek-v4-flash`) at temperature 0
+through `ANSWER_*`/`EVAL_*` in `.env.nmg`. All 1,540 questions were answered in
+both runs; one judge call per run was skipped under `--skip-failed-judge 1`
+because the judge wrapped its label JSON with an explanation that upstream's
+strict `extract_label_json` regex rejects.
+
+| Version | LLM-as-Judge | F1 | ROUGE-L | METEOR |
+| --- | ---: | ---: | ---: | ---: |
+| NMG (record vectors K=20) | **0.6173** | 0.3424 | 0.3573 | 0.3664 |
+| No-memory lower bound | 0.1741 | 0.1309 | 0.1254 | 0.1166 |
+
+| Category | NMG | No memory | Questions |
+| --- | ---: | ---: | ---: |
+| single hop | 0.6813 | 0.2093 | 841 |
+| temporal reasoning | 0.6854 | 0.0592 | 321 |
+| multi hop | 0.4184 | 0.1423 | 282 |
+| open domain | 0.4105 | 0.3438 | 96 |
+
+NMG beats the matched baseline by 44.3 judge points overall. Temporal
+reasoning gains the most (+62.6 points), validating the selective event-time
+rendering. Multi-hop remains the weakest memory category (0.4184), matching
+the retrieval audit's finding that multi-hop evidence recall is limited by
+ranking/composition rather than budget. Open-domain questions gain only 6.7
+points because many are answerable from parametric knowledge.
+
+Reproduce with (Python 3.12 venv at `.benchmarks/omni-venv`, `PYTHONUTF8=1`):
+
+```powershell
+bash scripts/run_locomo_eval.sh --lib nmg --env .env.nmg --version no_memory_timefinal --from-step 3 --skip-failed-judge 1
+bash scripts/run_locomo_eval.sh --lib nmg --env .env.nmg --version timefinal --from-step 3 --skip-failed-judge 1
+```
+
+Environment notes: NLTK `punkt_tab`/`wordnet` had to be fetched manually into
+`~/nltk_data` because the local network blocks nltk's downloader; the judge
+stage resumes completed groups from `nmg_locomo_judged.json`, so transient API
+errors are retried cheaply by rerunning step 4.
+
 ## Embedding-granularity ablation
 
 A matched LoCoMo K=20 retrieval ablation used the locally cached
