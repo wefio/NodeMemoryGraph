@@ -76,10 +76,77 @@ export interface MemoryGraphReasonerState {
   trainingSteps: number;
   /** Global decay log-rate: A = exp(A_log). 0 = no decay. */
   aLog: number;
+  /**
+   * Global sharpness log-rate for logic membership: τ = exp(tauLog).
+   * membership(v, q) = σ(τ · cos(v, q)). Optional; defaults to ln(8).
+   */
+  tauLog?: number;
   /** Per-node absorption logit, keyed by node ID. g = σ(b_log). */
   nodeBiasLogits: Record<string, number>;
   /** Per-node retention logit, keyed by node ID. β = σ(β_log). */
   nodeBetaLogits: Record<string, number>;
+}
+
+/**
+ * Differentiable set-logic expression over memory nodes.
+ *
+ * An `atom` maps every node to a fuzzy membership σ(τ·cos(v, q)) — a soft set.
+ * Combinators are t-norm operators, so the whole expression stays inside the
+ * autodiff DAG and gradients flow back to τ (and any future parameters):
+ *
+ *   and = product t-norm        a·b           (intersection)
+ *   or  = probabilistic sum     a+b−a·b       (union)
+ *   not = complement            1−a           (negation)
+ */
+export type LogicExpr =
+  | { kind: "atom"; queryVector: Float32Array }
+  | { kind: "and" | "or"; children: LogicExpr[] }
+  | { kind: "not"; child: LogicExpr };
+
+/** Ergonomic constructors for LogicExpr trees. */
+export const Logic = {
+  atom(queryVector: Float32Array): LogicExpr {
+    return { kind: "atom", queryVector };
+  },
+  and(...children: LogicExpr[]): LogicExpr {
+    return { kind: "and", children };
+  },
+  or(...children: LogicExpr[]): LogicExpr {
+    return { kind: "or", children };
+  },
+  not(child: LogicExpr): LogicExpr {
+    return { kind: "not", child };
+  },
+  /**
+   * NAND = NOT(AND(...)). Functionally complete, but as a ranking operator it
+   * is an anti-selector (irrelevant nodes score highest). Use it as a building
+   * block — see xor — or as a differentiable conflict penalty, never alone.
+   */
+  nand(...children: LogicExpr[]): LogicExpr {
+    return { kind: "not", child: { kind: "and", children } };
+  },
+  /**
+   * XOR = OR(a,b) · NAND(a,b): evidence that belongs to exactly one side.
+   * Surfaces decisive evidence for contradiction-resolution questions while
+   * excluding ambiguous statements that match both sides.
+   */
+  xor(a: LogicExpr, b: LogicExpr): LogicExpr {
+    return {
+      kind: "and",
+      children: [
+        { kind: "or", children: [a, b] },
+        { kind: "not", child: { kind: "and", children: [a, b] } },
+      ],
+    };
+  },
+} as const;
+
+export interface LogicSearchResult {
+  nodeId: string;
+  /** Combined membership of the whole expression, in (0,1). */
+  membership: number;
+  /** Per-unique-atom memberships for explanation, in expression order. */
+  atomScores: number[];
 }
 
 export class MemoryGraphReasoner {
@@ -91,6 +158,8 @@ export class MemoryGraphReasoner {
   readonly #nodeBiasLogits: Map<string, Tensor>;
   /** Per-node retention logit β_log → β = σ(β_log). */
   readonly #nodeBetaLogits: Map<string, Tensor>;
+  /** Global membership sharpness: τ = exp(tauLog), used by logicSearch. */
+  readonly #tauLog: Tensor;
   /** Shared scalar (1) for arithmetic. */
   readonly #one: Tensor;
 
@@ -111,6 +180,7 @@ export class MemoryGraphReasoner {
       }
     }
     this.#one = Tensor.scalar(1);
+    this.#tauLog = Tensor.scalar(state?.tauLog ?? Math.log(8), true);
   }
 
   get trainingSteps(): number {
@@ -438,6 +508,148 @@ export class MemoryGraphReasoner {
     return lossValue;
   }
 
+  // ── differentiable set logic ──
+
+  /** Fuzzy membership of every node in an atom: σ(τ·cos(v, q)) → [N,1]. */
+  #membership(nodeMat: Tensor, queryVector: Float32Array): Tensor {
+    const q = Tensor.vector(queryVector);
+    const tau = this.#tauLog.exp();
+    return nodeMat.matmul(q).multiply(tau).sigmoid();
+  }
+
+  /**
+   * Evaluate a LogicExpr over the stacked node matrix [N,d], returning the
+   * combined membership [N,1]. Atom memberships are computed once and cached
+   * by expression identity, so shared sub-queries cost one matmul.
+   */
+  #evalLogic(
+    expr: LogicExpr,
+    nodeMat: Tensor,
+    atomCache: Map<LogicExpr, Tensor>,
+  ): Tensor {
+    if (expr.kind === "atom") {
+      let m = atomCache.get(expr);
+      if (!m) {
+        m = this.#membership(nodeMat, expr.queryVector);
+        atomCache.set(expr, m);
+      }
+      return m;
+    }
+    if (expr.kind === "not") {
+      return this.#one.subtract(this.#evalLogic(expr.child, nodeMat, atomCache));
+    }
+    const parts = expr.children.map((c) => this.#evalLogic(c, nodeMat, atomCache));
+    if (parts.length === 0) {
+      return Tensor.scalar(expr.kind === "and" ? 1 : 0);
+    }
+    let acc = parts[0]!;
+    for (const part of parts.slice(1)) {
+      acc =
+        expr.kind === "and"
+          ? acc.multiply(part)
+          : acc.add(part).subtract(acc.multiply(part)); // probabilistic sum
+    }
+    return acc;
+  }
+
+  #collectAtoms(expr: LogicExpr, into: LogicExpr[]): void {
+    if (expr.kind === "atom") {
+      if (!into.includes(expr)) into.push(expr);
+      return;
+    }
+    if (expr.kind === "not") {
+      this.#collectAtoms(expr.child, into);
+      return;
+    }
+    for (const c of expr.children) this.#collectAtoms(c, into);
+  }
+
+  #stackGraph(graph: Map<string, MemoryNode>): { nodeIds: string[]; nodeMat: Tensor } {
+    const nodeIds = Array.from(graph.keys());
+    const data = new Float32Array(nodeIds.length * this.dimensions);
+    for (let i = 0; i < nodeIds.length; i++) {
+      data.set(graph.get(nodeIds[i]!)!.vector, i * this.dimensions);
+    }
+    return { nodeIds, nodeMat: Tensor.fromBuffer(data, nodeIds.length, this.dimensions) };
+  }
+
+  /**
+   * Rank nodes by the membership of a set-logic expression.
+   *
+   * Example — "cities both Jean and John visited":
+   *   logicSearch(Logic.and(Logic.atom(jeanCities), Logic.atom(johnCities)), graph, 10)
+   * Bridge nodes relevant to both atoms score highest, without leaving the DAG.
+   */
+  logicSearch(
+    expr: LogicExpr,
+    graph: Map<string, MemoryNode>,
+    topK: number,
+  ): LogicSearchResult[] {
+    const { nodeIds, nodeMat } = this.#stackGraph(graph);
+    const atomCache = new Map<LogicExpr, Tensor>();
+    const combined = this.#evalLogic(expr, nodeMat, atomCache);
+    const atoms: LogicExpr[] = [];
+    this.#collectAtoms(expr, atoms);
+
+    const results: LogicSearchResult[] = nodeIds.map((nodeId, i) => ({
+      nodeId,
+      membership: combined.at(i).scalarValue,
+      atomScores: atoms.map((a) => atomCache.get(a)!.at(i).scalarValue),
+    }));
+    results.sort((a, b) => b.membership - a.membership);
+    return results.slice(0, Math.max(0, topK));
+  }
+
+  /**
+   * Contrastive training for the membership sharpness τ: pull positives'
+   * memberships up and the strongest non-positives' down. Loss stays in the
+   * DAG; only τ (and future logic parameters) receives gradients.
+   */
+  trainLogic(
+    expr: LogicExpr,
+    graph: Map<string, MemoryNode>,
+    positiveIds: string[],
+    learningRate = 0.05,
+  ): number {
+    if (positiveIds.length === 0) {
+      throw new Error("trainLogic requires at least one positive node");
+    }
+    const { nodeIds, nodeMat } = this.#stackGraph(graph);
+    const combined = this.#evalLogic(expr, nodeMat, new Map());
+    const positives = new Set(positiveIds);
+
+    const posLosses: Tensor[] = [];
+    const negCandidates: { i: number; m: number }[] = [];
+    for (let i = 0; i < nodeIds.length; i++) {
+      if (positives.has(nodeIds[i]!)) {
+        // −log(p): push membership toward 1 (clamp away from log(0))
+        const p = combined.at(i);
+        posLosses.push(p.add(Tensor.scalar(1e-9)).log().negate());
+      } else {
+        negCandidates.push({ i, m: combined.at(i).scalarValue });
+      }
+    }
+    negCandidates.sort((a, b) => b.m - a.m);
+    // −log(1−p) on the hardest negatives, as many as there are positives
+    const negLosses = negCandidates.slice(0, posLosses.length).map(({ i }) => {
+      const p = combined.at(i);
+      return this.#one.subtract(p).add(Tensor.scalar(1e-9)).log().negate();
+    });
+
+    const loss = Tensor.sumN([...posLosses, ...negLosses]).divide(
+      Tensor.scalar(posLosses.length + negLosses.length),
+    );
+
+    const params: Tensor[] = [this.#tauLog];
+    params.forEach((p) => p.zeroGrad());
+    const lossValue = loss.scalarValue;
+    loss.backward();
+    gradientStep(params, learningRate);
+    this.#trainingSteps += 1;
+
+    return lossValue;
+  }
+
   // ── persistence ──
 
   toJSON(): MemoryGraphReasonerState {
@@ -454,6 +666,7 @@ export class MemoryGraphReasoner {
       dimensions: this.dimensions,
       trainingSteps: this.#trainingSteps,
       aLog: this.#aLog.scalarValue,
+      tauLog: this.#tauLog.scalarValue,
       nodeBiasLogits,
       nodeBetaLogits,
     };

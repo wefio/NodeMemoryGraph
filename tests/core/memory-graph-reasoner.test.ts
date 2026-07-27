@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { MemoryGraphReasoner } from "../../src/core/memory-graph-reasoner.ts";
+import { Logic, MemoryGraphReasoner } from "../../src/core/memory-graph-reasoner.ts";
 import type { MemoryNode } from "../../src/core/memory-graph-reasoner.ts";
 
 function rvec(d: number): Float32Array {
@@ -271,4 +271,168 @@ test("MGR traverse is deterministic", () => {
     assert.equal(r1.path[i]!.nodeId, r2.path[i]!.nodeId);
     assert.ok(Math.abs(r1.path[i]!.score - r2.path[i]!.score) < 1e-7);
   }
+});
+
+// ── differentiable set logic ──
+
+function unit(dims: number, ...hot: [number, number][]): Float32Array {
+  const v = new Float32Array(dims);
+  for (const [i, x] of hot) v[i] = x;
+  const n = Math.sqrt(v.reduce((s, x) => s + x * x, 0));
+  for (let i = 0; i < dims; i++) v[i] /= n;
+  return v;
+}
+
+function logicGraph(): Map<string, MemoryNode> {
+  // jean-rome: matches both "Jean visited" and "Rome" atoms (bridge node)
+  // jean-paris: matches "Jean visited" only
+  // john-rome: matches "John visited" and "Rome"
+  // gym: unrelated
+  return new Map([
+    ["jean-rome", { id: "jean-rome", vector: unit(d, [0, 1], [2, 1]) }],
+    ["jean-paris", { id: "jean-paris", vector: unit(d, [0, 1], [3, 1]) }],
+    ["john-rome", { id: "john-rome", vector: unit(d, [1, 1], [2, 1]) }],
+    ["gym", { id: "gym", vector: unit(d, [0, -1], [2, -1]) }],
+  ]);
+}
+
+const qJean = unit(d, [0, 1]); // "cities Jean visited"
+const qJohn = unit(d, [1, 1]); // "cities John visited"
+const qRome = unit(d, [2, 1]);
+
+test("logicSearch AND ranks bridge nodes above single-atom nodes", () => {
+  const mgr = new MemoryGraphReasoner(d);
+  const graph = logicGraph();
+
+  const results = mgr.logicSearch(Logic.and(Logic.atom(qJean), Logic.atom(qRome)), graph, 4);
+
+  assert.equal(results[0]!.nodeId, "jean-rome");
+  assert.ok(results[0]!.membership > results[1]!.membership);
+  // unrelated node is last and near zero
+  assert.equal(results[3]!.nodeId, "gym");
+  assert.ok(results[3]!.membership < 0.1);
+});
+
+test("logicSearch NOT excludes complement members", () => {
+  const mgr = new MemoryGraphReasoner(d);
+  const graph = logicGraph();
+
+  // "cities Jean visited, but NOT Rome" → jean-paris first
+  const results = mgr.logicSearch(
+    Logic.and(Logic.atom(qJean), Logic.not(Logic.atom(qRome))),
+    graph,
+    4,
+  );
+
+  assert.equal(results[0]!.nodeId, "jean-paris");
+});
+
+test("logicSearch OR is at least as large as each atom", () => {
+  const mgr = new MemoryGraphReasoner(d);
+  const graph = logicGraph();
+
+  const union = mgr.logicSearch(Logic.or(Logic.atom(qJean), Logic.atom(qJohn)), graph, 4);
+  const jeanOnly = mgr.logicSearch(Logic.atom(qJean), graph, 4);
+  const johnOnly = mgr.logicSearch(Logic.atom(qJohn), graph, 4);
+
+  const u = new Map(union.map((r) => [r.nodeId, r.membership]));
+  const a = new Map(jeanOnly.map((r) => [r.nodeId, r.membership]));
+  const b = new Map(johnOnly.map((r) => [r.nodeId, r.membership]));
+  for (const id of ["jean-rome", "jean-paris", "john-rome", "gym"]) {
+    assert.ok(
+      u.get(id)! >= Math.max(a.get(id)!, b.get(id)!) - 1e-6,
+      `union membership should dominate atoms for ${id}`,
+    );
+  }
+});
+
+test("logicSearch returns per-atom scores for explanation", () => {
+  const mgr = new MemoryGraphReasoner(d);
+  const graph = logicGraph();
+
+  const results = mgr.logicSearch(Logic.and(Logic.atom(qJean), Logic.atom(qRome)), graph, 1);
+
+  assert.equal(results[0]!.atomScores.length, 2);
+  assert.ok(results[0]!.atomScores[0]! > 0.5); // Jean membership of bridge node
+  assert.ok(results[0]!.atomScores[1]! > 0.5); // Rome membership of bridge node
+});
+
+test("logicSearch respects topK and is deterministic", () => {
+  const mgr = new MemoryGraphReasoner(d);
+  const graph = logicGraph();
+  const expr = Logic.and(Logic.atom(qJean), Logic.atom(qRome));
+
+  const r1 = mgr.logicSearch(expr, graph, 2);
+  const r2 = mgr.logicSearch(expr, graph, 2);
+
+  assert.equal(r1.length, 2);
+  assert.deepEqual(
+    r1.map((r) => r.nodeId),
+    r2.map((r) => r.nodeId),
+  );
+});
+
+test("trainLogic updates tauLog and improves positive margin", () => {
+  const mgr = new MemoryGraphReasoner(d);
+  const graph = logicGraph();
+  const expr = Logic.and(Logic.atom(qJean), Logic.atom(qRome));
+
+  const before = mgr.toJSON().tauLog ?? Math.log(8);
+  const beforeTop = mgr.logicSearch(expr, graph, 4)[0]!;
+
+  for (let i = 0; i < 20; i++) {
+    mgr.trainLogic(expr, graph, ["jean-rome"], 0.1);
+  }
+
+  const after = mgr.toJSON().tauLog ?? Math.log(8);
+  const afterTop = mgr.logicSearch(expr, graph, 4)[0]!;
+
+  assert.notEqual(before, after, "tauLog should change during training");
+  assert.equal(afterTop.nodeId, "jean-rome", "positive should remain the top hit");
+  assert.ok(afterTop.membership >= beforeTop.membership - 1e-6);
+  assert.ok(mgr.trainingSteps >= 20);
+});
+
+test("tauLog round-trips through persistence", () => {
+  const mgr = new MemoryGraphReasoner(d);
+  mgr.trainLogic(Logic.atom(qJean), logicGraph(), ["jean-rome"], 0.1);
+
+  const state = mgr.toJSON();
+  const restored = MemoryGraphReasoner.fromJSON(state);
+
+  assert.equal(restored.toJSON().tauLog, state.tauLog);
+});
+
+test("logicSearch XOR ranks one-sided evidence above both-sides nodes", () => {
+  const mgr = new MemoryGraphReasoner(d);
+  const qA = unit(d, [0, 1]);
+  const qB = unit(d, [1, 1]);
+  const graph = new Map<string, MemoryNode>([
+    ["only-a", { id: "only-a", vector: unit(d, [0, 1]) }],
+    ["only-b", { id: "only-b", vector: unit(d, [1, 1]) }],
+    ["both", { id: "both", vector: unit(d, [0, 1], [1, 1]) }],
+    ["neither", { id: "neither", vector: unit(d, [0, -1], [1, -1]) }],
+  ]);
+
+  const results = mgr.logicSearch(Logic.xor(Logic.atom(qA), Logic.atom(qB)), graph, 4);
+  const rank = new Map(results.map((r, i) => [r.nodeId, i]));
+
+  // one-sided statements beat the ambiguous both-sides statement
+  assert.ok(rank.get("only-a")! < rank.get("both")!);
+  assert.ok(rank.get("only-b")! < rank.get("both")!);
+});
+
+test("logicSearch NAND is an anti-selector: joint members rank last", () => {
+  const mgr = new MemoryGraphReasoner(d);
+  const qA = unit(d, [0, 1]);
+  const qB = unit(d, [1, 1]);
+  const graph = new Map<string, MemoryNode>([
+    ["only-a", { id: "only-a", vector: unit(d, [0, 1]) }],
+    ["both", { id: "both", vector: unit(d, [0, 1], [1, 1]) }],
+    ["neither", { id: "neither", vector: unit(d, [0, -1], [1, -1]) }],
+  ]);
+
+  const results = mgr.logicSearch(Logic.nand(Logic.atom(qA), Logic.atom(qB)), graph, 3);
+
+  assert.equal(results[2]!.nodeId, "both", "joint member should be suppressed most by NAND");
 });
