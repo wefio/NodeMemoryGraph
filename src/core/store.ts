@@ -119,7 +119,7 @@ export class NmgStore {
     const row = this.#db
       .prepare(
         "SELECT id, node_id, status, statement, memory_type, state_key, event_time, " +
-        "source_actor, truth_status, confidence, polarity, predicate_key, scope_json, valid_from, valid_until, " +
+        "source_actor, truth_status, confidence, polarity, predicate_key, extract_method, scope_json, valid_from, valid_until, " +
         "residence, promoted_at, expires_at, evidence_role, supersedes_id, " +
         "tier, importance, access_count, last_accessed_at, evidence_id, " +
         "write_reason, write_source, created_at " +
@@ -141,6 +141,7 @@ export class NmgStore {
       confidence: row.confidence === null || row.confidence === undefined ? null : Number(row.confidence),
       polarity: row.polarity ? (String(row.polarity) as MemoryRecord["polarity"]) : null,
       predicateKey: row.predicate_key ? String(row.predicate_key) : null,
+      extractMethod: row.extract_method ? (String(row.extract_method) as MemoryRecord["extractMethod"]) : null,
       scope: parseScope(row.scope_json),
       validFrom: row.valid_from ? String(row.valid_from) : null,
       validUntil: row.valid_until ? String(row.valid_until) : null,
@@ -345,6 +346,7 @@ export class NmgStore {
     confidence?: number;
     polarity?: MemoryRecord["polarity"];
     predicateKey?: string;
+    extractMethod?: MemoryRecord["extractMethod"];
     tier?: MemoryTier;
     importance?: number;
     scope?: MemoryScope;
@@ -375,6 +377,7 @@ export class NmgStore {
       confidence: input.confidence ?? null,
       polarity: input.polarity ?? null,
       predicateKey: input.predicateKey ?? null,
+      extractMethod: input.extractMethod ?? null,
       scope: input.scope ?? {},
       validFrom: input.validFrom ?? createdAt,
       validUntil: input.validUntil ?? null,
@@ -397,11 +400,11 @@ export class NmgStore {
       .prepare(
         `INSERT INTO memory_records
           (id, node_id, evidence_id, statement, memory_type, state_key,
-           event_time, source_actor, truth_status, confidence, polarity, predicate_key, scope_json, valid_from,
+           event_time, source_actor, truth_status, confidence, polarity, predicate_key, extract_method, scope_json, valid_from,
            valid_until, status, residence, promoted_at, expires_at,
            evidence_role, supersedes_id, tier, importance,
            access_count, last_accessed_at, write_reason, write_source, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
       )
       .run(
         memory.id,
@@ -416,6 +419,7 @@ export class NmgStore {
         memory.confidence,
         memory.polarity,
         memory.predicateKey,
+        memory.extractMethod,
         serializeScope(memory.scope),
         memory.validFrom,
         memory.validUntil,
@@ -2723,10 +2727,10 @@ export class NmgStore {
            m.truth_status AS m_truth_status,
          m.confidence AS m_confidence,
          m.polarity AS m_polarity,
-         m.predicate_key AS m_predicate_key,
+         m.predicate_key AS m_predicate_key, m.extract_method AS m_extract_method,
            m.confidence AS m_confidence,
            m.polarity AS m_polarity,
-           m.predicate_key AS m_predicate_key,
+           m.predicate_key AS m_predicate_key, m.extract_method AS m_extract_method,
            m.scope_json AS m_scope_json, m.valid_from AS m_valid_from,
            m.valid_until AS m_valid_until, m.status AS m_status,
            m.residence AS m_residence, m.promoted_at AS m_promoted_at,
@@ -3521,7 +3525,7 @@ export class NmgStore {
          m.truth_status AS m_truth_status,
          m.confidence AS m_confidence,
          m.polarity AS m_polarity,
-         m.predicate_key AS m_predicate_key,
+         m.predicate_key AS m_predicate_key, m.extract_method AS m_extract_method,
          m.scope_json AS m_scope_json, m.valid_from AS m_valid_from,
          m.valid_until AS m_valid_until, m.status AS m_status,
          m.residence AS m_residence, m.promoted_at AS m_promoted_at,
@@ -3713,6 +3717,7 @@ function mapSearchResult(row: Row, score: number): MemorySearchResult {
       confidence: row.m_confidence === null || row.m_confidence === undefined ? null : Number(row.m_confidence),
       polarity: row.m_polarity ? (String(row.m_polarity) as MemoryRecord["polarity"]) : null,
       predicateKey: row.m_predicate_key ? String(row.m_predicate_key) : null,
+      extractMethod: row.m_extract_method ? (String(row.m_extract_method) as MemoryRecord["extractMethod"]) : null,
       scope: parseScope(row.m_scope_json),
       validFrom: row.m_valid_from ? String(row.m_valid_from) : null,
       validUntil: row.m_valid_until ? String(row.m_valid_until) : null,

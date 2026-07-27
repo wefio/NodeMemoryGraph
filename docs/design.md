@@ -822,6 +822,27 @@ neighbours. Findings:
   deepseek-chat calls per conversation at temperature 0, no reader-grade
   model involved, and the regex pre-filter skips ~76% of records.
 
+A second iteration turned the prototype into a layered worker
+(`evals/omnimemeval/polarity-worker.py`, validated by
+`polarity-validate.py` against per-message DeepSeek labels on BEAM conv 1,
+188 messages ingested via `beam-ingest.mjs`). A spaCy rule layer (negation
+via dependency `neg` on the ROOT verb, SVO backbone for the key, idioms and
+"don't need/have" necessity-negations deferred) resolves 27% of records at
+zero cost with 100% polarity agreement; the rest go to the LLM in batches of
+15 (10 calls total vs 188 one-by-one) with the current key vocabulary in the
+prompt, reaching 99.3% agreement. An `extract_method` column records which
+layer filled each row. Two rule-layer lessons: in multi-clause sentences the
+predicate must come from the clause that carries the negation (msg-58's ROOT
+is "starting" but the fact is "never written"), and negations of
+necessity/ability are guidance, not factual denials. The deterministic join
+still misses the known pair, though: the rule layer emitted
+`user_write_route` for msg-58 while the LLM emitted `user_try_implement`
+for msg-24 — cross-layer key conventions diverge, and even
+polarity-guarded key clustering (which correctly blocked 3 cross-polarity
+merges) cannot bridge keys that dissimilar. Polarity detection is solved
+cheaply; cross-layer predicate canonicalisation is the remaining blocker for
+join-based contradiction detection.
+
 The expression shape must therefore follow the question type, and choosing
 the shape is itself an unrouted decision today. MGR set logic remains a Lab
 primitive.

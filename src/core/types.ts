@@ -48,6 +48,9 @@ export type MemoryActor = "assistant" | "system" | "tool" | "user";
 export type TruthStatus = "asserted" | "inferred" | "unverified" | "verified";
 /** Logical polarity of a statement, extracted at write time from text. */
 export type Polarity = "affirmative" | "negative";
+
+/** Provenance of polarity/predicate/confidence extraction. */
+export type ExtractMethod = "rule" | "llm";
 export type MemoryStatus = "active" | "deleted" | "disputed" | "inactive" | "superseded";
 export type EvidenceRole = "contradict" | "example" | "exception" | "origin" | "support" | "update";
 export type MemoryScope = Record<string, string>;
@@ -95,6 +98,8 @@ export interface MemoryRecord {
   polarity: Polarity | null;
   /** Normalized predicate used to group affirm/negate pairs; null if unset. */
   predicateKey: string | null;
+  /** Which extractor filled polarity/predicateKey/confidence; null if manual or never extracted. */
+  extractMethod: ExtractMethod | null;
   scope: MemoryScope;
   validFrom: string | null;
   validUntil: string | null;
@@ -126,6 +131,7 @@ export interface RememberInput {
   confidence?: number;
   polarity?: Polarity;
   predicateKey?: string;
+  extractMethod?: ExtractMethod;
   evidence?: string;
   evidenceHistoryId?: string;
   sessionId?: string;
