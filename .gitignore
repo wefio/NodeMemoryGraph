@@ -36,3 +36,5 @@ evals/snapshots/
 *.tar
 *.tar.gz
 *.zip
+.env
+__pycache__/
