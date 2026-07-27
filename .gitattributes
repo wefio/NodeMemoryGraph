@@ -1,2 +1,12 @@
-# Don't use Git LFS for this project — it caused 1.3GB of stale objects
-# All large binary files (*.sqlite, *.safetensors, *.onnx, *.pt) are gitignored
+# Normalize line endings: LF in the repo, platform-native in the working copy.
+# (Don't use Git LFS for this project — it caused 1.3GB of stale objects.
+#  All large binary files (*.sqlite, *.safetensors, *.onnx, *.pt) are gitignored.)
+* text=auto
+*.ts text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.sqlite binary
+*.safetensors binary
+*.onnx binary
+*.pt binary
