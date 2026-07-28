@@ -1,4 +1,4 @@
-import type { MemoryNode, MemorySearchResult, RecallCue } from "../types.ts";
+import type { MemoryNode, MemorySearchResult, MemoryType, RecallCue } from "../types.ts";
 
 export type StoreRow = Record<string, string | number | Uint8Array | null>;
 
@@ -22,6 +22,41 @@ export function contextUsefulness(query: string, result: MemorySearchResult): nu
     bonus += 0.25;
   }
   return result.combinedScore + bonus;
+}
+
+/**
+ * Query intent families used both by {@link contextUsefulness} (bonus tuning)
+ * and by QPP intent coverage. The canonical source of "which memory types a
+ * query expects". Add new families here, not as inline regexes.
+ */
+export interface QueryIntentFamily {
+  name: "list_count" | "recommend" | "assistant";
+  pattern: RegExp;
+  expectedTypes: readonly MemoryType[];
+}
+
+export const QUERY_INTENT_FAMILIES: readonly QueryIntentFamily[] = [
+  {
+    name: "list_count",
+    pattern: /\b(?:how many|how much|list|all|count)\b|(?:多少|几个|列出|全部)/iu,
+    expectedTypes: ["derived", "event", "fact", "state"],
+  },
+  {
+    name: "recommend",
+    pattern: /\b(?:recommend|suggest|preference)\b|(?:推荐|建议|偏好)/iu,
+    expectedTypes: ["preference", "constraint"],
+  },
+  {
+    name: "assistant",
+    pattern: /\b(?:assistant|you said|previous chat)\b|(?:你说过|助手|之前的对话)/iu,
+    expectedTypes: ["conversation_evidence"],
+  },
+];
+
+/** Intent families whose pattern matches the query (normalized). */
+export function queryIntentFamilies(query: string): QueryIntentFamily[] {
+  const normalized = normalize(query);
+  return QUERY_INTENT_FAMILIES.filter((family) => family.pattern.test(normalized));
 }
 
 export function lexicalScore(query: string, row: StoreRow): number {

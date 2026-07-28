@@ -40,6 +40,7 @@ import type {
   NodeRelationType,
   RememberInput,
   RememberResult,
+  QppTriggerDecision,
   RebalanceResult,
   RetrievalTraceInput,
   RetrievalTrace,
@@ -83,9 +84,9 @@ import {
   mergeSemanticCandidates,
   normalize,
   recallReason,
-  searchTerms,
   type StoreRow as Row,
 } from "./store/search-ranking.ts";
+import { qppCandidates, shouldTriggerSecondPass } from "./qpp.ts";
 
 const MAX_SEARCH_CANDIDATES = 500;
 export class NmgStore {
@@ -1386,6 +1387,10 @@ export class NmgStore {
     const expansions = activeGraphExpansions(directSelectedNodeIds, persistentEdges, graphHops);
     const budgetLedger = activeGraphBudgetLedger(budget, usage);
     const taskId = options.taskId?.trim() || stableTaskId(query);
+    // Shadow QPP observation (Stage 0): compute the second-pass decision but do
+    // NOT act on it — recorded on the trace for calibration (Stage 1) and DC
+    // supervision (Stage 2). Wiring the actual trigger is a later increment.
+    const qppDecision = shouldTriggerSecondPass(query, qppCandidates(results, selections));
     const traceInput: RetrievalTraceInput = {
       query,
       taskId,
@@ -1403,6 +1408,7 @@ export class NmgStore {
       selections,
       expansions,
       budgetLedger,
+      qpp: qppDecision,
     };
     // A controller probe is a private planning artifact, not an interaction the
     // model could have used. Persisting it would pollute online-learning labels
@@ -1467,9 +1473,9 @@ export class NmgStore {
            contradicted_memory_ids_json, rejected_memory_ids_json,
            relation_ids_json, task_id, active_graph_budget_json,
            active_graph_usage_json, selections_json, expansions_json,
-           budget_ledger_json, ambiguity,
+           budget_ledger_json, qpp_json, ambiguity,
            fallback_used, conflict_observed, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -1487,6 +1493,7 @@ export class NmgStore {
           JSON.stringify(input.selections ?? []),
           JSON.stringify(input.expansions ?? []),
           JSON.stringify(input.budgetLedger ?? []),
+          JSON.stringify(input.qpp ?? null),
           clamp(input.ambiguity ?? 0, 0, 1),
           input.fallbackUsed ? 1 : 0,
           input.conflictObserved ? 1 : 0,
@@ -1599,6 +1606,7 @@ export class NmgStore {
       selections: parseStoredJson(row.selections_json, []),
       expansions: parseStoredJson(row.expansions_json, []),
       budgetLedger: parseStoredJson(row.budget_ledger_json, []),
+      qpp: parseQppDecision(row.qpp_json),
       createdAt: String(row.created_at),
     };
   }
@@ -3539,12 +3547,6 @@ export class NmgStore {
     this.#vectorCaches.get(`${kind}:${model}`)?.upsert(id, vector);
   }
 
-  #invalidateVectorCacheEntry(kind: "leaf" | "node", model: string, id: string): void {
-    const key = `${kind}:${model}`;
-    const cache = this.#vectorCaches.get(key);
-    if (cache && cache.has(id)) cache.remove(id);
-  }
-
   #invalidateVectorCaches(kind: "leaf" | "node"): void {
     for (const key of this.#vectorCaches.keys()) {
       if (key.startsWith(`${kind}:`)) this.#vectorCaches.delete(key);
@@ -3972,6 +3974,16 @@ function parseStoredJson<T>(value: string | number | Uint8Array | null, fallback
   } catch {
     return fallback;
   }
+}
+
+/** Read the shadow QPP decision; undefined for pre-QPP or empty rows. */
+function parseQppDecision(
+  value: string | number | Uint8Array | null,
+): QppTriggerDecision | undefined {
+  const parsed = parseStoredJson<QppTriggerDecision | null>(value, null);
+  return parsed && typeof (parsed as { qpp?: unknown }).qpp === "number"
+    ? parsed
+    : undefined;
 }
 
 type StoredClaim = {

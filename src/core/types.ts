@@ -435,6 +435,54 @@ export interface NodeTransform {
   createdAt: string;
 }
 
+/** Learned weights for the QPP score composition (see qpp.ts). */
+export interface QppWeights {
+  /** weight on the score-variance (NQC-family) term. */
+  tauV: number;
+  /** weight on intent coverage. */
+  wIc: number;
+  /** weight on reason health. */
+  wRh: number;
+}
+
+/** A retrieval candidate projected to exactly the fields QPP needs. */
+export interface QppCandidate {
+  usefulness: number;
+  reason: RecallCue["reason"];
+  memoryType: MemoryType;
+  isDirect: boolean;
+}
+
+export interface QppComponents {
+  /** clamp(max usefulness among direct candidates, 0, 1). */
+  top1: number;
+  /** bounded standard deviation of direct usefulness in [0,1] (NQC-family). */
+  variance: number;
+  /** [0,1]; 0.5 neutral when the query matches no intent family. */
+  intentCoverage: number;
+  /** [0,1]; share of direct candidates whose reason is not hybrid_match. */
+  reasonHealth: number;
+  /** number of direct candidates used for the score-based signals. */
+  directCount: number;
+  /** total candidate count (direct + graph_expansion). */
+  totalCount: number;
+}
+
+export type QppTriggerReason =
+  | "ok"
+  | "below_threshold"
+  | "guardrail_empty"
+  | "guardrail_all_fallback";
+
+/** Stage 0 trigger decision; recorded on the trace as shadow observation. */
+export interface QppTriggerDecision {
+  trigger: boolean;
+  reason: QppTriggerReason;
+  qpp: number;
+  threshold: number;
+  components: QppComponents;
+}
+
 export interface RetrievalTraceInput {
   query: string;
   taskId?: string;
@@ -453,6 +501,8 @@ export interface RetrievalTraceInput {
   selections?: ActiveGraphSelection[];
   expansions?: ActiveGraphExpansion[];
   budgetLedger?: ActiveGraphBudgetLedgerEntry[];
+  /** Shadow QPP observation (Stage 0): computed, not yet acted on. */
+  qpp?: QppTriggerDecision;
 }
 
 export interface RetrievalTrace extends RetrievalTraceInput {
