@@ -13,7 +13,9 @@ const RETRIEVAL_GUIDANCE =
   "[NMG retrieval guidance] Treat relevant user facts, preferences, constraints, " +
   "tools, and prior experiences as evidence for a personalized answer. Apply them " +
   "to the current request even when the final answer did not appear verbatim in " +
-  "history. Do not invent unsupported user details.";
+  "history. A line beginning with [forget] is a revocation boundary, not an active " +
+  "fact: do not use or reconstruct that content, and prefer an answer independent " +
+  "of it. Do not invent unsupported user details.";
 
 export interface OmniMessage {
   role?: string;
@@ -128,9 +130,8 @@ export class OmniMemEvalBridge {
       .join(" ")
       .slice(0, 1_500);
     let added = 0;
-
-    messages.forEach((message, index) => {
-      if (!message || typeof message.content !== "string" || !message.content.trim()) return;
+    for (const [index, message] of messages.entries()) {
+      if (!message || typeof message.content !== "string" || !message.content.trim()) continue;
       const role = historyRole(message.role);
       const sourceRef = `omnimemeval:${userKey(userId)}:${conversation}:${index}:` +
         createHash("sha256").update(`${role}\0${message.content}`).digest("hex").slice(0, 16);
@@ -141,6 +142,26 @@ export class OmniMemEvalBridge {
         sourceMessageId: String(index),
         sourceRef,
       });
+      const forgetTarget = role === "user" ? explicitForgetTarget(message.content) : null;
+      if (forgetTarget) {
+        forgetMatchingMemories(store, forgetTarget);
+        store.remember({
+          statement: `[forget] ${forgetTarget}`,
+          nodeName: "Revoked memory boundary",
+          nodeSummary: "User-requested memory revocation boundary.",
+          memoryType: "constraint",
+          sourceActor: "user",
+          truthStatus: "asserted",
+          evidenceHistoryId: history.id,
+          tier: 0,
+          importance: 1,
+          scope: { benchmark: "OmniMemEval", user: userKey(userId) },
+          writeReason: "explicit_user_forget_request",
+          writeSource: "user",
+        });
+        added += 1;
+        continue;
+      }
       store.remember({
         statement: message.content,
         nodeName,
@@ -155,8 +176,7 @@ export class OmniMemEvalBridge {
         scope: { benchmark: "OmniMemEval", user: userKey(userId) },
       });
       added += 1;
-    });
-
+    }
     return { added };
   }
 
@@ -264,6 +284,55 @@ function prefersAssistantEvidence(query: string): boolean {
 function needsTemporalContext(query: string): boolean {
   return /\b(?:when|date|days?|weeks?|months?|years?|before|after|first|last|recent|recently|ago|long|yesterday|today|tomorrow|since|until|during|between|january|february|march|april|may|june|july|august|september|october|november|december)\b|(?:19|20)\d{2}/iu
     .test(query);
+}
+
+function explicitForgetTarget(content: string): string | null {
+  const match = content.trim().match(
+    /^(?:please\s+)?(?:i\s+(?:want|need|would\s+like)\s+you\s+to\s+)?(?:forget|erase|remove|delete)\s+(?:about\s+|that\s+)?(.+?)\s*[.!?]*$/iu,
+  );
+  const target = match?.[1]?.trim();
+  return target && forgetTerms(target).size >= 2 ? target : null;
+}
+
+function forgetMatchingMemories(store: NmgStore, target: string): void {
+  const targetTerms = forgetTerms(target);
+  const candidates = store.searchContext(target, {
+    sourceActor: "user",
+    includeHistorical: false,
+    maxTier: 3,
+    limit: 50,
+    graphHops: 0,
+    retrievalMode: "fts5",
+    persistTrace: false,
+  }).results;
+  for (const candidate of candidates) {
+    const candidateTerms = forgetTerms(candidate.memory.statement);
+    let shared = 0;
+    for (const term of targetTerms) {
+      if (candidateTerms.has(term)) shared += 1;
+    }
+    const targetCoverage = shared / targetTerms.size;
+    const candidateCoverage = shared / Math.max(1, candidateTerms.size);
+    if (
+      shared >= 2 &&
+      (targetCoverage >= 0.5 || candidateCoverage >= 0.6)
+    ) {
+      store.deleteMemory(candidate.memory.id);
+    }
+  }
+}
+
+function forgetTerms(text: string): Set<string> {
+  const stop = new Set([
+    "about", "after", "also", "and", "are", "been", "being", "but", "can",
+    "did", "does", "for", "from", "had", "has", "have", "into", "that",
+    "the", "their", "them", "they", "this", "was", "were", "with", "would",
+    "your", "you", "feel", "felt",
+  ]);
+  return new Set(
+    (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])
+      .filter((term) => term.length >= 3 && !stop.has(term)),
+  );
 }
 
 function userKey(userId: string): string {

@@ -217,6 +217,66 @@ LoCoMo's `context` fields but retained LongMemEval's `search_context`.
 `prepare-no-memory.ts` now clears both schemas and resets both duration fields;
 a regression test protects the matched-baseline invariant.
 
+### PersonaMem v2
+
+The first complete PersonaMem v2 run used record-level
+`BAAI/bge-small-en-v1.5` retrieval and completed 200/200 personas and
+5,000/5,000 questions without search or answer failures. With the fixed
+DeepSeek v4 Flash reader it scored **34.44%** overall:
+
+| Category | Accuracy |
+| --- | ---: |
+| sensitive preference | 28.57% |
+| ask to forget | 12.88% |
+| health / medical | 43.84% |
+| neutral | 39.98% |
+| therapy | 36.68% |
+| anti-stereotypical preference | 41.40% |
+| stereotypical preference | 49.72% |
+
+The low `ask_to_forget` score exposed a semantic error rather than a capacity
+problem. Deleting the active preference removed stale evidence but also removed
+the fact that a revocation boundary existed. It improved the 1,048-question
+category only to **14.12%**. The OmniMemEval adapter prototype now represents
+logical forgetting as a searchable constraint:
+
+```text
+[forget] the revoked fact or preference
+```
+
+The original active memory is soft-deleted, the immutable source history
+remains auditable, and retrieval guidance tells the reader that `[forget]`
+content is not an active fact and must not be reconstructed or used. A distinct
+physical-delete operation remains necessary for privacy erasure; the logical
+marker is not a substitute for deleting user data. Promotion into NMG core and
+Pi requires a typed revocation API rather than parsing benchmark text in the
+store.
+
+Two matched diagnostics validate this representation:
+
+| `ask_to_forget` arm | Accuracy | Delta vs deletion-only | Search path |
+| --- | ---: | ---: | --- |
+| deletion only | 14.12% | -- | record BGE |
+| NMG `[forget]`, real end-to-end | **16.22%** | +2.10 | FTS5 |
+| NMG `[forget]`, nearest-tag ablation | **20.52%** | +6.40 | BGE nearest revocation |
+
+The end-to-end FTS run completed all 200 persona lifecycles and all 5,000
+searches. Every one of the 1,048 forget questions retrieved at least one
+`[forget]` marker (1.15 markers per question on average, maximum four), with
+46 ms mean, 27 ms P50, and 297 ms P95 search latency. Against deletion-only it
+produced 64 answer wins, 42 losses, and 942 ties (exact paired binomial
+`p=0.0409`). The nearest-tag diagnostic produced 102 wins, 35 losses, and 911
+ties (`p<1e-8`), showing that revocation routing precision remains the main
+quality bottleneck.
+
+Both answer passes used the official PersonaMem response and metric scripts,
+the same 1,048 questions, and DeepSeek v4 Flash at temperature zero with 64
+concurrent workers. They completed in 93 and 98 seconds without API failures.
+The nearest-tag arm is an answer-stage ablation, not an end-to-end leaderboard
+result: `personamem-forget-tag-ablation.py` selects the closest explicit
+revocation from the original persona with BGE. A complete record-BGE NMG rerun
+is still required before claiming the 20.52% score as backend performance.
+
 ### LoCoMo
 
 The pinned LoCoMo search-only smoke ingested all 272 sessions for the ten

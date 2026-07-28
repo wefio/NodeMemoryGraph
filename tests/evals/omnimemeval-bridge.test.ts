@@ -157,3 +157,117 @@ test("OmniMemEval batches pending record vectors before search", async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("OmniMemEval replaces an explicitly forgotten memory with a tagged revocation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "nmg-omni-forget-"));
+  const bridge = new OmniMemEvalBridge(root);
+  try {
+    await bridge.handle({
+      id: 1,
+      op: "add",
+      userId: "alice",
+      conversationId: "before-forget",
+      messages: [
+        {
+          role: "user",
+          content:
+            "I feel isolated working from home and miss collaborative in-person brainstorms.",
+        },
+        {
+          role: "user",
+          content: "I prefer jasmine tea in the afternoon.",
+        },
+      ],
+    });
+    await bridge.handle({
+      id: 2,
+      op: "add",
+      userId: "alice",
+      conversationId: "forget-request",
+      messages: [
+        {
+          role: "user",
+          content:
+            "Please forget that I feel isolated working from home and miss collaborative in-person brainstorms.",
+        },
+      ],
+    });
+
+    const forgotten = await bridge.handle({
+      id: 3,
+      op: "search",
+      userId: "alice",
+      query: "How did I feel about working from home and collaboration?",
+      topK: 10,
+    }) as { text: string };
+    assert.match(
+      forgotten.text,
+      /\[forget\] I feel isolated working from home and miss collaborative in-person brainstorms/i,
+    );
+    assert.doesNotMatch(forgotten.text, /Please forget/i);
+
+    const retained = await bridge.handle({
+      id: 4,
+      op: "search",
+      userId: "alice",
+      query: "What tea do I prefer?",
+      topK: 10,
+    }) as { text: string };
+    assert.match(retained.text, /jasmine tea/i);
+  } finally {
+    bridge.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("semantic retrieval exposes a tagged revocation boundary", async () => {
+  const root = mkdtempSync(join(tmpdir(), "nmg-omni-revocation-"));
+  const bridge = new OmniMemEvalBridge(root, {
+    embeddingClient: {
+      indexId: "test-revocations@v1",
+      async embedDocuments(inputs) {
+        return inputs.map((input) =>
+          /isolated|collaborative|brainstorms/i.test(input) ? [1, 0] : [0, 1]
+        );
+      },
+      async embedQueries() {
+        return [[1, 0]];
+      },
+    },
+  });
+  try {
+    await bridge.handle({
+      id: 1,
+      op: "add",
+      userId: "alice",
+      messages: [
+        {
+          role: "user",
+          content:
+            "I feel isolated working from home and miss collaborative in-person brainstorms.",
+        },
+        {
+          role: "user",
+          content:
+            "Please forget that I feel isolated working from home and miss collaborative in-person brainstorms.",
+        },
+      ],
+    });
+
+    const result = await bridge.handle({
+      id: 2,
+      op: "search",
+      userId: "alice",
+      query: "How can I recreate collaboration while studying online?",
+      topK: 10,
+    }) as { text: string };
+    assert.match(
+      result.text,
+      /\[forget\] I feel isolated working from home and miss collaborative in-person brainstorms/i,
+    );
+    assert.doesNotMatch(result.text, /Please forget/i);
+  } finally {
+    bridge.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
