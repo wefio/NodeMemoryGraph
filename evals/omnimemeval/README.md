@@ -76,6 +76,68 @@ other nodes by relevance, token cost, and remaining budget. This recovers
 both same-session clues are present in the returned context. This sample is a
 pipeline smoke, not a statistically meaningful benchmark result.
 
+### LongMemEval full result
+
+A fresh full streaming run (`nmg_lme500_fixed_20260728`) completed the official
+add/search/delete lifecycle for all 500 LongMemEval conversations. The matched
+baseline (`no_memory_lme500_fixed_20260728`) preserves the same questions,
+golden answers, reader, judge, and prompts while removing only retrieved
+context. Both arms used `deepseek-chat` (currently `deepseek-v4-flash`) at
+temperature 0 with `top_k=20`.
+
+| Arm | LLM-as-Judge | F1 | METEOR | Answer prompt tokens / question | Search mean / P95 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| NMG | **0.6404** (317/495) | 0.1544 | 0.2124 | 1,138 | 156 / 175 ms |
+| No memory | 0.0646 (32/495) | 0.0853 | 0.0904 | 278 | 0 / 0 ms |
+
+The absolute NMG gain is **+57.6 judge points**. Search and answer stages
+completed 500/500 in both arms. The official judge accepted 495/500 outputs in
+each arm; five outputs per arm were skipped through OmniMemEval's documented
+`--skip-failed-judge 1` path because DeepSeek returned a JSON object containing
+both `label` and `explanation`, while upstream's strict parser accepts only its
+narrow label format. The skipped question sets differ. On the 490 questions
+successfully judged in both arms, NMG scores 0.6408 (314/490) versus 0.0653
+(32/490), so the matched-subset result is unchanged.
+
+| Category on common 490 | NMG | No memory | Questions |
+| --- | ---: | ---: | ---: |
+| single-session user | **0.9714** | 0.0857 | 70 |
+| temporal reasoning | **0.7519** | 0.0620 | 129 |
+| knowledge update | **0.7692** | 0.0769 | 78 |
+| multi-session | **0.5227** | 0.0909 | 132 |
+| single-session assistant | **0.2857** | 0.0000 | 56 |
+| single-session preference | **0.1600** | 0.0000 | 25 |
+
+The result shows a large end-to-end memory benefit with the fixed weak reader,
+but also identifies the next quality targets: assistant memories, preferences,
+and multi-session evidence composition. The 860-token average prompt increase
+over no memory is the approximate retrieval-context cost.
+
+The auxiliary exact-text evidence audit makes that diagnosis more concrete.
+Of 479 questions with labelled evidence, NMG retrieves at least one evidence
+turn for 79.96%, all evidence turns for 62.63%, and 69.42% of labelled turns
+overall. User evidence recall is 72.92%, but assistant evidence recall is only
+14.81%. When all labelled evidence is present, answer accuracy is 89.67%;
+with only partial evidence it falls to 16.67%, and with no exact evidence to
+7.45%. This strongly points to retrieval coverage and multi-record composition,
+rather than reader capacity alone, as the main remaining bottleneck. This
+audit is deliberately strict and is not an official LongMemEval score.
+
+Reproduce the diagnostic with:
+
+```powershell
+npm run benchmark:audit:longmem -- `
+  .benchmarks/official/OmniMemEval/results/lme/nmg-nmg_lme500_fixed_20260728/nmg_lme_search_results.json `
+  .benchmarks/official/OmniMemEval/results/lme/nmg-nmg_lme500_fixed_20260728/nmg_lme_judged.json
+```
+
+The first full attempt was invalid: 446 conversations were marked `skipped`
+after the Windows Python-to-Node NDJSON adapter encountered non-ASCII corpus
+content. The NMG adapter now emits ASCII-escaped JSON, which preserves Unicode
+content while making the pipe portable. The fresh run has 500 `success`
+search records, zero search errors, and zero empty contexts. Never compare or
+score the invalid `nmg_lme500_20260728` artifact.
+
 The first baseline attempt exposed a harness bug: the transformer cleared
 LoCoMo's `context` fields but retained LongMemEval's `search_context`.
 `prepare-no-memory.ts` now clears both schemas and resets both duration fields;
