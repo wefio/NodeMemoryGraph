@@ -23,8 +23,10 @@ export function prepareNoMemoryResults(
         ...record,
         context: "",
         raw_context: "",
+        search_context: "",
         reflect_answer: null,
         duration_ms: 0,
+        search_duration_ms: 0,
         status: "success_empty",
       };
     });

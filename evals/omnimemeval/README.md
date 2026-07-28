@@ -54,6 +54,33 @@ central client registry, so copying only `nmg_client.py` is insufficient.
 
 ## Current official smoke results
 
+### LongMemEval
+
+A seven-conversation streaming smoke (`nmg_smoke7_20260728`, conversation
+indices 0--6) exercised OmniMemEval's official add/search/delete lifecycle,
+then used `deepseek-chat` (`deepseek-v4-flash`, temperature 0) for both answer
+generation and judging. A matched no-memory artifact preserved the same seven
+questions and prompts while clearing all retrieved context.
+
+| Arm | LLM-as-Judge | Context tokens / question | Search mean / P95 |
+| --- | ---: | ---: | ---: |
+| NMG, K=20 | **0.7143** (5/7) | 1,046 | 152 / 160 ms |
+| No memory | 0.0000 (0/7) | 270 | 0 / 0 ms |
+
+All seven NMG units completed ingestion, retrieval, cleanup, answering, and
+judging without failures. The two misses were the expected answers `Target`
+and `Serenity Yoga`; the reader explicitly reported that the retrieved context
+did not contain the requested location, so these are retrieval/evidence
+coverage failures rather than answer-generation failures. This sample is a
+pipeline smoke, not a statistically meaningful benchmark result.
+
+The first baseline attempt exposed a harness bug: the transformer cleared
+LoCoMo's `context` fields but retained LongMemEval's `search_context`.
+`prepare-no-memory.ts` now clears both schemas and resets both duration fields;
+a regression test protects the matched-baseline invariant.
+
+### LoCoMo
+
 The pinned LoCoMo search-only smoke ingested all 272 sessions for the ten
 official conversations in about 3 seconds, then completed all 1,540 category
 1--4 queries in 54 seconds with ten workers and no search failures. Per-query
