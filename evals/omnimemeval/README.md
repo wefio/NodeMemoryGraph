@@ -123,6 +123,23 @@ with only partial evidence it falls to 16.67%, and with no exact evidence to
 rather than reader capacity alone, as the main remaining bottleneck. This
 audit is deliberately strict and is not an official LongMemEval score.
 
+The assistant category was then isolated as a 56-question diagnostic. Expanding
+the high-confidence assistant-recall cue from the literal words `assistant`,
+`you said`, and `previous chat` to ordinary references such as `you
+recommended`, `your answer`, and `previous conversation` retrieved exact
+evidence for 46/56 questions (82.14%): assistant evidence recall rose from
+14.81% in the full run to 43/51 (84.31%) in the isolated category. With the
+same DeepSeek reader and official judge, accuracy rose from 16/56 (28.57%) to
+48/56 (85.71%). The cue fired for 55/56 assistant-category questions and none
+of the other 444 LongMemEval questions.
+
+An additional experiment embedded each assistant reply together with its
+preceding user prompt. It reached 47/56 exact hits, but assistant evidence
+recall remained 43/51 while mean context grew from 6,792 to 7,503 characters
+and mean search latency grew from 172 to 191 ms. The paired representation was
+therefore rejected. NMG retains raw turn-level evidence and actor metadata.
+Query-intent cues choose the actor search scope; they do not rewrite evidence.
+
 Reproduce the diagnostic with:
 
 ```powershell

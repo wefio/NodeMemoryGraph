@@ -70,7 +70,8 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
       id: 6,
       op: "search",
       userId: "alice",
-      query: "What did you say in our previous chat about Admon's Sunday shift?",
+      query:
+        "I'm checking our previous conversation. Can you remind me what rotation you recommended for Admon on Sunday?",
       topK: 4,
     }) as { text: string };
     assert.match(assistantRecall.text, /Admon the Sunday day shift/);

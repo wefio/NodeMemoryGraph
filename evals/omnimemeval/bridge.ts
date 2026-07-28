@@ -128,6 +128,13 @@ export class OmniMemEvalBridge {
       const role = historyRole(message.role);
       const sourceRef = `omnimemeval:${userKey(userId)}:${conversation}:${index}:` +
         createHash("sha256").update(`${role}\0${message.content}`).digest("hex").slice(0, 16);
+      const history = store.appendHistory({
+        content: message.content,
+        role,
+        sessionId,
+        sourceMessageId: String(index),
+        sourceRef,
+      });
       store.remember({
         statement: message.content,
         nodeName,
@@ -135,10 +142,8 @@ export class OmniMemEvalBridge {
         memoryType: "conversation_evidence",
         sourceActor: memoryActor(role),
         truthStatus: role === "user" ? "asserted" : "unverified",
-        evidence: message.content,
+        evidenceHistoryId: history.id,
         eventTime: message.chat_time,
-        sessionId,
-        sourceRef,
         tier: 2,
         importance: role === "user" ? 0.6 : 0.4,
         scope: { benchmark: "OmniMemEval", user: userKey(userId) },
@@ -250,7 +255,8 @@ export class OmniMemEvalBridge {
 }
 
 function prefersAssistantEvidence(query: string): boolean {
-  return /\b(?:assistant|you said|previous chat)\b/iu.test(query);
+  return /\b(?:assistant|previous\s+(?:chat|conversation)|earlier\s+(?:you|we)|you\s+(?:said|suggested|recommended|provided|mentioned|told|wrote|created|made|gave|listed|outlined|explained)|we\s+(?:discussed|talked|decided)|(?:(?:can|could)\s+you|you\s+could)\s+remind\s+me|your\s+(?:answer|response|recommendation|list|example))\b/iu
+    .test(query);
 }
 
 function needsTemporalContext(query: string): boolean {
