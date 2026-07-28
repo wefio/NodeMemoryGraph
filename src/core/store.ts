@@ -21,6 +21,7 @@ import type {
   HistoryRole,
   MemoryContext,
   MemoryActor,
+  MemoryMarker,
   MemoryNode,
   MemoryNodeKind,
   LeafBlock,
@@ -127,7 +128,7 @@ export class NmgStore {
     const row = this.#db
       .prepare(
         "SELECT id, node_id, status, statement, memory_type, state_key, event_time, " +
-        "source_actor, truth_status, confidence, polarity, predicate_key, extract_method, claims_json, scope_json, valid_from, valid_until, " +
+        "source_actor, truth_status, confidence, polarity, predicate_key, extract_method, claims_json, markers_json, scope_json, valid_from, valid_until, " +
         "residence, promoted_at, expires_at, evidence_role, supersedes_id, " +
         "tier, importance, access_count, last_accessed_at, evidence_id, " +
         "write_reason, write_source, created_at " +
@@ -151,6 +152,7 @@ export class NmgStore {
       predicateKey: row.predicate_key ? String(row.predicate_key) : null,
       extractMethod: row.extract_method ? (String(row.extract_method) as MemoryRecord["extractMethod"]) : null,
       claims: parseClaims(row.claims_json),
+      markers: parseMarkers(row.markers_json),
       scope: parseScope(row.scope_json),
       validFrom: row.valid_from ? String(row.valid_from) : null,
       validUntil: row.valid_until ? String(row.valid_until) : null,
@@ -357,6 +359,7 @@ export class NmgStore {
     predicateKey?: string;
     extractMethod?: MemoryRecord["extractMethod"];
     claims?: MemoryRecord["claims"];
+    markers?: MemoryMarker[];
     tier?: MemoryTier;
     importance?: number;
     scope?: MemoryScope;
@@ -390,6 +393,7 @@ export class NmgStore {
       predicateKey: claimRollup ? claimRollup.predicateKey : input.predicateKey ?? null,
       extractMethod: claimRollup ? claimRollup.extractMethod : input.extractMethod ?? null,
       claims: claimRollup ? claimRollup.claims : null,
+      markers: normalizeMarkers(input.markers),
       scope: input.scope ?? {},
       validFrom: input.validFrom ?? createdAt,
       validUntil: input.validUntil ?? null,
@@ -412,11 +416,11 @@ export class NmgStore {
       .prepare(
         `INSERT INTO memory_records
           (id, node_id, evidence_id, statement, memory_type, state_key,
-           event_time, source_actor, truth_status, confidence, polarity, predicate_key, extract_method, claims_json, scope_json, valid_from,
+           event_time, source_actor, truth_status, confidence, polarity, predicate_key, extract_method, claims_json, markers_json, scope_json, valid_from,
            valid_until, status, residence, promoted_at, expires_at,
            evidence_role, supersedes_id, tier, importance,
            access_count, last_accessed_at, write_reason, write_source, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
       )
       .run(
         memory.id,
@@ -433,6 +437,7 @@ export class NmgStore {
         memory.predicateKey,
         memory.extractMethod,
         serializeClaims(memory.claims),
+        serializeMarkers(memory.markers),
         serializeScope(memory.scope),
         memory.validFrom,
         memory.validUntil,
@@ -538,6 +543,7 @@ export class NmgStore {
         predicateKey: input.predicateKey,
         extractMethod: input.extractMethod,
         claims: input.claims,
+        markers: input.markers,
         tier: input.tier,
         importance: input.importance,
         scope: input.scope,
@@ -2802,6 +2808,7 @@ export class NmgStore {
            m.confidence AS m_confidence,
            m.polarity AS m_polarity,
            m.predicate_key AS m_predicate_key, m.extract_method AS m_extract_method, m.claims_json AS m_claims_json,
+           m.markers_json AS m_markers_json,
            m.scope_json AS m_scope_json, m.valid_from AS m_valid_from,
            m.valid_until AS m_valid_until, m.status AS m_status,
            m.residence AS m_residence, m.promoted_at AS m_promoted_at,
@@ -3597,6 +3604,7 @@ export class NmgStore {
          m.confidence AS m_confidence,
          m.polarity AS m_polarity,
          m.predicate_key AS m_predicate_key, m.extract_method AS m_extract_method, m.claims_json AS m_claims_json,
+         m.markers_json AS m_markers_json,
          m.scope_json AS m_scope_json, m.valid_from AS m_valid_from,
          m.valid_until AS m_valid_until, m.status AS m_status,
          m.residence AS m_residence, m.promoted_at AS m_promoted_at,
@@ -3790,6 +3798,7 @@ function mapSearchResult(row: Row, score: number): MemorySearchResult {
       predicateKey: row.m_predicate_key ? String(row.m_predicate_key) : null,
       extractMethod: row.m_extract_method ? (String(row.m_extract_method) as MemoryRecord["extractMethod"]) : null,
       claims: parseClaims(row.m_claims_json),
+      markers: parseMarkers(row.m_markers_json),
       scope: parseScope(row.m_scope_json),
       validFrom: row.m_valid_from ? String(row.m_valid_from) : null,
       validUntil: row.m_valid_until ? String(row.m_valid_until) : null,
@@ -3997,6 +4006,45 @@ function parseClaims(value: string | number | Uint8Array | null): MemoryRecord["
     confidence: claim.confidence ?? null,
     extractMethod: claim.extract_method,
   }));
+}
+
+function normalizeMarkers(markers: readonly MemoryMarker[] | undefined): MemoryMarker[] {
+  if (!markers) return [];
+  const normalized = markers.flatMap((marker) => {
+    const kind = marker.kind?.trim();
+    if (!kind) return [];
+    const attributes = marker.attributes
+      ? Object.fromEntries(
+          Object.entries(marker.attributes)
+            .filter(([, value]) =>
+              value === null ||
+              typeof value === "string" ||
+              typeof value === "number" ||
+              typeof value === "boolean"
+            )
+            .sort(([left], [right]) => left.localeCompare(right)),
+        )
+      : undefined;
+    return [{ kind, ...(attributes && Object.keys(attributes).length > 0 ? { attributes } : {}) }];
+  });
+  return [...new Map(normalized.map((marker) => [JSON.stringify(marker), marker])).values()];
+}
+
+function serializeMarkers(markers: readonly MemoryMarker[]): string {
+  return JSON.stringify(normalizeMarkers(markers));
+}
+
+function parseMarkers(value: string | number | Uint8Array | null): MemoryMarker[] {
+  const stored = parseStoredJson<unknown>(value, []);
+  if (!Array.isArray(stored)) return [];
+  return normalizeMarkers(
+    stored.filter(
+      (marker): marker is MemoryMarker =>
+        Boolean(marker) &&
+        typeof marker === "object" &&
+        typeof (marker as { kind?: unknown }).kind === "string",
+    ),
+  );
 }
 
 function matchesScope(memory: MemoryScope, requested?: MemoryScope): boolean {

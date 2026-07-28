@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { OpenAIEmbeddingClient } from "../../src/core/openai-embedding.ts";
 import { syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
 import { NmgStore } from "../../src/core/store.ts";
-import type { HistoryRole, MemoryActor } from "../../src/core/types.ts";
+import type { HistoryRole, MemoryActor, MemoryMarker } from "../../src/core/types.ts";
 
 const RETRIEVAL_GUIDANCE =
   "[NMG retrieval guidance] Treat relevant user facts, preferences, constraints, " +
@@ -146,7 +146,8 @@ export class OmniMemEvalBridge {
       if (forgetTarget) {
         forgetMatchingMemories(store, forgetTarget);
         store.remember({
-          statement: `[forget] ${forgetTarget}`,
+          statement: forgetTarget,
+          markers: [{ kind: "forget", attributes: { effect: "revoke" } }],
           nodeName: "Revoked memory boundary",
           nodeSummary: "User-requested memory revocation boundary.",
           memoryType: "constraint",
@@ -187,6 +188,7 @@ export class OmniMemEvalBridge {
       memoryId: string;
       nodeId: string;
       statement: string;
+      markers: MemoryMarker[];
       eventTime: string | null;
       score: number;
       sourceRef: string | null;
@@ -219,6 +221,7 @@ export class OmniMemEvalBridge {
       memoryId: result.memory.id,
       nodeId: result.node.id,
       statement: result.memory.statement,
+      markers: result.memory.markers,
       eventTime: result.memory.eventTime,
       score: result.combinedScore,
       sourceRef: result.evidence.sourceRef,
@@ -239,8 +242,11 @@ export class OmniMemEvalBridge {
                 includeTime && memory.eventTime
                   ? `[${memory.eventTime}] ${memory.statement}`
                   : memory.statement;
+              const rendered = memory.markers.some((marker) => marker.kind === "forget")
+                ? `[forget] ${base}`
+                : base;
               const note = notes.get(memory.memoryId);
-              return note ? `${base}\n${note}` : base;
+              return note ? `${rendered}\n${note}` : rendered;
             }),
           ].join("\n"),
       memories,

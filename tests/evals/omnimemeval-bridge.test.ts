@@ -199,12 +199,26 @@ test("OmniMemEval replaces an explicitly forgotten memory with a tagged revocati
       userId: "alice",
       query: "How did I feel about working from home and collaboration?",
       topK: 10,
-    }) as { text: string };
+    }) as {
+      text: string;
+      memories: Array<{
+        statement: string;
+        markers: Array<{ kind: string; attributes?: Record<string, unknown> }>;
+      }>;
+    };
     assert.match(
       forgotten.text,
       /\[forget\] I feel isolated working from home and miss collaborative in-person brainstorms/i,
     );
     assert.doesNotMatch(forgotten.text, /Please forget/i);
+    const revocation = forgotten.memories.find((memory) =>
+      memory.markers.some((marker) => marker.kind === "forget")
+    );
+    assert.ok(revocation);
+    assert.equal(revocation.statement.startsWith("[forget]"), false);
+    assert.deepEqual(revocation.markers, [
+      { kind: "forget", attributes: { effect: "revoke" } },
+    ]);
 
     const retained = await bridge.handle({
       id: 4,
@@ -260,12 +274,19 @@ test("semantic retrieval exposes a tagged revocation boundary", async () => {
       userId: "alice",
       query: "How can I recreate collaboration while studying online?",
       topK: 10,
-    }) as { text: string };
+    }) as {
+      text: string;
+      memories: Array<{ statement: string; markers: Array<{ kind: string }> }>;
+    };
     assert.match(
       result.text,
       /\[forget\] I feel isolated working from home and miss collaborative in-person brainstorms/i,
     );
     assert.doesNotMatch(result.text, /Please forget/i);
+    assert.ok(result.memories.some((memory) =>
+      memory.statement.startsWith("[forget]") === false &&
+      memory.markers.some((marker) => marker.kind === "forget")
+    ));
   } finally {
     bridge.close();
     rmSync(root, { recursive: true, force: true });

@@ -38,6 +38,27 @@ test("remember persists a memory with traceable evidence", () => {
   });
 });
 
+test("memory markers persist as extensible control metadata", () => {
+  withStore((store) => {
+    const markers = [
+      { kind: "forget", attributes: { effect: "revoke" } },
+      { kind: "future-extension", attributes: { enabled: true, score: 0.8 } },
+    ];
+    const saved = store.remember({
+      statement: "The user prefers jasmine tea",
+      nodeName: "tea preference",
+      markers,
+    });
+
+    assert.deepEqual(saved.memory.markers, markers);
+    assert.equal(saved.memory.statement.startsWith("[forget]"), false);
+
+    const [result] = store.search("jasmine tea");
+    assert.deepEqual(result?.memory.markers, markers);
+    assert.equal(result?.memory.statement, "The user prefers jasmine tea");
+  });
+});
+
 test("memory writes retain accepted and privacy-safe rejected policy decisions", () => {
   withStore((store) => {
     const saved = store.remember({
@@ -1493,6 +1514,8 @@ test("P3 schema migrates an existing pre-lifecycle database before creating new 
     assert.equal(saved.memory.residence, "ltg");
     assert.ok(saved.memory.promotedAt);
     assert.equal(saved.node.residence, "ltg");
+    assert.deepEqual(saved.memory.markers, []);
+    assert.deepEqual(store.search("Migration succeeded")[0]?.memory.markers, []);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });

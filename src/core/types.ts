@@ -92,6 +92,19 @@ export interface NodeRelation {
   createdAt: string;
 }
 
+export type MemoryMarkerValue = string | number | boolean | null;
+
+/**
+ * Typed control metadata attached to a memory without becoming part of its
+ * factual statement. Marker kinds are intentionally open so integrations can
+ * add labels such as `forget`, `sensitive`, `pinned`, or `exception` without a
+ * schema migration.
+ */
+export interface MemoryMarker {
+  kind: string;
+  attributes?: Record<string, MemoryMarkerValue>;
+}
+
 export interface MemoryRecord {
   id: string;
   nodeId: string;
@@ -114,6 +127,7 @@ export interface MemoryRecord {
   /** Atomic claims extracted from the statement; source of truth for the
    *  polarity/predicateKey/confidence rollup columns above. */
   claims: MemoryClaim[] | null;
+  markers: MemoryMarker[];
   scope: MemoryScope;
   validFrom: string | null;
   validUntil: string | null;
@@ -147,6 +161,7 @@ export interface RememberInput {
   predicateKey?: string;
   extractMethod?: ExtractMethod;
   claims?: MemoryClaim[];
+  markers?: MemoryMarker[];
   evidence?: string;
   evidenceHistoryId?: string;
   sessionId?: string;
