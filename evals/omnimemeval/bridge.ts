@@ -190,6 +190,11 @@ export class OmniMemEvalBridge {
         maxEvidence: limit,
         maxTokens: Math.max(1_000, limit * 300),
       },
+      // LongMemEval questions can require composing several turns from one
+      // conversation. The generic store keeps a conservative two-record
+      // per-node cap; this benchmark adapter explicitly opts into the larger
+      // evidence budget while the default remains unchanged for Pi memory.
+      maxResultsPerNode: limit,
     }, semantic);
     const memories = context.results.map((result) => ({
       memoryId: result.memory.id,

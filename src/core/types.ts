@@ -178,6 +178,8 @@ export interface SearchOptions {
   includeHistorical?: boolean;
   maxTier?: MemoryTier;
   limit?: number;
+  /** Maximum returned evidence records from any one semantic node. */
+  maxResultsPerNode?: number;
   graphHops?: number;
   retrievalMode?: "legacy" | "fts5" | "hashing" | "qwen3" | "hybrid";
   taskId?: string;

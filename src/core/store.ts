@@ -1277,20 +1277,18 @@ export class NmgStore {
         options.sourceActor,
       ),
     );
-    const nodeCounts = new Map<string, number>();
     const candidates = [...direct, ...related]
       .filter(
         (result, index, all) =>
           all.findIndex((candidate) => candidate.memory.id === result.memory.id) === index,
       )
-      .sort((left, right) => contextUsefulness(query, right) - contextUsefulness(query, left))
-      .filter((result) => {
-        const count = nodeCounts.get(result.node.id) ?? 0;
-        if (count >= 2) return false;
-        nodeCounts.set(result.node.id, count + 1);
-        return true;
-      });
+      .sort((left, right) => contextUsefulness(query, right) - contextUsefulness(query, left));
     const selectedNodes = new Set<string>();
+    const maxResultsPerNode = Math.max(1, Math.min(
+      options.maxResultsPerNode ?? 2,
+      budget.maxEvidence,
+    ));
+    const nodeResultCounts = new Map<string, number>();
     const results: MemorySearchResult[] = [];
     let estimatedTokens = 0;
     const exhausted = new Set<ActiveGraphBudgetUsage["exhausted"][number]>();
@@ -1303,6 +1301,8 @@ export class NmgStore {
         exhausted.add("nodes");
         continue;
       }
+      const nodeResultCount = nodeResultCounts.get(candidate.node.id) ?? 0;
+      if (nodeResultCount >= maxResultsPerNode) continue;
       const candidateTokens = estimateResultTokens(candidate);
       if (results.length > 0 && estimatedTokens + candidateTokens > budget.maxTokens) {
         exhausted.add("tokens");
@@ -1310,6 +1310,7 @@ export class NmgStore {
       }
       results.push(candidate);
       selectedNodes.add(candidate.node.id);
+      nodeResultCounts.set(candidate.node.id, nodeResultCount + 1);
       estimatedTokens += candidateTokens;
     }
     const persistentEdges = relations

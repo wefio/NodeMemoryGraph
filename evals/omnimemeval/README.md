@@ -56,7 +56,7 @@ central client registry, so copying only `nmg_client.py` is insufficient.
 
 ### LongMemEval
 
-A seven-conversation streaming smoke (`nmg_smoke7_20260728`, conversation
+A seven-conversation streaming smoke (`nmg_smoke7_fix_20260728`, conversation
 indices 0--6) exercised OmniMemEval's official add/search/delete lifecycle,
 then used `deepseek-chat` (`deepseek-v4-flash`, temperature 0) for both answer
 generation and judging. A matched no-memory artifact preserved the same seven
@@ -64,15 +64,16 @@ questions and prompts while clearing all retrieved context.
 
 | Arm | LLM-as-Judge | Context tokens / question | Search mean / P95 |
 | --- | ---: | ---: | ---: |
-| NMG, K=20 | **0.7143** (5/7) | 1,046 | 152 / 160 ms |
+| NMG, K=20 | **0.8571** (6/7) | 1,150 | 152 / 160 ms |
 | No memory | 0.0000 (0/7) | 270 | 0 / 0 ms |
 
 All seven NMG units completed ingestion, retrieval, cleanup, answering, and
-judging without failures. The two misses were the expected answers `Target`
-and `Serenity Yoga`; the reader explicitly reported that the retrieved context
-did not contain the requested location, so these are retrieval/evidence
-coverage failures rather than answer-generation failures. This sample is a
-pipeline smoke, not a statistically meaningful benchmark result.
+judging without failures. The earlier run missed both `Target` and `Serenity
+Yoga` because the generic search path capped each semantic node at two records.
+The OmniMemEval adapter now opts into a larger per-node evidence budget; this
+recovers `Serenity Yoga`. `Target` remains a weak-reader composition miss even
+though both same-session clues are present in the returned context. This sample
+is a pipeline smoke, not a statistically meaningful benchmark result.
 
 The first baseline attempt exposed a harness bug: the transformer cleared
 LoCoMo's `context` fields but retained LongMemEval's `search_context`.
