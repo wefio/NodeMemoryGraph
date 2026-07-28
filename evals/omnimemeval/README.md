@@ -69,11 +69,12 @@ questions and prompts while clearing all retrieved context.
 
 All seven NMG units completed ingestion, retrieval, cleanup, answering, and
 judging without failures. The earlier run missed both `Target` and `Serenity
-Yoga` because the generic search path capped each semantic node at two records.
-The OmniMemEval adapter now opts into a larger per-node evidence budget; this
-recovers `Serenity Yoga`. `Target` remains a weak-reader composition miss even
-though both same-session clues are present in the returned context. This sample
-is a pipeline smoke, not a statistically meaningful benchmark result.
+Yoga` because retrieval applied a per-node evidence cap. Retrieval now uses only
+shared Active Graph budgets: records from one node compete with records from
+other nodes by relevance, token cost, and remaining budget. This recovers
+`Serenity Yoga`. `Target` remains a weak-reader composition miss even though
+both same-session clues are present in the returned context. This sample is a
+pipeline smoke, not a statistically meaningful benchmark result.
 
 The first baseline attempt exposed a harness bug: the transformer cleared
 LoCoMo's `context` fields but retained LongMemEval's `search_context`.
