@@ -143,6 +143,59 @@ test("search headers disclose IDs but not source evidence", () => {
   assert.match(output, /activeGraphId/);
 });
 
+test("an explicit search may widen through the controller while automatic recall stays separate", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-controller-search-test-"));
+  const previousData = process.env.NMG_DATA_DIR;
+  const previousControllerSearch = process.env.NMG_CONTROLLER_SEARCH;
+  process.env.NMG_DATA_DIR = directory;
+  process.env.NMG_CONTROLLER_SEARCH = "1";
+  const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+  const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
+  const sessionManager = {
+    getSessionId: () => "controller-search-session",
+    getSessionFile: () => undefined,
+    getBranch: () => [],
+  };
+  try {
+    nmgExtension({
+      on(event: string, handler: (...args: unknown[]) => Promise<unknown>) {
+        handlers.set(event, handler);
+      },
+      registerTool(tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) {
+        tools.set(tool.name, tool);
+      },
+    } as never);
+    const context = { sessionManager };
+    for (let index = 0; index < 12; index += 1) {
+      await tools
+        .get("nmg_remember")!
+        .execute(
+          `remember-${index}`,
+          { statement: `Atlas project fact ${index}`, nodeName: "Atlas project" },
+          undefined,
+          undefined,
+          context,
+        );
+    }
+    const result = (await tools
+      .get("nmg_search")!
+      .execute("search", { query: "Atlas project facts" }, undefined, undefined, context)) as {
+      details: MemoryContext;
+    };
+    assert.ok(result.details.activeGraph);
+    assert.ok(result.details.activeGraph.budget.maxEvidence > 8);
+    assert.ok(result.details.activeGraph.budget.maxEvidence <= 20);
+    assert.ok(result.details.results.length > 8);
+    await handlers.get("session_shutdown")!({}, context);
+  } finally {
+    if (previousData === undefined) delete process.env.NMG_DATA_DIR;
+    else process.env.NMG_DATA_DIR = previousData;
+    if (previousControllerSearch === undefined) delete process.env.NMG_CONTROLLER_SEARCH;
+    else process.env.NMG_CONTROLLER_SEARCH = previousControllerSearch;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("Pi write and automatic recall close the claim contradiction loop", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-extension-claims-"));
   const previousData = process.env.NMG_DATA_DIR;

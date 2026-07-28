@@ -1373,7 +1373,7 @@ export class NmgStore {
     const expansions = activeGraphExpansions(directSelectedNodeIds, persistentEdges, graphHops);
     const budgetLedger = activeGraphBudgetLedger(budget, usage);
     const taskId = options.taskId?.trim() || stableTaskId(query);
-    const traceId = this.recordRetrievalTrace({
+    const traceInput: RetrievalTraceInput = {
       query,
       taskId,
       resultMemoryIds: results.map((result) => result.memory.id),
@@ -1390,7 +1390,11 @@ export class NmgStore {
       selections,
       expansions,
       budgetLedger,
-    });
+    };
+    // A controller probe is a private planning artifact, not an interaction the
+    // model could have used. Persisting it would pollute online-learning labels
+    // and steadily grow the trace table with duplicate searches.
+    const traceId = options.persistTrace === false ? randomUUID() : this.recordRetrievalTrace(traceInput);
     const activeGraph: ActiveGraph = {
       id: traceId,
       query,

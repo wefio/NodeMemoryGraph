@@ -188,6 +188,11 @@ export interface SearchOptions {
   leafCandidateLimit?: number;
   /** Selects compressed node/leaf routing or a full record-vector diagnostic path. */
   vectorGranularity?: "hierarchy" | "records" | "union";
+  /**
+   * Internal two-stage retrieval can inspect a disposable candidate graph before
+   * committing the final Active Graph. The probe must not become a feedback trace.
+   */
+  persistTrace?: boolean;
 }
 
 export interface EmbeddingDocument {

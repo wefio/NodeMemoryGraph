@@ -196,8 +196,13 @@ three stable tools. This prevents unrelated global permission extensions from
 blocking non-interactive RPC tool calls. Set `NMG_PI_MODEL` to override the
 test model when needed.
 
-The learned retrieval controller remains in shadow mode until matched
-evaluation gates pass. Shadow events are written locally to
+The learned retrieval controller remains shadow-observed for automatic recall,
+so ordinary turns keep their small fixed context budget. For an explicit
+`nmg_search` without a caller-specified limit, it now performs a disposable
+lexical probe and may widen only that tool call within a hard envelope (up to
+20 records and 6,000 estimated tokens). The committed search remains the sole
+retrieval trace and may still be read with `nmg_get`. Set
+`NMG_CONTROLLER_SEARCH=0` to disable this adaptive expansion. Shadow events are written locally to
 `.nmg/evaluation/controller-shadow.jsonl` (or under `NMG_DATA_DIR`) with bounded
 size and rotation. They record deterministic and learned node order, candidate
 exposure, explicit `nmg_get` use, retrieval/controller latency, estimated

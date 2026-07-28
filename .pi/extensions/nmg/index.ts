@@ -78,7 +78,9 @@ export async function searchMemoryContext(
   options: Parameters<NmgStore["searchContext"]>[1],
 ): Promise<MemoryContext> {
   const vectorGranularity = options?.vectorGranularity ?? "records";
-  if (!embeddingClient) {
+  // A controller probe only needs cheap lexical candidate statistics. It must
+  // not spend a second embedding request before the committed search.
+  if (!embeddingClient || options?.retrievalMode === "fts5") {
     return {
       ...memoryStore.searchContext(query, { ...options, retrievalMode: "fts5" }),
       retrieval: { mode: "lexical", degraded: false },
@@ -143,6 +145,10 @@ export function configuredGraphHops(fallback: number): number {
 export default function nmgExtension(pi: ExtensionAPI): void {
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
   const controllerShadowEnabled = process.env.NMG_CONTROLLER_SHADOW !== "0";
+  // Normal automatic recall remains deliberately small. The controller is
+  // allowed to widen only an explicit nmg_search, where the model has asked to
+  // spend a tool call on remembering.
+  const controllerSearchEnabled = process.env.NMG_CONTROLLER_SEARCH !== "0";
   let store: NmgStore | undefined;
   const getStore = (): NmgStore => (store ??= new NmgStore(databasePath()));
   const controller = new ControllerRuntime(join(dataDirectory(), "controller.json"));
@@ -207,7 +213,41 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     sessionId: string,
     origin: ShadowRetrievalOrigin,
   ): Promise<MemoryContext> => {
-    const context = await searchMemoryContext(getStore(), embeddingClient, query, options);
+    const canExpand =
+      controllerSearchEnabled &&
+      origin === "tool" &&
+      options.limit === undefined &&
+      options.activeGraphBudget === undefined;
+    let context = await searchMemoryContext(getStore(), embeddingClient, query, {
+      ...options,
+      // A controller probe is intentionally not an actual retrieval trace.
+      ...(canExpand ? { persistTrace: false, retrievalMode: "fts5" as const } : {}),
+    });
+    if (canExpand && context.activeGraph) {
+      const baseline = context.activeGraph.budget;
+      const plan = controller.allocate(context, baseline, {
+        maxNodes: 16,
+        maxEdges: 24,
+        maxEvidence: 20,
+        maxTokens: 6_000,
+        maxGraphHops: 2,
+        maxLocalTier: 3,
+        maxLatencyMs: 800,
+      });
+      if (plan && budgetWidens(baseline, plan.budget)) {
+        context = await searchMemoryContext(getStore(), embeddingClient, query, {
+          ...options,
+          // The final search is the only trace that the model can consume and
+          // later mark useful. A user-provided limit is never overridden.
+          limit: plan.budget.maxEvidence,
+          activeGraphBudget: plan.budget,
+        });
+      } else if (context.activeGraph) {
+        // The probe already has a valid graph; make it a normal feedback trace
+        // only when no wider final query was necessary.
+        context = await searchMemoryContext(getStore(), embeddingClient, query, options);
+      }
+    }
     if (context.activeGraph) {
       if (controllerShadowEnabled) {
         searchContexts.set(context.activeGraph.id, context);
@@ -1098,6 +1138,21 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         ctx.ui.notify(`Recorded NMG shadow feedback for ${graphId}.`, "info");
       },
     });
+}
+
+function budgetWidens(
+  baseline: NonNullable<MemoryContext["activeGraph"]>["budget"],
+  proposed: NonNullable<MemoryContext["activeGraph"]>["budget"],
+): boolean {
+  return (
+    proposed.maxNodes > baseline.maxNodes ||
+    proposed.maxEdges > baseline.maxEdges ||
+    proposed.maxEvidence > baseline.maxEvidence ||
+    proposed.maxTokens > baseline.maxTokens ||
+    proposed.maxGraphHops > baseline.maxGraphHops ||
+    proposed.maxLocalTier > baseline.maxLocalTier ||
+    proposed.maxLatencyMs > baseline.maxLatencyMs
+  );
 }
 
 function summarizeMessageUsage(messages: readonly unknown[]): {

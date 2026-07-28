@@ -1022,7 +1022,9 @@ Important gaps between the prototype and the target plugin:
   and false-promotion evaluation are stronger;
 - `MemoryGraphReasoner` remains a numerical Lab prototype that scores the
   global unvisited candidate set rather than following graph edges;
-- the differentiable controller is trained and evaluated as a shadow primitive;
+- the differentiable controller remains shadow-observed for automatic recall;
+  an explicit `nmg_search` without a caller-specified limit may use a disposable
+  lexical probe and a bounded learned budget to widen that one retrieval only;
   it has not passed the matched quality/cost gate required to affect production
   retrieval;
 - the ANN experiment has unacceptable recall on the near-duplicate workload;

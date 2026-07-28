@@ -8,9 +8,11 @@ import {
 } from "./controller-protocol.ts";
 import {
   DifferentiableController,
+  type ControllerAction,
+  type ControllerBudgetDimension,
   type DifferentiableControllerState,
 } from "./differentiable-controller.ts";
-import type { MemoryContext, RetrievalTrace } from "./types.ts";
+import type { ActiveGraphBudget, MemoryContext, RetrievalTrace } from "./types.ts";
 
 export interface ControllerRuntimeState {
   version: 1;
@@ -24,6 +26,14 @@ export interface ControllerShadowDecision {
   baselineNodeIds: string[];
   learnedNodeIds: string[];
   changed: boolean;
+  trainingSteps: number;
+}
+
+/** A real, bounded budget decision derived from a disposable candidate graph. */
+export interface ControllerBudgetDecision {
+  action: ControllerAction;
+  fractions: Record<ControllerBudgetDimension, number>;
+  budget: ActiveGraphBudget;
   trainingSteps: number;
 }
 
@@ -84,6 +94,53 @@ export class ControllerRuntime {
       baselineNodeIds,
       learnedNodeIds,
       changed: baselineNodeIds.some((nodeId, index) => learnedNodeIds[index] !== nodeId),
+      trainingSteps: this.#controller.trainingSteps,
+    };
+  }
+
+  /**
+   * Convert the controller's continuous allocation head into a concrete Active
+   * Graph budget. `minimum` and `maximum` are hard operator policy bounds: the
+   * learned model can allocate within the envelope but cannot weaken safety or
+   * latency limits by itself.
+   */
+  allocate(
+    context: MemoryContext,
+    minimum: ActiveGraphBudget,
+    maximum: ActiveGraphBudget,
+  ): ControllerBudgetDecision | null {
+    if (!context.activeGraph) return null;
+    const trace = traceFromActiveGraph(context);
+    const sample = controllerSampleFromTrace(context, trace);
+    const fractions = this.#controller.allocateBudget(sample.globalFeatures);
+    const control = this.#controller.chooseControl(sample.globalFeatures);
+    const expanded = control.action === "expand";
+    const fraction = (dimension: ControllerBudgetDimension): number =>
+      Math.max(fractions[dimension], expanded ? 0.75 : 0);
+    return {
+      action: control.action,
+      fractions,
+      budget: {
+        maxNodes: project(minimum.maxNodes, maximum.maxNodes, fraction("nodes")),
+        maxEdges: project(minimum.maxEdges, maximum.maxEdges, fraction("edges")),
+        maxEvidence: project(minimum.maxEvidence, maximum.maxEvidence, fraction("evidence")),
+        maxTokens: project(minimum.maxTokens, maximum.maxTokens, fraction("tokens")),
+        maxGraphHops: project(
+          minimum.maxGraphHops,
+          maximum.maxGraphHops,
+          fraction("graphHops"),
+        ),
+        maxLocalTier: project(
+          minimum.maxLocalTier,
+          maximum.maxLocalTier,
+          fraction("localTier"),
+        ) as ActiveGraphBudget["maxLocalTier"],
+        maxLatencyMs: project(
+          minimum.maxLatencyMs,
+          maximum.maxLatencyMs,
+          fraction("latencyMs"),
+        ),
+      },
       trainingSteps: this.#controller.trainingSteps,
     };
   }
@@ -160,4 +217,10 @@ function rank(values: Array<{ nodeId: string; score: number }>): string[] {
   return values
     .sort((left, right) => right.score - left.score || left.nodeId.localeCompare(right.nodeId))
     .map((value) => value.nodeId);
+}
+
+function project(minimum: number, maximum: number, fraction: number): number {
+  const lower = Math.min(minimum, maximum);
+  const upper = Math.max(minimum, maximum);
+  return Math.round(lower + (upper - lower) * Math.max(0, Math.min(1, fraction)));
 }

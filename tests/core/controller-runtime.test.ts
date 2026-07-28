@@ -36,3 +36,36 @@ test("controller runtime learns from actual-use traces and persists exact state"
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("controller allocation widens an explicit recall within its operator envelope", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-controller-budget-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    store.remember({ statement: "Project color is cobalt", nodeName: "Project" });
+    const context = store.searchContext("project color", { limit: 8, persistTrace: false });
+    assert.ok(context.activeGraph);
+    const decision = new ControllerRuntime(join(directory, "controller.json")).allocate(
+      context,
+      context.activeGraph.budget,
+      {
+        maxNodes: 16,
+        maxEdges: 24,
+        maxEvidence: 20,
+        maxTokens: 6_000,
+        maxGraphHops: 2,
+        maxLocalTier: 3,
+        maxLatencyMs: 800,
+      },
+    );
+    assert.ok(decision);
+    assert.ok(decision.budget.maxEvidence > context.activeGraph.budget.maxEvidence);
+    assert.ok(decision.budget.maxEvidence <= 20);
+    assert.ok(decision.budget.maxTokens > context.activeGraph.budget.maxTokens);
+    assert.ok(decision.budget.maxTokens <= 6_000);
+    assert.ok(decision.budget.maxNodes <= 16);
+    assert.ok(decision.budget.maxLocalTier <= 3);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

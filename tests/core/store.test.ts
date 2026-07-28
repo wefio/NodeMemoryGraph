@@ -71,6 +71,15 @@ test("memory writes retain accepted and privacy-safe rejected policy decisions",
   });
 });
 
+test("disposable controller probes do not persist retrieval traces", () => {
+  withStore((store) => {
+    store.remember({ statement: "Project Atlas stores analytics in DuckDB", nodeName: "Atlas" });
+    const context = store.searchContext("Atlas analytics", { persistTrace: false });
+    assert.ok(context.activeGraph);
+    assert.equal(store.retrievalTrace(context.activeGraph.id), null);
+  });
+});
+
 test("semantic searchContext preserves Active Graph budgets and tracing", () => {
   withStore((store) => {
     const saved = store.remember({
