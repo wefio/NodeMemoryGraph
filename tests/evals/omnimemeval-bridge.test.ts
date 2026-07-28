@@ -46,6 +46,7 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
 
     assert.match(alice.text, /\[NMG retrieval guidance\]/);
     assert.match(alice.text, /Kepler/);
+    assert.doesNotMatch(alice.text, /\[forget\]/);
     assert.doesNotMatch(alice.text, /2026-07-20/);
     assert.equal(bob.text, "");
 
@@ -190,6 +191,15 @@ test("OmniMemEval replaces an explicitly forgotten memory with a tagged revocati
           content:
             "Please forget that I feel isolated working from home and miss collaborative in-person brainstorms.",
         },
+        {
+          role: "user",
+          content: "I prefer collaborative whiteboard sessions over written status updates.",
+        },
+        {
+          role: "user",
+          content:
+            "Please forget that I prefer collaborative whiteboard sessions over written status updates.",
+        },
       ],
     });
 
@@ -265,6 +275,15 @@ test("semantic retrieval exposes a tagged revocation boundary", async () => {
           content:
             "Please forget that I feel isolated working from home and miss collaborative in-person brainstorms.",
         },
+        {
+          role: "user",
+          content: "I prefer collaborative whiteboard sessions over written status updates.",
+        },
+        {
+          role: "user",
+          content:
+            "Please forget that I prefer collaborative whiteboard sessions over written status updates.",
+        },
       ],
     });
 
@@ -280,13 +299,15 @@ test("semantic retrieval exposes a tagged revocation boundary", async () => {
     };
     assert.match(
       result.text,
-      /\[forget\] I feel isolated working from home and miss collaborative in-person brainstorms/i,
+      /\[forget\] I (?:feel isolated working from home|prefer collaborative whiteboard sessions)/i,
     );
     assert.doesNotMatch(result.text, /Please forget/i);
-    assert.ok(result.memories.some((memory) =>
+    const revocations = result.memories.filter((memory) =>
       memory.statement.startsWith("[forget]") === false &&
       memory.markers.some((marker) => marker.kind === "forget")
-    ));
+    );
+    assert.equal(revocations.length, 2);
+    assert.equal(result.text.match(/^\[forget\]/gm)?.length, 1);
   } finally {
     bridge.close();
     rmSync(root, { recursive: true, force: true });

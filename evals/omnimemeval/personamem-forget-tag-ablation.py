@@ -76,6 +76,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Remove [forget] rows and restore the pre-revocation guidance.",
     )
+    parser.add_argument(
+        "--max-existing-tags",
+        type=int,
+        help="In filter-only mode, retain at most this many existing [forget] rows.",
+    )
+    parser.add_argument(
+        "--min-existing-similarity",
+        type=float,
+        help="In filter-only mode, drop existing tags below forget_tag_similarity.",
+    )
     return parser.parse_args()
 
 
@@ -138,12 +148,46 @@ def load_memory_state(chat_dir: Path) -> dict[int, tuple[list[str], list[str]]]:
     return result
 
 
+def project_existing_tags(
+    context: str,
+    *,
+    maximum: int | None,
+    similarity: float | None,
+    minimum_similarity: float | None,
+) -> tuple[str, int]:
+    keep = maximum
+    if minimum_similarity is not None and (
+        similarity is None or similarity < minimum_similarity
+    ):
+        keep = 0
+    retained = 0
+    lines: list[str] = []
+    for line in context.splitlines():
+        if not line.lstrip().startswith("[forget]"):
+            lines.append(line)
+            continue
+        if keep is None or retained < keep:
+            lines.append(line)
+            retained += 1
+    projected = "\n".join(lines)
+    if retained == 0:
+        projected = projected.replace(TAG_GUIDANCE, OLD_GUIDANCE)
+    return projected, retained
+
+
 def main() -> None:
     args = parse_args()
     if args.top_tags < 1:
         raise ValueError("--top-tags must be at least 1")
     if args.strip_forget_tags and not args.filter_only:
         raise ValueError("--strip-forget-tags requires --filter-only")
+    if args.max_existing_tags is not None and args.max_existing_tags < 0:
+        raise ValueError("--max-existing-tags must be non-negative")
+    if (
+        (args.max_existing_tags is not None or args.min_existing_similarity is not None)
+        and not args.filter_only
+    ):
+        raise ValueError("existing-tag projection requires --filter-only")
 
     source = json.loads(args.source.read_text(encoding="utf-8"))
     rows = []
@@ -180,21 +224,36 @@ def main() -> None:
                 new_key = f"pm_exper_user_{row_index}_{args.version}"
                 updated["key"] = new_key
                 updated["user_id"] = new_key
-                if args.strip_forget_tags:
+                if (
+                    args.strip_forget_tags
+                    or args.max_existing_tags is not None
+                    or args.min_existing_similarity is not None
+                ):
                     context = str(updated.get("search_context", ""))
-                    context = "\n".join(
-                        line
-                        for line in context.splitlines()
-                        if not line.lstrip().startswith("[forget]")
+                    maximum = 0 if args.strip_forget_tags else args.max_existing_tags
+                    context, retained = project_existing_tags(
+                        context,
+                        maximum=maximum,
+                        similarity=(
+                            float(updated["forget_tag_similarity"])
+                            if "forget_tag_similarity" in updated
+                            else None
+                        ),
+                        minimum_similarity=args.min_existing_similarity,
                     )
-                    updated["search_context"] = context.replace(
-                        TAG_GUIDANCE, OLD_GUIDANCE
-                    )
+                    updated["search_context"] = context
+                    updated["projected_forget_tags"] = retained
+                    tagged += int(retained > 0)
                 updated["ablation_source_key"] = old_key
                 updated["ablation"] = (
                     "strip_forget_tags"
                     if args.strip_forget_tags
-                    else "category_filter_only"
+                    else (
+                        "selective_forget_projection"
+                        if args.max_existing_tags is not None
+                        or args.min_existing_similarity is not None
+                        else "category_filter_only"
+                    )
                 )
                 output[new_key] = [updated]
             continue
@@ -277,6 +336,8 @@ def main() -> None:
                 "filter_only": args.filter_only,
                 "category": args.category,
                 "strip_forget_tags": args.strip_forget_tags,
+                "max_existing_tags": args.max_existing_tags,
+                "min_existing_similarity": args.min_existing_similarity,
                 "output": str(args.output),
             },
             ensure_ascii=False,

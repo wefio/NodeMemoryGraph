@@ -282,6 +282,27 @@ contaminate unrelated questions. The next change should be a selective
 revocation gate at Active Graph projection time, not deletion of the marker or
 a hard per-node count limit.
 
+The first projection rule is intentionally smaller than a learned gate: after
+retrieval ranking, expose at most the highest-ranked marker of each registered
+control kind. All marker records remain in the structured result and audit
+trace. On the same 5,000 questions, projecting only the Top-1 `forget` marker
+scored **35.04%** overall and preserved **18.70%** on `ask_to_forget`. Against
+the all-marker arm it produced 224 wins, 181 losses, and 4,595 ties
+(`p=0.0368`); within `ask_to_forget`, wins and losses were exactly 39/39. Against
+the fully stripped arm, overall accuracy was indistinguishable (206 wins, 205
+losses), while forgetting remained materially better (80 wins, 28 losses,
+`p=5.65e-7`). This supports an AG projection budget rather than a storage
+limit: a memory may retain arbitrarily many typed markers, but the model sees
+only the most relevant registered control marker per kind.
+
+A second answer-stage upper-bound ablation selected the nearest explicit
+revocation only when BGE similarity was at least 0.65. It exposed a marker on
+1,383/5,000 questions and scored **35.46%** overall with **18.03%** on
+`ask_to_forget`. The overall gain over Top-1 was not significant (206 wins,
+185 losses, `p=0.312`), and this arm sees the persona's complete revocation
+set rather than only NMG's retrieved candidates. It therefore does not justify
+adding a model-specific threshold to the runtime.
+
 All answer passes used the official PersonaMem response and metric scripts and
 DeepSeek v4 Flash at temperature zero with 64 concurrent workers. The
 nearest-tag arm remains an answer-stage ablation rather than an end-to-end
@@ -290,6 +311,16 @@ explicit revocation from the original persona with BGE. Maximum forget-target
 similarity separates forget from non-forget questions only moderately
 (`AUC=0.796`), so a single similarity threshold is useful as a baseline but is
 not yet a reliable production gate.
+
+On Windows, the official response runner rewrites its growing JSON checkpoint
+with `os.replace` after every answer. Reading that file during a run can lock
+the target and make the writer fail with `WinError 5`; monitoring must use
+process/log state or a copied snapshot. This checkpoint rewrite also becomes a
+substantial part of wall-clock cost at 5,000 questions. The official prompt is
+kept unchanged for comparability. Non-official NMG runners should keep rubric,
+model options, and tool schemas in a stable prefix, place per-question payloads
+after it, and schedule matched arms adjacently to improve provider prefix-cache
+reuse.
 
 ### LoCoMo
 

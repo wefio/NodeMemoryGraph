@@ -9,13 +9,28 @@ import { syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import type { HistoryRole, MemoryActor, MemoryMarker } from "../../src/core/types.ts";
 
-const RETRIEVAL_GUIDANCE =
+const BASE_RETRIEVAL_GUIDANCE =
   "[NMG retrieval guidance] Treat relevant user facts, preferences, constraints, " +
   "tools, and prior experiences as evidence for a personalized answer. Apply them " +
   "to the current request even when the final answer did not appear verbatim in " +
+  "history. Do not invent unsupported user details.";
+const FORGET_RETRIEVAL_GUIDANCE = BASE_RETRIEVAL_GUIDANCE.replace(
+  "history. Do not invent",
   "history. A line beginning with [forget] is a revocation boundary, not an active " +
-  "fact: do not use or reconstruct that content, and prefer an answer independent " +
-  "of it. Do not invent unsupported user details.";
+    "fact: do not use or reconstruct that content, and prefer an answer independent " +
+    "of it. Do not invent",
+);
+const PROJECTED_CONTROL_MARKERS = new Set(["forget"]);
+
+type OmniRetrievedMemory = {
+  memoryId: string;
+  nodeId: string;
+  statement: string;
+  markers: MemoryMarker[];
+  eventTime: string | null;
+  score: number;
+  sourceRef: string | null;
+};
 
 export interface OmniMessage {
   role?: string;
@@ -184,15 +199,7 @@ export class OmniMemEvalBridge {
   async #search(userId: string, query: string, topK: number): Promise<{
     text: string;
     retrievalMode: "lexical" | "records";
-    memories: Array<{
-      memoryId: string;
-      nodeId: string;
-      statement: string;
-      markers: MemoryMarker[];
-      eventTime: string | null;
-      score: number;
-      sourceRef: string | null;
-    }>;
+    memories: OmniRetrievedMemory[];
   }> {
     if (!query.trim()) throw new Error("query must not be empty");
     const limit = Math.max(1, Math.min(Math.trunc(topK || 10), 50));
@@ -231,23 +238,16 @@ export class OmniMemEvalBridge {
     // retrieved memory contradicts another memory (claims metadata), the
     // note is rendered into the context regardless of the caller.
     const notes = store.contradictionNotes(memories.map((m) => m.memoryId));
+    const projection = projectMemoryContext(memories, includeTime, notes);
     return {
       retrievalMode: semantic ? "records" : "lexical",
-      text: memories.length === 0
+      text: projection.lines.length === 0
         ? ""
         : [
-            RETRIEVAL_GUIDANCE,
-            ...memories.map((memory) => {
-              const base =
-                includeTime && memory.eventTime
-                  ? `[${memory.eventTime}] ${memory.statement}`
-                  : memory.statement;
-              const rendered = memory.markers.some((marker) => marker.kind === "forget")
-                ? `[forget] ${base}`
-                : base;
-              const note = notes.get(memory.memoryId);
-              return note ? `${rendered}\n${note}` : rendered;
-            }),
+            projection.hasForget
+              ? FORGET_RETRIEVAL_GUIDANCE
+              : BASE_RETRIEVAL_GUIDANCE,
+            ...projection.lines,
           ].join("\n"),
       memories,
     };
@@ -282,6 +282,39 @@ export class OmniMemEvalBridge {
   }
 }
 
+function projectMemoryContext(
+  memories: readonly OmniRetrievedMemory[],
+  includeTime: boolean,
+  notes: ReadonlyMap<string, string>,
+): { lines: string[]; hasForget: boolean } {
+  const projectedKinds = new Set<string>();
+  const lines: string[] = [];
+  for (const memory of memories) {
+    const controlKinds = [
+      ...new Set(
+        memory.markers
+          .map((marker) => marker.kind.trim().toLowerCase())
+          .filter((kind) => PROJECTED_CONTROL_MARKERS.has(kind)),
+      ),
+    ];
+    const visibleKinds = controlKinds.filter((kind) => !projectedKinds.has(kind));
+    if (controlKinds.length > 0 && visibleKinds.length === 0) continue;
+    visibleKinds.forEach((kind) => projectedKinds.add(kind));
+
+    const base =
+      includeTime && memory.eventTime
+        ? `[${memory.eventTime}] ${memory.statement}`
+        : memory.statement;
+    const rendered =
+      visibleKinds.length > 0
+        ? `[${visibleKinds.join(",")}] ${base}`
+        : base;
+    const note = notes.get(memory.memoryId);
+    lines.push(note ? `${rendered}\n${note}` : rendered);
+  }
+  return { lines, hasForget: projectedKinds.has("forget") };
+}
+
 function prefersAssistantEvidence(query: string): boolean {
   return /\b(?:assistant|previous\s+(?:chat|conversation)|earlier\s+(?:you|we)|you\s+(?:said|suggested|recommended|provided|mentioned|told|wrote|created|made|gave|listed|outlined|explained)|we\s+(?:discussed|talked|decided)|(?:(?:can|could)\s+you|you\s+could)\s+remind\s+me|your\s+(?:answer|response|recommendation|list|example))\b/iu
     .test(query);
@@ -312,6 +345,7 @@ function forgetMatchingMemories(store: NmgStore, target: string): void {
     persistTrace: false,
   }).results;
   for (const candidate of candidates) {
+    if (candidate.memory.markers.some((marker) => marker.kind === "forget")) continue;
     const candidateTerms = forgetTerms(candidate.memory.statement);
     let shared = 0;
     for (const term of targetTerms) {
