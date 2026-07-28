@@ -103,10 +103,14 @@ class NmgClient:
             assert process.stdout is not None
             self._next_id += 1
             request_id = self._next_id
+            # Keep the line protocol ASCII-only.  OmniMemEval conversations can
+            # contain arbitrary Unicode (including malformed surrogate data in
+            # upstream corpora); JSON escapes preserve the content while making
+            # the Python-to-Node pipe portable on Windows.
             process.stdin.write(
                 json.dumps(
                     {"id": request_id, "op": operation, **payload},
-                    ensure_ascii=False,
+                    ensure_ascii=True,
                 )
                 + "\n"
             )
@@ -117,7 +121,9 @@ class NmgClient:
             response = json.loads(line)
             if response.get("id") != request_id:
                 raise RuntimeError(
-                    f"NMG bridge response id mismatch: {response.get('id')!r}"
+                    "NMG bridge response id mismatch: "
+                    f"expected {request_id!r}, got {response.get('id')!r}; "
+                    f"bridge error: {response.get('error')!r}"
                 )
             if response.get("error"):
                 raise RuntimeError(str(response["error"]))
