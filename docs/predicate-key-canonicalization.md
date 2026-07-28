@@ -194,8 +194,8 @@ clarification — the exact `ideal_answer` behaviour. Caveat: an earlier
 probe round with a contradiction-primed reader prompt found no A/B
 difference, so the gain is specifically for harnesses whose answer prompt
 does not already instruct contradiction handling. The metadata carries
-the signal only if the answer stage renders it — that render path is the
-remaining integration work.
+the signal only if the answer stage renders it. The query-time render path
+below now supplies that signal.
 
 ## Query-time render path (2026-07-27): contradiction notes reach the reader
 
@@ -209,6 +209,12 @@ rendered statement, so the answer-stage reader sees the metadata-derived
 annotation that the probe proved necessary. OmniMemEval itself is unmodified —
 the annotation is an NMG retrieval product rendered on NMG's own side of the
 boundary.
+
+The same lookup now runs in the Pi plugin for resident memory, automatic
+recall, and exact `nmg_get` expansion. `nmg_remember` accepts atomic claims from
+the model-facing write call, and core persistence treats those claims as the
+source of truth for the record-level rollup. Shared predicate keys do not form
+a contradiction when common scope fields have different values.
 
 Two supporting fixes landed with it: `remember()` no longer silently drops
 `confidence` / `polarity` / `predicateKey` / `extractMethod` / `claims`

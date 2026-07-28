@@ -143,6 +143,86 @@ test("search headers disclose IDs but not source evidence", () => {
   assert.match(output, /activeGraphId/);
 });
 
+test("Pi write and automatic recall close the claim contradiction loop", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-extension-claims-"));
+  const previousData = process.env.NMG_DATA_DIR;
+  process.env.NMG_DATA_DIR = directory;
+  const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+  const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
+  const sessionManager = {
+    getSessionId: () => "claims-session",
+    getSessionFile: () => undefined,
+    getBranch: () => [],
+  };
+  try {
+    nmgExtension({
+      on(event: string, handler: (...args: unknown[]) => Promise<unknown>) {
+        handlers.set(event, handler);
+      },
+      registerTool(tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) {
+        tools.set(tool.name, tool);
+      },
+    } as never);
+    const remember = tools.get("nmg_remember")!;
+    const context = { sessionManager };
+    await remember.execute(
+      "write-positive",
+      {
+        statement: "The user integrated Flask-Login in the website project.",
+        nodeName: "Flask experience",
+        scope: { project: "website" },
+        claims: [
+          {
+            text: "The user integrated Flask-Login.",
+            polarity: "affirmative",
+            predicateKey: "user_integrate_flask_login",
+            confidence: 0.9,
+          },
+        ],
+      },
+      undefined,
+      undefined,
+      context,
+    );
+    await remember.execute(
+      "write-negative",
+      {
+        statement: "The user has never integrated Flask-Login in the website project.",
+        nodeName: "Flask experience",
+        scope: { project: "website" },
+        claims: [
+          {
+            text: "The user has never integrated Flask-Login.",
+            polarity: "negative",
+            predicateKey: "user_integrate_flask_login",
+            confidence: 0.95,
+          },
+        ],
+      },
+      undefined,
+      undefined,
+      context,
+    );
+
+    const result = (await handlers.get("before_agent_start")!(
+      {
+        prompt: "Have I ever integrated Flask-Login in this project?",
+        systemPrompt: "base",
+      },
+      context,
+    )) as { systemPrompt: string };
+    assert.match(result.systemPrompt, /<nmg_automatic_recall>/);
+    assert.match(result.systemPrompt, /contradictory memories/);
+    assert.match(result.systemPrompt, /user_integrate_flask_login/);
+    assert.match(result.systemPrompt, /flag this to the user/);
+    await handlers.get("session_shutdown")!({}, context);
+  } finally {
+    if (previousData === undefined) delete process.env.NMG_DATA_DIR;
+    else process.env.NMG_DATA_DIR = previousData;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("graph-hop environment override clamps model-requested expansion", () => {
   const previous = process.env.NMG_GRAPH_HOPS;
   try {

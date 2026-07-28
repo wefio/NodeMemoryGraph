@@ -330,6 +330,47 @@ test("events and conversation evidence preserve time, actor, and truth status", 
   });
 });
 
+test("claims are persisted and derive the record-level logical rollup", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "The user has used Flask, but has never used Flask-Login.",
+      nodeName: "Flask experience",
+      polarity: "affirmative",
+      predicateKey: "wrong_rollup",
+      confidence: 0.1,
+      claims: [
+        {
+          text: " The user has never used Flask-Login. ",
+          polarity: "negative",
+          predicateKey: "USER_USE_FLASK_LOGIN",
+          confidence: 1.2,
+          extractMethod: "llm",
+        },
+        {
+          text: "The user has used Flask.",
+          polarity: "affirmative",
+          predicateKey: "user_use_flask",
+          confidence: 0.9,
+          extractMethod: "llm",
+        },
+      ],
+    });
+
+    assert.equal(saved.memory.polarity, "negative");
+    assert.equal(saved.memory.predicateKey, "user_use_flask_login");
+    assert.equal(saved.memory.confidence, 1);
+    assert.equal(saved.memory.extractMethod, "llm");
+    assert.deepEqual(saved.memory.claims?.map((claim) => claim.text), [
+      "The user has never used Flask-Login.",
+      "The user has used Flask.",
+    ]);
+
+    const [reloaded] = store.search("Flask Login", { limit: 1 });
+    assert.deepEqual(reloaded?.memory.claims, saved.memory.claims);
+    assert.equal(reloaded?.memory.predicateKey, "user_use_flask_login");
+  });
+});
+
 test("searchContext can restrict evidence to the requested source actor", () => {
   withStore((store) => {
     const userMemory = store.remember({
@@ -1503,5 +1544,38 @@ test("contradictionNotes flags claim pairs with opposite polarity in temporal or
     // A record without claims never produces a note.
     const plain = store.remember({ statement: "user: no claims here", nodeName: "beam" });
     assert.equal(store.contradictionNotes([plain.memory.id]).size, 0);
+
+    const otherProject = store.remember({
+      statement: "user: I have not written Flask routes in the mobile project",
+      nodeName: "beam",
+      scope: { project: "mobile" },
+      claims: [
+        {
+          text: "user has not written Flask routes",
+          polarity: "negative",
+          predicateKey: "user_use_project_router",
+          confidence: 0.9,
+          extractMethod: "llm",
+        },
+      ],
+    });
+    const scopedPositive = store.remember({
+      statement: "user: I wrote Flask routes in the website project",
+      nodeName: "beam",
+      scope: { project: "website" },
+      claims: [
+        {
+          text: "user wrote Flask routes",
+          polarity: "affirmative",
+          predicateKey: "user_use_project_router",
+          confidence: 0.9,
+          extractMethod: "llm",
+        },
+      ],
+    });
+    assert.equal(
+      store.contradictionNotes([otherProject.memory.id, scopedPositive.memory.id]).size,
+      0,
+    );
   });
 });

@@ -29,6 +29,7 @@ import {
 import type {
   EvidenceRole,
   MemoryActor,
+  MemoryClaim,
   MemoryContext,
   MemoryResidence,
   RecallIndex,
@@ -241,7 +242,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     const memoryStore = getStore();
     memoryStore.expireShortTermMemories();
     void scheduleEmbeddingSync();
-    const kernelBlock = formatResidentKernel(memoryStore.residentKernel());
+    const kernelContext = memoryStore.residentKernel();
+    const kernelBlock = formatResidentKernel(
+      kernelContext,
+      memoryStore.contradictionNotes(kernelContext.results.map((result) => result.memory.id)),
+    );
     const decision = decideMemoryLoad(event.prompt);
     let dynamicBlock = "";
     if (decision.mode === "retrieve") {
@@ -255,7 +260,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         ctx.sessionManager.getSessionId(),
         "automatic",
       );
-      const formatted = formatMemoryContext(context);
+      const formatted = formatMemoryContext(
+        context,
+        memoryStore.contradictionNotes(context.results.map((result) => result.memory.id)),
+      );
       if (formatted) {
         dynamicBlock = `<nmg_automatic_recall>\n${formatted}\n</nmg_automatic_recall>`;
       }
@@ -296,6 +304,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         `For user-stated facts, states, events, preferences, and constraints, set ` +
         `evidence to the shortest exact source excerpt that supports the memory. ` +
         `The statement is a retrieval summary; evidence preserves exact details. ` +
+        `Also provide atomic claims for factual memory: one independently true or ` +
+        `false proposition per claim, polarity affirmative or negative when it ` +
+        `asserts or explicitly denies a fact, and a stable lowercase snake_case ` +
+        `predicateKey shared by a fact and its negation. Use neutral with no key ` +
+        `for non-factual content. ` +
         `Set writeReason to a concise explanation of why the information will ` +
         `remain useful beyond the current turn. ` +
         `Preserve useful assistant output as conversation_evidence with ` +
@@ -633,6 +646,30 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           Type.Literal("verified"),
         ]),
       ),
+      claims: Type.Optional(
+        Type.Array(
+          Type.Object({
+            text: Type.String({ description: "One atomic factual proposition" }),
+            polarity: Type.Union([
+              Type.Literal("affirmative"),
+              Type.Literal("negative"),
+              Type.Literal("neutral"),
+            ]),
+            predicateKey: Type.Optional(
+              Type.String({
+                description:
+                  "Stable lowercase snake_case predicate; omit for neutral content",
+              }),
+            ),
+            confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+          }),
+          {
+            minItems: 1,
+            description:
+              "Atomic claims represented by this memory; opposite polarities must reuse the same predicateKey",
+          },
+        ),
+      ),
       evidence: Type.Optional(
         Type.String({ description: "Exact supporting text or source description" }),
       ),
@@ -720,6 +757,16 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         eventTime: params.eventTime,
         sourceActor: params.sourceActor as MemoryActor | undefined,
         truthStatus: params.truthStatus as TruthStatus | undefined,
+        claims: params.claims?.map(
+          (claim) =>
+            ({
+              text: claim.text,
+              polarity: claim.polarity,
+              predicateKey: claim.predicateKey ?? null,
+              confidence: claim.confidence ?? null,
+              extractMethod: "llm",
+            }) satisfies MemoryClaim,
+        ),
         evidence: params.evidence,
         evidenceHistoryId: params.evidenceHistoryId,
         tier: params.tier as MemoryTier | undefined,
@@ -934,7 +981,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const missing = params.memoryIds.filter(
         (id) => !context.results.some((result) => result.memory.id === id),
       );
-      const text = formatMemoryContext(context);
+      const text = formatMemoryContext(
+        context,
+        getStore().contradictionNotes(context.results.map((result) => result.memory.id)),
+      );
       return {
         content: [
           {
@@ -1149,12 +1199,18 @@ export function formatRecallIndex(index: RecallIndex): string {
   return cues.length > 0 ? `<nmg_recall_cues>\n${cues.join("\n")}\n</nmg_recall_cues>` : "";
 }
 
-export function formatResidentKernel(context: MemoryContext): string {
-  const formatted = formatMemoryContext(context);
+export function formatResidentKernel(
+  context: MemoryContext,
+  contradictionNotes: ReadonlyMap<string, string> = new Map(),
+): string {
+  const formatted = formatMemoryContext(context, contradictionNotes);
   return formatted ? `<nmg_resident_kernel>\n${formatted}\n</nmg_resident_kernel>` : "";
 }
 
-export function formatMemoryContext(context: MemoryContext): string {
+export function formatMemoryContext(
+  context: MemoryContext,
+  contradictionNotes: ReadonlyMap<string, string> = new Map(),
+): string {
   const memories = context.results.map(({ memory, node, evidence }) => {
     const metadata = [
       `TYPE=${memory.memoryType}`,
@@ -1178,7 +1234,9 @@ export function formatMemoryContext(context: MemoryContext): string {
       evidence.content.trim() !== memory.statement.trim()
         ? `\n  SOURCE=${excerpt(evidence.content, 320)}`
         : "";
-    return `- ${memory.statement}\n  ${metadata}${source}`;
+    const contradiction = contradictionNotes.get(memory.id);
+    const note = contradiction ? `\n  ${contradiction}` : "";
+    return `- ${memory.statement}\n  ${metadata}${source}${note}`;
   });
   const relations = context.relations.map(
     (relation) => `- ${relation.sourceNodeId} -[${relation.type}]-> ${relation.targetNodeId}`,

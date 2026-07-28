@@ -8,6 +8,7 @@ export type {
 } from "./core/embedding-sync.ts";
 export { UsearchAnnIndex } from "./core/ann.ts";
 export { decideMemoryLoad } from "./core/gate.ts";
+export { normalizeClaims } from "./core/claims.ts";
 export { Tensor, gradientStep } from "./core/autodiff.ts";
 export { ControllerRuntime } from "./core/controller-runtime.ts";
 export {
@@ -63,6 +64,7 @@ export type {
   EvidenceRole,
   DeriveMemoryInput,
   MemoryActor,
+  MemoryClaim,
   MemoryContext,
   MemoryGateDecision,
   MemoryLoadMode,

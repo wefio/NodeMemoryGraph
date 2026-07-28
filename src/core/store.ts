@@ -65,6 +65,7 @@ import {
   embeddingIndexHealth,
   failEmbeddingIndex,
 } from "./store/embedding-index.ts";
+import { normalizeClaims } from "./claims.ts";
 
 type Row = Record<string, string | number | Uint8Array | null>;
 
@@ -365,6 +366,7 @@ export class NmgStore {
     const residence = input.residence ?? defaultResidence(input);
     const writeSource = input.writeSource ?? (input.memoryType === "derived" ? "derived" : "core");
     const writeReason = input.writeReason?.trim() || defaultWriteReason(input, residence);
+    const claimRollup = normalizeClaims(input.claims);
     const memory: MemoryRecord = {
       id: randomUUID(),
       nodeId: input.nodeId,
@@ -376,11 +378,11 @@ export class NmgStore {
       eventTime: input.eventTime ?? null,
       sourceActor: input.sourceActor ?? "user",
       truthStatus: input.truthStatus ?? "asserted",
-      confidence: input.confidence ?? null,
-      polarity: input.polarity ?? null,
-      predicateKey: input.predicateKey ?? null,
-      extractMethod: input.extractMethod ?? null,
-      claims: input.claims ?? null,
+      confidence: claimRollup ? claimRollup.confidence : input.confidence ?? null,
+      polarity: claimRollup ? claimRollup.polarity : input.polarity ?? null,
+      predicateKey: claimRollup ? claimRollup.predicateKey : input.predicateKey ?? null,
+      extractMethod: claimRollup ? claimRollup.extractMethod : input.extractMethod ?? null,
+      claims: claimRollup ? claimRollup.claims : null,
       scope: input.scope ?? {},
       validFrom: input.validFrom ?? createdAt,
       validUntil: input.validUntil ?? null,
@@ -2375,6 +2377,12 @@ export class NmgStore {
           AND c1.value ->> 'polarity' IN ('affirmative', 'negative')
           AND c2.value ->> 'polarity' IN ('affirmative', 'negative')
           AND c1.value ->> 'polarity' <> c2.value ->> 'polarity'
+          AND NOT EXISTS (
+            SELECT 1
+              FROM json_each(m1.scope_json) s1
+              JOIN json_each(m2.scope_json) s2 ON s1.key = s2.key
+             WHERE CAST(s1.value AS TEXT) <> CAST(s2.value AS TEXT)
+          )
           AND (m1.rowid <> m2.rowid OR c1.key < c2.key)
         ORDER BY m2.rowid
         LIMIT 1`,
@@ -2787,9 +2795,6 @@ export class NmgStore {
            m.memory_type AS m_memory_type, m.state_key AS m_state_key,
            m.event_time AS m_event_time, m.source_actor AS m_source_actor,
            m.truth_status AS m_truth_status,
-         m.confidence AS m_confidence,
-         m.polarity AS m_polarity,
-         m.predicate_key AS m_predicate_key, m.extract_method AS m_extract_method, m.claims_json AS m_claims_json,
            m.confidence AS m_confidence,
            m.polarity AS m_polarity,
            m.predicate_key AS m_predicate_key, m.extract_method AS m_extract_method, m.claims_json AS m_claims_json,

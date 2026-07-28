@@ -870,8 +870,13 @@ arbitration confirmed 83 synonym merges. An answer-stage A/B probe
 scores: an unprimed weak reader given raw evidence picks one side and misses
 the contradiction (Q1 answered confidently wrong), while the same evidence
 plus a metadata-derived contradiction note produces the official
-`ideal_answer` behaviour. The remaining integration work is the render path
-that attaches such notes automatically at retrieval time.
+`ideal_answer` behaviour. The render path now attaches those deterministic
+notes in both the OmniMemEval adapter and Pi's resident, automatic-recall, and
+`nmg_get` contexts. Pi's `nmg_remember` schema also accepts atomic claims, while
+the core derives record-level polarity, predicate, confidence, and extraction
+method from the first non-neutral claim rather than trusting a second,
+independently supplied rollup. Contradiction lookup rejects records whose
+shared scope keys disagree.
 
 The expression shape must therefore follow the question type, and choosing
 the shape is itself an unrouted decision today. MGR set logic remains a Lab
