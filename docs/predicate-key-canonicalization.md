@@ -148,3 +148,37 @@ phrasing, false in a batch of 11, false with a rephrased single prompt).
 Verification is kept as an advisory annotation only; the deterministic
 join + temporal order is the output. Precision improvements must come from
 better keying/polarity upstream, not from a weak-model veto downstream.
+
+## Claims model (2026-07-27): both official contradictions detected
+
+BEAM conv 1 has exactly two `contradiction_resolution` probing questions.
+The record-level pipeline caught only Q1 (Flask routes); Q2 (Flask-Login)
+was invisible because its evidence lives INSIDE one 4,776-char message
+(msg-66) that packs "integrating Flask-Login" + "completed login modules"
++ "never written Flask routes" — one record, one polarity, so the
+intra-message contradiction could not exist at record granularity.
+
+The fix adopts the chat.completions content-parts model: a record is the
+evidence unit and carries a `claims_json` array of atomic claims, each
+with its own polarity/predicate_key/confidence (`MemoryClaim`,
+`claims_json` column, record columns kept as a first-non-neutral rollup
+cache). The worker segments sentences (code blocks stripped) and the LLM
+returns claims arrays; the canonicalizer flattens claims and the
+contradiction join orders by (record rowid, claim index), making
+intra-record contradictions joinable.
+
+Results on BEAM conv 1 (188 records -> 721 claims, ~3.8/record):
+
+- **Both official contradiction pairs detected and advisory-verified** —
+  Q1 (`user_write_flask_route`: implement homepage route vs never written
+  Flask routes) and Q2 (`user_implement_login`: integrating Flask-Login
+  v0.6.2 vs never integrated Flask-Login, the negative claim extracted
+  from inside msg-66).
+- Key arbitration confirmed 83 synonym merges over the richer claim-key
+  space (vs 7 at record level), including
+  `user_implement_login == user_integrate_flask_login`.
+- Trade-offs: rule-layer coverage fell 27% -> 10% (every sentence must
+  resolve for the free path); one large claims batch returned malformed
+  JSON (longer outputs), fixed by retrying with smaller batches; remaining
+  false candidates are mostly "user is not sure how to X" uncertainty
+  claims mislabeled negative (uncertainty is not denial).

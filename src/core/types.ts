@@ -51,6 +51,17 @@ export type Polarity = "affirmative" | "negative" | "neutral";
 
 /** Provenance of polarity/predicate/confidence extraction. */
 export type ExtractMethod = "rule" | "llm";
+
+/** One atomic claim extracted from a memory statement. A record is the
+ * evidence unit; claims are the metadata unit (chat.completions parts
+ * model: one message, many typed parts). */
+export interface MemoryClaim {
+  text: string;
+  polarity: Polarity | null;
+  predicateKey: string | null;
+  confidence: number | null;
+  extractMethod: ExtractMethod;
+}
 export type MemoryStatus = "active" | "deleted" | "disputed" | "inactive" | "superseded";
 export type EvidenceRole = "contradict" | "example" | "exception" | "origin" | "support" | "update";
 export type MemoryScope = Record<string, string>;
@@ -100,6 +111,9 @@ export interface MemoryRecord {
   predicateKey: string | null;
   /** Which extractor filled polarity/predicateKey/confidence; null if manual or never extracted. */
   extractMethod: ExtractMethod | null;
+  /** Atomic claims extracted from the statement; source of truth for the
+   *  polarity/predicateKey/confidence rollup columns above. */
+  claims: MemoryClaim[] | null;
   scope: MemoryScope;
   validFrom: string | null;
   validUntil: string | null;
@@ -132,6 +146,7 @@ export interface RememberInput {
   polarity?: Polarity;
   predicateKey?: string;
   extractMethod?: ExtractMethod;
+  claims?: MemoryClaim[];
   evidence?: string;
   evidenceHistoryId?: string;
   sessionId?: string;

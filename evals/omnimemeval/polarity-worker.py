@@ -1,16 +1,18 @@
 """Polarity extraction worker: spaCy rule layer + batched LLM fallback.
 
-Scans memory_records where extract_method IS NULL (pending) and fills
-polarity / predicate_key / confidence / extract_method:
+Claims model (docs/predicate-key-canonicalization.md, chat.completions
+parts analogy): a memory record is the evidence unit; each record carries
+a claims_json array of atomic claims, each with its own polarity /
+predicate_key / confidence. The record-level columns are a rollup cache
+(first non-neutral claim) for backward compatibility.
 
-1. Rule layer (spaCy, free, deterministic): negation cue via dependency
-   `neg` attached to the ROOT verb, SVO backbone -> predicate_key. Clean
-   cases are written directly with extract_method='rule'.
-2. LLM fallback (deepseek-chat, temp 0): everything the rule layer marks
-   uncertain (idioms, fragments, questions, missing SVO) is sent in ONE
-   batched call per BATCH statements. The prompt carries the current top
-   predicate_key vocabulary so the LLM reuses existing keys instead of
-   inventing paraphrases. Written with extract_method='llm'.
+Pipeline per record:
+1. Strip code blocks, segment into sentences (spaCy).
+2. Rule layer per sentence (free, deterministic): negation via dependency
+   `neg` on the ROOT verb, SVO backbone -> key. If EVERY sentence resolves,
+   the record is written with extract_method='rule'.
+3. Otherwise the whole statement goes to the LLM (deepseek-chat, temp 0,
+   batched) which returns a claims array. Written with extract_method='llm'.
 
 Usage:
   set -a; source .env; set +a
@@ -35,6 +37,7 @@ ASPECTUALS = {"try", "want", "need", "start", "begin", "manage", "used",
               "go", "plan", "hope", "attempt", "learn", "decide", "like"}
 
 SPEAKER_RE = re.compile(r"^\s*([A-Za-z][\w'-]{1,20})\s*:\s*(.*)$", re.DOTALL)
+CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 
 # Negation cues that are almost always idiomatic, not factual denials.
 IDIOM_RE = re.compile(
@@ -44,22 +47,21 @@ IDIOM_RE = re.compile(
     re.IGNORECASE,
 )
 
-BATCH_PROMPT = """You are a logic-normalization extractor. For EACH numbered statement below output one JSON object:
-{"i": <n>, "polarity": "affirmative"|"negative"|"neutral", "predicate_key": "<snake_case canonical predicate>", "confidence": <0..1>}
+BATCH_PROMPT = """You are a logic-normalization extractor. For EACH numbered statement below, split it into ATOMIC CLAIMS (one fact per claim; skip code blocks, skip pure filler) and output one JSON object:
+{"i": <n>, "claims": [{"text": "<the claim, minimally rewritten>", "polarity": "affirmative"|"negative"|"neutral", "predicate_key": "<snake_case or null>", "confidence": <0..1>}, ...]}
 Rules:
-- The speaker is the name before the leading colon; the key subject MUST be that speaker (lowercased) unless the statement is explicitly about someone else.
+- The speaker is the name before the leading colon; the key subject MUST be that speaker (lowercased) unless the claim is explicitly about someone else.
 - polarity:
-  * "negative" ONLY when the sentence contains an explicit negation cue (never, no, not, ...n't, without, no longer) denying a concrete fact.
-  * "affirmative" when the sentence asserts a concrete checkable fact — INCLUDING statements about the speaker's own activity: "I'm trying to implement X" affirms the speaker is implementing X; "I've managed to return static HTML" affirms a done fact.
-  * "neutral" ONLY for content-free talk: pure questions, greetings, encouragement, thanks, vague plans with no concrete action. An error report WITH a concrete claim ("the id is already in use") is affirmative about that claim.
-  * "negative" ONLY when the sentence contains an explicit negation cue (never, no, not, ...n't, without, no longer) denying a concrete fact. No cue word -> never "negative".
+  * "negative" ONLY when the claim contains an explicit negation cue (never, no, not, ...n't, without, no longer) denying a concrete fact. No cue word -> never "negative".
+  * "affirmative" when the claim asserts a concrete checkable fact — INCLUDING the speaker's own activity: "I'm trying to implement X" affirms the speaker is implementing X; "I've managed to return static HTML" affirms a done fact.
+  * "neutral" ONLY for content-free talk: pure questions, greetings, encouragement, thanks, vague plans with no concrete action. Neutral claims get predicate_key null.
 - Key grammar is STRICT: {subject}_{main-verb-lemma}[_{object-head-noun-singular}].
   * Strip aspectual/modal wrappers: "trying to implement X" -> implement, "wants to add Y" -> add, "started using Z" -> use.
   * Object is the bare head noun, singular, WITHOUT modifiers: "the basic homepage route" -> route. Keep only proper nouns or hyphenated technical names (flask-login).
   * GOOD: user_implement_route, user_write_route. BAD: user_try_implement, user_implement_homepage_route, user_write_routes.
-- predicate_key must be IDENTICAL for a statement and its negation (strip negation).
-- Vocabulary reuse: reuse a key from the existing vocabulary below ONLY if it names exactly the same predicate (same action AND same object). If none fits, ALWAYS mint a new key. Never force-fit a statement into a popular existing key.
-- confidence = how strongly the statement asserts a concrete checkable fact (small talk / questions / encouragement -> 0.3 or below).
+- predicate_key must be IDENTICAL for a claim and its negation (strip negation).
+- Vocabulary reuse: reuse a key from the existing vocabulary below ONLY if it names exactly the same predicate (same action AND same object). If none fits, ALWAYS mint a new key. Never force-fit a claim into a popular existing key.
+- A statement that asserts nothing gets an empty claims array.
 Existing predicate vocabulary:
 %s
 Statements:
@@ -74,9 +76,9 @@ def parse_statement(text):
     return "user", text.strip()
 
 
-def rule_extract(nlp, text):
-    """Return (polarity, predicate_key, confidence) or None when uncertain."""
-    speaker, body = parse_statement(text)
+def rule_sentence(nlp, speaker, sent):
+    """One sentence -> (polarity, predicate_key, confidence) or None."""
+    body = sent.strip()
     if not body:
         return None
     doc = nlp(body)
@@ -122,11 +124,27 @@ def rule_extract(nlp, text):
         if lemma:
             key += f"_{lemma}"
     key = re.sub(r"[^a-z0-9_]+", "", key)
-    polarity = "negative" if neg_on_root else "affirmative"
-    conf = 0.85 if neg_on_root else 0.8
     if body.rstrip().endswith("?"):
         return "neutral", None, 0.3
+    polarity = "negative" if neg_on_root else "affirmative"
+    conf = 0.85 if neg_on_root else 0.8
     return polarity, key, conf
+
+
+def claim(text, pol, key, conf, method):
+    return {"text": text, "polarity": pol, "predicate_key": key,
+            "confidence": conf, "extract_method": method}
+
+
+def rollup(claims):
+    """Record-level rollup: first non-neutral claim, else first claim."""
+    for c in claims:
+        if c["polarity"] in ("affirmative", "negative"):
+            return c["polarity"], c["predicate_key"], c["confidence"]
+    if claims:
+        c = claims[0]
+        return c["polarity"], c["predicate_key"], c["confidence"]
+    return None, None, None
 
 
 def llm_batch(api_key, texts, vocab):
@@ -141,7 +159,7 @@ def llm_batch(api_key, texts, vocab):
             "response_format": {"type": "json_object"},
             "messages": [{"role": "user", "content": prompt}],
         },
-        timeout=120,
+        timeout=180,
     )
     r.raise_for_status()
     data = json.loads(r.json()["choices"][0]["message"]["content"])
@@ -150,12 +168,17 @@ def llm_batch(api_key, texts, vocab):
     out = {}
     for item in data:
         i = int(item.get("i", 0))
-        pol = item.get("polarity")
-        out[i] = (
-            pol if pol in ("affirmative", "negative", "neutral") else None,
-            str(item["predicate_key"]).strip() if item.get("predicate_key") else None,
-            float(item["confidence"]) if item.get("confidence") is not None else None,
-        )
+        claims = []
+        for c in item.get("claims") or []:
+            pol = c.get("polarity")
+            claims.append(claim(
+                str(c.get("text", "")).strip(),
+                pol if pol in ("affirmative", "negative", "neutral") else None,
+                str(c["predicate_key"]).strip() if c.get("predicate_key") else None,
+                float(c["confidence"]) if c.get("confidence") is not None else None,
+                "llm",
+            ))
+        out[i] = claims
     return out
 
 
@@ -180,24 +203,34 @@ def main():
         rows = rows[: args.limit]
     print(f"{len(rows)} pending records")
 
-    rule_hits, llm_queue = [], []
-    for r in rows:
-        res = rule_extract(nlp, r["statement"])
-        if res is None:
-            llm_queue.append(r)
-        else:
-            rule_hits.append((r["id"],) + res)
-    print(f"rule layer: {len(rule_hits)} resolved, {len(llm_queue)} queued for LLM "
-          f"({100*len(rule_hits)/max(1,len(rows)):.0f}% coverage)")
-
     cur = db.cursor()
-    for rid, pol, key, conf in rule_hits:
+
+    def write(rid, claims, method):
+        pol, key, conf = rollup(claims)
         cur.execute(
             "UPDATE memory_records SET polarity=?, predicate_key=?, confidence=?, "
-            "extract_method='rule' WHERE id=?",
-            (pol, key, conf, rid),
+            "extract_method=?, claims_json=? WHERE id=?",
+            (pol, key, conf, method,
+             json.dumps(claims, ensure_ascii=False) if claims else None, rid),
         )
+
+    rule_count = 0
+    llm_queue = []
+    for r in rows:
+        speaker, body = parse_statement(r["statement"])
+        body = CODE_RE.sub(" ", body)
+        sents = [s.text.strip() for s in nlp(body).sents if s.text.strip()] or [body]
+        results = [rule_sentence(nlp, speaker, s) for s in sents]
+        if all(res is not None for res in results):
+            claims = [claim(s, pol, key, conf, "rule")
+                      for s, (pol, key, conf) in zip(sents, results)]
+            write(r["id"], claims, "rule")
+            rule_count += 1
+        else:
+            llm_queue.append(r)
     db.commit()
+    print(f"rule layer: {rule_count} resolved, {len(llm_queue)} queued for LLM "
+          f"({100*rule_count/max(1,len(rows)):.0f}% coverage)")
 
     done = 0
     for off in range(0, len(llm_queue), args.batch):
@@ -230,12 +263,7 @@ def main():
                 if m in res2:
                     res[n] = res2[m]
         for n, r in enumerate(chunk, 1):
-            pol, key, conf = res.get(n, (None, None, None))
-            cur.execute(
-                "UPDATE memory_records SET polarity=?, predicate_key=?, confidence=?, "
-                "extract_method='llm' WHERE id=?",
-                (pol, key, conf, r["id"]),
-            )
+            write(r["id"], res.get(n, []), "llm")
         done += len(chunk)
         db.commit()
         print(f"  llm {done}/{len(llm_queue)}")
@@ -246,6 +274,10 @@ def main():
     ).fetchall()
     for method, n, neg in stats:
         print(f"{method}: {n} records, {neg or 0} negative")
+    nclaims = db.execute(
+        "SELECT COALESCE(SUM(json_array_length(claims_json)), 0) FROM memory_records"
+    ).fetchone()[0]
+    print(f"total claims: {nclaims}")
     db.close()
 
 
