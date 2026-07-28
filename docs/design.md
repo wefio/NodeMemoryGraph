@@ -153,6 +153,16 @@ or LTG lifecycle. A `MemoryNode` is a stable semantic address for a coherent
 group of records. Creating one permanent node for every new memory would
 reproduce a flat store with extra graph overhead and is not the target model.
 
+One record can contain several atomic facts. Following the chat.completions
+content-parts model, a record stays the single evidence unit (embeddings, FTS,
+provenance, and lifecycle all operate at record granularity) while carrying a
+`claims` array (`claims_json`) of atomic `MemoryClaim` items — each with its
+own text, polarity, predicate key, confidence, and extraction provenance. The
+record-level polarity/predicate/confidence columns are a derived rollup cache
+(first non-neutral claim), never the source of truth. Contradiction detection
+joins claims, not records, so a contradiction inside one long message is as
+visible as one across messages.
+
 STG and LTG describe semantic residence, not separate truth systems. Promotion
 should preserve the same stable record/node identity and provenance rather than
 copying content into a second graph. Demotion or expiry changes normal
@@ -848,6 +858,18 @@ surprise negative result: deepseek-chat's per-pair contradiction verdicts
 are prompt-unstable (the same gold pair judged true and false under trivial
 rephrasings), so weak-model verification is advisory only — precision must
 come from upstream keying, not a downstream veto.
+
+Record granularity was the remaining ceiling: BEAM conv 1's second official
+contradiction lives inside one 4.7K-char message, invisible to a one-polarity-
+per-record model. Moving extraction to claims (721 claims from 188 records)
+made both official contradiction pairs detectable, and claim-level
+arbitration confirmed 83 synonym merges. An answer-stage A/B probe
+(`evals/omnimemeval/beam-answer-probe.py`) then showed why this matters for
+scores: an unprimed weak reader given raw evidence picks one side and misses
+the contradiction (Q1 answered confidently wrong), while the same evidence
+plus a metadata-derived contradiction note produces the official
+`ideal_answer` behaviour. The remaining integration work is the render path
+that attaches such notes automatically at retrieval time.
 
 The expression shape must therefore follow the question type, and choosing
 the shape is itself an unrouted decision today. MGR set logic remains a Lab
