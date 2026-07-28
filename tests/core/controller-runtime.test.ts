@@ -69,3 +69,59 @@ test("controller allocation widens an explicit recall within its operator envelo
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("an expansion-trained controller can enter the larger Active Graph tier", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-controller-expanded-budget-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    const primary = store.remember({ statement: "Project color is cobalt", nodeName: "Project" });
+    const context = store.searchContext("cobalt", { limit: 8 });
+    assert.ok(context.activeGraph);
+    const trace = store.retrievalTrace(context.activeGraph.id);
+    assert.ok(trace);
+    // This is the exact supervision shape emitted when a later graph expansion
+    // supplied the memory that was ultimately used. The budget test is about
+    // controller policy, not the separate graph-routing implementation.
+    const expansionTrace = {
+      ...trace,
+      usefulMemoryIds: [primary.memory.id],
+      selections: trace.selections.map((selection) => ({
+        ...selection,
+        source: "graph_expansion" as const,
+      })),
+    };
+    const runtime = new ControllerRuntime(join(directory, "controller.json"));
+    for (let step = 0; step < 64; step += 1) runtime.observe(context, expansionTrace, 0.2);
+    const decision = runtime.allocate(
+      context,
+      context.activeGraph.budget,
+      {
+        maxNodes: 16,
+        maxEdges: 24,
+        maxEvidence: 20,
+        maxTokens: 6_000,
+        maxGraphHops: 2,
+        maxLocalTier: 3,
+        maxLatencyMs: 800,
+      },
+      {
+        maxNodes: 50,
+        maxEdges: 100,
+        maxEvidence: 50,
+        maxTokens: 10_000,
+        maxGraphHops: 3,
+        maxLocalTier: 3,
+        maxLatencyMs: 1_500,
+      },
+    );
+    assert.ok(decision);
+    assert.equal(decision.action, "expand");
+    assert.ok(decision.budget.maxEvidence > 20);
+    assert.ok(decision.budget.maxEvidence <= 50);
+    assert.ok(decision.budget.maxTokens > 6_000);
+    assert.ok(decision.budget.maxTokens <= 10_000);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

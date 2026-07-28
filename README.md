@@ -199,8 +199,10 @@ test model when needed.
 The learned retrieval controller remains shadow-observed for automatic recall,
 so ordinary turns keep their small fixed context budget. For an explicit
 `nmg_search` without a caller-specified limit, it now performs a disposable
-lexical probe and may widen only that tool call within a hard envelope (up to
-20 records and 6,000 estimated tokens). The committed search remains the sole
+lexical probe and may widen only that tool call. Its normal tier is capped at
+20 records / 6,000 estimated tokens; a learned `expand` decision can promote
+the Active Graph to 50 records / 10,000 estimated tokens for aggregation or
+multi-hop work. The committed search remains the sole
 retrieval trace and may still be read with `nmg_get`. Set
 `NMG_CONTROLLER_SEARCH=0` to disable this adaptive expansion. Shadow events are written locally to
 `.nmg/evaluation/controller-shadow.jsonl` (or under `NMG_DATA_DIR`) with bounded

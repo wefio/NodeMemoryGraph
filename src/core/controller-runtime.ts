@@ -100,14 +100,15 @@ export class ControllerRuntime {
 
   /**
    * Convert the controller's continuous allocation head into a concrete Active
-   * Graph budget. `minimum` and `maximum` are hard operator policy bounds: the
-   * learned model can allocate within the envelope but cannot weaken safety or
-   * latency limits by itself.
+   * Graph budget. `minimum`, `normalMaximum`, and `expandedMaximum` are hard
+   * operator policy bounds. The control head chooses whether this search may
+   * enter the larger AG tier; the learned model cannot exceed either envelope.
    */
   allocate(
     context: MemoryContext,
     minimum: ActiveGraphBudget,
-    maximum: ActiveGraphBudget,
+    normalMaximum: ActiveGraphBudget,
+    expandedMaximum: ActiveGraphBudget = normalMaximum,
   ): ControllerBudgetDecision | null {
     if (!context.activeGraph) return null;
     const trace = traceFromActiveGraph(context);
@@ -115,6 +116,7 @@ export class ControllerRuntime {
     const fractions = this.#controller.allocateBudget(sample.globalFeatures);
     const control = this.#controller.chooseControl(sample.globalFeatures);
     const expanded = control.action === "expand";
+    const maximum = expanded ? expandedMaximum : normalMaximum;
     const fraction = (dimension: ControllerBudgetDimension): number =>
       Math.max(fractions[dimension], expanded ? 0.75 : 0);
     return {

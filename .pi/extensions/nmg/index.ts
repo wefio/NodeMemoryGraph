@@ -233,6 +233,17 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         maxGraphHops: 2,
         maxLocalTier: 3,
         maxLatencyMs: 800,
+      }, {
+        // Escalation is available only when the learned control head asks to
+        // expand. This keeps ordinary explicit recall near Top-20 while making
+        // a broad Active Graph available for aggregation and multi-hop tasks.
+        maxNodes: 50,
+        maxEdges: 100,
+        maxEvidence: 50,
+        maxTokens: 10_000,
+        maxGraphHops: 3,
+        maxLocalTier: 3,
+        maxLatencyMs: 1_500,
       });
       if (plan && budgetWidens(baseline, plan.budget)) {
         context = await searchMemoryContext(getStore(), embeddingClient, query, {

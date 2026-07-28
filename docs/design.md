@@ -1025,6 +1025,8 @@ Important gaps between the prototype and the target plugin:
 - the differentiable controller remains shadow-observed for automatic recall;
   an explicit `nmg_search` without a caller-specified limit may use a disposable
   lexical probe and a bounded learned budget to widen that one retrieval only;
+  ordinary explicit recall stays in a 20-record / 6k-token tier, while a
+  learned `expand` decision may enter a 50-record / 10k-token Active Graph;
   it has not passed the matched quality/cost gate required to affect production
   retrieval;
 - the ANN experiment has unacceptable recall on the near-duplicate workload;
