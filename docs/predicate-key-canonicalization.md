@@ -182,3 +182,17 @@ Results on BEAM conv 1 (188 records -> 721 claims, ~3.8/record):
   JSON (longer outputs), fixed by retrying with smaller batches; remaining
   false candidates are mostly "user is not sure how to X" uncertainty
   claims mislabeled negative (uncertainty is not denial).
+
+Answer-stage probe (`evals/omnimemeval/beam-answer-probe.py`, 2026-07-27):
+an UNPRIMED weak reader (deepseek-chat, temp 0) given the raw evidence
+statements picks one side and misses the contradiction on both official
+questions (Q1 answered confidently wrong: "you HAVE worked with Flask
+routes"). Given the same statements plus one metadata-derived annotation
+("memory metadata flags a CONTRADICTION on '<key>': earlier claim ... vs
+later claim ..."), the reader flags the contradiction and asks for
+clarification — the exact `ideal_answer` behaviour. Caveat: an earlier
+probe round with a contradiction-primed reader prompt found no A/B
+difference, so the gain is specifically for harnesses whose answer prompt
+does not already instruct contradiction handling. The metadata carries
+the signal only if the answer stage renders it — that render path is the
+remaining integration work.
