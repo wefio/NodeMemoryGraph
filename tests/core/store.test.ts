@@ -1448,3 +1448,60 @@ test("P3 schema migrates an existing pre-lifecycle database before creating new 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("contradictionNotes flags claim pairs with opposite polarity in temporal order", () => {
+  withStore((store) => {
+    const earlier = store.remember({
+      statement: "user: I'm trying to implement the basic homepage route with Flask",
+      nodeName: "beam",
+      claims: [
+        {
+          text: "user implemented the basic homepage route with Flask",
+          polarity: "affirmative",
+          predicateKey: "user_write_route",
+          confidence: 0.9,
+          extractMethod: "llm",
+        },
+      ],
+    });
+    const later = store.remember({
+      statement: "user: I've never written any Flask routes in this project",
+      nodeName: "beam",
+      claims: [
+        {
+          text: "user has never written any Flask routes",
+          polarity: "negative",
+          predicateKey: "user_write_route",
+          confidence: 1,
+          extractMethod: "rule",
+        },
+      ],
+    });
+    const unrelated = store.remember({
+      statement: "user: I'm trying to optimize the dashboard API",
+      nodeName: "beam",
+      claims: [
+        {
+          text: "user is optimizing the dashboard API",
+          polarity: "affirmative",
+          predicateKey: "user_optimize_api",
+          confidence: 0.8,
+          extractMethod: "llm",
+        },
+      ],
+    });
+
+    const notes = store.contradictionNotes([
+      earlier.memory.id,
+      later.memory.id,
+      unrelated.memory.id,
+    ]);
+    assert.ok(notes.get(earlier.memory.id)?.includes("user_write_route"));
+    assert.ok(notes.get(later.memory.id)?.includes("user_write_route"));
+    assert.equal(notes.has(unrelated.memory.id), false);
+
+    // A record without claims never produces a note.
+    const plain = store.remember({ statement: "user: no claims here", nodeName: "beam" });
+    assert.equal(store.contradictionNotes([plain.memory.id]).size, 0);
+  });
+});

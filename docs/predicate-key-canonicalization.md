@@ -196,3 +196,32 @@ difference, so the gain is specifically for harnesses whose answer prompt
 does not already instruct contradiction handling. The metadata carries
 the signal only if the answer stage renders it — that render path is the
 remaining integration work.
+
+## Query-time render path (2026-07-27): contradiction notes reach the reader
+
+The render path called out above is now landed. `NmgStore.contradictionNotes(memoryIds)`
+runs the claim-join contradiction lookup at query time — no stored flags — and
+returns one human-readable note per memory. Both records of a contradictory
+pair receive the note, since retrieval may surface only the later one; the
+note text always orders claims earlier-vs-later by record rowid. The OmniMemEval
+bridge (`evals/omnimemeval/bridge.ts` `#search`) appends the note to each
+rendered statement, so the answer-stage reader sees the metadata-derived
+annotation that the probe proved necessary. OmniMemEval itself is unmodified —
+the annotation is an NMG retrieval product rendered on NMG's own side of the
+boundary.
+
+Two supporting fixes landed with it: `remember()` no longer silently drops
+`confidence` / `polarity` / `predicateKey` / `extractMethod` / `claims`
+(previously only `truthStatus` was forwarded), and the claims serialization
+round-trips snake_case on disk / camelCase in TypeScript via `serializeClaims`
+/ `parseClaims`.
+
+Qualitative check on the real BEAM conv 1 store
+(`scripts/verify-notes.mts`): 13 notes over 175 claim-bearing records. Both
+official contradiction pairs are flagged in both directions
+(`user_write_flask_route`, `user_implement_login`). Noise comes from generic
+predicate keys — `user_ensure` pairs unrelated "ensure"-verb claims, and
+several "user is not sure how to X" uncertainty claims still sit in the
+negative bucket. The note mechanism is sound; the residual errors are
+extraction/canonicalization quality issues from the claims pipeline, not the
+render path.

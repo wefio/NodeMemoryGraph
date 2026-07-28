@@ -200,14 +200,21 @@ export class OmniMemEvalBridge {
       sourceRef: result.evidence.sourceRef,
     }));
     const includeTime = needsTemporalContext(query);
+    // Contradiction annotations are NMG's own retrieval product: when a
+    // retrieved memory contradicts another memory (claims metadata), the
+    // note is rendered into the context regardless of the caller.
+    const notes = store.contradictionNotes(memories.map((m) => m.memoryId));
     return {
       retrievalMode: semantic ? "records" : "lexical",
       text: memories
-        .map((memory) =>
-          includeTime && memory.eventTime
-            ? `[${memory.eventTime}] ${memory.statement}`
-            : memory.statement
-        )
+        .map((memory) => {
+          const base =
+            includeTime && memory.eventTime
+              ? `[${memory.eventTime}] ${memory.statement}`
+              : memory.statement;
+          const note = notes.get(memory.memoryId);
+          return note ? `${base}\n${note}` : base;
+        })
         .join("\n"),
       memories,
     };

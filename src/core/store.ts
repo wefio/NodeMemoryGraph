@@ -423,7 +423,7 @@ export class NmgStore {
         memory.polarity,
         memory.predicateKey,
         memory.extractMethod,
-        memory.claims ? JSON.stringify(memory.claims) : null,
+        serializeClaims(memory.claims),
         serializeScope(memory.scope),
         memory.validFrom,
         memory.validUntil,
@@ -524,6 +524,11 @@ export class NmgStore {
         eventTime: input.eventTime,
         sourceActor: input.sourceActor,
         truthStatus: input.truthStatus,
+        confidence: input.confidence,
+        polarity: input.polarity,
+        predicateKey: input.predicateKey,
+        extractMethod: input.extractMethod,
+        claims: input.claims,
         tier: input.tier,
         importance: input.importance,
         scope: input.scope,
@@ -2342,6 +2347,59 @@ export class NmgStore {
 
   embeddingIndexHealth(indexId: string): EmbeddingIndexHealth | null {
     return embeddingIndexHealth(this.#db, indexId);
+  }
+
+  /** Deterministic query-time contradiction lookup over claims: for each
+   *  given memory id, find one claim pair sharing a canonical predicate_key
+   *  with opposite polarity (earlier affirmation vs later denial, ordered by
+   *  record rowid and claim index). Both records of the pair receive the
+   *  note, since retrieval may surface only the later one. Returns a
+   *  human-readable note per memory for the render layer; empty when no
+   *  claims metadata exists. */
+  contradictionNotes(memoryIds: readonly string[]): Map<string, string> {
+    const notes = new Map<string, string>();
+    if (memoryIds.length === 0) return notes;
+    const stmt = this.#db.prepare(
+      `SELECT c1.value ->> 'predicate_key' AS pred_key,
+              c1.value ->> 'text' AS own_text,
+              c2.value ->> 'text' AS other_text,
+              m1.rowid AS own_rowid,
+              m2.rowid AS other_rowid
+         FROM memory_records m1
+         JOIN json_each(m1.claims_json) c1
+         JOIN memory_records m2
+         JOIN json_each(m2.claims_json) c2
+        WHERE m1.id = ?
+          AND m2.status IN ('active', 'disputed')
+          AND c1.value ->> 'predicate_key' = c2.value ->> 'predicate_key'
+          AND c1.value ->> 'polarity' IN ('affirmative', 'negative')
+          AND c2.value ->> 'polarity' IN ('affirmative', 'negative')
+          AND c1.value ->> 'polarity' <> c2.value ->> 'polarity'
+          AND (m1.rowid <> m2.rowid OR c1.key < c2.key)
+        ORDER BY m2.rowid
+        LIMIT 1`,
+    );
+    for (const id of memoryIds) {
+      const row = stmt.get(id) as
+        | {
+            pred_key: string;
+            own_text: string;
+            other_text: string;
+            own_rowid: number;
+            other_rowid: number;
+          }
+        | undefined;
+      if (!row) continue;
+      const ownIsEarlier = row.own_rowid <= row.other_rowid;
+      const earlierText = ownIsEarlier ? row.own_text : row.other_text;
+      const laterText = ownIsEarlier ? row.other_text : row.own_text;
+      notes.set(
+        id,
+        `[NMG note: contradictory memories about '${row.pred_key}': ` +
+          `"${earlierText}" vs later "${laterText}" -- flag this to the user.]`,
+      );
+    }
+    return notes;
   }
 
   rebuildDueLeafBlocks(
@@ -4195,8 +4253,38 @@ function parseStoredJson<T>(value: string | number | Uint8Array | null, fallback
   }
 }
 
+type StoredClaim = {
+  text: string;
+  polarity: MemoryRecord["polarity"];
+  predicate_key: string | null;
+  confidence: number | null;
+  extract_method: NonNullable<MemoryRecord["extractMethod"]>;
+};
+
+/** On-disk claims format is snake_case (shared with the Python extraction
+ *  worker); the in-memory MemoryClaim shape is camelCase. */
+function serializeClaims(claims: MemoryRecord["claims"]): string | null {
+  if (!claims) return null;
+  const stored: StoredClaim[] = claims.map((claim) => ({
+    text: claim.text,
+    polarity: claim.polarity,
+    predicate_key: claim.predicateKey,
+    confidence: claim.confidence,
+    extract_method: claim.extractMethod,
+  }));
+  return JSON.stringify(stored);
+}
+
 function parseClaims(value: string | number | Uint8Array | null): MemoryRecord["claims"] {
-  return parseStoredJson<MemoryRecord["claims"]>(value, null);
+  const stored = parseStoredJson<StoredClaim[] | null>(value, null);
+  if (!stored) return null;
+  return stored.map((claim) => ({
+    text: claim.text,
+    polarity: claim.polarity ?? null,
+    predicateKey: claim.predicate_key ?? null,
+    confidence: claim.confidence ?? null,
+    extractMethod: claim.extract_method,
+  }));
 }
 
 function matchesScope(memory: MemoryScope, requested?: MemoryScope): boolean {

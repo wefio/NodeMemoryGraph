@@ -161,7 +161,9 @@ own text, polarity, predicate key, confidence, and extraction provenance. The
 record-level polarity/predicate/confidence columns are a derived rollup cache
 (first non-neutral claim), never the source of truth. Contradiction detection
 joins claims, not records, so a contradiction inside one long message is as
-visible as one across messages.
+visible as one across messages. At query time, `contradictionNotes()` renders
+each detected pair as a note appended to the retrieved statement, so the
+answer-stage reader sees the flag without any harness-side changes.
 
 STG and LTG describe semantic residence, not separate truth systems. Promotion
 should preserve the same stable record/node identity and provenance rather than
