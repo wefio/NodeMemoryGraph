@@ -472,7 +472,8 @@ export type QppTriggerReason =
   | "ok"
   | "below_threshold"
   | "guardrail_empty"
-  | "guardrail_all_fallback";
+  | "guardrail_all_fallback"
+  | "guardrail_low_top1";
 
 /** Stage 0 trigger decision; recorded on the trace as shadow observation. */
 export interface QppTriggerDecision {

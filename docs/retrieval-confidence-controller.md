@@ -25,17 +25,17 @@
 
 ### 0. 归一化前置（任何 score-based QPP 的前提）
 
-`hybridScore`（`search-ranking.ts:53-55`）= 0.5·boundedLexical + 0.35·vector + 0.15·route 是**手设权重、未归一化**（lexicalScore 可达 10+，vector/route∈[0,1]，量纲不一）。算 QPP 前必须 **Z-score 跨候选集归一化**各通路分数，否则 top1 与方差跨量纲无意义。`contextUsefulness`（`search-ranking.ts:5-25`）= `combinedScore + bonus`，bonus 可使值 >1（preference +0.3）→ clamp 到 1.0 饱和。RankSVM 学通道组合权重是手设 0.5/0.35/0.15 的 supervised 版，与 DC 学 QPP 分量权重平行（Stage 2 可一并接管）。
+算 QPP 前须归一化分数。`hybridScore`（`search-ranking.ts:53-55`）本身已用 `boundedLexical = lexical/(lexical+10)` 把词法分压到 [0,1)，但**结果级 `combinedScore`（`mapSearchResult:3835` 设 = 原始词法分 `score`，实测 ~84）不在 [0,1]**，而 `contextUsefulness = combinedScore + bonus`。QPP 用 **bounded-squash** `s(x)=max(0,x)/(max(0,x)+k)`（k=`QPP_SQUASH_K`=10，同 `boundedLexical` 惯例）把 usefulness 压到 [0,1)——不用 clamp（>1 全饱和到 1.0，审计实测 top1 恒 1.0、variance 恒 0），也不用 Z-score（within-set 相对值，丢绝对质量：全弱匹配里一个相对强者 z 高会误判好）。bonus 仍保留为小偏移。RankSVM 学通道组合权重是手设 0.5/0.35/0.15 的 supervised 版（Stage 2 可接管），与 QPP 分量权重独立。
 
 ### 1. 算 QPP（post-retrieval，learned-weight）
 
 公式（Stage 1 起采用，替代原手设 `0.5*topScore+0.3*intentCoverage+0.2*reasonHealth`）：
 
 ```
-C = z(Top1) + τ_v·z(variance) + w_ic·intentCoverage + w_rh·reasonHealth
+C = Top1 + τ_v·variance + w_ic·intentCoverage + w_rh·reasonHealth
 ```
 
-这是 **learned-weight NQC 变体**（Top1 锚定 + 方差项 = score-based QPP 族），不是手设先验。高 C = 不触发，低 C = 触发。
+`Top1`/`variance` 已 squash 到 [0,1)（见 §0）。这是 **learned-weight NQC 变体**（Top1 锚定 + 方差项 = score-based QPP 族），不是手设先验。高 C = 不触发，低 C = 触发。
 
 **三信号按失败模式正交选取**（推导依据，非拍脑袋）：
 
@@ -46,12 +46,12 @@ C = z(Top1) + τ_v·z(variance) + w_ic·intentCoverage + w_rh·reasonHealth
 | `intentCoverage` | 捞到了但类型错（要 preference，全是 fact） | preference 0.16 / assistant 0.29 |
 | `reasonHealth` | 匹配是假的（三路全 ≤0 的兜底塞入） | hybrid_match 是 recallReason 红灯 |
 
-权重排序依据：`Top1` 最 informative（单信号即可否决触发）；`variance` 是 NQC 族核心、抓"分布形状"；`intentCoverage` 抓 `Top1` 盲区（高分但类型错）故独立值钱；`reasonHealth` 与 `Top1` 部分冗余（弱匹配大概率即 hybrid_match）故最低。**具体数值靠学，非手设**：Stage 1 贝叶斯优化，Stage 2 DC 梯度。
+权重排序依据：`Top1` 最 informative（单信号即可否决触发）；`variance` 是 NQC 族核心、抓"分布形状"；`intentCoverage` 抓 `Top1` 盲区（高分但类型错）故独立值钱；`reasonHealth` 权重最低。**关于 reasonHealth 冗余性**：它捕获"direct 里多少比例是真匹配（reason≠hybrid_match）"，与 `Top1`（只看最强）**互补不冗余**——可能 Top1 高但 reasonHealth 低（1 强 + 多兜底）。但实测 LongMemEval 非空题 reasonHealth 恒 1.0（返回的都真），**实践可能近常数、低区分度**；标定时须做 Top1×reasonHealth 相关性分析确认其边际贡献（见 §2 标定流程）。**具体数值靠学，非手设**：Stage 1 贝叶斯优化，Stage 2 DC 梯度。
 
 **分量精确口径**（从 `trace.selections` 算，即过预算后存活的 top-K——LLM 实际所见）：
-- `Top1` = `clamp(max(selections.scores.usefulness), 0, 1)`；`scores.usefulness` 见 `store.ts:1383`。
-- `variance` = top-K 归一化分标准差（NQC 族，须归一化后算；高方差双解——清晰赢家 vs 噪声离群——归一化缓解）。
-- `intentCoverage`：3 族意图正则→期望类型（`search-ranking.ts:9-23`：`list/count`→derived/event/fact/state；`recommend/suggest/preference`→preference+constraint；`assistant/you said/previous`→conversation_evidence）；coverage = 命中族中"期望类型确实出现在 top-K"的比例；**不命中任何正则→取中性 0.5**（不冤枉单跳事实题，不能取 0）。
+- `Top1` = `max(squash(usefulness))`，`squash(x)=max(0,x)/(max(0,x)+QPP_SQUASH_K)`；`scores.usefulness` 见 `store.ts:1383`。84→0.894 / 20→0.667 / 5→0.333，保留 gradation。
+- `variance` = `clamp(stdev(squashed_usefulness)*2, 0, 1)`（squashed 值∈[0,1) 故 stdev≤0.5，*2 映射 [0,1]）。高方差双解——清晰赢家 vs 噪声离群——squash 不解决，标定时用 Top1−Top2 差值作辅助/替代（见 §2）。
+- `intentCoverage`：3 族意图正则→期望类型（`search-ranking.ts:9-23`：`list/count`→derived/event/fact/state；`recommend/suggest/preference`→preference+constraint；`assistant/you said/previous`→conversation_evidence）；coverage = 命中族中"期望类型确实出现在 top-K"的比例；**不命中任何正则→取中性 0.5**（不冤枉单跳事实题，不能取 0）。0.5 贡献 `0.5·w_ic=0.15`，偏置有界且小；标定时对"未命中正则"查询单独看分布，若系统性偏，改用 `avg(intentCoverage)` 作中性。
 - `reasonHealth` = **仅 direct 选择项**中 `reason≠hybrid_match` 的比例（剔除 graph_expansion：其三路分恒 0，计入会把好召回拉成 0）；`recallReason` 见 `search-ranking.ts:72-84`，现仅 debug 用，正好接上。
 - 空结果 → C=0（必触发，正确）。
 
@@ -60,21 +60,34 @@ C = z(Top1) + τ_v·z(variance) + w_ic·intentCoverage + w_rh·reasonHealth
 ### 2. 触发决策（系统侧，三阶段）
 
 **Stage 0 — plumbing + guardrail floor**
-最简硬条件（`Top1 < floor` 或结果空 → 触发）验证第二趟检索 + `expandedMaximum` 预算 + 统一池管道通畅；立**永久 guardrail floor**（Stage 1/2 学化门控说"不触发"但结果灾难性空/全 hybrid_match → 无论如何触发）。价值在验证管道，非决策质量。原"手设 0.5/0.3/0.2 公式 + 手设 τ"的 Stage 0 **砍掉**——与 Stage 1 代理公式重复且更差。
+最简硬条件验证第二趟检索 + `expandedMaximum` 预算 + 统一池管道通畅；立**永久 guardrail floor**（Stage 1/2 学化门控说"不触发"但结果灾难性弱 → 无论如何触发）。必触发条件（具体数值，可操作基线）：
+- `totalCount === 0`（空结果）→ `guardrail_empty`
+- `directCount > 0 && reasonHealth === 0`（全 hybrid_match 兜底）→ `guardrail_all_fallback`（当前权重下与 low_top1 重叠，作防学错权重的安全网留）
+- `Top1 < QPP_TOP1_FLOOR(=0.2)`（squashed，≈ 原始 usefulness < 2.5，基本没真匹配）→ `guardrail_low_top1`
+- 否则 `C < τ` → `below_threshold`
+
+价值在验证管道，非决策质量。原"手设 0.5/0.3/0.2 公式 + 手设 τ"的 Stage 0 **砍掉**——与 Stage 1 代理公式重复且更差。
 
 **Stage 1 — 代理损失（工程首选）**
 `C` 如上；权重 `τ_v / w_ic / w_rh` 用**贝叶斯优化 / Optuna 黑盒**在 trace feedback（`trace.usefulMemoryIds / rejectedMemoryIds / contradictedMemoryIds`，见 `controller-protocol.ts:89-100`）上学；触发阈值手工设 + **rolling-window 校准**（近期高 C 结果实际 usefulness 下降 → 降阈值扩探索池，不死守）；DC 仍 shadow。轻量、解耦、近端到端。
 
 **Stage 2 — Gumbel-Sigmoid DC**
-阈值本身可微学化（Gumbel-Sigmoid 松弛 0/1 硬开关，梯度回传）；`Loss = 生成Loss + λ·搜索成本惩罚`；DC 出 shadow，取代手工/黑盒阈值。Soft-Hard（REALM/可微 RAG，softmax top-k→注意力→与生成向量融合）太侵入（改 retrieval→gen 接口，NMG 返回 context 非融合向量），列替代不主推。
+阈值本身可微学化（Gumbel-Sigmoid 松弛 0/1 硬开关，梯度回传）；`Loss = 生成Loss + λ·搜索成本惩罚`；DC 出 shadow，**取代**（非并发）Stage 1 的手工/黑盒阈值，warm-start 自 Stage 1 权重/阈值。**暴露范围**：默认只把 composite `qpp` 喂 DC globalFeatures → Stage 2 只学阈值（Stage 1 权重冻结），简单、小 eval N(≈500) 不易过拟合；数据足够时再暴露各分量让 DC 隐式再加权。Soft-Hard（REALM/可微 RAG，softmax top-k→注意力→与生成向量融合）太侵入（改 retrieval→gen 接口，NMG 返回 context 非融合向量），列替代不主推。
 
 **τ 标定方法**（Stage 0/1 起点阈值）：eval traces 采 (C, 证据完整性) 对；full-evidence（89.67% 批）=正、partial-evidence（16.67% 批）=负；τ = 使 partial-evidence 召回率 ≥ 目标（如 0.8）的阈值下限，扫 0.4–0.5。
+
+**标定流程**（Stage 1，审计脚本 `evals/omnimemeval/audit-qpp-signal.ts` 已可采 (qpp, outcome) 对）：
+1. **相关性分析**：Top1×reasonHealth 分布（确认 reasonHealth 边际贡献，若近常数则降权）；低 qpp 是否对应 partial-evidence/错答。
+2. **variance 双解处置**：人工抽高方差案例，若"清晰赢家误触发"多，用 Top1−Top2 差值替代/辅助 variance。
+3. **intentCoverage 中性值**：对"未命中正则"查询单独看 QPP 分布，若 0.5 系统性偏，改 `avg(intentCoverage)`。
+4. **贝叶斯优化目标**（明确标量）：`Objective = α·(partial-evidence 召回率) − β·(误触发率) − γ·(搜索成本)`。partial-evidence 召回率=触发后变对的比例（正）、误触发率=全证据题被误触浪费预算（负）、搜索成本=触发次数×均耗时（负）。
+5. **sequencing 约束**：目标第 1 项"触发后变对"需第二趟真跑 → 依赖 **Stage 0 plumbing 完成**；plumbing 之前只能做 1–3 的相关性分析（shadow traces），全目标贝叶斯优化在 plumbing 之后。
 
 ### 3. 接入计算图本体（落点已就绪，近乎免造）
 - `differentiable-controller.ts:14` 已内置 `ControllerAction="expand"|"stop"`，`:3-11` 有 `CONTROLLER_BUDGET_DIMENSIONS`。
 - `controller-runtime.ts:107-148` `allocate()` 在 `action==="expand"` 时解锁 `expandedMaximum` 预算信封（独立预算、有上限）。
 - `ControllerRuntime` 当前只在 `index.ts` 导出、**未接入 `store.ts` 实时循环**；集成 = 在首趟候选边界调用 `runtime.allocate()` 并按 `action` 行动。
-- 把 `qpp` 及其分量作为新 feature 喂 `globalFeatures`（`controller-protocol.ts:19-52` 加 `qpp / top1 / score_variance / intent_coverage / reason_health`，协议版本 1→2）；DC 过 gate 后从 globalFeatures 学化取代黑盒/手工权重与阈值。`globalFeatures` 全是标量统计量（`:140-173`），DC 在其上学习——梯度停在特征层，不穿过 ANN top-K 回传 embedder。
+- 把 `qpp` 作为新 feature 喂 `globalFeatures`（`controller-protocol.ts:19-52` 加 `qpp`，协议版本 1→2）；DC 过 gate 后从 globalFeatures 学化阈值取代手工/黑盒阈值。**默认只暴露 composite `qpp`**（Stage 2 只学阈值，见 §2）；数据足够时再暴露 `top1 / score_variance / intent_coverage / reason_health` 让 DC 隐式再加权。`globalFeatures` 全是标量统计量（`:140-173`），DC 在其上学习——梯度停在特征层，不穿过 ANN top-K 回传 embedder。
 
 ### 4. 预算与池
 - 搜索走 `expandedMaximum` 独立信封（有上限，不撑爆上下文）。

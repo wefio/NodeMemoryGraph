@@ -42,6 +42,13 @@ export const DEFAULT_QPP_WEIGHTS: QppWeights = { tauV: 0.3, wIc: 0.3, wRh: 0.2 }
  */
 export const DEFAULT_QPP_THRESHOLD = 0.45;
 
+/** Bounded-squash scale constant — matches `boundedLexical = lexical/(lexical+10)`. */
+export const QPP_SQUASH_K = 10;
+
+/** Stage 0 guardrail floor on (squashed) Top1 — a best match weaker than this
+ *  triggers unconditionally. 0.2 ≈ raw usefulness < 2.5 (essentially no real match). */
+export const QPP_TOP1_FLOOR = 0.2;
+
 /**
  * Join final {@link MemorySearchResult}s with their {@link ActiveGraphSelection}
  * projections to build QPP candidates. Selections already carry `scores.usefulness`
@@ -72,10 +79,12 @@ export function computeQppComponents(
   candidates: readonly QppCandidate[],
 ): QppComponents {
   const direct = candidates.filter((candidate) => candidate.isDirect);
-  const directUsefulness = direct.map((candidate) => clamp(candidate.usefulness, 0, 1));
-  const top1 = directUsefulness.length === 0 ? 0 : Math.max(...directUsefulness);
-  // stdev of [0,1]-bounded data is <= 0.5, so *2 maps to [0,1].
-  const variance = clamp(stdev(directUsefulness) * 2, 0, 1);
+  // Bounded-squash (x/(x+k)) maps the lexical-scale combinedScore (~0-100+) to
+  // [0,1) with gradation, instead of clamp which saturated everything >1 to 1.0.
+  const directSquashed = direct.map((candidate) => squash(candidate.usefulness));
+  const top1 = directSquashed.length === 0 ? 0 : Math.max(...directSquashed);
+  // stdev of [0,1]-bounded squashed values is <= 0.5, so *2 maps to [0,1].
+  const variance = clamp(stdev(directSquashed) * 2, 0, 1);
   const reasonHealth =
     direct.length === 0
       ? 0
@@ -150,6 +159,9 @@ export function shouldTriggerSecondPass(
   if (components.directCount > 0 && components.reasonHealth === 0) {
     return { trigger: true, reason: "guardrail_all_fallback", qpp, threshold, components };
   }
+  if (components.top1 < QPP_TOP1_FLOOR) {
+    return { trigger: true, reason: "guardrail_low_top1", qpp, threshold, components };
+  }
   if (qpp < threshold) {
     return { trigger: true, reason: "below_threshold", qpp, threshold, components };
   }
@@ -158,6 +170,13 @@ export function shouldTriggerSecondPass(
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
+}
+
+/** Bounded-squash to [0,1): s(x) = max(0,x)/(max(0,x)+k). Preserves gradation on
+ *  lexical-scale scores where clamp would saturate. */
+function squash(value: number): number {
+  const clamped = Math.max(0, Number.isFinite(value) ? value : 0);
+  return clamped / (clamped + QPP_SQUASH_K);
 }
 
 function stdev(values: number[]): number {
