@@ -295,6 +295,33 @@ losses), while forgetting remained materially better (80 wins, 28 losses,
 limit: a memory may retain arbitrarily many typed markers, but the model sees
 only the most relevant registered control marker per kind.
 
+The projection rule was then rerun through a fresh end-to-end lifecycle
+(`nmg_pmv2_marker_top1_e2e_20260728`) rather than only rewriting an older
+search artifact. It completed 200/200 persona ingestions and deletions,
+5,000/5,000 searches, and 5,000/5,000 answer calls without failures or empty
+contexts. Exactly 3,966 queries exposed a `forget` marker; no query exposed
+more than one. The run scored **35.02%** overall and **18.89%** on
+`ask_to_forget`. It was statistically indistinguishable from the prior
+answer-stage Top-1 arm overall (96 wins, 97 losses, 4,807 ties) and on
+`ask_to_forget` (22 wins, 20 losses, 1,006 ties). This closes the gap between
+the ablation and the live bridge implementation.
+
+Against the all-marker arm, the fresh run improved overall accuracy with
+231 wins, 189 losses, and 4,580 ties (`p=0.0453`). Against the stripped arm,
+overall accuracy was exactly tied, while `ask_to_forget` improved from 13.74%
+to 18.89% (87 wins, 33 losses, `p=8.68e-7`). The remaining category trade-off
+is real: compared with stripping markers, forgetting and sensitive-information
+questions improve, while health questions regress. A more selective gate may
+be useful later, but the full-history similarity-threshold upper bound does not
+yet justify adding that complexity.
+
+Search latency for the fresh run was 132 ms mean, 42 ms P50, and 85 ms P95;
+the mean includes each persona's first cold local index build. Answer generation
+used 5,892,265 reported prompt tokens (1,178 per question) and 44,340 completion
+tokens, taking 25m16s with 64 DeepSeek workers. OmniMemEval's token tracker
+records provider token totals but not DeepSeek's cache-hit token breakdown, so
+this run does not claim a measured cache-hit rate.
+
 A second answer-stage upper-bound ablation selected the nearest explicit
 revocation only when BGE similarity was at least 0.65. It exposed a marker on
 1,383/5,000 questions and scored **35.46%** overall with **18.03%** on
