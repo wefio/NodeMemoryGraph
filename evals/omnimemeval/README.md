@@ -361,9 +361,13 @@ Incremental add-time indexing preserved retrieval quality while reducing mean
 first-query latency from 2,102 to 193 ms. Across 90 session add calls, embedding
 increased aggregate ingestion time from 7.0 to 42.3 seconds, but total
 add-plus-search time for all 20 conversations still fell from 73.0 to 68.9
-seconds. The shared incremental synchronizer is therefore accepted:
-OmniMemEval awaits it after each add, while Pi schedules the same operation in
-the background after turns and continues using FTS until the index is ready.
+seconds. The shared incremental synchronizer is therefore accepted, but the
+OmniMemEval adapter now accumulates pending records across a benchmark user's
+session adds and flushes them as one or more batches immediately before search.
+This preserves a ready index at retrieval time without issuing dozens of tiny
+embedding requests for LongMemEval conversations. Pi separately schedules the
+same synchronizer in the background after turns and continues using FTS until
+the index is ready.
 
 BEAM also exposed an actor-routing trade-off. Of 1,094 labelled evidence
 messages, 253 are assistant messages. Searching all actors in one shared K=20

@@ -157,13 +157,6 @@ export class OmniMemEvalBridge {
       added += 1;
     });
 
-    if (this.#embeddingClient) {
-      await syncRecordEmbeddings(
-        store,
-        this.#embeddingClient,
-        this.#embeddingBatchSize,
-      );
-    }
     return { added };
   }
 

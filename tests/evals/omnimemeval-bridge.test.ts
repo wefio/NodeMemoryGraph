@@ -92,7 +92,7 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
   }
 });
 
-test("OmniMemEval incrementally indexes fine-grained record vectors", async () => {
+test("OmniMemEval batches pending record vectors before search", async () => {
   const root = mkdtempSync(join(tmpdir(), "nmg-omni-records-"));
   const calls = { documents: 0, queries: 0 };
   const bridge = new OmniMemEvalBridge(root, {
@@ -115,6 +115,7 @@ test("OmniMemEval incrementally indexes fine-grained record vectors", async () =
       userId: "alice",
       messages: [{ role: "user", content: "My telescope is named Kepler." }],
     });
+    assert.equal(calls.documents, 0);
     const result = await bridge.handle({
       id: 2,
       op: "search",
@@ -141,6 +142,7 @@ test("OmniMemEval incrementally indexes fine-grained record vectors", async () =
       userId: "alice",
       messages: [{ role: "user", content: "Kepler is stored in the observatory." }],
     });
+    assert.equal(calls.documents, 1);
     await bridge.handle({
       id: 5,
       op: "search",
