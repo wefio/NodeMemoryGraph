@@ -6,10 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import type {
   ActivationSignal,
   ActiveGraph,
-  ActiveGraphBudget,
-  ActiveGraphBudgetLedgerEntry,
   ActiveGraphBudgetUsage,
-  ActiveGraphExpansion,
   ActiveGraphSelection,
   ConsolidationEvent,
   ConsolidationResult,
@@ -66,20 +63,30 @@ import {
   failEmbeddingIndex,
 } from "./store/embedding-index.ts";
 import { normalizeClaims } from "./claims.ts";
-
-type Row = Record<string, string | number | Uint8Array | null>;
+import {
+  activeGraphBudget,
+  activeGraphBudgetLedger,
+  activeGraphExpansions,
+  estimateResultTokens,
+  queryAssociationEdges,
+  stableTaskId,
+} from "./store/active-graph.ts";
+import {
+  contextUsefulness,
+  ftsExpression,
+  hierarchyWeight,
+  hybridScore,
+  lexicalNodeScore,
+  lexicalScore,
+  memoryEmbeddingText,
+  mergeSemanticCandidates,
+  normalize,
+  recallReason,
+  searchTerms,
+  type StoreRow as Row,
+} from "./store/search-ranking.ts";
 
 const MAX_SEARCH_CANDIDATES = 500;
-const DEFAULT_ACTIVE_GRAPH_BUDGET: ActiveGraphBudget = {
-  maxNodes: 8,
-  maxEdges: 12,
-  maxEvidence: 8,
-  maxTokens: 2_000,
-  maxGraphHops: 1,
-  maxLocalTier: 1,
-  maxLatencyMs: 250,
-};
-
 export class NmgStore {
   readonly #db: DatabaseSync;
   readonly #embedder: VectorEmbedder;
@@ -3818,28 +3825,6 @@ function mapSearchResult(row: Row, score: number): MemorySearchResult {
   };
 }
 
-function contextUsefulness(query: string, result: MemorySearchResult): number {
-  const normalized = normalize(query);
-  const type = result.memory.memoryType;
-  let bonus = 0;
-  if (/\b(?:how many|how much|list|all|count)\b|(?:多少|几个|列出|全部)/iu.test(normalized)) {
-    if (["derived", "event", "fact", "state"].includes(type)) bonus += 0.25;
-    if (type === "conversation_evidence") bonus -= 0.15;
-    if (type === "strategy") bonus -= 0.1;
-  }
-  if (/\b(?:recommend|suggest|preference)\b|(?:推荐|建议|偏好)/iu.test(normalized)) {
-    if (type === "preference") bonus += 0.3;
-    if (type === "constraint") bonus += 0.15;
-  }
-  if (
-    /\b(?:assistant|you said|previous chat)\b|(?:你说过|助手|之前的对话)/iu.test(normalized) &&
-    type === "conversation_evidence"
-  ) {
-    bonus += 0.25;
-  }
-  return result.combinedScore + bonus;
-}
-
 function mapHistory(row: Row): HistoryRecord {
   return {
     id: String(row.id),
@@ -3922,144 +3907,12 @@ function mapActivation(row: Row | undefined, hasExpanded: boolean): ActivationSi
   };
 }
 
-function lexicalScore(query: string, row: Row): number {
-  const haystack = normalize(`${row.m_statement} ${row.n_canonical_name} ${row.n_summary}`);
-  if (haystack.includes(query)) return 10 + query.length;
-
-  const terms = searchTerms(query);
-  return terms.reduce((score, term) => score + (haystack.includes(term) ? term.length : 0), 0);
-}
-
-function memoryEmbeddingText(statement: unknown, canonicalName: unknown): string {
-  return `${String(canonicalName)}: ${String(statement)}`;
-}
-
-function ftsExpression(query: string): string {
-  return searchTerms(normalize(query))
-    .map((term) => `"${term.replaceAll('"', '""')}"`)
-    .join(" OR ");
-}
-
-function lexicalNodeScore(query: string, node: MemoryNode): number {
-  if (!query) return 0;
-  const haystack = normalize(`${node.canonicalName} ${node.summary}`);
-  if (haystack.includes(query)) return 1;
-  const terms = searchTerms(query);
-  if (terms.length === 0) return 0;
-  return terms.filter((term) => haystack.includes(term)).length / terms.length;
-}
-
-function hybridScore(lexical: number, vector: number, route: number): number {
-  const boundedLexical = lexical <= 0 ? 0 : lexical / (lexical + 10);
-  return boundedLexical * 0.5 + Math.max(0, vector) * 0.35 + Math.max(0, route) * 0.15;
-}
-
-function mergeSemanticCandidates(
-  query: string,
-  values: MemorySearchResult[],
-  limit = 8,
-): MemorySearchResult[] {
-  return values
-    .filter(
-      (result, index, all) =>
-        all.findIndex((candidate) => candidate.memory.id === result.memory.id) === index,
-    )
-    .sort((left, right) => contextUsefulness(query, right) - contextUsefulness(query, left))
-    .slice(0, Math.max(1, Math.min(limit, 50)));
-}
-
-function recallReason(result: MemorySearchResult): RecallCue["reason"] {
-  const scores = [
-    [
-      "lexical_match",
-      result.lexicalScore > 0 ? result.lexicalScore / (result.lexicalScore + 10) : 0,
-    ],
-    ["vector_match", Math.max(0, result.vectorScore)],
-    ["learned_route", Math.max(0, result.routeScore)],
-  ] as const;
-  const ordered = [...scores].sort((left, right) => right[1] - left[1]);
-  if ((ordered[0]?.[1] ?? 0) <= 0) return "hybrid_match";
-  return ordered[0]![0];
-}
-
-function hierarchyWeight(row: Row): number {
-  const frequency = Math.log2(2 + Number(row.access_count ?? 0));
-  const importance = 0.5 + Number(row.importance ?? 0);
-  const lastAccessed = row.last_accessed_at ? Date.parse(String(row.last_accessed_at)) : 0;
-  const ageDays = lastAccessed > 0 ? Math.max(0, (Date.now() - lastAccessed) / 86_400_000) : 365;
-  const recency = 1 / (1 + ageDays / 30);
-  return Math.max(Number.EPSILON, frequency * importance * (0.5 + recency));
-}
-
-function searchTerms(value: string): string[] {
-  const tokens = value.match(/[\p{L}\p{N}_+.#-]+/gu) ?? [];
-  const terms = new Set<string>();
-  for (const token of tokens) {
-    if (token.length >= 2 && !ENGLISH_SEARCH_STOP_WORDS.has(token)) terms.add(token);
-    if (/\p{Script=Han}/u.test(token) && token.length > 4) {
-      for (let index = 0; index < token.length - 1; index += 1) {
-        terms.add(token.slice(index, index + 2));
-      }
-    }
-  }
-  return [...terms];
-}
-
-const ENGLISH_SEARCH_STOP_WORDS = new Set([
-  "an",
-  "and",
-  "are",
-  "at",
-  "be",
-  "been",
-  "being",
-  "between",
-  "but",
-  "by",
-  "did",
-  "do",
-  "does",
-  "for",
-  "from",
-  "had",
-  "has",
-  "have",
-  "how",
-  "if",
-  "in",
-  "into",
-  "is",
-  "many",
-  "much",
-  "of",
-  "on",
-  "or",
-  "the",
-  "then",
-  "to",
-  "was",
-  "were",
-  "what",
-  "when",
-  "where",
-  "which",
-  "who",
-  "whom",
-  "whose",
-  "why",
-  "with",
-]);
-
 function identityTokens(value: string): Set<string> {
   return new Set(
     normalize(value)
       .split(/[^\p{L}\p{N}]+/u)
       .filter((token) => token.length >= 2 && token !== "time"),
   );
-}
-
-function normalize(value: string): string {
-  return value.trim().toLocaleLowerCase();
 }
 
 function requireText(value: string, label: string): string {
@@ -4091,149 +3944,6 @@ function defaultWriteReason(
   const type = input.memoryType ?? "fact";
   if (residence === "stg") return `provisional_${type}:${input.truthStatus ?? "asserted"}`;
   return `governed_durable_${type}`;
-}
-
-function activeGraphBudget(options: SearchOptions): ActiveGraphBudget {
-  const requested = options.activeGraphBudget ?? {};
-  return {
-    maxNodes: Math.max(1, Math.min(requested.maxNodes ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxNodes, 50)),
-    maxEdges: Math.max(
-      0,
-      Math.min(requested.maxEdges ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxEdges, 100),
-    ),
-    maxEvidence: Math.max(
-      1,
-      Math.min(
-        requested.maxEvidence ?? options.limit ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxEvidence,
-        50,
-      ),
-    ),
-    maxTokens: Math.max(
-      64,
-      Math.min(requested.maxTokens ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxTokens, 100_000),
-    ),
-    maxGraphHops: Math.max(
-      0,
-      Math.min(
-        requested.maxGraphHops ?? options.graphHops ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxGraphHops,
-        3,
-      ),
-    ),
-    maxLocalTier: Math.max(
-      0,
-      Math.min(
-        requested.maxLocalTier ?? options.maxTier ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxLocalTier,
-        3,
-      ),
-    ) as MemoryTier,
-    maxLatencyMs: Math.max(
-      1,
-      Math.min(requested.maxLatencyMs ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxLatencyMs, 60_000),
-    ),
-  };
-}
-
-function stableTaskId(query: string): string {
-  return `query:${createHash("sha256").update(normalize(query)).digest("hex").slice(0, 16)}`;
-}
-
-function estimateResultTokens(result: MemorySearchResult): number {
-  const characters =
-    result.memory.statement.length +
-    result.node.canonicalName.length +
-    result.node.summary.length +
-    result.evidence.content.length;
-  return Math.max(1, Math.ceil(characters / 4));
-}
-
-function queryAssociationEdges(
-  nodeIds: string[],
-  persistentEdges: ActiveGraph["edges"],
-  limit: number,
-): ActiveGraph["edges"] {
-  if (limit <= 0) return [];
-  const connected = new Set(
-    persistentEdges.map((edge) => [edge.sourceNodeId, edge.targetNodeId].sort().join(":")),
-  );
-  const edges: ActiveGraph["edges"] = [];
-  for (let left = 0; left < nodeIds.length && edges.length < limit; left += 1) {
-    for (let right = left + 1; right < nodeIds.length && edges.length < limit; right += 1) {
-      const pair = [nodeIds[left]!, nodeIds[right]!].sort();
-      const key = pair.join(":");
-      if (connected.has(key)) continue;
-      edges.push({
-        id: `temp:${createHash("sha256").update(key).digest("hex").slice(0, 16)}`,
-        sourceNodeId: pair[0]!,
-        targetNodeId: pair[1]!,
-        type: "query_association",
-        persistence: "temporary",
-        stability: 0,
-      });
-    }
-  }
-  return edges;
-}
-
-function activeGraphExpansions(
-  seedNodeIds: readonly string[],
-  edges: ActiveGraph["edges"],
-  maxHops: number,
-): ActiveGraphExpansion[] {
-  const visited = new Set(seedNodeIds);
-  const traversedRelations = new Set<string>();
-  let frontier = [...visited];
-  const expansions: ActiveGraphExpansion[] = [];
-  for (let hop = 1; hop <= maxHops && frontier.length > 0; hop += 1) {
-    const next: string[] = [];
-    for (const edge of edges) {
-      const sourceInFrontier = frontier.includes(edge.sourceNodeId);
-      const targetInFrontier = frontier.includes(edge.targetNodeId);
-      const target = sourceInFrontier
-        ? edge.targetNodeId
-        : targetInFrontier
-          ? edge.sourceNodeId
-          : null;
-      if (!target || traversedRelations.has(edge.id)) continue;
-      traversedRelations.add(edge.id);
-      expansions.push({
-        relationId: edge.id,
-        sourceNodeId: sourceInFrontier ? edge.sourceNodeId : edge.targetNodeId,
-        targetNodeId: target,
-        hop,
-      });
-      if (!visited.has(target)) {
-        visited.add(target);
-        next.push(target);
-      }
-    }
-    frontier = next;
-  }
-  return expansions;
-}
-
-function activeGraphBudgetLedger(
-  budget: ActiveGraphBudget,
-  usage: ActiveGraphBudgetUsage,
-): ActiveGraphBudgetLedgerEntry[] {
-  const exhausted = new Set(usage.exhausted);
-  const entries: Array<Omit<ActiveGraphBudgetLedgerEntry, "exhausted">> = [
-    { dimension: "nodes", limit: budget.maxNodes, used: usage.nodes },
-    { dimension: "edges", limit: budget.maxEdges, used: usage.edges },
-    { dimension: "evidence", limit: budget.maxEvidence, used: usage.evidence },
-    { dimension: "tokens", limit: budget.maxTokens, used: usage.estimatedTokens },
-    { dimension: "graphHops", limit: budget.maxGraphHops, used: usage.graphHops },
-    { dimension: "localTier", limit: budget.maxLocalTier, used: usage.deepestTier },
-    { dimension: "latencyMs", limit: budget.maxLatencyMs, used: usage.latencyMs },
-  ];
-  return entries.map((entry) => ({
-    ...entry,
-    exhausted:
-      exhausted.has(
-        entry.dimension === "latencyMs"
-          ? "latency"
-          : (entry.dimension as "edges" | "evidence" | "nodes" | "tokens"),
-      ) || entry.used >= entry.limit,
-  }));
 }
 
 function parseScope(value: string | number | Uint8Array | null): MemoryScope {
