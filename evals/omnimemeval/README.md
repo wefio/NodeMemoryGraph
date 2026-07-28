@@ -159,6 +159,38 @@ such as requests for broadly relevant publications or conferences, motivate a
 query-independent consolidated preference/profile representation; they do not
 justify more benchmark-specific prompt rules.
 
+The record-level BGE path was then evaluated on the complete 500-question
+LongMemEval set (`nmg_lme500_bge_merged_20260728`). All 500 searches and answer
+calls succeeded; the official judge accepted 491 answers. It scored **0.7963**
+(391/491), with lexical F1 0.1754 and METEOR 0.2456. The strict evidence audit
+found at least one labelled turn for 94.15% of questions, every labelled turn
+for 81.63%, and 87.28% recall over all labelled turns. Assistant and user
+evidence recall were 85.19% and 87.41%, respectively.
+
+On the 482 questions successfully judged in the BGE, lexical NMG, and
+no-memory runs, the scores were:
+
+| Arm on common 482 | Accuracy | Correct |
+| --- | ---: | ---: |
+| NMG + record BGE | **0.8008** | 386 |
+| NMG lexical/FTS | 0.6473 | 312 |
+| No memory | 0.0664 | 32 |
+
+BGE versus lexical NMG produced 96 wins, 22 losses, and 364 ties, a net gain of
+74 questions. Against no memory it produced 356 wins, 2 losses, and 124 ties.
+The gain tracks evidence completeness: BGE answers were correct for 88.80% of
+questions with all labelled evidence, 36.05% with partial evidence, and 25.00%
+with none.
+
+This quality result does not yet satisfy the latency goal. Full-run search
+latency was 12.91 seconds mean, 13.13 seconds P50, and 14.28 seconds P95,
+compared with roughly 156/175 ms mean/P95 for the lexical run. The BGE run
+builds each isolated user's record index on its first query, so these numbers
+mostly measure cold per-user embedding construction rather than warm ANN
+lookup. The answer prompt averaged 1,114 reported tokens per question. Future
+performance work must report cold indexing and warm retrieval separately and
+must not trade away the measured evidence-recall gain.
+
 On the Windows evaluation host, the offline BGE server is run from the existing
 `uv` script environment. Installing the CUDA PyTorch wheel into that environment
 reduced the 30-question search run from roughly 50--75 seconds per question on
@@ -169,8 +201,8 @@ Reproduce the diagnostic with:
 
 ```powershell
 npm run benchmark:audit:longmem -- `
-  .benchmarks/official/OmniMemEval/results/lme/nmg-nmg_lme500_fixed_20260728/nmg_lme_search_results.json `
-  .benchmarks/official/OmniMemEval/results/lme/nmg-nmg_lme500_fixed_20260728/nmg_lme_judged.json
+  .benchmarks/official/OmniMemEval/results/lme/nmg-nmg_lme500_bge_merged_20260728/nmg_lme_search_results.json `
+  .benchmarks/official/OmniMemEval/results/lme/nmg-nmg_lme500_bge_merged_20260728/nmg_lme_judged.json
 ```
 
 The first full attempt was invalid: 446 conversations were marked `skipped`
