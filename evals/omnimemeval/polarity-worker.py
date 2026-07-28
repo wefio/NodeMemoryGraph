@@ -29,6 +29,11 @@ import time
 import requests
 import spacy
 
+# Aspectual/modal verbs are transparent: the predicate is their infinitival
+# complement ("trying to implement X" -> implement X).
+ASPECTUALS = {"try", "want", "need", "start", "begin", "manage", "used",
+              "go", "plan", "hope", "attempt", "learn", "decide", "like"}
+
 SPEAKER_RE = re.compile(r"^\s*([A-Za-z][\w'-]{1,20})\s*:\s*(.*)$", re.DOTALL)
 
 # Negation cues that are almost always idiomatic, not factual denials.
@@ -40,11 +45,20 @@ IDIOM_RE = re.compile(
 )
 
 BATCH_PROMPT = """You are a logic-normalization extractor. For EACH numbered statement below output one JSON object:
-{"i": <n>, "polarity": "affirmative"|"negative", "predicate_key": "<snake_case canonical predicate>", "confidence": <0..1>}
+{"i": <n>, "polarity": "affirmative"|"negative"|"neutral", "predicate_key": "<snake_case canonical predicate>", "confidence": <0..1>}
 Rules:
-- The speaker is the name before the leading colon; use the SPEAKER (lowercased) as predicate subject unless the statement is explicitly about someone else.
-- polarity is "negative" ONLY when the speaker denies a concrete fact (never did X, no longer Y, didn't Z). Questions, idioms ("can't wait"), and figures of speech are "affirmative".
-- predicate_key must be IDENTICAL for a statement and its negation (strip negation). REUSE a key from the existing vocabulary below when it names the same predicate.
+- The speaker is the name before the leading colon; the key subject MUST be that speaker (lowercased) unless the statement is explicitly about someone else.
+- polarity:
+  * "negative" ONLY when the sentence contains an explicit negation cue (never, no, not, ...n't, without, no longer) denying a concrete fact.
+  * "affirmative" when the sentence asserts a concrete checkable fact — INCLUDING statements about the speaker's own activity: "I'm trying to implement X" affirms the speaker is implementing X; "I've managed to return static HTML" affirms a done fact.
+  * "neutral" ONLY for content-free talk: pure questions, greetings, encouragement, thanks, vague plans with no concrete action. An error report WITH a concrete claim ("the id is already in use") is affirmative about that claim.
+  * "negative" ONLY when the sentence contains an explicit negation cue (never, no, not, ...n't, without, no longer) denying a concrete fact. No cue word -> never "negative".
+- Key grammar is STRICT: {subject}_{main-verb-lemma}[_{object-head-noun-singular}].
+  * Strip aspectual/modal wrappers: "trying to implement X" -> implement, "wants to add Y" -> add, "started using Z" -> use.
+  * Object is the bare head noun, singular, WITHOUT modifiers: "the basic homepage route" -> route. Keep only proper nouns or hyphenated technical names (flask-login).
+  * GOOD: user_implement_route, user_write_route. BAD: user_try_implement, user_implement_homepage_route, user_write_routes.
+- predicate_key must be IDENTICAL for a statement and its negation (strip negation).
+- Vocabulary reuse: reuse a key from the existing vocabulary below ONLY if it names exactly the same predicate (same action AND same object). If none fits, ALWAYS mint a new key. Never force-fit a statement into a popular existing key.
 - confidence = how strongly the statement asserts a concrete checkable fact (small talk / questions / encouragement -> 0.3 or below).
 Existing predicate vocabulary:
 %s
@@ -87,10 +101,18 @@ def rule_extract(nlp, text):
         negated = next((t.head for t in negs if t.head.pos_ in ("VERB", "AUX")), None)
         if negated is not None:
             pred = negated
+    # Descend through aspectual/modal wrappers to the lexical verb.
+    for _ in range(3):
+        if pred.lemma_.lower() not in ASPECTUALS:
+            break
+        comp = next((c for c in pred.children if c.dep_ == "xcomp" and c.pos_ in ("VERB", "AUX")), None)
+        if comp is None:
+            break
+        pred = comp
     subj = next((c for c in pred.children if c.dep_ in ("nsubj", "nsubjpass")), None)
     if subj is None:
         subj = next((c for c in root.children if c.dep_ in ("nsubj", "nsubjpass")), None)
-    obj = next((c for c in pred.children if c.dep_ in ("dobj", "obj", "attr", "acomp", "xcomp")), None)
+    obj = next((c for c in pred.children if c.dep_ in ("dobj", "obj", "attr", "acomp")), None)
     if subj is None:
         return None  # unclear who acts -> LLM
     key = f"{speaker}_{pred.lemma_.lower()}"
@@ -103,7 +125,7 @@ def rule_extract(nlp, text):
     polarity = "negative" if neg_on_root else "affirmative"
     conf = 0.85 if neg_on_root else 0.8
     if body.rstrip().endswith("?"):
-        conf = 0.4
+        return "neutral", None, 0.3
     return polarity, key, conf
 
 
@@ -130,7 +152,7 @@ def llm_batch(api_key, texts, vocab):
         i = int(item.get("i", 0))
         pol = item.get("polarity")
         out[i] = (
-            pol if pol in ("affirmative", "negative") else None,
+            pol if pol in ("affirmative", "negative", "neutral") else None,
             str(item["predicate_key"]).strip() if item.get("predicate_key") else None,
             float(item["confidence"]) if item.get("confidence") is not None else None,
         )
@@ -196,6 +218,17 @@ def main():
                     print(f"  !! batch failed: {e}", file=sys.stderr)
                     res = {}
                 time.sleep(2 * (attempt + 1))
+        # Batched responses occasionally drop indices; retry misses once
+        # on their own before giving up on them.
+        missing = [(n, r) for n, r in enumerate(chunk, 1) if n not in res]
+        if missing:
+            try:
+                res2 = llm_batch(api_key, [r["statement"] for _, r in missing], vocab)
+            except Exception:
+                res2 = {}
+            for m, (n, _) in enumerate(missing, 1):
+                if m in res2:
+                    res[n] = res2[m]
         for n, r in enumerate(chunk, 1):
             pol, key, conf = res.get(n, (None, None, None))
             cur.execute(

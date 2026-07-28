@@ -27,7 +27,6 @@ def main():
         JOIN memory_records b
           ON a.predicate_key = b.predicate_key
          AND a.polarity = 'affirmative' AND b.polarity = 'negative'
-         AND a.id < b.id
         ORDER BY a.predicate_key
         """
     ).fetchall()

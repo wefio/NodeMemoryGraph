@@ -25,8 +25,12 @@ for r in labels:
     lab_by_text[r["text"].strip()] = r
 
 agree = {"rule": [0, 0], "llm": [0, 0]}
+neutral = {"rule": 0, "llm": 0}
 unmatched = 0
 for st, pol, key, conf, method in rows:
+    if pol == "neutral":
+        neutral[method] += 1
+        continue
     lab = lab_by_text.get(st.strip())
     if lab is None or lab["polarity"] not in ("affirmative", "negative"):
         unmatched += 1
@@ -36,7 +40,7 @@ for st, pol, key, conf, method in rows:
         agree[method][0] += 1
 
 for m, (a, n) in agree.items():
-    print(f"{m}: polarity agreement {a}/{n} = {a/max(1,n):.1%}")
+    print(f"{m}: polarity agreement {a}/{n} = {a/max(1,n):.1%}, neutral={neutral[m]}")
 print(f"unmatched: {unmatched}")
 
 # known pair

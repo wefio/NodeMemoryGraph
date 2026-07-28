@@ -47,7 +47,7 @@ export type MemoryType =
 export type MemoryActor = "assistant" | "system" | "tool" | "user";
 export type TruthStatus = "asserted" | "inferred" | "unverified" | "verified";
 /** Logical polarity of a statement, extracted at write time from text. */
-export type Polarity = "affirmative" | "negative";
+export type Polarity = "affirmative" | "negative" | "neutral";
 
 /** Provenance of polarity/predicate/confidence extraction. */
 export type ExtractMethod = "rule" | "llm";

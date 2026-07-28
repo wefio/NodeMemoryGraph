@@ -834,14 +834,20 @@ prompt, reaching 99.3% agreement. An `extract_method` column records which
 layer filled each row. Two rule-layer lessons: in multi-clause sentences the
 predicate must come from the clause that carries the negation (msg-58's ROOT
 is "starting" but the fact is "never written"), and negations of
-necessity/ability are guidance, not factual denials. The deterministic join
-still misses the known pair, though: the rule layer emitted
-`user_write_route` for msg-58 while the LLM emitted `user_try_implement`
-for msg-24 — cross-layer key conventions diverge, and even
-polarity-guarded key clustering (which correctly blocked 3 cross-polarity
-merges) cannot bridge keys that dissimilar. Polarity detection is solved
-cheaply; cross-layer predicate canonicalisation is the remaining blocker for
-join-based contradiction detection.
+necessity/ability are guidance, not factual denials.
+
+The canonicalisation blocker was then closed
+(`docs/predicate-key-canonicalization.md`,
+`evals/omnimemeval/polarity-canonicalize.py`): a strict key grammar on both
+layers (strip aspectual/modal wrappers, bare head-noun objects), LLM
+arbitration of embedding-similar key pairs (synonym merges like
+`implement_route == write_route`), a `neutral` polarity for non-claims, and
+a temporal join filter (earlier affirmation vs later negation, ordered by
+`rowid`). The known BEAM pair now ranks first of 4 join candidates. The
+surprise negative result: deepseek-chat's per-pair contradiction verdicts
+are prompt-unstable (the same gold pair judged true and false under trivial
+rephrasings), so weak-model verification is advisory only — precision must
+come from upstream keying, not a downstream veto.
 
 The expression shape must therefore follow the question type, and choosing
 the shape is itself an unrouted decision today. MGR set logic remains a Lab
