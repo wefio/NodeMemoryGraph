@@ -9,6 +9,12 @@ import { syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import type { HistoryRole, MemoryActor } from "../../src/core/types.ts";
 
+const RETRIEVAL_GUIDANCE =
+  "[NMG retrieval guidance] Treat relevant user facts, preferences, constraints, " +
+  "tools, and prior experiences as evidence for a personalized answer. Apply them " +
+  "to the current request even when the final answer did not appear verbatim in " +
+  "history. Do not invent unsupported user details.";
+
 export interface OmniMessage {
   role?: string;
   content: string;
@@ -211,16 +217,19 @@ export class OmniMemEvalBridge {
     const notes = store.contradictionNotes(memories.map((m) => m.memoryId));
     return {
       retrievalMode: semantic ? "records" : "lexical",
-      text: memories
-        .map((memory) => {
-          const base =
-            includeTime && memory.eventTime
-              ? `[${memory.eventTime}] ${memory.statement}`
-              : memory.statement;
-          const note = notes.get(memory.memoryId);
-          return note ? `${base}\n${note}` : base;
-        })
-        .join("\n"),
+      text: memories.length === 0
+        ? ""
+        : [
+            RETRIEVAL_GUIDANCE,
+            ...memories.map((memory) => {
+              const base =
+                includeTime && memory.eventTime
+                  ? `[${memory.eventTime}] ${memory.statement}`
+                  : memory.statement;
+              const note = notes.get(memory.memoryId);
+              return note ? `${base}\n${note}` : base;
+            }),
+          ].join("\n"),
       memories,
     };
   }

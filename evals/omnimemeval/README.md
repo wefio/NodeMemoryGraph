@@ -140,6 +140,31 @@ and mean search latency grew from 172 to 191 ms. The paired representation was
 therefore rejected. NMG retains raw turn-level evidence and actor metadata.
 Query-intent cues choose the actor search scope; they do not rewrite evidence.
 
+The 30-question preference category exposed a separate two-stage failure.
+Lexical retrieval recalled only 31.82% of labelled evidence. Record-level
+`BAAI/bge-small-en-v1.5` embeddings raised exact evidence recall to 86.36%,
+with at least one labelled turn for 93.33% of questions and all labelled turns
+for 83.33%. However, the weak reader often refused to apply retrieved
+preferences to a new request because the requested recommendation did not
+appear verbatim in history. A short retrieval header now tells the reader to
+treat retrieved facts, preferences, constraints, tools, and experiences as
+evidence for personalization without inventing user details.
+
+Three matched answer-and-judge runs over the same stored contexts averaged
+40.2% accuracy without that header and 53.3% with it, a stable gain of about
+13.1 points. The header added about 278 context characters per question. A
+longer instruction that explicitly demanded actionable recommendations did not
+improve the result and was rejected. Remaining misses on generic questions,
+such as requests for broadly relevant publications or conferences, motivate a
+query-independent consolidated preference/profile representation; they do not
+justify more benchmark-specific prompt rules.
+
+On the Windows evaluation host, the offline BGE server is run from the existing
+`uv` script environment. Installing the CUDA PyTorch wheel into that environment
+reduced the 30-question search run from roughly 50--75 seconds per question on
+CPU to about four seconds per question during indexing. This is local evaluation
+acceleration only: GPU PyTorch, WSL, and `uv` are not NMG runtime dependencies.
+
 Reproduce the diagnostic with:
 
 ```powershell

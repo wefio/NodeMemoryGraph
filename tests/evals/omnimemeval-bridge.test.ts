@@ -44,6 +44,7 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
       topK: 4,
     }) as { text: string };
 
+    assert.match(alice.text, /\[NMG retrieval guidance\]/);
     assert.match(alice.text, /Kepler/);
     assert.doesNotMatch(alice.text, /2026-07-20/);
     assert.equal(bob.text, "");
