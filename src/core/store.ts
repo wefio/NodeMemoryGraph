@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import type {
   ActivationSignal,
   ActiveGraph,
+  ActiveGraphBudget,
   ActiveGraphBudgetUsage,
   ActiveGraphSelection,
   ConsolidationEvent,
@@ -1298,34 +1299,85 @@ export class NmgStore {
           all.findIndex((candidate) => candidate.memory.id === result.memory.id) === index,
       )
       .sort((left, right) => contextUsefulness(query, right) - contextUsefulness(query, left));
-    const selectedNodes = new Set<string>();
-    const results: MemorySearchResult[] = [];
-    let estimatedTokens = 0;
-    const exhausted = new Set<ActiveGraphBudgetUsage["exhausted"][number]>();
-    for (const candidate of candidates) {
-      if (results.length >= limit) {
-        exhausted.add("evidence");
-        break;
+    const selectWithinBudget = (
+      bud: ActiveGraphBudget,
+      lim: number,
+    ): {
+      results: MemorySearchResult[];
+      selectedNodes: Set<string>;
+      estimatedTokens: number;
+      exhausted: Set<ActiveGraphBudgetUsage["exhausted"][number]>;
+    } => {
+      const nodes = new Set<string>();
+      const res: MemorySearchResult[] = [];
+      let tokens = 0;
+      const ex = new Set<ActiveGraphBudgetUsage["exhausted"][number]>();
+      for (const candidate of candidates) {
+        if (res.length >= lim) {
+          ex.add("evidence");
+          break;
+        }
+        if (!nodes.has(candidate.node.id) && nodes.size >= bud.maxNodes) {
+          ex.add("nodes");
+          continue;
+        }
+        const candidateTokens = estimateResultTokens(candidate);
+        if (res.length > 0 && tokens + candidateTokens > bud.maxTokens) {
+          ex.add("tokens");
+          continue;
+        }
+        res.push(candidate);
+        nodes.add(candidate.node.id);
+        tokens += candidateTokens;
       }
-      if (!selectedNodes.has(candidate.node.id) && selectedNodes.size >= budget.maxNodes) {
-        exhausted.add("nodes");
-        continue;
-      }
-      const candidateTokens = estimateResultTokens(candidate);
-      if (results.length > 0 && estimatedTokens + candidateTokens > budget.maxTokens) {
-        exhausted.add("tokens");
-        continue;
-      }
-      results.push(candidate);
-      selectedNodes.add(candidate.node.id);
-      estimatedTokens += candidateTokens;
+      return { results: res, selectedNodes: nodes, estimatedTokens: tokens, exhausted: ex };
+    };
+    const buildSelections = (res: readonly MemorySearchResult[]): ActiveGraphSelection[] =>
+      res.map((result, index) => ({
+        memoryId: result.memory.id,
+        nodeId: result.node.id,
+        source: direct.some((item) => item.memory.id === result.memory.id)
+          ? "direct"
+          : "graph_expansion",
+        reason: recallReason(result),
+        rank: index + 1,
+        tier: result.memory.tier,
+        estimatedTokens: estimateResultTokens(result),
+        scores: {
+          lexical: result.lexicalScore,
+          vector: result.vectorScore,
+          route: result.routeScore,
+          combined: result.combinedScore,
+          usefulness: contextUsefulness(query, result),
+        },
+      }));
+    let selection = selectWithinBudget(budget, limit);
+    let activeBudget = budget;
+    let selections = buildSelections(selection.results);
+    const qppDecision = shouldTriggerSecondPass(
+      query,
+      qppCandidates(selection.results, selections),
+      options.qppThreshold,
+    );
+    // Pool-based Stage 0: if QPP triggers OR the first pass truncated against the
+    // evidence/token budget, re-select from the SAME candidate pool (no re-search)
+    // with an expanded budget. Retrieval already over-samples (limit*3), so the
+    // pool usually holds the extra evidence; re-selection is cheap and over-trigger
+    // is acceptable (no second LLM call, no re-search). Calibration-free: the
+    // truncation signal is structural, QPP guardrails are absolute floors.
+    const truncated = selection.exhausted.has("evidence") || selection.exhausted.has("tokens");
+    if (options.secondPass && (qppDecision.trigger || truncated)) {
+      activeBudget = expandActiveGraphBudget(budget);
+      selection = selectWithinBudget(activeBudget, Math.min(50, activeBudget.maxEvidence));
+      selections = buildSelections(selection.results);
     }
+    const { results, selectedNodes, estimatedTokens, exhausted } = selection;
     const persistentEdges = relations
       .filter(
         (relation) =>
           selectedNodes.has(relation.sourceNodeId) && selectedNodes.has(relation.targetNodeId),
       )
-      .slice(0, budget.maxEdges)
+      .slice(0, activeBudget.maxEdges)
       .map((relation) => ({
         id: relation.id,
         sourceNodeId: relation.sourceNodeId,
@@ -1344,16 +1396,16 @@ export class NmgStore {
     const temporaryEdges = queryAssociationEdges(
       directSelectedNodeIds,
       persistentEdges,
-      budget.maxEdges - persistentEdges.length,
+      activeBudget.maxEdges - persistentEdges.length,
     );
     const edges = [...persistentEdges, ...temporaryEdges];
-    if (relations.length > persistentEdges.length || edges.length >= budget.maxEdges) {
+    if (relations.length > persistentEdges.length || edges.length >= activeBudget.maxEdges) {
       exhausted.add("edges");
     }
     const topScores = direct.slice(0, 2).map((result) => result.combinedScore);
     const ambiguity = topScores.length < 2 ? 0 : 1 - clamp(topScores[0]! - topScores[1]!, 0, 1);
     const latencyMs = Date.now() - startedAt;
-    if (latencyMs > budget.maxLatencyMs) exhausted.add("latency");
+    if (latencyMs > activeBudget.maxLatencyMs) exhausted.add("latency");
     const usage: ActiveGraphBudgetUsage = {
       nodes: selectedNodes.size,
       edges: edges.length,
@@ -1367,35 +1419,9 @@ export class NmgStore {
       latencyMs,
       exhausted: [...exhausted].sort(),
     };
-    const selections: ActiveGraphSelection[] = results.map((result, index) => ({
-      memoryId: result.memory.id,
-      nodeId: result.node.id,
-      source: direct.some((item) => item.memory.id === result.memory.id)
-        ? "direct"
-        : "graph_expansion",
-      reason: recallReason(result),
-      rank: index + 1,
-      tier: result.memory.tier,
-      estimatedTokens: estimateResultTokens(result),
-      scores: {
-        lexical: result.lexicalScore,
-        vector: result.vectorScore,
-        route: result.routeScore,
-        combined: result.combinedScore,
-        usefulness: contextUsefulness(query, result),
-      },
-    }));
     const expansions = activeGraphExpansions(directSelectedNodeIds, persistentEdges, graphHops);
-    const budgetLedger = activeGraphBudgetLedger(budget, usage);
+    const budgetLedger = activeGraphBudgetLedger(activeBudget, usage);
     const taskId = options.taskId?.trim() || stableTaskId(query);
-    // Shadow QPP observation (Stage 0): compute the second-pass decision but do
-    // NOT act on it — recorded on the trace for calibration (Stage 1) and DC
-    // supervision (Stage 2). Wiring the actual trigger is a later increment.
-    const qppDecision = shouldTriggerSecondPass(
-      query,
-      qppCandidates(results, selections),
-      options.qppThreshold,
-    );
     const traceInput: RetrievalTraceInput = {
       query,
       taskId,
@@ -1429,7 +1455,7 @@ export class NmgStore {
       selections,
       expansions,
       budgetLedger,
-      budget,
+      budget: activeBudget,
       usage,
       qpp: qppDecision,
       createdAt: new Date().toISOString(),
@@ -1444,36 +1470,20 @@ export class NmgStore {
   }
 
   /**
-   * Stage 0 second-pass retrieval. Runs the normal {@link searchContext}; if the
-   * shadow QPP decision triggers (low recall confidence) AND `secondPass` is set,
-   * re-runs the search with an expanded budget (more evidence/nodes/tokens + one
-   * more graph hop) and returns the expanded result. Both passes trace — the
-   * first records the trigger, the expanded records what the caller received
-   * (two traces per triggered query, linked by taskId). Default off.
+   * Convenience wrapper for {@link searchContext} with `secondPass` enabled.
+   * The pool-based re-selection logic lives inside `searchContext` (re-selects
+   * from the over-sampled candidate pool with an expanded budget when QPP
+   * triggers or the first pass truncated — no re-search). This wrapper just
+   * defaults `secondPass` to true so callers opt in by calling it.
    *
-   * QPP-thresholded adaptive retrieval trigger; see
-   * docs/retrieval-confidence-controller.md §2 Stage 0.
+   * See docs/retrieval-confidence-controller.md §2 Stage 0.
    */
   searchContextWithSecondPass(
     query: string,
-    options: SearchOptions & { secondPass?: boolean } = {},
+    options: SearchOptions = {},
     semantic?: { queryVector: readonly number[]; model: string },
   ): MemoryContext {
-    const first = this.searchContext(query, options, semantic);
-    if (!options.secondPass) return first;
-    const qpp = first.activeGraph?.qpp;
-    if (!qpp?.trigger) return first;
-    const expandedBudget = expandActiveGraphBudget(first.activeGraph!.budget);
-    return this.searchContext(
-      query,
-      {
-        ...options,
-        activeGraphBudget: expandedBudget,
-        graphHops: Math.min((options.graphHops ?? 1) + 1, 3),
-        limit: Math.min(50, expandedBudget.maxEvidence),
-      },
-      semantic,
-    );
+    return this.searchContext(query, { ...options, secondPass: options.secondPass ?? true }, semantic);
   }
 
   getContext(memoryIds: readonly string[], graphHops = 0): MemoryContext {

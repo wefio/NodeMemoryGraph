@@ -334,3 +334,35 @@ test("searchContextWithSecondPass: qppThreshold forces trigger on a strong match
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("searchContextWithSecondPass: truncated first pass re-selects from pool (no re-search)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-qpp-2p-trunc-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    // Four memories sharing "running" so a lexical query matches all; small budget
+    // truncates the first pass to 2.
+    for (const m of [
+      "I like running in the morning",
+      "I like running in the evening",
+      "I like running fast on trails",
+      "I like running slow in the park",
+    ]) {
+      store.remember({ statement: m, nodeName: "Run", memoryType: "fact" });
+    }
+    const small = { maxEvidence: 2, maxNodes: 2, maxTokens: 8_000 };
+    // Normal: only 2 of 4 surfaced (truncated).
+    const normal = store.searchContext("running", { limit: 2, activeGraphBudget: small });
+    assert.equal(normal.results.length, 2);
+    // secondPass: truncation triggers re-select from the SAME pool with expanded
+    // budget (4) — surfaces all 4. No re-search (one retrieval).
+    const adaptive = store.searchContextWithSecondPass("running", {
+      limit: 2,
+      activeGraphBudget: small,
+    });
+    assert.equal(adaptive.results.length, 4);
+    assert.equal(adaptive.activeGraph!.budget.maxEvidence, 4);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

@@ -210,6 +210,9 @@ export interface SearchOptions {
   persistTrace?: boolean;
   /** Override the QPP trigger threshold (Stage 1 calibration / experiments). */
   qppThreshold?: number;
+  /** Enable pool-based Stage 0 second-pass re-selection (expanded budget from the
+   *  same candidate pool, no re-search) when QPP triggers or the first pass truncated. */
+  secondPass?: boolean;
 }
 
 export interface EmbeddingDocument {

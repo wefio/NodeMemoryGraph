@@ -59,14 +59,21 @@ C = Top1 + τ_v·variance + w_ic·intentCoverage + w_rh·reasonHealth
 
 ### 2. 触发决策（系统侧，三阶段）
 
-**Stage 0 — plumbing + guardrail floor**
-最简硬条件验证第二趟检索 + `expandedMaximum` 预算 + 统一池管道通畅；立**永久 guardrail floor**（Stage 1/2 学化门控说"不触发"但结果灾难性弱 → 无论如何触发）。必触发条件（具体数值，可操作基线）：
-- `totalCount === 0`（空结果）→ `guardrail_empty`
-- `directCount > 0 && reasonHealth === 0`（全 hybrid_match 兜底）→ `guardrail_all_fallback`（当前权重下与 low_top1 重叠，作防学错权重的安全网留）
-- `Top1 < QPP_TOP1_FLOOR(=0.2)`（hybridScore 量纲，基本没真匹配）→ `guardrail_low_top1`
-- 否则 `C < τ` → `below_threshold`
+**Stage 0 — pool-based re-selection + guardrail floor（已落地，免标定）**
+searchContext 已过采样（池 = `min(50, max(20, limit*3))`），从中选 top-K 显示。Stage 0 不做"第二趟搜索"——而是在**同一池**里按扩展预算重选：
+1. 正常选 top-K（limit）→ 算 qpp（guardrail 用）
+2. 若 `secondPass && (qpp.guardrail 触发 OR 首趟撞 evidence/token 预算)` → 用 `expandActiveGraphBudget`（2x evidence/nodes/tokens +1 graphHop）**从同一 candidates 池重选** top-2K
+3. 显示重选后的结果
 
-价值在验证管道，非决策质量。原"手设 0.5/0.3/0.2 公式 + 手设 τ"的 Stage 0 **砍掉**——与 Stage 1 代理公式重复且更差。
+**零二次检索**——池已大，重选廉价；过触发无所谓（不重新搜、不额外调 LLM）。触发条件全**结构性/无标签**（guardrail 是绝对地板，truncation 是结构信号）→ **免标定、不作弊**。`below_threshold`（τ）路径保留但非必需（truncation 已覆盖"截断"case；τ 留给 Stage 1 学选择性）。
+
+guardrail 必触发条件（绝对地板，免标定）：
+- `totalCount === 0`（空）→ `guardrail_empty`
+- `directCount > 0 && reasonHealth === 0`（全 hybrid_match 兜底）→ `guardrail_all_fallback`
+- `Top1 < QPP_TOP1_FLOOR(=0.2)`（基本没真匹配）→ `guardrail_low_top1`
+- 首趟撞 evidence/token 预算（truncated）→ pool-based 重选
+
+`searchContextWithSecondPass` = `searchContext` 加 `secondPass:true` 的薄封装。BGE 实测：6 条跑步记忆、limit 2，NORMAL 拿 2 条（truncated、qpp 不触发），ADAPTIVE 从池重选 4 条（补回截断的 2 条）——零二次检索。
 
 **Stage 1 — 代理损失（工程首选）**
 `C` 如上；权重 `τ_v / w_ic / w_rh` 用**贝叶斯优化 / Optuna 黑盒**在 trace feedback（`trace.usefulMemoryIds / rejectedMemoryIds / contradictedMemoryIds`，见 `controller-protocol.ts:89-100`）上学；触发阈值手工设 + **rolling-window 校准**（近期高 C 结果实际 usefulness 下降 → 降阈值扩探索池，不死守）；DC 仍 shadow。轻量、解耦、近端到端。
