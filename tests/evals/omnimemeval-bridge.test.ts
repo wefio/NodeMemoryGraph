@@ -162,8 +162,13 @@ test("OmniMemEval batches pending record vectors before search", async () => {
 test("OmniMemEval can enable progressive QPP recall without changing the default arm", async () => {
   const normalRoot = mkdtempSync(join(tmpdir(), "nmg-omni-qpp-normal-"));
   const adaptiveRoot = mkdtempSync(join(tmpdir(), "nmg-omni-qpp-adaptive-"));
+  const safePrefixRoot = mkdtempSync(join(tmpdir(), "nmg-omni-qpp-prefix-"));
   const normal = new OmniMemEvalBridge(normalRoot);
   const adaptive = new OmniMemEvalBridge(adaptiveRoot, { secondPass: true });
+  const safePrefix = new OmniMemEvalBridge(safePrefixRoot, {
+    secondPass: true,
+    qppInitialEvidenceTarget: 2,
+  });
   const messages = [
     "I run five kilometres before breakfast on Monday.",
     "I run five kilometres before breakfast on Tuesday.",
@@ -173,16 +178,24 @@ test("OmniMemEval can enable progressive QPP recall without changing the default
   try {
     await normal.handle({ id: 1, op: "add", userId: "alice", messages });
     await adaptive.handle({ id: 2, op: "add", userId: "alice", messages });
+    await safePrefix.handle({ id: 3, op: "add", userId: "alice", messages });
 
     const normalResult = await normal.handle({
-      id: 3,
+      id: 4,
       op: "search",
       userId: "alice",
       query: "On which days do I run five kilometres before breakfast?",
       topK: 2,
     }) as { memories: unknown[] };
     const adaptiveResult = await adaptive.handle({
-      id: 4,
+      id: 5,
+      op: "search",
+      userId: "alice",
+      query: "On which days do I run five kilometres before breakfast?",
+      topK: 2,
+    }) as { memories: unknown[] };
+    const safePrefixResult = await safePrefix.handle({
+      id: 6,
       op: "search",
       userId: "alice",
       query: "On which days do I run five kilometres before breakfast?",
@@ -191,11 +204,14 @@ test("OmniMemEval can enable progressive QPP recall without changing the default
 
     assert.equal(normalResult.memories.length, 2);
     assert.equal(adaptiveResult.memories.length, 1);
+    assert.equal(safePrefixResult.memories.length, 2);
   } finally {
     normal.close();
     adaptive.close();
+    safePrefix.close();
     rmSync(normalRoot, { recursive: true, force: true });
     rmSync(adaptiveRoot, { recursive: true, force: true });
+    rmSync(safePrefixRoot, { recursive: true, force: true });
   }
 });
 

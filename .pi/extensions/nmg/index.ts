@@ -214,13 +214,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     sessionId: string,
     origin: ShadowRetrievalOrigin,
   ): Promise<MemoryContext> => {
+    const searchOptions = options ?? {};
     const canExpand =
       controllerSearchEnabled &&
       origin === "tool" &&
-      options.limit === undefined &&
-      options.activeGraphBudget === undefined;
+      searchOptions.limit === undefined &&
+      searchOptions.activeGraphBudget === undefined;
     let context = await searchMemoryContext(getStore(), embeddingClient, query, {
-      ...options,
+      ...searchOptions,
       // A controller probe is intentionally not an actual retrieval trace.
       ...(canExpand
         ? {
@@ -255,7 +256,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       });
       if (plan) {
         context = await searchMemoryContext(getStore(), embeddingClient, query, {
-          ...options,
+          ...searchOptions,
           // The autodiff budget head predicts the first Fibonacci tier. The
           // second QPP may continue to later tiers from the same candidate pool.
           limit: plan.budget.maxEvidence,
@@ -264,7 +265,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           initialEvidenceTarget: plan.budget.maxEvidence,
         });
       } else {
-        context = await searchMemoryContext(getStore(), embeddingClient, query, options);
+        context = await searchMemoryContext(getStore(), embeddingClient, query, searchOptions);
       }
     }
     if (context.activeGraph) {

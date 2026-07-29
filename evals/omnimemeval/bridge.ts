@@ -80,6 +80,10 @@ export interface OmniMemEvalBridgeOptions {
   embeddingBatchSize?: number;
   /** Enable QPP-triggered pool re-selection for matched benchmark ablations. */
   secondPass?: boolean;
+  /** First progressive evidence target; omitted to preserve the Top-1 experiment. */
+  qppInitialEvidenceTarget?: number;
+  /** Optional retrieval-confidence threshold for matched QPP ablations. */
+  qppThreshold?: number;
 }
 
 /**
@@ -94,6 +98,8 @@ export class OmniMemEvalBridge {
   readonly #embeddingClient?: OmniEmbeddingClient;
   readonly #embeddingBatchSize: number;
   readonly #secondPass: boolean;
+  readonly #qppInitialEvidenceTarget?: number;
+  readonly #qppThreshold?: number;
 
   constructor(root: string, options: OmniMemEvalBridgeOptions = {}) {
     this.#root = resolve(root);
@@ -103,6 +109,8 @@ export class OmniMemEvalBridge {
       Math.min(Math.trunc(options.embeddingBatchSize ?? 64), 2_048),
     );
     this.#secondPass = options.secondPass ?? false;
+    this.#qppInitialEvidenceTarget = positiveNumber(options.qppInitialEvidenceTarget);
+    this.#qppThreshold = finiteNumber(options.qppThreshold);
     mkdirSync(this.#root, { recursive: true });
   }
 
@@ -224,6 +232,8 @@ export class OmniMemEvalBridge {
       vectorGranularity: semantic ? "records" : undefined,
       sourceActor: prefersAssistantEvidence(query) ? undefined : "user",
       secondPass: this.#secondPass,
+      initialEvidenceTarget: this.#qppInitialEvidenceTarget,
+      qppThreshold: this.#qppThreshold,
       activeGraphBudget: {
         maxEvidence: limit,
         maxTokens: Math.max(1_000, limit * 300),
@@ -403,6 +413,16 @@ function memoryActor(role: HistoryRole): MemoryActor {
   return role === "system" ? "agent" : role;
 }
 
+function positiveNumber(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isFinite(value) && value > 0
+    ? Math.trunc(value)
+    : undefined;
+}
+
+function finiteNumber(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isFinite(value) ? value : undefined;
+}
+
 async function run(): Promise<void> {
   const root = process.env.NMG_OMNI_DATA_DIR?.trim() ||
     resolve(process.cwd(), ".nmg", "omnimemeval");
@@ -425,6 +445,12 @@ async function run(): Promise<void> {
       ? Number(process.env.NMG_EMBED_BATCH_SIZE)
       : undefined,
     secondPass: process.env.NMG_QPP_SECOND_PASS === "1",
+    qppInitialEvidenceTarget: process.env.NMG_QPP_INITIAL_EVIDENCE_TARGET
+      ? Number(process.env.NMG_QPP_INITIAL_EVIDENCE_TARGET)
+      : undefined,
+    qppThreshold: process.env.NMG_QPP_THRESHOLD
+      ? Number(process.env.NMG_QPP_THRESHOLD)
+      : undefined,
   });
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 
