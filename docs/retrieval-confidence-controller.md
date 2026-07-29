@@ -110,6 +110,21 @@ Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**�
 - **不做 Self-RAG**：LLM 自发 reflection token 需强模型微调，弱 reader 不触发，违背系统侧红线。
 - **不做端到端可微检索**：REALM 软索引太侵入，拒。
 
+## 多跳查询的方向评估
+
+针对多跳查询的召回充分性判别，调研 4 个学术方向，逐一对 NMG 现状给判断：
+
+| 方向 | NMG 现状 | 判断 |
+|---|---|---|
+| aspect-aware QPP（拆子主题分别评）| `intentCoverage` 已是粗版（query→3 意图族→期望类型→覆盖）| 不追细版——query decomposition 需 LLM/复杂规则，破坏 QPP"纯检索信号、无 LLM"设计；若未来要做，是独立 query-decomposer 模块，不混进 qpp |
+| compositional sufficiency（证据链组合完整）| `graph_expansion` + `reasonHealth` 已是间接代理（expansion 存在=多跳链、reasonHealth<1=有 expansion 补）| Stage 2+ 候选；真正的"链完整性"需 outcome 标签（隐式反馈已有），当前不优先 |
+| LLM sufficiency discriminator（轻量 LLM 读摘要判充分性）| 无 | 明确不追——与"纯检索、免 LLM、免 API"哲学冲突；弱 reader 不该把稀缺 LLM 调用花在判充分性上（与"模型不积极用工具、要自动"的诉求反了）|
+| intra-list consistency / 二重 qpp（在结果里二次检索看一致性）| `graph_expansion` 已是一次"二重"（在 direct 上扩关联节点），但当前 qpp 把 expansion 标 `isDirect=false` 排除在 score 信号外——丢了"多跳题靠 expansion 拼证据"信号 | 有增量，见下 |
+
+**可做增量（shadow 分量，未实现）**：`expansionDependence = expansions / totalCount`。但不能单独用——多跳题靠 expansion 是**正常**的（高 dependence ≠ 召回差）。真正信号是交互项 `(1 − Top1) × expansionDependence`：direct 强 → dependence 正常；direct 弱 + dependence 高 → 拼起来的链不稳固 → qpp 拉低 → 触发补强 direct。
+
+**风险**：第 5 个分量，`reasonHealth` 实测已近常数低区分度——再加交互项可能在 benchmark 同样退化；"expansion 多 = 多跳题正常"的歧义，标定时若误判会把多跳题都触发浪费预算。**先 shadow 记 trace，用隐式反馈的 (qpp, useful) 对验边际贡献，再决定升入 C 或留 shadow**——审计先于标定。
+
 ## 风险
 
 - **τ 非必需但有漂移**：Stage 0 触发已由 truncation/guardrail 免标定覆盖；τ 仅影响 `below_threshold` 选择性。τ 漂移由 rolling worker（生产 (qpp, useful)，非 eval）校准——worker 未实现前 τ 用占位 0.45。
