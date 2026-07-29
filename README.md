@@ -13,6 +13,13 @@ optimization:
 - SQLite is the local source of truth.
 - Facts, preferences, constraints, states, events, strategies, and
   conversational evidence have distinct types and usage rules.
+- Memory type, scope, and influence permission are orthogonal: presentation
+  preferences cannot change facts, behavioural signals remain non-binding, and
+  constraints apply only inside their active scope.
+- Repeated outcome-linked episodes may consolidate into transferable
+  experience. NMG returns its situation, outcome, applicability, limitations,
+  counterexamples, and evidence, but never creates or silently updates a Skill,
+  prompt, runbook, script, or other behavioural artifact.
 - Stable user-stated facts, preferences, constraints, and states are written
   automatically; explicit writes remain available.
 - Governed memory writes retain the supporting Pi message or a bounded exact

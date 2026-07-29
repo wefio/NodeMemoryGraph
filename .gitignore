@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 .nmg/
+.workbuddy/
 .benchmarks/
 evals/scale/.tmp/
 evals/hierarchy-scale/.tmp/

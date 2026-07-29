@@ -241,7 +241,88 @@ AG contains references and query-local annotations, not authoritative copies.
 When AG is released, temporary nodes and edges disappear; only explicitly
 recorded usage outcomes, stability observations, and accepted writes survive.
 
-### 5a. Confidence as a posterior: the outcome feedback loop
+### 5a. Influence permissions
+
+Memory type answers **what a record describes**. Scope answers **where it may
+apply**. Influence permission answers **how a recalled record is allowed to
+change the Agent's result**. These dimensions are orthogonal: retrieval
+relevance alone never grants authority.
+
+The initial permission vocabulary is:
+
+| Permission            | Permitted influence                                                                  | Forbidden influence                                                              |
+| --------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `reasoning_context`   | Supply a scoped, confidence-weighted premise or source                               | Override newer state, stronger evidence, or explicit constraints                 |
+| `presentation_style`  | Change language, tone, detail, ordering, or formatting                               | Change factual conclusions or tool decisions                                     |
+| `interaction_hint`    | Suggest a non-binding interaction pattern inferred from repeated behaviour           | Become a hard requirement from one observation                                   |
+| `task_continuation`   | Restore goals, progress, decisions, and open work within the matching task/workspace | Generalize temporary state into a user-wide preference                           |
+| `scoped_constraint`   | Restrict an action inside its explicit scope while active                            | Apply outside that scope or survive a superseding constraint                     |
+| `experience_advisory` | Offer evidence-backed experience for the Agent/user to interpret and adapt           | Silently become an executable procedure, system prompt, Skill, or mandatory plan |
+
+Default mappings may be inferred from memory type, but the effective permission
+must also respect source, scope, truth status, residence, recency, and
+supersession. For example, an explicit expression preference normally receives
+`presentation_style`; a repeated behavioural observation receives the weaker
+`interaction_hint`; a project constraint receives `scoped_constraint`; and a
+strategy candidate receives `experience_advisory`.
+
+Permission is enforced at rendering and use, not merely documented in prose.
+Until a structured field is implemented, adapters must render an explicit use
+instruction with every selected record. A future schema migration may persist
+the permission when tests show that type-derived defaults are insufficient.
+
+The promotion threshold grows with both scope breadth and influence strength:
+
+```text
+session/task < project/workspace < user < team/organization
+interaction hint < reasoning context < scoped constraint
+```
+
+Wider or more behaviour-changing memories require more independent evidence,
+stronger provenance, and an explicit correction/rollback path.
+
+### 5b. Transferable experience
+
+NMG may consolidate repeated, outcome-linked episodes into **transferable
+experience**, but it does not decide the final behavioural artifact. An
+experience is descriptive evidence about what happened under which conditions,
+not an instruction that must be executed.
+
+The logical experience projection contains:
+
+```text
+summary
+situation / preconditions
+action or approach observed
+outcome
+possible explanation
+applicability and scope
+known limitations
+counterexamples and failed variants
+confidence and independent-task count
+source memory, outcome, and HistoryRecord references
+```
+
+Formation requires multiple compatible episodes or an explicitly confirmed
+experience, attributable outcomes, preserved counterexamples, and a stable
+scope. A single successful action remains an event or provisional STG strategy.
+Repeated failure lowers confidence or narrows applicability; it does not erase
+the original episodes.
+
+NMG exposes the experience information through normal retrieval or a neutral
+structured export. It does **not** create or modify a `SKILL.md`, system prompt,
+runbook, script, policy, or model weights. The current Agent and user may choose
+to turn the same experience into any of those artifacts—or not use it at all.
+Keeping the stable layer limited to semantics, conditions, outcomes, and
+evidence allows experience to survive changes in Agent harnesses and artifact
+formats.
+
+Existing `strategy` memories are therefore interpreted as provisional or
+consolidated experience candidates with `experience_advisory` permission, not
+as executable procedures. The model may adapt them to the current task, but
+must inspect applicability and contrary evidence before acting.
+
+### 5c. Confidence as a posterior: the outcome feedback loop
 
 Claim `confidence` today is a prior — the extractor's self-assessment at write
 time. A memory system earns the word "experience" only when that number is
@@ -1263,7 +1344,7 @@ Important gaps between the prototype and the target plugin:
   lossless for the model: a needed candidate can remain folded unless the model
   explicitly unfolds the directory. A matched end-to-end test must measure
   answer quality, evidence use, extra tool calls, tokens, and latency;
-- the claim-level posterior outcome loop in section 5a remains design-only.
+- the claim-level posterior outcome loop in section 5c remains design-only.
   Retrieval/use/outcome events exist, but independent-task Beta-style counters
   do not yet update claim confidence or retrieval ranking;
 - the ANN experiment has unacceptable recall on the near-duplicate workload;
@@ -1595,7 +1676,7 @@ The next work should reduce uncertainty rather than add another subsystem:
    raw recall.
 3. Test whether the model follows one search recommendation when useful,
    ignores it when unnecessary, and stops after an unproductive search.
-4. Implement the claim outcome posterior from section 5a only after the
+4. Implement the claim outcome posterior from section 5c only after the
    existing use/outcome events can be attributed to independent tasks without
    self-reinforcement.
 5. Harden the plugin boundary: add an installable Pi package manifest, validate
