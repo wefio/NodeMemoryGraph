@@ -162,6 +162,11 @@ export function configuredQpp2Mode(): QppActuationMode {
   return parseMode(process.env.NMG_QPP2_MODE, ["off", "shadow", "active"]) ?? "off";
 }
 
+export function configuredQpp2RetainedMass(): number {
+  const configured = Number(process.env.NMG_QPP2_RETAINED_MASS ?? 0.98);
+  return Number.isFinite(configured) ? Math.max(0, Math.min(configured, 1)) : 0.98;
+}
+
 export function configuredSearchRecommendationMode(): SearchRecommendationMode {
   return (
     parseMode(process.env.NMG_SEARCH_RECOMMENDATION, ["off", "advisory", "guardrail"]) ?? "advisory"
@@ -172,6 +177,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
   const qpp1Mode = configuredQpp1Mode();
   const qpp2Mode = configuredQpp2Mode();
+  const qpp2RetainedMass = configuredQpp2RetainedMass();
   const searchRecommendationMode = configuredSearchRecommendationMode();
   const controllerShadowEnabled = process.env.NMG_CONTROLLER_SHADOW !== "0" && qpp1Mode !== "off";
   // Normal automatic recall remains deliberately small. The controller is
@@ -1179,7 +1185,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
                 : formatSearchHeaders(
                     context,
                     qpp2Mode === "active" && params.limit === undefined
-                      ? controller.foldMemories(context)?.visibleMemoryIds
+                      ? controller.foldMemories(context, qpp2RetainedMass)?.visibleMemoryIds
                       : undefined,
                   ),
           },

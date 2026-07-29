@@ -204,10 +204,13 @@ QPP actuation is split into three independent controls:
 - `NMG_QPP2_MODE=off|shadow|active` controls Fibonacci progressive inspection
   and learned listwise folding within that candidate pool. It defaults to
   `off`; `shadow` retains QPP telemetry without changing the visible result,
-  while `active` may continue to deeper evidence tiers and shows only a safe
-  prefix plus learned necessary headers. Lower-necessity candidates are grouped
-  as a folded directory, not deleted, and an explicit larger `limit` unfolds
-  them.
+  while `active` may continue to deeper evidence tiers and dynamically exposes
+  enough learned necessary headers to retain the configured listwise
+  probability mass. `NMG_QPP2_RETAINED_MASS` defaults to `0.98`. A flat score
+  distribution therefore stays wide; a steep distribution folds more.
+  Lower-necessity candidates are grouped as a folded directory, not deleted,
+  and an explicit larger `limit` unfolds them. Top-1 is the only fixed safety
+  anchor.
 - `NMG_SEARCH_RECOMMENDATION=off|advisory|guardrail` controls whether an
   inadequate automatic recall recommends one deliberate `nmg_search` call to
   the model. It defaults to `advisory`; `guardrail` emits a recommendation only

@@ -107,36 +107,24 @@ export class ControllerRuntime {
   }
 
   /**
-   * Keep a deterministic safe prefix, then let the learned memory head choose
-   * the remaining visible directory entries. Folded records stay in the Active
-   * Graph and can be inspected by a later explicit search.
+   * Retain a configurable share of the learned listwise probability mass.
+   * Top-1 is the only fixed safety anchor. A flat score distribution therefore
+   * stays wide, while a steep distribution permits aggressive folding.
    */
-  foldMemories(
-    context: MemoryContext,
-    visibleLimit = 20,
-    safePrefix = 15,
-  ): ControllerMemoryFold | null {
-    if (!context.activeGraph || context.results.length <= visibleLimit) return null;
+  foldMemories(context: MemoryContext, retainedMass = 0.98): ControllerMemoryFold | null {
+    if (!context.activeGraph || context.results.length <= 1) return null;
     const trace = traceFromActiveGraph(context);
     const sample = controllerSampleFromTrace(context, trace);
-    const safeCount = Math.min(safePrefix, visibleLimit, context.results.length);
-    const visible = context.results.slice(0, safeCount).map((result) => result.memory.id);
-    const visibleIds = new Set(visible);
-    const learned = context.results
-      .slice(safeCount)
-      .map((result, index) => ({
-        id: result.memory.id,
-        rank: safeCount + index,
-        score: this.#controller.scoreMemory(sample.memoryFeatures[result.memory.id]!),
-      }))
-      .sort((left, right) => right.score - left.score || left.rank - right.rank)
-      .slice(0, Math.max(0, visibleLimit - safeCount));
-    for (const candidate of learned) {
-      visible.push(candidate.id);
-      visibleIds.add(candidate.id);
-    }
+    const scores = context.results.map((result) =>
+      this.#controller.scoreMemory(sample.memoryFeatures[result.memory.id]!),
+    );
+    const visibleIndices = retainedMassIndices(scores, retainedMass);
+    const visibleIds = new Set(visibleIndices.map((index) => context.results[index]!.memory.id));
+    if (visibleIds.size === context.results.length) return null;
     return {
-      visibleMemoryIds: visible,
+      visibleMemoryIds: context.results
+        .map((result) => result.memory.id)
+        .filter((id) => visibleIds.has(id)),
       foldedMemoryIds: context.results
         .map((result) => result.memory.id)
         .filter((id) => !visibleIds.has(id)),
@@ -211,6 +199,30 @@ export class ControllerRuntime {
     writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`);
     renameSync(temporary, this.#path);
   }
+}
+
+export function retainedMassIndices(scores: readonly number[], retainedMass = 0.98): number[] {
+  if (scores.length === 0) return [];
+  const target = Math.max(0, Math.min(retainedMass, 1));
+  const logits = scores.map((score) => {
+    const probability = Math.max(1e-6, Math.min(Number.isFinite(score) ? score : 0.5, 1 - 1e-6));
+    return Math.log(probability / (1 - probability));
+  });
+  const maximum = Math.max(...logits);
+  const masses = logits.map((logit) => Math.exp(logit - maximum));
+  const total = masses.reduce((sum, mass) => sum + mass, 0);
+  const selected = new Set<number>([0]);
+  let accumulated = masses[0]!;
+  const ranked = masses
+    .map((mass, index) => ({ index, mass }))
+    .filter(({ index }) => index !== 0)
+    .sort((left, right) => right.mass - left.mass || left.index - right.index);
+  for (const candidate of ranked) {
+    if (accumulated / Math.max(total, Number.EPSILON) >= target) break;
+    selected.add(candidate.index);
+    accumulated += candidate.mass;
+  }
+  return [...selected].sort((left, right) => left - right);
 }
 
 function loadState(path: string): ControllerRuntimeState | null {

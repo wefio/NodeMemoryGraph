@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ControllerRuntime } from "../../src/core/controller-runtime.ts";
+import { ControllerRuntime, retainedMassIndices } from "../../src/core/controller-runtime.ts";
 import {
   CONTROLLER_FEATURE_COUNT,
   CONTROLLER_FEATURE_PROTOCOL_VERSION,
@@ -77,7 +77,7 @@ test("controller allocation widens an explicit recall within its operator envelo
   }
 });
 
-test("QPP2 folds candidates but preserves a deterministic safe prefix", () => {
+test("QPP2 does not fold an untrained flat candidate list", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-controller-fold-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
   try {
@@ -88,26 +88,18 @@ test("QPP2 folds candidates but preserves a deterministic safe prefix", () => {
       });
     }
     const context = store.searchContext("Atlas project detail", { limit: 25 });
-    const fold = new ControllerRuntime(join(directory, "controller.json")).foldMemories(
-      context,
-      20,
-      15,
-    );
-    assert.ok(fold);
-    assert.equal(fold.visibleMemoryIds.length, 20);
-    assert.equal(fold.foldedMemoryIds.length, 5);
-    assert.deepEqual(
-      fold.visibleMemoryIds.slice(0, 15),
-      context.results.slice(0, 15).map((result) => result.memory.id),
-    );
-    assert.deepEqual(
-      new Set([...fold.visibleMemoryIds, ...fold.foldedMemoryIds]),
-      new Set(context.results.map((result) => result.memory.id)),
-    );
+    const fold = new ControllerRuntime(join(directory, "controller.json")).foldMemories(context);
+    assert.equal(fold, null);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("QPP2 retained probability mass dynamically determines visible candidates", () => {
+  assert.deepEqual(retainedMassIndices([0.5, 0.5, 0.5, 0.5], 0.98), [0, 1, 2, 3]);
+  assert.deepEqual(retainedMassIndices([0.99, 0.01, 0.01, 0.01], 0.98), [0]);
+  assert.deepEqual(retainedMassIndices([0.01, 0.9, 0.08, 0.01], 0.9), [0, 1]);
 });
 
 test("controller runtime zero-pads a version-1 feature state", () => {

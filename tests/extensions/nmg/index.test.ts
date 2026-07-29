@@ -5,6 +5,7 @@ import nmgExtension from "../../../.pi/extensions/nmg/index.ts";
 import {
   configuredQpp1Mode,
   configuredQpp2Mode,
+  configuredQpp2RetainedMass,
   configuredSearchRecommendationMode,
   configuredGraphHops,
   formatSearchRecommendation,
@@ -335,6 +336,7 @@ test("QPP stages and search recommendation are independently configurable", () =
   const names = [
     "NMG_QPP1_MODE",
     "NMG_QPP2_MODE",
+    "NMG_QPP2_RETAINED_MASS",
     "NMG_SEARCH_RECOMMENDATION",
     "NMG_CONTROLLER_SEARCH",
   ] as const;
@@ -343,13 +345,16 @@ test("QPP stages and search recommendation are independently configurable", () =
     for (const name of names) delete process.env[name];
     assert.equal(configuredQpp1Mode(), "shadow");
     assert.equal(configuredQpp2Mode(), "off");
+    assert.equal(configuredQpp2RetainedMass(), 0.98);
     assert.equal(configuredSearchRecommendationMode(), "advisory");
 
     process.env.NMG_QPP1_MODE = "active";
     process.env.NMG_QPP2_MODE = "active";
+    process.env.NMG_QPP2_RETAINED_MASS = "0.9";
     process.env.NMG_SEARCH_RECOMMENDATION = "off";
     assert.equal(configuredQpp1Mode(), "active");
     assert.equal(configuredQpp2Mode(), "active");
+    assert.equal(configuredQpp2RetainedMass(), 0.9);
     assert.equal(configuredSearchRecommendationMode(), "off");
 
     delete process.env.NMG_QPP1_MODE;
