@@ -1,8 +1,0 @@
-torch>=2.4.0
-transformers>=4.45.0
-datasets
-sentence-transformers
-tqdm
-onnx>=1.16.0
-onnxruntime
-onnxconverter-common

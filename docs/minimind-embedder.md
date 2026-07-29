@@ -1,4 +1,26 @@
-# MiniMind-NMG Encoder — 专用向量模型设计 v3（最终）
+# MiniMind-NMG Encoder — 专用向量模型设计（历史归档）
+
+> **状态：未采用，相关实现已于 2026-07-29 从主仓库移除。**
+>
+> 这份文档保留一个曾经认真探索、但没有达到采用标准的设计。方案尝试为
+> NMG 训练一个约 30M 参数的专用双向文本编码器，并通过 ONNX 在 Pi 插件进程内
+> 推理。原型证明训练、导出和调用链路可以搭建，但没有证明它比现成的小型
+> embedding 模型更适合 NMG。
+>
+> 停止该方向的原因：
+>
+> - 训练数据准备、负样本构造、多语言覆盖、蒸馏、评估和部署形成了一个独立的
+>   模型项目，超出 NMG 作为轻量 Pi 长期记忆插件的核心边界；
+> - 当时可用的算力、数据质量和模型训练能力不足，实验效果没有达到替代 BGE
+>   等成熟 embedding 模型的程度；
+> - 专用模型增加了 PyTorch、ONNX、Tokenizer 映射和模型文件的维护负担；
+> - NMG 当前的主要不确定性在记忆写入、图组织、检索和 QPP，而不是 embedding
+>   模型本身；继续优化编码器无法优先验证核心价值。
+>
+> 因此，NMG 保留通用 `VectorEmbedder` 边界，优先使用现成模型或兼容 API。
+> 本文以下内容是历史设计记录，不代表当前实现、路线图或已验证性能；其中提到的
+> `minimind/`、`minimind-nmg/`、ONNX 适配器和测试路径均已删除，必要时可从 Git
+> 历史恢复。
 
 ## 1. 核心判断与设计原则
 
@@ -273,7 +295,8 @@ L_behavior:    交叉熵（预测"是否被使用"）
 
 ## 8. 部署：ONNX Runtime Node.js
 
-✅ **已实现。** `src/core/onnx-minimind-embedder.ts` 提供进程内推理：
+**历史原型（已删除）。** 原型曾通过 `src/core/onnx-minimind-embedder.ts`
+提供进程内推理：
 
 ```ts
 import { OnnxMiniMindEmbedder } from "../src/core/onnx-minimind-embedder.ts";

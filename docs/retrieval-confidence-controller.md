@@ -110,7 +110,7 @@ Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**�
 
 ## 不做什么
 
-- **不训练/不引入 embedding 模型**：代理损失与 Gumbel-Sigmoid DC 都在检索已产出的分数上运作；DC 梯度停在 `globalFeatures` 标量层，穿不过 ANN top-K（选择不可微，differentiable retrieval 已知断层）回传 embedder。与 park 自研 MiniMind encoder 自洽——攻覆盖/触发，与 embedder 质量正交；BGE 已验证够用（0.8008 LME）。embedder 质量仅二阶影响 vectorScore→分布→QPP 信号干净度，非功能依赖。
+- **不训练/不引入 embedding 模型**：代理损失与 Gumbel-Sigmoid DC 都在检索已产出的分数上运作；DC 梯度停在 `globalFeatures` 标量层，穿不过 ANN top-K（选择不可微，differentiable retrieval 已知断层）回传 embedder。该模块关注覆盖与触发，和具体 embedder 正交；现成的小型 embedding 模型已经足够验证当前假设。embedder 质量仅二阶影响 vectorScore→分布→QPP 信号干净度，非功能依赖。
 - **不做 FLARE（生成侧 entropy 触发）**：正交轴（生成 token 熵 vs 检索分数分布），但 NMG reader 外置（deterministic AutoRecall + deepseek-v4-flash），eval 拿不到 token logprob → 当前架构障碍。列为未来互补轴；双轴置信度（retrieval QPP + generation entropy）才完整，先发 retrieval 侧。
 - **不做 Self-RAG**：LLM 自发 reflection token 需强模型微调，弱 reader 不触发，违背系统侧红线。
 - **不做端到端可微检索**：REALM 软索引太侵入，拒。
