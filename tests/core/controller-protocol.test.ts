@@ -96,6 +96,8 @@ test("trace protocol joins STG, LTG and Active Graph into fixed bounded features
 
     const nodeLabels = [...(sample.training.nodes ?? [])].map((item) => item.target).sort();
     assert.deepEqual(nodeLabels, [false, true]);
+    assert.equal(sample.training.memoryPairs?.length, 1);
+    assert.equal(sample.training.memories, undefined);
     assert.equal(sample.training.control?.target, "expand");
     assert.equal(sample.training.budget?.targets.length, 7);
     assert.ok(sample.training.budget?.targets.every((value) => value >= 0 && value <= 1));

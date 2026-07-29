@@ -123,3 +123,63 @@ QPP1 扩大候选后获得的大部分召回收益。因此它只能保持在 sh
    - query relevance + 图路径；
    - 小型 cross-encoder reranker。
 6. 只有当 QPP2 在相同 token 预算下稳定优于固定 Top-K，才接入 Pi。
+
+## Pairwise QPP2 与动态压缩复测
+
+QPP2 后续改为 pairwise hard-negative 训练：对每条官方证据，要求其必要性分数高于第一轮列表中的高排位噪声。该目标只学习列表内次序，不把未校准分数当作绝对概率。
+
+在同一 LoCoMo 150 条协议下，QPP1 完整展开平均为 34.11 条记录、15,584 estimated tokens，evidence recall 为 0.4556。按 QPP2 分数的局部概率质量动态截断得到：
+
+| 保留局部质量 | Evidence recall | 相对 QPP1 evidence retention | 记录压缩 | Token 压缩 |
+|---:|---:|---:|---:|---:|
+| 90% | 0.3406 | 87.33% | 21.07% | 21.27% |
+| 95% | 0.3672 | 90.67% | 11.70% | 11.83% |
+| 98% | 0.4472 | 99.00% | 4.51% | 4.57% |
+
+结果目录：
+
+`evals/controller/results/2026-07-29T09-37-15.222Z`
+
+该结果验证了 QPP2 的第二个作用：减少 QPP1 已经展开、但最终需要完整注入 Agent 的推荐内容。98% 质量档接近无损，但压缩收益较小；90%—95% 档有更明显的上下文节省，同时带来不可忽略的证据损失。因此默认路径暂不采用单一固定档位，下一步应校准查询级置信度，让系统依据风险在这些档位间选择。
+# 补充：置信度驱动的可变检索池
+
+固定 `Top-K` 不是 NMG 的最终检索语义，只是在检索置信度尚未可靠时的容量保护。更完整的职责分工是：
+
+```text
+QPP1：判断当前候选池是否已经覆盖回答所需信息
+  └── 不足时按 Fibonacci 档位继续扩大搜索池
+
+QPP2：判断候选池中的各条内容是否值得完整交给 Agent
+  └── 保留必要证据，压缩已经展开但更像噪声的推荐内容
+```
+
+因此，候选池和最终上下文都应是可变长度，而不是固定 `Top-20`：
+
+\[
+K_{\mathrm{search}}
+=
+\min\{k:\Pr(\text{evidence complete}\mid q,R_{1:k})\ge\tau_s\}
+\]
+
+\[
+R_{\mathrm{visible}}
+=
+\{r_i\in R_{1:K_{\mathrm{search}}}:
+\Pr(\text{necessary}_i\mid q,R_{1:K_{\mathrm{search}}})\ge\tau_v\}
+\]
+
+其中仍保留：
+
+- 最小安全前缀，防止控制器尚未成熟时删掉高排位结果；
+- record/token/latency 总上限，防止低置信度查询无限展开；
+- 冲突、关键约束和用户固定记忆的保护通道；
+- 置信度不足时的渐进扩展，而不是一次跳到固定大池。
+
+当前 pairwise QPP2 训练得到的是**列表内必要性排序分数**。它能用于概率质量截断，但 sigmoid 输出尚未经过跨查询校准，不能直接解释为绝对的 `P(necessary)`。在取消固定 Top-K 前，需要在留出集上做 Platt scaling、isotonic regression 或等价校准，并报告：
+
+- evidence retention；
+- record/token compression；
+- calibration error（ECE/Brier score）；
+- 不同查询类别下的最坏召回损失。
+
+所以现阶段的 `Top-20` 只保留为 benchmark 基线；实际原型采用“QPP1 动态搜索池 + QPP2 动态可见集 + 硬预算上限”。

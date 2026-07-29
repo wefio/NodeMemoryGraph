@@ -18,8 +18,14 @@ export interface BinaryRouteExample {
   target: boolean;
 }
 
+export interface PairwiseRouteExample {
+  preferredFeatures: readonly number[];
+  rejectedFeatures: readonly number[];
+}
+
 export interface ControllerTrainingExample {
   memories?: readonly BinaryRouteExample[];
+  memoryPairs?: readonly PairwiseRouteExample[];
   nodes?: readonly BinaryRouteExample[];
   edges?: readonly BinaryRouteExample[];
   control?: {
@@ -152,6 +158,15 @@ export class DifferentiableController {
         losses.push(binaryCrossEntropy(this.#binary(this.#memory, item.features), item.target));
         totalObservations += 1;
       }
+    }
+
+    const memoryPairs = example.memoryPairs ?? [];
+    for (const pair of memoryPairs) {
+      const preferred = this.#linear(this.#memory, pair.preferredFeatures);
+      const rejected = this.#linear(this.#memory, pair.rejectedFeatures);
+      const margin = preferred.add(rejected.multiply(Tensor.scalar(-1)));
+      losses.push(margin.sigmoid().log().multiply(Tensor.scalar(-1)));
+      totalObservations += 1;
     }
 
     const nodeExamples = example.nodes ?? [];

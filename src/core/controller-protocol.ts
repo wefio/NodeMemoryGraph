@@ -273,10 +273,10 @@ function trainingExample(
     throw new Error("controller budget label shape does not match the controller");
   }
   return {
-    memories: balancedBinaryExamples(
+    memoryPairs: pairwiseMemoryExamples(
       context.results.map((result) => ({
         features: featureVector(context, trace, memoryCandidate(result)),
-        target: usefulMemoryIds.includes(result.memory.id),
+        useful: usefulMemoryIds.includes(result.memory.id),
       })),
     ),
     nodes: balancedBinaryExamples(
@@ -312,6 +312,21 @@ function memoryCandidate(result: MemorySearchResult): CandidateFeatures {
     accessCount: result.memory.accessCount,
     stability: 0,
   };
+}
+
+function pairwiseMemoryExamples(
+  values: Array<{ features: number[]; useful: boolean }>,
+): Array<{ preferredFeatures: number[]; rejectedFeatures: number[] }> {
+  const positives = values.filter((value) => value.useful);
+  const negatives = values.filter((value) => !value.useful);
+  if (positives.length === 0 || negatives.length === 0) return [];
+  const hardNegatives = negatives.slice(0, Math.max(4, positives.length * 4));
+  return positives.flatMap((positive) =>
+    hardNegatives.map((negative) => ({
+      preferredFeatures: positive.features,
+      rejectedFeatures: negative.features,
+    })),
+  );
 }
 
 /** Keep all positives and only the highest-ranked hard negatives to avoid trace-size imbalance. */

@@ -61,6 +61,21 @@ test("differentiable controller learns necessary memories separately from noise"
   assert.ok(controller.scoreMemory([-1, 0]) < 0.15);
 });
 
+test("pairwise memory loss learns evidence-over-noise ordering", () => {
+  const controller = new DifferentiableController(2);
+  const preferred = [0.8, 0.2];
+  const rejected = [0.2, 0.8];
+  for (let step = 0; step < 300; step += 1) {
+    controller.train(
+      {
+        memoryPairs: [{ preferredFeatures: preferred, rejectedFeatures: rejected }],
+      },
+      0.1,
+    );
+  }
+  assert.ok(controller.scoreMemory(preferred) > controller.scoreMemory(rejected) + 0.6);
+});
+
 test("differentiable controller state round-trips without changing decisions", () => {
   const controller = new DifferentiableController(3);
   controller.train(

@@ -108,11 +108,23 @@ const budget = {
   fibonacciQpp: summarizeBudget(budgetRows.map((row) => row.fibonacciQpp)),
   autodiffQpp: summarizeBudget(budgetRows.map((row) => row.autodiffQpp)),
   autodiffQpp2: summarizeBudget(budgetRows.map((row) => row.autodiffQpp2)),
+  adaptiveQpp2: summarizeBudget(budgetRows.map((row) => row.adaptiveQpp2)),
+  adaptiveQpp2_95: summarizeBudget(budgetRows.map((row) => row.adaptiveQpp2_95)),
+  adaptiveQpp2_98: summarizeBudget(budgetRows.map((row) => row.adaptiveQpp2_98)),
   fullTop50Qpp2: summarizeBudget(budgetRows.map((row) => row.fullTop50Qpp2)),
   diverseTop50Qpp2: summarizeBudget(budgetRows.map((row) => row.diverseTop50Qpp2)),
   fullTop50: summarizeBudget(budgetRows.map((row) => row.fullTop50)),
   oracleFibonacci: summarizeBudget(budgetRows.map((row) => row.oracleFibonacci)),
 };
+const adaptiveQpp2Tradeoff = summarizeCompression(
+  budgetRows.map((row) => ({ expanded: row.autodiffQpp, compressed: row.adaptiveQpp2 })),
+);
+const adaptiveQpp2Tradeoff95 = summarizeCompression(
+  budgetRows.map((row) => ({ expanded: row.autodiffQpp, compressed: row.adaptiveQpp2_95 })),
+);
+const adaptiveQpp2Tradeoff98 = summarizeCompression(
+  budgetRows.map((row) => ({ expanded: row.autodiffQpp, compressed: row.adaptiveQpp2_98 })),
+);
 const candidateRecall = average(rows.map((row) => row.candidateRecall));
 const latencyTolerance = Number.parseFloat(process.env.NMG_CONTROLLER_LATENCY_FACTOR ?? "4");
 const recallTolerance = Number.parseFloat(process.env.NMG_CONTROLLER_RECALL_TOLERANCE ?? "0.01");
@@ -172,6 +184,10 @@ const report = {
         "autodiff evidence-budget head chooses the first Fibonacci tier; QPP may continue",
       autodiffQpp2:
         "keep a high-confidence prefix, then use a differentiable necessity head to replace noisy tail items",
+      adaptiveQpp2:
+        "retain 90% of the local probe probability mass with a safe prefix; flat lists remain wide",
+      adaptiveQpp2_95: "same adaptive policy retaining 95% of local probability mass",
+      adaptiveQpp2_98: "same adaptive policy retaining 98% of local probability mass",
       fullTop50Qpp2:
         "retrieve 50 candidates, keep a safe prefix, then select necessary evidence from the expansion",
       diverseTop50Qpp2:
@@ -180,6 +196,11 @@ const report = {
       oracleFibonacci: "smallest Fibonacci tier containing every retrievable official evidence",
     },
     summary: budget,
+    adaptiveQpp2Tradeoff: {
+      retainedMass90: adaptiveQpp2Tradeoff,
+      retainedMass95: adaptiveQpp2Tradeoff95,
+      retainedMass98: adaptiveQpp2Tradeoff98,
+    },
     trainingMs: budgetCrossValidation.trainingMs,
     trainingSteps: budgetCrossValidation.trainingSteps,
     qpp2Cohesion,
@@ -211,7 +232,18 @@ writeFileSync(resolve(runDirectory, "report.json"), `${JSON.stringify(report, nu
 process.stdout.write(
   process.env.NMG_CONTROLLER_COMPACT === "1"
     ? `${JSON.stringify(
-        { runDirectory, benchmark, cases: prepared.length, budget, qpp2Cohesion },
+        {
+          runDirectory,
+          benchmark,
+          cases: prepared.length,
+          budget,
+          adaptiveQpp2Tradeoff: {
+            retainedMass90: adaptiveQpp2Tradeoff,
+            retainedMass95: adaptiveQpp2Tradeoff95,
+            retainedMass98: adaptiveQpp2Tradeoff98,
+          },
+          qpp2Cohesion,
+        },
         null,
         2,
       )}\n`
@@ -515,6 +547,36 @@ function compareBudgets(
     QPP2_SAFE_ANCHORS,
     allocationMs,
   );
+  const adaptiveQpp2 = adaptiveSelectionBudget(
+    item,
+    qpp2Controller,
+    evidence,
+    ordered,
+    initialTier,
+    QPP2_SAFE_ANCHORS,
+    0.9,
+    allocationMs,
+  );
+  const adaptiveQpp2_95 = adaptiveSelectionBudget(
+    item,
+    qpp2Controller,
+    evidence,
+    ordered,
+    initialTier,
+    QPP2_SAFE_ANCHORS,
+    0.95,
+    allocationMs,
+  );
+  const adaptiveQpp2_98 = adaptiveSelectionBudget(
+    item,
+    qpp2Controller,
+    evidence,
+    ordered,
+    initialTier,
+    QPP2_SAFE_ANCHORS,
+    0.98,
+    allocationMs,
+  );
   const fullTop50Qpp2 = learnedSelectionBudget(
     item,
     qpp2Controller,
@@ -533,11 +595,70 @@ function compareBudgets(
     fibonacciQpp,
     autodiffQpp,
     autodiffQpp2,
+    adaptiveQpp2,
+    adaptiveQpp2_95,
+    adaptiveQpp2_98,
     fullTop50Qpp2,
     diverseTop50Qpp2,
     fullTop50,
     oracleFibonacci,
   };
+}
+
+function adaptiveSelectionBudget(
+  item: PreparedCase,
+  controller: DifferentiableController,
+  evidence: Set<string>,
+  ordered: Array<{ result: MemoryContext["results"][number]; selection: ActiveGraphSelection }>,
+  candidateBreadth: number,
+  safeAnchors: number,
+  retainedMass: number,
+  previousInferenceMs = 0,
+): BudgetPolicyResult {
+  const startedAt = performance.now();
+  const candidates = ordered.slice(0, candidateBreadth);
+  if (candidates.length === 0) {
+    return budgetFromEntries(item, evidence, [], 0, 0, 1, true, previousInferenceMs);
+  }
+  const scored = candidates
+    .map((entry) => {
+      const probability = clampProbability(
+        controller.scoreMemory(qpp2Features(item, entry, candidates)),
+      );
+      return {
+        entry,
+        logit: Math.log(probability / (1 - probability)),
+      };
+    })
+    .sort(
+      (left, right) =>
+        right.logit - left.logit || left.entry.selection.rank - right.entry.selection.rank,
+    );
+  const maximum = scored[0]!.logit;
+  const masses = scored.map((item) => Math.exp(item.logit - maximum));
+  const totalMass = sum(masses);
+  const selectedIds = new Set(
+    candidates
+      .slice(0, Math.min(safeAnchors, candidates.length))
+      .map((entry) => entry.result.memory.id),
+  );
+  let accumulated = 0;
+  for (let index = 0; index < scored.length; index += 1) {
+    accumulated += masses[index]!;
+    selectedIds.add(scored[index]!.entry.result.memory.id);
+    if (accumulated / Math.max(totalMass, Number.EPSILON) >= retainedMass) break;
+  }
+  const selected = candidates.filter((entry) => selectedIds.has(entry.result.memory.id));
+  return budgetFromEntries(
+    item,
+    evidence,
+    selected,
+    candidateBreadth,
+    candidateBreadth,
+    1,
+    selected.length < candidates.length,
+    previousInferenceMs + performance.now() - startedAt,
+  );
 }
 
 function learnedSelectionBudget(
@@ -635,18 +756,14 @@ function qpp2TrainingExample(item: PreparedCase): ControllerTrainingExample | nu
   if (positives.length === 0) return null;
   const negatives = candidates
     .filter((entry) => !evidence.has(item.sourceByMemoryId.get(entry.result.memory.id) ?? ""))
-    .slice(0, Math.max(6, positives.length * 4));
-  const examples = [
-    ...positives.map((entry) => ({
-      features: qpp2Features(item, entry, candidates),
-      target: true,
+    .slice(0, Math.max(8, positives.length * 6));
+  const memoryPairs = positives.flatMap((positive) =>
+    negatives.map((negative) => ({
+      preferredFeatures: qpp2Features(item, positive, candidates),
+      rejectedFeatures: qpp2Features(item, negative, candidates),
     })),
-    ...negatives.map((entry) => ({
-      features: qpp2Features(item, entry, candidates),
-      target: false,
-    })),
-  ];
-  return examples.length > 0 ? { memories: examples } : null;
+  );
+  return memoryPairs.length > 0 ? { memoryPairs } : null;
 }
 
 function qpp2Features(
@@ -900,6 +1017,34 @@ function summarizeBudget(rows: BudgetPolicyResult[]) {
   };
 }
 
+function summarizeCompression(
+  rows: Array<{ expanded: BudgetPolicyResult; compressed: BudgetPolicyResult }>,
+) {
+  return {
+    evidenceRetention: average(
+      rows.map(({ expanded, compressed }) =>
+        expanded.evidenceFound === 0
+          ? 1
+          : Math.min(1, compressed.evidenceFound / expanded.evidenceFound),
+      ),
+    ),
+    tokenCompression: average(
+      rows.map(({ expanded, compressed }) =>
+        expanded.estimatedTokens === 0
+          ? 0
+          : 1 - compressed.estimatedTokens / expanded.estimatedTokens,
+      ),
+    ),
+    recordCompression: average(
+      rows.map(({ expanded, compressed }) =>
+        expanded.visibleMemories === 0
+          ? 0
+          : 1 - compressed.visibleMemories / expanded.visibleMemories,
+      ),
+    ),
+  };
+}
+
 function rankBaseline(item: PreparedCase): string[] {
   const scores = baselineScores(item);
   return Object.keys(item.sample.nodeFeatures).sort(
@@ -1017,6 +1162,10 @@ function residualWeight(): number {
 
 function boundedScore(value: number): number {
   return Math.max(0, Math.min(Number.isFinite(value) ? value : 0, 1));
+}
+
+function clampProbability(value: number): number {
+  return Math.max(1e-6, Math.min(1 - 1e-6, value));
 }
 
 function boundedCosine(
