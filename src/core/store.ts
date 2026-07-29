@@ -1391,7 +1391,11 @@ export class NmgStore {
     // Shadow QPP observation (Stage 0): compute the second-pass decision but do
     // NOT act on it — recorded on the trace for calibration (Stage 1) and DC
     // supervision (Stage 2). Wiring the actual trigger is a later increment.
-    const qppDecision = shouldTriggerSecondPass(query, qppCandidates(results, selections));
+    const qppDecision = shouldTriggerSecondPass(
+      query,
+      qppCandidates(results, selections),
+      options.qppThreshold,
+    );
     const traceInput: RetrievalTraceInput = {
       query,
       taskId,

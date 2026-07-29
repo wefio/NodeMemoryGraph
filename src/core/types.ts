@@ -208,6 +208,8 @@ export interface SearchOptions {
    * committing the final Active Graph. The probe must not become a feedback trace.
    */
   persistTrace?: boolean;
+  /** Override the QPP trigger threshold (Stage 1 calibration / experiments). */
+  qppThreshold?: number;
 }
 
 export interface EmbeddingDocument {

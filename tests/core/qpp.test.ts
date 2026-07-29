@@ -313,3 +313,24 @@ test("searchContextWithSecondPass: trigger runs expanded pass (doubled budget)",
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("searchContextWithSecondPass: qppThreshold forces trigger on a strong match", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-qpp-2p-tau-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    store.remember({ statement: "user prefers a window seat", nodeName: "Seat", memoryType: "preference" });
+    // strong match -> default τ=0.45 does NOT trigger.
+    const normal = store.searchContextWithSecondPass("window seat", { secondPass: true });
+    assert.equal(normal.activeGraph!.qpp?.trigger, false);
+    // raised τ forces below_threshold -> expanded pass runs (budget doubled).
+    const forced = store.searchContextWithSecondPass("window seat", {
+      secondPass: true,
+      qppThreshold: 2.0,
+    });
+    assert.equal(forced.activeGraph!.qpp?.trigger, true);
+    assert.equal(forced.activeGraph!.budget.maxEvidence, 16);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
