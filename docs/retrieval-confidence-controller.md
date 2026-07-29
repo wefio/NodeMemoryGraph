@@ -25,7 +25,7 @@
 
 ### 0. 归一化前置（任何 score-based QPP 的前提）
 
-算 QPP 前须归一化分数。`hybridScore`（`search-ranking.ts:53-55`）本身已用 `boundedLexical = lexical/(lexical+10)` 把词法分压到 [0,1)，但**结果级 `combinedScore`（`mapSearchResult:3835` 设 = 原始词法分 `score`，实测 ~84）不在 [0,1]**，而 `contextUsefulness = combinedScore + bonus`。QPP 用 **bounded-squash** `s(x)=max(0,x)/(max(0,x)+k)`（k=`QPP_SQUASH_K`=10，同 `boundedLexical` 惯例）把 usefulness 压到 [0,1)——不用 clamp（>1 全饱和到 1.0，审计实测 top1 恒 1.0、variance 恒 0），也不用 Z-score（within-set 相对值，丢绝对质量：全弱匹配里一个相对强者 z 高会误判好）。bonus 仍保留为小偏移。RankSVM 学通道组合权重是手设 0.5/0.35/0.15 的 supervised 版（Stage 2 可接管），与 QPP 分量权重独立。
+算 QPP 须用跨路径一致的分数。**`combinedScore` 量纲不一致**：lexical 搜索路径（`store.ts:2915`）设 = `hybridScore`（有界 [0,1]），但部分 vector 路径（`:2654`）设 = `leafScore*0.9 + lexical*0.1`（词法尺度 ~84），`#resultsForNode`（`:3684`）设 = 0。审计实测同一 hybridScore 在不同路径既出现 0.62 又出现 84。所以 QPP **不读 `combinedScore`/`usefulness`，而是从 `selections.scores.{lexical,vector,route}` 重算 `hybridScore`**（`search-ranking.ts:53-55`，恒有界 [0,1] 经 `boundedLexical`）作为 `strength`——这是 path-consistent 的，且对历史 trace（词法 84）和 live trace（0.62）都给出一致有界值。不用 squash（k 无法同时适配 0.6 与 84 两套量纲），不用 Z-score（within-set 相对值，丢绝对质量）。bonus 不进 top1（intent 类型奖励由 intentCoverage 分量单独承当，干净分离）。RankSVM 学通道组合权重是手设 0.5/0.35/0.15 的 supervised 版（Stage 2 可接管），与 QPP 分量权重独立。
 
 ### 1. 算 QPP（post-retrieval，learned-weight）
 
@@ -35,7 +35,7 @@
 C = Top1 + τ_v·variance + w_ic·intentCoverage + w_rh·reasonHealth
 ```
 
-`Top1`/`variance` 已 squash 到 [0,1)（见 §0）。这是 **learned-weight NQC 变体**（Top1 锚定 + 方差项 = score-based QPP 族），不是手设先验。高 C = 不触发，低 C = 触发。
+`Top1`/`variance` 基于 `strength`（重算的 hybridScore，有界 [0,1]、path-consistent，见 §0）。这是 **learned-weight NQC 变体**（Top1 锚定 + 方差项 = score-based QPP 族），不是手设先验。高 C = 不触发，低 C = 触发。
 
 **三信号按失败模式正交选取**（推导依据，非拍脑袋）：
 
@@ -49,8 +49,8 @@ C = Top1 + τ_v·variance + w_ic·intentCoverage + w_rh·reasonHealth
 权重排序依据：`Top1` 最 informative（单信号即可否决触发）；`variance` 是 NQC 族核心、抓"分布形状"；`intentCoverage` 抓 `Top1` 盲区（高分但类型错）故独立值钱；`reasonHealth` 权重最低。**关于 reasonHealth 冗余性**：它捕获"direct 里多少比例是真匹配（reason≠hybrid_match）"，与 `Top1`（只看最强）**互补不冗余**——可能 Top1 高但 reasonHealth 低（1 强 + 多兜底）。但实测 LongMemEval 非空题 reasonHealth 恒 1.0（返回的都真），**实践可能近常数、低区分度**；标定时须做 Top1×reasonHealth 相关性分析确认其边际贡献（见 §2 标定流程）。**具体数值靠学，非手设**：Stage 1 贝叶斯优化，Stage 2 DC 梯度。
 
 **分量精确口径**（从 `trace.selections` 算，即过预算后存活的 top-K——LLM 实际所见）：
-- `Top1` = `max(squash(usefulness))`，`squash(x)=max(0,x)/(max(0,x)+QPP_SQUASH_K)`；`scores.usefulness` 见 `store.ts:1383`。84→0.894 / 20→0.667 / 5→0.333，保留 gradation。
-- `variance` = `clamp(stdev(squashed_usefulness)*2, 0, 1)`（squashed 值∈[0,1) 故 stdev≤0.5，*2 映射 [0,1]）。高方差双解——清晰赢家 vs 噪声离群——squash 不解决，标定时用 Top1−Top2 差值作辅助/替代（见 §2）。
+- `Top1` = `max(clamp(strength,0,1))`，`strength = hybridScore(scores.lexical, scores.vector, scores.route)`（重算，非 combinedScore）。hybridScore 恒 [0,1]，跨路径一致。
+- `variance` = `clamp(stdev(strength)*2, 0, 1)`（strength∈[0,1] 故 stdev≤0.5，*2 映射 [0,1]）。高方差双解——清晰赢家 vs 噪声离群——标定时用 Top1−Top2 差值作辅助/替代（见 §2）。
 - `intentCoverage`：3 族意图正则→期望类型（`search-ranking.ts:9-23`：`list/count`→derived/event/fact/state；`recommend/suggest/preference`→preference+constraint；`assistant/you said/previous`→conversation_evidence）；coverage = 命中族中"期望类型确实出现在 top-K"的比例；**不命中任何正则→取中性 0.5**（不冤枉单跳事实题，不能取 0）。0.5 贡献 `0.5·w_ic=0.15`，偏置有界且小；标定时对"未命中正则"查询单独看分布，若系统性偏，改用 `avg(intentCoverage)` 作中性。
 - `reasonHealth` = **仅 direct 选择项**中 `reason≠hybrid_match` 的比例（剔除 graph_expansion：其三路分恒 0，计入会把好召回拉成 0）；`recallReason` 见 `search-ranking.ts:72-84`，现仅 debug 用，正好接上。
 - 空结果 → C=0（必触发，正确）。
@@ -63,7 +63,7 @@ C = Top1 + τ_v·variance + w_ic·intentCoverage + w_rh·reasonHealth
 最简硬条件验证第二趟检索 + `expandedMaximum` 预算 + 统一池管道通畅；立**永久 guardrail floor**（Stage 1/2 学化门控说"不触发"但结果灾难性弱 → 无论如何触发）。必触发条件（具体数值，可操作基线）：
 - `totalCount === 0`（空结果）→ `guardrail_empty`
 - `directCount > 0 && reasonHealth === 0`（全 hybrid_match 兜底）→ `guardrail_all_fallback`（当前权重下与 low_top1 重叠，作防学错权重的安全网留）
-- `Top1 < QPP_TOP1_FLOOR(=0.2)`（squashed，≈ 原始 usefulness < 2.5，基本没真匹配）→ `guardrail_low_top1`
+- `Top1 < QPP_TOP1_FLOOR(=0.2)`（hybridScore 量纲，基本没真匹配）→ `guardrail_low_top1`
 - 否则 `C < τ` → `below_threshold`
 
 价值在验证管道，非决策质量。原"手设 0.5/0.3/0.2 公式 + 手设 τ"的 Stage 0 **砍掉**——与 Stage 1 代理公式重复且更差。

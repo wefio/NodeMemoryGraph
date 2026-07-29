@@ -70,6 +70,7 @@ import {
   activeGraphBudgetLedger,
   activeGraphExpansions,
   estimateResultTokens,
+  expandActiveGraphBudget,
   queryAssociationEdges,
   stableTaskId,
 } from "./store/active-graph.ts";
@@ -1426,6 +1427,7 @@ export class NmgStore {
       budgetLedger,
       budget,
       usage,
+      qpp: qppDecision,
       createdAt: new Date().toISOString(),
     };
     return {
@@ -1435,6 +1437,39 @@ export class NmgStore {
       ),
       activeGraph,
     };
+  }
+
+  /**
+   * Stage 0 second-pass retrieval. Runs the normal {@link searchContext}; if the
+   * shadow QPP decision triggers (low recall confidence) AND `secondPass` is set,
+   * re-runs the search with an expanded budget (more evidence/nodes/tokens + one
+   * more graph hop) and returns the expanded result. Both passes trace — the
+   * first records the trigger, the expanded records what the caller received
+   * (two traces per triggered query, linked by taskId). Default off.
+   *
+   * QPP-thresholded adaptive retrieval trigger; see
+   * docs/retrieval-confidence-controller.md §2 Stage 0.
+   */
+  searchContextWithSecondPass(
+    query: string,
+    options: SearchOptions & { secondPass?: boolean } = {},
+    semantic?: { queryVector: readonly number[]; model: string },
+  ): MemoryContext {
+    const first = this.searchContext(query, options, semantic);
+    if (!options.secondPass) return first;
+    const qpp = first.activeGraph?.qpp;
+    if (!qpp?.trigger) return first;
+    const expandedBudget = expandActiveGraphBudget(first.activeGraph!.budget);
+    return this.searchContext(
+      query,
+      {
+        ...options,
+        activeGraphBudget: expandedBudget,
+        graphHops: Math.min((options.graphHops ?? 1) + 1, 3),
+        limit: Math.min(50, expandedBudget.maxEvidence),
+      },
+      semantic,
+    );
   }
 
   getContext(memoryIds: readonly string[], graphHops = 0): MemoryContext {

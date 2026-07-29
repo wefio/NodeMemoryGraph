@@ -19,7 +19,7 @@
  * Types (QppWeights / QppCandidate / QppComponents / QppTriggerReason /
  * QppTriggerDecision) live in types.ts alongside the other retrieval types.
  */
-import { queryIntentFamilies } from "./store/search-ranking.ts";
+import { hybridScore, queryIntentFamilies } from "./store/search-ranking.ts";
 import type {
   ActiveGraphSelection,
   MemorySearchResult,
@@ -42,19 +42,18 @@ export const DEFAULT_QPP_WEIGHTS: QppWeights = { tauV: 0.3, wIc: 0.3, wRh: 0.2 }
  */
 export const DEFAULT_QPP_THRESHOLD = 0.45;
 
-/** Bounded-squash scale constant — matches `boundedLexical = lexical/(lexical+10)`. */
-export const QPP_SQUASH_K = 10;
-
-/** Stage 0 guardrail floor on (squashed) Top1 — a best match weaker than this
- *  triggers unconditionally. 0.2 ≈ raw usefulness < 2.5 (essentially no real match). */
+/** Stage 0 guardrail floor on Top1 (hybridScore scale [0,1]) — a best match weaker
+ *  than this triggers unconditionally. */
 export const QPP_TOP1_FLOOR = 0.2;
 
 /**
  * Join final {@link MemorySearchResult}s with their {@link ActiveGraphSelection}
- * projections to build QPP candidates. Selections already carry `scores.usefulness`
- * and `reason`; results carry `memoryType`. graph_expansion selections are tagged
- * `isDirect=false` so score-based signals ignore them (their lexical/vector/route
- * scores are not from the search pass and would corrupt the distribution).
+ * projections to build QPP candidates. Strength is recomputed as `hybridScore` from
+ * the component scores (lexical/vector/route) — NOT `combinedScore`, whose scale is
+ * path-inconsistent (bounded hybridScore on the lexical path, raw lexical ~84 on
+ * some vector paths). hybridScore is always bounded [0,1] via `boundedLexical`.
+ * graph_expansion selections are tagged `isDirect=false` so score-based signals
+ * ignore them (their scores are not from the search pass).
  */
 export function qppCandidates(
   results: readonly MemorySearchResult[],
@@ -64,7 +63,11 @@ export function qppCandidates(
   return selections.map((selection) => {
     const result = byMemory.get(selection.memoryId);
     return {
-      usefulness: selection.scores.usefulness,
+      strength: hybridScore(
+        selection.scores.lexical,
+        selection.scores.vector,
+        selection.scores.route,
+      ),
       reason: selection.reason,
       // A missing join is a projection bug; fall back to a neutral type rather
       // than throwing so QPP degrades gracefully instead of breaking retrieval.
@@ -79,12 +82,12 @@ export function computeQppComponents(
   candidates: readonly QppCandidate[],
 ): QppComponents {
   const direct = candidates.filter((candidate) => candidate.isDirect);
-  // Bounded-squash (x/(x+k)) maps the lexical-scale combinedScore (~0-100+) to
-  // [0,1) with gradation, instead of clamp which saturated everything >1 to 1.0.
-  const directSquashed = direct.map((candidate) => squash(candidate.usefulness));
-  const top1 = directSquashed.length === 0 ? 0 : Math.max(...directSquashed);
-  // stdev of [0,1]-bounded squashed values is <= 0.5, so *2 maps to [0,1].
-  const variance = clamp(stdev(directSquashed) * 2, 0, 1);
+  // strength = hybridScore is already bounded [0,1] and path-consistent; clamp
+  // for safety (vector/route could marginally exceed 1 on some embedders).
+  const directStrength = direct.map((candidate) => clamp(candidate.strength, 0, 1));
+  const top1 = directStrength.length === 0 ? 0 : Math.max(...directStrength);
+  // stdev of [0,1]-bounded values is <= 0.5, so *2 maps to [0,1].
+  const variance = clamp(stdev(directStrength) * 2, 0, 1);
   const reasonHealth =
     direct.length === 0
       ? 0
@@ -170,13 +173,6 @@ export function shouldTriggerSecondPass(
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
-}
-
-/** Bounded-squash to [0,1): s(x) = max(0,x)/(max(0,x)+k). Preserves gradation on
- *  lexical-scale scores where clamp would saturate. */
-function squash(value: number): number {
-  const clamped = Math.max(0, Number.isFinite(value) ? value : 0);
-  return clamped / (clamped + QPP_SQUASH_K);
 }
 
 function stdev(values: number[]): number {

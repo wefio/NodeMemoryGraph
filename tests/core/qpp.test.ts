@@ -18,7 +18,7 @@ import {
 } from "../../src/core/qpp.ts";
 
 interface CandidateOpts {
-  usefulness?: number;
+  strength?: number;
   reason?: RecallCue["reason"];
   memoryType?: MemoryType;
   isDirect?: boolean;
@@ -26,7 +26,7 @@ interface CandidateOpts {
 
 function candidate(opts: CandidateOpts = {}): QppCandidate {
   return {
-    usefulness: opts.usefulness ?? 0.5,
+    strength: opts.strength ?? 0.5,
     reason: opts.reason ?? "lexical_match",
     memoryType: opts.memoryType ?? "fact",
     isDirect: opts.isDirect ?? true,
@@ -78,33 +78,31 @@ test("computeQppComponents covers multiple matched families independently", () =
   approx(components.intentCoverage, 0.5);
 });
 
-test("top1 uses bounded-squash (not clamp): lexical-scale usefulness keeps gradation", () => {
-  // combinedScore is lexical-scale (~0-100). squash(x)=x/(x+10) preserves gradation
-  // instead of clamp which saturated everything >1 to 1.0.
-  const strong = computeQppComponents("weather", [candidate({ usefulness: 84 })]);
-  approx(strong.top1, 84 / 94); // ~0.894
-  const medium = computeQppComponents("weather", [candidate({ usefulness: 20 })]);
-  approx(medium.top1, 20 / 30); // ~0.667
-  const weak = computeQppComponents("weather", [candidate({ usefulness: 5 })]);
-  approx(weak.top1, 5 / 15); // ~0.333
-  // Negative usefulness (bonus can go negative) clamps to 0 before squash.
-  const neg = computeQppComponents("weather", [candidate({ usefulness: -2 })]);
+test("top1 uses strength (hybridScore, bounded [0,1]) with gradation", () => {
+  // strength is recomputed hybridScore (bounded [0,1], path-consistent), not the
+  // path-inconsistent combinedScore. top1 = max(strength), clamped to [0,1].
+  const strong = computeQppComponents("weather", [candidate({ strength: 0.894 })]);
+  approx(strong.top1, 0.894);
+  const medium = computeQppComponents("weather", [candidate({ strength: 0.4 })]);
+  approx(medium.top1, 0.4);
+  // Negative strength (shouldn't happen, but clamp guards) -> 0.
+  const neg = computeQppComponents("weather", [candidate({ strength: -2 })]);
   approx(neg.top1, 0);
 });
 
 test("variance is 0 for a single direct candidate and bounded for a spread", () => {
-  const single = computeQppComponents("weather", [candidate({ usefulness: 84 })]);
+  const single = computeQppComponents("weather", [candidate({ strength: 0.894 })]);
   assert.equal(single.variance, 0);
-  // [84, 0] -> squashed [0.894, 0] -> stdev ~0.447 -> *2 ~0.894 (clear winner).
+  // [0.894, 0] -> stdev ~0.447 -> *2 ~0.894 (clear winner).
   const spread = computeQppComponents("weather", [
-    candidate({ usefulness: 84 }),
-    candidate({ usefulness: 0 }),
+    candidate({ strength: 0.894 }),
+    candidate({ strength: 0 }),
   ]);
-  approx(spread.variance, (84 / 94) * 1); // stdev*2 of two-point {h,0} == h
-  // [50, 50] -> squashed equal -> 0 (flat, no clear winner).
+  approx(spread.variance, 0.894);
+  // [0.5, 0.5] -> equal -> 0 (flat, no clear winner).
   const flat = computeQppComponents("weather", [
-    candidate({ usefulness: 50 }),
-    candidate({ usefulness: 50 }),
+    candidate({ strength: 0.5 }),
+    candidate({ strength: 0.5 }),
   ]);
   approx(flat.variance, 0);
 });
@@ -122,19 +120,19 @@ test("reasonHealth counts only direct candidates and excludes hybrid_match", () 
 });
 
 test("score-based signals ignore graph_expansion candidates", () => {
-  // Direct usefulness 0.5 (squash 0.048), expansion usefulness 84 -> top1 must be 0.048.
+  // Direct strength 0.5, expansion strength 0.894 -> top1 must be 0.5 (expansion ignored).
   const components = computeQppComponents("weather", [
-    candidate({ usefulness: 0.5, isDirect: true }),
-    candidate({ usefulness: 84, isDirect: false }),
+    candidate({ strength: 0.5, isDirect: true }),
+    candidate({ strength: 0.894, isDirect: false }),
   ]);
-  approx(components.top1, 0.5 / 10.5);
+  approx(components.top1, 0.5);
   assert.equal(components.directCount, 1);
 });
 
 test("composeQpp is the learned-weight sum C = Top1 + tauV*var + wIc*ic + wRh*rh", () => {
   const components = computeQppComponents("recommend a hotel", [
-    candidate({ usefulness: 84, memoryType: "preference" }),
-    candidate({ usefulness: 20, memoryType: "preference" }),
+    candidate({ strength: 0.894, memoryType: "preference" }),
+    candidate({ strength: 0.4, memoryType: "preference" }),
   ]);
   const qpp = composeQpp(components, { tauV: 0.3, wIc: 0.3, wRh: 0.2 });
   const expected =
@@ -146,7 +144,7 @@ test("composeQpp is the learned-weight sum C = Top1 + tauV*var + wIc*ic + wRh*rh
 });
 
 test("computeQpp matches composeQpp with the same weights", () => {
-  const candidates = [candidate({ usefulness: 84, memoryType: "fact" })];
+  const candidates = [candidate({ strength: 0.894, memoryType: "fact" })];
   const qpp = computeQpp("weather", candidates, DEFAULT_QPP_WEIGHTS);
   approx(qpp, composeQpp(computeQppComponents("weather", candidates), DEFAULT_QPP_WEIGHTS));
 });
@@ -159,20 +157,20 @@ test("shouldTriggerSecondPass fires guardrail_empty when no candidates", () => {
 });
 
 test("shouldTriggerSecondPass fires guardrail_all_fallback when every direct match is hybrid_match", () => {
-  // All direct are hybrid_match (score<=0) -> reasonHealth=0 -> triggers even though
-  // C would also be low; the guardrail is a defensive invariant against bad weights.
+  // All direct are hybrid_match -> reasonHealth=0 -> triggers; the guardrail is a
+  // defensive invariant against bad learned weights.
   const decision = shouldTriggerSecondPass("weather", [
-    candidate({ usefulness: 0, reason: "hybrid_match" }),
-    candidate({ usefulness: 0, reason: "hybrid_match" }),
+    candidate({ strength: 0, reason: "hybrid_match" }),
+    candidate({ strength: 0, reason: "hybrid_match" }),
   ]);
   assert.equal(decision.trigger, true);
   assert.equal(decision.reason, "guardrail_all_fallback");
 });
 
 test("shouldTriggerSecondPass fires guardrail_low_top1 when the best match is too weak", () => {
-  // usefulness=1 -> squash 0.091 < QPP_TOP1_FLOOR (0.2) -> triggers.
+  // strength 0.1 < QPP_TOP1_FLOOR (0.2) -> triggers.
   const decision = shouldTriggerSecondPass("weather", [
-    candidate({ usefulness: 1, reason: "lexical_match" }),
+    candidate({ strength: 0.1, reason: "lexical_match" }),
   ]);
   assert.equal(decision.trigger, true);
   assert.equal(decision.reason, "guardrail_low_top1");
@@ -180,27 +178,27 @@ test("shouldTriggerSecondPass fires guardrail_low_top1 when the best match is to
 });
 
 test("shouldTriggerSecondPass fires below_threshold when Top1 clears the floor but C is low", () => {
-  // usefulness=3 -> squash 0.231 (>= 0.2 floor). "recommend" matches intent but no
-  // preference memory -> intentCoverage=0. reasonHealth=1. C = 0.231 + 0 + 0 + 0.2 = 0.431 < 0.45.
+  // strength 0.22 (>= 0.2 floor). "recommend" matches intent but no preference
+  // memory -> intentCoverage=0. reasonHealth=1. C = 0.22 + 0 + 0 + 0.2 = 0.42 < 0.45.
   const decision = shouldTriggerSecondPass("recommend a hotel", [
-    candidate({ usefulness: 3, reason: "lexical_match", memoryType: "fact" }),
+    candidate({ strength: 0.22, reason: "lexical_match", memoryType: "fact" }),
   ]);
   assert.equal(decision.trigger, true);
   assert.equal(decision.reason, "below_threshold");
-  approx(decision.qpp, 3 / 13 + 0.2);
+  approx(decision.qpp, 0.22 + 0.2);
 });
 
 test("shouldTriggerSecondPass does not trigger when recall is strong", () => {
-  // usefulness=84 -> top1 0.894, ic=0.5, rh=1 -> C = 0.894 + 0.15 + 0.2 = 1.244 >= 0.45.
+  // strength 0.894, ic=0.5, rh=1 -> C = 0.894 + 0.15 + 0.2 = 1.244 >= 0.45.
   const decision = shouldTriggerSecondPass("weather", [
-    candidate({ usefulness: 84, reason: "lexical_match" }),
+    candidate({ strength: 0.894, reason: "lexical_match" }),
   ]);
   assert.equal(decision.trigger, false);
   assert.equal(decision.reason, "ok");
-  approx(decision.qpp, 84 / 94 + 0.3 * 0.5 + 0.2);
+  approx(decision.qpp, 0.894 + 0.3 * 0.5 + 0.2);
 });
 
-test("qppCandidates joins results and selections by memoryId and tags direct vs expansion", () => {
+test("qppCandidates recomputes strength as hybridScore from component scores", () => {
   const memoryId = "mem-1";
   const result = {
     memory: { id: memoryId, memoryType: "preference" },
@@ -215,7 +213,8 @@ test("qppCandidates joins results and selections by memoryId and tags direct vs 
   assert.equal(candidate?.isDirect, true);
   assert.equal(candidate?.memoryType, "preference");
   assert.equal(candidate?.reason, "vector_match");
-  approx(candidate?.usefulness ?? -1, 0.77);
+  // hybridScore(0, 0.8, 0) = 0.5*0 + 0.35*0.8 + 0.15*0 = 0.28.
+  approx(candidate?.strength ?? -1, 0.28);
 });
 
 test("searchContext records a shadow QPP decision on the trace (no behaviour change)", () => {
@@ -264,6 +263,51 @@ test("a trace recorded without qpp reads back qpp undefined (backward compatible
     const trace = store.retrievalTrace(traceId);
     assert.ok(trace);
     assert.equal(trace.qpp, undefined);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("searchContextWithSecondPass: secondPass off returns the normal result", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-qpp-2p-off-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    store.remember({ statement: "user prefers a window seat", nodeName: "Seat", memoryType: "preference" });
+    const normal = store.searchContext("window seat");
+    const adaptive = store.searchContextWithSecondPass("window seat");
+    assert.equal(adaptive.activeGraph!.budget.maxEvidence, normal.activeGraph!.budget.maxEvidence);
+    assert.equal(adaptive.results.length, normal.results.length);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("searchContextWithSecondPass: no trigger returns first pass (normal budget)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-qpp-2p-notrig-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    store.remember({ statement: "user prefers a window seat", nodeName: "Seat", memoryType: "preference" });
+    // strong lexical match -> top1 high -> qpp ok -> no trigger.
+    const result = store.searchContextWithSecondPass("window seat", { secondPass: true });
+    assert.equal(result.activeGraph!.qpp?.trigger, false);
+    assert.equal(result.activeGraph!.budget.maxEvidence, 8);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("searchContextWithSecondPass: trigger runs expanded pass (doubled budget)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-qpp-2p-trig-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    store.remember({ statement: "user prefers a window seat", nodeName: "Seat", memoryType: "preference" });
+    // no real match -> qpp triggers (guardrail_low_top1 or guardrail_empty) -> expanded pass runs.
+    const result = store.searchContextWithSecondPass("zzz-no-such-thing", { secondPass: true });
+    assert.equal(result.activeGraph!.qpp?.trigger, true);
+    assert.equal(result.activeGraph!.budget.maxEvidence, 16);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });

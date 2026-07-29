@@ -66,6 +66,24 @@ export function stableTaskId(query: string): string {
   return `query:${createHash("sha256").update(normalize(query)).digest("hex").slice(0, 16)}`;
 }
 
+/**
+ * Stage 0 second-pass budget: roughly double the evidence/node/token envelope and
+ * allow one more graph hop, capped at the hard operator limits. Independent
+ * envelope (does not inflate the first-pass budget) so the expanded pass can
+ * retrieve more without unbounded context growth.
+ */
+export function expandActiveGraphBudget(budget: ActiveGraphBudget): ActiveGraphBudget {
+  return {
+    maxNodes: Math.min(budget.maxNodes * 2, 50),
+    maxEdges: Math.min(budget.maxEdges * 2, 100),
+    maxEvidence: Math.min(budget.maxEvidence * 2, 50),
+    maxTokens: Math.min(budget.maxTokens * 2, 100_000),
+    maxGraphHops: Math.min(budget.maxGraphHops + 1, 3),
+    maxLocalTier: budget.maxLocalTier,
+    maxLatencyMs: Math.min(budget.maxLatencyMs * 2, 60_000),
+  };
+}
+
 export function estimateResultTokens(result: MemorySearchResult): number {
   const characters =
     result.memory.statement.length +

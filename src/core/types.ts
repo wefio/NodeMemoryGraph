@@ -390,6 +390,8 @@ export interface ActiveGraph {
   budgetLedger: ActiveGraphBudgetLedgerEntry[];
   budget: ActiveGraphBudget;
   usage: ActiveGraphBudgetUsage;
+  /** Shadow QPP decision (Stage 0): computed, not yet acted on by searchContext. */
+  qpp?: QppTriggerDecision;
   createdAt: string;
 }
 
@@ -447,7 +449,9 @@ export interface QppWeights {
 
 /** A retrieval candidate projected to exactly the fields QPP needs. */
 export interface QppCandidate {
-  usefulness: number;
+  /** Match strength = hybridScore(lexical, vector, route). Bounded [0,1] and
+   *  path-consistent (unlike combinedScore, which is lexical-scale on some paths). */
+  strength: number;
   reason: RecallCue["reason"];
   memoryType: MemoryType;
   isDirect: boolean;

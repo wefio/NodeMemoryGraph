@@ -15,6 +15,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { resolve } from "node:path";
 
+import { hybridScore } from "../../src/core/store/search-ranking.ts";
 import { shouldTriggerSecondPass, DEFAULT_QPP_THRESHOLD } from "../../src/core/qpp.ts";
 import type { QppCandidate } from "../../src/core/types.ts";
 
@@ -94,10 +95,10 @@ for (const questionId of readdirSorted(armsDir)) {
         memoryId: string;
         source: string;
         reason: string;
-        scores?: { usefulness?: number };
+        scores?: { lexical?: number; vector?: number; route?: number };
       }>;
       const candidates: QppCandidate[] = sels.map((s) => ({
-        usefulness: s.scores?.usefulness ?? 0,
+        strength: hybridScore(s.scores?.lexical ?? 0, s.scores?.vector ?? 0, s.scores?.route ?? 0),
         reason: s.reason,
         memoryType: (memoryType.get(s.memoryId) ?? "fact") as QppCandidate["memoryType"],
         isDirect: s.source === "direct",
