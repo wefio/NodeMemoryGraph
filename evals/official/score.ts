@@ -32,17 +32,18 @@ const report = JSON.parse(readFileSync(resolve(runDirectory, "report.json"), "ut
   results: Prediction[];
   codeRevision?: string | null;
   sampleFingerprint?: string | null;
+  benchmarkParameters?: unknown;
 };
-const scored = benchmark === "locomo"
-  ? scoreLocomo(report.results)
-  : benchmark === "personamem"
-  ? scorePersonaMem(report.results)
-  : await scoreBeam(report.results);
+const scored =
+  benchmark === "locomo"
+    ? scoreLocomo(report.results)
+    : benchmark === "personamem"
+      ? scorePersonaMem(report.results)
+      : await scoreBeam(report.results);
 const output = {
   benchmark,
-  protocol: benchmark === "beam"
-    ? "official-protocol/deepseek-judge"
-    : "official-protocol/deterministic",
+  protocol:
+    benchmark === "beam" ? "official-protocol/deepseek-judge" : "official-protocol/deterministic",
   judgeModel: benchmark === "beam" ? "deepseek/deepseek-v4-flash" : null,
   leaderboardComparable: false,
   upstream: upstreamInfo(benchmark),
@@ -50,22 +51,27 @@ const output = {
   results: scored,
 };
 writeFileSync(resolve(runDirectory, "official-score.json"), `${JSON.stringify(output, null, 2)}\n`);
-const snapshotPath = writeSnapshot(root, buildSnapshot({
-  benchmark,
-  protocol: output.protocol,
-  judgeModel: output.judgeModel,
-  upstream: output.upstream,
-  byMode: output.byMode,
-  codeRevision: report.codeRevision ?? null,
-  sampleFingerprint: report.sampleFingerprint ?? null,
-}));
+const snapshotPath = writeSnapshot(
+  root,
+  buildSnapshot({
+    benchmark,
+    protocol: output.protocol,
+    judgeModel: output.judgeModel,
+    upstream: output.upstream,
+    byMode: output.byMode,
+    codeRevision: report.codeRevision ?? null,
+    sampleFingerprint: report.sampleFingerprint ?? null,
+    parameters: report.benchmarkParameters ?? null,
+  }),
+);
 process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
 process.stderr.write(`snapshot: ${snapshotPath}\n`);
 
 function scorePersonaMem(rows: Prediction[]) {
-  return rows.map((row) => ({ ...row, officialScore: personaMemCorrect(
-    row.hypothesis, row.reference,
-  ) ? 1 : 0 }));
+  return rows.map((row) => ({
+    ...row,
+    officialScore: personaMemCorrect(row.hypothesis, row.reference) ? 1 : 0,
+  }));
 }
 
 function scoreLocomo(rows: Prediction[]) {
@@ -84,10 +90,13 @@ function scoreLocomo(rows: Prediction[]) {
     encoding: "utf8",
   });
   if (result.status !== 0) {
-    throw new Error(`LoCoMo official scorer failed. Run npm run benchmark:setup first.\n${result.stderr}`);
+    throw new Error(
+      `LoCoMo official scorer failed. Run npm run benchmark:setup first.\n${result.stderr}`,
+    );
   }
   const parsed = JSON.parse(result.stdout.slice(result.stdout.lastIndexOf("\n{") + 1)) as {
-    scores: number[]; recalls: number[];
+    scores: number[];
+    recalls: number[];
   };
   return rows.map((row, index) => ({
     ...row,
@@ -118,9 +127,8 @@ async function scoreBeam(rows: Prediction[]) {
     for (const item of rubric) scores.push(await judgeBeamRubric(row, item));
     output.push({
       ...row,
-      officialScore: scores.length > 0
-        ? scores.reduce((sum, score) => sum + score, 0) / scores.length
-        : 0,
+      officialScore:
+        scores.length > 0 ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0,
       rubricScores: scores,
     });
   }
@@ -129,22 +137,27 @@ async function scoreBeam(rows: Prediction[]) {
 
 async function alignBeamEvents(row: Prediction, rubric: string[]): Promise<number[]> {
   if (rubric.length === 0) return [];
-  const systemItems = row.hypothesis.split(/\r?\n/u).map((item) => item.trim()).filter(Boolean);
+  const systemItems = row.hypothesis
+    .split(/\r?\n/u)
+    .map((item) => item.trim())
+    .filter(Boolean);
   if (systemItems.length === 0) return [];
   const text = await runJudge(beamEventAlignmentPrompt(row.question, rubric, systemItems));
   const match = text.match(/\[[\s\S]*?\]/u);
   if (!match) throw new Error(`BEAM event-ordering judge returned invalid JSON: ${text}`);
   const parsed: unknown = JSON.parse(match[0]);
-  if (!Array.isArray(parsed) || parsed.length !== systemItems.length ||
-    !parsed.every(isEventAlignment)) {
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length !== systemItems.length ||
+    !parsed.every(isEventAlignment)
+  ) {
     throw new Error(`BEAM event-ordering judge returned invalid alignment: ${text}`);
   }
   let nextExtra = rubric.length;
   const usedReferences = new Set<number>();
   return parsed.map((item) => {
     const index = item.referenceIndex;
-    if (index !== null && index >= 0 && index < rubric.length &&
-      !usedReferences.has(index)) {
+    if (index !== null && index >= 0 && index < rubric.length && !usedReferences.has(index)) {
       usedReferences.add(index);
       return index;
     }
@@ -154,11 +167,15 @@ async function alignBeamEvents(row: Prediction, rubric: string[]): Promise<numbe
   });
 }
 
-function isEventAlignment(value: unknown): value is { referenceIndex: number | null; item: string } {
+function isEventAlignment(
+  value: unknown,
+): value is { referenceIndex: number | null; item: string } {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
-  return (item.referenceIndex === null || Number.isInteger(item.referenceIndex)) &&
-    typeof item.item === "string";
+  return (
+    (item.referenceIndex === null || Number.isInteger(item.referenceIndex)) &&
+    typeof item.item === "string"
+  );
 }
 
 async function judgeBeamRubric(row: Prediction, rubric: string): Promise<number> {
@@ -181,19 +198,27 @@ async function runJudge(prompt: string): Promise<string> {
 }
 
 function summarize<T extends Prediction & { officialScore: number }>(rows: T[]) {
-  const byMode = Object.fromEntries([...new Set(rows.map((row) => row.mode))].map((mode) => {
-    const selected = rows.filter((row) => row.mode === mode);
-    return [mode, {
-      score: selected.reduce((sum, row) => sum + row.officialScore, 0) / selected.length,
-      count: selected.length,
-      byCategory: Object.fromEntries([...new Set(selected.map((row) => row.category))]
-        .map((category) => {
-          const categoryRows = selected.filter((row) => row.category === category);
-          return [category, categoryRows.reduce((sum, row) => sum + row.officialScore, 0) /
-            categoryRows.length];
-        })),
-    }];
-  }));
+  const byMode = Object.fromEntries(
+    [...new Set(rows.map((row) => row.mode))].map((mode) => {
+      const selected = rows.filter((row) => row.mode === mode);
+      return [
+        mode,
+        {
+          score: selected.reduce((sum, row) => sum + row.officialScore, 0) / selected.length,
+          count: selected.length,
+          byCategory: Object.fromEntries(
+            [...new Set(selected.map((row) => row.category))].map((category) => {
+              const categoryRows = selected.filter((row) => row.category === category);
+              return [
+                category,
+                categoryRows.reduce((sum, row) => sum + row.officialScore, 0) / categoryRows.length,
+              ];
+            }),
+          ),
+        },
+      ];
+    }),
+  );
   return { byMode };
 }
 
@@ -203,11 +228,23 @@ function createJudgeClient(): RpcClient {
     cwd: root,
     provider: "deepseek",
     model: "deepseek-v4-flash",
-    env: Object.fromEntries(Object.entries(process.env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
-    )),
-    args: ["--offline", "--approve", "--no-session", "--no-extensions", "--tools", "read",
-      "--model", "deepseek/deepseek-v4-flash", "--thinking", "off"],
+    env: Object.fromEntries(
+      Object.entries(process.env).filter(
+        (entry): entry is [string, string] => entry[1] !== undefined,
+      ),
+    ),
+    args: [
+      "--offline",
+      "--approve",
+      "--no-session",
+      "--no-extensions",
+      "--tools",
+      "read",
+      "--model",
+      "deepseek/deepseek-v4-flash",
+      "--thinking",
+      "off",
+    ],
   });
 }
 

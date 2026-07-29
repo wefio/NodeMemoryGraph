@@ -54,7 +54,12 @@ Run directories are ignored, so scoring also writes a small snapshot under
 logs are local runtime artifacts and are ignored by Git.
 
 Each snapshot holds per-mode scores plus the provenance needed to interpret
-them: code revision, sample fingerprint, judge model, protocol and sample size.
+them: code revision, sample fingerprint, judge model, protocol, sample size,
+and a resolved non-secret parameter block. The parameter block records QPP1,
+QPP2, retained mass, recommendation mode, progressive-pass settings, QPP
+threshold, graph-hop override, and embedding model/profile/dimensions/batch
+size. API keys, provider credentials, and machine-specific data paths are never
+included.
 Two snapshots are only comparable when their `sampleFingerprint` matches; a
 differing fingerprint means the runs covered different cases, not that quality
 changed.

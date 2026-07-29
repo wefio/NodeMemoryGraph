@@ -1,0 +1,90 @@
+import { DEFAULT_QPP_THRESHOLD } from "../../src/core/qpp.ts";
+
+export interface BenchmarkParameters {
+  qpp: {
+    qpp1Mode: "active" | "off" | "shadow";
+    qpp2Mode: "active" | "off" | "shadow";
+    qpp2RetainedMass: number;
+    searchRecommendation: "advisory" | "guardrail" | "off";
+    progressiveSecondPass: boolean;
+    initialEvidenceTarget: number | null;
+    threshold: number;
+  };
+  retrieval: {
+    graphHopsOverride: number | null;
+  };
+  embeddings: {
+    enabled: boolean;
+    model: string | null;
+    profile: string | null;
+    dimensions: number | null;
+    batchSize: number;
+  };
+}
+
+/** Resolved, non-secret parameters shared by benchmark reports and score snapshots. */
+export function benchmarkParametersFromEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+): BenchmarkParameters {
+  return {
+    qpp: {
+      qpp1Mode: qpp1Mode(environment),
+      qpp2Mode: mode(environment.NMG_QPP2_MODE, ["off", "shadow", "active"], "off"),
+      qpp2RetainedMass: finiteNumber(environment.NMG_QPP2_RETAINED_MASS, 0.98),
+      searchRecommendation: mode(
+        environment.NMG_SEARCH_RECOMMENDATION,
+        ["off", "advisory", "guardrail"],
+        "off",
+      ),
+      progressiveSecondPass: environment.NMG_QPP_SECOND_PASS === "1",
+      initialEvidenceTarget: optionalFiniteNumber(environment.NMG_QPP_INITIAL_EVIDENCE_TARGET),
+      threshold: finiteNumber(environment.NMG_QPP_THRESHOLD, DEFAULT_QPP_THRESHOLD),
+    },
+    retrieval: {
+      graphHopsOverride: optionalFiniteNumber(environment.NMG_GRAPH_HOPS),
+    },
+    embeddings: {
+      enabled: Boolean(environment.NMG_EMBED_BASE_URL),
+      model: environment.NMG_EMBED_MODEL?.trim() || null,
+      profile: environment.NMG_EMBED_PROFILE?.trim() || null,
+      dimensions: optionalFiniteNumber(environment.NMG_EMBED_DIMENSIONS),
+      batchSize: finiteNumber(environment.NMG_EMBED_BATCH_SIZE, 64),
+    },
+  };
+}
+
+function qpp1Mode(environment: NodeJS.ProcessEnv): "active" | "off" | "shadow" {
+  const configured = mode(environment.NMG_QPP1_MODE, ["off", "shadow", "active"], null);
+  if (configured) return configured;
+  return environment.NMG_CONTROLLER_SEARCH === "1" ? "active" : "shadow";
+}
+
+function mode<const T extends string>(
+  value: string | undefined,
+  allowed: readonly T[],
+  fallback: T,
+): T;
+function mode<const T extends string>(
+  value: string | undefined,
+  allowed: readonly T[],
+  fallback: null,
+): T | null;
+function mode<const T extends string>(
+  value: string | undefined,
+  allowed: readonly T[],
+  fallback: T | null,
+): T | null {
+  const normalized = value?.trim().toLowerCase();
+  return allowed.find((candidate) => candidate === normalized) ?? fallback;
+}
+
+function finiteNumber(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return value !== undefined && Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function optionalFiniteNumber(value: string | undefined): number | null {
+  if (value === undefined || value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}

@@ -10,6 +10,7 @@ import { indexExternalEmbeddings } from "../external-embeddings.ts";
 import { computeCitationSignal } from "../official/citation.ts";
 import { resolveBenchmarkData } from "../official/data-path.ts";
 import { gitRevision, sampleFingerprint } from "../official/reproducibility.ts";
+import { benchmarkParametersFromEnvironment } from "../official/parameters.ts";
 import { loadBeam, loadLocomo, loadPersonaMem, stratifiedSample } from "./loaders.ts";
 import {
   controllerShadowEnvironment,
@@ -117,6 +118,7 @@ const report = {
   perCategory,
   repeats: repeats(),
   contextCharacterBudget: contextBudget(),
+  benchmarkParameters: benchmarkParametersFromEnvironment(),
   matchedProtocol:
     mode === "matched"
       ? {

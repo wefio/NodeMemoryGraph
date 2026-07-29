@@ -39,6 +39,7 @@ export interface Snapshot {
   judgeModel: string | null;
   leaderboardComparable: false;
   upstream: unknown;
+  parameters: unknown;
   byMode: Record<string, SnapshotMode>;
 }
 
@@ -48,17 +49,25 @@ export interface Snapshot {
  * `{score, count, byCategory}`.
  */
 export function normalizeByMode(byMode: Record<string, unknown>): Record<string, SnapshotMode> {
-  return Object.fromEntries(Object.entries(byMode).map(([mode, raw]) => {
-    const value = (raw ?? {}) as Record<string, unknown>;
-    const score = typeof value.score === "number"
-      ? value.score
-      : typeof value.accuracy === "number" ? value.accuracy : Number.NaN;
-    const count = typeof value.count === "number"
-      ? value.count
-      : typeof value.total === "number" ? value.total : 0;
-    const byCategory = value.byCategory as Record<string, number> | undefined;
-    return [mode, byCategory ? { score, count, byCategory } : { score, count }];
-  }));
+  return Object.fromEntries(
+    Object.entries(byMode).map(([mode, raw]) => {
+      const value = (raw ?? {}) as Record<string, unknown>;
+      const score =
+        typeof value.score === "number"
+          ? value.score
+          : typeof value.accuracy === "number"
+            ? value.accuracy
+            : Number.NaN;
+      const count =
+        typeof value.count === "number"
+          ? value.count
+          : typeof value.total === "number"
+            ? value.total
+            : 0;
+      const byCategory = value.byCategory as Record<string, number> | undefined;
+      return [mode, byCategory ? { score, count, byCategory } : { score, count }];
+    }),
+  );
 }
 
 export interface SnapshotInput {
@@ -66,6 +75,7 @@ export interface SnapshotInput {
   protocol: string;
   judgeModel: string | null;
   upstream: unknown;
+  parameters?: unknown;
   byMode: Record<string, unknown>;
   codeRevision?: string | null;
   sampleFingerprint?: string | null;
@@ -81,6 +91,7 @@ export function buildSnapshot(input: SnapshotInput): Snapshot {
     judgeModel: input.judgeModel,
     leaderboardComparable: false,
     upstream: input.upstream,
+    parameters: input.parameters ?? null,
     byMode: normalizeByMode(input.byMode),
   };
 }
