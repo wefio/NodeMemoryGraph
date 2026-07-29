@@ -147,6 +147,7 @@ npm run cli -- remember "User prefers concise answers" --node "Response preferen
 npm run cli -- search "How should answers be written?"
 npm run cli -- get <memory-id>
 npm run cli -- serve --stdio
+npm run cli -- stop
 ```
 
 Installed packages expose the same commands directly as `nmg`; the published
@@ -171,6 +172,11 @@ Supported methods are `hello`, `status`, `remember`, `search`, `get`, and
 does not create the database, and the resident service opens SQLite lazily on
 the first durable read or write. Optional embedding configuration degrades to
 lexical retrieval when its index is unavailable.
+
+The resident server writes a PID lease beside its SQLite database and rejects
+a second server for the same database. Use `nmg stop` with the same
+`--data-dir` or `--db` to terminate a detached server. Protocol clients that
+own the stdio session should continue to send `shutdown`.
 
 SQLite FTS5 is the zero-configuration Pi retrieval path. Set
 `NMG_EMBED_BASE_URL` and `NMG_EMBED_MODEL` to add the external node/leaf semantic

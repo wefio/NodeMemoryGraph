@@ -153,6 +153,48 @@ test("stdio server keeps one resident store across multiple NDJSON requests", as
   }
 });
 
+test("resident server rejects duplicates and can be stopped by CLI", async () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-process-lifecycle-"));
+  const child = spawn(process.execPath, [launcher, "serve", "--stdio", "--data-dir", directory], {
+    cwd: root,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  try {
+    child.stdin.write(
+      `${JSON.stringify({ protocol: NMG_PROTOCOL_VERSION, id: 1, method: "hello" })}\n`,
+    );
+    await waitForOutput(child.stdout);
+
+    const duplicate = spawnSync(
+      process.execPath,
+      [launcher, "serve", "--stdio", "--data-dir", directory],
+      { cwd: root, encoding: "utf8", timeout: 2_000 },
+    );
+    assert.equal(duplicate.status, 1);
+    assert.match(duplicate.stderr, /already running/);
+
+    const stopped = spawnSync(
+      process.execPath,
+      [launcher, "stop", "--json", "--data-dir", directory],
+      { cwd: root, encoding: "utf8", timeout: 5_000 },
+    );
+    assert.equal(stopped.status, 0, stopped.stderr);
+    assert.equal((JSON.parse(stopped.stdout) as { stopped: boolean }).stopped, true);
+    await waitForExit(child);
+
+    const stoppedAgain = spawnSync(
+      process.execPath,
+      [launcher, "stop", "--json", "--data-dir", directory],
+      { cwd: root, encoding: "utf8" },
+    );
+    assert.equal(stoppedAgain.status, 0, stoppedAgain.stderr);
+    assert.equal((JSON.parse(stoppedAgain.stdout) as { stopped: boolean }).stopped, false);
+  } finally {
+    if (child.exitCode === null) child.kill();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 function collect(stream: NodeJS.ReadableStream): Promise<string> {
   return new Promise((resolveOutput, reject) => {
     let output = "";
@@ -162,6 +204,21 @@ function collect(stream: NodeJS.ReadableStream): Promise<string> {
     });
     stream.on("end", () => resolveOutput(output));
     stream.on("error", reject);
+  });
+}
+
+function waitForOutput(stream: NodeJS.ReadableStream): Promise<void> {
+  return new Promise((resolveOutput, reject) => {
+    stream.once("data", () => resolveOutput());
+    stream.once("error", reject);
+  });
+}
+
+function waitForExit(child: ReturnType<typeof spawn>): Promise<number | null> {
+  if (child.exitCode !== null) return Promise.resolve(child.exitCode);
+  return new Promise((resolveExit, reject) => {
+    child.once("error", reject);
+    child.once("exit", resolveExit);
   });
 }
 

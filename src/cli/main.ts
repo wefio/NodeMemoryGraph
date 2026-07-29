@@ -9,6 +9,7 @@ import {
   type NmgResponse,
   type NmgSearchParams,
 } from "./protocol.ts";
+import { acquireServerLease, stopServer } from "./lifecycle.ts";
 import { NmgService } from "./service.ts";
 import { serveStdio } from "./stdio.ts";
 
@@ -20,6 +21,7 @@ Usage:
   nmg search QUERY [options] [--json]
   nmg get MEMORY_ID... [--graph-hops N] [--json]
   nmg serve --stdio [--data-dir DIR | --db FILE]
+  nmg stop [--data-dir DIR | --db FILE] [--json]
 
 Common options:
   --data-dir DIR             NMG data directory (default: NMG_DATA_DIR or .nmg)
@@ -104,13 +106,53 @@ export async function runCli(
     dataDirectory: parsed.dataDirectory,
     databasePath: parsed.databasePath,
   });
+  if (parsed.command === "stop") {
+    try {
+      const result = await stopServer(service.databasePath);
+      io.stdout.write(
+        parsed.json
+          ? `${JSON.stringify(result, null, 2)}\n`
+          : result.stopped
+            ? `Stopped NMG server pid ${result.pid}.\n`
+            : `NMG server is not running (${result.reason}).\n`,
+      );
+      return 0;
+    } catch (error) {
+      io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    } finally {
+      service.close();
+    }
+  }
   if (parsed.command === "serve") {
     if (!parsed.stdio) {
       io.stderr.write("serve currently requires --stdio\n");
+      service.close();
       return 2;
     }
-    await serveStdio(service);
-    return 0;
+    let lease;
+    try {
+      lease = acquireServerLease(service.databasePath);
+    } catch (error) {
+      service.close();
+      io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    }
+    const stopOnSignal = () => {
+      lease.release();
+      service.close();
+      process.exit(0);
+    };
+    process.once("SIGINT", stopOnSignal);
+    process.once("SIGTERM", stopOnSignal);
+    try {
+      await serveStdio(service);
+      return 0;
+    } finally {
+      process.off("SIGINT", stopOnSignal);
+      process.off("SIGTERM", stopOnSignal);
+      lease.release();
+    }
   }
 
   try {
@@ -135,7 +177,7 @@ export async function runCli(
 }
 
 interface ParsedArguments {
-  command: NmgMethod | "help" | "serve";
+  command: NmgMethod | "help" | "serve" | "stop";
   params?: NmgRememberParams | NmgSearchParams | NmgGetParams;
   json: boolean;
   stdio: boolean;
@@ -148,7 +190,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     return { command: "help", json: false, stdio: false };
   }
   const [command, ...rest] = argv;
-  if (!["status", "remember", "search", "get", "serve"].includes(command!)) {
+  if (!["status", "remember", "search", "get", "serve", "stop"].includes(command!)) {
     throw new Error(`unknown command: ${command}`);
   }
   const values = parseOptions(rest);
@@ -167,6 +209,10 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     case "serve":
       assertAllowed(values, ["data-dir", "db"], ["stdio"]);
       rejectPositionals(values, "serve");
+      return common;
+    case "stop":
+      assertAllowed(values, ["data-dir", "db"], ["json"]);
+      rejectPositionals(values, "stop");
       return common;
     case "remember":
       assertAllowed(

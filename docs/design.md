@@ -134,6 +134,7 @@ nmg search ... --json
 nmg get ... --json
 nmg status --json
 nmg serve --stdio
+nmg stop
 ```
 
 One-shot commands are for people, scripts, diagnostics, and harnesses that
@@ -142,6 +143,12 @@ exchange versioned NDJSON messages so the bounded in-memory working set,
 session/STG state, Active Graph continuations, node directory, and hot caches
 survive across tool calls. SQLite may open lazily on first durable read/write;
 large indexes and optional processors should load only when requested.
+
+Resident instances use a PID lease scoped to the selected SQLite database.
+Starting a second instance for the same database is rejected; stale leases are
+recovered on the next start. Harnesses that own stdio send the protocol
+`shutdown` request, while people and Skills may use `nmg stop` with the same
+data directory to terminate a detached process.
 
 Protocol version `nmg/1` keeps stdout machine-readable, writes diagnostics to stderr,
 publish a protocol version and capability list, and degrade when an optional
