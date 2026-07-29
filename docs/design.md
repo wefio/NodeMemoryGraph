@@ -1,7 +1,7 @@
 # NMG design baseline
 
 **Status:** 0.9 / P3 runtime memory model implemented
-**Updated:** 2026-07-22
+**Updated:** 2026-07-29
 
 ## 1. Definition
 
@@ -116,6 +116,38 @@ The default Pi package now exposes these three tools. `nmg_derive`, `nmg_link`,
 `nmg_organize`, `nmg_feedback`, and `nmg_rebalance` remain available only when
 `NMG_ENABLE_LAB_TOOLS=1`; future versions should move equivalent maintenance to
 background or administrative paths.
+
+### 4.1 Agent-independent CLI and resident service
+
+The target integration boundary is an agent-independent `nmg` CLI rather than
+direct access from a harness to NMG internals. Pi still requires a small
+TypeScript extension, but that extension should translate Pi lifecycle events
+and tools into a stable language-neutral protocol. It must not make the core
+storage or processing implementation TypeScript-specific.
+
+The CLI should support both one-shot administrative use and a resident mode:
+
+```text
+nmg remember ...
+nmg search ... --json
+nmg get ... --json
+nmg status --json
+nmg serve --stdio
+```
+
+One-shot commands are for people, scripts, diagnostics, and harnesses that
+cannot keep a process alive. Pi should normally use `nmg serve --stdio` and
+exchange versioned NDJSON messages so the bounded in-memory working set,
+session/STG state, Active Graph continuations, node directory, and hot caches
+survive across tool calls. SQLite may open lazily on first durable read/write;
+large indexes and optional processors should load only when requested.
+
+The protocol must keep stdout machine-readable, write diagnostics to stderr,
+publish a protocol version and capability list, and degrade when an optional
+processor is unavailable. This permits a TypeScript default implementation and
+future Rust, Python, ONNX, or hosted processors without changing the Pi tool
+contract. Cross-language acceleration is an extension point, not a current
+requirement; it is justified only by profiling a stable component.
 
 ## 5. Core data model
 
@@ -458,19 +490,49 @@ retrieval distortion enough to pay for its added complexity and maintenance.
 ## 9. Session capture and write path
 
 Completed Pi turns are checkpointed automatically. Message persistence is
-idempotent by stable `(session_id, source_message_id)`. A changed session archive
-appends a new immutable evidence record rather than mutating an old one.
+idempotent by stable `(session_id, source_message_id)`. Pi remains the owner of
+its complete append-only session history: NMG stores stable source references,
+message metadata, selected message content, and governed evidence rather than a
+new cumulative transcript snapshot after every turn. A future `HistoryProvider`
+boundary should resolve Pi or other harness references while allowing a managed
+copy mode for harnesses without durable history.
 
 Session storage and semantic extraction are separate:
 
 ```text
 Pi message/turn
-  -> immediate HistoryRecord append
-  -> extraction queue
+  -> turn-local pending evidence
+  -> governed extraction/admission
+  -> zero or more retained HistoryRecord excerpts
   -> zero or more governed MemoryRecord writes into STG
   -> optional immediate atomic promotion into LTG
   -> later evidence-backed structural consolidation
 ```
+
+NMG uses selective historical admission rather than duplicating every Pi
+message. A message body becomes durable NMG history when it supports an accepted
+memory, records an explicit user retention request, preserves a decision or
+unresolved obligation, captures a conflict/exception, or contains an
+irreproducible result. Otherwise Pi remains the temporary transcript owner and
+NMG keeps no second body copy.
+
+Admission has four outcomes:
+
+```text
+reference  source/message identity only; body remains in the harness
+excerpt    exact bounded source excerpt plus provenance
+full       complete source message when short or indivisibly important
+discard    no NMG history row
+```
+
+The default Pi path treats a successful governed `nmg_remember` write as the
+positive admission signal. The adapter resolves its exact `evidence` against
+the current Pi branch, binds the resulting HistoryRecord by stable source
+message ID, and stores the full source message only when bounded; long sources
+retain the exact excerpt with limited surrounding context. If the source cannot
+be resolved, the supplied evidence remains a self-contained fallback. This
+keeps important evidence after Pi deletes a session without paying to preserve
+ordinary conversation.
 
 Clear, stable user-stated facts, preferences, constraints, and replaceable
 states may become atomic LTG memories automatically. They do not need to wait for
@@ -481,6 +543,21 @@ before structural consolidation. Casual chatter, credentials, secrets, and
 unverified model claims do not become verified semantic memory. Assistant
 content may be retained as unverified conversation evidence when it is useful to
 remember that it was said.
+
+Tool output and logs are ephemeral by default. NMG does not duplicate their
+result bodies during session capture. A model or user may explicitly promote a
+bounded exact excerpt, an irreproducible result, or a requested full artifact
+through the governed memory/evidence path; that retained evidence keeps its tool
+source identity. Successful routine output, build logs, and reproducible command
+output remain in the harness history and follow its retention policy. Secrets
+and credentials are never promoted automatically.
+
+Raw-event identity and content storage are separate concerns. Repeated events
+may retain distinct timestamps and provenance while sharing one
+content-addressed body in a future object layer. Exact hash/identity
+deduplication is safe for evidence; embedding-based semantic deduplication is
+reserved for mutable memory organization and must not erase distinct historical
+events.
 
 Replaceable state uses a stable semantic `stateKey` plus canonical scope. A new
 active value supersedes the prior value without deleting historical evidence.
@@ -522,6 +599,40 @@ recall audits show acceptable quality at a scale where exact scanning violates
 the latency budget. Current near-duplicate tests and the LoCoMo record-vector
 run do not justify enabling the prototype USearch path or a separate vector
 database by default.
+
+Long-lived storage adds two lifecycle states after the indexed cold tier:
+
+```text
+L0 Hot -> L1 Warm -> L2 Cool -> L3 Cold
+        -> L4 Dormant/Unindexed
+        -> L5 Quarantine
+        -> physically deleted
+```
+
+L4 retains authoritative content and minimal lookup metadata but removes the
+record from normal FTS, vector/ANN, automatic recall, recommendations, and
+Active Graph construction. It remains addressable by stable ID and explicit
+archive search. Embeddings and other rebuildable caches may be discarded.
+Explicit reuse does not have to promote a record immediately: repeated use, an
+active project, or a user restore request can return it to an indexed tier and
+rebuild the necessary indexes.
+
+L5 is a deletion-candidate zone, not an ordinary memory tier. A record enters it
+only after a further retention interval and a dependency/protection review. It
+is invisible to retrieval during a configurable recovery window, after which
+its content and dependent indexes may be physically purged. Eligibility must
+combine age, time-decayed use, importance, lifecycle state, and dependency
+coverage; access count alone is insufficient. Pinned memories, current states,
+critical constraints, conflicts/exceptions, user-protected records, active
+references, and sole evidence for a surviving conclusion are not automatically
+eligible.
+
+Normal retention cleanup follows `indexed -> dormant -> quarantine -> purge`.
+An explicit privacy deletion may bypass the recovery window and must propagate
+through evidence links, summaries, FTS/vector/ANN entries, caches, and learned
+signals. In the initial implementation these states may remain rows in one
+SQLite database; physical cold partitions are an optional future optimization.
+History is immutable while retained, not guaranteed to be retained forever.
 
 ## 11. Progressive retrieval
 
@@ -1043,8 +1154,8 @@ Implemented and verified in the current prototype:
   content-derived block IDs that preserve unchanged embedding cache entries;
 - Float32 BLOB persistence with backward-compatible JSON migration and
   disposable contiguous vector caches that support geometric append/update;
-- local SQLite history, semantic memory, typed relations, evidence links, and
-  session checkpoints;
+- local SQLite selective history evidence, semantic memory, typed relations,
+  evidence links, and source-message identities;
 - state supersession, event time, actor/truth status, scope, merge/split, and
   redirects;
 - resident/automatic/cue execution layers;
@@ -1068,9 +1179,8 @@ Implemented and verified in the current prototype:
   and protection against increasing stability from retrieval alone;
 - auditable stability-driven relation consolidation and hysteretic demotion,
   with explicit relations protected from automatic demotion;
-- automatic turn-end maintenance in the Pi harness: session checkpointing, STG
-  expiry, due-node batch rebalancing, and conservative stability-driven
-  consolidation/demotion;
+- automatic turn-end maintenance in the Pi harness: STG expiry, due-node batch
+  rebalancing, and conservative stability-driven consolidation/demotion;
 - accepted and rejected write-policy audit events, including durable write
   reason and source while deliberately excluding rejected statement/evidence
   content;
@@ -1347,6 +1457,10 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
    records at add/turn boundaries, and retain FTS/exact as the
    zero-configuration and not-yet-ready fallback. Node/leaf-only and the
    current union ranker are explicitly gated off after the LoCoMo ablation.
+5. **Target:** expose the same application boundary through an
+   agent-independent `nmg` CLI and a versioned `nmg serve --stdio` protocol;
+   reduce the Pi extension to a lifecycle/tool adapter after protocol parity is
+   demonstrated.
 
 ### P1: incremental correctness and fair evaluation
 
@@ -1425,9 +1539,12 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 
 ### P5: optional platform capabilities
 
-1. Add a user-facing privacy deletion/export workflow over existing store-level
+1. Add measured retention transitions from indexed cold storage to L4
+   Dormant/Unindexed and L5 Quarantine, beginning with a dry-run report before
+   enabling automatic physical purge.
+2. Add a user-facing privacy deletion/export workflow over existing store-level
    deletion and dependency cleanup, including learned-signal erasure.
-2. Add optional encrypted cloud synchronization only after the local protocol
+3. Add optional encrypted cloud synchronization only after the local protocol
    and multi-device conflict semantics are specified.
 
 ### Immediate validation order

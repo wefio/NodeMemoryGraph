@@ -448,30 +448,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     if (workspace) saveReasoningWorkspace(workspace);
   });
 
-  const archiveCurrentSession = (ctx: {
-    sessionManager: {
-      getBranch(): readonly unknown[];
-      getSessionId(): string;
-      getSessionFile(): string | undefined;
-    };
-  }) => {
-    if (!store) return;
-    const branch = ctx.sessionManager.getBranch();
-    persistSessionMessages(
-      store,
-      ctx.sessionManager.getSessionId(),
-      branch,
-      ctx.sessionManager.getSessionFile(),
-    );
-    const transcript = serializeSession(branch);
-    if (!transcript) return;
-    store.archiveSession({
-      sessionId: ctx.sessionManager.getSessionId(),
-      transcript,
-      sourceRef: ctx.sessionManager.getSessionFile() ?? undefined,
-    });
-  };
-
   const maintainMemory = () => {
     if (!store) return;
     store.expireShortTermMemories();
@@ -480,7 +456,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   };
 
   // RPC clients may terminate Pi without emitting a graceful shutdown event.
-  // Checkpoint after each completed turn; archives are idempotent per session.
   pi.on("agent_end", async (event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
     const usage = summarizeMessageUsage(event.messages);
@@ -511,7 +486,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       searchContexts.delete(graphId);
     }
     turnGraphIds.delete(sessionId);
-    archiveCurrentSession(ctx);
     maintainMemory();
     void scheduleEmbeddingSync();
   });
@@ -519,7 +493,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   pi.on("session_shutdown", async (_event, ctx) => {
     const reasoningWorkspace = reasoningWorkspaces.get(ctx.sessionManager.getSessionId());
     if (reasoningWorkspace) saveReasoningWorkspace(reasoningWorkspace);
-    archiveCurrentSession(ctx);
     maintainMemory();
     await scheduleEmbeddingSync();
     store?.close();
@@ -859,7 +832,16 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           details: { saved: false, reason: assessment.reason },
         };
       }
-      const result = getStore().remember({
+      const memoryStore = getStore();
+      const evidenceHistoryId =
+        params.evidenceHistoryId ??
+        retainCurrentEvidence(
+          memoryStore,
+          params.evidence,
+          (params.sourceActor as MemoryActor | undefined) ?? "user",
+          ctx.sessionManager,
+        );
+      const result = memoryStore.remember({
         statement: params.statement,
         nodeName: params.nodeName,
         memoryType: params.memoryType as MemoryType | undefined,
@@ -878,7 +860,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             }) satisfies MemoryClaim,
         ),
         evidence: params.evidence,
-        evidenceHistoryId: params.evidenceHistoryId,
+        evidenceHistoryId,
         tier: params.tier as MemoryTier | undefined,
         importance: params.importance,
         scope: params.scope as MemoryScope | undefined,
@@ -1439,39 +1421,59 @@ function usageInstruction(type: MemoryType): string {
   }
 }
 
-function serializeSession(entries: readonly unknown[]): string {
-  const lines: string[] = [];
-  for (const entry of entries) {
-    if (!entry || typeof entry !== "object") continue;
-    const candidate = entry as { type?: unknown; message?: unknown };
-    if (candidate.type !== "message") continue;
-    const text = messageText(candidate.message);
-    if (text) lines.push(text);
-  }
-  return lines.join("\n\n");
-}
-
-function persistSessionMessages(
+function retainCurrentEvidence(
   memoryStore: NmgStore,
-  sessionId: string,
-  entries: readonly unknown[],
-  sourceRef?: string,
-): void {
-  for (const entry of entries) {
+  evidence: string | undefined,
+  sourceActor: MemoryActor,
+  sessionManager: {
+    getBranch(): readonly unknown[];
+    getSessionId(): string;
+    getSessionFile(): string | undefined;
+  },
+): string | undefined {
+  const exactEvidence = evidence?.trim();
+  if (!exactEvidence) return undefined;
+  const sessionId = sessionManager.getSessionId();
+  const entries = sessionManager.getBranch();
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
     if (!entry || typeof entry !== "object") continue;
     const candidate = entry as { id?: unknown; type?: unknown; message?: unknown };
     if (candidate.type !== "message" || typeof candidate.id !== "string") continue;
+    if (historyRole(candidate.message) !== sourceActor) continue;
     const content = rawMessageContent(candidate.message);
-    const role = historyRole(candidate.message);
-    if (!content || !role) continue;
-    memoryStore.appendHistory({
-      content,
-      role,
+    const evidenceOffset = indexOfEvidence(content, exactEvidence);
+    if (evidenceOffset < 0) continue;
+    const existing = memoryStore.getHistoryBySourceMessage(sessionId, candidate.id);
+    if (existing) return existing.id;
+    return memoryStore.appendHistory({
+      content: retainedEvidenceContent(content, evidenceOffset, exactEvidence.length),
+      role: sourceActor,
       sessionId,
       sourceMessageId: candidate.id,
-      sourceRef,
-    });
+      sourceRef: sessionManager.getSessionFile(),
+    }).id;
   }
+  return undefined;
+}
+
+function indexOfEvidence(content: string, evidence: string): number {
+  const exact = content.indexOf(evidence);
+  return exact >= 0 ? exact : content.toLocaleLowerCase().indexOf(evidence.toLocaleLowerCase());
+}
+
+function retainedEvidenceContent(content: string, evidenceOffset: number, evidenceLength: number): string {
+  const maxCharacters = 8_192;
+  if (content.length <= maxCharacters) return content;
+  if (evidenceLength >= maxCharacters) {
+    return content.slice(evidenceOffset, evidenceOffset + maxCharacters);
+  }
+  const contextCharacters = Math.floor((maxCharacters - evidenceLength) / 2);
+  const start = Math.max(
+    0,
+    Math.min(evidenceOffset - contextCharacters, content.length - maxCharacters),
+  );
+  return content.slice(start, start + maxCharacters);
 }
 
 function historyRole(value: unknown): "user" | "assistant" | "tool" | "system" | null {
@@ -1490,23 +1492,15 @@ function rawMessageContent(value: unknown): string {
   return content
     .flatMap((block) => {
       if (!block || typeof block !== "object") return [];
-      const item = block as { type?: unknown; text?: unknown; name?: unknown; arguments?: unknown };
+      const item = block as { type?: unknown; text?: unknown; name?: unknown };
       if (item.type === "text" && typeof item.text === "string") return [item.text];
       if (item.type === "toolCall" && typeof item.name === "string") {
-        return [`[tool ${item.name} ${JSON.stringify(item.arguments ?? {})}]`];
+        return [`[tool ${item.name}]`];
       }
       return [];
     })
     .join(" ")
     .trim();
-}
-
-function messageText(value: unknown): string {
-  if (!value || typeof value !== "object") return "";
-  const message = value as { role?: unknown; content?: unknown };
-  const role = typeof message.role === "string" ? message.role.toUpperCase() : "MESSAGE";
-  const content = rawMessageContent(message);
-  return content ? `${role}: ${content}` : "";
 }
 
 function lastAssistantText(messages: readonly unknown[]): string {

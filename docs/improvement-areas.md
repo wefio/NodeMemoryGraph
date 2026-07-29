@@ -262,26 +262,27 @@ database handle will serialize or, worse, interleave.
 
 ---
 
-## 9. Session transcript serialization is fragile
+## 9. Pi evidence-source resolution is fragile
 
-**Symptom:** `serializeSession` and `persistSessionMessages` in the Pi
-extension iterate over `unknown[]` entries and use type-narrowing casts
-(`entry as { type?: unknown; message?: unknown }`) to extract content.
+**Symptom:** selective evidence admission resolves an accepted
+`nmg_remember.evidence` against Pi's current `unknown[]` branch using
+type-narrowing casts (`entry as { type?: unknown; message?: unknown }`).
 
 **Concern:** If Pi changes its internal session branch representation the
-serialization will silently produce empty transcripts or miss messages. There
-is no schema version or runtime assertion.
+resolver may fail to bind the exact source message. The durable memory remains
+safe because NMG falls back to the supplied evidence excerpt, but loses the
+stable Pi message identity and surrounding context.
 
 **Approaches:**
 
 - **Add a JSON schema or TypeBox validator** for the session entry shape that
-  the extension depends on. Validate at the start of each session and refuse
-  to archive if the schema does not match.
-- **Version the session archive format:** store a `schema_version` field so
-  future NMG versions can migrate or reject old archives.
-- **Fail loudly:** if after iterating an entire session branch
-  `persistSessionMessages` has written zero history records, emit a warning
-  or throw. A silent empty archive is worse than a visible error.
+  the extension depends on. Validate once per session before attempting source
+  binding.
+- **Version the history-reference format:** record the provider and source
+  schema version so future adapters can resolve or migrate references.
+- **Expose degraded provenance:** when exact source binding fails, record that
+  the evidence is a model-supplied fallback rather than silently presenting it
+  as a harness-verified source excerpt.
 
 ---
 

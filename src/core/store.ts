@@ -288,6 +288,19 @@ export class NmgStore {
     return record;
   }
 
+  getHistoryBySourceMessage(sessionId: string, sourceMessageId: string): HistoryRecord | null {
+    const row = this.#db
+      .prepare(
+        `SELECT * FROM history_records
+         WHERE session_id = ? AND source_message_id = ?`,
+      )
+      .get(
+        requireText(sessionId, "session id"),
+        requireText(sourceMessageId, "source message id"),
+      ) as Row | undefined;
+    return row ? mapHistory(row) : null;
+  }
+
   upsertNode(input: {
     canonicalName: string;
     kind?: MemoryNodeKind;
@@ -3055,6 +3068,21 @@ export class NmgStore {
            created_at = excluded.created_at`,
         )
         .run(archive.sessionId, archive.historyId, archive.createdAt);
+      if (existing && existing.historyId !== archive.historyId) {
+        this.#db
+          .prepare(
+            `DELETE FROM history_records
+             WHERE id = ?
+               AND role = 'session'
+               AND NOT EXISTS (
+                 SELECT 1 FROM session_archives WHERE history_id = history_records.id
+               )
+               AND NOT EXISTS (
+                 SELECT 1 FROM memory_evidence_links WHERE history_id = history_records.id
+               )`,
+          )
+          .run(existing.historyId);
+      }
       this.#db.exec("COMMIT");
       return archive;
     } catch (error) {

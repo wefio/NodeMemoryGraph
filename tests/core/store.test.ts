@@ -240,7 +240,10 @@ test("a newer state supersedes but does not delete the old memory", () => {
 });
 
 test("session archives checkpoint changes without entering semantic search", () => {
-  withStore((store) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-session-archive-test-"));
+  const databasePath = join(directory, "nmg.sqlite");
+  const store = new NmgStore(databasePath);
+  try {
     const first = store.archiveSession({
       sessionId: "session-1",
       transcript: "USER: hello\nASSISTANT: hi",
@@ -258,7 +261,19 @@ test("session archives checkpoint changes without entering semantic search", () 
     assert.notEqual(updated.historyId, first.historyId);
     assert.deepEqual(store.search("hello", { maxTier: 3 }), []);
     assert.equal(store.getSessionArchive("session-1")?.historyId, updated.historyId);
-  });
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const row = database
+        .prepare("SELECT count(*) AS count FROM history_records WHERE role = 'session'")
+        .get() as { count: number };
+      assert.equal(row.count, 1);
+    } finally {
+      database.close();
+    }
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("stateKey automatically supersedes the active state in the same scope", () => {
@@ -877,6 +892,7 @@ test("appends source messages idempotently within a session", () => {
 
     assert.equal(repeated.id, first.id);
     assert.equal(repeated.sourceMessageId, "message-1");
+    assert.equal(store.getHistoryBySourceMessage("session-1", "message-1")?.id, first.id);
     assert.throws(
       () => store.appendHistory({ ...input, content: "Different content" }),
       /already exists with different content/,

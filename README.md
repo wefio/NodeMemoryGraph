@@ -10,8 +10,9 @@ optimization:
   conversational evidence have distinct types and usage rules.
 - Stable user-stated facts, preferences, constraints, and states are written
   automatically; explicit writes remain available.
-- Completed Pi turns checkpoint the session transcript as cold, immutable
-  evidence without turning every message into semantic memory.
+- Governed memory writes retain the supporting Pi message or a bounded exact
+  excerpt by stable source identity; ordinary conversation, cumulative
+  transcripts, and transient tool output are not copied into NMG.
 - Pi uses three execution layers: a small query-independent resident kernel,
   dynamic automatic recall for explicit memory questions, and compressed recall
   cues that let the agent decide whether to call `nmg_search`.

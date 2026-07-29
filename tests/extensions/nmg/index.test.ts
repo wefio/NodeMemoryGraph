@@ -16,6 +16,7 @@ import { NmgStore } from "../../../src/core/store.ts";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import type { MemoryContext } from "../../../src/core/types.ts";
 
 function registeredTools(lab = false): string[] {
@@ -54,6 +55,129 @@ test("NMG Lab tools require an explicit environment switch", () => {
     "nmg_get",
     "nmg_search",
   ]);
+});
+
+test("session capture retains only evidence admitted by governed memory writes", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-session-capture-test-"));
+  const previousData = process.env.NMG_DATA_DIR;
+  process.env.NMG_DATA_DIR = directory;
+  const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+  const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
+  const toolOutput = `${"noise ".repeat(1_000)}ERROR E42 dependency mismatch ${"tail ".repeat(1_000)}`;
+  const branch = [
+    {
+      id: "message-user",
+      type: "message",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "The Atlas project must keep SQLite because offline operation is required.",
+          },
+        ],
+      },
+    },
+    {
+      id: "message-assistant",
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "toolCall", name: "bash", arguments: { command: "secret command" } },
+          { type: "text", text: "I will inspect it." },
+        ],
+      },
+    },
+    {
+      id: "message-tool",
+      type: "message",
+      message: {
+        role: "toolResult",
+        content: [{ type: "text", text: toolOutput }],
+      },
+    },
+  ];
+  const sessionManager = {
+    getSessionId: () => "capture-session",
+    getSessionFile: () => "C:/pi/sessions/capture.jsonl",
+    getBranch: () => branch,
+  };
+
+  try {
+    nmgExtension({
+      on(event: string, handler: (...args: unknown[]) => Promise<unknown>) {
+        handlers.set(event, handler);
+      },
+      registerTool(tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) {
+        tools.set(tool.name, tool);
+      },
+    } as never);
+    await handlers.get("before_agent_start")!(
+      { prompt: "Continue", systemPrompt: "base" },
+      { sessionManager },
+    );
+    const remember = tools.get("nmg_remember")!;
+    await remember.execute(
+      "remember-user-evidence",
+      {
+        statement: "The Atlas project must retain SQLite for offline operation.",
+        nodeName: "Atlas storage constraint",
+        memoryType: "constraint",
+        sourceActor: "user",
+        evidence: "The Atlas project must keep SQLite because offline operation is required.",
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    );
+    await remember.execute(
+      "remember-tool-evidence",
+      {
+        statement: "The dependency check failed with error E42.",
+        nodeName: "Atlas dependency failure",
+        memoryType: "event",
+        sourceActor: "tool",
+        evidence: "ERROR E42 dependency mismatch",
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    );
+    await handlers.get("session_shutdown")!({}, { sessionManager });
+
+    const database = new DatabaseSync(join(directory, "nmg.sqlite"), { readOnly: true });
+    try {
+      const rows = database
+        .prepare(
+          "SELECT role, content, source_message_id FROM history_records ORDER BY source_message_id",
+        )
+        .all() as Array<{ role: string; content: string; source_message_id: string }>;
+      assert.deepEqual(
+        rows.map((row) => row.source_message_id),
+        ["message-tool", "message-user"],
+      );
+      assert.equal(rows.some((row) => row.role === "session" || row.role === "assistant"), false);
+      assert.equal(rows.find((row) => row.role === "user")?.content, branch[0]?.message.content[0]?.text);
+      const retainedTool = rows.find((row) => row.role === "tool")?.content ?? "";
+      assert.match(retainedTool, /ERROR E42 dependency mismatch/);
+      assert.ok(retainedTool.length <= 8_192);
+      assert.equal(
+        (
+          database.prepare("SELECT count(*) AS count FROM memory_evidence_links").get() as {
+            count: number;
+          }
+        ).count,
+        2,
+      );
+    } finally {
+      database.close();
+    }
+  } finally {
+    if (previousData === undefined) delete process.env.NMG_DATA_DIR;
+    else process.env.NMG_DATA_DIR = previousData;
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("Lab reasoning state persists and is injected after reloading the extension", async () => {
