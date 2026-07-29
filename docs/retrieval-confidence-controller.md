@@ -75,20 +75,22 @@ guardrail 必触发条件（绝对地板，免标定）：
 
 `searchContextWithSecondPass` = `searchContext` 加 `secondPass:true` 的薄封装。BGE 实测：6 条跑步记忆、limit 2，NORMAL 拿 2 条（truncated、qpp 不触发），ADAPTIVE 从池重选 4 条（补回截断的 2 条）——零二次检索。
 
-**Stage 1 — 代理损失（工程首选）**
-`C` 如上；权重 `τ_v / w_ic / w_rh` 用**贝叶斯优化 / Optuna 黑盒**在 trace feedback（`trace.usefulMemoryIds / rejectedMemoryIds / contradictedMemoryIds`，见 `controller-protocol.ts:89-100`）上学；触发阈值手工设 + **rolling-window 校准**（近期高 C 结果实际 usefulness 下降 → 降阈值扩探索池，不死守）；DC 仍 shadow。轻量、解耦、近端到端。
+**Stage 1 — rolling τ auto-calibration（无感自动标定，非 eval）**
+Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**——让 `below_threshold`（τ）触发更 selective（省检索），非激活前提。
+- **数据源（非 eval，不作弊）**：`agent_end` **隐式反馈**——匹配 agent 答案 ↔ 召回记忆（`src/core/feedback.ts: deriveUsedMemoryIds`，记忆 ≥50% content tokens 出现于答案 = used）→ `recordActiveGraphUse` 落 trace 的 `useful_memory_ids`。覆盖 AutoRecall（nmg_get 显式反馈不触发的路径）+ 记 actual-use（非 fetch-intent）。弱 reader 不需主动调 feedback 工具——系统侧自动。
+- **rolling worker**（⬜ 待实现）：后台读近期 trace 的 (qpp, useful) 对，高 qpp 常不 useful（过自信）→ 抬 τ；低 qpp 常 useful（欠自信）→ 降 τ。无感自动，不依赖 eval。
+- **权重** `τ_v / w_ic / w_rh`：可选贝叶斯优化 on 同一生产 (qpp, useful) 对（非 eval）；DC 仍 shadow。
+
+**τ 标定方法**：起点 τ=`DEFAULT_QPP_THRESHOLD`(0.45) 占位（Stage 0 truncation/guardrail 已免标定覆盖触发，τ 仅影响 below_threshold 选择性）；rolling worker 用生产 (qpp, useful) 自适应。**不在 eval 数据集上标定**（作弊）——eval 只作离线 sanity（audit 脚本看分量 gradation/区分度，不调参）。
+
+**标定/分析流程**：
+1. **离线 audit**（`evals/omnimemeval/audit-qpp-signal.ts`）：从历史 trace 重算 qpp（hybridScore，离线纯函数）+ join outcome，看分量 gradation/区分度——**只诊断，不调参**（不作弊）。
+2. **rolling worker**（生产）：采近期 N 条 trace 的 (qpp, usefulMemoryIds)（隐式反馈已落）；统计高/低 qpp 的 useful 率；高 qpp useful 率低→抬 τ，低 qpp useful 率高→降 τ；滚动窗口无感更新。
+3. **权重调参输入**（生产数据）：Top1×reasonHealth 相关性（reasonHealth 近常数则降权）、variance 双解（Top1−Top2 差值辅助）、intentCoverage 中性值（0.5 系统性偏则改均值）。
+4. **sequencing**：Stage 0 plumbing（pool-based）✅；隐式反馈 ✅；rolling worker ⬜。
 
 **Stage 2 — Gumbel-Sigmoid DC**
-阈值本身可微学化（Gumbel-Sigmoid 松弛 0/1 硬开关，梯度回传）；`Loss = 生成Loss + λ·搜索成本惩罚`；DC 出 shadow，**取代**（非并发）Stage 1 的手工/黑盒阈值，warm-start 自 Stage 1 权重/阈值。**暴露范围**：默认只把 composite `qpp` 喂 DC globalFeatures → Stage 2 只学阈值（Stage 1 权重冻结），简单、小 eval N(≈500) 不易过拟合；数据足够时再暴露各分量让 DC 隐式再加权。Soft-Hard（REALM/可微 RAG，softmax top-k→注意力→与生成向量融合）太侵入（改 retrieval→gen 接口，NMG 返回 context 非融合向量），列替代不主推。
-
-**τ 标定方法**（Stage 0/1 起点阈值）：eval traces 采 (C, 证据完整性) 对；full-evidence（89.67% 批）=正、partial-evidence（16.67% 批）=负；τ = 使 partial-evidence 召回率 ≥ 目标（如 0.8）的阈值下限，扫 0.4–0.5。
-
-**标定流程**（Stage 1，审计脚本 `evals/omnimemeval/audit-qpp-signal.ts` 已可采 (qpp, outcome) 对）：
-1. **相关性分析**：Top1×reasonHealth 分布（确认 reasonHealth 边际贡献，若近常数则降权）；低 qpp 是否对应 partial-evidence/错答。
-2. **variance 双解处置**：人工抽高方差案例，若"清晰赢家误触发"多，用 Top1−Top2 差值替代/辅助 variance。
-3. **intentCoverage 中性值**：对"未命中正则"查询单独看 QPP 分布，若 0.5 系统性偏，改 `avg(intentCoverage)`。
-4. **贝叶斯优化目标**（明确标量）：`Objective = α·(partial-evidence 召回率) − β·(误触发率) − γ·(搜索成本)`。partial-evidence 召回率=触发后变对的比例（正）、误触发率=全证据题被误触浪费预算（负）、搜索成本=触发次数×均耗时（负）。
-5. **sequencing 约束**：目标第 1 项"触发后变对"需第二趟真跑 → 依赖 **Stage 0 plumbing 完成**；plumbing 之前只能做 1–3 的相关性分析（shadow traces），全目标贝叶斯优化在 plumbing 之后。
+阈值本身可微学化（Gumbel-Sigmoid 松弛 0/1 硬开关，梯度回传）；`Loss = 生成Loss + λ·搜索成本惩罚`；DC 出 shadow，**取代**（非并发）Stage 1 的 rolling τ，warm-start 自其值。**暴露范围**：默认只把 composite `qpp` 喂 DC globalFeatures → Stage 2 只学阈值，简单、小 eval N(≈500) 不易过拟合；数据足够时再暴露各分量让 DC 隐式再加权。Soft-Hard（REALM/可微 RAG，softmax top-k→注意力→与生成向量融合）太侵入（改 retrieval→gen 接口，NMG 返回 context 非融合向量），列替代不主推。
 
 ### 3. 接入计算图本体（落点已就绪，近乎免造）
 - `differentiable-controller.ts:14` 已内置 `ControllerAction="expand"|"stop"`，`:3-11` 有 `CONTROLLER_BUDGET_DIMENSIONS`。
@@ -97,9 +99,9 @@ guardrail 必触发条件（绝对地板，免标定）：
 - 把 `qpp` 作为新 feature 喂 `globalFeatures`（`controller-protocol.ts:19-52` 加 `qpp`，协议版本 1→2）；DC 过 gate 后从 globalFeatures 学化阈值取代手工/黑盒阈值。**默认只暴露 composite `qpp`**（Stage 2 只学阈值，见 §2）；数据足够时再暴露 `top1 / score_variance / intent_coverage / reason_health` 让 DC 隐式再加权。`globalFeatures` 全是标量统计量（`:140-173`），DC 在其上学习——梯度停在特征层，不穿过 ANN top-K 回传 embedder。
 
 ### 4. 预算与池
-- 搜索走 `expandedMaximum` 独立信封（有上限，不撑爆上下文）。
-- 三层结果汇入统一池；**provenance 留系统侧，LLM 不该知道"这是搜来的"**。
-- 候选步按置信度自适应省 token，但过度裁剪会裁掉补全答案的那条，须保守（证据审计：部分证据→16.67% 崩，收缩仅在全证据时才缩）。
+- Stage 0 不另起搜索——从首趟过采样池（`min(50, max(20, limit*3))`）按 `expandActiveGraphBudget`（2x evidence/nodes/tokens +1 graphHop，有上限）重选。零二次检索、零额外 LLM。
+- 重选后的结果即统一池；**provenance 留系统侧，LLM 不该知道"这是扩来的"**。
+- 候选步按置信度自适应省 token 须保守（证据审计：部分证据→16.67% 崩，收缩仅在全证据时才缩）。
 
 ## 不做什么
 
@@ -110,8 +112,9 @@ guardrail 必触发条件（绝对地板，免标定）：
 
 ## 风险
 
-- τ 必须标定 + 滚动校准，否则错位置 firing 或漂移。
-- `variance` 高双解（清晰赢家 vs 噪声离群）——靠归一化缓解，标定时验证。
-- 经典 QPP 在 dense/neural IR 上相关性掉 10%+（文献）；NMG 用 BGE dense+hybrid，靠 `intentCoverage`/`reasonHealth` 领域增强补偿——这两项是 vanilla QPP 没有的 typed-memory / provenance 信号，非冗余。
+- **τ 非必需但有漂移**：Stage 0 触发已由 truncation/guardrail 免标定覆盖；τ 仅影响 `below_threshold` 选择性。τ 漂移由 rolling worker（生产 (qpp, useful)，非 eval）校准——worker 未实现前 τ 用占位 0.45。
+- **隐式反馈噪声/稀疏**：matcher（≥50% token overlap）是 precision-favoured 起点——noisy labels → noisy τ；弱 reader 答案若不引用召回记忆（泛化作答）→ 标签稀疏 → rolling 校准数据不足。需监控 useful 率，必要时加 embedding 相似度辅助匹配。
+- `variance` 高双解（清晰赢家 vs 噪声离群）——hybridScore 已 path-consistent；双解靠 Top1−Top2 差值辅助（标定时验证）。
+- 经典 QPP 在 dense/neural IR 上相关性掉 10%+（文献）；NMG 用 BGE dense+hybrid，靠 `intentCoverage`/`reasonHealth` 领域增强补偿——这两项是 vanilla QPP 没有的 typed-memory / provenance 信号，非冗余。但 benchmark 全 `conversation_evidence` ingest → intentCoverage 退化（恒 0.5），需类型化 ingest 才有信号。
 - 只攻"覆盖"半；"捞进来没排对/拼对"的 ranking/composition 半需另打，两者配套才完整。
-- DC 过 gate 前不可启用学化路径（Stage 2），Stage 1 黑盒权重不等于梯度学化。
+- DC 过 gate 前不可启用学化路径（Stage 2）；Stage 1 rolling τ 是生产自适应，非梯度学化。

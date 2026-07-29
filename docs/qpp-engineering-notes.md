@@ -15,6 +15,8 @@
 
 **修复**：bounded-squash `s(x)=max(0,x)/(max(0,x)+10)`（同 `boundedLexical` 惯例），替 clamp。84→0.894 / 20→0.667 / 5→0.333，恢复 gradation。见 commit d86b658。
 
+> **后续修正（squash 本身也被推翻）**：实测 live searchContext 的 combinedScore=0.623（有界），不是审计里的 84——根因更深：**combinedScore 跨路径量纲不一**（lexical 路径 `store.ts:2915` 设=hybridScore ~0.6 / vector 路径 `:2654` 设=leafScore*0.9+lexical*0.1 ~84 / `#resultsForNode` 设=0）。squash 任何 k 都顾此失彼（k=10 对 live 0.6 过压→0.059→好匹配误触发）。最终改为**从 `selections.scores.{lexical,vector,route}` 重算 hybridScore**（恒有界 [0,1]、跨路径一致）作 `strength`，回退 squash。见 commit 86c837f。教训升级：不只"不假设分数尺度"，更要"警惕同一字段跨代码路径量纲不一"。
+
 ## 问题 2：intentCoverage 在所有 benchmark 上退化
 
 **现象**：7/7 题 intentCoverage=0.5（中性，无信号）。
