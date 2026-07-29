@@ -66,6 +66,7 @@ export interface ControllerProtocolSample {
   version: typeof CONTROLLER_FEATURE_PROTOCOL_VERSION;
   traceId: string;
   globalFeatures: number[];
+  memoryFeatures: Record<string, number[]>;
   nodeFeatures: Record<string, number[]>;
   edgeFeatures: Record<string, number[]>;
   training: ControllerTrainingExample | null;
@@ -83,6 +84,12 @@ export function controllerSampleFromTrace(
 ): ControllerProtocolSample {
   const resultsByNode = groupByNode(context.results);
   const globalFeatures = featureVector(context, trace);
+  const memoryFeatures = Object.fromEntries(
+    context.results.map((result) => [
+      result.memory.id,
+      featureVector(context, trace, memoryCandidate(result)),
+    ]),
+  );
   const nodeFeatures = Object.fromEntries(
     trace.resultNodeIds.map((nodeId) => [
       nodeId,
@@ -112,11 +119,24 @@ export function controllerSampleFromTrace(
     version: CONTROLLER_FEATURE_PROTOCOL_VERSION,
     traceId: trace.id,
     globalFeatures,
+    memoryFeatures,
     nodeFeatures,
     edgeFeatures,
-    training: hasOutcomeFeedback
-      ? trainingExample(context, trace, globalFeatures, nodeFeatures, edgeFeatures, usefulMemoryIds)
-      : null,
+    // An all-negative candidate set says retrieval failed to surface evidence;
+    // it does not say that a smaller budget or an early stop was correct.
+    // Keep the feedback for diagnostics, but do not train any controller head
+    // until at least one returned memory has positive use evidence.
+    training:
+      hasOutcomeFeedback && usefulMemoryIds.length > 0
+        ? trainingExample(
+            context,
+            trace,
+            globalFeatures,
+            nodeFeatures,
+            edgeFeatures,
+            usefulMemoryIds,
+          )
+        : null,
     supervision: { usefulMemoryIds, usefulNodeIds, hasOutcomeFeedback },
   };
 }
@@ -253,6 +273,12 @@ function trainingExample(
     throw new Error("controller budget label shape does not match the controller");
   }
   return {
+    memories: balancedBinaryExamples(
+      context.results.map((result) => ({
+        features: featureVector(context, trace, memoryCandidate(result)),
+        target: usefulMemoryIds.includes(result.memory.id),
+      })),
+    ),
     nodes: balancedBinaryExamples(
       Object.entries(nodeFeatures).map(([nodeId, features]) => ({
         features,
@@ -270,6 +296,21 @@ function trainingExample(
       target: usefulExpansionNodeIds.size > 0 ? "expand" : "stop",
     },
     budget: { features: globalFeatures, targets: budgetTargets },
+  };
+}
+
+function memoryCandidate(result: MemorySearchResult): CandidateFeatures {
+  return {
+    isEdge: false,
+    lexical: result.lexicalScore,
+    vector: result.vectorScore,
+    route: result.routeScore,
+    combined: result.combinedScore,
+    usefulness: result.combinedScore,
+    tier: result.memory.tier,
+    importance: result.memory.importance,
+    accessCount: result.memory.accessCount,
+    stability: 0,
   };
 }
 

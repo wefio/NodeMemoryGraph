@@ -19,6 +19,7 @@ export interface BinaryRouteExample {
 }
 
 export interface ControllerTrainingExample {
+  memories?: readonly BinaryRouteExample[];
   nodes?: readonly BinaryRouteExample[];
   edges?: readonly BinaryRouteExample[];
   control?: {
@@ -44,6 +45,8 @@ export interface DifferentiableControllerState {
   parameters: {
     nodeWeights: number[];
     nodeBias: number[];
+    memoryWeights?: number[];
+    memoryBias?: number[];
     edgeWeights: number[];
     edgeBias: number[];
     controlWeights: number[];
@@ -74,6 +77,7 @@ export class DifferentiableController {
   readonly featureCount: number;
   #trainingSteps: number;
   readonly #node: Head;
+  readonly #memory: Head;
   readonly #edge: Head;
   readonly #control: Head;
   readonly #budget: Head;
@@ -88,6 +92,7 @@ export class DifferentiableController {
     this.featureCount = featureCount;
     this.#trainingSteps = state?.trainingSteps ?? 0;
     this.#node = this.#head(1, state?.parameters.nodeWeights, state?.parameters.nodeBias);
+    this.#memory = this.#head(1, state?.parameters.memoryWeights, state?.parameters.memoryBias);
     this.#edge = this.#head(1, state?.parameters.edgeWeights, state?.parameters.edgeBias);
     this.#control = this.#head(2, state?.parameters.controlWeights, state?.parameters.controlBias);
     this.#budget = this.#head(
@@ -103,6 +108,10 @@ export class DifferentiableController {
 
   scoreNode(features: readonly number[]): number {
     return this.#binaryScore(this.#node, features);
+  }
+
+  scoreMemory(features: readonly number[]): number {
+    return this.#binaryScore(this.#memory, features);
   }
 
   scoreEdge(features: readonly number[]): number {
@@ -133,6 +142,17 @@ export class DifferentiableController {
   train(example: ControllerTrainingExample, learningRate = 0.05): ControllerTrainingResult {
     const losses: Tensor[] = [];
     let totalObservations = 0;
+
+    const memoryExamples = example.memories ?? [];
+    if (memoryExamples.length >= BATCH_THRESHOLD) {
+      losses.push(this.#batchedBinaryLoss(this.#memory, memoryExamples));
+      totalObservations += memoryExamples.length;
+    } else {
+      for (const item of memoryExamples) {
+        losses.push(binaryCrossEntropy(this.#binary(this.#memory, item.features), item.target));
+        totalObservations += 1;
+      }
+    }
 
     const nodeExamples = example.nodes ?? [];
     if (nodeExamples.length >= BATCH_THRESHOLD) {
@@ -172,7 +192,8 @@ export class DifferentiableController {
       losses.push(difference.multiply(difference).mean());
       totalObservations += 1;
     }
-    if (totalObservations === 0) throw new Error("controller training requires at least one target");
+    if (totalObservations === 0)
+      throw new Error("controller training requires at least one target");
 
     const parameters = this.#parameters();
     parameters.forEach((parameter) => parameter.zeroGrad());
@@ -195,6 +216,8 @@ export class DifferentiableController {
       parameters: {
         nodeWeights: [...this.#node.weights.data],
         nodeBias: [...this.#node.bias.data],
+        memoryWeights: [...this.#memory.weights.data],
+        memoryBias: [...this.#memory.bias.data],
         edgeWeights: [...this.#edge.weights.data],
         edgeBias: [...this.#edge.bias.data],
         controlWeights: [...this.#control.weights.data],
@@ -246,11 +269,7 @@ export class DifferentiableController {
 
     // Pad to next power of 2 only when F is large (cache alignment)
     // and the overhead is acceptable.
-    if (
-      F >= PAD_FEATURE_MIN &&
-      padded > B &&
-      (padded - B) / B < PAD_RATIO_MAX
-    ) {
+    if (F >= PAD_FEATURE_MIN && padded > B && (padded - B) / B < PAD_RATIO_MAX) {
       return this.#batchedBinaryLossPadded(head, examples, B, F, padded);
     }
 
@@ -335,6 +354,8 @@ export class DifferentiableController {
     return [
       this.#node.weights,
       this.#node.bias,
+      this.#memory.weights,
+      this.#memory.bias,
       this.#edge.weights,
       this.#edge.bias,
       this.#control.weights,

@@ -120,13 +120,33 @@ test("trace without explicit outcome feedback is inference-only", () => {
     const sample = controllerSampleFromTrace(context, trace);
     assert.equal(sample.training, null);
     assert.equal(sample.supervision.hasOutcomeFeedback, false);
-    assert.ok(
-      sample.globalFeatures[CONTROLLER_FEATURE_NAMES.indexOf("qpp_top1")]! > 0,
-    );
+    assert.ok(sample.globalFeatures[CONTROLLER_FEATURE_NAMES.indexOf("qpp_top1")]! > 0);
     assert.equal(
       sample.globalFeatures[CONTROLLER_FEATURE_NAMES.indexOf("query_intent_list_count")],
       1,
     );
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("all-negative retrieval feedback does not teach the controller to stop early", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-controller-candidate-miss-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    const saved = store.remember({ statement: "An unrelated detail", nodeName: "Detail" });
+    const context = store.searchContext("unrelated detail");
+    assert.ok(context.activeGraph);
+    store.recordActiveGraphUse(context.activeGraph.id, {
+      rejectedMemoryIds: [saved.memory.id],
+    });
+    const trace = store.retrievalTrace(context.activeGraph.id);
+    assert.ok(trace);
+    const sample = controllerSampleFromTrace(context, trace);
+    assert.equal(sample.supervision.hasOutcomeFeedback, true);
+    assert.deepEqual(sample.supervision.usefulMemoryIds, []);
+    assert.equal(sample.training, null);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });

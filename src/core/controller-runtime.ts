@@ -133,21 +133,13 @@ export class ControllerRuntime {
           fraction("evidence"),
         ),
         maxTokens: project(minimum.maxTokens, maximum.maxTokens, fraction("tokens")),
-        maxGraphHops: project(
-          minimum.maxGraphHops,
-          maximum.maxGraphHops,
-          fraction("graphHops"),
-        ),
+        maxGraphHops: project(minimum.maxGraphHops, maximum.maxGraphHops, fraction("graphHops")),
         maxLocalTier: project(
           minimum.maxLocalTier,
           maximum.maxLocalTier,
           fraction("localTier"),
         ) as ActiveGraphBudget["maxLocalTier"],
-        maxLatencyMs: project(
-          minimum.maxLatencyMs,
-          maximum.maxLatencyMs,
-          fraction("latencyMs"),
-        ),
+        maxLatencyMs: project(minimum.maxLatencyMs, maximum.maxLatencyMs, fraction("latencyMs")),
       },
       trainingSteps: this.#controller.trainingSteps,
     };
@@ -255,8 +247,7 @@ function resizeControllerState(
     const resized = new Array<number>(rows * featureCount).fill(0);
     for (let row = 0; row < rows; row += 1) {
       for (let column = 0; column < state.featureCount; column += 1) {
-        resized[row * featureCount + column] =
-          values[row * state.featureCount + column] ?? 0;
+        resized[row * featureCount + column] = values[row * state.featureCount + column] ?? 0;
       }
     }
     return resized;
@@ -267,6 +258,11 @@ function resizeControllerState(
     parameters: {
       ...state.parameters,
       nodeWeights: resize(state.parameters.nodeWeights, 1),
+      memoryWeights: resize(
+        state.parameters.memoryWeights ?? new Array(state.featureCount).fill(0),
+        1,
+      ),
+      memoryBias: state.parameters.memoryBias ?? [0],
       edgeWeights: resize(state.parameters.edgeWeights, 1),
       controlWeights: resize(state.parameters.controlWeights, 2),
       budgetWeights: resize(state.parameters.budgetWeights, CONTROLLER_BUDGET_DIMENSIONS.length),

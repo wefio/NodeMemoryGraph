@@ -44,12 +44,36 @@ test("differentiable controller learns node, edge, control, and budget targets",
   });
 });
 
+test("differentiable controller learns necessary memories separately from noise", () => {
+  const controller = new DifferentiableController(2);
+  for (let step = 0; step < 500; step += 1) {
+    controller.train(
+      {
+        memories: [
+          { features: [1, 0], target: true },
+          { features: [-1, 0], target: false },
+        ],
+      },
+      0.1,
+    );
+  }
+  assert.ok(controller.scoreMemory([1, 0]) > 0.85);
+  assert.ok(controller.scoreMemory([-1, 0]) < 0.15);
+});
+
 test("differentiable controller state round-trips without changing decisions", () => {
   const controller = new DifferentiableController(3);
-  controller.train({ nodes: [{ features: [1, 0, -1], target: true }] }, 0.2);
+  controller.train(
+    {
+      memories: [{ features: [1, 0, -1], target: true }],
+      nodes: [{ features: [1, 0, -1], target: true }],
+    },
+    0.2,
+  );
   const restored = DifferentiableController.fromJSON(controller.toJSON());
 
   assert.equal(restored.trainingSteps, 1);
+  assert.equal(restored.scoreMemory([1, 0, -1]), controller.scoreMemory([1, 0, -1]));
   assert.equal(restored.scoreNode([1, 0, -1]), controller.scoreNode([1, 0, -1]));
   assert.deepEqual(restored.toJSON(), controller.toJSON());
 });
