@@ -67,10 +67,9 @@ export function stableTaskId(query: string): string {
 }
 
 /**
- * Stage 0 second-pass budget: roughly double the evidence/node/token envelope and
- * allow one more graph hop, capped at the hard operator limits. Independent
- * envelope (does not inflate the first-pass budget) so the expanded pass can
- * retrieve more without unbounded context growth.
+ * Hard envelope for Stage 0 progressive recall: roughly double the
+ * evidence/node/token budget, capped at operator limits. Fibonacci tiers walk
+ * toward this ceiling instead of exposing the whole envelope at once.
  */
 export function expandActiveGraphBudget(budget: ActiveGraphBudget): ActiveGraphBudget {
   return {
@@ -82,6 +81,21 @@ export function expandActiveGraphBudget(budget: ActiveGraphBudget): ActiveGraphB
     maxLocalTier: budget.maxLocalTier,
     maxLatencyMs: Math.min(budget.maxLatencyMs * 2, 60_000),
   };
+}
+
+/** Cumulative progressive-recall budgets. Top-1 is the first Fibonacci tier;
+ * the duplicate second 1 is omitted because it would perform no new read. */
+export function fibonacciEvidenceBudgets(maxEvidence: number): number[] {
+  const limit = Math.max(1, Math.floor(maxEvidence));
+  const budgets = [1];
+  let previous = 1;
+  let current = 2;
+  while (current < limit) {
+    budgets.push(current);
+    [previous, current] = [current, previous + current];
+  }
+  if (budgets.at(-1) !== limit) budgets.push(limit);
+  return budgets;
 }
 
 export function estimateResultTokens(result: MemorySearchResult): number {

@@ -159,7 +159,7 @@ test("OmniMemEval batches pending record vectors before search", async () => {
   }
 });
 
-test("OmniMemEval can enable QPP pool re-selection without changing the default arm", async () => {
+test("OmniMemEval can enable progressive QPP recall without changing the default arm", async () => {
   const normalRoot = mkdtempSync(join(tmpdir(), "nmg-omni-qpp-normal-"));
   const adaptiveRoot = mkdtempSync(join(tmpdir(), "nmg-omni-qpp-adaptive-"));
   const normal = new OmniMemEvalBridge(normalRoot);
@@ -190,7 +190,7 @@ test("OmniMemEval can enable QPP pool re-selection without changing the default 
     }) as { memories: unknown[] };
 
     assert.equal(normalResult.memories.length, 2);
-    assert.equal(adaptiveResult.memories.length, 4);
+    assert.equal(adaptiveResult.memories.length, 1);
   } finally {
     normal.close();
     adaptive.close();

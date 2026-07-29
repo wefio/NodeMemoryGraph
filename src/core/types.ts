@@ -210,8 +210,8 @@ export interface SearchOptions {
   persistTrace?: boolean;
   /** Override the QPP trigger threshold (Stage 1 calibration / experiments). */
   qppThreshold?: number;
-  /** Enable pool-based Stage 0 second-pass re-selection (expanded budget from the
-   *  same candidate pool, no re-search) when QPP triggers or the first pass truncated. */
+  /** Enable progressive Fibonacci re-selection from the same over-sampled pool.
+   *  Each cumulative tier (1, 2, 3, 5, ...) recomputes QPP; no re-search occurs. */
   secondPass?: boolean;
 }
 
@@ -484,6 +484,16 @@ export type QppTriggerReason =
   | "guardrail_all_fallback"
   | "guardrail_low_top1";
 
+export interface QppExpansionStage {
+  /** Cumulative evidence budget for this stage (1, 2, 3, 5, 8, ...). */
+  targetEvidence: number;
+  selectedEvidence: number;
+  estimatedTokens: number;
+  qpp: number;
+  trigger: boolean;
+  reason: QppTriggerReason;
+}
+
 /** Stage 0 trigger decision; recorded on the trace as shadow observation. */
 export interface QppTriggerDecision {
   trigger: boolean;
@@ -491,6 +501,12 @@ export interface QppTriggerDecision {
   qpp: number;
   threshold: number;
   components: QppComponents;
+  /** Present when progressive Fibonacci recall was enabled for this query. */
+  expansion?: {
+    strategy: "fibonacci";
+    stages: QppExpansionStage[];
+    stoppedBecause: "budget_exhausted" | "candidate_pool_exhausted" | "sufficient";
+  };
 }
 
 export interface RetrievalTraceInput {

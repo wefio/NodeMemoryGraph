@@ -72,6 +72,7 @@ import {
   activeGraphExpansions,
   estimateResultTokens,
   expandActiveGraphBudget,
+  fibonacciEvidenceBudgets,
   queryAssociationEdges,
   stableTaskId,
 } from "./store/active-graph.ts";
@@ -1354,22 +1355,55 @@ export class NmgStore {
     let selection = selectWithinBudget(budget, limit);
     let activeBudget = budget;
     let selections = buildSelections(selection.results);
-    const qppDecision = shouldTriggerSecondPass(
+    let qppDecision = shouldTriggerSecondPass(
       query,
       qppCandidates(selection.results, selections),
       options.qppThreshold,
     );
-    // Pool-based Stage 0: if QPP triggers OR the first pass truncated against the
-    // evidence/token budget, re-select from the SAME candidate pool (no re-search)
-    // with an expanded budget. Retrieval already over-samples (limit*3), so the
-    // pool usually holds the extra evidence; re-selection is cheap and over-trigger
-    // is acceptable (no second LLM call, no re-search). Calibration-free: the
-    // truncation signal is structural, QPP guardrails are absolute floors.
-    const truncated = selection.exhausted.has("evidence") || selection.exhausted.has("tokens");
-    if (options.secondPass && (qppDecision.trigger || truncated)) {
-      activeBudget = expandActiveGraphBudget(budget);
-      selection = selectWithinBudget(activeBudget, Math.min(50, activeBudget.maxEvidence));
-      selections = buildSelections(selection.results);
+    if (options.secondPass) {
+      const maximum = expandActiveGraphBudget(budget);
+      const stages = [];
+      let stoppedBecause: NonNullable<QppTriggerDecision["expansion"]>["stoppedBecause"] =
+        "budget_exhausted";
+      for (const targetEvidence of fibonacciEvidenceBudgets(
+        Math.min(50, maximum.maxEvidence),
+      )) {
+        // Relation expansion has already run at the original graph-hop budget.
+        // Do not claim the extra hop from the hard envelope until graph routing
+        // itself becomes progressive.
+        activeBudget = {
+          ...maximum,
+          maxEvidence: targetEvidence,
+          maxGraphHops: budget.maxGraphHops,
+        };
+        selection = selectWithinBudget(activeBudget, targetEvidence);
+        selections = buildSelections(selection.results);
+        qppDecision = shouldTriggerSecondPass(
+          query,
+          qppCandidates(selection.results, selections),
+          options.qppThreshold,
+        );
+        stages.push({
+          targetEvidence,
+          selectedEvidence: selection.results.length,
+          estimatedTokens: selection.estimatedTokens,
+          qpp: qppDecision.qpp,
+          trigger: qppDecision.trigger,
+          reason: qppDecision.reason,
+        });
+        if (!qppDecision.trigger) {
+          stoppedBecause = "sufficient";
+          break;
+        }
+        if (selection.results.length >= candidates.length) {
+          stoppedBecause = "candidate_pool_exhausted";
+          break;
+        }
+      }
+      qppDecision = {
+        ...qppDecision,
+        expansion: { strategy: "fibonacci", stages, stoppedBecause },
+      };
     }
     const { results, selectedNodes, estimatedTokens, exhausted } = selection;
     const persistentEdges = relations
@@ -1471,10 +1505,11 @@ export class NmgStore {
 
   /**
    * Convenience wrapper for {@link searchContext} with `secondPass` enabled.
-   * The pool-based re-selection logic lives inside `searchContext` (re-selects
-   * from the over-sampled candidate pool with an expanded budget when QPP
-   * triggers or the first pass truncated — no re-search). This wrapper just
-   * defaults `secondPass` to true so callers opt in by calling it.
+   * The progressive logic lives inside `searchContext`: start with the complete
+   * Top-1 memory, then walk cumulative Fibonacci evidence tiers while QPP still
+   * requests expansion. Every tier re-selects from the same over-sampled pool;
+   * no ANN or lexical re-search occurs. This wrapper only provides explicit
+   * opt-in.
    *
    * See docs/retrieval-confidence-controller.md §2 Stage 0.
    */

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { queryIntentFamilies } from "../../src/core/store/search-ranking.ts";
+import { fibonacciEvidenceBudgets } from "../../src/core/store/active-graph.ts";
 import type { MemoryType, QppCandidate, RecallCue } from "../../src/core/types.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import {
@@ -39,6 +40,12 @@ function approx(actual: number, expected: number, eps = 1e-6): void {
     `expected ${expected}, got ${actual}`,
   );
 }
+
+test("Fibonacci recall tiers use cumulative visible counts and include the hard cap", () => {
+  assert.deepEqual(fibonacciEvidenceBudgets(1), [1]);
+  assert.deepEqual(fibonacciEvidenceBudgets(8), [1, 2, 3, 5, 8]);
+  assert.deepEqual(fibonacciEvidenceBudgets(10), [1, 2, 3, 5, 8, 10]);
+});
 
 test("queryIntentFamilies detects the three intent families (en + zh)", () => {
   assert.deepEqual(queryIntentFamilies("recommend a hotel").map((f) => f.name), ["recommend"]);
@@ -275,7 +282,7 @@ test("searchContextWithSecondPass: secondPass off returns the normal result", ()
   try {
     store.remember({ statement: "user prefers a window seat", nodeName: "Seat", memoryType: "preference" });
     const normal = store.searchContext("window seat");
-    const adaptive = store.searchContextWithSecondPass("window seat");
+    const adaptive = store.searchContextWithSecondPass("window seat", { secondPass: false });
     assert.equal(adaptive.activeGraph!.budget.maxEvidence, normal.activeGraph!.budget.maxEvidence);
     assert.equal(adaptive.results.length, normal.results.length);
   } finally {
@@ -284,7 +291,7 @@ test("searchContextWithSecondPass: secondPass off returns the normal result", ()
   }
 });
 
-test("searchContextWithSecondPass: no trigger returns first pass (normal budget)", () => {
+test("searchContextWithSecondPass: sufficient Top-1 stops at the first Fibonacci tier", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-qpp-2p-notrig-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
   try {
@@ -292,14 +299,19 @@ test("searchContextWithSecondPass: no trigger returns first pass (normal budget)
     // strong lexical match -> top1 high -> qpp ok -> no trigger.
     const result = store.searchContextWithSecondPass("window seat", { secondPass: true });
     assert.equal(result.activeGraph!.qpp?.trigger, false);
-    assert.equal(result.activeGraph!.budget.maxEvidence, 8);
+    assert.equal(result.activeGraph!.budget.maxEvidence, 1);
+    assert.deepEqual(
+      result.activeGraph!.qpp?.expansion?.stages.map((stage) => stage.targetEvidence),
+      [1],
+    );
+    assert.equal(result.activeGraph!.qpp?.expansion?.stoppedBecause, "sufficient");
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });
   }
 });
 
-test("searchContextWithSecondPass: trigger runs expanded pass (doubled budget)", () => {
+test("searchContextWithSecondPass: an exhausted candidate pool stops progressive recall", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-qpp-2p-trig-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
   try {
@@ -307,7 +319,8 @@ test("searchContextWithSecondPass: trigger runs expanded pass (doubled budget)",
     // no real match -> qpp triggers (guardrail_low_top1 or guardrail_empty) -> expanded pass runs.
     const result = store.searchContextWithSecondPass("zzz-no-such-thing", { secondPass: true });
     assert.equal(result.activeGraph!.qpp?.trigger, true);
-    assert.equal(result.activeGraph!.budget.maxEvidence, 16);
+    assert.equal(result.activeGraph!.budget.maxEvidence, 1);
+    assert.equal(result.activeGraph!.qpp?.expansion?.stoppedBecause, "candidate_pool_exhausted");
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });
@@ -318,7 +331,14 @@ test("searchContextWithSecondPass: qppThreshold forces trigger on a strong match
   const directory = mkdtempSync(join(tmpdir(), "nmg-qpp-2p-tau-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
   try {
-    store.remember({ statement: "user prefers a window seat", nodeName: "Seat", memoryType: "preference" });
+    for (const statement of [
+      "user prefers a window seat on trains",
+      "user prefers a window seat on planes",
+      "user prefers a window seat on buses",
+      "user prefers a window seat in meeting rooms",
+    ]) {
+      store.remember({ statement, nodeName: "Seat", memoryType: "preference" });
+    }
     // strong match -> default τ=0.45 does NOT trigger.
     const normal = store.searchContextWithSecondPass("window seat", { secondPass: true });
     assert.equal(normal.activeGraph!.qpp?.trigger, false);
@@ -328,14 +348,30 @@ test("searchContextWithSecondPass: qppThreshold forces trigger on a strong match
       qppThreshold: 2.0,
     });
     assert.equal(forced.activeGraph!.qpp?.trigger, true);
-    assert.equal(forced.activeGraph!.budget.maxEvidence, 16);
+    assert.deepEqual(
+      forced.activeGraph!.qpp?.expansion?.stages.map((stage) => [
+        stage.targetEvidence,
+        stage.selectedEvidence,
+      ]),
+      [
+        [1, 1],
+        [2, 2],
+        [3, 3],
+        [5, 4],
+      ],
+    );
+    assert.equal(forced.activeGraph!.qpp?.expansion?.stoppedBecause, "candidate_pool_exhausted");
+    assert.deepEqual(
+      store.retrievalTrace(forced.activeGraph!.id)?.qpp?.expansion,
+      forced.activeGraph!.qpp?.expansion,
+    );
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });
   }
 });
 
-test("searchContextWithSecondPass: truncated first pass re-selects from pool (no re-search)", () => {
+test("searchContextWithSecondPass: forced expansion walks Fibonacci tiers without re-search", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-qpp-2p-trunc-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
   try {
@@ -353,14 +389,18 @@ test("searchContextWithSecondPass: truncated first pass re-selects from pool (no
     // Normal: only 2 of 4 surfaced (truncated).
     const normal = store.searchContext("running", { limit: 2, activeGraphBudget: small });
     assert.equal(normal.results.length, 2);
-    // secondPass: truncation triggers re-select from the SAME pool with expanded
-    // budget (4) — surfaces all 4. No re-search (one retrieval).
+    // A forced-low QPP walks cumulative Fibonacci tiers over the SAME pool.
     const adaptive = store.searchContextWithSecondPass("running", {
       limit: 2,
       activeGraphBudget: small,
+      qppThreshold: 2,
     });
     assert.equal(adaptive.results.length, 4);
     assert.equal(adaptive.activeGraph!.budget.maxEvidence, 4);
+    assert.deepEqual(
+      adaptive.activeGraph!.qpp?.expansion?.stages.map((stage) => stage.targetEvidence),
+      [1, 2, 3, 4],
+    );
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });

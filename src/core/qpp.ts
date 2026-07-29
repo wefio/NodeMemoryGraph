@@ -1,7 +1,7 @@
 /**
  * QPP (Query Performance Prediction) — post-retrieval confidence that the first
- * recall pass returned enough evidence. Drives the trigger for a second search
- * pass + expanded budget. See docs/retrieval-confidence-controller.md.
+ * recall prefix returned enough evidence. Drives progressive expansion through
+ * cumulative Fibonacci evidence tiers. See docs/fibonacci-progressive-recall.md.
  *
  * This is a learned-weight NQC variant: `C = Top1 + τ_v·variance +
  * w_ic·intentCoverage + w_rh·reasonHealth`. Top1 is the anchor (implicit weight
