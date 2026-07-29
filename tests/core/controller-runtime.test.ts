@@ -77,6 +77,39 @@ test("controller allocation widens an explicit recall within its operator envelo
   }
 });
 
+test("QPP2 folds candidates but preserves a deterministic safe prefix", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-controller-fold-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    for (let index = 0; index < 25; index += 1) {
+      store.remember({
+        statement: `Atlas project detail ${index}`,
+        nodeName: `Atlas topic ${index % 3}`,
+      });
+    }
+    const context = store.searchContext("Atlas project detail", { limit: 25 });
+    const fold = new ControllerRuntime(join(directory, "controller.json")).foldMemories(
+      context,
+      20,
+      15,
+    );
+    assert.ok(fold);
+    assert.equal(fold.visibleMemoryIds.length, 20);
+    assert.equal(fold.foldedMemoryIds.length, 5);
+    assert.deepEqual(
+      fold.visibleMemoryIds.slice(0, 15),
+      context.results.slice(0, 15).map((result) => result.memory.id),
+    );
+    assert.deepEqual(
+      new Set([...fold.visibleMemoryIds, ...fold.foldedMemoryIds]),
+      new Set(context.results.map((result) => result.memory.id)),
+    );
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("controller runtime zero-pads a version-1 feature state", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-controller-migrate-"));
   const statePath = join(directory, "controller.json");

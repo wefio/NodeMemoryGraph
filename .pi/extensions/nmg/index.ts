@@ -130,10 +130,14 @@ export async function searchMemoryContext(
     };
   }
   return {
-    ...memoryStore.searchContext(query, { ...options, vectorGranularity }, {
-      queryVector,
-      model: embeddingClient.indexId,
-    }),
+    ...memoryStore.searchContext(
+      query,
+      { ...options, vectorGranularity },
+      {
+        queryVector,
+        model: embeddingClient.indexId,
+      },
+    ),
     retrieval: { mode: "hybrid", degraded: false },
   };
 }
@@ -143,13 +147,37 @@ export function configuredGraphHops(fallback: number): number {
   return Number.isInteger(configured) ? Math.max(0, Math.min(configured, 3)) : fallback;
 }
 
+export type QppActuationMode = "off" | "shadow" | "active";
+export type SearchRecommendationMode = "off" | "advisory" | "guardrail";
+
+export function configuredQpp1Mode(): QppActuationMode {
+  const configured = parseMode(process.env.NMG_QPP1_MODE, ["off", "shadow", "active"]);
+  if (configured) return configured;
+  if (process.env.NMG_CONTROLLER_SEARCH === "1") return "active";
+  if (process.env.NMG_CONTROLLER_SEARCH === "0") return "shadow";
+  return "shadow";
+}
+
+export function configuredQpp2Mode(): QppActuationMode {
+  return parseMode(process.env.NMG_QPP2_MODE, ["off", "shadow", "active"]) ?? "off";
+}
+
+export function configuredSearchRecommendationMode(): SearchRecommendationMode {
+  return (
+    parseMode(process.env.NMG_SEARCH_RECOMMENDATION, ["off", "advisory", "guardrail"]) ?? "advisory"
+  );
+}
+
 export default function nmgExtension(pi: ExtensionAPI): void {
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
-  const controllerShadowEnabled = process.env.NMG_CONTROLLER_SHADOW !== "0";
+  const qpp1Mode = configuredQpp1Mode();
+  const qpp2Mode = configuredQpp2Mode();
+  const searchRecommendationMode = configuredSearchRecommendationMode();
+  const controllerShadowEnabled = process.env.NMG_CONTROLLER_SHADOW !== "0" && qpp1Mode !== "off";
   // Normal automatic recall remains deliberately small. The controller is
   // allowed to widen only an explicit nmg_search, where the model has asked to
   // spend a tool call on remembering.
-  const controllerSearchEnabled = process.env.NMG_CONTROLLER_SEARCH !== "0";
+  const controllerSearchEnabled = qpp1Mode === "active";
   let store: NmgStore | undefined;
   const getStore = (): NmgStore => (store ??= new NmgStore(databasePath()));
   const controller = new ControllerRuntime(join(dataDirectory(), "controller.json"));
@@ -220,6 +248,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       origin === "tool" &&
       searchOptions.limit === undefined &&
       searchOptions.activeGraphBudget === undefined;
+    const canProgress =
+      qpp2Mode === "active" && origin === "tool" && searchOptions.secondPass === undefined;
     let context = await searchMemoryContext(getStore(), embeddingClient, query, {
       ...searchOptions,
       // A controller probe is intentionally not an actual retrieval trace.
@@ -230,30 +260,37 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             limit: 1,
             activeGraphBudget: { maxEvidence: 1 },
           }
-        : {}),
+        : canProgress
+          ? { secondPass: true }
+          : {}),
     });
     if (canExpand && context.activeGraph) {
       const baseline = context.activeGraph.budget;
-      const plan = controller.allocate(context, baseline, {
-        maxNodes: 16,
-        maxEdges: 24,
-        maxEvidence: 20,
-        maxTokens: 6_000,
-        maxGraphHops: 2,
-        maxLocalTier: 3,
-        maxLatencyMs: 800,
-      }, {
-        // Escalation is available only when the learned control head asks to
-        // expand. This keeps ordinary explicit recall near Top-20 while making
-        // a broad Active Graph available for aggregation and multi-hop tasks.
-        maxNodes: 50,
-        maxEdges: 100,
-        maxEvidence: 50,
-        maxTokens: 10_000,
-        maxGraphHops: 3,
-        maxLocalTier: 3,
-        maxLatencyMs: 1_500,
-      });
+      const plan = controller.allocate(
+        context,
+        baseline,
+        {
+          maxNodes: 16,
+          maxEdges: 24,
+          maxEvidence: 20,
+          maxTokens: 6_000,
+          maxGraphHops: 2,
+          maxLocalTier: 3,
+          maxLatencyMs: 800,
+        },
+        {
+          // Escalation is available only when the learned control head asks to
+          // expand. This keeps ordinary explicit recall near Top-20 while making
+          // a broad Active Graph available for aggregation and multi-hop tasks.
+          maxNodes: 50,
+          maxEdges: 100,
+          maxEvidence: 50,
+          maxTokens: 10_000,
+          maxGraphHops: 3,
+          maxLocalTier: 3,
+          maxLatencyMs: 1_500,
+        },
+      );
       if (plan) {
         context = await searchMemoryContext(getStore(), embeddingClient, query, {
           ...searchOptions,
@@ -261,11 +298,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           // second QPP may continue to later tiers from the same candidate pool.
           limit: plan.budget.maxEvidence,
           activeGraphBudget: plan.budget,
-          secondPass: true,
+          secondPass: canProgress,
           initialEvidenceTarget: plan.budget.maxEvidence,
         });
       } else {
-        context = await searchMemoryContext(getStore(), embeddingClient, query, searchOptions);
+        context = await searchMemoryContext(getStore(), embeddingClient, query, {
+          ...searchOptions,
+          ...(canProgress ? { secondPass: true } : {}),
+        });
       }
     }
     if (context.activeGraph) {
@@ -326,6 +366,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       );
       if (formatted) {
         dynamicBlock = `<nmg_automatic_recall>\n${formatted}\n</nmg_automatic_recall>`;
+      }
+      const recommendation = formatSearchRecommendation(context, searchRecommendationMode);
+      if (recommendation) {
+        dynamicBlock = [dynamicBlock, recommendation].filter(Boolean).join("\n");
       }
     } else if (decision.mode === "cue") {
       dynamicBlock = formatRecallIndex(
@@ -733,8 +777,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             ]),
             predicateKey: Type.Optional(
               Type.String({
-                description:
-                  "Stable lowercase snake_case predicate; omit for neutral content",
+                description: "Stable lowercase snake_case predicate; omit for neutral content",
               }),
             ),
             confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
@@ -1133,7 +1176,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             text:
               results.length === 0
                 ? "No matching NMG memory found within the requested tier budget."
-                : formatSearchHeaders(context),
+                : formatSearchHeaders(
+                    context,
+                    qpp2Mode === "active" && params.limit === undefined
+                      ? controller.foldMemories(context)?.visibleMemoryIds
+                      : undefined,
+                  ),
           },
         ],
         details: context,
@@ -1174,6 +1222,31 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         ctx.ui.notify(`Recorded NMG shadow feedback for ${graphId}.`, "info");
       },
     });
+}
+
+export function formatSearchRecommendation(
+  context: MemoryContext,
+  mode: SearchRecommendationMode,
+): string {
+  const qpp = context.activeGraph?.qpp;
+  if (mode === "off" || !qpp?.trigger) return "";
+  const guardrail = qpp.reason.startsWith("guardrail_");
+  if (mode === "guardrail" && !guardrail) return "";
+  return (
+    `<nmg_search_recommendation>\n` +
+    `Automatic recall may be incomplete (${qpp.reason}). Before relying on memory, ` +
+    `consider one nmg_search call with a narrower or complementary subquery. ` +
+    `If it adds no relevant evidence, stop searching and answer with appropriate uncertainty.\n` +
+    `</nmg_search_recommendation>`
+  );
+}
+
+function parseMode<const T extends string>(
+  value: string | undefined,
+  allowed: readonly T[],
+): T | undefined {
+  const normalized = value?.trim().toLowerCase();
+  return allowed.find((candidate) => candidate === normalized);
 }
 
 function summarizeMessageUsage(messages: readonly unknown[]): {
@@ -1224,8 +1297,18 @@ function parseOptionalBoolean(
   return undefined;
 }
 
-export function formatSearchHeaders(context: MemoryContext): string {
-  const headers = context.results.map(({ memory, node }) =>
+export function formatSearchHeaders(
+  context: MemoryContext,
+  visibleMemoryIds?: readonly string[],
+): string {
+  const visible = visibleMemoryIds ? new Set(visibleMemoryIds) : null;
+  const visibleResults = visible
+    ? context.results.filter(({ memory }) => visible.has(memory.id))
+    : context.results;
+  const foldedResults = visible
+    ? context.results.filter(({ memory }) => !visible.has(memory.id))
+    : [];
+  const headers = visibleResults.map(({ memory, node }) =>
     [
       `- memory=${memory.id}`,
       `node=${node.id}:${node.canonicalName}`,
@@ -1238,6 +1321,19 @@ export function formatSearchHeaders(context: MemoryContext): string {
       `preview=${excerpt(node.summary, 120)}`,
     ].join("; "),
   );
+  const foldedNodes = new Map<string, number>();
+  for (const { node } of foldedResults) {
+    foldedNodes.set(node.canonicalName, (foldedNodes.get(node.canonicalName) ?? 0) + 1);
+  }
+  const folded =
+    foldedResults.length > 0
+      ? `QPP2 folded ${foldedResults.length} lower-necessity candidates across ` +
+        `${foldedNodes.size} nodes (${[...foldedNodes.entries()]
+          .slice(0, 8)
+          .map(([name, count]) => `${name}:${count}`)
+          .join(", ")}). They remain in the Active Graph; rerun nmg_search with an explicit ` +
+        `larger limit to inspect them.`
+      : "";
   return [
     "NMG SEARCH HEADERS",
     context.retrieval
@@ -1253,6 +1349,7 @@ export function formatSearchHeaders(context: MemoryContext): string {
         `exhausted=${context.activeGraph.usage.exhausted?.join(",") || "none"}`
       : "",
     ...headers,
+    folded,
     "Use nmg_get with selected memory IDs and activeGraphId to load exact statements, " +
       "source evidence, and record which recalled memories were actually used.",
   ]

@@ -39,6 +39,12 @@ export interface ControllerBudgetDecision {
   trainingSteps: number;
 }
 
+export interface ControllerMemoryFold {
+  visibleMemoryIds: string[];
+  foldedMemoryIds: string[];
+  trainingSteps: number;
+}
+
 /**
  * Persistent Pi-side controller adapter. It learns from completed retrieval traces but
  * deliberately exposes shadow decisions only; activation is an external evaluated gate.
@@ -96,6 +102,44 @@ export class ControllerRuntime {
       baselineNodeIds,
       learnedNodeIds,
       changed: baselineNodeIds.some((nodeId, index) => learnedNodeIds[index] !== nodeId),
+      trainingSteps: this.#controller.trainingSteps,
+    };
+  }
+
+  /**
+   * Keep a deterministic safe prefix, then let the learned memory head choose
+   * the remaining visible directory entries. Folded records stay in the Active
+   * Graph and can be inspected by a later explicit search.
+   */
+  foldMemories(
+    context: MemoryContext,
+    visibleLimit = 20,
+    safePrefix = 15,
+  ): ControllerMemoryFold | null {
+    if (!context.activeGraph || context.results.length <= visibleLimit) return null;
+    const trace = traceFromActiveGraph(context);
+    const sample = controllerSampleFromTrace(context, trace);
+    const safeCount = Math.min(safePrefix, visibleLimit, context.results.length);
+    const visible = context.results.slice(0, safeCount).map((result) => result.memory.id);
+    const visibleIds = new Set(visible);
+    const learned = context.results
+      .slice(safeCount)
+      .map((result, index) => ({
+        id: result.memory.id,
+        rank: safeCount + index,
+        score: this.#controller.scoreMemory(sample.memoryFeatures[result.memory.id]!),
+      }))
+      .sort((left, right) => right.score - left.score || left.rank - right.rank)
+      .slice(0, Math.max(0, visibleLimit - safeCount));
+    for (const candidate of learned) {
+      visible.push(candidate.id);
+      visibleIds.add(candidate.id);
+    }
+    return {
+      visibleMemoryIds: visible,
+      foldedMemoryIds: context.results
+        .map((result) => result.memory.id)
+        .filter((id) => !visibleIds.has(id)),
       trainingSteps: this.#controller.trainingSteps,
     };
   }

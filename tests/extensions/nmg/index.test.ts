@@ -3,7 +3,11 @@ import test from "node:test";
 
 import nmgExtension from "../../../.pi/extensions/nmg/index.ts";
 import {
+  configuredQpp1Mode,
+  configuredQpp2Mode,
+  configuredSearchRecommendationMode,
   configuredGraphHops,
+  formatSearchRecommendation,
   formatSearchHeaders,
   searchMemoryContext,
 } from "../../../.pi/extensions/nmg/index.ts";
@@ -141,6 +145,42 @@ test("search headers disclose IDs but not source evidence", () => {
   assert.match(output, /nmg_get/);
   assert.match(output, /active_graph=ag-1/);
   assert.match(output, /activeGraphId/);
+});
+
+test("QPP2 folds low-necessity headers without removing Active Graph candidates", () => {
+  const makeResult = (id: string, nodeId: string, name: string) => ({
+    memory: {
+      id,
+      statement: `statement ${id}`,
+      memoryType: "fact",
+      tier: 1,
+      createdAt: "2026-07-29T00:00:00.000Z",
+      truthStatus: "asserted",
+      status: "active",
+      residence: "ltg",
+      evidenceIds: [],
+      sourceActor: "user",
+      scope: {},
+    },
+    node: { id: nodeId, canonicalName: name, summary: `${name} summary` },
+    evidence: { content: `evidence ${id}` },
+  });
+  const context = {
+    results: [
+      makeResult("memory-1", "node-1", "project"),
+      makeResult("memory-2", "node-2", "archive"),
+      makeResult("memory-3", "node-2", "archive"),
+    ],
+    relations: [],
+  } as unknown as MemoryContext;
+
+  const output = formatSearchHeaders(context, ["memory-1"]);
+  assert.match(output, /memory=memory-1/);
+  assert.doesNotMatch(output, /memory=memory-2/);
+  assert.doesNotMatch(output, /memory=memory-3/);
+  assert.match(output, /folded 2 lower-necessity candidates/);
+  assert.match(output, /archive:2/);
+  assert.match(output, /remain in the Active Graph/);
 });
 
 test("an explicit search may widen through the controller while automatic recall stays separate", async () => {
@@ -289,6 +329,67 @@ test("graph-hop environment override clamps model-requested expansion", () => {
     if (previous === undefined) delete process.env.NMG_GRAPH_HOPS;
     else process.env.NMG_GRAPH_HOPS = previous;
   }
+});
+
+test("QPP stages and search recommendation are independently configurable", () => {
+  const names = [
+    "NMG_QPP1_MODE",
+    "NMG_QPP2_MODE",
+    "NMG_SEARCH_RECOMMENDATION",
+    "NMG_CONTROLLER_SEARCH",
+  ] as const;
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    for (const name of names) delete process.env[name];
+    assert.equal(configuredQpp1Mode(), "shadow");
+    assert.equal(configuredQpp2Mode(), "off");
+    assert.equal(configuredSearchRecommendationMode(), "advisory");
+
+    process.env.NMG_QPP1_MODE = "active";
+    process.env.NMG_QPP2_MODE = "active";
+    process.env.NMG_SEARCH_RECOMMENDATION = "off";
+    assert.equal(configuredQpp1Mode(), "active");
+    assert.equal(configuredQpp2Mode(), "active");
+    assert.equal(configuredSearchRecommendationMode(), "off");
+
+    delete process.env.NMG_QPP1_MODE;
+    process.env.NMG_CONTROLLER_SEARCH = "1";
+    assert.equal(configuredQpp1Mode(), "active");
+  } finally {
+    for (const name of names) {
+      const value = previous[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test("search recommendation respects advisory and guardrail modes", () => {
+  const context = {
+    activeGraph: {
+      qpp: {
+        trigger: true,
+        reason: "below_threshold",
+        qpp: 0.2,
+        threshold: 0.45,
+        components: {
+          top1: 0.3,
+          variance: 0.1,
+          intentCoverage: 0.5,
+          reasonHealth: 1,
+        },
+      },
+    },
+  } as unknown as MemoryContext;
+
+  assert.match(formatSearchRecommendation(context, "advisory"), /nmg_search/);
+  assert.equal(formatSearchRecommendation(context, "guardrail"), "");
+  assert.equal(formatSearchRecommendation(context, "off"), "");
+
+  context.activeGraph!.qpp!.reason = "guardrail_low_top1";
+  assert.match(formatSearchRecommendation(context, "guardrail"), /nmg_search/);
+  context.activeGraph!.qpp!.trigger = false;
+  assert.equal(formatSearchRecommendation(context, "advisory"), "");
 });
 
 test("embedding failure degrades to FTS while preserving an Active Graph", async () => {

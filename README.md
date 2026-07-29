@@ -196,15 +196,30 @@ three stable tools. This prevents unrelated global permission extensions from
 blocking non-interactive RPC tool calls. Set `NMG_PI_MODEL` to override the
 test model when needed.
 
-The learned retrieval controller remains shadow-observed for automatic recall,
-so ordinary turns keep their small fixed context budget. For an explicit
-`nmg_search` without a caller-specified limit, it now performs a disposable
-lexical probe and may widen only that tool call. Its normal tier is capped at
-20 records / 6,000 estimated tokens; a learned `expand` decision can promote
-the Active Graph to 50 records / 10,000 estimated tokens for aggregation or
-multi-hop work. The committed search remains the sole
-retrieval trace and may still be read with `nmg_get`. Set
-`NMG_CONTROLLER_SEARCH=0` to disable this adaptive expansion. Shadow events are written locally to
+QPP actuation is split into three independent controls:
+
+- `NMG_QPP1_MODE=off|shadow|active` controls the learned first candidate-pool
+  allocation. It defaults to `shadow`; `active` may widen only an explicit
+  `nmg_search` that has no caller-specified limit.
+- `NMG_QPP2_MODE=off|shadow|active` controls Fibonacci progressive inspection
+  and learned listwise folding within that candidate pool. It defaults to
+  `off`; `shadow` retains QPP telemetry without changing the visible result,
+  while `active` may continue to deeper evidence tiers and shows only a safe
+  prefix plus learned necessary headers. Lower-necessity candidates are grouped
+  as a folded directory, not deleted, and an explicit larger `limit` unfolds
+  them.
+- `NMG_SEARCH_RECOMMENDATION=off|advisory|guardrail` controls whether an
+  inadequate automatic recall recommends one deliberate `nmg_search` call to
+  the model. It defaults to `advisory`; `guardrail` emits a recommendation only
+  for hard failures such as empty, fallback-only, or very weak recall.
+
+The normal QPP1 tier is capped at 20 records / 6,000 estimated tokens; a
+learned `expand` decision can promote the Active Graph to 50 records / 10,000
+estimated tokens for aggregation or multi-hop work. Automatic recall keeps its
+small fixed budget. The committed search remains the sole retrieval trace and
+may still be read with `nmg_get`. The legacy `NMG_CONTROLLER_SEARCH=1|0`
+continues to map to QPP1 `active|shadow` when `NMG_QPP1_MODE` is unset.
+Shadow events are written locally to
 `.nmg/evaluation/controller-shadow.jsonl` (or under `NMG_DATA_DIR`) with bounded
 size and rotation. They record deterministic and learned node order, candidate
 exposure, explicit `nmg_get` use, retrieval/controller latency, estimated
