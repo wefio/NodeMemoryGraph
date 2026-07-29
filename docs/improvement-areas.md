@@ -8,9 +8,26 @@ code review and evaluation. Each item includes the observed symptom, the
 underlying concern, and one or more concrete approaches. Items are grouped by
 impact rather than priority.
 
+## Status audit — 2026-07-29
+
+The detailed notes below preserve the problem history. Current status is:
+
+| # | Area | Current status |
+| --- | --- | --- |
+| 1 | Store decomposition | **Partial.** Schema, ranking, Active Graph, vector codec, row parsing, and embedding-index concerns were extracted, but `store.ts` has grown to roughly 4,100 lines and remains the main maintainability risk. |
+| 2 | Vector-cache invalidation | **Resolved for the stated mechanism.** `Float32VectorCache.remove(id)` and targeted invalidation tests exist. Revisit only if measured rebuild latency regresses. |
+| 3 | Router expressiveness | **Superseded experimentally, not proven.** The custom autodiff controller now learns node, memory, edge, control, and budget heads, but still lacks a production-quality matched quality/cost win. |
+| 4 | Privacy deletion | **Core partial.** Soft deletion, FTS/embedding/evidence/leaf cleanup, and unsupported-derived-memory cascade are implemented and tested. User-facing delete/export and erasure of learned aggregate signals remain open. |
+| 5 | Regex-only recall gate | **Open.** English/Chinese deterministic coverage is tested; multilingual semantic gating and measured false-positive/false-negative rates are not. |
+| 6 | Test coverage | **Substantially improved.** The listed Chinese, graph, split, cache, and deletion paths now have coverage. Session-schema drift, QPP recommendation behavior, and natural topology adaptation remain important gaps. |
+| 7 | ANN recall | **Deferred by evidence.** Exact local scan remains the default; the current ANN path must not be promoted without a recall/latency crossover. |
+| 8 | Concurrency model | **Open.** Current runtime assumes one Pi extension event loop and one synchronous SQLite handle. |
+| 9 | Session serialization | **Open.** Capture is automatic and idempotent, but the Pi branch shape is still parsed from `unknown` without a versioned validator. |
+| 10 | Topology acceptance | **Intentionally Lab/manual.** Proposal creation and explicit review work; unattended mutation lacks a precision gate. |
+
 ---
 
-## 1. Store file is too large (~2,900 lines)
+## 1. Store file is too large (~4,100 lines)
 
 **Symptom:** `src/core/store.ts` contains mutations, queries, maintenance
 operations, schema migrations, and formatting helpers in one class.

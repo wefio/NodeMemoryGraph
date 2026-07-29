@@ -174,6 +174,47 @@ AG contains references and query-local annotations, not authoritative copies.
 When AG is released, temporary nodes and edges disappear; only explicitly
 recorded usage outcomes, stability observations, and accepted writes survive.
 
+### 5a. Confidence as a posterior: the outcome feedback loop
+
+Claim `confidence` today is a prior — the extractor's self-assessment at write
+time. A memory system earns the word "experience" only when that number is
+corrected by what happened when the memory was used. This loop is the one
+capability no LLM can provide on its own: outcome information (did the task
+succeed after this memory was retrieved and rendered?) is produced after and
+outside the model's inference, so only the external store can capture it and
+write it back. Model upgrades improve the prior; they can never close this
+loop.
+
+Mechanism (minimal, deterministic):
+
+1. **Usage logging.** Each retrieval that renders a record into an Active
+   Graph appends `(record_id, claim_id, query/task id, timestamp)` to a usage
+   ledger. Rendering, not just ranking, counts — an unrendered candidate
+   exerted no influence.
+2. **Outcome attribution.** When the enclosing task/session closes with a
+   success/failure signal (explicit user feedback, eval verdict, or task
+   status), every rendered claim receives one outcome vote. Outcomes are
+   recorded as events with provenance, never as silent in-place edits.
+3. **Posterior update.** Claim confidence becomes
+   `posterior = f(extraction prior, accumulated outcome votes)` — a Beta-style
+   running update keeps the storage to two counters per claim and stays
+   auditable. The raw prior is preserved so re-weighting rules can change
+   without re-extraction.
+4. **Retrieval weighting.** Rank fusion consumes the posterior, not the
+   prior: repeatedly useful memories surface more easily; memories that
+   correlate with failures sink toward archival review rather than being
+   deleted (history stays immutable).
+5. **Credit discipline.** Correlation is not causation — a memory co-rendered
+   with a failure is a suspect, not a culprit. Votes from the same session or
+   task are discounted, and a claim's posterior is only trusted after a
+   minimum number of independent usages (hysteresis), so early noise cannot
+   bury a good memory.
+
+This loop also answers, at claim granularity, part of the open routing
+question in section 17: the usefulness signal lives on the claim, not on the
+router's selection, so reinforcing a good memory does not require reinforcing
+the path that found it.
+
 ## 6. STG/LTG connectivity and provisional memory
 
 The semantic graph is not required to be connected. Its connected components
@@ -520,6 +561,42 @@ Arbitrary model-generated regex is not a relevance ranker and must not scan the
 entire store by default. Exact literal search is the first precision feature to
 add because it covers most code-agent identifiers without regex escaping or
 catastrophic-backtracking risk.
+
+### 11.1 QPP actuation and progressive disclosure
+
+QPP is an optional control plane over the same Active Graph retrieval path, not
+a separate store or retrieval engine. Its three actions are independently
+configurable because they have different costs and failure modes:
+
+1. **QPP1** predicts how broad the first candidate pool should be. It can
+   observe without acting or allocate a bounded initial Fibonacci tier.
+2. **QPP2** operates only inside the candidate pool. It may continue
+   progressive inspection and decide which headers are individually visible
+   versus folded.
+3. **Search recommendation** converts insufficient automatic recall into an
+   advisory signal for the model. It never invokes a tool by itself.
+
+QPP2 performs progressive disclosure rather than deletion. Let the controller
+produce listwise necessity scores `s_i`; convert them to relative odds and
+normalised local mass:
+
+```text
+o_i = clamp(s_i) / (1 - clamp(s_i))
+p_i = o_i / sum_j(o_j)
+```
+
+The visible directory is the smallest score-ranked set whose cumulative local
+mass reaches a configured retention target. Retrieval Top-1 is the only fixed
+safety anchor. A flat distribution therefore remains wide, while a steep
+distribution folds more candidates. Folded candidates remain in the Active
+Graph and retrieval trace and must stay explicitly unfoldable.
+
+The mass is a query-local relative allocation, not a calibrated absolute
+probability that a record is necessary. QPP2 therefore remains opt-in until
+matched tests show that the model can use the folded directory without losing
+answer evidence. Concrete Pi settings, defaults, compatibility variables, and
+operator instructions belong in the README rather than this architecture
+contract.
 
 ## 12. Learnable routing and minimal differentiable query graphs
 
@@ -1001,6 +1078,9 @@ Implemented and verified in the current prototype:
 - delayed evidence-backed link/split proposals with observation thresholds,
   gain thresholds, cooldown hysteresis, persistent review state, and explicit
   accept/reject application;
+- independently selectable QPP1 allocation, QPP2 progressive local folding,
+  and model-facing search recommendations, with folded candidates preserved in
+  the Active Graph rather than discarded;
 - Pi RPC regression tests, initial LongMemEval development runs, and scale
   experiments.
 - local quality automation for type checking, ESLint, Prettier verification,
@@ -1022,13 +1102,19 @@ Important gaps between the prototype and the target plugin:
   and false-promotion evaluation are stronger;
 - `MemoryGraphReasoner` remains a numerical Lab prototype that scores the
   global unvisited candidate set rather than following graph edges;
-- the differentiable controller remains shadow-observed for automatic recall;
-  an explicit `nmg_search` without a caller-specified limit may use a disposable
-  lexical probe and a bounded learned budget to widen that one retrieval only;
-  ordinary explicit recall stays in a 20-record / 6k-token tier, while a
-  learned `expand` decision may enter a 50-record / 10k-token Active Graph;
-  it has not passed the matched quality/cost gate required to affect production
-  retrieval;
+- QPP1, QPP2, and search recommendation are now independently wired, but none
+  has passed its production gate. QPP1 budget prediction correlated poorly
+  with the oracle Fibonacci tier in the full LoCoMo audit; QPP2 scores are
+  listwise rather than absolutely calibrated; and the cost/benefit of asking
+  the model to search again has not been measured. QPP1 therefore defaults to
+  shadow, QPP2 to off, and the advisory only recommends rather than invokes;
+- QPP2 folding is lossless at the store/Active-Graph layer but not necessarily
+  lossless for the model: a needed candidate can remain folded unless the model
+  explicitly unfolds the directory. A matched end-to-end test must measure
+  answer quality, evidence use, extra tool calls, tokens, and latency;
+- the claim-level posterior outcome loop in section 5a remains design-only.
+  Retrieval/use/outcome events exist, but independent-task Beta-style counters
+  do not yet update claim confidence or retrieval ranking;
 - the ANN experiment has unacceptable recall on the near-duplicate workload;
 - automatic extraction evaluation and the matched full-history sample are not
   yet large enough to make a product-quality claim;
@@ -1080,9 +1166,9 @@ product value. If Graph does not beat Lite, graph adaptation remains a Lab
 feature. If a learned router does not beat deterministic routing, it remains
 optional.
 
-Current development evidence (updated 2026-07-26):
+Current development evidence (updated 2026-07-29):
 
-- 213 automated tests cover UOp autodiff, the differentiable controller,
+- 275 automated tests cover UOp autodiff, the differentiable controller,
   hierarchical activation, the retained memory-graph reasoner prototype,
   reasoning-workspace persistence and checkpoint injection, P3 lifecycle,
   budget enforcement, actual-use activation, independent-task deduplication,
@@ -1306,6 +1392,11 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
    UOp autodiff engine and serializable multi-head controller for node, edge,
    STOP/EXPAND, and budget decisions. Activation in the Pi retrieval path remains
    gated on a fixed feature contract and matched evidence-recall/cost evaluation.
+7. **Mechanism complete, production gate open:** independently selectable QPP1
+   allocation, QPP2 progressive folding, and search recommendation are wired
+   through the Pi adapter. QPP2 preserves folded candidates in the Active Graph.
+   Calibration, matched answer-quality/cost evaluation, and safe default
+   promotion are not complete.
 
 ### P4: selective reasoning workspace
 
@@ -1333,6 +1424,28 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 2. Add optional encrypted cloud synchronization only after the local protocol
    and multi-device conflict semantics are specified.
 
+### Immediate validation order
+
+The next work should reduce uncertainty rather than add another subsystem:
+
+1. Run a small matched Pi experiment over the same fixed questions with QPP
+   controls independently ablated: deterministic, QPP1 active, QPP2 active,
+   recommendation active, and the combined path. Record evidence recall,
+   answers, tool-call count, injected tokens, and end-to-end latency.
+2. Calibrate QPP1 against oracle evidence depth and QPP2 against evidence
+   retention. Do not promote either default merely because a larger pool raises
+   raw recall.
+3. Test whether the model follows one search recommendation when useful,
+   ignores it when unnecessary, and stops after an unproductive search.
+4. Implement the claim outcome posterior from section 5a only after the
+   existing use/outcome events can be attributed to independent tasks without
+   self-reinforcement.
+5. Harden the plugin boundary: add an installable Pi package manifest, validate
+   the Pi session-entry schema, document the single-writer concurrency model,
+   and expose user-facing delete/export.
+6. Keep ANN, unattended topology mutation, cloud sync, and automatic reasoning
+   workspace activation deferred until their measured prerequisite appears.
+
 ## 17. Remaining design questions
 
 - Can a future deterministic gate identify the narrow tasks that benefit from
@@ -1359,6 +1472,12 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 - How should an Active Graph allocate token, node, edge, evidence, graph-hop,
   local-tier, and latency budgets, and what marginal-gain rule should stop its
   expansion?
+- How should QPP1 depth and QPP2 retained mass be calibrated from independent
+  outcome evidence rather than benchmark labels or the controller's own prior
+  selections?
+- When a QPP recommendation is emitted, what bounded policy prevents repeated
+  low-value searches while still allowing a genuinely multi-part query to
+  continue?
 - Can a consolidated LTG relation be demoted or reopened when later evidence
   changes its scope, and how is that transition audited?
 - Which rare safety/user constraints must remain pinned regardless of access
