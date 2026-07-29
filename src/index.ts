@@ -6,6 +6,18 @@ export { configuredProvider, createEmbeddingClientFromEnv } from "./core/embeddi
 export type { EmbeddingClient, EmbeddingProvider } from "./core/embedding-provider.ts";
 export { syncRecordEmbeddings } from "./core/embedding-sync.ts";
 export type { RecordEmbeddingClient, RecordEmbeddingSyncResult } from "./core/embedding-sync.ts";
+export {
+  configuredGraphHops,
+  configuredQpp1Mode,
+  configuredQpp2Mode,
+  configuredQpp2RetainedMass,
+  configuredSearchRecommendationMode,
+} from "./integration/config.ts";
+export type { QppActuationMode, SearchRecommendationMode } from "./integration/config.ts";
+export { retainEvidence } from "./integration/evidence.ts";
+export type { AgentHistoryMessage, AgentHistorySnapshot } from "./integration/evidence.ts";
+export { searchMemoryContext } from "./integration/search.ts";
+export type { QueryEmbeddingClient } from "./integration/search.ts";
 export { UsearchAnnIndex } from "./core/ann.ts";
 export { decideMemoryLoad } from "./core/gate.ts";
 export { normalizeClaims } from "./core/claims.ts";

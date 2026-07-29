@@ -75,8 +75,9 @@ NMG follows these principles:
 | Component            | Responsibilities                                                                                                                                                                          |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Base model           | Identify candidate facts/preferences/constraints, summarize, reformulate queries, decide whether more evidence is needed, propose semantic relations or splits, and synthesize an answer. |
-| Pi harness           | Run the model/tool loop, expose session lifecycle events, preserve current-turn execution state, and provide context/tool integration points.                                             |
-| NMG Pi plugin        | Capture sessions, enforce memory policy, request an Active Graph projection, inject resident/cue/selected context, expose the small memory API, and schedule background maintenance.      |
+| Agent harness        | Run the model/tool loop, expose session lifecycle events, preserve current-turn execution state, and provide context/tool integration points.                                             |
+| Harness adapter      | Translate native messages and lifecycle events into NMG integration contracts, register tools, and inject returned context. It contains no retrieval or storage policy.                   |
+| NMG integration      | Apply shared configuration, retain admitted source evidence, run hybrid retrieval, and expose an Agent-independent application boundary.                                                  |
 | NMG core             | Maintain stable IDs, provenance, STG/LTG lifecycle, time/scope/state invariants, Active Graph budgets, semantic organization, consolidation signals, and rebuildable indexes.             |
 | SQLite/index backend | Provide transactions, WAL/crash recovery, FTS, versioned records, dirty queues, content hashes, and physical index/cache persistence.                                                     |
 | Optional learner     | Learn query-to-node/leaf scores, edge usefulness, expansion depth, or stopping policy from labelled retrieval outcomes. It does not own persistent topology.                              |
@@ -148,6 +149,40 @@ processor is unavailable. This permits a TypeScript default implementation and
 future Rust, Python, ONNX, or hosted processors without changing the Pi tool
 contract. Cross-language acceleration is an extension point, not a current
 requirement; it is justified only by profiling a stable component.
+
+### 4.2 Modular harness adapters
+
+The TypeScript prototype is split by responsibility before introducing the
+stdio process boundary:
+
+```text
+Agent-specific adapter
+  |- native message -> AgentHistorySnapshot
+  |- native lifecycle -> recall/write/feedback calls
+  |- native tool schema and result formatting
+  `- prompt/context injection
+                |
+                v
+Agent-independent integration modules
+  |- config: environment and feature-mode parsing
+  |- evidence: selective source-message retention
+  `- search: lexical/hybrid retrieval with explicit degradation
+                |
+                v
+NMG core + SQLite
+```
+
+An adapter must provide stable session and message IDs, normalized actors and
+text, an optional source reference, and lifecycle hooks for pre-turn recall,
+post-turn feedback, and shutdown. It must not parse SQLite rows, update graph
+topology, implement QPP, or construct embedding indexes. Pi is the first
+adapter, not part of the NMG data model.
+
+The current in-process TypeScript adapter is a transition step. The same
+integration contracts will back `nmg serve --stdio`; moving them out of the Pi
+extension now prevents the future CLI from copying Pi-specific policy. No
+Rust/Python implementation is planned unless profiling later identifies a
+component that cannot meet its budget in TypeScript.
 
 ## 5. Core data model
 
@@ -978,11 +1013,11 @@ affirmative/negative sentence twins) confirmed this is not model-specific.
 For every embedding model tested, a negated sentence's top-1 neighbour is its
 own affirmative twin, not another negation:
 
-| Model | twin-as-top1 | cos(neg, twin) | cos(neg, best other neg) |
-| --- | ---: | ---: | ---: |
-| bge-small-en-v1.5 | 9/10 | 0.823 | 0.671 |
-| Qwen3-Embedding-0.6B | 10/10 | 0.861 | 0.556 |
-| gemini-embedding-001 | 10/10 | 0.881 | 0.654 |
+| Model                | twin-as-top1 | cos(neg, twin) | cos(neg, best other neg) |
+| -------------------- | -----------: | -------------: | -----------------------: |
+| bge-small-en-v1.5    |         9/10 |          0.823 |                    0.671 |
+| Qwen3-Embedding-0.6B |        10/10 |          0.861 |                    0.556 |
+| gemini-embedding-001 |        10/10 |          0.881 |                    0.654 |
 
 Negation is encoded as topic noise, not as a logical flip, across small,
 mid-size, and production API embedders alike. Logical polarity must therefore
@@ -1004,10 +1039,10 @@ neighbours. Findings:
   the basic homepage route with Flask" extracted as
   `affirmative / user_implemented_homepage_route_with_flask` and msg-58
   "I've never written any Flask routes..." as `negative /
-  user_written_flask_routes`. After key canonicalisation (below) both land on
+user_written_flask_routes`. After key canonicalisation (below) both land on
   one `predicate_key` with opposite polarities, so contradiction detection
   becomes `SELECT ... WHERE a.predicate_key = b.predicate_key AND a.polarity
-  <> b.polarity` — zero embedding math at query time.
+<> b.polarity` — zero embedding math at query time.
 - **LLM predicate keys are not canonical across paraphrases.** A single-pass
   extractor produced `user_implemented_homepage_route_with_flask` vs
   `user_written_flask_routes` for the same fact and the join missed. A second

@@ -15,7 +15,8 @@
   "files": [
     "extensions/nmg.ts",
     ".pi/extensions/nmg/index.ts",
-    "src/core/"
+    "src/core/",
+    "src/integration/"
   ],
   "scripts": {
     "check": "tsc --noEmit",

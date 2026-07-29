@@ -9,10 +9,17 @@ import { Type } from "typebox";
 import { decideMemoryLoad } from "../../../src/core/gate.ts";
 import { ControllerRuntime } from "../../../src/core/controller-runtime.ts";
 import { syncRecordEmbeddings } from "../../../src/core/embedding-sync.ts";
+import { createEmbeddingClientFromEnv } from "../../../src/core/embedding-provider.ts";
 import {
-  createEmbeddingClientFromEnv,
-  type EmbeddingClient,
-} from "../../../src/core/embedding-provider.ts";
+  configuredGraphHops,
+  configuredQpp1Mode,
+  configuredQpp2Mode,
+  configuredQpp2RetainedMass,
+  configuredSearchRecommendationMode,
+  type SearchRecommendationMode,
+} from "../../../src/integration/config.ts";
+import { retainEvidence, type AgentHistoryMessage } from "../../../src/integration/evidence.ts";
+import { searchMemoryContext } from "../../../src/integration/search.ts";
 import { deriveUsedMemoryIds } from "../../../src/core/feedback.ts";
 import { NmgStore } from "../../../src/core/store.ts";
 import {
@@ -68,109 +75,6 @@ function saveReasoningWorkspace(workspace: ReasoningWorkspace): void {
   const temporaryPath = `${path}.tmp`;
   writeFileSync(temporaryPath, `${JSON.stringify(workspace.toJSON(), null, 2)}\n`);
   renameSync(temporaryPath, path);
-}
-
-type QueryEmbeddingClient = Pick<EmbeddingClient, "embedQueries" | "indexId">;
-
-export async function searchMemoryContext(
-  memoryStore: NmgStore,
-  embeddingClient: QueryEmbeddingClient | undefined,
-  query: string,
-  options: Parameters<NmgStore["searchContext"]>[1],
-): Promise<MemoryContext> {
-  const vectorGranularity = options?.vectorGranularity ?? "records";
-  // A controller probe only needs cheap lexical candidate statistics. It must
-  // not spend a second embedding request before the committed search.
-  if (!embeddingClient || options?.retrievalMode === "fts5") {
-    return {
-      ...memoryStore.searchContext(query, { ...options, retrievalMode: "fts5" }),
-      retrieval: { mode: "lexical", degraded: false },
-    };
-  }
-  const indexHealth = memoryStore.embeddingIndexHealth(embeddingClient.indexId);
-  if (!indexHealth?.lastSucceededAt) {
-    return {
-      ...memoryStore.searchContext(query, { ...options, retrievalMode: "fts5" }),
-      retrieval: {
-        mode: "lexical",
-        degraded: true,
-        reason: "embedding_index_not_ready",
-      },
-    };
-  }
-  const requiredTargets: Array<"nodes" | "leaves" | "records"> =
-    vectorGranularity === "records"
-      ? ["records"]
-      : vectorGranularity === "hierarchy"
-        ? ["nodes", "leaves"]
-        : ["nodes", "leaves", "records"];
-  if (requiredTargets.some((target) => !indexHealth.targets.includes(target))) {
-    return {
-      ...memoryStore.searchContext(query, { ...options, retrievalMode: "fts5" }),
-      retrieval: {
-        mode: "lexical",
-        degraded: true,
-        reason: "embedding_index_missing_targets",
-      },
-    };
-  }
-  let queryVector: number[];
-  try {
-    const vectors = await embeddingClient.embedQueries([query]);
-    if (!vectors[0]?.length) throw new Error("embedding provider returned no query vector");
-    queryVector = vectors[0];
-  } catch {
-    return {
-      ...memoryStore.searchContext(query, { ...options, retrievalMode: "fts5" }),
-      retrieval: {
-        mode: "lexical",
-        degraded: true,
-        reason: "embedding_unavailable",
-      },
-    };
-  }
-  return {
-    ...memoryStore.searchContext(
-      query,
-      { ...options, vectorGranularity },
-      {
-        queryVector,
-        model: embeddingClient.indexId,
-      },
-    ),
-    retrieval: { mode: "hybrid", degraded: false },
-  };
-}
-
-export function configuredGraphHops(fallback: number): number {
-  const configured = Number.parseInt(process.env.NMG_GRAPH_HOPS ?? "", 10);
-  return Number.isInteger(configured) ? Math.max(0, Math.min(configured, 3)) : fallback;
-}
-
-export type QppActuationMode = "off" | "shadow" | "active";
-export type SearchRecommendationMode = "off" | "advisory" | "guardrail";
-
-export function configuredQpp1Mode(): QppActuationMode {
-  const configured = parseMode(process.env.NMG_QPP1_MODE, ["off", "shadow", "active"]);
-  if (configured) return configured;
-  if (process.env.NMG_CONTROLLER_SEARCH === "1") return "active";
-  if (process.env.NMG_CONTROLLER_SEARCH === "0") return "shadow";
-  return "shadow";
-}
-
-export function configuredQpp2Mode(): QppActuationMode {
-  return parseMode(process.env.NMG_QPP2_MODE, ["off", "shadow", "active"]) ?? "off";
-}
-
-export function configuredQpp2RetainedMass(): number {
-  const configured = Number(process.env.NMG_QPP2_RETAINED_MASS ?? 0.98);
-  return Number.isFinite(configured) ? Math.max(0, Math.min(configured, 1)) : 0.98;
-}
-
-export function configuredSearchRecommendationMode(): SearchRecommendationMode {
-  return (
-    parseMode(process.env.NMG_SEARCH_RECOMMENDATION, ["off", "advisory", "guardrail"]) ?? "off"
-  );
 }
 
 export default function nmgExtension(pi: ExtensionAPI): void {
@@ -1214,14 +1118,6 @@ export function formatSearchRecommendation(
   );
 }
 
-function parseMode<const T extends string>(
-  value: string | undefined,
-  allowed: readonly T[],
-): T | undefined {
-  const normalized = value?.trim().toLowerCase();
-  return allowed.find((candidate) => candidate === normalized);
-}
-
 function summarizeMessageUsage(messages: readonly unknown[]): {
   inputTokens?: number;
   outputTokens?: number;
@@ -1431,49 +1327,21 @@ function retainCurrentEvidence(
     getSessionFile(): string | undefined;
   },
 ): string | undefined {
-  const exactEvidence = evidence?.trim();
-  if (!exactEvidence) return undefined;
-  const sessionId = sessionManager.getSessionId();
-  const entries = sessionManager.getBranch();
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
+  const messages: AgentHistoryMessage[] = [];
+  for (const entry of sessionManager.getBranch()) {
     if (!entry || typeof entry !== "object") continue;
     const candidate = entry as { id?: unknown; type?: unknown; message?: unknown };
     if (candidate.type !== "message" || typeof candidate.id !== "string") continue;
-    if (historyRole(candidate.message) !== sourceActor) continue;
+    const actor = historyRole(candidate.message);
+    if (!actor) continue;
     const content = rawMessageContent(candidate.message);
-    const evidenceOffset = indexOfEvidence(content, exactEvidence);
-    if (evidenceOffset < 0) continue;
-    const existing = memoryStore.getHistoryBySourceMessage(sessionId, candidate.id);
-    if (existing) return existing.id;
-    return memoryStore.appendHistory({
-      content: retainedEvidenceContent(content, evidenceOffset, exactEvidence.length),
-      role: sourceActor,
-      sessionId,
-      sourceMessageId: candidate.id,
-      sourceRef: sessionManager.getSessionFile(),
-    }).id;
+    if (content) messages.push({ id: candidate.id, actor, content });
   }
-  return undefined;
-}
-
-function indexOfEvidence(content: string, evidence: string): number {
-  const exact = content.indexOf(evidence);
-  return exact >= 0 ? exact : content.toLocaleLowerCase().indexOf(evidence.toLocaleLowerCase());
-}
-
-function retainedEvidenceContent(content: string, evidenceOffset: number, evidenceLength: number): string {
-  const maxCharacters = 8_192;
-  if (content.length <= maxCharacters) return content;
-  if (evidenceLength >= maxCharacters) {
-    return content.slice(evidenceOffset, evidenceOffset + maxCharacters);
-  }
-  const contextCharacters = Math.floor((maxCharacters - evidenceLength) / 2);
-  const start = Math.max(
-    0,
-    Math.min(evidenceOffset - contextCharacters, content.length - maxCharacters),
-  );
-  return content.slice(start, start + maxCharacters);
+  return retainEvidence(memoryStore, evidence, sourceActor, {
+    sessionId: sessionManager.getSessionId(),
+    sourceRef: sessionManager.getSessionFile(),
+    messages,
+  });
 }
 
 function historyRole(value: unknown): "user" | "assistant" | "tool" | "system" | null {

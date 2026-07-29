@@ -3,15 +3,17 @@ import test from "node:test";
 
 import nmgExtension from "../../../.pi/extensions/nmg/index.ts";
 import {
+  formatSearchRecommendation,
+  formatSearchHeaders,
+} from "../../../.pi/extensions/nmg/index.ts";
+import {
+  configuredGraphHops,
   configuredQpp1Mode,
   configuredQpp2Mode,
   configuredQpp2RetainedMass,
   configuredSearchRecommendationMode,
-  configuredGraphHops,
-  formatSearchRecommendation,
-  formatSearchHeaders,
-  searchMemoryContext,
-} from "../../../.pi/extensions/nmg/index.ts";
+} from "../../../src/integration/config.ts";
+import { searchMemoryContext } from "../../../src/integration/search.ts";
 import { NmgStore } from "../../../src/core/store.ts";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -157,8 +159,14 @@ test("session capture retains only evidence admitted by governed memory writes",
         rows.map((row) => row.source_message_id),
         ["message-tool", "message-user"],
       );
-      assert.equal(rows.some((row) => row.role === "session" || row.role === "assistant"), false);
-      assert.equal(rows.find((row) => row.role === "user")?.content, branch[0]?.message.content[0]?.text);
+      assert.equal(
+        rows.some((row) => row.role === "session" || row.role === "assistant"),
+        false,
+      );
+      assert.equal(
+        rows.find((row) => row.role === "user")?.content,
+        branch[0]?.message.content[0]?.text,
+      );
       const retainedTool = rows.find((row) => row.role === "tool")?.content ?? "";
       assert.match(retainedTool, /ERROR E42 dependency mismatch/);
       assert.ok(retainedTool.length <= 8_192);

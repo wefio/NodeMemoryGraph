@@ -1,6 +1,11 @@
 # Node Memory Graph (NMG)
 
-NMG is a local-first long-term memory layer for the [Pi agent harness](https://github.com/earendil-works/pi). It stores mutable semantic memory over immutable evidence and retrieves a small, progressively deeper subset instead of flattening all history into one global prompt.
+NMG is a local-first long-term memory layer with modular harness adapters. The
+first adapter targets the [Pi agent harness](https://github.com/earendil-works/pi),
+while Agent-independent integration modules own evidence admission, retrieval,
+and configuration. NMG stores mutable semantic memory over immutable evidence
+and retrieves a small, progressively deeper subset instead of flattening all
+history into one global prompt.
 
 The current prototype focuses on the semantic memory contract before storage
 optimization:
