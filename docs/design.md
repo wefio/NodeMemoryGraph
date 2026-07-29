@@ -133,44 +133,32 @@ nmg remember ...
 nmg search ... --json
 nmg get ... --json
 nmg status --json
-nmg serve --stdio
-nmg stop
+nmg daemon start
+nmg daemon status
+nmg daemon stop
 ```
 
-One-shot commands are for people, scripts, diagnostics, and harnesses that
-cannot keep a process alive. Pi should normally use `nmg serve --stdio` and
-exchange versioned NDJSON messages so the bounded in-memory working set,
+One-shot commands remain useful for people and diagnostics. Harnesses normally
+connect to the resident gRPC service so the bounded in-memory working set,
 session/STG state, Active Graph continuations, node directory, and hot caches
-survive across tool calls. SQLite may open lazily on first durable read/write;
-large indexes and optional processors should load only when requested.
+survive across calls. The daemon uses binary Protocol Buffers over an
+OS-assigned `127.0.0.1` port, giving Windows, macOS, and Linux one transport
+implementation. SQLite opens lazily on first durable work.
 
 Resident instances use a PID lease scoped to the selected SQLite database.
-Starting a second instance for the same database is rejected; stale leases are
-recovered on the next start. Harnesses that own stdio send the protocol
-`shutdown` request, while people and Skills may use `nmg stop` with the same
-data directory to terminate a detached process.
+The lease records the loopback endpoint and a random bearer token. Starting a
+second daemon for the same database is rejected, stale leases are recovered,
+and `Shutdown` performs the normal close path. PID termination is only a
+fallback when the gRPC endpoint cannot be reached.
 
-Protocol version `nmg/1` keeps stdout machine-readable, writes diagnostics to stderr,
-publish a protocol version and capability list, and degrade when an optional
-processor is unavailable. This permits a TypeScript default implementation and
-future Rust, Python, ONNX, or hosted processors without changing the Pi tool
-contract. Cross-language acceleration is an extension point, not a current
-requirement; it is justified only by profiling a stable component.
-
-The implemented methods are `hello`, `status`, `remember`, `search`, `get`, and
-`shutdown`. Every response echoes the request ID and returns either
-`{ok:true,result}` or `{ok:false,error:{code,message}}`. Requests are processed
-sequentially so one resident process safely owns its SQLite connection and
-bounded caches. `status` and `hello` do not create the database; durable
-operations open it lazily. Repository development may run the TypeScript entry
-with Node's type-stripping runtime, while npm packages ship precompiled
-JavaScript because Node intentionally refuses to type-strip dependencies under
-`node_modules`.
+Protocol version `nmg.v1` exposes `Hello`, `Status`, `Remember`, `Search`,
+`Get`, and `Shutdown`. The `.proto` service is the only resident protocol;
+NMG does not maintain a parallel NDJSON or platform-specific socket API.
 
 ### 4.2 Modular harness adapters
 
-The TypeScript prototype is split by responsibility before introducing the
-stdio process boundary:
+The TypeScript prototype is split by responsibility at the gRPC process
+boundary:
 
 ```text
 Agent-specific adapter
@@ -195,11 +183,10 @@ post-turn feedback, and shutdown. It must not parse SQLite rows, update graph
 topology, implement QPP, or construct embedding indexes. Pi is the first
 adapter, not part of the NMG data model.
 
-The current in-process TypeScript adapter is a transition step. The same
-integration contracts will back `nmg serve --stdio`; moving them out of the Pi
-extension now prevents the future CLI from copying Pi-specific policy. No
-Rust/Python implementation is planned unless profiling later identifies a
-component that cannot meet its budget in TypeScript.
+The current in-process TypeScript Pi adapter is a transition step. It should
+become a thin gRPC lifecycle/tool adapter without copying Pi-specific policy
+into NMG core. No Rust/Python implementation is planned unless profiling later
+identifies a component that cannot meet its budget in TypeScript.
 
 ## 5. Core data model
 
@@ -1590,10 +1577,9 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
    records at add/turn boundaries, and retain FTS/exact as the
    zero-configuration and not-yet-ready fallback. Node/leaf-only and the
    current union ranker are explicitly gated off after the LoCoMo ablation.
-5. **Target:** expose the same application boundary through an
-   agent-independent `nmg` CLI and a versioned `nmg serve --stdio` protocol;
-   reduce the Pi extension to a lifecycle/tool adapter after protocol parity is
-   demonstrated.
+5. **Complete at CLI boundary:** expose the application boundary through an
+   agent-independent `nmg` CLI and cross-platform `nmg.v1` gRPC daemon.
+   Remaining work is reducing the Pi extension to a lifecycle/tool adapter.
 
 ### P1: incremental correctness and fair evaluation
 

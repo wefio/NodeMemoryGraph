@@ -1,17 +1,21 @@
+import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 
 import {
-  NMG_PROTOCOL_VERSION,
   type NmgGetParams,
   type NmgMethod,
   type NmgRememberParams,
-  type NmgRequest,
-  type NmgResponse,
   type NmgSearchParams,
 } from "./protocol.ts";
-import { acquireServerLease, stopServer } from "./lifecycle.ts";
+import { callGrpc, serveGrpc } from "./grpc.ts";
+import {
+  acquireServerLease,
+  isProcessAlive,
+  readServerState,
+  serverStatePath,
+  stopServer,
+} from "./lifecycle.ts";
 import { NmgService } from "./service.ts";
-import { serveStdio } from "./stdio.ts";
 
 const USAGE = `NMG command line
 
@@ -20,8 +24,7 @@ Usage:
   nmg remember STATEMENT --node NAME [options] [--json]
   nmg search QUERY [options] [--json]
   nmg get MEMORY_ID... [--graph-hops N] [--json]
-  nmg serve --stdio [--data-dir DIR | --db FILE]
-  nmg stop [--data-dir DIR | --db FILE] [--json]
+  nmg daemon start|status|stop [--data-dir DIR | --db FILE] [--json]
 
 Common options:
   --data-dir DIR             NMG data directory (default: NMG_DATA_DIR or .nmg)
@@ -52,7 +55,7 @@ Search options:
   --vector-granularity MODE  hierarchy, records, or union
   --second-pass              Enable progressive QPP recall
 `;
-const ALL_FLAGS = new Set(["include-historical", "json", "second-pass", "stdio"]);
+const ALL_FLAGS = new Set(["include-historical", "json", "second-pass"]);
 const ALL_OPTIONS = new Set([
   "actor",
   "data-dir",
@@ -106,15 +109,11 @@ export async function runCli(
     dataDirectory: parsed.dataDirectory,
     databasePath: parsed.databasePath,
   });
-  if (parsed.command === "stop") {
+  if (isDaemonCommand(parsed.command)) {
     try {
-      const result = await stopServer(service.databasePath);
+      const result = await runDaemonCommand(parsed.command, service);
       io.stdout.write(
-        parsed.json
-          ? `${JSON.stringify(result, null, 2)}\n`
-          : result.stopped
-            ? `Stopped NMG server pid ${result.pid}.\n`
-            : `NMG server is not running (${result.reason}).\n`,
+        parsed.json ? `${JSON.stringify(result, null, 2)}\n` : humanDaemonResult(result),
       );
       return 0;
     } catch (error) {
@@ -124,95 +123,154 @@ export async function runCli(
       service.close();
     }
   }
-  if (parsed.command === "serve") {
-    if (!parsed.stdio) {
-      io.stderr.write("serve currently requires --stdio\n");
-      service.close();
-      return 2;
-    }
-    let lease;
-    try {
-      lease = acquireServerLease(service.databasePath);
-    } catch (error) {
-      service.close();
-      io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-      return 1;
-    }
-    const stopOnSignal = () => {
-      lease.release();
-      service.close();
-      process.exit(0);
-    };
-    process.once("SIGINT", stopOnSignal);
-    process.once("SIGTERM", stopOnSignal);
-    try {
-      await serveStdio(service);
-      return 0;
-    } finally {
-      process.off("SIGINT", stopOnSignal);
-      process.off("SIGTERM", stopOnSignal);
-      lease.release();
-    }
-  }
 
   try {
-    const request: NmgRequest = {
-      protocol: NMG_PROTOCOL_VERSION,
-      id: "cli",
-      method: parsed.command,
-      params: parsed.params,
-    };
-    const response = await service.dispatch(request);
-    if (!response.ok) {
-      io.stderr.write(`${response.error.code}: ${response.error.message}\n`);
-      return 1;
-    }
-    io.stdout.write(
-      parsed.json ? `${JSON.stringify(response.result, null, 2)}\n` : humanResult(response),
-    );
+    const state = readServerState(serverStatePath(service.databasePath));
+    const result =
+      state?.transport === "grpc" && isProcessAlive(state.pid)
+        ? await callGrpc(state, parsed.command, (parsed.params ?? {}) as Record<string, unknown>)
+        : await service.invoke(parsed.command, parsed.params);
+    io.stdout.write(parsed.json ? `${JSON.stringify(result, null, 2)}\n` : humanResult(result));
     return 0;
+  } catch (error) {
+    io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
   } finally {
     service.close();
   }
 }
 
+async function runDaemonCommand(
+  command: DaemonCommand,
+  service: NmgService,
+): Promise<Record<string, unknown>> {
+  const statePath = serverStatePath(service.databasePath);
+  const existing = readServerState(statePath);
+
+  if (command === "daemon-status") {
+    if (!existing || !isProcessAlive(existing.pid) || existing.transport !== "grpc") {
+      return { running: false };
+    }
+    const status = await callGrpc(existing, "status");
+    return { running: true, pid: existing.pid, endpoint: `${existing.host}:${existing.port}`, status };
+  }
+
+  if (command === "daemon-stop") {
+    if (existing?.transport === "grpc" && isProcessAlive(existing.pid)) {
+      await callGrpc(existing, "shutdown");
+      await waitForProcessExit(existing.pid);
+      return { stopped: true, pid: existing.pid };
+    }
+    return stopServer(service.databasePath);
+  }
+
+  if (command === "daemon-start") {
+    if (existing && isProcessAlive(existing.pid)) {
+      return { started: false, alreadyRunning: true, pid: existing.pid };
+    }
+    const entrypoint = process.argv[1];
+    if (!entrypoint) throw new Error("cannot locate the NMG CLI entrypoint");
+    const child = spawn(
+      process.execPath,
+      [...process.execArgv, entrypoint, "daemon", "run", "--db", service.databasePath],
+      {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      },
+    );
+    child.unref();
+    const state = await waitForGrpcState(statePath);
+    await callGrpc(state, "hello");
+    return {
+      started: true,
+      pid: state.pid,
+      endpoint: `${state.host}:${state.port}`,
+    };
+  }
+
+  const lease = acquireServerLease(service.databasePath);
+  const stopOnSignal = () => {
+    lease.release();
+    service.close();
+    process.exit(0);
+  };
+  process.once("SIGINT", stopOnSignal);
+  process.once("SIGTERM", stopOnSignal);
+  try {
+    await serveGrpc(service, lease);
+    return { stopped: true };
+  } finally {
+    process.off("SIGINT", stopOnSignal);
+    process.off("SIGTERM", stopOnSignal);
+    lease.release();
+  }
+}
+
+async function waitForGrpcState(statePath: string) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const state = readServerState(statePath);
+    if (state?.transport === "grpc" && state.port && state.token) return state;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+  }
+  throw new Error("NMG daemon did not become ready");
+}
+
+async function waitForProcessExit(pid: number): Promise<void> {
+  for (let attempt = 0; attempt < 100 && isProcessAlive(pid); attempt += 1) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+  }
+  if (isProcessAlive(pid)) throw new Error(`NMG daemon pid ${pid} did not stop`);
+}
+
+type DaemonCommand = "daemon-run" | "daemon-start" | "daemon-status" | "daemon-stop";
+
+function isDaemonCommand(command: ParsedArguments["command"]): command is DaemonCommand {
+  return command.startsWith("daemon-");
+}
+
 interface ParsedArguments {
-  command: NmgMethod | "help" | "serve" | "stop";
+  command: NmgMethod | DaemonCommand | "help";
   params?: NmgRememberParams | NmgSearchParams | NmgGetParams;
   json: boolean;
-  stdio: boolean;
   dataDirectory?: string;
   databasePath?: string;
 }
 
 function parseArguments(argv: readonly string[]): ParsedArguments {
   if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) {
-    return { command: "help", json: false, stdio: false };
+    return { command: "help", json: false };
   }
   const [command, ...rest] = argv;
-  if (!["status", "remember", "search", "get", "serve", "stop"].includes(command!)) {
+  if (!["status", "remember", "search", "get", "daemon"].includes(command!)) {
     throw new Error(`unknown command: ${command}`);
   }
-  const values = parseOptions(rest);
+  const daemonAction = command === "daemon" ? rest[0] : undefined;
+  if (
+    command === "daemon" &&
+    !["run", "start", "status", "stop"].includes(daemonAction ?? "")
+  ) {
+    throw new Error("daemon requires start, status, or stop");
+  }
+  const values = parseOptions(command === "daemon" ? rest.slice(1) : rest);
   const common = {
-    command: command as ParsedArguments["command"],
+    command:
+      command === "daemon"
+        ? (`daemon-${daemonAction}` as DaemonCommand)
+        : (command as ParsedArguments["command"]),
     json: values.flags.has("json"),
-    stdio: values.flags.has("stdio"),
     dataDirectory: firstOption(values, "data-dir"),
     databasePath: optionalResolvedPath(firstOption(values, "db")),
   };
+  if (command === "daemon") {
+    assertAllowed(values, ["data-dir", "db"], daemonAction === "run" ? [] : ["json"]);
+    rejectPositionals(values, "daemon");
+    return common;
+  }
   switch (command) {
     case "status":
       assertAllowed(values, ["data-dir", "db"], ["json"]);
       rejectPositionals(values, "status");
-      return common;
-    case "serve":
-      assertAllowed(values, ["data-dir", "db"], ["stdio"]);
-      rejectPositionals(values, "serve");
-      return common;
-    case "stop":
-      assertAllowed(values, ["data-dir", "db"], ["json"]);
-      rejectPositionals(values, "stop");
       return common;
     case "remember":
       assertAllowed(
@@ -427,9 +485,8 @@ function compactObject(value: Record<string, unknown>): Record<string, unknown> 
   return Object.fromEntries(Object.entries(value).filter((entry) => entry[1] !== undefined));
 }
 
-function humanResult(response: NmgResponse): string {
-  if (!response.ok) return "";
-  const result = response.result as Record<string, unknown>;
+function humanResult(value: unknown): string {
+  const result = value as Record<string, unknown>;
   if ("memory" in result) {
     const memory = result.memory as { id: string };
     const node = result.node as { canonicalName: string };
@@ -473,7 +530,15 @@ function humanResult(response: NmgResponse): string {
       )
       .join("\n")}\n`;
   }
-  return `${JSON.stringify(response.result, null, 2)}\n`;
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+function humanDaemonResult(result: Record<string, unknown>): string {
+  if (result.started) return `Started NMG daemon pid ${String(result.pid)} at ${String(result.endpoint)}.\n`;
+  if (result.alreadyRunning) return `NMG daemon is already running (pid ${String(result.pid)}).\n`;
+  if (result.running) return `NMG daemon pid ${String(result.pid)} is running at ${String(result.endpoint)}.\n`;
+  if (result.stopped) return `Stopped NMG daemon pid ${String(result.pid ?? "")}.\n`;
+  return "NMG daemon is not running.\n";
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) {

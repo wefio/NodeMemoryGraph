@@ -8,13 +8,18 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 
-interface ServerState {
+export interface ServerState {
   pid: number;
   startedAt: string;
+  transport?: "grpc";
+  host?: string;
+  port?: number;
+  token?: string;
 }
 
 export interface ServerLease {
   statePath: string;
+  update(state: Partial<Omit<ServerState, "pid" | "startedAt">>): void;
   release(): void;
 }
 
@@ -29,7 +34,7 @@ export function acquireServerLease(databasePath: string): ServerLease {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let descriptor: number;
     try {
-      descriptor = openSync(statePath, "wx");
+      descriptor = openSync(statePath, "wx", 0o600);
     } catch (error) {
       if (!isAlreadyExists(error)) throw error;
       const state = readServerState(statePath);
@@ -49,6 +54,11 @@ export function acquireServerLease(databasePath: string): ServerLease {
     let released = false;
     return {
       statePath,
+      update(update) {
+        if (released) throw new Error("cannot update a released NMG server lease");
+        Object.assign(state, update);
+        writeFileSync(statePath, `${JSON.stringify(state)}\n`, "utf8");
+      },
       release() {
         if (released) return;
         released = true;
@@ -87,18 +97,25 @@ export async function stopServer(databasePath: string): Promise<
   return { stopped: true, pid: state.pid };
 }
 
-function readServerState(statePath: string): ServerState | undefined {
+export function readServerState(statePath: string): ServerState | undefined {
   try {
     const value = JSON.parse(readFileSync(statePath, "utf8")) as Partial<ServerState>;
     return Number.isSafeInteger(value.pid) && Number(value.pid) > 0
-      ? { pid: Number(value.pid), startedAt: String(value.startedAt ?? "") }
+      ? {
+          pid: Number(value.pid),
+          startedAt: String(value.startedAt ?? ""),
+          transport: value.transport === "grpc" ? "grpc" : undefined,
+          host: typeof value.host === "string" ? value.host : undefined,
+          port: Number.isSafeInteger(value.port) ? Number(value.port) : undefined,
+          token: typeof value.token === "string" ? value.token : undefined,
+        }
       : undefined;
   } catch {
     return undefined;
   }
 }
 
-function isProcessAlive(pid: number): boolean {
+export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;

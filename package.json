@@ -18,13 +18,14 @@
   "files": [
     "bin/nmg.mjs",
     "dist/",
+    "proto/",
     "extensions/nmg.ts",
     ".pi/extensions/nmg/index.ts",
     "src/core/",
     "src/integration/"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
     "check": "tsc --noEmit",
     "cli": "node --experimental-strip-types src/cli/main.ts",
     "lint": "eslint src/ .pi/extensions/",
@@ -87,5 +88,9 @@
   },
   "optionalDependencies": {
     "usearch": "2.26.0"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.4",
+    "@grpc/proto-loader": "^0.8.1"
   }
 }

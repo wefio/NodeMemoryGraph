@@ -146,8 +146,9 @@ npm run cli -- status
 npm run cli -- remember "User prefers concise answers" --node "Response preferences" --type preference
 npm run cli -- search "How should answers be written?"
 npm run cli -- get <memory-id>
-npm run cli -- serve --stdio
-npm run cli -- stop
+npm run cli -- daemon start
+npm run cli -- daemon status
+npm run cli -- daemon stop
 ```
 
 Installed packages expose the same commands directly as `nmg`; the published
@@ -157,26 +158,15 @@ for the complete structured result, `--data-dir` to select an NMG data
 directory, or `--db` to select one SQLite file. `remember` requires a stable
 `--node` name; `--scope key=value` is repeatable.
 
-`nmg serve --stdio` is the language-neutral harness boundary. It accepts one
-versioned NDJSON request per line and writes one response per line without
-logging to stdout:
+`nmg daemon start` launches the language-neutral gRPC boundary on an
+OS-assigned loopback port. Requests and responses use binary Protocol Buffers;
+the endpoint and a random local bearer token are recorded beside the selected
+SQLite database. The same implementation runs on Windows, macOS, and Linux.
 
-```json
-{"protocol":"nmg/1","id":1,"method":"hello","params":{}}
-{"protocol":"nmg/1","id":2,"method":"search","params":{"query":"concise answers"}}
-{"protocol":"nmg/1","id":3,"method":"shutdown","params":{}}
-```
-
-Supported methods are `hello`, `status`, `remember`, `search`, `get`, and
-`shutdown`. `hello` publishes the protocol version and capabilities. `status`
-does not create the database, and the resident service opens SQLite lazily on
-the first durable read or write. Optional embedding configuration degrades to
-lexical retrieval when its index is unavailable.
-
-The resident server writes a PID lease beside its SQLite database and rejects
-a second server for the same database. Use `nmg stop` with the same
-`--data-dir` or `--db` to terminate a detached server. Protocol clients that
-own the stdio session should continue to send `shutdown`.
+The service exposes `Hello`, `Status`, `Remember`, `Search`, `Get`, and
+`Shutdown`. It rejects a second daemon for the same database, opens SQLite
+lazily, and removes stale process leases. Use the same `--data-dir` or `--db`
+for daemon and client commands.
 
 SQLite FTS5 is the zero-configuration Pi retrieval path. Set
 `NMG_EMBED_BASE_URL` and `NMG_EMBED_MODEL` to add the external node/leaf semantic

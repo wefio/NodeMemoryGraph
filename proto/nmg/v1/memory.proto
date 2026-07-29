@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package nmg.v1;
+
+import "google/protobuf/struct.proto";
+
+service MemoryService {
+  rpc Hello(Empty) returns (ValueResponse);
+  rpc Status(Empty) returns (ValueResponse);
+  rpc Remember(RememberRequest) returns (ValueResponse);
+  rpc Search(SearchRequest) returns (ValueResponse);
+  rpc Get(GetRequest) returns (ValueResponse);
+  rpc Shutdown(Empty) returns (ValueResponse);
+}
+
+message Empty {}
+
+message ValueResponse {
+  google.protobuf.Struct value = 1;
+}
+
+message RememberRequest {
+  string statement = 1;
+  string node_name = 2;
+  optional string memory_type = 3;
+  optional string state_key = 4;
+  optional string event_time = 5;
+  optional string source_actor = 6;
+  optional string truth_status = 7;
+  optional string evidence = 8;
+  optional uint32 tier = 9;
+  optional double importance = 10;
+  map<string, string> scope = 11;
+  optional string valid_from = 12;
+  optional string valid_until = 13;
+  optional string evidence_role = 14;
+  optional string supersedes_id = 15;
+  optional string residence = 16;
+  optional string expires_at = 17;
+  optional string write_reason = 18;
+  optional string session_id = 19;
+  optional string source_ref = 20;
+}
+
+message SearchRequest {
+  string query = 1;
+  optional string node_name = 2;
+  map<string, string> scope = 3;
+  optional string source_actor = 4;
+  optional bool include_historical = 5;
+  optional uint32 max_tier = 6;
+  optional uint32 limit = 7;
+  optional uint32 graph_hops = 8;
+  optional string retrieval_mode = 9;
+  optional string vector_granularity = 10;
+  optional bool second_pass = 11;
+}
+
+message GetRequest {
+  repeated string memory_ids = 1;
+  optional uint32 graph_hops = 2;
+}

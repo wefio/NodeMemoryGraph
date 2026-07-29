@@ -9,7 +9,7 @@ import type {
   TruthStatus,
 } from "../core/types.ts";
 
-export const NMG_PROTOCOL_VERSION = "nmg/1" as const;
+export const NMG_PROTOCOL_VERSION = "nmg.v1" as const;
 
 export const NMG_CAPABILITIES = [
   "hello",
@@ -18,37 +18,13 @@ export const NMG_CAPABILITIES = [
   "search",
   "get",
   "shutdown",
+  "grpc",
+  "protobuf",
   "lexical-retrieval",
   "optional-embedding-retrieval",
 ] as const;
 
 export type NmgMethod = "get" | "hello" | "remember" | "search" | "shutdown" | "status";
-
-export interface NmgRequest {
-  protocol: typeof NMG_PROTOCOL_VERSION;
-  id: string | number | null;
-  method: NmgMethod;
-  params?: unknown;
-}
-
-export interface NmgSuccessResponse {
-  protocol: typeof NMG_PROTOCOL_VERSION;
-  id: string | number | null;
-  ok: true;
-  result: unknown;
-}
-
-export interface NmgErrorResponse {
-  protocol: typeof NMG_PROTOCOL_VERSION;
-  id: string | number | null;
-  ok: false;
-  error: {
-    code: string;
-    message: string;
-  };
-}
-
-export type NmgResponse = NmgSuccessResponse | NmgErrorResponse;
 
 export interface NmgHelloResult {
   protocol: typeof NMG_PROTOCOL_VERSION;

@@ -6,7 +6,6 @@ import test from "node:test";
 
 import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
-import { handleLine } from "../../src/cli/stdio.ts";
 
 test("status and hello do not create or open the database", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-status-"));
@@ -54,51 +53,21 @@ test("resident service remembers, searches, and expands exact evidence", async (
   }
 });
 
-test("protocol reports structured parse, version, method, and parameter errors", async () => {
+test("service validates method parameters", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-errors-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
   try {
-    const malformed = await handleLine(service, "{");
-    assert.equal(malformed.ok, false);
-    if (!malformed.ok) assert.equal(malformed.error.code, "PARSE_ERROR");
-
-    const mismatch = await service.dispatch({
-      protocol: "nmg/0" as typeof NMG_PROTOCOL_VERSION,
-      id: 1,
-      method: "hello",
+    await assert.rejects(service.invoke("get", { memoryIds: [] }), {
+      code: "INVALID_PARAMS",
     });
-    assert.equal(mismatch.ok, false);
-    if (!mismatch.ok) assert.equal(mismatch.error.code, "PROTOCOL_MISMATCH");
-
-    const unknown = await service.dispatch({
-      protocol: NMG_PROTOCOL_VERSION,
-      id: 2,
-      method: "unknown" as "hello",
-    });
-    assert.equal(unknown.ok, false);
-    if (!unknown.ok) assert.equal(unknown.error.code, "METHOD_NOT_FOUND");
-
-    const invalid = await service.dispatch({
-      protocol: NMG_PROTOCOL_VERSION,
-      id: 3,
-      method: "get",
-      params: { memoryIds: [] },
-    });
-    assert.equal(invalid.ok, false);
-    if (!invalid.ok) assert.equal(invalid.error.code, "INVALID_PARAMS");
-
-    const invalidState = await service.dispatch({
-      protocol: NMG_PROTOCOL_VERSION,
-      id: 4,
-      method: "remember",
-      params: {
+    await assert.rejects(
+      service.invoke("remember", {
         statement: "The current version is 2.",
         nodeName: "Current version",
         memoryType: "state",
-      },
-    });
-    assert.equal(invalidState.ok, false);
-    if (!invalidState.ok) assert.equal(invalidState.error.code, "INVALID_PARAMS");
+      }),
+      { code: "INVALID_PARAMS" },
+    );
   } finally {
     service.close();
     rmSync(directory, { recursive: true, force: true });
@@ -109,18 +78,14 @@ test("CLI writes pass through the governed memory admission policy", async () =>
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-write-policy-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
   try {
-    const response = await service.dispatch({
-      protocol: NMG_PROTOCOL_VERSION,
-      id: 1,
-      method: "remember",
-      params: {
+    await assert.rejects(
+      service.invoke("remember", {
         statement: "The API key is sk-secret-value-that-must-not-be-stored.",
         nodeName: "Credentials",
         memoryType: "fact",
-      },
-    });
-    assert.equal(response.ok, false);
-    if (!response.ok) assert.equal(response.error.code, "WRITE_REJECTED");
+      }),
+      { code: "WRITE_REJECTED" },
+    );
   } finally {
     service.close();
     rmSync(directory, { recursive: true, force: true });

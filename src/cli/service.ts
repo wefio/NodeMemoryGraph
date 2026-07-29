@@ -28,8 +28,6 @@ import {
   type NmgMethod,
   type NmgMethodResult,
   type NmgRememberParams,
-  type NmgRequest,
-  type NmgResponse,
   type NmgSearchParams,
   type NmgStatusResult,
 } from "./protocol.ts";
@@ -86,29 +84,6 @@ export class NmgService {
 
   get shutdownRequested(): boolean {
     return this.#shutdownRequested;
-  }
-
-  async dispatch(request: NmgRequest): Promise<NmgResponse> {
-    const id = validRequestId(request?.id) ? request.id : null;
-    try {
-      validateRequest(request);
-      const result = await this.invoke(request.method, request.params);
-      return { protocol: NMG_PROTOCOL_VERSION, id, ok: true, result };
-    } catch (error) {
-      const protocolError =
-        error instanceof NmgProtocolError
-          ? error
-          : new NmgProtocolError(
-              "INTERNAL_ERROR",
-              error instanceof Error ? error.message : String(error),
-            );
-      return {
-        protocol: NMG_PROTOCOL_VERSION,
-        id,
-        ok: false,
-        error: { code: protocolError.code, message: protocolError.message },
-      };
-    }
   }
 
   async invoke<M extends NmgMethod>(method: M, params?: unknown): Promise<NmgMethodResult[M]> {
@@ -237,25 +212,6 @@ export class NmgService {
       return this.#environment.NMG_EMBED_PROVIDER?.trim() || null;
     }
   }
-}
-
-function validateRequest(request: NmgRequest): void {
-  if (!request || typeof request !== "object") {
-    throw new NmgProtocolError("INVALID_REQUEST", "request must be an object");
-  }
-  if (request.protocol !== NMG_PROTOCOL_VERSION) {
-    throw new NmgProtocolError("PROTOCOL_MISMATCH", `expected protocol ${NMG_PROTOCOL_VERSION}`);
-  }
-  if (!validRequestId(request.id)) {
-    throw new NmgProtocolError("INVALID_REQUEST", "id must be a string, number, or null");
-  }
-  if (!["hello", "status", "remember", "search", "get", "shutdown"].includes(request.method)) {
-    throw new NmgProtocolError("METHOD_NOT_FOUND", `unknown method: ${String(request.method)}`);
-  }
-}
-
-function validRequestId(value: unknown): value is string | number | null {
-  return value === null || typeof value === "string" || typeof value === "number";
 }
 
 function parseRememberParams(value: unknown): NmgRememberParams {

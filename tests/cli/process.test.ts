@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
 
-import { NMG_PROTOCOL_VERSION, type NmgResponse } from "../../src/cli/protocol.ts";
+import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 
 const root = resolve(import.meta.dirname, "../..");
 const launcher = resolve(root, "bin/nmg.mjs");
@@ -88,139 +88,74 @@ test("packaged launcher rejects unknown options with a usage exit code", () => {
   assert.match(result.stderr, /unknown option: --typo/);
 });
 
-test("stdio server keeps one resident store across multiple NDJSON requests", async () => {
-  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-process-stdio-"));
-  const child = spawn(process.execPath, [launcher, "serve", "--stdio", "--data-dir", directory], {
-    cwd: root,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+test("gRPC daemon starts once, serves CLI requests, and stops cleanly", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-process-grpc-"));
   try {
-    const requests = [
-      { protocol: NMG_PROTOCOL_VERSION, id: 1, method: "hello" },
-      {
-        protocol: NMG_PROTOCOL_VERSION,
-        id: 2,
-        method: "remember",
-        params: {
-          statement: "The CLI resident test uses SQLite.",
-          nodeName: "CLI resident test",
-          memoryType: "fact",
-        },
-      },
-      {
-        protocol: NMG_PROTOCOL_VERSION,
-        id: 3,
-        method: "search",
-        params: { query: "CLI resident SQLite" },
-      },
-      { protocol: NMG_PROTOCOL_VERSION, id: 4, method: "status" },
-      { protocol: NMG_PROTOCOL_VERSION, id: 5, method: "shutdown" },
-    ];
-    child.stdin.end(`${requests.map((request) => JSON.stringify(request)).join("\n")}\n`);
+    const started = runLauncher(["daemon", "start", "--json", "--data-dir", directory]) as {
+      started: boolean;
+      pid: number;
+      endpoint: string;
+    };
+    assert.equal(started.started, true);
+    assert.match(started.endpoint, /^127\.0\.0\.1:\d+$/);
 
-    const [stdout, stderr, exitCode] = await Promise.all([
-      collect(child.stdout),
-      collect(child.stderr),
-      new Promise<number | null>((resolveExit, reject) => {
-        child.on("error", reject);
-        child.on("exit", resolveExit);
-      }),
+    const duplicate = runLauncher(["daemon", "start", "--json", "--data-dir", directory]) as {
+      started: boolean;
+      alreadyRunning: boolean;
+      pid: number;
+    };
+    assert.equal(duplicate.started, false);
+    assert.equal(duplicate.alreadyRunning, true);
+    assert.equal(duplicate.pid, started.pid);
+
+    runLauncher([
+      "remember",
+      "The gRPC daemon keeps one resident NMG service.",
+      "--node",
+      "gRPC daemon",
+      "--type",
+      "fact",
+      "--json",
+      "--data-dir",
+      directory,
     ]);
-    assert.equal(exitCode, 0, stderr);
-    assert.equal(stderr, "");
-    const responses = stdout
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line) as NmgResponse);
-    assert.equal(responses.length, requests.length);
-    assert.ok(responses.every((response) => response.ok));
+    const searched = runLauncher([
+      "search",
+      "resident gRPC service",
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { results: unknown[] };
+    assert.equal(searched.results.length, 1);
 
-    const search = responses[2]!;
-    assert.equal(search.ok, true);
-    if (search.ok) {
-      const result = search.result as { results: unknown[] };
-      assert.equal(result.results.length, 1);
-    }
-    const status = responses[3]!;
-    assert.equal(status.ok, true);
-    if (status.ok) {
-      const result = status.result as { storage: { loaded: boolean } };
-      assert.equal(result.storage.loaded, true);
-    }
+    const status = runLauncher(["daemon", "status", "--json", "--data-dir", directory]) as {
+      running: boolean;
+      pid: number;
+    };
+    assert.equal(status.running, true);
+    assert.equal(status.pid, started.pid);
+
+    const stopped = runLauncher(["daemon", "stop", "--json", "--data-dir", directory]) as {
+      stopped: boolean;
+    };
+    assert.equal(stopped.stopped, true);
+    const stoppedStatus = runLauncher([
+      "daemon",
+      "status",
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { running: boolean };
+    assert.equal(stoppedStatus.running, false);
   } finally {
-    if (child.exitCode === null) child.kill();
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test("resident server rejects duplicates and can be stopped by CLI", async () => {
-  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-process-lifecycle-"));
-  const child = spawn(process.execPath, [launcher, "serve", "--stdio", "--data-dir", directory], {
-    cwd: root,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  try {
-    child.stdin.write(
-      `${JSON.stringify({ protocol: NMG_PROTOCOL_VERSION, id: 1, method: "hello" })}\n`,
-    );
-    await waitForOutput(child.stdout);
-
-    const duplicate = spawnSync(
+    spawnSync(
       process.execPath,
-      [launcher, "serve", "--stdio", "--data-dir", directory],
-      { cwd: root, encoding: "utf8", timeout: 2_000 },
-    );
-    assert.equal(duplicate.status, 1);
-    assert.match(duplicate.stderr, /already running/);
-
-    const stopped = spawnSync(
-      process.execPath,
-      [launcher, "stop", "--json", "--data-dir", directory],
-      { cwd: root, encoding: "utf8", timeout: 5_000 },
-    );
-    assert.equal(stopped.status, 0, stopped.stderr);
-    assert.equal((JSON.parse(stopped.stdout) as { stopped: boolean }).stopped, true);
-    await waitForExit(child);
-
-    const stoppedAgain = spawnSync(
-      process.execPath,
-      [launcher, "stop", "--json", "--data-dir", directory],
+      [launcher, "daemon", "stop", "--json", "--data-dir", directory],
       { cwd: root, encoding: "utf8" },
     );
-    assert.equal(stoppedAgain.status, 0, stoppedAgain.stderr);
-    assert.equal((JSON.parse(stoppedAgain.stdout) as { stopped: boolean }).stopped, false);
-  } finally {
-    if (child.exitCode === null) child.kill();
     rmSync(directory, { recursive: true, force: true });
   }
 });
-
-function collect(stream: NodeJS.ReadableStream): Promise<string> {
-  return new Promise((resolveOutput, reject) => {
-    let output = "";
-    stream.setEncoding("utf8");
-    stream.on("data", (chunk: string) => {
-      output += chunk;
-    });
-    stream.on("end", () => resolveOutput(output));
-    stream.on("error", reject);
-  });
-}
-
-function waitForOutput(stream: NodeJS.ReadableStream): Promise<void> {
-  return new Promise((resolveOutput, reject) => {
-    stream.once("data", () => resolveOutput());
-    stream.once("error", reject);
-  });
-}
-
-function waitForExit(child: ReturnType<typeof spawn>): Promise<number | null> {
-  if (child.exitCode !== null) return Promise.resolve(child.exitCode);
-  return new Promise((resolveExit, reject) => {
-    child.once("error", reject);
-    child.once("exit", resolveExit);
-  });
-}
 
 function runLauncher(args: string[]): unknown {
   const result = spawnSync(process.execPath, [launcher, ...args], {
