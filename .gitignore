@@ -3,6 +3,7 @@ dist/
 coverage/
 .nmg/
 .workbuddy/
+.claude/settings.local.json
 .benchmarks/
 evals/scale/.tmp/
 evals/hierarchy-scale/.tmp/
@@ -38,4 +39,17 @@ evals/snapshots/
 *.tar.gz
 *.zip
 .env
+.env.*
+!.env.example
+!.env.sample
+.venv/
+venv/
 __pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.tmp
+*.tmp.*
+.DS_Store
+Thumbs.db
