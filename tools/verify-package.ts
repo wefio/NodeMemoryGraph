@@ -28,7 +28,7 @@ if (!entry) throw new Error("npm pack did not return a package report");
 const packed = new Set(entry.files.map((file) => normalize(file.path)));
 const visited = new Set<string>();
 const missing = new Set<string>();
-const queue = ["extensions/nmg.ts"];
+const queue = ["extensions/nmg.ts", "bin/nmg.mjs"];
 
 while (queue.length > 0) {
   const relative = normalize(queue.pop()!);
@@ -56,7 +56,7 @@ if (missing.size > 0) {
 }
 
 process.stdout.write(
-  `package closure ok: ${visited.size} runtime TypeScript files, ${packed.size} packed files\n`,
+  `package closure ok: ${visited.size} runtime files, ${packed.size} packed files\n`,
 );
 
 function relativeImports(source: string): string[] {

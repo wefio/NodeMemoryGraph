@@ -238,13 +238,6 @@ export class MemoryGraphReasoner {
     return { nextQuery: qNew, score, gate, retention: beta };
   }
 
-  #scaleVector(v: Float32Array, s: number): Float32Array {
-    const d = this.dimensions;
-    const result = new Float32Array(d);
-    for (let i = 0; i < d; i++) result[i] = v[i]! * s;
-    return result;
-  }
-
   #getOrCreateBiasLogit(nodeId: string): Tensor {
     let b = this.#nodeBiasLogits.get(nodeId);
     if (!b) {

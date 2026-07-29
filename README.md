@@ -136,6 +136,42 @@ pi --no-extensions --extension ./.pi/extensions/nmg/index.ts
 Loading the package manifest, project-local extension, and an explicit
 `--extension` together can register duplicate tools and stall tool loops.
 
+## Agent-independent CLI
+
+The package includes a TypeScript `nmg` executable. During repository
+development, use the equivalent npm command:
+
+```powershell
+npm run cli -- status
+npm run cli -- remember "User prefers concise answers" --node "Response preferences" --type preference
+npm run cli -- search "How should answers be written?"
+npm run cli -- get <memory-id>
+npm run cli -- serve --stdio
+```
+
+Installed packages expose the same commands directly as `nmg`; the published
+CLI runs precompiled JavaScript and does not type-strip files from
+`node_modules`. Use `--json`
+for the complete structured result, `--data-dir` to select an NMG data
+directory, or `--db` to select one SQLite file. `remember` requires a stable
+`--node` name; `--scope key=value` is repeatable.
+
+`nmg serve --stdio` is the language-neutral harness boundary. It accepts one
+versioned NDJSON request per line and writes one response per line without
+logging to stdout:
+
+```json
+{"protocol":"nmg/1","id":1,"method":"hello","params":{}}
+{"protocol":"nmg/1","id":2,"method":"search","params":{"query":"concise answers"}}
+{"protocol":"nmg/1","id":3,"method":"shutdown","params":{}}
+```
+
+Supported methods are `hello`, `status`, `remember`, `search`, `get`, and
+`shutdown`. `hello` publishes the protocol version and capabilities. `status`
+does not create the database, and the resident service opens SQLite lazily on
+the first durable read or write. Optional embedding configuration degrades to
+lexical retrieval when its index is unavailable.
+
 SQLite FTS5 is the zero-configuration Pi retrieval path. Set
 `NMG_EMBED_BASE_URL` and `NMG_EMBED_MODEL` to add the external node/leaf semantic
 signal to the same budgeted Active Graph pipeline. If the endpoint fails or

@@ -12,14 +12,21 @@
       "./extensions/nmg.ts"
     ]
   },
+  "bin": {
+    "nmg": "./bin/nmg.mjs"
+  },
   "files": [
+    "bin/nmg.mjs",
+    "dist/",
     "extensions/nmg.ts",
     ".pi/extensions/nmg/index.ts",
     "src/core/",
     "src/integration/"
   ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "check": "tsc --noEmit",
+    "cli": "node --experimental-strip-types src/cli/main.ts",
     "lint": "eslint src/ .pi/extensions/",
     "lint:fix": "eslint --fix src/ .pi/extensions/",
     "format": "prettier --write \"src/**/*.ts\" \".pi/**/*.ts\"",
@@ -52,6 +59,8 @@
     "index:status": "node --experimental-strip-types scripts/embedding-status.ts",
     "index:ann": "node --experimental-strip-types scripts/build-ann.ts",
     "package:check": "node --experimental-strip-types tools/verify-package.ts",
+    "prepack": "npm run build",
+    "pretest": "npm run build",
     "pi:prompt": "node --experimental-strip-types scripts/pi-control.ts prompt",
     "pi:state": "node --experimental-strip-types scripts/pi-control.ts state",
     "bench:autodiff": "node --experimental-strip-types tools/autodiff-benchmark.ts",

@@ -126,7 +126,7 @@ TypeScript extension, but that extension should translate Pi lifecycle events
 and tools into a stable language-neutral protocol. It must not make the core
 storage or processing implementation TypeScript-specific.
 
-The CLI should support both one-shot administrative use and a resident mode:
+The CLI supports both one-shot administrative use and a resident mode:
 
 ```text
 nmg remember ...
@@ -143,12 +143,22 @@ session/STG state, Active Graph continuations, node directory, and hot caches
 survive across tool calls. SQLite may open lazily on first durable read/write;
 large indexes and optional processors should load only when requested.
 
-The protocol must keep stdout machine-readable, write diagnostics to stderr,
+Protocol version `nmg/1` keeps stdout machine-readable, writes diagnostics to stderr,
 publish a protocol version and capability list, and degrade when an optional
 processor is unavailable. This permits a TypeScript default implementation and
 future Rust, Python, ONNX, or hosted processors without changing the Pi tool
 contract. Cross-language acceleration is an extension point, not a current
 requirement; it is justified only by profiling a stable component.
+
+The implemented methods are `hello`, `status`, `remember`, `search`, `get`, and
+`shutdown`. Every response echoes the request ID and returns either
+`{ok:true,result}` or `{ok:false,error:{code,message}}`. Requests are processed
+sequentially so one resident process safely owns its SQLite connection and
+bounded caches. `status` and `hello` do not create the database; durable
+operations open it lazily. Repository development may run the TypeScript entry
+with Node's type-stripping runtime, while npm packages ship precompiled
+JavaScript because Node intentionally refuses to type-strip dependencies under
+`node_modules`.
 
 ### 4.2 Modular harness adapters
 

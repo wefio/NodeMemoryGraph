@@ -77,7 +77,6 @@ export class Float32VectorCache {
       );
     }
     this.#indices.delete(id);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     this.#ids[last] = undefined as unknown as string;
     this.#length = last;
   }
