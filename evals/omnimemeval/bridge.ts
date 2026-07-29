@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
-import { OpenAIEmbeddingClient } from "../../src/core/openai-embedding.ts";
+import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
 import { syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import type { HistoryRole, MemoryActor, MemoryMarker } from "../../src/core/types.ts";
@@ -160,7 +160,8 @@ export class OmniMemEvalBridge {
     for (const [index, message] of messages.entries()) {
       if (!message || typeof message.content !== "string" || !message.content.trim()) continue;
       const role = historyRole(message.role);
-      const sourceRef = `omnimemeval:${userKey(userId)}:${conversation}:${index}:` +
+      const sourceRef =
+        `omnimemeval:${userKey(userId)}:${conversation}:${index}:` +
         createHash("sha256").update(`${role}\0${message.content}`).digest("hex").slice(0, 16);
       const history = store.appendHistory({
         content: message.content,
@@ -208,7 +209,11 @@ export class OmniMemEvalBridge {
     return { added };
   }
 
-  async #search(userId: string, query: string, topK: number): Promise<{
+  async #search(
+    userId: string,
+    query: string,
+    topK: number,
+  ): Promise<{
     text: string;
     retrievalMode: "lexical" | "records";
     memories: OmniRetrievedMemory[];
@@ -216,29 +221,31 @@ export class OmniMemEvalBridge {
     if (!query.trim()) throw new Error("query must not be empty");
     const limit = Math.max(1, Math.min(Math.trunc(topK || 10), 50));
     const store = this.#store(userId);
-    let semantic:
-      | { queryVector: readonly number[]; model: string }
-      | undefined;
+    let semantic: { queryVector: readonly number[]; model: string } | undefined;
     if (this.#embeddingClient) {
       await this.#syncSemanticIndex(store);
       const [queryVector] = await this.#embeddingClient.embedQueries([query]);
       if (!queryVector) throw new Error("embedding client returned no query vector");
       semantic = { queryVector, model: this.#embeddingClient.indexId };
     }
-    const context = store.searchContext(query, {
-      limit,
-      maxTier: 3,
-      graphHops: 1,
-      vectorGranularity: semantic ? "records" : undefined,
-      sourceActor: prefersAssistantEvidence(query) ? undefined : "user",
-      secondPass: this.#secondPass,
-      initialEvidenceTarget: this.#qppInitialEvidenceTarget,
-      qppThreshold: this.#qppThreshold,
-      activeGraphBudget: {
-        maxEvidence: limit,
-        maxTokens: Math.max(1_000, limit * 300),
+    const context = store.searchContext(
+      query,
+      {
+        limit,
+        maxTier: 3,
+        graphHops: 1,
+        vectorGranularity: semantic ? "records" : undefined,
+        sourceActor: prefersAssistantEvidence(query) ? undefined : "user",
+        secondPass: this.#secondPass,
+        initialEvidenceTarget: this.#qppInitialEvidenceTarget,
+        qppThreshold: this.#qppThreshold,
+        activeGraphBudget: {
+          maxEvidence: limit,
+          maxTokens: Math.max(1_000, limit * 300),
+        },
       },
-    }, semantic);
+      semantic,
+    );
     const memories = context.results.map((result) => ({
       memoryId: result.memory.id,
       nodeId: result.node.id,
@@ -256,14 +263,13 @@ export class OmniMemEvalBridge {
     const projection = projectMemoryContext(memories, includeTime, notes);
     return {
       retrievalMode: semantic ? "records" : "lexical",
-      text: projection.lines.length === 0
-        ? ""
-        : [
-            projection.hasForget
-              ? FORGET_RETRIEVAL_GUIDANCE
-              : BASE_RETRIEVAL_GUIDANCE,
-            ...projection.lines,
-          ].join("\n"),
+      text:
+        projection.lines.length === 0
+          ? ""
+          : [
+              projection.hasForget ? FORGET_RETRIEVAL_GUIDANCE : BASE_RETRIEVAL_GUIDANCE,
+              ...projection.lines,
+            ].join("\n"),
       memories,
     };
   }
@@ -320,10 +326,7 @@ function projectMemoryContext(
       includeTime && memory.eventTime
         ? `[${memory.eventTime}] ${memory.statement}`
         : memory.statement;
-    const rendered =
-      visibleKinds.length > 0
-        ? `[${visibleKinds.join(",")}] ${base}`
-        : base;
+    const rendered = visibleKinds.length > 0 ? `[${visibleKinds.join(",")}] ${base}` : base;
     const note = notes.get(memory.memoryId);
     lines.push(note ? `${rendered}\n${note}` : rendered);
   }
@@ -331,19 +334,23 @@ function projectMemoryContext(
 }
 
 function prefersAssistantEvidence(query: string): boolean {
-  return /\b(?:assistant|previous\s+(?:chat|conversation)|earlier\s+(?:you|we)|you\s+(?:said|suggested|recommended|provided|mentioned|told|wrote|created|made|gave|listed|outlined|explained)|we\s+(?:discussed|talked|decided)|(?:(?:can|could)\s+you|you\s+could)\s+remind\s+me|your\s+(?:answer|response|recommendation|list|example))\b/iu
-    .test(query);
+  return /\b(?:assistant|previous\s+(?:chat|conversation)|earlier\s+(?:you|we)|you\s+(?:said|suggested|recommended|provided|mentioned|told|wrote|created|made|gave|listed|outlined|explained)|we\s+(?:discussed|talked|decided)|(?:(?:can|could)\s+you|you\s+could)\s+remind\s+me|your\s+(?:answer|response|recommendation|list|example))\b/iu.test(
+    query,
+  );
 }
 
 function needsTemporalContext(query: string): boolean {
-  return /\b(?:when|date|days?|weeks?|months?|years?|before|after|first|last|recent|recently|ago|long|yesterday|today|tomorrow|since|until|during|between|january|february|march|april|may|june|july|august|september|october|november|december)\b|(?:19|20)\d{2}/iu
-    .test(query);
+  return /\b(?:when|date|days?|weeks?|months?|years?|before|after|first|last|recent|recently|ago|long|yesterday|today|tomorrow|since|until|during|between|january|february|march|april|may|june|july|august|september|october|november|december)\b|(?:19|20)\d{2}/iu.test(
+    query,
+  );
 }
 
 function explicitForgetTarget(content: string): string | null {
-  const match = content.trim().match(
-    /^(?:please\s+)?(?:i\s+(?:want|need|would\s+like)\s+you\s+to\s+)?(?:forget|erase|remove|delete)\s+(?:about\s+|that\s+)?(.+?)\s*[.!?]*$/iu,
-  );
+  const match = content
+    .trim()
+    .match(
+      /^(?:please\s+)?(?:i\s+(?:want|need|would\s+like)\s+you\s+to\s+)?(?:forget|erase|remove|delete)\s+(?:about\s+|that\s+)?(.+?)\s*[.!?]*$/iu,
+    );
   const target = match?.[1]?.trim();
   return target && forgetTerms(target).size >= 2 ? target : null;
 }
@@ -368,10 +375,7 @@ function forgetMatchingMemories(store: NmgStore, target: string): void {
     }
     const targetCoverage = shared / targetTerms.size;
     const candidateCoverage = shared / Math.max(1, candidateTerms.size);
-    if (
-      shared >= 2 &&
-      (targetCoverage >= 0.5 || candidateCoverage >= 0.6)
-    ) {
+    if (shared >= 2 && (targetCoverage >= 0.5 || candidateCoverage >= 0.6)) {
       store.deleteMemory(candidate.memory.id);
     }
   }
@@ -379,14 +383,42 @@ function forgetMatchingMemories(store: NmgStore, target: string): void {
 
 function forgetTerms(text: string): Set<string> {
   const stop = new Set([
-    "about", "after", "also", "and", "are", "been", "being", "but", "can",
-    "did", "does", "for", "from", "had", "has", "have", "into", "that",
-    "the", "their", "them", "they", "this", "was", "were", "with", "would",
-    "your", "you", "feel", "felt",
+    "about",
+    "after",
+    "also",
+    "and",
+    "are",
+    "been",
+    "being",
+    "but",
+    "can",
+    "did",
+    "does",
+    "for",
+    "from",
+    "had",
+    "has",
+    "have",
+    "into",
+    "that",
+    "the",
+    "their",
+    "them",
+    "they",
+    "this",
+    "was",
+    "were",
+    "with",
+    "would",
+    "your",
+    "you",
+    "feel",
+    "felt",
   ]);
   return new Set(
-    (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])
-      .filter((term) => term.length >= 3 && !stop.has(term)),
+    (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(
+      (term) => term.length >= 3 && !stop.has(term),
+    ),
   );
 }
 
@@ -414,9 +446,7 @@ function memoryActor(role: HistoryRole): MemoryActor {
 }
 
 function positiveNumber(value: number | undefined): number | undefined {
-  return value !== undefined && Number.isFinite(value) && value > 0
-    ? Math.trunc(value)
-    : undefined;
+  return value !== undefined && Number.isFinite(value) && value > 0 ? Math.trunc(value) : undefined;
 }
 
 function finiteNumber(value: number | undefined): number | undefined {
@@ -424,21 +454,9 @@ function finiteNumber(value: number | undefined): number | undefined {
 }
 
 async function run(): Promise<void> {
-  const root = process.env.NMG_OMNI_DATA_DIR?.trim() ||
-    resolve(process.cwd(), ".nmg", "omnimemeval");
-  const embeddingClient = process.env.NMG_EMBED_BASE_URL
-    ? new OpenAIEmbeddingClient({
-        baseUrl: process.env.NMG_EMBED_BASE_URL,
-        apiKey: process.env.NMG_EMBED_API_KEY,
-        model: process.env.NMG_EMBED_MODEL,
-        profile: process.env.NMG_EMBED_PROFILE as "bge-en" | "plain" | "qwen3" | undefined,
-        queryTemplate: process.env.NMG_EMBED_QUERY_TEMPLATE,
-        documentTemplate: process.env.NMG_EMBED_DOCUMENT_TEMPLATE,
-        dimensions: process.env.NMG_EMBED_DIMENSIONS
-          ? Number(process.env.NMG_EMBED_DIMENSIONS)
-          : undefined,
-      })
-    : undefined;
+  const root =
+    process.env.NMG_OMNI_DATA_DIR?.trim() || resolve(process.cwd(), ".nmg", "omnimemeval");
+  const embeddingClient = createEmbeddingClientFromEnv();
   const bridge = new OmniMemEvalBridge(root, {
     embeddingClient,
     embeddingBatchSize: process.env.NMG_EMBED_BATCH_SIZE
@@ -448,9 +466,7 @@ async function run(): Promise<void> {
     qppInitialEvidenceTarget: process.env.NMG_QPP_INITIAL_EVIDENCE_TARGET
       ? Number(process.env.NMG_QPP_INITIAL_EVIDENCE_TARGET)
       : undefined,
-    qppThreshold: process.env.NMG_QPP_THRESHOLD
-      ? Number(process.env.NMG_QPP_THRESHOLD)
-      : undefined,
+    qppThreshold: process.env.NMG_QPP_THRESHOLD ? Number(process.env.NMG_QPP_THRESHOLD) : undefined,
   });
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 

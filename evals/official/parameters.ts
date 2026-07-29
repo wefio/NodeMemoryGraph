@@ -15,6 +15,7 @@ export interface BenchmarkParameters {
   };
   embeddings: {
     enabled: boolean;
+    provider: string | null;
     model: string | null;
     profile: string | null;
     dimensions: number | null;
@@ -26,6 +27,8 @@ export interface BenchmarkParameters {
 export function benchmarkParametersFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
 ): BenchmarkParameters {
+  const embeddingProvider =
+    environment.NMG_EMBED_PROVIDER?.trim() || (environment.NMG_EMBED_BASE_URL ? "openai" : null);
   return {
     qpp: {
       qpp1Mode: qpp1Mode(environment),
@@ -44,13 +47,29 @@ export function benchmarkParametersFromEnvironment(
       graphHopsOverride: optionalFiniteNumber(environment.NMG_GRAPH_HOPS),
     },
     embeddings: {
-      enabled: Boolean(environment.NMG_EMBED_BASE_URL),
-      model: environment.NMG_EMBED_MODEL?.trim() || null,
-      profile: environment.NMG_EMBED_PROFILE?.trim() || null,
+      enabled: embeddingProvider !== null,
+      provider: embeddingProvider,
+      model: environment.NMG_EMBED_MODEL?.trim() || defaultEmbeddingModel(embeddingProvider),
+      profile: environment.NMG_EMBED_PROFILE?.trim() || defaultEmbeddingProfile(embeddingProvider),
       dimensions: optionalFiniteNumber(environment.NMG_EMBED_DIMENSIONS),
       batchSize: finiteNumber(environment.NMG_EMBED_BATCH_SIZE, 64),
     },
   };
+}
+
+function defaultEmbeddingModel(provider: string | null): string | null {
+  if (provider === "cloudflare") return "@cf/baai/bge-m3";
+  if (provider === "gemini") return "gemini-embedding-001";
+  if (provider === "jina") return "jina-embeddings-v3";
+  if (provider === "openai") return "Qwen/Qwen3-Embedding-0.6B";
+  return null;
+}
+
+function defaultEmbeddingProfile(provider: string | null): string | null {
+  if (provider === "gemini") return "gemini-retrieval";
+  if (provider === "cloudflare" || provider === "jina") return "plain";
+  if (provider === "openai") return "qwen3";
+  return null;
 }
 
 function qpp1Mode(environment: NodeJS.ProcessEnv): "active" | "off" | "shadow" {

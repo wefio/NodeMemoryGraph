@@ -6,11 +6,14 @@ export interface OpenAIEmbeddingClientOptions {
   baseUrl?: string;
   apiKey?: string;
   model?: string;
+  indexNamespace?: string;
   dimensions?: number;
   profile?: EmbeddingProfileName;
   queryInstruction?: string;
   queryTemplate?: string;
   documentTemplate?: string;
+  queryBody?: Record<string, unknown>;
+  documentBody?: Record<string, unknown>;
   timeoutMs?: number;
 }
 
@@ -42,6 +45,8 @@ export class OpenAIEmbeddingClient {
   readonly queryInstruction: string;
   readonly queryTemplate: string;
   readonly documentTemplate: string;
+  readonly queryBody: Record<string, unknown>;
+  readonly documentBody: Record<string, unknown>;
   readonly timeoutMs: number;
 
   constructor(options: OpenAIEmbeddingClientOptions = {}) {
@@ -59,16 +64,21 @@ export class OpenAIEmbeddingClient {
     this.documentTemplate = requireTextTemplate(
       options.documentTemplate ?? profile.documentTemplate,
     );
+    this.queryBody = options.queryBody ?? {};
+    this.documentBody = options.documentBody ?? {};
     this.indexId = `${this.model}@${createHash("sha256")
       .update(
         JSON.stringify({
+          ...(options.indexNamespace ? { indexNamespace: options.indexNamespace } : {}),
           dimensions: this.dimensions ?? null,
           documentTemplate: this.documentTemplate,
+          ...(Object.keys(this.documentBody).length ? { documentBody: this.documentBody } : {}),
           profile: this.profile,
           queryInstruction: this.queryTemplate.includes("{instruction}")
             ? this.queryInstruction
             : null,
           queryTemplate: this.queryTemplate,
+          ...(Object.keys(this.queryBody).length ? { queryBody: this.queryBody } : {}),
         }),
       )
       .digest("hex")
@@ -77,7 +87,10 @@ export class OpenAIEmbeddingClient {
   }
 
   embedQueries(inputs: string[]): Promise<number[][]> {
-    return this.request(inputs.map((input) => this.render(this.queryTemplate, input)));
+    return this.request(
+      inputs.map((input) => this.render(this.queryTemplate, input)),
+      this.queryBody,
+    );
   }
 
   embedDocuments(inputs: string[]): Promise<number[][]> {
@@ -89,10 +102,13 @@ export class OpenAIEmbeddingClient {
   }
 
   embed(inputs: string[]): Promise<number[][]> {
-    return this.request(inputs.map((input) => this.render(this.documentTemplate, input)));
+    return this.request(
+      inputs.map((input) => this.render(this.documentTemplate, input)),
+      this.documentBody,
+    );
   }
 
-  private async request(inputs: string[]): Promise<number[][]> {
+  private async request(inputs: string[], extraBody: Record<string, unknown>): Promise<number[][]> {
     if (inputs.length === 0) return [];
     const response = await fetch(`${this.baseUrl}/embeddings`, {
       method: "POST",
@@ -104,6 +120,7 @@ export class OpenAIEmbeddingClient {
         model: this.model,
         input: inputs,
         ...(this.dimensions ? { dimensions: this.dimensions } : {}),
+        ...extraBody,
       }),
       signal: AbortSignal.timeout(this.timeoutMs),
     });

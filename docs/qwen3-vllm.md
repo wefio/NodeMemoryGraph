@@ -1,5 +1,9 @@
 # External embeddings through vLLM
 
+For hosted providers that avoid running an embedding model locally, see
+[online-embeddings.md](online-embeddings.md). This document covers the optional
+local vLLM backend.
+
 NMG treats embeddings as an optional provider, not as part of the memory
 architecture. The default endpoint is the OpenAI-compatible
 `http://127.0.0.1:8000/v1/embeddings`. Normal Pi retrieval always preserves the

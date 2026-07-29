@@ -1,11 +1,11 @@
 export { NmgStore } from "./core/store.ts";
 export { HashingVectorEmbedder } from "./core/vector.ts";
 export { OpenAIEmbeddingClient } from "./core/openai-embedding.ts";
+export { GeminiEmbeddingClient } from "./core/embedding-providers/gemini.ts";
+export { configuredProvider, createEmbeddingClientFromEnv } from "./core/embedding-provider.ts";
+export type { EmbeddingClient, EmbeddingProvider } from "./core/embedding-provider.ts";
 export { syncRecordEmbeddings } from "./core/embedding-sync.ts";
-export type {
-  RecordEmbeddingClient,
-  RecordEmbeddingSyncResult,
-} from "./core/embedding-sync.ts";
+export type { RecordEmbeddingClient, RecordEmbeddingSyncResult } from "./core/embedding-sync.ts";
 export { UsearchAnnIndex } from "./core/ann.ts";
 export { decideMemoryLoad } from "./core/gate.ts";
 export { normalizeClaims } from "./core/claims.ts";

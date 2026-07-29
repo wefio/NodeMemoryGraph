@@ -1,37 +1,73 @@
 import { mkdirSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { DatabaseSync } from "node:sqlite";
-import { NmgStore, OpenAIEmbeddingClient } from "../../src/index.ts";
+import {
+  createEmbeddingClientFromEnv,
+  type EmbeddingClient,
+  NmgStore,
+} from "../../src/index.ts";
 
 const DEFAULT_SIZES = [100, 1_000, 10_000, 100_000];
-const sizes = (process.env.NMG_SCALE_SIZES?.split(",").map(Number) ?? DEFAULT_SIZES)
-  .filter((value) => Number.isInteger(value) && value >= 10);
+const sizes = (process.env.NMG_SCALE_SIZES?.split(",").map(Number) ?? DEFAULT_SIZES).filter(
+  (value) => Number.isInteger(value) && value >= 10,
+);
 const outputDir = join(process.cwd(), "evals", "scale", ".tmp");
-const qwenClient = process.env.NMG_EMBED_BASE_URL
-  ? new OpenAIEmbeddingClient({
-      baseUrl: process.env.NMG_EMBED_BASE_URL,
-      apiKey: process.env.NMG_EMBED_API_KEY,
-      model: process.env.NMG_EMBED_MODEL,
-      profile: process.env.NMG_EMBED_PROFILE as "bge-en" | "plain" | "qwen3" | undefined,
-      queryTemplate: process.env.NMG_EMBED_QUERY_TEMPLATE,
-      documentTemplate: process.env.NMG_EMBED_DOCUMENT_TEMPLATE,
-    })
-  : null;
+const qwenClient = createEmbeddingClientFromEnv() ?? null;
 const modes = qwenClient
   ? (["legacy", "fts5", "hashing", "qwen3", "hybrid"] as const)
   : (["legacy", "fts5", "hashing", "hybrid"] as const);
 mkdirSync(outputDir, { recursive: true });
 
 const cases = [
-  { id: "hot-exact", statement: "The user's telescope access code is ORBIT-7319", query: "What is my telescope access code?", tier: 0 as const },
-  { id: "warm-exact", statement: "The user's archive nickname is cobalt heron", query: "What is my archive nickname?", tier: 1 as const },
-  { id: "cool-exact", statement: "The user's backup city is Valparaíso", query: "What is my backup city?", tier: 2 as const },
-  { id: "cold-exact", statement: "The user's retired project codename is lantern fern", query: "What was my retired project codename?", tier: 3 as const },
-  { id: "hot-semantic", statement: "The user avoids auditory alerts after midnight", query: "Should notifications make sound late at night?", tier: 0 as const },
-  { id: "warm-semantic", statement: "For build failures, inspect the selected runtime before reinstalling packages", query: "What should I check first when imports fail?", tier: 1 as const },
-  { id: "rare-critical", statement: "Never delete the lunar telemetry archive", query: "May I remove the lunar telemetry archive?", tier: 0 as const },
-  { id: "cold-semantic", statement: "The user once fixed rendering by switching to software graphics", query: "How did I previously solve the display startup issue?", tier: 3 as const },
+  {
+    id: "hot-exact",
+    statement: "The user's telescope access code is ORBIT-7319",
+    query: "What is my telescope access code?",
+    tier: 0 as const,
+  },
+  {
+    id: "warm-exact",
+    statement: "The user's archive nickname is cobalt heron",
+    query: "What is my archive nickname?",
+    tier: 1 as const,
+  },
+  {
+    id: "cool-exact",
+    statement: "The user's backup city is Valparaíso",
+    query: "What is my backup city?",
+    tier: 2 as const,
+  },
+  {
+    id: "cold-exact",
+    statement: "The user's retired project codename is lantern fern",
+    query: "What was my retired project codename?",
+    tier: 3 as const,
+  },
+  {
+    id: "hot-semantic",
+    statement: "The user avoids auditory alerts after midnight",
+    query: "Should notifications make sound late at night?",
+    tier: 0 as const,
+  },
+  {
+    id: "warm-semantic",
+    statement: "For build failures, inspect the selected runtime before reinstalling packages",
+    query: "What should I check first when imports fail?",
+    tier: 1 as const,
+  },
+  {
+    id: "rare-critical",
+    statement: "Never delete the lunar telemetry archive",
+    query: "May I remove the lunar telemetry archive?",
+    tier: 0 as const,
+  },
+  {
+    id: "cold-semantic",
+    statement: "The user once fixed rendering by switching to software graphics",
+    query: "How did I previously solve the display startup issue?",
+    tier: 3 as const,
+  },
 ];
 const qwenQueries = qwenClient
   ? await qwenClient.embedQueries(cases.map((item) => item.query))
@@ -70,13 +106,14 @@ for (const size of sizes) {
   for (const mode of modes) {
     const queries = cases.map((item, caseIndex) => {
       const started = performance.now();
-      const results = (mode === "qwen3" || (mode === "hybrid" && qwenClient))
-        ? store.searchByVector(item.query, qwenQueries[caseIndex]!, qwenClient!.indexId, {
-            maxTier: 3,
-            limit: 8,
-            retrievalMode: mode,
-          })
-        : store.search(item.query, { maxTier: 3, limit: 8, retrievalMode: mode });
+      const results =
+        mode === "qwen3" || (mode === "hybrid" && qwenClient)
+          ? store.searchByVector(item.query, qwenQueries[caseIndex]!, qwenClient!.indexId, {
+              maxTier: 3,
+              limit: 8,
+              retrievalMode: mode,
+            })
+          : store.search(item.query, { maxTier: 3, limit: 8, retrievalMode: mode });
       const latencyMs = performance.now() - started;
       const rank = results.findIndex((result) => result.memory.id === expected.get(item.id));
       return {
@@ -86,8 +123,10 @@ for (const size of sizes) {
         rank: rank >= 0 ? rank + 1 : null,
         latencyMs,
         returned: results.length,
-        returnedChars: results.reduce((sum, result) =>
-          sum + result.memory.statement.length + result.evidence.content.length, 0),
+        returnedChars: results.reduce(
+          (sum, result) => sum + result.memory.statement.length + result.evidence.content.length,
+          0,
+        ),
         tiers: results.map((result) => result.memory.tier),
       };
     });
@@ -95,10 +134,12 @@ for (const size of sizes) {
     modeReports.push({
       mode,
       accuracy: queries.filter((item) => item.hit).length / queries.length,
-      tierHitRate: Object.fromEntries([0, 1, 2, 3].map((tier) => {
-        const tierCases = queries.filter((item) => item.expectedTier === tier);
-        return [tier, tierCases.filter((item) => item.hit).length / tierCases.length];
-      })),
+      tierHitRate: Object.fromEntries(
+        [0, 1, 2, 3].map((tier) => {
+          const tierCases = queries.filter((item) => item.expectedTier === tier);
+          return [tier, tierCases.filter((item) => item.hit).length / tierCases.length];
+        }),
+      ),
       latencyMs: {
         p50: percentile(latencies, 0.5),
         p95: percentile(latencies, 0.95),
@@ -125,12 +166,13 @@ for (const size of sizes) {
   });
 }
 
-const output = process.env.NMG_SCALE_VERBOSE === "1"
-  ? reports
-  : reports.map((report) => ({
-      ...report,
-      modes: report.modes.map(({ queries: _queries, ...summary }) => summary),
-    }));
+const output =
+  process.env.NMG_SCALE_VERBOSE === "1"
+    ? reports
+    : reports.map((report) => ({
+        ...report,
+        modes: report.modes.map(({ queries: _queries, ...summary }) => summary),
+      }));
 console.log(JSON.stringify({ candidateWindow: 500, sizes: output }, null, 2));
 
 function insertDistractors(path: string, count: number): void {
@@ -154,9 +196,7 @@ function insertDistractors(path: string, count: number): void {
      VALUES (?, ?, ?, ?, 'fact', 'user', 'asserted', '{}', 'active', 'support',
              ?, 0.5, 0, 0, ?)`,
   );
-  const link = db.prepare(
-    "INSERT INTO memory_evidence_links(memory_id, history_id) VALUES (?, ?)",
-  );
+  const link = db.prepare("INSERT INTO memory_evidence_links(memory_id, history_id) VALUES (?, ?)");
   db.exec("BEGIN");
   try {
     for (let index = 0; index < count; index += 1) {
@@ -187,7 +227,7 @@ function percentile(sorted: number[], ratio: number): number {
 
 async function indexWithClient(
   store: NmgStore,
-  client: OpenAIEmbeddingClient,
+  client: EmbeddingClient,
   batchSize = Number(process.env.NMG_EMBED_BATCH_SIZE ?? 64),
 ): Promise<number> {
   let cursor = "";
@@ -196,10 +236,13 @@ async function indexWithClient(
     const documents = store.embeddingDocuments(cursor, batchSize, client.indexId);
     if (documents.length === 0) return indexed;
     const vectors = await client.embed(documents.map((document) => document.text));
-    store.upsertExternalEmbeddings(client.indexId, documents.map((document, index) => ({
-      memoryId: document.memoryId,
-      vector: vectors[index]!,
-    })));
+    store.upsertExternalEmbeddings(
+      client.indexId,
+      documents.map((document, index) => ({
+        memoryId: document.memoryId,
+        vector: vectors[index]!,
+      })),
+    );
     indexed += documents.length;
     cursor = documents.at(-1)!.memoryId;
   }

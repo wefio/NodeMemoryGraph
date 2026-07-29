@@ -93,6 +93,7 @@ test("benchmark parameters record resolved QPP and embedding values without secr
     retrieval: { graphHopsOverride: 2 },
     embeddings: {
       enabled: true,
+      provider: "openai",
       model: "BAAI/bge-small-en-v1.5",
       profile: "bge-en",
       dimensions: 384,
@@ -116,10 +117,27 @@ test("benchmark parameters include runtime defaults when no overrides are suppli
     retrieval: { graphHopsOverride: null },
     embeddings: {
       enabled: false,
+      provider: null,
       model: null,
       profile: null,
       dimensions: null,
       batchSize: 64,
     },
   });
+});
+
+test("benchmark parameters resolve hosted provider defaults without recording keys", () => {
+  const parameters = benchmarkParametersFromEnvironment({
+    NMG_EMBED_PROVIDER: "gemini",
+    GEMINI_API_KEY: "must-not-appear",
+  });
+  assert.deepEqual(parameters.embeddings, {
+    enabled: true,
+    provider: "gemini",
+    model: "gemini-embedding-001",
+    profile: "gemini-retrieval",
+    dimensions: null,
+    batchSize: 64,
+  });
+  assert.doesNotMatch(JSON.stringify(parameters), /must-not-appear/u);
 });

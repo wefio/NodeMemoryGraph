@@ -12,7 +12,10 @@ import {
   DifferentiableController,
   type ControllerTrainingExample,
 } from "../../src/core/differentiable-controller.ts";
-import { OpenAIEmbeddingClient } from "../../src/core/openai-embedding.ts";
+import {
+  createEmbeddingClientFromEnv,
+  type EmbeddingClient,
+} from "../../src/core/embedding-provider.ts";
 import { qppCandidates, shouldTriggerSecondPass } from "../../src/core/qpp.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { fibonacciEvidenceBudgets } from "../../src/core/store/active-graph.ts";
@@ -455,13 +458,8 @@ function corpusKey(item: BenchmarkCase): string {
   return `${item.benchmark}:${item.id.split(":")[0]}`;
 }
 
-function embeddingClient(): OpenAIEmbeddingClient {
-  return new OpenAIEmbeddingClient({
-    baseUrl: process.env.NMG_EMBED_BASE_URL,
-    model: process.env.NMG_EMBED_MODEL,
-    profile: process.env.NMG_EMBED_PROFILE as "bge-en" | "plain" | "qwen3" | undefined,
-    timeoutMs: Number.parseInt(process.env.NMG_EMBED_TIMEOUT_MS ?? "30000", 10),
-  });
+function embeddingClient(): EmbeddingClient {
+  return createEmbeddingClientFromEnv(process.env, { required: true })!;
 }
 
 function compare(item: PreparedCase, controller: DifferentiableController, limit: number) {
