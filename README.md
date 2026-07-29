@@ -213,8 +213,12 @@ QPP actuation is split into three independent controls:
   anchor.
 - `NMG_SEARCH_RECOMMENDATION=off|advisory|guardrail` controls whether an
   inadequate automatic recall recommends one deliberate `nmg_search` call to
-  the model. It defaults to `advisory`; `guardrail` emits a recommendation only
+  the model. It defaults to `off`; `guardrail` emits a recommendation only
   for hard failures such as empty, fallback-only, or very weak recall.
+
+NMG reports each module's scores, quality, and cost but does not choose an
+operator's policy or search for a preferred combination. Enabling QPP1, QPP2,
+or recommendations—and composing them—is an explicit user/operator decision.
 
 The normal QPP1 tier is capped at 20 records / 6,000 estimated tokens; a
 learned `expand` decision can promote the Active Graph to 50 records / 10,000

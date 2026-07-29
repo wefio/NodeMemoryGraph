@@ -169,7 +169,7 @@ export function configuredQpp2RetainedMass(): number {
 
 export function configuredSearchRecommendationMode(): SearchRecommendationMode {
   return (
-    parseMode(process.env.NMG_SEARCH_RECOMMENDATION, ["off", "advisory", "guardrail"]) ?? "advisory"
+    parseMode(process.env.NMG_SEARCH_RECOMMENDATION, ["off", "advisory", "guardrail"]) ?? "off"
   );
 }
 

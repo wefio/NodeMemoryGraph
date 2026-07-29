@@ -576,6 +576,11 @@ configurable because they have different costs and failure modes:
 3. **Search recommendation** converts insufficient automatic recall into an
    advisory signal for the model. It never invokes a tool by itself.
 
+NMG's responsibility ends at producing auditable scores and measuring each
+module's quality and cost. Whether to activate a module, and which modules to
+compose, is operator policy rather than a learned NMG decision. The project
+does not need to optimise or endorse a combinatorial configuration.
+
 QPP2 performs progressive disclosure rather than deletion. Let the controller
 produce listwise necessity scores `s_i`; convert them to relative odds and
 normalised local mass:
@@ -1102,12 +1107,13 @@ Important gaps between the prototype and the target plugin:
   and false-promotion evaluation are stronger;
 - `MemoryGraphReasoner` remains a numerical Lab prototype that scores the
   global unvisited candidate set rather than following graph edges;
-- QPP1, QPP2, and search recommendation are now independently wired, but none
-  has passed its production gate. QPP1 budget prediction correlated poorly
+- QPP1, QPP2, and search recommendation are now independently wired, but their
+  utility and cost are not yet sufficiently characterised. QPP1 budget
+  prediction correlated poorly
   with the oracle Fibonacci tier in the full LoCoMo audit; QPP2 scores are
   listwise rather than absolutely calibrated; and the cost/benefit of asking
-  the model to search again has not been measured. QPP1 therefore defaults to
-  shadow, QPP2 to off, and the advisory only recommends rather than invokes;
+  the model to search again has not been measured. Active behavior remains an
+  explicit operator choice rather than a default selected by NMG;
 - QPP2 folding is lossless at the store/Active-Graph layer but not necessarily
   lossless for the model: a needed candidate can remain folded unless the model
   explicitly unfolds the directory. A matched end-to-end test must measure
@@ -1392,11 +1398,11 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
    UOp autodiff engine and serializable multi-head controller for node, edge,
    STOP/EXPAND, and budget decisions. Activation in the Pi retrieval path remains
    gated on a fixed feature contract and matched evidence-recall/cost evaluation.
-7. **Mechanism complete, production gate open:** independently selectable QPP1
+7. **Mechanism complete, utility evaluation open:** independently selectable QPP1
    allocation, QPP2 progressive folding, and search recommendation are wired
    through the Pi adapter. QPP2 preserves folded candidates in the Active Graph.
-   Calibration, matched answer-quality/cost evaluation, and safe default
-   promotion are not complete.
+   Calibration and matched answer-quality/cost evaluation are not complete;
+   activation and composition remain user/operator policy.
 
 ### P4: selective reasoning workspace
 
@@ -1428,12 +1434,12 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 
 The next work should reduce uncertainty rather than add another subsystem:
 
-1. Run a small matched Pi experiment over the same fixed questions with QPP
-   controls independently ablated: deterministic, QPP1 active, QPP2 active,
-   recommendation active, and the combined path. Record evidence recall,
-   answers, tool-call count, injected tokens, and end-to-end latency.
+1. Evaluate QPP1, QPP2, and search recommendation independently against the
+   same fixed baseline. Report each module's score change, evidence recall,
+   tool-call count, injected tokens, and end-to-end latency. Do not make
+   exhaustive module combinations a project requirement.
 2. Calibrate QPP1 against oracle evidence depth and QPP2 against evidence
-   retention. Do not promote either default merely because a larger pool raises
+   retention. Do not call a module useful merely because a larger pool raises
    raw recall.
 3. Test whether the model follows one search recommendation when useful,
    ignores it when unnecessary, and stops after an unproductive search.
@@ -1443,7 +1449,8 @@ The next work should reduce uncertainty rather than add another subsystem:
 5. Harden the plugin boundary: add an installable Pi package manifest, validate
    the Pi session-entry schema, document the single-writer concurrency model,
    and expose user-facing delete/export.
-6. Keep ANN, unattended topology mutation, cloud sync, and automatic reasoning
+6. Leave activation and module composition to explicit user/operator policy.
+7. Keep ANN, unattended topology mutation, cloud sync, and automatic reasoning
    workspace activation deferred until their measured prerequisite appears.
 
 ## 17. Remaining design questions

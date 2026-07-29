@@ -346,7 +346,7 @@ test("QPP stages and search recommendation are independently configurable", () =
     assert.equal(configuredQpp1Mode(), "shadow");
     assert.equal(configuredQpp2Mode(), "off");
     assert.equal(configuredQpp2RetainedMass(), 0.98);
-    assert.equal(configuredSearchRecommendationMode(), "advisory");
+    assert.equal(configuredSearchRecommendationMode(), "off");
 
     process.env.NMG_QPP1_MODE = "active";
     process.env.NMG_QPP2_MODE = "active";
