@@ -78,6 +78,8 @@ export interface OmniEmbeddingClient {
 export interface OmniMemEvalBridgeOptions {
   embeddingClient?: OmniEmbeddingClient;
   embeddingBatchSize?: number;
+  /** Enable QPP-triggered pool re-selection for matched benchmark ablations. */
+  secondPass?: boolean;
 }
 
 /**
@@ -91,6 +93,7 @@ export class OmniMemEvalBridge {
   readonly #stores = new Map<string, NmgStore>();
   readonly #embeddingClient?: OmniEmbeddingClient;
   readonly #embeddingBatchSize: number;
+  readonly #secondPass: boolean;
 
   constructor(root: string, options: OmniMemEvalBridgeOptions = {}) {
     this.#root = resolve(root);
@@ -99,6 +102,7 @@ export class OmniMemEvalBridge {
       1,
       Math.min(Math.trunc(options.embeddingBatchSize ?? 64), 2_048),
     );
+    this.#secondPass = options.secondPass ?? false;
     mkdirSync(this.#root, { recursive: true });
   }
 
@@ -219,6 +223,7 @@ export class OmniMemEvalBridge {
       graphHops: 1,
       vectorGranularity: semantic ? "records" : undefined,
       sourceActor: prefersAssistantEvidence(query) ? undefined : "user",
+      secondPass: this.#secondPass,
       activeGraphBudget: {
         maxEvidence: limit,
         maxTokens: Math.max(1_000, limit * 300),
@@ -419,6 +424,7 @@ async function run(): Promise<void> {
     embeddingBatchSize: process.env.NMG_EMBED_BATCH_SIZE
       ? Number(process.env.NMG_EMBED_BATCH_SIZE)
       : undefined,
+    secondPass: process.env.NMG_QPP_SECOND_PASS === "1",
   });
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 

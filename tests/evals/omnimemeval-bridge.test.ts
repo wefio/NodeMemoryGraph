@@ -159,6 +159,46 @@ test("OmniMemEval batches pending record vectors before search", async () => {
   }
 });
 
+test("OmniMemEval can enable QPP pool re-selection without changing the default arm", async () => {
+  const normalRoot = mkdtempSync(join(tmpdir(), "nmg-omni-qpp-normal-"));
+  const adaptiveRoot = mkdtempSync(join(tmpdir(), "nmg-omni-qpp-adaptive-"));
+  const normal = new OmniMemEvalBridge(normalRoot);
+  const adaptive = new OmniMemEvalBridge(adaptiveRoot, { secondPass: true });
+  const messages = [
+    "I run five kilometres before breakfast on Monday.",
+    "I run five kilometres before breakfast on Tuesday.",
+    "I run five kilometres before breakfast on Wednesday.",
+    "I run five kilometres before breakfast on Thursday.",
+  ].map((content) => ({ role: "user", content }));
+  try {
+    await normal.handle({ id: 1, op: "add", userId: "alice", messages });
+    await adaptive.handle({ id: 2, op: "add", userId: "alice", messages });
+
+    const normalResult = await normal.handle({
+      id: 3,
+      op: "search",
+      userId: "alice",
+      query: "On which days do I run five kilometres before breakfast?",
+      topK: 2,
+    }) as { memories: unknown[] };
+    const adaptiveResult = await adaptive.handle({
+      id: 4,
+      op: "search",
+      userId: "alice",
+      query: "On which days do I run five kilometres before breakfast?",
+      topK: 2,
+    }) as { memories: unknown[] };
+
+    assert.equal(normalResult.memories.length, 2);
+    assert.equal(adaptiveResult.memories.length, 4);
+  } finally {
+    normal.close();
+    adaptive.close();
+    rmSync(normalRoot, { recursive: true, force: true });
+    rmSync(adaptiveRoot, { recursive: true, force: true });
+  }
+});
+
 test("OmniMemEval replaces an explicitly forgotten memory with a tagged revocation", async () => {
   const root = mkdtempSync(join(tmpdir(), "nmg-omni-forget-"));
   const bridge = new OmniMemEvalBridge(root);
