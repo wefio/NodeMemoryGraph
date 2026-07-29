@@ -9,6 +9,7 @@ import { Type } from "typebox";
 import { decideMemoryLoad } from "../../../src/core/gate.ts";
 import { ControllerRuntime } from "../../../src/core/controller-runtime.ts";
 import { syncRecordEmbeddings } from "../../../src/core/embedding-sync.ts";
+import { deriveUsedMemoryIds } from "../../../src/core/feedback.ts";
 import {
   OpenAIEmbeddingClient,
   type EmbeddingProfileName,
@@ -440,7 +441,23 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   pi.on("agent_end", async (event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
     const usage = summarizeMessageUsage(event.messages);
+    const answerText = lastAssistantText(event.messages);
     for (const graphId of turnGraphIds.get(sessionId) ?? []) {
+      // Implicit feedback: match the agent's answer against the retrieved
+      // memories still held in searchContexts (AutoRecall contexts are not
+      // consumed by nmg_get). Records actual-use on the trace so rolling τ
+      // calibration has (qpp, useful) pairs without the agent calling feedback.
+      const context = searchContexts.get(graphId);
+      if (context && answerText) {
+        const usedMemoryIds = deriveUsedMemoryIds(answerText, context.results);
+        if (usedMemoryIds.length > 0) {
+          try {
+            getStore().recordActiveGraphUse(graphId, { usedMemoryIds });
+          } catch {
+            // Probe traces (persistTrace:false) have no row — skip silently.
+          }
+        }
+      }
       shadowLog.outcome({
         graphId,
         sessionId,
@@ -1410,3 +1427,16 @@ function messageText(value: unknown): string {
   const content = rawMessageContent(message);
   return content ? `${role}: ${content}` : "";
 }
+
+function lastAssistantText(messages: readonly unknown[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || typeof message !== "object") continue;
+    if ((message as { role?: unknown }).role === "assistant") {
+      return rawMessageContent(message);
+    }
+  }
+  return "";
+}
+
+
