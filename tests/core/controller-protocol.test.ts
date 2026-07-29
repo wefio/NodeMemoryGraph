@@ -99,6 +99,9 @@ test("trace protocol joins STG, LTG and Active Graph into fixed bounded features
     assert.equal(sample.training.control?.target, "expand");
     assert.equal(sample.training.budget?.targets.length, 7);
     assert.ok(sample.training.budget?.targets.every((value) => value >= 0 && value <= 1));
+    // The required recall depth is the deepest useful rank (2/4), not the
+    // number of useful memories (1/4).
+    assert.equal(sample.training.budget?.targets[2], 0.5);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });
@@ -110,13 +113,20 @@ test("trace without explicit outcome feedback is inference-only", () => {
   const store = new NmgStore(join(directory, "nmg.sqlite"));
   try {
     store.remember({ statement: "A remembered detail", nodeName: "Detail" });
-    const context = store.searchContext("remembered detail");
+    const context = store.searchContext("how many remembered details");
     assert.ok(context.activeGraph);
     const trace = store.retrievalTrace(context.activeGraph.id);
     assert.ok(trace);
     const sample = controllerSampleFromTrace(context, trace);
     assert.equal(sample.training, null);
     assert.equal(sample.supervision.hasOutcomeFeedback, false);
+    assert.ok(
+      sample.globalFeatures[CONTROLLER_FEATURE_NAMES.indexOf("qpp_top1")]! > 0,
+    );
+    assert.equal(
+      sample.globalFeatures[CONTROLLER_FEATURE_NAMES.indexOf("query_intent_list_count")],
+      1,
+    );
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });

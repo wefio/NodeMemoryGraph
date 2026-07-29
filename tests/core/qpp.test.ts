@@ -406,3 +406,32 @@ test("searchContextWithSecondPass: forced expansion walks Fibonacci tiers withou
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("searchContextWithSecondPass starts from a learned Fibonacci tier", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-qpp-learned-tier-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    for (const statement of [
+      "running detail one",
+      "running detail two",
+      "running detail three",
+      "running detail four",
+      "running detail five",
+    ]) {
+      store.remember({ statement, nodeName: "Run", memoryType: "fact" });
+    }
+    const result = store.searchContextWithSecondPass("running", {
+      limit: 3,
+      activeGraphBudget: { maxEvidence: 3, maxTokens: 8_000 },
+      initialEvidenceTarget: 3,
+      qppThreshold: 2,
+    });
+    assert.deepEqual(
+      result.activeGraph!.qpp?.expansion?.stages.map((stage) => stage.targetEvidence),
+      [3, 5],
+    );
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

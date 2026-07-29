@@ -213,6 +213,8 @@ export interface SearchOptions {
   /** Enable progressive Fibonacci re-selection from the same over-sampled pool.
    *  Each cumulative tier (1, 2, 3, 5, ...) recomputes QPP; no re-search occurs. */
   secondPass?: boolean;
+  /** Learned first-pass Fibonacci tier. QPP may continue to later tiers. */
+  initialEvidenceTarget?: number;
 }
 
 export interface EmbeddingDocument {

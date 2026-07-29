@@ -61,7 +61,7 @@ stoppedBecause
 - 简单查询在 Top-1 停止，显著减少上下文；
 - 多跳查询被错误早停，遗漏后续证据。
 
-只观察已经触发的扩展还不能发现全部错误早停。后续需要少量受控探索，例如让一部分
+只观察已经触发的扩展还不能发现全部错误早停。仍需要少量受控探索，例如让一部分
 “Top-1 已充分”的查询在 shadow 模式继续计算更深档位，并用 benchmark 证据标签、
 实际使用记录或任务结果判断额外内容是否有价值。
 
@@ -88,5 +88,7 @@ Top-1 → QPP → Top-2 → QPP → Top-3 → QPP → Top-5 → …
 - `secondPass=true`：启用 Fibonacci 渐进召回；
 - 最终档位不会超过 `expandActiveGraphBudget()` 给出的硬上限；
 - 当前只渐进扩展 evidence，图关系仍按首次 `graphHops` 计算；
-- QPP 轨迹可用于后续规则校准或可微控制器训练，但当前不会自动更新权重。
-
+- 第一次 Top-1 probe 将 QPP 分量和查询意图送入现有 autodiff 控制器；
+- evidence budget head 输出连续值并映射到 Fibonacci 首档；
+- 最深实际使用 rank 作为首档深度训练目标，二重 QPP负责继续扩展；
+- 旧版控制器状态会为新增特征零填充，保留既有参数。

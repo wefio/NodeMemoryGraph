@@ -222,7 +222,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     let context = await searchMemoryContext(getStore(), embeddingClient, query, {
       ...options,
       // A controller probe is intentionally not an actual retrieval trace.
-      ...(canExpand ? { persistTrace: false, retrievalMode: "fts5" as const } : {}),
+      ...(canExpand
+        ? {
+            persistTrace: false,
+            retrievalMode: "fts5" as const,
+            limit: 1,
+            activeGraphBudget: { maxEvidence: 1 },
+          }
+        : {}),
     });
     if (canExpand && context.activeGraph) {
       const baseline = context.activeGraph.budget;
@@ -246,17 +253,17 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         maxLocalTier: 3,
         maxLatencyMs: 1_500,
       });
-      if (plan && budgetWidens(baseline, plan.budget)) {
+      if (plan) {
         context = await searchMemoryContext(getStore(), embeddingClient, query, {
           ...options,
-          // The final search is the only trace that the model can consume and
-          // later mark useful. A user-provided limit is never overridden.
+          // The autodiff budget head predicts the first Fibonacci tier. The
+          // second QPP may continue to later tiers from the same candidate pool.
           limit: plan.budget.maxEvidence,
           activeGraphBudget: plan.budget,
+          secondPass: true,
+          initialEvidenceTarget: plan.budget.maxEvidence,
         });
-      } else if (context.activeGraph) {
-        // The probe already has a valid graph; make it a normal feedback trace
-        // only when no wider final query was necessary.
+      } else {
         context = await searchMemoryContext(getStore(), embeddingClient, query, options);
       }
     }
@@ -1168,21 +1175,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     });
 }
 
-function budgetWidens(
-  baseline: NonNullable<MemoryContext["activeGraph"]>["budget"],
-  proposed: NonNullable<MemoryContext["activeGraph"]>["budget"],
-): boolean {
-  return (
-    proposed.maxNodes > baseline.maxNodes ||
-    proposed.maxEdges > baseline.maxEdges ||
-    proposed.maxEvidence > baseline.maxEvidence ||
-    proposed.maxTokens > baseline.maxTokens ||
-    proposed.maxGraphHops > baseline.maxGraphHops ||
-    proposed.maxLocalTier > baseline.maxLocalTier ||
-    proposed.maxLatencyMs > baseline.maxLatencyMs
-  );
-}
-
 function summarizeMessageUsage(messages: readonly unknown[]): {
   inputTokens?: number;
   outputTokens?: number;
@@ -1438,5 +1430,3 @@ function lastAssistantText(messages: readonly unknown[]): string {
   }
   return "";
 }
-
-

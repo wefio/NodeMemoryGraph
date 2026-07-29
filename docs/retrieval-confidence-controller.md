@@ -59,21 +59,25 @@ C = Top1 + τ_v·variance + w_ic·intentCoverage + w_rh·reasonHealth
 
 ### 2. 触发决策（系统侧，三阶段）
 
-**Stage 0 — pool-based re-selection + guardrail floor（已落地，免标定）**
-searchContext 已过采样（池 = `min(50, max(20, limit*3))`），从中选 top-K 显示。Stage 0 不做"第二趟搜索"——而是在**同一池**里按扩展预算重选：
-1. 正常选 top-K（limit）→ 算 qpp（guardrail 用）
-2. 若 `secondPass && (qpp.guardrail 触发 OR 首趟撞 evidence/token 预算)` → 用 `expandActiveGraphBudget`（2x evidence/nodes/tokens +1 graphHop）**从同一 candidates 池重选** top-2K
-3. 显示重选后的结果
+**Stage 0 — Fibonacci progressive re-selection + guardrail floor（已落地）**
+searchContext 仍一次性过采样候选池（`min(50, max(20, limit*3))`），但不再因
+top-K 截断而直接把全部扩展结果暴露给模型：
+1. 可微控制器的 evidence budget head 根据 Top-1 probe、QPP 分量和查询意图预测首个
+   Fibonacci 档位；
+2. 从预测档位（`1/2/3/5/8/...`）完整加载结果并计算二重 QPP；
+3. QPP 仍不足才进入下一档；充分、候选池耗尽或硬预算到顶即停止。
 
-**零二次检索**——池已大，重选廉价；过触发无所谓（不重新搜、不额外调 LLM）。触发条件全**结构性/无标签**（guardrail 是绝对地板，truncation 是结构信号）→ **免标定、不作弊**。`below_threshold`（τ）路径保留但非必需（truncation 已覆盖"截断"case；τ 留给 Stage 1 学选择性）。
+这里 Fibonacci 数字表示**累计可见记忆数**。每档仍从同一 candidates 池重选，因此
+保持零二次 ANN/FTS 检索。截断仅记录预算状态，**不再单独触发扩展**，避免大型记忆库
+中几乎每次查询都扩大上下文。
 
 guardrail 必触发条件（绝对地板，免标定）：
 - `totalCount === 0`（空）→ `guardrail_empty`
 - `directCount > 0 && reasonHealth === 0`（全 hybrid_match 兜底）→ `guardrail_all_fallback`
 - `Top1 < QPP_TOP1_FLOOR(=0.2)`（基本没真匹配）→ `guardrail_low_top1`
-- 首趟撞 evidence/token 预算（truncated）→ pool-based 重选
 
-`searchContextWithSecondPass` = `searchContext` 加 `secondPass:true` 的薄封装。BGE 实测：6 条跑步记忆、limit 2，NORMAL 拿 2 条（truncated、qpp 不触发），ADAPTIVE 从池重选 4 条（补回截断的 2 条）——零二次检索。
+`searchContextWithSecondPass` = `searchContext` 加 `secondPass:true` 的薄封装。各档的
+目标数量、实际数量、token、QPP 和停止原因记录在 retrieval trace，供后续反馈训练。
 
 **Stage 1 — rolling τ auto-calibration（无感自动标定，非 eval）**
 Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**——让 `below_threshold`（τ）触发更 selective（省检索），非激活前提。
@@ -87,7 +91,8 @@ Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**�
 1. **离线 audit**（`evals/omnimemeval/audit-qpp-signal.ts`）：从历史 trace 重算 qpp（hybridScore，离线纯函数）+ join outcome，看分量 gradation/区分度——**只诊断，不调参**（不作弊）。
 2. **rolling worker**（生产）：采近期 N 条 trace 的 (qpp, usefulMemoryIds)（隐式反馈已落）；统计高/低 qpp 的 useful 率；高 qpp useful 率低→抬 τ，低 qpp useful 率高→降 τ；滚动窗口无感更新。
 3. **权重调参输入**（生产数据）：Top1×reasonHealth 相关性（reasonHealth 近常数则降权）、variance 双解（Top1−Top2 差值辅助）、intentCoverage 中性值（0.5 系统性偏则改均值）。
-4. **sequencing**：Stage 0 plumbing（pool-based）✅；隐式反馈 ✅；rolling worker ⬜。
+4. **sequencing**：Stage 0 Fibonacci plumbing ✅；隐式反馈 ✅；autodiff 首档预测 ✅；
+   rolling worker ⬜。
 
 **Stage 2 — Gumbel-Sigmoid DC**
 阈值本身可微学化（Gumbel-Sigmoid 松弛 0/1 硬开关，梯度回传）；`Loss = 生成Loss + λ·搜索成本惩罚`；DC 出 shadow，**取代**（非并发）Stage 1 的 rolling τ，warm-start 自其值。**暴露范围**：默认只把 composite `qpp` 喂 DC globalFeatures → Stage 2 只学阈值，简单、小 eval N(≈500) 不易过拟合；数据足够时再暴露各分量让 DC 隐式再加权。Soft-Hard（REALM/可微 RAG，softmax top-k→注意力→与生成向量融合）太侵入（改 retrieval→gen 接口，NMG 返回 context 非融合向量），列替代不主推。

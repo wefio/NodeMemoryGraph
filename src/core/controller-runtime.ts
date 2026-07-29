@@ -7,12 +7,14 @@ import {
   controllerSampleFromTrace,
 } from "./controller-protocol.ts";
 import {
+  CONTROLLER_BUDGET_DIMENSIONS,
   DifferentiableController,
   type ControllerAction,
   type ControllerBudgetDimension,
   type DifferentiableControllerState,
 } from "./differentiable-controller.ts";
 import type { ActiveGraphBudget, MemoryContext, RetrievalTrace } from "./types.ts";
+import { fibonacciEvidenceBudgets } from "./store/active-graph.ts";
 
 export interface ControllerRuntimeState {
   version: 1;
@@ -125,7 +127,11 @@ export class ControllerRuntime {
       budget: {
         maxNodes: project(minimum.maxNodes, maximum.maxNodes, fraction("nodes")),
         maxEdges: project(minimum.maxEdges, maximum.maxEdges, fraction("edges")),
-        maxEvidence: project(minimum.maxEvidence, maximum.maxEvidence, fraction("evidence")),
+        maxEvidence: projectFibonacci(
+          minimum.maxEvidence,
+          maximum.maxEvidence,
+          fraction("evidence"),
+        ),
         maxTokens: project(minimum.maxTokens, maximum.maxTokens, fraction("tokens")),
         maxGraphHops: project(
           minimum.maxGraphHops,
@@ -176,12 +182,15 @@ function loadState(path: string): ControllerRuntimeState | null {
     const state = JSON.parse(readFileSync(path, "utf8")) as ControllerRuntimeState;
     if (
       state.version !== 1 ||
-      state.featureProtocolVersion !== CONTROLLER_FEATURE_PROTOCOL_VERSION ||
-      state.controller.featureCount !== CONTROLLER_FEATURE_COUNT
+      ![1, CONTROLLER_FEATURE_PROTOCOL_VERSION].includes(state.featureProtocolVersion)
     ) {
       throw new Error("controller runtime state is incompatible with the feature protocol");
     }
-    return state;
+    return {
+      ...state,
+      featureProtocolVersion: CONTROLLER_FEATURE_PROTOCOL_VERSION,
+      controller: resizeControllerState(state.controller, CONTROLLER_FEATURE_COUNT),
+    };
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
       return null;
@@ -211,6 +220,7 @@ function traceFromActiveGraph(context: MemoryContext): RetrievalTrace {
     selections: graph.selections,
     expansions: graph.expansions,
     budgetLedger: graph.budgetLedger,
+    qpp: graph.qpp,
     createdAt: graph.createdAt,
   };
 }
@@ -225,4 +235,41 @@ function project(minimum: number, maximum: number, fraction: number): number {
   const lower = Math.min(minimum, maximum);
   const upper = Math.max(minimum, maximum);
   return Math.round(lower + (upper - lower) * Math.max(0, Math.min(1, fraction)));
+}
+
+function projectFibonacci(minimum: number, maximum: number, fraction: number): number {
+  const projected = project(minimum, maximum, fraction);
+  const tiers = fibonacciEvidenceBudgets(maximum).filter((tier) => tier >= minimum);
+  return tiers.find((tier) => tier >= projected) ?? maximum;
+}
+
+function resizeControllerState(
+  state: DifferentiableControllerState,
+  featureCount: number,
+): DifferentiableControllerState {
+  if (state.featureCount === featureCount) return state;
+  if (state.featureCount > featureCount) {
+    throw new Error("controller state has more features than the current protocol");
+  }
+  const resize = (values: number[], rows: number): number[] => {
+    const resized = new Array<number>(rows * featureCount).fill(0);
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < state.featureCount; column += 1) {
+        resized[row * featureCount + column] =
+          values[row * state.featureCount + column] ?? 0;
+      }
+    }
+    return resized;
+  };
+  return {
+    ...state,
+    featureCount,
+    parameters: {
+      ...state.parameters,
+      nodeWeights: resize(state.parameters.nodeWeights, 1),
+      edgeWeights: resize(state.parameters.edgeWeights, 1),
+      controlWeights: resize(state.parameters.controlWeights, 2),
+      budgetWeights: resize(state.parameters.budgetWeights, CONTROLLER_BUDGET_DIMENSIONS.length),
+    },
+  };
 }

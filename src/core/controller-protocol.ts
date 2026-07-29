@@ -8,13 +8,14 @@ import type {
   MemorySearchResult,
   RetrievalTrace,
 } from "./types.ts";
+import { queryIntentFamilies } from "./store/search-ranking.ts";
 
 /**
  * Versioned, bounded feature contract shared by STG, LTG and the runtime Active Graph.
  * Every value is finite and normally in [0, 1], so a saved controller is meaningful only
  * together with this exact protocol version.
  */
-export const CONTROLLER_FEATURE_PROTOCOL_VERSION = 1 as const;
+export const CONTROLLER_FEATURE_PROTOCOL_VERSION = 2 as const;
 
 export const CONTROLLER_FEATURE_NAMES = [
   "query_characters",
@@ -49,6 +50,14 @@ export const CONTROLLER_FEATURE_NAMES = [
   "candidate_importance",
   "candidate_access_count",
   "candidate_stability",
+  "qpp_score",
+  "qpp_top1",
+  "qpp_variance",
+  "qpp_intent_coverage",
+  "qpp_reason_health",
+  "query_intent_list_count",
+  "query_intent_recommend",
+  "query_intent_assistant",
 ] as const;
 
 export const CONTROLLER_FEATURE_COUNT = CONTROLLER_FEATURE_NAMES.length;
@@ -137,6 +146,8 @@ function featureVector(
   const nodeCount = Math.max(1, new Set(results.map((result) => result.node.id)).size);
   const usage = trace.activeGraphUsage;
   const budget = trace.activeGraphBudget;
+  const qpp = trace.qpp;
+  const intents = new Set(queryIntentFamilies(trace.query).map((family) => family.name));
   const values = [
     bounded(trace.query.length / 512),
     bounded(tokenCount(trace.query) / 64),
@@ -170,6 +181,14 @@ function featureVector(
     bounded(candidate?.importance ?? 0),
     bounded(Math.log1p(candidate?.accessCount ?? 0) / Math.log(1024)),
     bounded(candidate?.stability ?? 0),
+    bounded((qpp?.qpp ?? 0) / 2),
+    bounded(qpp?.components.top1 ?? 0),
+    bounded(qpp?.components.variance ?? 0),
+    bounded(qpp?.components.intentCoverage ?? 0.5),
+    bounded(qpp?.components.reasonHealth ?? 0),
+    Number(intents.has("list_count")),
+    Number(intents.has("recommend")),
+    Number(intents.has("assistant")),
   ];
   if (
     values.length !== CONTROLLER_FEATURE_COUNT ||
@@ -217,10 +236,14 @@ function trainingExample(
     (maximum, selection) => Math.max(maximum, selection.tier),
     0,
   );
+  const requiredEvidence = usefulSelections.reduce(
+    (maximum, selection) => Math.max(maximum, selection.rank),
+    0,
+  );
   const budgetTargets = [
     ratio(usefulNodeIds.size, budget.maxNodes),
     ratio(usefulEdges.size, budget.maxEdges),
-    ratio(usefulSelections.length, budget.maxEvidence),
+    ratio(requiredEvidence, budget.maxEvidence),
     ratio(usefulTokens, budget.maxTokens),
     ratio(usefulHops, budget.maxGraphHops),
     ratio(usefulTier, budget.maxLocalTier),

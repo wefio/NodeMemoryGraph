@@ -1365,8 +1365,15 @@ export class NmgStore {
       const stages = [];
       let stoppedBecause: NonNullable<QppTriggerDecision["expansion"]>["stoppedBecause"] =
         "budget_exhausted";
-      for (const targetEvidence of fibonacciEvidenceBudgets(
-        Math.min(50, maximum.maxEvidence),
+      const fibonacciBudgets = fibonacciEvidenceBudgets(Math.min(50, maximum.maxEvidence));
+      const requestedInitial = Math.max(
+        1,
+        Math.min(options.initialEvidenceTarget ?? 1, maximum.maxEvidence),
+      );
+      const initialTarget =
+        fibonacciBudgets.find((target) => target >= requestedInitial) ?? maximum.maxEvidence;
+      for (const targetEvidence of fibonacciBudgets.filter(
+        (target) => target >= initialTarget,
       )) {
         // Relation expansion has already run at the original graph-hop budget.
         // Do not claim the extra hop from the hard envelope until graph routing

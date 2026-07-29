@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { ControllerRuntime } from "../../src/core/controller-runtime.ts";
+import {
+  CONTROLLER_FEATURE_COUNT,
+  CONTROLLER_FEATURE_PROTOCOL_VERSION,
+} from "../../src/core/controller-protocol.ts";
+import { DifferentiableController } from "../../src/core/differentiable-controller.ts";
+import { fibonacciEvidenceBudgets } from "../../src/core/store/active-graph.ts";
 import { NmgStore } from "../../src/core/store.ts";
 
 test("controller runtime learns from actual-use traces and persists exact state", () => {
@@ -60,12 +66,41 @@ test("controller allocation widens an explicit recall within its operator envelo
     assert.ok(decision);
     assert.ok(decision.budget.maxEvidence > context.activeGraph.budget.maxEvidence);
     assert.ok(decision.budget.maxEvidence <= 20);
+    assert.ok(fibonacciEvidenceBudgets(20).includes(decision.budget.maxEvidence));
     assert.ok(decision.budget.maxTokens > context.activeGraph.budget.maxTokens);
     assert.ok(decision.budget.maxTokens <= 6_000);
     assert.ok(decision.budget.maxNodes <= 16);
     assert.ok(decision.budget.maxLocalTier <= 3);
   } finally {
     store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("controller runtime zero-pads a version-1 feature state", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-controller-migrate-"));
+  const statePath = join(directory, "controller.json");
+  try {
+    const legacy = new DifferentiableController(32);
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        version: 1,
+        featureProtocolVersion: 1,
+        controller: legacy.toJSON(),
+        observations: 3,
+        updatedAt: new Date(0).toISOString(),
+      }),
+    );
+    const runtime = new ControllerRuntime(statePath);
+    runtime.save();
+    const saved = JSON.parse(readFileSync(statePath, "utf8")) as {
+      featureProtocolVersion: number;
+      controller: { featureCount: number };
+    };
+    assert.equal(saved.featureProtocolVersion, CONTROLLER_FEATURE_PROTOCOL_VERSION);
+    assert.equal(saved.controller.featureCount, CONTROLLER_FEATURE_COUNT);
+  } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 });
