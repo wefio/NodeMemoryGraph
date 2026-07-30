@@ -4,6 +4,8 @@ coverage/
 .nmg/
 .workbuddy/
 .claude/settings.local.json
+.claude/.mcp-approvals.json
+.mcp.json
 .benchmarks/
 evals/scale/.tmp/
 evals/hierarchy-scale/.tmp/
