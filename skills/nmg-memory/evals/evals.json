@@ -1,0 +1,31 @@
+[
+  {
+    "name": "recall_project_decision",
+    "prompt": "上次 Atlas 项目决定使用哪个数据库？继续按那个决定写迁移计划。",
+    "expected": [
+      "Checks or starts the NMG daemon before recall",
+      "Searches memory and loads selected exact evidence",
+      "Uses the recalled decision in the migration plan",
+      "Stops the daemon only when this invocation started it"
+    ]
+  },
+  {
+    "name": "remember_preference",
+    "prompt": "记住我今后希望中文简洁回答，然后告诉我保存结果。",
+    "expected": [
+      "Stores a durable preference automatically",
+      "Includes short user evidence and a stable semantic node",
+      "Does not store unrelated conversation",
+      "Reports the saved result"
+    ]
+  },
+  {
+    "name": "shared_daemon",
+    "prompt": "NMG daemon 已经由另一个 Agent 启动。查一下以前失败过的 Gazebo 方案，完成后不要影响其他 Agent。",
+    "expected": [
+      "Reuses the existing daemon",
+      "Uses progressive search and exact get",
+      "Does not stop a daemon it did not start"
+    ]
+  }
+]

@@ -67,8 +67,9 @@ Pi agent harness
       ▼
 NMG Pi extension
       │
+      │ persistent local gRPC client
       ▼
-NMG core ── MemoryNode graph ── tiered MemoryRecord
+NMG daemon ── NMG core ── MemoryNode graph ── tiered MemoryRecord
       │          │                    │
       │     online router       vector embedding
       │          └──────┬─────────────┘
@@ -93,6 +94,11 @@ pi
 
 By default, the extension stores data in `.nmg/nmg.sqlite` under the current project. Set `NMG_DATA_DIR` to use another directory.
 
+The Pi adapter is deliberately thin. It lazily starts the local gRPC daemon,
+reuses one channel for automatic recall and the three stable tools, and stops
+the daemon at session shutdown only when that adapter invocation started it.
+An already-running shared daemon is left untouched.
+
 By default, the model receives three tools and a typed write/use policy:
 
 - `nmg_remember`: save a typed long-term memory with scope, truth status,
@@ -102,29 +108,9 @@ By default, the model receives three tools and a typed write/use policy:
 - `nmg_get`: expand selected IDs into exact memory statements and bounded source
   evidence.
 
-Set `NMG_ENABLE_LAB_TOOLS=1` before starting Pi to expose the experimental
-maintenance surface:
-
-- `nmg_reason`: maintain a session-local, auditable task scratchpad of goals,
-  observations, hypotheses, evidence, conclusions, decisions, open questions,
-  and next actions across ordinary turns and Pi context compaction.
-- `nmg_derive`: form a new conclusion from at least two existing memories while
-  retaining every transitive evidence reference.
-- `nmg_link`: add a typed semantic relation between two memory nodes.
-- `nmg_organize`: merge duplicate nodes or split an over-broad node using an
-  explicit, complete memory partition.
-- `nmg_feedback`: train the local online node router from useful-query feedback.
-- `nmg_rebalance`: batch-rebuild node-local block tiers from accumulated access
-  probability statistics.
-- `nmg_consolidate`: reconcile evidence-backed relation stability with
-  hysteretic promotion and demotion.
-
-The reasoning workspace is not hidden chain-of-thought and does not
-automatically become long-term memory. Its files live under
-`.nmg/reasoning/`. Current evidence supports keeping it selective rather than
-always-on: it can recover task state after compaction, but unnecessary tool
-calls add substantial latency and model-proposed hypotheses can pollute the
-scratchpad.
+Graph maintenance, QPP, indexing, and experimental reasoning components remain
+core/CLI concerns rather than Pi tools. The adapter never opens SQLite or
+imports those implementations directly.
 
 For one-off development inside this repository, disable automatic extension
 discovery and load NMG exactly once:
@@ -167,6 +153,15 @@ The service exposes `Hello`, `Status`, `Remember`, `Search`, `Get`, and
 `Shutdown`. It rejects a second daemon for the same database, opens SQLite
 lazily, and removes stale process leases. Use the same `--data-dir` or `--db`
 for daemon and client commands.
+
+## Agent Skill
+
+[`skills/nmg-memory/SKILL.md`](skills/nmg-memory/SKILL.md) lets other
+tool-capable Agents use the same lifecycle and progressive recall workflow.
+It is a small first-use card with on-demand reference pages: detailed write,
+recall, and operations guidance is read only after an Agent forgets an operation
+or encounters a special case. The normal path remains
+`status → start if needed → search → selected get → ownership-safe stop`.
 
 SQLite FTS5 is the zero-configuration Pi retrieval path. Set
 `NMG_EMBED_BASE_URL` and `NMG_EMBED_MODEL` to add the external node/leaf semantic

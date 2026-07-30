@@ -1,0 +1,4 @@
+interface:
+  display_name: "NMG Memory"
+  short_description: "Recall and save durable Agent memory"
+  default_prompt: "Use $nmg-memory to recall relevant prior context and preserve durable new information."

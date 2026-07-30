@@ -113,10 +113,9 @@ Automatic extraction may use the same write path. Privacy deletion, reindexing,
 graph editing, feedback inspection, and maintenance belong in CLI/UI/background
 operations rather than ordinary model tools.
 
-The default Pi package now exposes these three tools. `nmg_derive`, `nmg_link`,
-`nmg_organize`, `nmg_feedback`, and `nmg_rebalance` remain available only when
-`NMG_ENABLE_LAB_TOOLS=1`; future versions should move equivalent maintenance to
-background or administrative paths.
+The default Pi package exposes only these three tools. Graph editing, feedback,
+rebalancing, consolidation, QPP, and experimental reasoning remain background,
+CLI, benchmark, or administrative concerns rather than Pi tools.
 
 ### 4.1 Agent-independent CLI and resident service
 
@@ -183,10 +182,17 @@ post-turn feedback, and shutdown. It must not parse SQLite rows, update graph
 topology, implement QPP, or construct embedding indexes. Pi is the first
 adapter, not part of the NMG data model.
 
-The current in-process TypeScript Pi adapter is a transition step. It should
-become a thin gRPC lifecycle/tool adapter without copying Pi-specific policy
-into NMG core. No Rust/Python implementation is planned unless profiling later
-identifies a component that cannot meet its budget in TypeScript.
+The Pi adapter is now a thin gRPC lifecycle/tool adapter. It lazily starts the
+daemon, reuses one channel for automatic recall and the three stable tools, and
+stops the daemon only when that adapter invocation owns it. It does not open
+SQLite, maintain indexes, or import graph/QPP implementations. No Rust/Python
+implementation is planned unless profiling later identifies a component that
+cannot meet its budget in TypeScript.
+
+Other Agents can use the packaged `nmg-memory` Skill. Its entry document is a
+small first-use card; detailed write, recall, and daemon operations live in
+linked references and are loaded only when the Agent forgets an operation or
+encounters a special case.
 
 ## 5. Core data model
 
@@ -1577,9 +1583,10 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
    records at add/turn boundaries, and retain FTS/exact as the
    zero-configuration and not-yet-ready fallback. Node/leaf-only and the
    current union ranker are explicitly gated off after the LoCoMo ablation.
-5. **Complete at CLI boundary:** expose the application boundary through an
+5. **Complete:** expose the application boundary through an
    agent-independent `nmg` CLI and cross-platform `nmg.v1` gRPC daemon.
-   Remaining work is reducing the Pi extension to a lifecycle/tool adapter.
+   The Pi extension uses the same daemon through a persistent gRPC client and
+   ownership-aware lifecycle.
 
 ### P1: incremental correctness and fair evaluation
 

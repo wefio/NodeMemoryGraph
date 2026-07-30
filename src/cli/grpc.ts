@@ -81,31 +81,48 @@ export async function callGrpc(
   method: NmgMethod,
   params: Record<string, unknown> = {},
 ): Promise<unknown> {
-  if (state.transport !== "grpc" || !state.host || !state.port || !state.token) {
-    throw new Error("NMG daemon state does not contain a gRPC endpoint");
-  }
-  const client = new MemoryService(
-    `${state.host}:${state.port}`,
-    ChannelCredentials.createInsecure(),
-  );
-  const metadata = new Metadata();
-  metadata.set(AUTHORIZATION, `Bearer ${state.token}`);
+  const client = new NmgGrpcClient(state);
   try {
+    return await client.invoke(method, params);
+  } finally {
+    client.close();
+  }
+}
+
+export class NmgGrpcClient {
+  readonly #client: Client & Record<string, UnaryClientMethod>;
+  readonly #metadata: Metadata;
+
+  constructor(state: ServerState) {
+    if (state.transport !== "grpc" || !state.host || !state.port || !state.token) {
+      throw new Error("NMG daemon state does not contain a gRPC endpoint");
+    }
+    this.#client = new MemoryService(
+      `${state.host}:${state.port}`,
+      ChannelCredentials.createInsecure(),
+    );
+    this.#metadata = new Metadata();
+    this.#metadata.set(AUTHORIZATION, `Bearer ${state.token}`);
+  }
+
+  async invoke(method: NmgMethod, params: Record<string, unknown> = {}): Promise<unknown> {
     const response = await new Promise<ValueResponse>((resolveResponse, reject) => {
-      const call = client[method];
+      const call = this.#client[method];
       if (typeof call !== "function") {
         reject(new Error(`gRPC method is unavailable: ${method}`));
         return;
       }
-      call.call(client, params, metadata, (error, value) => {
+      call.call(this.#client, params, this.#metadata, (error, value) => {
         if (error) reject(error);
         else if (!value) reject(new Error(`gRPC method returned no response: ${method}`));
         else resolveResponse(value);
       });
     });
     return fromStruct(response.value);
-  } finally {
-    client.close();
+  }
+
+  close(): void {
+    this.#client.close();
   }
 }
 
@@ -117,7 +134,11 @@ function unaryHandler(
 ): handleUnaryCall<Record<string, unknown>, ValueResponse> {
   return async (call, callback) => {
     if (call.metadata.get(AUTHORIZATION)[0] !== `Bearer ${token}`) {
-      callback({ name: "Unauthenticated", message: "invalid NMG daemon token", code: status.UNAUTHENTICATED });
+      callback({
+        name: "Unauthenticated",
+        message: "invalid NMG daemon token",
+        code: status.UNAUTHENTICATED,
+      });
       return;
     }
     try {

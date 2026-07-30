@@ -21,6 +21,8 @@
     "proto/",
     "extensions/nmg.ts",
     ".pi/extensions/nmg/index.ts",
+    "skills/",
+    "src/cli/",
     "src/core/",
     "src/integration/"
   ],
