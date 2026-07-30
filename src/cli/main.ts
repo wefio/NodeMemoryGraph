@@ -3,9 +3,14 @@ import { resolve } from "node:path";
 
 import {
   type NmgGetParams,
+  type NmgDeleteMemoryParams,
+  type NmgMergeNodesParams,
   type NmgMethod,
   type NmgRememberParams,
+  type NmgRetentionCandidatesParams,
   type NmgSearchParams,
+  type NmgSetStorageStateParams,
+  type NmgSplitNodeParams,
 } from "./protocol.ts";
 import { callGrpc, serveGrpc } from "./grpc.ts";
 import {
@@ -24,6 +29,13 @@ Usage:
   nmg remember STATEMENT --node NAME [options] [--json]
   nmg search QUERY [options] [--json]
   nmg get MEMORY_ID... [--graph-hops N] [--json]
+  nmg retention candidates [policy options] [--json]
+  nmg retention archive MEMORY_ID [--json]
+  nmg retention quarantine MEMORY_ID [--recovery-days N] [--json]
+  nmg retention restore MEMORY_ID [--json]
+  nmg memory delete MEMORY_ID [--json]
+  nmg node merge NODE_ID... --target-name NAME [--target-kind KIND] [--json]
+  nmg node split NODE_ID --partition NAME=MEMORY_ID,... --partition ... [--json]
   nmg daemon start|status|stop [--data-dir DIR | --db FILE] [--json]
 
 Common options:
@@ -54,21 +66,38 @@ Search options:
   --retrieval-mode MODE      fts5, hybrid, qwen3, hashing, or legacy
   --vector-granularity MODE  hierarchy, records, or union
   --second-pass              Enable progressive QPP recall
+
+Retention policy options:
+  --dormant-after-days N     Minimum age and idle time before L4
+  --quarantine-after-days N  Minimum time in L4 before L5
+  --maximum-importance N     Candidate ceiling from 0..1
+  --maximum-access-count N   Candidate access-count ceiling
+
+Node maintenance:
+  --target-name NAME         New canonical node name for merge
+  --target-kind KIND         Optional semantic node kind
+  --partition NAME=IDS       Split partition; repeat and assign every memory ID
 `;
 const ALL_FLAGS = new Set(["include-historical", "json", "second-pass"]);
 const ALL_OPTIONS = new Set([
   "actor",
   "data-dir",
   "db",
+  "dormant-after-days",
   "event-time",
   "evidence",
   "evidence-role",
   "expires-at",
   "graph-hops",
   "importance",
+  "maximum-access-count",
+  "maximum-importance",
   "limit",
   "max-tier",
   "node",
+  "partition",
+  "quarantine-after-days",
+  "recovery-days",
   "residence",
   "retrieval-mode",
   "scope",
@@ -76,8 +105,11 @@ const ALL_OPTIONS = new Set([
   "source-actor",
   "source-ref",
   "state-key",
+  "summary",
   "supersedes",
   "tier",
+  "target-kind",
+  "target-name",
   "truth",
   "type",
   "valid-from",
@@ -152,7 +184,12 @@ async function runDaemonCommand(
       return { running: false };
     }
     const status = await callGrpc(existing, "status");
-    return { running: true, pid: existing.pid, endpoint: `${existing.host}:${existing.port}`, status };
+    return {
+      running: true,
+      pid: existing.pid,
+      endpoint: `${existing.host}:${existing.port}`,
+      status,
+    };
   }
 
   if (command === "daemon-stop") {
@@ -231,7 +268,15 @@ function isDaemonCommand(command: ParsedArguments["command"]): command is Daemon
 
 interface ParsedArguments {
   command: NmgMethod | DaemonCommand | "help";
-  params?: NmgRememberParams | NmgSearchParams | NmgGetParams;
+  params?:
+    | NmgRememberParams
+    | NmgSearchParams
+    | NmgGetParams
+    | NmgRetentionCandidatesParams
+    | NmgSetStorageStateParams
+    | NmgDeleteMemoryParams
+    | NmgMergeNodesParams
+    | NmgSplitNodeParams;
   json: boolean;
   dataDirectory?: string;
   databasePath?: string;
@@ -242,22 +287,48 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     return { command: "help", json: false };
   }
   const [command, ...rest] = argv;
-  if (!["status", "remember", "search", "get", "daemon"].includes(command!)) {
+  if (
+    !["status", "remember", "search", "get", "retention", "memory", "node", "daemon"].includes(
+      command!,
+    )
+  ) {
     throw new Error(`unknown command: ${command}`);
   }
   const daemonAction = command === "daemon" ? rest[0] : undefined;
-  if (
-    command === "daemon" &&
-    !["run", "start", "status", "stop"].includes(daemonAction ?? "")
-  ) {
+  if (command === "daemon" && !["run", "start", "status", "stop"].includes(daemonAction ?? "")) {
     throw new Error("daemon requires start, status, or stop");
   }
-  const values = parseOptions(command === "daemon" ? rest.slice(1) : rest);
+  const subcommand = ["retention", "memory", "node"].includes(command!) ? rest[0] : undefined;
+  if (
+    command === "retention" &&
+    !["candidates", "archive", "quarantine", "restore"].includes(subcommand ?? "")
+  ) {
+    throw new Error("retention requires candidates, archive, quarantine, or restore");
+  }
+  if (command === "memory" && subcommand !== "delete") {
+    throw new Error("memory requires delete");
+  }
+  if (command === "node" && !["merge", "split"].includes(subcommand ?? "")) {
+    throw new Error("node requires merge or split");
+  }
+  const values = parseOptions(command === "daemon" || subcommand ? rest.slice(1) : rest);
+  const maintenanceCommand =
+    command === "retention"
+      ? subcommand === "candidates"
+        ? "retentionCandidates"
+        : "setStorageState"
+      : command === "memory"
+        ? "deleteMemory"
+        : command === "node"
+          ? subcommand === "merge"
+            ? "mergeNodes"
+            : "splitNode"
+          : undefined;
   const common = {
     command:
       command === "daemon"
         ? (`daemon-${daemonAction}` as DaemonCommand)
-        : (command as ParsedArguments["command"]),
+        : ((maintenanceCommand ?? command) as ParsedArguments["command"]),
     json: values.flags.has("json"),
     dataDirectory: firstOption(values, "data-dir"),
     databasePath: optionalResolvedPath(firstOption(values, "db")),
@@ -266,6 +337,45 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     assertAllowed(values, ["data-dir", "db"], daemonAction === "run" ? [] : ["json"]);
     rejectPositionals(values, "daemon");
     return common;
+  }
+  if (command === "retention") {
+    if (subcommand === "candidates") {
+      assertAllowed(
+        values,
+        [
+          "data-dir",
+          "db",
+          "dormant-after-days",
+          "quarantine-after-days",
+          "maximum-importance",
+          "maximum-access-count",
+        ],
+        ["json"],
+      );
+      rejectPositionals(values, "retention candidates");
+      return { ...common, params: retentionCandidatesParams(values) };
+    }
+    assertAllowed(
+      values,
+      ["data-dir", "db", ...(subcommand === "quarantine" ? ["recovery-days"] : [])],
+      ["json"],
+    );
+    return {
+      ...common,
+      params: storageStateParams(values, subcommand as "archive" | "quarantine" | "restore"),
+    };
+  }
+  if (command === "memory") {
+    assertAllowed(values, ["data-dir", "db"], ["json"]);
+    return { ...common, params: singleMemoryParams(values, "memory delete") };
+  }
+  if (command === "node") {
+    if (subcommand === "merge") {
+      assertAllowed(values, ["data-dir", "db", "target-name", "target-kind", "summary"], ["json"]);
+      return { ...common, params: mergeNodesParams(values) };
+    }
+    assertAllowed(values, ["data-dir", "db", "partition"], ["json"]);
+    return { ...common, params: splitNodeParams(values) };
   }
   switch (command) {
     case "status":
@@ -334,6 +444,69 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     default:
       throw new Error(`unknown command: ${command}`);
   }
+}
+
+function retentionCandidatesParams(values: OptionValues): NmgRetentionCandidatesParams {
+  return compactObject({
+    dormantAfterDays: numericOption(values, "dormant-after-days"),
+    quarantineAfterDays: numericOption(values, "quarantine-after-days"),
+    maximumImportance: numericOption(values, "maximum-importance"),
+    maximumAccessCount: numericOption(values, "maximum-access-count"),
+  });
+}
+
+function storageStateParams(
+  values: OptionValues,
+  action: "archive" | "quarantine" | "restore",
+): NmgSetStorageStateParams {
+  const memoryId = singlePositional(values, `retention ${action}`);
+  return compactObject({
+    memoryId,
+    storageState:
+      action === "archive" ? "dormant" : action === "quarantine" ? "quarantine" : "indexed",
+    recoveryDays: numericOption(values, "recovery-days"),
+  }) as unknown as NmgSetStorageStateParams;
+}
+
+function singleMemoryParams(values: OptionValues, command: string): NmgDeleteMemoryParams {
+  return { memoryId: singlePositional(values, command) };
+}
+
+function mergeNodesParams(values: OptionValues): NmgMergeNodesParams {
+  if (values.positionals.length < 2) throw new Error("node merge requires at least two node IDs");
+  const targetName = firstOption(values, "target-name");
+  if (!targetName) throw new Error("node merge requires --target-name NAME");
+  return compactObject({
+    sourceNodeIds: values.positionals,
+    targetName,
+    targetKind: firstOption(values, "target-kind"),
+    summary: firstOption(values, "summary"),
+  }) as unknown as NmgMergeNodesParams;
+}
+
+function splitNodeParams(values: OptionValues): NmgSplitNodeParams {
+  const sourceNodeId = singlePositional(values, "node split");
+  const partitions = (values.options.get("partition") ?? []).map((entry) => {
+    const separator = entry.indexOf("=");
+    if (separator < 1 || separator === entry.length - 1) {
+      throw new Error("--partition must use NAME=MEMORY_ID,...");
+    }
+    const memoryIds = entry
+      .slice(separator + 1)
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+    if (memoryIds.length === 0) throw new Error("--partition requires at least one memory ID");
+    return { nodeName: entry.slice(0, separator).trim(), memoryIds };
+  });
+  if (partitions.length < 2)
+    throw new Error("node split requires at least two --partition options");
+  return { sourceNodeId, partitions };
+}
+
+function singlePositional(values: OptionValues, command: string): string {
+  if (values.positionals.length !== 1) throw new Error(`${command} requires exactly one ID`);
+  return values.positionals[0]!;
 }
 
 interface OptionValues {
@@ -487,6 +660,35 @@ function compactObject(value: Record<string, unknown>): Record<string, unknown> 
 
 function humanResult(value: unknown): string {
   const result = value as Record<string, unknown>;
+  if ("candidates" in result) {
+    const candidates = result.candidates as Array<{
+      memoryId: string;
+      storageState: string;
+      recommendedState: string;
+      statement: string;
+    }>;
+    return candidates.length === 0
+      ? "No retention candidates.\n"
+      : `${candidates
+          .map(
+            (candidate) =>
+              `${candidate.memoryId}\t${candidate.storageState}->${candidate.recommendedState}\t${candidate.statement}`,
+          )
+          .join("\n")}\n`;
+  }
+  if ("storageState" in result && "memoryId" in result) {
+    return `${String(result.memoryId)} is now ${String(result.storageState)}.\n`;
+  }
+  if ("deleted" in result) {
+    return result.deleted
+      ? `Deleted semantic memory ${String((result.memory as { id: string }).id)}; source history was retained.\n`
+      : "Memory not found.\n";
+  }
+  if ("sourceNodeIds" in result && "targetNodeIds" in result) {
+    return `Applied ${String(result.type)} transform ${String(result.id)}: ${String(
+      (result.sourceNodeIds as string[]).join(", "),
+    )} -> ${String((result.targetNodeIds as string[]).join(", "))}.\n`;
+  }
   if ("memory" in result) {
     const memory = result.memory as { id: string };
     const node = result.node as { canonicalName: string };
@@ -534,9 +736,11 @@ function humanResult(value: unknown): string {
 }
 
 function humanDaemonResult(result: Record<string, unknown>): string {
-  if (result.started) return `Started NMG daemon pid ${String(result.pid)} at ${String(result.endpoint)}.\n`;
+  if (result.started)
+    return `Started NMG daemon pid ${String(result.pid)} at ${String(result.endpoint)}.\n`;
   if (result.alreadyRunning) return `NMG daemon is already running (pid ${String(result.pid)}).\n`;
-  if (result.running) return `NMG daemon pid ${String(result.pid)} is running at ${String(result.endpoint)}.\n`;
+  if (result.running)
+    return `NMG daemon pid ${String(result.pid)} is running at ${String(result.endpoint)}.\n`;
   if (result.stopped) return `Stopped NMG daemon pid ${String(result.pid ?? "")}.\n`;
   return "NMG daemon is not running.\n";
 }

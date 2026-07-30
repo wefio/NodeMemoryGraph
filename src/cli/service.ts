@@ -25,10 +25,15 @@ import {
   NmgProtocolError,
   type NmgGetParams,
   type NmgHelloResult,
+  type NmgDeleteMemoryParams,
   type NmgMethod,
   type NmgMethodResult,
+  type NmgMergeNodesParams,
   type NmgRememberParams,
+  type NmgRetentionCandidatesParams,
   type NmgSearchParams,
+  type NmgSetStorageStateParams,
+  type NmgSplitNodeParams,
   type NmgStatusResult,
 } from "./protocol.ts";
 
@@ -56,6 +61,18 @@ const EVIDENCE_ROLES = [
 const RESIDENCES = ["ltg", "stg"] as const;
 const RETRIEVAL_MODES = ["legacy", "fts5", "hashing", "qwen3", "hybrid"] as const;
 const VECTOR_GRANULARITIES = ["hierarchy", "records", "union"] as const;
+const STORAGE_STATES = ["indexed", "dormant", "quarantine"] as const;
+const NODE_KINDS = [
+  "concept",
+  "constraint",
+  "entity",
+  "preference",
+  "procedure",
+  "project",
+  "state",
+  "strategy",
+  "topic",
+] as const;
 
 export interface NmgServiceOptions {
   dataDirectory?: string;
@@ -98,6 +115,30 @@ export class NmgService {
         return (await this.#search(parseSearchParams(params))) as NmgMethodResult[M];
       case "get":
         return this.#get(parseGetParams(params)) as NmgMethodResult[M];
+      case "retentionCandidates":
+        return {
+          candidates: this.#getStore().retentionCandidates(parseRetentionCandidatesParams(params)),
+        } as NmgMethodResult[M];
+      case "setStorageState": {
+        const parsed = parseSetStorageStateParams(params);
+        return {
+          memoryId: parsed.memoryId,
+          storageState: this.#getStore().setMemoryStorageState(
+            parsed.memoryId,
+            parsed.storageState,
+            parsed.recoveryDays,
+          ),
+        } as NmgMethodResult[M];
+      }
+      case "deleteMemory": {
+        const parsed = parseDeleteMemoryParams(params);
+        const memory = this.#getStore().deleteMemory(parsed.memoryId);
+        return { deleted: memory !== null, memory } as NmgMethodResult[M];
+      }
+      case "mergeNodes":
+        return this.#getStore().mergeNodes(parseMergeNodesParams(params)) as NmgMethodResult[M];
+      case "splitNode":
+        return this.#getStore().splitNode(parseSplitNodeParams(params)) as NmgMethodResult[M];
       case "shutdown":
         this.#shutdownRequested = true;
         return { shuttingDown: true } as NmgMethodResult[M];
@@ -281,6 +322,58 @@ function parseGetParams(value: unknown): NmgGetParams {
   };
 }
 
+function parseRetentionCandidatesParams(value: unknown): NmgRetentionCandidatesParams {
+  const params = objectParams(value);
+  return {
+    dormantAfterDays: optionalInteger(params, "dormantAfterDays", 1, 36500),
+    quarantineAfterDays: optionalInteger(params, "quarantineAfterDays", 1, 36500),
+    maximumImportance: optionalNumber(params, "maximumImportance", 0, 1),
+    maximumAccessCount: optionalInteger(params, "maximumAccessCount", 0, 1_000_000_000),
+  };
+}
+
+function parseSetStorageStateParams(value: unknown): NmgSetStorageStateParams {
+  const params = objectParams(value);
+  return {
+    memoryId: requiredString(params, "memoryId"),
+    storageState: optionalEnum(params, "storageState", STORAGE_STATES) ?? "indexed",
+    recoveryDays: optionalInteger(params, "recoveryDays", 0, 36500),
+  };
+}
+
+function parseDeleteMemoryParams(value: unknown): NmgDeleteMemoryParams {
+  return { memoryId: requiredString(objectParams(value), "memoryId") };
+}
+
+function parseMergeNodesParams(value: unknown): NmgMergeNodesParams {
+  const params = objectParams(value);
+  return {
+    sourceNodeIds: requiredStringArray(params, "sourceNodeIds", 2, 100),
+    targetName: requiredString(params, "targetName"),
+    targetKind: optionalEnum(params, "targetKind", NODE_KINDS),
+    summary: optionalString(params, "summary"),
+  };
+}
+
+function parseSplitNodeParams(value: unknown): NmgSplitNodeParams {
+  const params = objectParams(value);
+  if (!Array.isArray(params.partitions) || params.partitions.length < 2) {
+    throw new NmgProtocolError("INVALID_PARAMS", "partitions must contain at least two entries");
+  }
+  return {
+    sourceNodeId: requiredString(params, "sourceNodeId"),
+    partitions: params.partitions.map((value) => {
+      const partition = objectParams(value);
+      return {
+        nodeName: requiredString(partition, "nodeName"),
+        memoryIds: requiredStringArray(partition, "memoryIds", 1, 10_000),
+        nodeKind: optionalEnum(partition, "nodeKind", NODE_KINDS),
+        summary: optionalString(partition, "summary"),
+      };
+    }),
+  };
+}
+
 function objectParams(value: unknown): Record<string, unknown> {
   if (value === undefined) return {};
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -302,6 +395,27 @@ function optionalString(params: Record<string, unknown>, key: string): string | 
     throw new NmgProtocolError("INVALID_PARAMS", `${key} must be a non-empty string`);
   }
   return value.trim();
+}
+
+function requiredStringArray(
+  params: Record<string, unknown>,
+  key: string,
+  minimum: number,
+  maximum: number,
+): string[] {
+  const value = params[key];
+  if (
+    !Array.isArray(value) ||
+    value.length < minimum ||
+    value.length > maximum ||
+    value.some((entry) => typeof entry !== "string" || !entry.trim())
+  ) {
+    throw new NmgProtocolError(
+      "INVALID_PARAMS",
+      `${key} must contain between ${minimum} and ${maximum} non-empty strings`,
+    );
+  }
+  return value.map((entry) => String(entry).trim());
 }
 
 function optionalBoolean(params: Record<string, unknown>, key: string): boolean | undefined {

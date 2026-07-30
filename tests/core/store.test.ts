@@ -405,10 +405,10 @@ test("claims are persisted and derive the record-level logical rollup", () => {
     assert.equal(saved.memory.predicateKey, "user_use_flask_login");
     assert.equal(saved.memory.confidence, 1);
     assert.equal(saved.memory.extractMethod, "llm");
-    assert.deepEqual(saved.memory.claims?.map((claim) => claim.text), [
-      "The user has never used Flask-Login.",
-      "The user has used Flask.",
-    ]);
+    assert.deepEqual(
+      saved.memory.claims?.map((claim) => claim.text),
+      ["The user has never used Flask-Login.", "The user has used Flask."],
+    );
 
     const [reloaded] = store.search("Flask Login", { limit: 1 });
     assert.deepEqual(reloaded?.memory.claims, saved.memory.claims);
@@ -1002,6 +1002,14 @@ test("node vectors route first and node-local search recovers leaf evidence", ()
     );
     assert.equal(results[0]?.memory.id, robotics.memory.id);
     assert.notEqual(results[0]?.memory.id, cooking.memory.id);
+  });
+});
+
+test("node creation automatically reuses punctuation and case variants", () => {
+  withStore((store) => {
+    const first = store.upsertNode({ canonicalName: "ROS Melodic", kind: "project" });
+    const variant = store.upsertNode({ canonicalName: "ros-melodic", kind: "project" });
+    assert.equal(variant.id, first.id);
   });
 });
 

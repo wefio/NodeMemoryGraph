@@ -33,13 +33,21 @@ platform.
 NMG has two intentionally different surfaces:
 
 - **NMG Lite** is the default product surface: a zero-configuration Pi plugin
-  backed by SQLite and a small model-facing API.
+  backed by SQLite, a small model-facing API, and the framework-free
+  differentiable computation substrate used by optional controllers.
 - **NMG Lab** contains measured experiments such as graph routing, adaptive
   tiers, ANN, learned routing, and topology refinement. A Lab feature enters
   Lite only after an ablation demonstrates a benefit over a simpler baseline.
 
 The repository may contain both surfaces, but experimental complexity must not
 become an installation or prompt dependency for the default plugin.
+
+The autodiff substrate belongs to Lite because product features may depend on
+its numerical graph and it adds no Python, PyTorch, GPU, or model-service
+dependency. This does **not** promote every consumer of that substrate:
+learned routing, hierarchical activation, fork/merge experiments, and the
+Memory-Graph Reasoner each retain an independent feature gate and evidence
+requirement.
 
 ## 2. First principles
 
@@ -1014,6 +1022,12 @@ construction is separate from graph execution. NMG deliberately omits
 scheduler, kernel lowering, code generation, JIT, and device runtime because
 the controller workload (~280 KFLOPs/query) does not justify them.
 
+This engine is Lite infrastructure, not a claim that STG, LTG, or AG are
+themselves differentiable. Those graphs are semantic and runtime data
+structures. A controller may build an ephemeral differentiable projection from
+their numeric features, optimise its parameters, then hand the result back to
+ordinary budgeted graph selection.
+
 ### 12.1 UOp op catalogue
 
 ```text
@@ -1578,7 +1592,7 @@ optional.
 
 Current development evidence (updated 2026-07-30):
 
-- 285 automated tests cover UOp autodiff, the differentiable controller,
+- 287 automated tests cover UOp autodiff, the differentiable controller,
   hierarchical activation, the retained memory-graph reasoner prototype,
   reasoning-workspace persistence and checkpoint injection, P3 lifecycle,
   budget enforcement, actual-use activation, independent-task deduplication,
@@ -1802,10 +1816,12 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
    local-subgraph consolidation into LTG with minimum
    evidence, hysteresis, cooldown, and explicit evaluation gates. Pi runs this
    conservative maintenance policy automatically after completed turns.
-6. **Complete as an isolated Lab primitive:** implement a tinygrad-inspired
-   UOp autodiff engine and serializable multi-head controller for node, edge,
-   STOP/EXPAND, and budget decisions. Activation in the Pi retrieval path remains
-   gated on a fixed feature contract and matched evidence-recall/cost evaluation.
+6. **Autodiff complete as Lite infrastructure; controller separately gated:**
+   implement a tinygrad-inspired UOp engine and a serializable multi-head
+   controller for node, edge, STOP/EXPAND, and budget decisions. The numerical
+   substrate ships with Lite; controller activation in the Pi retrieval path
+   remains gated on a fixed feature contract and matched
+   evidence-recall/cost evaluation.
 7. **Mechanism complete, utility evaluation open:** independently selectable QPP1
    allocation, QPP2 progressive folding, and search recommendation are wired
    through the Pi adapter. QPP2 preserves folded candidates in the Active Graph.
@@ -1835,9 +1851,11 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 
 1. Measure retention transitions from indexed cold storage through implemented
    L4 Dormant/Unindexed and L5 Quarantine states before considering automatic
-   physical purge.
-2. Add a user-facing privacy deletion/export workflow over existing store-level
-   deletion and dependency cleanup, including learned-signal erasure.
+   physical purge. The CLI exposes dry-run candidates and explicit
+   archive/quarantine/restore operations through the resident service.
+2. The CLI exposes semantic-memory deletion with dependent index cleanup while
+   retaining immutable source history. Full privacy erasure/export, including
+   raw history and learned-signal erasure, remains separate work.
 3. Add optional encrypted cloud synchronization only after the local protocol
    and multi-device conflict semantics are specified.
 

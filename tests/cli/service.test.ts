@@ -53,6 +53,47 @@ test("resident service remembers, searches, and expands exact evidence", async (
   }
 });
 
+test("resident service exposes explicit retention and deletion maintenance", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-maintenance-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    const remembered = await service.invoke("remember", {
+      statement: "A disposable historical observation.",
+      nodeName: "Disposable observations",
+      memoryType: "event",
+      importance: 0.1,
+    });
+    const archived = await service.invoke("setStorageState", {
+      memoryId: remembered.memory.id,
+      storageState: "dormant",
+    });
+    assert.equal(archived.storageState, "dormant");
+    assert.equal(
+      (await service.invoke("search", { query: "disposable historical" })).results.length,
+      0,
+    );
+
+    await service.invoke("setStorageState", {
+      memoryId: remembered.memory.id,
+      storageState: "indexed",
+    });
+    assert.equal(
+      (await service.invoke("search", { query: "disposable historical" })).results.length,
+      1,
+    );
+
+    const deleted = await service.invoke("deleteMemory", { memoryId: remembered.memory.id });
+    assert.equal(deleted.deleted, true);
+    assert.equal(
+      (await service.invoke("search", { query: "disposable historical" })).results.length,
+      0,
+    );
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("service validates method parameters", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-errors-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });

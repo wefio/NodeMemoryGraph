@@ -108,7 +108,7 @@ test("gRPC daemon starts once, serves CLI requests, and stops cleanly", () => {
     assert.equal(duplicate.alreadyRunning, true);
     assert.equal(duplicate.pid, started.pid);
 
-    runLauncher([
+    const remembered = runLauncher([
       "remember",
       "The gRPC daemon keeps one resident NMG service.",
       "--node",
@@ -118,7 +118,7 @@ test("gRPC daemon starts once, serves CLI requests, and stops cleanly", () => {
       "--json",
       "--data-dir",
       directory,
-    ]);
+    ]) as { memory: { id: string } };
     const searched = runLauncher([
       "search",
       "resident gRPC service",
@@ -127,6 +127,45 @@ test("gRPC daemon starts once, serves CLI requests, and stops cleanly", () => {
       directory,
     ]) as { results: unknown[] };
     assert.equal(searched.results.length, 1);
+
+    const maintained = runLauncher([
+      "retention",
+      "candidates",
+      "--dormant-after-days",
+      "1",
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { candidates: unknown[] };
+    assert.ok(Array.isArray(maintained.candidates));
+
+    const archived = runLauncher([
+      "retention",
+      "archive",
+      remembered.memory.id,
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { storageState: string };
+    assert.equal(archived.storageState, "dormant");
+    const restored = runLauncher([
+      "retention",
+      "restore",
+      remembered.memory.id,
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { storageState: string };
+    assert.equal(restored.storageState, "indexed");
+    const deleted = runLauncher([
+      "memory",
+      "delete",
+      remembered.memory.id,
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { deleted: boolean };
+    assert.equal(deleted.deleted, true);
 
     const status = runLauncher(["daemon", "status", "--json", "--data-dir", directory]) as {
       running: boolean;
@@ -139,20 +178,15 @@ test("gRPC daemon starts once, serves CLI requests, and stops cleanly", () => {
       stopped: boolean;
     };
     assert.equal(stopped.stopped, true);
-    const stoppedStatus = runLauncher([
-      "daemon",
-      "status",
-      "--json",
-      "--data-dir",
-      directory,
-    ]) as { running: boolean };
+    const stoppedStatus = runLauncher(["daemon", "status", "--json", "--data-dir", directory]) as {
+      running: boolean;
+    };
     assert.equal(stoppedStatus.running, false);
   } finally {
-    spawnSync(
-      process.execPath,
-      [launcher, "daemon", "stop", "--json", "--data-dir", directory],
-      { cwd: root, encoding: "utf8" },
-    );
+    spawnSync(process.execPath, [launcher, "daemon", "stop", "--json", "--data-dir", directory], {
+      cwd: root,
+      encoding: "utf8",
+    });
     rmSync(directory, { recursive: true, force: true });
   }
 });

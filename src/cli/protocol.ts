@@ -1,11 +1,16 @@
 import type {
   MemoryActor,
   MemoryContext,
+  MemoryNodeKind,
+  MemoryRecord,
   MemoryResidence,
   MemoryScope,
+  MemoryStorageState,
   MemoryTier,
   MemoryType,
+  NodeTransform,
   RememberResult,
+  RetentionCandidate,
   TruthStatus,
 } from "../core/types.ts";
 
@@ -17,6 +22,11 @@ export const NMG_CAPABILITIES = [
   "remember",
   "search",
   "get",
+  "retention-candidates",
+  "set-storage-state",
+  "delete-memory",
+  "merge-nodes",
+  "split-node",
   "shutdown",
   "grpc",
   "protobuf",
@@ -24,7 +34,18 @@ export const NMG_CAPABILITIES = [
   "optional-embedding-retrieval",
 ] as const;
 
-export type NmgMethod = "get" | "hello" | "remember" | "search" | "shutdown" | "status";
+export type NmgMethod =
+  | "get"
+  | "hello"
+  | "remember"
+  | "search"
+  | "retentionCandidates"
+  | "setStorageState"
+  | "deleteMemory"
+  | "mergeNodes"
+  | "splitNode"
+  | "shutdown"
+  | "status";
 
 export interface NmgHelloResult {
   protocol: typeof NMG_PROTOCOL_VERSION;
@@ -95,12 +116,51 @@ export interface NmgGetParams {
   graphHops?: number;
 }
 
+export interface NmgRetentionCandidatesParams {
+  dormantAfterDays?: number;
+  quarantineAfterDays?: number;
+  maximumImportance?: number;
+  maximumAccessCount?: number;
+}
+
+export interface NmgSetStorageStateParams {
+  memoryId: string;
+  storageState: MemoryStorageState;
+  recoveryDays?: number;
+}
+
+export interface NmgDeleteMemoryParams {
+  memoryId: string;
+}
+
+export interface NmgMergeNodesParams {
+  sourceNodeIds: string[];
+  targetName: string;
+  targetKind?: MemoryNodeKind;
+  summary?: string;
+}
+
+export interface NmgSplitNodeParams {
+  sourceNodeId: string;
+  partitions: Array<{
+    nodeName: string;
+    memoryIds: string[];
+    nodeKind?: MemoryNodeKind;
+    summary?: string;
+  }>;
+}
+
 export type NmgMethodResult = {
   hello: NmgHelloResult;
   status: NmgStatusResult;
   remember: RememberResult;
   search: MemoryContext;
   get: MemoryContext & { missingMemoryIds: string[] };
+  retentionCandidates: { candidates: RetentionCandidate[] };
+  setStorageState: { memoryId: string; storageState: MemoryStorageState };
+  deleteMemory: { deleted: boolean; memory: MemoryRecord | null };
+  mergeNodes: NodeTransform;
+  splitNode: NodeTransform;
   shutdown: { shuttingDown: true };
 };
 

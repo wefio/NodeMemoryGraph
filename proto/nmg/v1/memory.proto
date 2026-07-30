@@ -10,6 +10,11 @@ service MemoryService {
   rpc Remember(RememberRequest) returns (ValueResponse);
   rpc Search(SearchRequest) returns (ValueResponse);
   rpc Get(GetRequest) returns (ValueResponse);
+  rpc RetentionCandidates(RetentionCandidatesRequest) returns (ValueResponse);
+  rpc SetStorageState(SetStorageStateRequest) returns (ValueResponse);
+  rpc DeleteMemory(DeleteMemoryRequest) returns (ValueResponse);
+  rpc MergeNodes(MergeNodesRequest) returns (ValueResponse);
+  rpc SplitNode(SplitNodeRequest) returns (ValueResponse);
   rpc Shutdown(Empty) returns (ValueResponse);
 }
 
@@ -59,4 +64,40 @@ message SearchRequest {
 message GetRequest {
   repeated string memory_ids = 1;
   optional uint32 graph_hops = 2;
+}
+
+message RetentionCandidatesRequest {
+  optional uint32 dormant_after_days = 1;
+  optional uint32 quarantine_after_days = 2;
+  optional double maximum_importance = 3;
+  optional uint32 maximum_access_count = 4;
+}
+
+message SetStorageStateRequest {
+  string memory_id = 1;
+  string storage_state = 2;
+  optional uint32 recovery_days = 3;
+}
+
+message DeleteMemoryRequest {
+  string memory_id = 1;
+}
+
+message MergeNodesRequest {
+  repeated string source_node_ids = 1;
+  string target_name = 2;
+  optional string target_kind = 3;
+  optional string summary = 4;
+}
+
+message SplitPartition {
+  string node_name = 1;
+  repeated string memory_ids = 2;
+  optional string node_kind = 3;
+  optional string summary = 4;
+}
+
+message SplitNodeRequest {
+  string source_node_id = 1;
+  repeated SplitPartition partitions = 2;
 }

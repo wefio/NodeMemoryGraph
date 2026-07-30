@@ -132,6 +132,11 @@ npm run cli -- status
 npm run cli -- remember "User prefers concise answers" --node "Response preferences" --type preference
 npm run cli -- search "How should answers be written?"
 npm run cli -- get <memory-id>
+npm run cli -- retention candidates
+npm run cli -- retention archive <memory-id>
+npm run cli -- retention quarantine <memory-id> --recovery-days 30
+npm run cli -- retention restore <memory-id>
+npm run cli -- memory delete <memory-id>
 npm run cli -- daemon start
 npm run cli -- daemon status
 npm run cli -- daemon stop
@@ -149,10 +154,22 @@ OS-assigned loopback port. Requests and responses use binary Protocol Buffers;
 the endpoint and a random local bearer token are recorded beside the selected
 SQLite database. The same implementation runs on Windows, macOS, and Linux.
 
-The service exposes `Hello`, `Status`, `Remember`, `Search`, `Get`, and
-`Shutdown`. It rejects a second daemon for the same database, opens SQLite
-lazily, and removes stale process leases. Use the same `--data-dir` or `--db`
-for daemon and client commands.
+The service also carries administrative retention, deletion, merge, and split
+RPCs so a running daemon remains the only database writer. These are CLI/admin
+capabilities, not extra model-facing Pi tools. Retention candidate selection is
+a dry run; moving a memory to L4/L5 or deleting its semantic interpretation
+requires an explicit command. `memory delete` retains immutable source history.
+
+The service rejects a second daemon for the same database, opens SQLite lazily,
+and removes stale process leases. Use the same `--data-dir` or `--db` for daemon
+and client commands.
+
+Node identity maintenance starts automatically on write: exact canonical names
+and case/spacing/punctuation-only variants of the same node kind reuse the
+existing node. Broader semantic merges are not performed from embedding
+similarity alone. They require accumulated evidence and use reversible
+transform/redirect records; the low-level merge/split RPCs remain an
+administrative recovery surface rather than routine user work.
 
 ## Agent Skill
 

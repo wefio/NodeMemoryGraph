@@ -63,7 +63,21 @@ export async function serveGrpc(service: NmgService, lease: ServerLease): Promis
   });
 
   const implementation = Object.fromEntries(
-    (["hello", "status", "remember", "search", "get", "shutdown"] as const).map((method) => [
+    (
+      [
+        "hello",
+        "status",
+        "remember",
+        "search",
+        "get",
+        "retentionCandidates",
+        "setStorageState",
+        "deleteMemory",
+        "mergeNodes",
+        "splitNode",
+        "shutdown",
+      ] as const
+    ).map((method) => [
       method,
       unaryHandler(service, token, method, () => {
         setImmediate(() => server.tryShutdown(resolveStopped));

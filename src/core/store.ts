@@ -477,6 +477,18 @@ export class NmgStore {
       );
     }
 
+    // Node identity is maintained automatically for spelling-only variants.
+    // This deliberately does not attempt semantic merging: punctuation, case,
+    // and whitespace are safe to canonicalise, while synonyms require evidence
+    // and a reversible topology transform.
+    const normalizedIdentity = canonicalNodeIdentity(canonicalName);
+    const identityCandidates = (
+      this.#db
+        .prepare("SELECT * FROM memory_nodes WHERE kind = ? AND status = 'active'")
+        .all(input.kind ?? "concept") as Row[]
+    ).filter((row) => canonicalNodeIdentity(String(row.canonical_name)) === normalizedIdentity);
+    if (identityCandidates.length === 1) return mapNode(identityCandidates[0]!);
+
     const now = new Date().toISOString();
     const node: MemoryNode = {
       id: randomUUID(),
@@ -3940,6 +3952,13 @@ function mapNode(row: Row, prefix = ""): MemoryNode {
     status: String(row[`${prefix}status`] ?? "active") as MemoryNode["status"],
     residence: String(row[`${prefix}residence`] ?? "ltg") as MemoryResidence,
   };
+}
+
+function canonicalNodeIdentity(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US")
+    .replace(/[\p{P}\p{S}\s]+/gu, "");
 }
 
 function mapLeafBlock(row: Row): LeafBlock {
