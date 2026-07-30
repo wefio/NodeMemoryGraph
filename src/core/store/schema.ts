@@ -72,6 +72,10 @@ export function migrate(db: DatabaseSync): void {
       last_accessed_at TEXT,
       write_reason TEXT NOT NULL DEFAULT 'legacy_write',
       write_source TEXT NOT NULL DEFAULT 'core',
+      storage_state TEXT NOT NULL DEFAULT 'indexed'
+        CHECK (storage_state IN ('indexed', 'dormant', 'quarantine')),
+      retention_changed_at TEXT,
+      quarantine_until TEXT,
       created_at TEXT NOT NULL
     );
 
@@ -379,9 +383,9 @@ export function migrate(db: DatabaseSync): void {
     JOIN memory_nodes n ON n.id = m.node_id
     JOIN history_records h ON h.id = m.evidence_id
     LEFT JOIN memory_fts_registry r ON r.memory_id = m.id
-    WHERE r.memory_id IS NULL;
+    WHERE r.memory_id IS NULL AND m.storage_state = 'indexed';
     INSERT OR IGNORE INTO memory_fts_registry(memory_id)
-    SELECT id FROM memory_records;
+    SELECT id FROM memory_records WHERE storage_state = 'indexed';
     INSERT OR IGNORE INTO leaf_block_status(node_id, dirty, updated_at)
     SELECT id, 1, updated_at FROM memory_nodes WHERE status = 'active';
   `);
@@ -389,9 +393,7 @@ export function migrate(db: DatabaseSync): void {
 
 export function ensureMemoryColumns(db: DatabaseSync): void {
   const existing = new Set(
-    (db.prepare("PRAGMA table_info(memory_records)").all() as Row[]).map((row) =>
-      String(row.name),
-    ),
+    (db.prepare("PRAGMA table_info(memory_records)").all() as Row[]).map((row) => String(row.name)),
   );
   const additions: Array<[string, string]> = [
     ["scope_json", "TEXT NOT NULL DEFAULT '{}'"],
@@ -417,12 +419,19 @@ export function ensureMemoryColumns(db: DatabaseSync): void {
     ["expires_at", "TEXT"],
     ["write_reason", "TEXT NOT NULL DEFAULT 'legacy_write'"],
     ["write_source", "TEXT NOT NULL DEFAULT 'core'"],
+    ["storage_state", "TEXT NOT NULL DEFAULT 'indexed'"],
+    ["retention_changed_at", "TEXT"],
+    ["quarantine_until", "TEXT"],
   ];
   for (const [name, definition] of additions) {
     if (!existing.has(name)) {
       db.exec(`ALTER TABLE memory_records ADD COLUMN ${name} ${definition}`);
     }
   }
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_memory_records_storage_state
+     ON memory_records(storage_state, retention_changed_at)`,
+  );
 }
 
 export function ensureDeltaColumns(db: DatabaseSync): void {
@@ -432,9 +441,7 @@ export function ensureDeltaColumns(db: DatabaseSync): void {
     ),
   );
   if (!columns.has("compacted")) {
-    db.exec(
-      "ALTER TABLE memory_index_delta ADD COLUMN compacted INTEGER NOT NULL DEFAULT 0",
-    );
+    db.exec("ALTER TABLE memory_index_delta ADD COLUMN compacted INTEGER NOT NULL DEFAULT 0");
   }
 }
 
@@ -446,9 +453,7 @@ export function ensureBinaryVectors(db: DatabaseSync): void {
   ];
   for (const [table, idColumn] of tables) {
     const columns = new Set(
-      (db.prepare(`PRAGMA table_info(${table})`).all() as Row[]).map((row) =>
-        String(row.name),
-      ),
+      (db.prepare(`PRAGMA table_info(${table})`).all() as Row[]).map((row) => String(row.name)),
     );
     if (!columns.has("vector_blob")) {
       db.exec(`ALTER TABLE ${table} ADD COLUMN vector_blob BLOB`);
@@ -504,12 +509,9 @@ export function ensureEmbeddingTable(db: DatabaseSync): void {
   `);
 }
 
-
 export function ensureNodeColumns(db: DatabaseSync): void {
   const existing = new Set(
-    (db.prepare("PRAGMA table_info(memory_nodes)").all() as Row[]).map((row) =>
-      String(row.name),
-    ),
+    (db.prepare("PRAGMA table_info(memory_nodes)").all() as Row[]).map((row) => String(row.name)),
   );
   if (!existing.has("status")) {
     db.exec("ALTER TABLE memory_nodes ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
@@ -521,9 +523,7 @@ export function ensureNodeColumns(db: DatabaseSync): void {
 
 export function ensureRelationColumns(db: DatabaseSync): void {
   const existing = new Set(
-    (db.prepare("PRAGMA table_info(node_relations)").all() as Row[]).map((row) =>
-      String(row.name),
-    ),
+    (db.prepare("PRAGMA table_info(node_relations)").all() as Row[]).map((row) => String(row.name)),
   );
   const additions: Array<[string, string]> = [
     ["residence", "TEXT NOT NULL DEFAULT 'ltg'"],
@@ -533,12 +533,9 @@ export function ensureRelationColumns(db: DatabaseSync): void {
     ["consolidated_at", "TEXT"],
   ];
   for (const [name, definition] of additions) {
-    if (!existing.has(name))
-      db.exec(`ALTER TABLE node_relations ADD COLUMN ${name} ${definition}`);
+    if (!existing.has(name)) db.exec(`ALTER TABLE node_relations ADD COLUMN ${name} ${definition}`);
   }
-  db.exec(
-    "UPDATE node_relations SET consolidated_at = created_at WHERE consolidated_at IS NULL",
-  );
+  db.exec("UPDATE node_relations SET consolidated_at = created_at WHERE consolidated_at IS NULL");
 }
 
 export function ensureRetrievalTraceColumns(db: DatabaseSync): void {
@@ -564,4 +561,3 @@ export function ensureRetrievalTraceColumns(db: DatabaseSync): void {
       db.exec(`ALTER TABLE retrieval_traces ADD COLUMN ${name} ${definition}`);
   }
 }
-

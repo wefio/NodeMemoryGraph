@@ -172,7 +172,7 @@ function configuredAutoRecallLimit(): number {
 function shouldAutoRecall(prompt: string): boolean {
   const normalized = prompt.toLocaleLowerCase();
   return [
-    /\b(previous|before|earlier|last time|remember|recall|my preference|my project|we decided)\b/u,
+    /\b(previous(?:ly)?|before|earlier|last time|remember|recall|my preference|my project|we decided)\b/u,
     /(?:之前|以前|上次|还记得|回忆|记忆|我的偏好|我们决定|项目决定|当前状态)/u,
   ].some((pattern) => pattern.test(normalized));
 }

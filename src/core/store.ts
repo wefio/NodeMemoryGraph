@@ -32,6 +32,7 @@ import type {
   NodeTransform,
   MemoryRecord,
   MemoryResidence,
+  MemoryStorageState,
   MemoryWriteEvent,
   MemorySearchResult,
   MemoryScope,
@@ -41,6 +42,8 @@ import type {
   NodeRelationType,
   RememberInput,
   RememberResult,
+  RetentionCandidate,
+  RetentionPolicy,
   QppTriggerDecision,
   RebalanceResult,
   RetrievalTraceInput,
@@ -132,11 +135,11 @@ export class NmgStore {
     const row = this.#db
       .prepare(
         "SELECT id, node_id, status, statement, memory_type, state_key, event_time, " +
-        "source_actor, truth_status, confidence, polarity, predicate_key, extract_method, claims_json, markers_json, scope_json, valid_from, valid_until, " +
-        "residence, promoted_at, expires_at, evidence_role, supersedes_id, " +
-        "tier, importance, access_count, last_accessed_at, evidence_id, " +
-        "write_reason, write_source, created_at " +
-        "FROM memory_records WHERE id = ?",
+          "source_actor, truth_status, confidence, polarity, predicate_key, extract_method, claims_json, markers_json, scope_json, valid_from, valid_until, " +
+          "residence, promoted_at, expires_at, evidence_role, supersedes_id, " +
+          "tier, importance, access_count, last_accessed_at, evidence_id, " +
+          "write_reason, write_source, created_at " +
+          "FROM memory_records WHERE id = ?",
       )
       .get(memoryId) as Row | undefined;
     if (!row) return null;
@@ -151,10 +154,13 @@ export class NmgStore {
       eventTime: row.event_time ? String(row.event_time) : null,
       sourceActor: String(row.source_actor) as MemoryRecord["sourceActor"],
       truthStatus: String(row.truth_status) as MemoryRecord["truthStatus"],
-      confidence: row.confidence === null || row.confidence === undefined ? null : Number(row.confidence),
+      confidence:
+        row.confidence === null || row.confidence === undefined ? null : Number(row.confidence),
       polarity: row.polarity ? (String(row.polarity) as MemoryRecord["polarity"]) : null,
       predicateKey: row.predicate_key ? String(row.predicate_key) : null,
-      extractMethod: row.extract_method ? (String(row.extract_method) as MemoryRecord["extractMethod"]) : null,
+      extractMethod: row.extract_method
+        ? (String(row.extract_method) as MemoryRecord["extractMethod"])
+        : null,
       claims: parseClaims(row.claims_json),
       markers: parseMarkers(row.markers_json),
       scope: parseScope(row.scope_json),
@@ -177,9 +183,7 @@ export class NmgStore {
     const now = new Date().toISOString();
     this.#db.exec("BEGIN IMMEDIATE");
     try {
-      this.#db
-        .prepare("UPDATE memory_records SET status = 'deleted' WHERE id = ?")
-        .run(memoryId);
+      this.#db.prepare("UPDATE memory_records SET status = 'deleted' WHERE id = ?").run(memoryId);
       this.#db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
       this.#db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(memoryId);
       this.#db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(memoryId);
@@ -205,11 +209,154 @@ export class NmgStore {
     }
   }
 
+  /**
+   * Move retained LTG content between the indexed tier, the unindexed L4
+   * archive, and the recoverable L5 quarantine. STG is session-private and is
+   * intentionally outside this long-term retention lifecycle.
+   */
+  setMemoryStorageState(
+    memoryId: string,
+    target: MemoryStorageState,
+    recoveryDays = 30,
+  ): MemoryStorageState {
+    const row = this.#db
+      .prepare(
+        `SELECT id, node_id, evidence_id, statement, residence, storage_state
+         FROM memory_records WHERE id = ?`,
+      )
+      .get(memoryId) as Row | undefined;
+    if (!row) throw new Error(`memory ${memoryId} does not exist`);
+    if (String(row.residence) !== "ltg") {
+      throw new Error("L4/L5 retention applies only to shared LTG memories");
+    }
+    const current = String(row.storage_state ?? "indexed") as MemoryStorageState;
+    if (current === target) return current;
+    const now = new Date();
+    const quarantineUntil =
+      target === "quarantine"
+        ? new Date(now.getTime() + Math.max(0, recoveryDays) * 86_400_000).toISOString()
+        : null;
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#db
+        .prepare(
+          `UPDATE memory_records
+           SET storage_state = ?, retention_changed_at = ?, quarantine_until = ?
+           WHERE id = ?`,
+        )
+        .run(target, now.toISOString(), quarantineUntil, memoryId);
+      if (target === "indexed") {
+        this.#upsertFts(
+          memoryId,
+          String(row.statement),
+          String(row.node_id),
+          String(row.evidence_id),
+        );
+        this.#markIndexDelta(memoryId, String(row.node_id), "upsert", now.toISOString());
+      } else {
+        this.#db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
+        this.#db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(memoryId);
+        this.#db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(memoryId);
+        this.#db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(memoryId);
+        this.#db.prepare("DELETE FROM memory_leaf_members WHERE memory_id = ?").run(memoryId);
+        this.#db
+          .prepare(
+            `INSERT INTO leaf_block_status (node_id, dirty, updated_at)
+             VALUES (?, 1, ?)
+             ON CONFLICT(node_id) DO UPDATE SET dirty = 1, updated_at = excluded.updated_at`,
+          )
+          .run(row.node_id, now.toISOString());
+        for (const cache of this.#vectorCaches.values()) cache.remove(memoryId);
+      }
+      this.#db.exec("COMMIT");
+      return target;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  /**
+   * Produce a conservative dry-run report. Callers must explicitly apply the
+   * returned transitions; this method never archives or deletes content.
+   */
+  retentionCandidates(policy: RetentionPolicy = {}): RetentionCandidate[] {
+    const now = policy.now ?? new Date();
+    const dormantAfterDays = Math.max(1, policy.dormantAfterDays ?? 365);
+    const quarantineAfterDays = Math.max(1, policy.quarantineAfterDays ?? 365);
+    const maximumImportance = clamp(policy.maximumImportance ?? 0.25, 0, 1);
+    const maximumAccessCount = Math.max(0, policy.maximumAccessCount ?? 1);
+    const rows = this.#db
+      .prepare(
+        `SELECT m.id, m.node_id, m.statement, m.memory_type, m.evidence_role,
+                m.markers_json, m.storage_state, m.retention_changed_at,
+                m.created_at, m.last_accessed_at, m.importance, m.access_count
+         FROM memory_records m
+         WHERE m.residence = 'ltg'
+           AND m.status IN ('active', 'inactive', 'superseded')
+           AND m.storage_state IN ('indexed', 'dormant')
+           AND m.importance <= ?
+           AND m.access_count <= ?
+           AND m.memory_type NOT IN ('constraint', 'preference', 'state')
+           AND m.evidence_role NOT IN ('contradict', 'exception')
+           AND NOT EXISTS (
+             SELECT 1 FROM memory_derivations d WHERE d.source_memory_id = m.id
+           )`,
+      )
+      .all(maximumImportance, maximumAccessCount) as Row[];
+    return rows.flatMap((row) => {
+      const markers = parseMarkers(row.markers_json);
+      if (
+        markers.some((marker) =>
+          ["critical", "pinned", "protected", "safety_constraint", "user_defined"].includes(
+            marker.kind,
+          ),
+        )
+      ) {
+        return [];
+      }
+      const storageState = String(row.storage_state) as MemoryStorageState;
+      const createdAt = Date.parse(String(row.created_at));
+      const lastUsedAt = row.last_accessed_at
+        ? Date.parse(String(row.last_accessed_at))
+        : createdAt;
+      const ageDays = Math.max(0, (now.getTime() - createdAt) / 86_400_000);
+      const idleDays = Math.max(0, (now.getTime() - lastUsedAt) / 86_400_000);
+      const retentionChangedAt = row.retention_changed_at
+        ? Date.parse(String(row.retention_changed_at))
+        : createdAt;
+      const dormantDays = Math.max(0, (now.getTime() - retentionChangedAt) / 86_400_000);
+      const recommendedState =
+        storageState === "indexed" && ageDays >= dormantAfterDays && idleDays >= dormantAfterDays
+          ? "dormant"
+          : storageState === "dormant" && dormantDays >= quarantineAfterDays
+            ? "quarantine"
+            : null;
+      return recommendedState
+        ? [
+            {
+              memoryId: String(row.id),
+              nodeId: String(row.node_id),
+              statement: String(row.statement),
+              storageState,
+              recommendedState,
+              ageDays,
+              idleDays,
+              importance: Number(row.importance),
+              accessCount: Number(row.access_count),
+            },
+          ]
+        : [];
+    });
+  }
+
   #cascadeDerivedMemories(sourceMemoryId: string): void {
     const derivations = this.#db
       .prepare("SELECT derived_memory_id FROM memory_derivations WHERE source_memory_id = ?")
       .all(sourceMemoryId) as Row[];
-    this.#db.prepare("DELETE FROM memory_derivations WHERE source_memory_id = ?").run(sourceMemoryId);
+    this.#db
+      .prepare("DELETE FROM memory_derivations WHERE source_memory_id = ?")
+      .run(sourceMemoryId);
     for (const row of derivations) {
       const derivedId = String(row.derived_memory_id);
       const remaining = this.#db
@@ -405,10 +552,10 @@ export class NmgStore {
       eventTime: input.eventTime ?? null,
       sourceActor: input.sourceActor ?? "user",
       truthStatus: input.truthStatus ?? "asserted",
-      confidence: claimRollup ? claimRollup.confidence : input.confidence ?? null,
-      polarity: claimRollup ? claimRollup.polarity : input.polarity ?? null,
-      predicateKey: claimRollup ? claimRollup.predicateKey : input.predicateKey ?? null,
-      extractMethod: claimRollup ? claimRollup.extractMethod : input.extractMethod ?? null,
+      confidence: claimRollup ? claimRollup.confidence : (input.confidence ?? null),
+      polarity: claimRollup ? claimRollup.polarity : (input.polarity ?? null),
+      predicateKey: claimRollup ? claimRollup.predicateKey : (input.predicateKey ?? null),
+      extractMethod: claimRollup ? claimRollup.extractMethod : (input.extractMethod ?? null),
       claims: claimRollup ? claimRollup.claims : null,
       markers: normalizeMarkers(input.markers),
       scope: input.scope ?? {},
@@ -1149,7 +1296,8 @@ export class NmgStore {
     const rows = this.#db
       .prepare(
         `SELECT m.id, m.statement, m.node_id, n.canonical_name, n.summary
-       FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id`,
+       FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id
+       WHERE m.storage_state = 'indexed'`,
       )
       .all() as Row[];
     const upsert = this.#db.prepare(
@@ -1193,7 +1341,7 @@ export class NmgStore {
       .prepare(
         `SELECT id, tier, importance, access_count, pending_access_count,
               last_accessed_at, status
-       FROM memory_records WHERE node_id = ?`,
+       FROM memory_records WHERE node_id = ? AND storage_state = 'indexed'`,
       )
       .all(nodeId) as Row[];
     const active = rows.filter((row) => ["active", "disputed"].includes(String(row.status)));
@@ -1282,12 +1430,7 @@ export class NmgStore {
               ...directOptions,
               retrievalMode: "qwen3",
             })
-          : this.searchHierarchyByVector(
-              query,
-              semantic.queryVector,
-              semantic.model,
-              directOptions,
-            )
+          : this.searchHierarchyByVector(query, semantic.queryVector, semantic.model, directOptions)
       : this.search(query, directOptions);
     const graphHops = Math.min(options.graphHops ?? 1, budget.maxGraphHops);
     const relations = this.getRelations(
@@ -1385,9 +1528,7 @@ export class NmgStore {
       );
       const initialTarget =
         fibonacciBudgets.find((target) => target >= requestedInitial) ?? maximum.maxEvidence;
-      for (const targetEvidence of fibonacciBudgets.filter(
-        (target) => target >= initialTarget,
-      )) {
+      for (const targetEvidence of fibonacciBudgets.filter((target) => target >= initialTarget)) {
         // Relation expansion has already run at the original graph-hop budget.
         // Do not claim the extra hop from the hard envelope until graph routing
         // itself becomes progressive.
@@ -1498,7 +1639,8 @@ export class NmgStore {
     // A controller probe is a private planning artifact, not an interaction the
     // model could have used. Persisting it would pollute online-learning labels
     // and steadily grow the trace table with duplicate searches.
-    const traceId = options.persistTrace === false ? randomUUID() : this.recordRetrievalTrace(traceInput);
+    const traceId =
+      options.persistTrace === false ? randomUUID() : this.recordRetrievalTrace(traceInput);
     const activeGraph: ActiveGraph = {
       id: traceId,
       query,
@@ -1538,7 +1680,11 @@ export class NmgStore {
     options: SearchOptions = {},
     semantic?: { queryVector: readonly number[]; model: string },
   ): MemoryContext {
-    return this.searchContext(query, { ...options, secondPass: options.secondPass ?? true }, semantic);
+    return this.searchContext(
+      query,
+      { ...options, secondPass: options.secondPass ?? true },
+      semantic,
+    );
   }
 
   getContext(memoryIds: readonly string[], graphHops = 0): MemoryContext {
@@ -2116,6 +2262,7 @@ export class NmgStore {
        JOIN memory_nodes n ON n.id = m.node_id
        WHERE m.memory_type = 'constraint'
          AND m.tier = 0
+         AND m.storage_state = 'indexed'
          AND m.importance >= 0.8
          AND m.status = 'active'
          AND m.truth_status IN ('asserted', 'verified')
@@ -2152,7 +2299,8 @@ export class NmgStore {
               SUM(CASE WHEN status = 'disputed' THEN 1 ELSE 0 END) AS conflicts,
               GROUP_CONCAT(DISTINCT memory_type) AS memory_types
        FROM memory_records
-       WHERE node_id = ? AND status IN ('active', 'disputed')`,
+       WHERE node_id = ? AND status IN ('active', 'disputed')
+         AND storage_state = 'indexed'`,
     );
     const cues: RecallCue[] = nodeIds.map((nodeId) => {
       const matches = candidates.filter((result) => result.node.id === nodeId);
@@ -2223,6 +2371,7 @@ export class NmgStore {
         `SELECT m.id, m.statement, n.canonical_name, n.summary
        FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id
        WHERE m.id > ?
+         AND m.storage_state = 'indexed'
          AND (? IS NULL OR NOT EXISTS (
            SELECT 1 FROM memory_embeddings e WHERE e.memory_id = m.id AND e.model = ?
          ))
@@ -2335,7 +2484,7 @@ export class NmgStore {
               m.event_time, m.valid_from, m.valid_until, m.status, n.canonical_name
        FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id
        WHERE n.status = 'active' AND m.status IN ('active', 'disputed')
-         AND m.node_id = ?
+         AND m.storage_state = 'indexed' AND m.node_id = ?
        ORDER BY m.node_id, m.tier, m.memory_type, m.scope_json, m.created_at DESC`,
       )
       .all(nodeId) as Row[];
@@ -2736,12 +2885,7 @@ export class NmgStore {
     const nodeLimit = Math.max(1, Math.min(options.nodeCandidateLimit ?? 5, 50));
     const blockLimit = Math.max(1, Math.min(options.leafCandidateLimit ?? 8, 50));
     const nodes = this.routeNodesByVector(queryVector, model, nodeLimit);
-    const directLeaves = this.routeLeafBlocksByVector(
-      queryVector,
-      model,
-      [],
-      blockLimit,
-    );
+    const directLeaves = this.routeLeafBlocksByVector(queryVector, model, [], blockLimit);
     const routedLeaves = this.routeLeafBlocksByVector(
       queryVector,
       model,
@@ -2796,6 +2940,7 @@ export class NmgStore {
                 `SELECT id FROM memory_records
          WHERE node_id IN (${selected.map(() => "?").join(",")})
            AND tier <= ? AND status IN ('active', 'disputed')
+           AND storage_state = 'indexed'
          ORDER BY tier ASC, importance DESC, access_count DESC, created_at DESC
          LIMIT ?`,
               )
@@ -2946,6 +3091,7 @@ export class NmgStore {
          JOIN history_records h ON h.id = m.evidence_id
          LEFT JOIN memory_embeddings ve ON ve.memory_id = m.id AND ve.model = ?
          WHERE m.tier <= ?
+           AND m.storage_state = 'indexed'
            ${candidateClause}
            AND n.status = 'active'
            AND (? IS NULL OR n.canonical_name = ?)
@@ -3748,6 +3894,7 @@ export class NmgStore {
        JOIN memory_nodes n ON n.id = m.node_id
        JOIN history_records h ON h.id = m.evidence_id
        WHERE m.node_id = ? AND m.tier <= ? AND n.status = 'active'
+         AND (m.storage_state = 'indexed' OR ? IS NOT NULL)
          AND (? IS NULL OR m.id = ?)
          AND (? IS NULL OR m.source_actor = ?)
          AND m.status IN ('active', 'disputed')
@@ -3758,6 +3905,7 @@ export class NmgStore {
       .all(
         nodeId,
         maxTier,
+        memoryId ?? null,
         memoryId ?? null,
         memoryId ?? null,
         sourceActor ?? null,
@@ -3914,10 +4062,15 @@ function mapSearchResult(row: Row, score: number): MemorySearchResult {
       eventTime: row.m_event_time ? String(row.m_event_time) : null,
       sourceActor: String(row.m_source_actor) as MemoryRecord["sourceActor"],
       truthStatus: String(row.m_truth_status) as MemoryRecord["truthStatus"],
-      confidence: row.m_confidence === null || row.m_confidence === undefined ? null : Number(row.m_confidence),
+      confidence:
+        row.m_confidence === null || row.m_confidence === undefined
+          ? null
+          : Number(row.m_confidence),
       polarity: row.m_polarity ? (String(row.m_polarity) as MemoryRecord["polarity"]) : null,
       predicateKey: row.m_predicate_key ? String(row.m_predicate_key) : null,
-      extractMethod: row.m_extract_method ? (String(row.m_extract_method) as MemoryRecord["extractMethod"]) : null,
+      extractMethod: row.m_extract_method
+        ? (String(row.m_extract_method) as MemoryRecord["extractMethod"])
+        : null,
       claims: parseClaims(row.m_claims_json),
       markers: parseMarkers(row.m_markers_json),
       scope: parseScope(row.m_scope_json),
@@ -4085,7 +4238,6 @@ function parseScope(value: string | number | Uint8Array | null): MemoryScope {
   }
 }
 
-
 function parseStoredJson<T>(value: string | number | Uint8Array | null, fallback: T): T {
   if (typeof value !== "string") return fallback;
   try {
@@ -4100,9 +4252,7 @@ function parseQppDecision(
   value: string | number | Uint8Array | null,
 ): QppTriggerDecision | undefined {
   const parsed = parseStoredJson<QppTriggerDecision | null>(value, null);
-  return parsed && typeof (parsed as { qpp?: unknown }).qpp === "number"
-    ? parsed
-    : undefined;
+  return parsed && typeof (parsed as { qpp?: unknown }).qpp === "number" ? parsed : undefined;
 }
 
 type StoredClaim = {
@@ -4147,11 +4297,12 @@ function normalizeMarkers(markers: readonly MemoryMarker[] | undefined): MemoryM
     const attributes = marker.attributes
       ? Object.fromEntries(
           Object.entries(marker.attributes)
-            .filter(([, value]) =>
-              value === null ||
-              typeof value === "string" ||
-              typeof value === "number" ||
-              typeof value === "boolean"
+            .filter(
+              ([, value]) =>
+                value === null ||
+                typeof value === "string" ||
+                typeof value === "number" ||
+                typeof value === "boolean",
             )
             .sort(([left], [right]) => left.localeCompare(right)),
         )

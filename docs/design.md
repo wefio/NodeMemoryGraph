@@ -12,18 +12,18 @@ needed by the current task.
 
 NMG separates physical memory residence from runtime exposure:
 
-- the **Short-Term Graph (STG)** holds new, provisional, task-local, or
-  not-yet-consolidated semantic information;
-- the **Long-Term Graph (LTG)** holds durable atomic memories and consolidated
-  semantic structure;
-- the **Active Graph (AG)** is a budget-constrained runtime projection selected
-  from STG and LTG for the current task, with optional temporary cross-graph
-  relations.
+- the **Short-Term Graph (STG)** is private to one Agent session and holds new,
+  provisional, task-local, or not-yet-consolidated semantic information;
+- the **Long-Term Graph (LTG)** is the only shared graph and holds durable atomic
+  memories and consolidated semantic structure;
+- the **Active Graph (AG)** is a private, per-Agent/per-session,
+  budget-constrained runtime projection selected from that session's STG and
+  the shared LTG, with optional temporary cross-graph relations.
 
-AG is not a third authoritative memory graph. It is the virtual memory space
-presented to the model. STG and LTG are different logical/physical storage
-classes behind that projection, while immutable history remains the evidence
-source beneath both.
+AG is not a third authoritative or shared memory graph. It is the private
+virtual memory space presented to one model session. Agents never write a
+shared AG or STG: collaboration occurs only through admitted LTG memories and
+their provenance.
 
 The primary integration target is the Pi agent harness. Pi owns the model loop,
 session lifecycle, tools, and UI. NMG owns durable memory, provenance, retrieval,
@@ -414,6 +414,15 @@ expansion mechanism, never the only retrieval entry point. STG entries may be
 persisted in SQLite for crash recovery and cross-turn continuity; expiry is a
 policy decision, not an implication that short-term data must live only in RAM.
 
+“Global” here means all retrieval modes inside the owning session, not visibility
+across sessions. A multi-Agent runtime must carry a non-forgeable `runtime_id`
+and `session_id` through search and exact access, and every STG row, temporary
+edge, AG trace, and feedback event must be filtered by that identity. A separate
+`semantic_task_id` deduplicates repeated evidence across Agents; it must not be
+used as the isolation identity. The current store does not yet persist this full
+runtime ownership on semantic rows, so strict shared-daemon multi-Agent STG
+isolation remains an implementation requirement rather than a verified feature.
+
 The semantic STG is distinct from the existing index `Inbox/Delta`. STG tracks
 memory lifecycle and provisional meaning. Index Delta tracks records whose
 derived leaf/vector index has not yet been compacted. A long-term memory may be
@@ -529,6 +538,63 @@ fact, preference, constraint, state, or explicit remember request may enter LTG
 immediately. New relations, derived concepts, aggregated strategies, and node
 merges/splits require the stronger stability process above.
 
+#### 7.3.1 Edge strength is not one scalar
+
+NMG must not use one “thickness” value for truth, habitual access, and current
+attention. Existing theories support three orthogonal quantities:
+
+1. **Confidence** is an evidence-backed belief that the typed relation is valid
+   in its time and scope. Supporting and contradicting independent source
+   lineages update a Beta posterior `(confidence_alpha, confidence_beta)`.
+   Factual edges use a conservative posterior lower bound as a gate.
+2. **Usefulness/stability** estimates whether traversing the edge has repeatedly
+   helped across independent semantic tasks. A separate Beta posterior records
+   useful versus expanded-but-unused outcomes; an ACT-R-style recency/frequency
+   base level may summarize repeated successful observations.
+3. **Activation** is private to one AG and decays rapidly:
+
+   ```text
+   activation_e(t) =
+     previous * exp(-lambda * delta_t)
+     + eta * activation_source * activation_target
+     + zeta * successful_current_path
+   ```
+
+   Outgoing activation is normalized and budget-clipped, following the
+   stabilization lesson of Oja/BCM rather than unbounded Hebbian growth.
+
+Co-activation or co-retrieval may create only a candidate associative
+`related_to` edge. It cannot establish `causes`, `depends_on`, `constraint`,
+supersession, or another strong directed relation without explicit evidence.
+Every persistent confidence update must retain W3C PROV-style source/activity
+provenance and deduplicate copied or repeatedly quoted evidence by source
+lineage.
+
+The runtime may combine these values without overwriting them:
+
+```text
+route_score =
+  type_match
+  * query_relevance
+  * usefulness_lower_bound
+  * factual_confidence_gate
+  * (1 + mu * private_AG_activation)
+```
+
+Rare pinned or safety-critical constraints are exempt from access-frequency
+demotion. In a UI, route score may temporarily control rendered line width, but
+the storage model preserves confidence, usefulness/stability, and activation as
+separate axes.
+
+The model draws on
+[ACT-R base-level and spreading activation](https://act-r.psy.cmu.edu/wordpress/wp-content/uploads/2012/12/39jra_cds_2000_a.pdf),
+[Collins–Loftus spreading activation](https://doi.org/10.1037/0033-295X.82.6.407),
+[Oja-style normalized Hebbian learning](https://users.ics.aalto.fi/oja/papers.html),
+[temporal tie decay](https://arxiv.org/abs/1906.09394),
+[uncertain knowledge-graph confidence](https://doi.org/10.1609/aaai.v33i01.33013363),
+and [W3C PROV-O](https://www.w3.org/TR/prov-o/). These are design sources, not
+evidence that the proposed combination already improves NMG retrieval.
+
 ### 7.4 Adaptive semantic granularity
 
 A node represents an observational equivalence class under current evidence:
@@ -560,6 +626,93 @@ one unusual query cannot repeatedly split and merge the graph.
 
 Merge/split operations preserve records and evidence, mark old nodes inactive,
 and retain redirects. A split requires a complete, disjoint memory partition.
+
+### 7.5 Node identity and reversible canonicalization
+
+Node similarity is only a blocking signal that proposes pairs for comparison.
+It does not authorize a merge. NMG distinguishes:
+
+```text
+SAME_ENTITY    same real-world object
+EXACT_MATCH    concepts broadly interchangeable for retrieval
+CLOSE_MATCH    concepts interchangeable only in some contexts
+BROADER        source concept contains the target
+NARROWER       source concept is contained by the target
+RELATED        associated but independently meaningful
+DIFFERENT      explicit non-identity evidence
+```
+
+This follows the distinction between strict identity and the weaker
+`exactMatch`, `closeMatch`, `broader/narrower`, and `related` relations in
+[OWL identity](https://www.w3.org/TR/owl2-rdf-based-semantics/) and
+[SKOS](https://www.w3.org/TR/skos-reference). In particular, `CLOSE_MATCH` is
+not transitive and must not create an equivalence closure.
+
+Identity resolution uses three decisions rather than a forced binary merge,
+following [Fellegi–Sunter record linkage](https://doi.org/10.1080/01621459.1969.10501049):
+
+```text
+log_odds_same =
+  prior_log_odds
+  + sum(feature_log_likelihood_ratio)
+
+high confidence -> SAME_ENTITY candidate
+middle interval -> possible link / human or Agent review
+strong mismatch -> DIFFERENT
+```
+
+Names, embeddings, shared evidence, aliases, time, scope, stable external IDs,
+and defining attributes are comparison features. Node-kind incompatibility,
+different stable IDs, disjoint scope, event-time differences, incompatible
+validity intervals, or explicit non-identity are hard vetoes. Correlated
+features must be grouped or calibrated rather than counted as independent
+evidence.
+
+For concepts, merge is also a model-selection decision. An
+[MDL](https://arxiv.org/abs/math/0406077) gain is positive only when one shared
+description plus exceptions is shorter than two separate descriptions:
+
+```text
+delta_MDL =
+  [L(separate_model) + L(data | separate)]
+  - [L(merged_model) + L(data | merged)]
+```
+
+If a merged description needs many scope qualifiers, conflicts, or exceptions,
+NMG keeps the nodes separate or creates a common broader parent. This mirrors
+[COBWEB incremental concept formation](https://axon.cs.byu.edu/~martinez/classes/678/Papers/Fisher_Cobweb.pdf),
+which compares adding, creating, merging, and splitting categories instead of
+assuming merge is the only operation.
+
+The safe lifecycle is:
+
+```text
+candidate pair
+  -> classify identity/match/hierarchy relation
+  -> shadow canonical view
+  -> compare retrieval utility, conflicts, and MDL
+  -> accept or reject
+  -> reversible canonical view
+```
+
+Acceptance does not physically delete either node. A versioned merge event
+records the input IDs, previous canonical mappings, decision relation, evidence,
+algorithm/model version, reviewer, and rollback state. Original records,
+evidence, and edges retain their original node IDs; query resolution follows a
+`canonical_id`/redirect view. Rollback removes that mapping. A later split
+reassigns only evidence with known provenance; ambiguous members remain under
+the old/common parent rather than being guessed into a child.
+
+Node kinds require different defaults:
+
+- entities may become `SAME_ENTITY` under strong identity evidence;
+- concepts normally use exact/close/hierarchical relations;
+- states with different time or scope use `SUPERSEDES` or coexistence, not merge;
+- repeated events remain distinct events and may share an event/problem cluster.
+
+Because false merges are more destructive than missed merges, automated
+identity uses a high asymmetric-loss threshold. The default action for uncertain
+pairs is a typed link, not a merge.
 
 ## 8. Information and communication interpretation
 
@@ -759,6 +912,18 @@ through evidence links, summaries, FTS/vector/ANN entries, caches, and learned
 signals. In the initial implementation these states may remain rows in one
 SQLite database; physical cold partitions are an optional future optimization.
 History is immutable while retained, not guaranteed to be retained forever.
+
+The current store implements these states as
+`memory_records.storage_state = indexed | dormant | quarantine`, independently
+of retrieval `tier = 0..3`. `setMemoryStorageState` performs explicit
+transitions: entering L4/L5 removes FTS, record embeddings, pending index
+deltas, leaf membership, and in-memory vector-cache entries; restoring to
+`indexed` rebuilds FTS immediately and queues rebuildable semantic indexes.
+Stable-ID `getContext` remains available for L4/L5 recovery. The conservative
+`retentionCandidates` API is dry-run only and protects STG records, preferences,
+states, constraints, contradictions/exceptions, marked records, high-value or
+frequently used records, and evidence with surviving derivations. Automatic
+purge is deliberately not implemented.
 
 ## 11. Progressive retrieval
 
@@ -1314,6 +1479,9 @@ Implemented and verified in the current prototype:
   explicit query/document profiles, node/leaf indexing, and a
   rebuildable USearch experiment;
 - L0-L3 local tiers, accumulated access statistics, and batch rebalancing;
+- LTG-only L4 Dormant/Unindexed and L5 Quarantine lifecycle states, explicit
+  restore, and conservative dry-run retention reports (without automatic
+  physical purge);
 - persisted ambiguity, fallback, contradiction, usefulness, and node-pair
   co-retrieval telemetry;
 - delayed evidence-backed link/split proposals with observation thresholds,
@@ -1408,9 +1576,9 @@ product value. If Graph does not beat Lite, graph adaptation remains a Lab
 feature. If a learned router does not beat deterministic routing, it remains
 optional.
 
-Current development evidence (updated 2026-07-29):
+Current development evidence (updated 2026-07-30):
 
-- 275 automated tests cover UOp autodiff, the differentiable controller,
+- 285 automated tests cover UOp autodiff, the differentiable controller,
   hierarchical activation, the retained memory-graph reasoner prototype,
   reasoning-workspace persistence and checkpoint injection, P3 lifecycle,
   budget enforcement, actual-use activation, independent-task deduplication,
@@ -1665,9 +1833,9 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 
 ### P5: optional platform capabilities
 
-1. Add measured retention transitions from indexed cold storage to L4
-   Dormant/Unindexed and L5 Quarantine, beginning with a dry-run report before
-   enabling automatic physical purge.
+1. Measure retention transitions from indexed cold storage through implemented
+   L4 Dormant/Unindexed and L5 Quarantine states before considering automatic
+   physical purge.
 2. Add a user-facing privacy deletion/export workflow over existing store-level
    deletion and dependency cleanup, including learned-signal erasure.
 3. Add optional encrypted cloud synchronization only after the local protocol

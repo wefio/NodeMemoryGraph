@@ -33,6 +33,7 @@ export interface MemoryNode {
 }
 
 export type MemoryTier = 0 | 1 | 2 | 3;
+export type MemoryStorageState = "dormant" | "indexed" | "quarantine";
 export type MemoryResidence = "ltg" | "stg";
 export type MemoryWriteSource = "agent" | "automatic" | "core" | "derived" | "import" | "user";
 export type MemoryType =
@@ -144,6 +145,26 @@ export interface MemoryRecord {
   writeReason: string;
   writeSource: MemoryWriteSource;
   createdAt: string;
+}
+
+export interface RetentionCandidate {
+  memoryId: string;
+  nodeId: string;
+  statement: string;
+  storageState: MemoryStorageState;
+  recommendedState: Exclude<MemoryStorageState, "indexed">;
+  ageDays: number;
+  idleDays: number;
+  importance: number;
+  accessCount: number;
+}
+
+export interface RetentionPolicy {
+  dormantAfterDays?: number;
+  quarantineAfterDays?: number;
+  maximumImportance?: number;
+  maximumAccessCount?: number;
+  now?: Date;
 }
 
 export interface RememberInput {
@@ -315,9 +336,7 @@ export interface MemoryContext {
     mode: "hybrid" | "lexical";
     degraded: boolean;
     reason?:
-      | "embedding_index_missing_targets"
-      | "embedding_index_not_ready"
-      | "embedding_unavailable";
+      "embedding_index_missing_targets" | "embedding_index_not_ready" | "embedding_unavailable";
   };
 }
 
@@ -480,11 +499,7 @@ export interface QppComponents {
 }
 
 export type QppTriggerReason =
-  | "ok"
-  | "below_threshold"
-  | "guardrail_empty"
-  | "guardrail_all_fallback"
-  | "guardrail_low_top1";
+  "ok" | "below_threshold" | "guardrail_empty" | "guardrail_all_fallback" | "guardrail_low_top1";
 
 export interface QppExpansionStage {
   /** Cumulative evidence budget for this stage (1, 2, 3, 5, 8, ...). */

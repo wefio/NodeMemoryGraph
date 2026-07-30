@@ -56,7 +56,7 @@ test("Pi adapter starts, recalls through, and closes its owned daemon", async ()
     assert.equal(isProcessAlive(started!.pid), true);
 
     const recalled = await handlers.get("before_agent_start")!(
-      { prompt: "What database did we previously decide Atlas requires?", systemPrompt: "base" },
+      { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
       { sessionManager },
     );
     assert.match(recalled.systemPrompt, /Atlas must use SQLite/);
