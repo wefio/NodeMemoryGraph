@@ -1,18 +1,19 @@
-# Activating NMG Memory in Claude Code
+# NMG Memory MCP server
 
-Zero-dependency durable memory for the current project. After setup, three
-tools appear automatically in every session:
+Three durable-memory tools served over MCP stdio:
 
-- `nmg_search` — recall compact memory headers (mid/node/type/tier/preview)
-- `nmg_get` — load exact memory statements and source evidence
-- `nmg_remember` — save facts, preferences, constraints, states, events
+- `nmg_search` — compact memory headers (mid/node/type/tier/preview)
+- `nmg_get` — exact memory statements and source evidence
+- `nmg_remember` — save facts/preferences/constraints/states/events
 
-The MCP server manages the local gRPC daemon automatically (start on connect,
-safe stop on exit, reuse if already running).
+The MCP server manages the local gRPC daemon automatically (start on
+connect, safe stop on exit, reuse if already running).
 
-## One-time setup
+Requirements: Node.js ≥ 22.19, `npm install` run in the project.
 
-Add this `.mcp.json` file to the project root:
+## Adding to any MCP client
+
+Register the server as a stdio transport:
 
 ```json
 {
@@ -29,23 +30,24 @@ Add this `.mcp.json` file to the project root:
 }
 ```
 
-Requirements: Node.js ≥ 22.19 and `npm install` already run.
+- **Claude Code**: place the block above in a `.mcp.json` at the project
+  root. Auto-discovered at session start.
+- **Claude Desktop**: add to `claude_desktop_config.json` under `mcpServers`.
+- **VS Code / Cursor / Codex**: add to the editor's MCP config file.
+- **Any MCP-compatible client**: same JSON block, same stdio protocol.
 
-## Verifying
+After restarting the client, restart it. The three NMG tools appear
+automatically. First connection may require a one-time approval.
 
-After restarting Claude Code, `nmg_search` / `nmg_get` / `nmg_remember`
-should appear in the tool list. The first MCP connection needs a one-time
-approval.
+**Alternative — global install**: to make NMG available across all projects
+regardless of cwd, use an absolute path for `args` and for `--experimental-strip-types` include `--experimental-strip-types` pointing at the plugin's
+`CLAUDE.md` directory.
 
 ## Troubleshooting
 
-If tools are missing, the MCP server likely failed to connect. Check that
-
-- Node.js ≥ 22.19 is installed (`node --version`)
-- `npm install` was run in the project
-- NMG daemon is not already running with a stale lockfile
-  (`rm .nmg/nmg.sqlite.server.json`)
-
-If the daemon is running but search returns nothing, the database may be
-empty. Any `nmg_remember` call populates it. Use `nmg daemon status --json`
-(in a terminal) to inspect embedding availability and database size.
+- Tools missing? MCP server likely failed to connect. Check Node.js version,
+  `npm install`, and remove a stale daemon lockfile if present
+  (`rm .nmg/nmg.sqlite.server.json`).
+- Empty search results? The database may not have been written to yet. Any
+  `nmg_remember` call populates it.
+- Run `npx claude mcp list` (Claude Code) or `node bin/nmg.mjs daemon status --json` (terminal) to inspect daemon and embedding health.
