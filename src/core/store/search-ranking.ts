@@ -150,5 +150,8 @@ const ENGLISH_SEARCH_STOP_WORDS = new Set([
 ]);
 
 export function normalize(value: string): string {
-  return value.trim().toLocaleLowerCase();
+  return value
+    .normalize("NFKC")
+    .trim()
+    .toLocaleLowerCase("en-US");
 }
