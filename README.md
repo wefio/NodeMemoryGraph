@@ -80,6 +80,44 @@ NMG daemon ── NMG core ── MemoryNode graph ── tiered MemoryRecord
 
 See [docs/design.md](docs/design.md) for the decisions and roadmap.
 
+## Claude Code plugin
+
+A local MCP plugin ships with the repository for zero-config Claude Code use:
+
+```
+claude-plugins/nmg-memory/
+├── .claude-plugin/plugin.json   # Plugin metadata
+└── agents/memory-copilot.ts     # MCP server (< 130 lines)
+```
+
+**How it works**
+
+The root `.mcp.json` registers `nmg` as a local MCP server. Claude Code
+auto-discovers it at session start and exposes three tools:
+
+| Tool | Purpose |
+|------|---------|
+| `nmg_search` | Return compact memory headers (mid/node/type/tier/preview) |
+| `nmg_get` | Load exact memory statements and source evidence |
+| `nmg_remember` | Save durable facts/preferences/states/constraints/events |
+
+Daemon lifecycle is automatic: the MCP server starts the NMG daemon when it
+launches and safely stops it on exit. If a daemon was already running (e.g.,
+from another Agent), it is reused and left untouched.
+
+**Output is purposefully compact** — tab-separated single-line result headers
+and excerpt-only evidence — to constrain token consumption.
+
+**Quick start**
+
+```powershell
+npm install
+npx claude   # .mcp.json is auto-discovered inside the project
+```
+
+No explicit plugin install is required. After the first connection approval,
+NMG memory is available in every session under this project.
+
 ## Try it
 
 Requirements: Node.js 22.19 or newer and Pi.
