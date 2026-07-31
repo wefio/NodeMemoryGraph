@@ -56,6 +56,7 @@ import type {
   VectorEmbedder,
 } from "./types.ts";
 import { blockTiers, huffmanDepths } from "./hierarchy.ts";
+import { nowMs, PerfTimer, SECTION } from "./perf.ts";
 import { Router } from "./router.ts";
 import { cosineSimilarity, HashingVectorEmbedder } from "./vector.ts";
 import { Float32VectorCache } from "./vector-cache.ts";
@@ -654,6 +655,15 @@ export class NmgStore {
   }
 
   remember(input: RememberInput): RememberResult {
+    if (input.perf === false) return this.#rememberInner(input);
+    const startedAt = nowMs();
+    const perf = new PerfTimer();
+    const result = perf.measure(SECTION.write, () => this.#rememberInner(input));
+    perf.setTotal(Date.now() - startedAt);
+    return Object.assign(result, { timings: perf.snapshot() });
+  }
+
+  #rememberInner(input: RememberInput): RememberResult {
     const memoryType = input.memoryType ?? "fact";
     if (memoryType === "state" && !input.stateKey?.trim()) {
       throw new Error("state memories require a stable stateKey");
@@ -1411,7 +1421,8 @@ export class NmgStore {
     options: SearchOptions = {},
     semantic?: { queryVector: readonly number[]; model: string },
   ): MemoryContext {
-    const startedAt = Date.now();
+    const startedAt = nowMs();
+    const perf = options.perf === false ? null : new PerfTimer();
     const budget = activeGraphBudget(options);
     const limit = Math.max(1, Math.min(options.limit ?? 8, budget.maxEvidence, 50));
     const directOptions = {
@@ -1419,49 +1430,96 @@ export class NmgStore {
       maxTier: Math.min(options.maxTier ?? budget.maxLocalTier, budget.maxLocalTier) as MemoryTier,
       limit: Math.min(50, Math.max(20, limit * 3)),
     };
-    const direct = semantic
-      ? options.vectorGranularity === "union"
-        ? mergeSemanticCandidates(
-            query,
-            [
-              ...this.searchHierarchyByVector(
-                query,
-                semantic.queryVector,
-                semantic.model,
-                directOptions,
-              ),
-              ...this.searchByVector(query, semantic.queryVector, semantic.model, {
+    const direct = perf
+      ? perf.measure(SECTION.searchDirect, () =>
+          semantic
+            ? options.vectorGranularity === "union"
+              ? mergeSemanticCandidates(
+                  query,
+                  [
+                    ...this.searchHierarchyByVector(
+                      query,
+                      semantic.queryVector,
+                      semantic.model,
+                      directOptions,
+                    ),
+                    ...this.searchByVector(query, semantic.queryVector, semantic.model, {
+                      ...directOptions,
+                      retrievalMode: "qwen3",
+                    }),
+                  ],
+                  directOptions.limit,
+                )
+              : options.vectorGranularity === "records"
+                ? this.searchByVector(query, semantic.queryVector, semantic.model, {
+                    ...directOptions,
+                    retrievalMode: "qwen3",
+                  })
+                : this.searchHierarchyByVector(query, semantic.queryVector, semantic.model, directOptions)
+            : this.search(query, directOptions),
+        )
+      : semantic
+        ? options.vectorGranularity === "union"
+          ? mergeSemanticCandidates(
+              query,
+              [
+                ...this.searchHierarchyByVector(
+                  query,
+                  semantic.queryVector,
+                  semantic.model,
+                  directOptions,
+                ),
+                ...this.searchByVector(query, semantic.queryVector, semantic.model, {
+                  ...directOptions,
+                  retrievalMode: "qwen3",
+                }),
+              ],
+              directOptions.limit,
+            )
+          : options.vectorGranularity === "records"
+            ? this.searchByVector(query, semantic.queryVector, semantic.model, {
                 ...directOptions,
                 retrievalMode: "qwen3",
-              }),
-            ],
-            directOptions.limit,
-          )
-        : options.vectorGranularity === "records"
-          ? this.searchByVector(query, semantic.queryVector, semantic.model, {
-              ...directOptions,
-              retrievalMode: "qwen3",
-            })
-          : this.searchHierarchyByVector(query, semantic.queryVector, semantic.model, directOptions)
-      : this.search(query, directOptions);
+              })
+            : this.searchHierarchyByVector(query, semantic.queryVector, semantic.model, directOptions)
+        : this.search(query, directOptions);
     const graphHops = Math.min(options.graphHops ?? 1, budget.maxGraphHops);
-    const relations = this.getRelations(
-      direct.map((result) => result.node.id),
-      graphHops,
-    );
+    const relations = perf
+      ? perf.measure(SECTION.relations, () =>
+          this.getRelations(
+            direct.map((result) => result.node.id),
+            graphHops,
+          ),
+        )
+      : this.getRelations(
+          direct.map((result) => result.node.id),
+          graphHops,
+        );
     const directNodeIds = new Set(direct.map((result) => result.node.id));
     const relatedNodeIds = [
       ...new Set(relations.flatMap((relation) => [relation.sourceNodeId, relation.targetNodeId])),
     ].filter((id) => !directNodeIds.has(id));
-    const related = relatedNodeIds.flatMap((nodeId) =>
-      this.#resultsForNode(
-        nodeId,
-        Math.min(options.maxTier ?? budget.maxLocalTier, budget.maxLocalTier) as MemoryTier,
-        2,
-        undefined,
-        options.sourceActor,
-      ),
-    );
+    const related = perf
+      ? perf.measure(SECTION.relatedExpansion, () =>
+          relatedNodeIds.flatMap((nodeId) =>
+            this.#resultsForNode(
+              nodeId,
+              Math.min(options.maxTier ?? budget.maxLocalTier, budget.maxLocalTier) as MemoryTier,
+              2,
+              undefined,
+              options.sourceActor,
+            ),
+          ),
+        )
+      : relatedNodeIds.flatMap((nodeId) =>
+          this.#resultsForNode(
+            nodeId,
+            Math.min(options.maxTier ?? budget.maxLocalTier, budget.maxLocalTier) as MemoryTier,
+            2,
+            undefined,
+            options.sourceActor,
+          ),
+        );
     const candidates = [...direct, ...related]
       .filter(
         (result, index, all) =>
@@ -1529,6 +1587,7 @@ export class NmgStore {
       options.qppThreshold,
     );
     if (options.secondPass) {
+      perf?.start(SECTION.secondPass);
       const maximum = expandActiveGraphBudget(budget);
       const stages = [];
       let stoppedBecause: NonNullable<QppTriggerDecision["expansion"]>["stoppedBecause"] =
@@ -1577,22 +1636,42 @@ export class NmgStore {
         ...qppDecision,
         expansion: { strategy: "fibonacci", stages, stoppedBecause },
       };
+      perf?.stop(SECTION.secondPass);
     }
     const { results, selectedNodes, estimatedTokens, exhausted } = selection;
-    const persistentEdges = relations
-      .filter(
-        (relation) =>
-          selectedNodes.has(relation.sourceNodeId) && selectedNodes.has(relation.targetNodeId),
-      )
-      .slice(0, activeBudget.maxEdges)
-      .map((relation) => ({
-        id: relation.id,
-        sourceNodeId: relation.sourceNodeId,
-        targetNodeId: relation.targetNodeId,
-        type: relation.type,
-        persistence: "persistent" as const,
-        stability: relation.stability,
-      }));
+    const persistentEdges = perf
+      ? perf.measure(SECTION.edges, () =>
+          relations
+            .filter(
+              (relation) =>
+                selectedNodes.has(relation.sourceNodeId) &&
+                selectedNodes.has(relation.targetNodeId),
+            )
+            .slice(0, activeBudget.maxEdges)
+            .map((relation) => ({
+              id: relation.id,
+              sourceNodeId: relation.sourceNodeId,
+              targetNodeId: relation.targetNodeId,
+              type: relation.type,
+              persistence: "persistent" as const,
+              stability: relation.stability,
+            })),
+        )
+      : relations
+          .filter(
+            (relation) =>
+              selectedNodes.has(relation.sourceNodeId) &&
+              selectedNodes.has(relation.targetNodeId),
+          )
+          .slice(0, activeBudget.maxEdges)
+          .map((relation) => ({
+            id: relation.id,
+            sourceNodeId: relation.sourceNodeId,
+            targetNodeId: relation.targetNodeId,
+            type: relation.type,
+            persistence: "persistent" as const,
+            stability: relation.stability,
+          }));
     const directSelectedNodeIds = [
       ...new Set(
         results
@@ -1611,7 +1690,7 @@ export class NmgStore {
     }
     const topScores = direct.slice(0, 2).map((result) => result.combinedScore);
     const ambiguity = topScores.length < 2 ? 0 : 1 - clamp(topScores[0]! - topScores[1]!, 0, 1);
-    const latencyMs = Date.now() - startedAt;
+    const latencyMs = nowMs() - startedAt;
     if (latencyMs > activeBudget.maxLatencyMs) exhausted.add("latency");
     const usage: ActiveGraphBudgetUsage = {
       nodes: selectedNodes.size,
@@ -1647,12 +1726,27 @@ export class NmgStore {
       expansions,
       budgetLedger,
       qpp: qppDecision,
+      timings: perf?.snapshot(),
     };
     // A controller probe is a private planning artifact, not an interaction the
     // model could have used. Persisting it would pollute online-learning labels
     // and steadily grow the trace table with duplicate searches.
-    const traceId =
-      options.persistTrace === false ? randomUUID() : this.recordRetrievalTrace(traceInput);
+    const traceId = perf
+      ? perf.measure(SECTION.trace, () =>
+          options.persistTrace === false ? randomUUID() : this.recordRetrievalTrace(traceInput),
+        )
+      : options.persistTrace === false
+        ? randomUUID()
+        : this.recordRetrievalTrace(traceInput);
+    // The INSERT above carried the pre-trace snapshot; patch the row with the
+    // final snapshot so the persisted profile includes the trace span itself.
+    perf?.setTotal(nowMs() - startedAt);
+    const snapshot = perf?.snapshot();
+    if (perf && options.persistTrace !== false) {
+      this.#db
+        .prepare("UPDATE retrieval_traces SET timings_json = ? WHERE id = ?")
+        .run(JSON.stringify(snapshot), traceId);
+    }
     const activeGraph: ActiveGraph = {
       id: traceId,
       query,
@@ -1668,13 +1762,15 @@ export class NmgStore {
       qpp: qppDecision,
       createdAt: new Date().toISOString(),
     };
-    return {
+    const context: MemoryContext = {
       results,
       relations: persistentEdges.flatMap((edge) =>
         relations.filter((relation) => relation.id === edge.id),
       ),
       activeGraph,
+      timings: snapshot,
     };
+    return context;
   }
 
   /**
@@ -1735,9 +1831,9 @@ export class NmgStore {
            contradicted_memory_ids_json, rejected_memory_ids_json,
            relation_ids_json, task_id, active_graph_budget_json,
            active_graph_usage_json, selections_json, expansions_json,
-           budget_ledger_json, qpp_json, ambiguity,
+           budget_ledger_json, qpp_json, timings_json, ambiguity,
            fallback_used, conflict_observed, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -1756,6 +1852,7 @@ export class NmgStore {
           JSON.stringify(input.expansions ?? []),
           JSON.stringify(input.budgetLedger ?? []),
           JSON.stringify(input.qpp ?? null),
+          JSON.stringify(input.timings ?? {}),
           clamp(input.ambiguity ?? 0, 0, 1),
           input.fallbackUsed ? 1 : 0,
           input.conflictObserved ? 1 : 0,
@@ -1869,11 +1966,35 @@ export class NmgStore {
       expansions: parseStoredJson(row.expansions_json, []),
       budgetLedger: parseStoredJson(row.budget_ledger_json, []),
       qpp: parseQppDecision(row.qpp_json),
+      timings: parseStoredJson(row.timings_json, null) ?? undefined,
       createdAt: String(row.created_at),
     };
   }
 
   recordActiveGraphUse(
+    activeGraphId: string,
+    input: {
+      usedMemoryIds: readonly string[];
+      contradictedMemoryIds?: readonly string[];
+      rejectedMemoryIds?: readonly string[];
+    },
+  ): void {
+    const startedAt = nowMs();
+    this.#recordActiveGraphUseInner(activeGraphId, input);
+    // Record the use-attribution span on the same trace row (best-effort —
+    // the span is diagnostic, never a reason to fail the call).
+    try {
+      this.#db
+        .prepare(
+          `UPDATE retrieval_traces SET timings_json = json_patch(timings_json, ?) WHERE id = ?`,
+        )
+        .run(JSON.stringify({ use: { totalMs: nowMs() - startedAt } }), activeGraphId);
+    } catch {
+      /* trace timing is diagnostic; ignore write failure */
+    }
+  }
+
+  #recordActiveGraphUseInner(
     activeGraphId: string,
     input: {
       usedMemoryIds: readonly string[];

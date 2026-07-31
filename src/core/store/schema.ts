@@ -230,6 +230,7 @@ export function migrate(db: DatabaseSync): void {
       fallback_used INTEGER NOT NULL,
       conflict_observed INTEGER NOT NULL,
       qpp_json TEXT NOT NULL DEFAULT '{}',
+      timings_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL
     );
 
@@ -555,6 +556,7 @@ export function ensureRetrievalTraceColumns(db: DatabaseSync): void {
     ["expansions_json", "TEXT NOT NULL DEFAULT '[]'"],
     ["budget_ledger_json", "TEXT NOT NULL DEFAULT '[]'"],
     ["qpp_json", "TEXT NOT NULL DEFAULT '{}'"],
+    ["timings_json", "TEXT NOT NULL DEFAULT '{}'"],
   ];
   for (const [name, definition] of additions) {
     if (!existing.has(name))

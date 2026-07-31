@@ -1,3 +1,5 @@
+import type { PerfSnapshot } from "./perf.ts";
+
 export type HistoryRole = "user" | "assistant" | "tool" | "system" | "explicit" | "session";
 
 export interface HistoryRecord {
@@ -198,12 +200,16 @@ export interface RememberInput {
   expiresAt?: string;
   writeReason?: string;
   writeSource?: MemoryWriteSource;
+  /** Disable per-phase timing for this write (default: enabled). */
+  perf?: boolean;
 }
 
 export interface RememberResult {
   history: HistoryRecord;
   node: MemoryNode;
   memory: MemoryRecord;
+  /** Per-phase timings, present unless disabled via RememberInput.perf. */
+  timings?: PerfSnapshot;
 }
 
 export interface SearchOptions {
@@ -236,6 +242,8 @@ export interface SearchOptions {
   secondPass?: boolean;
   /** Learned first-pass Fibonacci tier. QPP may continue to later tiers. */
   initialEvidenceTarget?: number;
+  /** Disable per-phase timing for this operation (default: enabled). */
+  perf?: boolean;
 }
 
 export interface EmbeddingDocument {
@@ -338,6 +346,8 @@ export interface MemoryContext {
     reason?:
       "embedding_index_missing_targets" | "embedding_index_not_ready" | "embedding_unavailable";
   };
+  /** Per-phase timings, present unless timing was disabled via SearchOptions.perf. */
+  timings?: PerfSnapshot;
 }
 
 export interface ActiveGraphBudget {
@@ -546,6 +556,9 @@ export interface RetrievalTraceInput {
   budgetLedger?: ActiveGraphBudgetLedgerEntry[];
   /** Shadow QPP observation (Stage 0): computed, not yet acted on. */
   qpp?: QppTriggerDecision;
+  /** Per-phase timing captured on the search pass, persisted for aggregate
+   *  performance profiling (retrieval_traces.timings_json). */
+  timings?: PerfSnapshot;
 }
 
 export interface RetrievalTrace extends RetrievalTraceInput {

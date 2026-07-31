@@ -10,6 +10,54 @@ import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 const root = resolve(import.meta.dirname, "../..");
 const launcher = resolve(root, "bin/nmg.mjs");
 
+test("search prints a per-phase perf line by default and omits it with --no-perf", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-perf-"));
+  try {
+    const remember = spawnSync(
+      process.execPath,
+      [launcher, "remember", "perf demo memory", "--node", "perfdemo", "--data-dir", directory],
+      { cwd: root, encoding: "utf8" },
+    );
+    assert.equal(remember.status, 0, remember.stderr);
+
+    const withPerf = spawnSync(
+      process.execPath,
+      [launcher, "search", "perf", "--data-dir", directory],
+      { cwd: root, encoding: "utf8" },
+    );
+    assert.equal(withPerf.status, 0, withPerf.stderr);
+    const perfLine = withPerf.stdout
+      .split("\n")
+      .find((line) => line.startsWith("perf\t"));
+    assert.ok(perfLine, `perf line present:\n${withPerf.stdout}`);
+    assert.match(perfLine!, /search\.direct=/, "direct search section listed");
+    assert.match(perfLine!, /total=\d+(\.\d+)?ms/, "wall-clock total");
+
+    const noPerf = spawnSync(
+      process.execPath,
+      [launcher, "search", "perf", "--data-dir", directory, "--no-perf"],
+      { cwd: root, encoding: "utf8" },
+    );
+    assert.equal(noPerf.status, 0, noPerf.stderr);
+    assert.ok(
+      !noPerf.stdout.split("\n").some((line) => line.startsWith("perf\t")),
+      `no perf line with --no-perf:\n${noPerf.stdout}`,
+    );
+
+    const json = spawnSync(
+      process.execPath,
+      [launcher, "search", "perf", "--data-dir", directory, "--json"],
+      { cwd: root, encoding: "utf8" },
+    );
+    assert.equal(json.status, 0, json.stderr);
+    const parsed = JSON.parse(json.stdout) as { timings?: { timings: Record<string, number> } };
+    assert.ok(parsed.timings, "json search carries timings");
+    assert.ok(parsed.timings!.timings["search.direct"] >= 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("packaged launcher runs one-shot status without creating storage", () => {
   const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-process-status-"));
   try {
