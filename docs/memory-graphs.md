@@ -290,6 +290,37 @@ Open question (kept): how the resident set is maintained — explicit `pinned`
 and whether resident content counts against the token budget (proposal:
 counts, but allocated first, before discretionary content).
 
+#### Filter usage: a cross-cutting trace field
+
+Every trace records which retrieval filters were effective and what they
+cost — one record, many consumers (not a filter-counter dedicated to index
+decisions):
+
+```ts
+// RetrievalTraceInput.filterUsage
+{
+  dimensions: string[];      // e.g. ["scope.project", "node", "sourceActor", "maxTier:1"]
+  candidatesBefore: number;  // rows scanned by SQL
+  candidatesAfter: number;   // rows surviving post-filter, before sort
+  selectivity: number;       // 1 − after/before
+}
+```
+
+Consumers (each reads the same persisted field):
+
+| Consumer | Question answered |
+| --- | --- |
+| Index decision | does a dimension get used enough and reduce candidates enough to justify an index? (`usage rate × selectivity × latency share`) |
+| Budget projection (controller) | filtered queries have smaller candidate pools — budget dimensions can tighten |
+| QPP calibration | filtered queries carry different top1/variance semantics; thresholds may differ |
+| Router learning | filter context is a routing signal: within one scope, node ranking should be stable |
+| Retention | a scope never filtered for is a candidate for cold demotion |
+| Agent feedback | "slow because unscoped" → suggest `--scope` to narrow |
+
+`selectivity` is measured after SQL but before sort, so it reflects what a
+future pushdown would actually save (see the index-decision sketch in
+docs/improvement-areas.md).
+
 ### AG lifecycle and the tiered disclosure design
 
 The tiered gate ([tiered-disclosure-design.md](tiered-disclosure-design.md))

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { histogramAdd, histogramQuantile, PerfTimer } from "../../src/core/perf.ts";
@@ -231,6 +232,127 @@ test("histogram quantiles approximate known distributions", () => {
 
   // Empty → 0.
   assert.equal(histogramQuantile([], 0.5), 0);
+});
+
+test("filterUsage records effective filter dimensions and selectivity", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Atlas uses SQLite.",
+      nodeName: "Atlas storage",
+      scope: { project: "atlas" },
+    });
+    store.remember({
+      statement: "NMG uses Pi.",
+      nodeName: "NMG runtime",
+      scope: { project: "nmg" },
+    });
+
+    // No filter → no filterUsage on context or trace.
+    const plain = store.searchContext("storage");
+    assert.equal(plain.filterUsage, undefined, "no filter → no filterUsage");
+
+    // Scoped query → dimension recorded, only matching-scope results, persists.
+    const scoped = store.searchContext("storage", { scope: { project: "atlas" } });
+    assert.ok(scoped.filterUsage, "scoped query captures filterUsage");
+    assert.ok(scoped.filterUsage!.dimensions.includes("scope.project"));
+    // Pushdown semantics: the SQL already filtered, so every result matches
+    // the scope; selectivity is 0 because no post-filter remained.
+    assert.ok(
+      scoped.results.every(
+        (result) => result.memory.scope && result.memory.scope.project === "atlas",
+      ),
+      "pushdown leaves only matching-scope results",
+    );
+    assert.equal(scoped.filterUsage!.selectivity, 0, "no post-filter after pushdown");
+
+    const trace = store.retrievalTrace(scoped.activeGraph!.id);
+    assert.ok(trace?.filterUsage, "filterUsage persists in the trace");
+    assert.ok(trace!.filterUsage!.dimensions.includes("scope.project"));
+  });
+});
+
+test("scope pushdown handles dotted keys and multiple scope keys", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Atlas prod storage uses SQLite.",
+      nodeName: "Atlas",
+      scope: { "app.name": "atlas", env: "prod" },
+    });
+    store.remember({
+      statement: "Atlas staging storage uses Postgres.",
+      nodeName: "Atlas",
+      scope: { "app.name": "atlas", env: "staging" },
+    });
+    store.remember({
+      statement: "NMG storage uses Pi.",
+      nodeName: "NMG",
+      scope: { "app.name": "nmg", env: "prod" },
+    });
+
+    // Dotted key: pushdown must match the literal key, not strip the dot.
+    const dotted = store.search("storage", { maxTier: 3, scope: { "app.name": "atlas" } });
+    assert.equal(dotted.length, 2, "dotted key filters both atlas rows");
+    assert.ok(dotted.every((r) => r.memory.scope["app.name"] === "atlas"));
+
+    // Multiple scope keys AND together.
+    const both = store.search("storage", {
+      maxTier: 3,
+      scope: { "app.name": "atlas", env: "prod" },
+    });
+    assert.equal(both.length, 1, "multi-key scope ANDs");
+    assert.match(both[0]?.memory.statement ?? "", /SQLite/);
+  });
+});
+
+test("scope pushdown never changes behavior vs the legacy in-memory filter", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Prod DB is PostgreSQL.",
+      nodeName: "database",
+      scope: { environment: "production" },
+    });
+    store.remember({
+      statement: "Test DB is SQLite.",
+      nodeName: "database",
+      scope: { environment: "test" },
+    });
+    store.remember({ statement: "Unscoped fact.", nodeName: "database" });
+    // A memory with no scope must never match a scoped query (json_extract
+    // returns null, which does not equal any value).
+    const scoped = store.search("database", {
+      maxTier: 3,
+      scope: { environment: "production" },
+    });
+    assert.equal(scoped.length, 1);
+    assert.match(scoped[0]?.memory.statement ?? "", /PostgreSQL/);
+    // And the unscoped memory still appears for unscoped queries.
+    const plain = store.search("database", { maxTier: 3 });
+    assert.equal(plain.length, 3);
+  });
+});
+
+test("SQLite PRAGMA tuning is applied on open", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-prgma-"));
+  const database = join(directory, "nmg.sqlite");
+  try {
+    const store = new NmgStore(database, new HashingVectorEmbedder());
+    // A second connection in the same process probes the database; the
+    // store's own connection was configured at construction. WAL + NORMAL +
+    // busy_timeout are the multi-writer contract.
+    const probe = new DatabaseSync(database, { readOnly: true });
+    const wal = probe.prepare("PRAGMA journal_mode").get();
+    assert.equal(String(wal.journal_mode), "wal", "WAL journal mode");
+    const idx = probe
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name = 'idx_retrieval_traces_created_at'",
+      )
+      .get();
+    assert.ok(idx, "trace prune index exists");
+    probe.close();
+    store.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("perfAggregates accumulates Welford statistics and survives pruning", () => {

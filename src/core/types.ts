@@ -338,6 +338,20 @@ export interface DeriveMemoryInput extends Omit<RememberInput, "evidence"> {
   derivation: string;
 }
 
+/** Which retrieval filters were effective on a query and what they cost.
+ *  Captured in every trace so downstream consumers (index-decision, budget
+ *  projection, QPP calibration, retention, agent feedback) share one record. */
+export interface RetrievalFilterUsage {
+  /** Filter dimensions actually applied, e.g. ["scope.project", "node", "sourceActor"]. */
+  dimensions: string[];
+  /** Candidate rows scanned by SQL (before post-filter). */
+  candidatesBefore: number;
+  /** Candidates surviving the filter (after post-filter, before sort). */
+  candidatesAfter: number;
+  /** selectiveness = 1 − after/before; 0 = no reduction, 1 = everything filtered. */
+  selectivity: number;
+}
+
 export interface MemoryContext {
   results: MemorySearchResult[];
   relations: NodeRelation[];
@@ -350,6 +364,8 @@ export interface MemoryContext {
   };
   /** Per-phase timings, present unless timing was disabled via SearchOptions.perf. */
   timings?: PerfSnapshot;
+  /** Effective filters and their candidate reduction, when filtering was applied. */
+  filterUsage?: RetrievalFilterUsage;
 }
 
 export interface ActiveGraphBudget {
@@ -561,6 +577,8 @@ export interface RetrievalTraceInput {
   /** Per-phase timing captured on the search pass, persisted for aggregate
    *  performance profiling (retrieval_traces.timings_json). */
   timings?: PerfSnapshot;
+  /** Effective filter dimensions and candidate reduction (multi-consumer). */
+  filterUsage?: RetrievalFilterUsage;
 }
 
 /** Long-term per-section performance aggregate (Welford online statistics).

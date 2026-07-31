@@ -231,6 +231,7 @@ export function migrate(db: DatabaseSync): void {
       conflict_observed INTEGER NOT NULL,
       qpp_json TEXT NOT NULL DEFAULT '{}',
       timings_json TEXT NOT NULL DEFAULT '{}',
+      filter_usage_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL
     );
 
@@ -385,6 +386,8 @@ export function migrate(db: DatabaseSync): void {
       ON memory_records(memory_type, state_key, status);
     CREATE INDEX IF NOT EXISTS idx_memory_records_residence_expiry
       ON memory_records(residence, expires_at, status);
+    CREATE INDEX IF NOT EXISTS idx_retrieval_traces_created_at
+      ON retrieval_traces(created_at);
     UPDATE memory_records SET promoted_at = created_at
       WHERE residence = 'ltg' AND promoted_at IS NULL;
     INSERT OR IGNORE INTO memory_evidence_links (memory_id, history_id)
@@ -579,6 +582,7 @@ export function ensureRetrievalTraceColumns(db: DatabaseSync): void {
     ["budget_ledger_json", "TEXT NOT NULL DEFAULT '[]'"],
     ["qpp_json", "TEXT NOT NULL DEFAULT '{}'"],
     ["timings_json", "TEXT NOT NULL DEFAULT '{}'"],
+    ["filter_usage_json", "TEXT NOT NULL DEFAULT '{}'"],
   ];
   for (const [name, definition] of additions) {
     if (!existing.has(name))

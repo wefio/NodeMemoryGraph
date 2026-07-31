@@ -116,19 +116,25 @@ function searchH(r: MemoryContext): string {
           `mid=${m.id}\tnode=${n.canonicalName}\ttype=${m.memoryType}\tL${m.tier}\t${t115(m.statement)}`,
       )
     : ["No NMG match."];
-  const perfLine = perfFeedback(r.timings);
+  const perfLine = perfFeedback(r.timings, r.filterUsage);
   if (perfLine) lines.push(perfLine);
   return lines.join("\n");
 }
 
 /** Compact per-phase timing feedback line for agent self-maintenance. */
-function perfFeedback(timings: PerfSnapshot | undefined): string | null {
+function perfFeedback(timings: PerfSnapshot | undefined, filters?: unknown): string | null {
   if (!timings) return null;
   const sections = Object.entries(timings.timings)
     .sort((left, right) => right[1] - left[1])
     .map(([section, ms]) => `${section}=${ms.toFixed(1)}ms`)
     .join(" ");
-  return `[perf ${sections} total=${timings.totalMs.toFixed(1)}ms]`;
+  let advice = "";
+  // Slow + unfiltered → the agent can narrow scope instead of widening the
+  // query. This is the index-decision signal surfacing at the boundary.
+  if (timings.totalMs > 50 && (!filters || (filters as { dimensions?: string[] }).dimensions?.length === 0)) {
+    advice = " (slow: consider --scope to narrow)";
+  }
+  return `[perf ${sections} total=${timings.totalMs.toFixed(1)}ms${advice}]`;
 }
 
 function memText(r: MemoryContext & { missingMemoryIds?: string[] }): string {

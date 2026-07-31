@@ -44,6 +44,7 @@ import type {
   RememberResult,
   RetentionCandidate,
   RetentionPolicy,
+  RetrievalFilterUsage,
   QppTriggerDecision,
   PerfAggregate,
   PerfSnapshot,
@@ -116,6 +117,7 @@ export class NmgStore {
       PRAGMA cache_size = -64000;
       PRAGMA temp_store = MEMORY;
       PRAGMA mmap_size = 268435456;
+      PRAGMA busy_timeout = 5000;
     `);
     migrate(this.#db);
   }
@@ -1432,6 +1434,12 @@ export class NmgStore {
       maxTier: Math.min(options.maxTier ?? budget.maxLocalTier, budget.maxLocalTier) as MemoryTier,
       limit: Math.min(50, Math.max(20, limit * 3)),
     };
+    const filterUsage: RetrievalFilterUsage = {
+      dimensions: effectiveFilterDimensions(options),
+      candidatesBefore: 0,
+      candidatesAfter: 0,
+      selectivity: 0,
+    };
     const direct = perf
       ? perf.measure(SECTION.searchDirect, () =>
           semantic
@@ -1458,7 +1466,7 @@ export class NmgStore {
                     retrievalMode: "qwen3",
                   })
                 : this.searchHierarchyByVector(query, semantic.queryVector, semantic.model, directOptions)
-            : this.search(query, directOptions),
+            : this.search(query, directOptions, filterUsage),
         )
       : semantic
         ? options.vectorGranularity === "union"
@@ -1484,7 +1492,7 @@ export class NmgStore {
                 retrievalMode: "qwen3",
               })
             : this.searchHierarchyByVector(query, semantic.queryVector, semantic.model, directOptions)
-        : this.search(query, directOptions);
+        : this.search(query, directOptions, filterUsage);
     const graphHops = Math.min(options.graphHops ?? 1, budget.maxGraphHops);
     const relations = perf
       ? perf.measure(SECTION.relations, () =>
@@ -1729,6 +1737,7 @@ export class NmgStore {
       budgetLedger,
       qpp: qppDecision,
       timings: perf?.snapshot(),
+      filterUsage: filterUsage.dimensions.length > 0 ? filterUsage : undefined,
     };
     // A controller probe is a private planning artifact, not an interaction the
     // model could have used. Persisting it would pollute online-learning labels
@@ -1772,6 +1781,7 @@ export class NmgStore {
       ),
       activeGraph,
       timings: snapshot,
+      filterUsage: filterUsage.dimensions.length > 0 ? filterUsage : undefined,
     };
     return context;
   }
@@ -1834,9 +1844,9 @@ export class NmgStore {
            contradicted_memory_ids_json, rejected_memory_ids_json,
            relation_ids_json, task_id, active_graph_budget_json,
            active_graph_usage_json, selections_json, expansions_json,
-           budget_ledger_json, qpp_json, timings_json, ambiguity,
-           fallback_used, conflict_observed, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           budget_ledger_json, qpp_json, timings_json, filter_usage_json,
+           ambiguity, fallback_used, conflict_observed, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -1856,6 +1866,7 @@ export class NmgStore {
           JSON.stringify(input.budgetLedger ?? []),
           JSON.stringify(input.qpp ?? null),
           JSON.stringify(input.timings ?? {}),
+          JSON.stringify(input.filterUsage ?? {}),
           clamp(input.ambiguity ?? 0, 0, 1),
           input.fallbackUsed ? 1 : 0,
           input.conflictObserved ? 1 : 0,
@@ -2072,6 +2083,7 @@ export class NmgStore {
       budgetLedger: parseStoredJson(row.budget_ledger_json, []),
       qpp: parseQppDecision(row.qpp_json),
       timings: parseStoredJson(row.timings_json, null) ?? undefined,
+      filterUsage: parseStoredJson(row.filter_usage_json, null) ?? undefined,
       createdAt: String(row.created_at),
     };
   }
@@ -2563,12 +2575,18 @@ export class NmgStore {
     return { cues };
   }
 
-  search(query: string, options: SearchOptions = {}): MemorySearchResult[] {
+  search(
+    query: string,
+    options: SearchOptions = {},
+    filterUsage?: RetrievalFilterUsage,
+  ): MemorySearchResult[] {
     return this.#searchWithVector(
       query,
       this.#embedder.embed(query),
       this.#embedder.model,
       options,
+      [],
+      filterUsage,
     );
   }
 
@@ -2577,11 +2595,12 @@ export class NmgStore {
     queryVector: readonly number[],
     model: string,
     options: SearchOptions = {},
+    filterUsage?: RetrievalFilterUsage,
   ): MemorySearchResult[] {
     return this.#searchWithVector(query, queryVector, model, {
       ...options,
       retrievalMode: options.retrievalMode ?? "qwen3",
-    });
+    }, [], filterUsage);
   }
 
   searchByVectorCandidates(
@@ -3251,6 +3270,7 @@ export class NmgStore {
     vectorModel: string,
     options: SearchOptions,
     forcedCandidateIds: string[] = [],
+    filterUsage?: RetrievalFilterUsage,
   ): MemorySearchResult[] {
     const normalizedQuery = normalize(query);
     if (!normalizedQuery) return [];
@@ -3292,6 +3312,22 @@ export class NmgStore {
           : retrievalMode === "fts5"
             ? ftsIds.length
             : MAX_SEARCH_CANDIDATES + ftsIds.length;
+    // Scope filtering is pushed into SQL so scoring runs only on matching
+    // rows (filter-then-score, not score-then-filter). One json_extract per
+    // requested scope key; keys are emitted as quoted path segments
+    // ($."key" — safe for dots and other JSON-legal key characters), values
+    // parameterized — no injection surface.
+    const scopeEntries = Object.entries(options.scope ?? {});
+    const scopeClause =
+      scopeEntries.length > 0
+        ? `AND ${scopeEntries
+            .map(
+              ([key]) =>
+                `json_extract(m.scope_json, '$."${key.replace(/["\\]/g, "")}"') = ?`,
+            )
+            .join(" AND ")}`
+        : "";
+    const scopeParams = scopeEntries.map(([, value]) => value);
     const rows = this.#db
       .prepare(
         `SELECT
@@ -3338,6 +3374,7 @@ export class NmgStore {
            AND (? IS NULL OR m.source_actor = ?)
            AND (? = 1 OR m.status IN ('active', 'disputed'))
            AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+           ${scopeClause}
          ORDER BY ${candidateOrder} m.tier ASC, m.importance DESC,
                   m.access_count DESC, m.created_at DESC
          LIMIT ?`,
@@ -3352,6 +3389,7 @@ export class NmgStore {
         options.sourceActor ?? null,
         options.includeHistorical ? 1 : 0,
         ...(forcedCandidateIds.length === 0 && retrievalMode === "hybrid" ? ftsIds : []),
+        ...scopeParams,
         rowLimit,
       ) as Row[];
 
@@ -3359,7 +3397,7 @@ export class NmgStore {
       retrievalMode === "fts5" || retrievalMode === "hashing" || retrievalMode === "qwen3"
         ? new Map<string, number>()
         : new Map(this.routeNodes(query, 20).map((route) => [route.node.id, route.score]));
-    const results = rows
+    const filtered = rows
       .map((row) => {
         const lexical = lexicalScore(normalizedQuery, row);
         const vector = cosineSimilarity(queryVector, storedVector(row, "ve_"));
@@ -3386,8 +3424,16 @@ export class NmgStore {
           right.combinedScore - left.combinedScore ||
           left.memory.tier - right.memory.tier ||
           right.memory.importance - left.memory.importance,
-      )
-      .slice(0, limit);
+      );
+    if (filterUsage) {
+      // Measure before LIMIT: after = what survived scope+score filtering, not
+      // what the limit truncated to.
+      filterUsage.candidatesBefore = rows.length;
+      filterUsage.candidatesAfter = filtered.length;
+      filterUsage.selectivity =
+        rows.length > 0 ? 1 - filtered.length / rows.length : 0;
+    }
+    const results = filtered.slice(0, limit);
     for (const result of results) {
       result.memory.evidenceIds = this.#evidenceIds(result.memory.id);
       result.evidenceRecords = this.#evidenceRecords(result.memory.evidenceIds);
@@ -4581,6 +4627,20 @@ function parseMarkers(value: string | number | Uint8Array | null): MemoryMarker[
 function matchesScope(memory: MemoryScope, requested?: MemoryScope): boolean {
   if (!requested) return true;
   return Object.entries(requested).every(([key, value]) => memory[key] === value);
+}
+
+/** Which filter dimensions a query actually applies (for trace capture). */
+function effectiveFilterDimensions(options: SearchOptions): string[] {
+  const dimensions: string[] = [];
+  if (options.scope) {
+    for (const key of Object.keys(options.scope)) dimensions.push(`scope.${key}`);
+  }
+  if (options.nodeName) dimensions.push("node");
+  if (options.sourceActor) dimensions.push("sourceActor");
+  if (options.includeHistorical) dimensions.push("includeHistorical");
+  if (options.maxTier !== undefined && options.maxTier < 3) dimensions.push(`maxTier:${options.maxTier}`);
+  if (options.graphHops !== undefined && options.graphHops > 0) dimensions.push("graphHops");
+  return dimensions;
 }
 
 function serializeScope(scope: MemoryScope): string {
