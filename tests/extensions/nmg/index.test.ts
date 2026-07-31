@@ -11,13 +11,13 @@ import nmgExtension, {
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
 
 function extensionHarness() {
-  const handlers = new Map<string, (...args: any[]) => Promise<any>>();
-  const tools = new Map<string, { execute: (...args: any[]) => Promise<any> }>();
+  const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
+  const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
   nmgExtension({
-    on(event: string, handler: (...args: any[]) => Promise<any>) {
+    on(event: string, handler: (...args: unknown[]) => Promise<unknown>) {
       handlers.set(event, handler);
     },
-    registerTool(tool: { name: string; execute: (...args: any[]) => Promise<any> }) {
+    registerTool(tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) {
       tools.set(tool.name, tool);
     },
   } as never);
