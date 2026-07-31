@@ -74,7 +74,7 @@ const EXTRACTED: ExtractedGroup[] = [
       "effectiveFilterDimensions",
       "serializeScope",
     ],
-    kept: ["NmgStore", "MAX_SEARCH_CANDIDATES"],
+    kept: ["NmgStore"],
   },
 ];
 

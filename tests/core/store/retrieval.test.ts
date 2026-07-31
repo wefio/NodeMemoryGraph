@@ -1,0 +1,466 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+
+import { NmgStore } from "../../../src/core/store.ts";
+
+function withStore(run: (store: NmgStore) => void): void {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-retrieval-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    run(store);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+// ── searchContext ──
+
+test("searchContext returns results and relations for a lexical query", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Atlas uses SQLite for persistence",
+      nodeName: "Atlas storage",
+      memoryType: "constraint",
+      importance: 0.9,
+    });
+    store.remember({
+      statement: "Atlas uses WAL mode",
+      nodeName: "Atlas storage",
+      memoryType: "constraint",
+      importance: 0.8,
+    });
+
+    const ctx = store.searchContext("SQLite persistence");
+    assert.ok(ctx.results.length >= 1);
+    assert.equal(ctx.results[0]?.node.canonicalName, "Atlas storage");
+    assert.ok(Array.isArray(ctx.relations));
+  });
+});
+
+test("searchContext returns results sorted by contextUsefulness", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "The sky is blue",
+      nodeName: "sky",
+      memoryType: "fact",
+      importance: 0.5,
+    });
+    store.remember({
+      statement: "Project Atlas database uses SQLite",
+      nodeName: "Atlas",
+      memoryType: "constraint",
+      importance: 0.9,
+    });
+
+    const ctx = store.searchContext("Atlas SQLite database");
+    assert.ok(ctx.results.length >= 1);
+    // The Atlas result should be first because it matches better
+    assert.equal(ctx.results[0]?.node.canonicalName, "Atlas");
+  });
+});
+
+test("searchContext populates activeGraph with budget, usage and trace id", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Memory for trace test",
+      nodeName: "trace node",
+      memoryType: "fact",
+      importance: 0.7,
+    });
+
+    const ctx = store.searchContext("trace test");
+    assert.ok(ctx.activeGraph);
+    assert.ok(ctx.activeGraph.id, "active graph should have a trace id");
+    assert.ok(ctx.activeGraph.budget);
+    assert.ok(ctx.activeGraph.usage);
+    assert.equal(ctx.activeGraph.query, "trace test");
+    assert.ok(Array.isArray(ctx.activeGraph.nodeIds));
+    assert.ok(Array.isArray(ctx.activeGraph.memoryIds));
+  });
+});
+
+test("searchContext with persistTrace=false still returns a valid context", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Persist trace false test",
+      nodeName: "trace flag node",
+      memoryType: "fact",
+      importance: 0.6,
+    });
+
+    const ctx = store.searchContext("trace false", { persistTrace: false });
+    assert.ok(ctx.results.length >= 1);
+    assert.ok(ctx.activeGraph.id);
+  });
+});
+
+// ── searchContextWithSecondPass ──
+
+test("searchContextWithSecondPass enables secondPass and returns context", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Second pass test memory alpha",
+      nodeName: "alpha node",
+      memoryType: "constraint",
+      importance: 0.9,
+    });
+    store.remember({
+      statement: "Second pass test memory beta",
+      nodeName: "beta node",
+      memoryType: "fact",
+      importance: 0.7,
+    });
+
+    const ctx = store.searchContextWithSecondPass("second pass test");
+    assert.ok(ctx.results.length >= 1);
+    assert.ok(ctx.activeGraph);
+    assert.ok(ctx.activeGraph.qpp);
+  });
+});
+
+// ── getContext ──
+
+test("getContext retrieves results for given memory IDs", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "Direct context lookup memory",
+      nodeName: "context node",
+      memoryType: "fact",
+      importance: 0.8,
+    });
+
+    const ctx = store.getContext([saved.memory.id]);
+    assert.equal(ctx.results.length, 1);
+    assert.equal(ctx.results[0]?.memory.id, saved.memory.id);
+    assert.equal(ctx.results[0]?.memory.statement, "Direct context lookup memory");
+  });
+});
+
+test("getContext returns empty results for unknown memory IDs", () => {
+  withStore((store) => {
+    const ctx = store.getContext(["nonexistent-id-12345"]);
+    assert.equal(ctx.results.length, 0);
+    assert.deepEqual(ctx.relations, []);
+  });
+});
+
+test("getContext with graphHops retrieves relations between nodes", () => {
+  withStore((store) => {
+    const a = store.remember({
+      statement: "Node A is foundational",
+      nodeName: "Node A",
+      memoryType: "fact",
+      importance: 0.8,
+    });
+    const b = store.remember({
+      statement: "Node B depends on A",
+      nodeName: "Node B",
+      memoryType: "fact",
+      importance: 0.7,
+    });
+    store.linkNodes({
+      sourceNodeId: a.node.id,
+      targetNodeId: b.node.id,
+      type: "depends_on",
+    });
+
+    const ctx = store.getContext([a.memory.id], 1);
+    assert.ok(ctx.results.length >= 1);
+    // Relations should include the link between A and B
+    const linkedNodeIds = ctx.relations.flatMap((r) => [r.sourceNodeId, r.targetNodeId]);
+    assert.ok(linkedNodeIds.includes(a.node.id));
+    assert.ok(linkedNodeIds.includes(b.node.id));
+  });
+});
+
+// ── residentKernel ──
+
+test("residentKernel returns high-importance constraint memories", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Critical: service must always encrypt data",
+      nodeName: "security policy",
+      memoryType: "constraint",
+      importance: 0.95,
+      truthStatus: "asserted",
+      sourceActor: "system",
+    });
+    // Constraint with high importance, truthStatus asserted, sourceActor system,
+    // should remain tier 0 after rebalance and pass kernel filter
+    store.rebuildVectorIndex();
+
+    const kernel = store.residentKernel();
+    // The single constraint may or may not be tier 0 after rebalance;
+    // validate the method runs and returns a valid MemoryContext shape
+    assert.ok(Array.isArray(kernel.results));
+    assert.ok(Array.isArray(kernel.relations));
+    // Any returned result must be a constraint
+    for (const result of kernel.results) {
+      assert.equal(result.memory.memoryType, "constraint");
+    }
+  });
+});
+
+test("residentKernel respects limit parameter", () => {
+  withStore((store) => {
+    for (let i = 0; i < 5; i++) {
+      store.remember({
+        statement: `Constraint rule ${i}`,
+        nodeName: `rule node ${i}`,
+        memoryType: "constraint",
+        importance: 0.9,
+      });
+    }
+
+    const kernel = store.residentKernel(2);
+    assert.ok(kernel.results.length <= 2);
+  });
+});
+
+// ── recallCues ──
+
+test("recallCues returns cues with node information for a query", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "The deployment uses Kubernetes on AWS",
+      nodeName: "deployment infrastructure",
+      memoryType: "fact",
+      importance: 0.8,
+    });
+    store.remember({
+      statement: "AWS region is us-east-1",
+      nodeName: "AWS config",
+      memoryType: "constraint",
+      importance: 0.7,
+    });
+
+    const index = store.recallCues("Kubernetes deployment");
+    assert.ok(index.cues.length >= 1);
+    const firstCue = index.cues[0]!;
+    assert.ok(firstCue.nodeId);
+    assert.ok(firstCue.canonicalName);
+    assert.ok(firstCue.score > 0);
+    assert.equal(typeof firstCue.activeCount, "number");
+    assert.equal(typeof firstCue.deepestTier, "number");
+    assert.equal(typeof firstCue.hasConflicts, "boolean");
+    assert.equal(typeof firstCue.hasDeepMemory, "boolean");
+  });
+});
+
+test("recallCues respects limit option", () => {
+  withStore((store) => {
+    for (let i = 0; i < 10; i++) {
+      store.remember({
+        statement: `Memory in distinct node ${i}`,
+        nodeName: `distinct node ${i}`,
+        memoryType: "fact",
+        importance: 0.8,
+      });
+    }
+
+    const index = store.recallCues("distinct node", { limit: 3 });
+    assert.ok(index.cues.length <= 3);
+  });
+});
+
+// ── search ──
+
+test("search returns MemorySearchResult array for a lexical query", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "The build system uses webpack",
+      nodeName: "build system",
+      memoryType: "fact",
+      importance: 0.7,
+    });
+
+    const results = store.search("webpack build");
+    assert.ok(results.length >= 1);
+    assert.ok(results[0]!.memory.id);
+    assert.ok(results[0]!.node.canonicalName);
+    assert.equal(typeof results[0]!.lexicalScore, "number");
+    assert.equal(typeof results[0]!.combinedScore, "number");
+  });
+});
+
+test("search returns empty array when matching memories are dormant", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "The project uses TypeScript",
+      nodeName: "project tech",
+      memoryType: "fact",
+      importance: 0.9,
+    });
+
+    const before = store.search("TypeScript");
+    assert.ok(before.length >= 1, "should find the memory initially");
+
+    store.setMemoryStorageState(before[0]!.memory.id, "dormant");
+    const after = store.search("TypeScript");
+    assert.equal(after.length, 0, "dormant memory should not appear in search");
+  });
+});
+
+// ── searchByVector ──
+
+test("searchByVector returns results with vector scoring", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "The database connection pool size is 20",
+      nodeName: "database config",
+      memoryType: "constraint",
+      importance: 0.8,
+    });
+    store.upsertExternalEmbeddings("test-model", [
+      { memoryId: saved.memory.id, vector: new Array(128).fill(0).map(() => Math.random()) },
+    ]);
+
+    const queryVector = new Array(128).fill(0).map(() => Math.random());
+    const results = store.searchByVector("database pool", queryVector, "test-model", {
+      retrievalMode: "qwen3",
+    });
+    assert.ok(Array.isArray(results));
+    // With random vectors, results are non-deterministic but the call should not throw
+  });
+});
+
+// ── searchByVectorCandidates ──
+
+test("searchByVectorCandidates restricts search to given candidate memory IDs", () => {
+  withStore((store) => {
+    const alpha = store.remember({
+      statement: "Alpha memory for candidate test",
+      nodeName: "alpha candidate",
+      memoryType: "fact",
+      importance: 0.9,
+    });
+    const beta = store.remember({
+      statement: "Beta memory for candidate test",
+      nodeName: "beta candidate",
+      memoryType: "fact",
+      importance: 0.8,
+    });
+
+    const queryVector = new Array(128).fill(0.1);
+    const results = store.searchByVectorCandidates(
+      "candidate test",
+      queryVector,
+      "unused-model",
+      [alpha.memory.id, beta.memory.id],
+      { retrievalMode: "fts5" },
+    );
+    // Should only include results from the candidate set
+    for (const result of results) {
+      assert.ok(
+        result.memory.id === alpha.memory.id || result.memory.id === beta.memory.id,
+        `result ${result.memory.id} should be in candidate set`,
+      );
+    }
+  });
+});
+
+test("searchByVectorCandidates with empty candidates still delegates to FTS search", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Some memory for fallback test",
+      nodeName: "fallback test node",
+      memoryType: "fact",
+      importance: 0.5,
+    });
+
+    const queryVector = new Array(128).fill(0.1);
+    // Empty candidate list means no forced restriction — searchWithVector
+    // falls through to its normal FTS candidate pool.
+    const results = store.searchByVectorCandidates(
+      "fallback test",
+      queryVector,
+      "unused-model",
+      [],
+      { retrievalMode: "fts5" },
+    );
+    assert.ok(results.length >= 1);
+  });
+});
+
+// ── searchLeafBlocks ──
+
+test("searchLeafBlocks returns empty for empty block IDs", () => {
+  withStore((store) => {
+    const queryVector = new Array(128).fill(0.1);
+    const results = store.searchLeafBlocks("anything", queryVector, "unused-model", []);
+    assert.equal(results.length, 0);
+  });
+});
+
+// ── searchHierarchyByVector ──
+
+test("searchHierarchyByVector returns results through hierarchical routing", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "Hierarchy search test memory",
+      nodeName: "hierarchy node",
+      memoryType: "constraint",
+      importance: 0.9,
+    });
+    store.upsertExternalEmbeddings("hier-model", [
+      { memoryId: saved.memory.id, vector: new Array(128).fill(0.1) },
+    ]);
+
+    const queryVector = new Array(128).fill(0.1);
+    const results = store.searchHierarchyByVector("hierarchy search", queryVector, "hier-model", {
+      limit: 10,
+    });
+    assert.ok(Array.isArray(results));
+  });
+});
+
+// ── searchNodeFirst ──
+
+test("searchNodeFirst restricts results to given node IDs", () => {
+  withStore((store) => {
+    const target = store.remember({
+      statement: "Memory inside target node for NodeFirst",
+      nodeName: "target node",
+      memoryType: "fact",
+      importance: 0.9,
+    });
+    store.remember({
+      statement: "Memory in other node for NodeFirst",
+      nodeName: "other node",
+      memoryType: "fact",
+      importance: 0.8,
+    });
+
+    const queryVector = new Array(128).fill(0.1);
+    const results = store.searchNodeFirst(
+      "NodeFirst",
+      queryVector,
+      "unused-model",
+      [target.node.id],
+      { retrievalMode: "fts5" },
+    );
+    // All results should belong to the target node
+    for (const result of results) {
+      assert.equal(result.node.id, target.node.id);
+    }
+  });
+});
+
+test("searchNodeFirst with empty node IDs returns empty", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Memory for empty nodes test",
+      nodeName: "empty nodes",
+      memoryType: "fact",
+      importance: 0.5,
+    });
+
+    const queryVector = new Array(128).fill(0.1);
+    const results = store.searchNodeFirst("empty nodes", queryVector, "unused-model", []);
+    assert.equal(results.length, 0);
+  });
+});

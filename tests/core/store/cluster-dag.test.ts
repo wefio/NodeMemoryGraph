@@ -33,9 +33,9 @@ import test from "node:test";
 
 const STORE = "src/core/store.ts";
 const STORE_DIR = dirname(STORE);
-const BASE_FILE = join(STORE_DIR, "base.ts");
+const BASE_FILE = join(STORE_DIR, "store", "base.ts");
 const BASE_ANCHOR = "NmgStoreBase";
-const FINAL_ANCHOR = "class NmgStore";
+const FINAL_ANCHOR = "NmgStore";
 
 /** Cluster → methods assigned to it (single source of truth for the guard). */
 const CLUSTERS: Record<string, string[]> = {
@@ -117,10 +117,13 @@ const CLUSTERS: Record<string, string[]> = {
 const MIXIN_CHAIN_RE =
   /class\s+NmgStore\s+extends\s+withGraph\(\s*withRetrieval\(\s*withWrites\(\s*withMaintenance\(\s*NmgStoreBase\s*\)\s*\)\s*\)\s*\)/;
 
-function methodDef(name: string, source: string): boolean {
-  // Class method: `  [protected ]name(` at class-member indent; also matches
-  // multi-line signatures because only the first line needs the name.
-  return new RegExp(`^  (?:protected\\s+)?${name}\\s*\\(`, "m").test(source);
+function methodDef(name: string, source: string, indent = 2): boolean {
+  // Class method: `<indent>[protected ]name(` at class-member indent; also
+  // matches multi-line signatures because only the first line needs the name.
+  // `declare` field declarations are type-only placeholders (erased at
+  // runtime, never real definitions) and must NOT match.
+  const pad = " ".repeat(indent);
+  return new RegExp(`^${pad}(?!declare\\b)(?:protected\\s+)?${name}\\s*\\(`, "m").test(source);
 }
 
 function exportDef(name: string, source: string): boolean {
@@ -138,7 +141,7 @@ function relativeImports(source: string): string[] {
 }
 
 function clusterFilePath(cluster: string): string {
-  return join(STORE_DIR, `${cluster}.ts`);
+  return join(STORE_DIR, "store", `${cluster}.ts`);
 }
 
 test("cluster split: every cluster file exists and exports only its with<Cluster> mixin", () => {
@@ -171,20 +174,23 @@ test("cluster split: every method lives in exactly one cluster, none left in sto
   for (const [cluster, methods] of Object.entries(CLUSTERS)) {
     for (const method of methods) {
       assert.ok(
-        methodDef(method, byFile.get(cluster)!),
+        methodDef(method, byFile.get(cluster)!, 4),
         `${method} must be defined in ${clusterFilePath(cluster)}`,
       );
       // defined in exactly one cluster — never in a sibling cluster file.
       for (const [other, text] of byFile) {
         if (other !== cluster) {
           assert.ok(
-            !methodDef(method, text),
+            !methodDef(method, text, 4),
             `${method} must not be defined in ${clusterFilePath(other)}`,
           );
         }
       }
       // never still defined in the monolith.
-      assert.ok(!methodDef(method, storeText), `${method} must no longer be defined in ${STORE}`);
+      assert.ok(
+        !methodDef(method, storeText, 2),
+        `${method} must no longer be defined in ${STORE}`,
+      );
     }
   }
 });

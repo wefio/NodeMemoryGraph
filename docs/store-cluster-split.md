@@ -49,9 +49,7 @@ tsc + 测试验证，不可脚本盲改。
 
 ```ts
 // src/core/store/retrieval.ts
-import type { Constructor } from "./store-ctor.ts";
-
-export function withRetrieval<TBase extends Constructor>(Base: TBase) {
+import type { Constructor } from "./store-ctor.ts";export function withRetrieval<TBase extends Constructor>(Base: TBase) {
   return class extends Base {
     searchContext(query: string, options: SearchOptions = {}): MemoryContext {
       // 方法体原样，this.db / this.search(...) 直接可用
@@ -138,6 +136,37 @@ export class NmgStoreBase {
 - 方法体逐字节保留（`git diff` 抽查）
 - `this.` 前缀原样（mixin 里合法，不是上次的 `store.`）
 - 组装由主进程手工做（禁脚本自动化），每步 tsc + 全量测试
+
+**Phase 3 组装清单（2026-07-31 验证）**:
+
+- 跨簇调用矩阵：graph → maintenance；retrieval → graph, maintenance；
+  writes → maintenance, graph；maintenance → ∅（无环，mixin 链顺序已定）
+- 簇内/簇外 base helper 调用占比 42–76%，全部走原型链，方法体零改动成立
+- **3 个 base 保留方法调用簇方法**（抽 base.ts 时必须在基类声明 stub，
+  子类 mixin 覆盖）：
+  - `recordActiveGraphUseInner` (2158-2255) → recordUsage, trainRouter
+  - `searchWithVector` (3318-3489) → routeNodes
+  - `redirectRelations` (3980-4004) → linkNodes
+  - 需声明的 stub 签名：`recordUsage(memoryIds: string[]): void`、
+    `trainRouter(query, usefulNodeIds, learningRate = 0.2): void`、
+    `routeNodes(query, limit = 5): NodeRoute[]`、
+    `linkNodes(input): NodeRelation`
+- **stub 而非 abstract**（2026-07-31 实证）：测试用 `node --experimental-strip-types`
+  直接跑源码，而 strip-types **不支持** `abstract` 方法（除非整个类是
+  `abstract class`，那样不能实例化）。改用「声明签名 + `throw new Error` 体」
+  的 stub：类型上 base 方法可调用，运行时永远被簇 mixin 覆盖（stub 不可达），
+  且完全兼容 strip-types（probe 已验证 `graphOp: 2` 正确输出）。
+  官方约束「mixin 不能声明 private/protected properties」只针对**属性**；
+  基类声明 protected 字段/方法、mixin 覆盖为 public（可见性加宽）合法。
+- **`Constructor` 必须 `new (...args: any[])`**（TS2545 实证）：`never[]` 会在
+  组装时报 "mixin class must have a constructor with a single rest parameter of
+  type 'any[]'"。已修复 store-ctor.ts（Phase 1 误用 never[]）。
+- **strip-types 全链路验证**（2026-07-31 probe）：泛型类表达式 mixin + stub 覆盖 +
+  base 方法经 this 调 stub + 跨 mixin 原型链调用，`node --experimental-strip-types`
+  直接跑源码全部正确（子 agent 测试模式的前提）。
+- `NmgStoreBase` 零直接引用（全部 `new NmgStore`），abstract 无运行风险
+- 基类保留 50 成员：16 外部 embedding API + routeLeafBlocksByVector +
+  33 protected helpers（requireNode、searchWithVector、markIndexDelta 等）
 
 ## 5. 测试计划
 
