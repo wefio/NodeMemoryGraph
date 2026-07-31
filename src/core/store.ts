@@ -132,17 +132,17 @@ import {
 
 const MAX_SEARCH_CANDIDATES = 500;
 export class NmgStore {
-  readonly #db: DatabaseSync;
-  readonly #embedder: VectorEmbedder;
-  readonly #router: Router;
-  readonly #vectorCaches = new Map<string, Float32VectorCache>();
+  protected db: DatabaseSync;
+  protected embedder: VectorEmbedder;
+  protected router: Router;
+  protected vectorCaches = new Map<string, Float32VectorCache>();
 
   constructor(databasePath: string, embedder: VectorEmbedder = new HashingVectorEmbedder()) {
     mkdirSync(dirname(databasePath), { recursive: true });
-    this.#db = new DatabaseSync(databasePath);
-    this.#embedder = embedder;
-    this.#router = new Router(embedder);
-    this.#db.exec(`
+    this.db = new DatabaseSync(databasePath);
+    this.embedder = embedder;
+    this.router = new Router(embedder);
+    this.db.exec(`
       PRAGMA foreign_keys = ON;
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = NORMAL;
@@ -151,11 +151,11 @@ export class NmgStore {
       PRAGMA mmap_size = 268435456;
       PRAGMA busy_timeout = 5000;
     `);
-    migrate(this.#db);
+    migrate(this.db);
   }
 
   close(): void {
-    this.#db.close();
+    this.db.close();
   }
 
   /**
@@ -169,7 +169,7 @@ export class NmgStore {
    * are retained.
    */
   deleteMemory(memoryId: string): MemoryRecord | null {
-    const row = this.#db
+    const row = this.db
       .prepare(
         "SELECT id, node_id, status, statement, memory_type, state_key, event_time, " +
           "source_actor, truth_status, confidence, polarity, predicate_key, extract_method, claims_json, markers_json, scope_json, valid_from, valid_until, " +
@@ -218,30 +218,30 @@ export class NmgStore {
       createdAt: String(row.created_at),
     };
     const now = new Date().toISOString();
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.#db.prepare("UPDATE memory_records SET status = 'deleted' WHERE id = ?").run(memoryId);
-      this.#db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
-      this.#db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(memoryId);
-      this.#db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(memoryId);
-      this.#db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(memoryId);
-      this.#db.prepare("DELETE FROM memory_evidence_links WHERE memory_id = ?").run(memoryId);
-      this.#db.prepare("DELETE FROM memory_leaf_members WHERE memory_id = ?").run(memoryId);
-      this.#db
+      this.db.prepare("UPDATE memory_records SET status = 'deleted' WHERE id = ?").run(memoryId);
+      this.db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
+      this.db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(memoryId);
+      this.db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(memoryId);
+      this.db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(memoryId);
+      this.db.prepare("DELETE FROM memory_evidence_links WHERE memory_id = ?").run(memoryId);
+      this.db.prepare("DELETE FROM memory_leaf_members WHERE memory_id = ?").run(memoryId);
+      this.db
         .prepare(
           `INSERT INTO leaf_block_status (node_id, dirty, updated_at)
            VALUES (?, 1, ?)
            ON CONFLICT(node_id) DO UPDATE SET dirty = 1, updated_at = excluded.updated_at`,
         )
         .run(memory.nodeId, now);
-      for (const key of this.#vectorCaches.keys()) {
-        this.#vectorCaches.get(key)?.remove(memoryId);
+      for (const key of this.vectorCaches.keys()) {
+        this.vectorCaches.get(key)?.remove(memoryId);
       }
-      this.#cascadeDerivedMemories(memoryId);
-      this.#db.exec("COMMIT");
+      this.cascadeDerivedMemories(memoryId);
+      this.db.exec("COMMIT");
       return memory;
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
@@ -256,7 +256,7 @@ export class NmgStore {
     target: MemoryStorageState,
     recoveryDays = 30,
   ): MemoryStorageState {
-    const row = this.#db
+    const row = this.db
       .prepare(
         `SELECT id, node_id, evidence_id, statement, residence, storage_state
          FROM memory_records WHERE id = ?`,
@@ -273,9 +273,9 @@ export class NmgStore {
       target === "quarantine"
         ? new Date(now.getTime() + Math.max(0, recoveryDays) * 86_400_000).toISOString()
         : null;
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.#db
+      this.db
         .prepare(
           `UPDATE memory_records
            SET storage_state = ?, retention_changed_at = ?, quarantine_until = ?
@@ -283,32 +283,32 @@ export class NmgStore {
         )
         .run(target, now.toISOString(), quarantineUntil, memoryId);
       if (target === "indexed") {
-        this.#upsertFts(
+        this.upsertFts(
           memoryId,
           String(row.statement),
           String(row.node_id),
           String(row.evidence_id),
         );
-        this.#markIndexDelta(memoryId, String(row.node_id), "upsert", now.toISOString());
+        this.markIndexDelta(memoryId, String(row.node_id), "upsert", now.toISOString());
       } else {
-        this.#db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
-        this.#db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(memoryId);
-        this.#db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(memoryId);
-        this.#db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(memoryId);
-        this.#db.prepare("DELETE FROM memory_leaf_members WHERE memory_id = ?").run(memoryId);
-        this.#db
+        this.db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
+        this.db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(memoryId);
+        this.db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(memoryId);
+        this.db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(memoryId);
+        this.db.prepare("DELETE FROM memory_leaf_members WHERE memory_id = ?").run(memoryId);
+        this.db
           .prepare(
             `INSERT INTO leaf_block_status (node_id, dirty, updated_at)
              VALUES (?, 1, ?)
              ON CONFLICT(node_id) DO UPDATE SET dirty = 1, updated_at = excluded.updated_at`,
           )
           .run(row.node_id, now.toISOString());
-        for (const cache of this.#vectorCaches.values()) cache.remove(memoryId);
+        for (const cache of this.vectorCaches.values()) cache.remove(memoryId);
       }
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
       return target;
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
@@ -323,7 +323,7 @@ export class NmgStore {
     const quarantineAfterDays = Math.max(1, policy.quarantineAfterDays ?? 365);
     const maximumImportance = clamp(policy.maximumImportance ?? 0.25, 0, 1);
     const maximumAccessCount = Math.max(0, policy.maximumAccessCount ?? 1);
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT m.id, m.node_id, m.statement, m.memory_type, m.evidence_role,
                 m.markers_json, m.storage_state, m.retention_changed_at,
@@ -387,32 +387,32 @@ export class NmgStore {
     });
   }
 
-  #cascadeDerivedMemories(sourceMemoryId: string): void {
-    const derivations = this.#db
+  protected cascadeDerivedMemories(sourceMemoryId: string): void {
+    const derivations = this.db
       .prepare("SELECT derived_memory_id FROM memory_derivations WHERE source_memory_id = ?")
       .all(sourceMemoryId) as Row[];
-    this.#db
+    this.db
       .prepare("DELETE FROM memory_derivations WHERE source_memory_id = ?")
       .run(sourceMemoryId);
     for (const row of derivations) {
       const derivedId = String(row.derived_memory_id);
-      const remaining = this.#db
+      const remaining = this.db
         .prepare("SELECT 1 FROM memory_derivations WHERE derived_memory_id = ?")
         .get(derivedId);
       if (!remaining) {
-        this.#db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(derivedId);
-        this.#db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(derivedId);
-        this.#db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(derivedId);
-        this.#db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(derivedId);
-        this.#db.prepare("DELETE FROM memory_evidence_links WHERE memory_id = ?").run(derivedId);
-        this.#db.prepare("DELETE FROM memory_leaf_members WHERE memory_id = ?").run(derivedId);
-        this.#db
+        this.db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(derivedId);
+        this.db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(derivedId);
+        this.db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(derivedId);
+        this.db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(derivedId);
+        this.db.prepare("DELETE FROM memory_evidence_links WHERE memory_id = ?").run(derivedId);
+        this.db.prepare("DELETE FROM memory_leaf_members WHERE memory_id = ?").run(derivedId);
+        this.db
           .prepare("UPDATE memory_records SET status = 'deleted' WHERE id = ?")
           .run(derivedId);
-        for (const key of this.#vectorCaches.keys()) {
-          this.#vectorCaches.get(key)?.remove(derivedId);
+        for (const key of this.vectorCaches.keys()) {
+          this.vectorCaches.get(key)?.remove(derivedId);
         }
-        this.#cascadeDerivedMemories(derivedId);
+        this.cascadeDerivedMemories(derivedId);
       }
     }
   }
@@ -430,7 +430,7 @@ export class NmgStore {
       if (!input.sessionId?.trim()) {
         throw new Error("sourceMessageId requires sessionId");
       }
-      const existing = this.#db
+      const existing = this.db
         .prepare("SELECT * FROM history_records WHERE session_id = ? AND source_message_id = ?")
         .get(input.sessionId, sourceMessageId) as Row | undefined;
       if (existing) {
@@ -453,7 +453,7 @@ export class NmgStore {
       createdAt: new Date().toISOString(),
     };
 
-    this.#db
+    this.db
       .prepare(
         `INSERT INTO history_records
           (id, session_id, source_message_id, role, content, source_ref, created_at)
@@ -473,7 +473,7 @@ export class NmgStore {
   }
 
   getHistoryBySourceMessage(sessionId: string, sourceMessageId: string): HistoryRecord | null {
-    const row = this.#db
+    const row = this.db
       .prepare(
         `SELECT * FROM history_records
          WHERE session_id = ? AND source_message_id = ?`,
@@ -491,14 +491,14 @@ export class NmgStore {
     summary?: string;
   }): MemoryNode {
     const canonicalName = requireText(input.canonicalName, "node name");
-    const existing = this.#db
+    const existing = this.db
       .prepare("SELECT * FROM memory_nodes WHERE canonical_name = ?")
       .get(canonicalName) as Row | undefined;
 
     if (existing) {
       const node = mapNode(existing);
       if (node.status === "active") return node;
-      const redirects = this.#db
+      const redirects = this.db
         .prepare(
           `SELECT n.* FROM node_redirects r
          JOIN memory_nodes n ON n.id = r.target_node_id
@@ -520,7 +520,7 @@ export class NmgStore {
     // and a reversible topology transform.
     const normalizedIdentity = canonicalNodeIdentity(canonicalName);
     const identityCandidates = (
-      this.#db
+      this.db
         .prepare("SELECT * FROM memory_nodes WHERE kind = ? AND status = 'active'")
         .all(input.kind ?? "concept") as Row[]
     ).filter((row) => canonicalNodeIdentity(String(row.canonical_name)) === normalizedIdentity);
@@ -538,7 +538,7 @@ export class NmgStore {
       residence: "stg",
     };
 
-    this.#db
+    this.db
       .prepare(
         `INSERT INTO memory_nodes
           (id, canonical_name, kind, summary, created_at, updated_at, status, residence)
@@ -625,7 +625,7 @@ export class NmgStore {
       createdAt,
     };
 
-    this.#db
+    this.db
       .prepare(
         `INSERT INTO memory_records
           (id, node_id, evidence_id, statement, memory_type, state_key,
@@ -667,47 +667,47 @@ export class NmgStore {
         memory.createdAt,
       );
     if (memory.residence === "ltg") {
-      this.#db
+      this.db
         .prepare("UPDATE memory_nodes SET residence = 'ltg', updated_at = ? WHERE id = ?")
         .run(createdAt, memory.nodeId);
     }
-    this.#db
+    this.db
       .prepare(
         `INSERT OR IGNORE INTO memory_evidence_links (memory_id, history_id)
          VALUES (?, ?)`,
       )
       .run(memory.id, memory.evidenceId);
-    this.#upsertEmbedding(memory.id, this.#memoryText(memory, input.nodeId));
-    this.#upsertFts(memory.id, memory.statement, input.nodeId, input.evidenceId);
-    this.#db
+    this.upsertEmbedding(memory.id, this.memoryText(memory, input.nodeId));
+    this.upsertFts(memory.id, memory.statement, input.nodeId, input.evidenceId);
+    this.db
       .prepare(
         `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 1, ?)
        ON CONFLICT(node_id) DO UPDATE SET dirty = 1, updated_at = excluded.updated_at`,
       )
       .run(input.nodeId, createdAt);
-    this.#markIndexDelta(memory.id, input.nodeId, "upsert", createdAt);
+    this.markIndexDelta(memory.id, input.nodeId, "upsert", createdAt);
 
     return memory;
   }
 
   remember(input: RememberInput): RememberResult {
-    if (input.perf === false) return this.#rememberInner(input);
+    if (input.perf === false) return this.rememberInner(input);
     const startedAt = nowMs();
     const perf = new PerfTimer();
-    const result = perf.measure(SECTION.write, () => this.#rememberInner(input));
+    const result = perf.measure(SECTION.write, () => this.rememberInner(input));
     perf.setTotal(Date.now() - startedAt);
     return Object.assign(result, { timings: perf.snapshot() });
   }
 
-  #rememberInner(input: RememberInput): RememberResult {
+  protected rememberInner(input: RememberInput): RememberResult {
     const memoryType = input.memoryType ?? "fact";
     if (memoryType === "state" && !input.stateKey?.trim()) {
       throw new Error("state memories require a stable stateKey");
     }
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       const history = input.evidenceHistoryId
-        ? this.#requireHistory(input.evidenceHistoryId)
+        ? this.requireHistory(input.evidenceHistoryId)
         : this.appendHistory({
             content: input.evidence ?? input.statement,
             role: "explicit",
@@ -721,11 +721,11 @@ export class NmgStore {
       });
       const stateKey =
         memoryType === "state" && input.stateKey
-          ? this.#resolveStateKey(input.stateKey, input.scope ?? {}, node)
+          ? this.resolveStateKey(input.stateKey, input.scope ?? {}, node)
           : input.stateKey;
       const automaticPrevious =
         memoryType === "state" && stateKey
-          ? (this.#db
+          ? (this.db
               .prepare(
                 `SELECT id FROM memory_records
                WHERE memory_type = 'state' AND state_key = ? AND scope_json = ?
@@ -738,12 +738,12 @@ export class NmgStore {
         input.supersedesId ?? (automaticPrevious ? String(automaticPrevious.id) : undefined);
       let supersededNodeId: string | undefined;
       if (supersedesId) {
-        const previous = this.#db
+        const previous = this.db
           .prepare("SELECT node_id FROM memory_records WHERE id = ?")
           .get(supersedesId) as Row | undefined;
         if (!previous) throw new Error(`memory ${supersedesId} does not exist`);
         supersededNodeId = String(previous.node_id);
-        this.#db
+        this.db
           .prepare(
             `UPDATE memory_records
              SET status = 'superseded', valid_until = ?
@@ -778,7 +778,7 @@ export class NmgStore {
         writeReason: input.writeReason,
         writeSource: input.writeSource,
       });
-      this.#recordMemoryWriteEvent({
+      this.recordMemoryWriteEvent({
         memoryId: memory.id,
         historyId: history.id,
         sessionId: input.sessionId ?? null,
@@ -791,12 +791,12 @@ export class NmgStore {
       });
       if (memory.residence === "ltg") node.residence = "ltg";
       if (supersededNodeId && supersededNodeId !== node.id) {
-        this.#refreshNodeResidence(supersededNodeId, memory.createdAt);
+        this.refreshNodeResidence(supersededNodeId, memory.createdAt);
       }
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
       return { history, node, memory };
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
@@ -809,7 +809,7 @@ export class NmgStore {
     requestedResidence?: MemoryResidence;
     sessionId?: string;
   }): MemoryWriteEvent {
-    return this.#recordMemoryWriteEvent({
+    return this.recordMemoryWriteEvent({
       memoryId: null,
       historyId: null,
       sessionId: input.sessionId ?? null,
@@ -824,12 +824,12 @@ export class NmgStore {
 
   memoryWriteEvents(memoryId?: string): MemoryWriteEvent[] {
     const rows = memoryId
-      ? (this.#db
+      ? (this.db
           .prepare(
             "SELECT * FROM memory_write_events WHERE memory_id = ? ORDER BY created_at, rowid",
           )
           .all(memoryId) as Row[])
-      : (this.#db
+      : (this.db
           .prepare("SELECT * FROM memory_write_events ORDER BY created_at, rowid")
           .all() as Row[]);
     return rows.map(mapMemoryWriteEvent);
@@ -840,7 +840,7 @@ export class NmgStore {
     reason: string,
     evidenceTraceIds: readonly string[] = [],
   ): MemoryRecord {
-    const memory = this.#requireActiveMemory(memoryId);
+    const memory = this.requireActiveMemory(memoryId);
     if (memory.residence === "ltg") return memory;
     // Loop guard (docs/stg-isolated-store.md §3): a cached_from_ltg memory is
     // already LTG content — promoting it would create a copy cycle. Refuse.
@@ -850,19 +850,19 @@ export class NmgStore {
       );
     }
     const now = new Date().toISOString();
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.#db
+      this.db
         .prepare(
           `UPDATE memory_records
            SET residence = 'ltg', promoted_at = ?, expires_at = NULL
            WHERE id = ?`,
         )
         .run(now, memoryId);
-      this.#db
+      this.db
         .prepare("UPDATE memory_nodes SET residence = 'ltg', updated_at = ? WHERE id = ?")
         .run(now, memory.nodeId);
-      this.#recordConsolidationEvent(
+      this.recordConsolidationEvent(
         "promote_memory",
         memoryId,
         "stg",
@@ -871,29 +871,29 @@ export class NmgStore {
         evidenceTraceIds,
         now,
       );
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
     return { ...memory, residence: "ltg", promotedAt: now, expiresAt: null };
   }
 
   demoteMemory(memoryId: string, reason: string, expiresAt?: string): MemoryRecord {
-    const memory = this.#requireActiveMemory(memoryId);
+    const memory = this.requireActiveMemory(memoryId);
     if (memory.residence === "stg") return memory;
     const now = new Date().toISOString();
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.#db
+      this.db
         .prepare(
           `UPDATE memory_records
            SET residence = 'stg', promoted_at = NULL, expires_at = ?
            WHERE id = ?`,
         )
         .run(expiresAt ?? null, memoryId);
-      this.#refreshNodeResidence(memory.nodeId, now);
-      this.#recordConsolidationEvent(
+      this.refreshNodeResidence(memory.nodeId, now);
+      this.recordConsolidationEvent(
         "demote_memory",
         memoryId,
         "ltg",
@@ -902,16 +902,16 @@ export class NmgStore {
         [],
         now,
       );
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
     return { ...memory, residence: "stg", promotedAt: null, expiresAt: expiresAt ?? null };
   }
 
   expireShortTermMemories(at = new Date().toISOString()): string[] {
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT id, node_id FROM memory_records
          WHERE residence = 'stg' AND status IN ('active', 'disputed')
@@ -920,13 +920,13 @@ export class NmgStore {
       .all(at) as Row[];
     if (rows.length === 0) return [];
     const now = new Date().toISOString();
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
-      const update = this.#db.prepare("UPDATE memory_records SET status = 'inactive' WHERE id = ?");
+      const update = this.db.prepare("UPDATE memory_records SET status = 'inactive' WHERE id = ?");
       for (const row of rows) {
         const id = String(row.id);
         update.run(id);
-        this.#recordConsolidationEvent(
+        this.recordConsolidationEvent(
           "expire_memory",
           id,
           "stg:active",
@@ -937,11 +937,11 @@ export class NmgStore {
         );
       }
       for (const nodeId of new Set(rows.map((row) => String(row.node_id)))) {
-        this.#refreshNodeResidence(nodeId, now);
+        this.refreshNodeResidence(nodeId, now);
       }
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
     return rows.map((row) => String(row.id));
@@ -953,7 +953,7 @@ export class NmgStore {
       throw new Error("derived memories require at least two source memories");
     }
     const sources = sourceMemoryIds.map((id) => {
-      const row = this.#db
+      const row = this.db
         .prepare("SELECT id, node_id, evidence_id FROM memory_records WHERE id = ?")
         .get(id) as Row | undefined;
       if (!row) throw new Error(`source memory ${id} does not exist`);
@@ -968,18 +968,18 @@ export class NmgStore {
       truthStatus: input.truthStatus ?? "inferred",
     });
 
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
-      const linkEvidence = this.#db.prepare(
+      const linkEvidence = this.db.prepare(
         `INSERT OR IGNORE INTO memory_evidence_links (memory_id, history_id)
          VALUES (?, ?)`,
       );
-      const linkDerivation = this.#db.prepare(
+      const linkDerivation = this.db.prepare(
         `INSERT INTO memory_derivations (derived_memory_id, source_memory_id)
          VALUES (?, ?)`,
       );
       for (const source of sources) {
-        const evidenceIds = this.#evidenceIds(String(source.id));
+        const evidenceIds = this.evidenceIds(String(source.id));
         for (const evidenceId of evidenceIds) {
           linkEvidence.run(result.memory.id, evidenceId);
         }
@@ -991,12 +991,12 @@ export class NmgStore {
           evidenceIds,
         });
       }
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
-    result.memory.evidenceIds = this.#evidenceIds(result.memory.id);
+    result.memory.evidenceIds = this.evidenceIds(result.memory.id);
     return result;
   }
 
@@ -1008,7 +1008,7 @@ export class NmgStore {
     stability?: number;
     consolidationSource?: NodeRelation["consolidationSource"];
   }): NodeRelation {
-    const existing = this.#db
+    const existing = this.db
       .prepare(
         `SELECT * FROM node_relations
          WHERE source_node_id = ? AND target_node_id = ? AND relation_type = ?`,
@@ -1018,14 +1018,14 @@ export class NmgStore {
       const relation = mapRelation(existing);
       const evidenceIds = [...new Set([...relation.evidenceIds, ...(input.evidenceIds ?? [])])];
       if (evidenceIds.length !== relation.evidenceIds.length) {
-        this.#db
+        this.db
           .prepare("UPDATE node_relations SET evidence_ids_json = ? WHERE id = ?")
           .run(JSON.stringify(evidenceIds), relation.id);
         relation.evidenceIds = evidenceIds;
       }
       if (relation.status === "demoted") {
         const consolidatedAt = new Date().toISOString();
-        this.#db
+        this.db
           .prepare(
             "UPDATE node_relations SET status = 'consolidated', stability = ?, consolidated_at = ? WHERE id = ?",
           )
@@ -1033,7 +1033,7 @@ export class NmgStore {
         relation.status = "consolidated";
         relation.stability = clamp(input.stability ?? 1, 0, 1);
         relation.consolidatedAt = consolidatedAt;
-        this.#db
+        this.db
           .prepare("UPDATE memory_nodes SET residence = 'ltg', updated_at = ? WHERE id IN (?, ?)")
           .run(consolidatedAt, relation.sourceNodeId, relation.targetNodeId);
       }
@@ -1054,7 +1054,7 @@ export class NmgStore {
       consolidatedAt: now,
       createdAt: now,
     };
-    this.#db
+    this.db
       .prepare(
         `INSERT INTO node_relations
           (id, source_node_id, target_node_id, relation_type,
@@ -1075,7 +1075,7 @@ export class NmgStore {
         relation.consolidatedAt,
         relation.createdAt,
       );
-    this.#db
+    this.db
       .prepare("UPDATE memory_nodes SET residence = 'ltg', updated_at = ? WHERE id IN (?, ?)")
       .run(now, relation.sourceNodeId, relation.targetNodeId);
     return relation;
@@ -1088,7 +1088,7 @@ export class NmgStore {
     for (let hop = 0; hop < Math.max(0, maxHops) && frontier.length > 0; hop += 1) {
       const next: string[] = [];
       for (const nodeId of frontier) {
-        const rows = this.#db
+        const rows = this.db
           .prepare(
             `SELECT * FROM node_relations
              WHERE status = 'consolidated'
@@ -1119,8 +1119,8 @@ export class NmgStore {
   }): NodeTransform {
     const sourceNodeIds = [...new Set(input.sourceNodeIds)];
     if (sourceNodeIds.length < 2) throw new Error("merge requires at least two nodes");
-    const sources = sourceNodeIds.map((id) => this.#requireNode(id));
-    this.#db.exec("BEGIN IMMEDIATE");
+    const sources = sourceNodeIds.map((id) => this.requireNode(id));
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       const target = this.upsertNode({
         canonicalName: input.targetName,
@@ -1130,17 +1130,17 @@ export class NmgStore {
       if (sourceNodeIds.includes(target.id)) {
         throw new Error("merge target must be distinct from every source node");
       }
-      const movedMemoryIds = this.#memoryIdsForNodes(sourceNodeIds);
-      const operation = this.#createTransform("merge", sourceNodeIds, [target.id], movedMemoryIds);
+      const movedMemoryIds = this.memoryIdsForNodes(sourceNodeIds);
+      const operation = this.createTransform("merge", sourceNodeIds, [target.id], movedMemoryIds);
       for (const sourceId of sourceNodeIds) {
-        this.#db
+        this.db
           .prepare("UPDATE memory_records SET node_id = ? WHERE node_id = ?")
           .run(target.id, sourceId);
-        this.#redirectRelations(sourceId, target.id);
-        this.#db
+        this.redirectRelations(sourceId, target.id);
+        this.db
           .prepare("UPDATE memory_nodes SET status = 'merged', updated_at = ? WHERE id = ?")
           .run(operation.createdAt, sourceId);
-        this.#db
+        this.db
           .prepare(
             `INSERT INTO node_redirects (source_node_id, target_node_id, transform_id)
            VALUES (?, ?, ?)`,
@@ -1148,14 +1148,14 @@ export class NmgStore {
           .run(sourceId, target.id, operation.id);
       }
       for (const memoryId of movedMemoryIds) {
-        this.#markIndexDelta(memoryId, target.id, "move", operation.createdAt);
+        this.markIndexDelta(memoryId, target.id, "move", operation.createdAt);
       }
-      this.#refreshNodeResidence(target.id, operation.createdAt);
-      this.#db.exec("COMMIT");
-      this.#refreshEmbeddings(movedMemoryIds);
+      this.refreshNodeResidence(target.id, operation.createdAt);
+      this.db.exec("COMMIT");
+      this.refreshEmbeddings(movedMemoryIds);
       return operation;
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
@@ -1169,13 +1169,13 @@ export class NmgStore {
       memoryIds: string[];
     }>;
   }): NodeTransform {
-    const source = this.#requireNode(input.sourceNodeId);
+    const source = this.requireNode(input.sourceNodeId);
     if (input.partitions.length < 2) throw new Error("split requires at least two partitions");
     const assigned = input.partitions.flatMap((partition) => partition.memoryIds);
     if (new Set(assigned).size !== assigned.length) {
       throw new Error("a memory cannot belong to two split partitions");
     }
-    const available = new Set(this.#memoryIdsForNodes([source.id]));
+    const available = new Set(this.memoryIdsForNodes([source.id]));
     if (assigned.some((id) => !available.has(id))) {
       throw new Error("split partitions may contain only memories from the source node");
     }
@@ -1183,7 +1183,7 @@ export class NmgStore {
       throw new Error("split partitions must assign every source memory exactly once");
     }
 
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       const targets = input.partitions.map((partition) =>
         this.upsertNode({
@@ -1198,7 +1198,7 @@ export class NmgStore {
       ) {
         throw new Error("split targets must be new, distinct semantic nodes");
       }
-      const operation = this.#createTransform(
+      const operation = this.createTransform(
         "split",
         [source.id],
         targets.map((node) => node.id),
@@ -1207,33 +1207,33 @@ export class NmgStore {
       for (let index = 0; index < input.partitions.length; index += 1) {
         const partition = input.partitions[index]!;
         const target = targets[index]!;
-        const update = this.#db.prepare("UPDATE memory_records SET node_id = ? WHERE id = ?");
+        const update = this.db.prepare("UPDATE memory_records SET node_id = ? WHERE id = ?");
         for (const memoryId of partition.memoryIds) {
           update.run(target.id, memoryId);
-          this.#markIndexDelta(memoryId, target.id, "move", operation.createdAt);
+          this.markIndexDelta(memoryId, target.id, "move", operation.createdAt);
         }
         this.linkNodes({ sourceNodeId: target.id, targetNodeId: source.id, type: "is_a" });
-        this.#db
+        this.db
           .prepare(
             `INSERT INTO node_redirects (source_node_id, target_node_id, transform_id)
            VALUES (?, ?, ?)`,
           )
           .run(source.id, target.id, operation.id);
       }
-      this.#db
+      this.db
         .prepare("UPDATE memory_nodes SET status = 'split', updated_at = ? WHERE id = ?")
         .run(operation.createdAt, source.id);
-      this.#db.exec("COMMIT");
-      this.#refreshEmbeddings(assigned);
+      this.db.exec("COMMIT");
+      this.refreshEmbeddings(assigned);
       return operation;
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
 
   getNodeTransform(transformId: string): NodeTransform | null {
-    const row = this.#db.prepare("SELECT * FROM node_transforms WHERE id = ?").get(transformId) as
+    const row = this.db.prepare("SELECT * FROM node_transforms WHERE id = ?").get(transformId) as
       Row | undefined;
     if (!row) return null;
     return {
@@ -1247,7 +1247,7 @@ export class NmgStore {
   }
 
   routeNodes(query: string, limit = 5): NodeRoute[] {
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT n.*, r.weights_json
        FROM memory_nodes n LEFT JOIN router_weights r ON r.node_id = n.id
@@ -1258,7 +1258,7 @@ export class NmgStore {
     return rows
       .map((row) => {
         const node = mapNode(row);
-        const learned = this.#router.score(query, parseVector(row.weights_json));
+        const learned = this.router.score(query, parseVector(row.weights_json));
         const lexical = lexicalNodeScore(normalized, node);
         return { node, score: learned * 0.7 + lexical * 0.3 };
       })
@@ -1279,7 +1279,7 @@ export class NmgStore {
     const candidates = [...new Set(candidateNodeIds)].slice(0, 2_000);
     const clause =
       candidates.length > 0 ? `AND n.id IN (${candidates.map(() => "?").join(",")})` : "";
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT n.*
        FROM memory_nodes n JOIN node_embeddings e ON e.node_id = n.id AND e.model = ?
@@ -1287,7 +1287,7 @@ export class NmgStore {
       )
       .all(model, ...candidates) as Row[];
     const byId = new Map(rows.map((row) => [String(row.id), row]));
-    const cache = this.#embeddingCache("node", model);
+    const cache = this.embeddingCache("node", model);
     if (!cache) return [];
 
     // HA is a stateful experimental controller. It must not silently replace
@@ -1299,7 +1299,7 @@ export class NmgStore {
         if (vec) candidateList.push({ id, vector: vec });
       }
       if (candidateList.length > 0) {
-        const ha = this.#router.ensureHA(queryVector.length);
+        const ha = this.router.ensureHA(queryVector.length);
         const out = ha.propagate(
           new Float32Array(queryVector),
           candidateList.map((c) => ({ nodeId: c.id, vector: c.vector })),
@@ -1324,48 +1324,48 @@ export class NmgStore {
 
   trainRouter(query: string, usefulNodeIds: string[], learningRate = 0.2): void {
     const uniqueIds = [...new Set(usefulNodeIds)];
-    const upsert = this.#db.prepare(
+    const upsert = this.db.prepare(
       `INSERT INTO router_weights (node_id, model, dimensions, weights_json, examples, updated_at)
        VALUES (?, ?, ?, ?, 1, ?)
        ON CONFLICT(node_id) DO UPDATE SET weights_json = excluded.weights_json,
          examples = router_weights.examples + 1, updated_at = excluded.updated_at`,
     );
-    const select = this.#db.prepare("SELECT weights_json FROM router_weights WHERE node_id = ?");
+    const select = this.db.prepare("SELECT weights_json FROM router_weights WHERE node_id = ?");
     const now = new Date().toISOString();
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const nodeId of uniqueIds) {
-        this.#requireNode(nodeId);
+        this.requireNode(nodeId);
         const row = select.get(nodeId) as Row | undefined;
-        const weights = this.#router.update(
+        const weights = this.router.update(
           query,
           row ? parseVector(row.weights_json) : undefined,
           clamp(learningRate, 0.001, 1),
         );
         upsert.run(
           nodeId,
-          this.#embedder.model,
-          this.#embedder.dimensions,
+          this.embedder.model,
+          this.embedder.dimensions,
           JSON.stringify(weights),
           now,
         );
       }
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
 
   rebuildVectorIndex(): number {
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT m.id, m.statement, m.node_id, n.canonical_name, n.summary
        FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id
        WHERE m.storage_state = 'indexed'`,
       )
       .all() as Row[];
-    const upsert = this.#db.prepare(
+    const upsert = this.db.prepare(
       `INSERT INTO memory_embeddings
         (memory_id, model, dimensions, vector_json, vector_blob, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)
@@ -1375,24 +1375,24 @@ export class NmgStore {
          updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const row of rows) {
         const text = memoryEmbeddingText(row.statement, row.canonical_name);
-        const vector = this.#embedder.embed(text);
+        const vector = this.embedder.embed(text);
         upsert.run(
           row.id,
-          this.#embedder.model,
-          this.#embedder.dimensions,
+          this.embedder.model,
+          this.embedder.dimensions,
           JSON.stringify(vector),
           encodeVector(vector),
           now,
         );
       }
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
       return rows.length;
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
@@ -1401,8 +1401,8 @@ export class NmgStore {
     nodeId: string,
     capacities: readonly [number, number, number] = [16, 64, 256],
   ): RebalanceResult {
-    this.#requireNode(nodeId);
-    const rows = this.#db
+    this.requireNode(nodeId);
+    const rows = this.db
       .prepare(
         `SELECT id, tier, importance, access_count, pending_access_count,
               last_accessed_at, status
@@ -1422,10 +1422,10 @@ export class NmgStore {
       0,
     );
     const changedMemoryIds: string[] = [];
-    const update = this.#db.prepare(
+    const update = this.db.prepare(
       "UPDATE memory_records SET tier = ?, pending_access_count = 0 WHERE id = ?",
     );
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const row of active) {
         const id = String(row.id);
@@ -1433,9 +1433,9 @@ export class NmgStore {
         if (tier !== Number(row.tier)) changedMemoryIds.push(id);
         update.run(tier, id);
       }
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
     return {
@@ -1450,7 +1450,7 @@ export class NmgStore {
     threshold = 32,
     capacities: readonly [number, number, number] = [16, 64, 256],
   ): RebalanceResult[] {
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT node_id, SUM(pending_access_count) AS pending
        FROM memory_records GROUP BY node_id HAVING pending >= ?`,
@@ -1561,7 +1561,7 @@ export class NmgStore {
     const related = perf
       ? perf.measure(SECTION.relatedExpansion, () =>
           relatedNodeIds.flatMap((nodeId) =>
-            this.#resultsForNode(
+            this.resultsForNode(
               nodeId,
               Math.min(options.maxTier ?? budget.maxLocalTier, budget.maxLocalTier) as MemoryTier,
               2,
@@ -1571,7 +1571,7 @@ export class NmgStore {
           ),
         )
       : relatedNodeIds.flatMap((nodeId) =>
-          this.#resultsForNode(
+          this.resultsForNode(
             nodeId,
             Math.min(options.maxTier ?? budget.maxLocalTier, budget.maxLocalTier) as MemoryTier,
             2,
@@ -1802,10 +1802,10 @@ export class NmgStore {
     perf?.setTotal(nowMs() - startedAt);
     const snapshot = perf?.snapshot();
     if (perf && options.persistTrace !== false) {
-      this.#db
+      this.db
         .prepare("UPDATE retrieval_traces SET timings_json = ? WHERE id = ?")
         .run(JSON.stringify(snapshot), traceId);
-      this.#recordPerfAggregates(snapshot);
+      this.recordPerfAggregates(snapshot);
     }
     const activeGraph: ActiveGraph = {
       id: traceId,
@@ -1858,11 +1858,11 @@ export class NmgStore {
 
   getContext(memoryIds: readonly string[], graphHops = 0): MemoryContext {
     const ids = [...new Set(memoryIds)].slice(0, 50);
-    const findNode = this.#db.prepare("SELECT node_id FROM memory_records WHERE id = ?");
+    const findNode = this.db.prepare("SELECT node_id FROM memory_records WHERE id = ?");
     const results = ids.flatMap((memoryId) => {
       const row = findNode.get(memoryId) as Row | undefined;
       if (!row) return [];
-      return this.#resultsForNode(String(row.node_id), 3, 1, memoryId);
+      return this.resultsForNode(String(row.node_id), 3, 1, memoryId);
     });
     return {
       results,
@@ -1877,14 +1877,14 @@ export class NmgStore {
     const id = randomUUID();
     const createdAt = new Date().toISOString();
     const nodeIds = [...new Set(input.resultNodeIds)].sort();
-    const usefulNodeIds = new Set(this.#nodeIdsForMemories(input.usefulMemoryIds ?? []));
+    const usefulNodeIds = new Set(this.nodeIdsForMemories(input.usefulMemoryIds ?? []));
     const contradictedNodeIds = new Set(
-      this.#nodeIdsForMemories(input.contradictedMemoryIds ?? []),
+      this.nodeIdsForMemories(input.contradictedMemoryIds ?? []),
     );
     const taskId = input.taskId?.trim() || stableTaskId(input.query);
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.#db
+      this.db
         .prepare(
           `INSERT INTO retrieval_traces
           (id, query, result_memory_ids_json, result_node_ids_json,
@@ -1920,7 +1920,7 @@ export class NmgStore {
           input.conflictObserved ? 1 : 0,
           createdAt,
         );
-      const updateNode = this.#db.prepare(
+      const updateNode = this.db.prepare(
         `INSERT INTO node_retrieval_signals
           (node_id, query_count, ambiguity_sum, fallback_count,
            conflict_count, updated_at)
@@ -1941,9 +1941,9 @@ export class NmgStore {
           createdAt,
         );
       }
-      this.#recordNodeSelections(nodeIds, input.expandedNodeIds ?? [], createdAt);
-      this.#recordEdgeSelections(input.relationIds ?? [], createdAt);
-      const updatePair = this.#db.prepare(
+      this.recordNodeSelections(nodeIds, input.expandedNodeIds ?? [], createdAt);
+      this.recordEdgeSelections(input.relationIds ?? [], createdAt);
+      const updatePair = this.db.prepare(
         `INSERT INTO node_pair_signals
           (left_node_id, right_node_id, co_retrieval_count, useful_count,
            evidence_trace_ids_json, updated_at)
@@ -1953,7 +1953,7 @@ export class NmgStore {
            evidence_trace_ids_json = excluded.evidence_trace_ids_json,
            updated_at = excluded.updated_at`,
       );
-      const observeTask = this.#db.prepare(
+      const observeTask = this.db.prepare(
         `INSERT INTO edge_task_observations
           (left_node_id, right_node_id, task_id, trace_id, useful,
            contradicted, created_at)
@@ -1965,7 +1965,7 @@ export class NmgStore {
       for (let left = 0; left < nodeIds.length; left += 1) {
         for (let right = left + 1; right < nodeIds.length; right += 1) {
           const pair = [nodeIds[left]!, nodeIds[right]!] as const;
-          const previous = this.#db
+          const previous = this.db
             .prepare(
               `SELECT evidence_trace_ids_json FROM node_pair_signals
              WHERE left_node_id = ? AND right_node_id = ?`,
@@ -1984,13 +1984,13 @@ export class NmgStore {
             contradictedNodeIds.has(pair[0]) || contradictedNodeIds.has(pair[1]) ? 1 : 0,
             createdAt,
           );
-          this.#refreshPairUsefulness(pair[0], pair[1]);
+          this.refreshPairUsefulness(pair[0], pair[1]);
         }
       }
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
       return id;
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
@@ -2000,11 +2000,11 @@ export class NmgStore {
    * final snapshot (post-trace, post-total) so aggregates include the trace
    * span and total. Aggregates are never pruned with raw rows.
    */
-  #recordPerfAggregates(timings: PerfSnapshot | undefined): void {
+  protected recordPerfAggregates(timings: PerfSnapshot | undefined): void {
     if (!timings) return;
     const createdAt = new Date().toISOString();
-    const read = this.#db.prepare(`SELECT buckets_json FROM perf_aggregates WHERE section = ?`);
-    const upsert = this.#db.prepare(
+    const read = this.db.prepare(`SELECT buckets_json FROM perf_aggregates WHERE section = ?`);
+    const upsert = this.db.prepare(
       `INSERT INTO perf_aggregates (section, count, sum, sum_sq, buckets_json, updated_at)
        VALUES (?, 1, ?, ?, ?, ?)
        ON CONFLICT(section) DO UPDATE SET
@@ -2037,7 +2037,7 @@ export class NmgStore {
 
   /** Long-term per-section aggregates (never pruned). */
   perfAggregates(): PerfAggregate[] {
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT section, count, sum, sum_sq, buckets_json, updated_at
          FROM perf_aggregates ORDER BY section`,
@@ -2055,7 +2055,7 @@ export class NmgStore {
 
   /** Number of raw retrieval traces (for pruning window checks/tests). */
   retrievalTracesCount(): number {
-    const row = this.#db.prepare(`SELECT COUNT(*) AS n FROM retrieval_traces`).get() as Row;
+    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM retrieval_traces`).get() as Row;
     return Number(row.n);
   }
 
@@ -2076,7 +2076,7 @@ export class NmgStore {
     // One atomic statement: delete rows older than the window OR beyond the
     // row-count ceiling (keep the newest maxRows). A LIMIT caps a single call
     // so a huge backlog is drained across maintenance runs, not one shot.
-    const deleted = this.#db
+    const deleted = this.db
       .prepare(
         `DELETE FROM retrieval_traces
          WHERE id IN (
@@ -2094,7 +2094,7 @@ export class NmgStore {
   }
 
   retrievalTrace(id: string): RetrievalTrace | null {
-    const row = this.#db.prepare("SELECT * FROM retrieval_traces WHERE id = ?").get(id) as
+    const row = this.db.prepare("SELECT * FROM retrieval_traces WHERE id = ?").get(id) as
       Row | undefined;
     if (!row) return null;
     return {
@@ -2141,11 +2141,11 @@ export class NmgStore {
     },
   ): void {
     const startedAt = nowMs();
-    this.#recordActiveGraphUseInner(activeGraphId, input);
+    this.recordActiveGraphUseInner(activeGraphId, input);
     // Record the use-attribution span on the same trace row (best-effort —
     // the span is diagnostic, never a reason to fail the call).
     try {
-      this.#db
+      this.db
         .prepare(
           `UPDATE retrieval_traces SET timings_json = json_patch(timings_json, ?) WHERE id = ?`,
         )
@@ -2155,7 +2155,7 @@ export class NmgStore {
     }
   }
 
-  #recordActiveGraphUseInner(
+  protected recordActiveGraphUseInner(
     activeGraphId: string,
     input: {
       usedMemoryIds: readonly string[];
@@ -2163,7 +2163,7 @@ export class NmgStore {
       rejectedMemoryIds?: readonly string[];
     },
   ): void {
-    const row = this.#db
+    const row = this.db
       .prepare("SELECT * FROM retrieval_traces WHERE id = ?")
       .get(activeGraphId) as Row | undefined;
     if (!row) throw new Error(`active graph ${activeGraphId} does not exist`);
@@ -2189,19 +2189,19 @@ export class NmgStore {
     const rejectedMemoryIds = [
       ...new Set([...parseStringArray(row.rejected_memory_ids_json), ...observedRejectedMemoryIds]),
     ];
-    const usedNodeIds = new Set(this.#nodeIdsForMemories(usedMemoryIds));
-    const contradictedNodeIds = new Set(this.#nodeIdsForMemories(contradictedMemoryIds));
-    const observedUsedNodeIds = new Set(this.#nodeIdsForMemories(observedUsedMemoryIds));
+    const usedNodeIds = new Set(this.nodeIdsForMemories(usedMemoryIds));
+    const contradictedNodeIds = new Set(this.nodeIdsForMemories(contradictedMemoryIds));
+    const observedUsedNodeIds = new Set(this.nodeIdsForMemories(observedUsedMemoryIds));
     const observedContradictedNodeIds = new Set(
-      this.#nodeIdsForMemories(observedContradictedMemoryIds),
+      this.nodeIdsForMemories(observedContradictedMemoryIds),
     );
-    const observedRejectedNodeIds = new Set(this.#nodeIdsForMemories(observedRejectedMemoryIds));
+    const observedRejectedNodeIds = new Set(this.nodeIdsForMemories(observedRejectedMemoryIds));
     const resultNodeIds = parseStringArray(row.result_node_ids_json).sort();
     const relationIds = parseStringArray(row.relation_ids_json);
     const now = new Date().toISOString();
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
-      this.#db
+      this.db
         .prepare(
           `UPDATE retrieval_traces SET useful_memory_ids_json = ?,
            contradicted_memory_ids_json = ?, rejected_memory_ids_json = ?
@@ -2213,13 +2213,13 @@ export class NmgStore {
           JSON.stringify(rejectedMemoryIds),
           activeGraphId,
         );
-      this.#recordNodeOutcomes(
+      this.recordNodeOutcomes(
         observedUsedNodeIds,
         observedContradictedNodeIds,
         observedRejectedNodeIds,
         now,
       );
-      this.#recordEdgeOutcomes(
+      this.recordEdgeOutcomes(
         relationIds,
         observedUsedNodeIds,
         observedContradictedNodeIds,
@@ -2230,7 +2230,7 @@ export class NmgStore {
       for (let left = 0; left < resultNodeIds.length; left += 1) {
         for (let right = left + 1; right < resultNodeIds.length; right += 1) {
           const pair = [resultNodeIds[left]!, resultNodeIds[right]!] as const;
-          this.#db
+          this.db
             .prepare(
               `UPDATE edge_task_observations
                SET useful = MAX(useful, ?), contradicted = MAX(contradicted, ?)
@@ -2242,12 +2242,12 @@ export class NmgStore {
               ...pair,
               taskId,
             );
-          this.#refreshPairUsefulness(pair[0], pair[1]);
+          this.refreshPairUsefulness(pair[0], pair[1]);
         }
       }
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
     this.recordUsage(observedUsedMemoryIds);
@@ -2256,7 +2256,7 @@ export class NmgStore {
 
   edgeStability(leftNodeId: string, rightNodeId: string): EdgeStability {
     const [left, right] = [leftNodeId, rightNodeId].sort();
-    const row = this.#db
+    const row = this.db
       .prepare(
         `SELECT COUNT(*) AS independent_tasks,
                 SUM(useful) AS useful_tasks,
@@ -2288,14 +2288,14 @@ export class NmgStore {
   }
 
   nodeActivation(nodeId: string): ActivationSignal {
-    const row = this.#db
+    const row = this.db
       .prepare("SELECT * FROM node_activation_signals WHERE node_id = ?")
       .get(nodeId) as Row | undefined;
     return mapActivation(row, true);
   }
 
   relationActivation(relationId: string): ActivationSignal {
-    const row = this.#db
+    const row = this.db
       .prepare("SELECT * FROM edge_activation_signals WHERE relation_id = ?")
       .get(relationId) as Row | undefined;
     return mapActivation(row, false);
@@ -2316,7 +2316,7 @@ export class NmgStore {
     const consolidatedRelations: NodeRelation[] = [];
     const demotedRelations: NodeRelation[] = [];
     const eventIds: string[] = [];
-    const pairs = this.#db
+    const pairs = this.db
       .prepare(
         `SELECT DISTINCT left_node_id, right_node_id FROM edge_task_observations
          ORDER BY left_node_id, right_node_id`,
@@ -2324,7 +2324,7 @@ export class NmgStore {
       .all() as Row[];
     for (const row of pairs) {
       const stability = this.edgeStability(String(row.left_node_id), String(row.right_node_id));
-      const relationRow = this.#db
+      const relationRow = this.db
         .prepare(
           `SELECT * FROM node_relations WHERE consolidation_source = 'stability'
            AND ((source_node_id = ? AND target_node_id = ?)
@@ -2342,12 +2342,12 @@ export class NmgStore {
         stability.independentTasks >= minIndependentTasks &&
         stability.score >= promoteThreshold &&
         (!relation || relation.status === "demoted") &&
-        !this.#consolidationCoolingDown(
+        !this.consolidationCoolingDown(
           relation?.id ?? `pair:${stability.leftNodeId}:${stability.rightNodeId}`,
           cooldownMs,
         )
       ) {
-        const evidenceTraceIds = this.#edgeEvidenceTraceIds(
+        const evidenceTraceIds = this.edgeEvidenceTraceIds(
           stability.leftNodeId,
           stability.rightNodeId,
         );
@@ -2359,12 +2359,12 @@ export class NmgStore {
           stability: stability.score,
           consolidationSource: "stability",
         });
-        this.#db
+        this.db
           .prepare("UPDATE node_relations SET consolidation_source = 'stability' WHERE id = ?")
           .run(promoted.id);
         promoted.consolidationSource = "stability";
         eventIds.push(
-          this.#recordConsolidationEvent(
+          this.recordConsolidationEvent(
             "consolidate",
             promoted.id,
             relation?.status ?? "candidate",
@@ -2377,24 +2377,24 @@ export class NmgStore {
       } else if (
         relation?.status === "consolidated" &&
         stability.score <= demoteThreshold &&
-        !this.#consolidationCoolingDown(relation.id, cooldownMs)
+        !this.consolidationCoolingDown(relation.id, cooldownMs)
       ) {
-        this.#db
+        this.db
           .prepare("UPDATE node_relations SET status = 'demoted', stability = ? WHERE id = ?")
           .run(stability.score, relation.id);
         relation.status = "demoted";
         relation.stability = stability.score;
         const now = new Date().toISOString();
-        this.#refreshNodeResidence(relation.sourceNodeId, now);
-        this.#refreshNodeResidence(relation.targetNodeId, now);
+        this.refreshNodeResidence(relation.sourceNodeId, now);
+        this.refreshNodeResidence(relation.targetNodeId, now);
         eventIds.push(
-          this.#recordConsolidationEvent(
+          this.recordConsolidationEvent(
             "demote",
             relation.id,
             "consolidated",
             "demoted",
             `stability=${stability.score.toFixed(3)} threshold=${demoteThreshold}`,
-            this.#edgeEvidenceTraceIds(stability.leftNodeId, stability.rightNodeId),
+            this.edgeEvidenceTraceIds(stability.leftNodeId, stability.rightNodeId),
           ),
         );
         demotedRelations.push(relation);
@@ -2403,13 +2403,13 @@ export class NmgStore {
     return {
       consolidatedRelations,
       demotedRelations,
-      events: eventIds.map((id) => this.#requireConsolidationEvent(id)),
+      events: eventIds.map((id) => this.requireConsolidationEvent(id)),
     };
   }
 
   consolidationEvents(): ConsolidationEvent[] {
     return (
-      this.#db.prepare("SELECT * FROM consolidation_events ORDER BY rowid").all() as Row[]
+      this.db.prepare("SELECT * FROM consolidation_events ORDER BY rowid").all() as Row[]
     ).map(mapConsolidationEvent);
   }
 
@@ -2424,7 +2424,7 @@ export class NmgStore {
     const minGain = clamp(options.minGain ?? 0.6, 0, 1);
     const cooldownMs = Math.max(0, options.cooldownMs ?? 7 * 24 * 60 * 60 * 1_000);
     const proposals: TopologyProposal[] = [];
-    const pairRows = this.#db
+    const pairRows = this.db
       .prepare(
         `SELECT p.*, l.query_count AS left_queries, r.query_count AS right_queries
        FROM node_pair_signals p
@@ -2443,8 +2443,8 @@ export class NmgStore {
       // co-results into self-reinforcing graph edges.
       const gain =
         Number(row.useful_count) / Math.max(Number(row.left_queries), Number(row.right_queries), 1);
-      if (gain < minGain || this.#proposalCoolingDown(proposalKey, cooldownMs)) continue;
-      const relation = this.#db
+      if (gain < minGain || this.proposalCoolingDown(proposalKey, cooldownMs)) continue;
+      const relation = this.db
         .prepare(
           `SELECT 1 FROM node_relations WHERE
          (source_node_id = ? AND target_node_id = ?) OR
@@ -2453,7 +2453,7 @@ export class NmgStore {
         .get(sourceNodeIds[0], sourceNodeIds[1], sourceNodeIds[1], sourceNodeIds[0]);
       if (relation) continue;
       proposals.push(
-        this.#insertTopologyProposal({
+        this.insertTopologyProposal({
           proposalKey,
           type: "link",
           sourceNodeIds,
@@ -2465,7 +2465,7 @@ export class NmgStore {
         }),
       );
     }
-    const nodeRows = this.#db
+    const nodeRows = this.db
       .prepare(
         `SELECT s.* FROM node_retrieval_signals s
        JOIN memory_nodes n ON n.id = s.node_id AND n.status = 'active'
@@ -2478,17 +2478,17 @@ export class NmgStore {
       const fallback = Number(row.fallback_count) / Math.max(Number(row.query_count), 1);
       const gain = Math.max(ambiguity, fallback);
       const proposalKey = `split:${nodeId}`;
-      if (gain < minGain || this.#proposalCoolingDown(proposalKey, cooldownMs)) continue;
-      const partitions = this.#candidatePartitions(nodeId);
+      if (gain < minGain || this.proposalCoolingDown(proposalKey, cooldownMs)) continue;
+      const partitions = this.candidatePartitions(nodeId);
       if (partitions.length < 2) continue;
-      const traces = this.#db
+      const traces = this.db
         .prepare(
           `SELECT id FROM retrieval_traces
          WHERE result_node_ids_json LIKE ? ORDER BY created_at DESC LIMIT 16`,
         )
         .all(`%${nodeId}%`) as Row[];
       proposals.push(
-        this.#insertTopologyProposal({
+        this.insertTopologyProposal({
           proposalKey,
           type: "split",
           sourceNodeIds: [nodeId],
@@ -2505,14 +2505,14 @@ export class NmgStore {
 
   topologyProposals(status: TopologyProposal["status"] = "pending"): TopologyProposal[] {
     return (
-      this.#db
+      this.db
         .prepare("SELECT * FROM topology_proposals WHERE status = ? ORDER BY created_at, id")
         .all(status) as Row[]
     ).map(mapTopologyProposal);
   }
 
   reviewTopologyProposal(proposalId: string, decision: "accept" | "reject"): TopologyProposal {
-    const row = this.#db
+    const row = this.db
       .prepare("SELECT * FROM topology_proposals WHERE id = ?")
       .get(proposalId) as Row | undefined;
     if (!row) throw new Error(`topology proposal ${proposalId} does not exist`);
@@ -2521,7 +2521,7 @@ export class NmgStore {
       throw new Error(`topology proposal ${proposalId} is already ${proposal.status}`);
     }
     if (decision === "reject") {
-      this.#db
+      this.db
         .prepare("UPDATE topology_proposals SET status = 'rejected' WHERE id = ?")
         .run(proposalId);
       return { ...proposal, status: "rejected" };
@@ -2533,7 +2533,7 @@ export class NmgStore {
         type: proposal.relationType ?? "related_to",
       });
     } else {
-      const source = this.#requireNode(proposal.sourceNodeIds[0]!);
+      const source = this.requireNode(proposal.sourceNodeIds[0]!);
       this.splitNode({
         sourceNodeId: source.id,
         partitions: proposal.partitions.map((partition, index) => ({
@@ -2542,14 +2542,14 @@ export class NmgStore {
         })),
       });
     }
-    this.#db
+    this.db
       .prepare("UPDATE topology_proposals SET status = 'accepted' WHERE id = ?")
       .run(proposalId);
     return { ...proposal, status: "accepted" };
   }
 
   residentKernel(limit = 4): MemoryContext {
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT m.id, m.node_id
        FROM memory_records m
@@ -2571,7 +2571,7 @@ export class NmgStore {
       const nodeId = String(row.node_id);
       let nodeResults = byNode.get(nodeId);
       if (!nodeResults) {
-        nodeResults = this.#resultsForNode(nodeId, 0, 50);
+        nodeResults = this.resultsForNode(nodeId, 0, 50);
         byNode.set(nodeId, nodeResults);
       }
       return nodeResults.filter((result) => result.memory.id === String(row.id));
@@ -2587,7 +2587,7 @@ export class NmgStore {
       limit: 50,
     });
     const nodeIds = [...new Set(candidates.map((result) => result.node.id))].slice(0, cueLimit);
-    const aggregate = this.#db.prepare(
+    const aggregate = this.db.prepare(
       `SELECT COUNT(*) AS active_count, MAX(created_at) AS newest_at,
               MAX(tier) AS deepest_tier,
               SUM(CASE WHEN status = 'disputed' THEN 1 ELSE 0 END) AS conflicts,
@@ -2624,10 +2624,10 @@ export class NmgStore {
     options: SearchOptions = {},
     filterUsage?: RetrievalFilterUsage,
   ): MemorySearchResult[] {
-    return this.#searchWithVector(
+    return this.searchWithVector(
       query,
-      this.#embedder.embed(query),
-      this.#embedder.model,
+      this.embedder.embed(query),
+      this.embedder.model,
       options,
       [],
       filterUsage,
@@ -2641,7 +2641,7 @@ export class NmgStore {
     options: SearchOptions = {},
     filterUsage?: RetrievalFilterUsage,
   ): MemorySearchResult[] {
-    return this.#searchWithVector(
+    return this.searchWithVector(
       query,
       queryVector,
       model,
@@ -2661,7 +2661,7 @@ export class NmgStore {
     candidateMemoryIds: string[],
     options: SearchOptions = {},
   ): MemorySearchResult[] {
-    return this.#searchWithVector(
+    return this.searchWithVector(
       query,
       queryVector,
       model,
@@ -2674,7 +2674,7 @@ export class NmgStore {
   }
 
   embeddingDocuments(afterMemoryId = "", limit = 256, missingModel?: string): EmbeddingDocument[] {
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT m.id, m.statement, n.canonical_name, n.summary
        FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id
@@ -2702,7 +2702,7 @@ export class NmgStore {
     limit = 256,
     missingModel?: string,
   ): NodeEmbeddingDocument[] {
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT n.id, n.canonical_name, n.kind, n.summary
        FROM memory_nodes n
@@ -2732,7 +2732,7 @@ export class NmgStore {
     if (dimensions === 0 || embeddings.some((item) => item.vector.length !== dimensions)) {
       throw new Error("external embeddings must have one consistent non-zero dimension");
     }
-    const upsert = this.#db.prepare(
+    const upsert = this.db.prepare(
       `INSERT INTO node_embeddings
         (node_id, model, dimensions, vector_json, vector_blob, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)
@@ -2741,7 +2741,7 @@ export class NmgStore {
          updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const item of embeddings) {
         upsert.run(
@@ -2753,19 +2753,19 @@ export class NmgStore {
           now,
         );
       }
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
       for (const item of embeddings) {
-        this.#updateVectorCache("node", model, item.nodeId, item.vector);
+        this.updateVectorCache("node", model, item.nodeId, item.vector);
       }
       return embeddings.length;
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
 
   storedNodeEmbeddings(model: string, afterNodeId = "", limit = 256): ExternalNodeEmbedding[] {
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT node_id, vector_blob, vector_json FROM node_embeddings
        WHERE model = ? AND node_id > ? ORDER BY node_id LIMIT ?`,
@@ -2780,13 +2780,13 @@ export class NmgStore {
   rebuildLeafBlocks(nodeId?: string, blockSize = 32): LeafBlock[] {
     const size = Math.max(4, Math.min(blockSize, 128));
     if (!nodeId) {
-      const rows = this.#db
+      const rows = this.db
         .prepare("SELECT id FROM memory_nodes WHERE status = 'active' ORDER BY id")
         .all() as Row[];
       return rows.flatMap((row) => this.rebuildLeafBlocks(String(row.id), size));
     }
-    this.#requireNode(nodeId);
-    const rows = this.#db
+    this.requireNode(nodeId);
+    const rows = this.db
       .prepare(
         `SELECT m.id, m.node_id, m.statement, m.memory_type, m.scope_json, m.tier,
               m.event_time, m.valid_from, m.valid_until, m.status, n.canonical_name
@@ -2807,7 +2807,7 @@ export class NmgStore {
     const now = new Date().toISOString();
     const existing = new Map(
       (
-        this.#db
+        this.db
           .prepare("SELECT id, created_at, updated_at FROM memory_leaf_blocks WHERE node_id = ?")
           .all(nodeId) as Row[]
       ).map((row) => [
@@ -2832,9 +2832,9 @@ export class NmgStore {
     }
     const desiredIds = new Set(blocks.map((block) => block.id));
     const staleIds = [...existing.keys()].filter((id) => !desiredIds.has(id));
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
-      const insertBlock = this.#db.prepare(
+      const insertBlock = this.db.prepare(
         `INSERT INTO memory_leaf_blocks
           (id, node_id, tier, summary, memory_count, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -2842,7 +2842,7 @@ export class NmgStore {
            summary = excluded.summary, memory_count = excluded.memory_count,
            updated_at = excluded.updated_at`,
       );
-      const insertMember = this.#db.prepare(
+      const insertMember = this.db.prepare(
         `INSERT OR IGNORE INTO memory_leaf_members
           (block_id, memory_id, ordinal) VALUES (?, ?, ?)`,
       );
@@ -2867,26 +2867,26 @@ export class NmgStore {
           .get(block.id)!
           .forEach((member, ordinal) => insertMember.run(block.id, member.id, ordinal));
       }
-      const removeBlock = this.#db.prepare("DELETE FROM memory_leaf_blocks WHERE id = ?");
+      const removeBlock = this.db.prepare("DELETE FROM memory_leaf_blocks WHERE id = ?");
       for (const id of staleIds) removeBlock.run(id);
-      this.#db
+      this.db
         .prepare(
           `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 0, ?)
          ON CONFLICT(node_id) DO UPDATE SET dirty = 0, updated_at = excluded.updated_at`,
         )
         .run(nodeId, now);
-      this.#db.prepare("UPDATE memory_index_delta SET compacted = 1 WHERE node_id = ?").run(nodeId);
-      this.#db.exec("COMMIT");
-      if (staleIds.length > 0) this.#invalidateVectorCaches("leaf");
+      this.db.prepare("UPDATE memory_index_delta SET compacted = 1 WHERE node_id = ?").run(nodeId);
+      this.db.exec("COMMIT");
+      if (staleIds.length > 0) this.invalidateVectorCaches("leaf");
       return blocks;
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
 
   dirtyLeafNodeIds(): string[] {
-    const rows = this.#db
+    const rows = this.db
       .prepare("SELECT node_id FROM leaf_block_status WHERE dirty = 1 ORDER BY node_id")
       .all() as Row[];
     return rows.map((row) => String(row.node_id));
@@ -2894,13 +2894,13 @@ export class NmgStore {
 
   pendingIndexDelta(nodeId?: string, limit = 512): string[] {
     const rows = nodeId
-      ? (this.#db
+      ? (this.db
           .prepare(
             `SELECT memory_id FROM memory_index_delta
            WHERE node_id = ? ORDER BY created_at, memory_id LIMIT ?`,
           )
           .all(nodeId, Math.max(1, Math.min(limit, 2_048))) as Row[])
-      : (this.#db
+      : (this.db
           .prepare(
             `SELECT memory_id FROM memory_index_delta
            ORDER BY created_at, memory_id LIMIT ?`,
@@ -2915,19 +2915,19 @@ export class NmgStore {
     profile: string;
     targets: Array<"leaves" | "nodes" | "records">;
   }): void {
-    beginEmbeddingIndex(this.#db, input);
+    beginEmbeddingIndex(this.db, input);
   }
 
   completeEmbeddingIndex(indexId: string): void {
-    completeEmbeddingIndex(this.#db, indexId);
+    completeEmbeddingIndex(this.db, indexId);
   }
 
   failEmbeddingIndex(indexId: string, error: unknown): void {
-    failEmbeddingIndex(this.#db, indexId, error);
+    failEmbeddingIndex(this.db, indexId, error);
   }
 
   embeddingIndexHealth(indexId: string): EmbeddingIndexHealth | null {
-    return embeddingIndexHealth(this.#db, indexId);
+    return embeddingIndexHealth(this.db, indexId);
   }
 
   /** Deterministic query-time contradiction lookup over claims: for each
@@ -2940,7 +2940,7 @@ export class NmgStore {
   contradictionNotes(memoryIds: readonly string[]): Map<string, string> {
     const notes = new Map<string, string>();
     if (memoryIds.length === 0) return notes;
-    const stmt = this.#db.prepare(
+    const stmt = this.db.prepare(
       `SELECT c1.value ->> 'predicate_key' AS pred_key,
               c1.value ->> 'text' AS own_text,
               c2.value ->> 'text' AS other_text,
@@ -2998,7 +2998,7 @@ export class NmgStore {
   ): LeafBlock[] {
     const threshold = Math.max(1, options.deltaThreshold ?? 16);
     const nodeLimit = Math.max(1, Math.min(options.nodeLimit ?? 32, 256));
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT d.node_id, COUNT(*) AS delta_count, MIN(d.created_at) AS oldest
        FROM memory_index_delta d
@@ -3016,7 +3016,7 @@ export class NmgStore {
   acknowledgeIndexDelta(nodeIds: readonly string[]): number {
     const ids = [...new Set(nodeIds)];
     if (ids.length === 0) return 0;
-    const result = this.#db
+    const result = this.db
       .prepare(
         `DELETE FROM memory_index_delta
        WHERE node_id IN (${ids.map(() => "?").join(",")}) AND compacted = 1`,
@@ -3030,7 +3030,7 @@ export class NmgStore {
     limit = 256,
     missingModel?: string,
   ): LeafEmbeddingDocument[] {
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT b.id, b.node_id, b.summary, n.canonical_name, n.summary AS node_summary
        FROM memory_leaf_blocks b JOIN memory_nodes n ON n.id = b.node_id
@@ -3061,7 +3061,7 @@ export class NmgStore {
     if (dimensions === 0 || embeddings.some((item) => item.vector.length !== dimensions)) {
       throw new Error("external embeddings must have one consistent non-zero dimension");
     }
-    const upsert = this.#db.prepare(
+    const upsert = this.db.prepare(
       `INSERT INTO leaf_embeddings
         (block_id, model, dimensions, vector_json, vector_blob, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)
@@ -3070,7 +3070,7 @@ export class NmgStore {
          updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const item of embeddings) {
         upsert.run(
@@ -3082,19 +3082,19 @@ export class NmgStore {
           now,
         );
       }
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
       for (const item of embeddings) {
-        this.#updateVectorCache("leaf", model, item.blockId, item.vector);
+        this.updateVectorCache("leaf", model, item.blockId, item.vector);
       }
       return embeddings.length;
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
 
   storedLeafEmbeddings(model: string, afterBlockId = "", limit = 256): ExternalLeafEmbedding[] {
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT block_id, vector_blob, vector_json FROM leaf_embeddings
        WHERE model = ? AND block_id > ? ORDER BY block_id LIMIT ?`,
@@ -3118,7 +3118,7 @@ export class NmgStore {
     const nodeClause =
       nodes.length > 0 ? `AND b.node_id IN (${nodes.map(() => "?").join(",")})` : "";
     const blockClause = blocks.length > 0 ? `AND b.id IN (${blocks.map(() => "?").join(",")})` : "";
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT b.* FROM memory_leaf_blocks b
        JOIN memory_nodes n ON n.id = b.node_id AND n.status = 'active'
@@ -3127,7 +3127,7 @@ export class NmgStore {
       )
       .all(model, ...nodes, ...blocks) as Row[];
     const byId = new Map(rows.map((row) => [String(row.id), row]));
-    const cache = this.#embeddingCache("leaf", model);
+    const cache = this.embeddingCache("leaf", model);
     if (!cache) return [];
     return cache
       .score(queryVector, new Set(byId.keys()))
@@ -3145,7 +3145,7 @@ export class NmgStore {
   ): MemorySearchResult[] {
     const blocks = [...new Set(blockIds)].slice(0, 50);
     if (blocks.length === 0) return [];
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT memory_id FROM memory_leaf_members
        WHERE block_id IN (${blocks.map(() => "?").join(",")})
@@ -3153,7 +3153,7 @@ export class NmgStore {
       )
       .all(...blocks) as Row[];
     const requestedLimit = Math.max(1, Math.min(options.limit ?? 8, 50));
-    const results = this.#searchWithVector(
+    const results = this.searchWithVector(
       query,
       queryVector,
       model,
@@ -3165,7 +3165,7 @@ export class NmgStore {
       rows.map((row) => String(row.memory_id)),
     );
     if (!blockScores) return results;
-    const memberships = this.#db
+    const memberships = this.db
       .prepare(
         `SELECT memory_id, block_id FROM memory_leaf_members
        WHERE block_id IN (${blocks.map(() => "?").join(",")})`,
@@ -3215,7 +3215,7 @@ export class NmgStore {
       options,
       new Map(leaves.map((route) => [route.block.id, route.score])),
     );
-    const lexical = this.#searchWithVector(query, queryVector, model, {
+    const lexical = this.searchWithVector(query, queryVector, model, {
       ...options,
       limit: Math.min(50, Math.max(options.limit ?? 8, 20)),
       retrievalMode: "fts5",
@@ -3238,12 +3238,12 @@ export class NmgStore {
   ): MemorySearchResult[] {
     const selected = [...new Set(nodeIds)].slice(0, 50);
     if (selected.length === 0) return [];
-    const ftsIds = this.#ftsCandidatesInNodes(query, selected, MAX_SEARCH_CANDIDATES);
+    const ftsIds = this.ftsCandidatesInNodes(query, selected, MAX_SEARCH_CANDIDATES);
     const candidateIds =
       ftsIds.length > 0
         ? ftsIds
         : (
-            this.#db
+            this.db
               .prepare(
                 `SELECT id FROM memory_records
          WHERE node_id IN (${selected.map(() => "?").join(",")})
@@ -3254,7 +3254,7 @@ export class NmgStore {
               )
               .all(...selected, options.maxTier ?? 1, MAX_SEARCH_CANDIDATES) as Row[]
           ).map((row) => String(row.id));
-    return this.#searchWithVector(
+    return this.searchWithVector(
       query,
       queryVector,
       model,
@@ -3273,7 +3273,7 @@ export class NmgStore {
     if (dimensions === 0 || embeddings.some((item) => item.vector.length !== dimensions)) {
       throw new Error("external embeddings must have one consistent non-zero dimension");
     }
-    const upsert = this.#db.prepare(
+    const upsert = this.db.prepare(
       `INSERT INTO memory_embeddings
         (memory_id, model, dimensions, vector_json, vector_blob, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)
@@ -3282,7 +3282,7 @@ export class NmgStore {
          updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const item of embeddings) {
         upsert.run(
@@ -3294,16 +3294,16 @@ export class NmgStore {
           now,
         );
       }
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
       return embeddings.length;
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
 
   storedEmbeddings(model: string, afterMemoryId = "", limit = 256): ExternalEmbedding[] {
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT memory_id, vector_blob, vector_json FROM memory_embeddings
        WHERE model = ? AND memory_id > ? ORDER BY memory_id LIMIT ?`,
@@ -3315,7 +3315,7 @@ export class NmgStore {
     }));
   }
 
-  #searchWithVector(
+  protected searchWithVector(
     query: string,
     queryVector: readonly number[],
     vectorModel: string,
@@ -3328,11 +3328,11 @@ export class NmgStore {
 
     const maxTier = options.maxTier ?? 1;
     const limit = Math.max(1, Math.min(options.limit ?? 8, 50));
-    const nodeName = options.nodeName ? this.#resolveActiveNodeName(options.nodeName) : null;
+    const nodeName = options.nodeName ? this.resolveActiveNodeName(options.nodeName) : null;
     const retrievalMode = options.retrievalMode ?? "legacy";
     const ftsIds =
       retrievalMode === "fts5" || retrievalMode === "hybrid"
-        ? this.#ftsCandidates(query, MAX_SEARCH_CANDIDATES)
+        ? this.ftsCandidates(query, MAX_SEARCH_CANDIDATES)
         : [];
     if (retrievalMode === "fts5" && ftsIds.length === 0 && forcedCandidateIds.length === 0) {
       return [];
@@ -3376,7 +3376,7 @@ export class NmgStore {
             .join(" AND ")}`
         : "";
     const scopeParams = scopeEntries.map(([, value]) => value);
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT
            m.id AS m_id, m.node_id AS m_node_id,
@@ -3482,8 +3482,8 @@ export class NmgStore {
     }
     const results = filtered.slice(0, limit);
     for (const result of results) {
-      result.memory.evidenceIds = this.#evidenceIds(result.memory.id);
-      result.evidenceRecords = this.#evidenceRecords(result.memory.evidenceIds);
+      result.memory.evidenceIds = this.evidenceIds(result.memory.id);
+      result.evidenceRecords = this.evidenceRecords(result.memory.evidenceIds);
     }
     return results;
   }
@@ -3492,7 +3492,7 @@ export class NmgStore {
     const uniqueIds = [...new Set(memoryIds)];
     if (uniqueIds.length === 0) return;
 
-    const statement = this.#db.prepare(
+    const statement = this.db.prepare(
       `UPDATE memory_records
        SET access_count = access_count + 1,
            pending_access_count = pending_access_count + 1,
@@ -3501,12 +3501,12 @@ export class NmgStore {
     );
     const now = new Date().toISOString();
 
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const id of uniqueIds) statement.run(now, id);
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
@@ -3519,13 +3519,13 @@ export class NmgStore {
     const sessionId = requireText(input.sessionId, "session id");
     const existing = this.getSessionArchive(sessionId);
     if (existing) {
-      const row = this.#db
+      const row = this.db
         .prepare("SELECT content FROM history_records WHERE id = ?")
         .get(existing.historyId) as Row | undefined;
       if (row && String(row.content) === input.transcript) return existing;
     }
 
-    this.#db.exec("BEGIN IMMEDIATE");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       const history = this.appendHistory({
         content: input.transcript,
@@ -3538,7 +3538,7 @@ export class NmgStore {
         historyId: history.id,
         createdAt: history.createdAt,
       };
-      this.#db
+      this.db
         .prepare(
           `INSERT INTO session_archives (session_id, history_id, created_at)
          VALUES (?, ?, ?)
@@ -3548,7 +3548,7 @@ export class NmgStore {
         )
         .run(archive.sessionId, archive.historyId, archive.createdAt);
       if (existing && existing.historyId !== archive.historyId) {
-        this.#db
+        this.db
           .prepare(
             `DELETE FROM history_records
              WHERE id = ?
@@ -3562,16 +3562,16 @@ export class NmgStore {
           )
           .run(existing.historyId);
       }
-      this.#db.exec("COMMIT");
+      this.db.exec("COMMIT");
       return archive;
     } catch (error) {
-      this.#db.exec("ROLLBACK");
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
 
   getSessionArchive(sessionId: string): SessionArchive | null {
-    const row = this.#db
+    const row = this.db
       .prepare("SELECT * FROM session_archives WHERE session_id = ?")
       .get(sessionId) as Row | undefined;
     if (!row) return null;
@@ -3582,40 +3582,40 @@ export class NmgStore {
     };
   }
 
-  #requireActiveMemory(memoryId: string): MemoryRecord {
-    const row = this.#db
+  protected requireActiveMemory(memoryId: string): MemoryRecord {
+    const row = this.db
       .prepare("SELECT node_id FROM memory_records WHERE id = ?")
       .get(memoryId) as Row | undefined;
     if (!row) throw new Error(`memory ${memoryId} does not exist`);
-    const result = this.#resultsForNode(String(row.node_id), 3, 1, memoryId)[0];
+    const result = this.resultsForNode(String(row.node_id), 3, 1, memoryId)[0];
     if (!result) throw new Error(`memory ${memoryId} is not active`);
     return result.memory;
   }
 
-  #refreshNodeResidence(nodeId: string, updatedAt: string): void {
-    const hasLongTermMemory = this.#db
+  protected refreshNodeResidence(nodeId: string, updatedAt: string): void {
+    const hasLongTermMemory = this.db
       .prepare(
         `SELECT 1 FROM memory_records
          WHERE node_id = ? AND residence = 'ltg'
            AND status IN ('active', 'disputed') LIMIT 1`,
       )
       .get(nodeId);
-    const hasLongTermRelation = this.#db
+    const hasLongTermRelation = this.db
       .prepare(
         `SELECT 1 FROM node_relations
          WHERE status = 'consolidated'
            AND (source_node_id = ? OR target_node_id = ?) LIMIT 1`,
       )
       .get(nodeId, nodeId);
-    this.#db
+    this.db
       .prepare("UPDATE memory_nodes SET residence = ?, updated_at = ? WHERE id = ?")
       .run(hasLongTermMemory || hasLongTermRelation ? "ltg" : "stg", updatedAt, nodeId);
   }
 
-  #recordNodeSelections(nodeIds: string[], expandedNodeIds: string[], updatedAt: string): void {
+  protected recordNodeSelections(nodeIds: string[], expandedNodeIds: string[], updatedAt: string): void {
     const selected = new Set(nodeIds);
     const expanded = new Set(expandedNodeIds);
-    const upsert = this.#db.prepare(
+    const upsert = this.db.prepare(
       `INSERT INTO node_activation_signals
         (node_id, selected_count, expanded_count, used_count,
          contradicted_count, rejected_count, updated_at)
@@ -3630,8 +3630,8 @@ export class NmgStore {
     }
   }
 
-  #recordEdgeSelections(relationIds: readonly string[], updatedAt: string): void {
-    const upsert = this.#db.prepare(
+  protected recordEdgeSelections(relationIds: readonly string[], updatedAt: string): void {
+    const upsert = this.db.prepare(
       `INSERT INTO edge_activation_signals
         (relation_id, selected_count, used_count, contradicted_count,
          rejected_count, updated_at)
@@ -3643,13 +3643,13 @@ export class NmgStore {
     for (const relationId of new Set(relationIds)) upsert.run(relationId, updatedAt);
   }
 
-  #recordNodeOutcomes(
+  protected recordNodeOutcomes(
     used: Set<string>,
     contradicted: Set<string>,
     rejected: Set<string>,
     updatedAt: string,
   ): void {
-    const upsert = this.#db.prepare(
+    const upsert = this.db.prepare(
       `INSERT INTO node_activation_signals
         (node_id, selected_count, expanded_count, used_count,
          contradicted_count, rejected_count, updated_at)
@@ -3671,15 +3671,15 @@ export class NmgStore {
     }
   }
 
-  #recordEdgeOutcomes(
+  protected recordEdgeOutcomes(
     relationIds: readonly string[],
     used: Set<string>,
     contradicted: Set<string>,
     rejected: Set<string>,
     updatedAt: string,
   ): void {
-    const find = this.#db.prepare("SELECT * FROM node_relations WHERE id = ?");
-    const upsert = this.#db.prepare(
+    const find = this.db.prepare("SELECT * FROM node_relations WHERE id = ?");
+    const upsert = this.db.prepare(
       `INSERT INTO edge_activation_signals
         (relation_id, selected_count, used_count, contradicted_count,
          rejected_count, updated_at)
@@ -3705,8 +3705,8 @@ export class NmgStore {
     }
   }
 
-  #refreshPairUsefulness(leftNodeId: string, rightNodeId: string): void {
-    this.#db
+  protected refreshPairUsefulness(leftNodeId: string, rightNodeId: string): void {
+    this.db
       .prepare(
         `UPDATE node_pair_signals SET useful_count = (
            SELECT COUNT(*) FROM edge_task_observations
@@ -3716,9 +3716,9 @@ export class NmgStore {
       .run(leftNodeId, rightNodeId, leftNodeId, rightNodeId);
   }
 
-  #edgeEvidenceTraceIds(leftNodeId: string, rightNodeId: string): string[] {
+  protected edgeEvidenceTraceIds(leftNodeId: string, rightNodeId: string): string[] {
     return (
-      this.#db
+      this.db
         .prepare(
           `SELECT trace_id FROM edge_task_observations
            WHERE left_node_id = ? AND right_node_id = ? AND useful = 1
@@ -3728,7 +3728,7 @@ export class NmgStore {
     ).map((row) => String(row.trace_id));
   }
 
-  #recordConsolidationEvent(
+  protected recordConsolidationEvent(
     action: ConsolidationEvent["action"],
     targetId: string,
     previousState: string,
@@ -3738,7 +3738,7 @@ export class NmgStore {
     createdAt = new Date().toISOString(),
   ): string {
     const id = randomUUID();
-    this.#db
+    this.db
       .prepare(
         `INSERT INTO consolidation_events
           (id, action, target_id, previous_state, next_state, reason,
@@ -3758,13 +3758,13 @@ export class NmgStore {
     return id;
   }
 
-  #recordMemoryWriteEvent(input: Omit<MemoryWriteEvent, "createdAt" | "id">): MemoryWriteEvent {
+  protected recordMemoryWriteEvent(input: Omit<MemoryWriteEvent, "createdAt" | "id">): MemoryWriteEvent {
     const event: MemoryWriteEvent = {
       id: randomUUID(),
       ...input,
       createdAt: new Date().toISOString(),
     };
-    this.#db
+    this.db
       .prepare(
         `INSERT INTO memory_write_events
           (id, memory_id, history_id, session_id, decision, policy_reason,
@@ -3787,15 +3787,15 @@ export class NmgStore {
     return event;
   }
 
-  #requireConsolidationEvent(id: string): ConsolidationEvent {
-    const row = this.#db.prepare("SELECT * FROM consolidation_events WHERE id = ?").get(id) as
+  protected requireConsolidationEvent(id: string): ConsolidationEvent {
+    const row = this.db.prepare("SELECT * FROM consolidation_events WHERE id = ?").get(id) as
       Row | undefined;
     if (!row) throw new Error(`consolidation event ${id} does not exist`);
     return mapConsolidationEvent(row);
   }
 
-  #consolidationCoolingDown(targetId: string, cooldownMs: number): boolean {
-    const row = this.#db
+  protected consolidationCoolingDown(targetId: string, cooldownMs: number): boolean {
+    const row = this.db
       .prepare(
         `SELECT created_at FROM consolidation_events
          WHERE target_id = ? ORDER BY created_at DESC LIMIT 1`,
@@ -3804,31 +3804,31 @@ export class NmgStore {
     return Boolean(row) && Date.now() - Date.parse(String(row!.created_at)) < cooldownMs;
   }
 
-  #requireHistory(historyId: string): HistoryRecord {
-    const row = this.#db.prepare("SELECT * FROM history_records WHERE id = ?").get(historyId) as
+  protected requireHistory(historyId: string): HistoryRecord {
+    const row = this.db.prepare("SELECT * FROM history_records WHERE id = ?").get(historyId) as
       Row | undefined;
     if (!row) throw new Error(`history ${historyId} does not exist`);
     return mapHistory(row);
   }
 
-  #upsertFts(memoryId: string, statement: string, nodeId: string, evidenceId: string): void {
-    const node = this.#requireNode(nodeId);
-    const evidence = this.#requireHistory(evidenceId);
-    this.#db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
-    this.#db
+  protected upsertFts(memoryId: string, statement: string, nodeId: string, evidenceId: string): void {
+    const node = this.requireNode(nodeId);
+    const evidence = this.requireHistory(evidenceId);
+    this.db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
+    this.db
       .prepare(
         "INSERT INTO memory_fts(memory_id, statement, node_name, evidence) VALUES (?, ?, ?, ?)",
       )
       .run(memoryId, statement, node.canonicalName, evidence.content);
-    this.#db
+    this.db
       .prepare("INSERT OR IGNORE INTO memory_fts_registry(memory_id) VALUES (?)")
       .run(memoryId);
   }
 
-  #ftsCandidates(query: string, limit: number): string[] {
+  protected ftsCandidates(query: string, limit: number): string[] {
     const expression = ftsExpression(query);
     if (!expression) return [];
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         "SELECT memory_id FROM memory_fts WHERE memory_fts MATCH ? ORDER BY bm25(memory_fts) LIMIT ?",
       )
@@ -3836,10 +3836,10 @@ export class NmgStore {
     return rows.map((row) => String(row.memory_id));
   }
 
-  #ftsCandidatesInNodes(query: string, nodeIds: string[], limit: number): string[] {
+  protected ftsCandidatesInNodes(query: string, nodeIds: string[], limit: number): string[] {
     const expression = ftsExpression(query);
     if (!expression || nodeIds.length === 0) return [];
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT f.memory_id FROM memory_fts f
        JOIN memory_records m ON m.id = f.memory_id
@@ -3850,21 +3850,21 @@ export class NmgStore {
     return rows.map((row) => String(row.memory_id));
   }
 
-  #requireNode(nodeId: string): MemoryNode {
-    const row = this.#db.prepare("SELECT * FROM memory_nodes WHERE id = ?").get(nodeId) as
+  protected requireNode(nodeId: string): MemoryNode {
+    const row = this.db.prepare("SELECT * FROM memory_nodes WHERE id = ?").get(nodeId) as
       Row | undefined;
     if (!row) throw new Error(`node ${nodeId} does not exist`);
     return mapNode(row);
   }
 
-  #resolveActiveNodeName(canonicalName: string): string {
-    const row = this.#db
+  protected resolveActiveNodeName(canonicalName: string): string {
+    const row = this.db
       .prepare("SELECT * FROM memory_nodes WHERE canonical_name = ?")
       .get(canonicalName) as Row | undefined;
     if (!row) return canonicalName;
     const node = mapNode(row);
     if (node.status === "active") return node.canonicalName;
-    const targets = this.#db
+    const targets = this.db
       .prepare(
         `SELECT DISTINCT n.canonical_name FROM node_redirects r
        JOIN memory_nodes n ON n.id = r.target_node_id
@@ -3878,9 +3878,9 @@ export class NmgStore {
     return canonicalName;
   }
 
-  #resolveStateKey(requestedKey: string, scope: MemoryScope, node: MemoryNode): string {
+  protected resolveStateKey(requestedKey: string, scope: MemoryScope, node: MemoryNode): string {
     const scopeJson = serializeScope(scope);
-    const alias = this.#db
+    const alias = this.db
       .prepare(
         `SELECT canonical_key FROM state_key_aliases
        WHERE alias_key = ? AND scope_json = ?`,
@@ -3888,7 +3888,7 @@ export class NmgStore {
       .get(requestedKey, scopeJson) as Row | undefined;
     if (alias) return String(alias.canonical_key);
 
-    const exact = this.#db
+    const exact = this.db
       .prepare(
         `SELECT state_key FROM memory_records
        WHERE memory_type = 'state' AND state_key = ? AND scope_json = ?
@@ -3897,7 +3897,7 @@ export class NmgStore {
       .get(requestedKey, scopeJson) as Row | undefined;
     if (exact) return requestedKey;
 
-    const candidates = this.#db
+    const candidates = this.db
       .prepare(
         `SELECT m.state_key, n.canonical_name
        FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id
@@ -3919,8 +3919,8 @@ export class NmgStore {
         return {
           key: String(candidate.state_key),
           score: cosineSimilarity(
-            this.#embedder.embed(requestedIdentity),
-            this.#embedder.embed(identity),
+            this.embedder.embed(requestedIdentity),
+            this.embedder.embed(identity),
           ),
           overlap,
         };
@@ -3930,7 +3930,7 @@ export class NmgStore {
     if (matches.length === 0) return requestedKey;
 
     const canonicalKey = matches[0]!.key;
-    this.#db
+    this.db
       .prepare(
         `INSERT OR REPLACE INTO state_key_aliases
         (alias_key, scope_json, canonical_key, created_at)
@@ -3940,12 +3940,12 @@ export class NmgStore {
     return canonicalKey;
   }
 
-  #memoryIdsForNodes(nodeIds: string[]): string[] {
-    const select = this.#db.prepare("SELECT id FROM memory_records WHERE node_id = ?");
+  protected memoryIdsForNodes(nodeIds: string[]): string[] {
+    const select = this.db.prepare("SELECT id FROM memory_records WHERE node_id = ?");
     return nodeIds.flatMap((nodeId) => (select.all(nodeId) as Row[]).map((row) => String(row.id)));
   }
 
-  #createTransform(
+  protected createTransform(
     type: NodeTransform["type"],
     sourceNodeIds: string[],
     targetNodeIds: string[],
@@ -3959,7 +3959,7 @@ export class NmgStore {
       movedMemoryIds,
       createdAt: new Date().toISOString(),
     };
-    this.#db
+    this.db
       .prepare(
         `INSERT INTO node_transforms
         (id, transform_type, source_node_ids_json, target_node_ids_json,
@@ -3977,14 +3977,14 @@ export class NmgStore {
     return transform;
   }
 
-  #redirectRelations(sourceNodeId: string, targetNodeId: string): void {
-    const rows = this.#db
+  protected redirectRelations(sourceNodeId: string, targetNodeId: string): void {
+    const rows = this.db
       .prepare(
         `SELECT * FROM node_relations
        WHERE source_node_id = ? OR target_node_id = ?`,
       )
       .all(sourceNodeId, sourceNodeId) as Row[];
-    const remove = this.#db.prepare("DELETE FROM node_relations WHERE id = ?");
+    const remove = this.db.prepare("DELETE FROM node_relations WHERE id = ?");
     for (const row of rows) {
       const relation = mapRelation(row);
       remove.run(relation.id);
@@ -4003,14 +4003,14 @@ export class NmgStore {
     }
   }
 
-  #memoryText(memory: Pick<MemoryRecord, "statement">, nodeId: string): string {
-    const node = this.#requireNode(nodeId);
+  protected memoryText(memory: Pick<MemoryRecord, "statement">, nodeId: string): string {
+    const node = this.requireNode(nodeId);
     return memoryEmbeddingText(memory.statement, node.canonicalName);
   }
 
-  #upsertEmbedding(memoryId: string, text: string): void {
-    const vector = this.#embedder.embed(text);
-    this.#db
+  protected upsertEmbedding(memoryId: string, text: string): void {
+    const vector = this.embedder.embed(text);
+    this.db
       .prepare(
         `INSERT INTO memory_embeddings
         (memory_id, model, dimensions, vector_json, vector_blob, updated_at)
@@ -4022,31 +4022,31 @@ export class NmgStore {
       )
       .run(
         memoryId,
-        this.#embedder.model,
-        this.#embedder.dimensions,
+        this.embedder.model,
+        this.embedder.dimensions,
         JSON.stringify(vector),
         encodeVector(vector),
         new Date().toISOString(),
       );
   }
 
-  #refreshEmbeddings(memoryIds: string[]): void {
-    const select = this.#db.prepare(
+  protected refreshEmbeddings(memoryIds: string[]): void {
+    const select = this.db.prepare(
       `SELECT m.id, m.statement, m.node_id, n.canonical_name, n.summary
        FROM memory_records m JOIN memory_nodes n ON n.id = m.node_id WHERE m.id = ?`,
     );
     for (const memoryId of memoryIds) {
       const row = select.get(memoryId) as Row | undefined;
       if (row)
-        this.#upsertEmbedding(memoryId, memoryEmbeddingText(row.statement, row.canonical_name));
+        this.upsertEmbedding(memoryId, memoryEmbeddingText(row.statement, row.canonical_name));
     }
   }
 
-  #nodeIdsForMemories(memoryIds: readonly string[]): string[] {
+  protected nodeIdsForMemories(memoryIds: readonly string[]): string[] {
     const ids = [...new Set(memoryIds)];
     if (ids.length === 0) return [];
     return (
-      this.#db
+      this.db
         .prepare(
           `SELECT DISTINCT node_id FROM memory_records
        WHERE id IN (${ids.map(() => "?").join(",")})`,
@@ -4055,8 +4055,8 @@ export class NmgStore {
     ).map((row) => String(row.node_id));
   }
 
-  #proposalCoolingDown(proposalKey: string, cooldownMs: number): boolean {
-    const row = this.#db
+  protected proposalCoolingDown(proposalKey: string, cooldownMs: number): boolean {
+    const row = this.db
       .prepare(
         `SELECT created_at FROM topology_proposals
        WHERE proposal_key = ? ORDER BY created_at DESC LIMIT 1`,
@@ -4065,8 +4065,8 @@ export class NmgStore {
     return Boolean(row) && Date.now() - Date.parse(String(row!.created_at)) < cooldownMs;
   }
 
-  #candidatePartitions(nodeId: string): Array<{ label: string; memoryIds: string[] }> {
-    const rows = this.#db
+  protected candidatePartitions(nodeId: string): Array<{ label: string; memoryIds: string[] }> {
+    const rows = this.db
       .prepare(
         `SELECT id, memory_type, scope_json FROM memory_records
        WHERE node_id = ?
@@ -4083,7 +4083,7 @@ export class NmgStore {
     return [...groups].map(([label, memoryIds]) => ({ label, memoryIds }));
   }
 
-  #insertTopologyProposal(
+  protected insertTopologyProposal(
     proposal: Omit<TopologyProposal, "createdAt" | "id" | "status">,
   ): TopologyProposal {
     const result: TopologyProposal = {
@@ -4092,7 +4092,7 @@ export class NmgStore {
       status: "pending",
       createdAt: new Date().toISOString(),
     };
-    this.#db
+    this.db
       .prepare(
         `INSERT INTO topology_proposals
         (id, proposal_key, proposal_type, source_node_ids_json, relation_type,
@@ -4116,13 +4116,13 @@ export class NmgStore {
     return result;
   }
 
-  #embeddingCache(kind: "leaf" | "node", model: string): Float32VectorCache | null {
+  protected embeddingCache(kind: "leaf" | "node", model: string): Float32VectorCache | null {
     const key = `${kind}:${model}`;
-    const existing = this.#vectorCaches.get(key);
+    const existing = this.vectorCaches.get(key);
     if (existing) return existing;
     const table = kind === "node" ? "node_embeddings" : "leaf_embeddings";
     const idColumn = kind === "node" ? "node_id" : "block_id";
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT ${idColumn} AS id, dimensions, vector_blob, vector_json
        FROM ${table} WHERE model = ? ORDER BY ${idColumn}`,
@@ -4132,32 +4132,32 @@ export class NmgStore {
     const dimensions = Number(rows[0]!.dimensions);
     const cache = new Float32VectorCache(dimensions, rows.length);
     for (const row of rows) cache.upsert(String(row.id), storedVector(row));
-    this.#vectorCaches.set(key, cache);
+    this.vectorCaches.set(key, cache);
     return cache;
   }
 
-  #updateVectorCache(
+  protected updateVectorCache(
     kind: "leaf" | "node",
     model: string,
     id: string,
     vector: readonly number[],
   ): void {
-    this.#vectorCaches.get(`${kind}:${model}`)?.upsert(id, vector);
+    this.vectorCaches.get(`${kind}:${model}`)?.upsert(id, vector);
   }
 
-  #invalidateVectorCaches(kind: "leaf" | "node"): void {
-    for (const key of this.#vectorCaches.keys()) {
-      if (key.startsWith(`${kind}:`)) this.#vectorCaches.delete(key);
+  protected invalidateVectorCaches(kind: "leaf" | "node"): void {
+    for (const key of this.vectorCaches.keys()) {
+      if (key.startsWith(`${kind}:`)) this.vectorCaches.delete(key);
     }
   }
 
-  #markIndexDelta(
+  protected markIndexDelta(
     memoryId: string,
     nodeId: string,
     operation: "move" | "upsert",
     createdAt = new Date().toISOString(),
   ): void {
-    this.#db
+    this.db
       .prepare(
         `INSERT INTO memory_index_delta
         (memory_id, node_id, operation, compacted, created_at)
@@ -4167,7 +4167,7 @@ export class NmgStore {
          created_at = excluded.created_at`,
       )
       .run(memoryId, nodeId, operation, createdAt);
-    this.#db
+    this.db
       .prepare(
         `INSERT INTO leaf_block_status (node_id, dirty, updated_at) VALUES (?, 1, ?)
        ON CONFLICT(node_id) DO UPDATE SET dirty = 1, updated_at = excluded.updated_at`,
@@ -4175,9 +4175,9 @@ export class NmgStore {
       .run(nodeId, createdAt);
   }
 
-  #evidenceIds(memoryId: string): string[] {
+  protected evidenceIds(memoryId: string): string[] {
     return (
-      this.#db
+      this.db
         .prepare(
           `SELECT history_id FROM memory_evidence_links
          WHERE memory_id = ? ORDER BY history_id`,
@@ -4186,14 +4186,14 @@ export class NmgStore {
     ).map((row) => String(row.history_id));
   }
 
-  #resultsForNode(
+  protected resultsForNode(
     nodeId: string,
     maxTier: MemoryTier,
     limit: number,
     memoryId?: string,
     sourceActor?: MemoryActor,
   ): MemorySearchResult[] {
-    const rows = this.#db
+    const rows = this.db
       .prepare(
         `SELECT
          m.id AS m_id, m.node_id AS m_node_id,
@@ -4249,14 +4249,14 @@ export class NmgStore {
       ) as Row[];
     return rows.map((row) => {
       const result = mapSearchResult(row, 0);
-      result.memory.evidenceIds = this.#evidenceIds(result.memory.id);
-      result.evidenceRecords = this.#evidenceRecords(result.memory.evidenceIds);
+      result.memory.evidenceIds = this.evidenceIds(result.memory.id);
+      result.evidenceRecords = this.evidenceRecords(result.memory.evidenceIds);
       return result;
     });
   }
 
-  #evidenceRecords(ids: string[]): HistoryRecord[] {
-    const statement = this.#db.prepare("SELECT * FROM history_records WHERE id = ?");
+  protected evidenceRecords(ids: string[]): HistoryRecord[] {
+    const statement = this.db.prepare("SELECT * FROM history_records WHERE id = ?");
     return ids.flatMap((id) => {
       const row = statement.get(id) as Row | undefined;
       return row ? [mapHistory(row)] : [];
