@@ -810,6 +810,13 @@ export class NmgStore {
   ): MemoryRecord {
     const memory = this.#requireActiveMemory(memoryId);
     if (memory.residence === "ltg") return memory;
+    // Loop guard (docs/stg-isolated-store.md §3): a cached_from_ltg memory is
+    // already LTG content — promoting it would create a copy cycle. Refuse.
+    if (memory.markers.some((marker) => marker.kind === "cached_from_ltg")) {
+      throw new Error(
+        `memory ${memoryId} is cached_from_ltg and cannot be promoted (already LTG content)`,
+      );
+    }
     const now = new Date().toISOString();
     this.#db.exec("BEGIN IMMEDIATE");
     try {
