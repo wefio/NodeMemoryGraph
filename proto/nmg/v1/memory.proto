@@ -15,6 +15,8 @@ service MemoryService {
   rpc DeleteMemory(DeleteMemoryRequest) returns (ValueResponse);
   rpc MergeNodes(MergeNodesRequest) returns (ValueResponse);
   rpc SplitNode(SplitNodeRequest) returns (ValueResponse);
+  rpc PerfAggregates(Empty) returns (ValueResponse);
+  rpc PruneRetrievalTraces(PruneRetrievalTracesRequest) returns (ValueResponse);
   rpc Shutdown(Empty) returns (ValueResponse);
 }
 
@@ -101,4 +103,9 @@ message SplitPartition {
 message SplitNodeRequest {
   string source_node_id = 1;
   repeated SplitPartition partitions = 2;
+}
+
+message PruneRetrievalTracesRequest {
+  optional uint32 max_days = 1;
+  optional uint32 max_rows = 2;
 }

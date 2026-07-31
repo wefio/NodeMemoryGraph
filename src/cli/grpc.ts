@@ -75,6 +75,8 @@ export async function serveGrpc(service: NmgService, lease: ServerLease): Promis
         "deleteMemory",
         "mergeNodes",
         "splitNode",
+        "perfAggregates",
+        "pruneRetrievalTraces",
         "shutdown",
       ] as const
     ).map((method) => [

@@ -183,9 +183,8 @@ test("perf defaults on unless disabled; perf:false opt-out verified", () => {
 });
 
 test("perf flag survives the gRPC daemon round-trip", async () => {
-  const { connectDaemon, invokeDaemon, shutdownOwnedDaemon } = await import(
-    "../../src/cli/daemon-client.ts"
-  );
+  const { connectDaemon, invokeDaemon, shutdownOwnedDaemon } =
+    await import("../../src/cli/daemon-client.ts");
   const directory = mkdtempSync(join(tmpdir(), "nmg-perf-grpc-"));
   const connection = await connectDaemon(join(directory, "nmg.sqlite"));
   try {
@@ -218,8 +217,14 @@ test("histogram quantiles approximate known distributions", () => {
   // All values identical → every quantile equals that value.
   let buckets: number[] = [];
   for (let index = 0; index < 100; index += 1) buckets = histogramAdd(buckets, 5);
-  assert.ok(Math.abs(histogramQuantile(buckets, 0.5) - 5) < 1, `p50≈5 (${histogramQuantile(buckets, 0.5)})`);
-  assert.ok(Math.abs(histogramQuantile(buckets, 0.95) - 5) < 1, `p95≈5 (${histogramQuantile(buckets, 0.95)})`);
+  assert.ok(
+    Math.abs(histogramQuantile(buckets, 0.5) - 5) < 1,
+    `p50≈5 (${histogramQuantile(buckets, 0.5)})`,
+  );
+  assert.ok(
+    Math.abs(histogramQuantile(buckets, 0.95) - 5) < 1,
+    `p95≈5 (${histogramQuantile(buckets, 0.95)})`,
+  );
 
   // Mixed 1ms/10ms values → p50 near 1, p95 near 10.
   let mixed: number[] = [];
@@ -426,6 +431,45 @@ test("existing database gains timings_json via migration", () => {
       store.close();
     }
   } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("perf maintenance commands reach the gRPC daemon end to end", async () => {
+  const { connectDaemon, invokeDaemon, shutdownOwnedDaemon } =
+    await import("../../src/cli/daemon-client.ts");
+  const directory = mkdtempSync(join(tmpdir(), "nmg-perf-grpc-maint-"));
+  const connection = await connectDaemon(join(directory, "nmg.sqlite"));
+  try {
+    // A search leaves a trace row; perfAggregates must surface it through
+    // the daemon (regression: the RPC was missing from the proto, so the
+    // client stub did not exist and the command reported unavailable).
+    await invokeDaemon(connection, "remember", {
+      statement: "perf maintenance probe",
+      nodeName: "grpc-maint",
+    });
+    const searched = (await invokeDaemon(connection, "search", {
+      query: "perf maintenance",
+    })) as { activeGraph?: { id: string } };
+    assert.ok(searched.activeGraph?.id, "search produced a trace");
+
+    // Arrays cross the Struct wire wrapped in { value: [...] }.
+    const wrapped = (await invokeDaemon(connection, "perfAggregates")) as {
+      value: Array<{ section: string; count: number; buckets: number[] }>;
+    };
+    const aggregates = Array.isArray(wrapped) ? wrapped : wrapped.value;
+    assert.ok(Array.isArray(aggregates), "perfAggregates RPC resolves");
+    assert.ok(
+      aggregates.some((entry) => entry.section === "search.direct" && entry.count >= 1),
+      `aggregates include search.direct (${aggregates.map((a) => a.section).join(", ")})`,
+    );
+
+    const pruned = (await invokeDaemon(connection, "pruneRetrievalTraces", {
+      maxRows: 1_000_000,
+    })) as { pruned: number };
+    assert.equal(typeof pruned.pruned, "number", "pruneRetrievalTraces RPC resolves");
+  } finally {
+    await shutdownOwnedDaemon(connection);
     rmSync(directory, { recursive: true, force: true });
   }
 });
