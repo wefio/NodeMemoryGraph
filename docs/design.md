@@ -25,6 +25,13 @@ virtual memory space presented to one model session. Agents never write a
 shared AG or STG: collaboration occurs only through admitted LTG memories and
 their provenance.
 
+> **Standalone reference:** the STG/LTG/AG model, its theoretical lineage
+> (Atkinson–Shiffrin 1968, Complementary Learning Systems 1995, ACT-R/SOAR,
+> MemGPT/Letta), provisional-memory rules, promotion/demotion thresholds, and
+> implementation state are consolidated in
+> [memory-graphs.md](memory-graphs.md). design.md keeps the normative model;
+> details moved to the standalone document.
+
 The primary integration target is the Pi agent harness. Pi owns the model loop,
 session lifecycle, tools, and UI. NMG owns durable memory, provenance, retrieval,
 and memory-maintenance policy. NMG is not an agent harness, a sandbox, or a cloud
@@ -416,6 +423,10 @@ path. Their atomic content can be durable without committing speculative graph
 structure. Relations inferred from co-occurrence, reasoning, or one task remain
 in STG as observations or candidates until consolidation criteria are met.
 
+> The provisional-memory rules, isolation requirements, STG-vs-Delta
+> distinction, and promotion/demotion thresholds are consolidated in
+> [memory-graphs.md](memory-graphs.md) §3–§6.
+
 STG records and isolated/provisional nodes must participate in global FTS,
 exact, recency, and optional vector search. Graph traversal is a candidate
 expansion mechanism, never the only retrieval entry point. STG entries may be
@@ -445,6 +456,11 @@ must remain acyclic. Each query may materialize a bounded, visited-set-protected
 local expansion DAG even when the persistent semantic graph contains cycles.
 
 ## 7. Active Graph, activation, stability, and consolidation
+
+> AG construction rules moved to [memory-graphs.md](memory-graphs.md) §5;
+> activation rules are designed in [edge-activation-design.md](edge-activation-design.md);
+> the tiered disclosure gate is designed in [tiered-disclosure-design.md](tiered-disclosure-design.md).
+> This section keeps the normative activation/stability model.
 
 ### 7.1 Active Graph construction
 
