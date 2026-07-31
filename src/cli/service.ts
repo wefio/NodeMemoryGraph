@@ -119,6 +119,12 @@ export class NmgService {
         return {
           candidates: this.#getStore().retentionCandidates(parseRetentionCandidatesParams(params)),
         } as NmgMethodResult[M];
+      case "perfAggregates":
+        return this.#getStore().perfAggregates() as NmgMethodResult[M];
+      case "pruneRetrievalTraces":
+        return {
+          pruned: this.#getStore().pruneRetrievalTraces(parsePerfPruneParams(params)),
+        } as NmgMethodResult[M];
       case "setStorageState": {
         const parsed = parseSetStorageStateParams(params);
         return {
@@ -300,6 +306,14 @@ function parseSearchParams(value: unknown): NmgSearchParams {
     vectorGranularity: optionalEnum(params, "vectorGranularity", VECTOR_GRANULARITIES),
     secondPass: optionalBoolean(params, "secondPass"),
     perf: optionalBoolean(params, "perf"),
+  };
+}
+
+function parsePerfPruneParams(value: unknown): { maxDays?: number; maxRows?: number } {
+  const params = objectParams(value);
+  return {
+    maxDays: optionalInteger(params, "maxDays", 1, 3650),
+    maxRows: optionalInteger(params, "maxRows", 100, 1_000_000),
   };
 }
 

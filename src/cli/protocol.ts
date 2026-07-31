@@ -9,6 +9,7 @@ import type {
   MemoryTier,
   MemoryType,
   NodeTransform,
+  PerfAggregate,
   RememberResult,
   RetentionCandidate,
   TruthStatus,
@@ -37,6 +38,8 @@ export const NMG_CAPABILITIES = [
 export type NmgMethod =
   | "get"
   | "hello"
+  | "perfAggregates"
+  | "pruneRetrievalTraces"
   | "remember"
   | "search"
   | "retentionCandidates"
@@ -124,6 +127,13 @@ export interface NmgRetentionCandidatesParams {
   maximumAccessCount?: number;
 }
 
+export interface NmgPerfParams {
+  /** Prune raw traces beyond the retention window. */
+  action?: "aggregates" | "prune";
+  maxDays?: number;
+  maxRows?: number;
+}
+
 export interface NmgSetStorageStateParams {
   memoryId: string;
   storageState: MemoryStorageState;
@@ -159,6 +169,8 @@ export type NmgMethodResult = {
   get: MemoryContext & { missingMemoryIds: string[] };
   retentionCandidates: { candidates: RetentionCandidate[] };
   setStorageState: { memoryId: string; storageState: MemoryStorageState };
+  perfAggregates: PerfAggregate[];
+  pruneRetrievalTraces: { pruned: number };
   deleteMemory: { deleted: boolean; memory: MemoryRecord | null };
   mergeNodes: NodeTransform;
   splitNode: NodeTransform;

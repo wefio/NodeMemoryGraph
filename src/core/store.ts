@@ -45,6 +45,8 @@ import type {
   RetentionCandidate,
   RetentionPolicy,
   QppTriggerDecision,
+  PerfAggregate,
+  PerfSnapshot,
   RebalanceResult,
   RetrievalTraceInput,
   RetrievalTrace,
@@ -56,12 +58,12 @@ import type {
   VectorEmbedder,
 } from "./types.ts";
 import { blockTiers, huffmanDepths } from "./hierarchy.ts";
-import { nowMs, PerfTimer, SECTION } from "./perf.ts";
+import { nowMs, histogramAdd, PerfTimer, SECTION } from "./perf.ts";
 import { Router } from "./router.ts";
 import { cosineSimilarity, HashingVectorEmbedder } from "./vector.ts";
 import { Float32VectorCache } from "./vector-cache.ts";
 import { migrate } from "./store/schema.ts";
-import { parseStringArray } from "./store/row-parse.ts";
+import { parseNumberArray, parseStringArray } from "./store/row-parse.ts";
 import { encodeVector, parseVector, storedVector } from "./store/vector-codec.ts";
 import {
   beginEmbeddingIndex,
@@ -1746,6 +1748,7 @@ export class NmgStore {
       this.#db
         .prepare("UPDATE retrieval_traces SET timings_json = ? WHERE id = ?")
         .run(JSON.stringify(snapshot), traceId);
+      this.#recordPerfAggregates(snapshot);
     }
     const activeGraph: ActiveGraph = {
       id: traceId,
@@ -1931,6 +1934,108 @@ export class NmgStore {
       this.#db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  /**
+   * Welford online update of long-term per-section aggregates. Runs with the
+   * final snapshot (post-trace, post-total) so aggregates include the trace
+   * span and total. Aggregates are never pruned with raw rows.
+   */
+  #recordPerfAggregates(timings: PerfSnapshot | undefined): void {
+    if (!timings) return;
+    const createdAt = new Date().toISOString();
+    const read = this.#db.prepare(
+      `SELECT buckets_json FROM perf_aggregates WHERE section = ?`,
+    );
+    const upsert = this.#db.prepare(
+      `INSERT INTO perf_aggregates (section, count, sum, sum_sq, buckets_json, updated_at)
+       VALUES (?, 1, ?, ?, ?, ?)
+       ON CONFLICT(section) DO UPDATE SET
+         count = count + 1,
+         sum = sum + excluded.sum,
+         sum_sq = sum_sq + excluded.sum_sq,
+         buckets_json = excluded.buckets_json,
+         updated_at = excluded.updated_at`,
+    );
+    for (const [section, ms] of Object.entries(timings.timings)) {
+      const previous = read.get(section) as Row | undefined;
+      const buckets = histogramAdd(parseNumberArray(previous?.buckets_json ?? null), ms);
+      upsert.run(section, ms, ms * ms, JSON.stringify(buckets), createdAt);
+    }
+    if (timings.totalMs > 0) {
+      const previous = read.get("total") as Row | undefined;
+      const buckets = histogramAdd(
+        parseNumberArray(previous?.buckets_json ?? null),
+        timings.totalMs,
+      );
+      upsert.run(
+        "total",
+        timings.totalMs,
+        timings.totalMs ** 2,
+        JSON.stringify(buckets),
+        createdAt,
+      );
+    }
+  }
+
+  /** Long-term per-section aggregates (never pruned). */
+  perfAggregates(): PerfAggregate[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT section, count, sum, sum_sq, buckets_json, updated_at
+         FROM perf_aggregates ORDER BY section`,
+      )
+      .all() as Row[];
+    return rows.map((row) => ({
+      section: String(row.section),
+      count: Number(row.count),
+      sum: Number(row.sum),
+      sumSq: Number(row.sum_sq),
+      buckets: parseNumberArray(row.buckets_json),
+      updatedAt: String(row.updated_at),
+    }));
+  }
+
+  /** Number of raw retrieval traces (for pruning window checks/tests). */
+  retrievalTracesCount(): number {
+    const row = this.#db
+      .prepare(`SELECT COUNT(*) AS n FROM retrieval_traces`)
+      .get() as Row;
+    return Number(row.n);
+  }
+
+  /**
+   * Prune raw retrieval traces beyond the retention window. The window is
+   * defined by age (default 30 days) and row count (default 10 000) — the
+   * larger of the two bounds wins, whichever is breached first. Aggregates
+   * are never touched: perf_aggregates survives pruning by design.
+   *
+   * Runs as a maintenance action (retention lifecycle), never automatically
+   * per-query, matching the repo's "explicit maintenance, no background
+   * scheduler" discipline.
+   */
+  pruneRetrievalTraces(options: { maxDays?: number; maxRows?: number } = {}): number {
+    const maxDays = options.maxDays ?? 30;
+    const maxRows = options.maxRows ?? 10_000;
+    const cutoff = new Date(Date.now() - maxDays * 86_400_000).toISOString();
+    // One atomic statement: delete rows older than the window OR beyond the
+    // row-count ceiling (keep the newest maxRows). A LIMIT caps a single call
+    // so a huge backlog is drained across maintenance runs, not one shot.
+    const deleted = this.#db
+      .prepare(
+        `DELETE FROM retrieval_traces
+         WHERE id IN (
+           SELECT id FROM retrieval_traces
+           WHERE created_at < ?
+              OR id NOT IN (
+                SELECT id FROM retrieval_traces
+                ORDER BY created_at DESC LIMIT ?
+              )
+           LIMIT 5000
+         )`,
+      )
+      .run(cutoff, maxRows);
+    return Number(deleted.changes);
   }
 
   retrievalTrace(id: string): RetrievalTrace | null {

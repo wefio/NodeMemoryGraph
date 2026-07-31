@@ -11,6 +11,18 @@ connect, safe stop on exit, reuse if already running).
 
 Requirements: Node.js ≥ 22.19, `npm install` run in the project.
 
+## Performance feedback (off by default)
+
+Set `NMG_AGENT_PERF=1` to make `nmg_search` append a compact per-phase timing
+line (`[perf search.direct=..ms relations=..ms total=..ms]`) to its result.
+The agent can use it for self-maintenance — e.g. a slow `search.direct` scan
+on a large store suggests pruning or merging low-tier nodes. The switch is
+per MCP server process: shared daemons keep their own timing behavior.
+
+```bash
+NMG_AGENT_PERF=1 node --experimental-strip-types claude-plugins/nmg-memory/agents/memory-copilot.ts
+```
+
 ## Adding to any MCP client
 
 Register the server as a stdio transport:

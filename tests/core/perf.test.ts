@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { PerfTimer } from "../../src/core/perf.ts";
+import { histogramAdd, histogramQuantile, PerfTimer } from "../../src/core/perf.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder } from "../../src/core/vector.ts";
 
@@ -166,6 +166,122 @@ test("search results preserve the original writeReason instead of legacy_write",
       [...viaSearch, ...viaContext.results].some((result) => result.memory.id === saved.memory.id),
       "saved memory reachable through both paths",
     );
+  });
+});
+
+test("perf defaults on unless disabled; perf:false opt-out verified", () => {
+  withStore((store) => {
+    store.remember({ statement: "Default perf.", nodeName: "perf-default" });
+    // Default (no option) → timings present.
+    const context = store.searchContext("perf-default");
+    assert.ok(context.timings, "default searchContext carries timings");
+    // Explicit opt-out → none, and sections absent from the response.
+    const bare = store.searchContext("perf-default", { perf: false });
+    assert.equal(bare.timings, undefined);
+  });
+});
+
+test("perf flag survives the gRPC daemon round-trip", async () => {
+  const { connectDaemon, invokeDaemon, shutdownOwnedDaemon } = await import(
+    "../../src/cli/daemon-client.ts"
+  );
+  const directory = mkdtempSync(join(tmpdir(), "nmg-perf-grpc-"));
+  const connection = await connectDaemon(join(directory, "nmg.sqlite"));
+  try {
+    const remembered = (await invokeDaemon(connection, "remember", {
+      statement: "gRPC perf probe",
+      nodeName: "grpc-perf",
+    })) as { memory: { id: string } };
+    assert.ok(remembered.memory.id);
+    // Core timing is default-on (trace persistence); the wire-level contract
+    // is that perf:false disables it end to end.
+    const explicitOff = (await invokeDaemon(connection, "search", {
+      query: "gRPC perf probe",
+      perf: false,
+    })) as { timings?: unknown };
+    assert.equal(explicitOff.timings, undefined, "perf:false disables timings through gRPC");
+    const on = (await invokeDaemon(connection, "search", {
+      query: "gRPC perf probe",
+      perf: true,
+    })) as { timings?: { totalMs: number; timings: Record<string, number> } };
+    assert.ok(on.timings, "perf:true returns timings through gRPC");
+    assert.ok(on.timings!.totalMs >= 0);
+    assert.ok(on.timings!.timings["search.direct"] >= 0);
+  } finally {
+    await shutdownOwnedDaemon(connection);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("histogram quantiles approximate known distributions", () => {
+  // All values identical → every quantile equals that value.
+  let buckets: number[] = [];
+  for (let index = 0; index < 100; index += 1) buckets = histogramAdd(buckets, 5);
+  assert.ok(Math.abs(histogramQuantile(buckets, 0.5) - 5) < 1, `p50≈5 (${histogramQuantile(buckets, 0.5)})`);
+  assert.ok(Math.abs(histogramQuantile(buckets, 0.95) - 5) < 1, `p95≈5 (${histogramQuantile(buckets, 0.95)})`);
+
+  // Mixed 1ms/10ms values → p50 near 1, p95 near 10.
+  let mixed: number[] = [];
+  for (let index = 0; index < 90; index += 1) mixed = histogramAdd(mixed, 1);
+  for (let index = 0; index < 10; index += 1) mixed = histogramAdd(mixed, 10);
+  const p50 = histogramQuantile(mixed, 0.5);
+  const p95 = histogramQuantile(mixed, 0.95);
+  assert.ok(p50 < 3, `p50 near low mass (${p50})`);
+  assert.ok(p95 > 5, `p95 near high mass (${p95})`);
+
+  // Empty → 0.
+  assert.equal(histogramQuantile([], 0.5), 0);
+});
+
+test("perfAggregates accumulates Welford statistics and survives pruning", () => {
+  withStore((store) => {
+    store.remember({ statement: "Aggregate probe.", nodeName: "agg-probe" });
+    for (let index = 0; index < 5; index += 1) {
+      store.searchContext(`agg probe ${index}`, { secondPass: true });
+    }
+    const aggregates = store.perfAggregates();
+    const sections = new Set(aggregates.map((entry) => entry.section));
+    assert.ok(sections.has("search.direct"), "direct section aggregated");
+    assert.ok(sections.has("total"), "total aggregated");
+    const total = aggregates.find((entry) => entry.section === "total")!;
+    assert.equal(total.count, 5);
+    assert.ok(total.sum > 0);
+    assert.ok(total.buckets.length > 0, "histogram buckets captured");
+    const sumBuckets = total.buckets.reduce((sum, count) => sum + count, 0);
+    assert.equal(sumBuckets, 5, "histogram bucket counts match sample count");
+    // Welford variance must be non-negative.
+    const variance =
+      total.count > 1
+        ? (total.sumSq - (total.sum * total.sum) / total.count) / (total.count - 1)
+        : 0;
+    assert.ok(variance >= -1e-9, `variance non-negative (${variance})`);
+
+    // Prune everything; aggregates must survive (long-term statistics outlive
+    // the raw-trace window by design).
+    store.pruneRetrievalTraces({ maxDays: 0, maxRows: 1 });
+    const after = store.perfAggregates();
+    const totalAfter = after.find((entry) => entry.section === "total")!;
+    assert.equal(totalAfter.count, 5, "aggregates survive raw-trace pruning");
+  });
+});
+
+test("pruneRetrievalTraces enforces age and row-count windows", () => {
+  withStore((store) => {
+    store.remember({ statement: "Prune probe.", nodeName: "prune-probe" });
+    for (let index = 0; index < 10; index += 1) {
+      store.searchContext(`prune probe ${index}`);
+    }
+    // Row-count ceiling: keep the newest 3.
+    const prunedByCount = store.pruneRetrievalTraces({ maxDays: 3650, maxRows: 3 });
+    assert.ok(prunedByCount >= 7, `pruned by count (${prunedByCount})`);
+    const remaining = store.retrievalTracesCount();
+    assert.ok(remaining <= 3, `at most maxRows remain (${remaining})`);
+
+    // Age window: insert a fresh trace (now), then prune with maxDays 0 —
+    // the fresh row is younger than any window, so only older rows go.
+    const beforeAgePrune = store.retrievalTracesCount();
+    const prunedByAge = store.pruneRetrievalTraces({ maxDays: 0, maxRows: 1_000_000 });
+    assert.ok(prunedByAge >= beforeAgePrune - 1, `age window prunes (${prunedByAge})`);
   });
 });
 

@@ -234,6 +234,16 @@ export function migrate(db: DatabaseSync): void {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS perf_aggregates (
+      section TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      sum REAL NOT NULL DEFAULT 0,
+      sum_sq REAL NOT NULL DEFAULT 0,
+      buckets_json TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (section)
+    );
+
     CREATE TABLE IF NOT EXISTS node_retrieval_signals (
       node_id TEXT PRIMARY KEY REFERENCES memory_nodes(id),
       query_count INTEGER NOT NULL DEFAULT 0,
@@ -364,6 +374,7 @@ export function migrate(db: DatabaseSync): void {
   ensureNodeColumns(db);
   ensureRelationColumns(db);
   ensureRetrievalTraceColumns(db);
+  ensurePerfAggregateColumns(db);
   ensureDeltaColumns(db);
   ensureBinaryVectors(db);
   db.exec(`
@@ -519,6 +530,17 @@ export function ensureNodeColumns(db: DatabaseSync): void {
   }
   if (!existing.has("residence")) {
     db.exec("ALTER TABLE memory_nodes ADD COLUMN residence TEXT NOT NULL DEFAULT 'ltg'");
+  }
+}
+
+export function ensurePerfAggregateColumns(db: DatabaseSync): void {
+  const existing = new Set(
+    (db.prepare("PRAGMA table_info(perf_aggregates)").all() as Row[]).map((row) =>
+      String(row.name),
+    ),
+  );
+  if (!existing.has("buckets_json")) {
+    db.exec("ALTER TABLE perf_aggregates ADD COLUMN buckets_json TEXT NOT NULL DEFAULT '[]'");
   }
 }
 

@@ -6,6 +6,7 @@ import {
   type NmgDeleteMemoryParams,
   type NmgMergeNodesParams,
   type NmgMethod,
+  type NmgPerfParams,
   type NmgRememberParams,
   type NmgRetentionCandidatesParams,
   type NmgSearchParams,
@@ -21,6 +22,7 @@ import {
   stopServer,
 } from "./lifecycle.ts";
 import { NmgService } from "./service.ts";
+import { histogramQuantile } from "../core/perf.ts";
 
 const USAGE = `NMG command line
 
@@ -36,6 +38,8 @@ Usage:
   nmg memory delete MEMORY_ID [--json]
   nmg node merge NODE_ID... --target-name NAME [--target-kind KIND] [--json]
   nmg node split NODE_ID --partition NAME=MEMORY_ID,... --partition ... [--json]
+  nmg perf aggregates [--json]
+  nmg perf prune [--max-days N] [--max-rows N] [--json]
   nmg daemon start|status|stop [--data-dir DIR | --db FILE] [--json]
 
 Common options:
@@ -94,6 +98,8 @@ const ALL_OPTIONS = new Set([
   "maximum-access-count",
   "maximum-importance",
   "limit",
+  "max-days",
+  "max-rows",
   "max-tier",
   "node",
   "partition",
@@ -277,7 +283,8 @@ interface ParsedArguments {
     | NmgSetStorageStateParams
     | NmgDeleteMemoryParams
     | NmgMergeNodesParams
-    | NmgSplitNodeParams;
+    | NmgSplitNodeParams
+    | NmgPerfParams;
   json: boolean;
   dataDirectory?: string;
   databasePath?: string;
@@ -289,9 +296,17 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   }
   const [command, ...rest] = argv;
   if (
-    !["status", "remember", "search", "get", "retention", "memory", "node", "daemon"].includes(
-      command!,
-    )
+    ![
+      "status",
+      "remember",
+      "search",
+      "get",
+      "retention",
+      "memory",
+      "node",
+      "perf",
+      "daemon",
+    ].includes(command!)
   ) {
     throw new Error(`unknown command: ${command}`);
   }
@@ -299,7 +314,9 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   if (command === "daemon" && !["run", "start", "status", "stop"].includes(daemonAction ?? "")) {
     throw new Error("daemon requires start, status, or stop");
   }
-  const subcommand = ["retention", "memory", "node"].includes(command!) ? rest[0] : undefined;
+  const subcommand = ["retention", "memory", "node", "perf"].includes(command!)
+    ? rest[0]
+    : undefined;
   if (
     command === "retention" &&
     !["candidates", "archive", "quarantine", "restore"].includes(subcommand ?? "")
@@ -311,6 +328,9 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   }
   if (command === "node" && !["merge", "split"].includes(subcommand ?? "")) {
     throw new Error("node requires merge or split");
+  }
+  if (command === "perf" && !["aggregates", "prune"].includes(subcommand ?? "")) {
+    throw new Error("perf requires aggregates or prune");
   }
   const values = parseOptions(command === "daemon" || subcommand ? rest.slice(1) : rest);
   const maintenanceCommand =
@@ -324,7 +344,11 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
           ? subcommand === "merge"
             ? "mergeNodes"
             : "splitNode"
-          : undefined;
+          : command === "perf"
+            ? subcommand === "aggregates"
+              ? "perfAggregates"
+              : "pruneRetrievalTraces"
+            : undefined;
   const common = {
     command:
       command === "daemon"
@@ -377,6 +401,18 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     }
     assertAllowed(values, ["data-dir", "db", "partition"], ["json"]);
     return { ...common, params: splitNodeParams(values) };
+  }
+  if (command === "perf") {
+    if (subcommand === "aggregates") {
+      assertAllowed(values, ["data-dir", "db"], ["json"]);
+      rejectPositionals(values, "perf aggregates");
+      return { ...common, params: undefined };
+    }
+    assertAllowed(values, ["data-dir", "db", "max-days", "max-rows"], ["json"]);
+    return {
+      ...common,
+      params: perfPruneParams(values),
+    };
   }
   switch (command) {
     case "status":
@@ -503,6 +539,14 @@ function splitNodeParams(values: OptionValues): NmgSplitNodeParams {
   if (partitions.length < 2)
     throw new Error("node split requires at least two --partition options");
   return { sourceNodeId, partitions };
+}
+
+function perfPruneParams(values: OptionValues): NmgPerfParams {
+  return compactObject({
+    action: "prune",
+    maxDays: numericOption(values, "max-days"),
+    maxRows: numericOption(values, "max-rows"),
+  });
 }
 
 function singlePositional(values: OptionValues, command: string): string {
@@ -662,6 +706,42 @@ function compactObject(value: Record<string, unknown>): Record<string, unknown> 
 
 function humanResult(value: unknown): string {
   const result = value as Record<string, unknown>;
+  if ("pruned" in result && typeof result.pruned === "number") {
+    return `Pruned ${String(result.pruned)} retrieval traces.\n`;
+  }
+  if (Array.isArray(result) && result.every((entry) => typeof entry === "object" && entry !== null && "section" in entry && "count" in entry && "sum" in entry)) {
+    const rows = (result as Array<{
+      section: string;
+      count: number;
+      sum: number;
+      sumSq: number;
+      buckets?: number[];
+    }>).map((entry) => {
+      const avg = entry.count > 0 ? entry.sum / entry.count : 0;
+      const variance =
+        entry.count > 1
+          ? (entry.sumSq - (entry.sum * entry.sum) / entry.count) / (entry.count - 1)
+          : 0;
+      // Fewer than ~10 samples: histogram quantiles are unreliable (buckets
+      // are logarithmic; a couple of outliers dominate the median). Fall back
+      // to avg as the only meaningful location statistic.
+      const fmtMs = (value: number) => (value >= 0 ? `${value.toFixed(2)}ms` : "n/a");
+      const p50 =
+        entry.count >= 10 && entry.buckets?.length
+          ? histogramQuantile(entry.buckets, 0.5)
+          : -1;
+      const p90 =
+        entry.count >= 10 && entry.buckets?.length
+          ? histogramQuantile(entry.buckets, 0.9)
+          : -1;
+      const p95 =
+        entry.count >= 10 && entry.buckets?.length
+          ? histogramQuantile(entry.buckets, 0.95)
+          : -1;
+      return `${entry.section}\tcount=${entry.count}\tavg=${avg.toFixed(2)}ms\tp50=${fmtMs(p50)}\tp90=${fmtMs(p90)}\tp95=${fmtMs(p95)}\tσ=${Math.sqrt(Math.max(0, variance)).toFixed(2)}ms`;
+    });
+    return rows.length === 0 ? "No performance aggregates yet.\n" : `${rows.join("\n")}\n`;
+  }
   if ("candidates" in result) {
     const candidates = result.candidates as Array<{
       memoryId: string;

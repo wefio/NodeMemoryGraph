@@ -59,6 +59,7 @@ message SearchRequest {
   optional string retrieval_mode = 9;
   optional string vector_granularity = 10;
   optional bool second_pass = 11;
+  optional bool perf = 12;
 }
 
 message GetRequest {

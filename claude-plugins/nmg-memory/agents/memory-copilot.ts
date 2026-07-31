@@ -3,11 +3,17 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { connectDaemon, invokeDaemon, shutdownOwnedDaemon } from "../../../src/cli/daemon-client.ts";
-import type { MemoryContext } from "../../../src/core/types.ts";
+import type { MemoryContext, PerfSnapshot } from "../../../src/core/types.ts";
 
 function dbPath(): string {
   return join(process.env.NMG_DATA_DIR ?? join(process.cwd(), ".nmg"), "nmg.sqlite");
 }
+
+// Per-call performance feedback, off by default. When enabled, nmg_search
+// returns a compact per-phase timing line the agent can act on (e.g. detect
+// a slow lexical scan and suggest retention/merge). Shared daemons keep
+// their own env; this switch applies only to this MCP server's requests.
+const AGENT_PERF = process.env.NMG_AGENT_PERF === "1";
 
 const MEMORY_TYPES = ["constraint", "event", "fact", "preference", "state", "strategy"] as const;
 const ACTORS = ["assistant", "system", "tool", "user"] as const;
@@ -39,7 +45,7 @@ server.registerTool(
     },
   },
   async (params) => {
-    const r = (await invokeDaemon(connection, "search", params)) as MemoryContext;
+    const r = (await invokeDaemon(connection, "search", AGENT_PERF ? { ...params, perf: true } : params)) as MemoryContext;
     return { content: [{ type: "text", text: searchH(r) }] };
   },
 );
@@ -94,7 +100,7 @@ server.registerTool(
 
 // ── Lifecycle ──
 
-let connection = await connectDaemon(dbPath());
+const connection = await connectDaemon(dbPath());
 const transport = new StdioServerTransport();
 await server.connect(transport);
 const done = async () => { await shutdownOwnedDaemon(connection); process.exit(0); };
@@ -104,10 +110,25 @@ process.on("SIGTERM", done);
 // ── Compact formatters ──
 
 function searchH(r: MemoryContext): string {
-  if (!r.results.length) return "No NMG match.";
-  return r.results
-    .map(({ memory: m, node: n }) => `mid=${m.id}\tnode=${n.canonicalName}\ttype=${m.memoryType}\tL${m.tier}\t${t115(m.statement)}`)
-    .join("\n");
+  const lines = r.results.length
+    ? r.results.map(
+        ({ memory: m, node: n }) =>
+          `mid=${m.id}\tnode=${n.canonicalName}\ttype=${m.memoryType}\tL${m.tier}\t${t115(m.statement)}`,
+      )
+    : ["No NMG match."];
+  const perfLine = perfFeedback(r.timings);
+  if (perfLine) lines.push(perfLine);
+  return lines.join("\n");
+}
+
+/** Compact per-phase timing feedback line for agent self-maintenance. */
+function perfFeedback(timings: PerfSnapshot | undefined): string | null {
+  if (!timings) return null;
+  const sections = Object.entries(timings.timings)
+    .sort((left, right) => right[1] - left[1])
+    .map(([section, ms]) => `${section}=${ms.toFixed(1)}ms`)
+    .join(" ");
+  return `[perf ${sections} total=${timings.totalMs.toFixed(1)}ms]`;
 }
 
 function memText(r: MemoryContext & { missingMemoryIds?: string[] }): string {

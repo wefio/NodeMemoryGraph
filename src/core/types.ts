@@ -1,5 +1,7 @@
 import type { PerfSnapshot } from "./perf.ts";
 
+export type { PerfSnapshot } from "./perf.ts";
+
 export type HistoryRole = "user" | "assistant" | "tool" | "system" | "explicit" | "session";
 
 export interface HistoryRecord {
@@ -559,6 +561,22 @@ export interface RetrievalTraceInput {
   /** Per-phase timing captured on the search pass, persisted for aggregate
    *  performance profiling (retrieval_traces.timings_json). */
   timings?: PerfSnapshot;
+}
+
+/** Long-term per-section performance aggregate (Welford online statistics).
+ *  Independent of retrieval_traces pruning: rows live as long as the schema,
+ *  so averages survive raw-trace expiry. */
+export interface PerfAggregate {
+  section: string;
+  count: number;
+  /** Sum of observed section ms. */
+  sum: number;
+  /** Sum of squared section ms (Welford M2); avg = sum/count,
+   *  variance = (sumSq − sum²/count)/count. */
+  sumSq: number;
+  /** Log-scale histogram counts (fixed length) for percentile estimation. */
+  buckets: number[];
+  updatedAt: string;
 }
 
 export interface RetrievalTrace extends RetrievalTraceInput {

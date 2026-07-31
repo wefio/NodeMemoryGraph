@@ -20,6 +20,59 @@ export interface PerfSnapshot {
   totalMs: number;
 }
 
+/**
+ * Fixed-size log-scale histogram for long-term percentile estimation.
+ * 64 buckets span 0.05 ms to ~10 s on a log scale — wide enough for every
+ * NMG section, constant memory per section (~64 counts). Percentiles are
+ * estimated by linear interpolation inside the bucket containing the rank.
+ * Kept here (not in types.ts) because store.ts only stores/reads counts;
+ * estimation lives at the display boundary.
+ */
+export const HISTOGRAM_BUCKETS = 64;
+const HISTOGRAM_MIN_MS = 0.05;
+const HISTOGRAM_MAX_MS = 10_000;
+
+export function histogramAdd(buckets: readonly number[], ms: number): number[] {
+  const next = new Array<number>(HISTOGRAM_BUCKETS).fill(0);
+  for (let index = 0; index < Math.min(HISTOGRAM_BUCKETS, buckets.length); index += 1) {
+    const count = buckets[index];
+    if (typeof count === "number" && Number.isFinite(count)) next[index] = count;
+  }
+  const clamped = Math.min(HISTOGRAM_MAX_MS, Math.max(HISTOGRAM_MIN_MS, ms));
+  const logMin = Math.log(HISTOGRAM_MIN_MS);
+  const logMax = Math.log(HISTOGRAM_MAX_MS);
+  const index = Math.min(
+    HISTOGRAM_BUCKETS - 1,
+    Math.max(
+      0,
+      Math.floor(((Math.log(clamped) - logMin) / (logMax - logMin)) * HISTOGRAM_BUCKETS),
+    ),
+  );
+  next[index] = (next[index] ?? 0) + 1;
+  return next;
+}
+
+/** Estimated quantile (0..1) from histogram counts. */
+export function histogramQuantile(buckets: readonly number[], ratio: number): number {
+  const total = buckets.reduce((sum, count) => sum + (count ?? 0), 0);
+  if (total === 0) return 0;
+  const target = ratio * total;
+  const logMin = Math.log(HISTOGRAM_MIN_MS);
+  const logMax = Math.log(HISTOGRAM_MAX_MS);
+  let cumulative = 0;
+  for (let index = 0; index < HISTOGRAM_BUCKETS; index += 1) {
+    cumulative += buckets[index] ?? 0;
+    if (cumulative >= target) {
+      const lower = Math.exp(logMin + (index / HISTOGRAM_BUCKETS) * (logMax - logMin));
+      const upper = Math.exp(logMin + ((index + 1) / HISTOGRAM_BUCKETS) * (logMax - logMin));
+      const within = cumulative - (buckets[index] ?? 0);
+      const fraction = within === cumulative ? 0 : (target - within) / (cumulative - within);
+      return lower + fraction * (upper - lower);
+    }
+  }
+  return HISTOGRAM_MAX_MS;
+}
+
 export class PerfTimer {
   #enabled = true;
   #sections = new Map<string, number>();
