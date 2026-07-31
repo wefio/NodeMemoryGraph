@@ -136,8 +136,8 @@ test("packaged launcher rejects unknown options with a usage exit code", () => {
   assert.match(result.stderr, /unknown option: --typo/);
 });
 
-test("gRPC daemon starts once, serves CLI requests, and stops cleanly", () => {
-  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-process-grpc-"));
+test("HTTP daemon starts once, serves CLI requests, and stops cleanly", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-process-http-"));
   try {
     const started = runLauncher(["daemon", "start", "--json", "--data-dir", directory]) as {
       started: boolean;
@@ -158,9 +158,9 @@ test("gRPC daemon starts once, serves CLI requests, and stops cleanly", () => {
 
     const remembered = runLauncher([
       "remember",
-      "The gRPC daemon keeps one resident NMG service.",
+      "The HTTP daemon keeps one resident NMG service.",
       "--node",
-      "gRPC daemon",
+      "HTTP daemon",
       "--type",
       "fact",
       "--json",
@@ -169,7 +169,7 @@ test("gRPC daemon starts once, serves CLI requests, and stops cleanly", () => {
     ]) as { memory: { id: string } };
     const searched = runLauncher([
       "search",
-      "resident gRPC service",
+      "resident HTTP service",
       "--json",
       "--data-dir",
       directory,

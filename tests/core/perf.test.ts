@@ -182,29 +182,29 @@ test("perf defaults on unless disabled; perf:false opt-out verified", () => {
   });
 });
 
-test("perf flag survives the gRPC daemon round-trip", async () => {
+test("perf flag survives the HTTP daemon round-trip", async () => {
   const { connectDaemon, invokeDaemon, shutdownOwnedDaemon } =
     await import("../../src/cli/daemon-client.ts");
-  const directory = mkdtempSync(join(tmpdir(), "nmg-perf-grpc-"));
+  const directory = mkdtempSync(join(tmpdir(), "nmg-perf-http-"));
   const connection = await connectDaemon(join(directory, "nmg.sqlite"));
   try {
     const remembered = (await invokeDaemon(connection, "remember", {
-      statement: "gRPC perf probe",
-      nodeName: "grpc-perf",
+      statement: "HTTP perf probe",
+      nodeName: "http-perf",
     })) as { memory: { id: string } };
     assert.ok(remembered.memory.id);
     // Core timing is default-on (trace persistence); the wire-level contract
     // is that perf:false disables it end to end.
     const explicitOff = (await invokeDaemon(connection, "search", {
-      query: "gRPC perf probe",
+      query: "HTTP perf probe",
       perf: false,
     })) as { timings?: unknown };
-    assert.equal(explicitOff.timings, undefined, "perf:false disables timings through gRPC");
+    assert.equal(explicitOff.timings, undefined, "perf:false disables timings through HTTP");
     const on = (await invokeDaemon(connection, "search", {
-      query: "gRPC perf probe",
+      query: "HTTP perf probe",
       perf: true,
     })) as { timings?: { totalMs: number; timings: Record<string, number> } };
-    assert.ok(on.timings, "perf:true returns timings through gRPC");
+    assert.ok(on.timings, "perf:true returns timings through HTTP");
     assert.ok(on.timings!.totalMs >= 0);
     assert.ok(on.timings!.timings["search.direct"] >= 0);
   } finally {
@@ -435,10 +435,10 @@ test("existing database gains timings_json via migration", () => {
   }
 });
 
-test("perf maintenance commands reach the gRPC daemon end to end", async () => {
+test("perf maintenance commands reach the HTTP daemon end to end", async () => {
   const { connectDaemon, invokeDaemon, shutdownOwnedDaemon } =
     await import("../../src/cli/daemon-client.ts");
-  const directory = mkdtempSync(join(tmpdir(), "nmg-perf-grpc-maint-"));
+  const directory = mkdtempSync(join(tmpdir(), "nmg-perf-http-maint-"));
   const connection = await connectDaemon(join(directory, "nmg.sqlite"));
   try {
     // A search leaves a trace row; perfAggregates must surface it through
@@ -446,7 +446,7 @@ test("perf maintenance commands reach the gRPC daemon end to end", async () => {
     // client stub did not exist and the command reported unavailable).
     await invokeDaemon(connection, "remember", {
       statement: "perf maintenance probe",
-      nodeName: "grpc-maint",
+      nodeName: "http-maint",
     });
     const searched = (await invokeDaemon(connection, "search", {
       query: "perf maintenance",

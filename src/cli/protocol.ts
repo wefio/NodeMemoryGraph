@@ -29,8 +29,8 @@ export const NMG_CAPABILITIES = [
   "merge-nodes",
   "split-node",
   "shutdown",
-  "grpc",
-  "protobuf",
+  "http",
+  "json-rpc",
   "lexical-retrieval",
   "optional-embedding-retrieval",
 ] as const;

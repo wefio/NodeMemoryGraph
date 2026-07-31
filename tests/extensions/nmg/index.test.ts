@@ -24,15 +24,15 @@ function extensionHarness() {
   return { handlers, tools };
 }
 
-test("Pi adapter exposes only the stable gRPC tool surface", () => {
+test("Pi adapter exposes only the stable tool surface", () => {
   assert.deepEqual([...extensionHarness().tools.keys()], ["nmg_remember", "nmg_get", "nmg_search"]);
 });
 
-test("Pi adapter starts, recalls through, and closes its owned daemon", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-grpc-"));
+test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-http-"));
   const previous = process.env.NMG_DATA_DIR;
   process.env.NMG_DATA_DIR = directory;
-  const sessionManager = { getSessionId: () => "grpc-test-session" };
+  const sessionManager = { getSessionId: () => "http-test-session" };
   try {
     const { handlers, tools } = extensionHarness();
     const remember = await tools.get("nmg_remember")!.execute(
@@ -52,7 +52,7 @@ test("Pi adapter starts, recalls through, and closes its owned daemon", async ()
     assert.match(remember.content[0].text, /saved/i);
 
     const started = readServerState(serverStatePath(join(directory, "nmg.sqlite")));
-    assert.equal(started?.transport, "grpc");
+    assert.equal(started?.transport, "http");
     assert.equal(isProcessAlive(started!.pid), true);
 
     const recalled = await handlers.get("before_agent_start")!(

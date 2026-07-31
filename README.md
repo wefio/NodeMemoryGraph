@@ -67,7 +67,7 @@ Pi agent harness
       ▼
 NMG Pi extension
       │
-      │ persistent local gRPC client
+      │ persistent local HTTP client
       ▼
 NMG daemon ── NMG core ── MemoryNode graph ── tiered MemoryRecord
       │          │                    │
@@ -132,9 +132,10 @@ pi
 
 By default, the extension stores data in `.nmg/nmg.sqlite` under the current project. Set `NMG_DATA_DIR` to use another directory.
 
-The Pi adapter is deliberately thin. It lazily starts the local gRPC daemon,
-reuses one channel for automatic recall and the three stable tools, and stops
-the daemon at session shutdown only when that adapter invocation started it.
+The Pi adapter is deliberately thin. It lazily starts the local daemon over
+JSON-RPC/HTTP, reuses one connection for automatic recall and the three stable
+tools, and stops the daemon at session shutdown only when that adapter
+invocation started it.
 An already-running shared daemon is left untouched.
 
 By default, the model receives three tools and a typed write/use policy:
@@ -187,9 +188,10 @@ for the complete structured result, `--data-dir` to select an NMG data
 directory, or `--db` to select one SQLite file. `remember` requires a stable
 `--node` name; `--scope key=value` is repeatable.
 
-`nmg daemon start` launches the language-neutral gRPC boundary on an
-OS-assigned loopback port. Requests and responses use binary Protocol Buffers;
-the endpoint and a random local bearer token are recorded beside the selected
+`nmg daemon start` launches the language-neutral JSON-RPC-over-HTTP boundary
+on an OS-assigned loopback port. Requests and responses are JSON-RPC 2.0 over
+Node's built-in `http`/`fetch` (no third-party transport dependencies); the
+endpoint and a random local bearer token are recorded beside the selected
 SQLite database. The same implementation runs on Windows, macOS, and Linux.
 
 The service also carries administrative retention, deletion, merge, and split

@@ -11,6 +11,16 @@ import {
 } from "../../../src/cli/daemon-client.ts";
 import type { MemoryContext, MemoryTier } from "../../../src/core/types.ts";
 
+/**
+ * NMG Pi extension.
+ *
+ * Transport: connects to the NMG daemon over JSON-RPC/HTTP via
+ * `daemon-client.ts`. The client path is intentionally thin — it imports only
+ * `http-client.ts` (Node built-in fetch) and never `service.ts` / the core
+ * store. That keeps the store dependency tree out of every Pi startup. See
+ * tests/cli/http-boundary.test.ts.
+ */
+
 function databasePath(): string {
   return join(process.env.NMG_DATA_DIR || join(process.cwd(), ".nmg"), "nmg.sqlite");
 }

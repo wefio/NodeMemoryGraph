@@ -11,7 +11,7 @@ import { dirname } from "node:path";
 export interface ServerState {
   pid: number;
   startedAt: string;
-  transport?: "grpc";
+  transport?: "http";
   host?: string;
   port?: number;
   token?: string;
@@ -104,7 +104,7 @@ export function readServerState(statePath: string): ServerState | undefined {
       ? {
           pid: Number(value.pid),
           startedAt: String(value.startedAt ?? ""),
-          transport: value.transport === "grpc" ? "grpc" : undefined,
+          transport: value.transport === "http" ? "http" : undefined,
           host: typeof value.host === "string" ? value.host : undefined,
           port: Number.isSafeInteger(value.port) ? Number(value.port) : undefined,
           token: typeof value.token === "string" ? value.token : undefined,

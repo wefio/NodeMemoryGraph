@@ -1,6 +1,6 @@
 {
   "name": "nmg",
-  "description": "NMG durable memory for Claude Code — local gRPC daemon with FTS5 BM25 + optional vector hybrid retrieval.",
+  "description": "NMG durable memory for Claude Code — local JSON-RPC-over-HTTP daemon with FTS5 BM25 + optional vector hybrid retrieval.",
   "author": { "name": "NMG" },
   "keywords": ["memory", "semantic-memory", "long-term-memory"],
   "agents": ["./agents"]

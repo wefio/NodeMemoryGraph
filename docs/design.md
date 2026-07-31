@@ -153,26 +153,27 @@ nmg daemon stop
 ```
 
 One-shot commands remain useful for people and diagnostics. Harnesses normally
-connect to the resident gRPC service so the bounded in-memory working set,
+connect to the resident HTTP JSON-RPC service so the bounded in-memory working set,
 session/STG state, Active Graph continuations, node directory, and hot caches
-survive across calls. The daemon uses binary Protocol Buffers over an
-OS-assigned `127.0.0.1` port, giving Windows, macOS, and Linux one transport
-implementation. SQLite opens lazily on first durable work.
+survive across calls. The daemon speaks JSON-RPC 2.0 over HTTP on an
+OS-assigned `127.0.0.1` port, using Node's built-in `http` and `fetch` and
+requiring no third-party transport dependencies. SQLite opens lazily on first
+durable work.
 
 Resident instances use a PID lease scoped to the selected SQLite database.
 The lease records the loopback endpoint and a random bearer token. Starting a
 second daemon for the same database is rejected, stale leases are recovered,
 and `Shutdown` performs the normal close path. PID termination is only a
-fallback when the gRPC endpoint cannot be reached.
+fallback when the HTTP endpoint cannot be reached.
 
 Protocol version `nmg.v1` exposes `Hello`, `Status`, `Remember`, `Search`,
-`Get`, and `Shutdown`. The `.proto` service is the only resident protocol;
+`Get`, and `Shutdown` over JSON-RPC 2.0. HTTP is the only resident protocol;
 NMG does not maintain a parallel NDJSON or platform-specific socket API.
 
 ### 4.2 Modular harness adapters
 
-The TypeScript prototype is split by responsibility at the gRPC process
-boundary:
+The TypeScript prototype is split by responsibility at the HTTP
+client/server process boundary:
 
 ```text
 Agent-specific adapter
@@ -197,8 +198,9 @@ post-turn feedback, and shutdown. It must not parse SQLite rows, update graph
 topology, implement QPP, or construct embedding indexes. Pi is the first
 adapter, not part of the NMG data model.
 
-The Pi adapter is now a thin gRPC lifecycle/tool adapter. It lazily starts the
-daemon, reuses one channel for automatic recall and the three stable tools, and
+The Pi adapter is now a thin HTTP lifecycle/tool adapter. It lazily starts the
+daemon, reuses one connection (via the shared `http-client`) for automatic
+recall and the three stable tools, and
 stops the daemon only when that adapter invocation owns it. It does not open
 SQLite, maintain indexes, or import graph/QPP implementations. No Rust/Python
 implementation is planned unless profiling later identifies a component that
@@ -1782,9 +1784,9 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
    zero-configuration and not-yet-ready fallback. Node/leaf-only and the
    current union ranker are explicitly gated off after the LoCoMo ablation.
 5. **Complete:** expose the application boundary through an
-   agent-independent `nmg` CLI and cross-platform `nmg.v1` gRPC daemon.
-   The Pi extension uses the same daemon through a persistent gRPC client and
-   ownership-aware lifecycle.
+   agent-independent `nmg` CLI and cross-platform `nmg.v1`
+   JSON-RPC-over-HTTP daemon. The Pi extension uses the same daemon through a
+   persistent HTTP client and ownership-aware lifecycle.
 
 ### P1: incremental correctness and fair evaluation
 

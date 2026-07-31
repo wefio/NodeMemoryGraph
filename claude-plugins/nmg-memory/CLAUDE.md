@@ -6,8 +6,8 @@ Three durable-memory tools served over MCP stdio:
 - `nmg_get` — exact memory statements and source evidence
 - `nmg_remember` — save facts/preferences/constraints/states/events
 
-The MCP server manages the local gRPC daemon automatically (start on
-connect, safe stop on exit, reuse if already running).
+The MCP server manages the local daemon automatically (JSON-RPC over HTTP;
+start on connect, safe stop on exit, reuse if already running).
 
 Requirements: Node.js ≥ 22.19, `npm install` run in the project.
 

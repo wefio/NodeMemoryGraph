@@ -13,7 +13,8 @@ import {
   type NmgSetStorageStateParams,
   type NmgSplitNodeParams,
 } from "./protocol.ts";
-import { callGrpc, serveGrpc } from "./grpc.ts";
+import { httpCall } from "./http-client.ts";
+import { serveHttp } from "./http-server.ts";
 import {
   acquireServerLease,
   isProcessAlive,
@@ -166,8 +167,8 @@ export async function runCli(
   try {
     const state = readServerState(serverStatePath(service.databasePath));
     const result =
-      state?.transport === "grpc" && isProcessAlive(state.pid)
-        ? await callGrpc(state, parsed.command, (parsed.params ?? {}) as Record<string, unknown>)
+      state?.transport === "http" && isProcessAlive(state.pid)
+        ? await httpCall(state, parsed.command, (parsed.params ?? {}) as Record<string, unknown>)
         : await service.invoke(parsed.command, parsed.params);
     io.stdout.write(parsed.json ? `${JSON.stringify(result, null, 2)}\n` : humanResult(result));
     return 0;
@@ -187,10 +188,10 @@ async function runDaemonCommand(
   const existing = readServerState(statePath);
 
   if (command === "daemon-status") {
-    if (!existing || !isProcessAlive(existing.pid) || existing.transport !== "grpc") {
+    if (!existing || !isProcessAlive(existing.pid) || existing.transport !== "http") {
       return { running: false };
     }
-    const status = await callGrpc(existing, "status");
+    const status = await httpCall(existing, "status");
     return {
       running: true,
       pid: existing.pid,
@@ -200,8 +201,8 @@ async function runDaemonCommand(
   }
 
   if (command === "daemon-stop") {
-    if (existing?.transport === "grpc" && isProcessAlive(existing.pid)) {
-      await callGrpc(existing, "shutdown");
+    if (existing?.transport === "http" && isProcessAlive(existing.pid)) {
+      await httpCall(existing, "shutdown");
       await waitForProcessExit(existing.pid);
       return { stopped: true, pid: existing.pid };
     }
@@ -224,8 +225,8 @@ async function runDaemonCommand(
       },
     );
     child.unref();
-    const state = await waitForGrpcState(statePath);
-    await callGrpc(state, "hello");
+    const state = await waitForState(statePath);
+    await httpCall(state, "hello");
     return {
       started: true,
       pid: state.pid,
@@ -242,7 +243,7 @@ async function runDaemonCommand(
   process.once("SIGINT", stopOnSignal);
   process.once("SIGTERM", stopOnSignal);
   try {
-    await serveGrpc(service, lease);
+    await serveHttp(service, lease);
     return { stopped: true };
   } finally {
     process.off("SIGINT", stopOnSignal);
@@ -251,10 +252,10 @@ async function runDaemonCommand(
   }
 }
 
-async function waitForGrpcState(statePath: string) {
+async function waitForState(statePath: string) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const state = readServerState(statePath);
-    if (state?.transport === "grpc" && state.port && state.token) return state;
+    if (state?.transport === "http" && state.port && state.token) return state;
     await new Promise((resolveWait) => setTimeout(resolveWait, 25));
   }
   throw new Error("NMG daemon did not become ready");
