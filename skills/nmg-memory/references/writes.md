@@ -31,10 +31,40 @@ nmg remember "Atlas currently uses SQLite." \
   --json
 ```
 
+Writing a new state with the same key and scope automatically supersedes the
+previous active state (same `state_key + scope`).
+
 ## Event
 
 Use `--type event --event-time <ISO_TIME>` for something that happened. If the
 event also changes current state, write both the event and the state.
+
+## Advanced options
+
+| Option | When to use |
+| --- | --- |
+| `--event-time "<ISO>"` | Required for `--type event`; the occurrence time |
+| `--supersedes "<MEMORY_ID>"` | Explicitly replace an old memory without deleting its evidence |
+| `--residence ltg` | Long-term: durable, shared, normal visibility (default) |
+| `--residence stg` | Short-term: provisional, task-local, expires by policy |
+| `--scope key=value` | Repeatable; couples with search's `--scope` filter |
+| `--evidence-role support|contradict|...` | Builds multi-evidence memories: a second memory with `contradict` adds the counter-evidence to the same evidence chain |
+| `--truth unverified` | Assistant output not verified by user or tool |
+| `--valid-from` / `--valid-until` | Time-window validity for the memory |
+| `--expires-at` | Hard expiry (e.g. temporary facts) |
+| `--source-ref` | Source reference for tool or file provenance |
+| `--write-reason` | Why this write stays useful; appears in search results |
+
+The full `--actor` set is `user`, `assistant`, `system`, `tool`.
+
+## Deleting a memory
+
+```text
+nmg memory delete <MEMORY_ID> --json
+```
+
+`memory delete` removes only the semantic interpretation. The immutable
+history evidence is retained.
 
 ## Evidence rules
 

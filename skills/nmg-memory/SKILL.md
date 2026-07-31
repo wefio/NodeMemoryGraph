@@ -20,6 +20,10 @@ an operation or encountering its named special case.
    nmg search "<focused recall query>" --limit 8 --max-tier 1 --json
    ```
 
+   Narrow the scope when the store is large or the topic is specific:
+   `--node "<name>"`, `--scope project=NAME`, `--source-actor user`,
+   `--include-historical`, `--max-tier 2`, `--graph-hops 2`.
+
 4. Search results are compact headers. Load only selected exact records:
 
    ```text
@@ -40,7 +44,10 @@ selected a non-default store.
 
 Start shallow. If the first result set is insufficient, try one narrower or
 complementary query, then increase `--max-tier`, `--limit`, or `--graph-hops`.
-Do not load all candidate evidence into the model.
+If lexical results are still insufficient and embeddings are configured,
+switch to `--retrieval-mode hybrid` (semantic path; see
+[embedding](references/embedding.md)). Do not load all candidate evidence into
+the model.
 
 ## When to read the manual
 
@@ -50,3 +57,5 @@ Do not load all candidate evidence into the model.
   [recall](references/recall.md)
 - For daemon failures, shared ownership, storage selection, or cleanup:
   [operations](references/operations.md)
+- For embedding configuration and semantic search:
+  [embedding](references/embedding.md)

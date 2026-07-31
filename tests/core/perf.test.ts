@@ -144,6 +144,31 @@ test("domain objects (NodeTransform) do not carry timings", () => {
   });
 });
 
+test("search results preserve the original writeReason instead of legacy_write", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "The archive uses SQLite.",
+      nodeName: "archive storage",
+      writeReason: "current architecture decision",
+      writeSource: "agent",
+    });
+    // Both retrieval paths build results through mapSearchResult; the legacy
+    // fallback ("legacy_write" / "core") is only valid when the column is
+    // genuinely absent.
+    const viaSearch = store.search("archive storage", { maxTier: 3 });
+    const viaContext = store.searchContext("archive storage", { maxTier: 3 });
+    for (const result of [...viaSearch, ...viaContext.results]) {
+      if (result.memory.id !== saved.memory.id) continue;
+      assert.equal(result.memory.writeReason, "current architecture decision");
+      assert.equal(result.memory.writeSource, "agent");
+    }
+    assert.ok(
+      [...viaSearch, ...viaContext.results].some((result) => result.memory.id === saved.memory.id),
+      "saved memory reachable through both paths",
+    );
+  });
+});
+
 test("existing database gains timings_json via migration", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-perf-"));
   const database = join(directory, "nmg.sqlite");

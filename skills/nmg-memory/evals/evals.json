@@ -27,5 +27,24 @@
       "Uses progressive search and exact get",
       "Does not stop a daemon it did not start"
     ]
+  },
+  {
+    "name": "semantic_recall_escalation",
+    "prompt": "用词法搜不到上次关于图形渲染修复的决定，看看能不能用语义搜索找到。",
+    "expected": [
+      "Checks embedding health (nmg status --json) before semantic search",
+      "Escalates from lexical to --retrieval-mode hybrid when lexical is insufficient",
+      "Loads exact evidence with nmg get before using the recalled decision",
+      "Does not fabricate a recalled fact when the index is not ready"
+    ]
+  },
+  {
+    "name": "second_pass_recall",
+    "prompt": "同一个查询换一种说法搜不出来，试试不换查询直接加深证据选择。",
+    "expected": [
+      "Uses --second-pass on the same query before rewriting it",
+      "Understands --second-pass re-selects within the same candidate pool",
+      "Loads only the selected exact records, not the whole pool"
+    ]
   }
 ]

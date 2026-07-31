@@ -7,9 +7,45 @@
 3. Increase `--max-tier` one level.
 4. Add `--graph-hops 1` or `2` for related concepts.
 5. Use `--include-historical` only when old or superseded state is relevant.
+6. If lexical results are insufficient and embeddings are configured and the
+   index is ready, switch `--retrieval-mode hybrid` (see
+   [embedding](embedding.md)).
 
 Stop when evidence is sufficient. Use `nmg get` only for IDs likely to affect the
 answer.
+
+## Progressive second pass
+
+When the first recall quality is doubtful but the query is right, re-select
+within the same candidate pool instead of changing the query:
+
+```text
+nmg search "<query>" --second-pass --limit 8 --json
+```
+
+`--second-pass` walks cumulative Fibonacci evidence tiers (1, 2, 3, 5, ...),
+recomputing the QPP confidence after each tier from the same over-sampled
+pool. No re-search occurs — it only widens the selected evidence.
+
+## QPP tuning
+
+NMG has three independent retrieval-confidence controls (environment
+variables read at startup):
+
+| Variable | Values | Default | Effect |
+| --- | --- | --- | --- |
+| `NMG_QPP1_MODE` | `off`, `shadow`, `active` | `shadow` | First-pass candidate-pool allocation |
+| `NMG_QPP2_MODE` | `off`, `shadow`, `active` | `off` | Fibonacci progressive detection + fold |
+| `NMG_QPP2_RETAINED_MASS` | `0..1` | `0.98` | Probability mass retained per fold |
+| `NMG_SEARCH_RECOMMENDATION` | `off`, `advisory`, `guardrail` | `off` | Suggests an explicit search to the model on weak recall |
+
+Shadow mode computes and logs the decision without acting on it — use it to
+observe, then flip to `active` once behavior is stable. Lab feedback for
+shadow evaluations:
+
+```text
+/nmg-shadow-feedback last success|failure|corrected|uncorrected|unknown
+```
 
 ## Conflicts
 
