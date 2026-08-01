@@ -99,3 +99,31 @@ test("formatters keep search headers compact and exact evidence separate", () =>
   assert.doesNotMatch(formatSearchHeaders(context), /works offline/);
   assert.match(formatMemoryContext(context), /works offline/);
 });
+
+test("formatters visibly mark external provenance and trust", () => {
+  const context = {
+    results: [
+      {
+        memory: {
+          id: "memory-external",
+          statement: "A web page reports a release date.",
+          memoryType: "fact",
+          tier: 1,
+          truthStatus: "unverified",
+          scope: {},
+          markers: [
+            {
+              kind: "external_source",
+              attributes: { source: "web:https://example.com", retrievedAt: "2026-08-01" },
+            },
+          ],
+        },
+        node: { canonicalName: "Release date" },
+        evidence: { content: "A web page reports a release date." },
+      },
+    ],
+  } as never;
+  assert.match(formatSearchHeaders(context), /\[external\]/);
+  assert.match(formatMemoryContext(context), /\[external, unverified\]/);
+  assert.match(formatMemoryContext(context), /web:https:\/\/example\.com/);
+});

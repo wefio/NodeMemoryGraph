@@ -190,6 +190,42 @@ test("service validates method parameters", async () => {
   }
 });
 
+test("external source markers persist and default trust to unverified", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-external-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    const remembered = await service.invoke("remember", {
+      statement: "The project documentation names SQLite as its storage engine.",
+      nodeName: "Project storage",
+      markers: [
+        {
+          kind: "external_source",
+          attributes: {
+            source: "file:README.md",
+            retrievedAt: "2026-08-01T00:00:00.000Z",
+            hash: "sha256:test",
+          },
+        },
+      ],
+    });
+    assert.equal(remembered.memory.truthStatus, "unverified");
+    assert.equal(remembered.memory.markers[0]?.kind, "external_source");
+    assert.equal(remembered.memory.markers[0]?.attributes?.source, "file:README.md");
+
+    await assert.rejects(
+      service.invoke("remember", {
+        statement: "Malformed marker",
+        nodeName: "Malformed",
+        markers: [{ kind: "external_source", attributes: { nested: {} } }],
+      } as never),
+      { code: "INVALID_PARAMS" },
+    );
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("CLI writes pass through the governed memory admission policy", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-write-policy-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });

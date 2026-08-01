@@ -163,6 +163,21 @@ test("CLI writes and reads project STG and exposes scoped sync", () => {
   }
 });
 
+test("CLI writes external provenance as an unverified marker", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-process-external-"));
+  try {
+    const remembered = runLauncher([
+      "remember", "README describes the external source contract", "--node", "External source",
+      "--external-source", "file:README.md", "--retrieved-at", "2026-08-01T00:00:00.000Z",
+      "--content-hash", "sha256:test", "--json", "--data-dir", directory,
+    ]) as { memory: { truthStatus: string; markers: Array<{ kind: string }> } };
+    assert.equal(remembered.memory.truthStatus, "unverified");
+    assert.equal(remembered.memory.markers[0]?.kind, "external_source");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("HTTP daemon starts once, serves CLI requests, and stops cleanly", () => {
   const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-process-http-"));
   try {

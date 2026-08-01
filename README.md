@@ -197,6 +197,16 @@ directory, or `--db` to select one SQLite file. `remember` requires a stable
 copies a usage-ranked scoped LTG working set into that STG idempotently; LTG
 remains authoritative.
 
+External evidence is opt-in and visibly marked:
+
+```text
+nmg remember "The upstream docs list version 2" --node "Upstream version" \
+  --external-source web:https://example.com/docs --content-hash sha256:... --json
+```
+
+External writes default to `truth=unverified`; Pi renders `[external]` and the
+source so the Agent can decide whether the current task requires re-checking.
+
 `nmg daemon start` launches the language-neutral JSON-RPC-over-HTTP boundary
 on an OS-assigned loopback port. Requests and responses are JSON-RPC 2.0 over
 Node's built-in `http`/`fetch` (no third-party transport dependencies); the

@@ -1,7 +1,7 @@
 # External Source Design（外部来源设计）
 
-**Status:** design proposal
-**Updated:** 2026-07-31
+**Status:** implemented across core protocol, CLI, and Pi adapter
+**Updated:** 2026-08-01
 **Related:** [memory-graphs.md](memory-graphs.md), [edge-activation-design.md](edge-activation-design.md), [tiered-disclosure-design.md](tiered-disclosure-design.md), design.md §5a/§9
 
 ## 1. Principle
@@ -56,8 +56,9 @@ work. No new schema, no new memory type.
 | `hash` | content hash (optional) | page hash (optional) | agent compares on re-check; local files make this a one-line diff |
 
 `normalizeMarkers` (store.ts:4311) already deduplicates and validates
-attributes; `external_source` needs no core change beyond being documented as
-a recognized kind.
+attributes. The resident protocol accepts bounded scalar marker attributes;
+CLI exposes `--external-source`, `--retrieved-at`, and `--content-hash`; Pi
+exposes the typed `externalSource` write field.
 
 ## 4. Three orthogonal dimensions
 
@@ -80,6 +81,11 @@ Suggested rendering (adapter):
 [external, unverified] <statement>
   source: https://example.com/page (retrieved 2026-07-31)
 ```
+
+The Pi adapter now renders this label in both compact search headers and exact
+memory expansion. When the caller omits `truthStatus`, an external marker
+defaults the memory to `unverified`; explicit later confirmation may raise
+trust without removing provenance.
 
 ## 5. Where external content enters
 

@@ -63,6 +63,9 @@ Remember options:
   --importance N             Importance 0..1
   --residence VALUE          ltg or stg
   --write-reason TEXT        Durable-write justification
+  --external-source REF      External provenance: web:URL or file:PATH
+  --retrieved-at ISO         External retrieval timestamp (default: now)
+  --content-hash HASH        Optional external content hash
 
 Search options:
   --node NAME                Restrict to one semantic node
@@ -94,11 +97,13 @@ const ALL_OPTIONS = new Set([
   "db",
   "dormant-after-days",
   "event-time",
+  "external-source",
   "evidence",
   "evidence-role",
   "expires-at",
   "graph-hops",
   "importance",
+  "content-hash",
   "maximum-access-count",
   "maximum-importance",
   "limit",
@@ -110,6 +115,7 @@ const ALL_OPTIONS = new Set([
   "project-dir",
   "quarantine-after-days",
   "recovery-days",
+  "retrieved-at",
   "residence",
   "retrieval-mode",
   "scope",
@@ -447,17 +453,20 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
           "type",
           "state-key",
           "event-time",
+          "external-source",
           "actor",
           "truth",
           "evidence",
           "tier",
           "importance",
+          "content-hash",
           "scope",
           "valid-from",
           "valid-until",
           "evidence-role",
           "supersedes",
           "residence",
+          "retrieved-at",
           "expires-at",
           "write-reason",
           "session-id",
@@ -628,6 +637,22 @@ function rememberParams(values: OptionValues): NmgRememberParams {
   if (!statement) throw new Error("remember requires a statement");
   const nodeName = firstOption(values, "node");
   if (!nodeName) throw new Error("remember requires --node NAME");
+  const externalSource = firstOption(values, "external-source");
+  if (externalSource && !/^(?:file|web):.+/u.test(externalSource)) {
+    throw new Error("--external-source must start with web: or file:");
+  }
+  const externalMarker = externalSource
+    ? [
+        {
+          kind: "external_source",
+          attributes: compactObject({
+            source: externalSource,
+            retrievedAt: firstOption(values, "retrieved-at") ?? new Date().toISOString(),
+            hash: firstOption(values, "content-hash"),
+          }),
+        },
+      ]
+    : undefined;
   return compactObject({
     statement,
     nodeName,
@@ -649,6 +674,7 @@ function rememberParams(values: OptionValues): NmgRememberParams {
     writeReason: firstOption(values, "write-reason"),
     sessionId: firstOption(values, "session-id"),
     sourceRef: firstOption(values, "source-ref"),
+    markers: externalMarker,
     projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
   }) as unknown as NmgRememberParams;
 }

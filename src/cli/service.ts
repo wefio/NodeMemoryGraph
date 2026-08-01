@@ -13,6 +13,7 @@ import type {
   MemoryActor,
   MemoryResidence,
   MemoryScope,
+  MemoryMarker,
   MemoryTier,
   MemoryType,
   SearchOptions,
@@ -206,6 +207,7 @@ export class NmgService {
   }
 
   #remember(params: NmgRememberParams): NmgMethodResult["remember"] {
+    const external = params.markers?.some((marker) => marker.kind === "external_source") ?? false;
     const assessment = assessMemoryWrite({
       statement: params.statement,
       evidence: params.evidence,
@@ -228,6 +230,7 @@ export class NmgService {
       : this.#getStore();
     return store.remember({
       ...memory,
+      truthStatus: memory.truthStatus ?? (external ? "unverified" : undefined),
       writeReason: params.writeReason ?? `cli_confirmed_${params.memoryType ?? "fact"}`,
       writeSource: "user",
     });
@@ -322,6 +325,7 @@ function parseRememberParams(value: unknown): NmgRememberParams {
     writeReason: optionalString(params, "writeReason"),
     sessionId: optionalString(params, "sessionId"),
     sourceRef: optionalString(params, "sourceRef"),
+    markers: optionalMarkers(params, "markers"),
     projectDir: optionalString(params, "projectDir"),
   };
   if (parsed.memoryType === "state" && !parsed.stateKey) {
@@ -551,4 +555,36 @@ function optionalScope(params: Record<string, unknown>, key: string): MemoryScop
     throw new NmgProtocolError("INVALID_PARAMS", `${key} must be a string map`);
   }
   return value as MemoryScope;
+}
+
+function optionalMarkers(params: Record<string, unknown>, key: string): MemoryMarker[] | undefined {
+  const value = params[key];
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 20) {
+    throw new NmgProtocolError("INVALID_PARAMS", `${key} must be an array of at most 20 markers`);
+  }
+  return value.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new NmgProtocolError("INVALID_PARAMS", `${key} entries must be objects`);
+    }
+    const marker = entry as Record<string, unknown>;
+    const kind = requiredString(marker, "kind");
+    const attributes = marker.attributes;
+    if (
+      attributes !== undefined &&
+      (!attributes ||
+        typeof attributes !== "object" ||
+        Array.isArray(attributes) ||
+        Object.values(attributes).some(
+          (item) =>
+            item !== null &&
+            typeof item !== "string" &&
+            typeof item !== "number" &&
+            typeof item !== "boolean",
+        ))
+    ) {
+      throw new NmgProtocolError("INVALID_PARAMS", `${key} attributes must contain scalar values`);
+    }
+    return { kind, attributes: attributes as MemoryMarker["attributes"] };
+  });
 }

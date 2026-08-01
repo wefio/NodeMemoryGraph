@@ -117,10 +117,33 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       scope: Type.Optional(Type.Record(Type.String(), Type.String())),
       residence: Type.Optional(Type.Union([Type.Literal("ltg"), Type.Literal("stg")])),
       expiresAt: Type.Optional(Type.String()),
+      externalSource: Type.Optional(
+        Type.Object({
+          source: Type.String({ description: "web:URL or file:PATH" }),
+          retrievedAt: Type.Optional(Type.String()),
+          hash: Type.Optional(Type.String()),
+        }),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const { externalSource, ...memory } = params;
+      if (externalSource && !/^(?:file|web):.+/u.test(externalSource.source)) {
+        throw new Error("externalSource.source must start with web: or file:");
+      }
       const result = await invoke("remember", {
-        ...params,
+        ...memory,
+        markers: externalSource
+          ? [
+              {
+                kind: "external_source",
+                attributes: {
+                  source: externalSource.source,
+                  retrievedAt: externalSource.retrievedAt ?? new Date().toISOString(),
+                  ...(externalSource.hash ? { hash: externalSource.hash } : {}),
+                },
+              },
+            ]
+          : undefined,
         projectDir: projectDirectory(),
         sessionId: ctx.sessionManager.getSessionId(),
       });
@@ -203,7 +226,8 @@ export function formatSearchHeaders(context: MemoryContext): string {
     "NMG SEARCH HEADERS",
     ...context.results.map(
       ({ memory, node }) =>
-        `- memory=${memory.id}; node=${node.canonicalName}; type=${memory.memoryType}; ` +
+        `- ${(memory.markers ?? []).some((marker) => marker.kind === "external_source") ? "[external] " : ""}` +
+        `memory=${memory.id}; node=${node.canonicalName}; type=${memory.memoryType}; ` +
         `tier=L${memory.tier}; preview=${excerpt(memory.statement, 160)}`,
     ),
     "Use nmg_get with selected memory IDs to load exact evidence.",
@@ -217,10 +241,15 @@ export function formatMemoryContext(context: MemoryContext): string {
         evidence.content.trim() !== memory.statement.trim()
           ? `\n  SOURCE=${excerpt(evidence.content, 320)}`
           : "";
+      const external = (memory.markers ?? []).find((marker) => marker.kind === "external_source");
+      const externalLabel = external ? `[external, ${memory.truthStatus}] ` : "";
+      const externalSource = external?.attributes?.source
+        ? `\n  EXTERNAL_SOURCE=${String(external.attributes.source)}; retrievedAt=${String(external.attributes.retrievedAt ?? "unknown")}`
+        : "";
       return (
-        `- ${memory.statement}\n  memory=${memory.id}; node=${node.canonicalName}; ` +
+        `- ${externalLabel}${memory.statement}\n  memory=${memory.id}; node=${node.canonicalName}; ` +
         `type=${memory.memoryType}; truth=${memory.truthStatus}; scope=${JSON.stringify(memory.scope)}` +
-        source
+        externalSource + source
       );
     })
     .join("\n");

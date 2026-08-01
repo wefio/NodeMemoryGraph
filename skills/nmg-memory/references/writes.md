@@ -54,6 +54,8 @@ event also changes current state, write both the event and the state.
 | `--valid-from` / `--valid-until` | Time-window validity for the memory |
 | `--expires-at` | Hard expiry (e.g. temporary facts) |
 | `--source-ref` | Source reference for tool or file provenance |
+| `--external-source web:URL|file:PATH` | Mark external provenance; defaults trust to `unverified` |
+| `--retrieved-at` / `--content-hash` | Timestamp and optional digest for an external source |
 | `--write-reason` | Why this write stays useful; appears in search results |
 
 The full `--actor` set is `user`, `assistant`, `system`, `tool`.

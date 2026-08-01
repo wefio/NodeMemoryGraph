@@ -1,6 +1,7 @@
 import type {
   MemoryActor,
   MemoryContext,
+  MemoryMarker,
   MemoryNodeKind,
   MemoryRecord,
   MemoryResidence,
@@ -100,6 +101,7 @@ export interface NmgRememberParams {
   writeReason?: string;
   sessionId?: string;
   sourceRef?: string;
+  markers?: MemoryMarker[];
   projectDir?: string;
 }
 
