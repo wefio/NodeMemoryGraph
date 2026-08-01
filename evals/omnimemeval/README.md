@@ -191,6 +191,47 @@ lookup. The answer prompt averaged 1,114 reported tokens per question. Future
 performance work must report cold indexing and warm retrieval separately and
 must not trade away the measured evidence-recall gain.
 
+### Current-code BGE full rerun (2026-08-01)
+
+The current code was rerun over all 500 LongMemEval questions as
+`nmg_bge_full_current_merged_20260801`, with a matched
+`no_memory_bge_full_current_20260801` arm. Both arms used
+`deepseek-v4-flash`, temperature 0, and the same official prompts and question
+set. NMG used `BAAI/bge-small-en-v1.5`, the `bge-en` preprocessing profile,
+record embeddings, `top_k=20`, and the default QPP-off retrieval path. The
+streaming search was split into non-overlapping index ranges and merged with
+the checked shard merger, which proved that all 500 indices were present once.
+
+| Arm | Official judge | F1 | METEOR | Search mean / P50 / P95 |
+| --- | ---: | ---: | ---: | ---: |
+| Current NMG + BGE | **0.6278** (312/497) | 0.1675 | 0.2322 | 7.81s / 9.10s / 10.32s |
+| Matched no memory | 0.0607 (30/494) | 0.0961 | 0.1081 | 0 / 0 / 0 ms |
+
+On the 491 questions judged successfully in both arms, current NMG scores
+0.6293 (309/491), versus 0.0611 (30/491) without memory: an absolute gain of
+56.82 points. NMG uniquely answers 280 questions correctly; the baseline
+uniquely answers one. All 500 searches and all 500 answer calls completed. The
+strict upstream parser skipped three NMG and six baseline judge responses. All
+three skipped NMG judge payloads explicitly contained `WRONG`, so the
+conservative all-500 NMG score is 0.6240.
+
+The strict evidence audit reports 83.30% of labelled questions with at least
+one evidence turn, 51.36% with every evidence turn, and 60.94% recall over all
+labelled turns. This is a real regression from the 2026-07-28 BGE run (94.15%,
+81.63%, and 87.28%). Mean returned context also fell from 3,615 to 1,383
+characters. The largest paired judge regressions are multi-session (98 to 54
+correct on 130 common questions) and temporal reasoning (104 to 75 on 133).
+The shorter context therefore removed useful multi-record evidence rather than
+merely eliminating noise. Do not treat the older 0.7963 result as current
+performance; restoring evidence composition under the shared Active Graph
+budget is the next retrieval-quality gate.
+
+The full run used a persistent embedding cache. Cold end-to-end search includes
+per-user GPU embedding construction; the NMG core sidecar reports P50 25.63 ms,
+P95 59.70 ms, and P99 66.26 ms for the graph/search work itself. A separate
+same-corpus warm check demonstrated identical returned contexts while reducing
+end-to-end search from 44.73 seconds to 260.09 ms on the Windows host.
+
 The NMG bridge preserves its existing `PerfTimer` snapshots in
 `.benchmarks/omnimemeval-nmg/search-perf.jsonl`. This sidecar survives the
 official streaming runner's per-user database deletion. The official
