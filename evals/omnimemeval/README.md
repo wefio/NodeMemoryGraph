@@ -208,6 +208,13 @@ The report includes nearest-rank P50, P95, and P99 for total core retrieval and
 each recorded phase. Large comparisons should use a version prefix so unrelated
 runs are not mixed.
 
+When an external embedding provider is configured, document and query vectors
+are cached by embedding index identity, input kind, and text hash in
+`.benchmarks/omnimemeval-nmg/embedding-cache.sqlite`. The cache is independent
+of disposable benchmark user databases, so repeated corpora and queries reuse
+vectors across users and runs. Changing the model or preprocessing contract
+changes the index identity and cannot reuse incompatible vectors.
+
 On the Windows evaluation host, the offline BGE server is run from the existing
 `uv` script environment. Installing the CUDA PyTorch wheel into that environment
 reduced the 30-question search run from roughly 50--75 seconds per question on

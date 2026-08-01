@@ -13,6 +13,7 @@ import type {
   MemoryMarker,
   PerfSnapshot,
 } from "../../src/core/types.ts";
+import { CachedOmniEmbeddingClient } from "./embedding-cache.ts";
 
 const BASE_RETRIEVAL_GUIDANCE =
   "[NMG retrieval guidance] Treat relevant user facts, preferences, constraints, " +
@@ -91,6 +92,8 @@ export interface OmniMemEvalBridgeOptions {
   qppThreshold?: number;
   /** Persist core retrieval timings independently of disposable user databases. */
   perfLogPath?: string;
+  /** Override the persistent content-addressed embedding cache location. */
+  embeddingCachePath?: string;
 }
 
 /**
@@ -103,6 +106,7 @@ export class OmniMemEvalBridge {
   readonly #root: string;
   readonly #stores = new Map<string, NmgStore>();
   readonly #embeddingClient?: OmniEmbeddingClient;
+  readonly #embeddingCache?: CachedOmniEmbeddingClient;
   readonly #embeddingBatchSize: number;
   readonly #secondPass: boolean;
   readonly #qppInitialEvidenceTarget?: number;
@@ -111,7 +115,13 @@ export class OmniMemEvalBridge {
 
   constructor(root: string, options: OmniMemEvalBridgeOptions = {}) {
     this.#root = resolve(root);
-    this.#embeddingClient = options.embeddingClient;
+    if (options.embeddingClient) {
+      this.#embeddingCache = new CachedOmniEmbeddingClient(
+        resolve(options.embeddingCachePath ?? resolve(this.#root, "embedding-cache.sqlite")),
+        options.embeddingClient,
+      );
+      this.#embeddingClient = this.#embeddingCache;
+    }
     this.#embeddingBatchSize = Math.max(
       1,
       Math.min(Math.trunc(options.embeddingBatchSize ?? 64), 2_048),
@@ -141,6 +151,7 @@ export class OmniMemEvalBridge {
   close(): void {
     for (const store of this.#stores.values()) store.close();
     this.#stores.clear();
+    this.#embeddingCache?.close();
   }
 
   deleteUser(userId: string): void {

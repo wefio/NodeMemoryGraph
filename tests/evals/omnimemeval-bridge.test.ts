@@ -103,19 +103,18 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
 test("OmniMemEval batches pending record vectors before search", async () => {
   const root = mkdtempSync(join(tmpdir(), "nmg-omni-records-"));
   const calls = { documents: 0, queries: 0 };
-  const bridge = new OmniMemEvalBridge(root, {
-    embeddingClient: {
-      indexId: "test-records@v1",
-      async embedDocuments(inputs) {
-        calls.documents += inputs.length;
-        return inputs.map((input) => [input.includes("Kepler") ? 1 : 0, 0]);
-      },
-      async embedQueries(inputs) {
-        calls.queries += inputs.length;
-        return inputs.map(() => [1, 0]);
-      },
+  const embeddingClient = {
+    indexId: "test-records@v1",
+    async embedDocuments(inputs: string[]) {
+      calls.documents += inputs.length;
+      return inputs.map((input) => [input.includes("Kepler") ? 1 : 0, 0]);
     },
-  });
+    async embedQueries(inputs: string[]) {
+      calls.queries += inputs.length;
+      return inputs.map(() => [1, 0]);
+    },
+  };
+  let bridge = new OmniMemEvalBridge(root, { embeddingClient });
   try {
     await bridge.handle({
       id: 1,
@@ -159,7 +158,26 @@ test("OmniMemEval batches pending record vectors before search", async () => {
       topK: 4,
     });
     assert.equal(calls.documents, 2);
-    assert.equal(calls.queries, 3);
+    assert.equal(calls.queries, 2, "repeated query uses the persistent cache");
+
+    await bridge.handle({ id: 6, op: "delete", userId: "alice" });
+    bridge.close();
+    bridge = new OmniMemEvalBridge(root, { embeddingClient });
+    await bridge.handle({
+      id: 7,
+      op: "add",
+      userId: "bob",
+      messages: [{ role: "user", content: "My telescope is named Kepler." }],
+    });
+    await bridge.handle({
+      id: 8,
+      op: "search",
+      userId: "bob",
+      query: "What is my telescope named?",
+      topK: 4,
+    });
+    assert.equal(calls.documents, 2, "document vector survives user deletion");
+    assert.equal(calls.queries, 2, "query vector survives bridge restart");
   } finally {
     bridge.close();
     rmSync(root, { recursive: true, force: true });
