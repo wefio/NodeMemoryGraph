@@ -1,6 +1,6 @@
 # STG Isolated Store（STG 独立库）
 
-**Status:** core, daemon, CLI, and Pi adapter integration implemented
+**Status:** session-private core, daemon, CLI, and Pi adapter integration implemented
 **Updated:** 2026-08-01
 **Related:** [memory-graphs.md](memory-graphs.md) §1/§3/§5, [external-source-design.md](external-source-design.md), docs/design.md §1
 
@@ -27,7 +27,7 @@ task/project-local), not merely a residence flag:
 LTG (authoritative, shared, durable)          SQLite, shared location
       │  usage-driven copy (cached subset)
       ▼
-STG (project-local, deletable, cache+new)     SQLite, project folder
+STG (session-private, deletable, cache+new)   SQLite, project/session folder
       │  query projection
       ▼
 AG (per-query memory)                         RAM, released with query
@@ -35,9 +35,9 @@ AG (per-query memory)                         RAM, released with query
 
 | Property | LTG | STG | AG |
 | --- | --- | --- | --- |
-| Location | shared store | **project folder** (`<project>/.nmg/stg.sqlite`) | RAM |
+| Location | shared store | **session folder** (`<project>/.nmg/sessions/<session-hash>/stg.sqlite`) | RAM |
 | Authority | sole authoritative | local provisional + **cached LTG subset** | derived |
-| Lifecycle | durable | project lifecycle; **deleting the folder drops it** | per query |
+| Lifecycle | durable | session lifecycle; **deleting the session folder drops it** | per query |
 | Write path | governed, durable | local fast writes | — |
 | Backed up? | yes (the only one that matters) | no (recreatable) | no |
 
@@ -114,8 +114,11 @@ query
 | 2 | **Implemented:** `cached_from_ltg` marker + usage-ranked `stg sync` | real copy/idempotency tests pass; automatic sync policy remains open |
 | 3 | **Implemented:** STG-first dual-store search with QPP fallback + authoritative dedupe | service and adapter tests pass; benchmark gate pending |
 
-The daemon opens project stores lazily from request `projectDir`; CLI exposes
-`--project-dir`, and Pi supplies its current working directory automatically.
+The daemon keys stores by `projectDir + sessionId` and opens them lazily. Pi
+supplies both its current working directory and native session ID on remember,
+search, automatic recall, and get. CLI exposes `--project-dir` plus optional
+`--session-id`; when omitted it uses the isolated administrative session
+`cli`, preserving the fallback workflow without joining a Pi session.
 
 ## 8. Non-goals
 

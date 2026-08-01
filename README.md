@@ -139,7 +139,7 @@ invocation started it.
 An already-running shared daemon is left untouched.
 
 The Pi extension keeps authoritative LTG in `NMG_DATA_DIR` or
-`~/.nmg/nmg.sqlite` and uses `<project>/.nmg/stg.sqlite` for the current
+`~/.nmg/nmg.sqlite` and uses `<project>/.nmg/sessions/<session-hash>/stg.sqlite` for the current
 working directory's isolated STG. Set `NMG_PROJECT_DIR` only when the project
 root differs from Pi's working directory.
 
@@ -201,6 +201,10 @@ directory, or `--db` to select one SQLite file. `remember` requires a stable
 `remember`, `search`, and `get` when they may touch isolated STG. `stg sync`
 copies a usage-ranked scoped LTG working set into that STG idempotently; LTG
 remains authoritative.
+
+Project STG is also session-private. Pi supplies its session ID automatically;
+CLI callers may add `--session-id ID`. Without it, CLI uses a separate `cli`
+administrative session rather than reading any Pi session's STG.
 
 External evidence is opt-in and visibly marked:
 

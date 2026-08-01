@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
+import { stgStorePath } from "../../src/core/stg.ts";
 
 test("status and hello do not create or open the database", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-status-"));
@@ -93,7 +94,41 @@ test("resident service isolates project STG while retaining LTG fallback", async
     });
     assert.equal(expanded.results[0]?.memory.id, local.memory.id);
     assert.deepEqual(expanded.missingMemoryIds, []);
-    assert.ok(existsSync(join(projectA, ".nmg", "stg.sqlite")));
+    assert.ok(existsSync(stgStorePath(projectA, "cli")));
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("resident service isolates STG by session inside one project", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-session-stg-"));
+  const projectDir = join(directory, "project");
+  const service = new NmgService({ databasePath: join(directory, "ltg.sqlite"), environment: {} });
+  try {
+    const local = await service.invoke("remember", {
+      statement: "Session alpha scratch fact is cobalt.",
+      nodeName: "Session scratch",
+      residence: "stg",
+      projectDir,
+      sessionId: "session-alpha",
+    });
+    const alpha = await service.invoke("search", {
+      query: "scratch fact cobalt",
+      projectDir,
+      sessionId: "session-alpha",
+    });
+    const beta = await service.invoke("search", {
+      query: "scratch fact cobalt",
+      projectDir,
+      sessionId: "session-beta",
+    });
+    assert.ok(alpha.results.some((result) => result.memory.id === local.memory.id));
+    assert.ok(!beta.results.some((result) => result.memory.id === local.memory.id));
+    assert.notEqual(
+      stgStorePath(projectDir, "session-alpha"),
+      stgStorePath(projectDir, "session-beta"),
+    );
   } finally {
     service.close();
     rmSync(directory, { recursive: true, force: true });

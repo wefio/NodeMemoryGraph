@@ -440,7 +440,11 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     };
   }
   if (command === "stg") {
-    assertAllowed(values, ["data-dir", "db", "project-dir", "scope", "limit"], ["json"]);
+    assertAllowed(
+      values,
+      ["data-dir", "db", "project-dir", "session-id", "scope", "limit"],
+      ["json"],
+    );
     rejectPositionals(values, "stg sync");
     return { ...common, params: syncStgParams(values) };
   }
@@ -457,6 +461,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
           "db",
           "node",
           "project-dir",
+          "session-id",
           "type",
           "state-key",
           "event-time",
@@ -493,6 +498,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
           "db",
           "node",
           "project-dir",
+          "session-id",
           "scope",
           "source-actor",
           "max-tier",
@@ -508,7 +514,11 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
         params: searchParams(values),
       };
     case "get":
-      assertAllowed(values, ["data-dir", "db", "graph-hops", "project-dir"], ["json"]);
+      assertAllowed(
+        values,
+        ["data-dir", "db", "graph-hops", "project-dir", "session-id"],
+        ["json"],
+      );
       return {
         ...common,
         params: getParams(values),
@@ -591,6 +601,7 @@ function syncStgParams(values: OptionValues): NmgSyncStgParams {
   if (!scope) throw new Error("stg sync requires --scope KEY=VALUE");
   return compactObject({
     projectDir: resolve(projectDir),
+    sessionId: firstOption(values, "session-id"),
     scope,
     limit: numericOption(values, "limit"),
   }) as unknown as NmgSyncStgParams;
@@ -704,6 +715,7 @@ function searchParams(values: OptionValues): NmgSearchParams {
     tieredDisclosure: values.flags.has("tiered-disclosure") || undefined,
     perf: values.flags.has("no-perf") ? false : undefined,
     projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
+    sessionId: firstOption(values, "session-id"),
   }) as unknown as NmgSearchParams;
 }
 
@@ -714,6 +726,7 @@ function getParams(values: OptionValues): NmgGetParams {
     memoryIds,
     graphHops: numericOption(values, "graph-hops"),
     projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
+    sessionId: firstOption(values, "session-id"),
   }) as unknown as NmgGetParams;
 }
 

@@ -152,7 +152,11 @@ export class NmgService {
       case "syncStg": {
         const parsed = parseSyncStgParams(params);
         return {
-          copied: copyLtgSubsetToStg(this.#getStore(), this.#getStgStore(parsed.projectDir), parsed),
+          copied: copyLtgSubsetToStg(
+            this.#getStore(),
+            this.#getStgStore(parsed.projectDir, parsed.sessionId),
+            parsed,
+          ),
           projectDir: parsed.projectDir,
         } as NmgMethodResult[M];
       }
@@ -226,7 +230,7 @@ export class NmgService {
     }
     const { projectDir, ...memory } = params;
     const store = memory.residence === "stg" && projectDir
-      ? this.#getStgStore(projectDir)
+      ? this.#getStgStore(projectDir, memory.sessionId)
       : this.#getStore();
     return store.remember({
       ...memory,
@@ -237,7 +241,7 @@ export class NmgService {
   }
 
   async #search(params: NmgSearchParams): Promise<NmgMethodResult["search"]> {
-    const { query, projectDir, ...options } = params;
+    const { query, projectDir, sessionId, ...options } = params;
     const search = (store: NmgStore) =>
       searchMemoryContext(
         store,
@@ -247,7 +251,7 @@ export class NmgService {
       );
     if (!projectDir) return search(this.#getStore());
 
-    const local = await search(this.#getStgStore(projectDir));
+    const local = await search(this.#getStgStore(projectDir, sessionId));
     if (local.results.length > 0 && local.activeGraph?.qpp?.trigger === false) return local;
 
     const shared = await search(this.#getStore());
@@ -257,7 +261,10 @@ export class NmgService {
   #get(params: NmgGetParams): NmgMethodResult["get"] {
     const shared = this.#getStore().getContext(params.memoryIds, params.graphHops ?? 0);
     const local = params.projectDir
-      ? this.#getStgStore(params.projectDir).getContext(params.memoryIds, params.graphHops ?? 0)
+      ? this.#getStgStore(params.projectDir, params.sessionId).getContext(
+          params.memoryIds,
+          params.graphHops ?? 0,
+        )
       : undefined;
     const context = local ? mergeStgLtgContexts(local, shared) : shared;
     const found = new Set(context.results.map((result) => result.memory.id));
@@ -271,12 +278,13 @@ export class NmgService {
     return (this.#store ??= new NmgStore(this.databasePath));
   }
 
-  #getStgStore(projectDir: string): NmgStore {
+  #getStgStore(projectDir: string, sessionId = "cli"): NmgStore {
     const resolved = resolve(projectDir);
-    let store = this.#stgStores.get(resolved);
+    const key = `${resolved}\0${sessionId}`;
+    let store = this.#stgStores.get(key);
     if (!store) {
-      store = createStgStore(resolved);
-      this.#stgStores.set(resolved, store);
+      store = createStgStore(resolved, undefined, sessionId);
+      this.#stgStores.set(key, store);
     }
     return store;
   }
@@ -351,6 +359,7 @@ function parseSearchParams(value: unknown): NmgSearchParams {
     tieredDisclosure: optionalBoolean(params, "tieredDisclosure"),
     perf: optionalBoolean(params, "perf"),
     projectDir: optionalString(params, "projectDir"),
+    sessionId: optionalString(params, "sessionId"),
   };
 }
 
@@ -380,6 +389,7 @@ function parseGetParams(value: unknown): NmgGetParams {
     memoryIds: ids.map((id) => String(id).trim()),
     graphHops: optionalInteger(params, "graphHops", 0, 3),
     projectDir: optionalString(params, "projectDir"),
+    sessionId: optionalString(params, "sessionId"),
   };
 }
 
@@ -391,6 +401,7 @@ function parseSyncStgParams(value: unknown): NmgSyncStgParams {
   }
   return {
     projectDir: requiredString(params, "projectDir"),
+    sessionId: optionalString(params, "sessionId"),
     scope,
     limit: optionalInteger(params, "limit", 1, 200),
   };

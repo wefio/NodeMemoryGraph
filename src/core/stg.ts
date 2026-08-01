@@ -2,17 +2,18 @@
  * STG isolated store (docs/stg-isolated-store.md).
  *
  * Three-storage model support without touching NmgStore internals:
- *   - createStgStore: open/create the project-local STG SQLite (Phase 1)
+ *   - createStgStore: open/create the session-private project STG SQLite (Phase 1)
  *   - copyLtgSubsetToStg: usage-driven copy of LTG content into the STG,
  *     each copy carrying a cached_from_ltg marker (Phase 2)
  *   - searchStgFirst: STG-first dual-store search with LTG fallback and
  *     dedupe by sourceMemoryId (Phase 3)
  *
  * STG stores are plain NmgStore instances on separate files: deletable,
- * project-local, never authoritative. LTG remains the sole authority;
+ * session-private and project-local, never authoritative. LTG remains the sole authority;
  * cached copies are search hints (marker, no re-verification) and are
  * refused by the promotion pipeline (loop guard in promoteMemory).
  */
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import type { MemoryContext, MemoryMarker, MemoryScope, SearchOptions } from "./types.ts";
@@ -24,17 +25,19 @@ export function cachedFromLtgMarker(sourceMemoryId: string, cachedAt: string): M
   return { kind: "cached_from_ltg", attributes: { sourceMemoryId, cachedAt } };
 }
 
-/** Project-local STG database path (Phase 1): `<project>/.nmg/stg.sqlite`. */
-export function stgStorePath(projectDir: string): string {
-  return join(projectDir, ".nmg", "stg.sqlite");
+/** Session-private STG path. The hash prevents session IDs from becoming paths. */
+export function stgStorePath(projectDir: string, sessionId = "default"): string {
+  const sessionKey = createHash("sha256").update(sessionId).digest("hex").slice(0, 24);
+  return join(projectDir, ".nmg", "sessions", sessionKey, "stg.sqlite");
 }
 
-/** Open (or create) the project STG store. Deletable — recreating it is free. */
+/** Open (or create) one session's project STG. Deletable; recreating it is free. */
 export function createStgStore(
   projectDir: string,
   embedder?: VectorEmbedder,
+  sessionId = "default",
 ): NmgStore {
-  return new NmgStore(stgStorePath(projectDir), embedder);
+  return new NmgStore(stgStorePath(projectDir, sessionId), embedder);
 }
 
 /**

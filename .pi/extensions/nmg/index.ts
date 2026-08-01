@@ -37,7 +37,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const invoke = async (method: "get" | "remember" | "search", params: Record<string, unknown>) =>
     invokeDaemon(await connection(), method, params);
 
-  pi.on("before_agent_start", async (event) => {
+  pi.on("before_agent_start", async (event, ctx) => {
     if (!shouldAutoRecall(event.prompt)) {
       return { systemPrompt: `${event.systemPrompt}\n\n${MEMORY_POLICY}` };
     }
@@ -45,6 +45,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const context = (await invoke("search", {
         query: event.prompt,
         projectDir: projectDirectory(),
+        sessionId: ctx.sessionManager.getSessionId(),
         maxTier: configuredAutoRecallTier(),
         limit: configuredAutoRecallLimit(),
         graphHops: 1,
@@ -160,8 +161,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       memoryIds: Type.Array(Type.String(), { minItems: 1, maxItems: 50 }),
       graphHops: Type.Optional(Type.Number({ minimum: 0, maximum: 3 })),
     }),
-    async execute(_toolCallId, params) {
-      const result = (await invoke("get", { ...params, projectDir: projectDirectory() })) as MemoryContext;
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = (await invoke("get", {
+        ...params,
+        projectDir: projectDirectory(),
+        sessionId: ctx.sessionManager.getSessionId(),
+      })) as MemoryContext;
       return toolResult(result, formatMemoryContext(result) || "No active memory found.");
     },
   });
@@ -184,10 +189,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       secondPass: Type.Optional(Type.Boolean()),
       tieredDisclosure: Type.Optional(Type.Boolean()),
     }),
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const result = (await invoke("search", {
         ...params,
         projectDir: projectDirectory(),
+        sessionId: ctx.sessionManager.getSessionId(),
       })) as MemoryContext;
       return toolResult(result, formatSearchHeaders(result));
     },

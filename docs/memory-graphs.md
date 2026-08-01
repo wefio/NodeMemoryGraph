@@ -2,10 +2,10 @@
 
 **Status:** consolidated design note
 
-Implementation note: isolated project STG is wired through the core, daemon,
-CLI, and Pi adapter. STG is project-local; finer session-per-Agent separation
-inside one project remains separate work.
-**Updated:** 2026-07-31
+Implementation note: isolated STG is wired through the core, daemon, CLI, and
+Pi adapter. It is stored per `projectDir + sessionId`; Pi propagates its native
+session identity through automatic recall and all three tools.
+**Updated:** 2026-08-01
 **Related:** [design.md](design.md) §1/§5/§6/§7.1, [tiered-disclosure-design.md](tiered-disclosure-design.md), [edge-activation-design.md](edge-activation-design.md)
 
 This document is the standalone reference for NMG's three-graph model:
@@ -172,9 +172,11 @@ non-forgeable `runtime_id` and `session_id` through search and exact access;
 every STG row, temporary edge, AG trace, and feedback event must be filtered
 by that identity. A separate `semantic_task_id` deduplicates repeated
 evidence across Agents; it must not be used as the isolation identity.
-**Current state:** the store does not yet persist full runtime ownership on
-semantic rows, so strict shared-daemon multi-Agent STG isolation remains an
-implementation requirement, not a verified feature.
+**Current state:** physical session-specific SQLite stores provide isolation.
+A session never scans another session's semantic rows; tests cover two
+sessions inside one project through both daemon and Pi adapter. Authenticating
+a claimed session ID remains a harness security concern, not a memory-row
+filter.
 
 ### STG vs index Delta
 
@@ -408,6 +410,7 @@ Implemented (design.md §13):
 - automatic turn-end maintenance in the Pi harness: STG expiry, due-node
   batch rebalance;
 - LTG-only L4 Dormant/Unindexed and L5 Quarantine lifecycle states.
+- session-private STG stores keyed by project and harness session identity;
 - deterministic tiered sequential disclosure in CLI/Pi, with a shared
   deep-evidence budget and AG ledger (calibrated SPRT evaluation remains open);
 - query-local typed edge activation with bounded propagation, fan dilution,
@@ -416,9 +419,8 @@ Implemented (design.md §13):
 
 Not yet implemented:
 
-- strict shared-daemon multi-Agent STG isolation (§3);
-- learned AG budget projection (Lab: `controller-runtime.ts` projects
-  budget dimensions, QPP shadow traces exist);
+- promotion of the implemented Lab AG budget projection into the default Lite
+  policy (the controller and QPP shadow traces already exist);
 - calibrated SPRT evaluation for tier opening;
 - learned temporal edge direction, contrastive unlearning, and automatic
   compression merge (see

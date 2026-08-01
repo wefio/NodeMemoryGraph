@@ -68,6 +68,30 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       .execute("search", { query: "Atlas database" }, undefined, undefined, { sessionManager });
     assert.match(searched.content[0].text, /NMG SEARCH HEADERS/);
 
+    await tools.get("nmg_remember")!.execute(
+      "remember-stg",
+      {
+        statement: "This session scratch color is cobalt.",
+        nodeName: "Session scratch",
+        residence: "stg",
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    );
+    const sameSession = await tools
+      .get("nmg_search")!
+      .execute("search-stg", { query: "scratch color cobalt" }, undefined, undefined, {
+        sessionManager,
+      });
+    const otherSession = await tools
+      .get("nmg_search")!
+      .execute("search-stg-other", { query: "scratch color cobalt" }, undefined, undefined, {
+        sessionManager: { getSessionId: () => "other-session" },
+      });
+    assert.match(sameSession.content[0].text, /Session scratch/);
+    assert.doesNotMatch(otherSession.content[0].text, /Session scratch/);
+
     await handlers.get("session_shutdown")!({}, { sessionManager });
     assert.equal(isProcessAlive(started!.pid), false);
   } finally {

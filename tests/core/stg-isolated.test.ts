@@ -148,7 +148,8 @@ test("Phase1: stgStorePath derives a deletable project-local file", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-stg-path-"));
   try {
     const path = stgStorePath(directory);
-    assert.equal(path, join(directory, ".nmg", "stg.sqlite"));
+    assert.ok(path.startsWith(join(directory, ".nmg", "sessions")));
+    assert.notEqual(path, stgStorePath(directory, "another-session"));
     const stg = createStgStore(directory, new HashingVectorEmbedder());
     stg.remember({ statement: "Local provisional", nodeName: "local" });
     stg.close();

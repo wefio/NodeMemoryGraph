@@ -120,16 +120,19 @@ export interface NmgSearchParams {
   tieredDisclosure?: boolean;
   perf?: boolean;
   projectDir?: string;
+  sessionId?: string;
 }
 
 export interface NmgGetParams {
   memoryIds: string[];
   graphHops?: number;
   projectDir?: string;
+  sessionId?: string;
 }
 
 export interface NmgSyncStgParams {
   projectDir: string;
+  sessionId?: string;
   scope: MemoryScope;
   limit?: number;
 }
