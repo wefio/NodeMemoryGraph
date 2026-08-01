@@ -20,7 +20,11 @@ benchmark data
 for plain vector retrieval, Top-1 reverse lookup followed by QPP2, QPP2-derived
 reverse lookup followed by QPP2, and their union. It is an offline mechanism
 probe: evidence labels are used only for scoring, and no answer model or judge
-is called.
+is called. The report also measures cumulative recall at configurable result
+cutoffs (20/25/30/40 by default) and records each gold session's rank. This
+models search-style continuation: a first page may stay compact while folded
+candidates remain available through `expand`, rather than being treated as
+deleted evidence.
 
 The probe embeds whole LongMemEval sessions, whereas the NMG benchmark retrieves
 memory records through its graph and tiers. Its absolute recall is therefore not
@@ -37,6 +41,8 @@ instructions after retrieval and therefore do not impose a minimum window size.
   --output .benchmarks\results\reverse-retrieval-temporal-full.json `
   --category temporal-reasoning
 ```
+
+Use `--page-cutoffs 20 25 30 40` to change the cumulative expansion points.
 
 ## Integration boundary
 

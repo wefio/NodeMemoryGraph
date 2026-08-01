@@ -88,19 +88,20 @@ def qpp2_fold(
     query: np.ndarray,
     documents: np.ndarray,
     fused: list[int],
-    limit: int,
+    limit: int | None = None,
 ) -> list[int]:
     """Keep fusion order as a prior while QPP2 removes the noisy tail."""
     qpp_order = qpp2_rank(query, documents, fused)
     qpp_rank = {value: rank for rank, value in enumerate(qpp_order, start=1)}
     fused_rank = {value: rank for rank, value in enumerate(fused, start=1)}
-    return sorted(
+    ranked = sorted(
         fused,
         key=lambda value: (
             0.7 * qpp_rank[value] + 0.3 * fused_rank[value],
             fused_rank[value],
         ),
-    )[:limit]
+    )
+    return ranked if limit is None else ranked[:limit]
 
 
 def reverse_top1(documents: np.ndarray, baseline: list[int], breadth: int) -> list[int]:
@@ -129,19 +130,20 @@ def select_variants(
 ) -> tuple[dict[str, list[int]], dict[str, float]]:
     timings: dict[str, float] = {}
     started = time.perf_counter()
-    baseline = top_indices(documents @ query, limit)
+    baseline_full = top_indices(documents @ query, len(documents))
+    baseline = baseline_full[:limit]
     timings["baseline"] = (time.perf_counter() - started) * 1000
 
     started = time.perf_counter()
     top1_reverse = reverse_top1(documents, baseline, reverse_breadth)
     option1_pool = reciprocal_rank_fusion([(baseline, 1.5), (top1_reverse, 1.0)])
-    option1 = qpp2_fold(query, documents, option1_pool, limit)
+    option1 = qpp2_fold(query, documents, option1_pool)
     timings["top1_reverse_then_qpp2"] = (time.perf_counter() - started) * 1000
 
     started = time.perf_counter()
     qpp_reverse = reverse_qpp2(query, documents, baseline, reverse_breadth)
     option2_pool = reciprocal_rank_fusion([(baseline, 1.5), (qpp_reverse, 1.0)])
-    option2 = qpp2_fold(query, documents, option2_pool, limit)
+    option2 = qpp2_fold(query, documents, option2_pool)
     timings["qpp2_reverse_then_qpp2"] = (time.perf_counter() - started) * 1000
 
     started = time.perf_counter()
@@ -150,10 +152,10 @@ def select_variants(
         (reverse_top1(documents, baseline, reverse_breadth), 1.0),
         (reverse_qpp2(query, documents, baseline, reverse_breadth), 1.0),
     ])
-    combined = qpp2_fold(query, documents, combined_pool, limit)
+    combined = qpp2_fold(query, documents, combined_pool)
     timings["combined_then_qpp2"] = (time.perf_counter() - started) * 1000
     return ({
-        "baseline": baseline,
+        "baseline": baseline_full,
         "top1_reverse_then_qpp2": option1,
         "qpp2_reverse_then_qpp2": option2,
         "combined_then_qpp2": combined,
@@ -174,6 +176,13 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--reverse-breadth", type=int, default=20)
     parser.add_argument("--max-cases", type=int)
+    parser.add_argument(
+        "--page-cutoffs",
+        type=int,
+        nargs="+",
+        default=[20, 25, 30, 40],
+        help="Cumulative result counts used to evaluate search-style expansion.",
+    )
     args = parser.parse_args()
 
     rows = json.loads(args.data.read_text(encoding="utf-8"))
@@ -184,6 +193,11 @@ def main() -> None:
     totals = {name: Metrics() for name in (
         "baseline", "top1_reverse_then_qpp2", "qpp2_reverse_then_qpp2", "combined_then_qpp2"
     )}
+    cutoffs = sorted(set([args.limit, *args.page_cutoffs]))
+    paged_totals = {
+        name: {cutoff: Metrics() for cutoff in cutoffs}
+        for name in totals
+    }
     details: list[dict[str, object]] = []
 
     for row in rows:
@@ -199,13 +213,25 @@ def main() -> None:
         evidence = {id_to_index[value] for value in row["answer_session_ids"] if value in id_to_index}
         variants, timings = select_variants(query, documents, args.limit, args.reverse_breadth)
         for name, selected in variants.items():
-            totals[name].add(selected, evidence, timings[name])
+            first_page = selected[: args.limit]
+            totals[name].add(first_page, evidence, timings[name])
+            for cutoff in cutoffs:
+                paged_totals[name][cutoff].add(selected[:cutoff], evidence, timings[name])
         details.append({
             "question_id": row["question_id"],
             "question": row["question"],
             "evidence_sessions": [row["haystack_session_ids"][index] for index in sorted(evidence)],
             "selected_sessions": {
-                name: [row["haystack_session_ids"][index] for index in selected]
+                name: [row["haystack_session_ids"][index] for index in selected[: max(cutoffs)]]
+                for name, selected in variants.items()
+            },
+            "evidence_ranks": {
+                name: {
+                    row["haystack_session_ids"][index]: (
+                        selected.index(index) + 1 if index in selected else None
+                    )
+                    for index in sorted(evidence)
+                }
                 for name, selected in variants.items()
             },
         })
@@ -219,11 +245,19 @@ def main() -> None:
             "fold": "rank blend: 0.7 QPP2 rank + 0.3 fused rank",
             "reverse_anchor_count": 3,
             "limit": args.limit,
+            "page_cutoffs": cutoffs,
             "reverse_breadth": args.reverse_breadth,
             "model": args.model,
             "category": args.category,
         },
         "metrics": {name: value.summary() for name, value in totals.items()},
+        "pagination": {
+            name: {
+                str(cutoff): metrics.summary()
+                for cutoff, metrics in by_cutoff.items()
+            }
+            for name, by_cutoff in paged_totals.items()
+        },
         "details": details,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
