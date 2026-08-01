@@ -25,8 +25,9 @@ The Pi adapter performs this ownership tracking automatically.
 
 ## Storage selection
 
-Default storage is `NMG_DATA_DIR` or `.nmg`. For an explicit store, pass the same
-option to every lifecycle and memory command:
+CLI LTG storage defaults to `NMG_DATA_DIR` or `.nmg`. The Pi adapter defaults
+LTG to `~/.nmg` and passes its working directory as the project STG root. For an
+explicit LTG store, pass the same option to every lifecycle and memory command:
 
 ```text
 --data-dir <DIRECTORY>
@@ -34,6 +35,16 @@ option to every lifecycle and memory command:
 ```
 
 Do not mix stores accidentally.
+
+Use `--project-dir <DIRECTORY>` on `remember`, `search`, and `get` when the
+operation may touch project STG. Populate a scoped project cache explicitly:
+
+```text
+nmg stg sync --project-dir . --scope project=atlas --limit 50 --json
+```
+
+The command is idempotent. It copies authoritative LTG content into
+`<project>/.nmg/stg.sqlite`; it does not move or delete LTG records.
 
 ## Failure handling
 
@@ -93,4 +104,3 @@ nmg node split <NODE_ID> \
 
 Run `nmg status --json` before a merge to check store health. Node IDs come
 from `nmg search --json` results or `nmg get` output.
-

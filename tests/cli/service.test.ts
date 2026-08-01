@@ -53,6 +53,81 @@ test("resident service remembers, searches, and expands exact evidence", async (
   }
 });
 
+test("resident service isolates project STG while retaining LTG fallback", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-stg-"));
+  const projectA = join(directory, "project-a");
+  const projectB = join(directory, "project-b");
+  const service = new NmgService({ databasePath: join(directory, "ltg.sqlite"), environment: {} });
+  try {
+    const local = await service.invoke("remember", {
+      statement: "Project A session branch is blue.",
+      nodeName: "Session branch",
+      residence: "stg",
+      projectDir: projectA,
+    });
+    const durable = await service.invoke("remember", {
+      statement: "The user prefers concise explanations.",
+      nodeName: "Response preference",
+      memoryType: "preference",
+    });
+
+    const inA = await service.invoke("search", {
+      query: "session branch blue",
+      projectDir: projectA,
+    });
+    assert.ok(inA.results.some((result) => result.memory.id === local.memory.id));
+    const inB = await service.invoke("search", {
+      query: "session branch blue",
+      projectDir: projectB,
+    });
+    assert.ok(!inB.results.some((result) => result.memory.id === local.memory.id));
+
+    const fallback = await service.invoke("search", {
+      query: "concise explanations",
+      projectDir: projectA,
+    });
+    assert.ok(fallback.results.some((result) => result.memory.id === durable.memory.id));
+    const expanded = await service.invoke("get", {
+      memoryIds: [local.memory.id],
+      projectDir: projectA,
+    });
+    assert.equal(expanded.results[0]?.memory.id, local.memory.id);
+    assert.deepEqual(expanded.missingMemoryIds, []);
+    assert.ok(existsSync(join(projectA, ".nmg", "stg.sqlite")));
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("resident service syncs a scoped LTG working set into project STG idempotently", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-stg-sync-"));
+  const projectDir = join(directory, "project");
+  const service = new NmgService({ databasePath: join(directory, "ltg.sqlite"), environment: {} });
+  try {
+    await service.invoke("remember", {
+      statement: "Project atlas uses SQLite.",
+      nodeName: "Atlas storage",
+      scope: { project: "atlas" },
+    });
+    const first = await service.invoke("syncStg", {
+      projectDir,
+      scope: { project: "atlas" },
+      limit: 10,
+    });
+    const second = await service.invoke("syncStg", {
+      projectDir,
+      scope: { project: "atlas" },
+      limit: 10,
+    });
+    assert.equal(first.copied, 1);
+    assert.equal(second.copied, 0);
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("resident service exposes explicit retention and deletion maintenance", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-maintenance-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });

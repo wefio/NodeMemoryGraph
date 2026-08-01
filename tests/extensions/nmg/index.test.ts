@@ -31,7 +31,9 @@ test("Pi adapter exposes only the stable tool surface", () => {
 test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-http-"));
   const previous = process.env.NMG_DATA_DIR;
+  const previousProject = process.env.NMG_PROJECT_DIR;
   process.env.NMG_DATA_DIR = directory;
+  process.env.NMG_PROJECT_DIR = directory;
   const sessionManager = { getSessionId: () => "http-test-session" };
   try {
     const { handlers, tools } = extensionHarness();
@@ -71,6 +73,8 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
   } finally {
     if (previous === undefined) delete process.env.NMG_DATA_DIR;
     else process.env.NMG_DATA_DIR = previous;
+    if (previousProject === undefined) delete process.env.NMG_PROJECT_DIR;
+    else process.env.NMG_PROJECT_DIR = previousProject;
     rmSync(directory, { recursive: true, force: true });
   }
 });

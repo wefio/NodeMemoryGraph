@@ -20,7 +20,7 @@ When the first recall quality is doubtful but the query is right, re-select
 within the same candidate pool instead of changing the query:
 
 ```text
-nmg search "<query>" --second-pass --limit 8 --json
+nmg search "<query>" --project-dir . --second-pass --limit 8 --json
 ```
 
 `--second-pass` walks cumulative Fibonacci evidence tiers (1, 2, 3, 5, ...),
@@ -63,4 +63,3 @@ previews.
 
 Say that no matching memory was found. Do not invent remembered facts. If NMG is
 unavailable, continue without memory and disclose the limitation when it matters.
-

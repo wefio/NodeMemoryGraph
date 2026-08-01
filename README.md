@@ -138,6 +138,11 @@ tools, and stops the daemon at session shutdown only when that adapter
 invocation started it.
 An already-running shared daemon is left untouched.
 
+The Pi extension keeps authoritative LTG in `NMG_DATA_DIR` or
+`~/.nmg/nmg.sqlite` and uses `<project>/.nmg/stg.sqlite` for the current
+working directory's isolated STG. Set `NMG_PROJECT_DIR` only when the project
+root differs from Pi's working directory.
+
 By default, the model receives three tools and a typed write/use policy:
 
 - `nmg_remember`: save a typed long-term memory with scope, truth status,
@@ -176,6 +181,7 @@ npm run cli -- retention archive <memory-id>
 npm run cli -- retention quarantine <memory-id> --recovery-days 30
 npm run cli -- retention restore <memory-id>
 npm run cli -- memory delete <memory-id>
+npm run cli -- stg sync --project-dir . --scope project=nmg --limit 50
 npm run cli -- daemon start
 npm run cli -- daemon status
 npm run cli -- daemon stop
@@ -186,7 +192,10 @@ CLI runs precompiled JavaScript and does not type-strip files from
 `node_modules`. Use `--json`
 for the complete structured result, `--data-dir` to select an NMG data
 directory, or `--db` to select one SQLite file. `remember` requires a stable
-`--node` name; `--scope key=value` is repeatable.
+`--node` name; `--scope key=value` is repeatable. Pass `--project-dir` to
+`remember`, `search`, and `get` when they may touch isolated STG. `stg sync`
+copies a usage-ranked scoped LTG working set into that STG idempotently; LTG
+remains authoritative.
 
 `nmg daemon start` launches the language-neutral JSON-RPC-over-HTTP boundary
 on an OS-assigned loopback port. Requests and responses are JSON-RPC 2.0 over

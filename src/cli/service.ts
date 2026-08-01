@@ -7,6 +7,7 @@ import {
   type EmbeddingClient,
 } from "../core/embedding-provider.ts";
 import { NmgStore } from "../core/store.ts";
+import { copyLtgSubsetToStg, createStgStore, mergeStgLtgContexts } from "../core/stg.ts";
 import type {
   EvidenceRole,
   MemoryActor,
@@ -35,6 +36,7 @@ import {
   type NmgSetStorageStateParams,
   type NmgSplitNodeParams,
   type NmgStatusResult,
+  type NmgSyncStgParams,
 } from "./protocol.ts";
 
 const SERVICE_VERSION = "0.1.0";
@@ -84,6 +86,7 @@ export class NmgService {
   readonly databasePath: string;
   readonly #environment: NodeJS.ProcessEnv;
   #store: NmgStore | undefined;
+  readonly #stgStores = new Map<string, NmgStore>();
   #embeddingClient: EmbeddingClient | undefined | null;
   #embeddingError: string | null = null;
   #shutdownRequested = false;
@@ -145,6 +148,13 @@ export class NmgService {
         return this.#getStore().mergeNodes(parseMergeNodesParams(params)) as NmgMethodResult[M];
       case "splitNode":
         return this.#getStore().splitNode(parseSplitNodeParams(params)) as NmgMethodResult[M];
+      case "syncStg": {
+        const parsed = parseSyncStgParams(params);
+        return {
+          copied: copyLtgSubsetToStg(this.#getStore(), this.#getStgStore(parsed.projectDir), parsed),
+          projectDir: parsed.projectDir,
+        } as NmgMethodResult[M];
+      }
       case "shutdown":
         this.#shutdownRequested = true;
         return { shuttingDown: true } as NmgMethodResult[M];
@@ -156,6 +166,8 @@ export class NmgService {
   close(): void {
     this.#store?.close();
     this.#store = undefined;
+    for (const store of this.#stgStores.values()) store.close();
+    this.#stgStores.clear();
   }
 
   #hello(): NmgHelloResult {
@@ -210,25 +222,41 @@ export class NmgService {
       });
       throw new NmgProtocolError("WRITE_REJECTED", assessment.reason);
     }
-    return this.#getStore().remember({
-      ...params,
+    const { projectDir, ...memory } = params;
+    const store = memory.residence === "stg" && projectDir
+      ? this.#getStgStore(projectDir)
+      : this.#getStore();
+    return store.remember({
+      ...memory,
       writeReason: params.writeReason ?? `cli_confirmed_${params.memoryType ?? "fact"}`,
       writeSource: "user",
     });
   }
 
   async #search(params: NmgSearchParams): Promise<NmgMethodResult["search"]> {
-    const { query, ...options } = params;
-    return searchMemoryContext(
-      this.#getStore(),
-      this.#configuredEmbeddingClient(),
-      query,
-      options as SearchOptions,
-    );
+    const { query, projectDir, ...options } = params;
+    const search = (store: NmgStore) =>
+      searchMemoryContext(
+        store,
+        this.#configuredEmbeddingClient(),
+        query,
+        options as SearchOptions,
+      );
+    if (!projectDir) return search(this.#getStore());
+
+    const local = await search(this.#getStgStore(projectDir));
+    if (local.results.length > 0 && local.activeGraph?.qpp?.trigger === false) return local;
+
+    const shared = await search(this.#getStore());
+    return local.results.length === 0 ? shared : mergeStgLtgContexts(local, shared);
   }
 
   #get(params: NmgGetParams): NmgMethodResult["get"] {
-    const context = this.#getStore().getContext(params.memoryIds, params.graphHops ?? 0);
+    const shared = this.#getStore().getContext(params.memoryIds, params.graphHops ?? 0);
+    const local = params.projectDir
+      ? this.#getStgStore(params.projectDir).getContext(params.memoryIds, params.graphHops ?? 0)
+      : undefined;
+    const context = local ? mergeStgLtgContexts(local, shared) : shared;
     const found = new Set(context.results.map((result) => result.memory.id));
     return {
       ...context,
@@ -238,6 +266,16 @@ export class NmgService {
 
   #getStore(): NmgStore {
     return (this.#store ??= new NmgStore(this.databasePath));
+  }
+
+  #getStgStore(projectDir: string): NmgStore {
+    const resolved = resolve(projectDir);
+    let store = this.#stgStores.get(resolved);
+    if (!store) {
+      store = createStgStore(resolved);
+      this.#stgStores.set(resolved, store);
+    }
+    return store;
   }
 
   #configuredEmbeddingClient(): EmbeddingClient | undefined {
@@ -284,6 +322,7 @@ function parseRememberParams(value: unknown): NmgRememberParams {
     writeReason: optionalString(params, "writeReason"),
     sessionId: optionalString(params, "sessionId"),
     sourceRef: optionalString(params, "sourceRef"),
+    projectDir: optionalString(params, "projectDir"),
   };
   if (parsed.memoryType === "state" && !parsed.stateKey) {
     throw new NmgProtocolError("INVALID_PARAMS", "state memories require stateKey");
@@ -306,6 +345,7 @@ function parseSearchParams(value: unknown): NmgSearchParams {
     vectorGranularity: optionalEnum(params, "vectorGranularity", VECTOR_GRANULARITIES),
     secondPass: optionalBoolean(params, "secondPass"),
     perf: optionalBoolean(params, "perf"),
+    projectDir: optionalString(params, "projectDir"),
   };
 }
 
@@ -334,6 +374,20 @@ function parseGetParams(value: unknown): NmgGetParams {
   return {
     memoryIds: ids.map((id) => String(id).trim()),
     graphHops: optionalInteger(params, "graphHops", 0, 3),
+    projectDir: optionalString(params, "projectDir"),
+  };
+}
+
+function parseSyncStgParams(value: unknown): NmgSyncStgParams {
+  const params = objectParams(value);
+  const scope = optionalScope(params, "scope");
+  if (!scope || Object.keys(scope).length === 0) {
+    throw new NmgProtocolError("INVALID_PARAMS", "scope is required");
+  }
+  return {
+    projectDir: requiredString(params, "projectDir"),
+    scope,
+    limit: optionalInteger(params, "limit", 1, 200),
   };
 }
 

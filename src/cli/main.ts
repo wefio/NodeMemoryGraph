@@ -12,6 +12,7 @@ import {
   type NmgSearchParams,
   type NmgSetStorageStateParams,
   type NmgSplitNodeParams,
+  type NmgSyncStgParams,
 } from "./protocol.ts";
 import { httpCall } from "./http-client.ts";
 import { serveHttp } from "./http-server.ts";
@@ -41,12 +42,14 @@ Usage:
   nmg node split NODE_ID --partition NAME=MEMORY_ID,... --partition ... [--json]
   nmg perf aggregates [--json]
   nmg perf prune [--max-days N] [--max-rows N] [--json]
+  nmg stg sync --project-dir DIR --scope KEY=VALUE [--limit N] [--json]
   nmg daemon start|status|stop [--data-dir DIR | --db FILE] [--json]
 
 Common options:
   --data-dir DIR             NMG data directory (default: NMG_DATA_DIR or .nmg)
   --db FILE                  Explicit SQLite database path
   --scope KEY=VALUE          Repeatable or comma-separated scope filter
+  --project-dir DIR          Project-local STG root (stores .nmg/stg.sqlite)
   --json                     Emit the full machine-readable result
 
 Remember options:
@@ -104,6 +107,7 @@ const ALL_OPTIONS = new Set([
   "max-tier",
   "node",
   "partition",
+  "project-dir",
   "quarantine-after-days",
   "recovery-days",
   "residence",
@@ -285,6 +289,7 @@ interface ParsedArguments {
     | NmgDeleteMemoryParams
     | NmgMergeNodesParams
     | NmgSplitNodeParams
+    | NmgSyncStgParams
     | NmgPerfParams;
   json: boolean;
   dataDirectory?: string;
@@ -306,6 +311,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
       "memory",
       "node",
       "perf",
+      "stg",
       "daemon",
     ].includes(command!)
   ) {
@@ -315,7 +321,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   if (command === "daemon" && !["run", "start", "status", "stop"].includes(daemonAction ?? "")) {
     throw new Error("daemon requires start, status, or stop");
   }
-  const subcommand = ["retention", "memory", "node", "perf"].includes(command!)
+  const subcommand = ["retention", "memory", "node", "perf", "stg"].includes(command!)
     ? rest[0]
     : undefined;
   if (
@@ -333,6 +339,9 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   if (command === "perf" && !["aggregates", "prune"].includes(subcommand ?? "")) {
     throw new Error("perf requires aggregates or prune");
   }
+  if (command === "stg" && subcommand !== "sync") {
+    throw new Error("stg requires sync");
+  }
   const values = parseOptions(command === "daemon" || subcommand ? rest.slice(1) : rest);
   const maintenanceCommand =
     command === "retention"
@@ -349,6 +358,8 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
             ? subcommand === "aggregates"
               ? "perfAggregates"
               : "pruneRetrievalTraces"
+            : command === "stg"
+              ? "syncStg"
             : undefined;
   const common = {
     command:
@@ -415,6 +426,11 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
       params: perfPruneParams(values),
     };
   }
+  if (command === "stg") {
+    assertAllowed(values, ["data-dir", "db", "project-dir", "scope", "limit"], ["json"]);
+    rejectPositionals(values, "stg sync");
+    return { ...common, params: syncStgParams(values) };
+  }
   switch (command) {
     case "status":
       assertAllowed(values, ["data-dir", "db"], ["json"]);
@@ -427,6 +443,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
           "data-dir",
           "db",
           "node",
+          "project-dir",
           "type",
           "state-key",
           "event-time",
@@ -459,6 +476,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
           "data-dir",
           "db",
           "node",
+          "project-dir",
           "scope",
           "source-actor",
           "max-tier",
@@ -474,7 +492,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
         params: searchParams(values),
       };
     case "get":
-      assertAllowed(values, ["data-dir", "db", "graph-hops"], ["json"]);
+      assertAllowed(values, ["data-dir", "db", "graph-hops", "project-dir"], ["json"]);
       return {
         ...common,
         params: getParams(values),
@@ -550,6 +568,18 @@ function perfPruneParams(values: OptionValues): NmgPerfParams {
   });
 }
 
+function syncStgParams(values: OptionValues): NmgSyncStgParams {
+  const projectDir = firstOption(values, "project-dir");
+  if (!projectDir) throw new Error("stg sync requires --project-dir DIR");
+  const scope = scopeOptions(values);
+  if (!scope) throw new Error("stg sync requires --scope KEY=VALUE");
+  return compactObject({
+    projectDir: resolve(projectDir),
+    scope,
+    limit: numericOption(values, "limit"),
+  }) as unknown as NmgSyncStgParams;
+}
+
 function singlePositional(values: OptionValues, command: string): string {
   if (values.positionals.length !== 1) throw new Error(`${command} requires exactly one ID`);
   return values.positionals[0]!;
@@ -619,6 +649,7 @@ function rememberParams(values: OptionValues): NmgRememberParams {
     writeReason: firstOption(values, "write-reason"),
     sessionId: firstOption(values, "session-id"),
     sourceRef: firstOption(values, "source-ref"),
+    projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
   }) as unknown as NmgRememberParams;
 }
 
@@ -638,6 +669,7 @@ function searchParams(values: OptionValues): NmgSearchParams {
     vectorGranularity: firstOption(values, "vector-granularity"),
     secondPass: values.flags.has("second-pass") || undefined,
     perf: values.flags.has("no-perf") ? false : undefined,
+    projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
   }) as unknown as NmgSearchParams;
 }
 
@@ -647,6 +679,7 @@ function getParams(values: OptionValues): NmgGetParams {
   return compactObject({
     memoryIds,
     graphHops: numericOption(values, "graph-hops"),
+    projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
   }) as unknown as NmgGetParams;
 }
 

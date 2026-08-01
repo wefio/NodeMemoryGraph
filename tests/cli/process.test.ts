@@ -136,6 +136,33 @@ test("packaged launcher rejects unknown options with a usage exit code", () => {
   assert.match(result.stderr, /unknown option: --typo/);
 });
 
+test("CLI writes and reads project STG and exposes scoped sync", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-process-stg-"));
+  const projectDir = resolve(directory, "project");
+  try {
+    const local = runLauncher([
+      "remember", "Session project fact", "--node", "Project scratch", "--residence", "stg",
+      "--project-dir", projectDir, "--json", "--data-dir", directory,
+    ]) as { memory: { id: string } };
+    const expanded = runLauncher([
+      "get", local.memory.id, "--project-dir", projectDir, "--json", "--data-dir", directory,
+    ]) as { results: Array<{ memory: { id: string } }> };
+    assert.equal(expanded.results[0]?.memory.id, local.memory.id);
+
+    runLauncher([
+      "remember", "Atlas durable storage uses SQLite", "--node", "Atlas storage", "--scope",
+      "project=atlas", "--json", "--data-dir", directory,
+    ]);
+    const synced = runLauncher([
+      "stg", "sync", "--project-dir", projectDir, "--scope", "project=atlas", "--json",
+      "--data-dir", directory,
+    ]) as { copied: number };
+    assert.equal(synced.copied, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("HTTP daemon starts once, serves CLI requests, and stops cleanly", () => {
   const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-process-http-"));
   try {

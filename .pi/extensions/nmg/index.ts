@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -22,7 +23,11 @@ import type { MemoryContext, MemoryTier } from "../../../src/core/types.ts";
  */
 
 function databasePath(): string {
-  return join(process.env.NMG_DATA_DIR || join(process.cwd(), ".nmg"), "nmg.sqlite");
+  return join(process.env.NMG_DATA_DIR || join(homedir(), ".nmg"), "nmg.sqlite");
+}
+
+function projectDirectory(): string {
+  return process.env.NMG_PROJECT_DIR || process.cwd();
 }
 
 export default function nmgExtension(pi: ExtensionAPI): void {
@@ -39,6 +44,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     try {
       const context = (await invoke("search", {
         query: event.prompt,
+        projectDir: projectDirectory(),
         maxTier: configuredAutoRecallTier(),
         limit: configuredAutoRecallLimit(),
         graphHops: 1,
@@ -115,6 +121,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const result = await invoke("remember", {
         ...params,
+        projectDir: projectDirectory(),
         sessionId: ctx.sessionManager.getSessionId(),
       });
       return toolResult(result, "Memory saved.");
@@ -130,7 +137,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       graphHops: Type.Optional(Type.Number({ minimum: 0, maximum: 3 })),
     }),
     async execute(_toolCallId, params) {
-      const result = (await invoke("get", params)) as MemoryContext;
+      const result = (await invoke("get", { ...params, projectDir: projectDirectory() })) as MemoryContext;
       return toolResult(result, formatMemoryContext(result) || "No active memory found.");
     },
   });
@@ -153,7 +160,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       secondPass: Type.Optional(Type.Boolean()),
     }),
     async execute(_toolCallId, params) {
-      const result = (await invoke("search", params)) as MemoryContext;
+      const result = (await invoke("search", {
+        ...params,
+        projectDir: projectDirectory(),
+      })) as MemoryContext;
       return toolResult(result, formatSearchHeaders(result));
     },
   });

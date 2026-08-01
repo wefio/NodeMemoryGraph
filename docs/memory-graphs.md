@@ -2,9 +2,9 @@
 
 **Status:** consolidated design note
 
-Implementation note: an isolated-store STG prototype now exists in
-`src/core/stg.ts`, but the daemon and Agent adapters still use the shared-store
-path. Strict multi-Agent/session STG isolation is therefore not yet shipped.
+Implementation note: isolated project STG is wired through the core, daemon,
+CLI, and Pi adapter. STG is project-local; finer session-per-Agent separation
+inside one project remains separate work.
 **Updated:** 2026-07-31
 **Related:** [design.md](design.md) §1/§5/§6/§7.1, [tiered-disclosure-design.md](tiered-disclosure-design.md), [edge-activation-design.md](edge-activation-design.md)
 

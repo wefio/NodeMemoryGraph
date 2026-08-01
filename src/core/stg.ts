@@ -134,6 +134,14 @@ export function searchStgFirst(
   }
   const shared = ltg.searchContext(query, options);
   if (!local || local.results.length === 0) return shared;
+  return mergeStgLtgContexts(local, shared);
+}
+
+/** Merge a project STG result with authoritative LTG results. */
+export function mergeStgLtgContexts(
+  local: MemoryContext,
+  shared: MemoryContext,
+): MemoryContext {
   // Merge: dedupe by cached sourceMemoryId; keep LTG rows (authoritative).
   const seenLtg = new Set(shared.results.map((result) => result.memory.id));
   const dedupedLocal = local.results.filter(

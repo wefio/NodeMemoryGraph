@@ -28,6 +28,7 @@ export const NMG_CAPABILITIES = [
   "delete-memory",
   "merge-nodes",
   "split-node",
+  "sync-stg",
   "shutdown",
   "http",
   "json-rpc",
@@ -47,6 +48,7 @@ export type NmgMethod =
   | "deleteMemory"
   | "mergeNodes"
   | "splitNode"
+  | "syncStg"
   | "shutdown"
   | "status";
 
@@ -98,6 +100,7 @@ export interface NmgRememberParams {
   writeReason?: string;
   sessionId?: string;
   sourceRef?: string;
+  projectDir?: string;
 }
 
 export interface NmgSearchParams {
@@ -113,11 +116,19 @@ export interface NmgSearchParams {
   vectorGranularity?: "hierarchy" | "records" | "union";
   secondPass?: boolean;
   perf?: boolean;
+  projectDir?: string;
 }
 
 export interface NmgGetParams {
   memoryIds: string[];
   graphHops?: number;
+  projectDir?: string;
+}
+
+export interface NmgSyncStgParams {
+  projectDir: string;
+  scope: MemoryScope;
+  limit?: number;
 }
 
 export interface NmgRetentionCandidatesParams {
@@ -174,6 +185,7 @@ export type NmgMethodResult = {
   deleteMemory: { deleted: boolean; memory: MemoryRecord | null };
   mergeNodes: NodeTransform;
   splitNode: NodeTransform;
+  syncStg: { copied: number; projectDir: string };
   shutdown: { shuttingDown: true };
 };
 

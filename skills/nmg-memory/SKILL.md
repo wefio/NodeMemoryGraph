@@ -17,7 +17,7 @@ an operation or encountering its named special case.
 3. Before answering a history-dependent question, run:
 
    ```text
-   nmg search "<focused recall query>" --limit 8 --max-tier 1 --json
+   nmg search "<focused recall query>" --project-dir . --limit 8 --max-tier 1 --json
    ```
 
    Narrow the scope when the store is large or the topic is specific:
@@ -27,7 +27,7 @@ an operation or encountering its named special case.
 4. Search results are compact headers. Load only selected exact records:
 
    ```text
-   nmg get <MEMORY_ID...> --json
+   nmg get <MEMORY_ID...> --project-dir . --json
    ```
 
 5. Save durable information with `nmg remember`. Automatically save stable facts,
@@ -38,7 +38,8 @@ an operation or encountering its named special case.
    Never stop a daemon that was already running.
 
 Use the same `--data-dir` or `--db` option on every command when the caller
-selected a non-default store.
+selected a non-default LTG store. Use the same `--project-dir` on project STG
+searches, exact reads, and provisional writes.
 
 ## Progressive recall
 

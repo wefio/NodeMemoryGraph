@@ -1,12 +1,14 @@
 # STG Isolated Store（STG 独立库）
 
-**Status:** core prototype implemented; daemon/adapter integration pending
+**Status:** core, daemon, CLI, and Pi adapter integration implemented
 **Updated:** 2026-08-01
 **Related:** [memory-graphs.md](memory-graphs.md) §1/§3/§5, [external-source-design.md](external-source-design.md), docs/design.md §1
 
 ## 1. Problem
 
-The current daemon and adapters still make STG and LTG share one SQLite database and one table
+Legacy calls without `projectDir` may still use the shared residence flag, but
+project-aware daemon, CLI, and Pi calls now route to separate stores. The former
+runtime made STG and LTG share one SQLite database and one table
 (`memory_records.residence` is a flag; `expireShortTermMemories` batch-marks
 `stg` rows inactive). This contradicts the three-graph model in
 memory-graphs.md §1 — STG is a *semantic lifecycle* (provisional,
@@ -108,13 +110,12 @@ query
 
 | Phase | Scope | Evidence gate |
 | --- | --- | --- |
-| 1 | **Core implemented:** separate project-local SQLite store | isolation/deletion tests pass; runtime wiring pending |
-| 2 | **Core implemented:** `cached_from_ltg` marker + usage-ranked copy routine | real copy/idempotency tests pass; runtime usage-trace policy pending |
-| 3 | **Core implemented:** STG-first dual-store search with QPP fallback + authoritative dedupe | correctness tests pass; daemon integration and benchmark gate pending |
+| 1 | **Implemented:** separate project-local SQLite store | daemon/CLI/Pi isolation tests pass |
+| 2 | **Implemented:** `cached_from_ltg` marker + usage-ranked `stg sync` | real copy/idempotency tests pass; automatic sync policy remains open |
+| 3 | **Implemented:** STG-first dual-store search with QPP fallback + authoritative dedupe | service and adapter tests pass; benchmark gate pending |
 
-These helpers are available to library callers, but none of the phases is a
-shipped product path until the daemon and adapters create and select the
-per-project STG automatically.
+The daemon opens project stores lazily from request `projectDir`; CLI exposes
+`--project-dir`, and Pi supplies its current working directory automatically.
 
 ## 8. Non-goals
 

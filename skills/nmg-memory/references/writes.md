@@ -47,6 +47,7 @@ event also changes current state, write both the event and the state.
 | `--supersedes "<MEMORY_ID>"` | Explicitly replace an old memory without deleting its evidence |
 | `--residence ltg` | Long-term: durable, shared, normal visibility (default) |
 | `--residence stg` | Short-term: provisional, task-local, expires by policy |
+| `--project-dir <DIR>` | Place/read `stg` records in that project's isolated store |
 | `--scope key=value` | Repeatable; couples with search's `--scope` filter |
 | `--evidence-role support|contradict|...` | Builds multi-evidence memories: a second memory with `contradict` adds the counter-evidence to the same evidence chain |
 | `--truth unverified` | Assistant output not verified by user or tool |
@@ -72,4 +73,3 @@ history evidence is retained.
 - Use `--truth unverified` for remembered assistant output that was not verified.
 - Keep separately countable events or obligations as separate memories.
 - Ask before storing ambiguous sensitive information. Never store credentials.
-

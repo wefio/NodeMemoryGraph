@@ -140,6 +140,7 @@ function isKnownMethod(value: string): boolean {
       "deleteMemory",
       "mergeNodes",
       "splitNode",
+      "syncStg",
       "perfAggregates",
       "pruneRetrievalTraces",
       "shutdown",
