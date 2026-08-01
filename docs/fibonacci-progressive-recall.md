@@ -1,6 +1,7 @@
 # Fibonacci 渐进召回
 
-> 状态：实验性；仅在显式启用 `secondPass` 时生效，默认检索不变。
+> 状态：实验性；核心 API 仅在启用 `secondPass` 时生效。OmniMemEval
+> 适配器默认启用（可用 `NMG_QPP_SECOND_PASS=0` 固定窗口），其他适配器自行选择。
 
 ## 定义
 
@@ -86,6 +87,8 @@ Top-1 → QPP → Top-2 → QPP → Top-3 → QPP → Top-5 → …
 
 - `secondPass=false`：保持原有固定预算检索；
 - `secondPass=true`：启用 Fibonacci 渐进召回；
+- `topK`/`limit` 是正常预算而非必须填满的返回数量；动态窗口默认至少
+  读取两条证据，以保留更新、冲突和撤销边界；
 - 最终档位不会超过 `expandActiveGraphBudget()` 给出的硬上限；
 - 当前只渐进扩展 evidence，图关系仍按首次 `graphHops` 计算；
 - 第一次 Top-1 probe 将 QPP 分量和查询意图送入现有 autodiff 控制器；

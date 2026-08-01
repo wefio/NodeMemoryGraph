@@ -25,6 +25,9 @@ is called.
 The probe embeds whole LongMemEval sessions, whereas the NMG benchmark retrieves
 memory records through its graph and tiers. Its absolute recall is therefore not
 an NMG score; only paired differences between the four arms are meaningful.
+Production integration uses the existing Fibonacci/QPP window rather than a
+mandatory Top-20. The caller's `top_k` is the normal budget, and the window starts
+at two records so update or revocation pairs are not reduced to one side.
 
 ```powershell
 .benchmarks\omni-venv\Scripts\python.exe `

@@ -121,8 +121,10 @@ export class OmniMemEvalBridge {
       1,
       Math.min(Math.trunc(options.embeddingBatchSize ?? 64), 2_048),
     );
-    this.#secondPass = options.secondPass ?? false;
-    this.#qppInitialEvidenceTarget = positiveNumber(options.qppInitialEvidenceTarget);
+    this.#secondPass = options.secondPass ?? true;
+    // A single result cannot express an update/revocation boundary. Start with
+    // an evidence pair by default, then let QPP grow the window as needed.
+    this.#qppInitialEvidenceTarget = positiveNumber(options.qppInitialEvidenceTarget) ?? 2;
     this.#qppThreshold = finiteNumber(options.qppThreshold);
     this.#perfLogPath = resolve(options.perfLogPath ?? resolve(this.#root, "search-perf.jsonl"));
     mkdirSync(this.#root, { recursive: true });
@@ -235,6 +237,9 @@ export class OmniMemEvalBridge {
     timings?: PerfSnapshot;
   }> {
     if (!query.trim()) throw new Error("query must not be empty");
+    // OmniMemEval calls this top_k. NMG treats it as the normal evidence budget;
+    // QPP grows a dynamic Fibonacci window and may enter the bounded expansion
+    // envelope when the normal budget is insufficient.
     const limit = Math.max(1, Math.min(Math.trunc(topK || 10), 50));
     const store = this.#store(userId);
     let semantic: { queryVector: readonly number[]; model: string } | undefined;
@@ -494,7 +499,7 @@ async function run(): Promise<void> {
     embeddingBatchSize: process.env.NMG_EMBED_BATCH_SIZE
       ? Number(process.env.NMG_EMBED_BATCH_SIZE)
       : undefined,
-    secondPass: process.env.NMG_QPP_SECOND_PASS === "1",
+    secondPass: process.env.NMG_QPP_SECOND_PASS !== "0",
     qppInitialEvidenceTarget: process.env.NMG_QPP_INITIAL_EVIDENCE_TARGET
       ? Number(process.env.NMG_QPP_INITIAL_EVIDENCE_TARGET)
       : undefined,

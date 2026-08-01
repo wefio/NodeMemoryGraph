@@ -195,7 +195,7 @@ test("OmniMemEval benchmark keeps full warm-pool retrieval for recall measuremen
       return [[1, 0]];
     },
   };
-  const bridge = new OmniMemEvalBridge(root, { embeddingClient });
+  const bridge = new OmniMemEvalBridge(root, { embeddingClient, secondPass: false });
   try {
     await bridge.handle({
       id: 1,
@@ -220,12 +220,12 @@ test("OmniMemEval benchmark keeps full warm-pool retrieval for recall measuremen
   }
 });
 
-test("OmniMemEval can enable progressive QPP recall without changing the default arm", async () => {
+test("OmniMemEval uses progressive QPP by default and permits a fixed-window baseline", async () => {
   const normalRoot = mkdtempSync(join(tmpdir(), "nmg-omni-qpp-normal-"));
   const adaptiveRoot = mkdtempSync(join(tmpdir(), "nmg-omni-qpp-adaptive-"));
   const safePrefixRoot = mkdtempSync(join(tmpdir(), "nmg-omni-qpp-prefix-"));
-  const normal = new OmniMemEvalBridge(normalRoot);
-  const adaptive = new OmniMemEvalBridge(adaptiveRoot, { secondPass: true });
+  const normal = new OmniMemEvalBridge(normalRoot, { secondPass: false });
+  const adaptive = new OmniMemEvalBridge(adaptiveRoot);
   const safePrefix = new OmniMemEvalBridge(safePrefixRoot, {
     secondPass: true,
     qppInitialEvidenceTarget: 2,
@@ -246,25 +246,25 @@ test("OmniMemEval can enable progressive QPP recall without changing the default
       op: "search",
       userId: "alice",
       query: "On which days do I run five kilometres before breakfast?",
-      topK: 2,
+      topK: 4,
     })) as { memories: unknown[] };
     const adaptiveResult = (await adaptive.handle({
       id: 5,
       op: "search",
       userId: "alice",
       query: "On which days do I run five kilometres before breakfast?",
-      topK: 2,
+      topK: 4,
     })) as { memories: unknown[] };
     const safePrefixResult = (await safePrefix.handle({
       id: 6,
       op: "search",
       userId: "alice",
       query: "On which days do I run five kilometres before breakfast?",
-      topK: 2,
+      topK: 4,
     })) as { memories: unknown[] };
 
-    assert.equal(normalResult.memories.length, 2);
-    assert.equal(adaptiveResult.memories.length, 1);
+    assert.equal(normalResult.memories.length, 4);
+    assert.equal(adaptiveResult.memories.length, 2);
     assert.equal(safePrefixResult.memories.length, 2);
   } finally {
     normal.close();
