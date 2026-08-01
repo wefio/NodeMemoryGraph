@@ -567,6 +567,14 @@ export interface RetrievalTraceInput {
   usefulMemoryIds?: string[];
   contradictedMemoryIds?: string[];
   rejectedMemoryIds?: string[];
+  /** Precomputed node IDs for the useful/contradicted memories. The retrieval
+   *  path already knows these (it selected the nodes); passing them avoids
+   *  the `nodeIdsForMemories` re-lookup in recordRetrievalTrace. Optional:
+   *  when omitted, recordRetrievalTrace falls back to mapping the memory IDs.
+   *  When present, must be the node-IDs corresponding to usefulMemoryIds /
+   *  contradictedMemoryIds respectively. */
+  usefulNodeIds?: string[];
+  contradictedNodeIds?: string[];
   activeGraphBudget?: ActiveGraphBudget;
   activeGraphUsage?: ActiveGraphBudgetUsage;
   selections?: ActiveGraphSelection[];

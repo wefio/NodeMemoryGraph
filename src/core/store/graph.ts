@@ -630,13 +630,16 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
       const proposals: TopologyProposal[] = [];
       const pairRows = this.db
         .prepare(
-          `SELECT p.*, l.query_count AS left_queries, r.query_count AS right_queries
-       FROM node_pair_signals p
-       JOIN node_retrieval_signals l ON l.node_id = p.left_node_id
-       JOIN node_retrieval_signals r ON r.node_id = p.right_node_id
-       JOIN memory_nodes ln ON ln.id = p.left_node_id AND ln.status = 'active'
-       JOIN memory_nodes rn ON rn.id = p.right_node_id AND rn.status = 'active'
-       WHERE p.co_retrieval_count >= ?`,
+          `SELECT p.*, l.query_count AS left_queries, r.query_count AS right_queries,
+                  (SELECT COUNT(*) FROM edge_task_observations o
+                   WHERE o.left_node_id = p.left_node_id
+                     AND o.right_node_id = p.right_node_id AND o.useful = 1) AS useful_count_now
+           FROM node_pair_signals p
+           JOIN node_retrieval_signals l ON l.node_id = p.left_node_id
+           JOIN node_retrieval_signals r ON r.node_id = p.right_node_id
+           JOIN memory_nodes ln ON ln.id = p.left_node_id AND ln.status = 'active'
+           JOIN memory_nodes rn ON rn.id = p.right_node_id AND rn.status = 'active'
+           WHERE p.co_retrieval_count >= ?`,
         )
         .all(minObservations) as Row[];
       for (const row of pairRows) {
@@ -646,7 +649,7 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         // been marked useful avoids turning the retriever's own accidental
         // co-results into self-reinforcing graph edges.
         const gain =
-          Number(row.useful_count) /
+          Number(row.useful_count_now) /
           Math.max(Number(row.left_queries), Number(row.right_queries), 1);
         if (gain < minGain || this.proposalCoolingDown(proposalKey, cooldownMs)) continue;
         const relation = this.db

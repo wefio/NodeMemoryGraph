@@ -659,9 +659,13 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       const id = randomUUID();
       const createdAt = new Date().toISOString();
       const nodeIds = [...new Set(input.resultNodeIds)].sort();
-      const usefulNodeIds = new Set(this.nodeIdsForMemories(input.usefulMemoryIds ?? []));
+      // Prefer precomputed node IDs (the retrieval path knows them); fall
+      // back to mapping the memory IDs for callers that only pass memories.
+      const usefulNodeIds = new Set(
+        input.usefulNodeIds ?? this.nodeIdsForMemories(input.usefulMemoryIds ?? []),
+      );
       const contradictedNodeIds = new Set(
-        this.nodeIdsForMemories(input.contradictedMemoryIds ?? []),
+        input.contradictedNodeIds ?? this.nodeIdsForMemories(input.contradictedMemoryIds ?? []),
       );
       const taskId = input.taskId?.trim() || stableTaskId(input.query);
       this.db.exec("BEGIN IMMEDIATE");
@@ -766,7 +770,8 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
               contradictedNodeIds.has(pair[0]) || contradictedNodeIds.has(pair[1]) ? 1 : 0,
               createdAt,
             );
-            this.refreshPairUsefulness(pair[0], pair[1]);
+            // useful_count is now derived on read (proposeTopologyChanges
+            // computes it from edge_task_observations); no per-pair refresh.
           }
         }
         this.db.exec("COMMIT");
