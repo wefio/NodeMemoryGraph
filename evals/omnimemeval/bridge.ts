@@ -7,12 +7,7 @@ import { pathToFileURL } from "node:url";
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
 import { syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
 import { NmgStore } from "../../src/core/store.ts";
-import type {
-  HistoryRole,
-  MemoryActor,
-  MemoryMarker,
-  PerfSnapshot,
-} from "../../src/core/types.ts";
+import type { HistoryRole, MemoryActor, MemoryMarker, PerfSnapshot } from "../../src/core/types.ts";
 import { CachedOmniEmbeddingClient } from "./embedding-cache.ts";
 
 const BASE_RETRIEVAL_GUIDANCE =
@@ -258,11 +253,14 @@ export class OmniMemEvalBridge {
         vectorGranularity: semantic ? "records" : undefined,
         sourceActor: prefersAssistantEvidence(query) ? undefined : "user",
         secondPass: this.#secondPass,
+        progressiveWarmDisclosure: false,
         initialEvidenceTarget: this.#qppInitialEvidenceTarget,
         qppThreshold: this.#qppThreshold,
         activeGraphBudget: {
+          maxNodes: limit,
           maxEvidence: limit,
           maxTokens: Math.max(1_000, limit * 300),
+          maxTierBudget: limit,
         },
       },
       semantic,

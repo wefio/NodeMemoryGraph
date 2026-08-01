@@ -249,6 +249,10 @@ export interface SearchOptions {
   /** Enable progressive Fibonacci re-selection from the same over-sampled pool.
    *  Each cumulative tier (1, 2, 3, 5, ...) recomputes QPP; no re-search occurs. */
   secondPass?: boolean;
+  /** Rank the complete pool once, then initially expose only the hotter half of
+   * tier-1 records. Deferred IDs can be fetched without repeating retrieval.
+   * Core retrieval defaults to false; harnesses may opt in at their boundary. */
+  progressiveWarmDisclosure?: boolean;
   /** Open memory tiers sequentially and stop when QPP says evidence is sufficient. */
   tieredDisclosure?: boolean;
   /** Learned first-pass Fibonacci tier. QPP may continue to later tiers. */
@@ -364,6 +368,12 @@ export interface RetrievalFilterUsage {
 export interface MemoryContext {
   results: MemorySearchResult[];
   relations: NodeRelation[];
+  progressiveDisclosure?: {
+    strategy: "warm_halves";
+    rankedWarmCandidates: number;
+    initiallyVisible: number;
+    deferredMemoryIds: string[];
+  };
   activeGraph?: ActiveGraph;
   retrieval?: {
     mode: "hybrid" | "lexical";

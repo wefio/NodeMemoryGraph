@@ -14,6 +14,18 @@
 Stop when evidence is sufficient. Use `nmg get` only for IDs likely to affect the
 answer.
 
+## Warm-memory continuation
+
+The CLI and Pi adapter rank the complete L1 candidate pool once. Pools of up
+to four records are exposed in full; pools of five or more initially expose
+only their hotter half. When a search result reports `L1 continuation`,
+inspect the visible headers first. If they are insufficient, call `nmg_get`
+once with the reported deferred memory IDs. Do not repeat `nmg_search`: the
+deferred IDs are the budgeted second window of the same stable ranking, and
+exact lookup does not repeat embedding or ANN work. Each response remains
+bounded by the caller's evidence and token budgets. Use `--full-warm` only for
+diagnostics that intentionally expose the entire ranked L1 pool immediately.
+
 ## Progressive second pass
 
 To make the storage tier itself progressive, add `--tiered-disclosure`. This

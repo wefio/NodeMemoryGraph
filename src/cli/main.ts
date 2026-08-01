@@ -77,6 +77,7 @@ Search options:
   --retrieval-mode MODE      fts5, hybrid, qwen3, hashing, or legacy
   --vector-granularity MODE  hierarchy, records, or union
   --second-pass              Enable progressive QPP recall
+  --full-warm                Expose all ranked L1 records in the first response
   --tiered-disclosure        Open tiers sequentially until QPP is sufficient
   --no-perf                  Disable per-phase performance timing
 
@@ -96,6 +97,7 @@ const ALL_FLAGS = new Set([
   "json",
   "no-perf",
   "second-pass",
+  "full-warm",
   "tiered-disclosure",
 ]);
 const ALL_OPTIONS = new Set([
@@ -373,7 +375,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
               : "pruneRetrievalTraces"
             : command === "stg"
               ? "syncStg"
-            : undefined;
+              : undefined;
   const common = {
     command:
       command === "daemon"
@@ -507,7 +509,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
           "retrieval-mode",
           "vector-granularity",
         ],
-        ["json", "include-historical", "no-perf", "second-pass", "tiered-disclosure"],
+        ["json", "include-historical", "no-perf", "second-pass", "full-warm", "tiered-disclosure"],
       );
       return {
         ...common,
@@ -712,6 +714,7 @@ function searchParams(values: OptionValues): NmgSearchParams {
     retrievalMode: firstOption(values, "retrieval-mode"),
     vectorGranularity: firstOption(values, "vector-granularity"),
     secondPass: values.flags.has("second-pass") || undefined,
+    progressiveWarmDisclosure: values.flags.has("full-warm") ? false : undefined,
     tieredDisclosure: values.flags.has("tiered-disclosure") || undefined,
     perf: values.flags.has("no-perf") ? false : undefined,
     projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
@@ -790,14 +793,26 @@ function humanResult(value: unknown): string {
   if ("pruned" in result && typeof result.pruned === "number") {
     return `Pruned ${String(result.pruned)} retrieval traces.\n`;
   }
-  if (Array.isArray(result) && result.every((entry) => typeof entry === "object" && entry !== null && "section" in entry && "count" in entry && "sum" in entry)) {
-    const rows = (result as Array<{
-      section: string;
-      count: number;
-      sum: number;
-      sumSq: number;
-      buckets?: number[];
-    }>).map((entry) => {
+  if (
+    Array.isArray(result) &&
+    result.every(
+      (entry) =>
+        typeof entry === "object" &&
+        entry !== null &&
+        "section" in entry &&
+        "count" in entry &&
+        "sum" in entry,
+    )
+  ) {
+    const rows = (
+      result as Array<{
+        section: string;
+        count: number;
+        sum: number;
+        sumSq: number;
+        buckets?: number[];
+      }>
+    ).map((entry) => {
       const avg = entry.count > 0 ? entry.sum / entry.count : 0;
       const variance =
         entry.count > 1
@@ -808,17 +823,11 @@ function humanResult(value: unknown): string {
       // to avg as the only meaningful location statistic.
       const fmtMs = (value: number) => (value >= 0 ? `${value.toFixed(2)}ms` : "n/a");
       const p50 =
-        entry.count >= 10 && entry.buckets?.length
-          ? histogramQuantile(entry.buckets, 0.5)
-          : -1;
+        entry.count >= 10 && entry.buckets?.length ? histogramQuantile(entry.buckets, 0.5) : -1;
       const p90 =
-        entry.count >= 10 && entry.buckets?.length
-          ? histogramQuantile(entry.buckets, 0.9)
-          : -1;
+        entry.count >= 10 && entry.buckets?.length ? histogramQuantile(entry.buckets, 0.9) : -1;
       const p95 =
-        entry.count >= 10 && entry.buckets?.length
-          ? histogramQuantile(entry.buckets, 0.95)
-          : -1;
+        entry.count >= 10 && entry.buckets?.length ? histogramQuantile(entry.buckets, 0.95) : -1;
       return `${entry.section}\tcount=${entry.count}\tavg=${avg.toFixed(2)}ms\tp50=${fmtMs(p50)}\tp90=${fmtMs(p90)}\tp95=${fmtMs(p95)}\tσ=${Math.sqrt(Math.max(0, variance)).toFixed(2)}ms`;
     });
     return rows.length === 0 ? "No performance aggregates yet.\n" : `${rows.join("\n")}\n`;
@@ -897,7 +906,9 @@ function humanResult(value: unknown): string {
       const sections = Object.entries(context.timings.timings ?? {})
         .sort((left, right) => right[1] - left[1])
         .map(([section, ms]) => `${section}=${ms.toFixed(1)}ms`);
-      lines.push(`perf\t${sections.join(" ")} total=${(context.timings.totalMs ?? 0).toFixed(1)}ms`);
+      lines.push(
+        `perf\t${sections.join(" ")} total=${(context.timings.totalMs ?? 0).toFixed(1)}ms`,
+      );
     }
     return `${lines.join("\n")}\n`;
   }

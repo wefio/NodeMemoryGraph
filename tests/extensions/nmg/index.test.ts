@@ -84,13 +84,15 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     assert.match(searched.content[0].text, /already_in_context=true/);
     const activeGraphId = searched.details.activeGraph.id;
     assert.match(searched.content[0].text, new RegExp(activeGraphId));
-    await tools.get("nmg_get")!.execute(
-      "get",
-      { memoryIds: [remember.details.memory.id], activeGraphId },
-      undefined,
-      undefined,
-      { sessionManager },
-    );
+    await tools
+      .get("nmg_get")!
+      .execute(
+        "get",
+        { memoryIds: [remember.details.memory.id], activeGraphId },
+        undefined,
+        undefined,
+        { sessionManager },
+      );
 
     await tools.get("nmg_remember")!.execute(
       "remember-stg",
@@ -151,9 +153,20 @@ test("formatters keep search headers compact and exact evidence separate", () =>
         evidence: { content: "The Atlas project must use SQLite because it works offline." },
       },
     ],
+    progressiveDisclosure: {
+      strategy: "warm_halves",
+      rankedWarmCandidates: 2,
+      initiallyVisible: 1,
+      deferredMemoryIds: ["memory-2"],
+    },
   } as never;
-  assert.doesNotMatch(formatSearchHeaders(context), /works offline/);
+  const headers = formatSearchHeaders(context);
+  assert.doesNotMatch(headers, /works offline/);
+  assert.match(headers, /L1 continuation/);
+  assert.match(headers, /memory-2/);
+  assert.match(headers, /do not repeat nmg_search/);
   assert.match(formatMemoryContext(context), /works offline/);
+  assert.match(formatMemoryContext(context), /L1 continuation/);
 });
 
 test("formatters visibly mark external provenance and trust", () => {

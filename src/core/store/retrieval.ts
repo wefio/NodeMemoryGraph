@@ -56,6 +56,7 @@ import type {
 import type { DatabaseSync } from "node:sqlite";
 
 const MAX_SEARCH_CANDIDATES = 500;
+const MIN_WARM_DISCLOSURE_SIZE = 5;
 
 export function withRetrieval<TBase extends Constructor>(Base: TBase) {
   return class extends Base {
@@ -199,11 +200,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       const directNodeIds = new Set(direct.map((result) => result.node.id));
       const seedActivations = new Map<string, number>();
       for (const result of direct) {
-        const activation = hybridScore(
-          result.lexicalScore,
-          result.vectorScore,
-          result.routeScore,
-        );
+        const activation = hybridScore(result.lexicalScore, result.vectorScore, result.routeScore);
         seedActivations.set(
           result.node.id,
           Math.max(seedActivations.get(result.node.id) ?? 0, activation),
@@ -219,23 +216,11 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       const relatedRaw = perf
         ? perf.measure(SECTION.relatedExpansion, () =>
             relatedNodeIds.flatMap((nodeId) =>
-              this.resultsForNode(
-                nodeId,
-                openedMaxTier,
-                2,
-                undefined,
-                options.sourceActor,
-              ),
+              this.resultsForNode(nodeId, openedMaxTier, 2, undefined, options.sourceActor),
             ),
           )
         : relatedNodeIds.flatMap((nodeId) =>
-            this.resultsForNode(
-              nodeId,
-              openedMaxTier,
-              2,
-              undefined,
-              options.sourceActor,
-            ),
+            this.resultsForNode(nodeId, openedMaxTier, 2, undefined, options.sourceActor),
           );
       const related = relatedRaw.map((result) => {
         const edgeScore = edgeProjection.nodeActivations.get(result.node.id) ?? 0;
@@ -246,15 +231,31 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           combinedScore: hybridScore(result.lexicalScore, result.vectorScore, edgeScore),
         };
       });
-      const candidates = [...direct, ...related]
+      const rankedCandidates = [...direct, ...related]
         .filter(
           (result, index, all) =>
             all.findIndex((candidate) => candidate.memory.id === result.memory.id) === index,
         )
         .sort((left, right) => contextUsefulness(query, right) - contextUsefulness(query, left));
+      const rankedWarm = rankedCandidates.filter((candidate) => candidate.memory.tier === 1);
+      const foldWarm =
+        options.progressiveWarmDisclosure === true &&
+        rankedWarm.length >= MIN_WARM_DISCLOSURE_SIZE;
+      const initiallyVisibleWarm = Math.ceil(rankedWarm.length / 2);
+      const visibleWarmIds = new Set(
+        rankedWarm.slice(0, initiallyVisibleWarm).map((candidate) => candidate.memory.id),
+      );
+      const deferredWarm = rankedWarm.slice(initiallyVisibleWarm);
+      const candidates =
+        foldWarm
+          ? rankedCandidates.filter(
+              (candidate) => candidate.memory.tier !== 1 || visibleWarmIds.has(candidate.memory.id),
+            )
+          : rankedCandidates;
       const selectWithinBudget = (
         bud: ActiveGraphBudget,
         lim: number,
+        pool: readonly MemorySearchResult[] = candidates,
       ): {
         results: MemorySearchResult[];
         selectedNodes: Set<string>;
@@ -266,7 +267,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         let tokens = 0;
         let deepEvidence = 0;
         const ex = new Set<ActiveGraphBudgetUsage["exhausted"][number]>();
-        for (const candidate of candidates) {
+        for (const candidate of pool) {
           if (res.length >= lim) {
             ex.add("evidence");
             break;
@@ -275,7 +276,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             ex.add("nodes");
             continue;
           }
-          if (candidate.memory.tier >= 1 && deepEvidence >= bud.maxTierBudget) {
+          if (candidate.memory.tier >= 2 && deepEvidence >= bud.maxTierBudget) {
             ex.add("deepEvidence");
             continue;
           }
@@ -287,10 +288,14 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           res.push(candidate);
           nodes.add(candidate.node.id);
           tokens += candidateTokens;
-          if (candidate.memory.tier >= 1) deepEvidence += 1;
+          if (candidate.memory.tier >= 2) deepEvidence += 1;
         }
         return { results: res, selectedNodes: nodes, estimatedTokens: tokens, exhausted: ex };
       };
+      const deferredWarmSelection =
+        foldWarm
+          ? selectWithinBudget(budget, limit, deferredWarm).results
+          : [];
       const buildSelections = (res: readonly MemorySearchResult[]): ActiveGraphSelection[] =>
         res.map((result, index) => ({
           memoryId: result.memory.id,
@@ -444,7 +449,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           0,
         ),
         tiersOpened: openedTiers.length,
-        deepEvidence: results.filter((result) => result.memory.tier >= 1).length,
+        deepEvidence: results.filter((result) => result.memory.tier >= 2).length,
         latencyMs,
         exhausted: [...exhausted].sort(),
       };
@@ -515,6 +520,15 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           relations.filter((relation) => relation.id === edge.id),
         ),
         activeGraph,
+        progressiveDisclosure:
+          foldWarm
+            ? {
+                strategy: "warm_halves",
+                rankedWarmCandidates: rankedWarm.length,
+                initiallyVisible: initiallyVisibleWarm,
+                deferredMemoryIds: deferredWarmSelection.map((candidate) => candidate.memory.id),
+              }
+            : undefined,
         timings: snapshot,
         filterUsage: filterUsage.dimensions.length > 0 ? filterUsage : undefined,
       };

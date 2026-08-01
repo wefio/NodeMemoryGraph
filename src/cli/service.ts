@@ -229,9 +229,10 @@ export class NmgService {
       throw new NmgProtocolError("WRITE_REJECTED", assessment.reason);
     }
     const { projectDir, ...memory } = params;
-    const store = memory.residence === "stg" && projectDir
-      ? this.#getStgStore(projectDir, memory.sessionId)
-      : this.#getStore();
+    const store =
+      memory.residence === "stg" && projectDir
+        ? this.#getStgStore(projectDir, memory.sessionId)
+        : this.#getStore();
     return store.remember({
       ...memory,
       truthStatus: memory.truthStatus ?? (external ? "unverified" : undefined),
@@ -242,14 +243,13 @@ export class NmgService {
 
   async #search(params: NmgSearchParams): Promise<NmgMethodResult["search"]> {
     const { query, projectDir, sessionId, ...options } = params;
-    const searchOptions: SearchOptions = { ...options, sessionId };
+    const searchOptions: SearchOptions = {
+      ...options,
+      sessionId,
+      progressiveWarmDisclosure: options.progressiveWarmDisclosure ?? true,
+    };
     const search = (store: NmgStore) =>
-      searchMemoryContext(
-        store,
-        this.#configuredEmbeddingClient(),
-        query,
-        searchOptions,
-      );
+      searchMemoryContext(store, this.#configuredEmbeddingClient(), query, searchOptions);
     if (!projectDir) return search(this.#getStore());
 
     const local = await search(this.#getStgStore(projectDir, sessionId));
@@ -266,10 +266,7 @@ export class NmgService {
       : undefined;
     const shared = sharedStore.getContext(params.memoryIds, params.graphHops ?? 0);
     const local = localStore
-      ? localStore.getContext(
-          params.memoryIds,
-          params.graphHops ?? 0,
-        )
+      ? localStore.getContext(params.memoryIds, params.graphHops ?? 0)
       : undefined;
     const context = local ? mergeStgLtgContexts(local, shared) : shared;
     const found = new Set(context.results.map((result) => result.memory.id));
@@ -375,6 +372,7 @@ function parseSearchParams(value: unknown): NmgSearchParams {
     retrievalMode: optionalEnum(params, "retrievalMode", RETRIEVAL_MODES),
     vectorGranularity: optionalEnum(params, "vectorGranularity", VECTOR_GRANULARITIES),
     secondPass: optionalBoolean(params, "secondPass"),
+    progressiveWarmDisclosure: optionalBoolean(params, "progressiveWarmDisclosure"),
     tieredDisclosure: optionalBoolean(params, "tieredDisclosure"),
     perf: optionalBoolean(params, "perf"),
     projectDir: optionalString(params, "projectDir"),

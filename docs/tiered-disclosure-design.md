@@ -80,23 +80,18 @@ fallback.
 
 ### 2.3 Budget composition (tier-aware)
 
-`ActiveGraphBudget` gains one field:
+At the harness boundary, L1 uses a two-window presentation policy. Retrieval
+ranks the complete L1 candidate pool once. The first response exposes the
+hotter half when the pool contains at least five records; smaller pools remain
+fully visible. When evidence is insufficient, the harness fetches the deferred
+IDs once by stable ID. This second presentation does not repeat vector search.
+Core graph operations retain full-pool semantics, and callers can disable the
+fold with `progressiveWarmDisclosure: false` (`nmg search --full-warm`).
 
-```ts
-maxTierBudget: number        // new: how many records may come from tiers ≥ 1
-```
-
-existing fields unchanged. Composition rule:
-
-```text
-tier-0 records  : governed by maxEvidence / maxTokens (unchanged)
-tier-1+ records : governed by maxEvidence / maxTokens AND maxTierBudget
-```
-
-The per-tier quota from the earlier discussion is replaced by a single
-**deep-token budget** with a Fibonacci-style scale per opened tier
-(1 record from tier 1, 2 from tier 2, 3 from tier 3 — reusing the Fibonacci
-progression already defined in fibonacci-progressive-recall.md).
+`ActiveGraphBudget.maxTierBudget` limits how many records may come from the
+cold tiers L2/L3. L0/L1 remain governed by `maxEvidence` and `maxTokens`; L1
+also uses the two-window harness presentation above. The cold tiers share one
+deep-evidence budget rather than independent per-tier quotas.
 
 ### 2.4 Interaction with existing mechanisms
 

@@ -141,7 +141,10 @@ test("tiered disclosure stops at L0 when shallow evidence is sufficient", () => 
     });
     assert.equal(context.activeGraph?.usage.tiersOpened, 1);
     assert.equal(context.activeGraph?.usage.deepestTier, 0);
-    assert.deepEqual(context.results.map((result) => result.memory.id), [hot.memory.id]);
+    assert.deepEqual(
+      context.results.map((result) => result.memory.id),
+      [hot.memory.id],
+    );
   });
 });
 
@@ -260,9 +263,79 @@ test("tiered disclosure enforces the shared deep-evidence budget", () => {
     });
     assert.equal(context.activeGraph?.usage.deepEvidence, 1);
     assert.equal(
-      context.activeGraph?.budgetLedger.find((entry) => entry.dimension === "deepEvidence")?.exhausted,
+      context.activeGraph?.budgetLedger.find((entry) => entry.dimension === "deepEvidence")
+        ?.exhausted,
       true,
     );
+  });
+});
+
+test("warm disclosure ranks once and defers the colder half of tier one", () => {
+  withStore((store) => {
+    const memories = Array.from({ length: 6 }, (_, index) =>
+      store.remember({
+        statement: `Warm atlas preference ${index}`,
+        nodeName: `Warm preference ${index}`,
+        tier: 1,
+      }),
+    );
+    const context = store.searchContext("Warm atlas preference", {
+      maxTier: 1,
+      limit: 6,
+      progressiveWarmDisclosure: true,
+      activeGraphBudget: { maxNodes: 6, maxEvidence: 6 },
+    });
+    assert.equal(context.results.length, 3);
+    assert.equal(context.progressiveDisclosure?.rankedWarmCandidates, 6);
+    assert.equal(context.progressiveDisclosure?.initiallyVisible, 3);
+    assert.equal(context.progressiveDisclosure?.deferredMemoryIds.length, 3);
+
+    const expanded = store.getContext(context.progressiveDisclosure!.deferredMemoryIds);
+    assert.equal(expanded.results.length, 3);
+    assert.deepEqual(
+      new Set([...context.results, ...expanded.results].map((result) => result.memory.id)),
+      new Set(memories.map((memory) => memory.memory.id)),
+    );
+  });
+});
+
+test("warm disclosure can be disabled for full-pool retrieval", () => {
+  withStore((store) => {
+    for (let index = 0; index < 6; index += 1) {
+      store.remember({
+        statement: `Warm full-pool preference ${index}`,
+        nodeName: `Full-pool preference ${index}`,
+        tier: 1,
+      });
+    }
+    const context = store.searchContext("Warm full-pool preference", {
+      maxTier: 1,
+      limit: 6,
+      progressiveWarmDisclosure: false,
+      activeGraphBudget: { maxNodes: 6, maxEvidence: 6 },
+    });
+    assert.equal(context.results.length, 6);
+    assert.equal(context.progressiveDisclosure, undefined);
+  });
+});
+
+test("warm disclosure leaves small tier-one pools fully visible", () => {
+  withStore((store) => {
+    for (let index = 0; index < 4; index += 1) {
+      store.remember({
+        statement: `Small warm preference ${index}`,
+        nodeName: `Small warm preference ${index}`,
+        tier: 1,
+      });
+    }
+    const context = store.searchContext("Small warm preference", {
+      maxTier: 1,
+      limit: 4,
+      progressiveWarmDisclosure: true,
+      activeGraphBudget: { maxNodes: 4, maxEvidence: 4 },
+    });
+    assert.equal(context.results.length, 4);
+    assert.equal(context.progressiveDisclosure, undefined);
   });
 });
 

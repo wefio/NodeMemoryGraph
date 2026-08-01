@@ -180,11 +180,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         projectDir: projectDirectory(),
         sessionId: ctx.sessionManager.getSessionId(),
       })) as MemoryContext;
-      const text = injectionWindow.format(
-        ctx.sessionManager.getSessionId(),
-        result,
-        "evidence",
-      );
+      const text = injectionWindow.format(ctx.sessionManager.getSessionId(), result, "evidence");
       return toolResult(result, text || "No active memory found.");
     },
   });
@@ -284,7 +280,9 @@ export class SessionInjectionWindow {
     const sections = [];
     if (fresh.length > 0) {
       const visible = { ...context, results: fresh } as MemoryContext;
-      sections.push(disclosure === "header" ? formatSearchHeaders(visible) : formatMemoryContext(visible));
+      sections.push(
+        disclosure === "header" ? formatSearchHeaders(visible) : formatMemoryContext(visible),
+      );
     }
     if (folded.length > 0) {
       sections.push(
@@ -357,8 +355,21 @@ export function formatSearchHeaders(context: MemoryContext): string {
         `tier=L${memory.tier}; preview=${excerpt(memory.statement, 160)}`,
     ),
     formatActiveGraph(context),
+    formatProgressiveDisclosure(context),
     "Use nmg_get with selected memory IDs and this activeGraphId to load exact evidence.",
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatProgressiveDisclosure(context: MemoryContext): string {
+  const disclosure = context.progressiveDisclosure;
+  if (!disclosure || disclosure.deferredMemoryIds.length === 0) return "";
+  return (
+    `L1 continuation: ${disclosure.deferredMemoryIds.length} ranked memories are folded. ` +
+    "If the visible evidence is insufficient, call nmg_get once with these memory IDs; " +
+    `do not repeat nmg_search: ${disclosure.deferredMemoryIds.join(",")}`
+  );
 }
 
 function formatActiveGraph(context: MemoryContext): string {
@@ -368,7 +379,7 @@ function formatActiveGraph(context: MemoryContext): string {
 }
 
 export function formatMemoryContext(context: MemoryContext): string {
-  return context.results
+  const records = context.results
     .map(({ memory, node, evidence }) => {
       const source =
         evidence.content.trim() !== memory.statement.trim()
@@ -382,10 +393,12 @@ export function formatMemoryContext(context: MemoryContext): string {
       return (
         `- ${externalLabel}${memory.statement}\n  memory=${memory.id}; node=${node.canonicalName}; ` +
         `type=${memory.memoryType}; truth=${memory.truthStatus}; scope=${JSON.stringify(memory.scope)}` +
-        externalSource + source
+        externalSource +
+        source
       );
     })
     .join("\n");
+  return [records, formatProgressiveDisclosure(context)].filter(Boolean).join("\n");
 }
 
 function toolResult(details: unknown, text: string) {

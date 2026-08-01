@@ -10,7 +10,7 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
   const root = mkdtempSync(join(tmpdir(), "nmg-omni-"));
   const bridge = new OmniMemEvalBridge(root);
   try {
-    const added = await bridge.handle({
+    const added = (await bridge.handle({
       id: 1,
       op: "add",
       userId: "alice",
@@ -26,23 +26,23 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
           content: "In the previous chat, I assigned Admon the Sunday day shift.",
         },
       ],
-    }) as { added: number };
+    })) as { added: number };
     assert.equal(added.added, 2);
 
-    const alice = await bridge.handle({
+    const alice = (await bridge.handle({
       id: 2,
       op: "search",
       userId: "alice",
       query: "What is my telescope named?",
       topK: 4,
-    }) as { text: string; timings?: { totalMs: number } };
-    const bob = await bridge.handle({
+    })) as { text: string; timings?: { totalMs: number } };
+    const bob = (await bridge.handle({
       id: 3,
       op: "search",
       userId: "bob",
       query: "What is my telescope named?",
       topK: 4,
-    }) as { text: string };
+    })) as { text: string };
 
     assert.match(alice.text, /\[NMG retrieval guidance\]/);
     assert.match(alice.text, /Kepler/);
@@ -52,32 +52,32 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
     assert.doesNotMatch(alice.text, /2026-07-20/);
     assert.equal(bob.text, "");
 
-    const temporalRecall = await bridge.handle({
+    const temporalRecall = (await bridge.handle({
       id: 4,
       op: "search",
       userId: "alice",
       query: "When did I name my telescope?",
       topK: 4,
-    }) as { text: string };
+    })) as { text: string };
     assert.match(temporalRecall.text, /\[2026-07-20\] My telescope is named Kepler/);
 
-    const datedRecall = await bridge.handle({
+    const datedRecall = (await bridge.handle({
       id: 5,
       op: "search",
       userId: "alice",
       query: "What telescope did I have in July 2026?",
       topK: 4,
-    }) as { text: string };
+    })) as { text: string };
     assert.match(datedRecall.text, /\[2026-07-20\] My telescope is named Kepler/);
 
-    const assistantRecall = await bridge.handle({
+    const assistantRecall = (await bridge.handle({
       id: 6,
       op: "search",
       userId: "alice",
       query:
         "I'm checking our previous conversation. Can you remind me what rotation you recommended for Admon on Sunday?",
       topK: 4,
-    }) as { text: string };
+    })) as { text: string };
     assert.match(assistantRecall.text, /Admon the Sunday day shift/);
 
     await bridge.handle({ id: 7, op: "delete", userId: "alice" });
@@ -86,13 +86,13 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
       .split("\n")
       .map((line) => JSON.parse(line) as { userId: string; timings?: { totalMs: number } });
     assert.ok(perfRows.some((row) => row.userId === "alice" && row.timings));
-    const deleted = await bridge.handle({
+    const deleted = (await bridge.handle({
       id: 8,
       op: "search",
       userId: "alice",
       query: "Kepler telescope",
       topK: 4,
-    }) as { text: string };
+    })) as { text: string };
     assert.equal(deleted.text, "");
   } finally {
     bridge.close();
@@ -123,13 +123,13 @@ test("OmniMemEval batches pending record vectors before search", async () => {
       messages: [{ role: "user", content: "My telescope is named Kepler." }],
     });
     assert.equal(calls.documents, 0);
-    const result = await bridge.handle({
+    const result = (await bridge.handle({
       id: 2,
       op: "search",
       userId: "alice",
       query: "What is my telescope named?",
       topK: 4,
-    }) as { retrievalMode: string; text: string };
+    })) as { retrievalMode: string; text: string };
     assert.equal(result.retrievalMode, "records");
     assert.match(result.text, /Kepler/);
     assert.equal(calls.documents, 1);
@@ -184,6 +184,42 @@ test("OmniMemEval batches pending record vectors before search", async () => {
   }
 });
 
+test("OmniMemEval benchmark keeps full warm-pool retrieval for recall measurement", async () => {
+  const root = mkdtempSync(join(tmpdir(), "nmg-omni-wide-budget-"));
+  const embeddingClient = {
+    indexId: "test-wide-budget@v1",
+    async embedDocuments(inputs: string[]) {
+      return inputs.map(() => [1, 0]);
+    },
+    async embedQueries() {
+      return [[1, 0]];
+    },
+  };
+  const bridge = new OmniMemEvalBridge(root, { embeddingClient });
+  try {
+    await bridge.handle({
+      id: 1,
+      op: "add",
+      userId: "alice",
+      messages: Array.from({ length: 6 }, (_, index) => ({
+        role: "user",
+        content: `Stable preference number ${index + 1}.`,
+      })),
+    });
+    const result = (await bridge.handle({
+      id: 2,
+      op: "search",
+      userId: "alice",
+      query: "What are my stable preferences?",
+      topK: 6,
+    })) as { memories: unknown[] };
+    assert.equal(result.memories.length, 6);
+  } finally {
+    bridge.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("OmniMemEval can enable progressive QPP recall without changing the default arm", async () => {
   const normalRoot = mkdtempSync(join(tmpdir(), "nmg-omni-qpp-normal-"));
   const adaptiveRoot = mkdtempSync(join(tmpdir(), "nmg-omni-qpp-adaptive-"));
@@ -205,27 +241,27 @@ test("OmniMemEval can enable progressive QPP recall without changing the default
     await adaptive.handle({ id: 2, op: "add", userId: "alice", messages });
     await safePrefix.handle({ id: 3, op: "add", userId: "alice", messages });
 
-    const normalResult = await normal.handle({
+    const normalResult = (await normal.handle({
       id: 4,
       op: "search",
       userId: "alice",
       query: "On which days do I run five kilometres before breakfast?",
       topK: 2,
-    }) as { memories: unknown[] };
-    const adaptiveResult = await adaptive.handle({
+    })) as { memories: unknown[] };
+    const adaptiveResult = (await adaptive.handle({
       id: 5,
       op: "search",
       userId: "alice",
       query: "On which days do I run five kilometres before breakfast?",
       topK: 2,
-    }) as { memories: unknown[] };
-    const safePrefixResult = await safePrefix.handle({
+    })) as { memories: unknown[] };
+    const safePrefixResult = (await safePrefix.handle({
       id: 6,
       op: "search",
       userId: "alice",
       query: "On which days do I run five kilometres before breakfast?",
       topK: 2,
-    }) as { memories: unknown[] };
+    })) as { memories: unknown[] };
 
     assert.equal(normalResult.memories.length, 2);
     assert.equal(adaptiveResult.memories.length, 1);
@@ -284,13 +320,13 @@ test("OmniMemEval replaces an explicitly forgotten memory with a tagged revocati
       ],
     });
 
-    const forgotten = await bridge.handle({
+    const forgotten = (await bridge.handle({
       id: 3,
       op: "search",
       userId: "alice",
       query: "How did I feel about working from home and collaboration?",
       topK: 10,
-    }) as {
+    })) as {
       text: string;
       memories: Array<{
         statement: string;
@@ -303,21 +339,19 @@ test("OmniMemEval replaces an explicitly forgotten memory with a tagged revocati
     );
     assert.doesNotMatch(forgotten.text, /Please forget/i);
     const revocation = forgotten.memories.find((memory) =>
-      memory.markers.some((marker) => marker.kind === "forget")
+      memory.markers.some((marker) => marker.kind === "forget"),
     );
     assert.ok(revocation);
     assert.equal(revocation.statement.startsWith("[forget]"), false);
-    assert.deepEqual(revocation.markers, [
-      { kind: "forget", attributes: { effect: "revoke" } },
-    ]);
+    assert.deepEqual(revocation.markers, [{ kind: "forget", attributes: { effect: "revoke" } }]);
 
-    const retained = await bridge.handle({
+    const retained = (await bridge.handle({
       id: 4,
       op: "search",
       userId: "alice",
       query: "What tea do I prefer?",
       topK: 10,
-    }) as { text: string };
+    })) as { text: string };
     assert.match(retained.text, /jasmine tea/i);
   } finally {
     bridge.close();
@@ -332,7 +366,7 @@ test("semantic retrieval exposes a tagged revocation boundary", async () => {
       indexId: "test-revocations@v1",
       async embedDocuments(inputs) {
         return inputs.map((input) =>
-          /isolated|collaborative|brainstorms/i.test(input) ? [1, 0] : [0, 1]
+          /isolated|collaborative|brainstorms/i.test(input) ? [1, 0] : [0, 1],
         );
       },
       async embedQueries() {
@@ -368,13 +402,13 @@ test("semantic retrieval exposes a tagged revocation boundary", async () => {
       ],
     });
 
-    const result = await bridge.handle({
+    const result = (await bridge.handle({
       id: 2,
       op: "search",
       userId: "alice",
       query: "How can I recreate collaboration while studying online?",
       topK: 10,
-    }) as {
+    })) as {
       text: string;
       memories: Array<{ statement: string; markers: Array<{ kind: string }> }>;
     };
@@ -383,9 +417,10 @@ test("semantic retrieval exposes a tagged revocation boundary", async () => {
       /\[forget\] I (?:feel isolated working from home|prefer collaborative whiteboard sessions)/i,
     );
     assert.doesNotMatch(result.text, /Please forget/i);
-    const revocations = result.memories.filter((memory) =>
-      memory.statement.startsWith("[forget]") === false &&
-      memory.markers.some((marker) => marker.kind === "forget")
+    const revocations = result.memories.filter(
+      (memory) =>
+        memory.statement.startsWith("[forget]") === false &&
+        memory.markers.some((marker) => marker.kind === "forget"),
     );
     assert.equal(revocations.length, 2);
     assert.equal(result.text.match(/^\[forget\]/gm)?.length, 1);

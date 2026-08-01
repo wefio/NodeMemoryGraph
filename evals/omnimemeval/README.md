@@ -226,6 +226,19 @@ merely eliminating noise. Do not treat the older 0.7963 result as current
 performance; restoring evidence composition under the shared Active Graph
 budget is the next retrieval-quality gate.
 
+A controlled full-pool rerun then identified that gate. OmniMemEval stores raw
+conversation evidence in L2, while the shared `maxTierBudget` default admitted
+only three L2/L3 records regardless of `top_k=20` or `50`. With the benchmark's
+total node and cold-evidence budgets aligned to `top_k=20`, all 500 searches
+succeeded and strict evidence recall recovered to **87.95%**: 94.15% of labelled
+questions contained at least one evidence turn and 82.67% contained every
+labelled turn. Mean context grew to 3,719 characters. This matches and slightly
+exceeds the 2026-07-28 retrieval result (87.28% / 81.63% / 3,615 characters),
+confirming that the regression was budget truncation rather than embedding or
+ANN quality. Agent-facing L1 retrieval now ranks once and presents two halves;
+the benchmark explicitly disables that presentation fold because it measures
+the full retrieval-recall ceiling rather than an agent's decision to expand.
+
 The full run used a persistent embedding cache. Cold end-to-end search includes
 per-user GPU embedding construction; the NMG core sidecar reports P50 25.63 ms,
 P95 59.70 ms, and P99 66.26 ms for the graph/search work itself. A separate
