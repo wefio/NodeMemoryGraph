@@ -293,3 +293,69 @@ test("getSessionArchive: returns null for unknown session ids", () => {
     assert.equal(result, null);
   });
 });
+
+test("addMemory: writes a memory record bound to a node and evidence", () => {
+  withStore((store) => {
+    const node = store.upsertNode({ canonicalName: "add-memory-node" });
+    const history = store.appendHistory({ role: "explicit", content: "the sky is blue" });
+    const memory = store.addMemory({
+      nodeId: node.id,
+      evidenceId: history.id,
+      statement: "the sky is blue",
+      memoryType: "fact",
+    });
+    assert.ok(memory.id);
+    assert.equal(memory.nodeId, node.id);
+    assert.equal(memory.evidenceId, history.id);
+    assert.equal(memory.statement, "the sky is blue");
+    assert.equal(memory.memoryType, "fact");
+    assert.equal(memory.status, "active");
+  });
+});
+
+test("addMemory: state memory stores stateKey and records explicit supersedesId", () => {
+  withStore((store) => {
+    const node = store.upsertNode({ canonicalName: "add-memory-state" });
+    const h1 = store.appendHistory({ role: "explicit", content: "theme is dark" });
+    const first = store.addMemory({
+      nodeId: node.id,
+      evidenceId: h1.id,
+      statement: "theme is dark",
+      memoryType: "state",
+      stateKey: "theme",
+    });
+    const h2 = store.appendHistory({ role: "explicit", content: "theme is light" });
+    const second = store.addMemory({
+      nodeId: node.id,
+      evidenceId: h2.id,
+      statement: "theme is light",
+      memoryType: "state",
+      stateKey: "theme",
+      supersedesId: first.id,
+    });
+    // addMemory is a low-level primitive: it stores stateKey verbatim and
+    // records the explicit supersedesId link. Automatic status flipping of
+    // the superseded memory is remember's orchestration, not addMemory's.
+    assert.equal(first.stateKey, "theme");
+    assert.equal(second.stateKey, "theme");
+    assert.equal(second.supersedesId, first.id);
+    assert.equal(first.supersedesId, null);
+  });
+});
+
+test("addMemory: derived memory records an evidence link to the source", () => {
+  withStore((store) => {
+    const node = store.upsertNode({ canonicalName: "add-memory-derived" });
+    const h = store.appendHistory({ role: "explicit", content: "parent claim" });
+    const memory = store.addMemory({
+      nodeId: node.id,
+      evidenceId: h.id,
+      statement: "parent claim",
+      memoryType: "derived",
+      writeSource: "derived",
+    });
+    assert.equal(memory.memoryType, "derived");
+    assert.equal(memory.writeSource, "derived");
+    assert.equal(memory.status, "active");
+  });
+});

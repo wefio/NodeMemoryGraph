@@ -307,6 +307,28 @@ test("perfAggregates: returns empty array on fresh store", () => {
   });
 });
 
+test("perfAggregates: hot path records search.direct and trace after a searchContext", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "hot path perf probe",
+      nodeName: "hot path",
+      memoryType: "fact",
+    });
+    // run the hot retrieval path (this is the perf-instrumented path)
+    store.searchContext("hot path perf");
+    const aggregates = store.perfAggregates();
+    const bySection = new Map(aggregates.map((a) => [a.section, a]));
+    assert.ok(bySection.has("search.direct"), "search.direct section must be recorded");
+    assert.ok(bySection.has("trace"), "trace section must be recorded");
+    const direct = bySection.get("search.direct")!;
+    const trace = bySection.get("trace")!;
+    assert.equal(direct.count, 1);
+    assert.equal(trace.count, 1);
+    assert.ok(direct.sum >= 0);
+    assert.ok(trace.sum >= 0);
+  });
+});
+
 // ── recordActiveGraphUse ──
 
 test("recordActiveGraphUse: records usage on a trace", () => {

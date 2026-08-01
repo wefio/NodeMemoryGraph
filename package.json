@@ -36,6 +36,8 @@
     "format:check": "prettier --check \"src/**/*.ts\" \".pi/**/*.ts\"",
     "test:coverage": "c8 node --experimental-strip-types --test \"tests/**/*.test.ts\"",
     "eval:agents": "node --experimental-strip-types evals/run.ts",
+    "hotspot:modules": "node --experimental-strip-types scripts/hotspot-files.ts",
+    "perf:hotspots": "node --experimental-strip-types scripts/perf-hotspots.ts",
     "eval:adaptive": "node --experimental-strip-types evals/adaptive-topology/run.ts",
     "eval:controller": "node --experimental-strip-types evals/controller/run.ts",
     "eval:quality": "node --experimental-strip-types evals/memory-quality/run.ts",
