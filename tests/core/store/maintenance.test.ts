@@ -92,6 +92,20 @@ test("deleteMemory: cascade-deletes derived memories with no remaining sources",
   });
 });
 
+test("deleteMemory: deleted memories are filtered from getContext", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "user is vegan",
+      nodeName: "user diet",
+      memoryType: "preference",
+      sourceActor: "user",
+    });
+    store.deleteMemory(saved.memory.id);
+    const ctx = store.getContext(saved.memory.evidenceIds, 0);
+    assert.ok(ctx.results.every((result) => result.memory.id !== saved.memory.id));
+  });
+});
+
 // ── promoteMemory / demoteMemory tier migration ──
 
 test("promoteMemory: promotes STG memory to LTG", () => {

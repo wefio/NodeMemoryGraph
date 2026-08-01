@@ -1635,3 +1635,48 @@ test("contradictionNotes flags claim pairs with opposite polarity in temporal or
     );
   });
 });
+
+test("search defaults to legacy mode: lexical fallback works without matching vectors", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "legacy default mode probe statement",
+      nodeName: "probe node",
+      memoryType: "fact",
+    });
+    // Legacy is the correct default: it tolerates stores whose memory vectors
+    // don't match the search embedder (hybridScore keeps a lexical floor). A
+    // pure-vector default (hashing) would miss memories with no matching
+    // vector — see retention.test.ts L4 (2-dim injected vectors).
+    const results = store.search("legacy default probe");
+    assert.ok(results.length > 0, "legacy fallback must find the memory by lexical match");
+    for (const result of results) {
+      assert.ok(
+        result.combinedScore > 0,
+        "legacy combinedScore keeps a lexical floor even with no vector match",
+      );
+    }
+  });
+});
+
+test("searchContext falls back to lexical when semantic retrieval is empty", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "The retired project codename was silver heron",
+      nodeName: "project codename",
+    });
+    // Semantic vector that matches nothing in the store (no embeddings under
+    // this model), but the query has strong lexical overlap with the memory.
+    const context = store.searchContext(
+      "silver heron project",
+      { limit: 4, graphHops: 0 },
+      { queryVector: [0, 0, 0, 0], model: "no-such-model" },
+    );
+    // Semantic search returns nothing; the lexical fallback must still surface
+    // the memory by token overlap — otherwise a stale/unavailable embedder
+    // silently kills recall.
+    assert.ok(
+      context.results.some((result) => result.memory.id === saved.memory.id),
+      "lexical fallback should recover the memory when semantic is empty",
+    );
+  });
+});
