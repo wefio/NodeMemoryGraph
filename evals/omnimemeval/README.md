@@ -44,6 +44,30 @@ instructions after retrieval and therefore do not impose a minimum window size.
 
 Use `--page-cutoffs 20 25 30 40` to change the cumulative expansion points.
 
+### Progressive expansion answer probe (2026-08-02)
+
+The official LongMemEval answer and judge stages were run on all 133 temporal
+questions using the combined reverse-retrieval ranking. The paired arms exposed
+the first 20 sessions or continued to 25. Both used DeepSeek v4 Flash at
+temperature zero and 64 workers. On the 123 questions successfully judged in
+both arms, Top-20 scored 78.05% and Top-25 scored 76.42% (8 wins, 10 losses;
+two-sided sign-test p=0.815). Mean rendered context grew from 234k to 288k
+characters because this diagnostic embeds and renders whole sessions rather
+than NMG memory records.
+
+Expansion recovered a newly labelled session on six questions, but only one of
+those six answers changed from wrong to correct. In particular, question
+`0bc8ad93` recovered its January bridge session at rank 24 yet the reader still
+preferred the October museum visit with a friend. Progressive disclosure thus
+improves evidence reachability, but unconditional expansion is not an answer
+quality improvement and does not replace evidence composition. Production must
+leave expansion available to the Agent/QPP instead of injecting the next page
+on every query.
+
+`materialize-pagination-arm.py` converts an offline ranking arm into the
+official search-artifact format so answer-stage comparisons can reuse the
+upstream response and judge scripts without modifying OmniMemEval.
+
 ## Integration boundary
 
 NMG should contribute a thin Python client in OmniMemEval's
