@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -35,7 +35,7 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
       userId: "alice",
       query: "What is my telescope named?",
       topK: 4,
-    }) as { text: string };
+    }) as { text: string; timings?: { totalMs: number } };
     const bob = await bridge.handle({
       id: 3,
       op: "search",
@@ -46,6 +46,8 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
 
     assert.match(alice.text, /\[NMG retrieval guidance\]/);
     assert.match(alice.text, /Kepler/);
+    assert.ok(alice.timings);
+    assert.ok(alice.timings.totalMs >= 0);
     assert.doesNotMatch(alice.text, /\[forget\]/);
     assert.doesNotMatch(alice.text, /2026-07-20/);
     assert.equal(bob.text, "");
@@ -79,6 +81,11 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
     assert.match(assistantRecall.text, /Admon the Sunday day shift/);
 
     await bridge.handle({ id: 7, op: "delete", userId: "alice" });
+    const perfRows = readFileSync(join(root, "search-perf.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { userId: string; timings?: { totalMs: number } });
+    assert.ok(perfRows.some((row) => row.userId === "alice" && row.timings));
     const deleted = await bridge.handle({
       id: 8,
       op: "search",

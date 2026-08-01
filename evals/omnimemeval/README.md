@@ -191,6 +191,23 @@ lookup. The answer prompt averaged 1,114 reported tokens per question. Future
 performance work must report cold indexing and warm retrieval separately and
 must not trade away the measured evidence-recall gain.
 
+The NMG bridge preserves its existing `PerfTimer` snapshots in
+`.benchmarks/omnimemeval-nmg/search-perf.jsonl`. This sidecar survives the
+official streaming runner's per-user database deletion. The official
+`search_duration_ms` remains the cold end-to-end measurement; the sidecar
+reports warm core phases independently. Summarize all rows, or restrict the
+report to one benchmark version's user-ID prefix, with:
+
+```powershell
+npm run benchmark:report:omni-perf -- `
+  .benchmarks/omnimemeval-nmg/search-perf.jsonl `
+  lme_exper_user_nmg_lme500_bge_20260728_
+```
+
+The report includes nearest-rank P50, P95, and P99 for total core retrieval and
+each recorded phase. Large comparisons should use a version prefix so unrelated
+runs are not mixed.
+
 On the Windows evaluation host, the offline BGE server is run from the existing
 `uv` script environment. Installing the CUDA PyTorch wheel into that environment
 reduced the 30-question search run from roughly 50--75 seconds per question on

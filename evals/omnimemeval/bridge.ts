@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
@@ -7,7 +7,12 @@ import { pathToFileURL } from "node:url";
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
 import { syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
 import { NmgStore } from "../../src/core/store.ts";
-import type { HistoryRole, MemoryActor, MemoryMarker } from "../../src/core/types.ts";
+import type {
+  HistoryRole,
+  MemoryActor,
+  MemoryMarker,
+  PerfSnapshot,
+} from "../../src/core/types.ts";
 
 const BASE_RETRIEVAL_GUIDANCE =
   "[NMG retrieval guidance] Treat relevant user facts, preferences, constraints, " +
@@ -84,6 +89,8 @@ export interface OmniMemEvalBridgeOptions {
   qppInitialEvidenceTarget?: number;
   /** Optional retrieval-confidence threshold for matched QPP ablations. */
   qppThreshold?: number;
+  /** Persist core retrieval timings independently of disposable user databases. */
+  perfLogPath?: string;
 }
 
 /**
@@ -100,6 +107,7 @@ export class OmniMemEvalBridge {
   readonly #secondPass: boolean;
   readonly #qppInitialEvidenceTarget?: number;
   readonly #qppThreshold?: number;
+  readonly #perfLogPath: string;
 
   constructor(root: string, options: OmniMemEvalBridgeOptions = {}) {
     this.#root = resolve(root);
@@ -111,6 +119,7 @@ export class OmniMemEvalBridge {
     this.#secondPass = options.secondPass ?? false;
     this.#qppInitialEvidenceTarget = positiveNumber(options.qppInitialEvidenceTarget);
     this.#qppThreshold = finiteNumber(options.qppThreshold);
+    this.#perfLogPath = resolve(options.perfLogPath ?? resolve(this.#root, "search-perf.jsonl"));
     mkdirSync(this.#root, { recursive: true });
   }
 
@@ -217,6 +226,7 @@ export class OmniMemEvalBridge {
     text: string;
     retrievalMode: "lexical" | "records";
     memories: OmniRetrievedMemory[];
+    timings?: PerfSnapshot;
   }> {
     if (!query.trim()) throw new Error("query must not be empty");
     const limit = Math.max(1, Math.min(Math.trunc(topK || 10), 50));
@@ -261,8 +271,21 @@ export class OmniMemEvalBridge {
     // note is rendered into the context regardless of the caller.
     const notes = store.contradictionNotes(memories.map((m) => m.memoryId));
     const projection = projectMemoryContext(memories, includeTime, notes);
+    appendFileSync(
+      this.#perfLogPath,
+      `${JSON.stringify({
+        timestamp: new Date().toISOString(),
+        userId,
+        topK: limit,
+        retrievalMode: semantic ? "records" : "lexical",
+        resultCount: memories.length,
+        timings: context.timings,
+      })}\n`,
+      "utf8",
+    );
     return {
       retrievalMode: semantic ? "records" : "lexical",
+      timings: context.timings,
       text:
         projection.lines.length === 0
           ? ""
