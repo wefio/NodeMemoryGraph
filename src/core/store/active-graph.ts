@@ -19,6 +19,7 @@ const DEFAULT_ACTIVE_GRAPH_BUDGET: ActiveGraphBudget = {
   maxTokens: 2_000,
   maxGraphHops: 1,
   maxLocalTier: 1,
+  maxTierBudget: 3,
   maxLatencyMs: 250,
 };
 
@@ -55,6 +56,10 @@ export function activeGraphBudget(options: SearchOptions): ActiveGraphBudget {
         3,
       ),
     ) as MemoryTier,
+    maxTierBudget: Math.max(
+      0,
+      Math.min(requested.maxTierBudget ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxTierBudget, 50),
+    ),
     maxLatencyMs: Math.max(
       1,
       Math.min(requested.maxLatencyMs ?? DEFAULT_ACTIVE_GRAPH_BUDGET.maxLatencyMs, 60_000),
@@ -79,6 +84,7 @@ export function expandActiveGraphBudget(budget: ActiveGraphBudget): ActiveGraphB
     maxTokens: Math.min(budget.maxTokens * 2, 100_000),
     maxGraphHops: Math.min(budget.maxGraphHops + 1, 3),
     maxLocalTier: budget.maxLocalTier,
+    maxTierBudget: Math.min(budget.maxTierBudget * 2, 50),
     maxLatencyMs: Math.min(budget.maxLatencyMs * 2, 60_000),
   };
 }
@@ -184,6 +190,8 @@ export function activeGraphBudgetLedger(
     { dimension: "tokens", limit: budget.maxTokens, used: usage.estimatedTokens },
     { dimension: "graphHops", limit: budget.maxGraphHops, used: usage.graphHops },
     { dimension: "localTier", limit: budget.maxLocalTier, used: usage.deepestTier },
+    { dimension: "tiersOpened", limit: budget.maxLocalTier + 1, used: usage.tiersOpened },
+    { dimension: "deepEvidence", limit: budget.maxTierBudget, used: usage.deepEvidence },
     { dimension: "latencyMs", limit: budget.maxLatencyMs, used: usage.latencyMs },
   ];
   return entries.map((entry) => ({
@@ -192,7 +200,9 @@ export function activeGraphBudgetLedger(
       exhausted.has(
         entry.dimension === "latencyMs"
           ? "latency"
-          : (entry.dimension as "edges" | "evidence" | "nodes" | "tokens"),
+          : entry.dimension === "deepEvidence"
+            ? "deepEvidence"
+            : (entry.dimension as "edges" | "evidence" | "nodes" | "tokens"),
       ) || entry.used >= entry.limit,
   }));
 }

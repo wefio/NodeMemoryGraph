@@ -122,6 +122,101 @@ test("searchContextWithSecondPass enables secondPass and returns context", () =>
   });
 });
 
+test("tiered disclosure stops at L0 when shallow evidence is sufficient", () => {
+  withStore((store) => {
+    const hot = store.remember({
+      statement: "Atlas storage engine is SQLite",
+      nodeName: "Atlas storage",
+      tier: 0,
+    });
+    store.remember({
+      statement: "Atlas storage engine migration details are archived",
+      nodeName: "Atlas storage archive",
+      tier: 2,
+    });
+    const context = store.searchContext("Atlas storage engine SQLite", {
+      maxTier: 3,
+      tieredDisclosure: true,
+      limit: 8,
+    });
+    assert.equal(context.activeGraph?.usage.tiersOpened, 1);
+    assert.equal(context.activeGraph?.usage.deepestTier, 0);
+    assert.deepEqual(context.results.map((result) => result.memory.id), [hot.memory.id]);
+  });
+});
+
+test("tiered disclosure prevents graph expansion from bypassing unopened tiers", () => {
+  withStore((store) => {
+    const hot = store.remember({
+      statement: "Atlas storage engine is SQLite",
+      nodeName: "Atlas storage",
+      tier: 0,
+    });
+    const deep = store.remember({
+      statement: "Atlas migration archive contains an obsolete engine comparison",
+      nodeName: "Atlas migration archive",
+      tier: 2,
+    });
+    store.linkNodes({
+      sourceNodeId: hot.node.id,
+      targetNodeId: deep.node.id,
+      type: "related_to",
+    });
+
+    const context = store.searchContext("Atlas storage engine SQLite", {
+      maxTier: 3,
+      graphHops: 1,
+      tieredDisclosure: true,
+      limit: 8,
+    });
+
+    assert.equal(context.activeGraph?.usage.deepestTier, 0);
+    assert.ok(context.results.some((result) => result.memory.id === hot.memory.id));
+    assert.ok(!context.results.some((result) => result.memory.id === deep.memory.id));
+  });
+});
+
+test("tiered disclosure opens deeper tiers on a shallow miss", () => {
+  withStore((store) => {
+    const deep = store.remember({
+      statement: "The archived codename is silver heron",
+      nodeName: "Archived codename",
+      tier: 2,
+    });
+    const context = store.searchContext("archived codename silver heron", {
+      maxTier: 3,
+      tieredDisclosure: true,
+      limit: 8,
+    });
+    assert.equal(context.activeGraph?.usage.tiersOpened, 3);
+    assert.equal(context.activeGraph?.usage.deepestTier, 2);
+    assert.ok(context.results.some((result) => result.memory.id === deep.memory.id));
+  });
+});
+
+test("tiered disclosure enforces the shared deep-evidence budget", () => {
+  withStore((store) => {
+    for (let index = 0; index < 4; index += 1) {
+      store.remember({
+        statement: `Archived atlas decision ${index}`,
+        nodeName: `Archived decision ${index}`,
+        tier: 2,
+      });
+    }
+    const context = store.searchContext("Archived atlas decision", {
+      maxTier: 3,
+      tieredDisclosure: true,
+      limit: 8,
+      activeGraphBudget: { maxTierBudget: 1 },
+    });
+    assert.equal(context.activeGraph?.usage.deepEvidence, 1);
+    assert.equal(
+      context.activeGraph?.budgetLedger.find((entry) => entry.dimension === "deepEvidence")?.exhausted,
+      true,
+    );
+  });
+});
+
 // ── getContext ──
 
 test("getContext retrieves results for given memory IDs", () => {

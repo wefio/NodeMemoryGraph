@@ -26,6 +26,7 @@ import {
 import { qppCandidates, shouldTriggerSecondPass } from "../qpp.ts";
 import {
   contextUsefulness,
+  hybridScore,
   mergeSemanticCandidates,
   recallReason,
   type StoreRow as Row,
@@ -109,83 +110,79 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       const perf = options.perf === false ? null : new PerfTimer();
       const budget = activeGraphBudget(options);
       const limit = Math.max(1, Math.min(options.limit ?? 8, budget.maxEvidence, 50));
-      const directOptions = {
-        ...options,
-        maxTier: Math.min(
-          options.maxTier ?? budget.maxLocalTier,
-          budget.maxLocalTier,
-        ) as MemoryTier,
-        limit: Math.min(50, Math.max(20, limit * 3)),
-      };
+      const hardTier = Math.min(
+        options.maxTier ?? budget.maxLocalTier,
+        budget.maxLocalTier,
+      ) as MemoryTier;
       const filterUsage: RetrievalFilterUsage = {
         dimensions: effectiveFilterDimensions(options),
         candidatesBefore: 0,
         candidatesAfter: 0,
         selectivity: 0,
       };
-      const direct = perf
-        ? perf.measure(SECTION.searchDirect, () =>
-            semantic
-              ? options.vectorGranularity === "union"
-                ? mergeSemanticCandidates(
-                    query,
-                    [
-                      ...this.searchHierarchyByVector(
-                        query,
-                        semantic.queryVector,
-                        semantic.model,
-                        directOptions,
-                      ),
-                      ...this.searchByVector(query, semantic.queryVector, semantic.model, {
-                        ...directOptions,
-                        retrievalMode: "qwen3",
-                      }),
-                    ],
-                    directOptions.limit,
-                  )
-                : options.vectorGranularity === "records"
-                  ? this.searchByVector(query, semantic.queryVector, semantic.model, {
-                      ...directOptions,
-                      retrievalMode: "qwen3",
-                    })
-                  : this.searchHierarchyByVector(
+      const retrieveDirect = (maxTier: MemoryTier): MemorySearchResult[] => {
+        const directOptions = {
+          ...options,
+          maxTier,
+          limit: Math.min(50, Math.max(20, limit * 3)),
+        };
+        const retrieve = () =>
+          semantic
+            ? options.vectorGranularity === "union"
+              ? mergeSemanticCandidates(
+                  query,
+                  [
+                    ...this.searchHierarchyByVector(
                       query,
                       semantic.queryVector,
                       semantic.model,
                       directOptions,
-                    )
-              : this.search(query, directOptions, filterUsage),
-          )
-        : semantic
-          ? options.vectorGranularity === "union"
-            ? mergeSemanticCandidates(
-                query,
-                [
-                  ...this.searchHierarchyByVector(
+                    ),
+                    ...this.searchByVector(query, semantic.queryVector, semantic.model, {
+                      ...directOptions,
+                      retrievalMode: "qwen3",
+                    }),
+                  ],
+                  directOptions.limit,
+                )
+              : options.vectorGranularity === "records"
+                ? this.searchByVector(query, semantic.queryVector, semantic.model, {
+                    ...directOptions,
+                    retrievalMode: "qwen3",
+                  })
+                : this.searchHierarchyByVector(
                     query,
                     semantic.queryVector,
                     semantic.model,
                     directOptions,
-                  ),
-                  ...this.searchByVector(query, semantic.queryVector, semantic.model, {
-                    ...directOptions,
-                    retrievalMode: "qwen3",
-                  }),
-                ],
-                directOptions.limit,
-              )
-            : options.vectorGranularity === "records"
-              ? this.searchByVector(query, semantic.queryVector, semantic.model, {
-                  ...directOptions,
-                  retrievalMode: "qwen3",
-                })
-              : this.searchHierarchyByVector(
-                  query,
-                  semantic.queryVector,
-                  semantic.model,
-                  directOptions,
-                )
-          : this.search(query, directOptions, filterUsage);
+                  )
+            : this.search(query, directOptions, filterUsage);
+        return perf ? perf.measure(SECTION.searchDirect, retrieve) : retrieve();
+      };
+      const directQpp = (results: readonly MemorySearchResult[]): QppTriggerDecision =>
+        shouldTriggerSecondPass(
+          query,
+          results.map((result) => ({
+            strength: hybridScore(result.lexicalScore, result.vectorScore, result.routeScore),
+            reason: recallReason(result),
+            memoryType: result.memory.memoryType,
+            isDirect: true,
+          })),
+          options.qppThreshold,
+        );
+      const openedTiers: MemoryTier[] = [];
+      let direct = retrieveDirect(options.tieredDisclosure ? 0 : hardTier);
+      if (options.tieredDisclosure) {
+        openedTiers.push(0);
+      } else {
+        for (let tier = 0; tier <= hardTier; tier += 1) openedTiers.push(tier as MemoryTier);
+      }
+      if (options.tieredDisclosure) {
+        for (let tier = 1; tier <= hardTier && directQpp(direct).trigger; tier += 1) {
+          direct = retrieveDirect(tier as MemoryTier);
+          openedTiers.push(tier as MemoryTier);
+        }
+      }
       const graphHops = Math.min(options.graphHops ?? 1, budget.maxGraphHops);
       const relations = perf
         ? perf.measure(SECTION.relations, () =>
@@ -202,12 +199,13 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       const relatedNodeIds = [
         ...new Set(relations.flatMap((relation) => [relation.sourceNodeId, relation.targetNodeId])),
       ].filter((id) => !directNodeIds.has(id));
+      const openedMaxTier = openedTiers.at(-1) ?? 0;
       const related = perf
         ? perf.measure(SECTION.relatedExpansion, () =>
             relatedNodeIds.flatMap((nodeId) =>
               this.resultsForNode(
                 nodeId,
-                Math.min(options.maxTier ?? budget.maxLocalTier, budget.maxLocalTier) as MemoryTier,
+                openedMaxTier,
                 2,
                 undefined,
                 options.sourceActor,
@@ -217,7 +215,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         : relatedNodeIds.flatMap((nodeId) =>
             this.resultsForNode(
               nodeId,
-              Math.min(options.maxTier ?? budget.maxLocalTier, budget.maxLocalTier) as MemoryTier,
+              openedMaxTier,
               2,
               undefined,
               options.sourceActor,
@@ -241,6 +239,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         const nodes = new Set<string>();
         const res: MemorySearchResult[] = [];
         let tokens = 0;
+        let deepEvidence = 0;
         const ex = new Set<ActiveGraphBudgetUsage["exhausted"][number]>();
         for (const candidate of candidates) {
           if (res.length >= lim) {
@@ -251,6 +250,10 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             ex.add("nodes");
             continue;
           }
+          if (candidate.memory.tier >= 1 && deepEvidence >= bud.maxTierBudget) {
+            ex.add("deepEvidence");
+            continue;
+          }
           const candidateTokens = estimateResultTokens(candidate);
           if (res.length > 0 && tokens + candidateTokens > bud.maxTokens) {
             ex.add("tokens");
@@ -259,6 +262,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           res.push(candidate);
           nodes.add(candidate.node.id);
           tokens += candidateTokens;
+          if (candidate.memory.tier >= 1) deepEvidence += 1;
         }
         return { results: res, selectedNodes: nodes, estimatedTokens: tokens, exhausted: ex };
       };
@@ -405,6 +409,8 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           (deepest, result) => Math.max(deepest, result.memory.tier) as MemoryTier,
           0,
         ),
+        tiersOpened: openedTiers.length,
+        deepEvidence: results.filter((result) => result.memory.tier >= 1).length,
         latencyMs,
         exhausted: [...exhausted].sort(),
       };

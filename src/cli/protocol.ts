@@ -117,6 +117,7 @@ export interface NmgSearchParams {
   retrievalMode?: "legacy" | "fts5" | "hashing" | "qwen3" | "hybrid";
   vectorGranularity?: "hierarchy" | "records" | "union";
   secondPass?: boolean;
+  tieredDisclosure?: boolean;
   perf?: boolean;
   projectDir?: string;
 }

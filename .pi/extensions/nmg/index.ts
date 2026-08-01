@@ -48,6 +48,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         maxTier: configuredAutoRecallTier(),
         limit: configuredAutoRecallLimit(),
         graphHops: 1,
+        tieredDisclosure: true,
       })) as MemoryContext;
       const recalled = formatMemoryContext(context);
       return {
@@ -181,6 +182,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       includeHistorical: Type.Optional(Type.Boolean()),
       graphHops: Type.Optional(Type.Number({ minimum: 0, maximum: 3 })),
       secondPass: Type.Optional(Type.Boolean()),
+      tieredDisclosure: Type.Optional(Type.Boolean()),
     }),
     async execute(_toolCallId, params) {
       const result = (await invoke("search", {
@@ -230,8 +232,11 @@ export function formatSearchHeaders(context: MemoryContext): string {
         `memory=${memory.id}; node=${node.canonicalName}; type=${memory.memoryType}; ` +
         `tier=L${memory.tier}; preview=${excerpt(memory.statement, 160)}`,
     ),
+    context.activeGraph
+      ? `AG tiersOpened=${context.activeGraph.usage.tiersOpened}; deepestTier=L${context.activeGraph.usage.deepestTier}; deepEvidence=${context.activeGraph.usage.deepEvidence}`
+      : "",
     "Use nmg_get with selected memory IDs to load exact evidence.",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 export function formatMemoryContext(context: MemoryContext): string {

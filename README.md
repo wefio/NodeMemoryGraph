@@ -207,6 +207,10 @@ nmg remember "The upstream docs list version 2" --node "Upstream version" \
 External writes default to `truth=unverified`; Pi renders `[external]` and the
 source so the Agent can decide whether the current task requires re-checking.
 
+Use `--tiered-disclosure` to search L0 first and open deeper tiers only while
+QPP reports insufficient evidence. Pi automatic recall enables this gate by
+default. The AG result reports `tiersOpened`, `deepestTier`, and `deepEvidence`.
+
 `nmg daemon start` launches the language-neutral JSON-RPC-over-HTTP boundary
 on an OS-assigned loopback port. Requests and responses are JSON-RPC 2.0 over
 Node's built-in `http`/`fetch` (no third-party transport dependencies); the

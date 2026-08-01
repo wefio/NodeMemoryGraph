@@ -348,6 +348,7 @@ function parseSearchParams(value: unknown): NmgSearchParams {
     retrievalMode: optionalEnum(params, "retrievalMode", RETRIEVAL_MODES),
     vectorGranularity: optionalEnum(params, "vectorGranularity", VECTOR_GRANULARITIES),
     secondPass: optionalBoolean(params, "secondPass"),
+    tieredDisclosure: optionalBoolean(params, "tieredDisclosure"),
     perf: optionalBoolean(params, "perf"),
     projectDir: optionalString(params, "projectDir"),
   };

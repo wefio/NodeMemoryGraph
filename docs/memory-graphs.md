@@ -414,8 +414,8 @@ Not yet implemented:
 - strict shared-daemon multi-Agent STG isolation (§3);
 - learned AG budget projection (Lab: `controller-runtime.ts` projects
   budget dimensions, QPP shadow traces exist);
-- tiered sequential disclosure (designed, see
-  [tiered-disclosure-design.md](tiered-disclosure-design.md));
+- deterministic tiered sequential disclosure in CLI/Pi, including its
+  deep-evidence budget and AG ledger (calibrated SPRT evaluation remains open);
 - edge activation as a derived function (designed, see
   [edge-activation-design.md](edge-activation-design.md)).
 

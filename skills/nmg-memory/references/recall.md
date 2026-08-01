@@ -16,6 +16,12 @@ answer.
 
 ## Progressive second pass
 
+To make the storage tier itself progressive, add `--tiered-disclosure`. This
+opens L0 first and only searches L1–L3 while deterministic QPP still reports
+insufficient evidence. It composes with, but is distinct from, `--second-pass`:
+the former opens storage tiers; the latter widens the evidence prefix inside
+the opened candidate pool.
+
 When the first recall quality is doubtful but the query is right, re-select
 within the same candidate pool instead of changing the query:
 

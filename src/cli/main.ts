@@ -77,6 +77,7 @@ Search options:
   --retrieval-mode MODE      fts5, hybrid, qwen3, hashing, or legacy
   --vector-granularity MODE  hierarchy, records, or union
   --second-pass              Enable progressive QPP recall
+  --tiered-disclosure        Open tiers sequentially until QPP is sufficient
   --no-perf                  Disable per-phase performance timing
 
 Retention policy options:
@@ -90,7 +91,13 @@ Node maintenance:
   --target-kind KIND         Optional semantic node kind
   --partition NAME=IDS       Split partition; repeat and assign every memory ID
 `;
-const ALL_FLAGS = new Set(["include-historical", "json", "no-perf", "second-pass"]);
+const ALL_FLAGS = new Set([
+  "include-historical",
+  "json",
+  "no-perf",
+  "second-pass",
+  "tiered-disclosure",
+]);
 const ALL_OPTIONS = new Set([
   "actor",
   "data-dir",
@@ -494,7 +501,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
           "retrieval-mode",
           "vector-granularity",
         ],
-        ["json", "include-historical", "no-perf", "second-pass"],
+        ["json", "include-historical", "no-perf", "second-pass", "tiered-disclosure"],
       );
       return {
         ...common,
@@ -694,6 +701,7 @@ function searchParams(values: OptionValues): NmgSearchParams {
     retrievalMode: firstOption(values, "retrieval-mode"),
     vectorGranularity: firstOption(values, "vector-granularity"),
     secondPass: values.flags.has("second-pass") || undefined,
+    tieredDisclosure: values.flags.has("tiered-disclosure") || undefined,
     perf: values.flags.has("no-perf") ? false : undefined,
     projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
   }) as unknown as NmgSearchParams;

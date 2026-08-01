@@ -1398,7 +1398,17 @@ test("Active Graph enforces a shared budget and records actual memory use", () =
     assert.ok(context.activeGraph.selections.every((selection) => selection.estimatedTokens > 0));
     assert.deepEqual(
       context.activeGraph.budgetLedger.map((entry) => entry.dimension),
-      ["nodes", "edges", "evidence", "tokens", "graphHops", "localTier", "latencyMs"],
+      [
+        "nodes",
+        "edges",
+        "evidence",
+        "tokens",
+        "graphHops",
+        "localTier",
+        "tiersOpened",
+        "deepEvidence",
+        "latencyMs",
+      ],
     );
     const trace = store.retrievalTrace(context.activeGraph.id);
     assert.deepEqual(trace?.selections, context.activeGraph.selections);

@@ -242,6 +242,8 @@ export interface SearchOptions {
   /** Enable progressive Fibonacci re-selection from the same over-sampled pool.
    *  Each cumulative tier (1, 2, 3, 5, ...) recomputes QPP; no re-search occurs. */
   secondPass?: boolean;
+  /** Open memory tiers sequentially and stop when QPP says evidence is sufficient. */
+  tieredDisclosure?: boolean;
   /** Learned first-pass Fibonacci tier. QPP may continue to later tiers. */
   initialEvidenceTarget?: number;
   /** Disable per-phase timing for this operation (default: enabled). */
@@ -375,6 +377,7 @@ export interface ActiveGraphBudget {
   maxTokens: number;
   maxGraphHops: number;
   maxLocalTier: MemoryTier;
+  maxTierBudget: number;
   maxLatencyMs: number;
 }
 
@@ -385,12 +388,22 @@ export interface ActiveGraphBudgetUsage {
   estimatedTokens: number;
   graphHops: number;
   deepestTier: MemoryTier;
+  tiersOpened: number;
+  deepEvidence: number;
   latencyMs: number;
-  exhausted: Array<"edges" | "evidence" | "latency" | "nodes" | "tokens">;
+  exhausted: Array<"deepEvidence" | "edges" | "evidence" | "latency" | "nodes" | "tokens">;
 }
 
 export type ActiveGraphBudgetDimension =
-  "edges" | "evidence" | "graphHops" | "latencyMs" | "localTier" | "nodes" | "tokens";
+  | "deepEvidence"
+  | "edges"
+  | "evidence"
+  | "graphHops"
+  | "latencyMs"
+  | "localTier"
+  | "nodes"
+  | "tiersOpened"
+  | "tokens";
 
 export interface ActiveGraphBudgetLedgerEntry {
   dimension: ActiveGraphBudgetDimension;

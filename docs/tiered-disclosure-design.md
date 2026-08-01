@@ -1,7 +1,7 @@
 # Tiered Disclosure Design（层级渐进披露）
 
-**Status:** design proposal
-**Updated:** 2026-07-31
+**Status:** deterministic QPP gate implemented; calibrated SPRT remains future work
+**Updated:** 2026-08-01
 **Related:** [edge-activation-design.md](edge-activation-design.md), [fibonacci-progressive-recall.md](fibonacci-progressive-recall.md), docs/design.md §7.1, §11
 
 ## 1. Problem
@@ -80,7 +80,7 @@ fallback.
 
 ### 2.3 Budget composition (tier-aware)
 
-`ActiveGraphBudget` (src/core/types.ts:343) gains one field:
+`ActiveGraphBudget` gains one field:
 
 ```ts
 maxTierBudget: number        // new: how many records may come from tiers ≥ 1
@@ -151,10 +151,14 @@ maxTierBudget: number;
 
 // ActiveGraphBudgetUsage
 tiersOpened: number;
+deepEvidence: number;
 
 // ActiveGraphBudgetDimension
-"tiersOpened"
+"tiersOpened" | "deepEvidence"
 ```
+
+`deepEvidence` is the consumable dimension governed by `maxTierBudget`;
+`tiersOpened` records the gate path for explanation and later calibration.
 
 ### 3.3 controller-runtime.ts — project the new budget
 
@@ -197,10 +201,14 @@ baseline (benchmark discipline §"Always run the matched no-memory baseline").
 
 | Phase | Scope | Evidence gate |
 | --- | --- | --- |
-| 0 | `maxTierBudget` + ledger fields; gate only in **shadow** (log what would open, change nothing) | shadow traces stable over 100+ queries |
-| 1 | Sequential open active for `nmg_search` (CLI) | eval:scale latency + recall no regression |
-| 2 | Sequential open active in the Pi automatic-recall path | LongMemEval full-set matched run |
-| 3 | `tiersOpened` exposed to the model in recall cues; `nmg_get` becomes the deep unlock | agent eval suite (`eval:agents`) |
+| 0 | **Implemented:** `maxTierBudget`, `tiersOpened`, `deepEvidence`, and ledger fields | unit tests cover the hard envelope |
+| 1 | **Implemented, opt-in:** `nmg_search --tiered-disclosure` opens L0→L3 with deterministic QPP | targeted shallow-stop/deep-open tests pass; scale/recall benchmark pending |
+| 2 | **Implemented:** Pi automatic recall enables sequential opening | adapter integration tests pass; matched LongMemEval run pending |
+| 3 | **Implemented:** search headers expose opened/deep tiers; `nmg_get` remains the exact unlock | agent utility evaluation pending |
+
+The runtime intentionally does not claim SPRT: QPP scores are not calibrated
+likelihoods yet. It follows §2.2's required fallback and uses the deterministic
+QPP decision until calibration evidence exists.
 
 ## 6. Non-goals
 

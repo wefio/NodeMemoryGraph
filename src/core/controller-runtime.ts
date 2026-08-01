@@ -171,6 +171,11 @@ export class ControllerRuntime {
           maximum.maxLocalTier,
           fraction("localTier"),
         ) as ActiveGraphBudget["maxLocalTier"],
+        maxTierBudget: projectFibonacci(
+          minimum.maxTierBudget,
+          maximum.maxTierBudget,
+          fraction("evidence"),
+        ),
         maxLatencyMs: project(minimum.maxLatencyMs, maximum.maxLatencyMs, fraction("latencyMs")),
       },
       trainingSteps: this.#controller.trainingSteps,

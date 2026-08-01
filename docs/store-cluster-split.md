@@ -82,7 +82,7 @@ export class NmgStore
 
 ## 4. 验证
 
-- 当前完整测试套件 465/465 全绿；其中簇拆分的 4 个结构守卫持续通过。
+- 当前完整测试套件 472/472 全绿；其中簇拆分的 4 个结构守卫持续通过。
 - tsc 0 错误（含 `--noUnusedLocals`）、eslint 0 警告、prettier 通过
 - `npm run build`（dist）通过；dist 冒烟 + nmg CLI 端到端（remember/search/status）正常
 
