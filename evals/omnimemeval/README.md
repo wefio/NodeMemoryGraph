@@ -14,6 +14,26 @@ benchmark data
   -> report
 ```
 
+## Reverse-retrieval recall probe
+
+`reverse-retrieval-ablation.py` compares equal-size session-level Top-K outputs
+for plain vector retrieval, Top-1 reverse lookup followed by QPP2, QPP2-derived
+reverse lookup followed by QPP2, and their union. It is an offline mechanism
+probe: evidence labels are used only for scoring, and no answer model or judge
+is called.
+
+The probe embeds whole LongMemEval sessions, whereas the NMG benchmark retrieves
+memory records through its graph and tiers. Its absolute recall is therefore not
+an NMG score; only paired differences between the four arms are meaningful.
+
+```powershell
+.benchmarks\omni-venv\Scripts\python.exe `
+  evals\omnimemeval\reverse-retrieval-ablation.py `
+  --data .benchmarks\official\OmniMemEval\data\longmemeval\longmemeval_s_cleaned.json `
+  --output .benchmarks\results\reverse-retrieval-temporal-full.json `
+  --category temporal-reasoning
+```
+
 ## Integration boundary
 
 NMG should contribute a thin Python client in OmniMemEval's

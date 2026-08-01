@@ -52,6 +52,7 @@
     "benchmark:audit:locomo": "node --experimental-strip-types evals/omnimemeval/audit-locomo-retrieval.ts",
     "benchmark:audit:beam": "python evals/omnimemeval/audit-beam-retrieval.py",
     "benchmark:audit:longmem": "python evals/omnimemeval/audit-longmemeval-retrieval.py",
+    "benchmark:ablate:reverse-retrieval": "python evals/omnimemeval/reverse-retrieval-ablation.py",
     "benchmark:merge:longmem": "node --experimental-strip-types evals/omnimemeval/merge-longmemeval-shards.ts",
     "benchmark:validate": "npm run eval:longmem -- validate 1 && npm run eval:locomo -- validate 1 && npm run eval:personamem -- validate 1 && npm run eval:beam -- validate 1",
     "benchmark:score": "node --experimental-strip-types evals/official/score.ts",
