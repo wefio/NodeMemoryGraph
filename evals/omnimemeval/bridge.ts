@@ -122,9 +122,7 @@ export class OmniMemEvalBridge {
       Math.min(Math.trunc(options.embeddingBatchSize ?? 64), 2_048),
     );
     this.#secondPass = options.secondPass ?? true;
-    // A single result cannot express an update/revocation boundary. Start with
-    // an evidence pair by default, then let QPP grow the window as needed.
-    this.#qppInitialEvidenceTarget = positiveNumber(options.qppInitialEvidenceTarget) ?? 2;
+    this.#qppInitialEvidenceTarget = positiveNumber(options.qppInitialEvidenceTarget);
     this.#qppThreshold = finiteNumber(options.qppThreshold);
     this.#perfLogPath = resolve(options.perfLogPath ?? resolve(this.#root, "search-perf.jsonl"));
     mkdirSync(this.#root, { recursive: true });

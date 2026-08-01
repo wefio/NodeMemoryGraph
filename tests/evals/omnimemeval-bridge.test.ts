@@ -264,7 +264,7 @@ test("OmniMemEval uses progressive QPP by default and permits a fixed-window bas
     })) as { memories: unknown[] };
 
     assert.equal(normalResult.memories.length, 4);
-    assert.equal(adaptiveResult.memories.length, 2);
+    assert.equal(adaptiveResult.memories.length, 1);
     assert.equal(safePrefixResult.memories.length, 2);
   } finally {
     normal.close();
@@ -422,7 +422,9 @@ test("semantic retrieval exposes a tagged revocation boundary", async () => {
         memory.statement.startsWith("[forget]") === false &&
         memory.markers.some((marker) => marker.kind === "forget"),
     );
-    assert.equal(revocations.length, 2);
+    // The dynamic window may retrieve only one revocation. Its structured
+    // marker is projected to [forget] for the LLM without loading a pair.
+    assert.equal(revocations.length, 1);
     assert.equal(result.text.match(/^\[forget\]/gm)?.length, 1);
   } finally {
     bridge.close();
