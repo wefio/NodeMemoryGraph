@@ -239,6 +239,19 @@ ANN quality. Agent-facing L1 retrieval now ranks once and presents two halves;
 the benchmark explicitly disables that presentation fold because it measures
 the full retrieval-recall ceiling rather than an agent's decision to expand.
 
+The same 500 stored contexts were then answered with the configured DeepSeek
+answer model and judged with the official LongMemEval prompt. All 500 answer
+calls succeeded. The official parser accepted 499 judge responses and marked
+413 correct, for **0.8277** accuracy. The remaining response explicitly said
+`"label": "WRONG"` but also included a `reason` field that the upstream strict
+regex rejects; conservatively counting it as wrong gives **0.8260** (413/500).
+This is 19.99 points above the truncated current-code run (0.6278) and 3.14
+points above the 2026-07-28 full-pool run (0.7963). Answer generation reported
+567,656 prompt tokens and 49,473 completion tokens across 500 calls. Semantic
+NLP metrics were disabled for the final checkpoint repair because the upstream
+evaluator constructs BERTScore weights once per item; this does not affect the
+LLM-as-a-Judge accuracy.
+
 The full run used a persistent embedding cache. Cold end-to-end search includes
 per-user GPU embedding construction; the NMG core sidecar reports P50 25.63 ms,
 P95 59.70 ms, and P99 66.26 ms for the graph/search work itself. A separate
