@@ -219,7 +219,7 @@ On the Windows evaluation host, the offline BGE server is run from the existing
 `uv` script environment. Installing the CUDA PyTorch wheel into that environment
 reduced the 30-question search run from roughly 50--75 seconds per question on
 CPU to about four seconds per question during indexing. This is local evaluation
-acceleration only: GPU PyTorch, WSL, and `uv` are not NMG runtime dependencies.
+acceleration only: GPU PyTorch and `uv` are not NMG runtime dependencies.
 
 Reproduce the diagnostic with:
 

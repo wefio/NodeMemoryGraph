@@ -65,8 +65,7 @@ npm run index:embeddings
 
 ## Generic OpenAI-compatible endpoint
 
-The existing local vLLM path and arbitrary compatible services remain
-available:
+Arbitrary OpenAI-compatible embedding services remain available:
 
 ```powershell
 $env:NMG_EMBED_PROVIDER = "openai"
