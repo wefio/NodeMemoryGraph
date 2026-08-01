@@ -6,6 +6,8 @@ import type { NmgMethod } from "./protocol.ts";
 import { NmgProtocolError } from "./protocol.ts";
 import { NmgService } from "./service.ts";
 
+const MAX_REQUEST_BYTES = 1_048_576;
+
 /**
  * The NMG daemon's JSON-RPC-over-HTTP transport (Node built-in http).
  *
@@ -70,8 +72,18 @@ async function handle(
   }
 
   let raw = "";
+  let bytes = 0;
   try {
-    for await (const chunk of req) raw += chunk;
+    for await (const chunk of req) {
+      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      bytes += Buffer.byteLength(text);
+      if (bytes > MAX_REQUEST_BYTES) {
+        req.resume();
+        send(413, jsonRpcError(undefined, -32600, "request too large"));
+        return;
+      }
+      raw += text;
+    }
   } catch {
     send(400, jsonRpcError(undefined, -32700, "parse error"));
     return;

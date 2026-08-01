@@ -47,9 +47,9 @@ export function createStgStore(
  * globally-hot-but-project-cold memory is not copied.
  *
  * Idempotent: a memory already cached (same sourceMemoryId marker) is
- * refreshed (new cachedAt) instead of duplicated.
+ * skipped instead of duplicated.
  *
- * Returns the number of rows written (copied + refreshed).
+ * Returns the number of new rows copied.
  */
 export function copyLtgSubsetToStg(
   ltg: NmgStore,
@@ -75,47 +75,36 @@ export function copyLtgSubsetToStg(
   for (const result of ranked) {
     const memory = result.memory;
     const existing = stg.search(memory.statement, {
-      nodeName: memory.nodeId,
+      nodeName: result.node.canonicalName,
+      scope: options.scope,
       maxTier: 3,
-      limit: 1,
+      limit: 50,
     });
+    const alreadyCached = existing.some((entry) =>
+      entry.memory.markers.some(
+        (candidate) =>
+          candidate.kind === "cached_from_ltg" &&
+          candidate.attributes?.sourceMemoryId === memory.id,
+      ),
+    );
+    if (alreadyCached) continue;
     const marker = cachedFromLtgMarker(memory.id, cachedAt);
-    if (existing.some((entry) => entry.memory.markers.some((m) => m.kind === "cached_from_ltg"))) {
-      // Refresh: re-write with a fresh cachedAt. The marker kind stays.
-      stg.remember({
-        statement: memory.statement,
-        nodeName: result.node.canonicalName,
-        memoryType: memory.memoryType,
-        stateKey: memory.stateKey ?? undefined,
-        evidence: result.evidence?.content,
-        sourceActor: memory.sourceActor,
-        truthStatus: memory.truthStatus,
-        tier: memory.tier,
-        importance: memory.importance,
-        scope: options.scope,
-        residence: "stg",
-        markers: [marker],
-        writeReason: "stg_cache_refresh",
-      });
-      written += 1;
-    } else {
-      stg.remember({
-        statement: memory.statement,
-        nodeName: result.node.canonicalName,
-        memoryType: memory.memoryType,
-        stateKey: memory.stateKey ?? undefined,
-        evidence: result.evidence?.content,
-        sourceActor: memory.sourceActor,
-        truthStatus: memory.truthStatus,
-        tier: memory.tier,
-        importance: memory.importance,
-        scope: options.scope,
-        residence: "stg",
-        markers: [marker],
-        writeReason: "stg_cache_copy",
-      });
-      written += 1;
-    }
+    stg.remember({
+      statement: memory.statement,
+      nodeName: result.node.canonicalName,
+      memoryType: memory.memoryType,
+      stateKey: memory.stateKey ?? undefined,
+      evidence: result.evidence?.content,
+      sourceActor: memory.sourceActor,
+      truthStatus: memory.truthStatus,
+      tier: memory.tier,
+      importance: memory.importance,
+      scope: options.scope,
+      residence: "stg",
+      markers: [marker],
+      writeReason: "stg_cache_copy",
+    });
+    written += 1;
   }
   return written;
 }
@@ -136,19 +125,17 @@ export function searchStgFirst(
   options: SearchOptions = {},
 ): MemoryContext {
   const local = stg?.searchContext(query, options);
-  if (local && local.results.length > 0 && !options.scope) {
+  if (
+    local &&
+    local.results.length > 0 &&
+    local.activeGraph?.qpp?.trigger === false
+  ) {
     return local;
   }
   const shared = ltg.searchContext(query, options);
   if (!local || local.results.length === 0) return shared;
   // Merge: dedupe by cached sourceMemoryId; keep LTG rows (authoritative).
-  const seenLtg = new Set(
-    shared.results.flatMap((result) =>
-      result.memory.markers
-        .filter((marker) => marker.kind === "cached_from_ltg")
-        .map((marker) => String(marker.attributes?.sourceMemoryId ?? "")),
-    ),
-  );
+  const seenLtg = new Set(shared.results.map((result) => result.memory.id));
   const dedupedLocal = local.results.filter(
     (result) =>
       !result.memory.markers.some(
@@ -159,8 +146,14 @@ export function searchStgFirst(
   );
   return {
     results: [...dedupedLocal, ...shared.results],
-    relations: [...(local.relations ?? []), ...shared.relations],
+    relations: [
+      ...new Map(
+        [...(local.relations ?? []), ...shared.relations].map((relation) => [relation.id, relation]),
+      ).values(),
+    ],
     activeGraph: shared.activeGraph,
     retrieval: shared.retrieval,
+    timings: shared.timings,
+    filterUsage: shared.filterUsage,
   };
 }

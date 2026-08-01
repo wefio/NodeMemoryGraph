@@ -100,9 +100,9 @@ test("deleteMemory: deleted memories are filtered from getContext", () => {
       memoryType: "preference",
       sourceActor: "user",
     });
+    assert.equal(store.getContext([saved.memory.id], 0).results.length, 1);
     store.deleteMemory(saved.memory.id);
-    const ctx = store.getContext(saved.memory.evidenceIds, 0);
-    assert.ok(ctx.results.every((result) => result.memory.id !== saved.memory.id));
+    assert.equal(store.getContext([saved.memory.id], 0).results.length, 0);
   });
 });
 

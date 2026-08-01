@@ -1,12 +1,12 @@
 # STG Isolated Store（STG 独立库）
 
-**Status:** design proposal
-**Updated:** 2026-07-31
+**Status:** core prototype implemented; daemon/adapter integration pending
+**Updated:** 2026-08-01
 **Related:** [memory-graphs.md](memory-graphs.md) §1/§3/§5, [external-source-design.md](external-source-design.md), docs/design.md §1
 
 ## 1. Problem
 
-Today STG and LTG share one SQLite database and one table
+The current daemon and adapters still make STG and LTG share one SQLite database and one table
 (`memory_records.residence` is a flag; `expireShortTermMemories` batch-marks
 `stg` rows inactive). This contradicts the three-graph model in
 memory-graphs.md §1 — STG is a *semantic lifecycle* (provisional,
@@ -54,6 +54,9 @@ A cached LTG memory in STG is a **search hint**, not an authority.
 - **Never promoted back**: a `cached_from_ltg` memory must not enter the
   promotion pipeline (it already *is* LTG — promoting it would be a copy
   cycle). Promotion eligibility requires the absence of the marker.
+- Repeated cache fills skip an already cached `sourceMemoryId`. Refresh and
+  invalidation policy remains a later integration concern; the prototype does
+  not create a second cached identity merely to update `cachedAt`.
 - Expiry is usage-driven (symmetrical to copy): a cache entry not used by
   the project for N queries is evicted, independent of provisional-STG
   expiry.
@@ -105,12 +108,13 @@ query
 
 | Phase | Scope | Evidence gate |
 | --- | --- | --- |
-| 1 | STG as separate project-local SQLite file (write path separated; search still reads both via merged view) | existing test suite + STG-orphan tests |
-| 2 | `cached_from_ltg` marker + usage-driven copy routine | copied set matches usage trace; promotion pipeline rejects cached |
-| 3 | STG-first dual-store search with fallback + dedupe | eval:scale latency no regression; LongMemEval recall no regression |
+| 1 | **Core implemented:** separate project-local SQLite store | isolation/deletion tests pass; runtime wiring pending |
+| 2 | **Core implemented:** `cached_from_ltg` marker + usage-ranked copy routine | real copy/idempotency tests pass; runtime usage-trace policy pending |
+| 3 | **Core implemented:** STG-first dual-store search with QPP fallback + authoritative dedupe | correctness tests pass; daemon integration and benchmark gate pending |
 
-Each phase is independently shippable; phase 1 alone delivers project
-isolation and deletability.
+These helpers are available to library callers, but none of the phases is a
+shipped product path until the daemon and adapters create and select the
+per-project STG automatically.
 
 ## 8. Non-goals
 

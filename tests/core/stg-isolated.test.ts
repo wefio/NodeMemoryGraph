@@ -92,28 +92,35 @@ test("Phase2: cached_from_ltg memories never promote (loop guard)", () => {
   });
 });
 
-test("Phase2: usage-driven copy mirrors the usage trace, not global L1/L2", () => {
-  withStore((store) => {
-    // Two LTG memories: one project-hot (used), one globally-hot-but-unused.
-    const hot = store.remember({ statement: "Project hot memory", nodeName: "hot" });
-    const cold = store.remember({ statement: "Project cold memory", nodeName: "cold" });
-
-    // Simulate a project that used only `hot` (its usage trace).
-    store.recordRetrievalTrace({
-      query: "project query",
-      taskId: "project-task",
-      resultMemoryIds: [hot.memory.id],
-      resultNodeIds: [hot.node.id],
-      usefulMemoryIds: [hot.memory.id],
+test("Phase2: usage-driven copy selects the used project memory", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-stg-usage-"));
+  const ltg = new NmgStore(join(directory, "nmg.sqlite"), new HashingVectorEmbedder());
+  const stg = createStgStore(directory, new HashingVectorEmbedder());
+  try {
+    const hot = ltg.remember({
+      statement: "Project atlas hot memory",
+      nodeName: "hot",
+      scope: { project: "atlas" },
     });
+    const cold = ltg.remember({
+      statement: "Project atlas cold memory",
+      nodeName: "cold",
+      scope: { project: "atlas" },
+    });
+    ltg.recordUsage([hot.memory.id]);
 
-    // Copy routine (Phase 2 contract): copies what the project used.
-    // The test asserts the *signal*: a usage-driven copy must select `hot`
-    // and not `cold` — global L1/L2 would have copied both.
-    const copied = [hot.memory.id];
-    assert.deepEqual(copied, [hot.memory.id], "copy selects used memory");
-    assert.ok(!copied.includes(cold.memory.id), "unused memory not copied");
-  });
+    assert.equal(copyLtgSubsetToStg(ltg, stg, { scope: { project: "atlas" }, limit: 1 }), 1);
+    const copied = stg.search("atlas memory", { maxTier: 3, limit: 10 });
+    const sourceIds = copied.flatMap((result) =>
+      result.memory.markers.map((marker) => marker.attributes?.sourceMemoryId),
+    );
+    assert.ok(sourceIds.includes(hot.memory.id), "used memory copied");
+    assert.ok(!sourceIds.includes(cold.memory.id), "unused memory not copied");
+  } finally {
+    ltg.close();
+    stg.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("Phase2: cache markers carry sourceMemoryId for authority resolution", () => {
@@ -200,6 +207,13 @@ test("Phase2: copyLtgSubsetToStg copies usage-ranked project LTG with markers", 
       copied.some((r) => r.memory.markers.some((m) => m.attributes?.sourceMemoryId === used.memory.id)),
       "used memory copied with sourceMemoryId",
     );
+    const countBefore = copied.length;
+    assert.equal(
+      copyLtgSubsetToStg(ltg, stg, { scope: { project: "atlas" }, limit: 10 }),
+      0,
+      "repeated copy is idempotent",
+    );
+    assert.equal(stg.search("atlas", { maxTier: 3, limit: 20 }).length, countBefore);
   } finally {
     ltg.close();
     stg.close();
@@ -233,9 +247,17 @@ test("Phase3: searchStgFirst returns STG hits directly and falls back to LTG", (
       nodeName: "atlas deep",
       scope: { project: "atlas" },
     });
-    const fallback = searchStgFirst(ltg, stg, "uncached deep memory");
+    const fallback = searchStgFirst(ltg, stg, "uncached deep memory", { qppThreshold: 2 });
     assert.ok(fallback.results.length >= 1, "LTG fallback found uncached content");
-    void hot;
+    assert.ok(
+      fallback.results.some((result) => result.memory.statement.includes("uncached deep memory")),
+      "fallback includes the authoritative LTG result",
+    );
+
+    const merged = searchStgFirst(ltg, stg, "Project atlas hot memory", { qppThreshold: 2 });
+    const matching = merged.results.filter((result) => result.memory.statement === hot.memory.statement);
+    assert.equal(matching.length, 1, "cached copy and LTG authority are deduplicated");
+    assert.equal(matching[0]?.memory.id, hot.memory.id, "LTG authority wins the merge");
   } finally {
     ltg.close();
     stg.close();

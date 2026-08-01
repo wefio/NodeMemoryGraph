@@ -114,3 +114,12 @@ test("JSON-RPC over HTTP surfaces protocol validation errors", async () => {
     );
   });
 });
+
+test("JSON-RPC over HTTP rejects oversized request bodies", async () => {
+  await withServer(async (state) => {
+    await assert.rejects(
+      httpCall(state, "hello", { payload: "x".repeat(1_048_576) }),
+      /request too large/,
+    );
+  });
+});
