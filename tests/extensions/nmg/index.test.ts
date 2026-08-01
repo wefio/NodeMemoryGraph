@@ -7,8 +7,10 @@ import test from "node:test";
 import nmgExtension, {
   formatMemoryContext,
   formatSearchHeaders,
+  SessionInjectionWindow,
 } from "../../../.pi/extensions/nmg/index.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
+import type { MemoryContext } from "../../../src/core/types.ts";
 
 function extensionHarness() {
   const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
@@ -62,11 +64,17 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       { sessionManager },
     );
     assert.match(recalled.systemPrompt, /Atlas must use SQLite/);
+    const recalledAgain = await handlers.get("before_agent_start")!(
+      { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
+      { sessionManager },
+    );
+    assert.match(recalledAgain.systemPrompt, /already_in_context=true/);
+    assert.doesNotMatch(recalledAgain.systemPrompt, /Atlas must use SQLite/);
 
     const searched = await tools
       .get("nmg_search")!
       .execute("search", { query: "Atlas database" }, undefined, undefined, { sessionManager });
-    assert.match(searched.content[0].text, /NMG SEARCH HEADERS/);
+    assert.match(searched.content[0].text, /already_in_context=true/);
 
     await tools.get("nmg_remember")!.execute(
       "remember-stg",
@@ -151,3 +159,48 @@ test("formatters visibly mark external provenance and trust", () => {
   assert.match(formatMemoryContext(context), /\[external, unverified\]/);
   assert.match(formatMemoryContext(context), /web:https:\/\/example\.com/);
 });
+
+test("session injection window folds duplicates but permits deeper disclosure", () => {
+  const window = new SessionInjectionWindow();
+  const context = memoryContext("memory-1", "Use SQLite.", "SQLite works offline.");
+  window.beginTurn("session-a");
+
+  assert.match(window.format("session-a", context, "header"), /Use SQLite/);
+  assert.match(window.format("session-a", context, "header"), /already_in_context=true/);
+  assert.match(window.format("session-a", context, "evidence"), /SQLite works offline/);
+  assert.match(window.format("session-a", context, "exact"), /already_in_context=true/);
+  assert.match(window.format("session-b", context, "header"), /Use SQLite/);
+});
+
+test("session injection window reinjects changed and expired content", () => {
+  const window = new SessionInjectionWindow(2);
+  const original = memoryContext("memory-1", "Use SQLite.", "SQLite works offline.");
+  window.beginTurn("session-a");
+  window.format("session-a", original, "evidence");
+
+  const changed = memoryContext("memory-1", "Use SQLite.", "SQLite also supports local tests.");
+  assert.match(window.format("session-a", changed, "evidence"), /local tests/);
+  window.beginTurn("session-a");
+  window.beginTurn("session-a");
+  assert.match(window.format("session-a", changed, "evidence"), /local tests/);
+});
+
+function memoryContext(id: string, statement: string, evidence: string): MemoryContext {
+  return {
+    results: [
+      {
+        memory: {
+          id,
+          statement,
+          memoryType: "constraint",
+          tier: 1,
+          truthStatus: "asserted",
+          scope: {},
+          markers: [],
+        },
+        node: { canonicalName: "Atlas storage" },
+        evidence: { content: evidence },
+      },
+    ],
+  } as MemoryContext;
+}

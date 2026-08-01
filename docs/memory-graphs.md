@@ -236,6 +236,16 @@ copies. When AG is released, temporary nodes and edges disappear; only
 explicitly recorded usage outcomes, stability observations, and accepted
 writes survive.
 
+The Pi adapter may keep a small **session injection window** beside these
+query-scoped projections. It records only the stable memory ID, a content
+hash, the greatest disclosure depth already rendered, and the turn number.
+Within 12 turns, unchanged content already disclosed deeply enough is folded
+to an `already_in_context` reference. A deeper request, changed evidence,
+expiry from the window, or another session renders it again. The window is
+bounded to 128 references, lives only in adapter memory, and is cleared at
+session shutdown. It is context-cache metadata, not a third graph and not an
+authoritative usage outcome.
+
 ### AG lifecycle: memory-resident, trace-persistent
 
 AG itself is **pure memory, released with the session**. What persists is

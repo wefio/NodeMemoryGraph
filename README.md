@@ -137,6 +137,12 @@ JSON-RPC/HTTP, reuses one connection for automatic recall and the three stable
 tools, and stops the daemon at session shutdown only when that adapter
 invocation started it.
 An already-running shared daemon is left untouched.
+To avoid repeatedly injecting the same memory, the adapter keeps a
+session-local in-memory window for the last 12 turns (at most 128 memory
+references). Repeated unchanged content is folded to its stable ID; deeper
+disclosure, changed evidence, window expiry, or a different session permits
+reinjection. This cache is discarded at session shutdown and is never stored
+as LTG.
 
 The Pi extension keeps authoritative LTG in `NMG_DATA_DIR` or
 `~/.nmg/nmg.sqlite` and uses `<project>/.nmg/sessions/<session-hash>/stg.sqlite` for the current

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -32,12 +33,15 @@ function projectDirectory(): string {
 
 export default function nmgExtension(pi: ExtensionAPI): void {
   let connectionPromise: Promise<DaemonConnection> | undefined;
+  const injectionWindow = new SessionInjectionWindow();
   const connection = (): Promise<DaemonConnection> =>
     (connectionPromise ??= connectDaemon(databasePath()));
   const invoke = async (method: "get" | "remember" | "search", params: Record<string, unknown>) =>
     invokeDaemon(await connection(), method, params);
 
   pi.on("before_agent_start", async (event, ctx) => {
+    const sessionId = ctx.sessionManager.getSessionId();
+    injectionWindow.beginTurn(sessionId);
     if (!shouldAutoRecall(event.prompt)) {
       return { systemPrompt: `${event.systemPrompt}\n\n${MEMORY_POLICY}` };
     }
@@ -45,13 +49,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const context = (await invoke("search", {
         query: event.prompt,
         projectDir: projectDirectory(),
-        sessionId: ctx.sessionManager.getSessionId(),
+        sessionId,
         maxTier: configuredAutoRecallTier(),
         limit: configuredAutoRecallLimit(),
         graphHops: 1,
         tieredDisclosure: true,
       })) as MemoryContext;
-      const recalled = formatMemoryContext(context);
+      const recalled = injectionWindow.format(sessionId, context, "exact");
       return {
         systemPrompt: [
           event.systemPrompt,
@@ -68,7 +72,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("session_shutdown", async () => {
+  pi.on("session_shutdown", async (_event, ctx) => {
+    injectionWindow.clear(ctx.sessionManager.getSessionId());
     if (!connectionPromise) return;
     const active = await connectionPromise.catch(() => undefined);
     connectionPromise = undefined;
@@ -167,7 +172,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         projectDir: projectDirectory(),
         sessionId: ctx.sessionManager.getSessionId(),
       })) as MemoryContext;
-      return toolResult(result, formatMemoryContext(result) || "No active memory found.");
+      const text = injectionWindow.format(
+        ctx.sessionManager.getSessionId(),
+        result,
+        "evidence",
+      );
+      return toolResult(result, text || "No active memory found.");
     },
   });
 
@@ -195,9 +205,105 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         projectDir: projectDirectory(),
         sessionId: ctx.sessionManager.getSessionId(),
       })) as MemoryContext;
-      return toolResult(result, formatSearchHeaders(result));
+      return toolResult(
+        result,
+        injectionWindow.format(ctx.sessionManager.getSessionId(), result, "header"),
+      );
     },
   });
+}
+
+type DisclosureLevel = "header" | "exact" | "evidence";
+
+interface InjectionEntry {
+  contentHash: string;
+  disclosure: DisclosureLevel;
+  turn: number;
+}
+
+interface SessionInjectionState {
+  turn: number;
+  entries: Map<string, InjectionEntry>;
+}
+
+/** Small, session-local cache of memory content already placed in Pi's context. */
+export class SessionInjectionWindow {
+  readonly #sessions = new Map<string, SessionInjectionState>();
+  readonly maxTurns: number;
+  readonly maxEntries: number;
+
+  constructor(maxTurns = 12, maxEntries = 128) {
+    this.maxTurns = maxTurns;
+    this.maxEntries = maxEntries;
+  }
+
+  beginTurn(sessionId: string): void {
+    const state = this.#state(sessionId);
+    state.turn += 1;
+    for (const [memoryId, entry] of state.entries) {
+      if (state.turn - entry.turn >= this.maxTurns) state.entries.delete(memoryId);
+    }
+  }
+
+  clear(sessionId: string): void {
+    this.#sessions.delete(sessionId);
+  }
+
+  format(sessionId: string, context: MemoryContext, disclosure: DisclosureLevel): string {
+    if (context.results.length === 0) {
+      return disclosure === "header" ? "No matching NMG memory found." : "";
+    }
+    const state = this.#state(sessionId);
+    const fresh = [];
+    const folded = [];
+    for (const result of context.results) {
+      const contentHash = injectionHash(result);
+      const previous = state.entries.get(result.memory.id);
+      const alreadyAvailable =
+        previous?.contentHash === contentHash &&
+        disclosureRank(previous.disclosure) >= disclosureRank(disclosure);
+      if (alreadyAvailable) folded.push(result);
+      else {
+        fresh.push(result);
+        state.entries.delete(result.memory.id);
+        state.entries.set(result.memory.id, { contentHash, disclosure, turn: state.turn });
+      }
+    }
+    while (state.entries.size > this.maxEntries) {
+      state.entries.delete(state.entries.keys().next().value!);
+    }
+
+    const sections = [];
+    if (fresh.length > 0) {
+      const visible = { ...context, results: fresh } as MemoryContext;
+      sections.push(disclosure === "header" ? formatSearchHeaders(visible) : formatMemoryContext(visible));
+    }
+    if (folded.length > 0) {
+      sections.push(
+        "NMG ALREADY IN CURRENT CONTEXT\n" +
+          folded.map(({ memory }) => `- memory=${memory.id}; already_in_context=true`).join("\n"),
+      );
+    }
+    return sections.join("\n");
+  }
+
+  #state(sessionId: string): SessionInjectionState {
+    let state = this.#sessions.get(sessionId);
+    if (!state) {
+      state = { turn: 0, entries: new Map() };
+      this.#sessions.set(sessionId, state);
+    }
+    return state;
+  }
+}
+
+function disclosureRank(level: DisclosureLevel): number {
+  return { header: 0, exact: 1, evidence: 2 }[level];
+}
+
+function injectionHash(result: MemoryContext["results"][number]): string {
+  const content = `${result.memory.statement}\n${result.evidence.content}`;
+  return createHash("sha256").update(content).digest("base64url");
 }
 
 const MEMORY_POLICY =
