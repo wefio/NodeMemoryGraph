@@ -242,12 +242,13 @@ export class NmgService {
 
   async #search(params: NmgSearchParams): Promise<NmgMethodResult["search"]> {
     const { query, projectDir, sessionId, ...options } = params;
+    const searchOptions: SearchOptions = { ...options, sessionId };
     const search = (store: NmgStore) =>
       searchMemoryContext(
         store,
         this.#configuredEmbeddingClient(),
         query,
-        options as SearchOptions,
+        searchOptions,
       );
     if (!projectDir) return search(this.#getStore());
 
@@ -259,15 +260,33 @@ export class NmgService {
   }
 
   #get(params: NmgGetParams): NmgMethodResult["get"] {
-    const shared = this.#getStore().getContext(params.memoryIds, params.graphHops ?? 0);
-    const local = params.projectDir
-      ? this.#getStgStore(params.projectDir, params.sessionId).getContext(
+    const sharedStore = this.#getStore();
+    const localStore = params.projectDir
+      ? this.#getStgStore(params.projectDir, params.sessionId)
+      : undefined;
+    const shared = sharedStore.getContext(params.memoryIds, params.graphHops ?? 0);
+    const local = localStore
+      ? localStore.getContext(
           params.memoryIds,
           params.graphHops ?? 0,
         )
       : undefined;
     const context = local ? mergeStgLtgContexts(local, shared) : shared;
     const found = new Set(context.results.map((result) => result.memory.id));
+    if (params.activeGraphId) {
+      const activeGraphId = params.activeGraphId;
+      const traceStore = [localStore, sharedStore]
+        .filter((store): store is NmgStore => store !== undefined)
+        .find((store) => store.retrievalTrace(activeGraphId, params.sessionId) !== null);
+      if (!traceStore) {
+        throw new NmgProtocolError("NOT_FOUND", `active graph ${activeGraphId} does not exist`);
+      }
+      traceStore.recordActiveGraphUse(
+        activeGraphId,
+        { usedMemoryIds: [...found] },
+        params.sessionId,
+      );
+    }
     return {
       ...context,
       missingMemoryIds: params.memoryIds.filter((id) => !found.has(id)),
@@ -387,6 +406,7 @@ function parseGetParams(value: unknown): NmgGetParams {
   }
   return {
     memoryIds: ids.map((id) => String(id).trim()),
+    activeGraphId: optionalString(params, "activeGraphId"),
     graphHops: optionalInteger(params, "graphHops", 0, 3),
     projectDir: optionalString(params, "projectDir"),
     sessionId: optionalString(params, "sessionId"),

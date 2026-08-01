@@ -220,6 +220,8 @@ export interface RememberResult {
 }
 
 export interface SearchOptions {
+  /** Harness session that owns the resulting Active Graph and retrieval trace. */
+  sessionId?: string;
   nodeName?: string;
   scope?: MemoryScope;
   /** Restrict retrieval to memories attributed to one actor. */
@@ -455,6 +457,7 @@ export interface ActiveGraphEdge {
 
 export interface ActiveGraph {
   id: string;
+  sessionId: string | null;
   query: string;
   taskId: string;
   nodeIds: string[];
@@ -576,6 +579,8 @@ export interface QppTriggerDecision {
 }
 
 export interface RetrievalTraceInput {
+  /** Harness session allowed to read or attribute use to this trace. */
+  sessionId?: string | null;
   query: string;
   taskId?: string;
   resultMemoryIds: string[];
@@ -628,6 +633,7 @@ export interface PerfAggregate {
 
 export interface RetrievalTrace extends RetrievalTraceInput {
   id: string;
+  sessionId: string | null;
   taskId: string;
   expandedNodeIds: string[];
   relationIds: string[];

@@ -452,6 +452,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       const budgetLedger = activeGraphBudgetLedger(activeBudget, usage);
       const taskId = options.taskId?.trim() || stableTaskId(query);
       const traceInput: RetrievalTraceInput = {
+        sessionId: options.sessionId?.trim() || null,
         query,
         taskId,
         resultMemoryIds: results.map((result) => result.memory.id),
@@ -494,6 +495,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       }
       const activeGraph: ActiveGraph = {
         id: traceId,
+        sessionId: traceInput.sessionId ?? null,
         query,
         taskId,
         nodeIds: [...selectedNodes],

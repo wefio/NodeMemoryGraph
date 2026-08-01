@@ -125,6 +125,8 @@ export interface NmgSearchParams {
 
 export interface NmgGetParams {
   memoryIds: string[];
+  /** Active Graph that recommended these IDs; enables owned actual-use feedback. */
+  activeGraphId?: string;
   graphHops?: number;
   projectDir?: string;
   sessionId?: string;

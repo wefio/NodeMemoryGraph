@@ -156,11 +156,13 @@ export class NmgStoreBase {
       contradictedMemoryIds?: readonly string[];
       rejectedMemoryIds?: readonly string[];
     },
+    sessionId?: string,
   ): void {
     const row = this.db
       .prepare("SELECT * FROM retrieval_traces WHERE id = ?")
       .get(activeGraphId) as Row | undefined;
     if (!row) throw new Error(`active graph ${activeGraphId} does not exist`);
+    this.assertTraceOwner(row, sessionId);
     const resultMemoryIds = new Set(parseStringArray(row.result_memory_ids_json));
     const observedUsedMemoryIds = [...new Set(input.usedMemoryIds)].filter((id) =>
       resultMemoryIds.has(id),
@@ -246,6 +248,14 @@ export class NmgStoreBase {
     }
     this.recordUsage(observedUsedMemoryIds);
     if (usedNodeIds.size > 0) this.trainRouter(String(row.query), [...usedNodeIds]);
+  }
+  protected assertTraceOwner(row: Row, sessionId?: string): void {
+    const owner = row.session_id === null || row.session_id === undefined
+      ? null
+      : String(row.session_id);
+    if (owner !== null && owner !== sessionId?.trim()) {
+      throw new Error(`active graph ${String(row.id)} belongs to another session`);
+    }
   }
   embeddingDocuments(afterMemoryId = "", limit = 256, missingModel?: string): EmbeddingDocument[] {
     const rows = this.db

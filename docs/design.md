@@ -446,9 +446,10 @@ across sessions. A multi-Agent runtime must carry a non-forgeable `runtime_id`
 and `session_id` through search and exact access, and every STG row, temporary
 edge, AG trace, and feedback event must be filtered by that identity. A separate
 `semantic_task_id` deduplicates repeated evidence across Agents; it must not be
-used as the isolation identity. The current store does not yet persist this full
-runtime ownership on semantic rows, so strict shared-daemon multi-Agent STG
-isolation remains an implementation requirement rather than a verified feature.
+used as the isolation identity. The current implementation physically isolates
+STG by Pi `sessionId`, persists that owner on AG traces, and rejects cross-session
+trace reads and feedback. A separate non-forgeable `runtime_id` remains a future
+harness boundary because Pi does not currently provide one to this adapter.
 
 The semantic STG is distinct from the existing index `Inbox/Delta`. STG tracks
 memory lifecycle and provisional meaning. Index Delta tracks records whose

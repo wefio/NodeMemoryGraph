@@ -216,6 +216,7 @@ export function migrate(db: DatabaseSync): void {
 
     CREATE TABLE IF NOT EXISTS retrieval_traces (
       id TEXT PRIMARY KEY,
+      session_id TEXT,
       query TEXT NOT NULL,
       result_memory_ids_json TEXT NOT NULL,
       result_node_ids_json TEXT NOT NULL,
@@ -415,6 +416,7 @@ export function ensureMemoryColumns(db: DatabaseSync): void {
     (db.prepare("PRAGMA table_info(memory_records)").all() as Row[]).map((row) => String(row.name)),
   );
   const additions: Array<[string, string]> = [
+    ["session_id", "TEXT"],
     ["scope_json", "TEXT NOT NULL DEFAULT '{}'"],
     ["valid_from", "TEXT"],
     ["valid_until", "TEXT"],

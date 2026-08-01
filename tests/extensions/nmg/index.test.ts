@@ -10,6 +10,7 @@ import nmgExtension, {
   SessionInjectionWindow,
 } from "../../../.pi/extensions/nmg/index.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
+import { NmgStore } from "../../../src/core/store.ts";
 import type { MemoryContext } from "../../../src/core/types.ts";
 
 function extensionHarness() {
@@ -70,11 +71,26 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     );
     assert.match(recalledAgain.systemPrompt, /already_in_context=true/);
     assert.doesNotMatch(recalledAgain.systemPrompt, /Atlas must use SQLite/);
+    await handlers.get("session_before_compact")!({}, { sessionManager });
+    const recalledAfterCompaction = await handlers.get("before_agent_start")!(
+      { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
+      { sessionManager },
+    );
+    assert.match(recalledAfterCompaction.systemPrompt, /Atlas must use SQLite/);
 
     const searched = await tools
       .get("nmg_search")!
       .execute("search", { query: "Atlas database" }, undefined, undefined, { sessionManager });
     assert.match(searched.content[0].text, /already_in_context=true/);
+    const activeGraphId = searched.details.activeGraph.id;
+    assert.match(searched.content[0].text, new RegExp(activeGraphId));
+    await tools.get("nmg_get")!.execute(
+      "get",
+      { memoryIds: [remember.details.memory.id], activeGraphId },
+      undefined,
+      undefined,
+      { sessionManager },
+    );
 
     await tools.get("nmg_remember")!.execute(
       "remember-stg",
@@ -102,6 +118,14 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
 
     await handlers.get("session_shutdown")!({}, { sessionManager });
     assert.equal(isProcessAlive(started!.pid), false);
+    const store = new NmgStore(join(directory, "nmg.sqlite"));
+    try {
+      assert.deepEqual(store.retrievalTrace(activeGraphId, "http-test-session")?.usefulMemoryIds, [
+        remember.details.memory.id,
+      ]);
+    } finally {
+      store.close();
+    }
   } finally {
     if (previous === undefined) delete process.env.NMG_DATA_DIR;
     else process.env.NMG_DATA_DIR = previous;

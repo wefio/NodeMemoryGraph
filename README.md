@@ -154,9 +154,11 @@ By default, the model receives three tools and a typed write/use policy:
 - `nmg_remember`: save a typed long-term memory with scope, truth status,
   event time, stable state identity, evidence role, and provenance.
 - `nmg_search`: retrieve compact headers and stable IDs from matching and
-  graph-adjacent nodes, with tier, scope, conflict, and historical-state controls.
+  graph-adjacent nodes, with tier, scope, conflict, historical-state controls,
+  and the session-owned `activeGraphId` for follow-up attribution.
 - `nmg_get`: expand selected IDs into exact memory statements and bounded source
-  evidence.
+  evidence. Passing the `activeGraphId` returned by `nmg_search` records those
+  selected IDs as actually used; another session cannot read or update that AG.
 
 Graph maintenance, QPP, indexing, and experimental reasoning components remain
 core/CLI concerns rather than Pi tools. The adapter never opens SQLite or

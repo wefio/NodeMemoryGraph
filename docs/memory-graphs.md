@@ -246,6 +246,16 @@ bounded to 128 references, lives only in adapter memory, and is cleared at
 session shutdown. It is context-cache metadata, not a third graph and not an
 authoritative usage outcome.
 
+Every persisted AG trace carries its owning harness `sessionId`. Trace reads,
+expansion attribution, and actual-use feedback must present the same identity;
+cross-session access is rejected before any learning or stability signal is
+updated. Pi exposes the owned `activeGraphId` in `nmg_search` headers and sends
+it back with an explicit `nmg_get`, making exact evidence expansion the
+conservative actual-use signal. Automatic recall remains selection/exposure,
+not proof that the model used a memory. Pi's `session_before_compact` event
+clears the injection window so evidence removed by compaction can be rendered
+again.
+
 ### AG lifecycle: memory-resident, trace-persistent
 
 AG itself is **pure memory, released with the session**. What persists is

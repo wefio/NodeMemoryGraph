@@ -6,6 +6,7 @@ import test from "node:test";
 
 import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
+import { NmgStore } from "../../src/core/store.ts";
 import { stgStorePath } from "../../src/core/stg.ts";
 
 test("status and hello do not create or open the database", async () => {
@@ -129,6 +130,46 @@ test("resident service isolates STG by session inside one project", async () => 
       stgStorePath(projectDir, "session-alpha"),
       stgStorePath(projectDir, "session-beta"),
     );
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("resident service attributes nmg_get use only to the owning session", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-owned-ag-"));
+  const service = new NmgService({ databasePath: join(directory, "ltg.sqlite"), environment: {} });
+  try {
+    const remembered = await service.invoke("remember", {
+      statement: "Atlas uses a session-owned memory trace.",
+      nodeName: "Atlas trace",
+    });
+    const searched = await service.invoke("search", {
+      query: "Atlas session owned trace",
+      sessionId: "session-alpha",
+    });
+    const activeGraphId = searched.activeGraph!.id;
+    await assert.rejects(
+      service.invoke("get", {
+        memoryIds: [remembered.memory.id],
+        activeGraphId,
+        sessionId: "session-beta",
+      }),
+      /belongs to another session/,
+    );
+    await service.invoke("get", {
+      memoryIds: [remembered.memory.id],
+      activeGraphId,
+      sessionId: "session-alpha",
+    });
+    const reader = new NmgStore(join(directory, "ltg.sqlite"));
+    try {
+      assert.deepEqual(reader.retrievalTrace(activeGraphId, "session-alpha")?.usefulMemoryIds, [
+        remembered.memory.id,
+      ]);
+    } finally {
+      reader.close();
+    }
   } finally {
     service.close();
     rmSync(directory, { recursive: true, force: true });

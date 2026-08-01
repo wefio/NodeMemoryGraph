@@ -80,6 +80,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     if (active) await shutdownOwnedDaemon(active);
   });
 
+  pi.on("session_before_compact", async (_event, ctx) => {
+    injectionWindow.clear(ctx.sessionManager.getSessionId());
+  });
+
   pi.registerTool({
     name: "nmg_remember",
     label: "Remember with NMG",
@@ -161,9 +165,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "nmg_get",
     label: "Get NMG evidence",
-    description: "Load exact memory and evidence for IDs returned by nmg_search.",
+    description:
+      "Load exact memory and evidence for IDs returned by nmg_search; pass its activeGraphId for use attribution.",
     parameters: Type.Object({
       memoryIds: Type.Array(Type.String(), { minItems: 1, maxItems: 50 }),
+      activeGraphId: Type.Optional(
+        Type.String({ description: "activeGraphId returned by nmg_search" }),
+      ),
       graphHops: Type.Optional(Type.Number({ minimum: 0, maximum: 3 })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -284,6 +292,10 @@ export class SessionInjectionWindow {
           folded.map(({ memory }) => `- memory=${memory.id}; already_in_context=true`).join("\n"),
       );
     }
+    if (disclosure === "header" && fresh.length === 0) {
+      const activeGraph = formatActiveGraph(context);
+      if (activeGraph) sections.push(activeGraph);
+    }
     return sections.join("\n");
   }
 
@@ -344,11 +356,15 @@ export function formatSearchHeaders(context: MemoryContext): string {
         `memory=${memory.id}; node=${node.canonicalName}; type=${memory.memoryType}; ` +
         `tier=L${memory.tier}; preview=${excerpt(memory.statement, 160)}`,
     ),
-    context.activeGraph
-      ? `AG tiersOpened=${context.activeGraph.usage.tiersOpened}; deepestTier=L${context.activeGraph.usage.deepestTier}; deepEvidence=${context.activeGraph.usage.deepEvidence}`
-      : "",
-    "Use nmg_get with selected memory IDs to load exact evidence.",
+    formatActiveGraph(context),
+    "Use nmg_get with selected memory IDs and this activeGraphId to load exact evidence.",
   ].filter(Boolean).join("\n");
+}
+
+function formatActiveGraph(context: MemoryContext): string {
+  return context.activeGraph
+    ? `AG activeGraphId=${context.activeGraph.id}; tiersOpened=${context.activeGraph.usage.tiersOpened}; deepestTier=L${context.activeGraph.usage.deepestTier}; deepEvidence=${context.activeGraph.usage.deepEvidence}`
+    : "";
 }
 
 export function formatMemoryContext(context: MemoryContext): string {

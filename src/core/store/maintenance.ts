@@ -109,7 +109,9 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         contradictedMemoryIds?: readonly string[];
         rejectedMemoryIds?: readonly string[];
       },
+      sessionId?: string,
     ) => void;
+    declare protected assertTraceOwner: (row: Row, sessionId?: string) => void;
 
     /**
      * Soft-delete a memory and all its dependent artifacts.
@@ -673,17 +675,18 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         this.db
           .prepare(
             `INSERT INTO retrieval_traces
-            (id, query, result_memory_ids_json, result_node_ids_json,
+            (id, session_id, query, result_memory_ids_json, result_node_ids_json,
              expanded_node_ids_json, useful_memory_ids_json,
              contradicted_memory_ids_json, rejected_memory_ids_json,
              relation_ids_json, task_id, active_graph_budget_json,
              active_graph_usage_json, selections_json, expansions_json,
              budget_ledger_json, qpp_json, timings_json, filter_usage_json,
              ambiguity, fallback_used, conflict_observed, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             id,
+            input.sessionId?.trim() || null,
             input.query,
             JSON.stringify([...new Set(input.resultMemoryIds)]),
             JSON.stringify(nodeIds),
@@ -840,12 +843,14 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       return Number(deleted.changes);
     }
 
-    retrievalTrace(id: string): RetrievalTrace | null {
+    retrievalTrace(id: string, sessionId?: string): RetrievalTrace | null {
       const row = this.db.prepare("SELECT * FROM retrieval_traces WHERE id = ?").get(id) as
         Row | undefined;
       if (!row) return null;
+      this.assertTraceOwner(row, sessionId);
       return {
         id: String(row.id),
+        sessionId: row.session_id === null ? null : String(row.session_id),
         query: String(row.query),
         taskId: String(row.task_id),
         resultMemoryIds: parseStringArray(row.result_memory_ids_json),
@@ -888,9 +893,10 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         contradictedMemoryIds?: readonly string[];
         rejectedMemoryIds?: readonly string[];
       },
+      sessionId?: string,
     ): void {
       const startedAt = nowMs();
-      this.recordActiveGraphUseInner(activeGraphId, input);
+      this.recordActiveGraphUseInner(activeGraphId, input, sessionId);
       // Record the use-attribution span on the same trace row (best-effort —
       // the span is diagnostic, never a reason to fail the call).
       try {

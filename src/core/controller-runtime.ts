@@ -256,6 +256,7 @@ function traceFromActiveGraph(context: MemoryContext): RetrievalTrace {
   const graph = context.activeGraph!;
   return {
     id: graph.id,
+    sessionId: graph.sessionId,
     query: graph.query,
     taskId: graph.taskId,
     resultMemoryIds: graph.memoryIds,

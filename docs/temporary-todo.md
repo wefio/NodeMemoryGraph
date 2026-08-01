@@ -8,14 +8,19 @@ An unchecked item is not automatically a commitment.
 
 ## P0 — close correctness and isolation gaps
 
-- [ ] Bind every Active Graph and retrieval trace to `sessionId` and, where the
-  harness provides it, a non-forgeable `runtimeId`.
-- [ ] Validate ownership when an Active Graph is expanded, read, or receives
+- [x] Bind every Active Graph and retrieval trace to the Pi `sessionId`.
+- [ ] Add a non-forgeable `runtimeId` only when a harness exposes one; the
+  current local daemon authentication and Pi session identity are the boundary.
+- [x] Validate ownership when an Active Graph is expanded, read, or receives
   usefulness/outcome feedback.
-- [ ] Add cross-session rejection tests for AG lookup, expansion, and feedback.
-- [ ] Decide how the Pi session injection window learns that context was
+- [x] Add cross-session rejection tests for AG lookup, expansion, and feedback.
+- [x] Decide how the Pi session injection window learns that context was
   compacted. Prefer a stable Pi lifecycle event; otherwise document the
   conservative 12-turn expiry as the fallback.
+
+Implemented through Pi's stable `session_before_compact` event. The daemon
+also connects `nmg_search.activeGraphId` to explicit `nmg_get` use attribution;
+automatic recall alone is not labelled useful.
 
 ## P1 — replace real placeholders
 

@@ -367,6 +367,44 @@ test("recordActiveGraphUse: records usage on a trace", () => {
   });
 });
 
+test("retrieval traces and Active Graph feedback enforce session ownership", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "session-owned active graph memory",
+      nodeName: "owned ag node",
+      memoryType: "fact",
+      sourceActor: "user",
+    });
+    const context = store.searchContext("session owned active graph", {
+      sessionId: "session-alpha",
+    });
+    const activeGraphId = context.activeGraph!.id;
+    assert.equal(context.activeGraph!.sessionId, "session-alpha");
+    assert.equal(store.retrievalTrace(activeGraphId, "session-alpha")?.sessionId, "session-alpha");
+    assert.throws(
+      () => store.retrievalTrace(activeGraphId, "session-beta"),
+      /belongs to another session/,
+    );
+    assert.throws(
+      () =>
+        store.recordActiveGraphUse(
+          activeGraphId,
+          { usedMemoryIds: [saved.memory.id] },
+          "session-beta",
+        ),
+      /belongs to another session/,
+    );
+    store.recordActiveGraphUse(
+      activeGraphId,
+      { usedMemoryIds: [saved.memory.id] },
+      "session-alpha",
+    );
+    assert.deepEqual(store.retrievalTrace(activeGraphId, "session-alpha")?.usefulMemoryIds, [
+      saved.memory.id,
+    ]);
+  });
+});
+
 test("recordActiveGraphUse: survives non-existent active graph id gracefully", () => {
   withStore((store) => {
     const saved = store.remember({
