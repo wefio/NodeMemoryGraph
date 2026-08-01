@@ -72,18 +72,35 @@ def qpp2_rank(query: np.ndarray, documents: np.ndarray, pool: list[int]) -> list
     return [pool[index] for index in order]
 
 
-def unique_prefix(groups: list[list[int]], limit: int | None = None) -> list[int]:
-    result: list[int] = []
-    seen: set[int] = set()
-    for group in groups:
-        for value in group:
-            if value in seen:
-                continue
-            seen.add(value)
-            result.append(value)
-            if limit is not None and len(result) >= limit:
-                return result
-    return result
+def reciprocal_rank_fusion(
+    routes: list[tuple[list[int], float]], rank_constant: int = 60
+) -> list[int]:
+    scores: dict[int, float] = {}
+    best: dict[int, int] = {}
+    for route, weight in routes:
+        for rank, value in enumerate(dict.fromkeys(route), start=1):
+            scores[value] = scores.get(value, 0.0) + weight / (rank_constant + rank)
+            best[value] = min(best.get(value, rank), rank)
+    return sorted(scores, key=lambda value: (-scores[value], best[value], value))
+
+
+def qpp2_fold(
+    query: np.ndarray,
+    documents: np.ndarray,
+    fused: list[int],
+    limit: int,
+) -> list[int]:
+    """Keep fusion order as a prior while QPP2 removes the noisy tail."""
+    qpp_order = qpp2_rank(query, documents, fused)
+    qpp_rank = {value: rank for rank, value in enumerate(qpp_order, start=1)}
+    fused_rank = {value: rank for rank, value in enumerate(fused, start=1)}
+    return sorted(
+        fused,
+        key=lambda value: (
+            0.7 * qpp_rank[value] + 0.3 * fused_rank[value],
+            fused_rank[value],
+        ),
+    )[:limit]
 
 
 def reverse_top1(documents: np.ndarray, baseline: list[int], breadth: int) -> list[int]:
@@ -117,23 +134,23 @@ def select_variants(
 
     started = time.perf_counter()
     top1_reverse = reverse_top1(documents, baseline, reverse_breadth)
-    option1_pool = unique_prefix([baseline, top1_reverse])
-    option1 = qpp2_rank(query, documents, option1_pool)[:limit]
+    option1_pool = reciprocal_rank_fusion([(baseline, 1.5), (top1_reverse, 1.0)])
+    option1 = qpp2_fold(query, documents, option1_pool, limit)
     timings["top1_reverse_then_qpp2"] = (time.perf_counter() - started) * 1000
 
     started = time.perf_counter()
     qpp_reverse = reverse_qpp2(query, documents, baseline, reverse_breadth)
-    option2_pool = unique_prefix([baseline, qpp_reverse])
-    option2 = qpp2_rank(query, documents, option2_pool)[:limit]
+    option2_pool = reciprocal_rank_fusion([(baseline, 1.5), (qpp_reverse, 1.0)])
+    option2 = qpp2_fold(query, documents, option2_pool, limit)
     timings["qpp2_reverse_then_qpp2"] = (time.perf_counter() - started) * 1000
 
     started = time.perf_counter()
-    combined_pool = unique_prefix([
-        baseline,
-        reverse_top1(documents, baseline, reverse_breadth),
-        reverse_qpp2(query, documents, baseline, reverse_breadth),
+    combined_pool = reciprocal_rank_fusion([
+        (baseline, 1.5),
+        (reverse_top1(documents, baseline, reverse_breadth), 1.0),
+        (reverse_qpp2(query, documents, baseline, reverse_breadth), 1.0),
     ])
-    combined = qpp2_rank(query, documents, combined_pool)[:limit]
+    combined = qpp2_fold(query, documents, combined_pool, limit)
     timings["combined_then_qpp2"] = (time.perf_counter() - started) * 1000
     return ({
         "baseline": baseline,
@@ -198,6 +215,8 @@ def main() -> None:
             "unit": "LongMemEval session",
             "labels_used_for_ranking": False,
             "qpp2": "0.7 query cosine + 0.3 mean top-3 intra-list cosine",
+            "fusion": "weighted RRF: original=1.5, reverse routes=1.0, k=60",
+            "fold": "rank blend: 0.7 QPP2 rank + 0.3 fused rank",
             "reverse_anchor_count": 3,
             "limit": args.limit,
             "reverse_breadth": args.reverse_breadth,
