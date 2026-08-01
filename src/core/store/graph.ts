@@ -42,6 +42,7 @@ import {
 } from "./rows.ts";
 import { lexicalNodeScore, normalize, type StoreRow as Row } from "./search-ranking.ts";
 import { parseVector } from "./vector-codec.ts";
+import { relationActivationDefaults } from "../edge-activation.ts";
 
 export function withGraph<TBase extends Constructor>(Base: TBase) {
   return class extends Base {
@@ -107,6 +108,10 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
       type: NodeRelationType;
       evidenceIds?: string[];
       stability?: number;
+      strength?: number;
+      direction?: NodeRelation["direction"];
+      fanBudget?: boolean;
+      activationRule?: NodeRelation["activationRule"];
       consolidationSource?: NodeRelation["consolidationSource"];
     }): NodeRelation {
       const existing = this.db
@@ -142,6 +147,7 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
       }
 
       const now = new Date().toISOString();
+      const activationDefaults = relationActivationDefaults(input.type);
       const relation: NodeRelation = {
         id: randomUUID(),
         sourceNodeId: input.sourceNodeId,
@@ -151,6 +157,10 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         residence: "ltg",
         status: "consolidated",
         stability: clamp(input.stability ?? 1, 0, 1),
+        strength: clamp(input.strength ?? 0.5, 0, 1),
+        direction: input.direction ?? activationDefaults.direction,
+        fanBudget: input.fanBudget ?? activationDefaults.fanBudget,
+        activationRule: input.activationRule ?? activationDefaults.activationRule,
         consolidationSource: input.consolidationSource ?? "explicit",
         consolidatedAt: now,
         createdAt: now,
@@ -159,9 +169,9 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         .prepare(
           `INSERT INTO node_relations
           (id, source_node_id, target_node_id, relation_type,
-           evidence_ids_json, residence, status, stability,
-           consolidation_source, consolidated_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           evidence_ids_json, residence, status, stability, strength, direction,
+           fan_budget, activation_rule, consolidation_source, consolidated_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           relation.id,
@@ -172,6 +182,10 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
           relation.residence,
           relation.status,
           relation.stability,
+          relation.strength,
+          relation.direction,
+          relation.fanBudget ? 1 : 0,
+          relation.activationRule,
           relation.consolidationSource,
           relation.consolidatedAt,
           relation.createdAt,

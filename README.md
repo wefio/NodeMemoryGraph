@@ -168,8 +168,13 @@ Loading the package manifest, project-local extension, and an explicit
 
 ## Agent-independent CLI
 
-The package includes a TypeScript `nmg` executable. During repository
-development, use the equivalent npm command:
+The package includes a TypeScript `nmg` executable.
+The CLI is the agent-neutral fallback and administrative surface, especially
+for harnesses with no plugin or an incomplete adapter. Internal retrieval
+mechanisms do not each receive a dedicated command; they compose behind the
+stable `search/get/remember` surface unless explicit administration is needed.
+
+During repository development, use the equivalent npm command:
 
 ```powershell
 npm run cli -- status

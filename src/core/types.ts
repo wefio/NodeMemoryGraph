@@ -92,6 +92,11 @@ export interface NodeRelation {
   residence: "ltg";
   status: "consolidated" | "demoted";
   stability: number;
+  /** Slowly learned retrieval weight. Query-local activation is never stored here. */
+  strength: number;
+  direction: "both" | "source->target" | "target->source";
+  fanBudget: boolean;
+  activationRule: "conductive" | "regulatory";
   consolidationSource: "explicit" | "stability";
   consolidatedAt: string;
   createdAt: string;
@@ -443,6 +448,9 @@ export interface ActiveGraphEdge {
   type: NodeRelationType | "query_association";
   persistence: "persistent" | "temporary";
   stability: number;
+  /** Query-local derived value captured only for trace/debug output. */
+  activation?: number;
+  activationChannel?: "conductive" | "regulatory";
 }
 
 export interface ActiveGraph {

@@ -160,6 +160,12 @@ OS-assigned `127.0.0.1` port, using Node's built-in `http` and `fetch` and
 requiring no third-party transport dependencies. SQLite opens lazily on first
 durable work.
 
+The CLI is a fallback and administrative surface for harnesses without a full
+adapter; it is not a requirement that every internal mechanism gain a command.
+Query-internal policies such as edge activation reuse `search` and its trace
+output. A dedicated command is justified only when a person or incomplete
+adapter needs to invoke, inspect, or recover that operation explicitly.
+
 Resident instances use a PID lease scoped to the selected SQLite database.
 The lease records the loopback endpoint and a random bearer token. Starting a
 second daemon for the same database is rejected, stale leases are recovered,

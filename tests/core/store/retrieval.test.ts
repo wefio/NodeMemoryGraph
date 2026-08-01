@@ -176,6 +176,55 @@ test("tiered disclosure prevents graph expansion from bypassing unopened tiers",
   });
 });
 
+test("Active Graph exposes derived edge activation without storing it on the relation", () => {
+  withStore((store) => {
+    const source = store.remember({
+      statement: "Atlas uses SQLite",
+      nodeName: "Atlas",
+      tier: 0,
+    });
+    const target = store.remember({
+      statement: "SQLite persistence is local",
+      nodeName: "SQLite persistence",
+      tier: 0,
+    });
+    const relation = store.linkNodes({
+      sourceNodeId: source.node.id,
+      targetNodeId: target.node.id,
+      type: "depends_on",
+      strength: 0.9,
+    });
+
+    const context = store.searchContext("Atlas uses SQLite", { graphHops: 1, limit: 8 });
+    const projected = context.activeGraph?.edges.find((edge) => edge.id === relation.id);
+    assert.ok((projected?.activation ?? 0) > 0);
+    assert.equal(projected?.activationChannel, "conductive");
+    assert.equal(store.getRelations([source.node.id])[0]?.strength, 0.9);
+  });
+});
+
+test("explicit Active Graph use updates edge strength through prediction error", () => {
+  withStore((store) => {
+    const source = store.remember({ statement: "Orchid alpha", nodeName: "Orchid alpha" });
+    const target = store.remember({ statement: "Orchid beta", nodeName: "Orchid beta" });
+    const relation = store.linkNodes({
+      sourceNodeId: source.node.id,
+      targetNodeId: target.node.id,
+      type: "related_to",
+      strength: 0.2,
+    });
+    const context = store.searchContext("Orchid alpha beta", { graphHops: 1, limit: 8 });
+    assert.ok(context.results.some((result) => result.memory.id === source.memory.id));
+    assert.ok(context.results.some((result) => result.memory.id === target.memory.id));
+
+    store.recordActiveGraphUse(context.activeGraph!.id, {
+      usedMemoryIds: [source.memory.id, target.memory.id],
+    });
+
+    assert.ok(store.getRelations([source.node.id])[0]!.strength > relation.strength);
+  });
+});
+
 test("tiered disclosure opens deeper tiers on a shallow miss", () => {
   withStore((store) => {
     const deep = store.remember({

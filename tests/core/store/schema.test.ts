@@ -40,6 +40,14 @@ test("migrate creates the core graph tables", () => {
     ]) {
       assert.ok(tables.has(expected), `expected table ${expected}`);
     }
+    const relationColumns = new Set(
+      (db.prepare("PRAGMA table_info(node_relations)").all() as Array<{ name: string }>).map(
+        (row) => row.name,
+      ),
+    );
+    for (const expected of ["strength", "direction", "fan_budget", "activation_rule"]) {
+      assert.ok(relationColumns.has(expected), `expected node_relations.${expected}`);
+    }
   });
 });
 

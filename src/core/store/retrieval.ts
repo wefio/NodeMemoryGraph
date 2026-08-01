@@ -24,6 +24,7 @@ import {
   stableTaskId,
 } from "./active-graph.ts";
 import { qppCandidates, shouldTriggerSecondPass } from "../qpp.ts";
+import { propagateEdgeActivation } from "../edge-activation.ts";
 import {
   contextUsefulness,
   hybridScore,
@@ -196,11 +197,26 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             graphHops,
           );
       const directNodeIds = new Set(direct.map((result) => result.node.id));
+      const seedActivations = new Map<string, number>();
+      for (const result of direct) {
+        const activation = hybridScore(
+          result.lexicalScore,
+          result.vectorScore,
+          result.routeScore,
+        );
+        seedActivations.set(
+          result.node.id,
+          Math.max(seedActivations.get(result.node.id) ?? 0, activation),
+        );
+      }
+      const edgeProjection = propagateEdgeActivation(seedActivations, relations, {
+        maxHops: graphHops,
+      });
       const relatedNodeIds = [
         ...new Set(relations.flatMap((relation) => [relation.sourceNodeId, relation.targetNodeId])),
       ].filter((id) => !directNodeIds.has(id));
       const openedMaxTier = openedTiers.at(-1) ?? 0;
-      const related = perf
+      const relatedRaw = perf
         ? perf.measure(SECTION.relatedExpansion, () =>
             relatedNodeIds.flatMap((nodeId) =>
               this.resultsForNode(
@@ -221,6 +237,15 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
               options.sourceActor,
             ),
           );
+      const related = relatedRaw.map((result) => {
+        const edgeScore = edgeProjection.nodeActivations.get(result.node.id) ?? 0;
+        if (edgeScore <= result.routeScore) return result;
+        return {
+          ...result,
+          routeScore: edgeScore,
+          combinedScore: hybridScore(result.lexicalScore, result.vectorScore, edgeScore),
+        };
+      });
       const candidates = [...direct, ...related]
         .filter(
           (result, index, all) =>
@@ -346,6 +371,9 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         perf?.stop(SECTION.secondPass);
       }
       const { results, selectedNodes, estimatedTokens, exhausted } = selection;
+      const projectedEdges = new Map(
+        edgeProjection.edges.map((edge) => [edge.relationId, edge] as const),
+      );
       const persistentEdges = perf
         ? perf.measure(SECTION.edges, () =>
             relations
@@ -362,6 +390,9 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                 type: relation.type,
                 persistence: "persistent" as const,
                 stability: relation.stability,
+                activation: projectedEdges.get(relation.id)?.activation ?? 0,
+                activationChannel:
+                  projectedEdges.get(relation.id)?.channel ?? relation.activationRule,
               })),
           )
         : relations
@@ -378,6 +409,9 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
               type: relation.type,
               persistence: "persistent" as const,
               stability: relation.stability,
+              activation: projectedEdges.get(relation.id)?.activation ?? 0,
+              activationChannel:
+                projectedEdges.get(relation.id)?.channel ?? relation.activationRule,
             }));
       const directSelectedNodeIds = [
         ...new Set(

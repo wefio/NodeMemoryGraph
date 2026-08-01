@@ -209,6 +209,10 @@ test("mapRelation: defaults residence/status/stability/source and consolidatedAt
   assert.equal(relation.residence, "ltg");
   assert.equal(relation.status, "consolidated");
   assert.equal(relation.stability, 1);
+  assert.equal(relation.strength, 0.5);
+  assert.equal(relation.direction, "both");
+  assert.equal(relation.fanBudget, true);
+  assert.equal(relation.activationRule, "conductive");
   assert.equal(relation.consolidationSource, "explicit");
   assert.equal(relation.consolidatedAt, "2026-01-01T00:00:00.000Z");
   assert.deepEqual(relation.evidenceIds, []);

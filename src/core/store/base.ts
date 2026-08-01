@@ -38,6 +38,7 @@ import { migrate } from "./schema.ts";
 import { parseNumberArray, parseStringArray } from "./row-parse.ts";
 import { encodeVector, storedVector } from "./vector-codec.ts";
 import { stableTaskId } from "./active-graph.ts";
+import { updateRelationStrength } from "../edge-activation.ts";
 import {
   ftsExpression,
   hybridScore,
@@ -762,6 +763,14 @@ export class NmgStoreBase {
     updatedAt: string,
   ): void {
     const find = this.db.prepare("SELECT * FROM node_relations WHERE id = ?");
+    const rows = [...new Set(relationIds)]
+      .map((relationId) => find.get(relationId) as Row | undefined)
+      .filter((row): row is Row => Boolean(row));
+    const totalPrediction = Math.min(
+      1,
+      rows.reduce((total, row) => total + Number(row.strength ?? 0.5), 0),
+    );
+    const updateStrength = this.db.prepare("UPDATE node_relations SET strength = ? WHERE id = ?");
     const upsert = this.db.prepare(
       `INSERT INTO edge_activation_signals
         (relation_id, selected_count, used_count, contradicted_count,
@@ -773,18 +782,32 @@ export class NmgStoreBase {
          rejected_count = rejected_count + excluded.rejected_count,
          updated_at = excluded.updated_at`,
     );
-    for (const relationId of new Set(relationIds)) {
-      const row = find.get(relationId) as Row | undefined;
-      if (!row) continue;
+    for (const row of rows) {
       const relation = mapRelation(row);
+      const relationId = relation.id;
       const endpoints = [relation.sourceNodeId, relation.targetNodeId];
+      const usedTogether = endpoints.every((nodeId) => used.has(nodeId));
+      const negative = endpoints.some(
+        (nodeId) => contradicted.has(nodeId) || rejected.has(nodeId),
+      );
       upsert.run(
         relationId,
-        endpoints.every((nodeId) => used.has(nodeId)) ? 1 : 0,
+        usedTogether ? 1 : 0,
         endpoints.some((nodeId) => contradicted.has(nodeId)) ? 1 : 0,
         endpoints.some((nodeId) => rejected.has(nodeId)) ? 1 : 0,
         updatedAt,
       );
+      if (usedTogether || negative) {
+        updateStrength.run(
+          updateRelationStrength(
+            relation.strength,
+            usedTogether && !negative ? 1 : 0,
+            totalPrediction,
+            1,
+          ),
+          relationId,
+        );
+      }
     }
   }
   refreshPairUsefulness(leftNodeId: string, rightNodeId: string): void {

@@ -40,6 +40,10 @@ test("linkNodes creates new relation and is idempotent on re-link", () => {
     assert.equal(rel.targetNodeId, b.node.id);
     assert.equal(rel.type, "depends_on");
     assert.equal(rel.status, "consolidated");
+    assert.equal(rel.strength, 0.5);
+    assert.equal(rel.direction, "source->target");
+    assert.equal(rel.fanBudget, true);
+    assert.equal(rel.activationRule, "conductive");
     assert.ok(rel.evidenceIds.length >= 0);
 
     // Idempotent: same call returns the same relation id.

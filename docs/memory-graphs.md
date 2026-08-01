@@ -408,15 +408,20 @@ Implemented (design.md §13):
 - automatic turn-end maintenance in the Pi harness: STG expiry, due-node
   batch rebalance;
 - LTG-only L4 Dormant/Unindexed and L5 Quarantine lifecycle states.
+- deterministic tiered sequential disclosure in CLI/Pi, with a shared
+  deep-evidence budget and AG ledger (calibrated SPRT evaluation remains open);
+- query-local typed edge activation with bounded propagation, fan dilution,
+  regulatory-channel separation, trace visibility, and feedback-driven
+  prediction-error strength updates.
 
 Not yet implemented:
 
 - strict shared-daemon multi-Agent STG isolation (§3);
 - learned AG budget projection (Lab: `controller-runtime.ts` projects
   budget dimensions, QPP shadow traces exist);
-- deterministic tiered sequential disclosure in CLI/Pi, including its
-  deep-evidence budget and AG ledger (calibrated SPRT evaluation remains open);
-- edge activation as a derived function (designed, see
+- calibrated SPRT evaluation for tier opening;
+- learned temporal edge direction, contrastive unlearning, and automatic
+  compression merge (see
   [edge-activation-design.md](edge-activation-design.md)).
 
 ## 9. Open questions

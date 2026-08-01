@@ -114,6 +114,10 @@ export function migrate(db: DatabaseSync): void {
       residence TEXT NOT NULL DEFAULT 'ltg',
       status TEXT NOT NULL DEFAULT 'consolidated',
       stability REAL NOT NULL DEFAULT 1,
+      strength REAL NOT NULL DEFAULT 0.5,
+      direction TEXT NOT NULL DEFAULT 'both',
+      fan_budget INTEGER NOT NULL DEFAULT 1,
+      activation_rule TEXT NOT NULL DEFAULT 'conductive',
       consolidation_source TEXT NOT NULL DEFAULT 'explicit',
       consolidated_at TEXT NOT NULL,
       created_at TEXT NOT NULL,
@@ -555,11 +559,29 @@ export function ensureRelationColumns(db: DatabaseSync): void {
     ["residence", "TEXT NOT NULL DEFAULT 'ltg'"],
     ["status", "TEXT NOT NULL DEFAULT 'consolidated'"],
     ["stability", "REAL NOT NULL DEFAULT 1"],
+    ["strength", "REAL NOT NULL DEFAULT 0.5"],
+    ["direction", "TEXT NOT NULL DEFAULT 'both'"],
+    ["fan_budget", "INTEGER NOT NULL DEFAULT 1"],
+    ["activation_rule", "TEXT NOT NULL DEFAULT 'conductive'"],
     ["consolidation_source", "TEXT NOT NULL DEFAULT 'explicit'"],
     ["consolidated_at", "TEXT"],
   ];
   for (const [name, definition] of additions) {
     if (!existing.has(name)) db.exec(`ALTER TABLE node_relations ADD COLUMN ${name} ${definition}`);
+  }
+  if (!existing.has("direction")) {
+    db.exec(`UPDATE node_relations SET direction = CASE
+      WHEN relation_type IN ('causes', 'depends_on', 'is_a', 'part_of') THEN 'source->target'
+      WHEN relation_type = 'derived_from' THEN 'target->source'
+      ELSE 'both' END`);
+  }
+  if (!existing.has("activation_rule")) {
+    db.exec(`UPDATE node_relations SET activation_rule = CASE
+      WHEN relation_type IN ('contradicts', 'supersedes', 'exception_to') THEN 'regulatory'
+      ELSE 'conductive' END`);
+  }
+  if (!existing.has("fan_budget")) {
+    db.exec("UPDATE node_relations SET fan_budget = CASE WHEN relation_type = 'derived_from' THEN 0 ELSE 1 END");
   }
   db.exec("UPDATE node_relations SET consolidated_at = created_at WHERE consolidated_at IS NULL");
 }

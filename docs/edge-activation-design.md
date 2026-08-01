@@ -1,7 +1,7 @@
 # Edge Activation Design
 
-**Status:** design proposal
-**Updated:** 2026-07-31
+**Status:** core runtime implemented; advanced calibration remains experimental
+**Updated:** 2026-08-01
 
 ## 1. Principle
 
@@ -19,7 +19,9 @@ A_e(u,v)    edge activation = f(a_u, a_v, w_uv, type)   (derived, stateless)
 
 Consequences:
 
-- No per-edge activation state to store; the runtime computes `A_e` on demand.
+- No durable per-edge activation state; the runtime computes `A_e` on demand.
+  A retrieval trace may retain the derived value as an immutable audit sample,
+  but it is never read back as the next query's edge state.
 - Edge strength is the only learned quantity per edge. It changes slowly
   (consolidation), never within one query.
 - Type-specific routing rules (direction, gating, inhibition) are part of the
@@ -148,6 +150,28 @@ contradiction edge that no query ever actually surfaces).
 
 ## 4. Where this lands in the code
 
+### 4.0 Current implementation boundary
+
+The Lite retrieval path now implements the bounded, inspectable core rather
+than leaving edge activation only in Lab:
+
+- `src/core/edge-activation.ts` owns typed defaults, fan dilution, bounded
+  propagation, separate conductive/regulatory channels, and the bounded
+  Rescorla-Wagner update;
+- `node_relations` persists `strength`, `direction`, `fan_budget`, and
+  `activation_rule`; migrations infer safe type defaults for legacy rows;
+- `searchContext()` seeds node activation from direct hybrid scores, derives
+  edge activation within the existing graph-hop budget, and uses propagated
+  activation as a graph-expansion route score;
+- Active Graph traces expose derived activation for audit, but it is not
+  written back to `node_relations`;
+- explicit `recordActiveGraphUse()` feedback updates strength by prediction
+  error. Mere selection or missing feedback does not count as a negative.
+
+Learned temporal direction, contrastive batch unlearning, an eighth
+`HierarchicalActivation` score head, and automatic compression merge from
+mutual information/lift remain research/calibration work.
+
 ### 4.1 NodeRelation gains runtime-derived fields
 
 Existing `NodeRelation` (src/core/types.ts:82) already has `stability`,
@@ -166,15 +190,17 @@ not persist.
 ### 4.2 HierarchicalActivation gains an edge layer
 
 `HierarchicalActivation` (src/core/hierarchical-activation.ts) currently
-computes node scores from attention over vectors. Add an edge-aware term:
+computes node scores from attention over vectors. A future Lab experiment may
+add an edge-aware term:
 
 ```
 simEdge = Σ_{e in edges} A_e(u,v) · sim(v, q)      // one extra fused score
 ```
 
-The 7-dim `scoreWeights` tensor becomes 8 (add `w_edge`); the existing NLL
+The 7-dim `scoreWeights` tensor would become 8 (add `w_edge`); the existing NLL
 training already provides the used-node signal that can supervise edge
-strength (`usedNodeIds`).
+strength (`usedNodeIds`). This is deliberately not in Lite until a matched
+evaluation shows gain beyond the deterministic runtime projection.
 
 ### 4.3 Retrieval pipeline (search.ts / router.ts)
 
@@ -223,7 +249,7 @@ itself is not yet part of the NMG data model).
 
 | Invariant | Enforced by |
 | --- | --- |
-| Edge activation derived, never stored | runtime computes from `a` + `w` |
+| Edge activation derived, never stored as relation state | runtime computes from `a` + `w`; traces are audit-only |
 | Edge strength persists; updates only via RW/TD/contrastive passes | write path gates |
 | Fan dilution always applied | §2.2 in edge layer |
 | Diffusion bounded: max hops, threshold, decay | §2.3 / §4.3 stop rule |
@@ -235,9 +261,9 @@ itself is not yet part of the NMG data model).
 
 1. Should `w_uv` be per-direction (two scalars) or one scalar + direction
    flag? ACT-R uses one `S_ji`; conditional lift suggests two.
-2. Does the edge layer belong in `HierarchicalActivation` (a Lab-facing
-   autodiff component) or in the core retrieval path first? Proposal: Lab
-   prototype first, matching the repo's Lite/Lab split (docs/design.md §1).
+2. **Resolved for the initial implementation:** deterministic edge activation
+   belongs in the core retrieval path. A differentiable HA term remains a Lab
+   experiment and must earn promotion through matched evaluation.
 3. Fan-out dilution budget: `S − ln(fan)` is static; should it be learned
    (per-node `S_v`)? Initial design: static, measure, then learn if evidence
    shows a gain (the repo's "simplest measured implementation wins"
