@@ -171,7 +171,7 @@ export class OmniMemEvalBridge {
     const store = this.#store(userId);
     const conversation = conversationId?.trim() || batchIdentity(messages);
     const sessionId = `${userKey(userId)}:${conversation}`;
-    const nodeName = `Conversation ${conversation}`;
+    const nodeName = `Conversation ${batchIdentity(messages)}`;
     const nodeSummary = messages
       .map((message) => `${message.role ?? "user"}: ${message.content}`)
       .join(" ")
