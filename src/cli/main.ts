@@ -274,7 +274,11 @@ async function runDaemonCommand(
 async function waitForState(statePath: string) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const state = readServerState(statePath);
-    if (state?.transport === "http" && state.port && state.token) return state;
+    // 必须同时探活：stale lease（强杀残留）里也带着 transport/port/token，
+    // 仅校验字段会把死进程端点当成活 daemon 去连接。
+    if (state?.transport === "http" && state.port && state.token && isProcessAlive(state.pid)) {
+      return state;
+    }
     await new Promise((resolveWait) => setTimeout(resolveWait, 25));
   }
   throw new Error("NMG daemon did not become ready");
