@@ -44,6 +44,33 @@ instructions after retrieval and therefore do not impose a minimum window size.
 
 Use `--page-cutoffs 20 25 30 40` to change the cumulative expansion points.
 
+### Temporal answer probe (2026-08-02)
+
+The 133 temporal-reasoning questions were answered and judged with
+OmniMemEval's official LongMemEval prompts and DeepSeek v4 Flash. Because the
+retrieval probe ranks whole sessions, the answer context retained timestamped
+user turns and excluded verbose assistant turns. This is a paired mechanism
+probe, not the record-level NMG leaderboard configuration.
+
+| Arm | Correct | Accuracy | Mean context chars |
+| --- | ---: | ---: | ---: |
+| Original query Top-20 | 108/133 | 81.20% | 29,868 |
+| Legacy Top1+QPP2 reverse Top-20 | 107/133 | 80.45% | 30,317 |
+| Weighted-RRF three-route Top-25 | 110/133 | 82.71% | 37,079 |
+
+The Top-25 arm had 10 paired wins and 8 losses against the original route
+(two-sided exact binomial `p=0.815`), so the two-answer net gain is not evidence
+of an answer-quality improvement. It did demonstrate that progressive results
+can recover retrieval evidence without forcing it into the first page. The
+known museum bridge case still failed after its missing January session moved
+to rank 24: the reader did not infer "not with a friend" from the absence of a
+companion mention. That remaining failure is reader/benchmark inference rather
+than retrieval loss.
+
+The reproducible runner is `reverse-retrieval-answer-eval.py`; it consumes the
+saved old and weighted-RRF ranking artifacts and writes a result file
+under `.benchmarks/results/`.
+
 ### Progressive expansion answer probe (2026-08-02)
 
 The official LongMemEval answer and judge stages were run on all 133 temporal
