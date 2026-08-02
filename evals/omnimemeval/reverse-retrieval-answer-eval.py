@@ -20,10 +20,11 @@ from pathlib import Path
 OMNI = Path(__file__).resolve().parents[2] / ".benchmarks" / "official" / "OmniMemEval"
 sys.path.insert(0, str(OMNI / "scripts"))
 
-from longmemeval.lme_eval import lme_grader  # noqa: E402
 from longmemeval.lme_responses import lme_response  # noqa: E402
 from utils.env import load_env  # noqa: E402
 from utils.llm_client import create_async_openai_client  # noqa: E402
+from utils.nlp_metrics import extract_label_json  # noqa: E402
+from utils.prompts import JUDGE_PROMPT, JUDGE_SYSTEM_PROMPT  # noqa: E402
 from utils.token_tracker import get_tracker  # noqa: E402
 
 
@@ -39,6 +40,35 @@ def render_context(row: dict, session_ids: list[str]) -> str:
         ]
         blocks.append(f"Date: {dates[session_id]}\n" + "\n".join(turns))
     return "\n\n---\n\n".join(blocks)
+
+
+async def robust_lme_grader(client, model: str, question: str, gold: str, answer: str) -> bool:
+    """Use the official prompt, accepting the provider's extra `reason` field."""
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": JUDGE_PROMPT.format(
+                    question=question, golden_answer=gold, response=answer
+                ),
+            },
+        ],
+        temperature=0,
+    )
+    content = response.choices[0].message.content or ""
+    label_json = extract_label_json(text=content)
+    if label_json is not None:
+        label = json.loads(label_json).get("label")
+    else:
+        try:
+            label = json.loads(content).get("label")
+        except (json.JSONDecodeError, AttributeError):
+            label = None
+    if not isinstance(label, str) or label.upper() not in {"CORRECT", "WRONG"}:
+        raise ValueError(f"could not extract judge label: {content[:200]}")
+    return label.upper() == "CORRECT"
 
 
 async def main() -> None:
@@ -64,6 +94,7 @@ async def main() -> None:
     arms = {
         "baseline_top20": lambda q: new_details[q]["selected_sessions"]["baseline"][:20],
         "legacy_1plus2_top20": lambda q: old_details[q]["selected_sessions"]["combined_then_qpp2"][:20],
+        "rrf_combined_top20": lambda q: new_details[q]["selected_sessions"]["combined_then_qpp2"][:20],
         "rrf_combined_top25": lambda q: new_details[q]["selected_sessions"]["combined_then_qpp2"][:25],
     }
 
@@ -88,13 +119,12 @@ async def main() -> None:
                 row["question_date"],
             )
             answer_ms = (time.perf_counter() - started) * 1000
-            correct = await lme_grader(
+            correct = await robust_lme_grader(
                 judge_client,
                 judge_model,
                 row["question"],
                 row["answer"],
                 answer,
-                semaphore=asyncio.Semaphore(1),
             )
         results[key] = {
             "question_id": question_id,
@@ -107,12 +137,22 @@ async def main() -> None:
             "answer_duration_ms": answer_ms,
         }
 
-    tasks = [
-        evaluate(question_id, arm, selector(question_id))
+    pending = [
+        (question_id, arm, selector(question_id))
         for question_id in sorted(new_details)
         for arm, selector in arms.items()
+        if f"{question_id}:{arm}" not in results
     ]
-    await asyncio.gather(*tasks)
+    for offset in range(0, len(pending), args.workers):
+        await asyncio.gather(*[
+            evaluate(question_id, arm, selected)
+            for question_id, arm, selected in pending[offset : offset + args.workers]
+        ])
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(
+            json.dumps({"results": results}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
     summary = {}
     for arm in arms:
         records = [record for record in results.values() if record["arm"] == arm]

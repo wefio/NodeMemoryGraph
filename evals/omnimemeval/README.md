@@ -56,6 +56,7 @@ probe, not the record-level NMG leaderboard configuration.
 | --- | ---: | ---: | ---: |
 | Original query Top-20 | 108/133 | 81.20% | 29,868 |
 | Legacy Top1+QPP2 reverse Top-20 | 107/133 | 80.45% | 30,317 |
+| Weighted-RRF three-route Top-20 | **111/133** | **83.46%** | 30,223 |
 | Weighted-RRF three-route Top-25 | 110/133 | 82.71% | 37,079 |
 
 The Top-25 arm had 10 paired wins and 8 losses against the original route
@@ -66,6 +67,15 @@ known museum bridge case still failed after its missing January session moved
 to rank 24: the reader did not infer "not with a friend" from the absence of a
 companion mention. That remaining failure is reader/benchmark inference rather
 than retrieval loss.
+
+The matched Top-20 RRF arm was added to separate fusion quality from a larger
+reader context. It achieved 9 paired wins and 6 losses against original Top-20
+(two-sided exact binomial `p=0.607`). Its three-answer net gain is directional,
+not statistically significant, but it dominates Top-25 on point accuracy while
+using 18.5% fewer context characters. Top-20 and Top-25 had 11/10 paired
+wins/losses against each other, further showing substantial reader/judge noise;
+the extra five records should remain an on-demand continuation, not mandatory
+context.
 
 The reproducible runner is `reverse-retrieval-answer-eval.py`; it consumes the
 saved old and weighted-RRF ranking artifacts and writes a result file
