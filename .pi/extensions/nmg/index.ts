@@ -316,15 +316,15 @@ function injectionHash(result: MemoryContext["results"][number]): string {
 
 export const MEMORY_POLICY =
   `<nmg_policy>\n` +
-  `NMG is durable memory with progressive recall. Treat nmg_automatic_recall as compact ` +
-  `candidate headers, not complete evidence. Use them directly only when their preview is ` +
-  `sufficient; otherwise call nmg_search with a focused query, then nmg_get for selected ` +
-  `exact records. Call nmg_get before relying on exact values, wording, provenance, or ` +
-  `conflicts. Do not repeat a search when a continuation or memory IDs can be expanded. ` +
+  `NMG is durable memory with progressive recall. nmg_automatic_recall and nmg_search ` +
+  `return compact candidate headers; nmg_get loads selected exact records and source ` +
+  `evidence; nmg_remember saves durable information. Decide whether the question needs ` +
+  `one or several records and whether the evidence is sufficient—the number of candidates ` +
+  `does not prove completeness. Search with a focused query when information may be missing, ` +
+  `and get exact records before relying on values, wording, provenance, or conflicts. ` +
   `Automatically save supported stable facts, preferences, constraints, current states, ` +
-  `significant events, and reusable strategies. Use a stable stateKey for changeable state ` +
-  `and preserve a short exact evidence excerpt. Do not save secrets, temporary chatter, ` +
-  `duplicates, or unsupported assistant guesses.\n` +
+  `significant events, and reusable strategies. Use a stable stateKey for changeable state. ` +
+  `Do not save secrets, temporary chatter, duplicates, or unsupported assistant guesses.\n` +
   `</nmg_policy>`;
 
 export function composeNmgSystemPrompt(
