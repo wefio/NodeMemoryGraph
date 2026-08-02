@@ -145,6 +145,13 @@ For a command-level smoke test, set `NMG_BENCH_CASE` to one ID from the selected
 stratified sample. `NMG_BENCH_CONCURRENCY`, `NMG_BENCH_TIMEOUT_MS`, and
 `NMG_BENCH_CONTEXT_CHARS` control the shared runner.
 
+NMG daemons started per arm are self-limiting: `NMG_DAEMON_IDLE_TIMEOUT_MS`
+(default `300000`, `<=0` disables) makes an orphaned daemon exit after that
+many milliseconds without requests, and `NMG_DAEMON_LIMIT` (default `32`,
+`<=0` disables) warns on stderr when live daemon count exceeds the limit
+before spawning a new one. See
+[daemon-lifecycle-design.md](../docs/daemon-lifecycle-design.md).
+
 `validate` performs parsing and sampling without model calls. A matched run
 performs three reader experiments per selected case and can take minutes;
 the runner writes per-case/per-mode progress to stderr.
