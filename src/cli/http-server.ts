@@ -7,6 +7,7 @@ import { NmgProtocolError } from "./protocol.ts";
 import { NmgService } from "./service.ts";
 
 const MAX_REQUEST_BYTES = 1_048_576;
+const DEFAULT_IDLE_TIMEOUT_MS = 300_000;
 
 /**
  * The NMG daemon's JSON-RPC-over-HTTP transport (Node built-in http).
@@ -19,18 +20,42 @@ const MAX_REQUEST_BYTES = 1_048_576;
  * must only ever be loaded by the daemon process — never by the Pi extension.
  * Clients use the thin `http-client.ts` (built-in fetch, no deps).
  */
-export async function serveHttp(service: NmgService, lease: ServerLease): Promise<void> {
+export async function serveHttp(
+  service: NmgService,
+  lease: ServerLease,
+  options: { idleTimeoutMs?: number } = {},
+): Promise<void> {
+  const idleTimeoutMs = options.idleTimeoutMs ?? daemonIdleTimeoutMs();
   const token = randomBytes(32).toString("base64url");
   let resolveClosed!: () => void;
   const closed = new Promise<void>((resolve) => {
     resolveClosed = resolve;
   });
-  const server = createServer(
-    httpHandler(service, token, () => {
-      server.close(resolveClosed);
-      server.closeIdleConnections?.();
-    }),
-  );
+
+  let idleTimer: NodeJS.Timeout | undefined;
+  let closing = false;
+  const close = () => {
+    if (closing) return;
+    closing = true;
+    if (idleTimer) clearTimeout(idleTimer);
+    server.close(resolveClosed);
+    server.closeIdleConnections?.();
+  };
+  // 每次请求刷新 idle 计时器；超时后走与 shutdown 相同的关闭路径。
+  // 启动即计时：即使从未收到请求（spawn 后客户端先死）也会超时退出。
+  const touch = () => {
+    if (closing) return;
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = idleTimeoutMs > 0 ? setTimeout(close, idleTimeoutMs) : undefined;
+  };
+
+  const handler = httpHandler(service, token, close);
+  const server = createServer((req, res) => {
+    touch();
+    handler(req, res);
+  });
+  touch();
+
   await listen(server);
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
@@ -38,6 +63,17 @@ export async function serveHttp(service: NmgService, lease: ServerLease): Promis
 
   await closed;
   lease.release();
+}
+
+/**
+ * Idle 超时（毫秒）：无请求超过该值即自动退出；<= 0 表示禁用。
+ * 默认 5 分钟；评测等短生命周期场景可调低以快速回收内存。
+ */
+function daemonIdleTimeoutMs(): number {
+  const raw = process.env.NMG_DAEMON_IDLE_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === "") return DEFAULT_IDLE_TIMEOUT_MS;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isNaN(parsed) ? DEFAULT_IDLE_TIMEOUT_MS : parsed;
 }
 
 export function httpHandler(
