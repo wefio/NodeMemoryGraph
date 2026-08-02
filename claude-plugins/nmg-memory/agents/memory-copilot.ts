@@ -24,7 +24,7 @@ const server = new McpServer(
   { name: "nmg-memory", version: "0.1.0" },
   {
     instructions:
-      "NMG is durable memory. nmg_search returns candidate headers, nmg_get loads selected exact records and evidence, and nmg_remember saves durable information. Recall for the latest request; no useful memory is valid. Decide whether one or several records are needed; candidate count does not prove completeness. Save only attributable durable information. Do not promote unconfirmed assistant proposals or transient failures. Never save secrets, chatter, duplicates, or unsupported guesses.",
+      "NMG supplies durable memory; it does not decide answer truth or evidence completeness. nmg_search returns candidate headers, nmg_get loads selected exact records and evidence, and nmg_remember saves durable information. For the latest request, decide relevance, evidence needs, and whether more recall or current verification is required. No useful memory is valid. Save only attributable durable information; never save secrets, transient content, unconfirmed assistant proposals, or unsupported guesses.",
   },
 );
 

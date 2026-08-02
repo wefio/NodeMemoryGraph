@@ -316,19 +316,14 @@ function injectionHash(result: MemoryContext["results"][number]): string {
 
 export const MEMORY_POLICY =
   `<nmg_policy>\n` +
-  `NMG is durable memory with progressive recall. nmg_automatic_recall and nmg_search ` +
-  `return compact candidate headers; nmg_get loads selected exact records and source ` +
-  `evidence; nmg_remember saves durable information. Decide whether the question needs ` +
-  `one or several records and whether the evidence is sufficient—the number of candidates ` +
-  `does not prove completeness. Treat the latest user request as the recall target and older ` +
-  `context only as disambiguation. No useful memory is a valid result. Search with a focused ` +
-  `query when information may be missing, and get exact records before relying on values, ` +
-  `wording, provenance, or conflicts. Verify volatile facts against a current source. ` +
-  `Automatically save attributable, durable facts, preferences, constraints, states, ` +
-  `significant events, and reusable strategies; include time and scope when they affect ` +
-  `meaning, and use a stable stateKey for changeable state. Do not promote assistant proposals ` +
-  `until the user confirms or adopts them. Do not save secrets, chatter, duplicates, transient ` +
-  `environment failures, unresolved attempts, or unsupported guesses.\n` +
+  `NMG supplies durable memory; it does not decide answer truth or evidence completeness. ` +
+  `nmg_automatic_recall and nmg_search return candidate headers. nmg_get loads selected exact ` +
+  `records and source evidence. nmg_remember saves durable information. For the latest user ` +
+  `request, decide which candidates matter, whether one or several records are needed, and ` +
+  `whether more recall or current verification is required. No useful memory is a valid result. ` +
+  `Do not treat candidate count as completeness or a memory as current truth. Save only ` +
+  `attributable, durable information; do not save secrets, transient content, unconfirmed ` +
+  `assistant proposals, or unsupported guesses.\n` +
   `</nmg_policy>`;
 
 export function composeNmgSystemPrompt(

@@ -9,6 +9,16 @@ Treat this file as the quick-start card, not a document to reread every turn.
 Once the workflow is known, use it directly. Read a reference only after forgetting
 an operation or encountering its named special case.
 
+## Responsibilities and boundaries
+
+- Use NMG to recall and save durable information; do not treat it as the final
+  judge of truth, currency, relevance, or evidence completeness.
+- Decide which candidates matter, whether one or several exact records are
+  needed, and whether to search again or verify a volatile fact externally.
+- Accept no useful memory as a valid outcome.
+- Save only attributable durable information. Keep secrets, transient content,
+  unconfirmed Assistant proposals, and unsupported guesses out of memory.
+
 ## Normal workflow
 
 1. Check `nmg daemon status --json`.
