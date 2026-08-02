@@ -43,8 +43,11 @@ searches, exact reads, and provisional writes.
 
 ## Progressive recall
 
-Start shallow. If the first result set is insufficient, try one narrower or
-complementary query, then increase `--max-tier`, `--limit`, or `--graph-hops`.
+Treat automatically injected recall as candidate headers, not complete evidence.
+Use a preview directly only when it is sufficient; load exact values, wording,
+provenance, or conflicts with `nmg get`. Start shallow. If the first result set
+is insufficient, try one narrower or complementary query, then increase
+`--max-tier`, `--limit`, or `--graph-hops`.
 If lexical results are still insufficient and embeddings are configured,
 switch to `--retrieval-mode hybrid` (semantic path; see
 [embedding](references/embedding.md)). Do not load all candidate evidence into

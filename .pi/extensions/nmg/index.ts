@@ -43,7 +43,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     const sessionId = ctx.sessionManager.getSessionId();
     injectionWindow.beginTurn(sessionId);
     if (!shouldAutoRecall(event.prompt)) {
-      return { systemPrompt: `${event.systemPrompt}\n\n${MEMORY_POLICY}` };
+      return { systemPrompt: composeNmgSystemPrompt(event.systemPrompt) };
     }
     try {
       const context = (await invoke("search", {
@@ -55,19 +55,17 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         graphHops: 1,
         tieredDisclosure: true,
       })) as MemoryContext;
-      const recalled = injectionWindow.format(sessionId, context, "exact");
+      const recalled = injectionWindow.format(sessionId, context, "header");
       return {
-        systemPrompt: [
-          event.systemPrompt,
-          MEMORY_POLICY,
-          recalled ? `<nmg_automatic_recall>\n${recalled}\n</nmg_automatic_recall>` : "",
-        ]
-          .filter(Boolean)
-          .join("\n\n"),
+        systemPrompt: composeNmgSystemPrompt(event.systemPrompt, recalled),
       };
     } catch (error) {
       return {
-        systemPrompt: `${event.systemPrompt}\n\n<nmg_status>NMG unavailable: ${message(error)}</nmg_status>`,
+        systemPrompt: composeNmgSystemPrompt(
+          event.systemPrompt,
+          "",
+          `NMG unavailable: ${message(error)}`,
+        ),
       };
     }
   });
@@ -316,15 +314,35 @@ function injectionHash(result: MemoryContext["results"][number]): string {
   return createHash("sha256").update(content).digest("base64url");
 }
 
-const MEMORY_POLICY =
+export const MEMORY_POLICY =
   `<nmg_policy>\n` +
-  `NMG is durable memory. Automatically save stable facts, preferences, constraints, ` +
-  `current states, significant events, and reusable strategies. Use a stable stateKey ` +
-  `for changeable state. Preserve a short exact evidence excerpt. Do not save secrets, ` +
-  `temporary chatter, duplicates, or unsupported assistant guesses. Automatic recall is ` +
-  `a small working set. When it is incomplete, call nmg_search; call nmg_get before ` +
-  `relying on exact values or source evidence.\n` +
+  `NMG is durable memory with progressive recall. Treat nmg_automatic_recall as compact ` +
+  `candidate headers, not complete evidence. Use them directly only when their preview is ` +
+  `sufficient; otherwise call nmg_search with a focused query, then nmg_get for selected ` +
+  `exact records. Call nmg_get before relying on exact values, wording, provenance, or ` +
+  `conflicts. Do not repeat a search when a continuation or memory IDs can be expanded. ` +
+  `Automatically save supported stable facts, preferences, constraints, current states, ` +
+  `significant events, and reusable strategies. Use a stable stateKey for changeable state ` +
+  `and preserve a short exact evidence excerpt. Do not save secrets, temporary chatter, ` +
+  `duplicates, or unsupported assistant guesses.\n` +
   `</nmg_policy>`;
+
+export function composeNmgSystemPrompt(
+  baseSystemPrompt: string,
+  automaticRecall = "",
+  status = "",
+): string {
+  return [
+    baseSystemPrompt,
+    MEMORY_POLICY,
+    automaticRecall
+      ? `<nmg_automatic_recall>\n${automaticRecall}\n</nmg_automatic_recall>`
+      : "",
+    status ? `<nmg_status>${status}</nmg_status>` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
 
 function configuredAutoRecallTier(): MemoryTier {
   const value = Number(process.env.NMG_AUTO_RECALL_TIER ?? 1);

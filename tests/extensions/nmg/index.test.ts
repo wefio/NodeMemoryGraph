@@ -5,8 +5,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import nmgExtension, {
+  composeNmgSystemPrompt,
   formatMemoryContext,
   formatSearchHeaders,
+  MEMORY_POLICY,
   SessionInjectionWindow,
 } from "../../../.pi/extensions/nmg/index.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
@@ -29,6 +31,17 @@ function extensionHarness() {
 
 test("Pi adapter exposes only the stable tool surface", () => {
   assert.deepEqual([...extensionHarness().tools.keys()], ["nmg_remember", "nmg_get", "nmg_search"]);
+});
+
+test("NMG prompt keeps its policy prefix stable and dynamic recall last", () => {
+  const first = composeNmgSystemPrompt("base", "first candidate");
+  const second = composeNmgSystemPrompt("base", "second candidate");
+  const stablePrefix = `base\n\n${MEMORY_POLICY}\n\n<nmg_automatic_recall>\n`;
+
+  assert.ok(first.startsWith(stablePrefix));
+  assert.ok(second.startsWith(stablePrefix));
+  assert.match(first, /first candidate\n<\/nmg_automatic_recall>$/);
+  assert.match(second, /second candidate\n<\/nmg_automatic_recall>$/);
 });
 
 test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", async () => {
@@ -65,6 +78,8 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       { sessionManager },
     );
     assert.match(recalled.systemPrompt, /Atlas must use SQLite/);
+    assert.match(recalled.systemPrompt, /NMG SEARCH HEADERS/);
+    assert.doesNotMatch(recalled.systemPrompt, /SOURCE=/);
     const recalledAgain = await handlers.get("before_agent_start")!(
       { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
       { sessionManager },
