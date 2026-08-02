@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 
@@ -281,11 +282,213 @@ test("HTTP daemon starts once, serves CLI requests, and stops cleanly", () => {
   }
 });
 
-function runLauncher(args: string[]): unknown {
+test("daemon exits after idle timeout and removes its lease", async () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-idle-exit-"));
+  try {
+    const started = runLauncher(["daemon", "start", "--json", "--data-dir", directory], {
+      NMG_DAEMON_IDLE_TIMEOUT_MS: "1000",
+    }) as { started: boolean; pid: number };
+    assert.equal(started.started, true);
+    await delay(1_600);
+    const status = runLauncher(["daemon", "status", "--json", "--data-dir", directory]) as {
+      running: boolean;
+    };
+    assert.equal(status.running, false, "daemon idle-exited without an explicit stop");
+    assert.equal(
+      existsSync(join(directory, "nmg.sqlite.server.json")),
+      false,
+      "idle exit released the server lease",
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("daemon idle timer is refreshed by requests", async () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-idle-refresh-"));
+  try {
+    runLauncher(["daemon", "start", "--json", "--data-dir", directory], {
+      NMG_DAEMON_IDLE_TIMEOUT_MS: "2500",
+    });
+    await delay(1_500);
+    const first = runLauncher(["daemon", "status", "--json", "--data-dir", directory]) as {
+      running: boolean;
+    };
+    assert.equal(first.running, true, "still running before the idle deadline");
+    await delay(1_800);
+    const second = runLauncher(["daemon", "status", "--json", "--data-dir", directory]) as {
+      running: boolean;
+    };
+    assert.equal(second.running, true, "the status request refreshed the idle timer");
+  } finally {
+    runLauncher(["daemon", "stop", "--json", "--data-dir", directory]);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("daemon re-spawns on the same database after idle exit with data intact", async () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-idle-respawn-"));
+  try {
+    const first = runLauncher(["daemon", "start", "--json", "--data-dir", directory], {
+      NMG_DAEMON_IDLE_TIMEOUT_MS: "1000",
+    }) as { started: boolean; pid: number };
+    assert.equal(first.started, true);
+    runLauncher([
+      "remember",
+      "Idle-respawn probe memory",
+      "--node",
+      "idle-respawn",
+      "--json",
+      "--data-dir",
+      directory,
+    ]);
+    await delay(1_600);
+    const gone = runLauncher(["daemon", "status", "--json", "--data-dir", directory]) as {
+      running: boolean;
+    };
+    assert.equal(gone.running, false, "daemon idle-exited");
+
+    const second = runLauncher(["daemon", "start", "--json", "--data-dir", directory]) as {
+      started: boolean;
+      pid: number;
+    };
+    assert.equal(second.started, true);
+    assert.notEqual(second.pid, first.pid, "a fresh daemon process was spawned");
+    const searched = runLauncher([
+      "search",
+      "respawn probe",
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { results: Array<{ memory: { statement: string } }> };
+    assert.equal(searched.results[0]?.memory.statement, "Idle-respawn probe memory");
+  } finally {
+    runLauncher(["daemon", "stop", "--json", "--data-dir", directory]);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("daemon re-spawns over a stale lease file from a dead process", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-stale-lease-"));
+  try {
+    const deadPid = spawnSync(process.execPath, ["-e", "0"]).pid;
+    writeFileSync(
+      join(directory, "nmg.sqlite.server.json"),
+      JSON.stringify({
+        pid: deadPid,
+        startedAt: new Date().toISOString(),
+        transport: "http",
+        host: "127.0.0.1",
+        port: 1,
+        token: "stale",
+      }),
+    );
+    const started = runLauncher(["daemon", "start", "--json", "--data-dir", directory]) as {
+      started: boolean;
+      pid: number;
+    };
+    assert.equal(started.started, true);
+    assert.notEqual(started.pid, deadPid);
+  } finally {
+    runLauncher(["daemon", "stop", "--json", "--data-dir", directory]);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("connectDaemon warns when live daemon count exceeds NMG_DAEMON_LIMIT", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-daemon-limit-"));
+  try {
+    // 5 个"存活"daemon：pid 指向仍在运行的测试进程，模拟已经泄漏的 daemon。
+    for (let i = 0; i < 5; i += 1) {
+      const fake = join(directory, `fake-${i}`);
+      mkdirSync(fake, { recursive: true });
+      writeFileSync(
+        join(fake, "nmg.sqlite.server.json"),
+        JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }),
+      );
+    }
+    const probe = (limit: string) => {
+      const probePath = join(directory, "probe.mjs");
+      writeFileSync(
+        probePath,
+        [
+          `import { connectDaemon, shutdownOwnedDaemon } from ${JSON.stringify(
+            pathToFileURL(resolve(root, "src/cli/daemon-client.ts")).href,
+          )};`,
+          `const conn = await connectDaemon(${JSON.stringify(join(directory, "probe", "nmg.sqlite"))});`,
+          `await shutdownOwnedDaemon(conn);`,
+        ].join("\n"),
+      );
+      return spawnSync(process.execPath, ["--experimental-strip-types", probePath], {
+        cwd: root,
+        encoding: "utf8",
+        env: { ...process.env, NMG_DATA_DIR: directory, NMG_DAEMON_LIMIT: limit },
+      });
+    };
+
+    const warned = probe("2");
+    assert.equal(warned.status, 0, warned.stderr);
+    assert.match(warned.stderr, /NMG: warning: \d+ NMG daemons running \(limit 2\)/);
+
+    const quiet = probe("1000");
+    assert.equal(quiet.status, 0, quiet.stderr);
+    assert.ok(!/NMG: warning/.test(quiet.stderr), `no warning under a high limit:\n${quiet.stderr}`);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("invokeDaemon reconnects after the daemon dies mid-session", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-daemon-reconnect-"));
+  try {
+    const probePath = join(directory, "reconnect.mjs");
+    writeFileSync(
+      probePath,
+      [
+        `import { connectDaemon, invokeDaemon, shutdownOwnedDaemon } from ${JSON.stringify(
+          pathToFileURL(resolve(root, "src/cli/daemon-client.ts")).href,
+        )};`,
+        `import { isProcessAlive } from ${JSON.stringify(
+          pathToFileURL(resolve(root, "src/cli/lifecycle.ts")).href,
+        )};`,
+        `const conn = await connectDaemon(${JSON.stringify(join(directory, "nmg.sqlite"))});`,
+        `const before = conn.state.pid;`,
+        `await invokeDaemon(conn, "remember", { statement: "reconnect probe memory", nodeName: "reconnect-probe" });`,
+        `process.kill(before, "SIGKILL");`,
+        `for (let i = 0; i < 50 && isProcessAlive(before); i += 1) await new Promise((r) => setTimeout(r, 20));`,
+        `const result = await invokeDaemon(conn, "search", { query: "reconnect probe" });`,
+        `console.log(JSON.stringify({ before, after: conn.state.pid, reconnected: before !== conn.state.pid, found: (result.results ?? []).length > 0 }));`,
+        `await shutdownOwnedDaemon(conn);`,
+      ].join("\n"),
+    );
+    const result = spawnSync(process.execPath, ["--experimental-strip-types", probePath], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const parsed = JSON.parse(result.stdout.trim()) as {
+      before: number;
+      after: number;
+      reconnected: boolean;
+      found: boolean;
+    };
+    assert.equal(parsed.reconnected, true, "a fresh daemon process was spawned after death");
+    assert.equal(parsed.found, true, "sqlite memory survived daemon death");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+function runLauncher(args: string[], env: NodeJS.ProcessEnv = {}): unknown {
   const result = spawnSync(process.execPath, [launcher, ...args], {
     cwd: root,
     encoding: "utf8",
+    env: { ...process.env, ...env },
   });
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolveWait) => setTimeout(resolveWait, milliseconds));
 }
