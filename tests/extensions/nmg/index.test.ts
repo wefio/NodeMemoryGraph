@@ -42,6 +42,9 @@ test("NMG prompt keeps its policy prefix stable and dynamic recall last", () => 
   assert.ok(second.startsWith(stablePrefix));
   assert.match(first, /first candidate\n<\/nmg_automatic_recall>$/);
   assert.match(second, /second candidate\n<\/nmg_automatic_recall>$/);
+  assert.match(MEMORY_POLICY, /latest user request as the recall target/);
+  assert.match(MEMORY_POLICY, /No useful memory is a valid result/);
+  assert.match(MEMORY_POLICY, /Do not promote assistant proposals/);
 });
 
 test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", async () => {

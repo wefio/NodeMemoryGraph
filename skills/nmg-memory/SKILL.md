@@ -32,8 +32,10 @@ an operation or encountering its named special case.
 
 5. Save durable information with `nmg remember`. Automatically save stable facts,
    preferences, constraints, current states, significant events, and reusable
-   strategies. Do not save secrets, casual chatter, duplicates, or unsupported
-   assistant guesses.
+   strategies. Preserve attribution, time, and scope when they affect meaning.
+   Do not promote an Assistant proposal until the user confirms or adopts it.
+   Do not save secrets, casual chatter, duplicates, transient environment
+   failures, unresolved attempts, or unsupported guesses.
 6. On exit, run `nmg daemon stop --json` only if this invocation started it.
    Never stop a daemon that was already running.
 
@@ -46,9 +48,11 @@ searches, exact reads, and provisional writes.
 Treat automatically injected recall and search results as candidate headers.
 Use `nmg get` to load selected exact records and evidence. Decide whether the
 question needs one or several records; candidate count does not prove evidence
-completeness. Start shallow. If information may still be missing, try one
-narrower or complementary query, then increase `--max-tier`, `--limit`, or
-`--graph-hops`.
+completeness. Treat the latest request as the recall target and older context as
+disambiguation. No useful memory is a valid result. Start shallow. If information
+may still be missing, try one narrower or complementary query, then increase
+`--max-tier`, `--limit`, or `--graph-hops`. Verify volatile facts against a
+current source before relying on them.
 If lexical results are still insufficient and embeddings are configured,
 switch to `--retrieval-mode hybrid` (semantic path; see
 [embedding](references/embedding.md)). Do not load all candidate evidence into
