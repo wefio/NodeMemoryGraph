@@ -16,6 +16,28 @@ test("provider registry preserves legacy OpenAI-compatible configuration", () =>
   assert.equal(createEmbeddingClientFromEnv(environment)?.model, "custom/model");
 });
 
+test("BGE models default to the bge-en prompt profile", () => {
+  const environment = {
+    NMG_EMBED_BASE_URL: "https://embedding.example/v1",
+    NMG_EMBED_MODEL: "BAAI/bge-small-en-v1.5",
+  };
+  const client = createEmbeddingClientFromEnv(environment)!;
+  assert.equal(client.profile, "bge-en");
+  // explicit NMG_EMBED_PROFILE still wins over the model-derived default
+  const pinned = createEmbeddingClientFromEnv({
+    ...environment,
+    NMG_EMBED_PROFILE: "qwen3",
+  })!;
+  assert.equal(pinned.profile, "qwen3");
+  // non-BGE models keep the qwen3 default
+  const qwen = createEmbeddingClientFromEnv({
+    NMG_EMBED_BASE_URL: "https://embedding.example/v1",
+    NMG_EMBED_MODEL: "Qwen/Qwen3-Embedding-0.6B",
+  })!;
+  assert.equal(qwen.profile, "qwen3");
+  assert.notEqual(client.indexId, qwen.indexId);
+});
+
 test("Cloudflare and Jina presets own their defaults and index namespaces", () => {
   const cloudflare = createEmbeddingClientFromEnv({
     NMG_EMBED_PROVIDER: "cloudflare",
