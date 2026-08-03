@@ -49,7 +49,19 @@ export async function shutdownOwnedDaemon(connection: DaemonConnection): Promise
   } catch {
     // The daemon may already be gone.
   }
-  await waitForProcessExit(connection.state.pid);
+  try {
+    await waitForProcessExit(connection.state.pid);
+  } catch {
+    // Graceful shutdown can stall on Windows (keep-alive socket teardown or
+    // SQLite handle release). Force-exit the survivor so an owned daemon
+    // never lingers after its client is done.
+    try {
+      process.kill(connection.state.pid, "SIGKILL");
+    } catch {
+      // Already gone.
+    }
+    await waitForProcessExit(connection.state.pid);
+  }
 }
 
 /**

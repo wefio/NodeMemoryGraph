@@ -268,6 +268,11 @@ async function runDaemonCommand(
     process.off("SIGINT", stopOnSignal);
     process.off("SIGTERM", stopOnSignal);
     lease.release();
+    // serveHttp resolves on the shutdown RPC or idle timeout, but it only
+    // closes the HTTP server. Without service.close() the SQLite handle keeps
+    // the event loop alive and the daemon silently lingers (observed as leaked
+    // nmg.mjs daemon processes after tests). Release it so the process exits.
+    service.close();
   }
 }
 

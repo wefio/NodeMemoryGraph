@@ -38,8 +38,11 @@ export async function serveHttp(
     if (closing) return;
     closing = true;
     if (idleTimer) clearTimeout(idleTimer);
+    // closeAllConnections is required on the shutdown path: the RPC client's
+    // keep-alive fetch holds an open socket, closeIdleConnections does not
+    // drop it, and server.close() would wait forever -> daemon never exits.
     server.close(resolveClosed);
-    server.closeIdleConnections?.();
+    server.closeAllConnections?.();
   };
   // 每次请求刷新 idle 计时器；超时后走与 shutdown 相同的关闭路径。
   // 启动即计时：即使从未收到请求（spawn 后客户端先死）也会超时退出。

@@ -82,6 +82,8 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     );
     assert.match(recalled.systemPrompt, /Atlas must use SQLite/);
     assert.match(recalled.systemPrompt, /NMG SEARCH HEADERS/);
+    assert.match(recalled.systemPrompt, /reason=(lexical_match|vector_match)/);
+    assert.match(recalled.systemPrompt, /hits=storage/);
     assert.doesNotMatch(recalled.systemPrompt, /SOURCE=/);
     const recalledAgain = await handlers.get("before_agent_start")!(
       { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
@@ -144,14 +146,33 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
         remember.details.memory.id,
       ]);
     } finally {
+      // Close the in-process store first so the daemon's SQLite close (WAL
+      // checkpoint) is not blocked by our own connection; then shut the owned
+      // daemon down before the temp dir is removed.
       store.close();
+      await handlers
+        .get("session_shutdown")!({}, { sessionManager })
+        .catch((error) => console.error("session_shutdown error:", error));
     }
   } finally {
     if (previous === undefined) delete process.env.NMG_DATA_DIR;
     else process.env.NMG_DATA_DIR = previous;
     if (previousProject === undefined) delete process.env.NMG_PROJECT_DIR;
     else process.env.NMG_PROJECT_DIR = previousProject;
-    rmSync(directory, { recursive: true, force: true });
+    // Windows can hold the SQLite handle a moment after the daemon exits;
+    // retry, and tolerate a final failure (temp dirs are reclaimed by the OS).
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      try {
+        rmSync(directory, { recursive: true, force: true });
+        break;
+      } catch (error) {
+        if (attempt === 59) {
+          console.error(`rmSync left temp dir (Windows handle release): ${directory}`);
+          break;
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 150));
+      }
+    }
   }
 });
 
