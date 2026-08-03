@@ -348,6 +348,13 @@ export interface MemorySearchResult {
   vectorScore: number;
   routeScore: number;
   combinedScore: number;
+  /** Why this record surfaced: lexical/vector/graph route, populated by
+   *  searchContext before the context is returned. Header formatters use it
+   *  to tell the model why a candidate was recalled. */
+  recallReason?: "hybrid_match" | "learned_route" | "lexical_match" | "vector_match";
+  /** Query terms that literally appear in the candidate (lexical matches).
+   *  Empty for pure-semantic/route recalls. */
+  hitTerms?: string[];
 }
 
 export interface DeriveMemoryInput extends Omit<RememberInput, "evidence"> {

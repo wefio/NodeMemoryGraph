@@ -34,6 +34,7 @@ import {
   contextUsefulness,
   hybridScore,
   mergeSemanticCandidates,
+  recallHitTerms,
   recallReason,
   type StoreRow as Row,
 } from "./search-ranking.ts";
@@ -548,7 +549,11 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         createdAt: new Date().toISOString(),
       };
       const context: MemoryContext = {
-        results,
+        results: results.map((result) => ({
+          ...result,
+          recallReason: recallReason(result),
+          hitTerms: recallHitTerms(query, result),
+        })),
         relations: persistentEdges.flatMap((edge) =>
           relations.filter((relation) => relation.id === edge.id),
         ),

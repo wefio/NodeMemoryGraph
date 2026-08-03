@@ -375,10 +375,12 @@ export function formatSearchHeaders(context: MemoryContext): string {
   return [
     "NMG SEARCH HEADERS",
     ...context.results.map(
-      ({ memory, node }) =>
+      ({ memory, node, recallReason: reason, hitTerms }) =>
         `- ${(memory.markers ?? []).some((marker) => marker.kind === "external_source") ? "[external] " : ""}` +
         `memory=${memory.id}; node=${node.canonicalName}; type=${memory.memoryType}; ` +
-        `tier=L${memory.tier}; preview=${excerpt(memory.statement, 160)}`,
+        `tier=L${memory.tier}; reason=${reason ?? "hybrid_match"}; ` +
+        `${recallHitsLabel(hitTerms)}` +
+        `preview=${excerpt(memory.statement, 160)}`,
     ),
     formatActiveGraph(context),
     formatProgressiveDisclosure(context),
@@ -386,6 +388,14 @@ export function formatSearchHeaders(context: MemoryContext): string {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/** "hits=insurance,address" when the query literally matched candidate
+ *  text; omitted for pure-vector or graph-route recalls (reason already
+ *  carries that signal). */
+function recallHitsLabel(hitTerms: string[] | undefined): string {
+  if (hitTerms && hitTerms.length > 0) return `hits=${hitTerms.join(",")}; `;
+  return "";
 }
 
 function formatProgressiveDisclosure(context: MemoryContext): string {

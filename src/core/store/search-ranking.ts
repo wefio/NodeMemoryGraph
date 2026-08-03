@@ -118,6 +118,18 @@ export function recallReason(result: MemorySearchResult): RecallCue["reason"] {
   return ordered[0]![0];
 }
 
+/** Query terms that literally occur in the candidate's indexed text. Empty for
+ *  pure-semantic or graph-route recalls; used by header formatters to explain
+ *  "why was this recalled" without exposing the whole evidence. */
+export function recallHitTerms(query: string, result: MemorySearchResult): string[] {
+  const terms = searchTerms(query);
+  if (terms.length === 0) return [];
+  const haystack = normalize(
+    `${result.memory.statement} ${result.node.canonicalName} ${result.node.summary}`,
+  );
+  return terms.filter((term) => haystack.includes(term));
+}
+
 export function hierarchyWeight(row: StoreRow): number {
   const frequency = Math.log2(2 + Number(row.access_count ?? 0));
   const importance = 0.5 + Number(row.importance ?? 0);
