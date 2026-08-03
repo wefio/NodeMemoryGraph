@@ -1,4 +1,5 @@
 import { OpenAIEmbeddingClient, type OpenAIEmbeddingClientOptions } from "../openai-embedding.ts";
+import type { EmbeddingProfileName } from "../openai-embedding.ts";
 import { optionalNumber, profile } from "./environment.ts";
 import type { EmbeddingProviderFactory } from "./types.ts";
 
