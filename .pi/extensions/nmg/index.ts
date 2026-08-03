@@ -374,6 +374,7 @@ export function formatSearchHeaders(context: MemoryContext): string {
   if (context.results.length === 0) return "No matching NMG memory found.";
   return [
     "NMG SEARCH HEADERS",
+    "fields: memory=id; node=memory cluster; type=memory type; matches=query terms hit, else semantic/graph/hybrid; time=event date; expires=expiry date; preview=statement excerpt",
     ...context.results.map(
       ({ memory, node, recallReason: reason, hitTerms }) =>
         `- ${(memory.markers ?? []).some((marker) => marker.kind === "external_source") ? "[external] " : ""}` +
