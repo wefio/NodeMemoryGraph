@@ -82,8 +82,8 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     );
     assert.match(recalled.systemPrompt, /Atlas must use SQLite/);
     assert.match(recalled.systemPrompt, /NMG SEARCH HEADERS/);
-    assert.match(recalled.systemPrompt, /reason=(lexical_match|vector_match)/);
-    assert.match(recalled.systemPrompt, /hits=storage/);
+    assert.match(recalled.systemPrompt, /matches=storage/);
+    assert.doesNotMatch(recalled.systemPrompt, /tier=L\d/);
     assert.doesNotMatch(recalled.systemPrompt, /SOURCE=/);
     const recalledAgain = await handlers.get("before_agent_start")!(
       { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },

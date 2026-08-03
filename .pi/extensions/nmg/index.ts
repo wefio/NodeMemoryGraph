@@ -11,7 +11,7 @@ import {
   shutdownOwnedDaemon,
   type DaemonConnection,
 } from "../../../src/cli/daemon-client.ts";
-import type { MemoryContext, MemoryTier } from "../../../src/core/types.ts";
+import type { MemoryContext, MemorySearchResult, MemoryTier } from "../../../src/core/types.ts";
 
 /**
  * NMG Pi extension.
@@ -378,8 +378,7 @@ export function formatSearchHeaders(context: MemoryContext): string {
       ({ memory, node, recallReason: reason, hitTerms }) =>
         `- ${(memory.markers ?? []).some((marker) => marker.kind === "external_source") ? "[external] " : ""}` +
         `memory=${memory.id}; node=${node.canonicalName}; type=${memory.memoryType}; ` +
-        `tier=L${memory.tier}; reason=${reason ?? "hybrid_match"}; ` +
-        `${recallHitsLabel(hitTerms)}` +
+        `${recallMatchLabel(reason, hitTerms)}` +
         `preview=${excerpt(memory.statement, 160)}`,
     ),
     formatActiveGraph(context),
@@ -390,12 +389,17 @@ export function formatSearchHeaders(context: MemoryContext): string {
     .join("\n");
 }
 
-/** "hits=insurance,address" when the query literally matched candidate
- *  text; omitted for pure-vector or graph-route recalls (reason already
- *  carries that signal). */
-function recallHitsLabel(hitTerms: string[] | undefined): string {
-  if (hitTerms && hitTerms.length > 0) return `hits=${hitTerms.join(",")}; `;
-  return "";
+/** What the query actually matched, not why the record surfaced:
+ *  literal query terms for lexical hits, otherwise the mechanism
+ *  (semantic / graph route / hybrid) when no term is available. */
+function recallMatchLabel(
+  reason: MemorySearchResult["recallReason"],
+  hitTerms: MemorySearchResult["hitTerms"],
+): string {
+  if (hitTerms && hitTerms.length > 0) return `matches=${hitTerms.join(",")}; `;
+  const label =
+    reason === "learned_route" ? "graph" : reason === "vector_match" ? "semantic" : reason ?? "hybrid";
+  return `matches=${label}; `;
 }
 
 function formatProgressiveDisclosure(context: MemoryContext): string {
