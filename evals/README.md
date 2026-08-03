@@ -16,6 +16,26 @@ Public benchmark scores do not replace the deterministic core suite. A memory
 system can answer benchmark questions correctly while corrupting provenance,
 exceeding its retrieval budget, or rebuilding an index unnecessarily.
 
+## Experiment logs
+
+This file intentionally keeps stable guidance and principles only. Raw run
+matrices, root-cause analyses, and protocol notes live in dated standalone
+logs under `docs/` (indexed here so new work can find prior evidence):
+
+- `docs/longmemeval-profile-regression-2026-08-03.md` — LongMemEval baseline
+  "drift" (94.15% → 76.0%) root-caused to embedding profile config drift;
+  BGE models now auto-select the bge-en prompt template. Full fixed-vs-dynamic
+  matrix under the corrected config: 94.15%/87.95%/81.2% vs 95.19%/89.71%/82.3%
+  (any-evidence recall / overall / answer accuracy).
+- `docs/qpp-evidence-signal-experiments-2026-08-02.md` — QPP trigger signal
+  audit (top1 gap, cohesion, LLM sufficiency) and strong-hit evaluation.
+- `docs/locomo-evidence-mode-signal-2026-08-02.md` — LoCoMo official
+  search-only protocol alignment and evidence-mode signal protocol.
+- `docs/qpp2-local-probe-experiment-2026-07-29.md` — local QPP2/elbow probe.
+- `docs/daemon-lifecycle-design.md` — daemon lifecycle hardening (timeout,
+  store cap as warning, restart fidelity) and its acceptance tests.
+- `docs/llm-sufficiency-recall-design.md` — LLM-sufficiency recall design.
+
 ## Benchmark roles
 
 | Suite               | Primary role                  | NMG mechanisms under test                                                                          |

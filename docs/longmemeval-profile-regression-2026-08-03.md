@@ -47,17 +47,20 @@ env 被重写后丢失该行，静默回落到错误的 qwen3 模板。
 
 ## 修复后 LongMemEval 全量矩阵（n=479，any-evidence recall）
 
-| 配置 | any | overall | 平均记录数 | 说明 |
-|---|---|---|---|---|
-| 历史基线（07-28 / 08-01 wide20） | 94.15% | 87.95% | ~12 | bge-en + 固定 top-20 |
-| 修复后固定 top-20 | 94.15% | 87.95% | 15.1 | 精确复现历史 |
-| **修复后动态 init13（无 strong hit）** | **95.19%** | **89.71%** | 20.5 | 优于固定基线 |
-| 漂移期固定 top-20（qwen3 默认） | 76.0% | 62.3% | 12 | 回归期对照 |
+| 配置 | any | overall | answer acc | 平均记录数 | 说明 |
+|---|---|---|---|---|---|
+| 历史基线（07-28 / 08-01 wide20） | 94.15% | 87.95% | — | ~12 | bge-en + 固定 top-20 |
+| 修复后固定 top-20 | 94.15% | 87.95% | 81.2% | 15.1 | 精确复现历史 |
+| **修复后动态 init13（无 strong hit）** | **95.19%** | **89.71%** | **82.3%** | 20.5 | 优于固定基线 |
+| 漂移期固定 top-20（qwen3 默认） | 76.0% | 62.3% | — | 12 | 回归期对照 |
 
 动态机制（QPP init13 + Fibonacci 渐进，strong hit 关闭）在修复配置下仍全面优于
-固定 top-20：any +1.04pp、overall +1.76pp；类别级 single-session-assistant
-98.21 vs 92.86（+5.35pp）、single-session-user +1.56pp、temporal +0.75pp。
-代价是平均记录数 20.5 vs 15.1（token 更高，QPP 爬升部分）。
+固定 top-20：any +1.04pp、overall +1.76pp、answer 正确率 +1.1pp（81.2% →
+82.3%）。类别级亮点（answer 正确率）：single-session-preference 73.3 vs 66.7
+（+6.6pp）、single-session-assistant 98.2 vs 94.6（+3.6pp）、knowledge-update
+86.8 vs 84.6（+2.2pp）、multi-session 75.8 vs 74.4（+1.4pp）；single-session-user
+（-1.5pp）与 temporal（-0.7pp）小幅回退。代价是平均记录数 20.5 vs 15.1（token
+更高，QPP 爬升部分）。
 
 ## 教训
 
