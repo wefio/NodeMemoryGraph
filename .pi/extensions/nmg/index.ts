@@ -52,6 +52,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         sessionId,
         maxTier: configuredAutoRecallTier(),
         limit: configuredAutoRecallLimit(),
+        initialEvidenceTarget: configuredInitialTarget(),
+        secondPass: true,
         graphHops: 1,
         tieredDisclosure: true,
       })) as MemoryContext;
@@ -321,7 +323,9 @@ export const MEMORY_POLICY =
   `records and source evidence. nmg_remember saves durable information. For the latest user ` +
   `request, decide which candidates matter, whether one or several records are needed, and ` +
   `whether more recall or current verification is required. No useful memory is a valid result. ` +
-  `Do not treat candidate count as completeness or a memory as current truth. Save only ` +
+  `Do not treat candidate count as completeness or a memory as current truth. If the recalled ` +
+  `headers under-determine the answer, request additional evidence (append/re-fetch) before ` +
+  `guessing; ignore headers that are clearly irrelevant noise. Save only ` +
   `attributable, durable information; do not save secrets, transient content, unconfirmed ` +
   `assistant proposals, or unsupported guesses.\n` +
   `</nmg_policy>`;
@@ -349,8 +353,13 @@ function configuredAutoRecallTier(): MemoryTier {
 }
 
 function configuredAutoRecallLimit(): number {
-  const value = Number(process.env.NMG_AUTO_RECALL_LIMIT ?? 8);
-  return Math.max(1, Math.min(20, Number.isFinite(value) ? Math.floor(value) : 8));
+  const value = Number(process.env.NMG_AUTO_RECALL_LIMIT ?? 13);
+  return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 13));
+}
+
+function configuredInitialTarget(): number {
+  const value = Number(process.env.NMG_AUTO_RECALL_INITIAL_TARGET ?? 13);
+  return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 13));
 }
 
 function shouldAutoRecall(prompt: string): boolean {

@@ -527,12 +527,8 @@ export interface NodeTransform {
 
 /** Learned weights for the QPP score composition (see qpp.ts). */
 export interface QppWeights {
-  /** weight on the score-variance (NQC-family) term. */
-  tauV: number;
-  /** weight on intent coverage. */
-  wIc: number;
-  /** weight on reason health. */
-  wRh: number;
+  /** weight on the NQC normalised dispersion term (stdev/mean of top scores). */
+  wNqc: number;
 }
 
 /** A retrieval candidate projected to exactly the fields QPP needs. */
@@ -550,6 +546,15 @@ export interface QppComponents {
   top1: number;
   /** bounded standard deviation of direct usefulness in [0,1] (NQC-family). */
   variance: number;
+  /** NQC normalised dispersion: stdev(top-k) / mean(top-k), clamped [0,1].
+   *  Replaces the absolute top1 anchor's cross-query baseline problem: a sharp
+   *  top1 margin maps to a high NQC, a flat distribution to a low one. */
+  nqc: number;
+  /** Relative top1→top2 margin: (s1 − s2) / s1, clamped [0,1]. 0 when fewer
+   *  than 2 direct candidates. A large margin is the only retrieval-side
+   *  signal that reliably predicts a single-evidence query (measured: median
+   *  K_need drops to ~3 when this exceeds ~0.05; top1 alone does not). */
+  topGap: number;
   /** [0,1]; 0.5 neutral when the query matches no intent family. */
   intentCoverage: number;
   /** [0,1]; share of direct candidates whose reason is not hybrid_match. */

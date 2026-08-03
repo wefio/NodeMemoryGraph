@@ -23,7 +23,12 @@ import {
   queryAssociationEdges,
   stableTaskId,
 } from "./active-graph.ts";
-import { qppCandidates, shouldTriggerSecondPass } from "../qpp.ts";
+import { computeQppComponents, qppCandidates, shouldTriggerSecondPass } from "../qpp.ts";
+import {
+  DEFAULT_INITIAL_EVIDENCE_TARGET,
+  STRONG_HIT_INITIAL_TARGET,
+  STRONG_HIT_TOP_GAP,
+} from "../qpp.ts";
 import { propagateEdgeActivation } from "../edge-activation.ts";
 import {
   contextUsefulness,
@@ -329,14 +334,40 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         const stages = [];
         let stoppedBecause: NonNullable<QppTriggerDecision["expansion"]>["stoppedBecause"] =
           "budget_exhausted";
+        // Fibonacci tiers replace the fixed first-pass limit: the loop starts at
+        // the requested tier (default 1 = single evidence) and ascends 1, 2, 3,
+        // 5, 8, ... until QPP says the evidence is sufficient, the caller's
+        // `limit` hard cap is reached, or the expanded budget is exhausted.
+        // `limit` therefore means "maximum recommended records", not "give me
+        // exactly this many on the first pass".
         const fibonacciBudgets = fibonacciEvidenceBudgets(Math.min(50, maximum.maxEvidence));
+        // limit was clamped to the *original* budget at entry (line ~114); the
+        // hard cap must use the caller's requested limit so the walk can reach
+        // the expanded budget (otherwise every expansion stops at the original
+        // maxEvidence and the Fibonacci tiers never ascend).
+        const requestedLimit = Math.max(1, Math.min(options.limit ?? 8, 50));
+        const hardLimit = Math.max(1, Math.min(requestedLimit, maximum.maxEvidence));
+        // Start the walk at the configured default (13: measured sweet spot)
+        // instead of a single record. Only a real score cliff (relative
+        // top1→top2 margin > STRONG_HIT_TOP_GAP) early-stops to 1-3 records —
+        // top1 magnitude alone is not a reliable single-evidence signal.
+        const requestedRaw = options.initialEvidenceTarget ?? DEFAULT_INITIAL_EVIDENCE_TARGET;
+        const initialComponents = computeQppComponents(
+          query,
+          qppCandidates(selection.results, selections),
+        );
+        const strongHit = initialComponents.topGap >= STRONG_HIT_TOP_GAP;
         const requestedInitial = Math.max(
           1,
-          Math.min(options.initialEvidenceTarget ?? 1, maximum.maxEvidence),
+          Math.min(
+            strongHit ? Math.min(STRONG_HIT_INITIAL_TARGET, requestedRaw) : requestedRaw,
+            maximum.maxEvidence,
+          ),
         );
         const initialTarget =
           fibonacciBudgets.find((target) => target >= requestedInitial) ?? maximum.maxEvidence;
         for (const targetEvidence of fibonacciBudgets.filter((target) => target >= initialTarget)) {
+          if (targetEvidence > hardLimit) break;
           // Relation expansion has already run at the original graph-hop budget.
           // Do not claim the extra hop from the hard envelope until graph routing
           // itself becomes progressive.

@@ -1,12 +1,17 @@
 /**
  * QPP (Query Performance Prediction) — post-retrieval confidence that the first
  * recall prefix returned enough evidence. Drives progressive expansion through
- * cumulative Fibonacci evidence tiers. See docs/fibonacci-progressive-recall.md.
+ * cumulative Fibonacci evidence tiers. See docs/fibonacci-progressive-recall.md
+ * and docs/qpp-evidence-signal-experiments-2026-08-02.md.
  *
- * This is a learned-weight NQC variant: `C = Top1 + τ_v·variance +
- * w_ic·intentCoverage + w_rh·reasonHealth`. Top1 is the anchor (implicit weight
- * 1.0); the other three terms catch distinct recall-coverage failure modes
- * (flat score distribution, type miss, all-fallback matches).
+ * This is an NQC-anchored variant: `C = Top1 + wNqc·NQC`. Top1 keeps the
+ * absolute-strength anchor (a single strong hit is enough), NQC adds the
+ * normalised dispersion (stdev/mean of the top-k scores, clamped [0,1]) that
+ * measures the top1 margin relative to the rest. intentCoverage and
+ * reasonHealth are computed and recorded for shadow audits but no longer
+ * contribute to C — on real benchmark traces they are constant (intentCoverage
+ * 0.5 for untyped ingest, reasonHealth 1.0 for normal retrieval), which pushed
+ * C to ~0.92 and made the trigger never fire (see audit-qpp-trigger-stats.ts).
  *
  * Stages:
  *   - Stage 0: hard threshold + permanent guardrail floor (this module).
@@ -30,20 +35,39 @@ import type {
 } from "./types.ts";
 
 /**
- * Stage 1 initial weights (hand-set priors, ordered by signal informativeness
- * and non-redundancy). Replaced by Bayesian optimisation (Stage 1) then DC
- * gradient (Stage 2). Top1 carries implicit weight 1.0 as the NQC anchor.
+ * Stage 1 initial weights (hand-set priors). Replaced by Bayesian optimisation
+ * (Stage 1) then DC gradient (Stage 2). Top1 carries implicit weight 1.0 as the
+ * absolute anchor; NQC carries wNqc.
  */
-export const DEFAULT_QPP_WEIGHTS: QppWeights = { tauV: 0.3, wIc: 0.3, wRh: 0.2 };
+export const DEFAULT_QPP_WEIGHTS: QppWeights = { wNqc: 0.5 };
 
 /**
- * Stage 0/1 initial trigger threshold on C. Placeholder — must be calibrated on
- * the partial-evidence (16.67%) eval batch so its recall >= 0.8.
+ * Stage 0/1 initial trigger threshold on C. C = Top1 + 0.5·NQC, so a single
+ * strong hit (Top1 ≥ 0.7) clears it; a flat weak distribution does not.
+ * Placeholder — must be calibrated on the partial-evidence eval batch.
  */
-export const DEFAULT_QPP_THRESHOLD = 0.45;
+export const DEFAULT_QPP_THRESHOLD = 0.55;
 
-/** Stage 0 guardrail floor on Top1 (hybridScore scale [0,1]) — a best match weaker
- *  than this triggers unconditionally. */
+/**
+ * First-pass evidence target for the Fibonacci walk (replaces starting at 1).
+ * Starts near the measured efficiency sweet spot (13 on LoCoMo: 61% of
+ * queries fully covered; vs top-20 the walk measures -28% records, -29%
+ * noise at equal-or-better coverage). Most queries resolve in one pass; the
+ * caller's LLM only appends when its own sufficiency judgement says evidence
+ * is still missing (append IS the tier walk, judged by the consumer model).
+ * Config knob: search options.initialEvidenceTarget / NMG_AUTO_RECALL_INITIAL_TARGET.
+ */
+export const DEFAULT_INITIAL_EVIDENCE_TARGET = 13;
+
+/**
+ * Strong single-evidence hit: when the relative top1→top2 margin exceeds this
+ * threshold, measured median K_need collapses to ~3 (LoCoMo, BGE vectors).
+ * Only real score cliffs trigger early-stop; top1 magnitude alone does not
+ * (median K_need stays ~7 even at top1 ≥ 0.7).
+ */
+export const STRONG_HIT_TOP_GAP = 0.05;
+export const STRONG_HIT_INITIAL_TARGET = 3;
+
 export const QPP_TOP1_FLOOR = 0.2;
 
 /**
@@ -88,6 +112,16 @@ export function computeQppComponents(
   const top1 = directStrength.length === 0 ? 0 : Math.max(...directStrength);
   // stdev of [0,1]-bounded values is <= 0.5, so *2 maps to [0,1].
   const variance = clamp(stdev(directStrength) * 2, 0, 1);
+  // NQC: std(top-k) / mean(top-k). Measures the top1 margin relative to the
+  // rest of the visible list (0 when k < 2, which keeps single-hit queries on
+  // the top1 anchor alone).
+  const nqc = clamp(nqcDispersion(directStrength), 0, 1);
+  // Relative top1→top2 margin on the bounded strength scale. Fewer than 2
+  // direct candidates means no observable margin — neutral 0.
+  const topGap =
+    directStrength.length < 2 || directStrength[0]! <= 0
+      ? 0
+      : clamp((directStrength[0]! - directStrength[1]!) / directStrength[0]!, 0, 1);
   const reasonHealth =
     direct.length === 0
       ? 0
@@ -95,6 +129,8 @@ export function computeQppComponents(
   return {
     top1,
     variance,
+    nqc,
+    topGap,
     intentCoverage: computeIntentCoverage(query, candidates),
     reasonHealth,
     directCount: direct.length,
@@ -124,12 +160,7 @@ export function composeQpp(
   components: QppComponents,
   weights: QppWeights = DEFAULT_QPP_WEIGHTS,
 ): number {
-  return (
-    components.top1 +
-    weights.tauV * components.variance +
-    weights.wIc * components.intentCoverage +
-    weights.wRh * components.reasonHealth
-  );
+  return components.top1 + weights.wNqc * components.nqc;
 }
 
 /** Full QPP score C for a query + candidates. */
@@ -180,4 +211,12 @@ function stdev(values: number[]): number {
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
   const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
   return Math.sqrt(variance);
+}
+
+/** NQC normalised dispersion: std / mean, or 0 when fewer than 2 values. */
+function nqcDispersion(values: number[]): number {
+  if (values.length < 2) return 0;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  if (mean <= 1e-9) return 0;
+  return stdev(values) / mean;
 }

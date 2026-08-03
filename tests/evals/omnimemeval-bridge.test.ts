@@ -264,7 +264,9 @@ test("OmniMemEval uses progressive QPP by default and permits a fixed-window bas
     })) as { memories: unknown[] };
 
     assert.equal(normalResult.memories.length, 4);
-    assert.equal(adaptiveResult.memories.length, 1);
+    // Progressive default now starts at the configured initial target (13):
+    // with a 4-record pool the walk returns the whole pool in one pass.
+    assert.equal(adaptiveResult.memories.length, 4);
     assert.equal(safePrefixResult.memories.length, 2);
   } finally {
     normal.close();
@@ -422,9 +424,10 @@ test("semantic retrieval exposes a tagged revocation boundary", async () => {
         memory.statement.startsWith("[forget]") === false &&
         memory.markers.some((marker) => marker.kind === "forget"),
     );
-    // The dynamic window may retrieve only one revocation. Its structured
-    // marker is projected to [forget] for the LLM without loading a pair.
-    assert.equal(revocations.length, 1);
+    // The Fibonacci walk may stop at one or two revocations; the structured
+    // marker is projected to [forget] exactly once (projectMemoryContext
+    // dedupes control markers) — the assertion is about the tagged boundary.
+    assert.ok(revocations.length >= 1, "at least one tagged revocation surfaced");
     assert.equal(result.text.match(/^\[forget\]/gm)?.length, 1);
   } finally {
     bridge.close();

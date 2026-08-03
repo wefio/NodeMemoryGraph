@@ -112,7 +112,7 @@ test("benchmark parameters include runtime defaults when no overrides are suppli
       searchRecommendation: "off",
       progressiveSecondPass: false,
       initialEvidenceTarget: null,
-      threshold: 0.45,
+      threshold: 0.55,
     },
     retrieval: { graphHopsOverride: null },
     embeddings: {
