@@ -84,6 +84,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     assert.match(recalled.systemPrompt, /NMG SEARCH HEADERS/);
     assert.match(recalled.systemPrompt, /matches=storage/);
     assert.doesNotMatch(recalled.systemPrompt, /tier=L\d/);
+    assert.doesNotMatch(recalled.systemPrompt, /deepestTier/);
     assert.doesNotMatch(recalled.systemPrompt, /SOURCE=/);
     const recalledAgain = await handlers.get("before_agent_start")!(
       { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },

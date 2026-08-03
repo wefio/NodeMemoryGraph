@@ -379,6 +379,7 @@ export function formatSearchHeaders(context: MemoryContext): string {
         `- ${(memory.markers ?? []).some((marker) => marker.kind === "external_source") ? "[external] " : ""}` +
         `memory=${memory.id}; node=${node.canonicalName}; type=${memory.memoryType}; ` +
         `${recallMatchLabel(reason, hitTerms)}` +
+        `${recallTimeLabel(memory)}` +
         `preview=${excerpt(memory.statement, 160)}`,
     ),
     formatActiveGraph(context),
@@ -402,6 +403,19 @@ function recallMatchLabel(
   return `matches=${label}; `;
 }
 
+/** Temporal anchors the agent can act on: the event's own time when
+ *  recorded, and an expiry when the record stops being current. Dates only,
+ *  omitted when absent. */
+function recallTimeLabel(memory: MemorySearchResult["memory"]): string {
+  const day = (iso: string | null): string | null => (iso ? iso.slice(0, 10) : null);
+  const parts: string[] = [];
+  const event = day(memory.eventTime);
+  if (event) parts.push(`time=${event}`);
+  const expires = day(memory.expiresAt ?? memory.validUntil);
+  if (expires) parts.push(`expires=${expires}`);
+  return parts.length > 0 ? `${parts.join("; ")}; ` : "";
+}
+
 function formatProgressiveDisclosure(context: MemoryContext): string {
   const disclosure = context.progressiveDisclosure;
   if (!disclosure || disclosure.deferredMemoryIds.length === 0) return "";
@@ -413,9 +427,7 @@ function formatProgressiveDisclosure(context: MemoryContext): string {
 }
 
 function formatActiveGraph(context: MemoryContext): string {
-  return context.activeGraph
-    ? `AG activeGraphId=${context.activeGraph.id}; tiersOpened=${context.activeGraph.usage.tiersOpened}; deepestTier=L${context.activeGraph.usage.deepestTier}; deepEvidence=${context.activeGraph.usage.deepEvidence}`
-    : "";
+  return context.activeGraph ? `AG activeGraphId=${context.activeGraph.id}` : "";
 }
 
 export function formatMemoryContext(context: MemoryContext): string {
