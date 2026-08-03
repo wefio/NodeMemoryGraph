@@ -36,6 +36,46 @@ logs under `docs/` (indexed here so new work can find prior evidence):
   store cap as warning, restart fidelity) and its acceptance tests.
 - `docs/llm-sufficiency-recall-design.md` — LLM-sufficiency recall design.
 
+## Reproducible LongMemEval runs
+
+LongMemEval experiments go through one flow so recipes stop drifting between
+runs (env encoding, embedding-cache locking, worker flags, NMG_ROOT timing,
+baseline comparison):
+
+```bash
+# Full run (ingest + search + answer + judge + metrics)
+./evals/omnimemeval/run-lme.sh --env-file .env.nmg-bgefix --version fixed20_rerun
+
+# Reuse existing user stores (same corpus already ingested): start at search
+./evals/omnimemeval/run-lme.sh --env-file .env.nmg-bgefix --version fixed20_rerun --skip-ingest
+
+# Analyze an existing run (metrics + manifest)
+./evals/omnimemeval/run-lme.sh --analyze results/lme/nmg-lme500_fixed20_rerun
+```
+
+The script pins `NMG_ROOT`/`PYTHONUTF8`/`PYTHONIOENCODING`, kills stray
+bridge/lme processes, checks embedding-cache coverage, and defaults
+`--workers 1` (parallel bridge workers race on the cache schema lock). After
+the run it emits `experiment_manifest.json` into the result dir:
+
+- `code.commit` + dirty files — the exact NMG revision, i.e. the rollback
+  point for any change made in the experiment.
+- `prompt_templates.*` — hashes of the retrieval guidance (bridge.ts), the
+  LME answer/judge prompts (utils/prompts.py) and the NMG policy extension
+  (`.pi/extensions/nmg/index.ts`), so "prompt didn't change but the score
+  moved" is checkable against template hashes.
+- `runtime.env` + `runtime.llm_defaults` — answer/judge model, base URL,
+  embedding model/profile, QPP toggles, temperature.
+- `dataset.sha256` — exact LongMemEval corpus.
+- `results.*` — any-evidence recall, evidence recall (overall), all-evidence
+  recall, answer accuracy, per-category breakdowns, and up to five failing
+  samples for bad-case review.
+
+Publishing discipline: keep the env file (`OmniMemEval/.env.nmg-*`) and the
+result directory together, note the responsible person and canary scope in
+`experiment_manifest.json.experiment` if shared, and treat `code.commit` as
+the rollback version.
+
 ## Benchmark roles
 
 | Suite               | Primary role                  | NMG mechanisms under test                                                                          |

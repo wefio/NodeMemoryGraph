@@ -5,6 +5,10 @@ import { DatabaseSync } from "node:sqlite";
 
 import { encodeVector, parseVector } from "../../src/core/store/vector-codec.ts";
 
+function sleep(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 type InputKind = "document" | "query";
 
 interface CacheRow {
@@ -28,7 +32,11 @@ export class CachedOmniEmbeddingClient implements EmbeddingClient {
     this.#delegate = delegate;
     this.indexId = delegate.indexId;
     this.#db = new DatabaseSync(databasePath);
-    this.#db.exec(`
+    // Parallel bridge workers open the same cache file and their CREATE TABLE
+    // IF NOT EXISTS can collide on SQLite's schema lock (SQLITE_BUSY on DDL is
+    // immediate, busy_timeout does not cover it). Retry the init DDL a few
+    // times so a transient peer holds never fails the whole search.
+    const init = `
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = NORMAL;
       PRAGMA busy_timeout = 5000;
@@ -40,7 +48,16 @@ export class CachedOmniEmbeddingClient implements EmbeddingClient {
         created_at TEXT NOT NULL,
         PRIMARY KEY (index_id, input_kind, text_hash)
       );
-    `);
+    `;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        this.#db.exec(init);
+        break;
+      } catch (error) {
+        if (attempt >= 4) throw error;
+        sleep(250);
+      }
+    }
   }
 
   close(): void {
