@@ -356,11 +356,13 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           query,
           qppCandidates(selection.results, selections),
         );
-        const strongHit = initialComponents.topGap >= STRONG_HIT_TOP_GAP;
+        const strongHit = initialComponents.topGap >= (options.strongHitTopGap ?? STRONG_HIT_TOP_GAP);
         const requestedInitial = Math.max(
           1,
           Math.min(
-            strongHit ? Math.min(STRONG_HIT_INITIAL_TARGET, requestedRaw) : requestedRaw,
+            strongHit
+              ? Math.min(options.strongHitInitialTarget ?? STRONG_HIT_INITIAL_TARGET, requestedRaw)
+              : requestedRaw,
             maximum.maxEvidence,
           ),
         );

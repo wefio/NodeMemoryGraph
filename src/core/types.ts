@@ -257,6 +257,10 @@ export interface SearchOptions {
   tieredDisclosure?: boolean;
   /** Learned first-pass Fibonacci tier. QPP may continue to later tiers. */
   initialEvidenceTarget?: number;
+  /** Override the strong-hit margin (relative top1→top2 gap). Default 0.05. */
+  strongHitTopGap?: number;
+  /** Override the strong-hit first-pass target. Default 3. */
+  strongHitInitialTarget?: number;
   /** Disable per-phase timing for this operation (default: enabled). */
   perf?: boolean;
 }

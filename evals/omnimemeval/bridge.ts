@@ -85,6 +85,10 @@ export interface OmniMemEvalBridgeOptions {
   qppInitialEvidenceTarget?: number;
   /** Optional retrieval-confidence threshold for matched QPP ablations. */
   qppThreshold?: number;
+  /** Override the strong-hit margin (relative top1→top2 gap); 1 disables it. */
+  strongHitTopGap?: number;
+  /** Override the strong-hit first-pass target. */
+  strongHitInitialTarget?: number;
   /** Persist core retrieval timings independently of disposable user databases. */
   perfLogPath?: string;
   /** Override the persistent content-addressed embedding cache location. */
@@ -97,6 +101,8 @@ export interface OmniMemEvalBridgeOptions {
  * Each benchmark user receives an isolated SQLite database. The bridge calls
  * NMG's public store methods; it does not duplicate graph or retrieval logic.
  */
+const MAX_OPEN_STORES = 128;
+
 export class OmniMemEvalBridge {
   readonly #root: string;
   readonly #stores = new Map<string, NmgStore>();
@@ -106,6 +112,8 @@ export class OmniMemEvalBridge {
   readonly #secondPass: boolean;
   readonly #qppInitialEvidenceTarget?: number;
   readonly #qppThreshold?: number;
+  readonly #strongHitTopGap?: number;
+  readonly #strongHitInitialTarget?: number;
   readonly #perfLogPath: string;
 
   constructor(root: string, options: OmniMemEvalBridgeOptions = {}) {
@@ -124,6 +132,8 @@ export class OmniMemEvalBridge {
     this.#secondPass = options.secondPass ?? true;
     this.#qppInitialEvidenceTarget = positiveNumber(options.qppInitialEvidenceTarget);
     this.#qppThreshold = finiteNumber(options.qppThreshold);
+    this.#strongHitTopGap = finiteNumber(options.strongHitTopGap);
+    this.#strongHitInitialTarget = positiveNumber(options.strongHitInitialTarget);
     this.#perfLogPath = resolve(options.perfLogPath ?? resolve(this.#root, "search-perf.jsonl"));
     mkdirSync(this.#root, { recursive: true });
   }
@@ -259,6 +269,8 @@ export class OmniMemEvalBridge {
         progressiveWarmDisclosure: false,
         initialEvidenceTarget: this.#qppInitialEvidenceTarget,
         qppThreshold: this.#qppThreshold,
+        strongHitTopGap: this.#strongHitTopGap,
+        strongHitInitialTarget: this.#strongHitInitialTarget,
         activeGraphBudget: {
           maxNodes: limit,
           maxEvidence: limit,
@@ -329,6 +341,17 @@ export class OmniMemEvalBridge {
     if (!store) {
       store = new NmgStore(this.#databasePath(key));
       this.#stores.set(key, store);
+      // Keep the open-store cache bounded: every open NmgStore pins a SQLite
+      // connection (plus its WAL readers), and long benchmarks can otherwise
+      // exhaust process handles long before the map is ever evicted. Close the
+      // least-recently-used store once the cache exceeds a fixed cap.
+      if (this.#stores.size > MAX_OPEN_STORES) {
+        const oldestKey = this.#stores.keys().next().value as string | undefined;
+        if (oldestKey !== undefined && oldestKey !== key) {
+          this.#stores.get(oldestKey)?.close();
+          this.#stores.delete(oldestKey);
+        }
+      }
     }
     return store;
   }
@@ -502,6 +525,12 @@ async function run(): Promise<void> {
       ? Number(process.env.NMG_QPP_INITIAL_EVIDENCE_TARGET)
       : undefined,
     qppThreshold: process.env.NMG_QPP_THRESHOLD ? Number(process.env.NMG_QPP_THRESHOLD) : undefined,
+    strongHitTopGap: process.env.NMG_QPP_STRONG_HIT_TOP_GAP
+      ? Number(process.env.NMG_QPP_STRONG_HIT_TOP_GAP)
+      : undefined,
+    strongHitInitialTarget: process.env.NMG_QPP_STRONG_HIT_INITIAL_TARGET
+      ? Number(process.env.NMG_QPP_STRONG_HIT_INITIAL_TARGET)
+      : undefined,
   });
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 
