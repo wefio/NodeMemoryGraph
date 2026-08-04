@@ -66,7 +66,6 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
       targetNodeIds: string[],
       memoryIds: string[],
     ) => NodeTransform;
-    declare protected redirectRelations: (sourceNodeId: string, targetNodeId: string) => void;
     declare protected markIndexDelta: (
       memoryId: string,
       nodeId: string,
@@ -194,6 +193,35 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         .prepare("UPDATE memory_nodes SET residence = 'ltg', updated_at = ? WHERE id IN (?, ?)")
         .run(now, relation.sourceNodeId, relation.targetNodeId);
       return relation;
+    }
+
+    // Moved up from NmgStoreBase: its only caller is mergeNodes (this
+    // cluster), and it calls linkNodes — keeping it in base forced the
+    // upward linkNodes stub.
+    protected redirectRelations(sourceNodeId: string, targetNodeId: string): void {
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM node_relations
+         WHERE source_node_id = ? OR target_node_id = ?`,
+        )
+        .all(sourceNodeId, sourceNodeId) as Row[];
+      const remove = this.db.prepare("DELETE FROM node_relations WHERE id = ?");
+      for (const row of rows) {
+        const relation = mapRelation(row);
+        remove.run(relation.id);
+        const nextSource =
+          relation.sourceNodeId === sourceNodeId ? targetNodeId : relation.sourceNodeId;
+        const nextTarget =
+          relation.targetNodeId === sourceNodeId ? targetNodeId : relation.targetNodeId;
+        if (nextSource !== nextTarget) {
+          this.linkNodes({
+            sourceNodeId: nextSource,
+            targetNodeId: nextTarget,
+            type: relation.type,
+            evidenceIds: relation.evidenceIds,
+          });
+        }
+      }
     }
 
     getRelations(nodeIds: string[], maxHops = 1): NodeRelation[] {

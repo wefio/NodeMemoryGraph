@@ -30,10 +30,11 @@ automatic recall alone is not labelled useful.
   intentionally untrained heuristic.
 - [ ] Implement the rolling QPP calibration worker only if trace labels are
   sufficiently reliable; keep QPP optional until then.
-- [ ] Decide whether the four `NmgStoreBase` mixin stubs (`linkNodes`,
-  `routeNodes`, `recordUsage`, `trainRouter`) should become a compile-time
-  interface/abstract boundary. They are currently overridden and tested, so
-  this is maintainability work rather than missing behavior.
+- [x] ~~Decide whether the four `NmgStoreBase` mixin stubs~~ — resolved
+  2026-08-03 by moving the three base helpers that caused the upward calls
+  into their consuming clusters (`recordActiveGraphUseInner` → maintenance,
+  `searchWithVector` → retrieval, `redirectRelations` → graph); the stubs are
+  deleted and base no longer depends on cluster methods.
 
 ## P1 — finish the user-facing memory lifecycle
 

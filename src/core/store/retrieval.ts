@@ -33,18 +33,23 @@ import { propagateEdgeActivation } from "../edge-activation.ts";
 import {
   contextUsefulness,
   hybridScore,
+  lexicalScore,
   mergeSemanticCandidates,
+  normalize,
   recallHitTerms,
   recallReason,
   type StoreRow as Row,
 } from "./search-ranking.ts";
-import { clamp, effectiveFilterDimensions } from "./rows.ts";
+import { clamp, effectiveFilterDimensions, mapSearchResult, matchesScope } from "./rows.ts";
+import { cosineSimilarity } from "../vector.ts";
+import { storedVector } from "./vector-codec.ts";
 import type {
   ActiveGraph,
   ActiveGraphBudget,
   ActiveGraphBudgetUsage,
   ActiveGraphSelection,
   LeafBlock,
+  HistoryRecord,
   MemoryContext,
   MemoryRecord,
   MemorySearchResult,
@@ -72,6 +77,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
 
     // graph cluster
     declare getRelations: (nodeIds: string[], maxHops?: number) => NodeRelation[];
+    declare routeNodes: (query: string, limit?: number) => NodeRoute[];
     declare routeNodesByVector: (
       queryVector: readonly number[],
       model: string,
@@ -86,14 +92,10 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
     ) => Array<{ block: LeafBlock; score: number }>;
 
     // cross-cluster (maintenance / base)
-    declare protected searchWithVector: (
-      query: string,
-      queryVector: readonly number[],
-      model: string,
-      options: SearchOptions,
-      forcedCandidateIds?: string[],
-      filterUsage?: RetrievalFilterUsage,
-    ) => MemorySearchResult[];
+    declare protected resolveActiveNodeName: (nodeName: string) => string;
+    declare protected ftsCandidates: (query: string, limit: number) => string[];
+    declare protected evidenceIds: (memoryId: string) => string[];
+    declare protected evidenceRecords: (ids: string[]) => HistoryRecord[];
     declare protected resultsForNode: (
       nodeId: string,
       maxTier: MemoryTier,
@@ -869,6 +871,182 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         },
         candidateIds,
       );
+    }
+
+    // Moved up from NmgStoreBase: every caller lives in this cluster, and it
+    // calls routeNodes (graph) — keeping it in base forced the upward
+    // routeNodes stub.
+    protected searchWithVector(
+      query: string,
+      queryVector: readonly number[],
+      vectorModel: string,
+      options: SearchOptions,
+      forcedCandidateIds: string[] = [],
+      filterUsage?: RetrievalFilterUsage,
+    ): MemorySearchResult[] {
+      const normalizedQuery = normalize(query);
+      if (!normalizedQuery) return [];
+
+      const maxTier = options.maxTier ?? 1;
+      const limit = Math.max(1, Math.min(options.limit ?? 8, 50));
+      const nodeName = options.nodeName ? this.resolveActiveNodeName(options.nodeName) : null;
+      const retrievalMode = options.retrievalMode ?? "legacy";
+      const ftsIds =
+        retrievalMode === "fts5" || retrievalMode === "hybrid"
+          ? this.ftsCandidates(query, MAX_SEARCH_CANDIDATES)
+          : [];
+      if (retrievalMode === "fts5" && ftsIds.length === 0 && forcedCandidateIds.length === 0) {
+        return [];
+      }
+      const candidateIds = forcedCandidateIds.length > 0 ? forcedCandidateIds : ftsIds;
+      const candidateClause =
+        forcedCandidateIds.length > 0
+          ? `AND m.id IN (${forcedCandidateIds.map(() => "?").join(",")})`
+          : retrievalMode === "qwen3"
+            ? "AND ve.vector_json IS NOT NULL"
+            : retrievalMode === "fts5"
+              ? `AND m.id IN (${ftsIds.map(() => "?").join(",")})`
+              : retrievalMode === "hybrid" && ftsIds.length > 0
+                ? `AND (m.id IN (${ftsIds.map(() => "?").join(",")}) OR m.id IN (
+           SELECT id FROM memory_records ORDER BY tier ASC, importance DESC,
+             access_count DESC, created_at DESC LIMIT ${MAX_SEARCH_CANDIDATES}
+         ))`
+                : "";
+      const candidateOrder =
+        forcedCandidateIds.length === 0 && retrievalMode === "hybrid" && ftsIds.length > 0
+          ? `CASE WHEN m.id IN (${ftsIds.map(() => "?").join(",")}) THEN 0 ELSE 1 END,`
+          : "";
+      const rowLimit =
+        forcedCandidateIds.length > 0
+          ? forcedCandidateIds.length
+          : retrievalMode === "qwen3"
+            ? 1_000_000
+            : retrievalMode === "fts5"
+              ? ftsIds.length
+              : MAX_SEARCH_CANDIDATES + ftsIds.length;
+      // Scope filtering is pushed into SQL so scoring runs only on matching
+      // rows (filter-then-score, not score-then-filter). One json_extract per
+      // requested scope key; keys are emitted as quoted path segments
+      // ($."key" — safe for dots and other JSON-legal key characters), values
+      // parameterized — no injection surface.
+      const scopeEntries = Object.entries(options.scope ?? {});
+      const scopeClause =
+        scopeEntries.length > 0
+          ? `AND ${scopeEntries
+              .map(([key]) => `json_extract(m.scope_json, '$."${key.replace(/["\\]/g, "")}"') = ?`)
+              .join(" AND ")}`
+          : "";
+      const scopeParams = scopeEntries.map(([, value]) => value);
+      const rows = this.db
+        .prepare(
+          `SELECT
+           m.id AS m_id, m.node_id AS m_node_id,
+           m.evidence_id AS m_evidence_id, m.statement AS m_statement,
+           m.memory_type AS m_memory_type, m.state_key AS m_state_key,
+           m.event_time AS m_event_time, m.source_actor AS m_source_actor,
+           m.truth_status AS m_truth_status,
+           m.confidence AS m_confidence,
+           m.polarity AS m_polarity,
+           m.predicate_key AS m_predicate_key, m.extract_method AS m_extract_method, m.claims_json AS m_claims_json,
+           m.markers_json AS m_markers_json,
+           m.scope_json AS m_scope_json, m.valid_from AS m_valid_from,
+           m.valid_until AS m_valid_until, m.status AS m_status,
+           m.residence AS m_residence, m.promoted_at AS m_promoted_at,
+           m.expires_at AS m_expires_at,
+           m.evidence_role AS m_evidence_role,
+           m.supersedes_id AS m_supersedes_id,
+           m.tier AS m_tier, m.importance AS m_importance,
+           m.access_count AS m_access_count,
+           m.last_accessed_at AS m_last_accessed_at,
+           m.write_reason AS m_write_reason,
+           m.write_source AS m_write_source,
+           m.created_at AS m_created_at,
+           n.id AS n_id, n.canonical_name AS n_canonical_name,
+           n.kind AS n_kind, n.summary AS n_summary,
+           n.created_at AS n_created_at, n.updated_at AS n_updated_at,
+           n.status AS n_status, n.residence AS n_residence,
+           ve.vector_json AS ve_vector_json,
+           ve.vector_blob AS ve_vector_blob,
+           h.id AS h_id, h.session_id AS h_session_id, h.role AS h_role,
+           h.content AS h_content, h.source_message_id AS h_source_message_id,
+           h.source_ref AS h_source_ref,
+           h.created_at AS h_created_at
+         FROM memory_records m
+         JOIN memory_nodes n ON n.id = m.node_id
+         JOIN history_records h ON h.id = m.evidence_id
+         LEFT JOIN memory_embeddings ve ON ve.memory_id = m.id AND ve.model = ?
+         WHERE m.tier <= ?
+           AND m.storage_state = 'indexed'
+           ${candidateClause}
+           AND n.status = 'active'
+           AND (? IS NULL OR n.canonical_name = ?)
+           AND (? IS NULL OR m.source_actor = ?)
+           AND (? = 1 OR m.status IN ('active', 'disputed'))
+           AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+           ${scopeClause}
+         ORDER BY ${candidateOrder} m.tier ASC, m.importance DESC,
+                  m.access_count DESC, m.created_at DESC
+         LIMIT ?`,
+        )
+        .all(
+          vectorModel,
+          maxTier,
+          ...candidateIds,
+          nodeName,
+          nodeName,
+          options.sourceActor ?? null,
+          options.sourceActor ?? null,
+          options.includeHistorical ? 1 : 0,
+          ...(forcedCandidateIds.length === 0 && retrievalMode === "hybrid" ? ftsIds : []),
+          ...scopeParams,
+          rowLimit,
+        ) as Row[];
+
+      const routes =
+        retrievalMode === "fts5" || retrievalMode === "hashing" || retrievalMode === "qwen3"
+          ? new Map<string, number>()
+          : new Map(this.routeNodes(query, 20).map((route) => [route.node.id, route.score]));
+      const filtered = rows
+        .map((row) => {
+          const lexical = lexicalScore(normalizedQuery, row);
+          const vector = cosineSimilarity(queryVector, storedVector(row, "ve_"));
+          const route = routes.get(String(row.m_node_id)) ?? 0;
+          const result = mapSearchResult(row, lexical);
+          result.vectorScore = retrievalMode === "fts5" ? 0 : vector;
+          result.routeScore = route;
+          result.combinedScore =
+            retrievalMode === "fts5"
+              ? lexical > 0
+                ? lexical
+                : forcedCandidateIds.length > 0
+                  ? 0.001
+                  : 0
+              : retrievalMode === "hashing" || retrievalMode === "qwen3"
+                ? vector
+                : hybridScore(lexical, vector, route);
+          return result;
+        })
+        .filter((result) => matchesScope(result.memory.scope, options.scope))
+        .filter((result) => result.combinedScore > 0)
+        .sort(
+          (left, right) =>
+            right.combinedScore - left.combinedScore ||
+            left.memory.tier - right.memory.tier ||
+            right.memory.importance - left.memory.importance,
+        );
+      if (filterUsage) {
+        // Measure before LIMIT: after = what survived scope+score filtering, not
+        // what the limit truncated to.
+        filterUsage.candidatesBefore = rows.length;
+        filterUsage.candidatesAfter = filtered.length;
+        filterUsage.selectivity = rows.length > 0 ? 1 - filtered.length / rows.length : 0;
+      }
+      const results = filtered.slice(0, limit);
+      for (const result of results) {
+        result.memory.evidenceIds = this.evidenceIds(result.memory.id);
+        result.evidenceRecords = this.evidenceRecords(result.memory.evidenceIds);
+      }
+      return results;
     }
   };
 }

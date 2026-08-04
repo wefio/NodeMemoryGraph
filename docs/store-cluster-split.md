@@ -1,7 +1,7 @@
 # Store Cluster Split（store.ts 方法簇拆分）
 
-**Status:** done（2026-08-01）
-**Commits:** f3cd3b7（#private → protected）、5bcc4ef（守卫测试，红）、444983d（组装 + 98 测试）
+**Status:** done（2026-08-01；2026-08-03 消除基类 stub，见 §2.2 更新）
+**Commits:** f3cd3b7（#private → protected）、5bcc4ef（守卫测试，红）、444983d（组装 + 98 测试）、stub 消除（helper 上移）
 **Related:** [memory-graphs.md](memory-graphs.md), [stg-isolated-store.md](stg-isolated-store.md)
 
 ## 1. 背景
@@ -47,7 +47,7 @@ export class NmgStore
 | `Constructor` 必须 `new (...args: any[])` | `never[]` 触发 TS2545（mixin 构造器须 `...args: any[]` rest 透传） |
 | 基类用 **stub**（签名 + `throw`）而非 `abstract` | 测试用 `node --experimental-strip-types` 直接跑源码，而 strip-types 不支持 abstract 方法（须 abstract class，不可实例化） |
 | 字段 `#private` → `protected` | `#` 跨文件类不可访问；mixin 不能声明 protected 属性但可访问基类 protected 字段（Phase 0 已剥离 422 处） |
-| 基类调簇方法处声明 stub，簇 mixin 覆盖 | 3 处：`recordActiveGraphUseInner`→recordUsage/trainRouter、`searchWithVector`→routeNodes、`redirectRelations`→linkNodes。stub 运行时不可达（mixin 永远覆盖） |
+| ~~基类调簇方法处声明 stub~~（2026-08-03 已消除） | 原 3 处反向调用（`recordActiveGraphUseInner`→recordUsage/trainRouter、`searchWithVector`→routeNodes、`redirectRelations`→linkNodes）的根因是 helper 放错了层；已分别上移到唯一消费簇（maintenance / retrieval / graph），stub 全部删除，基类不再依赖簇方法 |
 | mixin 链顺序 graph ⊃ retrieval ⊃ writes ⊃ maintenance ⊃ Base | 依赖图无环（graph→maintenance；retrieval→graph,maintenance；writes→maintenance,graph；maintenance→∅），跨簇调用走原型链 |
 | 簇文件不 import store.ts / base.ts / 兄弟簇 | 模块图保持 DAG，只 import 类型/工具模块 |
 

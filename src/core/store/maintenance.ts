@@ -102,16 +102,23 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       updatedAt: string,
     ) => void;
     declare protected refreshPairUsefulness: (leftNodeId: string, rightNodeId: string) => void;
-    declare protected recordActiveGraphUseInner: (
-      activeGraphId: string,
-      input: {
-        usedMemoryIds: readonly string[];
-        contradictedMemoryIds?: readonly string[];
-        rejectedMemoryIds?: readonly string[];
-      },
-      sessionId?: string,
-    ) => void;
     declare protected assertTraceOwner: (row: Row, sessionId?: string) => void;
+    declare protected recordNodeOutcomes: (
+      used: Set<string>,
+      contradicted: Set<string>,
+      rejected: Set<string>,
+      updatedAt: string,
+    ) => void;
+    declare protected recordEdgeOutcomes: (
+      relationIds: readonly string[],
+      used: Set<string>,
+      contradicted: Set<string>,
+      rejected: Set<string>,
+      updatedAt: string,
+    ) => void;
+    // cross-cluster (writes / graph)
+    declare recordUsage: (memoryIds: string[]) => void;
+    declare trainRouter: (query: string, usefulNodeIds: string[], learningRate?: number) => void;
 
     /**
      * Soft-delete a memory and all its dependent artifacts.
@@ -910,6 +917,115 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       }
     }
 
+    // Moved up from NmgStoreBase: its only caller is recordActiveGraphUse
+    // (this cluster), and it calls recordUsage (writes) and trainRouter
+    // (graph) — keeping it in base forced two upward stubs.
+    protected recordActiveGraphUseInner(
+      activeGraphId: string,
+      input: {
+        usedMemoryIds: readonly string[];
+        contradictedMemoryIds?: readonly string[];
+        rejectedMemoryIds?: readonly string[];
+      },
+      sessionId?: string,
+    ): void {
+      const row = this.db
+        .prepare("SELECT * FROM retrieval_traces WHERE id = ?")
+        .get(activeGraphId) as Row | undefined;
+      if (!row) throw new Error(`active graph ${activeGraphId} does not exist`);
+      this.assertTraceOwner(row, sessionId);
+      const resultMemoryIds = new Set(parseStringArray(row.result_memory_ids_json));
+      const observedUsedMemoryIds = [...new Set(input.usedMemoryIds)].filter((id) =>
+        resultMemoryIds.has(id),
+      );
+      const observedContradictedMemoryIds = [
+        ...new Set(input.contradictedMemoryIds ?? []),
+      ].filter((id) => resultMemoryIds.has(id));
+      const observedRejectedMemoryIds = [...new Set(input.rejectedMemoryIds ?? [])].filter((id) =>
+        resultMemoryIds.has(id),
+      );
+      const usedMemoryIds = [
+        ...new Set([...parseStringArray(row.useful_memory_ids_json), ...observedUsedMemoryIds]),
+      ];
+      const contradictedMemoryIds = [
+        ...new Set([
+          ...parseStringArray(row.contradicted_memory_ids_json),
+          ...observedContradictedMemoryIds,
+        ]),
+      ];
+      const rejectedMemoryIds = [
+        ...new Set([
+          ...parseStringArray(row.rejected_memory_ids_json),
+          ...observedRejectedMemoryIds,
+        ]),
+      ];
+      const usedNodeIds = new Set(this.nodeIdsForMemories(usedMemoryIds));
+      const contradictedNodeIds = new Set(this.nodeIdsForMemories(contradictedMemoryIds));
+      const observedUsedNodeIds = new Set(this.nodeIdsForMemories(observedUsedMemoryIds));
+      const observedContradictedNodeIds = new Set(
+        this.nodeIdsForMemories(observedContradictedMemoryIds),
+      );
+      const observedRejectedNodeIds = new Set(
+        this.nodeIdsForMemories(observedRejectedMemoryIds),
+      );
+      const resultNodeIds = parseStringArray(row.result_node_ids_json).sort();
+      const relationIds = parseStringArray(row.relation_ids_json);
+      const now = new Date().toISOString();
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db
+          .prepare(
+            `UPDATE retrieval_traces SET useful_memory_ids_json = ?,
+           contradicted_memory_ids_json = ?, rejected_memory_ids_json = ?
+           WHERE id = ?`,
+          )
+          .run(
+            JSON.stringify(usedMemoryIds),
+            JSON.stringify(contradictedMemoryIds),
+            JSON.stringify(rejectedMemoryIds),
+            activeGraphId,
+          );
+        this.recordNodeOutcomes(
+          observedUsedNodeIds,
+          observedContradictedNodeIds,
+          observedRejectedNodeIds,
+          now,
+        );
+        this.recordEdgeOutcomes(
+          relationIds,
+          observedUsedNodeIds,
+          observedContradictedNodeIds,
+          observedRejectedNodeIds,
+          now,
+        );
+        const taskId = String(row.task_id) || stableTaskId(String(row.query));
+        for (let left = 0; left < resultNodeIds.length; left += 1) {
+          for (let right = left + 1; right < resultNodeIds.length; right += 1) {
+            const pair = [resultNodeIds[left]!, resultNodeIds[right]!] as const;
+            this.db
+              .prepare(
+                `UPDATE edge_task_observations
+               SET useful = MAX(useful, ?), contradicted = MAX(contradicted, ?)
+               WHERE left_node_id = ? AND right_node_id = ? AND task_id = ?`,
+              )
+              .run(
+                usedNodeIds.has(pair[0]) && usedNodeIds.has(pair[1]) ? 1 : 0,
+                contradictedNodeIds.has(pair[0]) || contradictedNodeIds.has(pair[1]) ? 1 : 0,
+                ...pair,
+                taskId,
+              );
+            this.refreshPairUsefulness(pair[0], pair[1]);
+          }
+        }
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+      this.recordUsage(observedUsedMemoryIds);
+      if (usedNodeIds.size > 0) this.trainRouter(String(row.query), [...usedNodeIds]);
+    }
+
     recordConsolidationEvent(
       action: ConsolidationEvent["action"],
       targetId: string,
@@ -961,7 +1077,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         .all(nodeId) as Row[];
       const groups = new Map<string, Row[]>();
       for (const row of rows) {
-        const key = `${row.node_id} ${row.tier} ${row.memory_type} ${row.scope_json}`;
+        const key = `${row.node_id}\0${row.tier}\0${row.memory_type}\0${row.scope_json}`;
         const group = groups.get(key) ?? [];
         group.push(row);
         groups.set(key, group);

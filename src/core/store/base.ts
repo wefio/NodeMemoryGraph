@@ -15,18 +15,13 @@ import type {
   LeafBlock,
   LeafEmbeddingDocument,
   NodeEmbeddingDocument,
-  NodeRoute,
   NodeTransform,
   MemoryRecord,
   MemoryWriteEvent,
   MemorySearchResult,
   MemoryScope,
   MemoryTier,
-  NodeRelation,
-  NodeRelationType,
-  RetrievalFilterUsage,
   PerfSnapshot,
-  SearchOptions,
   TopologyProposal,
   VectorEmbedder,
 } from "../types.ts";
@@ -35,18 +30,10 @@ import { Router } from "../router.ts";
 import { cosineSimilarity, HashingVectorEmbedder } from "../vector.ts";
 import { Float32VectorCache } from "../vector-cache.ts";
 import { migrate } from "./schema.ts";
-import { parseNumberArray, parseStringArray } from "./row-parse.ts";
+import { parseNumberArray } from "./row-parse.ts";
 import { encodeVector, storedVector } from "./vector-codec.ts";
-import { stableTaskId } from "./active-graph.ts";
 import { updateRelationStrength } from "../edge-activation.ts";
-import {
-  ftsExpression,
-  hybridScore,
-  lexicalScore,
-  memoryEmbeddingText,
-  normalize,
-  type StoreRow as Row,
-} from "./search-ranking.ts";
+import { ftsExpression, memoryEmbeddingText, type StoreRow as Row } from "./search-ranking.ts";
 
 import {
   identityTokens,
@@ -56,11 +43,9 @@ import {
   mapNode,
   mapRelation,
   mapSearchResult,
-  matchesScope,
   serializeScope,
 } from "./rows.ts";
 
-const MAX_SEARCH_CANDIDATES = 500;
 
 export class NmgStoreBase {
   protected db: DatabaseSync;
@@ -160,106 +145,6 @@ export class NmgStoreBase {
         createdAt,
       );
     }
-  }
-  recordActiveGraphUseInner(
-    activeGraphId: string,
-    input: {
-      usedMemoryIds: readonly string[];
-      contradictedMemoryIds?: readonly string[];
-      rejectedMemoryIds?: readonly string[];
-    },
-    sessionId?: string,
-  ): void {
-    const row = this.db
-      .prepare("SELECT * FROM retrieval_traces WHERE id = ?")
-      .get(activeGraphId) as Row | undefined;
-    if (!row) throw new Error(`active graph ${activeGraphId} does not exist`);
-    this.assertTraceOwner(row, sessionId);
-    const resultMemoryIds = new Set(parseStringArray(row.result_memory_ids_json));
-    const observedUsedMemoryIds = [...new Set(input.usedMemoryIds)].filter((id) =>
-      resultMemoryIds.has(id),
-    );
-    const observedContradictedMemoryIds = [...new Set(input.contradictedMemoryIds ?? [])].filter(
-      (id) => resultMemoryIds.has(id),
-    );
-    const observedRejectedMemoryIds = [...new Set(input.rejectedMemoryIds ?? [])].filter((id) =>
-      resultMemoryIds.has(id),
-    );
-    const usedMemoryIds = [
-      ...new Set([...parseStringArray(row.useful_memory_ids_json), ...observedUsedMemoryIds]),
-    ];
-    const contradictedMemoryIds = [
-      ...new Set([
-        ...parseStringArray(row.contradicted_memory_ids_json),
-        ...observedContradictedMemoryIds,
-      ]),
-    ];
-    const rejectedMemoryIds = [
-      ...new Set([...parseStringArray(row.rejected_memory_ids_json), ...observedRejectedMemoryIds]),
-    ];
-    const usedNodeIds = new Set(this.nodeIdsForMemories(usedMemoryIds));
-    const contradictedNodeIds = new Set(this.nodeIdsForMemories(contradictedMemoryIds));
-    const observedUsedNodeIds = new Set(this.nodeIdsForMemories(observedUsedMemoryIds));
-    const observedContradictedNodeIds = new Set(
-      this.nodeIdsForMemories(observedContradictedMemoryIds),
-    );
-    const observedRejectedNodeIds = new Set(this.nodeIdsForMemories(observedRejectedMemoryIds));
-    const resultNodeIds = parseStringArray(row.result_node_ids_json).sort();
-    const relationIds = parseStringArray(row.relation_ids_json);
-    const now = new Date().toISOString();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      this.db
-        .prepare(
-          `UPDATE retrieval_traces SET useful_memory_ids_json = ?,
-           contradicted_memory_ids_json = ?, rejected_memory_ids_json = ?
-           WHERE id = ?`,
-        )
-        .run(
-          JSON.stringify(usedMemoryIds),
-          JSON.stringify(contradictedMemoryIds),
-          JSON.stringify(rejectedMemoryIds),
-          activeGraphId,
-        );
-      this.recordNodeOutcomes(
-        observedUsedNodeIds,
-        observedContradictedNodeIds,
-        observedRejectedNodeIds,
-        now,
-      );
-      this.recordEdgeOutcomes(
-        relationIds,
-        observedUsedNodeIds,
-        observedContradictedNodeIds,
-        observedRejectedNodeIds,
-        now,
-      );
-      const taskId = String(row.task_id) || stableTaskId(String(row.query));
-      for (let left = 0; left < resultNodeIds.length; left += 1) {
-        for (let right = left + 1; right < resultNodeIds.length; right += 1) {
-          const pair = [resultNodeIds[left]!, resultNodeIds[right]!] as const;
-          this.db
-            .prepare(
-              `UPDATE edge_task_observations
-               SET useful = MAX(useful, ?), contradicted = MAX(contradicted, ?)
-               WHERE left_node_id = ? AND right_node_id = ? AND task_id = ?`,
-            )
-            .run(
-              usedNodeIds.has(pair[0]) && usedNodeIds.has(pair[1]) ? 1 : 0,
-              contradictedNodeIds.has(pair[0]) || contradictedNodeIds.has(pair[1]) ? 1 : 0,
-              ...pair,
-              taskId,
-            );
-          this.refreshPairUsefulness(pair[0], pair[1]);
-        }
-      }
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
-    this.recordUsage(observedUsedMemoryIds);
-    if (usedNodeIds.size > 0) this.trainRouter(String(row.query), [...usedNodeIds]);
   }
   protected assertTraceOwner(row: Row, sessionId?: string): void {
     const owner = row.session_id === null || row.session_id === undefined
@@ -521,178 +406,6 @@ export class NmgStoreBase {
       memoryId: String(row.memory_id),
       vector: storedVector(row),
     }));
-  }
-  searchWithVector(
-    query: string,
-    queryVector: readonly number[],
-    vectorModel: string,
-    options: SearchOptions,
-    forcedCandidateIds: string[] = [],
-    filterUsage?: RetrievalFilterUsage,
-  ): MemorySearchResult[] {
-    const normalizedQuery = normalize(query);
-    if (!normalizedQuery) return [];
-
-    const maxTier = options.maxTier ?? 1;
-    const limit = Math.max(1, Math.min(options.limit ?? 8, 50));
-    const nodeName = options.nodeName ? this.resolveActiveNodeName(options.nodeName) : null;
-    const retrievalMode = options.retrievalMode ?? "legacy";
-    const ftsIds =
-      retrievalMode === "fts5" || retrievalMode === "hybrid"
-        ? this.ftsCandidates(query, MAX_SEARCH_CANDIDATES)
-        : [];
-    if (retrievalMode === "fts5" && ftsIds.length === 0 && forcedCandidateIds.length === 0) {
-      return [];
-    }
-    const candidateIds = forcedCandidateIds.length > 0 ? forcedCandidateIds : ftsIds;
-    const candidateClause =
-      forcedCandidateIds.length > 0
-        ? `AND m.id IN (${forcedCandidateIds.map(() => "?").join(",")})`
-        : retrievalMode === "qwen3"
-          ? "AND ve.vector_json IS NOT NULL"
-          : retrievalMode === "fts5"
-            ? `AND m.id IN (${ftsIds.map(() => "?").join(",")})`
-            : retrievalMode === "hybrid" && ftsIds.length > 0
-              ? `AND (m.id IN (${ftsIds.map(() => "?").join(",")}) OR m.id IN (
-           SELECT id FROM memory_records ORDER BY tier ASC, importance DESC,
-             access_count DESC, created_at DESC LIMIT ${MAX_SEARCH_CANDIDATES}
-         ))`
-              : "";
-    const candidateOrder =
-      forcedCandidateIds.length === 0 && retrievalMode === "hybrid" && ftsIds.length > 0
-        ? `CASE WHEN m.id IN (${ftsIds.map(() => "?").join(",")}) THEN 0 ELSE 1 END,`
-        : "";
-    const rowLimit =
-      forcedCandidateIds.length > 0
-        ? forcedCandidateIds.length
-        : retrievalMode === "qwen3"
-          ? 1_000_000
-          : retrievalMode === "fts5"
-            ? ftsIds.length
-            : MAX_SEARCH_CANDIDATES + ftsIds.length;
-    // Scope filtering is pushed into SQL so scoring runs only on matching
-    // rows (filter-then-score, not score-then-filter). One json_extract per
-    // requested scope key; keys are emitted as quoted path segments
-    // ($."key" — safe for dots and other JSON-legal key characters), values
-    // parameterized — no injection surface.
-    const scopeEntries = Object.entries(options.scope ?? {});
-    const scopeClause =
-      scopeEntries.length > 0
-        ? `AND ${scopeEntries
-            .map(([key]) => `json_extract(m.scope_json, '$."${key.replace(/["\\]/g, "")}"') = ?`)
-            .join(" AND ")}`
-        : "";
-    const scopeParams = scopeEntries.map(([, value]) => value);
-    const rows = this.db
-      .prepare(
-        `SELECT
-           m.id AS m_id, m.node_id AS m_node_id,
-           m.evidence_id AS m_evidence_id, m.statement AS m_statement,
-           m.memory_type AS m_memory_type, m.state_key AS m_state_key,
-           m.event_time AS m_event_time, m.source_actor AS m_source_actor,
-           m.truth_status AS m_truth_status,
-           m.confidence AS m_confidence,
-           m.polarity AS m_polarity,
-           m.predicate_key AS m_predicate_key, m.extract_method AS m_extract_method, m.claims_json AS m_claims_json,
-           m.markers_json AS m_markers_json,
-           m.scope_json AS m_scope_json, m.valid_from AS m_valid_from,
-           m.valid_until AS m_valid_until, m.status AS m_status,
-           m.residence AS m_residence, m.promoted_at AS m_promoted_at,
-           m.expires_at AS m_expires_at,
-           m.evidence_role AS m_evidence_role,
-           m.supersedes_id AS m_supersedes_id,
-           m.tier AS m_tier, m.importance AS m_importance,
-           m.access_count AS m_access_count,
-           m.last_accessed_at AS m_last_accessed_at,
-           m.write_reason AS m_write_reason,
-           m.write_source AS m_write_source,
-           m.created_at AS m_created_at,
-           n.id AS n_id, n.canonical_name AS n_canonical_name,
-           n.kind AS n_kind, n.summary AS n_summary,
-           n.created_at AS n_created_at, n.updated_at AS n_updated_at,
-           n.status AS n_status, n.residence AS n_residence,
-           ve.vector_json AS ve_vector_json,
-           ve.vector_blob AS ve_vector_blob,
-           h.id AS h_id, h.session_id AS h_session_id, h.role AS h_role,
-           h.content AS h_content, h.source_message_id AS h_source_message_id,
-           h.source_ref AS h_source_ref,
-           h.created_at AS h_created_at
-         FROM memory_records m
-         JOIN memory_nodes n ON n.id = m.node_id
-         JOIN history_records h ON h.id = m.evidence_id
-         LEFT JOIN memory_embeddings ve ON ve.memory_id = m.id AND ve.model = ?
-         WHERE m.tier <= ?
-           AND m.storage_state = 'indexed'
-           ${candidateClause}
-           AND n.status = 'active'
-           AND (? IS NULL OR n.canonical_name = ?)
-           AND (? IS NULL OR m.source_actor = ?)
-           AND (? = 1 OR m.status IN ('active', 'disputed'))
-           AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-           ${scopeClause}
-         ORDER BY ${candidateOrder} m.tier ASC, m.importance DESC,
-                  m.access_count DESC, m.created_at DESC
-         LIMIT ?`,
-      )
-      .all(
-        vectorModel,
-        maxTier,
-        ...candidateIds,
-        nodeName,
-        nodeName,
-        options.sourceActor ?? null,
-        options.sourceActor ?? null,
-        options.includeHistorical ? 1 : 0,
-        ...(forcedCandidateIds.length === 0 && retrievalMode === "hybrid" ? ftsIds : []),
-        ...scopeParams,
-        rowLimit,
-      ) as Row[];
-
-    const routes =
-      retrievalMode === "fts5" || retrievalMode === "hashing" || retrievalMode === "qwen3"
-        ? new Map<string, number>()
-        : new Map(this.routeNodes(query, 20).map((route) => [route.node.id, route.score]));
-    const filtered = rows
-      .map((row) => {
-        const lexical = lexicalScore(normalizedQuery, row);
-        const vector = cosineSimilarity(queryVector, storedVector(row, "ve_"));
-        const route = routes.get(String(row.m_node_id)) ?? 0;
-        const result = mapSearchResult(row, lexical);
-        result.vectorScore = retrievalMode === "fts5" ? 0 : vector;
-        result.routeScore = route;
-        result.combinedScore =
-          retrievalMode === "fts5"
-            ? lexical > 0
-              ? lexical
-              : forcedCandidateIds.length > 0
-                ? 0.001
-                : 0
-            : retrievalMode === "hashing" || retrievalMode === "qwen3"
-              ? vector
-              : hybridScore(lexical, vector, route);
-        return result;
-      })
-      .filter((result) => matchesScope(result.memory.scope, options.scope))
-      .filter((result) => result.combinedScore > 0)
-      .sort(
-        (left, right) =>
-          right.combinedScore - left.combinedScore ||
-          left.memory.tier - right.memory.tier ||
-          right.memory.importance - left.memory.importance,
-      );
-    if (filterUsage) {
-      // Measure before LIMIT: after = what survived scope+score filtering, not
-      // what the limit truncated to.
-      filterUsage.candidatesBefore = rows.length;
-      filterUsage.candidatesAfter = filtered.length;
-      filterUsage.selectivity = rows.length > 0 ? 1 - filtered.length / rows.length : 0;
-    }
-    const results = filtered.slice(0, limit);
-    for (const result of results) {
-      result.memory.evidenceIds = this.evidenceIds(result.memory.id);
-      result.evidenceRecords = this.evidenceRecords(result.memory.evidenceIds);
-    }
-    return results;
   }
   requireActiveMemory(memoryId: string): MemoryRecord {
     const row = this.db.prepare("SELECT node_id FROM memory_records WHERE id = ?").get(memoryId) as
@@ -1060,31 +773,6 @@ export class NmgStoreBase {
       );
     return transform;
   }
-  redirectRelations(sourceNodeId: string, targetNodeId: string): void {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM node_relations
-       WHERE source_node_id = ? OR target_node_id = ?`,
-      )
-      .all(sourceNodeId, sourceNodeId) as Row[];
-    const remove = this.db.prepare("DELETE FROM node_relations WHERE id = ?");
-    for (const row of rows) {
-      const relation = mapRelation(row);
-      remove.run(relation.id);
-      const nextSource =
-        relation.sourceNodeId === sourceNodeId ? targetNodeId : relation.sourceNodeId;
-      const nextTarget =
-        relation.targetNodeId === sourceNodeId ? targetNodeId : relation.targetNodeId;
-      if (nextSource !== nextTarget) {
-        this.linkNodes({
-          sourceNodeId: nextSource,
-          targetNodeId: nextTarget,
-          type: relation.type,
-          evidenceIds: relation.evidenceIds,
-        });
-      }
-    }
-  }
   memoryText(memory: Pick<MemoryRecord, "statement">, nodeId: string): string {
     const node = this.requireNode(nodeId);
     return memoryEmbeddingText(memory.statement, node.canonicalName);
@@ -1330,39 +1018,5 @@ export class NmgStoreBase {
       const row = statement.get(id) as Row | undefined;
       return row ? [mapHistory(row)] : [];
     });
-  }
-
-  // ── cluster-method stubs ─────────────────────────────────────────
-  // Base methods call these; the cluster mixins override them on the
-  // assembled NmgStore. Stubs throw if ever reached (mixin absent = bug).
-
-  linkNodes(input: {
-    sourceNodeId: string;
-    targetNodeId: string;
-    type: NodeRelationType;
-    evidenceIds?: string[];
-    stability?: number;
-    consolidationSource?: NodeRelation["consolidationSource"];
-  }): NodeRelation {
-    void input;
-    throw new Error("linkNodes stub: cluster mixin did not override it");
-  }
-
-  routeNodes(query: string, limit = 5): NodeRoute[] {
-    void query;
-    void limit;
-    throw new Error("routeNodes stub: cluster mixin did not override it");
-  }
-
-  recordUsage(memoryIds: string[]): void {
-    void memoryIds;
-    throw new Error("recordUsage stub: cluster mixin did not override it");
-  }
-
-  trainRouter(query: string, usefulNodeIds: string[], learningRate = 0.2): void {
-    void query;
-    void usefulNodeIds;
-    void learningRate;
-    throw new Error("trainRouter stub: cluster mixin did not override it");
   }
 }
