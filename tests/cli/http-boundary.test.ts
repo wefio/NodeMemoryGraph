@@ -3,6 +3,8 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
+import { NMG_METHODS } from "../../src/cli/protocol.ts";
+
 /**
  * Module-boundary guard for the JSON-RPC-over-HTTP transport.
  *
@@ -160,13 +162,9 @@ test("http server implements every method the service supports", () => {
   );
   assert.ok(serviceMethods.size > 0, "service.invoke must declare methods");
 
-  // Methods the server's known-method guard accepts (string literals).
-  const serverText = fileText(SERVER_FILE);
-  const serverMethods = new Set(
-    [...serverText.matchAll(/(['"])([A-Za-z0-9_]+)\1/g)].map((m) => m[2]!),
-  );
-
-  const missing = [...serviceMethods].filter((m) => !serverMethods.has(m));
+  // The server's known-method guard is driven by NMG_METHODS (protocol.ts) —
+  // the same list the NmgMethod type derives from.
+  const missing = [...serviceMethods].filter((m) => !(NMG_METHODS as readonly string[]).includes(m));
   assert.deepEqual(
     missing,
     [],

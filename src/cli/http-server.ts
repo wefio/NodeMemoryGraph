@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 
 import type { ServerLease } from "./lifecycle.ts";
 import type { NmgMethod } from "./protocol.ts";
-import { NmgProtocolError } from "./protocol.ts";
+import { NMG_METHODS, NmgProtocolError } from "./protocol.ts";
 import { NmgService } from "./service.ts";
 
 const MAX_REQUEST_BYTES = 1_048_576;
@@ -167,24 +167,7 @@ function errorMessage(error: unknown): string {
 }
 
 function isKnownMethod(value: string): boolean {
-  return (
-    [
-      "hello",
-      "status",
-      "remember",
-      "search",
-      "get",
-      "retentionCandidates",
-      "setStorageState",
-      "deleteMemory",
-      "mergeNodes",
-      "splitNode",
-      "syncStg",
-      "perfAggregates",
-      "pruneRetrievalTraces",
-      "shutdown",
-    ] as const
-  ).includes(value as never);
+  return (NMG_METHODS as readonly string[]).includes(value);
 }
 
 function listen(server: Server): Promise<void> {

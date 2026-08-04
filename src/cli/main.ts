@@ -14,6 +14,17 @@ import {
   type NmgSplitNodeParams,
   type NmgSyncStgParams,
 } from "./protocol.ts";
+import {
+  assertSpecOptions,
+  cliCommandGroup,
+  cliUsage,
+  firstOption,
+  optionalResolvedPath,
+  rejectPositionals,
+  CLI_KNOWN_FLAGS,
+  CLI_KNOWN_OPTIONS,
+  type OptionValues,
+} from "./commands.ts";
 import { httpCall } from "./http-client.ts";
 import { serveHttp } from "./http-server.ts";
 import {
@@ -26,124 +37,10 @@ import {
 import { NmgService } from "./service.ts";
 import { histogramQuantile } from "../core/perf.ts";
 
-const USAGE = `NMG command line
-
-Usage:
-  nmg status [--json] [--data-dir DIR | --db FILE]
-  nmg remember STATEMENT --node NAME [options] [--json]
-  nmg search QUERY [options] [--json]
-  nmg get MEMORY_ID... [--graph-hops N] [--json]
-  nmg retention candidates [policy options] [--json]
-  nmg retention archive MEMORY_ID [--json]
-  nmg retention quarantine MEMORY_ID [--recovery-days N] [--json]
-  nmg retention restore MEMORY_ID [--json]
-  nmg memory delete MEMORY_ID [--json]
-  nmg node merge NODE_ID... --target-name NAME [--target-kind KIND] [--json]
-  nmg node split NODE_ID --partition NAME=MEMORY_ID,... --partition ... [--json]
-  nmg perf aggregates [--json]
-  nmg perf prune [--max-days N] [--max-rows N] [--json]
-  nmg stg sync --project-dir DIR --scope KEY=VALUE [--limit N] [--json]
-  nmg daemon start|status|stop [--data-dir DIR | --db FILE] [--json]
-
-Common options:
-  --data-dir DIR             NMG data directory (default: NMG_DATA_DIR or .nmg)
-  --db FILE                  Explicit SQLite database path
-  --scope KEY=VALUE          Repeatable or comma-separated scope filter
-  --project-dir DIR          Project-local STG root (stores .nmg/stg.sqlite)
-  --json                     Emit the full machine-readable result
-
-Remember options:
-  --node NAME                Stable semantic node name (required)
-  --type TYPE                fact, state, event, preference, constraint, strategy
-  --state-key KEY            Stable key required for state memory
-  --evidence TEXT            Supporting source text
-  --actor ACTOR              user, assistant, system, or tool
-  --truth STATUS             asserted, inferred, unverified, or verified
-  --tier N                   Initial tier 0..3
-  --importance N             Importance 0..1
-  --residence VALUE          ltg or stg
-  --write-reason TEXT        Durable-write justification
-  --external-source REF      External provenance: web:URL or file:PATH
-  --retrieved-at ISO         External retrieval timestamp (default: now)
-  --content-hash HASH        Optional external content hash
-
-Search options:
-  --node NAME                Restrict to one semantic node
-  --max-tier N               Deepest tier 0..3
-  --limit N                  Return 1..50 records
-  --graph-hops N             Expand 0..3 graph hops
-  --source-actor ACTOR       Restrict evidence actor
-  --include-historical       Include inactive/superseded memories
-  --retrieval-mode MODE      fts5, hybrid, qwen3, hashing, or legacy
-  --vector-granularity MODE  hierarchy, records, or union
-  --second-pass              Enable progressive QPP recall
-  --full-warm                Expose all ranked L1 records in the first response
-  --tiered-disclosure        Open tiers sequentially until QPP is sufficient
-  --no-perf                  Disable per-phase performance timing
-
-Retention policy options:
-  --dormant-after-days N     Minimum age and idle time before L4
-  --quarantine-after-days N  Minimum time in L4 before L5
-  --maximum-importance N     Candidate ceiling from 0..1
-  --maximum-access-count N   Candidate access-count ceiling
-
-Node maintenance:
-  --target-name NAME         New canonical node name for merge
-  --target-kind KIND         Optional semantic node kind
-  --partition NAME=IDS       Split partition; repeat and assign every memory ID
-`;
-const ALL_FLAGS = new Set([
-  "include-historical",
-  "json",
-  "no-perf",
-  "second-pass",
-  "full-warm",
-  "tiered-disclosure",
-]);
-const ALL_OPTIONS = new Set([
-  "actor",
-  "data-dir",
-  "db",
-  "dormant-after-days",
-  "event-time",
-  "external-source",
-  "evidence",
-  "evidence-role",
-  "expires-at",
-  "graph-hops",
-  "importance",
-  "content-hash",
-  "maximum-access-count",
-  "maximum-importance",
-  "limit",
-  "max-days",
-  "max-rows",
-  "max-tier",
-  "node",
-  "partition",
-  "project-dir",
-  "quarantine-after-days",
-  "recovery-days",
-  "retrieved-at",
-  "residence",
-  "retrieval-mode",
-  "scope",
-  "session-id",
-  "source-actor",
-  "source-ref",
-  "state-key",
-  "summary",
-  "supersedes",
-  "tier",
-  "target-kind",
-  "target-name",
-  "truth",
-  "type",
-  "valid-from",
-  "valid-until",
-  "vector-granularity",
-  "write-reason",
-]);
+// The CLI surface (synopsis, option details, known options/flags) is
+// assembled from the command registry in commands.ts; only the daemon
+// synopsis line is local because daemon commands are not RPC methods.
+const USAGE = cliUsage(["nmg daemon start|status|stop [--data-dir DIR | --db FILE] [--json]"]);
 
 export async function runCli(
   argv: readonly string[],
@@ -325,308 +222,53 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     return { command: "help", json: false };
   }
   const [command, ...rest] = argv;
-  if (
-    ![
-      "status",
-      "remember",
-      "search",
-      "get",
-      "retention",
-      "memory",
-      "node",
-      "perf",
-      "stg",
-      "daemon",
-    ].includes(command!)
-  ) {
-    throw new Error(`unknown command: ${command}`);
+  if (command === "daemon") return daemonArguments(rest);
+  const group = cliCommandGroup(command!);
+  if (group.length === 0) throw new Error(`unknown command: ${command}`);
+  const spec =
+    group.find((entry) => entry.words.length === 1) ??
+    group.find((entry) => entry.words[1] === rest[0]);
+  if (!spec) {
+    throw new Error(`${command} requires ${oxfordJoin(group.map((entry) => entry.words[1]!))}`);
   }
-  const daemonAction = command === "daemon" ? rest[0] : undefined;
-  if (command === "daemon" && !["run", "start", "status", "stop"].includes(daemonAction ?? "")) {
-    throw new Error("daemon requires start, status, or stop");
-  }
-  const subcommand = ["retention", "memory", "node", "perf", "stg"].includes(command!)
-    ? rest[0]
-    : undefined;
-  if (
-    command === "retention" &&
-    !["candidates", "archive", "quarantine", "restore"].includes(subcommand ?? "")
-  ) {
-    throw new Error("retention requires candidates, archive, quarantine, or restore");
-  }
-  if (command === "memory" && subcommand !== "delete") {
-    throw new Error("memory requires delete");
-  }
-  if (command === "node" && !["merge", "split"].includes(subcommand ?? "")) {
-    throw new Error("node requires merge or split");
-  }
-  if (command === "perf" && !["aggregates", "prune"].includes(subcommand ?? "")) {
-    throw new Error("perf requires aggregates or prune");
-  }
-  if (command === "stg" && subcommand !== "sync") {
-    throw new Error("stg requires sync");
-  }
-  const values = parseOptions(command === "daemon" || subcommand ? rest.slice(1) : rest);
-  const maintenanceCommand =
-    command === "retention"
-      ? subcommand === "candidates"
-        ? "retentionCandidates"
-        : "setStorageState"
-      : command === "memory"
-        ? "deleteMemory"
-        : command === "node"
-          ? subcommand === "merge"
-            ? "mergeNodes"
-            : "splitNode"
-          : command === "perf"
-            ? subcommand === "aggregates"
-              ? "perfAggregates"
-              : "pruneRetrievalTraces"
-            : command === "stg"
-              ? "syncStg"
-              : undefined;
-  const common = {
-    command:
-      command === "daemon"
-        ? (`daemon-${daemonAction}` as DaemonCommand)
-        : ((maintenanceCommand ?? command) as ParsedArguments["command"]),
+  const values = parseOptions(spec.words.length > 1 ? rest.slice(1) : rest);
+  assertSpecOptions(spec, values);
+  return {
+    command: spec.method,
+    params: spec.buildParams(values) as ParsedArguments["params"],
     json: values.flags.has("json"),
     dataDirectory: firstOption(values, "data-dir"),
     databasePath: optionalResolvedPath(firstOption(values, "db")),
   };
-  if (command === "daemon") {
-    assertAllowed(values, ["data-dir", "db"], daemonAction === "run" ? [] : ["json"]);
-    rejectPositionals(values, "daemon");
-    return common;
+}
+
+function daemonArguments(rest: readonly string[]): ParsedArguments {
+  const action = rest[0];
+  if (!["run", "start", "status", "stop"].includes(action ?? "")) {
+    throw new Error("daemon requires start, status, or stop");
   }
-  if (command === "retention") {
-    if (subcommand === "candidates") {
-      assertAllowed(
-        values,
-        [
-          "data-dir",
-          "db",
-          "dormant-after-days",
-          "quarantine-after-days",
-          "maximum-importance",
-          "maximum-access-count",
-        ],
-        ["json"],
-      );
-      rejectPositionals(values, "retention candidates");
-      return { ...common, params: retentionCandidatesParams(values) };
-    }
-    assertAllowed(
-      values,
-      ["data-dir", "db", ...(subcommand === "quarantine" ? ["recovery-days"] : [])],
-      ["json"],
-    );
-    return {
-      ...common,
-      params: storageStateParams(values, subcommand as "archive" | "quarantine" | "restore"),
-    };
+  const values = parseOptions(rest.slice(1));
+  const allowedFlags = new Set(action === "run" ? [] : ["json"]);
+  for (const name of values.options.keys()) {
+    if (name !== "data-dir" && name !== "db") throw new Error(`unknown option: --${name}`);
   }
-  if (command === "memory") {
-    assertAllowed(values, ["data-dir", "db"], ["json"]);
-    return { ...common, params: singleMemoryParams(values, "memory delete") };
+  for (const name of values.flags) {
+    if (!allowedFlags.has(name)) throw new Error(`unknown option: --${name}`);
   }
-  if (command === "node") {
-    if (subcommand === "merge") {
-      assertAllowed(values, ["data-dir", "db", "target-name", "target-kind", "summary"], ["json"]);
-      return { ...common, params: mergeNodesParams(values) };
-    }
-    assertAllowed(values, ["data-dir", "db", "partition"], ["json"]);
-    return { ...common, params: splitNodeParams(values) };
-  }
-  if (command === "perf") {
-    if (subcommand === "aggregates") {
-      assertAllowed(values, ["data-dir", "db"], ["json"]);
-      rejectPositionals(values, "perf aggregates");
-      return { ...common, params: undefined };
-    }
-    assertAllowed(values, ["data-dir", "db", "max-days", "max-rows"], ["json"]);
-    return {
-      ...common,
-      params: perfPruneParams(values),
-    };
-  }
-  if (command === "stg") {
-    assertAllowed(
-      values,
-      ["data-dir", "db", "project-dir", "session-id", "scope", "limit"],
-      ["json"],
-    );
-    rejectPositionals(values, "stg sync");
-    return { ...common, params: syncStgParams(values) };
-  }
-  switch (command) {
-    case "status":
-      assertAllowed(values, ["data-dir", "db"], ["json"]);
-      rejectPositionals(values, "status");
-      return common;
-    case "remember":
-      assertAllowed(
-        values,
-        [
-          "data-dir",
-          "db",
-          "node",
-          "project-dir",
-          "session-id",
-          "type",
-          "state-key",
-          "event-time",
-          "external-source",
-          "actor",
-          "truth",
-          "evidence",
-          "tier",
-          "importance",
-          "content-hash",
-          "scope",
-          "valid-from",
-          "valid-until",
-          "evidence-role",
-          "supersedes",
-          "residence",
-          "retrieved-at",
-          "expires-at",
-          "write-reason",
-          "session-id",
-          "source-ref",
-        ],
-        ["json"],
-      );
-      return {
-        ...common,
-        params: rememberParams(values),
-      };
-    case "search":
-      assertAllowed(
-        values,
-        [
-          "data-dir",
-          "db",
-          "node",
-          "project-dir",
-          "session-id",
-          "scope",
-          "source-actor",
-          "max-tier",
-          "limit",
-          "graph-hops",
-          "retrieval-mode",
-          "vector-granularity",
-        ],
-        ["json", "include-historical", "no-perf", "second-pass", "full-warm", "tiered-disclosure"],
-      );
-      return {
-        ...common,
-        params: searchParams(values),
-      };
-    case "get":
-      assertAllowed(
-        values,
-        ["data-dir", "db", "graph-hops", "project-dir", "session-id"],
-        ["json"],
-      );
-      return {
-        ...common,
-        params: getParams(values),
-      };
-    default:
-      throw new Error(`unknown command: ${command}`);
-  }
+  rejectPositionals(values, "daemon");
+  return {
+    command: `daemon-${action}` as DaemonCommand,
+    json: values.flags.has("json"),
+    dataDirectory: firstOption(values, "data-dir"),
+    databasePath: optionalResolvedPath(firstOption(values, "db")),
+  };
 }
 
-function retentionCandidatesParams(values: OptionValues): NmgRetentionCandidatesParams {
-  return compactObject({
-    dormantAfterDays: numericOption(values, "dormant-after-days"),
-    quarantineAfterDays: numericOption(values, "quarantine-after-days"),
-    maximumImportance: numericOption(values, "maximum-importance"),
-    maximumAccessCount: numericOption(values, "maximum-access-count"),
-  });
-}
-
-function storageStateParams(
-  values: OptionValues,
-  action: "archive" | "quarantine" | "restore",
-): NmgSetStorageStateParams {
-  const memoryId = singlePositional(values, `retention ${action}`);
-  return compactObject({
-    memoryId,
-    storageState:
-      action === "archive" ? "dormant" : action === "quarantine" ? "quarantine" : "indexed",
-    recoveryDays: numericOption(values, "recovery-days"),
-  }) as unknown as NmgSetStorageStateParams;
-}
-
-function singleMemoryParams(values: OptionValues, command: string): NmgDeleteMemoryParams {
-  return { memoryId: singlePositional(values, command) };
-}
-
-function mergeNodesParams(values: OptionValues): NmgMergeNodesParams {
-  if (values.positionals.length < 2) throw new Error("node merge requires at least two node IDs");
-  const targetName = firstOption(values, "target-name");
-  if (!targetName) throw new Error("node merge requires --target-name NAME");
-  return compactObject({
-    sourceNodeIds: values.positionals,
-    targetName,
-    targetKind: firstOption(values, "target-kind"),
-    summary: firstOption(values, "summary"),
-  }) as unknown as NmgMergeNodesParams;
-}
-
-function splitNodeParams(values: OptionValues): NmgSplitNodeParams {
-  const sourceNodeId = singlePositional(values, "node split");
-  const partitions = (values.options.get("partition") ?? []).map((entry) => {
-    const separator = entry.indexOf("=");
-    if (separator < 1 || separator === entry.length - 1) {
-      throw new Error("--partition must use NAME=MEMORY_ID,...");
-    }
-    const memoryIds = entry
-      .slice(separator + 1)
-      .split(",")
-      .map((id) => id.trim())
-      .filter(Boolean);
-    if (memoryIds.length === 0) throw new Error("--partition requires at least one memory ID");
-    return { nodeName: entry.slice(0, separator).trim(), memoryIds };
-  });
-  if (partitions.length < 2)
-    throw new Error("node split requires at least two --partition options");
-  return { sourceNodeId, partitions };
-}
-
-function perfPruneParams(values: OptionValues): NmgPerfParams {
-  return compactObject({
-    action: "prune",
-    maxDays: numericOption(values, "max-days"),
-    maxRows: numericOption(values, "max-rows"),
-  });
-}
-
-function syncStgParams(values: OptionValues): NmgSyncStgParams {
-  const projectDir = firstOption(values, "project-dir");
-  if (!projectDir) throw new Error("stg sync requires --project-dir DIR");
-  const scope = scopeOptions(values);
-  if (!scope) throw new Error("stg sync requires --scope KEY=VALUE");
-  return compactObject({
-    projectDir: resolve(projectDir),
-    sessionId: firstOption(values, "session-id"),
-    scope,
-    limit: numericOption(values, "limit"),
-  }) as unknown as NmgSyncStgParams;
-}
-
-function singlePositional(values: OptionValues, command: string): string {
-  if (values.positionals.length !== 1) throw new Error(`${command} requires exactly one ID`);
-  return values.positionals[0]!;
-}
-
-interface OptionValues {
-  flags: Set<string>;
-  options: Map<string, string[]>;
-  positionals: string[];
+/** "a" / "a or b" / "a, b, or c" — matches the historical error messages. */
+function oxfordJoin(words: readonly string[]): string {
+  if (words.length === 1) return words[0]!;
+  if (words.length === 2) return `${words[0]} or ${words[1]}`;
+  return `${words.slice(0, -1).join(", ")}, or ${words.at(-1)}`;
 }
 
 function parseOptions(args: readonly string[]): OptionValues {
@@ -642,10 +284,10 @@ function parseOptions(args: readonly string[]): OptionValues {
     }
     const [rawName, inlineValue] = argument.slice(2).split("=", 2);
     if (!rawName) throw new Error("empty option name");
-    if (!ALL_FLAGS.has(rawName) && !ALL_OPTIONS.has(rawName)) {
+    if (!CLI_KNOWN_FLAGS.has(rawName) && !CLI_KNOWN_OPTIONS.has(rawName)) {
       throw new Error(`unknown option: --${rawName}`);
     }
-    if (ALL_FLAGS.has(rawName)) {
+    if (CLI_KNOWN_FLAGS.has(rawName)) {
       if (inlineValue !== undefined) throw new Error(`--${rawName} does not take a value`);
       flags.add(rawName);
       continue;
@@ -659,142 +301,6 @@ function parseOptions(args: readonly string[]): OptionValues {
     options.set(rawName, entries);
   }
   return { flags, options, positionals };
-}
-
-function rememberParams(values: OptionValues): NmgRememberParams {
-  const statement = values.positionals.join(" ").trim();
-  if (!statement) throw new Error("remember requires a statement");
-  const nodeName = firstOption(values, "node");
-  if (!nodeName) throw new Error("remember requires --node NAME");
-  const externalSource = firstOption(values, "external-source");
-  if (externalSource && !/^(?:file|web):.+/u.test(externalSource)) {
-    throw new Error("--external-source must start with web: or file:");
-  }
-  const externalMarker = externalSource
-    ? [
-        {
-          kind: "external_source",
-          attributes: compactObject({
-            source: externalSource,
-            retrievedAt: firstOption(values, "retrieved-at") ?? new Date().toISOString(),
-            hash: firstOption(values, "content-hash"),
-          }),
-        },
-      ]
-    : undefined;
-  return compactObject({
-    statement,
-    nodeName,
-    memoryType: firstOption(values, "type"),
-    stateKey: firstOption(values, "state-key"),
-    eventTime: firstOption(values, "event-time"),
-    sourceActor: firstOption(values, "actor"),
-    truthStatus: firstOption(values, "truth"),
-    evidence: firstOption(values, "evidence"),
-    tier: numericOption(values, "tier"),
-    importance: numericOption(values, "importance"),
-    scope: scopeOptions(values),
-    validFrom: firstOption(values, "valid-from"),
-    validUntil: firstOption(values, "valid-until"),
-    evidenceRole: firstOption(values, "evidence-role"),
-    supersedesId: firstOption(values, "supersedes"),
-    residence: firstOption(values, "residence"),
-    expiresAt: firstOption(values, "expires-at"),
-    writeReason: firstOption(values, "write-reason"),
-    sessionId: firstOption(values, "session-id"),
-    sourceRef: firstOption(values, "source-ref"),
-    markers: externalMarker,
-    projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
-  }) as unknown as NmgRememberParams;
-}
-
-function searchParams(values: OptionValues): NmgSearchParams {
-  const query = values.positionals.join(" ").trim();
-  if (!query) throw new Error("search requires a query");
-  return compactObject({
-    query,
-    nodeName: firstOption(values, "node"),
-    scope: scopeOptions(values),
-    sourceActor: firstOption(values, "source-actor"),
-    includeHistorical: values.flags.has("include-historical") || undefined,
-    maxTier: numericOption(values, "max-tier"),
-    limit: numericOption(values, "limit"),
-    graphHops: numericOption(values, "graph-hops"),
-    retrievalMode: firstOption(values, "retrieval-mode"),
-    vectorGranularity: firstOption(values, "vector-granularity"),
-    secondPass: values.flags.has("second-pass") || undefined,
-    progressiveWarmDisclosure: values.flags.has("full-warm") ? false : undefined,
-    tieredDisclosure: values.flags.has("tiered-disclosure") || undefined,
-    perf: values.flags.has("no-perf") ? false : undefined,
-    projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
-    sessionId: firstOption(values, "session-id"),
-  }) as unknown as NmgSearchParams;
-}
-
-function getParams(values: OptionValues): NmgGetParams {
-  const memoryIds = values.positionals.flatMap((value) => value.split(",")).filter(Boolean);
-  if (memoryIds.length === 0) throw new Error("get requires at least one memory ID");
-  return compactObject({
-    memoryIds,
-    graphHops: numericOption(values, "graph-hops"),
-    projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
-    sessionId: firstOption(values, "session-id"),
-  }) as unknown as NmgGetParams;
-}
-
-function firstOption(values: OptionValues, name: string): string | undefined {
-  return values.options.get(name)?.at(-1);
-}
-
-function numericOption(values: OptionValues, name: string): number | undefined {
-  const value = firstOption(values, name);
-  if (value === undefined) return undefined;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) throw new Error(`--${name} must be a number`);
-  return parsed;
-}
-
-function scopeOptions(values: OptionValues): Record<string, string> | undefined {
-  const entries = (values.options.get("scope") ?? []).flatMap((value) => value.split(","));
-  if (entries.length === 0) return undefined;
-  return Object.fromEntries(
-    entries.map((entry) => {
-      const separator = entry.indexOf("=");
-      if (separator < 1 || separator === entry.length - 1) {
-        throw new Error("--scope values must use KEY=VALUE");
-      }
-      return [entry.slice(0, separator), entry.slice(separator + 1)];
-    }),
-  );
-}
-
-function rejectPositionals(values: OptionValues, command: string): void {
-  if (values.positionals.length > 0) {
-    throw new Error(`${command} does not accept positional arguments`);
-  }
-}
-
-function assertAllowed(
-  values: OptionValues,
-  optionNames: readonly string[],
-  flagNames: readonly string[],
-): void {
-  const allowedOptions = new Set(optionNames);
-  const allowedFlags = new Set(flagNames);
-  for (const name of values.options.keys()) {
-    if (!allowedOptions.has(name)) throw new Error(`unknown option: --${name}`);
-  }
-  for (const name of values.flags) {
-    if (!allowedFlags.has(name)) throw new Error(`unknown option: --${name}`);
-  }
-}
-
-function optionalResolvedPath(value: string | undefined): string | undefined {
-  return value ? resolve(value) : undefined;
-}
-
-function compactObject(value: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(value).filter((entry) => entry[1] !== undefined));
 }
 
 function humanResult(value: unknown): string {

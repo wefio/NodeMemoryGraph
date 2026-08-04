@@ -37,21 +37,24 @@ export const NMG_CAPABILITIES = [
   "optional-embedding-retrieval",
 ] as const;
 
-export type NmgMethod =
-  | "get"
-  | "hello"
-  | "perfAggregates"
-  | "pruneRetrievalTraces"
-  | "remember"
-  | "search"
-  | "retentionCandidates"
-  | "setStorageState"
-  | "deleteMemory"
-  | "mergeNodes"
-  | "splitNode"
-  | "syncStg"
-  | "shutdown"
-  | "status";
+export const NMG_METHODS = [
+  "get",
+  "hello",
+  "perfAggregates",
+  "pruneRetrievalTraces",
+  "remember",
+  "search",
+  "retentionCandidates",
+  "setStorageState",
+  "deleteMemory",
+  "mergeNodes",
+  "splitNode",
+  "syncStg",
+  "shutdown",
+  "status",
+] as const;
+
+export type NmgMethod = (typeof NMG_METHODS)[number];
 
 export interface NmgHelloResult {
   protocol: typeof NMG_PROTOCOL_VERSION;
