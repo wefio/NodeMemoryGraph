@@ -76,6 +76,14 @@ result directory together, note the responsible person and canary scope in
 `experiment_manifest.json.experiment` if shared, and treat `code.commit` as
 the rollback version.
 
+Storage: user stores (`omnimemeval-nmg/*.sqlite`) are keyed by
+`sha256(userId)` and the userId embeds the version label, so every run creates
+~500 fresh ~12 MB stores that are never reused; the shared
+`embedding-cache.sqlite` is the reusable part (vectors by text hash across
+runs). Run `--prune-stores` after a run to drop all stores except the current
+run's (ingestion rebuilds them; the embedding cache is what actually makes
+reruns cheap).
+
 ## Benchmark roles
 
 | Suite               | Primary role                  | NMG mechanisms under test                                                                          |
