@@ -35,6 +35,7 @@ logs under `docs/` (indexed here so new work can find prior evidence):
 - `docs/daemon-lifecycle-design.md` — daemon lifecycle hardening (timeout,
   store cap as warning, restart fidelity) and its acceptance tests.
 - `docs/llm-sufficiency-recall-design.md` — LLM-sufficiency recall design.
+- `docs/lme-recall-headers-2026-08-04.md` — recall-header refinement verified as format-only (94.15/87.95/82.67 unchanged; answer acc 82.3%).
 
 ## Reproducible LongMemEval runs
 
