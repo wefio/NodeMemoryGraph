@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { reciprocalRankFusion } from "../../src/core/rank-fusion.ts";
+import { reciprocalRankFusion } from "../../src/lab/rank-fusion.ts";
 
 test("RRF preserves one route and removes duplicate ids", () => {
   assert.deepEqual(

@@ -6,12 +6,12 @@ import { performance } from "node:perf_hooks";
 import {
   CONTROLLER_FEATURE_COUNT,
   controllerSampleFromTrace,
-} from "../../src/core/controller-protocol.ts";
-import { evaluateControllerGate } from "../../src/core/controller-gate.ts";
+} from "../../src/lab/controller-protocol.ts";
+import { evaluateControllerGate } from "../../src/lab/controller-gate.ts";
 import {
   DifferentiableController,
   type ControllerTrainingExample,
-} from "../../src/core/differentiable-controller.ts";
+} from "../../src/lab/differentiable-controller.ts";
 import {
   createEmbeddingClientFromEnv,
   type EmbeddingClient,

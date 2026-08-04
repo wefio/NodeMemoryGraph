@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ReasoningWorkspace } from "../../src/core/reasoning-workspace.ts";
+import { ReasoningWorkspace } from "../../src/lab/reasoning-workspace.ts";
 
 test("reasoning checkpoints preserve an explicit inference chain", () => {
   const workspace = new ReasoningWorkspace("session-chain");

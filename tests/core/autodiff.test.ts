@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { Tensor } from "../../src/core/autodiff.ts";
+import { Tensor } from "../../src/lab/autodiff.ts";
 
 function approximately(actual: number, expected: number, tolerance = 1e-5): void {
   assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} differs from ${expected}`);

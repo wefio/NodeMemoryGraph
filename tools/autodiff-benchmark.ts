@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
 
-import { Tensor } from "../src/core/autodiff.ts";
-import { DifferentiableController } from "../src/core/differentiable-controller.ts";
+import { Tensor } from "../src/lab/autodiff.ts";
+import { DifferentiableController } from "../src/lab/differentiable-controller.ts";
 
 interface Benchmark<State> {
   name: string;

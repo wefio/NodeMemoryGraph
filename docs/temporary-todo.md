@@ -25,7 +25,7 @@ automatic recall alone is not labelled useful.
 ## P1 — replace real placeholders
 
 - [ ] Replace or explicitly freeze the placeholder
-  `DEFAULT_QPP_THRESHOLD = 0.45` using held-out, production-like trace feedback.
+  `DEFAULT_QPP_THRESHOLD = 0.55` using held-out, production-like trace feedback.
 - [ ] Calibrate QPP component weights or document the hand-set values as an
   intentionally untrained heuristic.
 - [ ] Implement the rolling QPP calibration worker only if trace labels are
@@ -82,13 +82,21 @@ automatic recall alone is not labelled useful.
 
 ## Decision required — implemented but not connected to Pi
 
+**Update 2026-08-03:** the `lab/` boundary is now enacted. `ReasoningWorkspace`,
+`MemoryGraphReasoner`, `ForkMerge`, the differentiable-controller stack
+(`autodiff`, `differentiable-controller`, `controller-protocol/-runtime/-gate`,
+`shadow-evaluation`), and `rank-fusion` live under `src/lab/` and are no longer
+exported from `src/index.ts`; the public API now equals wired capability.
+`hierarchical-activation.ts` remains in `src/core/` because the production
+`Router` imports it — extracting the hierarchical routing out of `Router` is
+the remaining step. Open decisions that stay:
+
 - [ ] Decide whether `ReasoningWorkspace` should become Pi's optional
   session-scoped reasoning scratchpad.
 - [ ] If adopted, expose the minimum lifecycle needed to survive compaction;
   do not inject checkpoints automatically unless they improve matched tasks.
-- [ ] Decide whether `MemoryGraphReasoner`, `ForkMerge`, and the standalone
-  hierarchical-activation experiments remain public Lab APIs or move under a
-  clearer `lab/` boundary.
+- [ ] Extract the hierarchical-activation routing out of `src/core/router.ts`
+  so `hierarchical-activation.ts` can join `src/lab/`.
 - [ ] Do not imply that these prototypes affect normal NMG retrieval until a
   runtime integration and matched evaluation exist.
 

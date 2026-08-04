@@ -365,9 +365,9 @@ query → g₁ → g₂ → scores
 | 现有文件 | 改动 |
 |----------|------|
 | `src/core/router.ts` | 用 g₁ 加权替代或增强纯 cosineSimilarity |
-| `src/core/differentiable-controller.ts` | 接收 hierarchical scores 而非纯特征向量 |
+| `src/lab/differentiable-controller.ts` | 接收 hierarchical scores 而非纯特征向量 |
 | `.pi/extensions/nmg/index.ts` | gate 逻辑中传入 graphState snapshot |
-| `src/core/autodiff.ts` | 不变（只用现有的 matmul/softmax/sigmoid/add） |
+| `src/lab/autodiff.ts` | 不变（只用现有的 matmul/softmax/sigmoid/add） |
 
 ## 9. 为什么不在编码器里做
 

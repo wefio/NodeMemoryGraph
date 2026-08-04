@@ -7,8 +7,8 @@ import type {
   MemoryContext,
   MemorySearchResult,
   RetrievalTrace,
-} from "./types.ts";
-import { queryIntentFamilies } from "./store/search-ranking.ts";
+} from "../core/types.ts";
+import { queryIntentFamilies } from "../core/store/search-ranking.ts";
 
 /**
  * Versioned, bounded feature contract shared by STG, LTG and the runtime Active Graph.

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { HierarchicalActivation } from "../../src/core/hierarchical-activation.ts";
-import { ForkMerge } from "../../src/core/fork-merge.ts";
+import { ForkMerge } from "../../src/lab/fork-merge.ts";
 import type { NodeActivationInput } from "../../src/core/hierarchical-activation.ts";
 
 // ── helpers ──

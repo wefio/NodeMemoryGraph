@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Tensor } from "../../src/core/autodiff.ts";
+import { Tensor } from "../../src/lab/autodiff.ts";
 import { HierarchicalActivation } from "../../src/core/hierarchical-activation.ts";
 
 // ── numerical edge cases ──

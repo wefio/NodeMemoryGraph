@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ControllerRuntime, retainedMassIndices } from "../../src/core/controller-runtime.ts";
+import { ControllerRuntime, retainedMassIndices } from "../../src/lab/controller-runtime.ts";
 import {
   CONTROLLER_FEATURE_COUNT,
   CONTROLLER_FEATURE_PROTOCOL_VERSION,
-} from "../../src/core/controller-protocol.ts";
-import { DifferentiableController } from "../../src/core/differentiable-controller.ts";
+} from "../../src/lab/controller-protocol.ts";
+import { DifferentiableController } from "../../src/lab/differentiable-controller.ts";
 import { fibonacciEvidenceBudgets } from "../../src/core/store/active-graph.ts";
 import { NmgStore } from "../../src/core/store.ts";
 

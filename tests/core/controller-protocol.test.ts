@@ -8,7 +8,7 @@ import {
   CONTROLLER_FEATURE_COUNT,
   CONTROLLER_FEATURE_NAMES,
   controllerSampleFromTrace,
-} from "../../src/core/controller-protocol.ts";
+} from "../../src/lab/controller-protocol.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import type { VectorEmbedder } from "../../src/core/types.ts";
 

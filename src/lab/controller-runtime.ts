@@ -13,8 +13,8 @@ import {
   type ControllerBudgetDimension,
   type DifferentiableControllerState,
 } from "./differentiable-controller.ts";
-import type { ActiveGraphBudget, MemoryContext, RetrievalTrace } from "./types.ts";
-import { fibonacciEvidenceBudgets } from "./store/active-graph.ts";
+import type { ActiveGraphBudget, MemoryContext, RetrievalTrace } from "../core/types.ts";
+import { fibonacciEvidenceBudgets } from "../core/store/active-graph.ts";
 
 export interface ControllerRuntimeState {
   version: 1;

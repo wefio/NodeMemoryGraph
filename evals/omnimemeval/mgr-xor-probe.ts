@@ -18,7 +18,7 @@
 
 import { readFileSync } from "node:fs";
 
-import { Logic, MemoryGraphReasoner } from "../../src/core/memory-graph-reasoner.ts";
+import { Logic, MemoryGraphReasoner } from "../../src/lab/memory-graph-reasoner.ts";
 
 const EMBED_URL = "http://127.0.0.1:8000/v1/embeddings";
 const EMBED_MODEL = "BAAI/bge-small-en-v1.5";

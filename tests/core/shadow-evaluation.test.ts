@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { ShadowEvaluationLog } from "../../src/core/shadow-evaluation.ts";
+import { ShadowEvaluationLog } from "../../src/lab/shadow-evaluation.ts";
 
 test("shadow evaluation records retrieval, actual use, outcome, and feedback", async () => {
   const directory = await mkdtemp(join(tmpdir(), "nmg-shadow-"));

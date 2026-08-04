@@ -1,4 +1,4 @@
-import { Tensor, gradientStep } from "./autodiff.ts";
+import { Tensor, gradientStep } from "../lab/autodiff.ts";
 
 /**
  * Phase D: full hierarchical activation — g₁/g₂/g₃ + h₁/h₂/h₃.

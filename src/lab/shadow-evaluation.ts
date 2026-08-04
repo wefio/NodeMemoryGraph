@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, unlinkSync
 import { dirname } from "node:path";
 
 import type { ControllerShadowDecision } from "./controller-runtime.ts";
-import type { ActiveGraphBudgetUsage } from "./types.ts";
+import type { ActiveGraphBudgetUsage } from "../core/types.ts";
 
 export type ShadowRetrievalOrigin = "automatic" | "tool";
 

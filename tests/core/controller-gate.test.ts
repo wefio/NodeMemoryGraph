@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { evaluateControllerGate } from "../../src/core/controller-gate.ts";
+import { evaluateControllerGate } from "../../src/lab/controller-gate.ts";
 
 const healthyController = {
   trainingCases: 12,

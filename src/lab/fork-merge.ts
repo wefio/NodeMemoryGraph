@@ -10,11 +10,11 @@
  */
 
 import { Tensor, gradientStep } from "./autodiff.ts";
-import type { HierarchicalActivation } from "./hierarchical-activation.ts";
+import type { HierarchicalActivation } from "../core/hierarchical-activation.ts";
 import type {
   NodeActivationInput,
   GraphStateSnapshot,
-} from "./hierarchical-activation.ts";
+} from "../core/hierarchical-activation.ts";
 
 // ── types ──
 

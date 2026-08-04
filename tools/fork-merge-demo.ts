@@ -9,7 +9,7 @@
  */
 
 import { HierarchicalActivation } from "../src/core/hierarchical-activation.ts";
-import { ForkMerge } from "../src/core/fork-merge.ts";
+import { ForkMerge } from "../src/lab/fork-merge.ts";
 
 const D = 64;
 const N = 12;
