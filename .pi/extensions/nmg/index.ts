@@ -189,9 +189,21 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     name: "nmg_search",
     label: "Search NMG",
     description:
-      "Search long-term memory headers. Use nmg_get on selected IDs when exact evidence is needed.",
+      "Search long-term memory headers. Use nmg_get on selected IDs when exact evidence is needed. " +
+      "Advanced syntax: key:value filters (type:preference,constraint  node:\"Conversation …\"  " +
+      "state:key  time:2026-01-01..2026-06-30), -term exclusions, quoted phrases. Pass " +
+      "extra retrieval clauses via queries for a fused union (e.g. a HyDE clause).",
     parameters: Type.Object({
-      query: Type.String(),
+      query: Type.String({
+        description:
+          "Natural-language clause; may embed key:value filters, -exclusions and quoted phrases",
+      }),
+      queries: Type.Optional(
+        Type.Array(Type.String(), {
+          description:
+            "Extra retrieval clauses; results are unioned with the primary query (primary keeps rank)",
+        }),
+      ),
       nodeName: Type.Optional(Type.String()),
       maxTier: Type.Optional(
         Type.Union([Type.Literal(0), Type.Literal(1), Type.Literal(2), Type.Literal(3)]),

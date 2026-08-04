@@ -107,6 +107,8 @@ export interface NmgRememberParams {
 
 export interface NmgSearchParams {
   query: string;
+  /** Extra retrieval clauses fused with the primary query (union of results). */
+  queries?: string[];
   nodeName?: string;
   scope?: MemoryScope;
   sourceActor?: MemoryActor;

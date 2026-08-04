@@ -11,6 +11,7 @@ import { copyLtgSubsetToStg, createStgStore, mergeStgLtgContexts } from "../core
 import type {
   EvidenceRole,
   MemoryActor,
+  MemoryContext,
   MemoryResidence,
   MemoryScope,
   MemoryMarker,
@@ -21,6 +22,7 @@ import type {
 } from "../core/types.ts";
 import { assessMemoryWrite } from "../core/write-policy.ts";
 import { searchMemoryContext } from "../integration/search.ts";
+import { applyAdvancedFilters, parseAdvancedQuery } from "../core/store/advanced-query.ts";
 import {
   NMG_CAPABILITIES,
   NMG_PROTOCOL_VERSION,
@@ -242,21 +244,46 @@ export class NmgService {
   }
 
   async #search(params: NmgSearchParams): Promise<NmgMethodResult["search"]> {
-    const { query, projectDir, sessionId, ...options } = params;
+    const { query, queries, projectDir, sessionId, ...options } = params;
     const searchOptions: SearchOptions = {
       ...options,
       sessionId,
       progressiveWarmDisclosure: options.progressiveWarmDisclosure ?? true,
     };
-    const search = (store: NmgStore) =>
-      searchMemoryContext(store, this.#configuredEmbeddingClient(), query, searchOptions);
-    if (!projectDir) return search(this.#getStore());
+    const raws = [query, ...(queries ?? [])];
+    const embedding = this.#configuredEmbeddingClient();
+    const runOne = async (store: NmgStore, raw: string): Promise<MemoryContext> => {
+      const { semantic, filters } = parseAdvancedQuery(raw);
+      const ctx = await searchMemoryContext(store, embedding, semantic, searchOptions);
+      ctx.results = applyAdvancedFilters(ctx.results, filters);
+      return ctx;
+    };
+    const searchAcross = async (store: NmgStore, raw: string) => {
+      const local = await runOne(store, raw);
+      if (local.results.length > 0 && local.activeGraph?.qpp?.trigger === false) return local;
+      const shared = await runOne(this.#getStore(), raw);
+      return local.results.length === 0 ? shared : mergeStgLtgContexts(local, shared);
+    };
 
-    const local = await search(this.#getStgStore(projectDir, sessionId));
-    if (local.results.length > 0 && local.activeGraph?.qpp?.trigger === false) return local;
+    if (raws.length === 1) {
+      if (!projectDir) return runOne(this.#getStore(), raws[0]!);
+      return searchAcross(this.#getStgStore(projectDir, sessionId), raws[0]!);
+    }
 
-    const shared = await search(this.#getStore());
-    return local.results.length === 0 ? shared : mergeStgLtgContexts(local, shared);
+    // Multi-query fusion: primary keeps rank, extra clauses append unique
+    // hits (their own order), then the hard limit is applied once.
+    const primary = await runOne(this.#getStore(), raws[0]!);
+    const seen = new Set(primary.results.map((result) => result.memory.id));
+    for (let i = 1; i < raws.length; i += 1) {
+      const extra = await runOne(this.#getStore(), raws[i]!);
+      for (const result of extra.results) {
+        if (seen.has(result.memory.id)) continue;
+        seen.add(result.memory.id);
+        primary.results.push(result);
+      }
+    }
+    if (searchOptions.limit) primary.results = primary.results.slice(0, searchOptions.limit);
+    return primary;
   }
 
   #get(params: NmgGetParams): NmgMethodResult["get"] {
@@ -362,6 +389,7 @@ function parseSearchParams(value: unknown): NmgSearchParams {
   const params = objectParams(value);
   return {
     query: requiredString(params, "query"),
+    queries: optionalStringArray(params, "queries"),
     nodeName: optionalString(params, "nodeName"),
     scope: optionalScope(params, "scope"),
     sourceActor: optionalEnum(params, "sourceActor", ACTORS) as MemoryActor | undefined,
@@ -498,6 +526,19 @@ function optionalString(params: Record<string, unknown>, key: string): string | 
     throw new NmgProtocolError("INVALID_PARAMS", `${key} must be a non-empty string`);
   }
   return value.trim();
+}
+
+function optionalStringArray(params: Record<string, unknown>, key: string): string[] | undefined {
+  const value = params[key];
+  if (value === undefined) return undefined;
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.some((entry) => typeof entry !== "string" || !entry.trim())
+  ) {
+    throw new NmgProtocolError("INVALID_PARAMS", `${key} must be an array of non-empty strings`);
+  }
+  return value.map((entry) => String(entry).trim());
 }
 
 function requiredStringArray(

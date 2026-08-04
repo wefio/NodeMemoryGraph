@@ -97,6 +97,7 @@
     "usearch": "2.26.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0"
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "search-query-parser": "^1.6.0"
   }
 }
