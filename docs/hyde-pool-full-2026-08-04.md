@@ -44,13 +44,14 @@ with deepseek-chat for both answer and judge, same prompts and same
 
 | | baseline fixed-top-20 | + pool-aware HyDE | Δ |
 |---|---|---|---|
-| **answer accuracy (judged)** | **81.2%** | **85.0%** | **+3.8pp** |
+| **Overall Accuracy (official LLM-as-a-Judge)** | **81.2%** | **85.0%** | **+3.8pp** |
 | knowledge-update | 84.6% (78) | 85.9% (78) | +1.3 |
 | multi-session | 74.4% (133) | **82.7%** (133) | **+8.3** |
 | single-session-assistant | 94.6% (56) | **100.0%** (56) | +5.4 |
 | single-session-preference | 66.7% (30) | 63.3% (30) | **−3.4** |
 | single-session-user | 92.9% (70) | 94.3% (70) | +1.4 |
 | temporal-reasoning | 77.4% (133) | 80.5% (133) | +3.1 |
+| context tokens / question | 856 | 1100 | +28% |
 
 Notes: judge temperature 0 (deterministic), 500/500 success on both steps.
 multi-session is the largest gain (HyDE stitches cross-session detail into the
