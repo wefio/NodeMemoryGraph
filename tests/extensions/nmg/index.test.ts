@@ -53,7 +53,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
   const previousProject = process.env.NMG_PROJECT_DIR;
   process.env.NMG_DATA_DIR = directory;
   process.env.NMG_PROJECT_DIR = directory;
-  const sessionManager = { getSessionId: () => "http-test-session" };
+  const sessionManager = { getSessionId: () => "http-test-session", getSessionFile: () => "session.jsonl" };
   try {
     const { handlers, tools } = extensionHarness();
     const remember = await tools.get("nmg_remember")!.execute(
@@ -135,7 +135,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     const otherSession = await tools
       .get("nmg_search")!
       .execute("search-stg-other", { query: "scratch color cobalt" }, undefined, undefined, {
-        sessionManager: { getSessionId: () => "other-session" },
+        sessionManager: { getSessionId: () => "other-session", getSessionFile: () => "other.jsonl" },
       });
     assert.match(sameSession.content[0].text, /Session scratch/);
     assert.doesNotMatch(otherSession.content[0].text, /Session scratch/);

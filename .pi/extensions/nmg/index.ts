@@ -11,6 +11,13 @@ import {
   shutdownOwnedDaemon,
   type DaemonConnection,
 } from "../../../src/cli/daemon-client.ts";
+import {
+  archiveOrStage,
+  archiveNodeName,
+  archiveStatement,
+  flushArchives,
+  stagingDirFor,
+} from "../../../src/cli/archive-staging.ts";
 import type { MemoryContext, MemorySearchResult, MemoryTier } from "../../../src/core/types.ts";
 
 /**
@@ -72,12 +79,72 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("session_shutdown", async (_event, ctx) => {
-    injectionWindow.clear(ctx.sessionManager.getSessionId());
+  pi.on("session_start", async (_event, ctx) => {
+    // Flush archive entries staged by a previous session_shutdown. The daemon
+    // is lazily started by the first invoke, so this cannot race teardown.
+    // Failures keep the staging files for the next startup.
+    const sessionId = ctx.sessionManager.getSessionId();
+    try {
+      await flushArchives(stagingDirFor(projectDirectory()), async (entry) => {
+        await invoke("remember", {
+          statement: archiveStatement(entry),
+          nodeName: archiveNodeName(entry),
+          memoryType: "event",
+          eventTime: entry.archivedAt,
+          sourceActor: "system",
+          truthStatus: "asserted",
+          tier: 2,
+          importance: 0.2,
+          markers: [{ kind: "session_archive", attributes: { sessionId: entry.sessionId } }],
+          scope: { project: projectDirectory() },
+          writeReason: "session_archive_flush",
+          projectDir: projectDirectory(),
+          sessionId,
+        });
+      });
+    } catch {
+      // Daemon unavailable; staging files remain for the next startup.
+    }
+  });
+
+  pi.on("session_shutdown", async (event, ctx) => {
+    const sessionId = ctx.sessionManager.getSessionId();
+    injectionWindow.clear(sessionId);
     if (!connectionPromise) return;
     const active = await connectionPromise.catch(() => undefined);
     connectionPromise = undefined;
-    if (active) await shutdownOwnedDaemon(active);
+    if (!active) return;
+    // Archive before teardown (daemon is still alive here); archiveOrStage has
+    // a hard timeout and never throws, so daemon shutdown always runs.
+    await archiveOrStage(
+      stagingDirFor(projectDirectory()),
+      {
+        sessionId,
+        sessionFile: ctx.sessionManager.getSessionFile() ?? undefined,
+        projectDir: projectDirectory(),
+        archivedAt: new Date().toISOString(),
+        reason: event.reason,
+      },
+      async (params) =>
+        invoke("remember", {
+          ...params,
+          memoryType: "event",
+          sourceActor: "system",
+          truthStatus: "asserted",
+          tier: 2,
+          importance: 0.2,
+          markers: [{ kind: "session_archive", attributes: { sessionId } }],
+          scope: { project: projectDirectory() },
+          writeReason: "session_archive_shutdown",
+          projectDir: projectDirectory(),
+          sessionId,
+        }),
+    );
+    try {
+      await shutdownOwnedDaemon(active);
+    } catch {
+      // shutdownOwnedDaemon already force-exits survivors; nothing more to do.
+    }
   });
 
   pi.on("session_before_compact", async (_event, ctx) => {
