@@ -14,16 +14,18 @@ export interface HistoryRecord {
   createdAt: string;
 }
 
-export type MemoryNodeKind =
-  | "concept"
-  | "constraint"
-  | "entity"
-  | "preference"
-  | "procedure"
-  | "project"
-  | "state"
-  | "strategy"
-  | "topic";
+export const MEMORY_NODE_KINDS = [
+  "concept",
+  "constraint",
+  "entity",
+  "preference",
+  "procedure",
+  "project",
+  "state",
+  "strategy",
+  "topic",
+] as const;
+export type MemoryNodeKind = (typeof MEMORY_NODE_KINDS)[number];
 
 export interface MemoryNode {
   id: string;
@@ -37,20 +39,26 @@ export interface MemoryNode {
 }
 
 export type MemoryTier = 0 | 1 | 2 | 3;
-export type MemoryStorageState = "dormant" | "indexed" | "quarantine";
-export type MemoryResidence = "ltg" | "stg";
+export const MEMORY_STORAGE_STATES = ["dormant", "indexed", "quarantine"] as const;
+export type MemoryStorageState = (typeof MEMORY_STORAGE_STATES)[number];
+export const MEMORY_RESIDENCES = ["ltg", "stg"] as const;
+export type MemoryResidence = (typeof MEMORY_RESIDENCES)[number];
 export type MemoryWriteSource = "agent" | "automatic" | "core" | "derived" | "import" | "user";
-export type MemoryType =
-  | "constraint"
-  | "conversation_evidence"
-  | "derived"
-  | "event"
-  | "fact"
-  | "preference"
-  | "state"
-  | "strategy";
-export type MemoryActor = "assistant" | "system" | "tool" | "user";
-export type TruthStatus = "asserted" | "inferred" | "unverified" | "verified";
+export const MEMORY_TYPES = [
+  "constraint",
+  "conversation_evidence",
+  "derived",
+  "event",
+  "fact",
+  "preference",
+  "state",
+  "strategy",
+] as const;
+export type MemoryType = (typeof MEMORY_TYPES)[number];
+export const MEMORY_ACTORS = ["assistant", "system", "tool", "user"] as const;
+export type MemoryActor = (typeof MEMORY_ACTORS)[number];
+export const TRUTH_STATUSES = ["asserted", "inferred", "unverified", "verified"] as const;
+export type TruthStatus = (typeof TRUTH_STATUSES)[number];
 /** Logical polarity of a statement, extracted at write time from text. */
 export type Polarity = "affirmative" | "negative" | "neutral";
 
@@ -68,7 +76,15 @@ export interface MemoryClaim {
   extractMethod: ExtractMethod;
 }
 export type MemoryStatus = "active" | "deleted" | "disputed" | "inactive" | "superseded";
-export type EvidenceRole = "contradict" | "example" | "exception" | "origin" | "support" | "update";
+export const EVIDENCE_ROLES = [
+  "contradict",
+  "example",
+  "exception",
+  "origin",
+  "support",
+  "update",
+] as const;
+export type EvidenceRole = (typeof EVIDENCE_ROLES)[number];
 export type MemoryScope = Record<string, string>;
 export type NodeRelationType =
   | "applies_to"
@@ -219,6 +235,11 @@ export interface RememberResult {
   timings?: PerfSnapshot;
 }
 
+export const RETRIEVAL_MODES = ["legacy", "fts5", "hashing", "qwen3", "hybrid"] as const;
+export type RetrievalMode = (typeof RETRIEVAL_MODES)[number];
+export const VECTOR_GRANULARITIES = ["hierarchy", "records", "union"] as const;
+export type VectorGranularity = (typeof VECTOR_GRANULARITIES)[number];
+
 export interface SearchOptions {
   /** Harness session that owns the resulting Active Graph and retrieval trace. */
   sessionId?: string;
@@ -230,7 +251,7 @@ export interface SearchOptions {
   maxTier?: MemoryTier;
   limit?: number;
   graphHops?: number;
-  retrievalMode?: "legacy" | "fts5" | "hashing" | "qwen3" | "hybrid";
+  retrievalMode?: RetrievalMode;
   taskId?: string;
   activeGraphBudget?: Partial<ActiveGraphBudget>;
   /** Maximum semantic nodes considered by hierarchical vector routing. */
@@ -238,7 +259,7 @@ export interface SearchOptions {
   /** Maximum leaf blocks considered by hierarchical vector routing. */
   leafCandidateLimit?: number;
   /** Selects compressed node/leaf routing or a full record-vector diagnostic path. */
-  vectorGranularity?: "hierarchy" | "records" | "union";
+  vectorGranularity?: VectorGranularity;
   /**
    * Internal two-stage retrieval can inspect a disposable candidate graph before
    * committing the final Active Graph. The probe must not become a feedback trace.

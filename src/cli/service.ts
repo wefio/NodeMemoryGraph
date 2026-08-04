@@ -8,17 +8,21 @@ import {
 } from "../core/embedding-provider.ts";
 import { NmgStore } from "../core/store.ts";
 import { copyLtgSubsetToStg, createStgStore, mergeStgLtgContexts } from "../core/stg.ts";
-import type {
-  EvidenceRole,
-  MemoryActor,
-  MemoryContext,
-  MemoryResidence,
-  MemoryScope,
-  MemoryMarker,
-  MemoryTier,
-  MemoryType,
-  SearchOptions,
-  TruthStatus,
+import {
+  EVIDENCE_ROLES,
+  MEMORY_ACTORS,
+  MEMORY_NODE_KINDS,
+  MEMORY_RESIDENCES,
+  MEMORY_STORAGE_STATES,
+  MEMORY_TYPES,
+  RETRIEVAL_MODES,
+  TRUTH_STATUSES,
+  VECTOR_GRANULARITIES,
+  type MemoryContext,
+  type MemoryScope,
+  type MemoryMarker,
+  type MemoryTier,
+  type SearchOptions,
 } from "../core/types.ts";
 import { assessMemoryWrite } from "../core/write-policy.ts";
 import { searchMemoryContext } from "../integration/search.ts";
@@ -43,42 +47,6 @@ import {
 } from "./protocol.ts";
 
 const SERVICE_VERSION = "0.1.0";
-const MEMORY_TYPES = [
-  "constraint",
-  "conversation_evidence",
-  "derived",
-  "event",
-  "fact",
-  "preference",
-  "state",
-  "strategy",
-] as const;
-const ACTORS = ["assistant", "system", "tool", "user"] as const;
-const TRUTH_STATUSES = ["asserted", "inferred", "unverified", "verified"] as const;
-const EVIDENCE_ROLES = [
-  "contradict",
-  "example",
-  "exception",
-  "origin",
-  "support",
-  "update",
-] as const;
-const RESIDENCES = ["ltg", "stg"] as const;
-const RETRIEVAL_MODES = ["legacy", "fts5", "hashing", "qwen3", "hybrid"] as const;
-const VECTOR_GRANULARITIES = ["hierarchy", "records", "union"] as const;
-const STORAGE_STATES = ["indexed", "dormant", "quarantine"] as const;
-const NODE_KINDS = [
-  "concept",
-  "constraint",
-  "entity",
-  "preference",
-  "procedure",
-  "project",
-  "state",
-  "strategy",
-  "topic",
-] as const;
-
 export interface NmgServiceOptions {
   dataDirectory?: string;
   databasePath?: string;
@@ -358,20 +326,20 @@ function parseRememberParams(value: unknown): NmgRememberParams {
   const parsed: NmgRememberParams = {
     statement: requiredString(params, "statement"),
     nodeName: requiredString(params, "nodeName"),
-    memoryType: optionalEnum(params, "memoryType", MEMORY_TYPES) as MemoryType | undefined,
+    memoryType: optionalEnum(params, "memoryType", MEMORY_TYPES),
     stateKey: optionalString(params, "stateKey"),
     eventTime: optionalString(params, "eventTime"),
-    sourceActor: optionalEnum(params, "sourceActor", ACTORS) as MemoryActor | undefined,
-    truthStatus: optionalEnum(params, "truthStatus", TRUTH_STATUSES) as TruthStatus | undefined,
+    sourceActor: optionalEnum(params, "sourceActor", MEMORY_ACTORS),
+    truthStatus: optionalEnum(params, "truthStatus", TRUTH_STATUSES),
     evidence: optionalString(params, "evidence"),
     tier: optionalInteger(params, "tier", 0, 3) as MemoryTier | undefined,
     importance: optionalNumber(params, "importance", 0, 1),
     scope: optionalScope(params, "scope"),
     validFrom: optionalString(params, "validFrom"),
     validUntil: optionalString(params, "validUntil"),
-    evidenceRole: optionalEnum(params, "evidenceRole", EVIDENCE_ROLES) as EvidenceRole | undefined,
+    evidenceRole: optionalEnum(params, "evidenceRole", EVIDENCE_ROLES),
     supersedesId: optionalString(params, "supersedesId"),
-    residence: optionalEnum(params, "residence", RESIDENCES) as MemoryResidence | undefined,
+    residence: optionalEnum(params, "residence", MEMORY_RESIDENCES),
     expiresAt: optionalString(params, "expiresAt"),
     writeReason: optionalString(params, "writeReason"),
     sessionId: optionalString(params, "sessionId"),
@@ -392,7 +360,7 @@ function parseSearchParams(value: unknown): NmgSearchParams {
     queries: optionalStringArray(params, "queries"),
     nodeName: optionalString(params, "nodeName"),
     scope: optionalScope(params, "scope"),
-    sourceActor: optionalEnum(params, "sourceActor", ACTORS) as MemoryActor | undefined,
+    sourceActor: optionalEnum(params, "sourceActor", MEMORY_ACTORS),
     includeHistorical: optionalBoolean(params, "includeHistorical"),
     maxTier: optionalInteger(params, "maxTier", 0, 3) as MemoryTier | undefined,
     limit: optionalInteger(params, "limit", 1, 50),
@@ -467,7 +435,7 @@ function parseSetStorageStateParams(value: unknown): NmgSetStorageStateParams {
   const params = objectParams(value);
   return {
     memoryId: requiredString(params, "memoryId"),
-    storageState: optionalEnum(params, "storageState", STORAGE_STATES) ?? "indexed",
+    storageState: optionalEnum(params, "storageState", MEMORY_STORAGE_STATES) ?? "indexed",
     recoveryDays: optionalInteger(params, "recoveryDays", 0, 36500),
   };
 }
@@ -481,7 +449,7 @@ function parseMergeNodesParams(value: unknown): NmgMergeNodesParams {
   return {
     sourceNodeIds: requiredStringArray(params, "sourceNodeIds", 2, 100),
     targetName: requiredString(params, "targetName"),
-    targetKind: optionalEnum(params, "targetKind", NODE_KINDS),
+    targetKind: optionalEnum(params, "targetKind", MEMORY_NODE_KINDS),
     summary: optionalString(params, "summary"),
   };
 }
@@ -498,7 +466,7 @@ function parseSplitNodeParams(value: unknown): NmgSplitNodeParams {
       return {
         nodeName: requiredString(partition, "nodeName"),
         memoryIds: requiredStringArray(partition, "memoryIds", 1, 10_000),
-        nodeKind: optionalEnum(partition, "nodeKind", NODE_KINDS),
+        nodeKind: optionalEnum(partition, "nodeKind", MEMORY_NODE_KINDS),
         summary: optionalString(partition, "summary"),
       };
     }),
