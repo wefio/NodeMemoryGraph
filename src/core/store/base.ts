@@ -73,16 +73,28 @@ export class NmgStoreBase {
     this.db = new DatabaseSync(databasePath);
     this.embedder = embedder;
     this.router = new Router(embedder);
-    this.db.exec(`
-      PRAGMA foreign_keys = ON;
-      PRAGMA journal_mode = WAL;
-      PRAGMA synchronous = NORMAL;
-      PRAGMA cache_size = -64000;
-      PRAGMA temp_store = MEMORY;
-      PRAGMA mmap_size = 268435456;
-      PRAGMA busy_timeout = 5000;
-    `);
-    migrate(this.db);
+    try {
+      this.db.exec(`
+        PRAGMA foreign_keys = ON;
+        PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = NORMAL;
+        PRAGMA cache_size = -64000;
+        PRAGMA temp_store = MEMORY;
+        PRAGMA mmap_size = 268435456;
+        PRAGMA busy_timeout = 5000;
+      `);
+      migrate(this.db);
+    } catch (error) {
+      // A corrupt database makes PRAGMA/migrate throw while the underlying
+      // handle is still open. Close it before propagating, or the file stays
+      // locked on Windows and any cleanup (rmSync) fails with EPERM forever.
+      try {
+        this.db.close();
+      } catch {
+        // Best effort; the original error is the one the caller needs.
+      }
+      throw error;
+    }
   }
 
   close(): void {

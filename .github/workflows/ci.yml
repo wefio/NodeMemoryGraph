@@ -39,3 +39,24 @@ jobs:
 
       - name: Audit
         run: npm audit --production --audit-level=high
+
+  chaos:
+    # Chaos tests are Windows-sensitive (EPERM file pins, WAL locking — the
+    # exact incidents they reproduce), so run them on Windows explicitly.
+    # Ubuntu coverage comes from the ci job's npm test (tests/** glob).
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        node-version: ["22", "23"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Chaos tests (Windows)
+        run: npm run test:chaos
