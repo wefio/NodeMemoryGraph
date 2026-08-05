@@ -9,16 +9,36 @@ description: Run OmniMemEval benchmark evals (LongMemEval 500, PersonaMem-v2 qui
 
 ## 0. 前置环境（每次确认）
 
+**跑任何评测前先执行环境检查**（一键）：
+```bash
+bash evals/omnimemeval/check-env.sh   # GPU / CUDA torch / bge-server device / env / wrapper / 残留进程
+```
+
 - **bge-server**（embedding，8000 端口）必须活着：
   ```bash
-  curl -s localhost:8000/health   # 期望 {"status":"ok"}
+  curl -s localhost:8000/health   # 期望 {"status":"ok","device":"cuda"}
   # 启动（用评测 venv 直接跑——别用 uv run 临时环境！）：
   cd evals/omnimemeval && ../../.benchmarks/omni-venv/Scripts/python.exe bge-server.py
-  # 验证 GPU：日志 [bge-server] device=cuda；nvidia-smi 有进程占显存
   ```
   - **教训**：`uv run --with sentence-transformers...` 临时环境 = CPU torch + 每次重新解析/构建
     （还撞 cp313 无 cu121 wheel）——**浪费且慢**；`omni-venv`（评测 venv）**早有 CUDA torch**
     （2.13+cu132，cuda: True）——直接复用。fastapi/uvicorn 已补装到 omni-venv。
+
+### uv / GPU 环境速查（"uv 跑过 GPU 为什么每次重搞"的答案）
+
+- **GPU 检查用 nvidia-smi 一查就清楚**：
+  ```bash
+  nvidia-smi | grep "CUDA UMD"        # 驱动支持的 CUDA 版本（本机 13.3）
+  nvidia-smi --query-gpu=name,driver_version --format=csv  # 3060 Laptop / 610.88
+  ```
+  → **torch 装 cuXX 要匹配驱动**（本机装 cu132，不是 cu121）——`torch.version.cuda` 应 ≤ 驱动 UMD。
+- **uv 的现实**（uv 0.12+）：
+  - `uv python find` → 默认 python **3.13.5**——**cu121 index 无 cp313 wheel**（torch 2.5 时代）——
+    之前 `uv run --index cu121 --with torch` 解析失败就是这原因；cu132 才有 cp313 wheel。
+  - `uv run --with` 是 **ephemeral 临时环境**（cache 里 `.tmpXXXX/`）——每次重建、每次重新解析；
+    wheel 缓存持久（`uv cache dir`，archive-v0/ 里有 torch 2.13.0）但不自动复用（index 不同 → pypi CPU torch）。
+  - **正解**：固定环境（omni-venv 或 `uv venv --python 3.12` + `uv pip install torch --index https://download.pytorch.org/whl/cu132`）——
+    一次装好，之后直接 `.../Scripts/python.exe` 跑，不再每次 uv run。
 - **env 文件**：`.env.nmg-bgefix`（ANSWER_API_KEY/EVAL_API_KEY）
 - **不要直接跑官方脚本**——只通过 wrapper（固化 PYTHONUTF8/PYTHONIOENCODING/NMG_ROOT/kill_strays）：
   - LME：`bash evals/omnimemeval/run-lme.sh`
