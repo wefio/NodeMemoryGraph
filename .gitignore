@@ -3,6 +3,7 @@ dist/
 coverage/
 .nmg/
 .workbuddy/
+.qoder/
 .claude/settings.local.json
 .claude/.mcp-approvals.json
 .mcp.json
