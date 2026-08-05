@@ -65,13 +65,91 @@ function parseDateRange(value: string): { from?: string; to?: string } {
   return { from: value, to: value };
 }
 
+// ── Natural-language event-time extraction ────────────────────────────────
+// Benchmarks ask temporal questions ("as of Mar 10, 2029", "on Sep 13, 2029",
+// "from Feb 28, 2035 to Feb 28, 2036"). Parse the date mention into an
+// inclusive event-time window so retrieval filters by the question date
+// instead of ranking future memories above the ones current at that time.
+
+const MONTH_NUM: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
+function isoDay(y: number, m: number, d: number, addDays = 0): string {
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + addDays);
+  return dt.toISOString().slice(0, 10);
+}
+
+const DATE_TOKEN =
+  /[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2}|[A-Za-z]{3,9}\.?\s+\d{4}/;
+
+function parseDateToken(text: string): { day: string; nextDay: string } | null {
+  const t = text.trim();
+  let m = t.match(/^([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})$/i); // Mar 10, 2029
+  if (m) {
+    const mo = MONTH_NUM[m[1]!.toLowerCase().slice(0, 3)];
+    if (mo) return { day: isoDay(+m[3]!, mo, +m[2]!), nextDay: isoDay(+m[3]!, mo, +m[2]!, 1) };
+    return null;
+  }
+  m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); // 2029-03-10
+  if (m) {
+    const day = isoDay(+m[1]!, +m[2]!, +m[3]!);
+    return { day, nextDay: isoDay(+m[1]!, +m[2]!, +m[3]!, 1) };
+  }
+  m = t.match(/^([A-Za-z]{3,9})\.?\s+(\d{4})$/i); // March 2029
+  if (m) {
+    const mo = MONTH_NUM[m[1]!.toLowerCase().slice(0, 3)];
+    if (mo) {
+      const last = new Date(Date.UTC(+m[2]!, mo, 0)).getUTCDate();
+      return { day: isoDay(+m[2]!, mo, 1), nextDay: isoDay(+m[2]!, mo, last + 1) };
+    }
+    return null;
+  }
+  return null;
+}
+
+export function extractEventWindow(text: string): { from?: string; to?: string } {
+  // 1) "from <D1> to <D2>" / "between <D1> and <D2>" — explicit range
+  let m = text.match(
+    /\b(?:from|between)\s+([A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2}),?\s+(?:to|and)\s+([A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2})/i,
+  );
+  if (m) {
+    const a = parseDateToken(m[1]!);
+    const b = parseDateToken(m[2]!);
+    if (a && b) return { from: a.day, to: b.nextDay };
+  }
+  // 2) "as of / as at / by / before / until <D>" → inclusive through that day
+  m = text.match(new RegExp(`\\b(?:as of|as at|by|before|until|up to)\\s+(${DATE_TOKEN.source})\\b`, "i"));
+  if (m) {
+    const d = parseDateToken(m[1]!);
+    if (d) return { to: d.nextDay };
+  }
+  // 3) "on <D>" → that exact day
+  m = text.match(new RegExp(`\\bon\\s+(${DATE_TOKEN.source})\\b`, "i"));
+  if (m) {
+    const d = parseDateToken(m[1]!);
+    if (d) return { from: d.day, to: d.nextDay };
+  }
+  // 4) "after / since <D>" → from that day onward
+  m = text.match(new RegExp(`\\b(?:after|since)\\s+(${DATE_TOKEN.source})\\b`, "i"));
+  if (m) {
+    const d = parseDateToken(m[1]!);
+    if (d) return { from: d.day };
+  }
+  return {};
+}
+
 export function parseAdvancedQuery(query: string): ParsedAdvancedQuery {
   const parsed = (sqp.parse(query, PARSER_OPTIONS) ?? {}) as Parsed;
   const semantic = Array.isArray(parsed.text)
     ? parsed.text.join(" ").trim()
     : (parsed.text ?? "").trim();
   const excludeTerms = asList(parsed.exclude?.text) ?? [];
-  const range = parsed.time ? parseDateRange(parsed.time) : {};
+  const range = parsed.time
+    ? parseDateRange(parsed.time)
+    : extractEventWindow(semantic);
   return {
     semantic,
     filters: {

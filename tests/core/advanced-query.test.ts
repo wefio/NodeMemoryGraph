@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { applyAdvancedFilters, parseAdvancedQuery } from "../../src/core/store/advanced-query.ts";
+import { applyAdvancedFilters, extractEventWindow, parseAdvancedQuery } from "../../src/core/store/advanced-query.ts";
 
 function fakeResult(overrides: {
   statement: string;
@@ -86,4 +86,41 @@ test("applyAdvancedFilters filters by time range and exclusions", () => {
   const excluded = applyAdvancedFilters(results, { excludeTerms: ["快餐"], types: undefined });
   assert.equal(excluded.length, 2);
   assert.ok(!excluded.some((r) => r.memory.statement.includes("快餐")));
+});
+
+test("extractEventWindow: as of <date> → inclusive through that day", () => {
+  const w = extractEventWindow("What is Martin Mark's current mental health status as of Mar 10, 2029?");
+  assert.equal(w.to, "2029-03-11");
+  assert.equal(w.from, undefined);
+});
+
+test("extractEventWindow: on <date> → that exact day", () => {
+  const w = extractEventWindow("What sports activity did Donald engage in on September 13, 2029?");
+  assert.equal(w.from, "2029-09-13");
+  assert.equal(w.to, "2029-09-14");
+});
+
+test("extractEventWindow: from <d1> to <d2> → range", () => {
+  const w = extractEventWindow("How did Karen's motivation evolve from February 28, 2035, to February 28, 2036?");
+  assert.equal(w.from, "2035-02-28");
+  assert.equal(w.to, "2036-02-29");
+});
+
+test("extractEventWindow: ISO date + after", () => {
+  assert.deepEqual(extractEventWindow("events after 2029-05-20"), { from: "2029-05-20" });
+});
+
+test("extractEventWindow: no date → empty", () => {
+  assert.deepEqual(extractEventWindow("What is the person's name?"), {});
+});
+
+test("parseAdvancedQuery: explicit time: wins over natural language", () => {
+  const p = parseAdvancedQuery("mental health time:2029-01-01..2029-06-30 as of Mar 10, 2029");
+  assert.equal(p.filters.eventTimeFrom, "2029-01-01");
+  assert.equal(p.filters.eventTimeTo, "2029-06-30");
+});
+
+test("parseAdvancedQuery: applies natural date", () => {
+  const p = parseAdvancedQuery("What is the status as of Mar 10, 2029?");
+  assert.equal(p.filters.eventTimeTo, "2029-03-11");
 });
