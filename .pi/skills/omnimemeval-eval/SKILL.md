@@ -129,22 +129,23 @@ bash evals/omnimemeval/run-locomo.sh --analyze <results-dir>
 - **判定**：检索缺失型（cannot determine）是 NMG 真正负责的部分；judge 波动 ±0.05-0.08 算噪声
 - 新基线：`results/locomo/nmg-locomo_bgefix_20260805/`（后续改动对比这个）
 
-## 7. HaluMem（2026-08-05 实测中）
+## 7. HaluMem（2026-08-05 实测完成）
 
 ```bash
 # 小批量试坑（截断 jsonl 前 N 条——trial 粒度：1 条 ≈ 164 问）
-# 全量（20 persona ≈ 3467 问，~30-45 分钟）
+# 全量（20 persona ≈ 3467 问，GPU 下 ~40 分钟：answer 5m54s + judge 15m46s）
 bash evals/omnimemeval/run-halumem.sh --env-file .env.nmg-bgefix --version halumem_20260805 --workers 2 --llm-workers 16
 ```
 
 - 数据：`data/halumem/HaluMem-Medium.jsonl`（20 条 persona × ~140-206 问 ≈ **3467 问**；另有 long 变体）
 - **测什么**：操作级幻觉（记忆提取/更新/QA 三操作 + 干扰内容鲁棒性）——与我们 forget/脱敏工作相关（Memory Boundary/Conflict 题型）
 - 产物前缀 `nmg_hm_*`（hm 不是 halumem！）；`--variant medium|long` 默认 medium
-- **试坑（trial 20260805，1 条 164 问）**：一次跑通零新坑（wrapper 复用 run-locomo 模式——成型）；
-  截断 jsonl 前 N 条做 trial（备份 .bak 恢复）；无 audit 脚本——看官方 exp_report.md
-- **trial 结果（164 问）**：QA Accuracy 0.7500——题型：Memory Boundary 0.974 / Conflict 0.872 /
-  Basic Recall 0.700 / Generalization 0.581 / Multi-hop 0.222（9 问）/ Dynamic Update 0.500（6 问）
-- **全量（3467 问）跑完后把结果/坑补回本节**（边做边写原则）
+- **trial（164 问）**：一次跑通零新坑（wrapper 复用成型）；截断 jsonl 前 N 条做 trial（备份 .bak 恢复）；无 audit 脚本——看官方 exp_report.md
+- **全量（3467 问，version `halumem_20260805`）**：QA Accuracy **0.6873** 全 success 零失败——
+  题型：Memory Boundary **0.981**（828——最强，印证元数据/边界语义）/ Conflict 0.875 / Generalization 0.530 /
+  Basic Recall 0.503 / Multi-hop 0.429 / **Dynamic Update 0.239**（180——最弱，记忆更新场景可挖）；难度 easy 0.733 / medium 0.624 / hard 0.684
+- 对比：trial 0.750（164 问）vs 全量 0.687——小样本虚高规律
+- 新基线：`results/halumem/nmg-halumem_20260805/`（后续改动对比这个）
 
 ## 8. 结果与判定速查
 
