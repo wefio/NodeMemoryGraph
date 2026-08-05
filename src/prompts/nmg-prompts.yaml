@@ -74,9 +74,8 @@ get_hint: >-
   records and source evidence.
 
 forget_hint: >-
-  A line beginning with [forget] is a revocation boundary, not an active
-  fact: do not use or reconstruct that content, and prefer an answer
-  independent of it.
+  A line beginning with [forget] is a revocation boundary; treat it as
+  revoked.
 
 # Rendered in place of a revoked record's statement in search results
 # (auto-recommendation). The record id stays visible; exact content is
