@@ -78,6 +78,11 @@ forget_hint: >-
   fact: do not use or reconstruct that content, and prefer an answer
   independent of it.
 
+# Rendered in place of a revoked record's statement in search results
+# (auto-recommendation). The record id stays visible; exact content is
+# only returned by nmg_get on explicit request.
+forget_redacted: "[forget] (content withdrawn)"
+
 # ---- 其他 -----------------------------------------------------------------
 
 headers_fields: |-

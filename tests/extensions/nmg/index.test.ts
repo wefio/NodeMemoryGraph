@@ -279,6 +279,34 @@ test("formatters visibly mark external provenance and trust", () => {
   assert.match(formatMemoryContext(context), /web:https:\/\/example\.com/);
 });
 
+test("search headers redact revoked records; nmg_get keeps the statement", () => {
+  const context = {
+    results: [
+      {
+        memory: {
+          id: "memory-revoked",
+          statement: "I enjoy modern electronic music festivals.",
+          memoryType: "preference",
+          tier: 1,
+          truthStatus: "asserted",
+          scope: {},
+          markers: [{ kind: "forget", attributes: { effect: "revoke" } }],
+        },
+        node: { canonicalName: "Event preferences" },
+        evidence: { content: "I enjoy modern electronic music festivals." },
+      },
+    ],
+  } as never;
+  const headers = formatSearchHeaders(context);
+  // Auto-recommendation surfaces the id but withholds the statement.
+  assert.match(headers, /memory=memory-revoked/);
+  assert.match(headers, /\(content withdrawn\)/);
+  assert.doesNotMatch(headers, /modern electronic music festivals/);
+  assert.match(headers, /revocation boundary/);
+  // An explicit nmg_get still returns the exact record.
+  assert.match(formatMemoryContext(context), /I enjoy modern electronic music festivals/);
+});
+
 test("session injection window folds duplicates but permits deeper disclosure", () => {
   const window = new SessionInjectionWindow();
   const context = memoryContext("memory-1", "Use SQLite.", "SQLite works offline.");

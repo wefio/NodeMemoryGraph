@@ -115,7 +115,11 @@ function searchH(r: MemoryContext): string {
   const lines = r.results.length
     ? r.results.map(
         ({ memory: m, node: n }) =>
-          `mid=${m.id}\tnode=${n.canonicalName}\ttype=${m.memoryType}\tL${m.tier}\t${t115(m.statement)}`,
+          `mid=${m.id}\tnode=${n.canonicalName}\ttype=${m.memoryType}\tL${m.tier}\t${
+            (m.markers ?? []).some((marker) => marker.kind === "forget")
+              ? nmgPrompts.forget_redacted
+              : t115(m.statement)
+          }`,
       )
     : ["No NMG match."];
   const deferred = r.progressiveDisclosure?.deferredMemoryIds;

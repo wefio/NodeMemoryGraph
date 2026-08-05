@@ -446,14 +446,18 @@ export function formatSearchHeaders(context: MemoryContext): string {
     }),
     nmgPrompts.headers_title,
     nmgPrompts.headers_fields,
-    ...context.results.map(
-      ({ memory, node, recallReason: reason, hitTerms }) =>
+    ...context.results.map(({ memory, node, recallReason: reason, hitTerms }) => {
+      const forget = (memory.markers ?? []).some((marker) => marker.kind === "forget");
+      return (
         `- ${(memory.markers ?? []).some((marker) => marker.kind === "external_source") ? "[external] " : ""}` +
         `memory=${memory.id}; node=${node.canonicalName}; type=${memory.memoryType}; ` +
         `${recallMatchLabel(reason, hitTerms)}` +
         `${recallTimeLabel(memory)}` +
-        `preview=${excerpt(memory.statement, 160)}`,
-    ),
+        // Revoked records surface only their id in auto-recommendation;
+        // the statement is withheld until an explicit nmg_get.
+        `preview=${forget ? nmgPrompts.forget_redacted : excerpt(memory.statement, 160)}`
+      );
+    }),
     formatActiveGraph(context),
   ]
     .filter(Boolean)

@@ -17,6 +17,7 @@ export interface NmgPrompts {
   deferred_hint: string;
   get_hint: string;
   forget_hint: string;
+  forget_redacted: string;
   headers_fields: string;
   headers_title: string;
   in_context_title: string;

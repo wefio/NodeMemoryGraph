@@ -377,11 +377,19 @@ function projectMemoryContext(
     if (controlKinds.length > 0 && visibleKinds.length === 0) continue;
     visibleKinds.forEach((kind) => projectedKinds.add(kind));
 
+    // Revoked records (forget marker) surface only their marker in
+    // auto-recommendation; the statement is withheld (the eval protocol
+    // has no nmg_get step to fetch it on demand).
+    const forget = visibleKinds.includes("forget");
     const base =
       includeTime && memory.eventTime
         ? `[${memory.eventTime}] ${memory.statement}`
         : memory.statement;
-    const rendered = visibleKinds.length > 0 ? `[${visibleKinds.join(",")}] ${base}` : base;
+    const rendered = forget
+      ? nmgPrompts.forget_redacted
+      : visibleKinds.length > 0
+        ? `[${visibleKinds.join(",")}] ${base}`
+        : base;
     const note = notes.get(memory.memoryId);
     lines.push(note ? `${rendered}\n${note}` : rendered);
   }

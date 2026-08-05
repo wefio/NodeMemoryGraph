@@ -13,6 +13,7 @@ const SECTIONS = [
   "deferred_hint",
   "get_hint",
   "forget_hint",
+  "forget_redacted",
   "headers_fields",
   "headers_title",
   "in_context_title",
