@@ -11,18 +11,26 @@ import nmgExtension, {
   MEMORY_POLICY,
   SessionInjectionWindow,
 } from "../../../.pi/extensions/nmg/index.ts";
+import { loadPrompts } from "../../../src/prompts/load.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
 import { NmgStore } from "../../../src/core/store.ts";
 import type { MemoryContext } from "../../../src/core/types.ts";
 
 function extensionHarness() {
   const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
-  const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
+  const tools = new Map<
+    string,
+    { description?: string; execute: (...args: unknown[]) => Promise<unknown> }
+  >();
   nmgExtension({
     on(event: string, handler: (...args: unknown[]) => Promise<unknown>) {
       handlers.set(event, handler);
     },
-    registerTool(tool: { name: string; execute: (...args: unknown[]) => Promise<unknown> }) {
+    registerTool(tool: {
+      name: string;
+      description?: string;
+      execute: (...args: unknown[]) => Promise<unknown>;
+    }) {
       tools.set(tool.name, tool);
     },
   } as never);
@@ -31,6 +39,14 @@ function extensionHarness() {
 
 test("Pi adapter exposes only the stable tool surface", () => {
   assert.deepEqual([...extensionHarness().tools.keys()], ["nmg_remember", "nmg_get", "nmg_search"]);
+});
+
+test("tool descriptions come from the prompt source of truth", () => {
+  const { tools } = extensionHarness();
+  const prompts = loadPrompts();
+  assert.equal(tools.get("nmg_search")?.description, prompts.search_description);
+  assert.equal(tools.get("nmg_get")?.description, prompts.get_description);
+  assert.equal(tools.get("nmg_remember")?.description, prompts.remember_description);
 });
 
 test("NMG prompt keeps its policy prefix stable and dynamic recall last", () => {
@@ -203,11 +219,36 @@ test("formatters keep search headers compact and exact evidence separate", () =>
   } as never;
   const headers = formatSearchHeaders(context);
   assert.doesNotMatch(headers, /works offline/);
-  assert.match(headers, /L1 continuation/);
+  assert.match(headers, /NMG memory search results: 1 candidate record/);
+  assert.match(headers, /order is not a guarantee of relevance/);
+  assert.match(headers, /More ranked records are folded/);
   assert.match(headers, /memory-2/);
   assert.match(headers, /do not repeat nmg_search/);
   assert.match(formatMemoryContext(context), /works offline/);
-  assert.match(formatMemoryContext(context), /L1 continuation/);
+  assert.match(formatMemoryContext(context), /NMG evidence for 1 selected record/);
+  assert.match(formatMemoryContext(context), /More ranked records are folded/);
+});
+
+test("search headers close with the nmg_get hint when nothing is deferred", () => {
+  const context = {
+    results: [
+      {
+        memory: {
+          id: "memory-1",
+          statement: "Use SQLite.",
+          memoryType: "constraint",
+          tier: 1,
+          truthStatus: "asserted",
+          scope: { project: "atlas" },
+        },
+        node: { canonicalName: "Atlas storage" },
+        evidence: { content: "Use SQLite." },
+      },
+    ],
+    progressiveDisclosure: undefined,
+  } as never;
+  const headers = formatSearchHeaders(context);
+  assert.match(headers, /Use nmg_get with selected memory IDs and the activeGraphId/);
 });
 
 test("formatters visibly mark external provenance and trust", () => {

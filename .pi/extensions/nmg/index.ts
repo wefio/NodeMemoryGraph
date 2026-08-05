@@ -18,6 +18,7 @@ import {
   flushArchives,
   stagingDirFor,
 } from "../../../src/cli/archive-staging.ts";
+import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import type { MemoryContext, MemorySearchResult, MemoryTier } from "../../../src/core/types.ts";
 
 /**
@@ -154,7 +155,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "nmg_remember",
     label: "Remember with NMG",
-    description: "Save a durable fact, state, event, preference, constraint, or reusable strategy.",
+    description: nmgPrompts.remember_description,
     parameters: Type.Object({
       statement: Type.String(),
       nodeName: Type.String({ description: "Stable semantic node name" }),
@@ -232,8 +233,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "nmg_get",
     label: "Get NMG evidence",
-    description:
-      "Load exact memory and evidence for IDs returned by nmg_search; pass its activeGraphId for use attribution.",
+    description: nmgPrompts.get_description,
     parameters: Type.Object({
       memoryIds: Type.Array(Type.String(), { minItems: 1, maxItems: 50 }),
       activeGraphId: Type.Optional(
@@ -255,11 +255,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "nmg_search",
     label: "Search NMG",
-    description:
-      "Search long-term memory headers. Use nmg_get on selected IDs when exact evidence is needed. " +
-      "Advanced syntax: key:value filters (type:preference,constraint  node:\"Conversation …\"  " +
-      "state:key  time:2026-01-01..2026-06-30), -term exclusions, quoted phrases. Pass " +
-      "extra retrieval clauses via queries for a fused union (e.g. a HyDE clause).",
+    description: nmgPrompts.search_description,
     parameters: Type.Object({
       query: Type.String({
         description:
@@ -365,7 +361,7 @@ export class SessionInjectionWindow {
     }
     if (folded.length > 0) {
       sections.push(
-        "NMG ALREADY IN CURRENT CONTEXT\n" +
+        nmgPrompts.in_context_title + "\n" +
           folded.map(({ memory }) => `- memory=${memory.id}; already_in_context=true`).join("\n"),
       );
     }
@@ -395,19 +391,7 @@ function injectionHash(result: MemoryContext["results"][number]): string {
   return createHash("sha256").update(content).digest("base64url");
 }
 
-export const MEMORY_POLICY =
-  `<nmg_policy>\n` +
-  `NMG supplies durable memory; it does not decide answer truth or evidence completeness. ` +
-  `nmg_automatic_recall and nmg_search return candidate headers. nmg_get loads selected exact ` +
-  `records and source evidence. nmg_remember saves durable information. For the latest user ` +
-  `request, decide which candidates matter, whether one or several records are needed, and ` +
-  `whether more recall or current verification is required. No useful memory is a valid result. ` +
-  `Do not treat candidate count as completeness or a memory as current truth. If the recalled ` +
-  `headers under-determine the answer, request additional evidence (append/re-fetch) before ` +
-  `guessing; ignore headers that are clearly irrelevant noise. Save only ` +
-  `attributable, durable information; do not save secrets, transient content, unconfirmed ` +
-  `assistant proposals, or unsupported guesses.\n` +
-  `</nmg_policy>`;
+export const MEMORY_POLICY = `<nmg_policy>\n${loadPrompts().memory_policy}\n</nmg_policy>`;
 
 export function composeNmgSystemPrompt(
   baseSystemPrompt: string,
@@ -449,11 +433,19 @@ function shouldAutoRecall(prompt: string): boolean {
   ].some((pattern) => pattern.test(normalized));
 }
 
+const nmgPrompts = loadPrompts();
+
 export function formatSearchHeaders(context: MemoryContext): string {
   if (context.results.length === 0) return "No matching NMG memory found.";
+  const nextStep = formatProgressiveDisclosure(context) || nmgPrompts.get_hint;
   return [
-    "NMG SEARCH HEADERS",
-    "fields: memory=id; node=memory cluster; type=memory type; matches=query terms hit, else semantic/graph/hybrid; time=event date; expires=expiry date; preview=statement excerpt",
+    renderDisclosure(nmgPrompts.search_disclosure, {
+      count: String(context.results.length),
+      next_step: nextStep,
+      forget_hint: hasForgetMarker(context) ? nmgPrompts.forget_hint : "",
+    }),
+    nmgPrompts.headers_title,
+    nmgPrompts.headers_fields,
     ...context.results.map(
       ({ memory, node, recallReason: reason, hitTerms }) =>
         `- ${(memory.markers ?? []).some((marker) => marker.kind === "external_source") ? "[external] " : ""}` +
@@ -463,11 +455,15 @@ export function formatSearchHeaders(context: MemoryContext): string {
         `preview=${excerpt(memory.statement, 160)}`,
     ),
     formatActiveGraph(context),
-    formatProgressiveDisclosure(context),
-    "Use nmg_get with selected memory IDs and this activeGraphId to load exact evidence.",
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function hasForgetMarker(context: MemoryContext): boolean {
+  return (context.results ?? []).some((result) =>
+    (result.memory.markers ?? []).some((marker) => marker.kind === "forget"),
+  );
 }
 
 /** What the query actually matched, not why the record surfaced:
@@ -499,11 +495,7 @@ function recallTimeLabel(memory: MemorySearchResult["memory"]): string {
 function formatProgressiveDisclosure(context: MemoryContext): string {
   const disclosure = context.progressiveDisclosure;
   if (!disclosure || disclosure.deferredMemoryIds.length === 0) return "";
-  return (
-    `L1 continuation: ${disclosure.deferredMemoryIds.length} ranked memories are folded. ` +
-    "If the visible evidence is insufficient, call nmg_get once with these memory IDs; " +
-    `do not repeat nmg_search: ${disclosure.deferredMemoryIds.join(",")}`
-  );
+  return `${nmgPrompts.deferred_hint} Memory IDs: ${disclosure.deferredMemoryIds.join(",")}`;
 }
 
 function formatActiveGraph(context: MemoryContext): string {
@@ -530,7 +522,15 @@ export function formatMemoryContext(context: MemoryContext): string {
       );
     })
     .join("\n");
-  return [records, formatProgressiveDisclosure(context)].filter(Boolean).join("\n");
+  return [
+    renderDisclosure(nmgPrompts.get_disclosure, {
+      count: String(context.results.length),
+      next_step: formatProgressiveDisclosure(context) || "",
+    }),
+    records,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function toolResult(details: unknown, text: string) {

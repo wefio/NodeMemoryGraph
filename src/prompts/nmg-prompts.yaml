@@ -1,0 +1,100 @@
+# ============================================
+# NMG 提示词单一来源 (single source of truth)
+# --------------------------------------------
+# 修改此处即可生效：重启 daemon（Pi 扩展）或重跑评测桥即可，无需改代码。
+#
+# 各部分说明：
+#   *_description  —— 工具描述。LLM 决定是否调用工具时看到。保持中立：
+#                     只说明工具做什么、返回什么、存什么，不指示何时调用。
+#   *_disclosure   —— 渐进披露。工具返回结果时附带的使用说明（只解释
+#                     数据格式与下一步操作，不指示回答策略）。
+#   memory_policy  —— 注入 system prompt 的 NMG 使用策略（Pi 扩展用）。
+#
+# 占位符（运行时由代码替换，勿删）：
+#   {count}        —— 返回记录条数
+#   {next_step}    —— 下一步操作提示（有折叠记录时是 L1 continuation 说明）
+#   {forget_hint}  —— 出现 [forget] 标记时的撤销边界说明（否则留空）
+# ============================================
+
+# ---- 工具描述 ------------------------------------------------------------
+
+search_description: >-
+  Search long-term memory. Queries match saved records by literal terms,
+  semantic similarity, and learned graph routes; returns ranked candidate
+  headers (memory id, node, type, match terms, event date, preview) plus an
+  activeGraphId. Exact records and source evidence are loaded via nmg_get.
+  The store only contains what was explicitly saved - it is not a live
+  source. Advanced syntax: key:value filters (type:preference,constraint
+  node:"Conversation ..." state:key time:2026-01-01..2026-06-30), -term
+  exclusions, and quoted phrases.
+
+get_description: >-
+  Load exact memory records and source evidence for memory IDs returned by
+  nmg_search (or nmg_automatic_recall). Pass the activeGraphId returned by
+  the search for attribution. Returns the full statement plus evidence
+  content and source reference.
+
+remember_description: >-
+  Save a durable record (fact, state, event, preference, constraint,
+  strategy). You decide what is worth remembering. Returns confirmation.
+  The record persists across sessions. Only save attributable information -
+  not secrets, transient content, or unsupported guesses.
+
+# ---- 渐进披露（检索结果返回时附带） ---------------------------------------
+
+search_disclosure: |
+  NMG memory search results: {count} candidate record(s).
+  Each line is one memory record, optionally prefixed by [event date] and [marker] tags.
+  Records are ranked by retrieval score; order is not a guarantee of relevance.
+  {next_step}
+  {forget_hint}
+
+# MCP (Claude Code plugin) variant: the renderer emits compact tab-separated
+# headers (mid/node/type/L/preview), so the format line describes that layout.
+mcp_search_disclosure: |
+  NMG memory search results: {count} candidate header(s).
+  Each line: mid=memory id; node=cluster; type=memory type; L{tier}; statement preview.
+  Records are ranked by retrieval score; order is not a guarantee of relevance.
+  {next_step}
+  {forget_hint}
+
+get_disclosure: |
+  NMG evidence for {count} selected record(s):
+  - statement: the saved record content
+  - SOURCE=: original evidence content when it differs from the statement
+  - id/node/type/truth/scope identify the record
+  {next_step}
+
+deferred_hint: >-
+  More ranked records are folded. If these are insufficient, call nmg_get
+  once with the deferred memory IDs; do not repeat nmg_search.
+
+get_hint: >-
+  Use nmg_get with selected memory IDs and the activeGraphId to load exact
+  records and source evidence.
+
+forget_hint: >-
+  A line beginning with [forget] is a revocation boundary, not an active
+  fact: do not use or reconstruct that content, and prefer an answer
+  independent of it.
+
+# ---- 其他 -----------------------------------------------------------------
+
+headers_fields: |-
+  fields: memory=id; node=memory cluster; type=memory type; matches=query terms hit, else semantic/graph/hybrid; time=event date; expires=expiry date; preview=statement excerpt
+
+# Section titles injected by the Pi extension (LLM-visible format labels).
+headers_title: "NMG SEARCH HEADERS"
+in_context_title: "NMG ALREADY IN CURRENT CONTEXT"
+
+memory_policy: >-
+  NMG supplies durable memory; it does not decide answer truth or evidence completeness.
+  nmg_automatic_recall and nmg_search return candidate headers. nmg_get loads selected
+  exact records and source evidence. nmg_remember saves durable information. For the
+  latest user request, decide which candidates matter, whether one or several records
+  are needed, and whether more recall or current verification is required. No useful
+  memory is a valid result. Do not treat candidate count as completeness or a memory as
+  current truth. If the recalled headers under-determine the answer, request additional
+  evidence (append/re-fetch) before guessing; ignore headers that are clearly irrelevant
+  noise. Save only attributable, durable information; do not save secrets, transient
+  content, unconfirmed assistant proposals, or unsupported guesses.

@@ -3,7 +3,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { connectDaemon, invokeDaemon, shutdownOwnedDaemon } from "../../../src/cli/daemon-client.ts";
+import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import type { MemoryContext, PerfSnapshot } from "../../../src/core/types.ts";
+
+const nmgPrompts = loadPrompts();
 
 function dbPath(): string {
   return join(process.env.NMG_DATA_DIR ?? join(process.cwd(), ".nmg"), "nmg.sqlite");
@@ -23,8 +26,7 @@ const EVIDENCE_ROLES = ["contradict", "example", "exception", "origin", "support
 const server = new McpServer(
   { name: "nmg-memory", version: "0.1.0" },
   {
-    instructions:
-      "NMG supplies durable memory; it does not decide answer truth or evidence completeness. nmg_search returns candidate headers, nmg_get loads selected exact records and evidence, and nmg_remember saves durable information. For the latest request, decide relevance, evidence needs, and whether more recall or current verification is required. No useful memory is valid. Save only attributable durable information; never save secrets, transient content, unconfirmed assistant proposals, or unsupported guesses.",
+    instructions: nmgPrompts.memory_policy,
   },
 );
 
@@ -33,7 +35,7 @@ const server = new McpServer(
 server.registerTool(
   "nmg_search",
   {
-    description: "Search memory headers (mid, node, type, tier, preview). Use nmg_get on selected IDs.",
+    description: nmgPrompts.search_description,
     inputSchema: {
       query: z.string().describe("Focused recall query"),
       limit: z.number().int().min(1).max(50).default(8),
@@ -55,7 +57,7 @@ server.registerTool(
 server.registerTool(
   "nmg_get",
   {
-    description: "Load exact memory statements + evidence for selected IDs.",
+    description: nmgPrompts.get_description,
     inputSchema: {
       memoryIds: z.array(z.string()).min(1).max(50).describe("Memory IDs from nmg_search"),
       graphHops: z.number().int().min(0).max(3).optional(),
@@ -72,7 +74,7 @@ server.registerTool(
 server.registerTool(
   "nmg_remember",
   {
-    description: "Save durable memory. Auto-save stable facts/prefs/constraints/states. Skip secrets/chatter/duplicates.",
+    description: nmgPrompts.remember_description,
     inputSchema: {
       statement: z.string().describe("Self-contained semantic statement"),
       nodeName: z.string().describe("Stable semantic node grouping related memories"),
@@ -116,9 +118,24 @@ function searchH(r: MemoryContext): string {
           `mid=${m.id}\tnode=${n.canonicalName}\ttype=${m.memoryType}\tL${m.tier}\t${t115(m.statement)}`,
       )
     : ["No NMG match."];
+  const deferred = r.progressiveDisclosure?.deferredMemoryIds;
+  const nextStep =
+    deferred && deferred.length > 0
+      ? `${nmgPrompts.deferred_hint} Memory IDs: ${deferred.join(",")}`
+      : nmgPrompts.get_hint;
+  const forget = r.results.some(({ memory: m }) =>
+    (m.markers ?? []).some((marker) => marker.kind === "forget"),
+  );
   const perfLine = perfFeedback(r.timings, r.filterUsage);
   if (perfLine) lines.push(perfLine);
-  return lines.join("\n");
+  return [
+    renderDisclosure(nmgPrompts.mcp_search_disclosure, {
+      count: String(r.results.length),
+      next_step: nextStep,
+      forget_hint: forget ? nmgPrompts.forget_hint : "",
+    }),
+    ...lines,
+  ].join("\n");
 }
 
 /** Compact per-phase timing feedback line for agent self-maintenance. */

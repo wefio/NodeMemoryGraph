@@ -7,20 +7,11 @@ import { pathToFileURL } from "node:url";
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
 import { syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
 import { NmgStore } from "../../src/core/store.ts";
+import { loadPrompts, renderDisclosure } from "../../src/prompts/load.ts";
 import type { HistoryRole, MemoryActor, MemoryMarker, PerfSnapshot } from "../../src/core/types.ts";
 import { CachedOmniEmbeddingClient } from "./embedding-cache.ts";
 
-const BASE_RETRIEVAL_GUIDANCE =
-  "[NMG retrieval guidance] Treat relevant user facts, preferences, constraints, " +
-  "tools, and prior experiences as evidence for a personalized answer. Apply them " +
-  "to the current request even when the final answer did not appear verbatim in " +
-  "history. Do not invent unsupported user details.";
-const FORGET_RETRIEVAL_GUIDANCE = BASE_RETRIEVAL_GUIDANCE.replace(
-  "history. Do not invent",
-  "history. A line beginning with [forget] is a revocation boundary, not an active " +
-    "fact: do not use or reconstruct that content, and prefer an answer independent " +
-    "of it. Do not invent",
-);
+const nmgPrompts = loadPrompts();
 const PROJECTED_CONTROL_MARKERS = new Set(["forget"]);
 
 type OmniRetrievedMemory = {
@@ -314,7 +305,13 @@ export class OmniMemEvalBridge {
         projection.lines.length === 0
           ? ""
           : [
-              projection.hasForget ? FORGET_RETRIEVAL_GUIDANCE : BASE_RETRIEVAL_GUIDANCE,
+              renderDisclosure(nmgPrompts.search_disclosure, {
+                count: String(projection.lines.length),
+                // The OmniMemEval protocol has no nmg_get step; the next-step hint
+                // is intentionally empty so the answer follows the data directly.
+                next_step: "",
+                forget_hint: projection.hasForget ? nmgPrompts.forget_hint : "",
+              }),
               ...projection.lines,
             ].join("\n"),
       memories,
