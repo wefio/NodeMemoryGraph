@@ -78,8 +78,8 @@ forget_hint: >-
   revoked.
 
 # Rendered in place of a revoked record's statement in search results
-# (auto-recommendation). The record id stays visible; exact content is
-# only returned by nmg_get on explicit request.
+# (auto-recommendation). Metadata (id, type, time) stays visible on the
+# line; only the statement content is withheld.
 forget_redacted: "[forget] (content withdrawn)"
 
 # ---- 其他 -----------------------------------------------------------------

@@ -453,8 +453,8 @@ export function formatSearchHeaders(context: MemoryContext): string {
         `memory=${memory.id}; node=${node.canonicalName}; type=${memory.memoryType}; ` +
         `${recallMatchLabel(reason, hitTerms)}` +
         `${recallTimeLabel(memory)}` +
-        // Revoked records surface only their id in auto-recommendation;
-        // the statement is withheld until an explicit nmg_get.
+        // Revoked records show their metadata but not their statement:
+        // the model sees the revocation exists without content to cite.
         `preview=${forget ? nmgPrompts.forget_redacted : excerpt(memory.statement, 160)}`
       );
     }),

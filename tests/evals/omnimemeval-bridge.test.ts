@@ -337,9 +337,9 @@ test("OmniMemEval replaces an explicitly forgotten memory with a tagged revocati
         markers: Array<{ kind: string; attributes?: Record<string, unknown> }>;
       }>;
     };
-    // Revoked records are redacted in the rendered text: only the marker and
-    // a withheld notice appear, never the revoked statement itself.
-    assert.match(forgotten.text, /\[forget\] \(content withdrawn\)/);
+    // Revoked records show metadata but withhold the statement: the model
+    // sees the revocation exists (id/time) without content to cite.
+    assert.match(forgotten.text, /\(content withdrawn\) memory=/);
     assert.doesNotMatch(forgotten.text, /I feel isolated working from home/i);
     assert.doesNotMatch(forgotten.text, /collaborative whiteboard sessions/i);
     assert.doesNotMatch(forgotten.text, /Please forget/i);
@@ -417,7 +417,7 @@ test("semantic retrieval exposes a tagged revocation boundary", async () => {
       text: string;
       memories: Array<{ statement: string; markers: Array<{ kind: string }> }>;
     };
-    assert.match(result.text, /\(content withdrawn\)/);
+    assert.match(result.text, /\(content withdrawn\) memory=/);
     assert.doesNotMatch(result.text, /feel isolated working from home/i);
     assert.doesNotMatch(result.text, /collaborative whiteboard sessions/i);
     assert.doesNotMatch(result.text, /Please forget/i);

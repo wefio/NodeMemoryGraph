@@ -279,7 +279,7 @@ test("formatters visibly mark external provenance and trust", () => {
   assert.match(formatMemoryContext(context), /web:https:\/\/example\.com/);
 });
 
-test("search headers redact revoked records; nmg_get keeps the statement", () => {
+test("revoked records show metadata but withhold the statement", () => {
   const context = {
     results: [
       {
@@ -298,8 +298,11 @@ test("search headers redact revoked records; nmg_get keeps the statement", () =>
     ],
   } as never;
   const headers = formatSearchHeaders(context);
-  // Auto-recommendation surfaces the id but withholds the statement.
+  // Metadata stays visible (id, node, type, matches); the statement is
+  // withheld so the model cannot cite the revoked content.
   assert.match(headers, /memory=memory-revoked/);
+  assert.match(headers, /node=Event preferences/);
+  assert.match(headers, /type=preference/);
   assert.match(headers, /\(content withdrawn\)/);
   assert.doesNotMatch(headers, /modern electronic music festivals/);
   assert.match(headers, /revocation boundary/);

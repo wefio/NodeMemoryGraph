@@ -377,16 +377,15 @@ function projectMemoryContext(
     if (controlKinds.length > 0 && visibleKinds.length === 0) continue;
     visibleKinds.forEach((kind) => projectedKinds.add(kind));
 
-    // Revoked records (forget marker) surface only their marker in
-    // auto-recommendation; the statement is withheld (the eval protocol
-    // has no nmg_get step to fetch it on demand).
+    // Revoked records surface their metadata (id, time) but not their
+    // statement: the model sees the revocation without content to cite.
     const forget = visibleKinds.includes("forget");
     const base =
       includeTime && memory.eventTime
         ? `[${memory.eventTime}] ${memory.statement}`
         : memory.statement;
     const rendered = forget
-      ? nmgPrompts.forget_redacted
+      ? `${nmgPrompts.forget_redacted} memory=${memory.memoryId}${memory.eventTime ? `; time=${memory.eventTime}` : ""}`
       : visibleKinds.length > 0
         ? `[${visibleKinds.join(",")}] ${base}`
         : base;
