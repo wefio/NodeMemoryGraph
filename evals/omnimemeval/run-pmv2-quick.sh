@@ -41,16 +41,25 @@ if [ ! -f "$CSV" ]; then
   exit 1
 fi
 
-# 2. 范围限制：截断 csv 为表头 + 前 N 数据行（trap 保证恢复）
-TOTAL=$(wc -l < "$CSV")
+# 2. 范围限制：截断 csv 为表头 + 前 N 个完整问题（trap 保证恢复）
+#    注意：benchmark.csv 每问跨多行（JSON 字段引号转义）——必须用 csv 库
+#    按问题切分，不能简单 head -N（60 行 < 1 问会 Loaded 0/1）。
+TOTAL=$(grep -c "^[0-9]" "$CSV")
 if [ "$N" -lt "$TOTAL" ]; then
   cp "$CSV" "$BACKUP"
   restore() { cp "$BACKUP" "$CSV" && rm -f "$BACKUP"; }
   trap restore EXIT INT TERM
-  head -n 1 "$CSV" > "$CSV.tmp"
-  sed -n "2,$((N + 1))p" "$CSV" >> "$CSV.tmp"
-  mv "$CSV.tmp" "$CSV"
-  echo "→ benchmark.csv 截断为 ${N} 行（原 ${TOTAL} 行，跑完自动恢复）"
+  python - "$N" "$CSV" << 'PYEOF'
+import csv, sys
+n, path = int(sys.argv[1]), sys.argv[2]
+with open(path, encoding='utf-8', newline='') as f:
+    rows = list(csv.reader(f))
+with open(path, 'w', encoding='utf-8', newline='') as f:
+    w = csv.writer(f)
+    w.writerow(rows[0])
+    w.writerows(rows[1 : n + 1])
+print(f"→ benchmark.csv 截断为前 {n} 问（原 {len(rows)-1} 问，跑完自动恢复）")
+PYEOF
 fi
 
 # 3. 跑评测（失败自动重跑——计算 ~1 分钟/次，重跑比修锁便宜）

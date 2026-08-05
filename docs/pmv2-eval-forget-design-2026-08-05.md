@@ -19,9 +19,9 @@ bash evals/omnimemeval/run-pmv2-quick.sh 60 --llm-workers=16
 | 坑 | 现象 | 修复 |
 |---|---|---|
 | GBK 控制台崩溃 | rich 进度条 `•` 触发 UnicodeEncodeError，200/200 后崩 | `export PYTHONUTF8=1 PYTHONIOENCODING=utf-8`（**必须在 python 启动前**——env 文件里设太晚，解释器已启动） |
-| 全量误跑 | 非流式模式 `--end-idx` 不生效 → 跑全部 47 万行/5000 问 | 截断 `benchmark.csv` 为表头 + 前 N 行（`trap` 保证退出/中断时恢复） |
+| 全量误跑 | 非流式模式 `--end-idx` 不生效 → 跑全部 47 万行/5000 问 | 截断 `benchmark.csv`（**按问题切分**——每问跨 ~94 行 JSON 引号字段，必须用 Python csv 库；`head -N` 会切断 JSON 导致 Loaded 0/1）`trap` 保证退出/中断时恢复） |
 | WinError 5（os.replace） | `atomic_json_dump` 的 `os.replace` 被 Defender/索引器短暂锁住（实测 3200 次并发 ~0.4% 概率） | 失败自动重跑（计算 ~1 分钟/次，重跑比修锁便宜；脚本自带 checkpoint resume 兜底） |
-| 缺 `--lib` 参数 | `Error: --lib is required in normal mode` | 显式 `--lib nmg` |
+| 缺 `--lib` 参数 | `Error: --lib is required in normal mode` | 显式 `--lib nmg`（默认 version 变为 `nmg-omnimemeval_<date>`） |
 
 ### 关键事实
 
@@ -64,21 +64,22 @@ MCP:      mid=m-9  node=Event preferences  type=preference  L1  [forget] (conten
 - **元数据保留**：模型仍看到"存在一条撤销记录 + 身份"（id/类型/时间）——
   撤销可识别，但没有内容可重建。
 
-### 验证结论（pmv2 60 问，两次独立 run）
+### 验证结论（pmv2 60 问，三次独立 run）
 
-| 渲染 | run | ask_to_forget 泄漏（连续短语重叠法） |
-|---|---|---|
-| 原文 + 标记 | 155659 | 4/11 |
-| 脱敏（content withdrawn） | 165251 | 4/11 |
+| 渲染 | run | ask_to_forget 泄漏（连续短语重叠法） | 总体 acc |
+|---|---|---|---|
+| 原文 + 标记 | 155659 | 4/11 | 0.300 |
+| 脱敏（content withdrawn） | 165251 | 4/11 | 0.267 |
+| 元数据 + 脱敏（定案） | omnimemeval_20260805 | **0/11** | 0.317 |
 
-- **输入层脱敏确认生效**：新 run 11/11 条 context 无原文（全部 `[forget] (content withdrawn)`）。
-- **但泄漏指标未降（4/11 → 4/11）——基准局限，非渲染问题**：
+- **输入层脱敏确认生效**：脱敏 run 11/11 条 context 无原文（全部 `[forget] (content withdrawn)`）。
+- **但泄漏指标不可靠（0-4/11 波动）+ 与渲染无关**：
   - 该 benchmark 的干扰项**选项文本本身嵌入了被撤销内容原文**
     （如选项 (b) 自己写着 "draw from the atmosphere of **modern electronic music festivals**"）。
   - 模型**无需记忆，光看选项就能选中"泄漏项"**——9/11 选项选择与脱敏前完全一致。
+  - LLM 输出随机性使泄漏数在 0-4/11 间波动（同批 60 问三次跑 acc 0.300/0.267/0.317，±5%）。
   - MCQ 输出只有选项字母——无法做输出溯源（区分"真用记忆" vs "选项文本诱导"）。
-- **结论**：脱敏在输入层完全生效；行为收益**无法用该指标衡量**（选项设计主导）。
-  定案选择基于语义（防引用硬保障），不基于该指标。
+- **结论**：脱敏在输入层完全生效；泄漏指标既被选项设计主导、又随 LLM 随机波动——**无法衡量渲染的行为收益**。定案选择基于语义（防引用硬保障），不基于该指标。
 
 ---
 
