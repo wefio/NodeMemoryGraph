@@ -1,0 +1,96 @@
+---
+name: omnimemeval-eval
+description: Run OmniMemEval benchmark evals (LongMemEval 500, PersonaMem-v2 quick 60, LoCoMo) and no-regression verification against baselines. Use when the user says run the eval / benchmark, 跑评测, 防回退, no-regression, or names lme / pmv2 / locomo / LongMemEval / OmniMemEval.
+---
+
+# OmniMemEval 评测（LME / pmv2 / locomo）
+
+评测的主流程、version 约定、防回退验证与踩坑清单。**目标是每次一遍过**——跑之前先读本 skill 核对参数，别边跑边发现。
+
+## 0. 前置环境（每次确认）
+
+- **bge-server**（embedding，8000 端口）必须活着：
+  ```bash
+  curl -s localhost:8000/health   # 期望 {"status":"ok"}
+  # 死了就启动（uv 临时环境）：
+  cd evals/omnimemeval && uv run --with sentence-transformers --with fastapi --with "uvicorn[standard]" python bge-server.py
+  ```
+- **env 文件**：`.env.nmg-bgefix`（ANSWER_API_KEY/EVAL_API_KEY）
+- **不要直接跑官方脚本**——只通过 wrapper（固化 PYTHONUTF8/PYTHONIOENCODING/NMG_ROOT/kill_strays）：
+  - LME：`bash evals/omnimemeval/run-lme.sh`
+  - pmv2：`bash evals/omnimemeval/run-pmv2-quick.sh`
+  - 直接跑官方 `run_lme_eval.sh` 会丢 PYTHONUTF8 → rich emoji 打印 GBK 崩溃（Windows）
+
+## 1. Version 约定（最容易踩——漏前缀 = 废结果）
+
+**version 决定 store 的 userId label 和结果目录名**。防回退重跑必须与基线**完全一致**：
+
+1. 先找基线目录：`ls .benchmarks/official/OmniMemEval/results/lme/`
+2. **核对基线 VERSION**：`cat results/lme/<基线目录>/experiment_config.sh`（如 `VERSION="lme500_bgefix_header_20260804"`——**含 lme500 前缀**）
+3. 原样复制：`--version lme500_bgefix_header_20260804`
+
+漏前缀（如传 `bgefix_header_20260804`）→ store 不匹配 → search evidence 全空 → **recall 0 的废结果**，且写到错误目录（`nmg-bgefix_...` vs `nmg-lme500_...`）。
+
+## 2. 防回退流程（LME）
+
+```bash
+# 1) 备份基线（结果会被覆盖）
+cp -r .benchmarks/official/OmniMemEval/results/lme/nmg-lme500_bgefix_header_20260804 \
+      .benchmarks/official/OmniMemEval/results/lme/_bak_bgefix_header_20260804
+# 2) 同 version 重跑（--skip-ingest 复用 store；answer/judge 断点续跑）
+bash evals/omnimemeval/run-lme.sh --env-file .env.nmg-bgefix \
+  --version <与基线一字不差的 version> --skip-ingest --llm-workers 16
+# 3) 对比 manifest
+python -c "import json; m=json.load(open('.benchmarks/official/OmniMemEval/results/lme/<基线目录>/experiment_manifest.json',encoding='utf-8')); print(m['results'])"
+```
+
+**判定标准**：
+- recall 三项（any/evidence/all_evidence）**必须逐位一致**——检索无回退的硬标准
+- answer_accuracy **±2pp 内 = judge 波动**（实测同 answer 重判 28/498 = 5.6% 判定翻转）
+
+### 断点续跑机制（官方自带）
+- `nmg_lme_responses.json`（answer 500 全 → 跳过）；`nmg_lme_judged.json`（judge 已判定 → 跳过）
+- 失败重跑会重跑 search（~2 分钟）但 answer/judge 只补缺的
+- **输出确认**：日志出现 `Skipping N already-evaluated users` + `Generating responses 500/500` 才是 resume 成功
+
+## 3. 跑得慢？先查 dump（性能修复后 ~200 倍）
+
+**历史**：answer 500 问 3 小时 → 54 秒；judge 152 问 13 秒。真凶不是 429（16 并发实测 9.3 req/s 零错误）而是：
+- `scripts/longmemeval/lme_responses.py` + `lme_eval.py`：每完成一问就 `atomic_json_dump` 全量重写结果文件（873KB+ fsync）
+- 修复已推送到 fork 分支 `fix/eval-checkpoint-batching`（`5b6c0d9`）：批量 checkpoint 25 问一次
+- 若重跑变慢：确认 fork 的该分支代码在位（`grep CHECKPOINT_EVERY scripts/longmemeval/lme_eval.py`）
+
+**judge 崩溃修复**：`scripts/utils/nlp_metrics.py` 的 `extract_label_json` 曾要求 `}` 紧跟 label 值——LLM 返回 `{"label":"WRONG","reason":...}` 多字段时 2/500 失败——现容忍多字段/代码块/单引号。
+
+## 4. 坑表（Windows + 官方评测）
+
+| 坑 | 现象 | 解法 |
+|---|---|---|
+| GBK 崩溃 | `UnicodeEncodeError: 'gbk' codec`（rich emoji） | 只走 wrapper（PYTHONUTF8 已设）；直接跑官方脚本必崩 |
+| version 漏前缀 | recall 0、目录错乱 | 跑前 `cat experiment_config.sh` 核对 |
+| 全量误跑 | pmv2 跑 5000 问（每问跨 ~94 行 JSON 引号字段） | 截断 csv 按问题切分（`run-pmv2-quick.sh` 已做）；`--end-idx` 仅流式生效 |
+| SQLite 锁 | `database is locked` / `WinError 5 os.replace`（~0.4%/3200 并发） | 自动重试 3 次（wrapper 已做）；跑前 kill_strays 清锁 |
+| --lib nmg 缺失 | `Error: --lib is required` | normal mode 必须传 `--lib nmg` |
+| 结果目录混淆 | `nmg-bgefix_` vs `nmg-lme500_` | version 一字不差；误跑目录删除（rm -rf） |
+| judge 判崩 | `could not extract judge label` | 提取器已修（容忍多字段） |
+
+## 5. pmv2 速跑（60 问验证）
+
+```bash
+bash evals/omnimemeval/run-pmv2-quick.sh   # 已固化：截断 csv + 重试 + trap 恢复
+```
+- 60 问波动 ±5% 正常（选项设计 + LLM 随机）；泄漏指标 0-4/11 不可靠——**定案基于语义不基于泄漏数字**
+- forget 渲染定案：`[forget] (content withdrawn)` + 完整元数据（id/node/type/matches/time）；不给 statement 原文；nmg_get 主动查询仍返回原文
+
+## 6. locomo（跑之前读这里——待补充实测）
+
+- 数据：`data/locomo/locomo10.json` = 10 对话样本 × ~23 问 ≈ 233 问（2.7MB）——不是"只有 10 问"
+- 无截断问题（10 样本全量）——其余坑同表（--lib nmg/GBK/锁）
+- **跑完把新坑/流程补回本 skill 第 6 节**（边做边写原则）
+
+## 7. 结果与判定速查
+
+- LME 基线（2026-08-04，commit 82ec4c7）：94.15 / 87.95 / 82.67 / answer 82.33
+- LME 防回退（2026-08-05，commit bbbeb32）：recall 三项逐位复现；answer 80.8（-1.53pp，judge 波动内）→ **无回退**
+- 结果目录：`.benchmarks/official/OmniMemEval/results/lme/nmg-lme500_bgefix_header_20260804/`（备份 `_bak_bgefix_header_20260804`）
+- 文档配套：`docs/lme-eval-notes-2026-08-05.md`、`docs/pmv2-eval-forget-design-2026-08-05.md`
