@@ -82,23 +82,27 @@ bash evals/omnimemeval/run-pmv2-quick.sh   # 已固化：截断 csv + 重试 + t
 - 60 问波动 ±5% 正常（选项设计 + LLM 随机）；泄漏指标 0-4/11 不可靠——**定案基于语义不基于泄漏数字**
 - forget 渲染定案：`[forget] (content withdrawn)` + 完整元数据（id/node/type/matches/time）；不给 statement 原文；nmg_get 主动查询仍返回原文
 
-## 6. locomo（2026-08-05 实测）
+## 6. locomo（2026-08-05 实测完成）
 
 ```bash
-# 全量跑（10 对话样本 × ~23 问 ≈ 233 问——ingest+search+answer+judge 一体）
+# 全量跑（10 对话样本 ≈ 1540 问——ingest+search+answer+judge 一体，~4 分钟）
 bash evals/omnimemeval/run-locomo.sh --env-file .env.nmg-bgefix --version locomo_bgefix_20260805 --llm-workers 16
 # 分析已有跑（search evidence audit——官方口径）
 bash evals/omnimemeval/run-locomo.sh --analyze <results-dir>
 ```
 
-- 数据：`data/locomo/locomo10.json` = 10 对话样本 ≈ 233 问（2.7MB）——不是"只有 10 问"
+- 数据：`data/locomo/locomo10.json` = 10 对话样本 ≈ **1540 问**（不是 233！）
 - 无截断问题（10 样本全量）；其余坑同第 4 节表（--lib nmg/GBK/锁）
 - 官方脚本 `scripts/run_locomo_eval.sh`（steps 1-6 同 LME）；wrapper 见 `evals/omnimemeval/run-locomo.sh`
-- **基线现状**：无完整 answer judged 基线（旧目录多数只有 10 条 sample 级或 search-only）——
-  检索侧基线用 `audit-locomo-official.py`（search-only evidence audit，官方 README 口径）——
-  防回退对比：新 search_results vs 旧（如 `nmg-adaptive13_bge_20260802`/`nmg-bge_k20`）
-- **判定**：检索缺失型（cannot determine）是 NMG 真正负责的部分；指标波动 ±0.05-0.08 算噪声
-- **跑完把实测结果/新坑补回本节**（边做边写原则）
+- **实测（2026-08-05，version `locomo_bgefix_20260805`，commit 66e4555）**：
+  - 全流程 ~4 分钟（1540 问 search/answer/eval 全 success 零失败）；context tokens avg 1723
+  - **LLM-as-Judge 0.7110**（分类：single hop 0.769/841、temporal 0.707/321、multi hop 0.599/282、open domain 0.542/96）
+  - **检索（audit-locomo-official.py 官方口径）**：any 72.7% / overall 56.7%（records 模式 k20）——
+    对比旧 records_k20（68.6%/53.0%）：**+4.1pp——无回退且改进**
+- **WinError 5 重试**：locomo answer 阶段撞过一次（os.replace 被 Defender 锁）——
+  已在 fork 的 `scripts/utils/checkpoint.py` 加 `_replace_with_retry`（5 次退避）——**治本**
+- **判定**：检索缺失型（cannot determine）是 NMG 真正负责的部分；judge 波动 ±0.05-0.08 算噪声
+- 新基线：`results/locomo/nmg-locomo_bgefix_20260805/`（后续改动对比这个）
 
 ## 7. 结果与判定速查
 
