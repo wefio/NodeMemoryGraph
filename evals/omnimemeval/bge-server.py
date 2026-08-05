@@ -20,7 +20,11 @@ import uvicorn
 MODEL_NAME = os.environ.get("BGE_MODEL", "BAAI/bge-small-en-v1.5")
 PORT = int(os.environ.get("BGE_PORT", "8000"))
 
-model = SentenceTransformer(MODEL_NAME)
+# Prefer CUDA when available (sentence-transformers defaults to CPU).
+import torch
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"[bge-server] device={DEVICE}", flush=True)
+model = SentenceTransformer(MODEL_NAME, device=DEVICE)
 app = FastAPI(title="bge-embed")
 
 

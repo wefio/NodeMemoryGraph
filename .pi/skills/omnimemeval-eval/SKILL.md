@@ -12,14 +12,19 @@ description: Run OmniMemEval benchmark evals (LongMemEval 500, PersonaMem-v2 qui
 - **bge-server**（embedding，8000 端口）必须活着：
   ```bash
   curl -s localhost:8000/health   # 期望 {"status":"ok"}
-  # 死了就启动（uv 临时环境）：
-  cd evals/omnimemeval && uv run --with sentence-transformers --with fastapi --with "uvicorn[standard]" python bge-server.py
+  # 启动（用评测 venv 直接跑——别用 uv run 临时环境！）：
+  cd evals/omnimemeval && ../../.benchmarks/omni-venv/Scripts/python.exe bge-server.py
+  # 验证 GPU：日志 [bge-server] device=cuda；nvidia-smi 有进程占显存
   ```
+  - **教训**：`uv run --with sentence-transformers...` 临时环境 = CPU torch + 每次重新解析/构建
+    （还撞 cp313 无 cu121 wheel）——**浪费且慢**；`omni-venv`（评测 venv）**早有 CUDA torch**
+    （2.13+cu132，cuda: True）——直接复用。fastapi/uvicorn 已补装到 omni-venv。
 - **env 文件**：`.env.nmg-bgefix`（ANSWER_API_KEY/EVAL_API_KEY）
 - **不要直接跑官方脚本**——只通过 wrapper（固化 PYTHONUTF8/PYTHONIOENCODING/NMG_ROOT/kill_strays）：
   - LME：`bash evals/omnimemeval/run-lme.sh`
   - pmv2：`bash evals/omnimemeval/run-pmv2-quick.sh`
-  - 直接跑官方 `run_lme_eval.sh` 会丢 PYTHONUTF8 → rich emoji 打印 GBK 崩溃（Windows）
+  - locomo：`bash evals/omnimemeval/run-locomo.sh`；halumem：`bash evals/omnimemeval/run-halumem.sh`
+  - 直接跑官方 `run_*_eval.sh` 会丢 PYTHONUTF8 → rich emoji 打印 GBK 崩溃（Windows）
 
 ## 1. Version 约定（最容易踩——漏前缀 = 废结果）
 
