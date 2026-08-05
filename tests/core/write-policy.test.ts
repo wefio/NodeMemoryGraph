@@ -39,3 +39,18 @@ test("permits a temporary occurrence when deliberately encoded as an event", () 
     true,
   );
 });
+
+test("permits file names that merely contain the word temporary", () => {
+  assert.equal(
+    assessMemoryWrite({
+      statement: "docs/temporary-todo.md 是项目完成状态的权威清单。",
+      memoryType: "fact",
+    }).allowed,
+    true,
+  );
+  assert.equal(
+    assessMemoryWrite({ statement: "This is a temporary workaround.", memoryType: "fact" })
+      .allowed,
+    false,
+  );
+});

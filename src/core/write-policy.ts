@@ -20,7 +20,8 @@ const DO_NOT_RETAIN_PATTERNS = [
 
 const TRANSIENT_PATTERNS = [
   /\b(?:for )?(?:this|the current) (?:response|reply|turn|task|session) only\b/i,
-  /\btemporar(?:y|ily)\b/i,
+  // (?![.-]) keeps file names like "temporary-todo.md" from tripping the rule.
+  /\btemporar(?:y|ily)\b(?![.-])/i,
   /(?:仅|只)(?:用于|在)?(?:本次|当前)(?:回复|回答|任务|会话)/u,
   /(?:临时|暂时)(?:要求|指令|使用)?/u,
 ];

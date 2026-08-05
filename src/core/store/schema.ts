@@ -595,6 +595,9 @@ export function ensureRetrievalTraceColumns(db: DatabaseSync): void {
     ),
   );
   const additions: Array<[string, string]> = [
+    // session_id was added to CREATE TABLE with session isolation (P0) but
+    // missing here, so pre-isolation databases never received the column.
+    ["session_id", "TEXT"],
     ["contradicted_memory_ids_json", "TEXT NOT NULL DEFAULT '[]'"],
     ["rejected_memory_ids_json", "TEXT NOT NULL DEFAULT '[]'"],
     ["relation_ids_json", "TEXT NOT NULL DEFAULT '[]'"],

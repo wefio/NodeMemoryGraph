@@ -78,3 +78,20 @@ test("migrate preserves existing rows when re-run", () => {
     assert.equal(row?.content, "hello");
   });
 });
+
+test("migrate adds retrieval_traces.session_id to pre-isolation databases", () => {
+  // Regression: session_id was added to CREATE TABLE with session isolation
+  // (P0) but not to ensureRetrievalTraceColumns, so databases created before
+  // that change never received the column and every traced search failed with
+  // "table retrieval_traces has no column named session_id".
+  withDatabase((db) => {
+    db.exec("CREATE TABLE retrieval_traces (id TEXT PRIMARY KEY, created_at TEXT)");
+    migrate(db);
+    const columns = new Set(
+      (db.prepare("PRAGMA table_info(retrieval_traces)").all() as Array<{ name: string }>).map(
+        (row) => row.name,
+      ),
+    );
+    assert.ok(columns.has("session_id"), "expected retrieval_traces.session_id after migrate");
+  });
+});
