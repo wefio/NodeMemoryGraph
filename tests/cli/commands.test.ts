@@ -13,8 +13,13 @@ test("every CLI spec binds a valid RPC method and unique words", () => {
   const methods = new Set<string>(NMG_METHODS);
   const seen = new Set<string>();
   for (const spec of NMG_CLI_COMMANDS) {
-    assert.ok(methods.has(spec.method), `${spec.words.join(" ")} has unknown method`);
     const key = spec.words.join(" ");
+    if (spec.local) {
+      // Local commands (inspect) dispatch directly and must not bind RPC.
+      assert.equal(spec.method, undefined, `${key} is local and must not bind an RPC method`);
+    } else {
+      assert.ok(spec.method && methods.has(spec.method), `${key} has unknown method`);
+    }
     assert.ok(!seen.has(key), `duplicate CLI words: ${key}`);
     seen.add(key);
   }

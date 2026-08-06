@@ -40,10 +40,7 @@ import { histogramQuantile } from "../core/perf.ts";
 // The CLI surface (synopsis, option details, known options/flags) is
 // assembled from the command registry in commands.ts; only the daemon
 // synopsis line is local because daemon commands are not RPC methods.
-const USAGE = cliUsage([
-  "nmg daemon start|status|stop [--data-dir DIR | --db FILE] [--json]",
-  "nmg inspect [--data-dir DIR | --db FILE]",
-]);
+const USAGE = cliUsage(["nmg daemon start|status|stop [--data-dir DIR | --db FILE] [--json]"]);
 
 export async function runCli(
   argv: readonly string[],
@@ -238,7 +235,6 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   }
   const [command, ...rest] = argv;
   if (command === "daemon") return daemonArguments(rest);
-  if (command === "inspect") return inspectArguments(rest);
   const group = cliCommandGroup(command!);
   if (group.length === 0) throw new Error(`unknown command: ${command}`);
   const spec =
@@ -249,28 +245,21 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   }
   const values = parseOptions(spec.words.length > 1 ? rest.slice(1) : rest);
   assertSpecOptions(spec, values);
+  if (spec.local) {
+    // Local commands (inspect) validate through the registry but dispatch
+    // directly — no RPC method, no params, no --json.
+    spec.buildParams(values);
+    return {
+      command: "inspect",
+      json: false,
+      dataDirectory: firstOption(values, "data-dir"),
+      databasePath: optionalResolvedPath(firstOption(values, "db")),
+    };
+  }
   return {
-    command: spec.method,
+    command: spec.method!,
     params: spec.buildParams(values) as ParsedArguments["params"],
     json: values.flags.has("json"),
-    dataDirectory: firstOption(values, "data-dir"),
-    databasePath: optionalResolvedPath(firstOption(values, "db")),
-  };
-}
-
-/** `nmg inspect` is a local read-only TUI: only database-location options, no RPC, no --json. */
-function inspectArguments(rest: readonly string[]): ParsedArguments {
-  const values = parseOptions(rest);
-  for (const name of values.options.keys()) {
-    if (name !== "data-dir" && name !== "db") throw new Error(`unknown option: --${name}`);
-  }
-  for (const name of values.flags) {
-    throw new Error(`unknown option: --${name}`);
-  }
-  rejectPositionals(values, "inspect");
-  return {
-    command: "inspect",
-    json: false,
     dataDirectory: firstOption(values, "data-dir"),
     databasePath: optionalResolvedPath(firstOption(values, "db")),
   };

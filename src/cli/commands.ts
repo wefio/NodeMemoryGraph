@@ -32,8 +32,12 @@ export interface OptionValues {
 }
 
 export interface CliCommandSpec {
-  /** RPC method invoked (see protocol.ts NmgMethod). */
-  method: NmgMethod;
+  /** RPC method invoked (see protocol.ts NmgMethod). Absent for local commands. */
+  method?: NmgMethod;
+  /** Local command dispatched by main.ts without RPC (e.g. the inspect TUI). */
+  local?: boolean;
+  /** Set false to reject COMMON_FLAGS (e.g. --json) for this command. */
+  includeCommonFlags?: boolean;
   /** CLI words, e.g. ["search"] or ["retention", "candidates"]. */
   words: readonly [string, ...(string[])] | readonly [string];
   /** The `nmg ...` line in the USAGE synopsis. */
@@ -264,6 +268,19 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
       return syncStgParams(values);
     },
   },
+  {
+    // Local read-only TUI — no RPC method, no --json; main.ts dispatches it.
+    local: true,
+    includeCommonFlags: false,
+    words: ["inspect"],
+    usageLine: "nmg inspect [--data-dir DIR | --db FILE]",
+    options: [],
+    flags: [],
+    buildParams: (values) => {
+      rejectPositionals(values, "inspect");
+      return undefined;
+    },
+  },
 ];
 
 /** All option names any command accepts (drives parse-time typo rejection). */
@@ -286,7 +303,10 @@ export function cliCommandGroup(word: string): readonly CliCommandSpec[] {
 /** Reject options/flags outside the spec's allowed set (plus COMMON_*). */
 export function assertSpecOptions(spec: CliCommandSpec, values: OptionValues): void {
   const allowedOptions = new Set([...COMMON_OPTIONS, ...spec.options]);
-  const allowedFlags = new Set([...COMMON_FLAGS, ...spec.flags]);
+  const allowedFlags = new Set([
+    ...(spec.includeCommonFlags === false ? [] : COMMON_FLAGS),
+    ...spec.flags,
+  ]);
   for (const name of values.options.keys()) {
     if (!allowedOptions.has(name)) throw new Error(`unknown option: --${name}`);
   }
