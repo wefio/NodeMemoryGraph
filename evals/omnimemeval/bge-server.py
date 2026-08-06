@@ -50,7 +50,7 @@ def embed(req: EmbedRequest) -> dict:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "model": MODEL_NAME}
+    return {"status": "ok", "model": MODEL_NAME, "device": DEVICE}
 
 
 if __name__ == "__main__":
