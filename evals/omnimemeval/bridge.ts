@@ -5,10 +5,11 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
+import { createJudgeClientFromEnv, type JudgeClient } from "./judge-provider.ts";
 import { syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { loadPrompts, renderDisclosure } from "../../src/prompts/load.ts";
-import type { HistoryRole, MemoryActor, MemoryMarker, PerfSnapshot } from "../../src/core/types.ts";
+import type { HistoryRole, MemoryActor, MemoryMarker, PerfSnapshot, DuplicateCandidate } from "../../src/core/types.ts";
 import { CachedOmniEmbeddingClient } from "./embedding-cache.ts";
 
 const nmgPrompts = loadPrompts();
@@ -106,6 +107,7 @@ export class OmniMemEvalBridge {
   readonly #strongHitTopGap?: number;
   readonly #strongHitInitialTarget?: number;
   readonly #perfLogPath: string;
+  readonly #judge?: JudgeClient;
 
   constructor(root: string, options: OmniMemEvalBridgeOptions = {}) {
     this.#root = resolve(root);
@@ -126,6 +128,7 @@ export class OmniMemEvalBridge {
     this.#strongHitTopGap = finiteNumber(options.strongHitTopGap);
     this.#strongHitInitialTarget = positiveNumber(options.strongHitInitialTarget);
     this.#perfLogPath = resolve(options.perfLogPath ?? resolve(this.#root, "search-perf.jsonl"));
+    this.#judge = createJudgeClientFromEnv();
     mkdirSync(this.#root, { recursive: true });
   }
 
@@ -173,6 +176,14 @@ export class OmniMemEvalBridge {
       .join(" ")
       .slice(0, 1_500);
     let added = 0;
+    // Supersession judge tasks are collected during the (serial) write pass,
+    // then the LLM calls run concurrently so the judge is not an ingestion
+    // bottleneck; only the small applySupersession writes stay serial.
+    const judgeTasks: Array<{
+      statement: string;
+      cands: DuplicateCandidate[];
+      newMemoryId: string;
+    }> = [];
     for (const [index, message] of messages.entries()) {
       if (!message || typeof message.content !== "string" || !message.content.trim()) continue;
       const role = historyRole(message.role);
@@ -207,7 +218,7 @@ export class OmniMemEvalBridge {
         added += 1;
         continue;
       }
-      store.remember({
+      const remembered = store.remember({
         statement: message.content,
         nodeName,
         nodeSummary,
@@ -220,7 +231,55 @@ export class OmniMemEvalBridge {
         importance: role === "user" ? 0.6 : 0.4,
         scope: { benchmark: "OmniMemEval", user: userKey(userId) },
       });
+      // Simulate the NMG plugin's write path: when the new statement shares
+      // tokens with same-scope memories, ask the external LLM judge whether
+      // any candidate is a stale predecessor; if so mark it superseded so
+      // retrieval surfaces the current value instead of the stale one. The
+      // judge call itself is deferred to the parallel pass after the loop.
+      if (this.#judge && remembered.supersedeCandidates?.length && remembered.memory) {
+        const newTime = message.chat_time ? Date.parse(message.chat_time) : Number.NaN;
+        // A candidate can only be the stale predecessor of a newer value, so
+        // drop candidates that are not strictly older than this statement.
+        // Keep the core store's ordering (transition-name hits first, then
+        // similarity) — re-sorting by similarity here would push a real
+        // predecessor (low lexical overlap) back out of the top-k.
+        const cands = remembered.supersedeCandidates
+          .filter((c) => !c.eventTime || !Number.isFinite(newTime) || Date.parse(c.eventTime) < newTime)
+          .slice(0, 3);
+        if (cands.length) {
+          judgeTasks.push({ statement: message.content, cands, newMemoryId: remembered.memory.id });
+        }
+      }
       added += 1;
+    }
+    // Parallel judge pass (bounded concurrency), then serial supersession.
+    if (this.#judge && judgeTasks.length) {
+      const CONCURRENCY = 8;
+      for (let i = 0; i < judgeTasks.length; i += CONCURRENCY) {
+        const batch = judgeTasks.slice(i, i + CONCURRENCY);
+        const results = await Promise.all(
+          batch.map((task) =>
+            this.#judge!.judge({
+              statement: task.statement,
+              candidates: [],
+              supersedeCandidates: task.cands,
+            }),
+          ),
+        );
+        for (let j = 0; j < batch.length; j++) {
+          const judgement = results[j];
+          if (judgement.supersede && judgement.supersededMemoryId) {
+            try {
+              store.applySupersession({
+                newMemoryId: batch[j].newMemoryId,
+                supersededMemoryId: judgement.supersededMemoryId,
+              });
+            } catch {
+              // A bad supersession target must not break ingestion.
+            }
+          }
+        }
+      }
     }
     return { added };
   }
@@ -258,6 +317,7 @@ export class OmniMemEvalBridge {
         sourceActor: prefersAssistantEvidence(query) ? undefined : "user",
         secondPass: this.#secondPass,
         progressiveWarmDisclosure: false,
+        tieredDisclosure: true,
         initialEvidenceTarget: this.#qppInitialEvidenceTarget,
         qppThreshold: this.#qppThreshold,
         strongHitTopGap: this.#strongHitTopGap,

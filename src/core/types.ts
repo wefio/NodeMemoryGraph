@@ -245,6 +245,14 @@ export interface RememberResult {
    * RememberInput.judgeDuplicates) to decide whether to merge.
    */
   duplicates?: DuplicateCandidate[];
+  /**
+   * Same-scope memories that may hold an outdated value for the same topic as
+   * the incoming statement (a "supersession" candidate: the new statement is
+   * the current value and one of these may be its stale predecessor). NMG
+   * never decides this itself — an external judge (LLM) does, then applies it
+   * via applySupersession. Text-only heuristic: shared content token overlap.
+   */
+  supersedeCandidates?: DuplicateCandidate[];
   /** Per-phase timings, present unless disabled via RememberInput.perf. */
   timings?: PerfSnapshot;
 }
@@ -262,16 +270,28 @@ export interface DuplicateCandidate {
 export interface DuplicateJudgement {
   /** Merge the incoming statement into the candidate (do not write a new record). */
   merge: boolean;
+  /**
+   * The incoming statement is a newer value for the same topic and supersedes
+   * supersededMemoryId (the stale predecessor). The caller then calls
+   * store.applySupersession({ newMemoryId, supersededMemoryId }) to mark the
+   * old record superseded (retrieval already filters status='superseded').
+   */
+  supersede?: boolean;
+  /** memoryId of the same-scope candidate this statement supersedes. */
+  supersededMemoryId?: string;
   reason?: string;
 }
 
 /**
- * Optional external judge (an LLM) consulted on near-duplicates. NMG itself
- * only acts on exact normalized equality; ambiguous cases are delegated here.
+ * Optional external judge (an LLM) consulted on near-duplicates and potential
+ * supersessions. NMG itself only acts on exact normalized equality; ambiguous
+ * cases are delegated here. NLG may also flag a candidate as superseded.
  */
 export type DuplicateJudge = (input: {
   statement: string;
   candidates: DuplicateCandidate[];
+  /** Same-scope memories sharing content tokens — possible stale predecessors. */
+  supersedeCandidates?: DuplicateCandidate[];
 }) => DuplicateJudgement;
 
 export const RETRIEVAL_MODES = ["legacy", "fts5", "hashing", "qwen3", "hybrid"] as const;

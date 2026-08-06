@@ -69,6 +69,11 @@ import type {
 import type { DatabaseSync } from "node:sqlite";
 
 const MAX_SEARCH_CANDIDATES = 500;
+/** Combined-score boost applied to the active successor of a superseded
+ *  candidate when it is surfaced at retrieval time. Sized so a current value
+ *  with near-zero lexical overlap (common for "updated from X to Y" wording)
+ *  can still out-rank older high-lexical records. */
+const SUPERSEDE_SUCCESSOR_BOOST = 0.3;
 const MIN_WARM_DISCLOSURE_SIZE = 5;
 
 export function withRetrieval<TBase extends Constructor>(Base: TBase) {
@@ -1011,7 +1016,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
            AND n.status = 'active'
            AND (? IS NULL OR n.canonical_name = ?)
            AND (? IS NULL OR m.source_actor = ?)
-           AND (? = 1 OR m.status IN ('active', 'disputed'))
+           AND (? = 1 OR m.status IN ('active', 'disputed', 'superseded'))
            AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
            AND (? IS NULL OR m.event_time >= ?)
            AND (? IS NULL OR m.event_time <= ?)
@@ -1079,7 +1084,51 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         filterUsage.candidatesAfter = filtered.length;
         filterUsage.selectivity = rows.length > 0 ? 1 - filtered.length / rows.length : 0;
       }
-      const results = filtered.slice(0, limit);
+      // Supersession successor surfacing: a superseded candidate's active
+      // successor (the topic's current value) is surfaced with a recency boost
+      // and the superseded record itself is dropped. The successor can rank
+      // low on its own — its wording often differs from the query (e.g.
+      // "moved from employed to self-employed" vs "current employment
+      // status") — so the boost makes the current value visible and the model
+      // answers with the live value instead of a stale one. Only in the
+      // default (non-historical) view; includeHistorical keeps superseded rows.
+      let surfacedResults = filtered;
+      if (!options.includeHistorical) {
+        let sawSuperseded = false;
+        const successorBoost = new Map<string, number>();
+        const kept: MemorySearchResult[] = [];
+        for (const result of filtered) {
+          if (result.memory.status !== "superseded") {
+            kept.push(result);
+            continue;
+          }
+          sawSuperseded = true;
+          const successor = this.db
+            .prepare(
+              `SELECT id FROM memory_records
+               WHERE supersedes_id = ? AND status = 'active'
+               ORDER BY created_at DESC LIMIT 1`,
+            )
+            .get(result.memory.id) as Row | undefined;
+          if (successor) {
+            const key = String(successor.id);
+            successorBoost.set(key, (successorBoost.get(key) ?? 0) + SUPERSEDE_SUCCESSOR_BOOST);
+          }
+        }
+        if (sawSuperseded) {
+          for (const result of kept) {
+            const boost = successorBoost.get(result.memory.id);
+            if (boost) result.combinedScore += boost;
+          }
+          surfacedResults = kept.sort(
+            (left, right) =>
+              right.combinedScore - left.combinedScore ||
+              left.memory.tier - right.memory.tier ||
+              right.memory.importance - left.memory.importance,
+          );
+        }
+      }
+      const results = surfacedResults.slice(0, limit);
       for (const result of results) {
         result.memory.evidenceIds = this.evidenceIds(result.memory.id);
         result.evidenceRecords = this.evidenceRecords(result.memory.evidenceIds);

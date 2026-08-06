@@ -29,6 +29,7 @@ import {
 import type { StoreRow as Row } from "./search-ranking.ts";
 import {
   normalizeStatement,
+  searchTerms,
   statementSimilarity,
 } from "./search-ranking.ts";
 
@@ -318,6 +319,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         )
         .get(input.statement, scopeJson) as Record<string, unknown> | undefined;
       const dupCandidates = this.nearDuplicateCandidates(input.statement, scopeJson);
+      const supersedeCands = this.supersedeCandidates(input.statement, scopeJson);
       if (dupExact) {
         const judge = input.judgeDuplicates;
         if (!judge || judge({ statement: input.statement, candidates: dupCandidates }).merge) {
@@ -440,9 +442,55 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         }
         this.db.exec("COMMIT");
         const written = { history, node, memory };
-        return dupCandidates.length > 0
-          ? { ...written, duplicates: dupCandidates }
-          : written;
+        return {
+          ...written,
+          ...(dupCandidates.length > 0 ? { duplicates: dupCandidates } : {}),
+          ...(supersedeCands.length > 0 ? { supersedeCandidates: supersedeCands } : {}),
+        };
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+
+    /**
+     * Mark a same-scope memory as superseded by a newer record (deterministic
+     * supersession, the MemStrata/MemClaw write-time pattern): the stale record
+     * becomes status='superseded' with a valid_until, and the newer record
+     * points back via supersedes_id. Retrieval already filters superseded rows,
+     * so a superseded value stops appearing in future contexts. NMG only wires
+     * the pointers — deciding WHICH candidate is superseded is the external
+     * judge's job (it sees RememberResult.supersedeCandidates).
+     */
+    applySupersession(input: {
+      newMemoryId: string;
+      supersededMemoryId: string;
+      validUntil?: string;
+    }): void {
+      const newer = this.db
+        .prepare("SELECT id, node_id FROM memory_records WHERE id = ?")
+        .get(input.newMemoryId) as Row | undefined;
+      if (!newer) throw new Error(`memory ${input.newMemoryId} does not exist`);
+      const stale = this.db
+        .prepare("SELECT node_id FROM memory_records WHERE id = ?")
+        .get(input.supersededMemoryId) as Row | undefined;
+      if (!stale) throw new Error(`memory ${input.supersededMemoryId} does not exist`);
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db
+          .prepare(
+            "UPDATE memory_records SET status = 'superseded', valid_until = ? WHERE id = ?",
+          )
+          .run(input.validUntil ?? new Date().toISOString(), input.supersededMemoryId);
+        this.db
+          .prepare(
+            "UPDATE memory_records SET supersedes_id = ?, evidence_role = 'update' WHERE id = ?",
+          )
+          .run(input.supersededMemoryId, input.newMemoryId);
+        if (String(stale.node_id) !== String(newer.node_id)) {
+          this.refreshNodeResidence(String(stale.node_id), new Date().toISOString());
+        }
+        this.db.exec("COMMIT");
       } catch (error) {
         this.db.exec("ROLLBACK");
         throw error;
@@ -466,6 +514,61 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       }
       out.sort((a, b) => b.similarity - a.similarity);
       return out;
+    }
+
+    /**
+     * Same-scope active memories that share at least one content token with the
+     * incoming statement (but are NOT near-duplicates — those are merge
+     * territory). These are candidates for supersession: the incoming statement
+     * may be the current value and one of these may be its stale predecessor.
+     * Text-only heuristic; semantic judgement is delegated to an external judge.
+     */
+    private supersedeCandidates(statement: string, scopeJson: string): DuplicateCandidate[] {
+      // Token matching must survive case/punctuation drift across years of
+      // dialogue: "Employed" vs "employed", "healthcare." vs "healthcare".
+      // Normalize tokens to lowercased alphanumerics before comparing.
+      const normalizeTok = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const inputTokens = new Set(searchTerms(statement).map(normalizeTok).filter((t) => t.length >= 2));
+      // A transition phrase ("Moving from being employed to self-employed",
+      // "transitioned from A to B") names the OLD value on the "from" side.
+      // Use those words as explicit recall keys — similarity (lexical or
+      // vector) cannot separate a true predecessor from same-topic chit-chat,
+      // but the language structure can. Mark such rows high-priority.
+      const transitionTokens = transitionFromTokens(statement);
+      if (inputTokens.size === 0 && transitionTokens.length === 0) return [];
+      // Old values can sit arbitrarily far back in time (a 2025 employment
+      // status superseded by a 2035 self-employment), so the candidate pool
+      // must NOT be restricted to the most recent rows. Pre-filter by content
+      // tokens via instr() (plain substring, no LIKE wildcards) to avoid a
+      // full scope scan, then compute exact shared tokens (normalized).
+      const likeTerms = [...new Set([...inputTokens, ...transitionTokens])];
+      const likeClause = likeTerms.map(() => `instr(lower(m.statement), ?) > 0`).join(" OR ");
+      const params: string[] = likeTerms;
+      const recent = this.db
+        .prepare(
+          `SELECT m.id, m.node_id, m.statement, m.event_time FROM memory_records m
+           WHERE m.scope_json = ? AND m.status = 'active' AND (${likeClause})
+           ORDER BY m.created_at DESC`,
+        )
+        .all(scopeJson, ...params) as Record<string, unknown>[];
+      const inputNorm = normalizeStatement(statement);
+      const out: Array<{ c: DuplicateCandidate; shared: number; transitionHit: boolean }> = [];
+      for (const row of recent) {
+        const rowText = String(row.statement);
+        if (rowText === statement) continue;
+        const sim = statementSimilarity(inputNorm, normalizeStatement(rowText));
+        // Near-duplicates (>= threshold) are merge candidates, not supersession ones.
+        if (sim >= NEAR_DUPLICATE_THRESHOLD) continue;
+        const shared = searchTerms(rowText).map(normalizeTok).filter((t) => inputTokens.has(t)).length;
+        const transitionHit = transitionTokens.some((t) => rowText.toLowerCase().includes(t));
+        if (shared >= SUPERSEDE_MIN_SHARED_TOKENS || transitionHit) {
+          out.push({ c: dupCandidate(row, sim), shared, transitionHit });
+        }
+      }
+      // Transition-name hits go first (the "from" side names the predecessor),
+      // then same-topic lexical overlap.
+      out.sort((a, b) => Number(b.transitionHit) - Number(a.transitionHit) || b.c.similarity - a.c.similarity);
+      return out.slice(0, SUPERSEDE_CANDIDATE_MAX).map((x) => x.c);
     }
 
     private duplicateResult(
@@ -656,6 +759,32 @@ const NEAR_DUPLICATE_THRESHOLD = 0.7;
 /** How many recent same-scope statements to scan for near duplicates (real
  *  stores are small; duplicates live in the recent window of a conversation). */
 const NEAR_DUPLICATE_SCAN = 50;
+/** Supersession candidates: same-scope memories sharing >= this many content tokens. */
+const SUPERSEDE_MIN_SHARED_TOKENS = 1;
+const SUPERSEDE_CANDIDATE_MAX = 10;
+
+/**
+ * Detect "from X to Y" transition phrases ("Moving from being employed to
+ * self-employed", "transitioned from A to B", "went from X to Y"). The
+ * "from" side names the OLD value; those words are recall keys for the
+ * superseded predecessor, which similarity (lexical or vector) cannot
+ * separate from same-topic chit-chat.
+ */
+function transitionFromTokens(statement: string): string[] {
+  const out: string[] = [];
+  const re =
+    /\b(?:moving|moved|transition(?:ing|ed)?|switch(?:ing|ed)?|shift(?:ing|ed)?|went|going|go|changed|change|increase(?:d)?)\s+from\b([^.;!?]{0,45}?)\s+(?:to|into)\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(statement))) {
+    const fragment = String(match[1])
+      .replace(/\b(?:being|been|a|an|the|my|his|her|their|our|your)\b/gi, " ")
+      .trim();
+    for (const token of fragment.match(/[a-z0-9]{2,}/gi) ?? []) {
+      out.push(token.toLowerCase());
+    }
+  }
+  return [...new Set(out)];
+}
 
 function dupCandidate(row: Record<string, unknown>, similarity: number): DuplicateCandidate {
   return {
