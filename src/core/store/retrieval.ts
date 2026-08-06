@@ -37,6 +37,7 @@ import {
   lexicalScore,
   mergeSemanticCandidates,
   normalize,
+  normalizeStatement,
   recallHitTerms,
   recallReason,
   type StoreRow as Row,
@@ -586,6 +587,21 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         timings: snapshot,
         filterUsage: filterUsage.dimensions.length > 0 ? filterUsage : undefined,
       };
+      // Retrieval-time duplicate marking: a later result whose normalized
+      // statement matches an earlier (higher-ranked) one points at the kept
+      // record via duplicateOf. Callers may drop these for rendering.
+      {
+        const seen = new Map<string, string>();
+        for (const result of context.results) {
+          const norm = normalizeStatement(result.memory.statement);
+          const kept = seen.get(norm);
+          if (kept !== undefined) {
+            result.duplicateOf = kept;
+          } else {
+            seen.set(norm, result.memory.id);
+          }
+        }
+      }
       return context;
     }
 

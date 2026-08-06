@@ -213,6 +213,13 @@ export interface RememberInput {
   sessionId?: string;
   sourceRef?: string;
   tier?: MemoryTier;
+  /**
+   * Optional external judge (LLM) consulted when the incoming statement looks
+   * like a near-duplicate of an existing same-scope memory. NMG auto-skips
+   * exact normalized duplicates regardless; this callback decides the
+   * ambiguous (near) cases. Not consulted when there are no candidates.
+   */
+  judgeDuplicates?: DuplicateJudge;
   importance?: number;
   scope?: MemoryScope;
   validFrom?: string;
@@ -231,9 +238,41 @@ export interface RememberResult {
   history: HistoryRecord;
   node: MemoryNode;
   memory: MemoryRecord;
+  /**
+   * Detected duplicates/near-duplicates in the same scope at write time.
+   * Exact duplicates are auto-skipped (the existing record is returned);
+   * near-duplicates are surfaced here for the caller (optionally via
+   * RememberInput.judgeDuplicates) to decide whether to merge.
+   */
+  duplicates?: DuplicateCandidate[];
   /** Per-phase timings, present unless disabled via RememberInput.perf. */
   timings?: PerfSnapshot;
 }
+
+/** A same-scope memory that looks like a duplicate of the incoming statement. */
+export interface DuplicateCandidate {
+  memoryId: string;
+  nodeId: string;
+  statement: string;
+  eventTime: string | null;
+  /** 1 = exact (normalized) match; 0..1 for near duplicates. */
+  similarity: number;
+}
+
+export interface DuplicateJudgement {
+  /** Merge the incoming statement into the candidate (do not write a new record). */
+  merge: boolean;
+  reason?: string;
+}
+
+/**
+ * Optional external judge (an LLM) consulted on near-duplicates. NMG itself
+ * only acts on exact normalized equality; ambiguous cases are delegated here.
+ */
+export type DuplicateJudge = (input: {
+  statement: string;
+  candidates: DuplicateCandidate[];
+}) => DuplicateJudgement;
 
 export const RETRIEVAL_MODES = ["legacy", "fts5", "hashing", "qwen3", "hybrid"] as const;
 export type RetrievalMode = (typeof RETRIEVAL_MODES)[number];
@@ -380,6 +419,10 @@ export interface MemorySearchResult {
   /** Query terms that literally appear in the candidate (lexical matches).
    *  Empty for pure-semantic/route recalls. */
   hitTerms?: string[];
+  /** Set on retrieval-time near-duplicates: memoryId of the kept record
+   *  (first/highest-ranked occurrence) this result duplicates. Callers may
+   *  drop these for rendering or keep them for evidence. */
+  duplicateOf?: string;
 }
 
 export interface DeriveMemoryInput extends Omit<RememberInput, "evidence"> {

@@ -27,10 +27,16 @@ import {
   serializeScope,
 } from "./rows.ts";
 import type { StoreRow as Row } from "./search-ranking.ts";
+import {
+  normalizeStatement,
+  statementSimilarity,
+} from "./search-ranking.ts";
 
 import type {
   DeriveMemoryInput,
+  DuplicateCandidate,
   HistoryRecord,
+  MemoryClaim,
   HistoryRole,
   MemoryMarker,
   MemoryNode,
@@ -54,6 +60,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
     declare protected embedder: VectorEmbedder;
 
     // Cross-cluster calls (methods defined in other clusters or store.ts)
+    declare protected requireNode: (nodeId: string) => MemoryNode;
     declare protected upsertEmbedding: (memoryId: string, text: string) => void;
     declare protected memoryText: (
       memory: Pick<MemoryRecord, "statement">,
@@ -298,6 +305,50 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       if (memoryType === "state" && !input.stateKey?.trim()) {
         throw new Error("state memories require a stable stateKey");
       }
+      // Duplicate detection (read-only, pre-transaction): an exact normalized
+      // duplicate in the same scope auto-skips (returns the existing record,
+      // Mem0 hash-dedup pattern); near-duplicates surface as candidates for
+      // the optional LLM judge (Neo4j SAME_AS review-queue pattern).
+      const scopeJson = serializeScope(input.scope ?? {});
+      const dupExact = this.db
+        .prepare(
+          `SELECT m.* FROM memory_records m
+           WHERE m.statement = ? AND m.scope_json = ? AND m.status = 'active'
+           ORDER BY m.created_at DESC LIMIT 1`,
+        )
+        .get(input.statement, scopeJson) as Record<string, unknown> | undefined;
+      const dupCandidates = this.nearDuplicateCandidates(input.statement, scopeJson);
+      if (dupExact) {
+        const judge = input.judgeDuplicates;
+        if (!judge || judge({ statement: input.statement, candidates: dupCandidates }).merge) {
+          return this.duplicateResult(dupExact, [dupCandidate(dupExact, 1), ...dupCandidates]);
+        }
+      } else if (dupCandidates.length > 0) {
+        // A normalized-exact match (similarity 1.0) is an exact duplicate too —
+        // normalization catches case/punctuation/whitespace variants that the
+        // SQL equality check misses. Auto-skip like the SQL-exact case.
+        const normExact = dupCandidates[0]!.similarity >= 1 ? dupCandidates[0] : undefined;
+        if (normExact) {
+          const judge = input.judgeDuplicates;
+          if (!judge || judge({ statement: input.statement, candidates: dupCandidates }).merge) {
+            const targetRow = this.db
+              .prepare("SELECT m.* FROM memory_records m WHERE m.id = ?")
+              .get(normExact.memoryId) as Record<string, unknown>;
+            return this.duplicateResult(targetRow, dupCandidates);
+          }
+        } else if (input.judgeDuplicates) {
+          const decision = input.judgeDuplicates({
+            statement: input.statement,
+            candidates: dupCandidates,
+          });
+          if (decision.merge) {
+            const targetRow = this.db
+              .prepare("SELECT m.* FROM memory_records m WHERE m.id = ?")
+              .get(dupCandidates[0]!.memoryId) as Record<string, unknown>;
+            return this.duplicateResult(targetRow, dupCandidates);
+          }
+        }
+      }
       this.db.exec("BEGIN IMMEDIATE");
       try {
         const history = input.evidenceHistoryId
@@ -388,11 +439,45 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           this.refreshNodeResidence(supersededNodeId, memory.createdAt);
         }
         this.db.exec("COMMIT");
-        return { history, node, memory };
+        const written = { history, node, memory };
+        return dupCandidates.length > 0
+          ? { ...written, duplicates: dupCandidates }
+          : written;
       } catch (error) {
         this.db.exec("ROLLBACK");
         throw error;
       }
+    }
+
+    private nearDuplicateCandidates(statement: string, scopeJson: string): DuplicateCandidate[] {
+      const inputNorm = normalizeStatement(statement);
+      const recent = this.db
+        .prepare(
+          `SELECT m.id, m.node_id, m.statement, m.event_time FROM memory_records m
+           WHERE m.scope_json = ? AND m.status = 'active'
+           ORDER BY m.created_at DESC LIMIT ${NEAR_DUPLICATE_SCAN}`,
+        )
+        .all(scopeJson) as Record<string, unknown>[];
+      const out: DuplicateCandidate[] = [];
+      for (const row of recent) {
+        if (String(row.statement) === statement) continue;
+        const sim = statementSimilarity(inputNorm, normalizeStatement(String(row.statement)));
+        if (sim >= NEAR_DUPLICATE_THRESHOLD) out.push(dupCandidate(row, sim));
+      }
+      out.sort((a, b) => b.similarity - a.similarity);
+      return out;
+    }
+
+    private duplicateResult(
+      row: Record<string, unknown>,
+      candidates: DuplicateCandidate[],
+    ): RememberResult {
+      return {
+        history: this.requireHistory(String(row.evidence_id)),
+        node: this.requireNode(String(row.node_id)),
+        memory: mapMemoryRow(row),
+        duplicates: candidates,
+      };
     }
 
     recordRejectedWrite(input: {
@@ -562,5 +647,68 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         createdAt: String(row.created_at),
       };
     }
+  };
+}
+
+// ---- duplicate detection helpers (writes cluster) ----
+/** Lexical overlap threshold above which a same-scope statement is a candidate. */
+const NEAR_DUPLICATE_THRESHOLD = 0.7;
+/** How many recent same-scope statements to scan for near duplicates (real
+ *  stores are small; duplicates live in the recent window of a conversation). */
+const NEAR_DUPLICATE_SCAN = 50;
+
+function dupCandidate(row: Record<string, unknown>, similarity: number): DuplicateCandidate {
+  return {
+    memoryId: String(row.id),
+    nodeId: String(row.node_id),
+    statement: String(row.statement),
+    eventTime: (row.event_time as string | null) ?? null,
+    similarity,
+  };
+}
+
+/** Row (snake_case memory_records) → MemoryRecord for duplicate short-circuits. */
+function mapMemoryRow(row: Record<string, unknown>): MemoryRecord {
+  const parse = (v: unknown, fallback: unknown) => {
+    if (v == null) return fallback;
+    try {
+      return JSON.parse(String(v));
+    } catch {
+      return fallback;
+    }
+  };
+  return {
+    id: String(row.id),
+    nodeId: String(row.node_id),
+    evidenceId: String(row.evidence_id),
+    evidenceIds: [String(row.evidence_id)],
+    statement: String(row.statement),
+    memoryType: (row.memory_type as MemoryRecord["memoryType"]) ?? "fact",
+    stateKey: (row.state_key as string) ?? null,
+    eventTime: (row.event_time as string) ?? null,
+    sourceActor: (row.source_actor as MemoryRecord["sourceActor"]) ?? "user",
+    truthStatus: (row.truth_status as MemoryRecord["truthStatus"]) ?? "asserted",
+    confidence: (row.confidence as number) ?? null,
+    polarity: (row.polarity as MemoryRecord["polarity"]) ?? null,
+    predicateKey: (row.predicate_key as string) ?? null,
+    extractMethod: (row.extract_method as MemoryRecord["extractMethod"]) ?? null,
+    claims: parse(row.claims_json, null) as MemoryClaim[] | null,
+    markers: parse(row.markers_json, []) as MemoryMarker[],
+    scope: parse(row.scope_json, {}) as MemoryScope,
+    validFrom: (row.valid_from as string) ?? null,
+    validUntil: (row.valid_until as string) ?? null,
+    status: (row.status as MemoryRecord["status"]) ?? "active",
+    residence: (row.residence as MemoryRecord["residence"]) ?? "stg",
+    promotedAt: (row.promoted_at as string) ?? null,
+    expiresAt: (row.expires_at as string) ?? null,
+    evidenceRole: (row.evidence_role as MemoryRecord["evidenceRole"]) ?? "support",
+    supersedesId: (row.supersedes_id as string) ?? null,
+    tier: (row.tier as MemoryRecord["tier"]) ?? 1,
+    importance: (row.importance as number) ?? 0.5,
+    accessCount: (row.access_count as number) ?? 0,
+    lastAccessedAt: (row.last_accessed_at as string) ?? null,
+    writeReason: String(row.write_reason ?? ""),
+    writeSource: (row.write_source as MemoryRecord["writeSource"]) ?? "core",
+    createdAt: String(row.created_at),
   };
 }

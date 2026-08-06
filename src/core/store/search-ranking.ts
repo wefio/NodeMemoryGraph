@@ -167,3 +167,36 @@ export function normalize(value: string): string {
     .trim()
     .toLocaleLowerCase("en-US");
 }
+
+/**
+ * Statement-level normalization for duplicate detection: NFKC, lowercased,
+ * punctuation stripped, whitespace collapsed. Two statements that normalize
+ * equal are the same fact written again regardless of surface formatting
+ * (case, spacing, trailing punctuation, quotes).
+ */
+export function normalizeStatement(value: string): string {
+  return normalize(value)
+    .replace(/[\p{P}\p{S}]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Lexical similarity in [0,1] between two normalized statements (Jaccard over
+ * word sets with a token-count cap for long statements). Used to flag
+ * near-duplicate candidates for an external LLM judge — NMG itself only
+ * acts on exact normalized equality.
+ */
+export function statementSimilarity(left: string, right: string): number {
+  const a = normalizeStatement(left).split(" ").filter(Boolean);
+  const b = normalizeStatement(right).split(" ").filter(Boolean);
+  if (a.length === 0 || b.length === 0) return 0;
+  const setA = new Set(a);
+  const setB = new Set(b);
+  let inter = 0;
+  for (const tok of setA) {
+    if (setB.has(tok)) inter += 1;
+  }
+  const union = setA.size + setB.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
