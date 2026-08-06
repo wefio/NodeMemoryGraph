@@ -11,6 +11,7 @@
  */
 import type { Constructor } from "./store-ctor.ts";
 import { randomUUID } from "node:crypto";
+import { extractEventWindow } from "./advanced-query.ts";
 import { nowMs, PerfTimer, SECTION } from "../perf.ts";
 import type { PerfSnapshot } from "../perf.ts";
 import {
@@ -117,6 +118,19 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       semantic?: { queryVector: readonly number[]; model: string },
     ): MemoryContext {
       const startedAt = nowMs();
+      // Temporal intent: natural-language dates in the query ("as of Mar 10,
+      // 2029") bound the candidate-generation window. This is enforced in the
+      // candidate SQL — not post-query — so out-of-window memories never
+      // compete for the top-k slots. Explicit time: filters parsed upstream
+      // (SearchOptions.eventTimeFrom/To) take precedence.
+      const temporal = extractEventWindow(query);
+      if (temporal.from || temporal.to) {
+        options = {
+          ...options,
+          eventTimeFrom: options.eventTimeFrom ?? temporal.from,
+          eventTimeTo: options.eventTimeTo ?? temporal.to,
+        };
+      }
       const perf = options.perf === false ? null : new PerfTimer();
       const budget = activeGraphBudget(options);
       const limit = Math.max(1, Math.min(options.limit ?? 8, budget.maxEvidence, 50));
@@ -983,6 +997,8 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
            AND (? IS NULL OR m.source_actor = ?)
            AND (? = 1 OR m.status IN ('active', 'disputed'))
            AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+           AND (? IS NULL OR m.event_time >= ?)
+           AND (? IS NULL OR m.event_time <= ?)
            ${scopeClause}
          ORDER BY ${candidateOrder} m.tier ASC, m.importance DESC,
                   m.access_count DESC, m.created_at DESC
@@ -998,6 +1014,10 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           options.sourceActor ?? null,
           options.includeHistorical ? 1 : 0,
           ...(forcedCandidateIds.length === 0 && retrievalMode === "hybrid" ? ftsIds : []),
+          options.eventTimeFrom ?? null,
+          options.eventTimeFrom ?? null,
+          options.eventTimeTo ?? null,
+          options.eventTimeTo ?? null,
           ...scopeParams,
           rowLimit,
         ) as Row[];
@@ -1021,7 +1041,9 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                 : forcedCandidateIds.length > 0
                   ? 0.001
                   : 0
-              : retrievalMode === "hashing" || retrievalMode === "qwen3"
+              : retrievalMode === "hashing" ||
+                  (retrievalMode === "qwen3" &&
+                    vectorModel.toLowerCase().includes("qwen"))
                 ? vector
                 : hybridScore(lexical, vector, route);
           return result;

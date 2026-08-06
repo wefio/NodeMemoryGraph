@@ -245,6 +245,10 @@ export interface SearchOptions {
   sessionId?: string;
   nodeName?: string;
   scope?: MemoryScope;
+  eventTimeFrom?: string;
+  /** Inclusive upper bound (ISO day "2029-03-11") on memory event_time for
+   *  candidate generation — enforced in the candidate SQL, not post-query. */
+  eventTimeTo?: string;
   /** Restrict retrieval to memories attributed to one actor. */
   sourceActor?: MemoryActor;
   includeHistorical?: boolean;
