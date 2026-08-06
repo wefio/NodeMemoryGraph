@@ -7,11 +7,11 @@
  * inspect-data.ts; this command is safe against a live database.
  *
  * Key model (conflict-free by construction):
- *   printable chars  → list filter (fuzzy, via SelectList.setFilter)
- *   Backspace        → edit filter
+ *   printable chars  → full-text search (memory_fts FTS5, LIKE fallback; debounced)
+ *   Backspace        → edit search
  *   Tab              → switch memories / traces
  *   ↑/↓              → navigate (handled by SelectList)
- *   Esc              → clear filter (never quits)
+ *   Esc              → clear search (never quits)
  *   Ctrl+C           → quit immediately
  */
 import type {
@@ -55,7 +55,8 @@ export async function runInspectTui(databasePath: string): Promise<void> {
   let list = buildList();
 
   function memoryItems() {
-    return data.listMemories(db).map((row) => ({
+    const rows = filter ? data.searchMemories(db, filter) : data.listMemories(db);
+    return rows.map((row) => ({
       value: row.id,
       label: `L${row.tier} ${row.memoryType} ${row.nodeName}  ${row.statement}`,
       description: row.createdAt.slice(0, 16).replace("T", " "),
@@ -63,7 +64,8 @@ export async function runInspectTui(databasePath: string): Promise<void> {
   }
 
   function traceItems() {
-    return data.listTraces(db).map((row) => ({
+    const rows = filter ? data.searchTraces(db, filter) : data.listTraces(db);
+    return rows.map((row) => ({
       value: row.id,
       label: `${row.hasQpp ? "Q" : "-"} ${row.query}`,
       description: `${row.createdAt.slice(0, 19).replace("T", " ")}  ${row.resultCount} hits`,
@@ -74,7 +76,6 @@ export async function runInspectTui(databasePath: string): Promise<void> {
     const items = tab === "memories" ? memoryItems() : traceItems();
     const next = new SelectList(items, Math.min(Math.max(items.length, 1), 12), theme);
     next.onSelectionChange = (item) => updateDetail(item?.value);
-    next.setFilter(filter);
     return next;
   }
 
@@ -96,7 +97,7 @@ export async function runInspectTui(databasePath: string): Promise<void> {
       `${BOLD}NMG inspect${RESET}  ` +
         `${tab === "memories" ? CYAN + BOLD : DIM}[1 memories]${RESET} ` +
         `${tab === "traces" ? CYAN + BOLD : DIM}[2 traces]${RESET}` +
-        `${filterNote}\n${DIM}type to filter · Tab/1/2 switch · Esc clear filter · Ctrl+C quit${RESET}`,
+        `${filterNote}\n${DIM}type to search (FTS) · Tab/1/2 switch · Esc clear · Ctrl+C quit${RESET}`,
     );
   }
 
@@ -117,6 +118,20 @@ export async function runInspectTui(databasePath: string): Promise<void> {
   refreshHeader();
   updateDetail(list.getSelectedItem()?.value);
 
+  // Typing queries the database (FTS / LIKE) rather than the list's local
+  // fuzzy filter, debounced so each keystroke doesn't remount the list.
+  let searchTimer: NodeJS.Timeout | undefined;
+  const scheduleSearch = () => {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      searchTimer = undefined;
+      remountList();
+      refreshHeader();
+      tui.requestRender();
+    }, 120);
+    searchTimer.unref();
+  };
+
   const closed = new Promise<void>((resolve) => {
     tui.addInputListener((input) => {
       // IMPORTANT: listeners that consume input must call tui.requestRender()
@@ -130,7 +145,7 @@ export async function runInspectTui(databasePath: string): Promise<void> {
         // Esc only clears the filter; it never quits (Ctrl+C quits).
         if (filter) {
           filter = "";
-          list.setFilter(filter);
+          scheduleSearch();
           refreshHeader();
           tui.requestRender();
         }
@@ -155,7 +170,7 @@ export async function runInspectTui(databasePath: string): Promise<void> {
       if (matchesKey(input, "backspace")) {
         if (filter) {
           filter = [...filter].slice(0, -1).join("");
-          list.setFilter(filter);
+          scheduleSearch();
           refreshHeader();
           tui.requestRender();
         }
@@ -165,7 +180,7 @@ export async function runInspectTui(databasePath: string): Promise<void> {
       // goes to the filter; escape sequences pass through to the list.
       if (!input.startsWith("\x1b") && [...input].every((ch) => ch >= " ")) {
         filter += input;
-        list.setFilter(filter);
+        scheduleSearch();
         refreshHeader();
         tui.requestRender();
         return { consume: true };
@@ -177,6 +192,7 @@ export async function runInspectTui(databasePath: string): Promise<void> {
   tui.setFocus(list);
   tui.start();
   await closed;
+  if (searchTimer) clearTimeout(searchTimer);
   tui.stop();
   db.close();
 }

@@ -10,6 +10,8 @@ import {
   listMemories,
   listTraces,
   openInspectDb,
+  searchMemories,
+  searchTraces,
 } from "../../src/cli/inspect-data.ts";
 import { NmgService } from "../../src/cli/service.ts";
 
@@ -56,6 +58,25 @@ test("inspect queries read memories, evidence, and traces from a live database",
       assert.ok(traceDetail);
       assert.ok(traceDetail.resultMemoryIds.includes(remembered.memory.id));
       assert.equal(getTraceDetail(db, "missing-trace"), null);
+
+      // FTS search matches statement tokens with prefix semantics…
+      const ftsHits = searchMemories(db, "offline");
+      assert.deepEqual(
+        ftsHits.map((row) => row.id),
+        [remembered.memory.id],
+      );
+      // …node names are indexed too…
+      assert.equal(searchMemories(db, "Atlas")[0]?.id, remembered.memory.id);
+      // …misses stay empty, malformed syntax falls back to LIKE without throwing,
+      // and CJK takes the substring path.
+      assert.equal(searchMemories(db, "nonexistent-token").length, 0);
+      assert.doesNotThrow(() => searchMemories(db, '"unbalanced'));
+      assert.equal(searchMemories(db, "离线").length, 0);
+      assert.deepEqual(
+        searchTraces(db, "offline").map((row) => row.id),
+        [traces[0]!.id],
+      );
+      assert.equal(searchTraces(db, "no such query").length, 0);
     } finally {
       db.close();
     }
