@@ -234,6 +234,10 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     return { command: "help", json: false };
   }
   const [command, ...rest] = argv;
+  if (command === "help") {
+    if (rest.length > 0) throw new Error("help does not accept arguments");
+    return { command: "help", json: false };
+  }
   if (command === "daemon") return daemonArguments(rest);
   const group = cliCommandGroup(command!);
   if (group.length === 0) throw new Error(`unknown command: ${command}`);
