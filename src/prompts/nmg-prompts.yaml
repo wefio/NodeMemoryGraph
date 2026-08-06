@@ -40,6 +40,13 @@ remember_description: >-
   The record persists across sessions. Only save attributable information -
   not secrets, transient content, or unsupported guesses.
 
+# ---- 完成提醒（弱提示——commit/任务完成后注入，不强制） ------------------
+completion_nudge: >-
+  A code commit or task completion was just detected. NMG long-term memory is
+  available: you may recall relevant decisions (nmg_search) or save this
+  turn's key conclusions (nmg_remember) if useful. This is only a reminder;
+  it does not affect the current work.
+
 # ---- 渐进披露（检索结果返回时附带） ---------------------------------------
 
 search_disclosure: |

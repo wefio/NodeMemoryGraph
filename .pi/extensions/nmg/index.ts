@@ -42,16 +42,37 @@ function projectDirectory(): string {
 export default function nmgExtension(pi: ExtensionAPI): void {
   let connectionPromise: Promise<DaemonConnection> | undefined;
   const injectionWindow = new SessionInjectionWindow();
+  // Weak completion nudge: a git commit (or an explicit completion phrase) is a
+  // low-signal hint that NMG memory is available — a reminder, never a forced
+  // action. Set by the tool_call hook, consumed once by before_agent_start.
+  let commitNudgePending = false;
+  const popCompletionNudge = (prompt: string): string => {
+    const triggered =
+      commitNudgePending ||
+      /(?:完成了|收工|搞定|结束|提交了|committed|done|finished|wrapped up)/u.test(prompt);
+    commitNudgePending = false;
+    if (!triggered) return "";
+    return nmgPrompts.completion_nudge;
+  };
   const connection = (): Promise<DaemonConnection> =>
     (connectionPromise ??= connectDaemon(databasePath()));
   const invoke = async (method: "get" | "remember" | "search", params: Record<string, unknown>) =>
     invokeDaemon(await connection(), method, params);
 
+  // git commit via the bash tool is the strongest "milestone" signal available
+  // to the extension; remember it so the next turn can offer NMG memory.
+  pi.on("tool_call", async (event, _ctx) => {
+    if (event.toolName === "bash" && /\bgit\s+commit\b/.test(String(event.input.command))) {
+      commitNudgePending = true;
+    }
+  });
+
   pi.on("before_agent_start", async (event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
     injectionWindow.beginTurn(sessionId);
+    const nudge = popCompletionNudge(event.prompt);
     if (!shouldAutoRecall(event.prompt)) {
-      return { systemPrompt: composeNmgSystemPrompt(event.systemPrompt) };
+      return { systemPrompt: composeNmgSystemPrompt(event.systemPrompt, "", "", nudge) };
     }
     try {
       const context = (await invoke("search", {
@@ -67,7 +88,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       })) as MemoryContext;
       const recalled = injectionWindow.format(sessionId, context, "header");
       return {
-        systemPrompt: composeNmgSystemPrompt(event.systemPrompt, recalled),
+        systemPrompt: composeNmgSystemPrompt(event.systemPrompt, recalled, "", nudge),
       };
     } catch (error) {
       return {
@@ -75,6 +96,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           event.systemPrompt,
           "",
           `NMG unavailable: ${message(error)}`,
+          nudge,
         ),
       };
     }
@@ -397,6 +419,7 @@ export function composeNmgSystemPrompt(
   baseSystemPrompt: string,
   automaticRecall = "",
   status = "",
+  nudge = "",
 ): string {
   return [
     baseSystemPrompt,
@@ -404,6 +427,7 @@ export function composeNmgSystemPrompt(
     automaticRecall
       ? `<nmg_automatic_recall>\n${automaticRecall}\n</nmg_automatic_recall>`
       : "",
+    nudge ? `<nmg_nudge>\n${nudge}\n</nmg_nudge>` : "",
     status ? `<nmg_status>${status}</nmg_status>` : "",
   ]
     .filter(Boolean)

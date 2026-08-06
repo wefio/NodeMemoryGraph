@@ -354,3 +354,14 @@ function memoryContext(id: string, statement: string, evidence: string): MemoryC
     ],
   } as MemoryContext;
 }
+
+test("composeNmgSystemPrompt: injects a completion nudge block when provided", async () => {
+  const { composeNmgSystemPrompt } = await import("../../../.pi/extensions/nmg/index.ts");
+  const out = composeNmgSystemPrompt("base", "", "", "nudge text");
+  assert.match(out, /<nmg_nudge>/);
+  assert.match(out, /nudge text/);
+  assert.match(out, /<nmg_policy>/);
+  // no nudge -> no block
+  const plain = composeNmgSystemPrompt("base");
+  assert.doesNotMatch(plain, /<nmg_nudge>/);
+});

@@ -11,6 +11,7 @@ export interface NmgPrompts {
   search_description: string;
   get_description: string;
   remember_description: string;
+  completion_nudge: string;
   search_disclosure: string;
   mcp_search_disclosure: string;
   get_disclosure: string;
