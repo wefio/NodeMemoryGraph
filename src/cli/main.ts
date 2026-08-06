@@ -40,7 +40,10 @@ import { histogramQuantile } from "../core/perf.ts";
 // The CLI surface (synopsis, option details, known options/flags) is
 // assembled from the command registry in commands.ts; only the daemon
 // synopsis line is local because daemon commands are not RPC methods.
-const USAGE = cliUsage(["nmg daemon start|status|stop [--data-dir DIR | --db FILE] [--json]"]);
+const USAGE = cliUsage([
+  "nmg daemon start|status|stop [--data-dir DIR | --db FILE] [--json]",
+  "nmg inspect [--data-dir DIR | --db FILE]",
+]);
 
 export async function runCli(
   argv: readonly string[],
@@ -71,6 +74,18 @@ export async function runCli(
       io.stdout.write(
         parsed.json ? `${JSON.stringify(result, null, 2)}\n` : humanDaemonResult(result),
       );
+      return 0;
+    } catch (error) {
+      io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      return 1;
+    } finally {
+      service.close();
+    }
+  }
+  if (parsed.command === "inspect") {
+    try {
+      const { runInspectTui } = await import("./inspect-tui.ts");
+      await runInspectTui(service.databasePath);
       return 0;
     } catch (error) {
       io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -200,7 +215,7 @@ function isDaemonCommand(command: ParsedArguments["command"]): command is Daemon
 }
 
 interface ParsedArguments {
-  command: NmgMethod | DaemonCommand | "help";
+  command: NmgMethod | DaemonCommand | "inspect" | "help";
   params?:
     | NmgRememberParams
     | NmgSearchParams
@@ -223,6 +238,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   }
   const [command, ...rest] = argv;
   if (command === "daemon") return daemonArguments(rest);
+  if (command === "inspect") return inspectArguments(rest);
   const group = cliCommandGroup(command!);
   if (group.length === 0) throw new Error(`unknown command: ${command}`);
   const spec =
@@ -242,8 +258,25 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   };
 }
 
-function daemonArguments(rest: readonly string[]): ParsedArguments {
-  const action = rest[0];
+/** `nmg inspect` is a local read-only TUI: only database-location options, no RPC, no --json. */
+function inspectArguments(rest: readonly string[]): ParsedArguments {
+  const values = parseOptions(rest);
+  for (const name of values.options.keys()) {
+    if (name !== "data-dir" && name !== "db") throw new Error(`unknown option: --${name}`);
+  }
+  for (const name of values.flags) {
+    throw new Error(`unknown option: --${name}`);
+  }
+  rejectPositionals(values, "inspect");
+  return {
+    command: "inspect",
+    json: false,
+    dataDirectory: firstOption(values, "data-dir"),
+    databasePath: optionalResolvedPath(firstOption(values, "db")),
+  };
+}
+
+function daemonArguments(rest: readonly string[]): ParsedArguments {  const action = rest[0];
   if (!["run", "start", "status", "stop"].includes(action ?? "")) {
     throw new Error("daemon requires start, status, or stop");
   }
