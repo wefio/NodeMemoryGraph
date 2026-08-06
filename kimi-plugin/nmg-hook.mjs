@@ -2,21 +2,21 @@
 /**
  * NMG write-reminder hook for Kimi Code CLI.
  *
- * Kimi Code hooks speak the Claude-style JSON protocol: one JSON payload on
- * stdin, one JSON response on stdout. This script is dependency-free so it
- * runs anywhere Node does, and fast enough to sit on the prompt path.
+ * Kimi Code hooks receive one JSON payload on stdin; for events that affect
+ * the main flow (PreToolUse, Stop, UserPromptSubmit) stdout text is attached
+ * to the context on exit 0. PostToolUse is observational — its output is
+ * ignored — so the git-commit nudge must hook PreToolUse instead.
  *
  * Events handled:
- *   UserPromptSubmit  — completion keywords (done/完成了/收工/…) → nudge
- *   PostToolUse(Bash) — `git commit` in the command             → nudge
+ *   UserPromptSubmit — completion keywords (done/完成了/收工/…) → nudge
+ *   PreToolUse(Bash) — `git commit` in the command              → nudge
  *
- * The nudge is a weak reminder injected as additionalContext, mirroring the
- * Pi extension's completion nudge (src/prompts/nmg-prompts.yaml): it reminds
- * the agent that NMG memory is available; it never forces a write.
+ * The nudge is a weak reminder, mirroring the Pi extension's completion
+ * nudge (src/prompts/nmg-prompts.yaml): NMG memory is available; never a
+ * forced write. Exit 0 always — this hook never blocks.
  *
- * Payload shapes are defensive: Kimi sends UserPromptSubmit as ContentPart[]
- * (array of {type:"text", text}) while other clients send a plain string;
- * both are handled.
+ * Payload shapes are defensive: the prompt may be a plain string or a
+ * ContentPart[] array ({type:"text", text}); both are handled.
  */
 
 const NUDGE = [
@@ -51,7 +51,7 @@ function isGitCommit(payload) {
 function shouldNudge(payload) {
   const event = payload?.hook_event_name ?? payload?.event;
   if (event === "UserPromptSubmit") return COMPLETION_PATTERN.test(promptText(payload));
-  if (event === "PostToolUse") {
+  if (event === "PreToolUse") {
     const toolName = payload?.tool_name ?? "";
     return /^(bash|shell)$/iu.test(toolName) && isGitCommit(payload);
   }
@@ -65,7 +65,8 @@ process.stdin.on("end", () => {
   try {
     const payload = JSON.parse(input || "{}");
     if (shouldNudge(payload)) {
-      process.stdout.write(JSON.stringify({ additionalContext: NUDGE }));
+      // Plain stdout text is attached to the context; exit 0 = allow.
+      process.stdout.write(NUDGE);
     }
   } catch {
     // A hook must never break the session: stay silent on malformed input.
