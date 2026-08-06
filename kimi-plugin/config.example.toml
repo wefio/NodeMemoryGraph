@@ -1,0 +1,12 @@
+# NMG write-reminder hooks for Kimi Code CLI.
+# Append these two blocks to ~/.kimi-code/config.toml and fix the paths.
+# Windows: quote the path; Kimi runs hook commands via cmd.exe.
+
+[[hooks]]
+event = "UserPromptSubmit"
+command = "node \"C:/Documents/GitHub/NodeMemoryGraph/kimi-plugin/nmg-hook.mjs\""
+
+[[hooks]]
+event = "PostToolUse"
+matcher = "Bash"
+command = "node \"C:/Documents/GitHub/NodeMemoryGraph/kimi-plugin/nmg-hook.mjs\""
