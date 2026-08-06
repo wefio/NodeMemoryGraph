@@ -11,7 +11,7 @@
  *   Backspace        → edit filter
  *   Tab              → switch memories / traces
  *   ↑/↓              → navigate (handled by SelectList)
- *   Esc              → clear filter; press again to quit
+ *   Esc              → clear filter (never quits)
  *   Ctrl+C           → quit immediately
  */
 import type {
@@ -29,7 +29,9 @@ export async function runInspectTui(databasePath: string): Promise<void> {
   if (!process.stdout.isTTY) {
     throw new Error("nmg inspect requires an interactive terminal (TTY)");
   }
-  const { TUI, ProcessTerminal, Text, SelectList } = await import("@earendil-works/pi-tui");
+  const { TUI, ProcessTerminal, Text, SelectList, matchesKey } = await import(
+    "@earendil-works/pi-tui"
+  );
   const data = await import("./inspect-data.ts");
 
   const db = data.openInspectDb(databasePath);
@@ -94,7 +96,7 @@ export async function runInspectTui(databasePath: string): Promise<void> {
       `${BOLD}NMG inspect${RESET}  ` +
         `${tab === "memories" ? CYAN + BOLD : DIM}[1 memories]${RESET} ` +
         `${tab === "traces" ? CYAN + BOLD : DIM}[2 traces]${RESET}` +
-        `${filterNote}\n${DIM}type to filter · Tab/1/2 switch · Esc clear/quit · Ctrl+C quit${RESET}`,
+        `${filterNote}\n${DIM}type to filter · Tab/1/2 switch · Esc clear filter · Ctrl+C quit${RESET}`,
     );
   }
 
@@ -117,41 +119,45 @@ export async function runInspectTui(databasePath: string): Promise<void> {
 
   const closed = new Promise<void>((resolve) => {
     tui.addInputListener((input) => {
-      if (input === "\x03") {
-        // Ctrl+C
+      // IMPORTANT: listeners that consume input must call tui.requestRender()
+      // themselves — pi-tui only repaints after the *focused component*
+      // handles input, so a consumed key otherwise updates state invisibly.
+      if (matchesKey(input, "ctrl+c")) {
         resolve();
         return { consume: true };
       }
-      if (input === "\x1b") {
-        // Esc alone: clear filter first, quit when already empty.
+      if (matchesKey(input, "escape")) {
+        // Esc only clears the filter; it never quits (Ctrl+C quits).
         if (filter) {
           filter = "";
           list.setFilter(filter);
           refreshHeader();
-          return { consume: true };
+          tui.requestRender();
         }
-        resolve();
         return { consume: true };
       }
-      if (input === "\t" || input === "1" || input === "2") {
+      const isTab = matchesKey(input, "tab");
+      if (isTab || input === "1" || input === "2") {
         // Tab always switches; digits switch only when the filter is empty
         // (otherwise they are filter text).
-        if (input === "\t" || !filter) {
-          const next: Tab = input === "1" ? "memories" : input === "2" ? "traces" : tab === "memories" ? "traces" : "memories";
+        if (isTab || !filter) {
+          const next: Tab =
+            input === "1" ? "memories" : input === "2" ? "traces" : tab === "memories" ? "traces" : "memories";
           if (next !== tab) {
             tab = next;
             remountList();
             refreshHeader();
+            tui.requestRender();
           }
           return { consume: true };
         }
       }
-      if (input === "\x7f") {
-        // Backspace
+      if (matchesKey(input, "backspace")) {
         if (filter) {
           filter = [...filter].slice(0, -1).join("");
           list.setFilter(filter);
           refreshHeader();
+          tui.requestRender();
         }
         return { consume: true };
       }
@@ -161,6 +167,7 @@ export async function runInspectTui(databasePath: string): Promise<void> {
         filter += input;
         list.setFilter(filter);
         refreshHeader();
+        tui.requestRender();
         return { consume: true };
       }
       return undefined;
