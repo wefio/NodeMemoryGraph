@@ -243,8 +243,15 @@ export class OmniMemEvalBridge {
         // Keep the core store's ordering (transition-name hits first, then
         // similarity) — re-sorting by similarity here would push a real
         // predecessor (low lexical overlap) back out of the top-k.
+        // Throttle the LLM judge (ingest cost): only deterministic strong
+        // signals (transition-name hit / polarity flip) are worth a judge call;
+        // plain token-overlap candidates are usually "keep" and would only slow
+        // ingestion. Weak candidates are skipped entirely — the strong signals
+        // are exactly the supersession scenarios ("from X to Y", negated update)
+        // that need the LLM to confirm the stale predecessor.
         const cands = remembered.supersedeCandidates
           .filter((c) => !c.eventTime || !Number.isFinite(newTime) || Date.parse(c.eventTime) < newTime)
+          .filter((c) => c.priority === "transition" || c.priority === "polarity")
           .slice(0, 3);
         if (cands.length) {
           judgeTasks.push({ statement: message.content, cands, newMemoryId: remembered.memory.id });

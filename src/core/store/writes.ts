@@ -663,7 +663,12 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           (rowPol === "affirmative" || rowPol === "negative") &&
           rowPol !== inputPol;
         if (shared >= SUPERSEDE_MIN_SHARED_TOKENS || transitionHit || polarityHit) {
-          out.push({ c: dupCandidate(row, sim), shared, transitionHit, polarityHit });
+          const priority: "transition" | "polarity" | "token" = transitionHit
+            ? "transition"
+            : polarityHit
+              ? "polarity"
+              : "token";
+          out.push({ c: dupCandidate(row, sim, priority), shared, transitionHit, polarityHit });
         }
       }
       // Transition-name hits and polarity flips go first (they name the
@@ -892,13 +897,18 @@ function transitionFromTokens(statement: string): string[] {
   return [...new Set(out)];
 }
 
-function dupCandidate(row: Record<string, unknown>, similarity: number): DuplicateCandidate {
+function dupCandidate(
+  row: Record<string, unknown>,
+  similarity: number,
+  priority: "transition" | "polarity" | "token" = "token",
+): DuplicateCandidate {
   return {
     memoryId: String(row.id),
     nodeId: String(row.node_id),
     statement: String(row.statement),
     eventTime: (row.event_time as string | null) ?? null,
     similarity,
+    priority,
   };
 }
 

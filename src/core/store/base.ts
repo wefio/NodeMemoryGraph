@@ -994,9 +994,7 @@ export class NmgStoreBase {
          AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
          AND (m.valid_from IS NULL OR m.valid_from <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
          AND (m.valid_until IS NULL OR m.valid_until > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-       ORDER BY m.tier ASC,
-                CASE WHEN m.evidence_role = 'update' THEN 1 ELSE 0 END DESC,
-                m.importance DESC, m.created_at DESC
+       ORDER BY m.tier ASC, m.importance DESC, m.created_at DESC
        LIMIT ?`,
       )
       .all(

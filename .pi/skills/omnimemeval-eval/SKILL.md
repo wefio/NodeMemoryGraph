@@ -137,7 +137,7 @@ bash evals/omnimemeval/run-locomo.sh --analyze <results-dir>
 bash evals/omnimemeval/run-halumem.sh --env-file .env.nmg-bgefix --version halumem_20260805 --workers 2 --llm-workers 16
 ```
 
-- 数据：`data/halumem/HaluMem-Medium.jsonl`（20 条 persona × ~140-206 问 ≈ **3467 问**；另有 long 变体）
+- 数据：`data/halumem/HaluMem-Medium.jsonl` **当前是单 persona（164 问，trial 截断遗留）**；全量 20 persona ≈ 3467 问在 `HaluMem-Medium.jsonl.bak`（每行一个 persona，`total_question_count` 合计 3467）。trial 用当前 medium（1 条），全量需先 `cp .bak` 恢复（或直接跑 long 变体）；另有 long 变体
 - **测什么**：操作级幻觉（记忆提取/更新/QA 三操作 + 干扰内容鲁棒性）——与我们 forget/脱敏工作相关（Memory Boundary/Conflict 题型）
 - 产物前缀 `nmg_hm_*`（hm 不是 halumem！）；`--variant medium|long` 默认 medium
 - **trial（164 问）**：一次跑通零新坑（wrapper 复用成型）；截断 jsonl 前 N 条做 trial（备份 .bak 恢复）；无 audit 脚本——看官方 exp_report.md

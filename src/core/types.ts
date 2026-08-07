@@ -265,6 +265,14 @@ export interface DuplicateCandidate {
   eventTime: string | null;
   /** 1 = exact (normalized) match; 0..1 for near duplicates. */
   similarity: number;
+  /**
+   * Supersession signal strength: transition-name hit ("from X to Y"
+   * from-side words) and polarity flip are deterministic high-confidence
+   * predecessor signals; plain token overlap is weak (same topic ≠
+   * replacement). Lets the caller throttle how many candidates to consult
+   * an LLM judge on.
+   */
+  priority?: "transition" | "polarity" | "token";
 }
 
 export interface DuplicateJudgement {
