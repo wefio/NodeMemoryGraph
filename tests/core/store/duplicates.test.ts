@@ -190,10 +190,104 @@ test("applySupersession: marks stale record superseded and wires pointers", () =
   });
 });
 
+test("searchContext: as-of ranking lifts the record current at the asked date", () => {
+  withStore((store) => {
+    const old2026 = store.remember({
+      statement: "user wants a new job with better work-life balance",
+      nodeName: "career",
+      scope: { user: "a" },
+      eventTime: "2026-02-05T18:12:15Z",
+    });
+    const new2033 = store.remember({
+      statement: "user was promoted to Executive Director at Huaxin Consulting",
+      nodeName: "career",
+      scope: { user: "a" },
+      eventTime: "2033-04-25T16:27:50Z",
+    });
+    // As-of 2033: the 2033 promotion record must rank above the 2026 record
+    // even though the 2026 one shares lexical tokens with "current job".
+    const h = store.searchContext("current job title", {
+      limit: 10,
+      eventTimeTo: "2033-06-16T00:00:00Z",
+    });
+    const idx = (s: string) => h.results.findIndex((r) => r.memory.statement.includes(s));
+    const i2033 = idx("Executive Director");
+    const i2026 = idx("work-life balance");
+    assert.ok(i2033 >= 0, "2033 record must be retrieved");
+    assert.ok(i2026 >= 0, "2026 record must be retrieved");
+    assert.ok(i2033 < i2026, `as-of 2033 ranks the 2033 record (${i2033}) above 2026 (${i2026})`);
+
+    // No window (current query): relevance order is untouched by the temporal boost.
+    const c = store.searchContext("current job title", { limit: 10 });
+    const c2033 = c.results.findIndex((r) => r.memory.statement.includes("Executive Director"));
+    const c2026 = c.results.findIndex((r) => r.memory.statement.includes("work-life balance"));
+    assert.ok(c2033 >= 0 || c2026 >= 0, "no-window query still returns records");
+  });
+});
+
 test("applySupersession: unknown ids throw", () => {
   withStore((store) => {
     assert.throws(() =>
       store.applySupersession({ newMemoryId: "missing", supersededMemoryId: "also-missing" }),
+    );
+  });
+});
+
+test("searchContext: historical query keeps a superseded value when its successor is outside the window", () => {
+  withStore((store) => {
+    const oldV = store.remember({
+      statement: "job title is junior engineer",
+      nodeName: "job",
+      scope: { user: "a" },
+      eventTime: "2020-01-01T00:00:00Z",
+    });
+    const midV = store.remember({
+      statement: "job title is senior engineer",
+      nodeName: "job",
+      scope: { user: "a" },
+      eventTime: "2025-01-01T00:00:00Z",
+    });
+    const newV = store.remember({
+      statement: "job title is principal engineer",
+      nodeName: "job",
+      scope: { user: "a" },
+      eventTime: "2030-01-01T00:00:00Z",
+    });
+    store.applySupersession({ newMemoryId: midV.memory.id, supersededMemoryId: oldV.memory.id });
+    store.applySupersession({ newMemoryId: newV.memory.id, supersededMemoryId: midV.memory.id });
+
+    // as-of 2026: mid (2025) was current; its successor (2030) not yet happened —
+    // the superseded mid must survive instead of being replaced by a future value.
+    const h2026 = store.searchContext("current job title", {
+      limit: 10,
+      eventTimeTo: "2026-12-31T00:00:00Z",
+    });
+    const st26 = h2026.results.map((r) => r.memory.statement);
+    assert.ok(st26.some((s) => s.includes("senior engineer")), "mid value must survive as-of 2026");
+    assert.ok(
+      !st26.some((s) => s.includes("principal engineer")),
+      "successor outside the window must not replace the historical value",
+    );
+
+    // as-of 2031: successor (2030) is inside the window — replace mid with it.
+    const h2031 = store.searchContext("current job title", {
+      limit: 10,
+      eventTimeTo: "2031-12-31T00:00:00Z",
+    });
+    const st31 = h2031.results.map((r) => r.memory.statement);
+    assert.ok(st31.some((s) => s.includes("principal engineer")), "successor inside window replaces");
+    assert.ok(
+      !st31.some((s) => s.includes("senior engineer")),
+      "superseded mid dropped when its successor is inside the window",
+    );
+
+    // current query (no window): replace with the newest value.
+    const cur = store.searchContext("current job title", { limit: 10 });
+    const stc = cur.results.map((r) => r.memory.statement);
+    assert.ok(stc.some((s) => s.includes("principal engineer")), "current query surfaces newest");
+    assert.ok(
+      !stc.some((s) => s.includes("senior engineer")),
+      "current query drops superseded mid",
     );
   });
 });

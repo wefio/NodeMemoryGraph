@@ -74,6 +74,11 @@ const MAX_SEARCH_CANDIDATES = 500;
  *  with near-zero lexical overlap (common for "updated from X to Y" wording)
  *  can still out-rank older high-lexical records. */
 const SUPERSEDE_SUCCESSOR_BOOST = 0.3;
+/** Max combined-score boost for a memory whose event time is at the as-of
+ *  moment of a historical (event-time-window) query. Sizes so the value that
+ *  was current at the asked date can out-rank older high-lexical records
+ *  without overwhelming relevance: 0.25 vs lexical max 0.5 / vector 0.35. */
+const TEMPORAL_ASOF_BOOST = 0.25;
 const MIN_WARM_DISCLOSURE_SIZE = 5;
 
 export function withRetrieval<TBase extends Constructor>(Base: TBase) {
@@ -1077,6 +1082,32 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             left.memory.tier - right.memory.tier ||
             right.memory.importance - left.memory.importance,
         );
+      // Temporal as-of ranking: a historical query (event-time window) asks for
+      // the value that was current AT that date. The most relevant memories are
+      // the ones whose event time is closest to the window's end (the
+      // "as-of" moment) — a 2029 answer for an "as of 2033" question is worse
+      // than a 2033 one even when lexical overlap favors the older record.
+      // Conditional boost: only applied when the query carries an event-time
+      // window (never for plain current-value queries), so it cannot skew
+      // ordinary retrieval.
+      const asOfMs = options.eventTimeTo ? Date.parse(String(options.eventTimeTo)) : null;
+      if (asOfMs !== null && !Number.isNaN(asOfMs) && filtered.length > 1) {
+        for (const result of filtered) {
+          const eventMs = result.memory.eventTime ? Date.parse(result.memory.eventTime) : null;
+          if (eventMs === null || Number.isNaN(eventMs)) continue;
+          const distDays = Math.abs(eventMs - asOfMs) / 86_400_000;
+          // Linear decay over a 2-year horizon: records within ~2 years of the
+          // as-of moment get up to TEMPORAL_ASOF_BOOST; older records get none.
+          const boost = Math.max(0, 1 - distDays / 730) * TEMPORAL_ASOF_BOOST;
+          result.combinedScore += boost;
+        }
+        filtered.sort(
+          (left, right) =>
+            right.combinedScore - left.combinedScore ||
+            left.memory.tier - right.memory.tier ||
+            right.memory.importance - left.memory.importance,
+        );
+      }
       if (filterUsage) {
         // Measure before LIMIT: after = what survived scope+score filtering, not
         // what the limit truncated to.
@@ -1105,14 +1136,32 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           sawSuperseded = true;
           const successor = this.db
             .prepare(
-              `SELECT id FROM memory_records
+              `SELECT id, event_time FROM memory_records
                WHERE supersedes_id = ? AND status = 'active'
                ORDER BY created_at DESC LIMIT 1`,
             )
             .get(result.memory.id) as Row | undefined;
           if (successor) {
-            const key = String(successor.id);
-            successorBoost.set(key, (successorBoost.get(key) ?? 0) + SUPERSEDE_SUCCESSOR_BOOST);
+            // A historical query (event-time window) asks for the value that
+            // was current AT that date. If the successor's own event time is
+            // after the window, the successor had not happened yet at the
+            // asked-for date — keep the superseded record (it WAS the current
+            // value then) instead of replacing it. Only replace when the
+            // successor falls inside the window (or there is no window).
+            const successorInWindow =
+              !options.eventTimeTo ||
+              !successor.event_time ||
+              Date.parse(String(successor.event_time)) <= Date.parse(String(options.eventTimeTo));
+            if (successorInWindow) {
+              const key = String(successor.id);
+              successorBoost.set(key, (successorBoost.get(key) ?? 0) + SUPERSEDE_SUCCESSOR_BOOST);
+            } else {
+              kept.push(result);
+            }
+          } else {
+            // No active successor — keep the superseded record so a historical
+            // query can still surface the value that was current then.
+            kept.push(result);
           }
         }
         if (sawSuperseded) {
