@@ -147,6 +147,15 @@ bash evals/omnimemeval/run-halumem.sh --env-file .env.nmg-bgefix --version halum
 - 对比：trial 0.750（164 问）vs 全量 0.687——小样本虚高规律
 - 新基线：`results/halumem/nmg-halumem_20260805/`（后续改动对比这个）
 
+### 评测基建优化（2026-08-07，supersession 线验证）
+
+- **judge 降频**：bridge 只对强候选（`DuplicateCandidate.priority ∈ {transition,polarity}`）调 LLM judge——单条 ingest 2min（vs 10min）；弱 token 候选大多是 keep。强候选 = 转换结构/极性 flip——恰是动态更新场景
+- **前缀稳定**（LLM 上下文缓存）：answer 拆 `HM_ANSWER_SYSTEM`（固定前缀）+ `HM_ANSWER_USER`（context/question）——DeepSeek 缓存命中 system 前缀（ANSWER cache-hit **39%**，2.9M→1.15M cached）
+- **缓存字段**：DeepSeek 返回 `input_tokens_details.cached_tokens`（Responses 兼容）——**不是** OpenAI chat 的 `prompt_cache_hit_tokens`（读错 = 0）
+- **完成检测**：`judged.json` **分批写**——中途出现 ≠ 完成——应数 judged 问数达到全量（3467）再判完成；`--from-step 4` 可 resume judge
+- **全量结果（supersession_trial11）**：0.687 → **0.734**（+0.047 无回退）——Dynamic Update +0.122（0.239→0.361）、Multi-hop +0.146、Basic +0.129、Generalization +0.095；Memory Conflict -0.074（supersession 过滤旧值 → Conflict 题缺旧值信息，整体净提升可接受）
+- **单条 2 分钟（trial10）**：降频后单条（164 问）约 2min 完成——快速试坑优先单条，全量最后确认
+
 ## 8. 结果与判定速查
 
 - LME 基线（2026-08-04，commit 82ec4c7）：94.15 / 87.95 / 82.67 / answer 82.33
