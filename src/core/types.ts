@@ -294,6 +294,37 @@ export type DuplicateJudge = (input: {
   supersedeCandidates?: DuplicateCandidate[];
 }) => DuplicateJudgement;
 
+/**
+ * Feedback-driven write-path maintenance — "the LLM lives in the feedback
+ * loop, not the ingest path". The caller (an agent LLM, or an eval harness
+ * simulating one) supplies semantic judgements AFTER answering, so NMG needs
+ * no polarity/claims annotation at ingest time (0-annotation ingest).
+ */
+export interface RecordFeedbackInput {
+  sessionId?: string;
+  /** Retrieval memories the caller's answer actually used (access signals). */
+  usedMemoryIds?: string[];
+  /**
+   * Caller-judged supersession: supersededMemoryId is the stale predecessor.
+   * With newMemoryId → full supersession (pointer to the new value); without
+   * it → mark the predecessor disputed (stale, new value pending). NMG
+   * validates targets and applies.
+   */
+  supersede?: {
+    supersededMemoryId: string;
+    newMemoryId?: string;
+    reason?: string;
+  };
+  /**
+   * Retrieval hints (aliases / expected trigger words / CN-EN equivalent
+   * terms) for a memory — stored as retrieveHint markers so a query matching
+   * a hint (or its CJK substring) can surface the memory even when the
+   * statement itself does not contain the query term. LLM provides: only the
+   * writer knows the retrieval intent.
+   */
+  retrieveHints?: Array<{ memoryId: string; hints: string[] }>;
+}
+
 export const RETRIEVAL_MODES = ["legacy", "fts5", "hashing", "qwen3", "hybrid"] as const;
 export type RetrievalMode = (typeof RETRIEVAL_MODES)[number];
 export const VECTOR_GRANULARITIES = ["hierarchy", "records", "union"] as const;

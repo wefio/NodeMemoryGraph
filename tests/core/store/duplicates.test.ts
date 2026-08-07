@@ -280,3 +280,57 @@ test("transition phrase outranks higher-lexical-similarity chit-chat for superse
     }
   });
 });
+
+test("remember: polarity flip (new negative vs old affirmative) recalls stale predecessor first", () => {
+  withStore((store) => {
+    // 旧值：肯定（affirmative），调用方在写入时打标
+    store.remember({
+      statement: "I am currently Employed at Huaxin Consulting as a director.",
+      nodeName: "work",
+      scope: { user: "a" },
+      polarity: "affirmative",
+    });
+    // 高 sim 闲聊（共享 employed 但无关，且无 polarity 标签）——不应因 flip 排前
+    store.remember({
+      statement: "I feel employed in the sense of being busy with lots of projects these days.",
+      nodeName: "chat",
+      scope: { user: "a" },
+    });
+    // 新值：否定（negative），结束状态——调用方打标
+    const newer = store.remember({
+      statement: "I am no longer employed at Huaxin Consulting — I quit my job last week.",
+      nodeName: "work",
+      scope: { user: "a" },
+      polarity: "negative",
+    });
+    const cands = newer.supersedeCandidates ?? [];
+    const pred = cands.find((c) => c.statement.includes("Huaxin"));
+    const chit = cands.find((c) => c.statement.includes("feel employed"));
+    assert.ok(pred, "polarity flip should recall the affirmative predecessor");
+    if (pred && chit) {
+      assert.ok(
+        cands.indexOf(pred) < cands.indexOf(chit),
+        "polarity-flip predecessor should rank before higher-similarity chit-chat",
+      );
+    }
+  });
+});
+
+test("remember: no polarity metadata means no polarity-flip boost (baseline unchanged)", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "I am currently Employed at Huaxin Consulting as a director.",
+      nodeName: "work",
+      scope: { user: "a" },
+    });
+    const newer = store.remember({
+      statement: "I am no longer employed at Huaxin Consulting — I quit my job last week.",
+      nodeName: "work",
+      scope: { user: "a" },
+    });
+    // 无 polarity 标签时，旧值仍靠共享 token 进候选（不因 flip 提升）
+    const hit = newer.supersedeCandidates?.find((c) => c.statement.includes("Huaxin"));
+    assert.ok(hit, "shared-token recall still works without polarity metadata");
+  });
+});
+

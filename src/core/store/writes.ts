@@ -52,6 +52,8 @@ import type {
   RememberResult,
   SessionArchive,
   VectorEmbedder,
+  Polarity,
+  RecordFeedbackInput,
 } from "../types.ts";
 
 export function withWrites<TBase extends Constructor>(Base: TBase) {
@@ -319,7 +321,11 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         )
         .get(input.statement, scopeJson) as Record<string, unknown> | undefined;
       const dupCandidates = this.nearDuplicateCandidates(input.statement, scopeJson);
-      const supersedeCands = this.supersedeCandidates(input.statement, scopeJson);
+      const supersedeCands = this.supersedeCandidates(
+        input.statement,
+        scopeJson,
+        input.polarity ?? null,
+      );
       if (dupExact) {
         const judge = input.judgeDuplicates;
         if (!judge || judge({ statement: input.statement, candidates: dupCandidates }).merge) {
@@ -497,6 +503,79 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       }
     }
 
+    /**
+     * Feedback-driven write-path maintenance — "the LLM lives in the feedback
+     * loop, not the ingest path". The caller (an agent LLM, or an eval harness
+     * simulating one) supplies semantic judgements AFTER answering, so NMG
+     * needs no polarity/claims annotation at ingest time (0-annotation).
+     *
+     * - usedMemoryIds → recordUsage (access_count / last_accessed_at)
+     * - supersede     → applySupersession (mark the stale predecessor
+     *   superseded). Soft signal: an invalid target (missing / already
+     *   superseded / deleted) is ignored, never thrown to the caller.
+     */
+    recordFeedback(input: RecordFeedbackInput): void {
+      if (input.usedMemoryIds?.length) {
+        this.recordUsage(input.usedMemoryIds);
+      }
+      if (input.supersede) {
+        const { supersededMemoryId, newMemoryId } = input.supersede;
+        if (newMemoryId) {
+          try {
+            this.applySupersession({ newMemoryId, supersededMemoryId });
+          } catch {
+            // Soft maintenance signal — ignore an invalid supersede target.
+          }
+        } else {
+          // Old-value-only: the caller knows the predecessor is stale but the
+          // new value has not been ingested yet → mark disputed (retrieval
+          // still surfaces it as stale) instead of superseded; a later ingest
+          // of the same-topic new value supersedes it via supersedeCandidates.
+          this.db
+            .prepare("UPDATE memory_records SET status = 'disputed' WHERE id = ? AND status = 'active'")
+            .run(supersededMemoryId);
+        }
+      }
+      if (input.retrieveHints?.length) {
+        for (const { memoryId, hints } of input.retrieveHints) {
+          if (!hints.length) continue;
+          const row = this.db
+            .prepare("SELECT markers_json FROM memory_records WHERE id = ?")
+            .get(memoryId) as Row | undefined;
+          if (!row) continue; // soft signal — unknown target
+          const raw = row.markers_json;
+          const markers = (() => {
+            if (raw == null) return [] as MemoryMarker[];
+            try {
+              return JSON.parse(String(raw)) as MemoryMarker[];
+            } catch {
+              return [] as MemoryMarker[];
+            }
+          })();
+          let changed = false;
+          for (const hint of hints) {
+            if (!markers.some((m) => m.kind === "retrieveHint" && m.attributes?.value === hint)) {
+              markers.push({ kind: "retrieveHint", attributes: { value: hint } });
+              changed = true;
+            }
+          }
+          if (changed) {
+            this.db
+              .prepare("UPDATE memory_records SET markers_json = ? WHERE id = ?")
+              .run(JSON.stringify(markers), memoryId);
+          }
+        }
+      }
+    }
+
+    /** Read one memory by id — used to confirm a feedback target's state. */
+    getMemory(memoryId: string): MemoryRecord | null {
+      const row = this.db
+        .prepare("SELECT * FROM memory_records WHERE id = ? LIMIT 1")
+        .get(memoryId) as Row | undefined;
+      return row ? mapMemoryRow(row) : null;
+    }
+
     private nearDuplicateCandidates(statement: string, scopeJson: string): DuplicateCandidate[] {
       const inputNorm = normalizeStatement(statement);
       const recent = this.db
@@ -523,7 +602,11 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
      * may be the current value and one of these may be its stale predecessor.
      * Text-only heuristic; semantic judgement is delegated to an external judge.
      */
-    private supersedeCandidates(statement: string, scopeJson: string): DuplicateCandidate[] {
+    private supersedeCandidates(
+      statement: string,
+      scopeJson: string,
+      polarity: Polarity | null = null,
+    ): DuplicateCandidate[] {
       // Token matching must survive case/punctuation drift across years of
       // dialogue: "Employed" vs "employed", "healthcare." vs "healthcare".
       // Normalize tokens to lowercased alphanumerics before comparing.
@@ -546,13 +629,26 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       const params: string[] = likeTerms;
       const recent = this.db
         .prepare(
-          `SELECT m.id, m.node_id, m.statement, m.event_time FROM memory_records m
-           WHERE m.scope_json = ? AND m.status = 'active' AND (${likeClause})
+          `SELECT m.id, m.node_id, m.statement, m.event_time, m.polarity FROM memory_records m
+           WHERE m.scope_json = ? AND m.status IN ('active', 'disputed') AND (${likeClause})
            ORDER BY m.created_at DESC`,
         )
         .all(scopeJson, ...params) as Record<string, unknown>[];
       const inputNorm = normalizeStatement(statement);
-      const out: Array<{ c: DuplicateCandidate; shared: number; transitionHit: boolean }> = [];
+      // Polarity is caller-supplied metadata (the caller understands the
+      // semantics: "no longer employed" is a negative update). A polarity flip
+      // against a same-topic memory — new negative vs old affirmative, or the
+      // reverse — is a strong "this stale value is over" signal that pure
+      // lexical similarity cannot see (embeddings of a claim and its negation
+      // sit too close together).
+      const inputPol: Polarity | null =
+        polarity === "negative" || polarity === "affirmative" ? polarity : null;
+      const out: Array<{
+        c: DuplicateCandidate;
+        shared: number;
+        transitionHit: boolean;
+        polarityHit: boolean;
+      }> = [];
       for (const row of recent) {
         const rowText = String(row.statement);
         if (rowText === statement) continue;
@@ -561,13 +657,23 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         if (sim >= NEAR_DUPLICATE_THRESHOLD) continue;
         const shared = searchTerms(rowText).map(normalizeTok).filter((t) => inputTokens.has(t)).length;
         const transitionHit = transitionTokens.some((t) => rowText.toLowerCase().includes(t));
-        if (shared >= SUPERSEDE_MIN_SHARED_TOKENS || transitionHit) {
-          out.push({ c: dupCandidate(row, sim), shared, transitionHit });
+        const rowPol = String(row.polarity ?? "");
+        const polarityHit =
+          inputPol !== null &&
+          (rowPol === "affirmative" || rowPol === "negative") &&
+          rowPol !== inputPol;
+        if (shared >= SUPERSEDE_MIN_SHARED_TOKENS || transitionHit || polarityHit) {
+          out.push({ c: dupCandidate(row, sim), shared, transitionHit, polarityHit });
         }
       }
-      // Transition-name hits go first (the "from" side names the predecessor),
-      // then same-topic lexical overlap.
-      out.sort((a, b) => Number(b.transitionHit) - Number(a.transitionHit) || b.c.similarity - a.c.similarity);
+      // Transition-name hits and polarity flips go first (they name the
+      // predecessor directly), then same-topic lexical overlap.
+      out.sort(
+        (a, b) =>
+          Number(b.transitionHit || b.polarityHit) -
+            Number(a.transitionHit || a.polarityHit) ||
+          b.c.similarity - a.c.similarity,
+      );
       return out.slice(0, SUPERSEDE_CANDIDATE_MAX).map((x) => x.c);
     }
 
