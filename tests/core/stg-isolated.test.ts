@@ -259,6 +259,16 @@ test("Phase3: searchStgFirst returns STG hits directly and falls back to LTG", (
     const matching = merged.results.filter((result) => result.memory.statement === hot.memory.statement);
     assert.equal(matching.length, 1, "cached copy and LTG authority are deduplicated");
     assert.equal(matching[0]?.memory.id, hot.memory.id, "LTG authority wins the merge");
+    assert.deepEqual(
+      new Set(merged.activeGraph?.memoryIds),
+      new Set(merged.results.map((result) => result.memory.id)),
+      "the merged AG owns every visible STG/LTG result",
+    );
+    assert.deepEqual(
+      new Set(merged.activeGraph?.selections.map((selection) => selection.memoryId)),
+      new Set(merged.results.map((result) => result.memory.id)),
+      "the merged AG keeps selection provenance for every visible result",
+    );
   } finally {
     ltg.close();
     stg.close();

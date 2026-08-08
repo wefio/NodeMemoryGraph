@@ -58,6 +58,10 @@ export class NmgService {
   readonly #environment: NodeJS.ProcessEnv;
   #store: NmgStore | undefined;
   readonly #stgStores = new Map<string, NmgStore>();
+  readonly #activeGraphParts = new Map<
+    string,
+    Array<{ store: NmgStore; traceId: string; memoryIds: Set<string> }>
+  >();
   #embeddingClient: EmbeddingClient | undefined | null;
   #embeddingError: string | null = null;
   #shutdownRequested = false;
@@ -143,6 +147,7 @@ export class NmgService {
     this.#store = undefined;
     for (const store of this.#stgStores.values()) store.close();
     this.#stgStores.clear();
+    this.#activeGraphParts.clear();
   }
 
   #hello(): NmgHelloResult {
@@ -230,7 +235,33 @@ export class NmgService {
       const local = await runOne(store, raw);
       if (local.results.length > 0 && local.activeGraph?.qpp?.trigger === false) return local;
       const shared = await runOne(this.#getStore(), raw);
-      return local.results.length === 0 ? shared : mergeStgLtgContexts(local, shared);
+      if (local.results.length === 0) return shared;
+      const merged = mergeStgLtgContexts(local, shared);
+      if (merged.activeGraph) {
+        this.#activeGraphParts.set(
+          merged.activeGraph.id,
+          [
+            local.activeGraph
+              ? {
+                  store,
+                  traceId: local.activeGraph.id,
+                  memoryIds: new Set(local.activeGraph.memoryIds),
+                }
+              : undefined,
+            shared.activeGraph
+              ? {
+                  store: this.#getStore(),
+                  traceId: shared.activeGraph.id,
+                  memoryIds: new Set(shared.activeGraph.memoryIds),
+                }
+              : undefined,
+          ].filter(
+            (part): part is { store: NmgStore; traceId: string; memoryIds: Set<string> } =>
+              part !== undefined,
+          ),
+        );
+      }
+      return merged;
     };
 
     if (raws.length === 1) {
@@ -267,6 +298,20 @@ export class NmgService {
     const found = new Set(context.results.map((result) => result.memory.id));
     if (params.activeGraphId) {
       const activeGraphId = params.activeGraphId;
+      const parts = this.#activeGraphParts.get(activeGraphId);
+      if (parts) {
+        for (const part of parts) {
+          part.store.recordActiveGraphUse(
+            part.traceId,
+            { usedMemoryIds: [...found].filter((id) => part.memoryIds.has(id)) },
+            params.sessionId,
+          );
+        }
+        return {
+          ...context,
+          missingMemoryIds: params.memoryIds.filter((id) => !found.has(id)),
+        };
+      }
       const traceStore = [localStore, sharedStore]
         .filter((store): store is NmgStore => store !== undefined)
         .find((store) => store.retrievalTrace(activeGraphId, params.sessionId) !== null);

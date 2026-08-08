@@ -1483,14 +1483,9 @@ test("edge stability deduplicates tasks and drives auditable reversible consolid
     assert.equal(stable.usefulTasks, 3);
     assert.equal(stable.score > 0.99, true);
 
-    const consolidated = store.reconcileConsolidation({
-      minIndependentTasks: 3,
-      promoteThreshold: 0.75,
-      demoteThreshold: 0.4,
-      cooldownMs: 0,
-    });
-    assert.equal(consolidated.consolidatedRelations.length, 1);
-    const relation = consolidated.consolidatedRelations[0]!;
+    // The third independent, useful task crosses the default stability gate.
+    // Real AG-use attribution now invokes conservative reconciliation itself.
+    const relation = store.getRelations([alpha.node.id], 1)[0]!;
     assert.equal(relation.consolidationSource, "stability");
     assert.equal(relation.status, "consolidated");
     assert.equal(store.getRelations([alpha.node.id], 1)[0]?.id, relation.id);

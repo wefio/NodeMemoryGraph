@@ -553,6 +553,7 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         promoteThreshold?: number;
         demoteThreshold?: number;
         cooldownMs?: number;
+        pairs?: readonly (readonly [string, string])[];
       } = {},
     ): ConsolidationResult {
       const minIndependentTasks = Math.max(2, options.minIndependentTasks ?? 3);
@@ -562,12 +563,21 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
       const consolidatedRelations: NodeRelation[] = [];
       const demotedRelations: NodeRelation[] = [];
       const eventIds: string[] = [];
-      const pairs = this.db
-        .prepare(
-          `SELECT DISTINCT left_node_id, right_node_id FROM edge_task_observations
-         ORDER BY left_node_id, right_node_id`,
-        )
-        .all() as Row[];
+      const pairs = options.pairs
+        ? [
+            ...new Map(
+              options.pairs.map(([left, right]) => {
+                const ordered = left <= right ? [left, right] : [right, left];
+                return [ordered.join("\0"), { left_node_id: ordered[0], right_node_id: ordered[1] }];
+              }),
+            ).values(),
+          ]
+        : (this.db
+            .prepare(
+              `SELECT DISTINCT left_node_id, right_node_id FROM edge_task_observations
+             ORDER BY left_node_id, right_node_id`,
+            )
+            .all() as Row[]);
       for (const row of pairs) {
         const stability = this.edgeStability(String(row.left_node_id), String(row.right_node_id));
         const relationRow = this.db

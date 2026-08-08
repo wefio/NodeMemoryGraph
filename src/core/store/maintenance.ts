@@ -119,6 +119,9 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
     // cross-cluster (writes / graph)
     declare recordUsage: (memoryIds: string[]) => void;
     declare trainRouter: (query: string, usefulNodeIds: string[], learningRate?: number) => void;
+    declare reconcileConsolidation: (options?: {
+      pairs?: readonly (readonly [string, string])[];
+    }) => unknown;
 
     /**
      * Soft-delete a memory and all its dependent artifacts.
@@ -969,6 +972,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         this.nodeIdsForMemories(observedRejectedMemoryIds),
       );
       const resultNodeIds = parseStringArray(row.result_node_ids_json).sort();
+      const observedPairs: Array<readonly [string, string]> = [];
       const relationIds = parseStringArray(row.relation_ids_json);
       const now = new Date().toISOString();
       this.db.exec("BEGIN IMMEDIATE");
@@ -1002,6 +1006,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         for (let left = 0; left < resultNodeIds.length; left += 1) {
           for (let right = left + 1; right < resultNodeIds.length; right += 1) {
             const pair = [resultNodeIds[left]!, resultNodeIds[right]!] as const;
+            observedPairs.push(pair);
             this.db
               .prepare(
                 `UPDATE edge_task_observations
@@ -1024,6 +1029,11 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       }
       this.recordUsage(observedUsedMemoryIds);
       if (usedNodeIds.size > 0) this.trainRouter(String(row.query), [...usedNodeIds]);
+      // Outcome attribution is the point where co-retrieval becomes evidence.
+      // Reconciliation remains conservative (independent-task threshold and
+      // hysteresis live in the graph layer), but it must be invoked by a real
+      // production path rather than only by tests or manual maintenance.
+      if (observedPairs.length > 0) this.reconcileConsolidation({ pairs: observedPairs });
     }
 
     recordConsolidationEvent(

@@ -155,16 +155,103 @@ export function mergeStgLtgContexts(
           seenLtg.has(String(marker.attributes?.sourceMemoryId ?? "")),
       ),
   );
+  const results = [...dedupedLocal, ...shared.results];
+  const activeGraph = mergeActiveGraphs(local.activeGraph, shared.activeGraph, results);
   return {
-    results: [...dedupedLocal, ...shared.results],
+    results,
     relations: [
       ...new Map(
         [...(local.relations ?? []), ...shared.relations].map((relation) => [relation.id, relation]),
       ).values(),
     ],
-    activeGraph: shared.activeGraph,
+    activeGraph,
     retrieval: shared.retrieval,
     timings: shared.timings,
     filterUsage: shared.filterUsage,
+  };
+}
+
+function mergeActiveGraphs(
+  local: MemoryContext["activeGraph"],
+  shared: MemoryContext["activeGraph"],
+  results: MemoryContext["results"],
+): MemoryContext["activeGraph"] {
+  if (!local) return shared;
+  if (!shared) return local;
+
+  const memoryIds = results.map((result) => result.memory.id);
+  const memorySet = new Set(memoryIds);
+  const selections = [...local.selections, ...shared.selections]
+    .filter((selection) => memorySet.has(selection.memoryId))
+    .filter(
+      (selection, index, all) =>
+        all.findIndex((candidate) => candidate.memoryId === selection.memoryId) === index,
+    )
+    .sort((left, right) => memoryIds.indexOf(left.memoryId) - memoryIds.indexOf(right.memoryId))
+    .map((selection, rank) => ({ ...selection, rank: rank + 1 }));
+  const edges = [
+    ...new Map([...local.edges, ...shared.edges].map((edge) => [edge.id, edge])).values(),
+  ];
+  const expansions = [
+    ...new Map(
+      [...local.expansions, ...shared.expansions].map((expansion) => [
+        `${expansion.relationId}:${expansion.sourceNodeId}:${expansion.targetNodeId}:${expansion.hop}`,
+        expansion,
+      ]),
+    ).values(),
+  ];
+  const nodeIds = [...new Set(selections.map((selection) => selection.nodeId))];
+  const exhausted = [...new Set([...local.usage.exhausted, ...shared.usage.exhausted])];
+  const budgetLedger = [
+    ...new Map(
+      [...local.budgetLedger, ...shared.budgetLedger].map((entry) => [entry.dimension, entry]),
+    ).keys(),
+  ].map((dimension) => {
+    const entries = [...local.budgetLedger, ...shared.budgetLedger].filter(
+      (entry) => entry.dimension === dimension,
+    );
+    const takeMaximum = dimension === "graphHops" || dimension === "localTier";
+    return {
+      dimension,
+      limit: takeMaximum
+        ? Math.max(...entries.map((entry) => entry.limit))
+        : entries.reduce((sum, entry) => sum + entry.limit, 0),
+      used: takeMaximum
+        ? Math.max(...entries.map((entry) => entry.used))
+        : entries.reduce((sum, entry) => sum + entry.used, 0),
+      exhausted: entries.some((entry) => entry.exhausted),
+    };
+  });
+
+  return {
+    ...shared,
+    nodeIds,
+    memoryIds,
+    edges,
+    selections,
+    expansions,
+    budgetLedger,
+    budget: {
+      maxNodes: local.budget.maxNodes + shared.budget.maxNodes,
+      maxEdges: local.budget.maxEdges + shared.budget.maxEdges,
+      maxEvidence: local.budget.maxEvidence + shared.budget.maxEvidence,
+      maxTokens: local.budget.maxTokens + shared.budget.maxTokens,
+      maxGraphHops: Math.max(local.budget.maxGraphHops, shared.budget.maxGraphHops),
+      maxLocalTier: Math.max(local.budget.maxLocalTier, shared.budget.maxLocalTier) as 0 | 1 | 2 | 3,
+      maxTierBudget: local.budget.maxTierBudget + shared.budget.maxTierBudget,
+      maxLatencyMs: local.budget.maxLatencyMs + shared.budget.maxLatencyMs,
+    },
+    usage: {
+      nodes: nodeIds.length,
+      edges: edges.length,
+      evidence: memoryIds.length,
+      estimatedTokens: local.usage.estimatedTokens + shared.usage.estimatedTokens,
+      graphHops: Math.max(local.usage.graphHops, shared.usage.graphHops),
+      deepestTier: Math.max(local.usage.deepestTier, shared.usage.deepestTier) as 0 | 1 | 2 | 3,
+      tiersOpened: local.usage.tiersOpened + shared.usage.tiersOpened,
+      deepEvidence: local.usage.deepEvidence + shared.usage.deepEvidence,
+      latencyMs: local.usage.latencyMs + shared.usage.latencyMs,
+      exhausted,
+    },
   };
 }

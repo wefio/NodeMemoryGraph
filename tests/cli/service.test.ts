@@ -102,6 +102,61 @@ test("resident service isolates project STG while retaining LTG fallback", async
   }
 });
 
+test("resident service keeps mixed STG/LTG evidence in one AG and attributes both parts", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-mixed-ag-"));
+  const projectDir = join(directory, "project");
+  const databasePath = join(directory, "ltg.sqlite");
+  const service = new NmgService({ databasePath, environment: {} });
+  try {
+    const local = await service.invoke("remember", {
+      statement: "Atlas session branch uses the cobalt deployment lane.",
+      nodeName: "Atlas session lane",
+      residence: "stg",
+      projectDir,
+      sessionId: "session-alpha",
+    });
+    const durable = await service.invoke("remember", {
+      statement: "Atlas deployments require concise release notes.",
+      nodeName: "Atlas release constraint",
+      memoryType: "constraint",
+      sessionId: "session-alpha",
+    });
+
+    const searched = await service.invoke("search", {
+      query: "Which cobalt deployment lane and concise release-note constraint apply to Atlas?",
+      projectDir,
+      sessionId: "session-alpha",
+      secondPass: true,
+    });
+    assert.ok(searched.results.some((result) => result.memory.id === local.memory.id));
+    assert.ok(searched.results.some((result) => result.memory.id === durable.memory.id));
+    assert.deepEqual(
+      new Set(searched.activeGraph?.memoryIds),
+      new Set(searched.results.map((result) => result.memory.id)),
+    );
+
+    await service.invoke("get", {
+      memoryIds: [local.memory.id, durable.memory.id],
+      activeGraphId: searched.activeGraph!.id,
+      projectDir,
+      sessionId: "session-alpha",
+    });
+
+    const ltg = new NmgStore(databasePath);
+    const stg = new NmgStore(stgStorePath(projectDir, "session-alpha"));
+    try {
+      assert.ok(ltg.getContext([durable.memory.id]).results[0]!.memory.accessCount > 0);
+      assert.ok(stg.getContext([local.memory.id]).results[0]!.memory.accessCount > 0);
+    } finally {
+      ltg.close();
+      stg.close();
+    }
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("resident service isolates STG by session inside one project", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-session-stg-"));
   const projectDir = join(directory, "project");
