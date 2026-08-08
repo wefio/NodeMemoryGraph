@@ -19,7 +19,9 @@
   只有目录不足时才建议 Agent 主动搜索。
 - **不接受新增一步式工具：** Lite 保持 `search/get/remember` 三工具。header 足够时
   不必 `get`；需要原文时才展开。`activeGraphId` 是使用归因信息，不是读取前置条件。
-- **纠正 stateKey 解释：** `stateKey` 表示一个可替换属性，不是主题或节点分组标签。
+- **stateKey 是接口指引缺陷：** `stateKey` 实际表示一个可替换属性，但旧工具说明
+  只说“stable key”，没有向使用者说明它不是主题或节点分组标签。使用者把
+  `pi-lsp-env` 当作相关记录的归组键是合理推断；修复责任在 schema、手册和示例。
   setup、工具清单和 patch 约束不能仅因都属于 pi-lsp 就互相覆盖。
 - **不接受因 summary 重复而降低 LTG：** summary 是易失的会话表示，LTG 是跨会话
   持久状态。AG/适配器应抑制当前上下文已覆盖的重复注入，而不是改变长期 residence。
@@ -84,8 +86,9 @@ toggle / navigation / 11-tools / patch-constraint / workspace-symbol-mechanism�
 
 > **设计意见：不接受按节点自动合并。** 核心已经对相同 `stateKey + scope` 的
 > `state` 自动 supersede。若六条仍并存，应先核对 memory type、scope 和 key；而且
-> 本节列出的 setup/tools/constraint 很可能是不同属性，错误共用一个 stateKey
-> 才是问题。搜索也不能默认每节点只留一条，否则会丢失互补证据。
+> 本节列出的 setup/tools/constraint 很可能是不同属性；旧接口没有把这一点表达
+> 清楚，导致它们合理但危险地共用了一个 key。搜索也不能默认每节点只留一条，
+> 否则会丢失互补证据。
 
 现象/证据：一次 `nmg_search "pi-lsp"` 返回 6 条高度重叠的记录
 （setup / vendored / toggle / navigation / 11-tools / patch-constraint），

@@ -100,7 +100,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
     usageDetail: `Remember options:
   --node NAME                Stable semantic node name (required)
   --type TYPE                fact, state, event, preference, constraint, strategy
-  --state-key KEY            Stable key required for state memory
+  --state-key KEY            One replaceable property in scope, not a topic/group
   --evidence TEXT            Supporting source text
   --actor ACTOR              user, assistant, system, or tool
   --truth STATUS             asserted, inferred, unverified, or verified

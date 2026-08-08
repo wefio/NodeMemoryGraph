@@ -18,7 +18,31 @@ how the Agent should use the memory.
 ## Changeable state
 
 Use `--type state` and a stable `--state-key`. The key identifies the property,
-not its current value or date.
+not its current value, date, topic, node, project, or group. Two writes with the
+same canonical scope and state key mean “these are successive values of the
+same single-valued property”; the newer write automatically supersedes the old
+one.
+
+Keep these three identifiers separate:
+
+| Field | Meaning | Example |
+| --- | --- | --- |
+| `--node` | Semantic cluster that may contain several related memories | `pi-lsp environment` |
+| `--scope` | Where the memory applies | `project=pi-lsp` |
+| `--state-key` | Exactly one replaceable property inside that scope | `pi-lsp.installation.path` |
+
+Do **not** use a broad key such as `pi-lsp-env` for installation path, tool
+inventory, patch policy, and symbol-provider mechanism. Those facts can share a
+node and scope, but only separately changeable properties should be state keys:
+
+```text
+pi-lsp.installation.path
+pi-lsp.patch.survives_update
+pi-lsp.workspace_symbol.provider
+```
+
+Use `fact`, `constraint`, or `event` without a state key when the record is not
+one replaceable value.
 
 ```text
 nmg remember "Atlas currently uses SQLite." \

@@ -30,8 +30,9 @@ optimization:
   cues that let the agent decide whether to call `nmg_search`.
 - Ordinary prompts load no dynamic long-term memory. Automatic retrieval
   overfetches and type-reranks candidates before applying the final record budget.
-- Stable `stateKey` values identify replaceable state across sessions and
-  automatically supersede the prior active value in the same scope.
+- Stable `stateKey` values identify one replaceable property—not a topic or
+  grouping tag—and automatically supersede the prior active value in the same
+  scope.
 - Typed node relations and multi-evidence derived memories support graph-aware
   retrieval instead of treating every memory as an isolated chunk.
 - Duplicate nodes can be merged and over-broad nodes split without deleting
@@ -293,8 +294,10 @@ The automatic-write rule is intentionally narrow:
   information.
 - Never save casual chatter, duplicates, unverified model claims, credentials,
   secrets, or sensitive personal data as semantic memory.
-- Give replaceable states a stable `stateKey`; a new value in the same canonical
-  scope automatically supersedes the old state without deleting its evidence.
+- Give each replaceable property a stable `stateKey`; a new value in the same
+  canonical scope automatically supersedes the old state without deleting its
+  evidence. Use `nodeName` for a semantic group and `scope` for applicability;
+  do not reuse one broad state key for several related facts.
 - Preserve separately countable actions as separate memories and retain an exact
   source excerpt: the statement is a retrieval summary, not the evidence itself.
 - Treat assistant-authored conversational evidence as unverified unless a user

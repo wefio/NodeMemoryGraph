@@ -393,7 +393,10 @@ function parseRememberParams(value: unknown): NmgRememberParams {
     projectDir: optionalString(params, "projectDir"),
   };
   if (parsed.memoryType === "state" && !parsed.stateKey) {
-    throw new NmgProtocolError("INVALID_PARAMS", "state memories require stateKey");
+    throw new NmgProtocolError(
+      "INVALID_PARAMS",
+      "state memories require stateKey naming one replaceable property within scope (not a topic/group)",
+    );
   }
   return parsed;
 }
