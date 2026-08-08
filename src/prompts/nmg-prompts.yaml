@@ -6,6 +6,8 @@
 # 各部分说明：
 #   *_description  —— 工具描述。LLM 决定是否调用工具时看到。保持中立：
 #                     只说明工具做什么、返回什么、存什么，不指示何时调用。
+#   *_parameter_description —— 工具参数说明。解释参数语义与协议后果；
+#                     参数类型、必填性、枚举和数值范围仍由 TypeBox 定义。
 #   *_disclosure   —— 渐进披露。工具返回结果时附带的使用说明（只解释
 #                     数据格式与下一步操作，不指示回答策略）。
 #   memory_policy  —— 注入 system prompt 的 NMG 使用策略（Pi 扩展用）。
@@ -41,6 +43,32 @@ remember_description: >-
   The record persists across sessions. Only save attributable information -
   not secrets, transient content, or unsupported guesses. A stateKey names one
   replaceable property within a stable scope; it is not a topic or grouping tag.
+
+node_name_parameter_description: >-
+  Stable semantic cluster name. Related memories may share a node even when
+  they describe different properties.
+
+state_key_parameter_description: >-
+  Stable key for exactly one replaceable property within scope. Good:
+  pi-lsp.installation.path. Bad: pi-lsp-env used for installation path, tool
+  inventory, and patch policy. A newer state with the same key and canonical
+  scope automatically supersedes the previous active state, so a broad key can
+  incorrectly retire an unrelated state.
+
+external_source_parameter_description: >-
+  External provenance reference beginning with web: or file:.
+
+active_graph_id_parameter_description: >-
+  Optional activeGraphId returned by nmg_search. Pass it when available to
+  attribute actual memory use; it is not required to read a known memory ID.
+
+search_query_parameter_description: >-
+  Natural-language retrieval clause; may include key:value filters, -term
+  exclusions, and quoted phrases.
+
+search_queries_parameter_description: >-
+  Additional retrieval clauses unioned with the primary query; the primary
+  query retains rank priority.
 
 # ---- 完成提醒（弱提示——commit/任务完成后注入，不强制） ------------------
 completion_nudge: >-

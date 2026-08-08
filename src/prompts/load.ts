@@ -11,6 +11,12 @@ export interface NmgPrompts {
   search_description: string;
   get_description: string;
   remember_description: string;
+  node_name_parameter_description: string;
+  state_key_parameter_description: string;
+  external_source_parameter_description: string;
+  active_graph_id_parameter_description: string;
+  search_query_parameter_description: string;
+  search_queries_parameter_description: string;
   completion_nudge: string;
   search_disclosure: string;
   mcp_search_disclosure: string;

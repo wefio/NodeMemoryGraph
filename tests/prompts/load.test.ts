@@ -7,6 +7,12 @@ const SECTIONS = [
   "search_description",
   "get_description",
   "remember_description",
+  "node_name_parameter_description",
+  "state_key_parameter_description",
+  "external_source_parameter_description",
+  "active_graph_id_parameter_description",
+  "search_query_parameter_description",
+  "search_queries_parameter_description",
   "search_disclosure",
   "mcp_search_disclosure",
   "get_disclosure",
@@ -28,6 +34,14 @@ test("loadPrompts reads every prompt section from the yaml source", () => {
       `${key} must be a non-empty string`,
     );
   }
+});
+
+test("stateKey guidance includes positive, negative, and supersession consequence", () => {
+  const text = loadPrompts().state_key_parameter_description;
+  assert.match(text, /Good:/u);
+  assert.match(text, /Bad:/u);
+  assert.match(text, /automatically supersedes/u);
+  assert.match(text, /incorrectly retire/u);
 });
 
 test("tool descriptions are neutral: they state capability, not when to call", () => {

@@ -186,7 +186,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     description: nmgPrompts.remember_description,
     parameters: Type.Object({
       statement: Type.String(),
-      nodeName: Type.String({ description: "Stable semantic node name" }),
+      nodeName: Type.String({ description: nmgPrompts.node_name_parameter_description }),
       memoryType: Type.Optional(
         Type.Union([
           Type.Literal("constraint"),
@@ -199,8 +199,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ),
       stateKey: Type.Optional(
         Type.String({
-          description:
-            "Stable key for one replaceable property within scope (for example project.storage.engine), not a topic/group tag",
+          description: nmgPrompts.state_key_parameter_description,
         }),
       ),
       eventTime: Type.Optional(Type.String()),
@@ -231,7 +230,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       expiresAt: Type.Optional(Type.String()),
       externalSource: Type.Optional(
         Type.Object({
-          source: Type.String({ description: "web:URL or file:PATH" }),
+          source: Type.String({
+            description: nmgPrompts.external_source_parameter_description,
+          }),
           retrievedAt: Type.Optional(Type.String()),
           hash: Type.Optional(Type.String()),
         }),
@@ -271,8 +272,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       memoryIds: Type.Array(Type.String(), { minItems: 1, maxItems: 50 }),
       activeGraphId: Type.Optional(
         Type.String({
-          description:
-            "Optional activeGraphId returned by nmg_search; enables use attribution but is not required for exact lookup",
+          description: nmgPrompts.active_graph_id_parameter_description,
         }),
       ),
       graphHops: Type.Optional(Type.Number({ minimum: 0, maximum: 3 })),
@@ -294,13 +294,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     description: nmgPrompts.search_description,
     parameters: Type.Object({
       query: Type.String({
-        description:
-          "Natural-language clause; may embed key:value filters, -exclusions and quoted phrases",
+        description: nmgPrompts.search_query_parameter_description,
       }),
       queries: Type.Optional(
         Type.Array(Type.String(), {
-          description:
-            "Extra retrieval clauses; results are unioned with the primary query (primary keeps rank)",
+          description: nmgPrompts.search_queries_parameter_description,
         }),
       ),
       nodeName: Type.Optional(Type.String()),

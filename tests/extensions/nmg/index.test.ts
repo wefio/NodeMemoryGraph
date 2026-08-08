@@ -21,7 +21,11 @@ function extensionHarness() {
   const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
   const tools = new Map<
     string,
-    { description?: string; execute: (...args: unknown[]) => Promise<unknown> }
+    {
+      description?: string;
+      parameters?: { properties?: Record<string, { description?: string }> };
+      execute: (...args: unknown[]) => Promise<unknown>;
+    }
   >();
   nmgExtension({
     on(event: string, handler: (...args: unknown[]) => Promise<unknown>) {
@@ -30,6 +34,7 @@ function extensionHarness() {
     registerTool(tool: {
       name: string;
       description?: string;
+      parameters?: { properties?: Record<string, { description?: string }> };
       execute: (...args: unknown[]) => Promise<unknown>;
     }) {
       tools.set(tool.name, tool);
@@ -48,6 +53,23 @@ test("tool descriptions come from the prompt source of truth", () => {
   assert.equal(tools.get("nmg_search")?.description, prompts.search_description);
   assert.equal(tools.get("nmg_get")?.description, prompts.get_description);
   assert.equal(tools.get("nmg_remember")?.description, prompts.remember_description);
+});
+
+test("tool parameter descriptions come from the prompt source of truth", () => {
+  const { tools } = extensionHarness();
+  const prompts = loadPrompts();
+  assert.equal(
+    tools.get("nmg_remember")?.parameters?.properties?.stateKey?.description,
+    prompts.state_key_parameter_description,
+  );
+  assert.equal(
+    tools.get("nmg_get")?.parameters?.properties?.activeGraphId?.description,
+    prompts.active_graph_id_parameter_description,
+  );
+  assert.equal(
+    tools.get("nmg_search")?.parameters?.properties?.query?.description,
+    prompts.search_query_parameter_description,
+  );
 });
 
 test("NMG prompt keeps its policy prefix stable and dynamic recall last", () => {
