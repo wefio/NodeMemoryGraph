@@ -39,7 +39,14 @@ bash evals/omnimemeval/check-env.sh   # GPU / CUDA torch / bge-server device / e
     wheel 缓存持久（`uv cache dir`，archive-v0/ 里有 torch 2.13.0）但不自动复用（index 不同 → pypi CPU torch）。
   - **正解**：固定环境（omni-venv 或 `uv venv --python 3.12` + `uv pip install torch --index https://download.pytorch.org/whl/cu132`）——
     一次装好，之后直接 `.../Scripts/python.exe` 跑，不再每次 uv run。
-- **env 文件**：`.env.nmg-bgefix`（ANSWER_API_KEY/EVAL_API_KEY）
+- **env 文件**：`.env.nmg-bgefix`（OMNI_DIR 下，wrapper log 第 2 行 "Using env file:" 可确认实际加载路径）
+  - LLM key：`ANSWER_API_KEY`/`EVAL_API_KEY`（bridge 的 LLM judge/answer 用）
+  - **嵌入配置（语义检索必需，README §嵌入）**：
+    - `NMG_EMBED_BASE_URL=http://127.0.0.1:8000/v1`——**必须带 `/v1`**（bge-server 监听 `/v1/embeddings`；缺 `/v1` → client 建不出 → 评测退化成纯词法，Dynamic Update 记忆永不召回）
+    - `NMG_EMBED_MODEL=BAAI/bge-small-en-v1.5`、`NMG_EMBED_PROFILE=bge-en`、`NMG_EMBED_API_KEY=dummy`
+    - `NMG_QPP_SECOND_PASS=0`（评测关 secondPass）
+  - **坑**：`OMNIMEMEVAL_ENV_FILE` 是坏路径（反斜杠丢失 `C:Documents...`）——无害但别修到依赖它；改嵌入配置后**必须验证语义生效**（见 §7 基建节）
+  - 嵌入生效验证：重放 searchContext（打开 store + `createEmbeddingClientFromEnv`）——promotion 记忆应排第 0；或直接看评测 env 里 `load_dotenv` 后 `NMG_EMBED_BASE_URL` 是否含 `/v1`
 - **不要直接跑官方脚本**——只通过 wrapper（固化 PYTHONUTF8/PYTHONIOENCODING/NMG_ROOT/kill_strays）：
   - LME：`bash evals/omnimemeval/run-lme.sh`
   - pmv2：`bash evals/omnimemeval/run-pmv2-quick.sh`
@@ -155,6 +162,20 @@ bash evals/omnimemeval/run-halumem.sh --env-file .env.nmg-bgefix --version halum
 - **完成检测**：`judged.json` **分批写**——中途出现 ≠ 完成——应数 judged 问数达到全量（3467）再判完成；`--from-step 4` 可 resume judge
 - **全量结果（supersession_trial11）**：0.687 → **0.734**（+0.047 无回退）——Dynamic Update +0.122（0.239→0.361）、Multi-hop +0.146、Basic +0.129、Generalization +0.095；Memory Conflict -0.074（supersession 过滤旧值 → Conflict 题缺旧值信息，整体净提升可接受）
 - **单条 2 分钟（trial10）**：降频后单条（164 问）约 2min 完成——快速试坑优先单条，全量最后确认
+- **嵌入修复（2026-08-07，trial16）**：OMNI_DIR/.env.nmg-bgefix 的 `NMG_EMBED_BASE_URL` **缺 `/v1`**（README 663 行是对的）→ 评测一直跑**纯词法**（promotion 词法 0 永不进候选——halumem 历史分数 0.687/0.734 全是纯词法）。加 `/v1` 后 `createEmbeddingClientFromEnv` 建出 client（重放 promotion 排第 0）。**注意**：bridge 检索还带 `sourceActor=prefersAssistantEvidence(q)?undefined:"user"`——user 过滤下 promotion 可能仍被挤出 top-k（2026-08-07 待定位）
+
+### opencode 接入 + 编组批量（2026-08-08，supersession_trial19 验证）
+
+- **V4 思考模式坑（必须显式关）**：DeepSeek V4（deepseek-chat / opencode deepseek-v4-flash）**默认思考**——不显式关，每个请求先出 `reasoning_content`，content 可能为空（解析失败）+ 慢。关法：
+  - python openai 库：`extra_body={"thinking": {"type": "disabled"}}`——**直接传 `thinking=` 参数会 TypeError**（openai 库不认扩展参数）
+  - TS judge-provider：thinking=false 时也要**显式** `body.thinking = {type:"disabled"}`（V4 服务端默认开；只加 enabled 不关 = 慢）
+- **opencode 接入**：`OMNI_DIR/.env.nmg-opencode`（含 OPENCODE key，**本地不提交**——gitignore `.env.*`）：`ANSWER_BASE_URL=https://opencode.ai/zen/go/v1` + `ANSWER_MODEL=deepseek-v4-flash`（EVAL 同）——覆盖全部 3 个 LLM 点（bridge judge fallback 链 + answer + eval）
+- **judge 加速**：HM_JUDGE_PROMPT 只输出 `{"label":...}`（去掉 "explanation + label" 句——extract_label_json 只取 label，安全）+ `max_tokens=128`（label ~20 token，128 留余量防模型多写被截断）
+- **自适应并发**：`llm_client.py` 的 `AdaptiveConcurrency`（429→并发×0.7 最小 1；连续 20 成功→+1 恢复 max）替换 `asyncio.Semaphore`（hm_responses/hm_eval）——opencode 量大用满、429 自动降
+- **编组批量**（`evals/omnimemeval/run-halumem-batch.sh`）：20 user 分批（默认 2 user/批）ingest+search，search 结果**追加聚合**（读旧文件 + update 合并——同 version 累积），最后统一 answer/judge（checkpoint resume 幂等）。参数 `--users/--start-user/--batch-size/--start-batch/--ingest-only`；中途 Ctrl-C 可停，`--start-batch N` 续跑
+  - **step markers 坑**：官方脚本每 step 写 `.step_N_done`——分批跑 batch 2+ 会被 "already done, skipping" 直接跳过（0s 白跑）。批量脚本每批必须 `--from-step 1`（清 markers 强制重跑 step 1-2；start-user 偏移保证不重复 ingest）
+- **全量真值（supersession_trial19，嵌入生效 + supersession + 时间排序）**：QA Accuracy **0.7352**（3467 问/20 user，search/answer/eval 全 success 零失败）——**与纯词法 0.734 持平**（嵌入全量无显著提升但无回退）；Dynamic Update **0.444**（supersession 最强项，比 trial11 0.361 高）；Memory Boundary 0.984；t16 的 0.823 是小样本虚高
+- **全量耗时**：~44min（ingest ~34min + search ~3min + answer 8min + judge 9min，opencode 关思考）——比 trial18（60min 还 6/20 失败）**快且稳**；Add latency avg 3.0s（LLM judge 强候选仍主导）、Search 88ms（GPU 本地嵌入）
 
 ## 8. 结果与判定速查
 

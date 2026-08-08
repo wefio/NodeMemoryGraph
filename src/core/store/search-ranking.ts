@@ -85,9 +85,38 @@ export function lexicalNodeScore(query: string, node: MemoryNode): number {
   return terms.filter((term) => haystack.includes(term)).length / terms.length;
 }
 
-export function hybridScore(lexical: number, vector: number, route: number): number {
+export interface HybridWeights {
+  lexical: number;
+  vector: number;
+  route: number;
+}
+
+/** Legacy weights: keyword-dominant (0.5/0.35/0.15). QPP thresholds and graph
+ *  activation are calibrated on this scale — keep as the default so those
+ *  paths are untouched. */
+export const DEFAULT_HYBRID_WEIGHTS: HybridWeights = { lexical: 0.5, vector: 0.35, route: 0.15 };
+
+/** Balanced AutoMem-style weights (0.35/0.35/0.30): semantic similarity carries
+ *  as much rank weight as exact term overlap, so low-lexical high-vector
+ *  memories (e.g. a promotion record asked about in different wording) are not
+ *  dominated by keyword hits. Used only for candidate ranking in
+ *  searchWithVector; QPP/graph activation keep the legacy scale.
+ *
+ *  Experiment 2026-08-07 (HaluMem single persona, t17): 0.811 vs legacy 0.8232.
+ *  Balanced weights lifted Dynamic Update (2/6→3/6) and Multi-hop, but lost
+ *  Memory Conflict (0.872→0.795) and Generalization; net worse. The Dynamic
+ *  gain was already covered by the temporal as-of ranking (t14, 3/6 at 0.823).
+ *  Kept as a documented alternative, NOT the active ranking. */
+export const BALANCED_HYBRID_WEIGHTS: HybridWeights = { lexical: 0.35, vector: 0.35, route: 0.3 };
+
+export function hybridScore(
+  lexical: number,
+  vector: number,
+  route: number,
+  weights: HybridWeights = DEFAULT_HYBRID_WEIGHTS,
+): number {
   const boundedLexical = lexical <= 0 ? 0 : lexical / (lexical + 10);
-  return boundedLexical * 0.5 + Math.max(0, vector) * 0.35 + Math.max(0, route) * 0.15;
+  return boundedLexical * weights.lexical + Math.max(0, vector) * weights.vector + Math.max(0, route) * weights.route;
 }
 
 export function mergeSemanticCandidates(

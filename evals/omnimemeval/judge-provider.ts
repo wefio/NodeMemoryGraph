@@ -132,6 +132,11 @@ export class OpenAiCompatibleJudgeClient implements JudgeClient {
       body.reasoning_effort = this.#reasoningEffort;
     } else {
       body.temperature = 0;
+      // DeepSeek V4 defaults to thinking mode server-side even when the
+      // client sends no thinking field — that emits reasoning_content and can
+      // leave content empty (slow + parse failures). Always send the explicit
+      // disabled flag unless thinking was requested.
+      body.thinking = { type: "disabled" };
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.#timeoutMs);

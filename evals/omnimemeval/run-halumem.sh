@@ -14,7 +14,10 @@
 #   --skip-ingest       Reuse existing per-user stores; start at search step.
 #   --workers <n>       Search/ingest worker count. Default 1.
 #   --llm-workers <n>   Answer/judge concurrency. Default 16.
+#   --users <n>         Only run the first N users (quick subset). Default: all.
+#   --start-user <n>    Skip the first N users (batch offset; combine with --users). Default: 0.
 #   --from-step <n>     Resume from pipeline step n (search=2, answer=3, judge=4).
+#   --to-step <n>       Stop after pipeline step n (ingest=1, search=2).
 #   --clear             Pass --clear 1 to ingest (recreates user stores).
 #   --analyze <dir>     Skip running; print metrics for an existing run dir.
 
@@ -30,7 +33,10 @@ SKIP_INGEST=0
 CLEAR=0
 WORKERS=1
 LLM_WORKERS=16
+USERS=""
+START_USER=0
 FROM_STEP=""
+TO_STEP=""
 ANALYZE_DIR=""
 
 while [[ $# -gt 0 ]]; do
@@ -41,7 +47,10 @@ while [[ $# -gt 0 ]]; do
         --clear) CLEAR=1; shift ;;
         --workers) WORKERS="${2:?--workers requires a number}"; shift 2 ;;
         --llm-workers) LLM_WORKERS="${2:?--llm-workers requires a number}"; shift 2 ;;
+        --users) USERS="${2:?--users requires a number}"; shift 2 ;;
+        --start-user) START_USER="${2:?--start-user requires a number}"; shift 2 ;;
         --from-step) FROM_STEP="${2:?--from-step requires a number}"; shift 2 ;;
+        --to-step) TO_STEP="${2:?--to-step requires a number}"; shift 2 ;;
         --analyze) ANALYZE_DIR="${2:?--analyze requires a dir}"; shift 2 ;;
         -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; sed -n '2,25p' "$0"; exit 1 ;;
@@ -79,10 +88,20 @@ fi
 # Run
 # ────────────────────────────────────────────────────────────────────────────
 FROM_STEP_ARGS=()
+USERS_ARG=()
+if [[ -n "$USERS" ]]; then
+    USERS_ARG=(--users "$USERS")
+fi
+if [[ "$START_USER" != "0" ]]; then
+    USERS_ARG+=(--start-user "$START_USER")
+fi
 if [[ -n "$FROM_STEP" ]]; then
     FROM_STEP_ARGS+=(--from-step "$FROM_STEP")
 elif [[ "$SKIP_INGEST" == "1" ]]; then
     FROM_STEP_ARGS+=(--from-step 2)
+fi
+if [[ -n "$TO_STEP" ]]; then
+    FROM_STEP_ARGS+=(--to-step "$TO_STEP")
 fi
 if [[ "$CLEAR" == "1" ]]; then
     FROM_STEP_ARGS+=(--clear 1)
@@ -96,6 +115,7 @@ bash scripts/run_halumem_eval.sh \
     --version "$VERSION" \
     --workers "$WORKERS" \
     --llm-workers "$LLM_WORKERS" \
+    "${USERS_ARG[@]}" \
     "${FROM_STEP_ARGS[@]}"
 
 # ────────────────────────────────────────────────────────────────────────────
