@@ -10,6 +10,7 @@ import nmgExtension, {
   formatSearchHeaders,
   MEMORY_POLICY,
   SessionInjectionWindow,
+  SessionTaskWindow,
 } from "../../../.pi/extensions/nmg/index.ts";
 import { loadPrompts } from "../../../src/prompts/load.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
@@ -69,7 +70,10 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
   const previousProject = process.env.NMG_PROJECT_DIR;
   process.env.NMG_DATA_DIR = directory;
   process.env.NMG_PROJECT_DIR = directory;
-  const sessionManager = { getSessionId: () => "http-test-session", getSessionFile: () => "session.jsonl" };
+  const sessionManager = {
+    getSessionId: () => "http-test-session",
+    getSessionFile: () => "session.jsonl",
+  };
   try {
     const { handlers, tools } = extensionHarness();
     const remember = await tools.get("nmg_remember")!.execute(
@@ -151,7 +155,10 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     const otherSession = await tools
       .get("nmg_search")!
       .execute("search-stg-other", { query: "scratch color cobalt" }, undefined, undefined, {
-        sessionManager: { getSessionId: () => "other-session", getSessionFile: () => "other.jsonl" },
+        sessionManager: {
+          getSessionId: () => "other-session",
+          getSessionFile: () => "other.jsonl",
+        },
       });
     assert.match(sameSession.content[0].text, /Session scratch/);
     assert.doesNotMatch(otherSession.content[0].text, /Session scratch/);
@@ -168,9 +175,9 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       // checkpoint) is not blocked by our own connection; then shut the owned
       // daemon down before the temp dir is removed.
       store.close();
-      await handlers
-        .get("session_shutdown")!({}, { sessionManager })
-        .catch((error) => console.error("session_shutdown error:", error));
+      await handlers.get("session_shutdown")!({}, { sessionManager }).catch((error) =>
+        console.error("session_shutdown error:", error),
+      );
     }
   } finally {
     if (previous === undefined) delete process.env.NMG_DATA_DIR;
@@ -333,6 +340,36 @@ test("session injection window reinjects changed and expired content", () => {
   window.beginTurn("session-a");
   window.beginTurn("session-a");
   assert.match(window.format("session-a", changed, "evidence"), /local tests/);
+});
+
+test("session task window carries bounded task context into terse continuations", () => {
+  const window = new SessionTaskWindow();
+  const first = window.prepare(
+    "session-a",
+    "Configure the pi-lsp extension to use the vendored language server implementation.",
+  );
+  assert.match(first!, /pi-lsp extension/u);
+
+  const continuation = window.prepare("session-a", "我 reload 了，你试试");
+  assert.match(continuation!, /reload/u);
+  assert.match(continuation!, /Recent task context:/u);
+  assert.match(continuation!, /vendored language server/u);
+
+  const switched = window.prepare(
+    "session-a",
+    "Implement and test the unrelated billing export pipeline.",
+  );
+  assert.doesNotMatch(switched!, /pi-lsp|vendored language server/u);
+
+  assert.equal(window.prepare("session-b", "好的"), null);
+});
+
+test("session task window keeps explicit recall and clears session context", () => {
+  const window = new SessionTaskWindow();
+  window.prepare("session-a", "Implement and test the Atlas SQLite storage adapter.");
+  assert.match(window.prepare("session-a", "What did we decide last time?")!, /Atlas SQLite/u);
+  window.clear("session-a");
+  assert.doesNotMatch(window.prepare("session-a", "What did we decide last time?")!, /Atlas/u);
 });
 
 function memoryContext(id: string, statement: string, evidence: string): MemoryContext {

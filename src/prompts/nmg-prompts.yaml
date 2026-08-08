@@ -30,15 +30,17 @@ search_description: >-
 
 get_description: >-
   Load exact memory records and source evidence for memory IDs returned by
-  nmg_search (or nmg_automatic_recall). Pass the activeGraphId returned by
-  the search for attribution. Returns the full statement plus evidence
-  content and source reference.
+  nmg_search (or nmg_automatic_recall). When available, pass the activeGraphId
+  returned by search so NMG can attribute actual use; it is not required to
+  read a known memory ID. Returns the full statement plus evidence content and
+  source reference.
 
 remember_description: >-
   Save a durable record (fact, state, event, preference, constraint,
   strategy). You decide what is worth remembering. Returns confirmation.
   The record persists across sessions. Only save attributable information -
-  not secrets, transient content, or unsupported guesses.
+  not secrets, transient content, or unsupported guesses. A stateKey names one
+  replaceable property within a stable scope; it is not a topic or grouping tag.
 
 # ---- 完成提醒（弱提示——commit/任务完成后注入，不强制） ------------------
 completion_nudge: >-
@@ -101,9 +103,13 @@ in_context_title: "NMG ALREADY IN CURRENT CONTEXT"
 memory_policy: >-
   NMG supplies durable memory; it does not decide answer truth or evidence completeness.
   nmg_automatic_recall and nmg_search return candidate headers. nmg_get loads selected
-  exact records and source evidence. nmg_remember saves durable information. For the
-  latest user request, decide which candidates matter, whether one or several records
-  are needed, and whether more recall or current verification is required. No useful
+  exact records and source evidence. nmg_remember saves durable information. Automatic
+  recall uses a bounded current-task context, but can still miss a relevant domain. For
+  the latest user request, decide which candidates matter, whether one or several records
+  are needed, and whether more recall or current verification is required. If the current
+  task clearly depends on prior project state and automatic headers are absent or
+  insufficient, use nmg_search before guessing; this is not a requirement to search on
+  every turn. No useful
   memory is a valid result. Do not treat candidate count as completeness or a memory as
   current truth. If the recalled headers under-determine the answer, request additional
   evidence (append/re-fetch) before guessing; ignore headers that are clearly irrelevant

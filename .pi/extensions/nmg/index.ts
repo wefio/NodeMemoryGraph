@@ -43,6 +43,7 @@ function projectDirectory(): string {
 export default function nmgExtension(pi: ExtensionAPI): void {
   let connectionPromise: Promise<DaemonConnection> | undefined;
   const injectionWindow = new SessionInjectionWindow();
+  const taskWindow = new SessionTaskWindow();
   // Weak completion nudge: a git commit (or an explicit completion phrase) is a
   // low-signal hint that NMG memory is available — a reminder, never a forced
   // action. Set by the tool_call hook, consumed once by before_agent_start.
@@ -72,12 +73,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     const sessionId = ctx.sessionManager.getSessionId();
     injectionWindow.beginTurn(sessionId);
     const nudge = popCompletionNudge(event.prompt);
-    if (!shouldAutoRecall(event.prompt)) {
+    const recallQuery = taskWindow.prepare(sessionId, event.prompt);
+    if (!recallQuery) {
       return { systemPrompt: composeNmgSystemPrompt(event.systemPrompt, "", "", nudge) };
     }
     try {
       const context = (await invoke("search", {
-        query: event.prompt,
+        query: recallQuery,
         projectDir: projectDirectory(),
         sessionId,
         maxTier: configuredAutoRecallTier(),
@@ -136,6 +138,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   pi.on("session_shutdown", async (event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
     injectionWindow.clear(sessionId);
+    taskWindow.clear(sessionId);
     if (!connectionPromise) return;
     const active = await connectionPromise.catch(() => undefined);
     connectionPromise = undefined;
@@ -194,7 +197,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           Type.Literal("strategy"),
         ]),
       ),
-      stateKey: Type.Optional(Type.String()),
+      stateKey: Type.Optional(
+        Type.String({
+          description:
+            "Stable key for one replaceable property within scope (for example project.storage.engine), not a topic/group tag",
+        }),
+      ),
       eventTime: Type.Optional(Type.String()),
       sourceActor: Type.Optional(
         Type.Union([
@@ -262,7 +270,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     parameters: Type.Object({
       memoryIds: Type.Array(Type.String(), { minItems: 1, maxItems: 50 }),
       activeGraphId: Type.Optional(
-        Type.String({ description: "activeGraphId returned by nmg_search" }),
+        Type.String({
+          description:
+            "Optional activeGraphId returned by nmg_search; enables use attribution but is not required for exact lookup",
+        }),
       ),
       graphHops: Type.Optional(Type.Number({ minimum: 0, maximum: 3 })),
     }),
@@ -389,7 +400,8 @@ export class SessionInjectionWindow {
     }
     if (folded.length > 0) {
       sections.push(
-        nmgPrompts.in_context_title + "\n" +
+        nmgPrompts.in_context_title +
+          "\n" +
           folded.map(({ memory }) => `- memory=${memory.id}; already_in_context=true`).join("\n"),
       );
     }
@@ -404,6 +416,64 @@ export class SessionInjectionWindow {
     let state = this.#sessions.get(sessionId);
     if (!state) {
       state = { turn: 0, entries: new Map() };
+      this.#sessions.set(sessionId, state);
+    }
+    return state;
+  }
+}
+
+interface SessionTaskState {
+  anchors: string[];
+}
+
+/**
+ * Bounded query-side task context for automatic recall. It does not inject
+ * transcript text into the model and does not attempt semantic summarisation;
+ * it only carries two recent substantive user task anchors across terse
+ * continuation turns such as "reload 了，你试试".
+ */
+export class SessionTaskWindow {
+  readonly #sessions = new Map<string, SessionTaskState>();
+  readonly maxAnchors: number;
+  readonly maxAnchorCharacters: number;
+
+  constructor(maxAnchors = 2, maxAnchorCharacters = 480) {
+    this.maxAnchors = Math.max(1, maxAnchors);
+    this.maxAnchorCharacters = Math.max(80, maxAnchorCharacters);
+  }
+
+  prepare(sessionId: string, prompt: string): string | null {
+    const normalized = normalizeTaskPrompt(prompt);
+    if (!normalized) return null;
+    const state = this.#state(sessionId);
+    const explicitRecall = hasExplicitRecallIntent(normalized);
+    const substantive = isSubstantiveTaskPrompt(normalized);
+    const continuation = isTaskContinuation(normalized);
+    const prior = state.anchors.join("\n");
+    const shouldRecall = explicitRecall || substantive || (continuation && prior.length > 0);
+    const usePriorContext = prior.length > 0 && (explicitRecall || continuation);
+    const query = shouldRecall
+      ? [normalized, usePriorContext ? `Recent task context:\n${prior}` : ""]
+          .filter(Boolean)
+          .join("\n")
+      : null;
+
+    if (substantive) {
+      const anchor = excerpt(normalized, this.maxAnchorCharacters);
+      if (state.anchors.at(-1) !== anchor) state.anchors.push(anchor);
+      while (state.anchors.length > this.maxAnchors) state.anchors.shift();
+    }
+    return query;
+  }
+
+  clear(sessionId: string): void {
+    this.#sessions.delete(sessionId);
+  }
+
+  #state(sessionId: string): SessionTaskState {
+    let state = this.#sessions.get(sessionId);
+    if (!state) {
+      state = { anchors: [] };
       this.#sessions.set(sessionId, state);
     }
     return state;
@@ -430,9 +500,7 @@ export function composeNmgSystemPrompt(
   return [
     baseSystemPrompt,
     MEMORY_POLICY,
-    automaticRecall
-      ? `<nmg_automatic_recall>\n${automaticRecall}\n</nmg_automatic_recall>`
-      : "",
+    automaticRecall ? `<nmg_automatic_recall>\n${automaticRecall}\n</nmg_automatic_recall>` : "",
     nudge ? `<nmg_nudge>\n${nudge}\n</nmg_nudge>` : "",
     status ? `<nmg_status>${status}</nmg_status>` : "",
   ]
@@ -465,12 +533,29 @@ function configuredStrongHitInitialTarget(): number {
   return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 3));
 }
 
-function shouldAutoRecall(prompt: string): boolean {
-  const normalized = prompt.toLocaleLowerCase();
+function hasExplicitRecallIntent(normalized: string): boolean {
   return [
     /\b(previous(?:ly)?|before|earlier|last time|remember|recall|my preference|my project|we decided)\b/u,
     /(?:之前|以前|上次|还记得|回忆|记忆|我的偏好|我们决定|项目决定|当前状态)/u,
   ].some((pattern) => pattern.test(normalized));
+}
+
+function normalizeTaskPrompt(prompt: string): string {
+  return prompt.replace(/\s+/gu, " ").trim();
+}
+
+function isSubstantiveTaskPrompt(prompt: string): boolean {
+  if (prompt.length >= 40) return true;
+  return /(?:[A-Za-z][\w.-]{2,}[-_/][\w./-]+|\b(?:fix|implement|debug|test|build|refactor|install|configure)\b|(?:修复|实现|测试|构建|重构|安装|配置|设计))/iu.test(
+    prompt,
+  );
+}
+
+function isTaskContinuation(prompt: string): boolean {
+  if (prompt.length > 100) return false;
+  return /(?:\b(?:continue|again|retry|reload|try|proceed|go on|fix it|test it)\b|(?:继续|再试|重试|试试|开始吧|接着|改吧|修一下|好了|可以了|然后呢))/iu.test(
+    prompt,
+  );
 }
 
 const nmgPrompts = loadPrompts();
@@ -519,7 +604,11 @@ function recallMatchLabel(
 ): string {
   if (hitTerms && hitTerms.length > 0) return `matches=${hitTerms.join(",")}; `;
   const label =
-    reason === "learned_route" ? "graph" : reason === "vector_match" ? "semantic" : reason ?? "hybrid";
+    reason === "learned_route"
+      ? "graph"
+      : reason === "vector_match"
+        ? "semantic"
+        : (reason ?? "hybrid");
   return `matches=${label}; `;
 }
 
