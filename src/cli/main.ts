@@ -36,6 +36,8 @@ import {
 } from "./lifecycle.ts";
 import { NmgService } from "./service.ts";
 import { histogramQuantile } from "../core/perf.ts";
+import type { MemoryContext } from "../core/types.ts";
+import { compactSearchContext } from "../integration/search-projection.ts";
 
 // The CLI surface (synopsis, option details, known options/flags) is
 // assembled from the command registry in commands.ts; only the daemon
@@ -98,7 +100,15 @@ export async function runCli(
       state?.transport === "http" && isProcessAlive(state.pid)
         ? await httpCall(state, parsed.command, (parsed.params ?? {}) as Record<string, unknown>)
         : await service.invoke(parsed.command, parsed.params);
-    io.stdout.write(parsed.json ? `${JSON.stringify(result, null, 2)}\n` : humanResult(result));
+    const output =
+      parsed.compactJson && parsed.command === "search"
+        ? compactSearchContext(result as MemoryContext)
+        : result;
+    io.stdout.write(
+      parsed.json || parsed.compactJson
+        ? `${JSON.stringify(output, null, 2)}\n`
+        : humanResult(result),
+    );
     return 0;
   } catch (error) {
     io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -225,6 +235,7 @@ interface ParsedArguments {
     | NmgSyncStgParams
     | NmgPerfParams;
   json: boolean;
+  compactJson?: boolean;
   dataDirectory?: string;
   databasePath?: string;
 }
@@ -249,6 +260,9 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   }
   const values = parseOptions(spec.words.length > 1 ? rest.slice(1) : rest);
   assertSpecOptions(spec, values);
+  if (values.flags.has("json") && values.flags.has("compact-json")) {
+    throw new Error("--json and --compact-json are mutually exclusive");
+  }
   if (spec.local) {
     // Local commands (inspect) validate through the registry but dispatch
     // directly — no RPC method, no params, no --json.
@@ -264,6 +278,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     command: spec.method!,
     params: spec.buildParams(values) as ParsedArguments["params"],
     json: values.flags.has("json"),
+    compactJson: values.flags.has("compact-json"),
     dataDirectory: firstOption(values, "data-dir"),
     databasePath: optionalResolvedPath(firstOption(values, "db")),
   };

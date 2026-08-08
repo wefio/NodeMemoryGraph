@@ -27,7 +27,7 @@ an operation or encountering its named special case.
 3. Before answering a history-dependent question, run:
 
    ```text
-   nmg search "<focused recall query>" --project-dir . --limit 8 --max-tier 1 --json
+   nmg search "<focused recall query>" --project-dir . --limit 8 --max-tier 1 --compact-json
    ```
 
    Narrow the scope when the store is large or the topic is specific:
@@ -48,6 +48,12 @@ an operation or encountering its named special case.
    failures, unresolved attempts, or unsupported guesses.
 6. On exit, run `nmg daemon stop --json` only if this invocation started it.
    Never stop a daemon that was already running.
+
+For Codex, execute these commands through the shell tool. If the active
+`AGENTS.md` requires an RTK command prefix, use `rtk nmg ...`; otherwise use
+`nmg ...` directly. Do not reread this Skill on every turn: keep the stable
+three-command contract in working memory and open the references only for a
+named special case.
 
 Use the same `--data-dir` or `--db` option on every command when the caller
 selected a non-default LTG store. Use the same `--project-dir` on project STG

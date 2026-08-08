@@ -11,6 +11,44 @@ import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 const root = resolve(import.meta.dirname, "../..");
 const launcher = resolve(root, "bin/nmg.mjs");
 
+test("search compact JSON exposes bounded headers without exact evidence", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-compact-"));
+  const statement = `Durable detail ${"x".repeat(420)}`;
+  try {
+    const remembered = runLauncher([
+      "remember",
+      statement,
+      "--node",
+      "Compact projection",
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { memory: { id: string } };
+    const compact = runLauncher([
+      "search",
+      "Durable detail",
+      "--compact-json",
+      "--data-dir",
+      directory,
+    ]) as {
+      candidates: Array<{ id: string; preview: string }>;
+      activeGraphId: string | null;
+      results?: unknown;
+      activeGraph?: unknown;
+    };
+
+    assert.equal(compact.candidates[0]?.id, remembered.memory.id);
+    assert.ok(compact.candidates[0]!.preview.length > 160);
+    assert.equal(compact.candidates[0]!.preview.length, 320);
+    assert.match(compact.candidates[0]!.preview, /…$/u);
+    assert.ok(compact.activeGraphId);
+    assert.equal(compact.results, undefined);
+    assert.equal(compact.activeGraph, undefined);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("search prints a per-phase perf line by default and omits it with --no-perf", () => {
   const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-perf-"));
   try {

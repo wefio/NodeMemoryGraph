@@ -38,7 +38,7 @@ When the first recall quality is doubtful but the query is right, re-select
 within the same candidate pool instead of changing the query:
 
 ```text
-nmg search "<query>" --project-dir . --second-pass --limit 8 --json
+nmg search "<query>" --project-dir . --second-pass --limit 8 --compact-json
 ```
 
 `--second-pass` walks cumulative Fibonacci evidence tiers (1, 2, 3, 5, ...),

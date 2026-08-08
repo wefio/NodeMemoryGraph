@@ -116,7 +116,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   {
     method: "search",
     words: ["search"],
-    usageLine: "nmg search QUERY [options] [--json]",
+    usageLine: "nmg search QUERY [options] [--compact-json | --json]",
     options: [
       "node",
       "project-dir",
@@ -129,7 +129,14 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
       "retrieval-mode",
       "vector-granularity",
     ],
-    flags: ["include-historical", "no-perf", "second-pass", "full-warm", "tiered-disclosure"],
+    flags: [
+      "include-historical",
+      "no-perf",
+      "second-pass",
+      "full-warm",
+      "tiered-disclosure",
+      "compact-json",
+    ],
     usageDetail: `Search options:
   --node NAME                Restrict to one semantic node
   --max-tier N               Deepest tier 0..3
@@ -142,6 +149,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   --second-pass              Enable progressive QPP recall
   --full-warm                Expose all ranked L1 records in the first response
   --tiered-disclosure        Open tiers sequentially until QPP is sufficient
+  --compact-json             Emit agent-facing headers; exact evidence stays behind get
   --no-perf                  Disable per-phase performance timing`,
     buildParams: searchParams,
   },

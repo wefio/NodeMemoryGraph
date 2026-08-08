@@ -20,6 +20,7 @@ import {
 } from "../../../src/cli/archive-staging.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import type { MemoryContext, MemorySearchResult, MemoryTier } from "../../../src/core/types.ts";
+import { searchPreview } from "../../../src/integration/search-projection.ts";
 
 /**
  * NMG Pi extension.
@@ -479,7 +480,7 @@ export function formatSearchHeaders(context: MemoryContext): string {
         `${recallTimeLabel(memory)}` +
         // Revoked records show their metadata but not their statement:
         // the model sees the revocation exists without content to cite.
-        `preview=${forget ? nmgPrompts.forget_redacted : excerpt(memory.statement, 160)}`
+        `preview=${forget ? nmgPrompts.forget_redacted : searchPreview(memory)}`
       );
     }),
     formatActiveGraph(context),
