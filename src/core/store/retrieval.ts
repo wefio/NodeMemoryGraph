@@ -68,18 +68,19 @@ import type {
 } from "../types.ts";
 import type { DatabaseSync } from "node:sqlite";
 
-const MAX_SEARCH_CANDIDATES = 500;
+export const MAX_SEARCH_CANDIDATES = 500;
 /** Combined-score boost applied to the active successor of a superseded
  *  candidate when it is surfaced at retrieval time. Sized so a current value
  *  with near-zero lexical overlap (common for "updated from X to Y" wording)
  *  can still out-rank older high-lexical records. */
-const SUPERSEDE_SUCCESSOR_BOOST = 0.3;
+export const SUPERSEDE_SUCCESSOR_BOOST = 0.3;
 /** Max combined-score boost for a memory whose event time is at the as-of
  *  moment of a historical (event-time-window) query. Sizes so the value that
  *  was current at the asked date can out-rank older high-lexical records
  *  without overwhelming relevance: 0.25 vs lexical max 0.5 / vector 0.35. */
-const TEMPORAL_ASOF_BOOST = 0.25;
-const MIN_WARM_DISCLOSURE_SIZE = 5;
+export const TEMPORAL_ASOF_BOOST = 0.25;
+export const TEMPORAL_ASOF_DECAY_DAYS = 730;
+export const MIN_WARM_DISCLOSURE_SIZE = 5;
 
 export function withRetrieval<TBase extends Constructor>(Base: TBase) {
   return class extends Base {
@@ -272,19 +273,17 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         .sort((left, right) => contextUsefulness(query, right) - contextUsefulness(query, left));
       const rankedWarm = rankedCandidates.filter((candidate) => candidate.memory.tier === 1);
       const foldWarm =
-        options.progressiveWarmDisclosure === true &&
-        rankedWarm.length >= MIN_WARM_DISCLOSURE_SIZE;
+        options.progressiveWarmDisclosure === true && rankedWarm.length >= MIN_WARM_DISCLOSURE_SIZE;
       const initiallyVisibleWarm = Math.ceil(rankedWarm.length / 2);
       const visibleWarmIds = new Set(
         rankedWarm.slice(0, initiallyVisibleWarm).map((candidate) => candidate.memory.id),
       );
       const deferredWarm = rankedWarm.slice(initiallyVisibleWarm);
-      const candidates =
-        foldWarm
-          ? rankedCandidates.filter(
-              (candidate) => candidate.memory.tier !== 1 || visibleWarmIds.has(candidate.memory.id),
-            )
-          : rankedCandidates;
+      const candidates = foldWarm
+        ? rankedCandidates.filter(
+            (candidate) => candidate.memory.tier !== 1 || visibleWarmIds.has(candidate.memory.id),
+          )
+        : rankedCandidates;
       const selectWithinBudget = (
         bud: ActiveGraphBudget,
         lim: number,
@@ -325,10 +324,9 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         }
         return { results: res, selectedNodes: nodes, estimatedTokens: tokens, exhausted: ex };
       };
-      const deferredWarmSelection =
-        foldWarm
-          ? selectWithinBudget(budget, limit, deferredWarm).results
-          : [];
+      const deferredWarmSelection = foldWarm
+        ? selectWithinBudget(budget, limit, deferredWarm).results
+        : [];
       const buildSelections = (res: readonly MemorySearchResult[]): ActiveGraphSelection[] =>
         res.map((result, index) => ({
           memoryId: result.memory.id,
@@ -384,7 +382,8 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           query,
           qppCandidates(selection.results, selections),
         );
-        const strongHit = initialComponents.topGap >= (options.strongHitTopGap ?? STRONG_HIT_TOP_GAP);
+        const strongHit =
+          initialComponents.topGap >= (options.strongHitTopGap ?? STRONG_HIT_TOP_GAP);
         const requestedInitial = Math.max(
           1,
           Math.min(
@@ -585,15 +584,14 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           relations.filter((relation) => relation.id === edge.id),
         ),
         activeGraph,
-        progressiveDisclosure:
-          foldWarm
-            ? {
-                strategy: "warm_halves",
-                rankedWarmCandidates: rankedWarm.length,
-                initiallyVisible: initiallyVisibleWarm,
-                deferredMemoryIds: deferredWarmSelection.map((candidate) => candidate.memory.id),
-              }
-            : undefined,
+        progressiveDisclosure: foldWarm
+          ? {
+              strategy: "warm_halves",
+              rankedWarmCandidates: rankedWarm.length,
+              initiallyVisible: initiallyVisibleWarm,
+              deferredMemoryIds: deferredWarmSelection.map((candidate) => candidate.memory.id),
+            }
+          : undefined,
         timings: snapshot,
         filterUsage: filterUsage.dimensions.length > 0 ? filterUsage : undefined,
       };
@@ -1068,8 +1066,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                   ? 0.001
                   : 0
               : retrievalMode === "hashing" ||
-                  (retrievalMode === "qwen3" &&
-                    vectorModel.toLowerCase().includes("qwen"))
+                  (retrievalMode === "qwen3" && vectorModel.toLowerCase().includes("qwen"))
                 ? vector
                 : hybridScore(lexical, vector, route);
           return result;
@@ -1098,7 +1095,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           const distDays = Math.abs(eventMs - asOfMs) / 86_400_000;
           // Linear decay over a 2-year horizon: records within ~2 years of the
           // as-of moment get up to TEMPORAL_ASOF_BOOST; older records get none.
-          const boost = Math.max(0, 1 - distDays / 730) * TEMPORAL_ASOF_BOOST;
+          const boost = Math.max(0, 1 - distDays / TEMPORAL_ASOF_DECAY_DAYS) * TEMPORAL_ASOF_BOOST;
           result.combinedScore += boost;
         }
         filtered.sort(

@@ -71,6 +71,10 @@ export interface HierarchicalActivationState {
 }
 
 const SCORE_WEIGHT_COUNT = 7; // w_sim, w_g1, w_g2, w_g3, w_h1, w_h2, w_h3
+export const DEFAULT_HIERARCHICAL_ACTIVATION = {
+  temporalAlpha: 0.3,
+  reasoningBeta: 0.5,
+} as const;
 
 export class HierarchicalActivation {
   readonly dimensions: number;
@@ -84,17 +88,18 @@ export class HierarchicalActivation {
   constructor(dimensions: number, state?: HierarchicalActivationState) {
     this.dimensions = dimensions;
     this.#trainingSteps = state?.trainingSteps ?? 0;
-    this.#temperature = Tensor.scalar(
-      state?.temperature ?? 1 / Math.sqrt(dimensions),
-      true,
-    );
+    this.#temperature = Tensor.scalar(state?.temperature ?? 1 / Math.sqrt(dimensions), true);
     const weights = state?.scoreWeights ?? Array<number>(SCORE_WEIGHT_COUNT).fill(1);
     this.#scoreWeights = Tensor.vector(weights, true);
-    this.#temporalAlpha = Tensor.scalar(state?.temporalAlpha ?? 0.3, true);
-    this.#reasoningBeta = Tensor.scalar(state?.reasoningBeta ?? 0.5, true);
-    this.#h1State = state?.h1State
-      ? new Float32Array(state.h1State)
-      : null;
+    this.#temporalAlpha = Tensor.scalar(
+      state?.temporalAlpha ?? DEFAULT_HIERARCHICAL_ACTIVATION.temporalAlpha,
+      true,
+    );
+    this.#reasoningBeta = Tensor.scalar(
+      state?.reasoningBeta ?? DEFAULT_HIERARCHICAL_ACTIVATION.reasoningBeta,
+      true,
+    );
+    this.#h1State = state?.h1State ? new Float32Array(state.h1State) : null;
   }
 
   get trainingSteps(): number {
@@ -211,10 +216,7 @@ export class HierarchicalActivation {
 
   // ── training ──
 
-  train(
-    sample: ActivationTrainingSample,
-    learningRate = 0.05,
-  ): ActivationTrainingResult {
+  train(sample: ActivationTrainingSample, learningRate = 0.05): ActivationTrainingResult {
     const n = sample.candidates.length;
     if (n === 0) throw new Error("activation training requires at least one candidate");
 
@@ -239,12 +241,8 @@ export class HierarchicalActivation {
 
     // Temporal (detached from current graph for training stability — uses stored state)
     const h1 = Tensor.vector(this.#h1State ?? new Float32Array(this.dimensions));
-    const h2 = Tensor.vector(
-      this.#meanVector(sample.graphState?.mediumTermVectors),
-    );
-    const h3 = Tensor.vector(
-      this.#meanVector(sample.graphState?.longTermVectors),
-    );
+    const h2 = Tensor.vector(this.#meanVector(sample.graphState?.mediumTermVectors));
+    const h3 = Tensor.vector(this.#meanVector(sample.graphState?.longTermVectors));
 
     const g3 = Tensor.sumN([g1, g2, h1, h2, h3]).l2Normalize();
 
@@ -265,9 +263,7 @@ export class HierarchicalActivation {
     // NLL loss on used nodes
     let usedLoss: Tensor | null = null;
     const usedIds = sample.usedNodeIds;
-    const usedCount = sample.candidates.filter(
-      (c) => usedIds.has(c.nodeId),
-    ).length;
+    const usedCount = sample.candidates.filter((c) => usedIds.has(c.nodeId)).length;
     if (usedCount === 0) throw new Error("activation training requires at least one used node");
 
     for (let i = 0; i < n; i++) {
@@ -296,10 +292,7 @@ export class HierarchicalActivation {
    * Multi-step reasoning training. All steps share one DAG —
    * gradients flow from the final step back through every intermediate step.
    */
-  trainSequence(
-    sequence: ReasoningSequence[],
-    learningRate = 0.05,
-  ): ActivationTrainingResult {
+  trainSequence(sequence: ReasoningSequence[], learningRate = 0.05): ActivationTrainingResult {
     if (sequence.length === 0) throw new Error("trainSequence requires at least one step");
 
     let loss: Tensor | null = null;
@@ -352,9 +345,7 @@ export class HierarchicalActivation {
         const probs = blended.softmax();
 
         let stepLoss: Tensor | null = null;
-        const usedCount = step.candidates.filter(
-          (c) => step.usedNodeIds!.has(c.nodeId),
-        ).length;
+        const usedCount = step.candidates.filter((c) => step.usedNodeIds!.has(c.nodeId)).length;
         for (let i = 0; i < n; i++) {
           if (step.usedNodeIds.has(step.candidates[i]!.nodeId)) {
             const term = probs.at(i);
@@ -426,9 +417,7 @@ export class HierarchicalActivation {
   /** Tensor-level blend for multi-step DAG (gradients flow through). */
   #blendTensors(query: Tensor, prevG3: Tensor): Tensor {
     const beta = this.#reasoningBeta;
-    return query.multiply(Tensor.scalar(1).add(beta.negate())).add(
-      prevG3.multiply(beta),
-    );
+    return query.multiply(Tensor.scalar(1).add(beta.negate())).add(prevG3.multiply(beta));
   }
 
   #meanVector(vectors: Float32Array[] | undefined): Float32Array {
@@ -451,12 +440,7 @@ export class HierarchicalActivation {
   }
 
   #parameters(): Tensor[] {
-    return [
-      this.#temperature,
-      this.#scoreWeights,
-      this.#temporalAlpha,
-      this.#reasoningBeta,
-    ];
+    return [this.#temperature, this.#scoreWeights, this.#temporalAlpha, this.#reasoningBeta];
   }
 
   /** Public: expose parameter tensors for external optimisers (e.g. ForkMerge). */
@@ -501,12 +485,8 @@ export class HierarchicalActivation {
 
     // Temporal state
     const h1 = Tensor.vector(this.#h1State ?? new Float32Array(this.dimensions));
-    const h2 = Tensor.vector(
-      this.#meanVector(graphState?.mediumTermVectors),
-    );
-    const h3 = Tensor.vector(
-      this.#meanVector(graphState?.longTermVectors),
-    );
+    const h2 = Tensor.vector(this.#meanVector(graphState?.mediumTermVectors));
+    const h3 = Tensor.vector(this.#meanVector(graphState?.longTermVectors));
 
     // g₃: fused context
     const g3 = Tensor.sumN([g1, g2, h1, h2, h3]).l2Normalize();

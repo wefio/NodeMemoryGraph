@@ -12,7 +12,7 @@ import type {
 } from "../types.ts";
 import { normalize } from "./search-ranking.ts";
 
-const DEFAULT_ACTIVE_GRAPH_BUDGET: ActiveGraphBudget = {
+export const DEFAULT_ACTIVE_GRAPH_BUDGET: ActiveGraphBudget = {
   maxNodes: 8,
   maxEdges: 12,
   maxEvidence: 8,

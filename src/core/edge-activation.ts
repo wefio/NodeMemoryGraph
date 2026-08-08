@@ -1,5 +1,12 @@
 import type { NodeRelation, NodeRelationType } from "./types.ts";
 
+export const DEFAULT_EDGE_ACTIVATION = {
+  maxHops: 1,
+  decay: 0.7,
+  threshold: 0.02,
+  learningRate: 0.05,
+} as const;
+
 export interface DerivedEdgeActivation {
   relationId: string;
   sourceNodeId: string;
@@ -14,10 +21,9 @@ export interface EdgePropagationResult {
   edges: DerivedEdgeActivation[];
 }
 
-export function relationActivationDefaults(type: NodeRelationType): Pick<
-  NodeRelation,
-  "activationRule" | "direction" | "fanBudget"
-> {
+export function relationActivationDefaults(
+  type: NodeRelationType,
+): Pick<NodeRelation, "activationRule" | "direction" | "fanBudget"> {
   if (["contradicts", "supersedes", "exception_to"].includes(type)) {
     return {
       activationRule: "regulatory",
@@ -61,9 +67,12 @@ export function propagateEdgeActivation(
   relations: readonly NodeRelation[],
   options: { maxHops?: number; decay?: number; threshold?: number } = {},
 ): EdgePropagationResult {
-  const maxHops = Math.max(0, Math.min(4, Math.floor(options.maxHops ?? 1)));
-  const decay = clamp01(options.decay ?? 0.7);
-  const threshold = clamp01(options.threshold ?? 0.02);
+  const maxHops = Math.max(
+    0,
+    Math.min(4, Math.floor(options.maxHops ?? DEFAULT_EDGE_ACTIVATION.maxHops)),
+  );
+  const decay = clamp01(options.decay ?? DEFAULT_EDGE_ACTIVATION.decay);
+  const threshold = clamp01(options.threshold ?? DEFAULT_EDGE_ACTIVATION.threshold);
   const nodeActivations = new Map(
     [...seeds].map(([nodeId, activation]) => [nodeId, clamp01(activation)] as const),
   );
@@ -120,7 +129,8 @@ export function propagateEdgeActivation(
   return {
     nodeActivations,
     edges: [...edgeById.values()].sort(
-      (left, right) => right.activation - left.activation || left.relationId.localeCompare(right.relationId),
+      (left, right) =>
+        right.activation - left.activation || left.relationId.localeCompare(right.relationId),
     ),
   };
 }
@@ -131,7 +141,7 @@ export function updateRelationStrength(
   outcome: number,
   totalPrediction: number,
   coactivation = 1,
-  learningRate = 0.05,
+  learningRate = DEFAULT_EDGE_ACTIVATION.learningRate,
 ): number {
   return clamp01(
     current +

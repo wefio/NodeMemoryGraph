@@ -4,6 +4,27 @@ import {
   STRONG_HIT_INITIAL_TARGET,
   STRONG_HIT_TOP_GAP,
 } from "../../src/core/qpp.ts";
+import { DEFAULT_EDGE_ACTIVATION } from "../../src/core/edge-activation.ts";
+import { DEFAULT_HIERARCHICAL_ACTIVATION } from "../../src/core/hierarchical-activation.ts";
+import { DEFAULT_ACTIVE_GRAPH_BUDGET } from "../../src/core/store/active-graph.ts";
+import {
+  DEFAULT_CONSOLIDATION_POLICY,
+  DEFAULT_TOPOLOGY_POLICY,
+} from "../../src/core/store/graph.ts";
+import { DEFAULT_RETENTION_POLICY } from "../../src/core/store/maintenance.ts";
+import {
+  MIN_WARM_DISCLOSURE_SIZE,
+  SUPERSEDE_SUCCESSOR_BOOST,
+  TEMPORAL_ASOF_BOOST,
+  TEMPORAL_ASOF_DECAY_DAYS,
+} from "../../src/core/store/retrieval.ts";
+import { DEFAULT_HYBRID_WEIGHTS } from "../../src/core/store/search-ranking.ts";
+import {
+  NEAR_DUPLICATE_SCAN,
+  NEAR_DUPLICATE_THRESHOLD,
+  SUPERSEDE_CANDIDATE_MAX,
+  SUPERSEDE_MIN_SHARED_TOKENS,
+} from "../../src/core/store/writes.ts";
 
 export interface BenchmarkParameters {
   qpp: {
@@ -19,7 +40,26 @@ export interface BenchmarkParameters {
   };
   retrieval: {
     graphHopsOverride: number | null;
+    hybridWeights: typeof DEFAULT_HYBRID_WEIGHTS;
+    supersedeSuccessorBoost: number;
+    temporalAsOfBoost: number;
+    temporalAsOfDecayDays: number;
+    minimumWarmDisclosureSize: number;
   };
+  writes: {
+    nearDuplicateThreshold: number;
+    nearDuplicateScan: number;
+    supersedeMinimumSharedTokens: number;
+    supersedeCandidateMaximum: number;
+  };
+  graph: {
+    edgeActivation: typeof DEFAULT_EDGE_ACTIVATION;
+    consolidation: typeof DEFAULT_CONSOLIDATION_POLICY;
+    topology: typeof DEFAULT_TOPOLOGY_POLICY;
+  };
+  activeGraph: typeof DEFAULT_ACTIVE_GRAPH_BUDGET;
+  retention: typeof DEFAULT_RETENTION_POLICY;
+  controller: typeof DEFAULT_HIERARCHICAL_ACTIVATION;
   embeddings: {
     enabled: boolean;
     provider: string | null;
@@ -51,10 +91,7 @@ export function benchmarkParametersFromEnvironment(
         environment.NMG_QPP_INITIAL_EVIDENCE_TARGET,
         DEFAULT_INITIAL_EVIDENCE_TARGET,
       ),
-      strongHitTopGap: finiteNumber(
-        environment.NMG_QPP_STRONG_HIT_TOP_GAP,
-        STRONG_HIT_TOP_GAP,
-      ),
+      strongHitTopGap: finiteNumber(environment.NMG_QPP_STRONG_HIT_TOP_GAP, STRONG_HIT_TOP_GAP),
       strongHitInitialTarget: finiteNumber(
         environment.NMG_QPP_STRONG_HIT_INITIAL_TARGET,
         STRONG_HIT_INITIAL_TARGET,
@@ -63,7 +100,26 @@ export function benchmarkParametersFromEnvironment(
     },
     retrieval: {
       graphHopsOverride: optionalFiniteNumber(environment.NMG_GRAPH_HOPS),
+      hybridWeights: { ...DEFAULT_HYBRID_WEIGHTS },
+      supersedeSuccessorBoost: SUPERSEDE_SUCCESSOR_BOOST,
+      temporalAsOfBoost: TEMPORAL_ASOF_BOOST,
+      temporalAsOfDecayDays: TEMPORAL_ASOF_DECAY_DAYS,
+      minimumWarmDisclosureSize: MIN_WARM_DISCLOSURE_SIZE,
     },
+    writes: {
+      nearDuplicateThreshold: NEAR_DUPLICATE_THRESHOLD,
+      nearDuplicateScan: NEAR_DUPLICATE_SCAN,
+      supersedeMinimumSharedTokens: SUPERSEDE_MIN_SHARED_TOKENS,
+      supersedeCandidateMaximum: SUPERSEDE_CANDIDATE_MAX,
+    },
+    graph: {
+      edgeActivation: { ...DEFAULT_EDGE_ACTIVATION },
+      consolidation: { ...DEFAULT_CONSOLIDATION_POLICY },
+      topology: { ...DEFAULT_TOPOLOGY_POLICY },
+    },
+    activeGraph: { ...DEFAULT_ACTIVE_GRAPH_BUDGET },
+    retention: { ...DEFAULT_RETENTION_POLICY },
+    controller: { ...DEFAULT_HIERARCHICAL_ACTIVATION },
     embeddings: {
       enabled: embeddingProvider !== null,
       provider: embeddingProvider,

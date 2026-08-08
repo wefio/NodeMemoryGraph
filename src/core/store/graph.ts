@@ -27,6 +27,19 @@ import type {
   VectorEmbedder,
 } from "../types.ts";
 
+export const DEFAULT_CONSOLIDATION_POLICY = {
+  minIndependentTasks: 3,
+  promoteThreshold: 0.75,
+  demoteThreshold: 0.45,
+  cooldownMs: 7 * 24 * 60 * 60 * 1_000,
+} as const;
+
+export const DEFAULT_TOPOLOGY_POLICY = {
+  minObservations: 3,
+  minGain: 0.6,
+  cooldownMs: 7 * 24 * 60 * 60 * 1_000,
+} as const;
+
 import type { Constructor } from "./store-ctor.ts";
 import type { Router } from "../router.ts";
 import type { Float32VectorCache } from "../vector-cache.ts";
@@ -556,10 +569,21 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         pairs?: readonly (readonly [string, string])[];
       } = {},
     ): ConsolidationResult {
-      const minIndependentTasks = Math.max(2, options.minIndependentTasks ?? 3);
-      const promoteThreshold = clamp(options.promoteThreshold ?? 0.75, 0, 1);
-      const demoteThreshold = clamp(options.demoteThreshold ?? 0.45, 0, promoteThreshold);
-      const cooldownMs = Math.max(0, options.cooldownMs ?? 7 * 24 * 60 * 60 * 1_000);
+      const minIndependentTasks = Math.max(
+        2,
+        options.minIndependentTasks ?? DEFAULT_CONSOLIDATION_POLICY.minIndependentTasks,
+      );
+      const promoteThreshold = clamp(
+        options.promoteThreshold ?? DEFAULT_CONSOLIDATION_POLICY.promoteThreshold,
+        0,
+        1,
+      );
+      const demoteThreshold = clamp(
+        options.demoteThreshold ?? DEFAULT_CONSOLIDATION_POLICY.demoteThreshold,
+        0,
+        promoteThreshold,
+      );
+      const cooldownMs = Math.max(0, options.cooldownMs ?? DEFAULT_CONSOLIDATION_POLICY.cooldownMs);
       const consolidatedRelations: NodeRelation[] = [];
       const demotedRelations: NodeRelation[] = [];
       const eventIds: string[] = [];
@@ -568,7 +592,10 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
             ...new Map(
               options.pairs.map(([left, right]) => {
                 const ordered = left <= right ? [left, right] : [right, left];
-                return [ordered.join("\0"), { left_node_id: ordered[0], right_node_id: ordered[1] }];
+                return [
+                  ordered.join("\0"),
+                  { left_node_id: ordered[0], right_node_id: ordered[1] },
+                ];
               }),
             ).values(),
           ]
@@ -676,9 +703,12 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         cooldownMs?: number;
       } = {},
     ): TopologyProposal[] {
-      const minObservations = Math.max(2, options.minObservations ?? 3);
-      const minGain = clamp(options.minGain ?? 0.6, 0, 1);
-      const cooldownMs = Math.max(0, options.cooldownMs ?? 7 * 24 * 60 * 60 * 1_000);
+      const minObservations = Math.max(
+        2,
+        options.minObservations ?? DEFAULT_TOPOLOGY_POLICY.minObservations,
+      );
+      const minGain = clamp(options.minGain ?? DEFAULT_TOPOLOGY_POLICY.minGain, 0, 1);
+      const cooldownMs = Math.max(0, options.cooldownMs ?? DEFAULT_TOPOLOGY_POLICY.cooldownMs);
       const proposals: TopologyProposal[] = [];
       const pairRows = this.db
         .prepare(

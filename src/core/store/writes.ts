@@ -27,11 +27,7 @@ import {
   serializeScope,
 } from "./rows.ts";
 import type { StoreRow as Row } from "./search-ranking.ts";
-import {
-  normalizeStatement,
-  searchTerms,
-  statementSimilarity,
-} from "./search-ranking.ts";
+import { normalizeStatement, searchTerms, statementSimilarity } from "./search-ranking.ts";
 
 import type {
   DeriveMemoryInput,
@@ -484,9 +480,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       this.db.exec("BEGIN IMMEDIATE");
       try {
         this.db
-          .prepare(
-            "UPDATE memory_records SET status = 'superseded', valid_until = ? WHERE id = ?",
-          )
+          .prepare("UPDATE memory_records SET status = 'superseded', valid_until = ? WHERE id = ?")
           .run(input.validUntil ?? new Date().toISOString(), input.supersededMemoryId);
         this.db
           .prepare(
@@ -532,7 +526,9 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           // still surfaces it as stale) instead of superseded; a later ingest
           // of the same-topic new value supersedes it via supersedeCandidates.
           this.db
-            .prepare("UPDATE memory_records SET status = 'disputed' WHERE id = ? AND status = 'active'")
+            .prepare(
+              "UPDATE memory_records SET status = 'disputed' WHERE id = ? AND status = 'active'",
+            )
             .run(supersededMemoryId);
         }
       }
@@ -611,7 +607,11 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       // dialogue: "Employed" vs "employed", "healthcare." vs "healthcare".
       // Normalize tokens to lowercased alphanumerics before comparing.
       const normalizeTok = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, "");
-      const inputTokens = new Set(searchTerms(statement).map(normalizeTok).filter((t) => t.length >= 2));
+      const inputTokens = new Set(
+        searchTerms(statement)
+          .map(normalizeTok)
+          .filter((t) => t.length >= 2),
+      );
       // A transition phrase ("Moving from being employed to self-employed",
       // "transitioned from A to B") names the OLD value on the "from" side.
       // Use those words as explicit recall keys — similarity (lexical or
@@ -655,7 +655,9 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         const sim = statementSimilarity(inputNorm, normalizeStatement(rowText));
         // Near-duplicates (>= threshold) are merge candidates, not supersession ones.
         if (sim >= NEAR_DUPLICATE_THRESHOLD) continue;
-        const shared = searchTerms(rowText).map(normalizeTok).filter((t) => inputTokens.has(t)).length;
+        const shared = searchTerms(rowText)
+          .map(normalizeTok)
+          .filter((t) => inputTokens.has(t)).length;
         const transitionHit = transitionTokens.some((t) => rowText.toLowerCase().includes(t));
         const rowPol = String(row.polarity ?? "");
         const polarityHit =
@@ -675,8 +677,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       // predecessor directly), then same-topic lexical overlap.
       out.sort(
         (a, b) =>
-          Number(b.transitionHit || b.polarityHit) -
-            Number(a.transitionHit || a.polarityHit) ||
+          Number(b.transitionHit || b.polarityHit) - Number(a.transitionHit || a.polarityHit) ||
           b.c.similarity - a.c.similarity,
       );
       return out.slice(0, SUPERSEDE_CANDIDATE_MAX).map((x) => x.c);
@@ -866,13 +867,13 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
 
 // ---- duplicate detection helpers (writes cluster) ----
 /** Lexical overlap threshold above which a same-scope statement is a candidate. */
-const NEAR_DUPLICATE_THRESHOLD = 0.7;
+export const NEAR_DUPLICATE_THRESHOLD = 0.7;
 /** How many recent same-scope statements to scan for near duplicates (real
  *  stores are small; duplicates live in the recent window of a conversation). */
-const NEAR_DUPLICATE_SCAN = 50;
+export const NEAR_DUPLICATE_SCAN = 50;
 /** Supersession candidates: same-scope memories sharing >= this many content tokens. */
-const SUPERSEDE_MIN_SHARED_TOKENS = 1;
-const SUPERSEDE_CANDIDATE_MAX = 10;
+export const SUPERSEDE_MIN_SHARED_TOKENS = 1;
+export const SUPERSEDE_CANDIDATE_MAX = 10;
 
 /**
  * Detect "from X to Y" transition phrases ("Moving from being employed to

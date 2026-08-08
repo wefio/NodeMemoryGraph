@@ -34,6 +34,13 @@ import type {
   VectorEmbedder,
 } from "../types.ts";
 
+export const DEFAULT_RETENTION_POLICY = {
+  dormantAfterDays: 365,
+  quarantineAfterDays: 365,
+  maximumImportance: 0.25,
+  maximumAccessCount: 1,
+} as const;
+
 import { nowMs } from "../perf.ts";
 import { blockTiers, huffmanDepths } from "../hierarchy.ts";
 import { Float32VectorCache } from "../vector-cache.ts";
@@ -284,10 +291,23 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
      */
     retentionCandidates(policy: RetentionPolicy = {}): RetentionCandidate[] {
       const now = policy.now ?? new Date();
-      const dormantAfterDays = Math.max(1, policy.dormantAfterDays ?? 365);
-      const quarantineAfterDays = Math.max(1, policy.quarantineAfterDays ?? 365);
-      const maximumImportance = clamp(policy.maximumImportance ?? 0.25, 0, 1);
-      const maximumAccessCount = Math.max(0, policy.maximumAccessCount ?? 1);
+      const dormantAfterDays = Math.max(
+        1,
+        policy.dormantAfterDays ?? DEFAULT_RETENTION_POLICY.dormantAfterDays,
+      );
+      const quarantineAfterDays = Math.max(
+        1,
+        policy.quarantineAfterDays ?? DEFAULT_RETENTION_POLICY.quarantineAfterDays,
+      );
+      const maximumImportance = clamp(
+        policy.maximumImportance ?? DEFAULT_RETENTION_POLICY.maximumImportance,
+        0,
+        1,
+      );
+      const maximumAccessCount = Math.max(
+        0,
+        policy.maximumAccessCount ?? DEFAULT_RETENTION_POLICY.maximumAccessCount,
+      );
       const rows = this.db
         .prepare(
           `SELECT m.id, m.node_id, m.statement, m.memory_type, m.evidence_role,
@@ -880,9 +900,9 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
           evidence: 0,
           estimatedTokens: 0,
           graphHops: 0,
-        deepestTier: 0,
-        tiersOpened: 1,
-        deepEvidence: 0,
+          deepestTier: 0,
+          tiersOpened: 1,
+          deepEvidence: 0,
           latencyMs: 0,
           exhausted: [],
         }),
@@ -941,9 +961,9 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       const observedUsedMemoryIds = [...new Set(input.usedMemoryIds)].filter((id) =>
         resultMemoryIds.has(id),
       );
-      const observedContradictedMemoryIds = [
-        ...new Set(input.contradictedMemoryIds ?? []),
-      ].filter((id) => resultMemoryIds.has(id));
+      const observedContradictedMemoryIds = [...new Set(input.contradictedMemoryIds ?? [])].filter(
+        (id) => resultMemoryIds.has(id),
+      );
       const observedRejectedMemoryIds = [...new Set(input.rejectedMemoryIds ?? [])].filter((id) =>
         resultMemoryIds.has(id),
       );
@@ -968,9 +988,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       const observedContradictedNodeIds = new Set(
         this.nodeIdsForMemories(observedContradictedMemoryIds),
       );
-      const observedRejectedNodeIds = new Set(
-        this.nodeIdsForMemories(observedRejectedMemoryIds),
-      );
+      const observedRejectedNodeIds = new Set(this.nodeIdsForMemories(observedRejectedMemoryIds));
       const resultNodeIds = parseStringArray(row.result_node_ids_json).sort();
       const observedPairs: Array<readonly [string, string]> = [];
       const relationIds = parseStringArray(row.relation_ids_json);
