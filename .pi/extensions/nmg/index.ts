@@ -83,6 +83,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         maxTier: configuredAutoRecallTier(),
         limit: configuredAutoRecallLimit(),
         initialEvidenceTarget: configuredInitialTarget(),
+        strongHitTopGap: configuredStrongHitTopGap(),
+        strongHitInitialTarget: configuredStrongHitInitialTarget(),
         secondPass: true,
         graphHops: 1,
         tieredDisclosure: true,
@@ -299,6 +301,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       includeHistorical: Type.Optional(Type.Boolean()),
       graphHops: Type.Optional(Type.Number({ minimum: 0, maximum: 3 })),
       secondPass: Type.Optional(Type.Boolean()),
+      initialEvidenceTarget: Type.Optional(Type.Number({ minimum: 1, maximum: 50 })),
+      strongHitTopGap: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+      strongHitInitialTarget: Type.Optional(Type.Number({ minimum: 1, maximum: 50 })),
       tieredDisclosure: Type.Optional(Type.Boolean()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -448,6 +453,16 @@ function configuredAutoRecallLimit(): number {
 function configuredInitialTarget(): number {
   const value = Number(process.env.NMG_AUTO_RECALL_INITIAL_TARGET ?? 13);
   return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 13));
+}
+
+function configuredStrongHitTopGap(): number {
+  const value = Number(process.env.NMG_AUTO_RECALL_STRONG_HIT_TOP_GAP ?? 0.05);
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0.05));
+}
+
+function configuredStrongHitInitialTarget(): number {
+  const value = Number(process.env.NMG_AUTO_RECALL_STRONG_HIT_INITIAL_TARGET ?? 3);
+  return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 3));
 }
 
 function shouldAutoRecall(prompt: string): boolean {

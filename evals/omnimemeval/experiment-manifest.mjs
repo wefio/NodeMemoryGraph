@@ -137,6 +137,17 @@ const defaultParams = {
   answer_temperature: paramIn(join(omni, "scripts/longmemeval/lme_responses.py"), "temperature"),
   judge_temperature: paramIn(join(omni, "scripts/longmemeval/lme_eval.py"), "temperature"),
 };
+const resolvedNumber = (name, fallback) => {
+  const value = Number(env[name]);
+  return env[name] !== undefined && Number.isFinite(value) ? value : fallback;
+};
+const resolvedNmg = {
+  qppSecondPass: env.NMG_QPP_SECOND_PASS !== "0",
+  initialEvidenceTarget: resolvedNumber("NMG_QPP_INITIAL_EVIDENCE_TARGET", 13),
+  threshold: resolvedNumber("NMG_QPP_THRESHOLD", 0.55),
+  strongHitTopGap: resolvedNumber("NMG_QPP_STRONG_HIT_TOP_GAP", 0.05),
+  strongHitInitialTarget: resolvedNumber("NMG_QPP_STRONG_HIT_INITIAL_TARGET", 3),
+};
 
 // ── Dataset ────────────────────────────────────────────────────────────────
 const datasetPath = join(omni, "data/longmemeval/longmemeval_s_cleaned.json");
@@ -215,7 +226,12 @@ const manifest = {
       NMG_EMBED_MODEL: env.NMG_EMBED_MODEL ?? null,
       NMG_EMBED_PROFILE: env.NMG_EMBED_PROFILE ?? null,
       NMG_QPP_SECOND_PASS: env.NMG_QPP_SECOND_PASS ?? null,
+      NMG_QPP_INITIAL_EVIDENCE_TARGET: env.NMG_QPP_INITIAL_EVIDENCE_TARGET ?? null,
+      NMG_QPP_THRESHOLD: env.NMG_QPP_THRESHOLD ?? null,
+      NMG_QPP_STRONG_HIT_TOP_GAP: env.NMG_QPP_STRONG_HIT_TOP_GAP ?? null,
+      NMG_QPP_STRONG_HIT_INITIAL_TARGET: env.NMG_QPP_STRONG_HIT_INITIAL_TARGET ?? null,
     },
+    nmg_resolved: resolvedNmg,
     llm_defaults: defaultParams,
   },
   dataset,

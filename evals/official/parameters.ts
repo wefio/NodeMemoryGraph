@@ -1,4 +1,9 @@
-import { DEFAULT_QPP_THRESHOLD } from "../../src/core/qpp.ts";
+import {
+  DEFAULT_INITIAL_EVIDENCE_TARGET,
+  DEFAULT_QPP_THRESHOLD,
+  STRONG_HIT_INITIAL_TARGET,
+  STRONG_HIT_TOP_GAP,
+} from "../../src/core/qpp.ts";
 
 export interface BenchmarkParameters {
   qpp: {
@@ -7,7 +12,9 @@ export interface BenchmarkParameters {
     qpp2RetainedMass: number;
     searchRecommendation: "advisory" | "guardrail" | "off";
     progressiveSecondPass: boolean;
-    initialEvidenceTarget: number | null;
+    initialEvidenceTarget: number;
+    strongHitTopGap: number;
+    strongHitInitialTarget: number;
     threshold: number;
   };
   retrieval: {
@@ -40,7 +47,18 @@ export function benchmarkParametersFromEnvironment(
         "off",
       ),
       progressiveSecondPass: environment.NMG_QPP_SECOND_PASS === "1",
-      initialEvidenceTarget: optionalFiniteNumber(environment.NMG_QPP_INITIAL_EVIDENCE_TARGET),
+      initialEvidenceTarget: finiteNumber(
+        environment.NMG_QPP_INITIAL_EVIDENCE_TARGET,
+        DEFAULT_INITIAL_EVIDENCE_TARGET,
+      ),
+      strongHitTopGap: finiteNumber(
+        environment.NMG_QPP_STRONG_HIT_TOP_GAP,
+        STRONG_HIT_TOP_GAP,
+      ),
+      strongHitInitialTarget: finiteNumber(
+        environment.NMG_QPP_STRONG_HIT_INITIAL_TARGET,
+        STRONG_HIT_INITIAL_TARGET,
+      ),
       threshold: finiteNumber(environment.NMG_QPP_THRESHOLD, DEFAULT_QPP_THRESHOLD),
     },
     retrieval: {

@@ -400,3 +400,28 @@ test("an unbuilt optional embedding index degrades without blocking lexical sear
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("search protocol preserves Pi QPP evidence-window overrides", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-qpp-options-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    for (let index = 0; index < 5; index += 1) {
+      await service.invoke("remember", {
+        statement: `Atlas deployment evidence item ${index}.`,
+        nodeName: `Atlas evidence ${index}`,
+      });
+    }
+    const searched = await service.invoke("search", {
+      query: "Atlas deployment evidence",
+      limit: 5,
+      secondPass: true,
+      initialEvidenceTarget: 1,
+      strongHitTopGap: 1,
+      strongHitInitialTarget: 1,
+    });
+    assert.equal(searched.activeGraph?.qpp?.expansion?.stages[0]?.targetEvidence, 1);
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
