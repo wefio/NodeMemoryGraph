@@ -209,7 +209,10 @@ export class OmniMemEvalBridge {
           sourceActor: "user",
           truthStatus: "asserted",
           evidenceHistoryId: history.id,
-          tier: 0,
+          // A revocation is critical when its subject is queried, but it is not
+          // a global resident constraint. Keeping it in the searchable tier
+          // prevents an unrelated revocation from crowding out exact evidence.
+          tier: 2,
           importance: 1,
           scope: { benchmark: "OmniMemEval", user: userKey(userId) },
           writeReason: "explicit_user_forget_request",

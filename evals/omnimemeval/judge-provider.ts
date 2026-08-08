@@ -123,6 +123,7 @@ export class OpenAiCompatibleJudgeClient implements JudgeClient {
       ],
       stream: false,
     };
+    const deepSeekRequest = /deepseek/i.test(this.baseUrl) || /deepseek/i.test(this.model);
     if (this.#thinking) {
       // DeepSeek reasoning models (deepseek-v4-pro / deepseek-reasoner) take
       // thinking + reasoning_effort and reject temperature. Official example:
@@ -130,13 +131,15 @@ export class OpenAiCompatibleJudgeClient implements JudgeClient {
       //   "thinking":{"type":"enabled"},"reasoning_effort":"high","stream":false,...}'
       body.thinking = { type: "enabled" };
       body.reasoning_effort = this.#reasoningEffort;
-    } else {
+    } else if (deepSeekRequest) {
       body.temperature = 0;
       // DeepSeek V4 defaults to thinking mode server-side even when the
       // client sends no thinking field — that emits reasoning_content and can
       // leave content empty (slow + parse failures). Always send the explicit
       // disabled flag unless thinking was requested.
       body.thinking = { type: "disabled" };
+    } else {
+      body.temperature = 0;
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
