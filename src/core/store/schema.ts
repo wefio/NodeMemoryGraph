@@ -105,6 +105,35 @@ export function migrate(db: DatabaseSync): void {
       PRIMARY KEY (derived_memory_id, source_memory_id)
     );
 
+    CREATE TABLE IF NOT EXISTS claim_posteriors (
+      memory_id TEXT NOT NULL REFERENCES memory_records(id) ON DELETE CASCADE,
+      claim_index INTEGER NOT NULL,
+      claim_text TEXT NOT NULL,
+      prior_confidence REAL NOT NULL,
+      alpha REAL NOT NULL,
+      beta REAL NOT NULL,
+      independent_vote_count INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (memory_id, claim_index)
+    );
+
+    CREATE TABLE IF NOT EXISTS claim_outcome_events (
+      id TEXT PRIMARY KEY,
+      memory_id TEXT NOT NULL REFERENCES memory_records(id) ON DELETE CASCADE,
+      claim_index INTEGER NOT NULL,
+      semantic_task_id TEXT NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('benchmark', 'task', 'tool', 'user')),
+      source_lineage TEXT NOT NULL,
+      outcome TEXT NOT NULL CHECK (outcome IN ('supported', 'contradicted')),
+      weight REAL NOT NULL CHECK (weight > 0 AND weight <= 1),
+      active_graph_id TEXT REFERENCES retrieval_traces(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE (memory_id, claim_index, semantic_task_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_claim_outcome_events_task
+      ON claim_outcome_events(semantic_task_id, created_at);
+
     CREATE TABLE IF NOT EXISTS node_relations (
       id TEXT PRIMARY KEY,
       source_node_id TEXT NOT NULL REFERENCES memory_nodes(id),
@@ -138,6 +167,13 @@ export function migrate(db: DatabaseSync): void {
       target_node_id TEXT NOT NULL REFERENCES memory_nodes(id),
       transform_id TEXT NOT NULL REFERENCES node_transforms(id),
       PRIMARY KEY (source_node_id, target_node_id, transform_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS node_transform_journals (
+      transform_id TEXT PRIMARY KEY REFERENCES node_transforms(id),
+      snapshot_json TEXT NOT NULL,
+      expected_json TEXT NOT NULL,
+      rolled_back_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS memory_embeddings (
@@ -250,6 +286,19 @@ export function migrate(db: DatabaseSync): void {
       PRIMARY KEY (section)
     );
 
+    CREATE TABLE IF NOT EXISTS maintenance_runs (
+      id TEXT PRIMARY KEY,
+      phase TEXT NOT NULL,
+      considered_nodes INTEGER NOT NULL,
+      rows_touched INTEGER NOT NULL,
+      details_json TEXT NOT NULL DEFAULT '{}',
+      duration_ms REAL NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_maintenance_runs_created_at
+      ON maintenance_runs(created_at);
+
     CREATE TABLE IF NOT EXISTS node_retrieval_signals (
       node_id TEXT PRIMARY KEY REFERENCES memory_nodes(id),
       query_count INTEGER NOT NULL DEFAULT 0,
@@ -318,6 +367,7 @@ export function migrate(db: DatabaseSync): void {
       relation_type TEXT,
       partitions_json TEXT NOT NULL,
       evidence_trace_ids_json TEXT NOT NULL,
+      evidence_memory_ids_json TEXT NOT NULL DEFAULT '[]',
       observations INTEGER NOT NULL,
       estimated_gain REAL NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
@@ -379,6 +429,7 @@ export function migrate(db: DatabaseSync): void {
   ensureEmbeddingTable(db);
   ensureNodeColumns(db);
   ensureRelationColumns(db);
+  ensureTopologyProposalColumns(db);
   ensureRetrievalTraceColumns(db);
   ensurePerfAggregateColumns(db);
   ensureDeltaColumns(db);
@@ -583,9 +634,24 @@ export function ensureRelationColumns(db: DatabaseSync): void {
       ELSE 'conductive' END`);
   }
   if (!existing.has("fan_budget")) {
-    db.exec("UPDATE node_relations SET fan_budget = CASE WHEN relation_type = 'derived_from' THEN 0 ELSE 1 END");
+    db.exec(
+      "UPDATE node_relations SET fan_budget = CASE WHEN relation_type = 'derived_from' THEN 0 ELSE 1 END",
+    );
   }
   db.exec("UPDATE node_relations SET consolidated_at = created_at WHERE consolidated_at IS NULL");
+}
+
+export function ensureTopologyProposalColumns(db: DatabaseSync): void {
+  const existing = new Set(
+    (db.prepare("PRAGMA table_info(topology_proposals)").all() as Row[]).map((row) =>
+      String(row.name),
+    ),
+  );
+  if (!existing.has("evidence_memory_ids_json")) {
+    db.exec(
+      "ALTER TABLE topology_proposals ADD COLUMN evidence_memory_ids_json TEXT NOT NULL DEFAULT '[]'",
+    );
+  }
 }
 
 export function ensureRetrievalTraceColumns(db: DatabaseSync): void {

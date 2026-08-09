@@ -189,6 +189,74 @@ test("mergeNodes throws when given fewer than two source nodes", () => {
 
 // ── splitNode ──
 
+test("rollbackNodeTransform restores merge memory ownership, relations, and redirects", () => {
+  withStore((store) => {
+    const first = store.remember({
+      statement: "first fact",
+      nodeName: "rollback source one",
+      memoryType: "fact",
+    });
+    const second = store.remember({
+      statement: "second fact",
+      nodeName: "rollback source two",
+      memoryType: "fact",
+    });
+    const neighbor = store.remember({
+      statement: "neighbor fact",
+      nodeName: "rollback neighbor",
+      memoryType: "fact",
+    });
+    const relation = store.linkNodes({
+      sourceNodeId: first.node.id,
+      targetNodeId: neighbor.node.id,
+      type: "related_to",
+      evidenceIds: [first.history.id],
+    });
+    const transform = store.mergeNodes({
+      sourceNodeIds: [first.node.id, second.node.id],
+      targetName: "rollback merged target",
+    });
+
+    const rolledBack = store.rollbackNodeTransform(transform.id);
+    assert.ok(rolledBack.rolledBackAt);
+    const context = store.getContext([first.memory.id, second.memory.id]);
+    assert.deepEqual(
+      new Set(context.results.map((result) => result.node.id)),
+      new Set([first.node.id, second.node.id]),
+    );
+    assert.equal(
+      store.getRelations([first.node.id], 1).some((item) => item.id === relation.id),
+      true,
+    );
+    assert.throws(() => store.rollbackNodeTransform(transform.id), /already rolled back/u);
+  });
+});
+
+test("rollbackNodeTransform refuses to overwrite topology changed after merge", () => {
+  withStore((store) => {
+    const first = store.remember({ statement: "first", nodeName: "conflict source one" });
+    const second = store.remember({ statement: "second", nodeName: "conflict source two" });
+    const neighbor = store.remember({ statement: "neighbor", nodeName: "conflict neighbor" });
+    const transform = store.mergeNodes({
+      sourceNodeIds: [first.node.id, second.node.id],
+      targetName: "conflict merged target",
+    });
+    store.linkNodes({
+      sourceNodeId: transform.targetNodeIds[0]!,
+      targetNodeId: neighbor.node.id,
+      type: "related_to",
+    });
+    assert.throws(
+      () => store.rollbackNodeTransform(transform.id),
+      /related topology changed after the merge/u,
+    );
+    assert.equal(
+      store.getContext([first.memory.id]).results[0]!.node.id,
+      transform.targetNodeIds[0],
+    );
+  });
+});
+
 test("splitNode partitions source memories into distinct target nodes", () => {
   withStore((store) => {
     const src = store.remember({
@@ -382,6 +450,110 @@ test("topologyProposals returns empty list on a fresh store", () => {
   withStore((store) => {
     const proposals = store.topologyProposals();
     assert.deepEqual(proposals, []);
+  });
+});
+
+test("semantic relation proposals preserve evidence and never merge node identity", () => {
+  withStore((store) => {
+    const refined = store.remember({
+      statement: "Atlas offline storage uses SQLite",
+      nodeName: "Atlas offline storage",
+    });
+    const general = store.remember({
+      statement: "Atlas has a storage subsystem",
+      nodeName: "Atlas storage",
+    });
+    const proposal = store.proposeSemanticRelation({
+      sourceNodeId: refined.node.id,
+      targetNodeId: general.node.id,
+      relationType: "refines",
+      evidenceMemoryIds: [refined.memory.id, general.memory.id],
+      confidence: 0.8,
+    });
+    assert.equal(proposal.status, "pending");
+    assert.deepEqual(proposal.evidenceMemoryIds, [refined.memory.id, general.memory.id]);
+    assert.notEqual(refined.node.id, general.node.id);
+
+    const accepted = store.reviewTopologyProposal(proposal.id, "accept");
+    assert.equal(accepted.status, "accepted");
+    const relation = store
+      .getRelations([refined.node.id])
+      .find((candidate) => candidate.type === "refines");
+    assert.ok(relation);
+    assert.equal(relation.direction, "target->source");
+    assert.equal(relation.fanBudget, false);
+    assert.deepEqual(
+      new Set(relation.evidenceIds),
+      new Set([refined.history.id, general.history.id]),
+    );
+    // A relation, even accepted with strong evidence, is not a node merge.
+    assert.deepEqual(
+      new Set(store.routeNodes("Atlas", 10).map((route) => route.node.id)),
+      new Set([refined.node.id, general.node.id]),
+    );
+  });
+});
+
+test("same-as and distinct-from are regulatory proposals, not traversal edges", () => {
+  withStore((store) => {
+    const left = store.remember({ statement: "Sam uses Linux", nodeName: "Sam A" });
+    const right = store.remember({ statement: "Sam works remotely", nodeName: "Sam B" });
+    for (const relationType of ["same_as", "distinct_from"] as const) {
+      const proposal = store.proposeSemanticRelation({
+        sourceNodeId: left.node.id,
+        targetNodeId: right.node.id,
+        relationType,
+        evidenceMemoryIds: [left.memory.id, right.memory.id],
+      });
+      store.reviewTopologyProposal(proposal.id, "accept");
+      const relation = store
+        .getRelations([left.node.id])
+        .find((candidate) => candidate.type === relationType);
+      assert.ok(relation);
+      assert.equal(relation.activationRule, "regulatory");
+      assert.equal(relation.fanBudget, false);
+    }
+  });
+});
+
+test("automatic merge gate accumulates evidence but never mutates topology", () => {
+  withStore((store) => {
+    const left = [0, 1, 2].map((index) =>
+      store.remember({
+        statement: `Sam identity evidence A${index}`,
+        nodeName: "Sam A",
+        scope: { person: "sam" },
+      }),
+    );
+    const right = [0, 1, 2].map((index) =>
+      store.remember({
+        statement: `Sam identity evidence B${index}`,
+        nodeName: "Sam B",
+        scope: { person: "sam" },
+      }),
+    );
+    let proposal = store.proposeSemanticRelation({
+      sourceNodeId: left[0]!.node.id,
+      targetNodeId: right[0]!.node.id,
+      relationType: "same_as",
+      evidenceMemoryIds: [left[0]!.memory.id, right[0]!.memory.id],
+      confidence: 0.99,
+    });
+    assert.equal(store.assessAutomaticMergeProposal(proposal.id).eligible, false);
+    for (let index = 0; index < 4; index += 1) {
+      proposal = store.proposeSemanticRelation({
+        sourceNodeId: left[0]!.node.id,
+        targetNodeId: right[0]!.node.id,
+        relationType: "same_as",
+        evidenceMemoryIds: [left[index % 3]!.memory.id, right[index % 3]!.memory.id],
+        confidence: 0.99,
+      });
+    }
+    const assessment = store.assessAutomaticMergeProposal(proposal.id);
+    assert.equal(assessment.eligible, true);
+    assert.equal(proposal.observations, 5);
+    assert.equal(store.topologyProposals("pending").length, 1);
+    assert.equal(store.getRelations([left[0]!.node.id]).length, 0);
   });
 });
 

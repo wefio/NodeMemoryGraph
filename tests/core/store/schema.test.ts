@@ -19,9 +19,9 @@ function withDatabase(run: (db: DatabaseSync) => void): void {
 }
 
 function tableNames(db: DatabaseSync): Set<string> {
-  const rows = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
-    .all() as Array<{ name: string }>;
+  const rows = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{
+    name: string;
+  }>;
   return new Set(rows.map((row) => row.name));
 }
 
@@ -33,6 +33,9 @@ test("migrate creates the core graph tables", () => {
       "history_records",
       "memory_nodes",
       "memory_records",
+      "claim_posteriors",
+      "claim_outcome_events",
+      "maintenance_runs",
       "node_relations",
       "memory_embeddings",
       "embedding_index_state",

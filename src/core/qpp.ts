@@ -35,16 +35,19 @@ import type {
 } from "./types.ts";
 
 /**
- * Stage 1 initial weights (hand-set priors). Replaced by Bayesian optimisation
- * (Stage 1) then DC gradient (Stage 2). Top1 carries implicit weight 1.0 as the
- * absolute anchor; NQC carries wNqc.
+ * Untrained engineered prior. Top1 carries implicit weight 1.0 as the absolute
+ * anchor; NQC carries 0.5 so dispersion can request more evidence without
+ * overwhelming a genuinely strong hit. It stays frozen until independently
+ * labelled real-use traces justify calibration.
  */
 export const DEFAULT_QPP_WEIGHTS: QppWeights = { wNqc: 0.5 };
 
 /**
  * Stage 0/1 initial trigger threshold on C. C = Top1 + 0.5·NQC, so a single
  * strong hit (Top1 ≥ 0.7) clears it; a flat weak distribution does not.
- * Placeholder — must be calibrated on the partial-evidence eval batch.
+ * Conservative uncalibrated operating point. Benchmark traces are regression
+ * evidence only; a calibrated default requires held-out, production-like
+ * sufficiency and cost labels.
  */
 export const DEFAULT_QPP_THRESHOLD = 0.55;
 

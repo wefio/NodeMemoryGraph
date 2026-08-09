@@ -113,6 +113,76 @@ export function copyLtgSubsetToStg(
 }
 
 /**
+ * Materialize one outcome-qualified, session-local memory into authoritative LTG.
+ *
+ * This is intentionally a copy across stores rather than `promoteMemory`: STG
+ * and LTG are separate SQLite databases.  Cached LTG hints are rejected to
+ * prevent a copy loop.  `remember` supplies exact same-scope deduplication, so
+ * retrying after a crash is idempotent at the semantic-record boundary.
+ */
+export function consolidateStgMemoryToLtg(
+  stg: NmgStore,
+  ltg: NmgStore,
+  memoryId: string,
+): ReturnType<NmgStore["remember"]> {
+  const context = stg.getContext([memoryId], 0);
+  const result = context.results.find((candidate) => candidate.memory.id === memoryId);
+  if (!result) throw new Error(`STG memory ${memoryId} does not exist`);
+  const { memory, node, evidence } = result;
+  if (memory.residence !== "stg") throw new Error(`memory ${memoryId} is not resident in STG`);
+  if (memory.markers.some((marker) => marker.kind === "cached_from_ltg")) {
+    throw new Error(`memory ${memoryId} is a cached_from_ltg copy and cannot be consolidated`);
+  }
+  return ltg.remember({
+    statement: memory.statement,
+    nodeName: node.canonicalName,
+    nodeSummary: node.summary,
+    nodeKind: node.kind,
+    memoryType: memory.memoryType,
+    stateKey: memory.stateKey ?? undefined,
+    eventTime: memory.eventTime ?? undefined,
+    sourceActor: memory.sourceActor,
+    truthStatus: memory.truthStatus,
+    confidence: memory.confidence ?? undefined,
+    polarity: memory.polarity ?? undefined,
+    predicateKey: memory.predicateKey ?? undefined,
+    extractMethod: memory.extractMethod ?? undefined,
+    claims: memory.claims ?? undefined,
+    markers: [
+      ...memory.markers,
+      {
+        kind: "consolidated_from_stg",
+        attributes: { sourceMemoryId: memory.id },
+      },
+    ],
+    evidence: evidence?.content ?? memory.statement,
+    sourceRef: evidence?.sourceRef ?? undefined,
+    tier: memory.tier,
+    importance: memory.importance,
+    scope: memory.scope,
+    validFrom: memory.validFrom ?? undefined,
+    validUntil: memory.validUntil ?? undefined,
+    evidenceRole: memory.evidenceRole,
+    residence: "ltg",
+    writeReason: "stg_outcome_consolidation",
+    writeSource: "automatic",
+  });
+}
+
+/**
+ * Withdraw only LTG rows that were automatically materialized from this exact
+ * STG source. Pre-existing/manual LTG duplicates carry no source marker and are
+ * deliberately left untouched.
+ */
+export function retractStgConsolidation(ltg: NmgStore, sourceMemoryId: string): string[] {
+  const retracted: string[] = [];
+  for (const memory of ltg.consolidatedFromStg(sourceMemoryId)) {
+    if (ltg.deleteMemory(memory.id)) retracted.push(memory.id);
+  }
+  return retracted;
+}
+
+/**
  * Phase 3 — STG-first dual-store search.
  *
  * Searches the project STG first (local, fast, project-scoped). If the

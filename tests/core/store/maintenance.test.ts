@@ -106,6 +106,47 @@ test("deleteMemory: deleted memories are filtered from getContext", () => {
   });
 });
 
+test("deleteMemory: scrubs Active Graph references and rejects dependent pending proposals", () => {
+  withStore((store) => {
+    const target = store.remember({
+      statement: "Atlas stores an index in SQLite",
+      nodeName: "Atlas index",
+      sourceActor: "user",
+    });
+    const neighbour = store.remember({
+      statement: "Atlas has offline storage",
+      nodeName: "Atlas storage",
+      sourceActor: "user",
+    });
+    const traceId = store.recordRetrievalTrace({
+      query: "Atlas storage",
+      resultMemoryIds: [target.memory.id, neighbour.memory.id],
+      resultNodeIds: [target.node.id, neighbour.node.id],
+      usefulMemoryIds: [target.memory.id],
+      contradictedMemoryIds: [target.memory.id],
+      rejectedMemoryIds: [target.memory.id],
+    });
+    const proposal = store.proposeSemanticRelation({
+      sourceNodeId: target.node.id,
+      targetNodeId: neighbour.node.id,
+      relationType: "refines",
+      evidenceMemoryIds: [target.memory.id, neighbour.memory.id],
+    });
+
+    store.deleteMemory(target.memory.id);
+
+    const trace = store.retrievalTrace(traceId);
+    assert.deepEqual(trace?.resultMemoryIds, [neighbour.memory.id]);
+    assert.deepEqual(trace?.usefulMemoryIds, []);
+    assert.deepEqual(trace?.contradictedMemoryIds, []);
+    assert.deepEqual(trace?.rejectedMemoryIds, []);
+    assert.equal(
+      store.topologyProposals("rejected").some((candidate) => candidate.id === proposal.id),
+      true,
+    );
+  });
+});
+
 // ── promoteMemory / demoteMemory tier migration ──
 
 test("promoteMemory: promotes STG memory to LTG", () => {
@@ -570,6 +611,70 @@ test("rebalanceDueNodes: returns results for nodes above threshold", () => {
     });
     const results = store.rebalanceDueNodes(0);
     assert.ok(Array.isArray(results));
+  });
+});
+
+test("runDueMaintenance compacts write deltas and rebalances access changes within a node budget", () => {
+  withStore((store) => {
+    const writeDue = store.remember({
+      statement: "bounded maintenance write",
+      nodeName: "bounded write node",
+    });
+    const accessDue = store.remember({
+      statement: "bounded maintenance access",
+      nodeName: "bounded access node",
+    });
+    store.recordUsage([accessDue.memory.id]);
+
+    const first = store.runDueMaintenance({
+      writeThreshold: 1,
+      accessThreshold: 1,
+      nodeLimit: 1,
+    });
+    assert.equal(first.consideredNodes, 1, "one batch never exceeds its node budget");
+
+    const second = store.runDueMaintenance({
+      writeThreshold: 1,
+      accessThreshold: 1,
+      nodeLimit: 2,
+    });
+    assert.ok(
+      first.compactedNodeIds.includes(writeDue.memory.nodeId) ||
+        second.compactedNodeIds.includes(writeDue.memory.nodeId),
+    );
+    assert.ok(
+      first.rebalancedNodeIds.includes(accessDue.memory.nodeId) ||
+        second.rebalancedNodeIds.includes(accessDue.memory.nodeId),
+    );
+    assert.equal(store.pendingIndexDelta().length, 0);
+    assert.ok(
+      store.perfAggregates().some((aggregate) => aggregate.section === "maintenance.batch"),
+    );
+    const persisted = store.maintenanceRuns();
+    assert.equal(persisted.length, 2);
+    assert.ok(persisted.every((run) => run.durationMs >= 0 && run.rowsTouched >= 0));
+  });
+});
+
+test("runSemanticMaintenance expires STG records and keeps topology changes proposal-only", () => {
+  withStore((store) => {
+    const expired = store.remember({
+      statement: "expired session-local observation",
+      nodeName: "expired session node",
+      residence: "stg",
+      expiresAt: "2020-01-01T00:00:00.000Z",
+    });
+    const result = store.runSemanticMaintenance({
+      expiryLimit: 1,
+      pairLimit: 1,
+      topologyNodeLimit: 1,
+    });
+    assert.deepEqual(result.expiredMemoryIds, [expired.memory.id]);
+    assert.equal(store.getMemory(expired.memory.id)?.status, "inactive");
+    assert.deepEqual(result.proposedTopologyIds, []);
+    assert.ok(
+      store.perfAggregates().some((aggregate) => aggregate.section === "maintenance.semantic"),
+    );
   });
 });
 

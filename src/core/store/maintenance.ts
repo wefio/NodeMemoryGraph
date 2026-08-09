@@ -13,10 +13,13 @@ import { randomUUID } from "node:crypto";
 
 import type { DatabaseSync } from "node:sqlite";
 import type {
+  ClaimOutcomeEvent,
+  ClaimPosterior,
   ConsolidationEvent,
   EmbeddingIndexHealth,
   HistoryRecord,
   LeafBlock,
+  MaintenanceBatchResult,
   MemoryNode,
   MemoryNodeKind,
   MemoryRecord,
@@ -27,21 +30,16 @@ import type {
   MemoryWriteEvent,
   PerfAggregate,
   RebalanceResult,
+  RecordClaimOutcomesInput,
   RetentionCandidate,
   RetentionPolicy,
   RetrievalTrace,
   RetrievalTraceInput,
   VectorEmbedder,
 } from "../types.ts";
+import { PerfTimer, SECTION, nowMs } from "../perf.ts";
+import { DEFAULT_RETENTION_POLICY } from "./graph-policy.ts";
 
-export const DEFAULT_RETENTION_POLICY = {
-  dormantAfterDays: 365,
-  quarantineAfterDays: 365,
-  maximumImportance: 0.25,
-  maximumAccessCount: 1,
-} as const;
-
-import { nowMs } from "../perf.ts";
 import { blockTiers, huffmanDepths } from "../hierarchy.ts";
 import { Float32VectorCache } from "../vector-cache.ts";
 
@@ -75,6 +73,9 @@ import type { Constructor } from "./store-ctor.ts";
 
 export function withMaintenance<TBase extends Constructor>(Base: TBase) {
   return class extends Base {
+    declare protected recordPerfAggregates: (
+      timings: import("../types.ts").PerfSnapshot | undefined,
+    ) => void;
     // Base-class members (provided by constructor)
     declare protected db: DatabaseSync;
     declare protected embedder: VectorEmbedder;
@@ -129,6 +130,206 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
     declare reconcileConsolidation: (options?: {
       pairs?: readonly (readonly [string, string])[];
     }) => unknown;
+
+    /**
+     * Record strong, independently attributable outcomes for atomic claims.
+     *
+     * Retrieval and rendering are deliberately insufficient: callers must
+     * provide an explicit supported/contradicted result and semantic task ID.
+     * The UNIQUE task key prevents repeated turns from self-reinforcing the
+     * same claim. Posteriors are shadow metadata until a calibrated retrieval
+     * policy explicitly consumes them.
+     */
+    recordClaimOutcomes(input: RecordClaimOutcomesInput): {
+      events: ClaimOutcomeEvent[];
+      posteriors: ClaimPosterior[];
+    } {
+      const semanticTaskId = requireText(input.semanticTaskId, "semanticTaskId");
+      if (input.votes.length === 0) return { events: [], posteriors: [] };
+      let permittedMemoryIds: Set<string> | null = null;
+      if (input.activeGraphId) {
+        const trace = this.db
+          .prepare("SELECT * FROM retrieval_traces WHERE id = ?")
+          .get(input.activeGraphId) as Row | undefined;
+        if (!trace) throw new Error(`active graph ${input.activeGraphId} does not exist`);
+        this.assertTraceOwner(trace, input.sessionId);
+        permittedMemoryIds = new Set(parseStringArray(trace.result_memory_ids_json));
+      }
+
+      const seen = new Map<string, string>();
+      const prepared: Array<{
+        memoryId: string;
+        claimIndex: number;
+        claimText: string;
+        priorConfidence: number;
+        outcome: "supported" | "contradicted";
+        source: ClaimOutcomeEvent["source"];
+        sourceLineage: string;
+        weight: number;
+      }> = [];
+      for (const vote of input.votes) {
+        if (permittedMemoryIds && !permittedMemoryIds.has(vote.memoryId)) {
+          throw new Error(
+            `memory ${vote.memoryId} was not exposed by active graph ${input.activeGraphId}`,
+          );
+        }
+        const row = this.db
+          .prepare("SELECT statement, confidence, claims_json FROM memory_records WHERE id = ?")
+          .get(vote.memoryId) as Row | undefined;
+        if (!row) throw new Error(`memory ${vote.memoryId} does not exist`);
+        const claims = parseClaims(row.claims_json) ?? [
+          {
+            text: String(row.statement),
+            confidence: row.confidence == null ? null : Number(row.confidence),
+            polarity: null,
+            predicateKey: null,
+            extractMethod: "rule" as const,
+          },
+        ];
+        const indexes = vote.claimIndexes ?? claims.map((_, index) => index);
+        if (indexes.length === 0) throw new Error("claimIndexes must not be empty");
+        const weight = vote.weight ?? 1;
+        if (!Number.isFinite(weight) || weight <= 0 || weight > 1) {
+          throw new Error("claim outcome weight must be in (0,1]");
+        }
+        const sourceLineage = requireText(vote.sourceLineage, "sourceLineage");
+        for (const claimIndex of [...new Set(indexes)]) {
+          const claim = claims[claimIndex];
+          if (!claim || !Number.isInteger(claimIndex) || claimIndex < 0) {
+            throw new Error(`claim index ${claimIndex} does not exist on memory ${vote.memoryId}`);
+          }
+          const key = `${vote.memoryId}\0${claimIndex}`;
+          const previous = seen.get(key);
+          if (previous && previous !== vote.outcome) {
+            throw new Error(`conflicting claim outcomes in one task for memory ${vote.memoryId}`);
+          }
+          seen.set(key, vote.outcome);
+          prepared.push({
+            memoryId: vote.memoryId,
+            claimIndex,
+            claimText: claim.text,
+            priorConfidence: clamp(claim.confidence ?? Number(row.confidence ?? 0.5), 0, 1),
+            outcome: vote.outcome,
+            source: vote.source,
+            sourceLineage,
+            weight,
+          });
+        }
+      }
+
+      const events: ClaimOutcomeEvent[] = [];
+      const touched = new Set<string>();
+      const now = new Date().toISOString();
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        for (const item of prepared) {
+          const id = randomUUID();
+          const inserted = this.db
+            .prepare(
+              `INSERT OR IGNORE INTO claim_outcome_events
+                (id, memory_id, claim_index, semantic_task_id, source,
+                 source_lineage, outcome, weight, active_graph_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(
+              id,
+              item.memoryId,
+              item.claimIndex,
+              semanticTaskId,
+              item.source,
+              item.sourceLineage,
+              item.outcome,
+              item.weight,
+              input.activeGraphId ?? null,
+              now,
+            );
+          if (Number(inserted.changes) === 0) continue;
+          const priorStrength = 2;
+          this.db
+            .prepare(
+              `INSERT OR IGNORE INTO claim_posteriors
+                (memory_id, claim_index, claim_text, prior_confidence, alpha,
+                 beta, independent_vote_count, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+            )
+            .run(
+              item.memoryId,
+              item.claimIndex,
+              item.claimText,
+              item.priorConfidence,
+              1 + priorStrength * item.priorConfidence,
+              1 + priorStrength * (1 - item.priorConfidence),
+              now,
+            );
+          this.db
+            .prepare(
+              `UPDATE claim_posteriors
+               SET alpha = alpha + ?, beta = beta + ?,
+                   independent_vote_count = independent_vote_count + 1,
+                   updated_at = ?
+               WHERE memory_id = ? AND claim_index = ?`,
+            )
+            .run(
+              item.outcome === "supported" ? item.weight : 0,
+              item.outcome === "contradicted" ? item.weight : 0,
+              now,
+              item.memoryId,
+              item.claimIndex,
+            );
+          events.push({
+            id,
+            memoryId: item.memoryId,
+            claimIndex: item.claimIndex,
+            semanticTaskId,
+            source: item.source,
+            sourceLineage: item.sourceLineage,
+            outcome: item.outcome,
+            weight: item.weight,
+            activeGraphId: input.activeGraphId ?? null,
+            createdAt: now,
+          });
+          touched.add(item.memoryId);
+        }
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+      return {
+        events,
+        posteriors: [...touched].flatMap((memoryId) => this.claimPosteriors(memoryId)),
+      };
+    }
+
+    claimPosteriors(memoryId: string): ClaimPosterior[] {
+      return (
+        this.db
+          .prepare(`SELECT * FROM claim_posteriors WHERE memory_id = ? ORDER BY claim_index`)
+          .all(memoryId) as Row[]
+      ).map(mapClaimPosterior);
+    }
+
+    claimOutcomeEvents(memoryId: string): ClaimOutcomeEvent[] {
+      return (
+        this.db
+          .prepare(
+            `SELECT * FROM claim_outcome_events WHERE memory_id = ?
+             ORDER BY created_at, rowid`,
+          )
+          .all(memoryId) as Row[]
+      ).map((row) => ({
+        id: String(row.id),
+        memoryId: String(row.memory_id),
+        claimIndex: Number(row.claim_index),
+        semanticTaskId: String(row.semantic_task_id),
+        source: String(row.source) as ClaimOutcomeEvent["source"],
+        sourceLineage: String(row.source_lineage),
+        outcome: String(row.outcome) as ClaimOutcomeEvent["outcome"],
+        weight: Number(row.weight),
+        activeGraphId: row.active_graph_id ? String(row.active_graph_id) : null,
+        createdAt: String(row.created_at),
+      }));
+    }
 
     /**
      * Soft-delete a memory and all its dependent artifacts.
@@ -197,8 +398,52 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         this.db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(memoryId);
         this.db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(memoryId);
         this.db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(memoryId);
+        this.db.prepare("DELETE FROM claim_outcome_events WHERE memory_id = ?").run(memoryId);
+        this.db.prepare("DELETE FROM claim_posteriors WHERE memory_id = ?").run(memoryId);
         this.db.prepare("DELETE FROM memory_evidence_links WHERE memory_id = ?").run(memoryId);
         this.db.prepare("DELETE FROM memory_leaf_members WHERE memory_id = ?").run(memoryId);
+        const traceRows = this.db
+          .prepare(
+            `SELECT id, result_memory_ids_json, useful_memory_ids_json,
+                    contradicted_memory_ids_json, rejected_memory_ids_json
+             FROM retrieval_traces`,
+          )
+          .all() as Row[];
+        const updateTrace = this.db.prepare(
+          `UPDATE retrieval_traces
+           SET result_memory_ids_json = ?, useful_memory_ids_json = ?,
+               contradicted_memory_ids_json = ?, rejected_memory_ids_json = ?
+           WHERE id = ?`,
+        );
+        for (const trace of traceRows) {
+          const withoutDeleted = (value: unknown) =>
+            JSON.stringify(
+              parseStringArray(value as string | null).filter((id) => id !== memoryId),
+            );
+          updateTrace.run(
+            withoutDeleted(trace.result_memory_ids_json),
+            withoutDeleted(trace.useful_memory_ids_json),
+            withoutDeleted(trace.contradicted_memory_ids_json),
+            withoutDeleted(trace.rejected_memory_ids_json),
+            String(trace.id),
+          );
+        }
+        const proposalRows = this.db
+          .prepare(
+            `SELECT id, evidence_memory_ids_json FROM topology_proposals
+             WHERE status = 'pending'`,
+          )
+          .all() as Row[];
+        const rejectProposal = this.db.prepare(
+          "UPDATE topology_proposals SET status = 'rejected' WHERE id = ?",
+        );
+        for (const proposal of proposalRows) {
+          if (
+            parseStringArray(proposal.evidence_memory_ids_json as string | null).includes(memoryId)
+          ) {
+            rejectProposal.run(String(proposal.id));
+          }
+        }
         this.db
           .prepare(
             `INSERT INTO leaf_block_status (node_id, dirty, updated_at)
@@ -447,14 +692,15 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       return { ...memory, residence: "stg", promotedAt: null, expiresAt: expiresAt ?? null };
     }
 
-    expireShortTermMemories(at = new Date().toISOString()): string[] {
+    expireShortTermMemories(at = new Date().toISOString(), limit = 256): string[] {
       const rows = this.db
         .prepare(
           `SELECT id, node_id FROM memory_records
            WHERE residence = 'stg' AND status IN ('active', 'disputed')
-             AND expires_at IS NOT NULL AND expires_at <= ?`,
+             AND expires_at IS NOT NULL AND expires_at <= ?
+           ORDER BY expires_at, id LIMIT ?`,
         )
-        .all(at) as Row[];
+        .all(at, Math.max(1, Math.min(limit, 2_048))) as Row[];
       if (rows.length === 0) return [];
       const now = new Date().toISOString();
       this.db.exec("BEGIN IMMEDIATE");
@@ -669,6 +915,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       return {
         nodeId,
         changedMemoryIds,
+        processedMemoryCount: active.length,
         expectedDepth,
         pendingAccesses: rows.reduce((sum, row) => sum + Number(row.pending_access_count ?? 0), 0),
       };
@@ -685,6 +932,130 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         )
         .all(Math.max(1, threshold)) as Row[];
       return rows.map((row) => this.rebalanceNode(String(row.node_id), capacities));
+    }
+
+    /**
+     * Execute one bounded maintenance slice over nodes whose accumulated write
+     * Delta or access counter crossed a threshold. The counters already live on
+     * the write/read paths, so ordinary remember/get calls only enqueue work.
+     */
+    runDueMaintenance(
+      options: {
+        writeThreshold?: number;
+        accessThreshold?: number;
+        nodeLimit?: number;
+        blockSize?: number;
+        capacities?: readonly [number, number, number];
+      } = {},
+    ): MaintenanceBatchResult {
+      const writeThreshold = Math.max(1, options.writeThreshold ?? 16);
+      const accessThreshold = Math.max(1, options.accessThreshold ?? 32);
+      const nodeLimit = Math.max(1, Math.min(options.nodeLimit ?? 4, 64));
+      const rows = this.db
+        .prepare(
+          `SELECT n.id AS node_id,
+                  (SELECT COUNT(*) FROM memory_index_delta d
+                    WHERE d.node_id = n.id AND d.compacted = 0) AS pending_writes,
+                  (SELECT COALESCE(SUM(m.pending_access_count), 0)
+                     FROM memory_records m WHERE m.node_id = n.id) AS pending_accesses,
+                  COALESCE((SELECT MIN(d.created_at) FROM memory_index_delta d
+                    WHERE d.node_id = n.id AND d.compacted = 0), n.updated_at) AS oldest
+             FROM memory_nodes n
+            WHERE n.status = 'active'
+              AND ((SELECT COUNT(*) FROM memory_index_delta d
+                     WHERE d.node_id = n.id AND d.compacted = 0) >= ?
+                OR (SELECT COALESCE(SUM(m.pending_access_count), 0)
+                      FROM memory_records m WHERE m.node_id = n.id) >= ?)
+            ORDER BY oldest, n.id LIMIT ?`,
+        )
+        .all(writeThreshold, accessThreshold, nodeLimit) as Row[];
+
+      const startedAt = nowMs();
+      const timer = new PerfTimer();
+      const rebalancedNodeIds: string[] = [];
+      const compactedNodeIds: string[] = [];
+      const changedMemoryIds: string[] = [];
+      let rebuiltLeafBlocks = 0;
+      let acknowledgedDeltas = 0;
+      let rowsTouched = 0;
+      timer.measure(SECTION.maintenance, () => {
+        for (const row of rows) {
+          const nodeId = String(row.node_id);
+          if (Number(row.pending_accesses) >= accessThreshold) {
+            const result = this.rebalanceNode(nodeId, options.capacities);
+            rebalancedNodeIds.push(nodeId);
+            changedMemoryIds.push(...result.changedMemoryIds);
+            rowsTouched += result.processedMemoryCount;
+          }
+          if (Number(row.pending_writes) >= writeThreshold) {
+            const blocks = this.rebuildLeafBlocks(nodeId, options.blockSize ?? 32);
+            const acknowledged = this.acknowledgeIndexDelta([nodeId]);
+            compactedNodeIds.push(nodeId);
+            rebuiltLeafBlocks += blocks.length;
+            acknowledgedDeltas += acknowledged;
+            rowsTouched += blocks.reduce((sum, block) => sum + block.memoryCount, 0) + acknowledged;
+          }
+        }
+      });
+      timer.setTotal(nowMs() - startedAt);
+      this.recordPerfAggregates(timer.snapshot());
+      const result: MaintenanceBatchResult = {
+        id: randomUUID(),
+        consideredNodes: rows.length,
+        rebalancedNodeIds,
+        compactedNodeIds,
+        changedMemoryIds: [...new Set(changedMemoryIds)],
+        rebuiltLeafBlocks,
+        acknowledgedDeltas,
+        rowsTouched,
+        durationMs: timer.totalMs,
+        createdAt: new Date().toISOString(),
+      };
+      this.db
+        .prepare(
+          `INSERT INTO maintenance_runs
+            (id, phase, considered_nodes, rows_touched, details_json, duration_ms, created_at)
+           VALUES (?, 'local', ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          result.id,
+          result.consideredNodes,
+          result.rowsTouched,
+          JSON.stringify({
+            rebalancedNodeIds: result.rebalancedNodeIds,
+            compactedNodeIds: result.compactedNodeIds,
+            changedMemoryIds: result.changedMemoryIds,
+            rebuiltLeafBlocks: result.rebuiltLeafBlocks,
+            acknowledgedDeltas: result.acknowledgedDeltas,
+          }),
+          result.durationMs,
+          result.createdAt,
+        );
+      return result;
+    }
+
+    maintenanceRuns(limit = 100): MaintenanceBatchResult[] {
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM maintenance_runs
+           WHERE phase = 'local' ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+        )
+        .all(Math.max(1, Math.min(limit, 1_000))) as Row[];
+      return rows.map((row) => {
+        const details = parseStoredJson<Record<string, unknown>>(row.details_json, {});
+        return {
+          id: String(row.id),
+          consideredNodes: Number(row.considered_nodes),
+          rebalancedNodeIds: detailStringArray(details.rebalancedNodeIds),
+          compactedNodeIds: detailStringArray(details.compactedNodeIds),
+          changedMemoryIds: detailStringArray(details.changedMemoryIds),
+          rebuiltLeafBlocks: Number(details.rebuiltLeafBlocks ?? 0),
+          acknowledgedDeltas: Number(details.acknowledgedDeltas ?? 0),
+          rowsTouched: Number(row.rows_touched),
+          durationMs: Number(row.duration_ms),
+          createdAt: String(row.created_at),
+        };
+      });
     }
 
     recordRetrievalTrace(input: RetrievalTraceInput): string {
@@ -1334,4 +1705,32 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       return Number(result.changes);
     }
   };
+}
+
+function mapClaimPosterior(row: Row): ClaimPosterior {
+  const alpha = Number(row.alpha);
+  const beta = Number(row.beta);
+  const total = alpha + beta;
+  const mean = total > 0 ? alpha / total : 0.5;
+  // Lightweight conservative approximation suitable for shadow routing. The
+  // full Beta quantile can replace it later without changing stored counters.
+  const standardError = Math.sqrt((mean * (1 - mean)) / Math.max(1, total + 1));
+  return {
+    memoryId: String(row.memory_id),
+    claimIndex: Number(row.claim_index),
+    claimText: String(row.claim_text),
+    priorConfidence: Number(row.prior_confidence),
+    alpha,
+    beta,
+    mean,
+    conservativeLowerBound: clamp(mean - 1.96 * standardError, 0, 1),
+    independentVoteCount: Number(row.independent_vote_count),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function detailStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }

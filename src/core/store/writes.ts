@@ -13,6 +13,13 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
 import type { Constructor } from "./store-ctor.ts";
+import {
+  NEAR_DUPLICATE_SCAN,
+  NEAR_DUPLICATE_THRESHOLD,
+  SUPERSEDE_CANDIDATE_MAX,
+  SUPERSEDE_MIN_SHARED_TOKENS,
+  SUPERSEDE_PREFILTER_MAX_TERMS,
+} from "./graph-policy.ts";
 import { nowMs, PerfTimer, SECTION } from "../perf.ts";
 import { normalizeClaims } from "../claims.ts";
 import {
@@ -28,6 +35,7 @@ import {
 } from "./rows.ts";
 import type { StoreRow as Row } from "./search-ranking.ts";
 import { normalizeStatement, searchTerms, statementSimilarity } from "./search-ranking.ts";
+import { MAX_EVIDENCE_SOURCE_CHARACTERS } from "../types.ts";
 
 import type {
   DeriveMemoryInput,
@@ -36,6 +44,7 @@ import type {
   MemoryClaim,
   HistoryRole,
   MemoryMarker,
+  MemoryExportBundle,
   MemoryNode,
   MemoryNodeKind,
   MemoryRecord,
@@ -295,7 +304,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       const startedAt = nowMs();
       const perf = new PerfTimer();
       const result = perf.measure(SECTION.write, () => this.rememberInner(input));
-      perf.setTotal(Date.now() - startedAt);
+      perf.setTotal(nowMs() - startedAt);
       return Object.assign(result, { timings: perf.snapshot() });
     }
 
@@ -304,6 +313,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       if (memoryType === "state" && !input.stateKey?.trim()) {
         throw new Error("state memories require a stable stateKey");
       }
+      validateEvidenceSource(input);
       // Duplicate detection (read-only, pre-transaction): an exact normalized
       // duplicate in the same scope auto-skips (returns the existing record,
       // Mem0 hash-dedup pattern); near-duplicates surface as candidates for
@@ -358,10 +368,11 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         const history = input.evidenceHistoryId
           ? this.requireHistory(input.evidenceHistoryId)
           : this.appendHistory({
-              content: input.evidence ?? input.statement,
-              role: "explicit",
+              content: input.evidenceSource?.content ?? input.evidence ?? input.statement,
+              role: input.evidenceSource?.actor ?? "explicit",
               sessionId: input.sessionId,
-              sourceRef: input.sourceRef,
+              sourceMessageId: input.evidenceSource?.sourceMessageId,
+              sourceRef: input.evidenceSource?.sourceRef ?? input.sourceRef,
             });
         const node = this.upsertNode({
           canonicalName: input.nodeName,
@@ -572,6 +583,53 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       return row ? mapMemoryRow(row) : null;
     }
 
+    /** Active LTG copies created specifically from one STG source memory. */
+    consolidatedFromStg(sourceMemoryId: string): MemoryRecord[] {
+      return (
+        this.db
+          .prepare(
+            `SELECT DISTINCT m.*
+               FROM memory_records m, json_each(m.markers_json) marker
+              WHERE m.status = 'active'
+                AND json_extract(marker.value, '$.kind') = 'consolidated_from_stg'
+                AND json_extract(marker.value, '$.attributes.sourceMemoryId') = ?
+              ORDER BY m.created_at, m.id`,
+          )
+          .all(sourceMemoryId) as Row[]
+      ).map(mapMemoryRow);
+    }
+
+    exportMemories(input: {
+      sourceActor?: MemoryRecord["sourceActor"];
+      includeDeleted?: boolean;
+    } = {}): MemoryExportBundle {
+      const clauses = [input.includeDeleted ? "1 = 1" : "status <> 'deleted'"];
+      const params: string[] = [];
+      if (input.sourceActor) {
+        clauses.push("source_actor = ?");
+        params.push(input.sourceActor);
+      }
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM memory_records WHERE ${clauses.join(" AND ")} ORDER BY created_at, id`,
+        )
+        .all(...params) as Record<string, unknown>[];
+      return {
+        format: "nmg.memory-export.v1",
+        exportedAt: new Date().toISOString(),
+        items: rows.map((row) => {
+          const memory = mapMemoryRow(row);
+          const evidenceIds = [...new Set([memory.evidenceId, ...this.evidenceIds(memory.id)])];
+          memory.evidenceIds = evidenceIds;
+          return {
+            memory,
+            node: this.requireNode(memory.nodeId),
+            evidence: evidenceIds.map((id) => this.requireHistory(id)),
+          };
+        }),
+      };
+    }
+
     private nearDuplicateCandidates(statement: string, scopeJson: string): DuplicateCandidate[] {
       const inputNorm = normalizeStatement(statement);
       const recent = this.db
@@ -624,7 +682,14 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       // must NOT be restricted to the most recent rows. Pre-filter by content
       // tokens via instr() (plain substring, no LIKE wildcards) to avoid a
       // full scope scan, then compute exact shared tokens (normalized).
-      const likeTerms = [...new Set([...inputTokens, ...transitionTokens])];
+      const transitionSet = new Set(transitionTokens);
+      const contentTerms = [...inputTokens]
+        .filter((term) => !transitionSet.has(term))
+        .sort((left, right) => right.length - left.length || left.localeCompare(right));
+      const likeTerms = [...new Set([...transitionTokens, ...contentTerms])].slice(
+        0,
+        SUPERSEDE_PREFILTER_MAX_TERMS,
+      );
       const likeClause = likeTerms.map(() => `instr(lower(m.statement), ?) > 0`).join(" OR ");
       const params: string[] = likeTerms;
       const recent = this.db
@@ -865,16 +930,6 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
   };
 }
 
-// ---- duplicate detection helpers (writes cluster) ----
-/** Lexical overlap threshold above which a same-scope statement is a candidate. */
-export const NEAR_DUPLICATE_THRESHOLD = 0.7;
-/** How many recent same-scope statements to scan for near duplicates (real
- *  stores are small; duplicates live in the recent window of a conversation). */
-export const NEAR_DUPLICATE_SCAN = 50;
-/** Supersession candidates: same-scope memories sharing >= this many content tokens. */
-export const SUPERSEDE_MIN_SHARED_TOKENS = 1;
-export const SUPERSEDE_CANDIDATE_MAX = 10;
-
 /**
  * Detect "from X to Y" transition phrases ("Moving from being employed to
  * self-employed", "transitioned from A to B", "went from X to Y"). The
@@ -882,6 +937,29 @@ export const SUPERSEDE_CANDIDATE_MAX = 10;
  * superseded predecessor, which similarity (lexical or vector) cannot
  * separate from same-topic chit-chat.
  */
+function validateEvidenceSource(input: RememberInput): void {
+  const source = input.evidenceSource;
+  if (!source) return;
+  if (!input.sessionId?.trim()) throw new Error("evidenceSource requires sessionId");
+  if (!source.sourceMessageId?.trim()) {
+    throw new Error("evidenceSource requires sourceMessageId");
+  }
+  if (!source.content?.trim()) throw new Error("evidenceSource content must not be empty");
+  if (source.content.length > MAX_EVIDENCE_SOURCE_CHARACTERS) {
+    throw new Error(
+      `evidenceSource exceeds ${MAX_EVIDENCE_SOURCE_CHARACTERS} characters; retain an exact excerpt or external artifact reference`,
+    );
+  }
+  const actor = input.sourceActor ?? "user";
+  if (source.actor !== actor) {
+    throw new Error(`evidenceSource actor ${source.actor} does not match sourceActor ${actor}`);
+  }
+  const claimed = input.evidence?.trim();
+  if (claimed && source.content.toLocaleLowerCase() !== claimed.toLocaleLowerCase()) {
+    throw new Error("evidenceSource content must be the exact excerpt supplied as evidence");
+  }
+}
+
 function transitionFromTokens(statement: string): string[] {
   const out: string[] = [];
   const re =

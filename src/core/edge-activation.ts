@@ -24,17 +24,19 @@ export interface EdgePropagationResult {
 export function relationActivationDefaults(
   type: NodeRelationType,
 ): Pick<NodeRelation, "activationRule" | "direction" | "fanBudget"> {
-  if (["contradicts", "supersedes", "exception_to"].includes(type)) {
+  if (["contradicts", "supersedes", "exception_to", "same_as", "distinct_from"].includes(type)) {
     return {
       activationRule: "regulatory",
-      direction: type === "contradicts" ? "both" : "source->target",
-      fanBudget: true,
+      direction: ["contradicts", "same_as", "distinct_from"].includes(type)
+        ? "both"
+        : "source->target",
+      fanBudget: !["same_as", "distinct_from"].includes(type),
     };
   }
   if (["causes", "depends_on", "is_a", "part_of"].includes(type)) {
     return { activationRule: "conductive", direction: "source->target", fanBudget: true };
   }
-  if (type === "derived_from") {
+  if (type === "derived_from" || type === "refines") {
     return { activationRule: "conductive", direction: "target->source", fanBudget: false };
   }
   return { activationRule: "conductive", direction: "both", fanBudget: true };

@@ -62,6 +62,8 @@ export type {
   SessionArchive,
   TruthStatus,
   RebalanceResult,
+  MaintenanceBatchResult,
+  SemanticMaintenanceResult,
   RecallCue,
   RecallIndex,
   VectorEmbedder,

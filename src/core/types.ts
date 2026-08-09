@@ -57,6 +57,7 @@ export const MEMORY_TYPES = [
 export type MemoryType = (typeof MEMORY_TYPES)[number];
 export const MEMORY_ACTORS = ["assistant", "system", "tool", "user"] as const;
 export type MemoryActor = (typeof MEMORY_ACTORS)[number];
+export const MAX_EVIDENCE_SOURCE_CHARACTERS = 4_096;
 export const TRUTH_STATUSES = ["asserted", "inferred", "unverified", "verified"] as const;
 export type TruthStatus = (typeof TRUTH_STATUSES)[number];
 /** Logical polarity of a statement, extracted at write time from text. */
@@ -74,6 +75,57 @@ export interface MemoryClaim {
   predicateKey: string | null;
   confidence: number | null;
   extractMethod: ExtractMethod;
+}
+
+export const CLAIM_OUTCOMES = ["supported", "contradicted"] as const;
+export type ClaimOutcome = (typeof CLAIM_OUTCOMES)[number];
+export const CLAIM_OUTCOME_SOURCES = ["benchmark", "task", "tool", "user"] as const;
+export type ClaimOutcomeSource = (typeof CLAIM_OUTCOME_SOURCES)[number];
+
+/** One independently attributable result applied to selected claims. */
+export interface ClaimOutcomeVoteInput {
+  memoryId: string;
+  /** Omit to vote on every atomic claim, or on the record-level fallback claim. */
+  claimIndexes?: number[];
+  outcome: ClaimOutcome;
+  source: ClaimOutcomeSource;
+  /** Stable identity of the original user/tool/eval source, used for audit. */
+  sourceLineage: string;
+  /** Reliability in (0,1]. Defaults to 1 for explicit strong signals. */
+  weight?: number;
+}
+
+export interface RecordClaimOutcomesInput {
+  semanticTaskId: string;
+  votes: ClaimOutcomeVoteInput[];
+  activeGraphId?: string;
+  sessionId?: string;
+}
+
+export interface ClaimPosterior {
+  memoryId: string;
+  claimIndex: number;
+  claimText: string;
+  priorConfidence: number;
+  alpha: number;
+  beta: number;
+  mean: number;
+  conservativeLowerBound: number;
+  independentVoteCount: number;
+  updatedAt: string;
+}
+
+export interface ClaimOutcomeEvent {
+  id: string;
+  memoryId: string;
+  claimIndex: number;
+  semanticTaskId: string;
+  source: ClaimOutcomeSource;
+  sourceLineage: string;
+  outcome: ClaimOutcome;
+  weight: number;
+  activeGraphId: string | null;
+  createdAt: string;
 }
 export type MemoryStatus = "active" | "deleted" | "disputed" | "inactive" | "superseded";
 export const EVIDENCE_ROLES = [
@@ -96,6 +148,9 @@ export type NodeRelationType =
   | "is_a"
   | "part_of"
   | "related_to"
+  | "refines"
+  | "same_as"
+  | "distinct_from"
   | "supports"
   | "supersedes";
 
@@ -172,6 +227,18 @@ export interface MemoryRecord {
   createdAt: string;
 }
 
+export interface MemoryExportItem {
+  memory: MemoryRecord;
+  node: MemoryNode;
+  evidence: HistoryRecord[];
+}
+
+export interface MemoryExportBundle {
+  format: "nmg.memory-export.v1";
+  exportedAt: string;
+  items: MemoryExportItem[];
+}
+
 export interface RetentionCandidate {
   memoryId: string;
   nodeId: string;
@@ -209,6 +276,13 @@ export interface RememberInput {
   claims?: MemoryClaim[];
   markers?: MemoryMarker[];
   evidence?: string;
+  /** Exact, bounded source excerpt selected from a harness-owned message. */
+  evidenceSource?: {
+    actor: MemoryActor;
+    content: string;
+    sourceMessageId: string;
+    sourceRef?: string;
+  };
   evidenceHistoryId?: string;
   sessionId?: string;
   sourceRef?: string;
@@ -456,6 +530,31 @@ export interface EmbeddingIndexHealth {
   lastError: string | null;
 }
 
+/** Result of one bounded, threshold-triggered maintenance slice. */
+export interface MaintenanceBatchResult {
+  id: string;
+  consideredNodes: number;
+  rebalancedNodeIds: string[];
+  compactedNodeIds: string[];
+  changedMemoryIds: string[];
+  rebuiltLeafBlocks: number;
+  acknowledgedDeltas: number;
+  rowsTouched: number;
+  durationMs: number;
+  createdAt: string;
+}
+
+export interface SemanticMaintenanceResult {
+  id: string;
+  expiredMemoryIds: string[];
+  consolidatedRelationIds: string[];
+  demotedRelationIds: string[];
+  proposedTopologyIds: string[];
+  rowsTouched: number;
+  durationMs: number;
+  createdAt: string;
+}
+
 export interface SessionArchive {
   sessionId: string;
   historyId: string;
@@ -661,6 +760,7 @@ export interface NodeTransform {
   targetNodeIds: string[];
   movedMemoryIds: string[];
   createdAt: string;
+  rolledBackAt: string | null;
 }
 
 /** Learned weights for the QPP score composition (see qpp.ts). */
@@ -863,15 +963,28 @@ export interface TopologyProposal {
   relationType: NodeRelationType | null;
   partitions: Array<{ label: string; memoryIds: string[] }>;
   evidenceTraceIds: string[];
+  evidenceMemoryIds: string[];
   observations: number;
   estimatedGain: number;
   status: "accepted" | "pending" | "rejected";
   createdAt: string;
 }
 
+export interface TopologyAutomationAssessment {
+  proposalId: string;
+  eligible: boolean;
+  reasons: string[];
+  policy: {
+    minimumObservations: number;
+    minimumEstimatedGain: number;
+    minimumEvidenceMemories: number;
+  };
+}
+
 export interface RebalanceResult {
   nodeId: string;
   changedMemoryIds: string[];
+  processedMemoryCount: number;
   expectedDepth: number;
   pendingAccesses: number;
 }

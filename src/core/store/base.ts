@@ -46,7 +46,6 @@ import {
   serializeScope,
 } from "./rows.ts";
 
-
 export class NmgStoreBase {
   protected db: DatabaseSync;
   protected embedder: VectorEmbedder;
@@ -147,9 +146,8 @@ export class NmgStoreBase {
     }
   }
   protected assertTraceOwner(row: Row, sessionId?: string): void {
-    const owner = row.session_id === null || row.session_id === undefined
-      ? null
-      : String(row.session_id);
+    const owner =
+      row.session_id === null || row.session_id === undefined ? null : String(row.session_id);
     if (owner !== null && owner !== sessionId?.trim()) {
       throw new Error(`active graph ${String(row.id)} belongs to another session`);
     }
@@ -522,9 +520,7 @@ export class NmgStoreBase {
       const relationId = relation.id;
       const endpoints = [relation.sourceNodeId, relation.targetNodeId];
       const usedTogether = endpoints.every((nodeId) => used.has(nodeId));
-      const negative = endpoints.some(
-        (nodeId) => contradicted.has(nodeId) || rejected.has(nodeId),
-      );
+      const negative = endpoints.some((nodeId) => contradicted.has(nodeId) || rejected.has(nodeId));
       upsert.run(
         relationId,
         usedTogether ? 1 : 0,
@@ -755,6 +751,7 @@ export class NmgStoreBase {
       targetNodeIds,
       movedMemoryIds,
       createdAt: new Date().toISOString(),
+      rolledBackAt: null,
     };
     this.db
       .prepare(
@@ -848,10 +845,13 @@ export class NmgStoreBase {
     return [...groups].map(([label, memoryIds]) => ({ label, memoryIds }));
   }
   insertTopologyProposal(
-    proposal: Omit<TopologyProposal, "createdAt" | "id" | "status">,
+    proposal: Omit<TopologyProposal, "createdAt" | "id" | "status" | "evidenceMemoryIds"> & {
+      evidenceMemoryIds?: string[];
+    },
   ): TopologyProposal {
     const result: TopologyProposal = {
       ...proposal,
+      evidenceMemoryIds: [...new Set(proposal.evidenceMemoryIds ?? [])],
       id: randomUUID(),
       status: "pending",
       createdAt: new Date().toISOString(),
@@ -860,9 +860,9 @@ export class NmgStoreBase {
       .prepare(
         `INSERT INTO topology_proposals
         (id, proposal_key, proposal_type, source_node_ids_json, relation_type,
-         partitions_json, evidence_trace_ids_json, observations,
-         estimated_gain, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         partitions_json, evidence_trace_ids_json, evidence_memory_ids_json,
+         observations, estimated_gain, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         result.id,
@@ -872,6 +872,7 @@ export class NmgStoreBase {
         result.relationType,
         JSON.stringify(result.partitions),
         JSON.stringify(result.evidenceTraceIds),
+        JSON.stringify(result.evidenceMemoryIds),
         result.observations,
         result.estimatedGain,
         result.status,

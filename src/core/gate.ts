@@ -10,6 +10,12 @@ const EXPLICIT_RECALL_PATTERNS = [
   /^(?:what|when|where|who|which|how many|how long)\b.{0,32}\bmy\b/i,
   /\bmy (?:current|latest|previous|last|preference|preferences|history)\b/i,
   /\b(?:what|when|where|which|how)\s+did\s+[\p{L}][\p{L}'-]*\b/iu,
+  // Small, explicit multilingual recall lexicon. These patterns identify the
+  // intent to consult prior user state; they do not perform semantic search.
+  /(?:letztes mal|früher|erinnerst du|meine.{0,24}(?:bevorzugte|präferenz))/iu,
+  /(?:dernière fois|auparavant|souviens-toi|(?:ma|mon|mes).{0,24}préfér)/iu,
+  /(?:前回|以前|覚えて|私.{0,20}(?:好む|好み|好き|選ん|決め))/u,
+  /(?:última vez|anteriormente|recuerdas|mi.{0,24}(?:preferida|preferido|preferencia))/iu,
 ];
 
 const OPTIONAL_RECALL_PATTERNS = [

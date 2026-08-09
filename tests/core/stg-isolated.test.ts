@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  consolidateStgMemoryToLtg,
   copyLtgSubsetToStg,
   createStgStore,
   searchStgFirst,
@@ -90,6 +91,38 @@ test("Phase2: cached_from_ltg memories never promote (loop guard)", () => {
       "promoting a cached copy throws",
     );
   });
+});
+
+test("outcome-qualified STG memory can be copied into LTG without a cache loop", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-stg-consolidate-"));
+  const ltg = new NmgStore(join(directory, "ltg.sqlite"), new HashingVectorEmbedder());
+  const stg = createStgStore(directory, new HashingVectorEmbedder(), "session-alpha");
+  try {
+    const local = stg.remember({
+      statement: "Project atlas stores durable metadata in SQLite.",
+      nodeName: "Atlas storage",
+      evidence: "The user confirmed that Atlas stores durable metadata in SQLite.",
+      scope: { project: "atlas" },
+      residence: "stg",
+    });
+    const first = consolidateStgMemoryToLtg(stg, ltg, local.memory.id);
+    const second = consolidateStgMemoryToLtg(stg, ltg, local.memory.id);
+
+    assert.equal(first.memory.residence, "ltg");
+    assert.equal(second.memory.id, first.memory.id, "retry uses exact deduplication");
+    assert.equal(first.history.content, local.history.content);
+    assert.ok(
+      first.memory.markers.some(
+        (marker) =>
+          marker.kind === "consolidated_from_stg" &&
+          marker.attributes?.sourceMemoryId === local.memory.id,
+      ),
+    );
+  } finally {
+    ltg.close();
+    stg.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("Phase2: usage-driven copy selects the used project memory", () => {

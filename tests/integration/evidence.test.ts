@@ -27,9 +27,25 @@ test("agent-neutral evidence retention stores only the matching source message",
     assert.ok(evidenceId);
     assert.equal(
       store.getHistoryBySourceMessage("session-1", "user-1")?.content,
-      "The Atlas project must keep SQLite for offline operation.",
+      "must keep SQLite",
     );
     assert.equal(store.getHistoryBySourceMessage("session-1", "assistant-1"), null);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("agent-neutral evidence retention rejects oversized or wrong-actor excerpts", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-integration-evidence-boundary-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    const history = {
+      sessionId: "session-1",
+      messages: [{ id: "user-1", actor: "user" as const, content: `prefix ${"x".repeat(5_000)}` }],
+    };
+    assert.equal(retainEvidence(store, "prefix", "assistant", history), undefined);
+    assert.equal(retainEvidence(store, "x".repeat(5_000), "user", history), undefined);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });

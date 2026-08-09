@@ -117,6 +117,7 @@ test("remember attaches write timing; perf:false disables it", () => {
     const result = store.remember({ statement: "Lunch at 1pm.", nodeName: "lunch" });
     assert.ok(result.timings, "write timings present");
     assert.ok(result.timings!.timings.write >= 0);
+    assert.ok(result.timings!.totalMs < 60_000, "totalMs is a duration, not an epoch timestamp");
     // Total is the wrapper wall clock; sub-ms writes round to within 0.01 of
     // the write span, so compare with rounding tolerance.
     assert.ok(result.timings!.totalMs + 0.01 >= result.timings!.timings.write);

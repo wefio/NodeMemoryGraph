@@ -64,13 +64,13 @@ test("Chinese factual or meta-level questions do not trigger memory retrieval", 
 
 // ── non-English / non-Chinese probe ──
 
-test("known-recognisable non-English prompts default to no retrieval", () => {
-  // Gate only has explicit regex entries for Chinese and English. Other
-  // languages are not blocked on purpose — they just don't have patterns yet.
-  // Expected: mode none. If this one fails, someone added a pattern that
-  // over-matches and the gate needs a bounds test.
-  assert.equal(decideMemoryLoad("Was ist meine Lieblingsfarbe?").mode, "none");
-  assert.equal(decideMemoryLoad("Qu'est-ce que j'ai décidé la dernière fois?").mode, "none");
-  assert.equal(decideMemoryLoad("私の好みは何ですか？").mode, "none");
-  assert.equal(decideMemoryLoad("¿Qué decidimos la última vez?").mode, "none");
+test("supported multilingual recall cues trigger without matching generic questions", () => {
+  assert.equal(decideMemoryLoad("Was haben wir letztes Mal entschieden?").mode, "retrieve");
+  assert.equal(decideMemoryLoad("Qu'avons-nous décidé la dernière fois ?").mode, "retrieve");
+  assert.equal(decideMemoryLoad("前回は何を決めましたか？").mode, "retrieve");
+  assert.equal(decideMemoryLoad("¿Qué decidimos la última vez?").mode, "retrieve");
+  assert.equal(decideMemoryLoad("Erkläre SQLite-Indizes.").mode, "none");
+  assert.equal(decideMemoryLoad("Explique les index SQLite.").mode, "none");
+  assert.equal(decideMemoryLoad("SQLiteのインデックスを説明してください。").mode, "none");
+  assert.equal(decideMemoryLoad("Explica los índices de SQLite.").mode, "none");
 });

@@ -17,6 +17,66 @@ function withStore(run: (store: NmgStore) => void): void {
   }
 }
 
+test("remember validates exact harness evidence provenance", () => {
+  withStore((store) => {
+    assert.throws(
+      () =>
+        store.remember({
+          statement: "Atlas uses SQLite",
+          nodeName: "Atlas",
+          sessionId: "session-a",
+          sourceActor: "user",
+          evidence: "uses SQLite",
+          evidenceSource: {
+            actor: "assistant",
+            content: "uses SQLite",
+            sourceMessageId: "message-1",
+          },
+        }),
+      /does not match sourceActor/,
+    );
+    assert.throws(
+      () =>
+        store.remember({
+          statement: "Atlas uses SQLite",
+          nodeName: "Atlas",
+          sessionId: "session-a",
+          evidence: "uses SQLite",
+          evidenceSource: {
+            actor: "user",
+            content: "different text",
+            sourceMessageId: "message-1",
+          },
+        }),
+      /exact excerpt/,
+    );
+    const result = store.remember({
+      statement: "Atlas uses SQLite",
+      nodeName: "Atlas",
+      sessionId: "session-a",
+      evidence: "uses SQLite",
+      evidenceSource: {
+        actor: "user",
+        content: "uses SQLite",
+        sourceMessageId: "message-1",
+        sourceRef: "pi-session:session-a",
+      },
+    });
+    assert.equal(result.history.content, "uses SQLite");
+    assert.equal(result.history.role, "user");
+    assert.equal(result.history.sourceMessageId, "message-1");
+  });
+});
+
+test("remember bounds supersession prefilter terms for very long evidence", () => {
+  withStore((store) => {
+    store.remember({ statement: "baseline durable fact", nodeName: "Long evidence" });
+    const statement = Array.from({ length: 1_500 }, (_, index) => `distincttoken${index}`).join(" ");
+    const result = store.remember({ statement, nodeName: "Long evidence" });
+    assert.equal(result.memory.statement, statement);
+  });
+});
+
 test("remember: writes a memory and returns history/node/memory", () => {
   withStore((store) => {
     const result = store.remember({

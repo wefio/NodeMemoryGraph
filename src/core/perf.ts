@@ -43,10 +43,7 @@ export function histogramAdd(buckets: readonly number[], ms: number): number[] {
   const logMax = Math.log(HISTOGRAM_MAX_MS);
   const index = Math.min(
     HISTOGRAM_BUCKETS - 1,
-    Math.max(
-      0,
-      Math.floor(((Math.log(clamped) - logMin) / (logMax - logMin)) * HISTOGRAM_BUCKETS),
-    ),
+    Math.max(0, Math.floor(((Math.log(clamped) - logMin) / (logMax - logMin)) * HISTOGRAM_BUCKETS)),
   );
   next[index] = (next[index] ?? 0) + 1;
   return next;
@@ -165,6 +162,8 @@ export const SECTION = {
   edges: "edges",
   trace: "trace",
   write: "write",
+  maintenance: "maintenance.batch",
+  maintenanceSemantic: "maintenance.semantic",
 } as const;
 
 export type Section = (typeof SECTION)[keyof typeof SECTION];

@@ -67,20 +67,14 @@ import type {
   VectorEmbedder,
 } from "../types.ts";
 import type { DatabaseSync } from "node:sqlite";
+import {
+  MIN_WARM_DISCLOSURE_SIZE,
+  SUPERSEDE_SUCCESSOR_BOOST,
+  TEMPORAL_ASOF_BOOST,
+  TEMPORAL_ASOF_DECAY_DAYS,
+} from "./graph-policy.ts";
 
-export const MAX_SEARCH_CANDIDATES = 500;
-/** Combined-score boost applied to the active successor of a superseded
- *  candidate when it is surfaced at retrieval time. Sized so a current value
- *  with near-zero lexical overlap (common for "updated from X to Y" wording)
- *  can still out-rank older high-lexical records. */
-export const SUPERSEDE_SUCCESSOR_BOOST = 0.3;
-/** Max combined-score boost for a memory whose event time is at the as-of
- *  moment of a historical (event-time-window) query. Sizes so the value that
- *  was current at the asked date can out-rank older high-lexical records
- *  without overwhelming relevance: 0.25 vs lexical max 0.5 / vector 0.35. */
-export const TEMPORAL_ASOF_BOOST = 0.25;
-export const TEMPORAL_ASOF_DECAY_DAYS = 730;
-export const MIN_WARM_DISCLOSURE_SIZE = 5;
+const MAX_SEARCH_CANDIDATES = 500;
 
 export function withRetrieval<TBase extends Constructor>(Base: TBase) {
   return class extends Base {
