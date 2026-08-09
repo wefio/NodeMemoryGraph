@@ -2,7 +2,11 @@ import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, unlinkSync
 import { dirname } from "node:path";
 
 import type { ControllerShadowDecision } from "./controller-runtime.ts";
-import type { ActiveGraphBudgetUsage } from "../core/types.ts";
+import type {
+  ActiveGraphBudgetUsage,
+  ActiveGraphSelection,
+  QppTriggerDecision,
+} from "../core/types.ts";
 
 export type ShadowRetrievalOrigin = "automatic" | "tool";
 
@@ -17,8 +21,11 @@ export interface ShadowRetrievalEvent extends ShadowEventBase {
   type: "retrieval";
   origin: ShadowRetrievalOrigin;
   query: string;
+  queryTaskId: string;
   candidateMemoryIds: string[];
   candidateNodeIds: string[];
+  selections: ActiveGraphSelection[];
+  qpp: QppTriggerDecision | null;
   baselineNodeIds: string[];
   learnedNodeIds: string[];
   changed: boolean;
@@ -26,6 +33,8 @@ export interface ShadowRetrievalEvent extends ShadowEventBase {
   costs: {
     retrievalLatencyMs: number;
     controllerLatencyMs: number;
+    injectedCharacters: number;
+    injectedEstimatedTokens: number;
     recordsRead: number;
     estimatedTokens: number;
     nodesRead: number;
@@ -44,19 +53,37 @@ export interface ShadowOutcomeEvent extends ShadowEventBase {
   type: "outcome";
   runCompleted: boolean;
   messageCount: number;
+  toolRounds: number;
   inputTokens: number | null;
   outputTokens: number | null;
+  endToEndLatencyMs: number | null;
 }
 
 export interface ShadowFeedbackEvent extends ShadowEventBase {
   type: "feedback";
+  semanticTaskId: string | null;
   taskSuccess: boolean | null;
   userCorrection: boolean | null;
+  evidenceSufficient: boolean | null;
+  expansionUseful: boolean | null;
+  excessiveNoise: boolean | null;
+  noMemoryNeeded: boolean | null;
   note?: string;
 }
 
+export interface ShadowToolFlowEvent extends ShadowEventBase {
+  type: "tool_flow";
+  action: "search_suppressed";
+  reason: "evidence_progression_required";
+  query: string;
+}
+
 export type ShadowEvaluationEvent =
-  ShadowRetrievalEvent | ShadowUseEvent | ShadowOutcomeEvent | ShadowFeedbackEvent;
+  | ShadowRetrievalEvent
+  | ShadowUseEvent
+  | ShadowOutcomeEvent
+  | ShadowFeedbackEvent
+  | ShadowToolFlowEvent;
 
 export interface ShadowEvaluationLogOptions {
   maxBytes?: number;
@@ -86,11 +113,15 @@ export class ShadowEvaluationLog {
     sessionId: string;
     origin: ShadowRetrievalOrigin;
     query: string;
+    queryTaskId: string;
     candidateMemoryIds: readonly string[];
     candidateNodeIds: readonly string[];
+    selections: readonly ActiveGraphSelection[];
+    qpp?: QppTriggerDecision;
     decision: ControllerShadowDecision;
     usage: ActiveGraphBudgetUsage;
     controllerLatencyMs: number;
+    injectedText?: string;
   }): boolean {
     return this.#append({
       version: 1,
@@ -100,8 +131,25 @@ export class ShadowEvaluationLog {
       recordedAt: this.#now().toISOString(),
       origin: input.origin,
       query: input.query,
+      queryTaskId: input.queryTaskId,
       candidateMemoryIds: [...input.candidateMemoryIds],
       candidateNodeIds: [...input.candidateNodeIds],
+      selections: input.selections.map((selection) => ({
+        ...selection,
+        scores: { ...selection.scores },
+      })),
+      qpp: input.qpp
+        ? {
+            ...input.qpp,
+            components: { ...input.qpp.components },
+            expansion: input.qpp.expansion
+              ? {
+                  ...input.qpp.expansion,
+                  stages: input.qpp.expansion.stages.map((stage) => ({ ...stage })),
+                }
+              : undefined,
+          }
+        : null,
       baselineNodeIds: input.decision.baselineNodeIds,
       learnedNodeIds: input.decision.learnedNodeIds,
       changed: input.decision.changed,
@@ -109,6 +157,8 @@ export class ShadowEvaluationLog {
       costs: {
         retrievalLatencyMs: input.usage.latencyMs,
         controllerLatencyMs: input.controllerLatencyMs,
+        injectedCharacters: input.injectedText?.length ?? 0,
+        injectedEstimatedTokens: Math.ceil((input.injectedText?.length ?? 0) / 4),
         recordsRead: input.usage.evidence,
         estimatedTokens: input.usage.estimatedTokens,
         nodesRead: input.usage.nodes,
@@ -139,8 +189,10 @@ export class ShadowEvaluationLog {
     graphId: string;
     sessionId: string;
     messageCount: number;
+    toolRounds?: number;
     inputTokens?: number;
     outputTokens?: number;
+    endToEndLatencyMs?: number;
   }): boolean {
     return this.#append({
       version: 1,
@@ -150,8 +202,10 @@ export class ShadowEvaluationLog {
       recordedAt: this.#now().toISOString(),
       runCompleted: true,
       messageCount: input.messageCount,
+      toolRounds: Math.max(0, Math.floor(input.toolRounds ?? 0)),
       inputTokens: finiteOrNull(input.inputTokens),
       outputTokens: finiteOrNull(input.outputTokens),
+      endToEndLatencyMs: finiteOrNull(input.endToEndLatencyMs),
     });
   }
 
@@ -160,7 +214,12 @@ export class ShadowEvaluationLog {
     sessionId: string;
     taskSuccess?: boolean | null;
     userCorrection?: boolean | null;
+    evidenceSufficient?: boolean | null;
+    expansionUseful?: boolean | null;
+    excessiveNoise?: boolean | null;
+    noMemoryNeeded?: boolean | null;
     note?: string;
+    semanticTaskId?: string;
   }): boolean {
     return this.#append({
       version: 1,
@@ -168,9 +227,33 @@ export class ShadowEvaluationLog {
       graphId: input.graphId,
       sessionId: input.sessionId,
       recordedAt: this.#now().toISOString(),
+      semanticTaskId: input.semanticTaskId?.trim() || null,
       taskSuccess: input.taskSuccess ?? null,
       userCorrection: input.userCorrection ?? null,
+      evidenceSufficient: input.evidenceSufficient ?? null,
+      expansionUseful: input.expansionUseful ?? null,
+      excessiveNoise: input.excessiveNoise ?? null,
+      noMemoryNeeded: input.noMemoryNeeded ?? null,
       note: input.note?.trim() || undefined,
+    });
+  }
+
+  toolFlow(input: {
+    graphId: string;
+    sessionId: string;
+    action: ShadowToolFlowEvent["action"];
+    reason: ShadowToolFlowEvent["reason"];
+    query: string;
+  }): boolean {
+    return this.#append({
+      version: 1,
+      type: "tool_flow",
+      graphId: input.graphId,
+      sessionId: input.sessionId,
+      recordedAt: this.#now().toISOString(),
+      action: input.action,
+      reason: input.reason,
+      query: input.query,
     });
   }
 

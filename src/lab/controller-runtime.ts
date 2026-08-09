@@ -191,6 +191,27 @@ export class ControllerRuntime {
     return true;
   }
 
+  /**
+   * Train from the smallest reliable Pi-side signal: records explicitly fetched
+   * from the same Active Graph. This deliberately does not interpret automatic
+   * injection, retrieval rank, or an uncorrected answer as successful use.
+   */
+  observeUse(
+    context: MemoryContext,
+    usedMemoryIds: readonly string[],
+    learningRate = 0.03,
+  ): boolean {
+    if (!context.activeGraph) return false;
+    const visible = new Set(context.activeGraph.memoryIds);
+    const usefulMemoryIds = [...new Set(usedMemoryIds)].filter((id) => visible.has(id));
+    if (usefulMemoryIds.length === 0) return false;
+    return this.observe(
+      context,
+      { ...traceFromActiveGraph(context), usefulMemoryIds },
+      learningRate,
+    );
+  }
+
   save(): void {
     const state: ControllerRuntimeState = {
       version: 1,

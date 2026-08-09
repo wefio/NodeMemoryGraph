@@ -21,6 +21,8 @@ import {
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import type { MemoryContext, MemorySearchResult, MemoryTier } from "../../../src/core/types.ts";
 import { searchPreview } from "../../../src/integration/search-projection.ts";
+import { selectEvidence, type AgentHistoryMessage } from "../../../src/integration/evidence.ts";
+import { ControllerShadowBridge } from "./controller-shadow.ts";
 
 /**
  * NMG Pi extension.
@@ -44,6 +46,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   let connectionPromise: Promise<DaemonConnection> | undefined;
   const injectionWindow = new SessionInjectionWindow();
   const taskWindow = new SessionTaskWindow();
+  const recallFlow = new SessionRecallFlow();
+  const controllerShadow = new ControllerShadowBridge(
+    process.env.NMG_DATA_DIR || join(homedir(), ".nmg"),
+  );
   // Weak completion nudge: a git commit (or an explicit completion phrase) is a
   // low-signal hint that NMG memory is available — a reminder, never a forced
   // action. Set by the tool_call hook, consumed once by before_agent_start.
@@ -58,8 +64,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   };
   const connection = (): Promise<DaemonConnection> =>
     (connectionPromise ??= connectDaemon(databasePath()));
-  const invoke = async (method: "get" | "remember" | "search", params: Record<string, unknown>) =>
-    invokeDaemon(await connection(), method, params);
+  const invoke = async (
+    method: "get" | "remember" | "resolveRemember" | "search",
+    params: Record<string, unknown>,
+  ) => invokeDaemon(await connection(), method, params);
 
   // git commit via the bash tool is the strongest "milestone" signal available
   // to the extension; remember it so the next turn can offer NMG memory.
@@ -72,6 +80,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
     injectionWindow.beginTurn(sessionId);
+    recallFlow.beginTurn(sessionId, event.prompt);
     const nudge = popCompletionNudge(event.prompt);
     const recallQuery = taskWindow.prepare(sessionId, event.prompt);
     if (!recallQuery) {
@@ -92,6 +101,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         tieredDisclosure: true,
       })) as MemoryContext;
       const recalled = injectionWindow.format(sessionId, context, "header");
+      await controllerShadow.retrieval(context, sessionId, "automatic", recalled);
       return {
         systemPrompt: composeNmgSystemPrompt(event.systemPrompt, recalled, "", nudge),
       };
@@ -135,14 +145,22 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }
   });
 
+  pi.on("agent_end", async (event, ctx) => {
+    await controllerShadow.outcome(ctx.sessionManager.getSessionId(), event.messages);
+  });
+
   pi.on("session_shutdown", async (event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
     injectionWindow.clear(sessionId);
     taskWindow.clear(sessionId);
+    recallFlow.clear(sessionId);
+    controllerShadow.clear(sessionId);
     if (!connectionPromise) return;
     const active = await connectionPromise.catch(() => undefined);
-    connectionPromise = undefined;
-    if (!active) return;
+    if (!active) {
+      connectionPromise = undefined;
+      return;
+    }
     // Archive before teardown (daemon is still alive here); archiveOrStage has
     // a hard timeout and never throws, so daemon shutdown always runs.
     await archiveOrStage(
@@ -155,7 +173,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         reason: event.reason,
       },
       async (params) =>
-        invoke("remember", {
+        invokeDaemon(active, "remember", {
           ...params,
           memoryType: "event",
           sourceActor: "system",
@@ -173,6 +191,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       await shutdownOwnedDaemon(active);
     } catch {
       // shutdownOwnedDaemon already force-exits survivors; nothing more to do.
+    } finally {
+      connectionPromise = undefined;
     }
   });
 
@@ -185,8 +205,77 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     label: "Remember with NMG",
     description: nmgPrompts.remember_description,
     parameters: Type.Object({
-      statement: Type.String(),
-      nodeName: Type.String({ description: nmgPrompts.node_name_parameter_description }),
+      action: Type.Optional(
+        Type.Union(
+          [
+            Type.Literal("save"),
+            Type.Literal("supersede"),
+            Type.Literal("relate"),
+            Type.Literal("forget"),
+            Type.Literal("feedback"),
+          ],
+          { description: nmgPrompts.remember_action_parameter_description },
+        ),
+      ),
+      memoryId: Type.Optional(
+        Type.String({ description: nmgPrompts.remember_memory_id_parameter_description }),
+      ),
+      activeGraphId: Type.Optional(
+        Type.String({ description: nmgPrompts.active_graph_id_parameter_description }),
+      ),
+      taskSuccess: Type.Optional(
+        Type.Boolean({ description: nmgPrompts.feedback_label_parameter_description }),
+      ),
+      userCorrection: Type.Optional(
+        Type.Boolean({ description: nmgPrompts.feedback_label_parameter_description }),
+      ),
+      evidenceSufficient: Type.Optional(
+        Type.Boolean({ description: nmgPrompts.feedback_label_parameter_description }),
+      ),
+      expansionUseful: Type.Optional(
+        Type.Boolean({ description: nmgPrompts.feedback_label_parameter_description }),
+      ),
+      excessiveNoise: Type.Optional(
+        Type.Boolean({ description: nmgPrompts.feedback_label_parameter_description }),
+      ),
+      noMemoryNeeded: Type.Optional(
+        Type.Boolean({ description: nmgPrompts.feedback_label_parameter_description }),
+      ),
+      feedbackNote: Type.Optional(
+        Type.String({ description: nmgPrompts.feedback_note_parameter_description }),
+      ),
+      semanticTaskId: Type.Optional(
+        Type.String({ description: nmgPrompts.semantic_task_id_parameter_description }),
+      ),
+      statement: Type.Optional(Type.String()),
+      nodeName: Type.Optional(
+        Type.String({ description: nmgPrompts.node_name_parameter_description }),
+      ),
+      newMemoryId: Type.Optional(
+        Type.String({ description: nmgPrompts.remember_new_memory_id_parameter_description }),
+      ),
+      supersededMemoryId: Type.Optional(
+        Type.String({
+          description: nmgPrompts.remember_superseded_memory_id_parameter_description,
+        }),
+      ),
+      relatedMemoryId: Type.Optional(
+        Type.String({ description: nmgPrompts.remember_related_memory_id_parameter_description }),
+      ),
+      relationJudgement: Type.Optional(
+        Type.Union(
+          [
+            Type.Literal("conflict"),
+            Type.Literal("distinct"),
+            Type.Literal("refines"),
+            Type.Literal("related"),
+            Type.Literal("same_entity"),
+          ],
+          { description: nmgPrompts.remember_relation_judgement_parameter_description },
+        ),
+      ),
+      relationConfidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+      resolutionReason: Type.Optional(Type.String()),
       memoryType: Type.Optional(
         Type.Union([
           Type.Literal("constraint"),
@@ -219,7 +308,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           Type.Literal("verified"),
         ]),
       ),
-      evidence: Type.Optional(Type.String()),
+      evidence: Type.Optional(
+        Type.String({ description: nmgPrompts.evidence_parameter_description }),
+      ),
       writeReason: Type.Optional(Type.String()),
       tier: Type.Optional(
         Type.Union([Type.Literal(0), Type.Literal(1), Type.Literal(2), Type.Literal(3)]),
@@ -239,12 +330,111 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (params.action === "feedback") {
+        if (!params.activeGraphId) throw new Error("action=feedback requires activeGraphId");
+        const labels = {
+          taskSuccess: params.taskSuccess,
+          userCorrection: params.userCorrection,
+          evidenceSufficient: params.evidenceSufficient,
+          expansionUseful: params.expansionUseful,
+          excessiveNoise: params.excessiveNoise,
+          noMemoryNeeded: params.noMemoryNeeded,
+          note: params.feedbackNote,
+          semanticTaskId: params.semanticTaskId,
+        };
+        if (Object.values(labels).every((value) => value === undefined)) {
+          throw new Error("action=feedback requires at least one label or feedbackNote");
+        }
+        const recorded = await controllerShadow.feedback(
+          params.activeGraphId,
+          ctx.sessionManager.getSessionId(),
+          labels,
+        );
+        return toolResult(
+          { recorded, activeGraphId: params.activeGraphId },
+          recorded
+            ? "Retrieval feedback recorded for shadow calibration."
+            : "Feedback was not recorded: controller shadow is disabled or the Active Graph belongs to another session.",
+        );
+      }
+      if (params.action === "forget") {
+        if (!params.memoryId) throw new Error("action=forget requires memoryId");
+        const resolved = await invoke("resolveRemember", {
+          action: "forget",
+          memoryId: params.memoryId,
+          projectDir: projectDirectory(),
+          sessionId: ctx.sessionManager.getSessionId(),
+        });
+        return toolResult(
+          resolved,
+          "Memory withdrawn from normal retrieval. The tombstone remains for audit; this is not physical privacy erasure.",
+        );
+      }
+      if (params.action === "supersede") {
+        if (!params.newMemoryId || !params.supersededMemoryId) {
+          throw new Error("action=supersede requires newMemoryId and supersededMemoryId");
+        }
+        const resolved = await invoke("resolveRemember", {
+          action: "supersede",
+          newMemoryId: params.newMemoryId,
+          supersededMemoryId: params.supersededMemoryId,
+          reason: params.resolutionReason,
+          projectDir: projectDirectory(),
+          sessionId: ctx.sessionManager.getSessionId(),
+        });
+        return toolResult(resolved, "Older memory superseded by the new value.");
+      }
+      if (params.action === "relate") {
+        if (!params.newMemoryId || !params.relatedMemoryId || !params.relationJudgement) {
+          throw new Error(
+            "action=relate requires newMemoryId, relatedMemoryId, and relationJudgement",
+          );
+        }
+        const resolved = await invoke("resolveRemember", {
+          action: "relate",
+          newMemoryId: params.newMemoryId,
+          relatedMemoryId: params.relatedMemoryId,
+          relationJudgement: params.relationJudgement,
+          confidence: params.relationConfidence,
+          projectDir: projectDirectory(),
+          sessionId: ctx.sessionManager.getSessionId(),
+        });
+        return toolResult(
+          resolved,
+          "Semantic relation recorded as a reversible pending proposal; node identities remain separate.",
+        );
+      }
+      if (!params.statement?.trim() || !params.nodeName?.trim()) {
+        throw new Error("saving a memory requires statement and nodeName");
+      }
       const { externalSource, ...memory } = params;
+      delete memory.action;
+      delete memory.memoryId;
+      delete memory.newMemoryId;
+      delete memory.supersededMemoryId;
+      delete memory.relatedMemoryId;
+      delete memory.relationJudgement;
+      delete memory.relationConfidence;
+      delete memory.resolutionReason;
+      delete memory.activeGraphId;
+      delete memory.taskSuccess;
+      delete memory.userCorrection;
+      delete memory.evidenceSufficient;
+      delete memory.expansionUseful;
+      delete memory.excessiveNoise;
+      delete memory.noMemoryNeeded;
+      delete memory.feedbackNote;
+      delete memory.semanticTaskId;
       if (externalSource && !/^(?:file|web):.+/u.test(externalSource.source)) {
         throw new Error("externalSource.source must start with web: or file:");
       }
       const result = await invoke("remember", {
         ...memory,
+        evidenceSource: selectPiEvidenceSource(
+          ctx.sessionManager,
+          params.evidence,
+          params.sourceActor ?? "user",
+        ),
         markers: externalSource
           ? [
               {
@@ -260,7 +450,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         projectDir: projectDirectory(),
         sessionId: ctx.sessionManager.getSessionId(),
       });
-      return toolResult(result, "Memory saved.");
+      return toolResult(result, formatRememberResult(result));
     },
   });
 
@@ -283,6 +473,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         projectDir: projectDirectory(),
         sessionId: ctx.sessionManager.getSessionId(),
       })) as MemoryContext;
+      recallFlow.recordGet(ctx.sessionManager.getSessionId());
+      await controllerShadow.use(
+        params.activeGraphId,
+        ctx.sessionManager.getSessionId(),
+        params.memoryIds,
+        result.results.map((entry) => entry.memory.id),
+      );
       const text = injectionWindow.format(ctx.sessionManager.getSessionId(), result, "evidence");
       return toolResult(result, text || "No active memory found.");
     },
@@ -316,17 +513,112 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       tieredDisclosure: Type.Optional(Type.Boolean()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const sessionId = ctx.sessionManager.getSessionId();
+      if (!recallFlow.allowSearch(sessionId)) {
+        await controllerShadow.searchSuppressed(sessionId, params.query);
+        return toolResult(
+          { searchSuppressed: true, reason: "evidence_progression_required" },
+          nmgPrompts.search_progression_required,
+        );
+      }
       const result = (await invoke("search", {
         ...params,
+        // Automatic recall remains shallow. An explicit search is the agent's
+        // request to look beyond that cache, so expose all tiers by default;
+        // result/token budgets still bound what is returned.
+        maxTier: params.maxTier ?? 3,
         projectDir: projectDirectory(),
-        sessionId: ctx.sessionManager.getSessionId(),
+        sessionId,
       })) as MemoryContext;
-      return toolResult(
-        result,
-        injectionWindow.format(ctx.sessionManager.getSessionId(), result, "header"),
-      );
+      const text = injectionWindow.format(sessionId, result, "header");
+      await controllerShadow.retrieval(result, sessionId, "tool", text);
+      return toolResult(result, text);
     },
   });
+}
+
+const EVIDENCE_SOURCE_WINDOW = 64;
+export const PI_BRANCH_SHAPE_VERSION = "pi.branch.v1" as const;
+
+export function projectPiBranch(value: unknown): {
+  version: typeof PI_BRANCH_SHAPE_VERSION;
+  supported: boolean;
+  messages: AgentHistoryMessage[];
+} {
+  if (!Array.isArray(value)) {
+    return { version: PI_BRANCH_SHAPE_VERSION, supported: false, messages: [] };
+  }
+  const messages: AgentHistoryMessage[] = [];
+  for (const entry of value.slice(-EVIDENCE_SOURCE_WINDOW)) {
+    if (!entry || typeof entry !== "object") continue;
+    const candidate = entry as { type?: unknown; id?: unknown; message?: unknown };
+    if (candidate.type !== "message") continue;
+    if (
+      typeof candidate.id !== "string" ||
+      !candidate.message ||
+      typeof candidate.message !== "object" ||
+      typeof (candidate.message as { role?: unknown }).role !== "string"
+    ) {
+      return { version: PI_BRANCH_SHAPE_VERSION, supported: false, messages: [] };
+    }
+    const projected = piHistoryMessage(entry);
+    if (projected) messages.push(projected);
+  }
+  return { version: PI_BRANCH_SHAPE_VERSION, supported: true, messages };
+}
+
+export function selectPiEvidenceSource(
+  sessionManager: {
+    getSessionId(): string;
+    getBranch?: () => unknown[];
+  },
+  evidence: string | undefined,
+  sourceActor: "assistant" | "system" | "tool" | "user",
+) {
+  if (!evidence?.trim() || typeof sessionManager.getBranch !== "function") return undefined;
+  const branch = projectPiBranch(sessionManager.getBranch());
+  if (!branch.supported) return undefined;
+  return selectEvidence(evidence, sourceActor, {
+    sessionId: sessionManager.getSessionId(),
+    sourceRef: `pi-session:${sessionManager.getSessionId()};shape=${branch.version}`,
+    messages: branch.messages,
+  });
+}
+
+function piHistoryMessage(value: unknown): AgentHistoryMessage | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const entry = value as {
+    type?: unknown;
+    id?: unknown;
+    message?: { role?: unknown; content?: unknown };
+  };
+  if (entry.type !== "message" || typeof entry.id !== "string" || !entry.message) {
+    return undefined;
+  }
+  const actor =
+    entry.message.role === "user"
+      ? "user"
+      : entry.message.role === "assistant"
+        ? "assistant"
+        : entry.message.role === "toolResult"
+          ? "tool"
+          : undefined;
+  if (!actor) return undefined;
+  const content = messageText(entry.message.content);
+  return content ? { id: entry.id, actor, content } : undefined;
+}
+
+function messageText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) =>
+      part && typeof part === "object" && (part as { type?: unknown }).type === "text"
+        ? String((part as { text?: unknown }).text ?? "")
+        : "",
+    )
+    .filter(Boolean)
+    .join("\n");
 }
 
 type DisclosureLevel = "header" | "exact" | "evidence";
@@ -475,6 +767,42 @@ export class SessionTaskWindow {
       this.#sessions.set(sessionId, state);
     }
     return state;
+  }
+}
+
+/**
+ * Per-turn tool-flow guard. It does not cap retrieval depth or result count;
+ * it prevents repeated paraphrased searches when the model has not consumed
+ * any returned evidence. A successful get opens the search phase again.
+ */
+export class SessionRecallFlow {
+  readonly #states = new Map<string, { turnKey: string; searches: number }>();
+  readonly maxSearchesBeforeGet: number;
+
+  constructor(maxSearchesBeforeGet = 2) {
+    this.maxSearchesBeforeGet = Math.max(1, maxSearchesBeforeGet);
+  }
+
+  beginTurn(sessionId: string, turnKey: string): void {
+    const current = this.#states.get(sessionId);
+    if (current?.turnKey === turnKey) return;
+    this.#states.set(sessionId, { turnKey, searches: 0 });
+  }
+
+  allowSearch(sessionId: string): boolean {
+    const current = this.#states.get(sessionId) ?? { turnKey: "", searches: 0 };
+    if (current.searches >= this.maxSearchesBeforeGet) return false;
+    this.#states.set(sessionId, { ...current, searches: current.searches + 1 });
+    return true;
+  }
+
+  recordGet(sessionId: string): void {
+    const current = this.#states.get(sessionId) ?? { turnKey: "", searches: 0 };
+    this.#states.set(sessionId, { ...current, searches: 0 });
+  }
+
+  clear(sessionId: string): void {
+    this.#states.delete(sessionId);
   }
 }
 
@@ -666,6 +994,45 @@ export function formatMemoryContext(context: MemoryContext): string {
 
 function toolResult(details: unknown, text: string) {
   return { content: [{ type: "text" as const, text }], details };
+}
+
+function formatRememberResult(value: unknown): string {
+  const result = value as {
+    memory?: { id?: string; statement?: string };
+    duplicates?: Array<{ memoryId: string; statement: string; similarity?: number }>;
+    supersedeCandidates?: Array<{
+      memoryId: string;
+      statement: string;
+      supersedeSignal?: number;
+    }>;
+  };
+  const memoryId = result.memory?.id;
+  const lines = [`Memory saved${memoryId ? ` as ${memoryId}` : ""}.`];
+  const supersede = (result.supersedeCandidates ?? []).slice(0, 3);
+  if (supersede.length > 0 && memoryId) {
+    lines.push(
+      "NMG found possible older values. Similarity is only a candidate signal; decide semantically.",
+    );
+    for (const candidate of supersede) {
+      lines.push(`- ${candidate.memoryId}: ${excerpt(candidate.statement, 180)}`);
+    }
+    lines.push(
+      "If exactly one candidate is genuinely replaced in the same scope, call nmg_remember again with action=supersede, newMemoryId, supersededMemoryId, and a short reason. Otherwise do nothing.",
+    );
+  }
+  const duplicates = (result.duplicates ?? []).filter(
+    (candidate) => candidate.memoryId !== memoryId,
+  );
+  if (duplicates.length > 0) {
+    lines.push("Possible semantic neighbours were retained as distinct nodes:");
+    for (const candidate of duplicates.slice(0, 3)) {
+      lines.push(`- ${candidate.memoryId}: ${excerpt(candidate.statement, 180)}`);
+    }
+    lines.push(
+      "Only if a relationship is useful, call nmg_remember again with action=relate, newMemoryId, relatedMemoryId, and relationJudgement. Similarity alone is not identity; otherwise do nothing.",
+    );
+  }
+  return lines.join("\n");
 }
 
 function excerpt(value: string, maxLength: number): string {

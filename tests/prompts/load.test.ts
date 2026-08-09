@@ -7,12 +7,23 @@ const SECTIONS = [
   "search_description",
   "get_description",
   "remember_description",
+  "remember_action_parameter_description",
+  "remember_memory_id_parameter_description",
+  "remember_new_memory_id_parameter_description",
+  "remember_superseded_memory_id_parameter_description",
+  "remember_related_memory_id_parameter_description",
+  "remember_relation_judgement_parameter_description",
   "node_name_parameter_description",
   "state_key_parameter_description",
   "external_source_parameter_description",
+  "evidence_parameter_description",
   "active_graph_id_parameter_description",
+  "feedback_note_parameter_description",
+  "feedback_label_parameter_description",
+  "semantic_task_id_parameter_description",
   "search_query_parameter_description",
   "search_queries_parameter_description",
+  "search_progression_required",
   "search_disclosure",
   "mcp_search_disclosure",
   "get_disclosure",
@@ -50,9 +61,20 @@ test("tool descriptions are neutral: they state capability, not when to call", (
     const text = prompts[key];
     assert.doesNotMatch(text, /\buse when\b/i, `${key} must not advise when to call`);
     assert.doesNotMatch(text, /\bdo not use\b/i, `${key} must not advise when not to call`);
-    assert.doesNotMatch(text, /personalized answer/i, `${key} must not bias toward personalization`);
+    assert.doesNotMatch(
+      text,
+      /personalized answer/i,
+      `${key} must not bias toward personalization`,
+    );
     assert.doesNotMatch(text, /benchmark/i, `${key} must not reference the benchmark`);
   }
+});
+
+test("memory policy stops repeated searches for live-source facts", () => {
+  const prompts = loadPrompts();
+  assert.match(prompts.memory_policy, /historical memory, not a live code\/file\/web source/u);
+  assert.match(prompts.memory_policy, /after one deliberate search and selected get/u);
+  assert.match(prompts.memory_policy, /stop reformulating/u);
 });
 
 test("disclosures keep placeholders for runtime substitution", () => {

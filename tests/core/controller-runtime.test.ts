@@ -43,6 +43,27 @@ test("controller runtime learns from actual-use traces and persists exact state"
   }
 });
 
+test("controller runtime can learn directly from an explicit Active Graph get", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-controller-use-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    const saved = store.remember({ statement: "Atlas uses SQLite", nodeName: "Atlas" });
+    const context = store.searchContext("Atlas database", {
+      limit: 4,
+      sessionId: "session-a",
+      persistTrace: false,
+    });
+    const runtime = new ControllerRuntime(join(directory, "controller.json"));
+    assert.equal(runtime.observeUse(context, ["not-visible"]), false);
+    assert.equal(runtime.observeUse(context, [saved.memory.id, saved.memory.id]), true);
+    assert.equal(runtime.observations, 1);
+    assert.equal(runtime.trainingSteps, 1);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("controller allocation widens an explicit recall within its operator envelope", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-controller-budget-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));

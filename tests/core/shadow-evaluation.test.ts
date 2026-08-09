@@ -7,7 +7,7 @@ import test from "node:test";
 
 import { ShadowEvaluationLog } from "../../src/lab/shadow-evaluation.ts";
 
-test("shadow evaluation records retrieval, actual use, outcome, and feedback", async () => {
+test("shadow evaluation records retrieval, tool flow, actual use, outcome, and feedback", async () => {
   const directory = await mkdtemp(join(tmpdir(), "nmg-shadow-"));
   const path = join(directory, "shadow.jsonl");
   const log = new ShadowEvaluationLog(path, {
@@ -20,8 +20,37 @@ test("shadow evaluation records retrieval, actual use, outcome, and feedback", a
         sessionId: "session-1",
         origin: "tool",
         query: "What did I prefer?",
+        queryTaskId: "query:preference",
         candidateMemoryIds: ["memory-1"],
         candidateNodeIds: ["node-1"],
+        selections: [
+          {
+            memoryId: "memory-1",
+            nodeId: "node-1",
+            source: "direct",
+            reason: "lexical_match",
+            rank: 1,
+            tier: 0,
+            estimatedTokens: 20,
+            scores: { lexical: 1, vector: 0, route: 0, combined: 1, usefulness: 1 },
+          },
+        ],
+        qpp: {
+          trigger: false,
+          reason: "ok",
+          qpp: 0.9,
+          threshold: 0.55,
+          components: {
+            top1: 0.9,
+            variance: 0,
+            nqc: 0,
+            topGap: 1,
+            intentCoverage: 1,
+            reasonHealth: 1,
+            directCount: 1,
+            totalCount: 1,
+          },
+        },
         decision: {
           baselineNodeIds: ["node-1", "node-2"],
           learnedNodeIds: ["node-2", "node-1"],
@@ -42,6 +71,13 @@ test("shadow evaluation records retrieval, actual use, outcome, and feedback", a
       }),
       true,
     );
+    log.toolFlow({
+      graphId: "graph-1",
+      sessionId: "session-1",
+      action: "search_suppressed",
+      reason: "evidence_progression_required",
+      query: "same query again",
+    });
     log.use({
       graphId: "graph-1",
       sessionId: "session-1",
@@ -65,11 +101,13 @@ test("shadow evaluation records retrieval, actual use, outcome, and feedback", a
     const events = readFileSync(path, "utf8")
       .trim()
       .split("\n")
-      .map((line) => JSON.parse(line) as { type: string });
+      .map((line) => JSON.parse(line) as { type: string; queryTaskId?: string; qpp?: unknown });
     assert.deepEqual(
       events.map((event) => event.type),
-      ["retrieval", "use", "outcome", "feedback"],
+      ["retrieval", "tool_flow", "use", "outcome", "feedback"],
     );
+    assert.equal(events[0]?.queryTaskId, "query:preference");
+    assert.ok(events[0]?.qpp);
   } finally {
     await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
   }

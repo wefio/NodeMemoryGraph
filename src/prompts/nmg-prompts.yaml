@@ -39,10 +39,41 @@ get_description: >-
 
 remember_description: >-
   Save a durable record (fact, state, event, preference, constraint,
-  strategy). You decide what is worth remembering. Returns confirmation.
+  strategy), resolve a possible supersession, or attach explicit evaluation
+  feedback to a retrieval trace.
+  You decide the semantic content and whether a candidate is truly an older
+  value; NMG validates scope, identity, provenance, and applies the transaction.
   The record persists across sessions. Only save attributable information -
   not secrets, transient content, or unsupported guesses. A stateKey names one
   replaceable property within a stable scope; it is not a topic or grouping tag.
+
+remember_action_parameter_description: >-
+  Omit or use save for a new memory. Use supersede only when a candidate is the
+  older value of the new memory. Use relate to propose a semantic relationship
+  without merging node identity; the proposal remains reversible and pending.
+  Use forget only when the user explicitly asks to withdraw a selected memory.
+  Use feedback to record explicit task/retrieval labels for an activeGraphId;
+  silence or lack of correction is not positive feedback.
+
+remember_memory_id_parameter_description: >-
+  For action=forget, the exact memory ID to withdraw from normal retrieval.
+  This creates an auditable logical deletion, not physical privacy erasure.
+
+remember_new_memory_id_parameter_description: >-
+  For action=supersede, the new memory ID returned by the preceding save.
+
+remember_superseded_memory_id_parameter_description: >-
+  For action=supersede, the candidate memory ID whose value is replaced. Do not
+  use this merely because two memories are related or similar.
+
+remember_related_memory_id_parameter_description: >-
+  For action=relate, a candidate memory ID whose node has a meaningful semantic
+  relationship with the newly saved memory. This does not merge either node.
+
+remember_relation_judgement_parameter_description: >-
+  For action=relate, classify the nodes as same_entity, related, refines,
+  conflict, or distinct. Use same_entity only for identity, not similarity;
+  use distinct when an apparent match is actually a different entity or scope.
 
 node_name_parameter_description: >-
   Stable semantic cluster name. Related memories may share a node even when
@@ -58,9 +89,27 @@ state_key_parameter_description: >-
 external_source_parameter_description: >-
   External provenance reference beginning with web: or file:.
 
+evidence_parameter_description: >-
+  Smallest exact excerpt that supports the saved statement. Copy it from the
+  user, assistant, or tool source identified by sourceActor; do not summarize
+  or include surrounding routine prose. Pi binds a matching excerpt to its
+  source message. Use externalSource for web/file evidence.
+
 active_graph_id_parameter_description: >-
   Optional activeGraphId returned by nmg_search. Pass it when available to
   attribute actual memory use; it is not required to read a known memory ID.
+
+feedback_note_parameter_description: >-
+  Optional concise reason for an explicit retrieval/task label. Do not include
+  hidden reasoning, secrets, or infer success merely because no correction was made.
+
+feedback_label_parameter_description: >-
+  Explicit observed label for action=feedback. Omit when unknown; false means
+  the condition was actually reviewed and absent, not merely that nobody said it.
+
+semantic_task_id_parameter_description: >-
+  Optional stable identifier shared by retries of the same semantic task. It is
+  used for calibration deduplication, not session authorization or memory scope.
 
 search_query_parameter_description: >-
   Natural-language retrieval clause; may include key:value filters, -term
@@ -69,6 +118,12 @@ search_query_parameter_description: >-
 search_queries_parameter_description: >-
   Additional retrieval clauses unioned with the primary query; the primary
   query retains rank priority.
+
+search_progression_required: >-
+  NMG paused another search because two searches were already completed without
+  loading selected evidence. Use nmg_get on relevant returned memory IDs, or use
+  a current-source tool when the missing fact concerns live code, files, or the
+  web. Do not keep paraphrasing the same historical search.
 
 # ---- 完成提醒（弱提示——commit/任务完成后注入，不强制） ------------------
 completion_nudge: >-
@@ -137,8 +192,10 @@ memory_policy: >-
   are needed, and whether more recall or current verification is required. If the current
   task clearly depends on prior project state and automatic headers are absent or
   insufficient, use nmg_search before guessing; this is not a requirement to search on
-  every turn. No useful
-  memory is a valid result. Do not treat candidate count as completeness or a memory as
+  every turn. NMG is historical memory, not a live code/file/web source: after one
+  deliberate search and selected get fail to supply the missing fact, stop reformulating
+  the same request and either use an appropriate current-source tool or state that the
+  current fact was not verified. No useful memory is a valid result. Do not treat candidate count as completeness or a memory as
   current truth. If the recalled headers under-determine the answer, request additional
   evidence (append/re-fetch) before guessing; ignore headers that are clearly irrelevant
   noise. Save only attributable, durable information; do not save secrets, transient

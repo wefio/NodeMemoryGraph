@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -9,13 +9,21 @@ import nmgExtension, {
   formatMemoryContext,
   formatSearchHeaders,
   MEMORY_POLICY,
+  PI_BRANCH_SHAPE_VERSION,
+  projectPiBranch,
+  selectPiEvidenceSource,
   SessionInjectionWindow,
+  SessionRecallFlow,
   SessionTaskWindow,
 } from "../../../.pi/extensions/nmg/index.ts";
 import { loadPrompts } from "../../../src/prompts/load.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
 import { NmgStore } from "../../../src/core/store.ts";
 import type { MemoryContext } from "../../../src/core/types.ts";
+import {
+  ControllerShadowBridge,
+  shadowEnabled,
+} from "../../../.pi/extensions/nmg/controller-shadow.ts";
 
 function extensionHarness() {
   const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();
@@ -47,6 +55,168 @@ test("Pi adapter exposes only the stable tool surface", () => {
   assert.deepEqual([...extensionHarness().tools.keys()], ["nmg_remember", "nmg_get", "nmg_search"]);
 });
 
+test("remember feedback action stays on the stable tool surface and fails closed", async () => {
+  const { tools } = extensionHarness();
+  const sessionManager = { getSessionId: () => "session-a" };
+  await assert.rejects(
+    tools
+      .get("nmg_remember")!
+      .execute("feedback-empty", { action: "feedback", activeGraphId: "graph-a" }, undefined, undefined, {
+        sessionManager,
+      }),
+    /at least one label/u,
+  );
+  const result = await tools.get("nmg_remember")!.execute(
+    "feedback-disabled",
+    {
+      action: "feedback",
+      activeGraphId: "graph-a",
+      evidenceSufficient: false,
+      semanticTaskId: "task-a",
+    },
+    undefined,
+    undefined,
+    { sessionManager },
+  );
+  assert.equal(result.details.recorded, false);
+  assert.match(result.content[0].text, /not recorded/u);
+});
+
+test("controller shadow bridge is opt-in and learns only from explicit get use", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-controller-shadow-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    assert.equal(shadowEnabled(undefined), false);
+    assert.equal(shadowEnabled("true"), true);
+    const disabled = new ControllerShadowBridge(directory, false);
+    const saved = store.remember({ statement: "Atlas uses SQLite", nodeName: "Atlas" });
+    const context = store.searchContext("Atlas database", {
+      sessionId: "session-a",
+      persistTrace: false,
+    });
+    await disabled.retrieval(context, "session-a", "tool");
+    assert.equal(existsSync(join(directory, "controller-shadow-events.jsonl")), false);
+
+    const enabled = new ControllerShadowBridge(directory, true);
+    await enabled.retrieval(context, "session-a", "tool", "injected header");
+    await enabled.searchSuppressed("wrong-session", "ignored query");
+    await enabled.searchSuppressed("session-a", "same query again");
+    await enabled.use(
+      context.activeGraph!.id,
+      "wrong-session",
+      [saved.memory.id],
+      [saved.memory.id],
+    );
+    assert.equal(existsSync(join(directory, "controller-shadow-state.json")), false);
+    await enabled.use(context.activeGraph!.id, "session-a", [saved.memory.id], [saved.memory.id]);
+    const state = JSON.parse(
+      readFileSync(join(directory, "controller-shadow-state.json"), "utf8"),
+    ) as { observations: number };
+    assert.equal(state.observations, 1);
+    assert.equal(
+      await enabled.feedback(context.activeGraph!.id, "wrong-session", {
+        evidenceSufficient: true,
+      }),
+      false,
+    );
+    assert.equal(
+      await enabled.feedback(context.activeGraph!.id, "session-a", {
+        taskSuccess: true,
+        evidenceSufficient: true,
+        expansionUseful: false,
+        excessiveNoise: false,
+        noMemoryNeeded: false,
+        note: "explicit test label",
+      }),
+      true,
+    );
+    await enabled.outcome("session-a", [
+      { role: "assistant", usage: { input: 120, output: 30 } },
+      { role: "toolResult" },
+    ]);
+    // A repeated agent_end must not duplicate the same graph outcome.
+    await enabled.outcome("session-a", []);
+    const events = readFileSync(join(directory, "controller-shadow-events.jsonl"), "utf8")
+      .trim()
+      .split("\n");
+    assert.equal(events.length, 5);
+    const retrieval = JSON.parse(events[0]!) as {
+      type: string;
+      costs: { injectedCharacters: number; injectedEstimatedTokens: number };
+    };
+    assert.equal(retrieval.type, "retrieval");
+    assert.equal(retrieval.costs.injectedCharacters, "injected header".length);
+    assert.equal(retrieval.costs.injectedEstimatedTokens, 4);
+    const flow = JSON.parse(events[1]!) as { type: string; action: string; query: string };
+    assert.equal(flow.type, "tool_flow");
+    assert.equal(flow.action, "search_suppressed");
+    assert.equal(flow.query, "same query again");
+    assert.equal(JSON.parse(events[2]!).type, "use");
+    const feedback = JSON.parse(events[3]!) as {
+      type: string;
+      taskSuccess: boolean;
+      evidenceSufficient: boolean;
+    };
+    assert.equal(feedback.type, "feedback");
+    assert.equal(feedback.taskSuccess, true);
+    assert.equal(feedback.evidenceSufficient, true);
+    const outcome = JSON.parse(events[4]!) as {
+      type: string;
+      toolRounds: number;
+      inputTokens: number;
+      outputTokens: number;
+    };
+    assert.equal(outcome.type, "outcome");
+    assert.equal(outcome.toolRounds, 1);
+    assert.equal(outcome.inputTokens, 120);
+    assert.equal(outcome.outputTokens, 30);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Pi evidence projection retains only an exact bounded source excerpt", () => {
+  const sessionManager = {
+    getSessionId: () => "session-a",
+    getBranch: () => [
+      {
+        type: "message",
+        id: "assistant-1",
+        message: { role: "assistant", content: "A routine assistant explanation." },
+      },
+      {
+        type: "message",
+        id: "user-1",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Please remember that Atlas uses SQLite offline." }],
+        },
+      },
+    ],
+  };
+  assert.deepEqual(selectPiEvidenceSource(sessionManager, "Atlas uses SQLite", "user"), {
+    actor: "user",
+    content: "Atlas uses SQLite",
+    sourceMessageId: "user-1",
+    sourceRef: `pi-session:session-a;shape=${PI_BRANCH_SHAPE_VERSION}`,
+  });
+  assert.equal(selectPiEvidenceSource(sessionManager, "routine assistant", "user"), undefined);
+});
+
+test("Pi branch projection fails closed on an incompatible message shape", () => {
+  assert.deepEqual(projectPiBranch({ messages: [] }), {
+    version: PI_BRANCH_SHAPE_VERSION,
+    supported: false,
+    messages: [],
+  });
+  assert.equal(
+    projectPiBranch([{ type: "message", id: 42, message: { role: "user", content: "x" } }])
+      .supported,
+    false,
+  );
+});
+
 test("tool descriptions come from the prompt source of truth", () => {
   const { tools } = extensionHarness();
   const prompts = loadPrompts();
@@ -69,6 +239,14 @@ test("tool parameter descriptions come from the prompt source of truth", () => {
   assert.equal(
     tools.get("nmg_search")?.parameters?.properties?.query?.description,
     prompts.search_query_parameter_description,
+  );
+  assert.equal(
+    tools.get("nmg_remember")?.parameters?.properties?.evidence?.description,
+    prompts.evidence_parameter_description,
+  );
+  assert.equal(
+    tools.get("nmg_remember")?.parameters?.properties?.memoryId?.description,
+    prompts.remember_memory_id_parameter_description,
   );
 });
 
@@ -95,6 +273,16 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
   const sessionManager = {
     getSessionId: () => "http-test-session",
     getSessionFile: () => "session.jsonl",
+    getBranch: () => [
+      {
+        type: "message",
+        id: "user-atlas-storage",
+        message: {
+          role: "user",
+          content: "Please remember: Atlas must use SQLite for offline operation.",
+        },
+      },
+    ],
   };
   try {
     const { handlers, tools } = extensionHarness();
@@ -113,6 +301,46 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       { sessionManager },
     );
     assert.match(remember.content[0].text, /saved/i);
+    assert.equal(remember.details.history.sourceMessageId, "user-atlas-storage");
+    assert.equal(remember.details.history.content, "Atlas must use SQLite for offline operation.");
+
+    const oldDatabase = await tools.get("nmg_remember")!.execute(
+      "remember-old-database",
+      {
+        statement: "Atlas uses PostgreSQL as its database.",
+        nodeName: "Atlas database",
+        scope: { project: "atlas" },
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    );
+    const newDatabase = await tools.get("nmg_remember")!.execute(
+      "remember-new-database",
+      {
+        statement: "Atlas now uses SQLite as its database.",
+        nodeName: "Atlas database",
+        scope: { project: "atlas" },
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    );
+    assert.match(newDatabase.content[0].text, /possible older values/i);
+    assert.match(newDatabase.content[0].text, /action=supersede/i);
+    const resolvedDatabase = await tools.get("nmg_remember")!.execute(
+      "resolve-database",
+      {
+        action: "supersede",
+        newMemoryId: newDatabase.details.memory.id,
+        supersededMemoryId: oldDatabase.details.memory.id,
+        resolutionReason: "The user changed the project database.",
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    );
+    assert.equal(resolvedDatabase.details.applied, true);
 
     const started = readServerState(serverStatePath(join(directory, "nmg.sqlite")));
     assert.equal(started?.transport, "http");
@@ -159,6 +387,25 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       );
 
     await tools.get("nmg_remember")!.execute(
+      "remember-deep",
+      {
+        statement: "Atlas archive checksum uses BLAKE3.",
+        nodeName: "Atlas archive",
+        memoryType: "fact",
+        tier: 2,
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    );
+    const deepSearch = await tools
+      .get("nmg_search")!
+      .execute("search-deep", { query: "Atlas archive checksum" }, undefined, undefined, {
+        sessionManager,
+      });
+    assert.match(deepSearch.content[0].text, /BLAKE3/);
+
+    await tools.get("nmg_remember")!.execute(
       "remember-stg",
       {
         statement: "This session scratch color is cobalt.",
@@ -187,7 +434,10 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
 
     await handlers.get("session_shutdown")!({}, { sessionManager });
     assert.equal(isProcessAlive(started!.pid), false);
+    const remaining = readServerState(serverStatePath(join(directory, "nmg.sqlite")));
+    assert.equal(remaining ? isProcessAlive(remaining.pid) : false, false);
     const store = new NmgStore(join(directory, "nmg.sqlite"));
+    assert.equal(store.getMemory(oldDatabase.details.memory.id)?.status, "superseded");
     try {
       assert.deepEqual(store.retrievalTrace(activeGraphId, "http-test-session")?.usefulMemoryIds, [
         remember.details.memory.id,
@@ -362,6 +612,36 @@ test("session injection window reinjects changed and expired content", () => {
   window.beginTurn("session-a");
   window.beginTurn("session-a");
   assert.match(window.format("session-a", changed, "evidence"), /local tests/);
+});
+
+test("session recall flow requires evidence progression after two searches", () => {
+  const flow = new SessionRecallFlow();
+  flow.beginTurn("session-a", "first request");
+  assert.equal(flow.allowSearch("session-a"), true);
+  assert.equal(flow.allowSearch("session-a"), true);
+  assert.equal(flow.allowSearch("session-a"), false);
+
+  // Pi emits before_agent_start again after each tool result. The same user
+  // prompt must not reset the guard during those internal agent loops.
+  flow.beginTurn("session-a", "first request");
+  assert.equal(flow.allowSearch("session-a"), false);
+
+  flow.recordGet("session-a");
+  assert.equal(flow.allowSearch("session-a"), true);
+  flow.beginTurn("session-a", "second request");
+  assert.equal(flow.allowSearch("session-a"), true);
+});
+
+test("session recall flow isolates and clears session state", () => {
+  const flow = new SessionRecallFlow(1);
+  flow.beginTurn("session-a", "request");
+  flow.beginTurn("session-b", "request");
+  assert.equal(flow.allowSearch("session-a"), true);
+  assert.equal(flow.allowSearch("session-a"), false);
+  assert.equal(flow.allowSearch("session-b"), true);
+
+  flow.clear("session-a");
+  assert.equal(flow.allowSearch("session-a"), true);
 });
 
 test("session task window carries bounded task context into terse continuations", () => {
