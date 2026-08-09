@@ -1,7 +1,10 @@
 import type {
+  ClaimOutcomeEvent,
+  ClaimPosterior,
   MemoryActor,
   MemoryContext,
   MemoryMarker,
+  MemoryExportBundle,
   MemoryNodeKind,
   MemoryRecord,
   MemoryResidence,
@@ -12,7 +15,9 @@ import type {
   NodeTransform,
   PerfAggregate,
   RememberResult,
+  RecordClaimOutcomesInput,
   RetentionCandidate,
+  TopologyProposal,
   TruthStatus,
 } from "../core/types.ts";
 
@@ -22,12 +27,16 @@ export const NMG_CAPABILITIES = [
   "hello",
   "status",
   "remember",
+  "resolve-remember",
+  "claim-outcome-posterior",
   "search",
   "get",
   "retention-candidates",
   "set-storage-state",
   "delete-memory",
+  "export-memories",
   "merge-nodes",
+  "rollback-node-transform",
   "split-node",
   "sync-stg",
   "shutdown",
@@ -43,11 +52,15 @@ export const NMG_METHODS = [
   "perfAggregates",
   "pruneRetrievalTraces",
   "remember",
+  "resolveRemember",
+  "recordClaimOutcomes",
   "search",
   "retentionCandidates",
   "setStorageState",
   "deleteMemory",
+  "exportMemories",
   "mergeNodes",
+  "rollbackNodeTransform",
   "splitNode",
   "syncStg",
   "shutdown",
@@ -92,6 +105,12 @@ export interface NmgRememberParams {
   sourceActor?: MemoryActor;
   truthStatus?: TruthStatus;
   evidence?: string;
+  evidenceSource?: {
+    actor: MemoryActor;
+    content: string;
+    sourceMessageId: string;
+    sourceRef?: string;
+  };
   tier?: MemoryTier;
   importance?: number;
   scope?: MemoryScope;
@@ -105,6 +124,48 @@ export interface NmgRememberParams {
   sessionId?: string;
   sourceRef?: string;
   markers?: MemoryMarker[];
+  projectDir?: string;
+}
+
+export interface NmgSupersedeRememberParams {
+  action: "supersede";
+  newMemoryId: string;
+  supersededMemoryId: string;
+  reason?: string;
+  projectDir?: string;
+  sessionId?: string;
+}
+
+export const MEMORY_RELATION_JUDGEMENTS = [
+  "conflict",
+  "distinct",
+  "refines",
+  "related",
+  "same_entity",
+] as const;
+export type MemoryRelationJudgement = (typeof MEMORY_RELATION_JUDGEMENTS)[number];
+
+export interface NmgRelateRememberParams {
+  action: "relate";
+  newMemoryId: string;
+  relatedMemoryId: string;
+  relationJudgement: MemoryRelationJudgement;
+  confidence?: number;
+  projectDir?: string;
+  sessionId?: string;
+}
+
+export interface NmgForgetRememberParams {
+  action: "forget";
+  memoryId: string;
+  projectDir?: string;
+  sessionId?: string;
+}
+
+export type NmgResolveRememberParams =
+  NmgSupersedeRememberParams | NmgRelateRememberParams | NmgForgetRememberParams;
+
+export interface NmgRecordClaimOutcomesParams extends RecordClaimOutcomesInput {
   projectDir?: string;
 }
 
@@ -172,6 +233,11 @@ export interface NmgDeleteMemoryParams {
   memoryId: string;
 }
 
+export interface NmgExportMemoriesParams {
+  sourceActor?: MemoryActor;
+  includeDeleted?: boolean;
+}
+
 export interface NmgMergeNodesParams {
   sourceNodeIds: string[];
   targetName: string;
@@ -189,10 +255,39 @@ export interface NmgSplitNodeParams {
   }>;
 }
 
+export interface NmgRollbackNodeTransformParams {
+  transformId: string;
+}
+
 export type NmgMethodResult = {
   hello: NmgHelloResult;
   status: NmgStatusResult;
   remember: RememberResult;
+  resolveRemember:
+    | {
+        action: "supersede";
+        newMemoryId: string;
+        supersededMemoryId: string;
+        applied: boolean;
+      }
+    | {
+        action: "relate";
+        newMemoryId: string;
+        relatedMemoryId: string;
+        proposal: TopologyProposal;
+      }
+    | {
+        action: "forget";
+        memoryId: string;
+        deleted: boolean;
+      };
+  recordClaimOutcomes: {
+    events: ClaimOutcomeEvent[];
+    posteriors: ClaimPosterior[];
+    consolidationCandidates: string[];
+    consolidatedMemories: Array<{ sourceMemoryId: string; memoryId: string }>;
+    retractedMemories: Array<{ sourceMemoryId: string; memoryId: string }>;
+  };
   search: MemoryContext;
   get: MemoryContext & { missingMemoryIds: string[] };
   retentionCandidates: { candidates: RetentionCandidate[] };
@@ -200,7 +295,9 @@ export type NmgMethodResult = {
   perfAggregates: PerfAggregate[];
   pruneRetrievalTraces: { pruned: number };
   deleteMemory: { deleted: boolean; memory: MemoryRecord | null };
+  exportMemories: MemoryExportBundle;
   mergeNodes: NodeTransform;
+  rollbackNodeTransform: NodeTransform;
   splitNode: NodeTransform;
   syncStg: { copied: number; projectDir: string };
   shutdown: { shuttingDown: true };

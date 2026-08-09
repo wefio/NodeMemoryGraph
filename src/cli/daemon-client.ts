@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -23,11 +23,17 @@ export async function connectDaemon(databasePath: string): Promise<DaemonConnect
   const statePath = serverStatePath(databasePath);
   const existing = readyState(statePath);
   if (existing) {
-    await httpCall(existing, "hello");
-    return { startedByCaller: false, state: existing, databasePath };
+    try {
+      await httpCall(existing, "hello");
+      return { startedByCaller: false, state: existing, databasePath };
+    } catch {
+      // The OS may have reused a stale descriptor's PID for an unrelated
+      // process. Only an authenticated endpoint proves daemon identity.
+      rmSync(statePath, { force: true });
+    }
   }
 
-  warnIfDaemonLimitExceeded();
+  await warnIfDaemonLimitExceeded();
 
   const entrypoint = resolve(import.meta.dirname, "../../bin/nmg.mjs");
   const child = spawn(process.execPath, [entrypoint, "daemon", "run", "--db", databasePath], {
@@ -78,6 +84,10 @@ export async function invokeDaemon(
     return await httpCall(connection.state, method, params);
   } catch (error) {
     if (!(error instanceof TypeError)) throw error;
+    // A live owner with a transiently broken endpoint must not cause a second
+    // daemon to be spawned for the same database. Let the caller retry after
+    // the fault window; reconnect is reserved for an owner that has exited.
+    if (isProcessAlive(connection.state.pid)) throw error;
     const reconnected = await connectDaemon(connection.databasePath);
     connection.state = reconnected.state;
     connection.startedByCaller = reconnected.startedByCaller;
@@ -87,66 +97,88 @@ export async function invokeDaemon(
 
 /**
  * 统计当前存活的 NMG daemon 数量：扫描 NMG_DATA_DIR（默认 ~/.nmg）与
- * cwd 下所有 `*.server.json`，按 pid 探活计数。1 秒 memo 摊销扫描成本
+ * cwd 下所有 `*.server.json`，按 pid 和 authenticated hello 探活计数。1 秒 memo 摊销扫描成本
  * （评测多进程、每 arm 一次 spawn 场景）。
  */
-export function countRunningDaemons(roots: string[] = daemonScanRoots()): number {
+export async function countRunningDaemons(roots: string[] = daemonScanRoots()): Promise<number> {
   const key = roots.join("|");
   const now = Date.now();
   if (memoizedDaemonCount?.key === key && now - memoizedDaemonCount.at < DAEMON_COUNT_MEMO_MS) {
     return memoizedDaemonCount.count;
   }
-  let count = 0;
+  const states = new Map<string, ServerState>();
+  const seenPaths = new Set<string>();
   for (const root of roots) {
     if (!root) continue;
-    count += countDaemonsInDirectory(root);
+    collectDaemonStates(root, seenPaths, states);
   }
+  const alive = await Promise.all([...states.values()].map(authenticatedDaemonAlive));
+  const count = alive.filter(Boolean).length;
   memoizedDaemonCount = { key, at: now, count };
   return count;
 }
 
 function daemonScanRoots(): string[] {
-  const roots: string[] = [];
   const dataDir = resolve(process.env.NMG_DATA_DIR ?? join(homedir(), ".nmg"));
-  for (const root of [dataDir, process.cwd()]) {
-    if (root && !roots.includes(root)) roots.push(root);
-  }
-  return roots;
+  return [dataDir];
 }
 
-function countDaemonsInDirectory(directory: string): number {
+function collectDaemonStates(
+  directory: string,
+  seenPaths: Set<string>,
+  states: Map<string, ServerState>,
+): void {
   let entries: import("node:fs").Dirent[];
   try {
     entries = readdirSync(directory, { withFileTypes: true });
   } catch {
-    return 0; // 目录不存在或不可读
+    return; // 目录不存在或不可读
   }
-  let count = 0;
   for (const entry of entries) {
     const full = join(directory, entry.name);
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name)) continue;
-      count += countDaemonsInDirectory(full);
+      collectDaemonStates(full, seenPaths, states);
       continue;
     }
     if (!entry.isFile() || !entry.name.endsWith(SERVER_STATE_SUFFIX)) continue;
+    const path = resolve(full);
+    if (seenPaths.has(path)) continue;
+    seenPaths.add(path);
     const state = readServerState(full);
-    if (state && isProcessAlive(state.pid)) count += 1;
+    if (state?.transport === "http" && state.host && state.port && state.token && isProcessAlive(state.pid)) {
+      states.set(`${state.host}:${state.port}:${state.token}`, state);
+    }
   }
-  return count;
 }
 
 /** 拉起新 daemon 前检查数量上限；越限向 stderr 警告一次（每进程），不阻断。 */
-function warnIfDaemonLimitExceeded(): void {
+async function warnIfDaemonLimitExceeded(): Promise<void> {
   const limit = daemonLimit();
   if (limit <= 0 || daemonLimitWarningIssued) return;
-  const count = countRunningDaemons();
+  const count = await countRunningDaemons();
   if (count <= limit) return;
   daemonLimitWarningIssued = true;
   process.stderr.write(
     `NMG: warning: ${count} NMG daemons running (limit ${limit}); ` +
       "raise NMG_DAEMON_LIMIT or stop stale daemons (`nmg daemon stop --data-dir <dir>`)\n",
   );
+}
+
+async function authenticatedDaemonAlive(state: ServerState): Promise<boolean> {
+  return await new Promise<boolean>((resolveAlive) => {
+    const timeout = setTimeout(() => resolveAlive(false), 250);
+    void httpCall(state, "hello").then(
+      () => {
+        clearTimeout(timeout);
+        resolveAlive(true);
+      },
+      () => {
+        clearTimeout(timeout);
+        resolveAlive(false);
+      },
+    );
+  });
 }
 
 function daemonLimit(): number {

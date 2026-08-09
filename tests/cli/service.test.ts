@@ -27,6 +27,42 @@ test("status and hello do not create or open the database", async () => {
   }
 });
 
+test("resident service rolls back a journaled node merge", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-node-rollback-"));
+  const databasePath = join(directory, "nmg.sqlite");
+  const service = new NmgService({ databasePath, environment: {} });
+  try {
+    const first = await service.invoke("remember", {
+      statement: "Atlas uses cobalt labels.",
+      nodeName: "Atlas labels",
+    });
+    const second = await service.invoke("remember", {
+      statement: "Atlas release notes stay concise.",
+      nodeName: "Atlas release notes",
+    });
+    const transform = await service.invoke("mergeNodes", {
+      sourceNodeIds: [first.node.id, second.node.id],
+      targetName: "Atlas conventions",
+    });
+
+    const rolledBack = await service.invoke("rollbackNodeTransform", {
+      transformId: transform.id,
+    });
+    assert.ok(rolledBack.rolledBackAt);
+
+    const reader = new NmgStore(databasePath);
+    try {
+      assert.equal(reader.getContext([first.memory.id]).results[0]!.node.id, first.node.id);
+      assert.equal(reader.getContext([second.memory.id]).results[0]!.node.id, second.node.id);
+    } finally {
+      reader.close();
+    }
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("resident service remembers, searches, and expands exact evidence", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-roundtrip-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
@@ -49,6 +85,194 @@ test("resident service remembers, searches, and expands exact evidence", async (
     });
     assert.equal(expanded.results[0]?.evidence.content, remembered.history.content);
     assert.deepEqual(expanded.missingMemoryIds, ["missing-memory"]);
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("remember resolution lets an external semantic judge apply a validated supersession", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-resolve-remember-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    const oldValue = await service.invoke("remember", {
+      statement: "The Atlas database is PostgreSQL.",
+      nodeName: "Atlas database",
+      scope: { project: "atlas" },
+    });
+    const newValue = await service.invoke("remember", {
+      statement: "The Atlas database is now SQLite.",
+      nodeName: "Atlas database",
+      scope: { project: "atlas" },
+    });
+    const resolved = await service.invoke("resolveRemember", {
+      action: "supersede",
+      newMemoryId: newValue.memory.id,
+      supersededMemoryId: oldValue.memory.id,
+      reason: "The user explicitly changed the database choice.",
+    });
+    assert.equal(resolved.applied, true);
+    const search = await service.invoke("search", {
+      query: "Atlas database",
+      scope: { project: "atlas" },
+      includeHistorical: true,
+    });
+    const stale = search.results.find((entry) => entry.memory.id === oldValue.memory.id);
+    assert.equal(stale?.memory.status, "superseded");
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("remember relation resolution creates a reversible proposal without merging nodes", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-relate-remember-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    const specific = await service.invoke("remember", {
+      statement: "Atlas stores its local index in SQLite.",
+      nodeName: "Atlas local index",
+    });
+    const general = await service.invoke("remember", {
+      statement: "Atlas has an offline storage subsystem.",
+      nodeName: "Atlas storage",
+    });
+    const resolved = await service.invoke("resolveRemember", {
+      action: "relate",
+      newMemoryId: specific.memory.id,
+      relatedMemoryId: general.memory.id,
+      relationJudgement: "refines",
+      confidence: 0.84,
+    });
+    assert.equal(resolved.action, "relate");
+    assert.equal(resolved.proposal.status, "pending");
+    assert.equal(resolved.proposal.relationType, "refines");
+    assert.deepEqual(resolved.proposal.evidenceMemoryIds, [specific.memory.id, general.memory.id]);
+
+    const search = await service.invoke("search", { query: "Atlas storage", limit: 10 });
+    assert.deepEqual(
+      new Set(search.results.map((entry) => entry.memory.id)),
+      new Set([specific.memory.id, general.memory.id]),
+    );
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("remember relation resolution rejects identity claims across conflicting scopes", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-relate-scope-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    const atlas = await service.invoke("remember", {
+      statement: "Sam maintains Atlas.",
+      nodeName: "Sam in Atlas",
+      scope: { project: "atlas" },
+    });
+    const beacon = await service.invoke("remember", {
+      statement: "Sam maintains Beacon.",
+      nodeName: "Sam in Beacon",
+      scope: { project: "beacon" },
+    });
+    await assert.rejects(
+      service.invoke("resolveRemember", {
+        action: "relate",
+        newMemoryId: atlas.memory.id,
+        relatedMemoryId: beacon.memory.id,
+        relationJudgement: "same_entity",
+      }),
+      /requires non-conflicting scope/,
+    );
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("remember forget resolution withdraws a selected memory from retrieval", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-forget-remember-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    const remembered = await service.invoke("remember", {
+      statement: "The user uses the alias Sparrow.",
+      nodeName: "User aliases",
+    });
+    const resolved = await service.invoke("resolveRemember", {
+      action: "forget",
+      memoryId: remembered.memory.id,
+    });
+    assert.deepEqual(resolved, {
+      action: "forget",
+      memoryId: remembered.memory.id,
+      deleted: true,
+    });
+    const search = await service.invoke("search", {
+      query: "alias Sparrow",
+      includeHistorical: true,
+    });
+    assert.equal(
+      search.results.some((entry) => entry.memory.id === remembered.memory.id),
+      false,
+    );
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("memory export defaults can preserve user-owned memory with provenance", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-export-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    const userMemory = await service.invoke("remember", {
+      statement: "The user prefers concise release notes.",
+      nodeName: "Communication preferences",
+      sourceActor: "user",
+      evidence: "I prefer concise release notes.",
+      sourceRef: "pi-session:example",
+    });
+    await service.invoke("remember", {
+      statement: "The assistant suggested adding diagrams.",
+      nodeName: "Assistant suggestions",
+      sourceActor: "assistant",
+      evidence: "I suggest adding diagrams.",
+    });
+
+    const exported = await service.invoke("exportMemories", { sourceActor: "user" });
+    assert.equal(exported.format, "nmg.memory-export.v1");
+    assert.equal(exported.items.length, 1);
+    assert.equal(exported.items[0]?.memory.id, userMemory.memory.id);
+    assert.equal(exported.items[0]?.node.canonicalName, "Communication preferences");
+    assert.equal(exported.items[0]?.evidence[0]?.content, "I prefer concise release notes.");
+    assert.equal(exported.items[0]?.evidence[0]?.sourceRef, "pi-session:example");
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("resident service records claim outcomes without changing extraction confidence", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-claim-outcome-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    const remembered = await service.invoke("remember", {
+      statement: "Atlas uses SQLite.",
+      nodeName: "Atlas database",
+    });
+    const result = await service.invoke("recordClaimOutcomes", {
+      semanticTaskId: "atlas-verification-1",
+      votes: [
+        {
+          memoryId: remembered.memory.id,
+          outcome: "supported",
+          source: "tool",
+          sourceLineage: "sqlite-schema-check",
+        },
+      ],
+    });
+    assert.equal(result.events.length, 1);
+    assert.equal(result.posteriors[0]?.priorConfidence, 0.5);
+    assert.equal(result.posteriors[0]?.independentVoteCount, 1);
   } finally {
     service.close();
     rmSync(directory, { recursive: true, force: true });
@@ -255,7 +479,231 @@ test("resident service syncs a scoped LTG working set into project STG idempoten
     assert.equal(second.copied, 0);
   } finally {
     service.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  }
+});
+
+test("STG consolidation stays shadow by default and can be enabled after strong outcomes", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-stg-consolidation-"));
+  const projectDir = join(directory, "project");
+  const databasePath = join(directory, "ltg.sqlite");
+  const environment = {
+    NMG_STG_CONSOLIDATE_MIN_VOTES: "1",
+    NMG_STG_CONSOLIDATE_MIN_MEAN: "0",
+    NMG_STG_CONSOLIDATE_MIN_LOWER_BOUND: "0",
+  };
+  const service = new NmgService({ databasePath, environment });
+  try {
+    const local = await service.invoke("remember", {
+      statement: "Atlas durable convention uses cobalt labels.",
+      nodeName: "Atlas convention",
+      evidence: "The user confirmed the cobalt label convention.",
+      residence: "stg",
+      projectDir,
+      sessionId: "session-alpha",
+    });
+    const shadow = await service.invoke("recordClaimOutcomes", {
+      projectDir,
+      sessionId: "session-alpha",
+      semanticTaskId: "task-one",
+      votes: [
+        {
+          memoryId: local.memory.id,
+          outcome: "supported",
+          source: "user",
+          sourceLineage: "message:user-confirmation-1",
+        },
+      ],
+    });
+    assert.deepEqual(shadow.consolidationCandidates, [local.memory.id]);
+    assert.deepEqual(shadow.consolidatedMemories, []);
+  } finally {
+    service.close();
+  }
+
+  const active = new NmgService({
+    databasePath,
+    environment: { ...environment, NMG_STG_AUTO_CONSOLIDATE: "1" },
+  });
+  try {
+    const localStore = new NmgStore(stgStorePath(projectDir, "session-alpha"));
+    const [memory] = localStore.exportMemories({ sourceActor: "user" }).items;
+    localStore.close();
+    assert.ok(memory);
+    const promoted = await active.invoke("recordClaimOutcomes", {
+      projectDir,
+      sessionId: "session-alpha",
+      semanticTaskId: "task-two",
+      votes: [
+        {
+          memoryId: memory!.memory.id,
+          outcome: "supported",
+          source: "user",
+          sourceLineage: "message:user-confirmation-2",
+        },
+      ],
+    });
+    assert.equal(promoted.consolidatedMemories.length, 1);
+    const ltg = new NmgStore(databasePath);
+    try {
+      assert.equal(ltg.search("cobalt labels", { maxTier: 3 }).length, 1);
+    } finally {
+      ltg.close();
+    }
+  } finally {
+    active.close();
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("automatic STG consolidation retracts only its own LTG copy when posterior support falls", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-stg-retract-"));
+  const projectDir = join(directory, "project");
+  const databasePath = join(directory, "ltg.sqlite");
+  const service = new NmgService({
+    databasePath,
+    environment: {
+      NMG_STG_AUTO_CONSOLIDATE: "1",
+      NMG_STG_CONSOLIDATE_MIN_VOTES: "1",
+      NMG_STG_CONSOLIDATE_MIN_MEAN: "0.55",
+      NMG_STG_CONSOLIDATE_MIN_LOWER_BOUND: "0",
+    },
+  });
+  try {
+    const local = await service.invoke("remember", {
+      statement: "Atlas build labels are cobalt.",
+      nodeName: "Atlas build labels",
+      residence: "stg",
+      projectDir,
+      sessionId: "session-alpha",
+    });
+    const promoted = await service.invoke("recordClaimOutcomes", {
+      projectDir,
+      sessionId: "session-alpha",
+      semanticTaskId: "confirmation-one",
+      votes: [
+        {
+          memoryId: local.memory.id,
+          outcome: "supported",
+          source: "user",
+          sourceLineage: "message:confirmation-one",
+        },
+      ],
+    });
+    assert.equal(promoted.consolidatedMemories.length, 1);
+    assert.deepEqual(promoted.retractedMemories, []);
+
+    const corrected = await service.invoke("recordClaimOutcomes", {
+      projectDir,
+      sessionId: "session-alpha",
+      semanticTaskId: "correction-two",
+      votes: [
+        {
+          memoryId: local.memory.id,
+          outcome: "contradicted",
+          source: "user",
+          sourceLineage: "message:correction-two",
+        },
+      ],
+    });
+    assert.equal(corrected.retractedMemories.length, 1);
+    assert.equal(
+      (await service.invoke("search", { query: "cobalt build labels" })).results.length,
+      0,
+      "the automatically materialized LTG copy is withdrawn",
+    );
+
+    const requalified = await service.invoke("recordClaimOutcomes", {
+      projectDir,
+      sessionId: "session-alpha",
+      semanticTaskId: "confirmation-three",
+      votes: [
+        {
+          memoryId: local.memory.id,
+          outcome: "supported",
+          source: "user",
+          sourceLineage: "message:confirmation-three",
+        },
+      ],
+    });
+    assert.equal(requalified.consolidatedMemories.length, 1);
+    assert.notEqual(
+      requalified.consolidatedMemories[0]!.memoryId,
+      promoted.consolidatedMemories[0]!.memoryId,
+      "requalification creates a fresh auditable LTG version",
+    );
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  }
+});
+
+test("STG correction never retracts a pre-existing manual LTG duplicate", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-stg-manual-"));
+  const projectDir = join(directory, "project");
+  const databasePath = join(directory, "ltg.sqlite");
+  const service = new NmgService({
+    databasePath,
+    environment: {
+      NMG_STG_AUTO_CONSOLIDATE: "1",
+      NMG_STG_CONSOLIDATE_MIN_VOTES: "1",
+      NMG_STG_CONSOLIDATE_MIN_MEAN: "0.55",
+      NMG_STG_CONSOLIDATE_MIN_LOWER_BOUND: "0",
+    },
+  });
+  try {
+    const manual = await service.invoke("remember", {
+      statement: "Atlas release channel is stable.",
+      nodeName: "Atlas release channel",
+    });
+    const local = await service.invoke("remember", {
+      statement: "Atlas release channel is stable.",
+      nodeName: "Atlas release channel",
+      residence: "stg",
+      projectDir,
+      sessionId: "session-alpha",
+    });
+    const first = await service.invoke("recordClaimOutcomes", {
+      projectDir,
+      sessionId: "session-alpha",
+      semanticTaskId: "confirmation-one",
+      votes: [
+        {
+          memoryId: local.memory.id,
+          outcome: "supported",
+          source: "user",
+          sourceLineage: "message:confirmation-one",
+        },
+      ],
+    });
+    assert.deepEqual(
+      first.consolidatedMemories,
+      [],
+      "manual duplicate is not claimed as automatic",
+    );
+
+    const corrected = await service.invoke("recordClaimOutcomes", {
+      projectDir,
+      sessionId: "session-alpha",
+      semanticTaskId: "correction-two",
+      votes: [
+        {
+          memoryId: local.memory.id,
+          outcome: "contradicted",
+          source: "user",
+          sourceLineage: "message:correction-two",
+        },
+      ],
+    });
+    assert.deepEqual(corrected.retractedMemories, []);
+    assert.equal(
+      (await service.invoke("get", { memoryIds: [manual.memory.id] })).results.length,
+      1,
+      "manual LTG truth remains independently owned",
+    );
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   }
 });
 
@@ -294,6 +742,32 @@ test("resident service exposes explicit retention and deletion maintenance", asy
       (await service.invoke("search", { query: "disposable historical" })).results.length,
       0,
     );
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("remember schedules thresholded maintenance after returning", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-auto-maintenance-"));
+  const service = new NmgService({
+    databasePath: join(directory, "nmg.sqlite"),
+    environment: {
+      NMG_MAINTENANCE_WRITE_THRESHOLD: "1",
+      NMG_MAINTENANCE_ACCESS_THRESHOLD: "1",
+      NMG_MAINTENANCE_NODE_LIMIT: "1",
+    },
+  });
+  try {
+    const remembered = await service.invoke("remember", {
+      statement: "Maintenance is deferred until after remember.",
+      nodeName: "Maintenance scheduling",
+    });
+    assert.ok(remembered.memory.id, "remember completes independently of maintenance");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const aggregates = await service.invoke("perfAggregates");
+    assert.ok(aggregates.some((aggregate) => aggregate.section === "maintenance.batch"));
+    assert.ok(aggregates.some((aggregate) => aggregate.section === "maintenance.semantic"));
   } finally {
     service.close();
     rmSync(directory, { recursive: true, force: true });

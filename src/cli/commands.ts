@@ -14,10 +14,12 @@ import { resolve } from "node:path";
 import type { NmgMethod } from "./protocol.ts";
 import type {
   NmgDeleteMemoryParams,
+  NmgExportMemoriesParams,
   NmgGetParams,
   NmgMergeNodesParams,
   NmgPerfParams,
   NmgRememberParams,
+  NmgRollbackNodeTransformParams,
   NmgRetentionCandidatesParams,
   NmgSearchParams,
   NmgSetStorageStateParams,
@@ -39,7 +41,7 @@ export interface CliCommandSpec {
   /** Set false to reject COMMON_FLAGS (e.g. --json) for this command. */
   includeCommonFlags?: boolean;
   /** CLI words, e.g. ["search"] or ["retention", "candidates"]. */
-  words: readonly [string, ...(string[])] | readonly [string];
+  words: readonly [string, ...string[]] | readonly [string];
   /** The `nmg ...` line in the USAGE synopsis. */
   usageLine: string;
   /** Allowed --options on top of COMMON_OPTIONS. */
@@ -222,6 +224,23 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
     }),
   },
   {
+    method: "exportMemories",
+    words: ["memory", "export"],
+    usageLine: "nmg memory export [--all-actors] [--include-deleted] [--json]",
+    options: [],
+    flags: ["all-actors", "include-deleted"],
+    usageDetail: `Memory export options:
+  --all-actors              Include assistant, system, and tool memories
+  --include-deleted         Include logical-deletion tombstones and retained provenance`,
+    buildParams: (values): NmgExportMemoriesParams => {
+      rejectPositionals(values, "memory export");
+      return {
+        sourceActor: values.flags.has("all-actors") ? undefined : "user",
+        includeDeleted: values.flags.has("include-deleted"),
+      };
+    },
+  },
+  {
     method: "mergeNodes",
     words: ["node", "merge"],
     usageLine: "nmg node merge NODE_ID... --target-name NAME [--target-kind KIND] [--json]",
@@ -240,6 +259,19 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
     options: ["partition"],
     flags: [],
     buildParams: splitNodeParams,
+  },
+  {
+    method: "rollbackNodeTransform",
+    words: ["node", "rollback"],
+    usageLine: "nmg node rollback TRANSFORM_ID [--json]",
+    options: [],
+    flags: [],
+    usageDetail: `Node rollback:
+  Restores a journaled merge only when its memories, node states, and local topology
+  have not changed since the merge. Older unjournaled transforms cannot be restored.`,
+    buildParams: (values): NmgRollbackNodeTransformParams => ({
+      transformId: singlePositional(values, "node rollback"),
+    }),
   },
   {
     method: "perfAggregates",

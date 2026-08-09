@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { rmSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
@@ -129,7 +130,13 @@ async function runDaemonCommand(
     if (!existing || !isProcessAlive(existing.pid) || existing.transport !== "http") {
       return { running: false };
     }
-    const status = await httpCall(existing, "status");
+    let status: unknown;
+    try {
+      status = await httpCall(existing, "status");
+    } catch {
+      rmSync(statePath, { force: true });
+      return { running: false };
+    }
     return {
       running: true,
       pid: existing.pid,
@@ -140,7 +147,12 @@ async function runDaemonCommand(
 
   if (command === "daemon-stop") {
     if (existing?.transport === "http" && isProcessAlive(existing.pid)) {
-      await httpCall(existing, "shutdown");
+      try {
+        await httpCall(existing, "shutdown");
+      } catch {
+        rmSync(statePath, { force: true });
+        return { stopped: false, reason: "stale-state", pid: existing.pid };
+      }
       await waitForProcessExit(existing.pid);
       return { stopped: true, pid: existing.pid };
     }
@@ -149,7 +161,12 @@ async function runDaemonCommand(
 
   if (command === "daemon-start") {
     if (existing && isProcessAlive(existing.pid)) {
-      return { started: false, alreadyRunning: true, pid: existing.pid };
+      try {
+        await httpCall(existing, "hello");
+        return { started: false, alreadyRunning: true, pid: existing.pid };
+      } catch {
+        rmSync(statePath, { force: true });
+      }
     }
     const entrypoint = process.argv[1];
     if (!entrypoint) throw new Error("cannot locate the NMG CLI entrypoint");
