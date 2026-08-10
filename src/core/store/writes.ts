@@ -599,10 +599,12 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       ).map(mapMemoryRow);
     }
 
-    exportMemories(input: {
-      sourceActor?: MemoryRecord["sourceActor"];
-      includeDeleted?: boolean;
-    } = {}): MemoryExportBundle {
+    exportMemories(
+      input: {
+        sourceActor?: MemoryRecord["sourceActor"];
+        includeDeleted?: boolean;
+      } = {},
+    ): MemoryExportBundle {
       const clauses = [input.includeDeleted ? "1 = 1" : "status <> 'deleted'"];
       const params: string[] = [];
       if (input.sourceActor) {

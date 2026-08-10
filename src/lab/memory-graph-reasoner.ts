@@ -312,12 +312,21 @@ export class MemoryGraphReasoner {
         if (node.requires && factActsTensor) {
           for (const factId of node.requires) {
             const idx = factIndex.get(factId);
-            if (idx === undefined) { precondTensor = Tensor.scalar(0); break; }
+            if (idx === undefined) {
+              precondTensor = Tensor.scalar(0);
+              break;
+            }
             const act = factActsTensor.at(idx); // Index op, stays in DAG
             precondTensor = precondTensor ? precondTensor.multiply(act) : act;
           }
         }
-        const { nextQuery, score, gate } = this.#reasonStep(q, queryOriginal, node.vector, node.id, precondTensor);
+        const { nextQuery, score, gate } = this.#reasonStep(
+          q,
+          queryOriginal,
+          node.vector,
+          node.id,
+          precondTensor,
+        );
         const s = score.scalarValue;
         if (s > bestScore) {
           bestScore = s;
@@ -331,7 +340,13 @@ export class MemoryGraphReasoner {
       if (!bestNode) break;
       pathScore += bestScore;
       // Rebuild q for the next step (same precondition as evaluation)
-      const { nextQuery: winningQ } = this.#reasonStep(q, queryOriginal, bestNode.vector, bestNode.id, bestPrecond);
+      const { nextQuery: winningQ } = this.#reasonStep(
+        q,
+        queryOriginal,
+        bestNode.vector,
+        bestNode.id,
+        bestPrecond,
+      );
 
       path.push({
         nodeId: bestNode.id,
@@ -415,24 +430,17 @@ export class MemoryGraphReasoner {
     lines.push(`Inserting node "${hypotheticalNodeId}":`);
 
     // Is the hypothetical node itself picked?
-    const hypoInPath = result.withNode.path.some(
-      (s) => s.nodeId === hypotheticalNodeId,
-    );
+    const hypoInPath = result.withNode.path.some((s) => s.nodeId === hypotheticalNodeId);
     if (hypoInPath) {
-      const step = result.withNode.path.findIndex(
-        (s) => s.nodeId === hypotheticalNodeId,
-      );
-      const score =
-        result.withNode.path[step]!.score;
+      const step = result.withNode.path.findIndex((s) => s.nodeId === hypotheticalNodeId);
+      const score = result.withNode.path[step]!.score;
       lines.push(`  → enters path at step ${step + 1} (score ${score.toFixed(3)})`);
     } else {
       lines.push(`  → does NOT enter path`);
     }
 
     // Top impacts on existing nodes
-    const others = result.impacted.filter(
-      (i) => i.nodeId !== hypotheticalNodeId,
-    );
+    const others = result.impacted.filter((i) => i.nodeId !== hypotheticalNodeId);
     const top = others.slice(0, 5);
     if (top.length === 0) {
       lines.push(`  → no significant impact on existing nodes`);
@@ -440,9 +448,7 @@ export class MemoryGraphReasoner {
       for (const imp of top) {
         const dir = imp.delta > 0 ? "↑" : "↓";
         const flag = imp.pathChange !== "none" ? ` [${imp.pathChange}]` : "";
-        lines.push(
-          `  → ${imp.nodeId}: ${dir}${Math.abs(imp.delta).toFixed(3)}${flag}`,
-        );
+        lines.push(`  → ${imp.nodeId}: ${dir}${Math.abs(imp.delta).toFixed(3)}${flag}`);
       }
     }
 
@@ -460,10 +466,7 @@ export class MemoryGraphReasoner {
    * Train on a labeled path. Builds a DAG connecting every step,
    * so gradients flow from the final loss back through the entire traversal.
    */
-  trainPath(
-    sample: PathTrainingSample,
-    learningRate = 0.05,
-  ): number {
+  trainPath(sample: PathTrainingSample, learningRate = 0.05): number {
     if (sample.pathNodeIds.length < 1) {
       throw new Error("trainPath requires at least one node in path");
     }
@@ -515,11 +518,7 @@ export class MemoryGraphReasoner {
    * combined membership [N,1]. Atom memberships are computed once and cached
    * by expression identity, so shared sub-queries cost one matmul.
    */
-  #evalLogic(
-    expr: LogicExpr,
-    nodeMat: Tensor,
-    atomCache: Map<LogicExpr, Tensor>,
-  ): Tensor {
+  #evalLogic(expr: LogicExpr, nodeMat: Tensor, atomCache: Map<LogicExpr, Tensor>): Tensor {
     if (expr.kind === "atom") {
       let m = atomCache.get(expr);
       if (!m) {
@@ -537,10 +536,7 @@ export class MemoryGraphReasoner {
     }
     let acc = parts[0]!;
     for (const part of parts.slice(1)) {
-      acc =
-        expr.kind === "and"
-          ? acc.multiply(part)
-          : acc.add(part).subtract(acc.multiply(part)); // probabilistic sum
+      acc = expr.kind === "and" ? acc.multiply(part) : acc.add(part).subtract(acc.multiply(part)); // probabilistic sum
     }
     return acc;
   }
@@ -573,11 +569,7 @@ export class MemoryGraphReasoner {
    *   logicSearch(Logic.and(Logic.atom(jeanCities), Logic.atom(johnCities)), graph, 10)
    * Bridge nodes relevant to both atoms score highest, without leaving the DAG.
    */
-  logicSearch(
-    expr: LogicExpr,
-    graph: Map<string, MemoryNode>,
-    topK: number,
-  ): LogicSearchResult[] {
+  logicSearch(expr: LogicExpr, graph: Map<string, MemoryNode>, topK: number): LogicSearchResult[] {
     const { nodeIds, nodeMat } = this.#stackGraph(graph);
     const atomCache = new Map<LogicExpr, Tensor>();
     const combined = this.#evalLogic(expr, nodeMat, atomCache);

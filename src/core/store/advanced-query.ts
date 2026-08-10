@@ -72,8 +72,18 @@ function parseDateRange(value: string): { from?: string; to?: string } {
 // instead of ranking future memories above the ones current at that time.
 
 const MONTH_NUM: Record<string, number> = {
-  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
-  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12,
 };
 
 function isoDay(y: number, m: number, d: number, addDays = 0): string {
@@ -121,7 +131,9 @@ export function extractEventWindow(text: string): { from?: string; to?: string }
     if (a && b) return { from: a.day, to: b.nextDay };
   }
   // 2) "as of / as at / by / before / until <D>" → inclusive through that day
-  m = text.match(new RegExp(`\\b(?:as of|as at|by|before|until|up to)\\s+(${DATE_TOKEN.source})\\b`, "i"));
+  m = text.match(
+    new RegExp(`\\b(?:as of|as at|by|before|until|up to)\\s+(${DATE_TOKEN.source})\\b`, "i"),
+  );
   if (m) {
     const d = parseDateToken(m[1]!);
     if (d) return { to: d.nextDay };
@@ -147,9 +159,7 @@ export function parseAdvancedQuery(query: string): ParsedAdvancedQuery {
     ? parsed.text.join(" ").trim()
     : (parsed.text ?? "").trim();
   const excludeTerms = asList(parsed.exclude?.text) ?? [];
-  const range = parsed.time
-    ? parseDateRange(parsed.time)
-    : extractEventWindow(semantic);
+  const range = parsed.time ? parseDateRange(parsed.time) : extractEventWindow(semantic);
   return {
     semantic,
     filters: {
@@ -164,10 +174,17 @@ export function parseAdvancedQuery(query: string): ParsedAdvancedQuery {
 }
 
 /** Applies parsed filters to a ranked candidate list (keeps relative order). */
-export function applyAdvancedFilters<T extends { memory: { memoryType?: string; stateKey?: string | null; eventTime?: string | null; statement: string }; node?: { canonicalName: string } }>(
-  results: readonly T[],
-  filters: AdvancedQueryFilters,
-): T[] {
+export function applyAdvancedFilters<
+  T extends {
+    memory: {
+      memoryType?: string;
+      stateKey?: string | null;
+      eventTime?: string | null;
+      statement: string;
+    };
+    node?: { canonicalName: string };
+  },
+>(results: readonly T[], filters: AdvancedQueryFilters): T[] {
   const typeSet = filters.types ? new Set(filters.types) : null;
   const nodeSet = filters.nodeNames
     ? filters.nodeNames.map((name) => name.toLocaleLowerCase("en-US"))
@@ -178,7 +195,13 @@ export function applyAdvancedFilters<T extends { memory: { memoryType?: string; 
   const excluded = filters.excludeTerms;
   return results.filter((result) => {
     if (typeSet && !typeSet.has(result.memory.memoryType ?? "")) return false;
-    if (nodeSet && !nodeSet.some((name) => (result.node?.canonicalName ?? "").toLocaleLowerCase("en-US").includes(name))) return false;
+    if (
+      nodeSet &&
+      !nodeSet.some((name) =>
+        (result.node?.canonicalName ?? "").toLocaleLowerCase("en-US").includes(name),
+      )
+    )
+      return false;
     if (stateSet && !stateSet.has(result.memory.stateKey ?? "")) return false;
     if (fromMs !== null || toMs !== null) {
       const eventMs = result.memory.eventTime ? Date.parse(result.memory.eventTime) : null;
@@ -187,7 +210,8 @@ export function applyAdvancedFilters<T extends { memory: { memoryType?: string; 
       if (toMs !== null && eventMs > toMs) return false;
     }
     if (excluded.length > 0) {
-      const text = `${result.memory.statement} ${result.node?.canonicalName ?? ""}`.toLocaleLowerCase("en-US");
+      const text =
+        `${result.memory.statement} ${result.node?.canonicalName ?? ""}`.toLocaleLowerCase("en-US");
       if (excluded.some((term) => text.includes(term))) return false;
     }
     return true;

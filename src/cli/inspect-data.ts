@@ -212,8 +212,7 @@ function mapTraceRows(rows: Row[]): InspectTraceRow[] {
 
 export function getTraceDetail(db: DatabaseSync, traceId: string): InspectTraceDetail | null {
   const row = db.prepare("SELECT * FROM retrieval_traces WHERE id = ?").get(traceId) as
-    | Row
-    | undefined;
+    Row | undefined;
   if (!row) return null;
   return {
     id: String(row.id),
@@ -251,7 +250,8 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (char) => `\\${char}`);
 }
 
-function parseJsonArray(value: unknown): string[] {  if (typeof value !== "string") return [];
+function parseJsonArray(value: unknown): string[] {
+  if (typeof value !== "string") return [];
   try {
     const parsed = JSON.parse(value) as unknown;
     return Array.isArray(parsed) ? parsed.map(String) : [];

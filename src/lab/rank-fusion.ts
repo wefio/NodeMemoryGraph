@@ -32,7 +32,9 @@ export function reciprocalRankFusion(
   return [...scores.values()]
     .sort(
       (left, right) =>
-        right.score - left.score || left.bestRank - right.bestRank || left.id.localeCompare(right.id),
+        right.score - left.score ||
+        left.bestRank - right.bestRank ||
+        left.id.localeCompare(right.id),
     )
     .slice(0, Math.max(0, Math.floor(limit)));
 }

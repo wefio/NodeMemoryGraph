@@ -1,11 +1,4 @@
-import {
-  closeSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 export interface ServerState {
@@ -71,7 +64,9 @@ export function acquireServerLease(databasePath: string): ServerLease {
   throw new Error("could not acquire NMG server lease");
 }
 
-export async function stopServer(databasePath: string): Promise<
+export async function stopServer(
+  databasePath: string,
+): Promise<
   | { stopped: true; pid: number }
   | { stopped: false; reason: "not-running" | "stale-state"; pid?: number }
 > {

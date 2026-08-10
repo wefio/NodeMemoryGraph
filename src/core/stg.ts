@@ -70,7 +70,8 @@ export function copyLtgSubsetToStg(
     .sort(
       (left, right) =>
         right.memory.accessCount - left.memory.accessCount ||
-        Date.parse(right.memory.lastAccessedAt ?? "") - Date.parse(left.memory.lastAccessedAt ?? ""),
+        Date.parse(right.memory.lastAccessedAt ?? "") -
+          Date.parse(left.memory.lastAccessedAt ?? ""),
     )
     .slice(0, limit);
   const cachedAt = new Date().toISOString();
@@ -198,11 +199,7 @@ export function searchStgFirst(
   options: SearchOptions = {},
 ): MemoryContext {
   const local = stg?.searchContext(query, options);
-  if (
-    local &&
-    local.results.length > 0 &&
-    local.activeGraph?.qpp?.trigger === false
-  ) {
+  if (local && local.results.length > 0 && local.activeGraph?.qpp?.trigger === false) {
     return local;
   }
   const shared = ltg.searchContext(query, options);
@@ -211,10 +208,7 @@ export function searchStgFirst(
 }
 
 /** Merge a project STG result with authoritative LTG results. */
-export function mergeStgLtgContexts(
-  local: MemoryContext,
-  shared: MemoryContext,
-): MemoryContext {
+export function mergeStgLtgContexts(local: MemoryContext, shared: MemoryContext): MemoryContext {
   // Merge: dedupe by cached sourceMemoryId; keep LTG rows (authoritative).
   const seenLtg = new Set(shared.results.map((result) => result.memory.id));
   const dedupedLocal = local.results.filter(
@@ -231,7 +225,10 @@ export function mergeStgLtgContexts(
     results,
     relations: [
       ...new Map(
-        [...(local.relations ?? []), ...shared.relations].map((relation) => [relation.id, relation]),
+        [...(local.relations ?? []), ...shared.relations].map((relation) => [
+          relation.id,
+          relation,
+        ]),
       ).values(),
     ],
     activeGraph,
@@ -307,7 +304,8 @@ function mergeActiveGraphs(
       maxEvidence: local.budget.maxEvidence + shared.budget.maxEvidence,
       maxTokens: local.budget.maxTokens + shared.budget.maxTokens,
       maxGraphHops: Math.max(local.budget.maxGraphHops, shared.budget.maxGraphHops),
-      maxLocalTier: Math.max(local.budget.maxLocalTier, shared.budget.maxLocalTier) as 0 | 1 | 2 | 3,
+      maxLocalTier: Math.max(local.budget.maxLocalTier, shared.budget.maxLocalTier) as
+        0 | 1 | 2 | 3,
       maxTierBudget: local.budget.maxTierBudget + shared.budget.maxTierBudget,
       maxLatencyMs: local.budget.maxLatencyMs + shared.budget.maxLatencyMs,
     },

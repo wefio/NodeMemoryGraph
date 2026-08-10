@@ -116,7 +116,11 @@ export function hybridScore(
   weights: HybridWeights = DEFAULT_HYBRID_WEIGHTS,
 ): number {
   const boundedLexical = lexical <= 0 ? 0 : lexical / (lexical + 10);
-  return boundedLexical * weights.lexical + Math.max(0, vector) * weights.vector + Math.max(0, route) * weights.route;
+  return (
+    boundedLexical * weights.lexical +
+    Math.max(0, vector) * weights.vector +
+    Math.max(0, route) * weights.route
+  );
 }
 
 export function mergeSemanticCandidates(
@@ -183,18 +187,52 @@ export function searchTerms(value: string): string[] {
 }
 
 const ENGLISH_SEARCH_STOP_WORDS = new Set([
-  "an", "and", "are", "at", "be", "been", "being", "between", "but", "by",
-  "did", "do", "does", "for", "from", "had", "has", "have", "how", "if",
-  "in", "into", "is", "many", "much", "of", "on", "or", "the", "then",
-  "to", "was", "were", "what", "when", "where", "which", "who", "whom",
-  "whose", "why", "with",
+  "an",
+  "and",
+  "are",
+  "at",
+  "be",
+  "been",
+  "being",
+  "between",
+  "but",
+  "by",
+  "did",
+  "do",
+  "does",
+  "for",
+  "from",
+  "had",
+  "has",
+  "have",
+  "how",
+  "if",
+  "in",
+  "into",
+  "is",
+  "many",
+  "much",
+  "of",
+  "on",
+  "or",
+  "the",
+  "then",
+  "to",
+  "was",
+  "were",
+  "what",
+  "when",
+  "where",
+  "which",
+  "who",
+  "whom",
+  "whose",
+  "why",
+  "with",
 ]);
 
 export function normalize(value: string): string {
-  return value
-    .normalize("NFKC")
-    .trim()
-    .toLocaleLowerCase("en-US");
+  return value.normalize("NFKC").trim().toLocaleLowerCase("en-US");
 }
 
 /**

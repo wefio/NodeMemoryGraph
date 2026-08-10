@@ -61,7 +61,9 @@ function scalar(value: number): UOp {
 }
 
 function isScalarConstant(node: UOp): node is UOp & { argument: Float32Array } {
-  return node.op === Op.Constant && node.argument instanceof Float32Array && node.argument.length === 1;
+  return (
+    node.op === Op.Constant && node.argument instanceof Float32Array && node.argument.length === 1
+  );
 }
 
 function scalarValue(node: UOp): number {
@@ -193,11 +195,12 @@ function evaluate(root: UOp, cache = new Map<UOp, Float32Array>()): Float32Array
       for (let i = 0; i < src.length; i++) result[i] = -src[i]!;
       break;
     }
-    case Op.Broadcast: {
-      result = new Float32Array(sizeOf(root.shape));
-      const fill = values[0]![0]!;
-      for (let i = 0; i < result.length; i++) result[i] = fill;
-    }
+    case Op.Broadcast:
+      {
+        result = new Float32Array(sizeOf(root.shape));
+        const fill = values[0]![0]!;
+        for (let i = 0; i < result.length; i++) result[i] = fill;
+      }
       break;
     case Op.Matmul:
       result = evaluateMatmul(
@@ -207,21 +210,23 @@ function evaluate(root: UOp, cache = new Map<UOp, Float32Array>()): Float32Array
         root.sources[1]!.shape,
       );
       break;
-    case Op.Sum: {
-      const src = values[0]!;
-      let total = 0;
-      for (let i = 0; i < src.length; i++) total += src[i]!;
-      result = Float32Array.of(total);
-    }
-      break;
-    case Op.SumN: {
-      const n = values.length;
-      result = new Float32Array(values[0]!.length);
-      for (let j = 0; j < n; j++) {
-        const src = values[j]!;
-        for (let i = 0; i < src.length; i++) result[i] += src[i]!;
+    case Op.Sum:
+      {
+        const src = values[0]!;
+        let total = 0;
+        for (let i = 0; i < src.length; i++) total += src[i]!;
+        result = Float32Array.of(total);
       }
-    }
+      break;
+    case Op.SumN:
+      {
+        const n = values.length;
+        result = new Float32Array(values[0]!.length);
+        for (let j = 0; j < n; j++) {
+          const src = values[j]!;
+          for (let i = 0; i < src.length; i++) result[i] += src[i]!;
+        }
+      }
       break;
     case Op.Exp: {
       const src = values[0]!;
@@ -429,7 +434,14 @@ function compileGraph(root: UOp): GraphProgram | null {
       const leaf = leafData.length;
       leafData.push(node.argument as Float32Array);
       buffers.push(node.argument as Float32Array);
-      ops.push({ op: node.op, shape: node.shape, sourceShapes: [], sources: [], argument: leaf, leaf });
+      ops.push({
+        op: node.op,
+        shape: node.shape,
+        sourceShapes: [],
+        sources: [],
+        argument: leaf,
+        leaf,
+      });
     } else {
       // Ops the flat tape cannot faithfully reproduce (L2Normalize carries a
       // runtime side-channel for backward) make the whole graph uncompilable.
@@ -601,7 +613,14 @@ function compileBackwardProgram(
       const leaf = leafData.length;
       leafData.push(node.argument as Float32Array);
       gradBuffers.push(node.argument as Float32Array);
-      ops.push({ op: node.op, shape: node.shape, sourceShapes: [], sources: [], argument: leaf, leaf });
+      ops.push({
+        op: node.op,
+        shape: node.shape,
+        sourceShapes: [],
+        sources: [],
+        argument: leaf,
+        leaf,
+      });
     } else {
       if (!COMPILED_OPS.has(node.op)) return null;
       ops.push({
@@ -689,7 +708,10 @@ function evaluateCompiled(root: UOp): Float32Array {
   const session = lastSession;
   if (session) {
     const currentParams: UOp[] = [];
-    if (rebindGraph(session.fwd, root, currentParams) && sameParamSet(currentParams, session.params)) {
+    if (
+      rebindGraph(session.fwd, root, currentParams) &&
+      sameParamSet(currentParams, session.params)
+    ) {
       return runGraph(session.fwd);
     }
   }

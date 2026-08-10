@@ -301,7 +301,8 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   };
 }
 
-function daemonArguments(rest: readonly string[]): ParsedArguments {  const action = rest[0];
+function daemonArguments(rest: readonly string[]): ParsedArguments {
+  const action = rest[0];
   if (!["run", "start", "status", "stop"].includes(action ?? "")) {
     throw new Error("daemon requires start, status, or stop");
   }

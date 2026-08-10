@@ -146,7 +146,6 @@ function positiveInteger(value: string | undefined, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-
 function boundedNumber(value: string | undefined, fallback: number): number {
   if (!value?.trim()) return fallback;
   const parsed = Number(value);

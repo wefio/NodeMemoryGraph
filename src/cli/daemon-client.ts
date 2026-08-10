@@ -146,7 +146,13 @@ function collectDaemonStates(
     if (seenPaths.has(path)) continue;
     seenPaths.add(path);
     const state = readServerState(full);
-    if (state?.transport === "http" && state.host && state.port && state.token && isProcessAlive(state.pid)) {
+    if (
+      state?.transport === "http" &&
+      state.host &&
+      state.port &&
+      state.token &&
+      isProcessAlive(state.pid)
+    ) {
       states.set(`${state.host}:${state.port}:${state.token}`, state);
     }
   }

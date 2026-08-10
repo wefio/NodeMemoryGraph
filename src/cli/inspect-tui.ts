@@ -14,10 +14,7 @@
  *   Esc              → clear search (never quits)
  *   Ctrl+C           → quit immediately
  */
-import type {
-  InspectMemoryDetail,
-  InspectTraceDetail,
-} from "./inspect-data.ts";
+import type { InspectMemoryDetail, InspectTraceDetail } from "./inspect-data.ts";
 
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
@@ -29,9 +26,8 @@ export async function runInspectTui(databasePath: string): Promise<void> {
   if (!process.stdout.isTTY) {
     throw new Error("nmg inspect requires an interactive terminal (TTY)");
   }
-  const { TUI, ProcessTerminal, Text, SelectList, matchesKey } = await import(
-    "@earendil-works/pi-tui"
-  );
+  const { TUI, ProcessTerminal, Text, SelectList, matchesKey } =
+    await import("@earendil-works/pi-tui");
   const data = await import("./inspect-data.ts");
 
   const db = data.openInspectDb(databasePath);
@@ -157,7 +153,13 @@ export async function runInspectTui(databasePath: string): Promise<void> {
         // (otherwise they are filter text).
         if (isTab || !filter) {
           const next: Tab =
-            input === "1" ? "memories" : input === "2" ? "traces" : tab === "memories" ? "traces" : "memories";
+            input === "1"
+              ? "memories"
+              : input === "2"
+                ? "traces"
+                : tab === "memories"
+                  ? "traces"
+                  : "memories";
           if (next !== tab) {
             tab = next;
             remountList();
@@ -210,7 +212,9 @@ function formatMemoryDetail(row: InspectMemoryDetail | null): string {
     lines.push(`scope: ${scopeEntries.map(([key, value]) => `${key}=${value}`).join(" ")}`);
   }
   for (const evidence of row.evidence) {
-    lines.push(`${DIM}evidence[${evidence.role} ${evidence.createdAt.slice(0, 10)}]${RESET} ${evidence.content}`);
+    lines.push(
+      `${DIM}evidence[${evidence.role} ${evidence.createdAt.slice(0, 10)}]${RESET} ${evidence.content}`,
+    );
   }
   return lines.join("\n");
 }

@@ -50,7 +50,9 @@ export function stageArchive(stagingDir: string, entry: SessionArchiveEntry): st
 export function pendingArchives(stagingDir: string): SessionArchiveEntry[] {
   let files: string[];
   try {
-    files = readdirSync(stagingDir).filter((name) => name.endsWith(".json") && !name.endsWith(".tmp"));
+    files = readdirSync(stagingDir).filter(
+      (name) => name.endsWith(".json") && !name.endsWith(".tmp"),
+    );
   } catch {
     return [];
   }
@@ -114,9 +116,7 @@ export async function archiveOrStage(
   try {
     await Promise.race([
       remember(params),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("archive timeout")), timeoutMs),
-      ),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("archive timeout")), timeoutMs)),
     ]);
     return "remembered";
   } catch {

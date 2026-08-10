@@ -30,9 +30,7 @@ export function storedVector(row: Row, prefix = ""): number[] {
  * values rather than throwing: a corrupt embedding should degrade retrieval
  * quality, not break the read path.
  */
-export function parseVector(
-  value: string | number | Uint8Array | null | undefined,
-): number[] {
+export function parseVector(value: string | number | Uint8Array | null | undefined): number[] {
   if (value instanceof Uint8Array) {
     const buffer = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
     const vector: number[] = [];

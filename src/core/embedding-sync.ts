@@ -37,9 +37,7 @@ export async function syncRecordEmbeddings(
     while (true) {
       const documents = store.embeddingDocuments(cursor, limit, client.indexId);
       if (documents.length === 0) break;
-      const vectors = await client.embedDocuments(
-        documents.map((document) => document.text),
-      );
+      const vectors = await client.embedDocuments(documents.map((document) => document.text));
       if (vectors.length !== documents.length) {
         throw new Error(
           `embedding provider returned ${vectors.length} vectors for ` +

@@ -11,10 +11,7 @@
 
 import { Tensor, gradientStep } from "./autodiff.ts";
 import type { HierarchicalActivation } from "../core/hierarchical-activation.ts";
-import type {
-  NodeActivationInput,
-  GraphStateSnapshot,
-} from "../core/hierarchical-activation.ts";
+import type { NodeActivationInput, GraphStateSnapshot } from "../core/hierarchical-activation.ts";
 
 // ── types ──
 
@@ -70,9 +67,7 @@ export class ForkMerge {
     this.config = { ...DEFAULT_CONFIG, ...config };
 
     if (left.dimensions !== right.dimensions) {
-      throw new Error(
-        `dimension mismatch: left=${left.dimensions} right=${right.dimensions}`,
-      );
+      throw new Error(`dimension mismatch: left=${left.dimensions} right=${right.dimensions}`);
     }
   }
 
@@ -88,7 +83,8 @@ export class ForkMerge {
     },
   ): ForkMergeResult {
     const n = candidates.length;
-    if (n === 0) return { leftScores: new Float32Array(), rightScores: new Float32Array(), divergence: 0 };
+    if (n === 0)
+      return { leftScores: new Float32Array(), rightScores: new Float32Array(), divergence: 0 };
 
     // Build both branches from the same query tensor.  This is the
     // critical move: q is a single Tensor; both branches reference
@@ -178,10 +174,7 @@ export class ForkMerge {
     loss.backward();
 
     // Apply gradients to both branches' parameters
-    const allParams = [
-      ...this.left.parameters(),
-      ...this.right.parameters(),
-    ];
+    const allParams = [...this.left.parameters(), ...this.right.parameters()];
     gradientStep(allParams, learningRate);
 
     return { loss: lossValue, divergence: clampDivergence(1 - cos.scalarValue) };
@@ -227,17 +220,12 @@ export class ForkMerge {
     const normR = branchR.scores.norm();
     const epsilon = Tensor.scalar(1e-10);
     const cos = dot.divide(normL.multiply(normR).add(epsilon));
-    const loss = Tensor.scalar(1).subtract(cos).multiplyScalar(
-      this.config.divergenceWeight,
-    );
+    const loss = Tensor.scalar(1).subtract(cos).multiplyScalar(this.config.divergenceWeight);
 
     const lossValue = loss.scalarValue;
     loss.backward();
 
-    const allParams = [
-      ...this.left.parameters(),
-      ...this.right.parameters(),
-    ];
+    const allParams = [...this.left.parameters(), ...this.right.parameters()];
     gradientStep(allParams, learningRate);
 
     return { loss: lossValue, divergence: clampDivergence(1 - cos.scalarValue) };
@@ -272,12 +260,7 @@ export class ForkMerge {
     // Use HA's internal build method — we need the scores Tensor.
     // HA.propagate() already returns scores; we build a minimal duplicate
     // here to keep the HA interface clean.  This is intentional coupling.
-    return (ha as ForkMergeInternal).buildGraph(
-      q,
-      candidates,
-      neighborhood ?? [],
-      graphState,
-    );
+    return (ha as ForkMergeInternal).buildGraph(q, candidates, neighborhood ?? [], graphState);
   }
 }
 

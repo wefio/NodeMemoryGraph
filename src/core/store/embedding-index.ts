@@ -15,21 +15,22 @@ import type { DatabaseSync } from "node:sqlite";
 import type { EmbeddingIndexHealth } from "../types.ts";
 import { parseStringArray } from "./row-parse.ts";
 
-
 type Row = Record<string, string | number | Uint8Array | null>;
 
-export function beginEmbeddingIndex(db: DatabaseSync, input: {
-  indexId: string;
-  model: string;
-  profile: string;
-  targets: Array<"leaves" | "nodes" | "records">;
-}): void {
+export function beginEmbeddingIndex(
+  db: DatabaseSync,
+  input: {
+    indexId: string;
+    model: string;
+    profile: string;
+    targets: Array<"leaves" | "nodes" | "records">;
+  },
+): void {
   const now = new Date().toISOString();
   const targets = [...new Set(input.targets)].sort();
   if (targets.length === 0) throw new Error("embedding index requires at least one target");
-  db
-    .prepare(
-      `INSERT INTO embedding_index_state
+  db.prepare(
+    `INSERT INTO embedding_index_state
         (index_id, model, profile, targets_json, status, last_started_at, updated_at)
        VALUES (?, ?, ?, ?, 'running', ?, ?)
        ON CONFLICT(index_id) DO UPDATE SET model = excluded.model,
@@ -37,8 +38,7 @@ export function beginEmbeddingIndex(db: DatabaseSync, input: {
          status = 'running',
          last_started_at = excluded.last_started_at, last_error = NULL,
          updated_at = excluded.updated_at`,
-    )
-    .run(input.indexId, input.model, input.profile, JSON.stringify(targets), now, now);
+  ).run(input.indexId, input.model, input.profile, JSON.stringify(targets), now, now);
 }
 
 export function completeEmbeddingIndex(db: DatabaseSync, indexId: string): void {
@@ -66,16 +66,17 @@ export function failEmbeddingIndex(db: DatabaseSync, indexId: string, error: unk
   if (Number(result.changes) === 0) throw new Error(`embedding index ${indexId} was not started`);
 }
 
-export function embeddingIndexHealth(db: DatabaseSync, indexId: string): EmbeddingIndexHealth | null {
-  const row = db
-    .prepare("SELECT * FROM embedding_index_state WHERE index_id = ?")
-    .get(indexId) as Row | undefined;
+export function embeddingIndexHealth(
+  db: DatabaseSync,
+  indexId: string,
+): EmbeddingIndexHealth | null {
+  const row = db.prepare("SELECT * FROM embedding_index_state WHERE index_id = ?").get(indexId) as
+    Row | undefined;
   if (!row) return null;
   const targets = parseStringArray(row.targets_json) as EmbeddingIndexHealth["targets"];
   const includes = (target: EmbeddingIndexHealth["targets"][number]): boolean =>
     targets.includes(target);
-  const count = (sql: string): number =>
-    Number((db.prepare(sql).get(indexId) as Row).count ?? 0);
+  const count = (sql: string): number => Number((db.prepare(sql).get(indexId) as Row).count ?? 0);
   return {
     indexId,
     model: String(row.model),
