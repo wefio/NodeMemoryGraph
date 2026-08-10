@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { HierarchicalActivation } from "../../src/core/hierarchical-activation.ts";
 import { ForkMerge } from "../../src/lab/fork-merge.ts";
-import type { NodeActivationInput } from "../../src/core/hierarchical-activation.ts";
+import type {
+  HierarchicalActivationState,
+  NodeActivationInput,
+} from "../../src/core/hierarchical-activation.ts";
 
 // ── helpers ──
 
@@ -212,7 +215,11 @@ test("ForkMerge toJSON/fromJSON round-trip", () => {
   const right = new HierarchicalActivation(D);
   const fm = new ForkMerge(left, right, { divergenceWeight: 0.5 });
 
-  const json = fm.toJSON();
+  const json = fm.toJSON() as {
+    left: HierarchicalActivationState;
+    right: HierarchicalActivationState;
+    config: { divergenceWeight: number };
+  };
 
   assert.equal(json.config.divergenceWeight, 0.5);
   assert.equal(json.left.dimensions, D);

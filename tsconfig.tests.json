@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts", ".pi/extensions/**/*.ts", "tools/autodiff-benchmark.ts", "tests/**/*.ts"]
+}

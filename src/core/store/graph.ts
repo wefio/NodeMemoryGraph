@@ -81,6 +81,7 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
     declare protected vectorCaches: Map<string, Float32VectorCache>;
     declare protected recordPerfAggregates: (timings: PerfSnapshot | undefined) => void;
     declare expireShortTermMemories: (at?: string, limit?: number) => string[];
+    declare drainPendingTraceSignals: (options?: { limit?: number }) => number;
 
     // Cross-cluster calls (methods defined in other clusters or store.ts)
     declare protected requireNode: (nodeId: string) => MemoryNode;
@@ -935,6 +936,10 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
       };
       let proposals: TopologyProposal[] = [];
       timer.measure(SECTION.maintenanceSemantic, () => {
+        // Materialize deferred retrieval-pair signals before any reader
+        // (consolidation, topology proposals) consumes them. Bounded by the
+        // same per-run pair limit as the phases below.
+        this.drainPendingTraceSignals({ limit: options.pairLimit ?? 64 });
         expiredMemoryIds = this.expireShortTermMemories(
           new Date().toISOString(),
           options.expiryLimit ?? 256,

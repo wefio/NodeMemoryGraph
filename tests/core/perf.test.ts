@@ -39,7 +39,6 @@ test("PerfTimer records elapsed wall time, not absolute timestamps", () => {
   // would be ~1.7e12 ms rather than 5.
   let clock = 1_000_000;
   const originalNow = performance.now;
-  // @ts-expect-error — override the global for the duration of this test
   performance.now = () => (clock += 5);
   try {
     const perf = new PerfTimer();
@@ -346,8 +345,10 @@ test("SQLite PRAGMA tuning is applied on open", () => {
     // store's own connection was configured at construction. WAL + NORMAL +
     // busy_timeout are the multi-writer contract.
     const probe = new DatabaseSync(database, { readOnly: true });
-    const wal = probe.prepare("PRAGMA journal_mode").get();
-    assert.equal(String(wal.journal_mode), "wal", "WAL journal mode");
+    const wal = probe.prepare("PRAGMA journal_mode").get() as
+      | { journal_mode: string }
+      | undefined;
+    assert.equal(wal?.journal_mode, "wal", "WAL journal mode");
     const idx = probe
       .prepare(
         "SELECT name FROM sqlite_master WHERE type='index' AND name = 'idx_retrieval_traces_created_at'",

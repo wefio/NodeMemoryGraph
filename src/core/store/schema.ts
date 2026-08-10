@@ -273,6 +273,7 @@ export function migrate(db: DatabaseSync): void {
       qpp_json TEXT NOT NULL DEFAULT '{}',
       timings_json TEXT NOT NULL DEFAULT '{}',
       filter_usage_json TEXT NOT NULL DEFAULT '{}',
+      signals_drained_at TEXT,
       created_at TEXT NOT NULL
     );
 
@@ -676,6 +677,10 @@ export function ensureRetrievalTraceColumns(db: DatabaseSync): void {
     ["qpp_json", "TEXT NOT NULL DEFAULT '{}'"],
     ["timings_json", "TEXT NOT NULL DEFAULT '{}'"],
     ["filter_usage_json", "TEXT NOT NULL DEFAULT '{}'"],
+    // Pair-signal materialization marker: NULL = retrieval-pair signals for
+    // this trace have not been drained into node_pair_signals /
+    // edge_task_observations yet (deferred to maintenance).
+    ["signals_drained_at", "TEXT"],
   ];
   for (const [name, definition] of additions) {
     if (!existing.has(name))

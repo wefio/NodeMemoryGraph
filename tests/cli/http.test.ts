@@ -7,9 +7,10 @@ import test from "node:test";
 
 import { httpCall } from "../../src/cli/http-client.ts";
 import { httpHandler } from "../../src/cli/http-server.ts";
+import type { ServerState } from "../../src/cli/lifecycle.ts";
 import { NmgService } from "../../src/cli/service.ts";
 
-type EphemeralServer = { state: { transport: "http"; host: string; port: number; token: string } };
+type EphemeralServer = { state: ServerState };
 
 function startServer(service: NmgService, token: string): Promise<EphemeralServer & { server: Server }> {
   return new Promise((resolve, reject) => {
@@ -19,7 +20,14 @@ function startServer(service: NmgService, token: string): Promise<EphemeralServe
       const address = server.address() as { port: number };
       resolve({
         server,
-        state: { transport: "http", host: "127.0.0.1", port: address.port, token },
+        state: {
+          pid: process.pid,
+          startedAt: new Date().toISOString(),
+          transport: "http",
+          host: "127.0.0.1",
+          port: address.port,
+          token,
+        },
       });
     });
   });

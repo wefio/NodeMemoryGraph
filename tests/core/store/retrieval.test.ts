@@ -94,6 +94,7 @@ test("searchContext with persistTrace=false still returns a valid context", () =
 
     const ctx = store.searchContext("trace false", { persistTrace: false });
     assert.ok(ctx.results.length >= 1);
+    assert.ok(ctx.activeGraph);
     assert.ok(ctx.activeGraph.id);
   });
 });

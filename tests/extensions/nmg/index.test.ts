@@ -77,7 +77,7 @@ test("remember feedback action stays on the stable tool surface and fails closed
     undefined,
     undefined,
     { sessionManager },
-  );
+  ) as { details: { recorded: boolean }; content: Array<{ text: string }> };
   assert.equal(result.details.recorded, false);
   assert.match(result.content[0].text, /not recorded/u);
 });
@@ -299,7 +299,13 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       undefined,
       undefined,
       { sessionManager },
-    );
+    ) as {
+      content: Array<{ text: string }>;
+      details: {
+        history: { sourceMessageId: string; content: string };
+        memory: { id: string };
+      };
+    };
     assert.match(remember.content[0].text, /saved/i);
     assert.equal(remember.details.history.sourceMessageId, "user-atlas-storage");
     assert.equal(remember.details.history.content, "Atlas must use SQLite for offline operation.");
@@ -314,7 +320,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       undefined,
       undefined,
       { sessionManager },
-    );
+    ) as { details: { memory: { id: string } } };
     const newDatabase = await tools.get("nmg_remember")!.execute(
       "remember-new-database",
       {
@@ -325,7 +331,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       undefined,
       undefined,
       { sessionManager },
-    );
+    ) as { content: Array<{ text: string }>; details: { memory: { id: string } } };
     assert.match(newDatabase.content[0].text, /possible older values/i);
     assert.match(newDatabase.content[0].text, /action=supersede/i);
     const resolvedDatabase = await tools.get("nmg_remember")!.execute(
@@ -339,7 +345,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       undefined,
       undefined,
       { sessionManager },
-    );
+    ) as { details: { applied: boolean } };
     assert.equal(resolvedDatabase.details.applied, true);
 
     const started = readServerState(serverStatePath(join(directory, "nmg.sqlite")));
@@ -349,7 +355,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     const recalled = await handlers.get("before_agent_start")!(
       { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
       { sessionManager },
-    );
+    ) as { systemPrompt: string };
     assert.match(recalled.systemPrompt, /Atlas must use SQLite/);
     assert.match(recalled.systemPrompt, /NMG SEARCH HEADERS/);
     assert.match(recalled.systemPrompt, /fields: memory=id/);
@@ -360,19 +366,22 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     const recalledAgain = await handlers.get("before_agent_start")!(
       { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
       { sessionManager },
-    );
+    ) as { systemPrompt: string };
     assert.match(recalledAgain.systemPrompt, /already_in_context=true/);
     assert.doesNotMatch(recalledAgain.systemPrompt, /Atlas must use SQLite/);
     await handlers.get("session_before_compact")!({}, { sessionManager });
     const recalledAfterCompaction = await handlers.get("before_agent_start")!(
       { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
       { sessionManager },
-    );
+    ) as { systemPrompt: string };
     assert.match(recalledAfterCompaction.systemPrompt, /Atlas must use SQLite/);
 
     const searched = await tools
       .get("nmg_search")!
-      .execute("search", { query: "Atlas database" }, undefined, undefined, { sessionManager });
+      .execute("search", { query: "Atlas database" }, undefined, undefined, { sessionManager }) as {
+      content: Array<{ text: string }>;
+      details: { activeGraph: { id: string } };
+    };
     assert.match(searched.content[0].text, /already_in_context=true/);
     const activeGraphId = searched.details.activeGraph.id;
     assert.match(searched.content[0].text, new RegExp(activeGraphId));
@@ -402,7 +411,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       .get("nmg_search")!
       .execute("search-deep", { query: "Atlas archive checksum" }, undefined, undefined, {
         sessionManager,
-      });
+      }) as { content: Array<{ text: string }> };
     assert.match(deepSearch.content[0].text, /BLAKE3/);
 
     await tools.get("nmg_remember")!.execute(
@@ -420,7 +429,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       .get("nmg_search")!
       .execute("search-stg", { query: "scratch color cobalt" }, undefined, undefined, {
         sessionManager,
-      });
+      }) as { content: Array<{ text: string }> };
     const otherSession = await tools
       .get("nmg_search")!
       .execute("search-stg-other", { query: "scratch color cobalt" }, undefined, undefined, {
@@ -428,7 +437,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
           getSessionId: () => "other-session",
           getSessionFile: () => "other.jsonl",
         },
-      });
+      }) as { content: Array<{ text: string }> };
     assert.match(sameSession.content[0].text, /Session scratch/);
     assert.doesNotMatch(otherSession.content[0].text, /Session scratch/);
 
@@ -691,7 +700,7 @@ function memoryContext(id: string, statement: string, evidence: string): MemoryC
         evidence: { content: evidence },
       },
     ],
-  } as MemoryContext;
+  } as unknown as MemoryContext;
 }
 
 test("composeNmgSystemPrompt: injects a completion nudge block when provided", async () => {

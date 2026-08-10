@@ -64,6 +64,8 @@ test("shadow evaluation records retrieval, tool flow, actual use, outcome, and f
           estimatedTokens: 42,
           graphHops: 1,
           deepestTier: 1,
+          tiersOpened: 1,
+          deepEvidence: 0,
           latencyMs: 3.5,
           exhausted: [],
         },

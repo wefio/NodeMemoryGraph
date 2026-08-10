@@ -78,6 +78,7 @@ test("deleteMemory: cascade-deletes derived memories with no remaining sources",
       memoryType: "derived",
       sourceActor: "system",
       truthStatus: "inferred",
+      derivation: "inferred from standing desk and back pain",
     });
     store.deleteMemory(source.memory.id);
     const ctx = store.searchContext("standing desk");
@@ -845,5 +846,108 @@ test("promoteMemory triggers a consolidation event visible via consolidationEven
       (e) => e.targetId === saved.memory.id && e.action === "promote_memory",
     );
     assert.ok(found);
+  });
+});
+
+// ── deferred retrieval-pair signals (drainPendingTraceSignals) ──
+
+test("deferred pair signals materialize on drain and stay idempotent", () => {
+  withStore((store) => {
+    const alpha = store.remember({ statement: "deferred alpha", nodeName: "defer alpha" });
+    const beta = store.remember({ statement: "deferred beta", nodeName: "defer beta" });
+    for (let index = 0; index < 3; index += 1) {
+      store.recordRetrievalTrace({
+        query: `deferred combined ${index}`,
+        resultMemoryIds: [alpha.memory.id, beta.memory.id],
+        resultNodeIds: [alpha.node.id, beta.node.id],
+        usefulMemoryIds: [alpha.memory.id, beta.memory.id],
+      });
+    }
+    // Before drain: pair signals are deferred, so no link proposals yet.
+    assert.equal(
+      store
+        .proposeTopologyChanges({ minObservations: 3, minGain: 0.8, cooldownMs: 60_000 })
+        .filter((proposal) => proposal.type === "link").length,
+      0,
+    );
+    assert.equal(store.edgeStability(alpha.node.id, beta.node.id).independentTasks, 0);
+
+    assert.equal(store.drainPendingTraceSignals(), 3);
+    // Idempotent: nothing left pending after the first drain.
+    assert.equal(store.drainPendingTraceSignals(), 0);
+
+    const link = store
+      .proposeTopologyChanges({ minObservations: 3, minGain: 0.8, cooldownMs: 60_000 })
+      .find((proposal) => proposal.type === "link");
+    assert.ok(link);
+    assert.equal(link.evidenceTraceIds.length, 3);
+    assert.equal(store.edgeStability(alpha.node.id, beta.node.id).independentTasks, 3);
+  });
+});
+
+test("feedback before drain still records observations and drives consolidation", () => {
+  withStore((store) => {
+    const alpha = store.remember({ statement: "fb alpha", nodeName: "fb alpha" });
+    const beta = store.remember({ statement: "fb beta", nodeName: "fb beta" });
+    const traceId = store.recordRetrievalTrace({
+      query: "feedback before drain",
+      taskId: "fb-task",
+      resultMemoryIds: [alpha.memory.id, beta.memory.id],
+      resultNodeIds: [alpha.node.id, beta.node.id],
+    });
+    // No drain: feedback must still upsert the edge observation itself.
+    store.recordActiveGraphUse(traceId, {
+      usedMemoryIds: [alpha.memory.id, beta.memory.id],
+    });
+    assert.equal(store.edgeStability(alpha.node.id, beta.node.id).independentTasks, 1);
+    assert.equal(store.edgeStability(alpha.node.id, beta.node.id).usefulTasks, 1);
+
+    // Drain afterwards must not double-count or drop the useful flag.
+    assert.equal(store.drainPendingTraceSignals(), 1);
+    assert.equal(store.edgeStability(alpha.node.id, beta.node.id).independentTasks, 1);
+    assert.equal(store.edgeStability(alpha.node.id, beta.node.id).usefulTasks, 1);
+  });
+});
+
+test("drainPendingTraceSignals is bounded by limit and marks processed traces", () => {
+  withStore((store) => {
+    const alpha = store.remember({ statement: "bounded alpha", nodeName: "bounded alpha" });
+    const beta = store.remember({ statement: "bounded beta", nodeName: "bounded beta" });
+    for (let index = 0; index < 5; index += 1) {
+      store.recordRetrievalTrace({
+        query: `bounded trace ${index}`,
+        resultMemoryIds: [alpha.memory.id, beta.memory.id],
+        resultNodeIds: [alpha.node.id, beta.node.id],
+      });
+    }
+    assert.equal(store.drainPendingTraceSignals({ limit: 2 }), 2);
+    assert.equal(store.drainPendingTraceSignals(), 3);
+    assert.equal(store.drainPendingTraceSignals(), 0);
+    // Five distinct tasks -> five observations for the pair.
+    assert.equal(store.edgeStability(alpha.node.id, beta.node.id).independentTasks, 5);
+  });
+});
+
+test("runSemanticMaintenance drains deferred pair signals before proposing", () => {
+  withStore((store) => {
+    const alpha = store.remember({ statement: "sm alpha", nodeName: "sm alpha" });
+    const beta = store.remember({ statement: "sm beta", nodeName: "sm beta" });
+    for (let index = 0; index < 3; index += 1) {
+      store.recordRetrievalTrace({
+        query: `sm combined ${index}`,
+        resultMemoryIds: [alpha.memory.id, beta.memory.id],
+        resultNodeIds: [alpha.node.id, beta.node.id],
+        usefulMemoryIds: [alpha.memory.id, beta.memory.id],
+      });
+    }
+    // Before maintenance the pair observations are deferred (no drain yet).
+    assert.equal(store.edgeStability(alpha.node.id, beta.node.id).independentTasks, 0);
+    const result = store.runSemanticMaintenance({ pairLimit: 16, topologyNodeLimit: 16 });
+    // The semantic phase drained the pending signals before its readers ran.
+    assert.equal(store.edgeStability(alpha.node.id, beta.node.id).independentTasks, 3);
+    // A high-stability useful pair is consolidated into a relation by the same
+    // phase rather than left as a topology proposal (expected production order).
+    assert.equal(result.consolidatedRelationIds.length, 1);
+    assert.ok(result.durationMs >= 0);
   });
 });

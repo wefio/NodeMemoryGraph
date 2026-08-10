@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { NmgStore } from "../../src/core/store.ts";
-import type { VectorEmbedder } from "../../src/core/types.ts";
+import type { MemoryMarker, VectorEmbedder } from "../../src/core/types.ts";
 
 function withStore(run: (store: NmgStore) => void, embedder?: VectorEmbedder): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-test-"));
@@ -40,7 +40,7 @@ test("remember persists a memory with traceable evidence", () => {
 
 test("memory markers persist as extensible control metadata", () => {
   withStore((store) => {
-    const markers = [
+    const markers: MemoryMarker[] = [
       { kind: "forget", attributes: { effect: "revoke" } },
       { kind: "future-extension", attributes: { enabled: true, score: 0.8 } },
     ];
@@ -1199,6 +1199,9 @@ test("co-retrieval produces delayed link proposals with evidence and cooldown", 
       });
     }
 
+    // Pair signals are deferred to maintenance; drain before proposing.
+    store.drainPendingTraceSignals();
+
     const proposals = store.proposeTopologyChanges({
       minObservations: 3,
       minGain: 0.8,
@@ -1280,6 +1283,7 @@ test("topology proposals persist review decisions and ignore weak signals", () =
     resultMemoryIds: [alpha.memory.id, beta.memory.id],
     resultNodeIds: [alpha.node.id, beta.node.id],
   });
+  writer.drainPendingTraceSignals();
   assert.equal(
     writer.proposeTopologyChanges({
       minObservations: 3,
@@ -1296,6 +1300,7 @@ test("topology proposals persist review decisions and ignore weak signals", () =
       usefulMemoryIds: [alpha.memory.id, beta.memory.id],
     });
   }
+  writer.drainPendingTraceSignals();
   const proposal = writer
     .proposeTopologyChanges({
       minObservations: 3,

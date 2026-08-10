@@ -141,6 +141,7 @@ test("all-negative retrieval feedback does not teach the controller to stop earl
     const context = store.searchContext("unrelated detail");
     assert.ok(context.activeGraph);
     store.recordActiveGraphUse(context.activeGraph.id, {
+      usedMemoryIds: [],
       rejectedMemoryIds: [saved.memory.id],
     });
     const trace = store.retrievalTrace(context.activeGraph.id);

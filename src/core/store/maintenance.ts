@@ -1062,14 +1062,6 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       const id = randomUUID();
       const createdAt = new Date().toISOString();
       const nodeIds = [...new Set(input.resultNodeIds)].sort();
-      // Prefer precomputed node IDs (the retrieval path knows them); fall
-      // back to mapping the memory IDs for callers that only pass memories.
-      const usefulNodeIds = new Set(
-        input.usefulNodeIds ?? this.nodeIdsForMemories(input.usefulMemoryIds ?? []),
-      );
-      const contradictedNodeIds = new Set(
-        input.contradictedNodeIds ?? this.nodeIdsForMemories(input.contradictedMemoryIds ?? []),
-      );
       const taskId = input.taskId?.trim() || stableTaskId(input.query);
       this.db.exec("BEGIN IMMEDIATE");
       try {
@@ -1133,57 +1125,117 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         }
         this.recordNodeSelections(nodeIds, input.expandedNodeIds ?? [], createdAt);
         this.recordEdgeSelections(input.relationIds ?? [], createdAt);
-        const updatePair = this.db.prepare(
-          `INSERT INTO node_pair_signals
-            (left_node_id, right_node_id, co_retrieval_count, useful_count,
-             evidence_trace_ids_json, updated_at)
-           VALUES (?, ?, 1, 0, ?, ?)
-           ON CONFLICT(left_node_id, right_node_id) DO UPDATE SET
-             co_retrieval_count = co_retrieval_count + 1,
-             evidence_trace_ids_json = excluded.evidence_trace_ids_json,
-             updated_at = excluded.updated_at`,
-        );
-        const observeTask = this.db.prepare(
-          `INSERT INTO edge_task_observations
-            (left_node_id, right_node_id, task_id, trace_id, useful,
-             contradicted, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(left_node_id, right_node_id, task_id) DO UPDATE SET
-             useful = MAX(useful, excluded.useful),
-             contradicted = MAX(contradicted, excluded.contradicted)`,
-        );
-        for (let left = 0; left < nodeIds.length; left += 1) {
-          for (let right = left + 1; right < nodeIds.length; right += 1) {
-            const pair = [nodeIds[left]!, nodeIds[right]!] as const;
-            const previous = this.db
-              .prepare(
-                `SELECT evidence_trace_ids_json FROM node_pair_signals
-               WHERE left_node_id = ? AND right_node_id = ?`,
-              )
-              .get(...pair) as Row | undefined;
-            const evidence = [
-              ...parseStringArray(previous?.evidence_trace_ids_json ?? null),
-              id,
-            ].slice(-32);
-            updatePair.run(...pair, JSON.stringify(evidence), createdAt);
-            observeTask.run(
-              ...pair,
-              taskId,
-              id,
-              usefulNodeIds.has(pair[0]) && usefulNodeIds.has(pair[1]) ? 1 : 0,
-              contradictedNodeIds.has(pair[0]) || contradictedNodeIds.has(pair[1]) ? 1 : 0,
-              createdAt,
-            );
-            // useful_count is now derived on read (proposeTopologyChanges
-            // computes it from edge_task_observations); no per-pair refresh.
-          }
-        }
+        // Retrieval-pair signals (node_pair_signals, edge_task_observations)
+        // are deferred to drainPendingTraceSignals so the hot path stays
+        // O(result nodes) instead of O(pairs). The trace row above is the
+        // durable buffer: pending rows are replayed by the next maintenance
+        // drain, and feedback updates on the row survive via MAX semantics.
         this.db.exec("COMMIT");
         return id;
       } catch (error) {
         this.db.exec("ROLLBACK");
         throw error;
       }
+    }
+
+    /**
+     * Materialize deferred retrieval-pair signals (node_pair_signals and
+     * edge_task_observations) from trace rows that have not been drained yet.
+     *
+     * recordRetrievalTrace keeps the hot path O(result nodes) by deferring the
+     * O(pairs) accumulation here. The trace row is the durable buffer: pending
+     * rows (signals_drained_at IS NULL) are replayed by a later drain, so a
+     * crash between a search and a maintenance run loses nothing. Feedback that
+     * arrived before a drain is preserved because edge_task_observations uses
+     * MAX(useful/contradicted) and this drain derives the same values from the
+     * trace's (feedback-updated) useful/contradicted memory ids.
+     *
+     * Runs as part of runSemanticMaintenance (bounded, explicit), never per
+     * query. useful_count stays derived-on-read (proposeTopologyChanges
+     * recomputes it from edge_task_observations), so no per-pair refresh here.
+     * Returns the number of traces drained.
+     */
+    drainPendingTraceSignals(options: { limit?: number } = {}): number {
+      const limit = Math.max(1, Math.min(options.limit ?? 256, 2_048));
+      const pending = this.db
+        .prepare(
+          `SELECT id, result_node_ids_json, useful_memory_ids_json,
+                  contradicted_memory_ids_json, task_id, query, created_at
+           FROM retrieval_traces
+           WHERE signals_drained_at IS NULL
+           ORDER BY created_at, id LIMIT ?`,
+        )
+        .all(limit) as Row[];
+      if (pending.length === 0) return 0;
+      const drainedAt = new Date().toISOString();
+      const updatePair = this.db.prepare(
+        `INSERT INTO node_pair_signals
+          (left_node_id, right_node_id, co_retrieval_count, useful_count,
+           evidence_trace_ids_json, updated_at)
+         VALUES (?, ?, 1, 0, ?, ?)
+         ON CONFLICT(left_node_id, right_node_id) DO UPDATE SET
+           co_retrieval_count = co_retrieval_count + 1,
+           evidence_trace_ids_json = excluded.evidence_trace_ids_json,
+           updated_at = excluded.updated_at`,
+      );
+      const observeTask = this.db.prepare(
+        `INSERT INTO edge_task_observations
+          (left_node_id, right_node_id, task_id, trace_id, useful,
+           contradicted, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(left_node_id, right_node_id, task_id) DO UPDATE SET
+           useful = MAX(useful, excluded.useful),
+           contradicted = MAX(contradicted, excluded.contradicted)`,
+      );
+      const markDrained = this.db.prepare(
+        `UPDATE retrieval_traces SET signals_drained_at = ? WHERE id = ?`,
+      );
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        for (const row of pending) {
+          const id = String(row.id);
+          const nodeIds = [...new Set(parseStringArray(String(row.result_node_ids_json)))].sort();
+          if (nodeIds.length >= 2) {
+            const usefulNodeIds = new Set(
+              this.nodeIdsForMemories(parseStringArray(String(row.useful_memory_ids_json))),
+            );
+            const contradictedNodeIds = new Set(
+              this.nodeIdsForMemories(parseStringArray(String(row.contradicted_memory_ids_json))),
+            );
+            const taskId = String(row.task_id) || stableTaskId(String(row.query));
+            for (let left = 0; left < nodeIds.length; left += 1) {
+              for (let right = left + 1; right < nodeIds.length; right += 1) {
+                const pair = [nodeIds[left]!, nodeIds[right]!] as const;
+                const previous = this.db
+                  .prepare(
+                    `SELECT evidence_trace_ids_json FROM node_pair_signals
+                   WHERE left_node_id = ? AND right_node_id = ?`,
+                  )
+                  .get(...pair) as Row | undefined;
+                const evidence = [
+                  ...parseStringArray(previous?.evidence_trace_ids_json ?? null),
+                  id,
+                ].slice(-32);
+                updatePair.run(...pair, JSON.stringify(evidence), drainedAt);
+                observeTask.run(
+                  ...pair,
+                  taskId,
+                  id,
+                  usefulNodeIds.has(pair[0]) && usefulNodeIds.has(pair[1]) ? 1 : 0,
+                  contradictedNodeIds.has(pair[0]) || contradictedNodeIds.has(pair[1]) ? 1 : 0,
+                  drainedAt,
+                );
+              }
+            }
+          }
+          markDrained.run(drainedAt, id);
+        }
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+      return pending.length;
     }
 
     /** Long-term per-section aggregates (never pruned). */
@@ -1396,18 +1448,23 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
           for (let right = left + 1; right < resultNodeIds.length; right += 1) {
             const pair = [resultNodeIds[left]!, resultNodeIds[right]!] as const;
             observedPairs.push(pair);
+            const usefulFlag = usedNodeIds.has(pair[0]) && usedNodeIds.has(pair[1]) ? 1 : 0;
+            const contradictedFlag =
+              contradictedNodeIds.has(pair[0]) || contradictedNodeIds.has(pair[1]) ? 1 : 0;
+            // Pair signals may not have been drained into edge_task_observations
+            // yet (they are deferred to maintenance), so upsert instead of a
+            // bare UPDATE — a missing row must not silently drop the outcome.
             this.db
               .prepare(
-                `UPDATE edge_task_observations
-               SET useful = MAX(useful, ?), contradicted = MAX(contradicted, ?)
-               WHERE left_node_id = ? AND right_node_id = ? AND task_id = ?`,
+                `INSERT INTO edge_task_observations
+                  (left_node_id, right_node_id, task_id, trace_id, useful,
+                   contradicted, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(left_node_id, right_node_id, task_id) DO UPDATE SET
+                   useful = MAX(useful, excluded.useful),
+                   contradicted = MAX(contradicted, excluded.contradicted)`,
               )
-              .run(
-                usedNodeIds.has(pair[0]) && usedNodeIds.has(pair[1]) ? 1 : 0,
-                contradictedNodeIds.has(pair[0]) || contradictedNodeIds.has(pair[1]) ? 1 : 0,
-                ...pair,
-                taskId,
-              );
+              .run(...pair, taskId, activeGraphId, usefulFlag, contradictedFlag, now);
             this.refreshPairUsefulness(pair[0], pair[1]);
           }
         }

@@ -420,10 +420,10 @@ test("claims: serialize/parse round-trip through the snake_case disk format", ()
   const claims = [
     {
       text: "Atlas uses SQLite",
-      polarity: "positive" as const,
+      polarity: "affirmative" as const,
       predicateKey: "uses",
       confidence: 0.9,
-      extractMethod: "regex" as const,
+      extractMethod: "rule" as const,
     },
   ];
   const serialized = serializeClaims(claims);

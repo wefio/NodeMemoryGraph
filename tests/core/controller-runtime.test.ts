@@ -81,6 +81,7 @@ test("controller allocation widens an explicit recall within its operator envelo
         maxTokens: 6_000,
         maxGraphHops: 2,
         maxLocalTier: 3,
+        maxTierBudget: 3,
         maxLatencyMs: 800,
       },
     );
@@ -183,6 +184,7 @@ test("an expansion-trained controller can enter the larger Active Graph tier", (
         maxTokens: 6_000,
         maxGraphHops: 2,
         maxLocalTier: 3,
+        maxTierBudget: 3,
         maxLatencyMs: 800,
       },
       {
@@ -192,6 +194,7 @@ test("an expansion-trained controller can enter the larger Active Graph tier", (
         maxTokens: 10_000,
         maxGraphHops: 3,
         maxLocalTier: 3,
+        maxTierBudget: 3,
         maxLatencyMs: 1_500,
       },
     );

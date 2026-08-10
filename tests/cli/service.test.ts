@@ -111,6 +111,9 @@ test("remember resolution lets an external semantic judge apply a validated supe
       supersededMemoryId: oldValue.memory.id,
       reason: "The user explicitly changed the database choice.",
     });
+    if (resolved.action !== "supersede") {
+      throw new Error(`expected supersede, got ${resolved.action}`);
+    }
     assert.equal(resolved.applied, true);
     const search = await service.invoke("search", {
       query: "Atlas database",
