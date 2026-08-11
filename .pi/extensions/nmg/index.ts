@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 import {
@@ -103,9 +104,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     const nudge = [completionNudge, feedbackNudge].filter(Boolean).join("\n");
     const runtimeContext = runtimeAg.format(sessionId);
     const recallQuery = taskWindow.prepare(sessionId, event.prompt);
+    const dynamicContext = composeNmgContextMessage("", "", nudge, runtimeContext);
     if (!recallQuery) {
       return {
-        systemPrompt: composeNmgSystemPrompt(event.systemPrompt, "", "", nudge, runtimeContext),
+        systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
+        ...(dynamicContext
+          ? { message: { customType: "nmg-context", content: dynamicContext, display: true, details: { count: 0 } } }
+          : {}),
       };
     }
     try {
@@ -124,26 +129,57 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       })) as MemoryContext;
       const recalled = injectionWindow.format(sessionId, context, "header");
       await controllerShadow.retrieval(context, sessionId, "automatic", recalled);
+      const recordCount = (recalled.match(/memory=/g) ?? []).length;
+      const recallContext = composeNmgContextMessage(recalled, "", nudge, runtimeContext);
       return {
-        systemPrompt: composeNmgSystemPrompt(
-          event.systemPrompt,
-          recalled,
-          "",
-          nudge,
-          runtimeContext,
-        ),
+        systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
+        ...(recallContext
+          ? { message: { customType: "nmg-context", content: recallContext, display: true, details: { count: recordCount } } }
+          : {}),
       };
     } catch (error) {
+      const errorContext = composeNmgContextMessage(
+        "",
+        `NMG unavailable: ${message(error)}`,
+        nudge,
+        runtimeContext,
+      );
       return {
-        systemPrompt: composeNmgSystemPrompt(
-          event.systemPrompt,
-          "",
-          `NMG unavailable: ${message(error)}`,
-          nudge,
-          runtimeContext,
-        ),
+        systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
+        ...(errorContext
+          ? { message: { customType: "nmg-context", content: errorContext, display: true, details: { count: 0 } } }
+          : {}),
       };
     }
+  });
+
+  // TUI 折叠开关：nmg-context 默认折叠为一个 [nmg-context] chip，避免每轮刷屏。
+  // /nmg-recall 切换展开（走 pi 默认渲染：label + 全文）。状态只影响后续渲染
+  // 与重开会话后的历史恢复；已渲染的历史消息不重绘（pi 无公开 force-rerender）。
+  let recallCollapsed = true;
+  pi.registerMessageRenderer<{ count?: number }>("nmg-context", (message, options, theme) => {
+    if (!recallCollapsed) return undefined;
+    const count = (message.details as { count?: number } | undefined)?.count;
+    const label = theme.fg("customMessageLabel", "\x1b[1m[nmg-context]\x1b[22m");
+    const hint = theme.fg(
+      "dim",
+      count ? `  ${count} 条召回 · /nmg-recall 展开` : "  /nmg-recall 展开",
+    );
+    const box = new Box(options.outputPad, 1, (t) => theme.bg("customMessageBg", t));
+    box.addChild(new Text(`${label}${hint}`, 0, 0));
+    return box;
+  });
+  pi.registerCommand("nmg-recall", {
+    description: "切换 nmg-context 召回消息的折叠/展开",
+    handler: async (_args, ctx) => {
+      recallCollapsed = !recallCollapsed;
+      ctx.ui.notify(
+        recallCollapsed
+          ? "nmg-context 已折叠（只显示 [nmg-context] chip）"
+          : "nmg-context 已展开（显示召回全文）",
+        "info",
+      );
+    },
   });
 
   pi.on("session_start", async (_event, ctx) => {
@@ -890,16 +926,32 @@ const nmgPrompts = loadPrompts();
 export const MEMORY_POLICY_RESOLUTION = resolveSkillOptLabPolicy(nmgPrompts.memory_policy);
 export const MEMORY_POLICY = `<nmg_policy>\n${MEMORY_POLICY_RESOLUTION.text}\n</nmg_policy>`;
 
-export function composeNmgSystemPrompt(
-  baseSystemPrompt: string,
+/**
+ * Stable prefix only: base system prompt + static memory policy.
+ *
+ * Per-turn dynamic context (automatic recall, runtime AG, nudges) must NOT
+ * live here: the system prompt is the head of the provider's cached prefix,
+ * so any per-turn change invalidates the entire prefix (re-billing the full
+ * conversation, e.g. "Cache miss: 166k tokens re-billed"). Dynamic content is
+ * injected as a trailing custom message via `composeNmgContextMessage` instead,
+ * keeping this prefix byte-stable across turns.
+ */
+export function composeNmgSystemPrompt(baseSystemPrompt: string): string {
+  return [baseSystemPrompt, MEMORY_POLICY].filter(Boolean).join("\n\n");
+}
+
+/**
+ * Per-turn dynamic context, injected as a custom message AFTER the current user
+ * prompt. The message is persistent in the session, so on later turns it becomes
+ * part of the stable prefix and only the newest dynamic block is billed.
+ */
+export function composeNmgContextMessage(
   automaticRecall = "",
   status = "",
   nudge = "",
   runtimeAg = "",
 ): string {
   return [
-    baseSystemPrompt,
-    MEMORY_POLICY,
     automaticRecall ? `<nmg_automatic_recall>\n${automaticRecall}\n</nmg_automatic_recall>` : "",
     runtimeAg ? `<nmg_runtime_ag>\n${runtimeAg}\n</nmg_runtime_ag>` : "",
     nudge ? `<nmg_nudge>\n${nudge}\n</nmg_nudge>` : "",

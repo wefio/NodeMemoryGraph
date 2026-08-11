@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import nmgExtension, {
+  composeNmgContextMessage,
   composeNmgSystemPrompt,
   formatMemoryContext,
   formatSearchHeaders,
@@ -39,6 +40,8 @@ function extensionHarness() {
       execute: (...args: unknown[]) => Promise<unknown>;
     }
   >();
+  const messageRenderers = new Map<string, unknown>();
+  const commands = new Map<string, unknown>();
   nmgExtension({
     on(event: string, handler: (...args: unknown[]) => Promise<unknown>) {
       handlers.set(event, handler);
@@ -51,12 +54,24 @@ function extensionHarness() {
     }) {
       tools.set(tool.name, tool);
     },
+    registerMessageRenderer(customType: string, renderer: unknown) {
+      messageRenderers.set(customType, renderer);
+    },
+    registerCommand(name: string, command: unknown) {
+      commands.set(name, command);
+    },
   } as never);
-  return { handlers, tools };
+  return { handlers, tools, messageRenderers, commands };
 }
 
 test("Pi adapter exposes only the stable tool surface", () => {
   assert.deepEqual([...extensionHarness().tools.keys()], ["nmg_remember", "nmg_get", "nmg_search"]);
+});
+
+test("TUI registers the nmg-context renderer and nmg-recall command", () => {
+  const { messageRenderers, commands } = extensionHarness();
+  assert.ok(messageRenderers.has("nmg-context"), "nmg-context message renderer should be registered");
+  assert.ok(commands.has("nmg-recall"), "nmg-recall command should be registered");
 });
 
 test("runtime tool-state capture registers on tool_result, not pre-execution tool_call", () => {
@@ -130,6 +145,11 @@ test("remember cannot attribute an unbound Assistant inference to the user", asy
 test("controller shadow bridge is opt-in and learns only from explicit get use", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-controller-shadow-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
+  // Isolate the ambient NMG_CONTROLLER_SHADOW: running tests under the
+  // sample-collection env (NMG_CONTROLLER_SHADOW=1) must not flip the
+  // shadowEnabled(undefined) default assertion.
+  const previousShadow = process.env.NMG_CONTROLLER_SHADOW;
+  delete process.env.NMG_CONTROLLER_SHADOW;
   try {
     assert.equal(shadowEnabled(undefined), false);
     assert.equal(shadowEnabled("true"), true);
@@ -225,6 +245,8 @@ test("controller shadow bridge is opt-in and learns only from explicit get use",
     assert.equal(feedback.taskSuccess, true);
     assert.equal(feedback.evidenceSufficient, true);
   } finally {
+    if (previousShadow === undefined) delete process.env.NMG_CONTROLLER_SHADOW;
+    else process.env.NMG_CONTROLLER_SHADOW = previousShadow;
     store.close();
     rmSync(directory, { recursive: true, force: true });
   }
@@ -355,18 +377,25 @@ test("tool parameter descriptions come from the prompt source of truth", () => {
   );
 });
 
-test("NMG prompt keeps its policy prefix stable and dynamic recall last", () => {
-  const first = composeNmgSystemPrompt("base", "first candidate");
-  const second = composeNmgSystemPrompt("base", "second candidate");
-  const stablePrefix = `base\n\n${MEMORY_POLICY}\n\n<nmg_automatic_recall>\n`;
+test("NMG prompt keeps a stable policy prefix; dynamic recall goes to the trailing message", () => {
+  const first = composeNmgSystemPrompt("base");
+  const second = composeNmgSystemPrompt("base");
+  const stablePrefix = `base\n\n${MEMORY_POLICY}`;
 
-  assert.ok(first.startsWith(stablePrefix));
-  assert.ok(second.startsWith(stablePrefix));
-  assert.match(first, /first candidate\n<\/nmg_automatic_recall>$/);
-  assert.match(second, /second candidate\n<\/nmg_automatic_recall>$/);
+  assert.equal(first, stablePrefix);
+  assert.equal(second, stablePrefix);
   assert.match(MEMORY_POLICY, /does not decide answer truth or evidence completeness/);
   assert.match(MEMORY_POLICY, /No useful memory is a valid result/);
   assert.match(MEMORY_POLICY, /unconfirmed assistant proposals/);
+
+  const dynamic = composeNmgContextMessage("first candidate");
+  assert.match(dynamic, /<nmg_automatic_recall>\nfirst candidate\n<\/nmg_automatic_recall>$/);
+  assert.equal(composeNmgContextMessage(), "");
+  // Ordering: recall (head) then runtime AG then nudge, stable prefix untouched.
+  const full = composeNmgContextMessage("recall", "", "nudge", "runtime");
+  assert.match(full, /<nmg_automatic_recall>\nrecall\n<\/nmg_automatic_recall>/);
+  assert.match(full, /<nmg_runtime_ag>\nruntime\n<\/nmg_runtime_ag>/);
+  assert.match(full, /<nmg_nudge>\nnudge\n<\/nmg_nudge>/);
 });
 
 test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", async () => {
@@ -500,26 +529,32 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     const recalled = (await handlers.get("before_agent_start")!(
       { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
       { sessionManager },
-    )) as { systemPrompt: string };
-    assert.match(recalled.systemPrompt, /Atlas must use SQLite/);
-    assert.match(recalled.systemPrompt, /NMG SEARCH HEADERS/);
-    assert.match(recalled.systemPrompt, /fields: memory=id/);
-    assert.match(recalled.systemPrompt, /matches=storage/);
-    assert.doesNotMatch(recalled.systemPrompt, /tier=L\d/);
-    assert.doesNotMatch(recalled.systemPrompt, /deepestTier/);
-    assert.doesNotMatch(recalled.systemPrompt, /SOURCE=/);
+    )) as { systemPrompt: string; message?: { content: string } };
+    // Stable prefix: dynamic recall must NOT leak into the system prompt.
+    assert.match(recalled.systemPrompt, /^base\n\n<nmg_policy>/);
+    assert.doesNotMatch(recalled.systemPrompt, /Atlas must use SQLite/);
+    assert.doesNotMatch(recalled.systemPrompt, /NMG SEARCH HEADERS/);
+    const recallContent = recalled.message?.content ?? "";
+    assert.match(recallContent, /Atlas must use SQLite/);
+    assert.match(recallContent, /NMG SEARCH HEADERS/);
+    assert.match(recallContent, /fields: memory=id/);
+    assert.match(recallContent, /matches=storage/);
+    assert.doesNotMatch(recallContent, /tier=L\d/);
+    assert.doesNotMatch(recallContent, /deepestTier/);
+    assert.doesNotMatch(recallContent, /SOURCE=/);
     const recalledAgain = (await handlers.get("before_agent_start")!(
       { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
       { sessionManager },
-    )) as { systemPrompt: string };
-    assert.match(recalledAgain.systemPrompt, /already_in_context=true/);
+    )) as { systemPrompt: string; message?: { content: string } };
     assert.doesNotMatch(recalledAgain.systemPrompt, /Atlas must use SQLite/);
+    assert.match(recalledAgain.message?.content ?? "", /already_in_context=true/);
+    assert.doesNotMatch(recalledAgain.message?.content ?? "", /Atlas must use SQLite/);
     await handlers.get("session_before_compact")!({}, { sessionManager });
     const recalledAfterCompaction = (await handlers.get("before_agent_start")!(
       { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
       { sessionManager },
-    )) as { systemPrompt: string };
-    assert.match(recalledAfterCompaction.systemPrompt, /Atlas must use SQLite/);
+    )) as { systemPrompt: string; message?: { content: string } };
+    assert.match(recalledAfterCompaction.message?.content ?? "", /Atlas must use SQLite/);
 
     // A successful git commit raises the completion nudge for the next turn;
     // a no-op commit (nothing to commit) must not.
@@ -535,8 +570,9 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     const nudged = (await handlers.get("before_agent_start")!(
       { prompt: "continue", systemPrompt: "base" },
       { sessionManager },
-    )) as { systemPrompt: string };
-    assert.match(nudged.systemPrompt, /<nmg_nudge>/);
+    )) as { systemPrompt: string; message?: { content: string } };
+    assert.doesNotMatch(nudged.systemPrompt, /<nmg_nudge>/);
+    assert.match(nudged.message?.content ?? "", /<nmg_nudge>/);
     const noOp = await handlers.get("tool_result")!(
       {
         toolName: "bash",
@@ -559,9 +595,10 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     const withRuntimeAg = (await handlers.get("before_agent_start")!(
       { prompt: "continue", systemPrompt: "base" },
       { sessionManager },
-    )) as { systemPrompt: string };
-    assert.match(withRuntimeAg.systemPrompt, /<nmg_runtime_ag>/);
-    assert.match(withRuntimeAg.systemPrompt, /Edited src\/storage\.ts/);
+    )) as { systemPrompt: string; message?: { content: string } };
+    assert.doesNotMatch(withRuntimeAg.systemPrompt, /<nmg_runtime_ag>/);
+    assert.match(withRuntimeAg.message?.content ?? "", /<nmg_runtime_ag>/);
+    assert.match(withRuntimeAg.message?.content ?? "", /Edited src\/storage\.ts/);
 
     const searched = (await tools
       .get("nmg_search")!
@@ -920,15 +957,20 @@ function memoryContext(id: string, statement: string, evidence: string): MemoryC
   } as unknown as MemoryContext;
 }
 
-test("composeNmgSystemPrompt: injects a completion nudge block when provided", async () => {
-  const { composeNmgSystemPrompt } = await import("../../../.pi/extensions/nmg/index.ts");
-  const out = composeNmgSystemPrompt("base", "", "", "nudge text");
+test("composeNmgContextMessage: injects a completion nudge block when provided", async () => {
+  const { composeNmgContextMessage, composeNmgSystemPrompt } = await import(
+    "../../../.pi/extensions/nmg/index.ts",
+  );
+  const out = composeNmgContextMessage("", "", "nudge text");
   assert.match(out, /<nmg_nudge>/);
   assert.match(out, /nudge text/);
-  assert.match(out, /<nmg_policy>/);
   // no nudge -> no block
-  const plain = composeNmgSystemPrompt("base");
+  const plain = composeNmgContextMessage("");
   assert.doesNotMatch(plain, /<nmg_nudge>/);
+  // the stable system prompt never carries the nudge
+  const sys = composeNmgSystemPrompt("base");
+  assert.match(sys, /<nmg_policy>/);
+  assert.doesNotMatch(sys, /<nmg_nudge>/);
 });
 
 test("git commit nudge is success-aware on tool_result", () => {
@@ -1078,8 +1120,7 @@ test("runtime AG dedupes, bounds, isolates, and clears session tool state", () =
 });
 
 test("runtime AG is presented as temporary state after durable recall", () => {
-  const output = composeNmgSystemPrompt(
-    "base",
+  const output = composeNmgContextMessage(
     "durable recall",
     "",
     "",
