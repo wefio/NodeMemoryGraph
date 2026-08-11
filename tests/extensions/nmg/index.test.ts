@@ -5,9 +5,12 @@ import { join } from "node:path";
 import test from "node:test";
 
 import nmgExtension, {
+  applyLearnedFold,
   composeNmgContextMessage,
   composeNmgSystemPrompt,
+  controllerBudgetEnvelopes,
   formatMemoryContext,
+  formatSearchRecommendation,
   formatSearchHeaders,
   isMemorableToolResult,
   isSuccessfulCommit,
@@ -71,6 +74,75 @@ test("Pi adapter exposes only the stable tool surface", () => {
     "nmg_search",
     "nmg_board",
   ]);
+});
+
+test("QPP actuation keeps hard envelopes and learned folds lossless in the Active Graph", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-qpp-actuation-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    for (const [name, statement] of [
+      ["alpha", "Project alpha uses SQLite"],
+      ["beta", "Project beta uses PostgreSQL"],
+      ["gamma", "Project gamma uses files"],
+    ] as const) {
+      store.remember({ statement, nodeName: name });
+    }
+    const context = store.searchContext("project storage", {
+      limit: 3,
+      maxTier: 3,
+      persistTrace: false,
+    });
+    assert.equal(context.results.length, 3);
+    const envelopes = controllerBudgetEnvelopes(context);
+    assert.equal(envelopes.normalMaximum.maxEvidence, 20);
+    assert.equal(envelopes.normalMaximum.maxTokens, 6_000);
+    assert.equal(envelopes.expandedMaximum.maxEvidence, 50);
+    assert.equal(envelopes.expandedMaximum.maxTokens, 10_000);
+
+    const visibleId = context.results[0]!.memory.id;
+    const deferredIds = context.results.slice(1).map((result) => result.memory.id);
+    const folded = await applyLearnedFold(
+      context,
+      {
+        fold: async () => ({
+          visibleMemoryIds: [visibleId],
+          foldedMemoryIds: deferredIds,
+          trainingSteps: 1,
+        }),
+      },
+      0.98,
+      false,
+    );
+    assert.deepEqual(folded.results.map((result) => result.memory.id), [visibleId]);
+    assert.deepEqual(folded.progressiveDisclosure?.deferredMemoryIds, deferredIds);
+    assert.deepEqual(folded.activeGraph?.memoryIds, context.activeGraph?.memoryIds);
+    assert.equal(
+      (await applyLearnedFold(context, { fold: async () => null }, 0.98, true)).results.length,
+      3,
+    );
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("search recommendation distinguishes advisory from hard guardrails", () => {
+  const context = {
+    results: [],
+    relations: [],
+    activeGraph: {
+      qpp: {
+        trigger: true,
+        reason: "below_threshold",
+        qpp: 0.42,
+      },
+    },
+  } as unknown as MemoryContext;
+  assert.equal(formatSearchRecommendation(context, "off"), "");
+  assert.equal(formatSearchRecommendation(context, "guardrail"), "");
+  assert.match(formatSearchRecommendation(context, "advisory"), /below_threshold/u);
+  context.activeGraph!.qpp!.reason = "guardrail_empty";
+  assert.match(formatSearchRecommendation(context, "guardrail"), /guardrail_empty/u);
 });
 
 test("TUI registers the nmg-context renderer and nmg-recall command", () => {
@@ -168,6 +240,17 @@ test("controller shadow bridge is opt-in and learns only from explicit get use",
     assert.equal(existsSync(join(directory, "controller-shadow-events.jsonl")), false);
 
     const enabled = new ControllerShadowBridge(directory, true);
+    const envelopes = controllerBudgetEnvelopes(context);
+    assert.equal(
+      await enabled.allocate(
+        context,
+        envelopes.minimum,
+        envelopes.normalMaximum,
+        envelopes.expandedMaximum,
+      ),
+      null,
+      "an untrained controller must not actuate",
+    );
     await enabled.retrieval(context, "session-a", "tool", "injected header");
     await enabled.searchSuppressed("wrong-session", "ignored query");
     await enabled.searchSuppressed("session-a", "same query again");
@@ -183,6 +266,15 @@ test("controller shadow bridge is opt-in and learns only from explicit get use",
       readFileSync(join(directory, "controller-shadow-state.json"), "utf8"),
     ) as { observations: number };
     assert.equal(state.observations, 1);
+    assert.ok(
+      await enabled.allocate(
+        context,
+        envelopes.minimum,
+        envelopes.normalMaximum,
+        envelopes.expandedMaximum,
+      ),
+      "explicit use supervision unlocks active allocation",
+    );
     await enabled.outcome("session-a", [
       { role: "assistant", usage: { input: 120, output: 30 } },
       { role: "toolResult" },
@@ -536,6 +628,26 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     const started = readServerState(serverStatePath(join(directory, "nmg.sqlite")));
     assert.equal(started?.transport, "http");
     assert.equal(isProcessAlive(started!.pid), true);
+
+    // Identity chain fallback: with no NMG_AGENT_ID, the entry is attributed to
+    // the session id (stable within a session) rather than the volatile pid.
+    const fallbackAgent = process.env.NMG_AGENT_ID;
+    delete process.env.NMG_AGENT_ID;
+    const boardPutSession = (await tools.get("nmg_board")!.execute(
+      "board-put-session",
+      {
+        action: "put",
+        taskId: "atlas-review-fallback",
+        kind: "note",
+        content: "Written with the session-id fallback identity.",
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    )) as { details: { entry: { agentId: string } } };
+    assert.equal(boardPutSession.details.entry.agentId, "http-test-session");
+    if (fallbackAgent === undefined) delete process.env.NMG_AGENT_ID;
+    else process.env.NMG_AGENT_ID = fallbackAgent;
 
     process.env.NMG_AGENT_ID = "agent-a";
     const boardPut = (await tools.get("nmg_board")!.execute(

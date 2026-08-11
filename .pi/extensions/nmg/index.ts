@@ -21,10 +21,22 @@ import {
 } from "../../../src/cli/archive-staging.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import { resolveSkillOptLabPolicy } from "../../../src/lab/skillopt-policy.ts";
-import type { MemoryContext, MemorySearchResult, MemoryTier } from "../../../src/core/types.ts";
+import type {
+  ActiveGraphBudget,
+  MemoryContext,
+  MemorySearchResult,
+  MemoryTier,
+} from "../../../src/core/types.ts";
+import {
+  configuredQpp1Mode,
+  configuredQpp2Mode,
+  configuredQpp2RetainedMass,
+  configuredSearchRecommendationMode,
+  type SearchRecommendationMode,
+} from "../../../src/integration/config.ts";
 import { searchPreview } from "../../../src/integration/search-projection.ts";
 import { selectEvidence, type AgentHistoryMessage } from "../../../src/integration/evidence.ts";
-import { ControllerShadowBridge } from "./controller-shadow.ts";
+import { ControllerShadowBridge, shadowEnabled } from "./controller-shadow.ts";
 
 /**
  * NMG Pi extension.
@@ -50,7 +62,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const taskWindow = new SessionTaskWindow();
   const recallFlow = new SessionRecallFlow();
   const runtimeAg = new SessionRuntimeAg();
-  const controllerShadow = new ControllerShadowBridge(resolveNmgDataDir());
+  const qpp1Mode = configuredQpp1Mode();
+  const qpp2Mode = configuredQpp2Mode();
+  const qpp2RetainedMass = configuredQpp2RetainedMass();
+  const recommendationMode = configuredSearchRecommendationMode();
+  const controllerShadow = new ControllerShadowBridge(
+    resolveNmgDataDir(),
+    shadowEnabled() || qpp1Mode !== "off" || qpp2Mode !== "off",
+  );
   // Weak completion nudge: a git commit (or an explicit completion phrase) is a
   // low-signal hint that NMG memory is available — a reminder, never a forced
   // action. Set by the tool_result hook, consumed once by before_agent_start.
@@ -119,7 +138,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       };
     }
     try {
-      const context = (await invoke("search", {
+      let context = (await invoke("search", {
         query: recallQuery,
         projectDir: projectDirectory(),
         sessionId,
@@ -128,14 +147,24 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         initialEvidenceTarget: configuredInitialTarget(),
         strongHitTopGap: configuredStrongHitTopGap(),
         strongHitInitialTarget: configuredStrongHitInitialTarget(),
-        secondPass: true,
+        secondPass: qpp2Mode === "active",
         graphHops: 1,
         tieredDisclosure: true,
       })) as MemoryContext;
+      const fullContext = context;
+      if (qpp2Mode === "active") {
+        context = await applyLearnedFold(context, controllerShadow, qpp2RetainedMass, false);
+      }
       const recalled = injectionWindow.format(sessionId, context, "header");
-      await controllerShadow.retrieval(context, sessionId, "automatic", recalled);
+      await controllerShadow.retrieval(fullContext, sessionId, "automatic", recalled);
       const recordCount = (recalled.match(/memory=/g) ?? []).length;
-      const recallContext = composeNmgContextMessage(recalled, "", nudge, runtimeContext);
+      const searchNudge = formatSearchRecommendation(context, recommendationMode);
+      const recallContext = composeNmgContextMessage(
+        recalled,
+        "",
+        [nudge, searchNudge].filter(Boolean).join("\n"),
+        runtimeContext,
+      );
       return {
         systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
         ...(recallContext
@@ -646,7 +675,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           nmgPrompts.search_progression_required,
         );
       }
-      const result = (await invoke("search", {
+      const baseParams = {
         ...params,
         // Automatic recall remains shallow. An explicit search is the agent's
         // request to look beyond that cache, so expose all tiers by default;
@@ -654,9 +683,41 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         maxTier: params.maxTier ?? 3,
         projectDir: projectDirectory(),
         sessionId,
+      };
+      let activeGraphBudget: ActiveGraphBudget | undefined;
+      if (qpp1Mode === "active" && params.limit === undefined) {
+        const probe = (await invoke("search", {
+          ...baseParams,
+          limit: 20,
+          secondPass: false,
+          persistTrace: false,
+        })) as MemoryContext;
+        const envelopes = controllerBudgetEnvelopes(probe);
+        activeGraphBudget = (
+          await controllerShadow.allocate(
+            probe,
+            envelopes.minimum,
+            envelopes.normalMaximum,
+            envelopes.expandedMaximum,
+          )
+        )?.budget;
+      }
+      let result = (await invoke("search", {
+        ...baseParams,
+        secondPass: params.secondPass ?? qpp2Mode === "active",
+        ...(activeGraphBudget ? { activeGraphBudget, limit: activeGraphBudget.maxEvidence } : {}),
       })) as MemoryContext;
+      const fullResult = result;
+      if (qpp2Mode === "active") {
+        result = await applyLearnedFold(
+          result,
+          controllerShadow,
+          qpp2RetainedMass,
+          params.limit !== undefined,
+        );
+      }
       const text = injectionWindow.format(sessionId, result, "header");
-      await controllerShadow.retrieval(result, sessionId, "tool", text);
+      await controllerShadow.retrieval(fullResult, sessionId, "tool", text);
       return toolResult(result, text);
     },
   });
@@ -693,7 +754,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const sessionId = ctx.sessionManager.getSessionId();
-      const agentId = process.env.NMG_AGENT_ID?.trim() || `pi:${process.pid}`;
+      // Identity chain: explicit NMG_AGENT_ID wins, then the session id (stable
+      // across a session), then the pid as a last resort. A pid alone would
+      // change every launch and fragment cross-session attribution.
+      const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
       const result = (await invoke("taskBoard", {
         ...params,
         agentId,
@@ -1056,6 +1120,87 @@ function configuredStrongHitTopGap(): number {
 function configuredStrongHitInitialTarget(): number {
   const value = Number(process.env.NMG_AUTO_RECALL_STRONG_HIT_INITIAL_TARGET ?? 3);
   return Math.max(1, Math.min(50, Number.isFinite(value) ? Math.floor(value) : 3));
+}
+
+export function controllerBudgetEnvelopes(context: MemoryContext): {
+  minimum: ActiveGraphBudget;
+  normalMaximum: ActiveGraphBudget;
+  expandedMaximum: ActiveGraphBudget;
+} {
+  const base = context.activeGraph?.budget;
+  const fallback: ActiveGraphBudget = {
+    maxNodes: 8,
+    maxEdges: 12,
+    maxEvidence: 8,
+    maxTokens: 2_000,
+    maxGraphHops: 1,
+    maxLocalTier: 3,
+    maxTierBudget: 3,
+    maxLatencyMs: 250,
+  };
+  const current = base ?? fallback;
+  const minimum: ActiveGraphBudget = {
+    ...current,
+    maxNodes: Math.min(current.maxNodes, 4),
+    maxEdges: Math.min(current.maxEdges, 6),
+    maxEvidence: 1,
+    maxTokens: Math.min(current.maxTokens, 512),
+    maxTierBudget: Math.min(current.maxTierBudget, 1),
+  };
+  const normalMaximum: ActiveGraphBudget = {
+    ...current,
+    maxNodes: Math.max(current.maxNodes, 20),
+    maxEdges: Math.max(current.maxEdges, 32),
+    maxEvidence: Math.max(current.maxEvidence, 20),
+    maxTokens: Math.max(current.maxTokens, 6_000),
+    maxTierBudget: Math.max(current.maxTierBudget, 20),
+  };
+  const expandedMaximum: ActiveGraphBudget = {
+    ...normalMaximum,
+    maxNodes: 50,
+    maxEdges: 100,
+    maxEvidence: 50,
+    maxTokens: 10_000,
+    maxGraphHops: Math.max(normalMaximum.maxGraphHops, 2),
+    maxTierBudget: 50,
+    maxLatencyMs: Math.max(normalMaximum.maxLatencyMs, 500),
+  };
+  return { minimum, normalMaximum, expandedMaximum };
+}
+
+export async function applyLearnedFold(
+  context: MemoryContext,
+  controller: Pick<ControllerShadowBridge, "fold">,
+  retainedMass: number,
+  explicitLimit: boolean,
+): Promise<MemoryContext> {
+  if (explicitLimit) return context;
+  const fold = await controller.fold(context, retainedMass);
+  if (!fold || fold.foldedMemoryIds.length === 0) return context;
+  const visible = new Set(fold.visibleMemoryIds);
+  return {
+    ...context,
+    results: context.results.filter((result) => visible.has(result.memory.id)),
+    progressiveDisclosure: {
+      strategy: "learned_retained_mass",
+      rankedWarmCandidates: context.results.length,
+      initiallyVisible: visible.size,
+      deferredMemoryIds: fold.foldedMemoryIds,
+    },
+  };
+}
+
+export function formatSearchRecommendation(
+  context: MemoryContext,
+  mode: SearchRecommendationMode,
+): string {
+  const qpp = context.activeGraph?.qpp;
+  if (mode === "off" || !qpp?.trigger) return "";
+  if (mode === "guardrail" && !qpp.reason.startsWith("guardrail_")) return "";
+  return renderDisclosure(nmgPrompts.search_recommendation, {
+    reason: qpp.reason,
+    qpp: qpp.qpp.toFixed(3),
+  });
 }
 
 function hasExplicitRecallIntent(normalized: string): boolean {
