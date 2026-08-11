@@ -5,9 +5,13 @@ import { join } from "node:path";
 import test from "node:test";
 
 import nmgExtension, {
+  compactRescueRememberParams,
+  compactRescueStatement,
   composeNmgSystemPrompt,
   formatMemoryContext,
   formatSearchHeaders,
+  isMemorableToolResult,
+  isSuccessfulCommit,
   MEMORY_POLICY,
   PI_BRANCH_SHAPE_VERSION,
   projectPiBranch,
@@ -15,6 +19,10 @@ import nmgExtension, {
   SessionInjectionWindow,
   SessionRecallFlow,
   SessionTaskWindow,
+  SessionToolTraceCapture,
+  summarizeSessionFragment,
+  summarizeToolResult,
+  toolTraceRememberParams,
 } from "../../../.pi/extensions/nmg/index.ts";
 import { loadPrompts } from "../../../src/prompts/load.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
@@ -53,6 +61,12 @@ function extensionHarness() {
 
 test("Pi adapter exposes only the stable tool surface", () => {
   assert.deepEqual([...extensionHarness().tools.keys()], ["nmg_remember", "nmg_get", "nmg_search"]);
+});
+
+test("PostToolUse registers on tool_result, not the old pre-execution tool_call", () => {
+  const { handlers } = extensionHarness();
+  assert.equal(handlers.has("tool_result"), true);
+  assert.equal(handlers.has("tool_call"), false);
 });
 
 test("remember feedback action stays on the stable tool surface and fails closed", async () => {
@@ -375,6 +389,33 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       { sessionManager },
     ) as { systemPrompt: string };
     assert.match(recalledAfterCompaction.systemPrompt, /Atlas must use SQLite/);
+
+    // A successful git commit raises the completion nudge for the next turn;
+    // a no-op commit (nothing to commit) must not.
+    await handlers.get("tool_result")!(
+      {
+        toolName: "bash",
+        isError: false,
+        content: [{ type: "text", text: "[main a1b2c3d] feat: wire SQLite" }],
+        input: { command: "git commit -m 'feat' && git push" },
+      },
+      { sessionManager },
+    );
+    const nudged = await handlers.get("before_agent_start")!(
+      { prompt: "continue", systemPrompt: "base" },
+      { sessionManager },
+    ) as { systemPrompt: string };
+    assert.match(nudged.systemPrompt, /<nmg_nudge>/);
+    const noOp = await handlers.get("tool_result")!(
+      {
+        toolName: "bash",
+        isError: false,
+        content: [{ type: "text", text: "nothing to commit, working tree clean" }],
+        input: { command: "git commit -am x" },
+      },
+      { sessionManager },
+    );
+    assert.equal(noOp, undefined);
 
     const searched = await tools
       .get("nmg_search")!
@@ -712,4 +753,194 @@ test("composeNmgSystemPrompt: injects a completion nudge block when provided", a
   // no nudge -> no block
   const plain = composeNmgSystemPrompt("base");
   assert.doesNotMatch(plain, /<nmg_nudge>/);
+});
+
+test("git commit nudge is success-aware on tool_result", () => {
+  assert.equal(
+    isSuccessfulCommit({
+      toolName: "bash",
+      isError: false,
+      content: [{ type: "text", text: "[main a1b2c3d] feat: wire SQLite" }],
+      input: { command: "git commit -m 'feat' && git push" },
+    }),
+    true,
+  );
+  // Exit 0 but nothing actually committed: no nudge.
+  assert.equal(
+    isSuccessfulCommit({
+      toolName: "bash",
+      isError: false,
+      content: [{ type: "text", text: "nothing to commit, working tree clean" }],
+      input: { command: "git commit -am x" },
+    }),
+    false,
+  );
+  // A failed commit is not a milestone.
+  assert.equal(
+    isSuccessfulCommit({
+      toolName: "bash",
+      isError: true,
+      content: [],
+      input: { command: "git commit -m x" },
+    }),
+    false,
+  );
+  // Non-commit commands never nudge.
+  assert.equal(
+    isSuccessfulCommit({
+      toolName: "bash",
+      isError: false,
+      content: [],
+      input: { command: "npm test" },
+    }),
+    false,
+  );
+});
+
+test("tool result filter keeps only memorable outcomes", () => {
+  assert.equal(
+    isMemorableToolResult({
+      toolName: "bash",
+      isError: false,
+      content: [{ type: "text", text: "error: cannot find module" }],
+      input: { command: "npm run build" },
+    }),
+    true,
+  );
+  assert.equal(
+    isMemorableToolResult({
+      toolName: "bash",
+      isError: false,
+      content: [{ type: "text", text: "ok" }],
+      input: { command: "ls" },
+    }),
+    false,
+  );
+  assert.equal(
+    isMemorableToolResult({
+      toolName: "bash",
+      isError: false,
+      content: [{ type: "text", text: "1 passed, 0 failed" }],
+      input: { command: "npm test" },
+    }),
+    true,
+  );
+  assert.equal(
+    isMemorableToolResult({
+      toolName: "read",
+      isError: false,
+      content: [{ type: "text", text: "lots of file content" }],
+      input: { path: "src/a.ts" },
+    }),
+    false,
+  );
+  assert.equal(
+    isMemorableToolResult({
+      toolName: "edit",
+      isError: false,
+      content: [{ type: "text", text: "ok" }],
+      input: { path: "src/a.ts" },
+    }),
+    true,
+  );
+  assert.equal(
+    isMemorableToolResult({
+      toolName: "grep",
+      isError: false,
+      content: [{ type: "text", text: "src/a.ts:1: match" }],
+      input: { query: "x" },
+    }),
+    true,
+  );
+  assert.equal(
+    isMemorableToolResult({
+      toolName: "grep",
+      isError: false,
+      content: [{ type: "text", text: "" }],
+      input: { query: "x" },
+    }),
+    false,
+  );
+});
+
+test("tool trace statement carries the path and tool node", () => {
+  const edit = summarizeToolResult({
+    toolName: "edit",
+    isError: false,
+    content: [],
+    input: { path: "src/a.ts" },
+  });
+  assert.equal(edit.nodeName, "src/a.ts");
+  assert.match(edit.statement, /Edited src\/a\.ts/);
+  const bash = summarizeToolResult({
+    toolName: "bash",
+    isError: true,
+    content: [{ type: "text", text: "fatal: boom" }],
+    input: { command: "git commit" },
+  });
+  assert.equal(bash.nodeName, "tool:bash");
+  assert.match(bash.statement, /\[error\]/);
+});
+
+test("tool trace remember params are low-tier session events with markers", () => {
+  const params = toolTraceRememberParams(
+    { toolName: "edit", isError: false, content: [], input: { path: "src/a.ts" } },
+    "session-a",
+    "/project",
+  );
+  assert.equal(params?.tier, 3);
+  assert.equal(params?.importance, 0.1);
+  assert.equal(params?.writeReason, "post_tool_use");
+  assert.equal(params?.memoryType, "event");
+  assert.equal(params?.sourceActor, "system");
+  assert.equal(params?.sessionId, "session-a");
+  assert.deepEqual(params?.markers, [{ kind: "tool_trace", attributes: { tool: "edit" } }]);
+  assert.equal(
+    toolTraceRememberParams(
+      { toolName: "read", isError: false, content: [], input: {} },
+      "s",
+      "/p",
+    ),
+    null,
+  );
+});
+
+test("tool trace capture dedupes identical statements per session", () => {
+  const capture = new SessionToolTraceCapture();
+  assert.equal(capture.note("session-a", "bash", "Tool bash: npm test 1 failed"), true);
+  assert.equal(capture.note("session-a", "bash", "Tool bash: npm test 1 failed"), false);
+  assert.equal(capture.note("session-a", "bash", "Tool bash: npm test 2 passed"), true);
+  assert.equal(capture.note("session-b", "bash", "Tool bash: npm test 1 failed"), true);
+  capture.clear("session-a");
+  assert.equal(capture.note("session-a", "bash", "Tool bash: npm test 1 failed"), true);
+});
+
+test("compact rescue statement concatenates doomed messages and truncates", () => {
+  const fragment = summarizeSessionFragment([
+    { role: "assistant", content: "We decided Atlas uses SQLite with WAL mode." },
+    { role: "toolResult", content: [{ type: "text", text: "tests passed" }] },
+  ]);
+  assert.match(fragment, /assistant: We decided Atlas uses SQLite with WAL mode\./);
+  assert.match(fragment, /toolResult: tests passed/);
+
+  const long = compactRescueStatement([{ role: "user", content: "x".repeat(6000) }], 100);
+  assert.ok(long.length <= 100);
+  assert.match(long, /…$/);
+});
+
+test("compact rescue remember params mark the session node and reason", () => {
+  const params = compactRescueRememberParams(
+    [{ role: "assistant", content: "Decision: use SQLite." }],
+    "session-a",
+    "/project",
+    "threshold",
+  );
+  assert.equal(params?.nodeName, "session:session-a");
+  assert.equal(params?.tier, 2);
+  assert.equal(params?.importance, 0.3);
+  assert.equal(params?.writeReason, "pre_compact_rescue");
+  assert.deepEqual(params?.markers, [
+    { kind: "compact_rescue", attributes: { sessionId: "session-a", reason: "threshold" } },
+  ]);
+  assert.equal(compactRescueRememberParams([], "s", "/p", "manual"), null);
 });

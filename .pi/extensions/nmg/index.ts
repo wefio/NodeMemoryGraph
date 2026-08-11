@@ -47,12 +47,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const injectionWindow = new SessionInjectionWindow();
   const taskWindow = new SessionTaskWindow();
   const recallFlow = new SessionRecallFlow();
+  const toolTraceCapture = new SessionToolTraceCapture();
   const controllerShadow = new ControllerShadowBridge(
     process.env.NMG_DATA_DIR || join(homedir(), ".nmg"),
   );
   // Weak completion nudge: a git commit (or an explicit completion phrase) is a
   // low-signal hint that NMG memory is available — a reminder, never a forced
-  // action. Set by the tool_call hook, consumed once by before_agent_start.
+  // action. Set by the tool_result hook, consumed once by before_agent_start.
   let commitNudgePending = false;
   const popCompletionNudge = (prompt: string): string => {
     const triggered =
@@ -70,11 +71,20 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   ) => invokeDaemon(await connection(), method, params);
 
   // git commit via the bash tool is the strongest "milestone" signal available
-  // to the extension; remember it so the next turn can offer NMG memory.
-  pi.on("tool_call", async (event, _ctx) => {
-    if (event.toolName === "bash" && /\bgit\s+commit\b/.test(String(event.input.command))) {
-      commitNudgePending = true;
-    }
+  // to the extension; remember it so the next turn can offer NMG memory. The
+  // detection moved from the pre-execution tool_call hook to tool_result so it
+  // is success-aware (only a commit that actually landed nudges). The same
+  // hook feeds low-priority PostToolUse memory (tool traces); those writes are
+  // fire-and-forget so they never delay the tool result that just returned.
+  pi.on("tool_result", async (event, ctx) => {
+    const sessionId = ctx.sessionManager.getSessionId();
+    if (isSuccessfulCommit(event)) commitNudgePending = true;
+    const params = toolTraceRememberParams(event, sessionId, projectDirectory());
+    if (!params) return;
+    if (!toolTraceCapture.note(sessionId, event.toolName, String(params.statement))) return;
+    void invoke("remember", params).catch(() => {
+      // Fire-and-forget: a failed trace write must never block the agent loop.
+    });
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
@@ -154,6 +164,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     injectionWindow.clear(sessionId);
     taskWindow.clear(sessionId);
     recallFlow.clear(sessionId);
+    toolTraceCapture.clear(sessionId);
     controllerShadow.clear(sessionId);
     if (!connectionPromise) return;
     const active = await connectionPromise.catch(() => undefined);
@@ -196,8 +207,23 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("session_before_compact", async (_event, ctx) => {
-    injectionWindow.clear(ctx.sessionManager.getSessionId());
+  pi.on("session_before_compact", async (event, ctx) => {
+    const sessionId = ctx.sessionManager.getSessionId();
+    injectionWindow.clear(sessionId);
+    // Rescue the messages about to be compacted away before silent context
+    // loss. Pi already computed the doomed span (preparation.messagesToSummarize);
+    // we persist a bounded textual fragment as a low-tier event.
+    const params = compactRescueRememberParams(
+      event.preparation?.messagesToSummarize ?? [],
+      sessionId,
+      projectDirectory(),
+      event.reason,
+    );
+    if (params) {
+      void invoke("remember", params).catch(() => {
+        // Fire-and-forget: compaction must proceed even if the rescue fails.
+      });
+    }
   });
 
   pi.registerTool({
@@ -1042,4 +1068,193 @@ function excerpt(value: string, maxLength: number): string {
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * PostToolUse memory capture (first-principles: the tool result is the one
+ * event that carries input + content + isError + per-tool details).
+ */
+
+/** True only when a git commit actually landed, so a failed or no-op commit
+ *  never raises the completion nudge. */
+export function isSuccessfulCommit(event: {
+  toolName: string;
+  isError: boolean;
+  content: unknown;
+  input?: unknown;
+}): boolean {
+  if (event.toolName !== "bash" || event.isError) return false;
+  const command = String((event.input as { command?: unknown })?.command ?? "");
+  if (!/\bgit\s+commit\b/.test(command)) return false;
+  const output = messageText(event.content);
+  return !/(?:nothing to commit|no changes added to commit|nothing added to commit)/iu.test(
+    output,
+  );
+}
+
+/** Only tool results with lasting information value are captured as traces. */
+export function isMemorableToolResult(event: {
+  toolName: string;
+  isError: boolean;
+  content: unknown;
+  input?: unknown;
+}): boolean {
+  if (event.isError) return true;
+  const text = messageText(event.content);
+  switch (event.toolName) {
+    case "bash": {
+      const command = String((event.input as { command?: unknown })?.command ?? "");
+      const testRun =
+        /\b(?:npm|pnpm|yarn|bun|npx|node|deno)\s+(?:run\s+)?test\b|(?:vitest|jest|pytest|go\s+test|cargo\s+test)/iu.test(
+          command,
+        );
+      return testRun || /(?:error|fail(?:ed|ure)?|fatal|warning|exception|✗|FAILED)/iu.test(text);
+    }
+    case "edit":
+    case "write":
+      // File mutations are structural changes; capture the path.
+      return true;
+    case "grep":
+      return text.trim().length > 0;
+    default:
+      return false;
+  }
+}
+
+export function summarizeToolResult(event: {
+  toolName: string;
+  isError: boolean;
+  content: unknown;
+  input?: unknown;
+}): { statement: string; nodeName: string } {
+  const input = event.input as Record<string, unknown> | undefined;
+  if (event.toolName === "edit" || event.toolName === "write") {
+    const path = String(input?.path ?? input?.filePath ?? "?");
+    const verb = event.toolName === "write" ? "Wrote" : "Edited";
+    return {
+      statement: `${verb} ${path}${event.isError ? " (tool returned an error)" : ""}.`,
+      nodeName: path,
+    };
+  }
+  const text = excerpt(messageText(event.content), 400);
+  const status = event.isError ? " [error]" : "";
+  return {
+    statement: `Tool ${event.toolName}${status}: ${text || "(no text output)"}`,
+    nodeName: `tool:${event.toolName}`,
+  };
+}
+
+/** The exact low-tier remember payload for a memorable tool result, or null. */
+export function toolTraceRememberParams(
+  event: {
+    toolName: string;
+    isError: boolean;
+    content: unknown;
+    input?: unknown;
+  },
+  sessionId: string,
+  projectDir: string,
+): Record<string, unknown> | null {
+  if (!isMemorableToolResult(event)) return null;
+  const { statement, nodeName } = summarizeToolResult(event);
+  return {
+    statement,
+    nodeName,
+    memoryType: "event",
+    sourceActor: "system",
+    truthStatus: "asserted",
+    tier: 3,
+    importance: 0.1,
+    markers: [{ kind: "tool_trace", attributes: { tool: event.toolName } }],
+    scope: { project: projectDir },
+    writeReason: "post_tool_use",
+    projectDir,
+    sessionId,
+  };
+}
+
+/**
+ * Bounded per-session guard against redundant low-tier tool traces. Identical
+ * (tool, statement) pairs are written at most once per session; NMG's own
+ * exact-duplicate skip is the backstop for anything that slips past here.
+ */
+export class SessionToolTraceCapture {
+  readonly #recent = new Map<string, Set<string>>();
+  readonly maxPerSession: number;
+
+  constructor(maxPerSession = 64) {
+    this.maxPerSession = Math.max(1, maxPerSession);
+  }
+
+  /** Returns true when this (tool, statement) pair is new for the session. */
+  note(sessionId: string, toolName: string, statement: string): boolean {
+    const key = `${toolName}\u0000${toolTraceHash(statement)}`;
+    let set = this.#recent.get(sessionId);
+    if (!set) {
+      set = new Set();
+      this.#recent.set(sessionId, set);
+    }
+    if (set.has(key)) return false;
+    set.add(key);
+    if (set.size > this.maxPerSession) set.delete(set.values().next().value!);
+    return true;
+  }
+
+  clear(sessionId: string): void {
+    this.#recent.delete(sessionId);
+  }
+}
+
+function toolTraceHash(statement: string): string {
+  return createHash("sha256").update(statement).digest("base64url");
+}
+
+/**
+ * PreCompact rescue (first-principles: session_before_compact is the only
+ * place that can intercept silent context loss; Pi already computed the doomed
+ * span as preparation.messagesToSummarize).
+ */
+export function summarizeSessionFragment(messages: readonly unknown[]): string {
+  const lines: string[] = [];
+  for (const message of messages) {
+    if (!message || typeof message !== "object") continue;
+    const candidate = message as { role?: unknown; content?: unknown };
+    const role = typeof candidate.role === "string" ? candidate.role : "?";
+    const content = messageText(candidate.content);
+    if (!content) continue;
+    lines.push(`${role}: ${content}`);
+  }
+  return lines.join("\n");
+}
+
+export function compactRescueStatement(
+  messages: readonly unknown[],
+  maxLength = 4000,
+): string {
+  return excerpt(summarizeSessionFragment(messages), maxLength);
+}
+
+/** The exact low-tier remember payload for a compact rescue, or null. */
+export function compactRescueRememberParams(
+  messages: readonly unknown[],
+  sessionId: string,
+  projectDir: string,
+  reason: string,
+): Record<string, unknown> | null {
+  const statement = compactRescueStatement(messages);
+  if (!statement.trim()) return null;
+  return {
+    statement,
+    nodeName: `session:${sessionId}`,
+    memoryType: "event",
+    sourceActor: "system",
+    truthStatus: "asserted",
+    tier: 2,
+    importance: 0.3,
+    markers: [{ kind: "compact_rescue", attributes: { sessionId, reason } }],
+    scope: { project: projectDir },
+    writeReason: "pre_compact_rescue",
+    projectDir,
+    sessionId,
+  };
 }
