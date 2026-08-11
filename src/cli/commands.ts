@@ -385,7 +385,7 @@ export function cliUsage(extraLines: readonly string[] = []): string {
     ...extraLines.map((line) => `  ${line}`),
   ].join("\n");
   const common = `Common options:
-  --data-dir DIR             NMG data directory (default: NMG_DATA_DIR or .nmg)
+  --data-dir DIR             NMG data directory (default: NMG_DATA_DIR or ~/.nmg)
   --db FILE                  Explicit SQLite database path
   --scope KEY=VALUE          Repeatable or comma-separated scope filter
   --project-dir DIR          Project-local STG root (stores .nmg/stg.sqlite)

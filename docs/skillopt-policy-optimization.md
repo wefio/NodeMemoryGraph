@@ -5,8 +5,8 @@ not a memory editor and it is not part of ordinary Pi inference.
 
 ## Trainable and immutable state
 
-The only trainable artifact is the stable natural-language policy that tells an
-Agent how to use progressive recall. The initial artifact is copied from
+The currently implemented trainable artifact is the stable natural-language
+policy that tells an Agent how to use progressive recall. The initial artifact is copied from
 `src/prompts/nmg-prompts.yaml:memory_policy`.
 
 SkillOpt may propose bounded edits concerning:
@@ -78,9 +78,30 @@ Formal export fails closed below those counts. `--allow-insufficient` exists
 only to check the adapter and file layout; its output cannot authorize training
 or promotion.
 
-The current project shadow log on 2026-08-11 contains three fully labelled
-semantic tasks. The generated split has one task in each partition and is not
-ready for optimization.
+Each exported row currently requires a retrieval plus natural feedback with a
+stable `semanticTaskId` and all four retrieval labels (`evidenceSufficient`,
+`expansionUseful`, `excessiveNoise`, and `noMemoryNeeded`). `use` and `outcome`
+events enrich a row but are not mandatory in the current recall-policy exporter.
+A future maintenance-policy dataset may additionally require long-horizon
+outcomes; that is a separate, not-yet-implemented readiness contract.
+
+The extension and exporter previously used different default shadow paths. This
+was fixed on 2026-08-11 by a shared resolver: ordinary use defaults to `~/.nmg`,
+while controlled helpers explicitly select project-local `.nmg`. Historical
+counts from either file are snapshots and must be re-exported before making a
+readiness claim. At the time of this update the formal gate remains **not
+demonstrated ready**.
+
+## Proposed maintenance-policy extension
+
+**Status: designed, not implemented.** A future `memory_maintenance_policy` may
+use the same offline optimization and two-stage promotion protocol to propose
+content rewrites, scope corrections, supersession, splits, or merges. It must
+separate content, scope, and retrieval defects; retrieval defects must not mutate
+memory. Existing explicit feedback, collection provenance, and journaled node
+merge rollback are reusable infrastructure, not evidence that this maintenance
+decision layer already exists. The normative boundary is recorded in
+`design.md` under “Offline text-space policy optimization”.
 
 ## Commands
 

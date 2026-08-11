@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -12,6 +11,7 @@ import {
   shutdownOwnedDaemon,
   type DaemonConnection,
 } from "../../../src/cli/daemon-client.ts";
+import { resolveNmgDataDir } from "../../../src/cli/data-path.ts";
 import {
   archiveOrStage,
   archiveNodeName,
@@ -37,7 +37,7 @@ import { ControllerShadowBridge } from "./controller-shadow.ts";
  */
 
 function databasePath(): string {
-  return join(process.env.NMG_DATA_DIR || join(homedir(), ".nmg"), "nmg.sqlite");
+  return join(resolveNmgDataDir(), "nmg.sqlite");
 }
 
 function projectDirectory(): string {
@@ -51,7 +51,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const recallFlow = new SessionRecallFlow();
   const runtimeAg = new SessionRuntimeAg();
   const controllerShadow = new ControllerShadowBridge(
-    process.env.NMG_DATA_DIR || join(homedir(), ".nmg"),
+    resolveNmgDataDir(),
   );
   // Weak completion nudge: a git commit (or an explicit completion phrase) is a
   // low-signal hint that NMG memory is available — a reminder, never a forced

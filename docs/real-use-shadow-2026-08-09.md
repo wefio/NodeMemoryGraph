@@ -48,8 +48,12 @@ positive training example.
   acquires the daemon before starting Pi and shuts it down only when the helper
   owns it. A timed-out child therefore cannot leave a detached daemon behind;
   a daemon that predated the helper remains untouched.
-- The controller-shadow report resolves the same project-local `.nmg` path by
-  default instead of silently reading the user-home store.
+- The helper and report resolve the same project-local `.nmg` because the helper
+  explicitly supplies `NMG_DATA_DIR`. Ordinary Pi use is intentionally different:
+  without an override, all clients resolve the user-level `~/.nmg` store. A
+  2026-08-11 audit found that the extension and exporter had drifted to different
+  defaults; the shared data-path resolver now enforces this contract. Historical
+  event counts in this report are snapshots, not current readiness evidence.
 
 ## Follow-up after seeding the missing decision
 

@@ -64,6 +64,7 @@ import {
   type NmgStatusResult,
   type NmgSyncStgParams,
 } from "./protocol.ts";
+import { resolveNmgDataDir } from "./data-path.ts";
 
 const SERVICE_VERSION = "0.1.0";
 export interface NmgServiceOptions {
@@ -91,14 +92,12 @@ export class NmgService {
   >();
 
   constructor(options: NmgServiceOptions = {}) {
-    const dataDirectory = resolve(
-      options.dataDirectory ??
-        options.environment?.NMG_DATA_DIR ??
-        process.env.NMG_DATA_DIR ??
-        ".nmg",
-    );
+    const environment = options.environment ?? process.env;
+    const dataDirectory = options.dataDirectory
+      ? resolve(options.dataDirectory)
+      : resolveNmgDataDir(environment);
     this.databasePath = resolve(options.databasePath ?? join(dataDirectory, "nmg.sqlite"));
-    this.#environment = options.environment ?? process.env;
+    this.#environment = environment;
   }
 
   get shutdownRequested(): boolean {

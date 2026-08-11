@@ -1,7 +1,7 @@
 # NMG design baseline
 
 **Status:** 0.9 / P3 runtime memory model implemented
-**Updated:** 2026-07-29
+**Updated:** 2026-08-11
 
 ## 1. Definition
 
@@ -542,6 +542,20 @@ projection may contain:
 - temporary STG-to-LTG, LTG-to-LTG, or query-local relations used only for the
   current task.
 - bounded harness-local tool observations that remain virtual and session-owned.
+
+AG may therefore act as a **session communication blackboard**. Agents and the
+harness may place concise goals, hypotheses, pending checks, tool-result
+summaries, hand-off notes, and references to already injected memories in this
+private projection. Blackboard entries are not authoritative memories: they are
+session-owned, budgeted, provenance-labelled, and removed by the session window
+unless an explicit `remember` or consolidation decision admits supported content
+to STG or LTG. This keeps coordination and compaction checkpoints available
+without making temporary reasoning globally retrievable.
+
+**Implementation status:** bounded session-owned tool observations and the
+Lab-only `ReasoningWorkspace` are implemented. A general multi-Agent blackboard
+API is not implemented; shared collaboration must still pass through admitted
+LTG memories rather than a shared AG.
 
 AG construction is query planning, not graph copying. It should first identify
 candidate nodes, then allocate local-content and relation budgets according to
@@ -1330,6 +1344,15 @@ labels. Shadow decisions cannot change ranking, folding, expansion, or budgets.
 This closes the data path without making an unevaluated controller part of the
 product policy.
 
+All ordinary clients resolve the shadow log and database through one data-path
+contract: explicit `NMG_DATA_DIR` wins, otherwise the user-level `~/.nmg` store
+is used. Controlled/headless evaluations pass a project-local `.nmg` fallback or
+set `NMG_DATA_DIR` explicitly. The Pi extension, daemon client, CLI service,
+shadow exporter, and non-Pi adapter share this resolver. **Implemented and
+covered by path-contract tests.** This distinction prevents ordinary long-term
+memory from fragmenting by working directory while keeping benchmark state
+isolated.
+
 Because answer-quality labels only become observable after an Agent turn, the
 Pi bridge keeps completed, exactly-used, unlabelled retrievals in session-local
 shadow state. On the next distinct user turn it exposes at most one one-shot
@@ -2080,6 +2103,29 @@ evidence, pollution, token, tool-call, and latency gates must also pass, after
 which adoption is a reviewed edit back into the YAML source of truth. Runtime
 NMG never loads `best_skill.md` automatically. See
 `skillopt-policy-optimization.md` for the protocol and current readiness.
+
+A second, separate candidate artifact is the proposed
+`memory_maintenance_policy`. It would translate already observed controller and
+feedback signals into reviewed maintenance proposals, not mutate memory during
+inference. Its attribution must distinguish:
+
+- **content defect**: a statement is wrong, obsolete, or ambiguous;
+- **scope defect**: a valid statement is attached too broadly or narrowly;
+- **retrieval defect**: content is valid but selection or timing was wrong.
+
+Only the first two categories may propose content/scope maintenance. Retrieval
+defects remain selection-policy evidence. Candidate maintenance policies require
+their own long-horizon outcome definition, held-out gate, and matched Pi+NMG
+promotion test. Any accepted policy remains a reviewed YAML edit; individual
+rewrite, supersede, split, or merge proposals must retain evidence and use the
+existing journal where supported.
+
+**Implementation status:** explicit feedback collection, natural/controlled
+provenance, journaled node-merge rollback, and the recall-policy SkillOpt adapter
+are implemented. The maintenance-policy artifact, three-way attribution,
+long-horizon score, and proposal-to-store channel are not implemented. STG/LTG
+context composition is implemented, but it is not a reversible persistent STG
+merge.
 
 The current Pi regression, seven-category invariant suite, controlled topology
 ablation, and strict seven-question LongMemEval matched sample prove integration

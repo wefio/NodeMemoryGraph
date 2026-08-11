@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
 
@@ -82,13 +83,13 @@ test("shadow coverage keeps missing labels unknown and reports calibration block
   assert.match(report.blockers.at(-1)!, /held-out/u);
 });
 
-test("shadow report defaults to the current project data directory", () => {
+test("shadow report uses the shared user-level data directory contract", () => {
   assert.equal(
-    resolveShadowEventPath(undefined, {}, "C:/work/nmg"),
-    resolve("C:/work/nmg/.nmg/controller-shadow-events.jsonl"),
+    resolveShadowEventPath(undefined, {}),
+    resolve(homedir(), ".nmg/controller-shadow-events.jsonl"),
   );
   assert.equal(
-    resolveShadowEventPath(undefined, { NMG_DATA_DIR: "C:/state/nmg" }, "C:/work/nmg"),
+    resolveShadowEventPath(undefined, { NMG_DATA_DIR: "C:/state/nmg" }),
     resolve("C:/state/nmg/controller-shadow-events.jsonl"),
   );
 });

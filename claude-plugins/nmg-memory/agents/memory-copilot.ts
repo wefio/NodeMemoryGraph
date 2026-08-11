@@ -3,13 +3,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { connectDaemon, invokeDaemon, shutdownOwnedDaemon } from "../../../src/cli/daemon-client.ts";
+import { resolveNmgDataDir } from "../../../src/cli/data-path.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import type { MemoryContext, PerfSnapshot } from "../../../src/core/types.ts";
 
 const nmgPrompts = loadPrompts();
 
 function dbPath(): string {
-  return join(process.env.NMG_DATA_DIR ?? join(process.cwd(), ".nmg"), "nmg.sqlite");
+  return join(resolveNmgDataDir(), "nmg.sqlite");
 }
 
 // Per-call performance feedback, off by default. When enabled, nmg_search

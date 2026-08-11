@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { readdirSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { resolveNmgDataDir } from "./data-path.ts";
 import { httpCall } from "./http-client.ts";
 import { isProcessAlive, readServerState, serverStatePath, type ServerState } from "./lifecycle.ts";
 import type { NmgMethod } from "./protocol.ts";
@@ -119,8 +119,7 @@ export async function countRunningDaemons(roots: string[] = daemonScanRoots()): 
 }
 
 function daemonScanRoots(): string[] {
-  const dataDir = resolve(process.env.NMG_DATA_DIR ?? join(homedir(), ".nmg"));
-  return [dataDir];
+  return [resolveNmgDataDir()];
 }
 
 function collectDaemonStates(

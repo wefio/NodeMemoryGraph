@@ -1,5 +1,7 @@
 import { resolve } from "node:path";
 
+import { resolveNmgDataDir } from "../src/cli/data-path.ts";
+
 export interface PiControlPaths {
   agentDirectory: string;
   dataDirectory: string;
@@ -13,7 +15,7 @@ export function resolvePiControlPaths(
 ): PiControlPaths {
   return {
     agentDirectory: resolve(environment.NMG_PI_AGENT_DIR || resolve(root, ".nmg", "pi-agent")),
-    dataDirectory: resolve(environment.NMG_DATA_DIR || resolve(root, ".nmg")),
+    dataDirectory: resolveNmgDataDir(environment, resolve(root, ".nmg")),
     projectDirectory: resolve(environment.NMG_PROJECT_DIR || root),
   };
 }

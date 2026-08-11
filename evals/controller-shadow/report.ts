@@ -6,6 +6,7 @@ import type {
   ShadowEvaluationEvent,
   ShadowFeedbackEvent,
 } from "../../src/lab/shadow-evaluation.ts";
+import { resolveNmgDataDir } from "../../src/cli/data-path.ts";
 
 const LABELS = [
   "taskSuccess",
@@ -139,11 +140,9 @@ export function readShadowEvents(path: string): ShadowEvaluationEvent[] {
 export function resolveShadowEventPath(
   argument: string | undefined,
   environment: NodeJS.ProcessEnv = process.env,
-  cwd = process.cwd(),
 ): string {
   return resolve(
-    argument ??
-      join(environment.NMG_DATA_DIR ?? join(cwd, ".nmg"), "controller-shadow-events.jsonl"),
+    argument ?? join(resolveNmgDataDir(environment), "controller-shadow-events.jsonl"),
   );
 }
 
