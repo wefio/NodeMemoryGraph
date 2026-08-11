@@ -4,8 +4,8 @@
 
 Implementation note: isolated STG is wired through the core, daemon, CLI, and
 Pi adapter. It is stored per `projectDir + sessionId`; Pi propagates its native
-session identity through automatic recall and all three tools.
-**Updated:** 2026-08-01
+session identity through automatic recall and the memory tools.
+**Updated:** 2026-08-11
 **Related:** [design.md](design.md) §1/§5/§6/§7.1, [tiered-disclosure-design.md](tiered-disclosure-design.md), [edge-activation-design.md](edge-activation-design.md)
 
 This document is the standalone reference for NMG's three-graph model:
@@ -25,8 +25,9 @@ state.
 
 AG is **not** a third authoritative or shared memory graph. It is the private
 virtual memory space presented to one model session. Agents never write a
-shared AG or STG: collaboration occurs only through admitted LTG memories and
-their provenance.
+shared AG or STG. Durable collaboration occurs through admitted LTG memories;
+temporary coordination occurs through a separate Task Board whose entries are
+projected into each caller's private AG.
 
 ```text
 HistoryRecord
@@ -55,6 +56,11 @@ Active Graph (virtual, ephemeral)
   - selected nodes, relations, and bounded local record/evidence content
   - temporary cross-STG/LTG edges and query-local reasoning nodes
   - per-projection token/node/edge/depth/latency budget ledger
+
+Task Board (shared coordination, not a memory graph)
+  - task-scoped attributed goals, blockers, results, handoffs, and decisions
+  - cursor reads, TTL expiry, explicit resolution
+  - never enters LTG search; each caller receives a private AG projection
 ```
 
 Residence (STG vs LTG) describes persistence; AG describes current
@@ -256,6 +262,22 @@ not proof that the model used a memory. Pi's `session_before_compact` event
 clears the injection window so evidence removed by compaction can be rendered
 again.
 
+### Shared Task Board boundary
+
+One private AG cannot transmit state to another Agent. NMG therefore maintains
+an independent, task-scoped coordination table in the daemon. `nmg_board` and
+`nmg board put/read/resolve` operate on attributed, expiring entries identified
+by a shared `taskId`; reads return a task-local cursor so callers can avoid
+reinjecting old entries. Pi places read entries in the caller's bounded runtime
+AG projection.
+
+The board is deliberately outside `memory_records`, FTS, embeddings, QPP, and
+controller training. It may contain concise goals, questions, blockers, results,
+handoffs, or decisions, but not secrets or hidden chain-of-thought. Task Board
+content becomes durable semantic memory only through a separate, attributable
+`remember` operation. Current local sharing trusts callers that know the task ID;
+ACLs and multi-device transport remain future infrastructure.
+
 ### AG lifecycle: memory-resident, trace-persistent
 
 AG itself is **pure memory, released with the session**. What persists is
@@ -436,6 +458,8 @@ Implemented (design.md §13):
 - query-local typed edge activation with bounded propagation, fan dilution,
   regulatory-channel separation, trace visibility, and feedback-driven
   prediction-error strength updates.
+- a shared Task Board with task isolation, immutable writer attribution,
+  task-local cursors, TTL expiry, explicit resolution, and private Pi AG projection.
 
 Not yet implemented:
 

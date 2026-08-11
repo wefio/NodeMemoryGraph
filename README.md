@@ -134,7 +134,7 @@ pi
 By default, the extension stores data in `.nmg/nmg.sqlite` under the current project. Set `NMG_DATA_DIR` to use another directory.
 
 The Pi adapter is deliberately thin. It lazily starts the local daemon over
-JSON-RPC/HTTP, reuses one connection for automatic recall and the three stable
+JSON-RPC/HTTP, reuses one connection for automatic recall and four stable
 tools, and stops the daemon at session shutdown only when that adapter
 invocation started it.
 An already-running shared daemon is left untouched.
@@ -150,7 +150,7 @@ The Pi extension keeps authoritative LTG in `NMG_DATA_DIR` or
 working directory's isolated STG. Set `NMG_PROJECT_DIR` only when the project
 root differs from Pi's working directory.
 
-By default, the model receives three tools and a typed write/use policy:
+By default, the model receives four tools and a typed write/use policy:
 
 - `nmg_remember`: save a typed long-term memory with scope, truth status,
   event time, stable state identity, evidence role, and provenance.
@@ -160,6 +160,9 @@ By default, the model receives three tools and a typed write/use policy:
 - `nmg_get`: expand selected IDs into exact memory statements and bounded source
   evidence. Passing the `activeGraphId` returned by `nmg_search` records those
   selected IDs as actually used; another session cannot read or update that AG.
+- `nmg_board`: exchange temporary, task-scoped notes between agents through
+  attributed entries, TTL expiry, incremental cursors, and explicit resolution.
+  Board entries are not LTG memories and never enter semantic retrieval.
 
 Graph maintenance, QPP, indexing, and experimental reasoning components remain
 core/CLI concerns rather than Pi tools. The adapter never opens SQLite or

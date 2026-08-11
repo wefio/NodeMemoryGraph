@@ -11,6 +11,10 @@ export interface NmgPrompts {
   search_description: string;
   get_description: string;
   remember_description: string;
+  board_description: string;
+  board_action_parameter_description: string;
+  board_task_id_parameter_description: string;
+  board_content_parameter_description: string;
   remember_action_parameter_description: string;
   remember_memory_id_parameter_description: string;
   remember_new_memory_id_parameter_description: string;

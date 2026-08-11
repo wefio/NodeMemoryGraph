@@ -26,6 +26,7 @@ import type {
   NmgSetStorageStateParams,
   NmgSplitNodeParams,
   NmgSyncStgParams,
+  NmgTaskBoardParams,
 } from "./protocol.ts";
 
 export interface OptionValues {
@@ -321,6 +322,69 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
       }) as NmgPerfParams,
   },
   {
+    method: "taskBoard",
+    words: ["board", "put"],
+    usageLine: "nmg board put TASK_ID CONTENT --agent AGENT [options] [--json]",
+    options: ["agent", "kind", "session-id", "ttl-seconds", "expires-at"],
+    flags: [],
+    usageDetail: `Task board options:
+  --agent ID                 Writer/reader identity (required)
+  --kind KIND                goal, note, question, result, handoff, decision, or blocker
+  --ttl-seconds N            Lifetime from 60 seconds to 30 days (default: 1 day)
+  --expires-at ISO           Explicit expiry instead of --ttl-seconds
+  --after-cursor N           Read only entries after this task-local sequence
+  --include-resolved         Include resolved entries when reading`,
+    buildParams: (values): NmgTaskBoardParams => {
+      if (values.positionals.length < 2) {
+        throw new Error("board put requires TASK_ID and CONTENT");
+      }
+      return compactObject({
+        action: "put",
+        taskId: values.positionals[0],
+        content: values.positionals.slice(1).join(" "),
+        agentId: requiredOption(values, "agent"),
+        kind: firstOption(values, "kind"),
+        sourceSessionId: firstOption(values, "session-id"),
+        ttlSeconds: numericOption(values, "ttl-seconds"),
+        expiresAt: firstOption(values, "expires-at"),
+      }) as unknown as NmgTaskBoardParams;
+    },
+  },
+  {
+    method: "taskBoard",
+    words: ["board", "read"],
+    usageLine: "nmg board read TASK_ID --agent AGENT [options] [--json]",
+    options: ["agent", "after-cursor", "limit"],
+    flags: ["include-resolved"],
+    buildParams: (values): NmgTaskBoardParams => ({
+      action: "read",
+      taskId: singlePositional(values, "board read"),
+      agentId: requiredOption(values, "agent"),
+      afterCursor: numericOption(values, "after-cursor"),
+      limit: numericOption(values, "limit"),
+      includeResolved: values.flags.has("include-resolved"),
+    }),
+  },
+  {
+    method: "taskBoard",
+    words: ["board", "resolve"],
+    usageLine: "nmg board resolve TASK_ID ENTRY_ID --agent AGENT [--resolution TEXT] [--json]",
+    options: ["agent", "resolution"],
+    flags: [],
+    buildParams: (values): NmgTaskBoardParams => {
+      if (values.positionals.length !== 2) {
+        throw new Error("board resolve requires TASK_ID and ENTRY_ID");
+      }
+      return compactObject({
+        action: "resolve",
+        taskId: values.positionals[0],
+        entryId: values.positionals[1],
+        agentId: requiredOption(values, "agent"),
+        resolution: firstOption(values, "resolution"),
+      }) as unknown as NmgTaskBoardParams;
+    },
+  },
+  {
     method: "syncStg",
     words: ["stg", "sync"],
     usageLine: "nmg stg sync --project-dir DIR --scope KEY=VALUE [--limit N] [--json]",
@@ -564,6 +628,12 @@ export function rejectPositionals(values: OptionValues, command: string): void {
 
 export function firstOption(values: OptionValues, name: string): string | undefined {
   return values.options.get(name)?.at(-1);
+}
+
+function requiredOption(values: OptionValues, name: string): string {
+  const value = firstOption(values, name);
+  if (!value) throw new Error(`--${name} is required`);
+  return value;
 }
 
 function numericOption(values: OptionValues, name: string): number | undefined {

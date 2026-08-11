@@ -48,6 +48,25 @@ remember_description: >-
   Assistant inference as a user statement. A stateKey names one
   replaceable property within a stable scope; it is not a topic or grouping tag.
 
+board_description: >-
+  Coordinate through a temporary task-scoped blackboard shared by NMG clients.
+  Entries retain writer attribution, expire automatically, and can be read by a
+  task-local cursor or explicitly resolved. Blackboard content is projected into
+  the caller's private runtime context; it is not indexed as long-term memory.
+
+board_action_parameter_description: >-
+  Use put to publish one concise coordination entry, read to fetch entries after
+  an optional cursor, or resolve to close a selected entry. Put/read/resolve do
+  not create semantic memory; use nmg_remember separately for durable knowledge.
+
+board_task_id_parameter_description: >-
+  Stable task identifier shared by collaborating Agents. It is the blackboard
+  isolation boundary, not a session ID or semantic memory scope.
+
+board_content_parameter_description: >-
+  Concise task coordination state such as a goal, blocker, result, handoff,
+  question, or decision. Do not include secrets or hidden chain-of-thought.
+
 remember_action_parameter_description: >-
   Omit or use save for a new memory. Use supersede only when a candidate is the
   older value of the new memory. Use relate to propose a semantic relationship

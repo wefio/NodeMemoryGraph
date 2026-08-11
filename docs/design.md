@@ -111,7 +111,8 @@ semantic embedding provider may be enabled by configuration, but local Qwen,
 vLLM, CUDA, USearch, general-purpose ML frameworks, and Cloudflare are not
 default dependencies.
 
-The target model-facing surface is three tools:
+The target model-facing surface is four tools, with the fourth deliberately
+outside durable memory:
 
 ```text
 nmg_search(query, filters, budget)
@@ -122,6 +123,9 @@ nmg_get(ids)
 
 nmg_remember(statement, type?, scope?)
   -> explicit/hot-path durable write through the same governed write policy
+
+nmg_board(action, taskId, ...)
+  -> temporary cross-agent task coordination with TTL, cursors, and attribution
 ```
 
 Automatic extraction may use the same write path. Privacy deletion, reindexing,
@@ -132,10 +136,10 @@ it records adapter-owned evaluation metadata and never mutates memory truth or
 ranking. This action is currently a Pi shadow-controller integration, not an
 NMG Core/RPC method.
 
-The default Pi package exposes only these three tools. Graph editing,
+The default Pi package exposes only these four tools. Graph editing,
 rebalancing, consolidation, QPP, and experimental reasoning remain background,
 CLI, benchmark, or administrative concerns. Explicit retrieval feedback is an
-action on the existing remember boundary, not a fourth tool or an automatic
+action on the existing remember boundary, not another tool or an automatic
 inference from user silence.
 
 ### 4.1 Agent-independent CLI and resident service
@@ -543,19 +547,27 @@ projection may contain:
   current task.
 - bounded harness-local tool observations that remain virtual and session-owned.
 
-AG may therefore act as a **session communication blackboard**. Agents and the
-harness may place concise goals, hypotheses, pending checks, tool-result
-summaries, hand-off notes, and references to already injected memories in this
-private projection. Blackboard entries are not authoritative memories: they are
-session-owned, budgeted, provenance-labelled, and removed by the session window
-unless an explicit `remember` or consolidation decision admits supported content
-to STG or LTG. This keeps coordination and compaction checkpoints available
-without making temporary reasoning globally retrievable.
+AG can act as one Agent's **private working blackboard**, but cannot itself
+communicate across Agents. Cross-Agent coordination uses the independent
+task-scoped **Task Board** in the daemon. Its attributed, expiring entries are
+read through a task-local cursor and projected into each caller's private AG.
+They are never inserted into memory records, FTS, embeddings, QPP, or LTG search.
+An Agent may separately admit a supported durable conclusion through `remember`.
 
-**Implementation status:** bounded session-owned tool observations and the
-Lab-only `ReasoningWorkspace` are implemented. A general multi-Agent blackboard
-API is not implemented; shared collaboration must still pass through admitted
-LTG memories rather than a shared AG.
+```text
+Agent A private AG ─┐
+                    ├─ read/write ─ Task Board(taskId, cursor, TTL)
+Agent B private AG ─┘                       │
+                                           └─ explicit remember only ─▶ STG/LTG
+```
+
+**Implementation status:** the shared Task Board is implemented in SQLite and
+exposed by daemon RPC, CLI (`nmg board put/read/resolve`), and one trailing Pi
+tool (`nmg_board`). It records `agentId` and source session, supports task
+isolation, cursor reads, TTL deletion, and explicit resolution. Pi reads are
+added to the caller's bounded `SessionRuntimeAg`. Membership/ACLs and remote
+multi-device transport are not implemented; local callers sharing the daemon
+must agree on a task ID and should set stable `NMG_AGENT_ID` values.
 
 AG construction is query planning, not graph copying. It should first identify
 candidate nodes, then allocate local-content and relation budgets according to
@@ -1826,8 +1838,8 @@ evidence are eligible for later LTG consolidation. The current prototype merely
 reports those candidates; it does not automatically promote scratch state into
 long-term memory.
 
-The tool is Lab-only (`NMG_ENABLE_LAB_TOOLS=1`). NMG Lite keeps its stable
-three-tool surface, and the existing numerical MGR prototype remains available
+The tool is Lab-only (`NMG_ENABLE_LAB_TOOLS=1`). NMG Lite keeps three durable-memory
+tools plus the independent task-board coordination tool, and the existing numerical MGR prototype remains available
 for independent experiments.
 
 An automatic input-capture and checkpoint-injection variant was implemented and
@@ -1851,8 +1863,8 @@ insufficient.
 
 Implemented and verified in the current prototype:
 
-- a normal Pi package manifest, stable extension entry, and the three-tool Lite
-  surface with optional Lab tools;
+- a normal Pi package manifest, stable extension entry, three durable-memory
+  tools plus the independent `nmg_board` coordination tool, and optional Lab tools;
 - progressive `nmg_search` headers followed by exact `nmg_get` evidence loading;
 - a persistent Inbox/Delta path that survives restart, participates in hierarchy
   retrieval before compaction, and is acknowledged only after external leaf
@@ -1868,6 +1880,8 @@ Implemented and verified in the current prototype:
 - resident/automatic/cue execution layers;
 - a Lab-only, file-backed session reasoning workspace with bounded compaction
   checkpoints and explicit hypothesis/evidence status;
+- a task-scoped shared coordination board with attributed entries, TTL, cursor
+  reads, explicit resolution, CLI/RPC/Pi access, and no LTG/FTS indexing;
 - a bounded `searchContext` result that approximates an early Active Graph by
   combining resident, automatic, and agent-directed recall;
 - explicit STG/LTG residence on memories and nodes, governed immediate atomic

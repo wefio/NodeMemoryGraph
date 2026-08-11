@@ -742,6 +742,35 @@ export interface ActiveGraph {
   createdAt: string;
 }
 
+export const TASK_BOARD_KINDS = [
+  "blocker",
+  "decision",
+  "goal",
+  "handoff",
+  "note",
+  "question",
+  "result",
+] as const;
+export type TaskBoardKind = (typeof TASK_BOARD_KINDS)[number];
+export type TaskBoardStatus = "open" | "resolved";
+
+/** Temporary, task-scoped coordination state. It is never an LTG memory. */
+export interface TaskBoardEntry {
+  id: string;
+  taskId: string;
+  sequence: number;
+  agentId: string;
+  sourceSessionId: string | null;
+  kind: TaskBoardKind;
+  content: string;
+  status: TaskBoardStatus;
+  createdAt: string;
+  expiresAt: string;
+  resolvedAt: string | null;
+  resolvedBy: string | null;
+  resolution: string | null;
+}
+
 export interface RecallCue {
   nodeId: string;
   canonicalName: string;

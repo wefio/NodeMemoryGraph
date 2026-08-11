@@ -1,6 +1,6 @@
 ---
 name: nmg-memory
-description: Use NMG as durable memory when a task may depend on prior user facts, preferences, constraints, decisions, project state, events, or reusable experience; when the user asks to remember or recall something; or when an Agent must start, query, and safely close the NMG daemon.
+description: Use NMG as durable memory or temporary multi-Agent coordination when a task may depend on prior user facts, preferences, constraints, decisions, project state, events, reusable experience, or a shared task blackboard; when the user asks to remember or recall something; or when an Agent must start, query, and safely close the NMG daemon.
 ---
 
 # NMG Memory
@@ -18,6 +18,9 @@ an operation or encountering its named special case.
 - Accept no useful memory as a valid outcome.
 - Save only attributable durable information. Keep secrets, transient content,
   unconfirmed Assistant proposals, and unsupported guesses out of memory.
+- Use the task board, not LTG or Markdown files, for temporary cross-Agent
+  coordination. Blackboard entries expire and never become durable memory
+  unless an Agent separately calls `nmg remember` with attributable evidence.
 
 ## Normal workflow
 
@@ -66,6 +69,35 @@ For Codex, execute these commands through the shell tool. If the active
 `nmg ...` directly. Do not reread this Skill on every turn: keep the stable
 three-command contract in working memory and open the references only for a
 named special case.
+
+## Shared task blackboard
+
+Agents collaborating on one task share a stable `TASK_ID` and identify
+themselves with `--agent`. Publish only concise coordination state:
+
+```text
+nmg board put TASK_ID "parser tests pass; inspect serializer next" \
+  --agent scout-a --kind handoff --ttl-seconds 86400 --json
+```
+
+Read incrementally and retain the returned task-local cursor:
+
+```text
+nmg board read TASK_ID --agent scout-b --after-cursor 12 --json
+```
+
+Resolve completed or obsolete entries explicitly:
+
+```text
+nmg board resolve TASK_ID ENTRY_ID --agent scout-b \
+  --resolution "serializer review completed" --json
+```
+
+The board is a task-scoped coordination store. It is not semantic search, STG,
+LTG, or a shared AG. Each Agent reads relevant entries into its own private AG.
+Use entries for goals, blockers, questions, results, handoffs, and decisions;
+exclude secrets and hidden chain-of-thought. Promote a durable conclusion only
+through a separate, evidence-backed `nmg remember` call.
 
 Pass the `activeGraphId` returned by search to `nmg get`; this records actual
 evidence use without treating search or injection as success. Use the same

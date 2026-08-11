@@ -425,6 +425,25 @@ export function migrate(db: DatabaseSync): void {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS task_board_entries (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      agent_id TEXT NOT NULL,
+      source_session_id TEXT,
+      kind TEXT NOT NULL CHECK (
+        kind IN ('blocker', 'decision', 'goal', 'handoff', 'note', 'question', 'result')
+      ),
+      content TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      resolved_at TEXT,
+      resolved_by TEXT,
+      resolution TEXT,
+      UNIQUE(task_id, sequence)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_memory_records_node_tier
       ON memory_records(node_id, tier);
     CREATE INDEX IF NOT EXISTS idx_memory_records_tier_priority
@@ -439,6 +458,10 @@ export function migrate(db: DatabaseSync): void {
       ON topology_proposals(proposal_key, created_at);
     CREATE INDEX IF NOT EXISTS idx_edge_task_observations_pair
       ON edge_task_observations(left_node_id, right_node_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_task_board_task_status_sequence
+      ON task_board_entries(task_id, status, sequence);
+    CREATE INDEX IF NOT EXISTS idx_task_board_expiry
+      ON task_board_entries(expires_at);
   `);
   ensureMemoryColumns(db);
   ensureHistoryColumns(db);

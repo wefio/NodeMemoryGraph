@@ -22,6 +22,8 @@ import type {
   MemoryScope,
   MemoryTier,
   PerfSnapshot,
+  TaskBoardEntry,
+  TaskBoardKind,
   TopologyProposal,
   VectorEmbedder,
 } from "../types.ts";
@@ -83,6 +85,112 @@ export class NmgStoreBase {
 
   close(): void {
     this.db.close();
+  }
+  putTaskBoardEntry(input: {
+    taskId: string;
+    agentId: string;
+    sourceSessionId?: string;
+    kind: TaskBoardKind;
+    content: string;
+    expiresAt: string;
+  }): TaskBoardEntry {
+    const now = new Date().toISOString();
+    this.pruneExpiredTaskBoardEntries(now, input.taskId);
+    const id = randomUUID();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.db
+        .prepare(
+          "SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence FROM task_board_entries WHERE task_id = ?",
+        )
+        .get(input.taskId) as Row;
+      const sequence = Number(row.next_sequence);
+      this.db
+        .prepare(
+          `INSERT INTO task_board_entries(
+             id, task_id, sequence, agent_id, source_session_id, kind, content,
+             status, created_at, expires_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
+        )
+        .run(
+          id,
+          input.taskId,
+          sequence,
+          input.agentId,
+          input.sourceSessionId ?? null,
+          input.kind,
+          input.content,
+          now,
+          input.expiresAt,
+        );
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return this.taskBoardEntry(id)!;
+  }
+  readTaskBoard(input: {
+    taskId: string;
+    afterCursor?: number;
+    limit?: number;
+    includeResolved?: boolean;
+    now?: string;
+  }): { entries: TaskBoardEntry[]; nextCursor: number } {
+    const now = input.now ?? new Date().toISOString();
+    this.pruneExpiredTaskBoardEntries(now, input.taskId);
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM task_board_entries
+         WHERE task_id = ? AND sequence > ?
+           AND (? = 1 OR status = 'open')
+         ORDER BY sequence ASC LIMIT ?`,
+      )
+      .all(
+        input.taskId,
+        Math.max(0, input.afterCursor ?? 0),
+        input.includeResolved ? 1 : 0,
+        Math.max(1, Math.min(input.limit ?? 50, 200)),
+      ) as Row[];
+    const entries = rows.map(mapTaskBoardEntry);
+    return {
+      entries,
+      nextCursor: entries.at(-1)?.sequence ?? Math.max(0, input.afterCursor ?? 0),
+    };
+  }
+  resolveTaskBoardEntry(input: {
+    taskId: string;
+    entryId: string;
+    agentId: string;
+    resolution?: string;
+  }): TaskBoardEntry {
+    const existing = this.taskBoardEntry(input.entryId);
+    if (!existing || existing.taskId !== input.taskId) {
+      throw new Error(`task board entry not found in task ${input.taskId}`);
+    }
+    if (existing.status === "resolved") return existing;
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE task_board_entries
+         SET status = 'resolved', resolved_at = ?, resolved_by = ?, resolution = ?
+         WHERE id = ? AND task_id = ?`,
+      )
+      .run(now, input.agentId, input.resolution ?? null, input.entryId, input.taskId);
+    return this.taskBoardEntry(input.entryId)!;
+  }
+  pruneExpiredTaskBoardEntries(now = new Date().toISOString(), taskId?: string): number {
+    const result = taskId
+      ? this.db
+          .prepare("DELETE FROM task_board_entries WHERE task_id = ? AND expires_at <= ?")
+          .run(taskId, now)
+      : this.db.prepare("DELETE FROM task_board_entries WHERE expires_at <= ?").run(now);
+    return Number(result.changes);
+  }
+  private taskBoardEntry(id: string): TaskBoardEntry | null {
+    const row = this.db.prepare("SELECT * FROM task_board_entries WHERE id = ?").get(id) as
+      Row | undefined;
+    return row ? mapTaskBoardEntry(row) : null;
   }
   cascadeDerivedMemories(sourceMemoryId: string): void {
     const derivations = this.db
@@ -1024,4 +1132,22 @@ export class NmgStoreBase {
       return row ? [mapHistory(row)] : [];
     });
   }
+}
+
+function mapTaskBoardEntry(row: Row): TaskBoardEntry {
+  return {
+    id: String(row.id),
+    taskId: String(row.task_id),
+    sequence: Number(row.sequence),
+    agentId: String(row.agent_id),
+    sourceSessionId: row.source_session_id === null ? null : String(row.source_session_id),
+    kind: String(row.kind) as TaskBoardKind,
+    content: String(row.content),
+    status: String(row.status) as TaskBoardEntry["status"],
+    createdAt: String(row.created_at),
+    expiresAt: String(row.expires_at),
+    resolvedAt: row.resolved_at === null ? null : String(row.resolved_at),
+    resolvedBy: row.resolved_by === null ? null : String(row.resolved_by),
+    resolution: row.resolution === null ? null : String(row.resolution),
+  };
 }

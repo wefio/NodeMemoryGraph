@@ -65,7 +65,12 @@ function extensionHarness() {
 }
 
 test("Pi adapter exposes only the stable tool surface", () => {
-  assert.deepEqual([...extensionHarness().tools.keys()], ["nmg_remember", "nmg_get", "nmg_search"]);
+  assert.deepEqual([...extensionHarness().tools.keys()], [
+    "nmg_remember",
+    "nmg_get",
+    "nmg_search",
+    "nmg_board",
+  ]);
 });
 
 test("TUI registers the nmg-context renderer and nmg-recall command", () => {
@@ -346,6 +351,7 @@ test("tool descriptions come from the prompt source of truth", () => {
   assert.equal(tools.get("nmg_search")?.description, prompts.search_description);
   assert.equal(tools.get("nmg_get")?.description, prompts.get_description);
   assert.equal(tools.get("nmg_remember")?.description, prompts.remember_description);
+  assert.equal(tools.get("nmg_board")?.description, prompts.board_description);
 });
 
 test("tool parameter descriptions come from the prompt source of truth", () => {
@@ -375,6 +381,10 @@ test("tool parameter descriptions come from the prompt source of truth", () => {
     tools.get("nmg_remember")?.parameters?.properties?.memoryId?.description,
     prompts.remember_memory_id_parameter_description,
   );
+  assert.equal(
+    tools.get("nmg_board")?.parameters?.properties?.taskId?.description,
+    prompts.board_task_id_parameter_description,
+  );
 });
 
 test("NMG prompt keeps a stable policy prefix; dynamic recall goes to the trailing message", () => {
@@ -402,6 +412,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-http-"));
   const previous = process.env.NMG_DATA_DIR;
   const previousProject = process.env.NMG_PROJECT_DIR;
+  const previousAgent = process.env.NMG_AGENT_ID;
   process.env.NMG_DATA_DIR = directory;
   process.env.NMG_PROJECT_DIR = directory;
   const sessionManager = {
@@ -525,6 +536,42 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     const started = readServerState(serverStatePath(join(directory, "nmg.sqlite")));
     assert.equal(started?.transport, "http");
     assert.equal(isProcessAlive(started!.pid), true);
+
+    process.env.NMG_AGENT_ID = "agent-a";
+    const boardPut = (await tools.get("nmg_board")!.execute(
+      "board-put",
+      {
+        action: "put",
+        taskId: "atlas-review",
+        kind: "handoff",
+        content: "Agent B should verify the parser tests.",
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    )) as { details: { entry: { id: string; agentId: string } } };
+    assert.equal(boardPut.details.entry.agentId, "agent-a");
+
+    process.env.NMG_AGENT_ID = "agent-b";
+    const secondSessionManager = {
+      ...sessionManager,
+      getSessionId: () => "http-test-session-b",
+    };
+    const boardRead = (await tools.get("nmg_board")!.execute(
+      "board-read",
+      { action: "read", taskId: "atlas-review" },
+      undefined,
+      undefined,
+      { sessionManager: secondSessionManager },
+    )) as { content: Array<{ text: string }>; details: { entries: Array<{ id: string }> } };
+    assert.deepEqual(boardRead.details.entries.map((entry) => entry.id), [boardPut.details.entry.id]);
+    assert.match(boardRead.content[0].text, /Agent B should verify the parser tests/u);
+    const boardProjection = (await handlers.get("before_agent_start")!(
+      { prompt: "Continue the assigned review.", systemPrompt: "base" },
+      { sessionManager: secondSessionManager },
+    )) as { message?: { content: string } };
+    assert.match(boardProjection.message?.content ?? "", /<nmg_runtime_ag>/u);
+    assert.match(boardProjection.message?.content ?? "", /Agent B should verify the parser tests/u);
 
     const recalled = (await handlers.get("before_agent_start")!(
       { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
@@ -697,6 +744,8 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     else process.env.NMG_DATA_DIR = previous;
     if (previousProject === undefined) delete process.env.NMG_PROJECT_DIR;
     else process.env.NMG_PROJECT_DIR = previousProject;
+    if (previousAgent === undefined) delete process.env.NMG_AGENT_ID;
+    else process.env.NMG_AGENT_ID = previousAgent;
     // Windows can hold the SQLite handle a moment after the daemon exits;
     // retry, and tolerate a final failure (temp dirs are reclaimed by the OS).
     for (let attempt = 0; attempt < 60; attempt += 1) {

@@ -27,6 +27,55 @@ test("status and hello do not create or open the database", async () => {
   }
 });
 
+test("task board RPC shares temporary coordination without creating semantic memory", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-board-"));
+  const databasePath = join(directory, "nmg.sqlite");
+  const service = new NmgService({ databasePath, environment: {} });
+  try {
+    const written = await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "shared-task",
+      agentId: "agent-a",
+      sourceSessionId: "session-a",
+      kind: "handoff",
+      content: "Agent B should inspect the parser.",
+      ttlSeconds: 3600,
+    });
+    assert.equal(written.action, "put");
+
+    const read = await service.invoke("taskBoard", {
+      action: "read",
+      taskId: "shared-task",
+      agentId: "agent-b",
+    });
+    assert.equal(read.action, "read");
+    if (read.action !== "read") throw new Error("expected task board read result");
+    assert.equal(read.entries.length, 1);
+    assert.equal(read.entries[0]!.agentId, "agent-a");
+
+    const resolved = await service.invoke("taskBoard", {
+      action: "resolve",
+      taskId: "shared-task",
+      agentId: "agent-b",
+      entryId: read.entries[0]!.id,
+      resolution: "Parser review complete.",
+    });
+    assert.equal(resolved.action, "resolve");
+    if (resolved.action === "read") throw new Error("expected task board resolve result");
+    assert.equal(resolved.entry.resolvedBy, "agent-b");
+
+    const store = new NmgStore(databasePath);
+    try {
+      assert.deepEqual(store.search("parser"), []);
+    } finally {
+      store.close();
+    }
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("resident service rolls back a journaled node merge", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-node-rollback-"));
   const databasePath = join(directory, "nmg.sqlite");

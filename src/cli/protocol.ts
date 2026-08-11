@@ -19,6 +19,8 @@ import type {
   RecordClaimOutcomesInput,
   RetentionCandidate,
   TopologyProposal,
+  TaskBoardEntry,
+  TaskBoardKind,
   TruthStatus,
 } from "../core/types.ts";
 
@@ -40,6 +42,7 @@ export const NMG_CAPABILITIES = [
   "rollback-node-transform",
   "split-node",
   "sync-stg",
+  "task-board",
   "shutdown",
   "http",
   "json-rpc",
@@ -64,6 +67,7 @@ export const NMG_METHODS = [
   "rollbackNodeTransform",
   "splitNode",
   "syncStg",
+  "taskBoard",
   "shutdown",
   "status",
 ] as const;
@@ -234,6 +238,36 @@ export interface NmgSyncStgParams {
   limit?: number;
 }
 
+interface NmgTaskBoardBase {
+  taskId: string;
+  agentId: string;
+}
+
+export interface NmgTaskBoardPutParams extends NmgTaskBoardBase {
+  action: "put";
+  content: string;
+  kind?: TaskBoardKind;
+  sourceSessionId?: string;
+  ttlSeconds?: number;
+  expiresAt?: string;
+}
+
+export interface NmgTaskBoardReadParams extends NmgTaskBoardBase {
+  action: "read";
+  afterCursor?: number;
+  limit?: number;
+  includeResolved?: boolean;
+}
+
+export interface NmgTaskBoardResolveParams extends NmgTaskBoardBase {
+  action: "resolve";
+  entryId: string;
+  resolution?: string;
+}
+
+export type NmgTaskBoardParams =
+  NmgTaskBoardPutParams | NmgTaskBoardReadParams | NmgTaskBoardResolveParams;
+
 export interface NmgRetentionCandidatesParams {
   dormantAfterDays?: number;
   quarantineAfterDays?: number;
@@ -332,6 +366,9 @@ export type NmgMethodResult = {
   rollbackNodeTransform: NodeTransform;
   splitNode: NodeTransform;
   syncStg: { copied: number; projectDir: string };
+  taskBoard:
+    | { action: "put" | "resolve"; entry: TaskBoardEntry }
+    | { action: "read"; entries: TaskBoardEntry[]; nextCursor: number };
   shutdown: { shuttingDown: true };
 };
 

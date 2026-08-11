@@ -364,6 +364,28 @@ function parseOptions(args: readonly string[]): OptionValues {
 
 function humanResult(value: unknown): string {
   const result = value as Record<string, unknown>;
+  if (result.action === "read" && Array.isArray(result.entries)) {
+    const entries = result.entries as Array<{
+      sequence: number;
+      id: string;
+      agentId: string;
+      kind: string;
+      status: string;
+      content: string;
+    }>;
+    return entries.length === 0
+      ? "Task board has no matching entries.\n"
+      : `${entries
+          .map(
+            (entry) =>
+              `${entry.sequence}\t${entry.id}\t${entry.agentId}\t${entry.kind}\t${entry.status}\t${entry.content}`,
+          )
+          .join("\n")}\nnextCursor=${String(result.nextCursor)}\n`;
+  }
+  if ((result.action === "put" || result.action === "resolve") && result.entry) {
+    const entry = result.entry as { id: string; sequence: number; status: string };
+    return `Task board ${String(result.action)}: ${entry.id} (#${entry.sequence}, ${entry.status}).\n`;
+  }
   if ("pruned" in result && typeof result.pruned === "number") {
     return `Pruned ${String(result.pruned)} retrieval traces.\n`;
   }

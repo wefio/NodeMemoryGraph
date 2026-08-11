@@ -7,6 +7,10 @@ const SECTIONS = [
   "search_description",
   "get_description",
   "remember_description",
+  "board_description",
+  "board_action_parameter_description",
+  "board_task_id_parameter_description",
+  "board_content_parameter_description",
   "remember_action_parameter_description",
   "remember_memory_id_parameter_description",
   "remember_new_memory_id_parameter_description",
@@ -58,7 +62,12 @@ test("stateKey guidance includes positive, negative, and supersession consequenc
 
 test("tool descriptions are neutral: they state capability, not when to call", () => {
   const prompts = loadPrompts();
-  for (const key of ["search_description", "get_description", "remember_description"] as const) {
+  for (const key of [
+    "search_description",
+    "get_description",
+    "remember_description",
+    "board_description",
+  ] as const) {
     const text = prompts[key];
     assert.doesNotMatch(text, /\buse when\b/i, `${key} must not advise when to call`);
     assert.doesNotMatch(text, /\bdo not use\b/i, `${key} must not advise when not to call`);

@@ -24,6 +24,7 @@ import {
   MEMORY_RESOLUTIONS,
   MEMORY_STORAGE_STATES,
   MEMORY_TYPES,
+  TASK_BOARD_KINDS,
   RETRIEVAL_MODES,
   TRUTH_STATUSES,
   VECTOR_GRANULARITIES,
@@ -63,6 +64,7 @@ import {
   type NmgSplitNodeParams,
   type NmgStatusResult,
   type NmgSyncStgParams,
+  type NmgTaskBoardParams,
 } from "./protocol.ts";
 import { resolveNmgDataDir } from "./data-path.ts";
 
@@ -169,6 +171,35 @@ export class NmgService {
             parsed,
           ),
           projectDir: parsed.projectDir,
+        } as NmgMethodResult[M];
+      }
+      case "taskBoard": {
+        const parsed = parseTaskBoardParams(params);
+        if (parsed.action === "put") {
+          const expiresAt =
+            parsed.expiresAt ??
+            new Date(Date.now() + (parsed.ttlSeconds ?? 86_400) * 1_000).toISOString();
+          return {
+            action: "put",
+            entry: this.#getStore().putTaskBoardEntry({
+              taskId: parsed.taskId,
+              agentId: parsed.agentId,
+              sourceSessionId: parsed.sourceSessionId,
+              kind: parsed.kind ?? "note",
+              content: parsed.content,
+              expiresAt,
+            }),
+          } as NmgMethodResult[M];
+        }
+        if (parsed.action === "read") {
+          return {
+            action: "read",
+            ...this.#getStore().readTaskBoard(parsed),
+          } as NmgMethodResult[M];
+        }
+        return {
+          action: "resolve",
+          entry: this.#getStore().resolveTaskBoardEntry(parsed),
         } as NmgMethodResult[M];
       }
       case "shutdown":
@@ -949,6 +980,50 @@ function parseSyncStgParams(value: unknown): NmgSyncStgParams {
     sessionId: optionalString(params, "sessionId"),
     scope,
     limit: optionalInteger(params, "limit", 1, 200),
+  };
+}
+
+function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
+  const params = objectParams(value);
+  const action = requiredEnum(params, "action", ["put", "read", "resolve"] as const);
+  const base = {
+    action,
+    taskId: requiredString(params, "taskId"),
+    agentId: requiredString(params, "agentId"),
+  };
+  if (action === "put") {
+    const expiresAt = optionalString(params, "expiresAt");
+    if (expiresAt && Number.isNaN(Date.parse(expiresAt))) {
+      throw new NmgProtocolError("INVALID_PARAMS", "expiresAt must be an ISO timestamp");
+    }
+    const ttlSeconds = optionalInteger(params, "ttlSeconds", 60, 2_592_000);
+    if (expiresAt && ttlSeconds !== undefined) {
+      throw new NmgProtocolError("INVALID_PARAMS", "use expiresAt or ttlSeconds, not both");
+    }
+    return {
+      ...base,
+      action,
+      content: requiredString(params, "content"),
+      kind: optionalEnum(params, "kind", TASK_BOARD_KINDS),
+      sourceSessionId: optionalString(params, "sourceSessionId"),
+      ttlSeconds,
+      expiresAt,
+    };
+  }
+  if (action === "read") {
+    return {
+      ...base,
+      action,
+      afterCursor: optionalInteger(params, "afterCursor", 0, Number.MAX_SAFE_INTEGER),
+      limit: optionalInteger(params, "limit", 1, 200),
+      includeResolved: optionalBoolean(params, "includeResolved"),
+    };
+  }
+  return {
+    ...base,
+    action,
+    entryId: requiredString(params, "entryId"),
+    resolution: optionalString(params, "resolution"),
   };
 }
 

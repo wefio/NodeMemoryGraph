@@ -46,5 +46,15 @@
       "Understands --second-pass re-selects within the same candidate pool",
       "Loads only the selected exact records, not the whole pool"
     ]
+  },
+  {
+    "name": "shared_task_board",
+    "prompt": "两个 Agent 正在协作 release-42。把解析器测试通过且下一步检查序列化器这个交接写到临时黑板，让另一个 Agent 增量读取；不要把它保存成长期记忆。",
+    "expected": [
+      "Uses nmg board put with a stable task id and attributed agent id",
+      "Uses nmg board read with a cursor for the collaborating agent",
+      "Does not use nmg remember or semantic search for temporary coordination",
+      "Treats the board as expiring task state projected into each Agent's private AG"
+    ]
   }
 ]

@@ -50,9 +50,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const taskWindow = new SessionTaskWindow();
   const recallFlow = new SessionRecallFlow();
   const runtimeAg = new SessionRuntimeAg();
-  const controllerShadow = new ControllerShadowBridge(
-    resolveNmgDataDir(),
-  );
+  const controllerShadow = new ControllerShadowBridge(resolveNmgDataDir());
   // Weak completion nudge: a git commit (or an explicit completion phrase) is a
   // low-signal hint that NMG memory is available — a reminder, never a forced
   // action. Set by the tool_result hook, consumed once by before_agent_start.
@@ -68,7 +66,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const connection = (): Promise<DaemonConnection> =>
     (connectionPromise ??= connectDaemon(databasePath()));
   const invoke = async (
-    method: "get" | "remember" | "resolveRemember" | "search",
+    method: "get" | "remember" | "resolveRemember" | "search" | "taskBoard",
     params: Record<string, unknown>,
   ) => invokeDaemon(await connection(), method, params);
 
@@ -109,7 +107,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       return {
         systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
         ...(dynamicContext
-          ? { message: { customType: "nmg-context", content: dynamicContext, display: true, details: { count: 0 } } }
+          ? {
+              message: {
+                customType: "nmg-context",
+                content: dynamicContext,
+                display: true,
+                details: { count: 0 },
+              },
+            }
           : {}),
       };
     }
@@ -134,7 +139,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       return {
         systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
         ...(recallContext
-          ? { message: { customType: "nmg-context", content: recallContext, display: true, details: { count: recordCount } } }
+          ? {
+              message: {
+                customType: "nmg-context",
+                content: recallContext,
+                display: true,
+                details: { count: recordCount },
+              },
+            }
           : {}),
       };
     } catch (error) {
@@ -147,7 +159,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       return {
         systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
         ...(errorContext
-          ? { message: { customType: "nmg-context", content: errorContext, display: true, details: { count: 0 } } }
+          ? {
+              message: {
+                customType: "nmg-context",
+                content: errorContext,
+                display: true,
+                details: { count: 0 },
+              },
+            }
           : {}),
       };
     }
@@ -641,6 +660,59 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       return toolResult(result, text);
     },
   });
+
+  pi.registerTool({
+    name: "nmg_board",
+    label: "NMG Task Board",
+    description: nmgPrompts.board_description,
+    parameters: Type.Object({
+      action: Type.Union([Type.Literal("put"), Type.Literal("read"), Type.Literal("resolve")], {
+        description: nmgPrompts.board_action_parameter_description,
+      }),
+      taskId: Type.String({ description: nmgPrompts.board_task_id_parameter_description }),
+      content: Type.Optional(
+        Type.String({ description: nmgPrompts.board_content_parameter_description }),
+      ),
+      kind: Type.Optional(
+        Type.Union([
+          Type.Literal("blocker"),
+          Type.Literal("decision"),
+          Type.Literal("goal"),
+          Type.Literal("handoff"),
+          Type.Literal("note"),
+          Type.Literal("question"),
+          Type.Literal("result"),
+        ]),
+      ),
+      entryId: Type.Optional(Type.String()),
+      resolution: Type.Optional(Type.String()),
+      afterCursor: Type.Optional(Type.Number({ minimum: 0 })),
+      limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
+      includeResolved: Type.Optional(Type.Boolean()),
+      ttlSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 2_592_000 })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const sessionId = ctx.sessionManager.getSessionId();
+      const agentId = process.env.NMG_AGENT_ID?.trim() || `pi:${process.pid}`;
+      const result = (await invoke("taskBoard", {
+        ...params,
+        agentId,
+        sourceSessionId: sessionId,
+      })) as TaskBoardToolResult;
+      const entries = result.entries ?? (result.entry ? [result.entry] : []);
+      if (result.action === "read") {
+        for (const entry of entries) {
+          runtimeAg.note(
+            sessionId,
+            `board:${params.taskId}:${entry.id}`,
+            `[task-board ${params.taskId} #${entry.sequence} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
+          );
+        }
+        if (entries.length > 0) runtimeAg.activateProjection(sessionId);
+      }
+      return toolResult(result, formatTaskBoardResult(result, params.taskId));
+    },
+  });
 }
 
 const EVIDENCE_SOURCE_WINDOW = 64;
@@ -1122,6 +1194,34 @@ export function formatMemoryContext(context: MemoryContext): string {
 
 function toolResult(details: unknown, text: string) {
   return { content: [{ type: "text" as const, text }], details };
+}
+
+interface TaskBoardToolEntry {
+  id: string;
+  sequence: number;
+  agentId: string;
+  kind: string;
+  status: string;
+  content: string;
+}
+
+interface TaskBoardToolResult {
+  action: "put" | "read" | "resolve";
+  entry?: TaskBoardToolEntry;
+  entries?: TaskBoardToolEntry[];
+  nextCursor?: number;
+}
+
+function formatTaskBoardResult(result: TaskBoardToolResult, taskId: string): string {
+  const entries = result.entries ?? (result.entry ? [result.entry] : []);
+  if (entries.length === 0) return `Task board ${taskId} has no matching entries.`;
+  const lines = entries.map(
+    (entry) =>
+      `- #${entry.sequence} ${entry.id} [${entry.kind}/${entry.status}] ${entry.agentId}: ${excerpt(entry.content, 500)}`,
+  );
+  if (result.action === "read") lines.push(`nextCursor=${String(result.nextCursor ?? 0)}`);
+  lines.push("Temporary coordination only; use nmg_remember separately for durable knowledge.");
+  return lines.join("\n");
 }
 
 function formatRememberResult(value: unknown): string {
