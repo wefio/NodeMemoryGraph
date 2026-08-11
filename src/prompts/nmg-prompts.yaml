@@ -53,6 +53,9 @@ board_description: >-
   Entries retain writer attribution, expire automatically, and can be read by a
   task-local cursor or explicitly resolved. Blackboard content is projected into
   the caller's private runtime context; it is not indexed as long-term memory.
+  Keep it minimal: taskId is the only channel boundary — prefer a new taskId (or
+  an nmg_remember record for durable knowledge) over new board features such as
+  DMs, mentions, groups, or pinning.
 
 board_action_parameter_description: >-
   Use put to publish one concise coordination entry, read to fetch entries after
@@ -154,6 +157,11 @@ search_progression_required: >-
   loading selected evidence. Use nmg_get on relevant returned memory IDs, or use
   a current-source tool when the missing fact concerns live code, files, or the
   web. Do not keep paraphrasing the same historical search.
+
+search_recommendation: >-
+  Automatic recall may be incomplete ({reason}; confidence={qpp}). If prior
+  experience could change the answer, make one deliberate nmg_search call and
+  then inspect only useful IDs with nmg_get.
 
 # ---- 完成提醒（弱提示——commit/任务完成后注入，不强制） ------------------
 completion_nudge: >-
