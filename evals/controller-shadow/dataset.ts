@@ -65,7 +65,13 @@ export function buildShadowDataset(
     const feedback = [...group]
       .reverse()
       .find((event): event is ShadowFeedbackEvent => event.type === "feedback");
-    if (!retrieval || !feedback?.semanticTaskId || !hasRequiredLabels(feedback)) continue;
+    if (
+      !retrieval ||
+      feedback?.collectionOrigin !== "natural" ||
+      !feedback.semanticTaskId ||
+      !hasRequiredLabels(feedback)
+    )
+      continue;
     if (!hasReplayableFeatures(retrieval)) {
       legacyGraphsWithoutReplayInputs += 1;
       continue;

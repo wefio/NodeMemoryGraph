@@ -96,7 +96,13 @@ export function buildSkillOptPolicyDataset(
     const feedback = [...group]
       .reverse()
       .find((event): event is ShadowFeedbackEvent => event.type === "feedback");
-    if (!retrieval || !feedback?.semanticTaskId || !hasRequiredLabels(feedback)) continue;
+    if (
+      !retrieval ||
+      feedback?.collectionOrigin !== "natural" ||
+      !feedback.semanticTaskId ||
+      !hasRequiredLabels(feedback)
+    )
+      continue;
     joined.push({
       retrieval,
       feedback,

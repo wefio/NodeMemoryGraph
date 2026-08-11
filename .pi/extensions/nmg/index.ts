@@ -335,12 +335,15 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ),
       eventTime: Type.Optional(Type.String()),
       sourceActor: Type.Optional(
-        Type.Union([
-          Type.Literal("assistant"),
-          Type.Literal("system"),
-          Type.Literal("tool"),
-          Type.Literal("user"),
-        ]),
+        Type.Union(
+          [
+            Type.Literal("assistant"),
+            Type.Literal("system"),
+            Type.Literal("tool"),
+            Type.Literal("user"),
+          ],
+          { description: nmgPrompts.source_actor_parameter_description },
+        ),
       ),
       truthStatus: Type.Optional(
         Type.Union([
@@ -487,13 +490,21 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       if (externalSource && !/^(?:file|web):.+/u.test(externalSource.source)) {
         throw new Error("externalSource.source must start with web: or file:");
       }
+      const sourceActor = params.sourceActor ?? "assistant";
+      const evidenceSource = selectPiEvidenceSource(
+        ctx.sessionManager,
+        params.evidence,
+        sourceActor,
+      );
+      if (sourceActor !== "assistant" && !evidenceSource && !externalSource) {
+        throw new Error(
+          `sourceActor=${sourceActor} requires an exact matching evidence excerpt from the current Pi session or an explicit externalSource`,
+        );
+      }
       const result = await invoke("remember", {
         ...memory,
-        evidenceSource: selectPiEvidenceSource(
-          ctx.sessionManager,
-          params.evidence,
-          params.sourceActor ?? "user",
-        ),
+        sourceActor,
+        evidenceSource,
         markers: externalSource
           ? [
               {

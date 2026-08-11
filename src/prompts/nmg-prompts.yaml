@@ -44,7 +44,8 @@ remember_description: >-
   You decide the semantic content and whether a candidate is truly an older
   value; NMG validates scope, identity, provenance, and applies the transaction.
   The record persists across sessions. Only save attributable information -
-  not secrets, transient content, or unsupported guesses. A stateKey names one
+  not secrets, transient content, or unsupported guesses. Never label an
+  Assistant inference as a user statement. A stateKey names one
   replaceable property within a stable scope; it is not a topic or grouping tag.
 
 remember_action_parameter_description: >-
@@ -97,6 +98,13 @@ evidence_parameter_description: >-
   user, assistant, or tool source identified by sourceActor; do not summarize
   or include surrounding routine prose. Pi binds a matching excerpt to its
   source message. Use externalSource for web/file evidence.
+
+source_actor_parameter_description: >-
+  Author of the supporting evidence, not the desired authority of the memory.
+  Omit only for Assistant-created content (the safe default). Use user, tool,
+  or system only with an exact evidence excerpt from that source in the current
+  Pi session, or with an explicit externalSource for tool-derived web/file
+  evidence. Never mark an Assistant inference or summary as sourceActor=user.
 
 active_graph_id_parameter_description: >-
   Optional activeGraphId returned by nmg_search. Pass it when available to

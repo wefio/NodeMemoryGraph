@@ -98,6 +98,35 @@ test("remember feedback action stays on the stable tool surface and fails closed
   assert.match(result.content[0].text, /not recorded/u);
 });
 
+test("remember cannot attribute an unbound Assistant inference to the user", async () => {
+  const { tools } = extensionHarness();
+  const sessionManager = {
+    getSessionId: () => "session-attribution",
+    getBranch: () => [
+      {
+        type: "message",
+        id: "user-question",
+        message: { role: "user", content: "Why does this design use an append-only history?" },
+      },
+    ],
+  };
+  await assert.rejects(
+    tools.get("nmg_remember")!.execute(
+      "misattributed-memory",
+      {
+        statement: "The user requires append-only history for auditability.",
+        nodeName: "history policy",
+        sourceActor: "user",
+        truthStatus: "inferred",
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    ),
+    /sourceActor=user requires an exact matching evidence excerpt/u,
+  );
+});
+
 test("controller shadow bridge is opt-in and learns only from explicit get use", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-controller-shadow-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
@@ -185,11 +214,13 @@ test("controller shadow bridge is opt-in and learns only from explicit get use",
     assert.equal(outcome.outputTokens, 30);
     const feedback = JSON.parse(events[4]!) as {
       type: string;
+      collectionOrigin: string;
       semanticTaskId: string;
       taskSuccess: boolean;
       evidenceSufficient: boolean;
     };
     assert.equal(feedback.type, "feedback");
+    assert.equal(feedback.collectionOrigin, "natural");
     assert.equal(feedback.semanticTaskId, context.activeGraph!.taskId);
     assert.equal(feedback.taskSuccess, true);
     assert.equal(feedback.evidenceSufficient, true);
@@ -313,6 +344,10 @@ test("tool parameter descriptions come from the prompt source of truth", () => {
   assert.equal(
     tools.get("nmg_remember")?.parameters?.properties?.evidence?.description,
     prompts.evidence_parameter_description,
+  );
+  assert.equal(
+    tools.get("nmg_remember")?.parameters?.properties?.sourceActor?.description,
+    prompts.source_actor_parameter_description,
   );
   assert.equal(
     tools.get("nmg_remember")?.parameters?.properties?.memoryId?.description,

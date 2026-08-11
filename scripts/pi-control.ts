@@ -125,6 +125,9 @@ function definedEnvironment(): Record<string, string> {
     PI_CODING_AGENT_DIR: agentDirectory,
     NMG_DATA_DIR: dataDirectory,
     NMG_PROJECT_DIR: projectDirectory,
+    // This helper exists for bounded reproducible probes. Its labelled outcomes
+    // must never satisfy the natural-product-data readiness gate.
+    NMG_SHADOW_COLLECTION_ORIGIN: "controlled",
   };
 }
 

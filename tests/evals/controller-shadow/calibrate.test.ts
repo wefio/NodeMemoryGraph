@@ -159,6 +159,7 @@ function eventsFor(
     {
       version: 1,
       type: "feedback",
+      collectionOrigin: "natural",
       graphId,
       sessionId: retrieval.sessionId,
       recordedAt,

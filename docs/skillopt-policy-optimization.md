@@ -59,6 +59,12 @@ source.
 
 ## Data readiness
 
+Formal readiness accepts only feedback emitted by ordinary Pi use with
+`collectionOrigin=natural`. The bounded headless `pi-control` helper always
+marks its runs `controlled`; legacy events without an origin are `unknown` and
+are excluded. Controlled and legacy rows may exercise parsing and adapter
+plumbing, but cannot satisfy training or promotion thresholds.
+
 The exporter defaults to conservative engineering minima, not a statistical
 power guarantee:
 

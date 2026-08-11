@@ -53,6 +53,37 @@ test("SkillOpt policy dataset fails readiness on sparse natural labels", () => {
   assert.match(dataset.blockers.join("\n"), /tasks requires 24|val requires 6|test requires 6/u);
 });
 
+test("SkillOpt policy dataset excludes controlled and legacy-unclassified feedback", () => {
+  const controlled = eventsFor(
+    "controlled",
+    "task-controlled",
+    "2026-08-01T00:00:00Z",
+    true,
+    false,
+    false,
+    false,
+  );
+  const controlledFeedback = controlled.find(
+    (event): event is ShadowFeedbackEvent => event.type === "feedback",
+  )!;
+  controlledFeedback.collectionOrigin = "controlled";
+  const legacy = eventsFor(
+    "legacy",
+    "task-legacy",
+    "2026-08-02T00:00:00Z",
+    true,
+    false,
+    false,
+    false,
+  );
+  delete (legacy.find((event) => event.type === "feedback") as Partial<ShadowFeedbackEvent>)
+    .collectionOrigin;
+  const dataset = buildSkillOptPolicyDataset([...controlled, ...legacy]);
+  assert.equal(dataset.items.length, 0);
+  assert.equal(dataset.counts.tasks, 0);
+  assert.equal(dataset.excluded_graphs, 2);
+});
+
 function eventsFor(
   suffix: string,
   task: string,
@@ -96,6 +127,7 @@ function eventsFor(
   const feedback: ShadowFeedbackEvent = {
     version: 1,
     type: "feedback",
+    collectionOrigin: "natural",
     graphId,
     sessionId: retrieval.sessionId,
     recordedAt,

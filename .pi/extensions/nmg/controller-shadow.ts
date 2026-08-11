@@ -32,12 +32,19 @@ export class ControllerShadowBridge {
   readonly #dataDirectory: string;
   readonly #contexts = new Map<string, PendingContext>();
   readonly #maxContexts: number;
+  readonly #collectionOrigin: "controlled" | "natural";
   #dependenciesPromise: Promise<ShadowDependencies> | undefined;
 
-  constructor(dataDirectory: string, enabled = shadowEnabled(), maxContexts = 128) {
+  constructor(
+    dataDirectory: string,
+    enabled = shadowEnabled(),
+    maxContexts = 128,
+    collectionOrigin = shadowCollectionOrigin(),
+  ) {
     this.#dataDirectory = dataDirectory;
     this.enabled = enabled;
     this.#maxContexts = Math.max(1, maxContexts);
+    this.#collectionOrigin = collectionOrigin;
   }
 
   async retrieval(
@@ -97,6 +104,7 @@ export class ControllerShadowBridge {
       const recorded = dependencies.log.feedback({
         graphId: activeGraphId,
         sessionId,
+        collectionOrigin: this.#collectionOrigin,
         ...labels,
         semanticTaskId: labels.semanticTaskId ?? pending.context.activeGraph?.taskId,
       });
@@ -285,4 +293,10 @@ function summarizeMessages(messages: readonly unknown[]): {
 
 export function shadowEnabled(value = process.env.NMG_CONTROLLER_SHADOW): boolean {
   return /^(?:1|true|yes|on)$/iu.test(value?.trim() ?? "");
+}
+
+export function shadowCollectionOrigin(
+  value = process.env.NMG_SHADOW_COLLECTION_ORIGIN,
+): "controlled" | "natural" {
+  return value?.trim().toLowerCase() === "controlled" ? "controlled" : "natural";
 }

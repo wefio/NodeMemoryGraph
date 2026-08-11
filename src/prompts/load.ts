@@ -21,6 +21,7 @@ export interface NmgPrompts {
   state_key_parameter_description: string;
   external_source_parameter_description: string;
   evidence_parameter_description: string;
+  source_actor_parameter_description: string;
   active_graph_id_parameter_description: string;
   feedback_note_parameter_description: string;
   feedback_label_parameter_description: string;

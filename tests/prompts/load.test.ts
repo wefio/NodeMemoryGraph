@@ -17,6 +17,7 @@ const SECTIONS = [
   "state_key_parameter_description",
   "external_source_parameter_description",
   "evidence_parameter_description",
+  "source_actor_parameter_description",
   "active_graph_id_parameter_description",
   "feedback_note_parameter_description",
   "feedback_label_parameter_description",

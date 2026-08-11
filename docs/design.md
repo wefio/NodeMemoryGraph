@@ -1042,6 +1042,12 @@ remember that it was said.
 
 ### 9.1 `remember` as the semantic maintenance boundary
 
+Attribution is fail-closed at the harness boundary. The Pi adapter defaults an
+unspecified `sourceActor` to `assistant`; a record attributed to `user`, `tool`,
+or `system` must bind an exact excerpt from that actor in the current session,
+or carry explicit external provenance. This prevents an Agent inference from
+silently acquiring user authority before Core admission and consolidation.
+
 `remember` is the deliberate LLM intervention point between semantic judgment
 and deterministic storage. The two sides have different responsibilities:
 
@@ -2054,6 +2060,12 @@ subgraph reuse, AG node/edge/evidence counts, budget utilization, expansion
 steps, and marginal evidence gain per added token.
 
 ### Offline text-space policy optimization
+
+Training provenance is part of the gate, not a prose convention. Normal Pi
+feedback is recorded as `collectionOrigin=natural`; the reproducible headless
+probe is fixed to `controlled`, and pre-field legacy events remain `unknown`.
+Only fully labelled natural outcomes may enter controller calibration or the
+formal SkillOpt split. Controlled outcomes remain valid engineering smoke data.
 
 NMG Lab may use SkillOpt to optimize the stable recall/write/tool-use policy,
 but never mutable memory contents. The trainable artifact begins as the

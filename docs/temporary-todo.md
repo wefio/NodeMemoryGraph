@@ -15,7 +15,9 @@ closed.
   `unknown`, not success.
 
 The capture and session-ownership plumbing is implemented. Controlled examples
-may validate plumbing but must not be counted as natural product evidence.
+may validate plumbing but must not be counted as natural product evidence. This
+is enforced by `collectionOrigin`: ordinary Pi writes `natural`, the headless
+probe writes `controlled`, and legacy events without the field are excluded.
 
 ## 2. Calibrate retrieval and the differentiable controller
 

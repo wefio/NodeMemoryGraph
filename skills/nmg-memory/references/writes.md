@@ -128,6 +128,11 @@ history evidence is retained.
 ## Evidence rules
 
 - Prefer a short exact user or tool excerpt.
+- `sourceActor` identifies who produced that evidence, not who the Agent wants
+  to treat as authoritative. In the Pi adapter, an omitted actor safely defaults
+  to `assistant`; claiming `user`, `tool`, or `system` requires a matching exact
+  session excerpt or explicit external provenance. Never relabel an Assistant
+  inference as a user statement.
 - Use `--truth unverified` for remembered assistant output that was not verified.
 - Keep separately countable events or obligations as separate memories.
 - Ask before storing ambiguous sensitive information. Never store credentials.

@@ -71,6 +71,7 @@ export interface ShadowOutcomeEvent extends ShadowEventBase {
 
 export interface ShadowFeedbackEvent extends ShadowEventBase {
   type: "feedback";
+  collectionOrigin: "controlled" | "natural";
   semanticTaskId: string | null;
   taskSuccess: boolean | null;
   userCorrection: boolean | null;
@@ -234,6 +235,7 @@ export class ShadowEvaluationLog {
     noMemoryNeeded?: boolean | null;
     note?: string;
     semanticTaskId?: string;
+    collectionOrigin?: ShadowFeedbackEvent["collectionOrigin"];
   }): boolean {
     return this.#append({
       version: 1,
@@ -241,6 +243,7 @@ export class ShadowEvaluationLog {
       graphId: input.graphId,
       sessionId: input.sessionId,
       recordedAt: this.#now().toISOString(),
+      collectionOrigin: input.collectionOrigin ?? "natural",
       semanticTaskId: input.semanticTaskId?.trim() || null,
       taskSuccess: input.taskSuccess ?? null,
       userCorrection: input.userCorrection ?? null,
