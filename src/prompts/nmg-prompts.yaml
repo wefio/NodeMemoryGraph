@@ -63,8 +63,10 @@ board_action_parameter_description: >-
   not create semantic memory; use nmg_remember separately for durable knowledge.
 
 board_task_id_parameter_description: >-
-  Stable task identifier shared by collaborating Agents. It is the blackboard
-  isolation boundary, not a session ID or semantic memory scope.
+  Optional. Stable task identifier shared by collaborating Agents. It is the
+  blackboard isolation boundary, not a session ID or semantic memory scope.
+  When omitted, the board is scoped to the caller's own identity (agent
+  username or session), giving every agent a personal cross-session board.
 
 board_content_parameter_description: >-
   Concise task coordination state such as a goal, blocker, result, handoff,

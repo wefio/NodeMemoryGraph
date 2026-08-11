@@ -730,7 +730,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       action: Type.Union([Type.Literal("put"), Type.Literal("read"), Type.Literal("resolve")], {
         description: nmgPrompts.board_action_parameter_description,
       }),
-      taskId: Type.String({ description: nmgPrompts.board_task_id_parameter_description }),
+      taskId: Type.Optional(
+        Type.String({ description: nmgPrompts.board_task_id_parameter_description }),
+      ),
       content: Type.Optional(
         Type.String({ description: nmgPrompts.board_content_parameter_description }),
       ),
@@ -758,8 +760,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // across a session), then the pid as a last resort. A pid alone would
       // change every launch and fragment cross-session attribution.
       const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
+      // taskId is optional: without one the board is the caller's own
+      // identity-scoped board (agent username / session), so a user who gives
+      // no channel still gets a personal, cross-session consistent board.
+      const taskId = params.taskId?.trim() || agentId;
       const result = (await invoke("taskBoard", {
         ...params,
+        taskId,
         agentId,
         sourceSessionId: sessionId,
       })) as TaskBoardToolResult;
@@ -768,13 +775,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         for (const entry of entries) {
           runtimeAg.note(
             sessionId,
-            `board:${params.taskId}:${entry.id}`,
-            `[task-board ${params.taskId} #${entry.sequence} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
+            `board:${taskId}:${entry.id}`,
+            `[task-board ${taskId} #${entry.sequence} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
           );
         }
         if (entries.length > 0) runtimeAg.activateProjection(sessionId);
       }
-      return toolResult(result, formatTaskBoardResult(result, params.taskId));
+      return toolResult(result, formatTaskBoardResult(result, taskId));
     },
   });
 }

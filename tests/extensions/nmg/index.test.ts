@@ -637,15 +637,17 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       "board-put-session",
       {
         action: "put",
-        taskId: "atlas-review-fallback",
         kind: "note",
         content: "Written with the session-id fallback identity.",
       },
       undefined,
       undefined,
       { sessionManager },
-    )) as { details: { entry: { agentId: string } } };
+    )) as { details: { entry: { agentId: string; taskId: string } } };
+    // No explicit NMG_AGENT_ID and no taskId: the entry is attributed to the
+    // session id AND lands on that identity-scoped board (agent as username).
     assert.equal(boardPutSession.details.entry.agentId, "http-test-session");
+    assert.equal(boardPutSession.details.entry.taskId, "http-test-session");
     if (fallbackAgent === undefined) delete process.env.NMG_AGENT_ID;
     else process.env.NMG_AGENT_ID = fallbackAgent;
 
