@@ -33,6 +33,7 @@ test("migrate creates the core graph tables", () => {
       "history_records",
       "memory_nodes",
       "memory_records",
+      "memory_resolution_events",
       "claim_posteriors",
       "claim_outcome_events",
       "maintenance_runs",
@@ -50,6 +51,14 @@ test("migrate creates the core graph tables", () => {
     );
     for (const expected of ["strength", "direction", "fan_budget", "activation_rule"]) {
       assert.ok(relationColumns.has(expected), `expected node_relations.${expected}`);
+    }
+    const memoryColumns = new Set(
+      (db.prepare("PRAGMA table_info(memory_records)").all() as Array<{ name: string }>).map(
+        (row) => row.name,
+      ),
+    );
+    for (const expected of ["resolution", "opened_at", "related_memory_ids_json"]) {
+      assert.ok(memoryColumns.has(expected), `expected memory_records.${expected}`);
     }
   });
 });

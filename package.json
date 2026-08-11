@@ -31,7 +31,8 @@
     "src/lab/controller-protocol.ts",
     "src/lab/controller-runtime.ts",
     "src/lab/differentiable-controller.ts",
-    "src/lab/shadow-evaluation.ts"
+    "src/lab/shadow-evaluation.ts",
+    "src/lab/skillopt-policy.ts"
   ],
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
@@ -49,9 +50,18 @@
     "eval:controller": "node --experimental-strip-types evals/controller/run.ts",
     "eval:controller-shadow": "node --experimental-strip-types evals/controller-shadow/report.ts",
     "eval:controller-dataset": "node --experimental-strip-types evals/controller-shadow/dataset.ts",
+    "eval:controller-calibrate": "node --experimental-strip-types evals/controller-shadow/calibrate.ts",
+    "eval:skillopt:export": "node --experimental-strip-types evals/skillopt/export.ts",
+    "eval:skillopt:install": "node --experimental-strip-types evals/skillopt/install-adapter.ts",
     "eval:consolidation": "node --experimental-strip-types evals/consolidation/run.ts",
     "eval:topology": "node --experimental-strip-types evals/topology/run.ts",
     "eval:topology:bpid": "node --experimental-strip-types evals/topology/bpid.ts",
+    "eval:topology:namesakes": "node --experimental-strip-types evals/topology/namesakes.ts",
+    "eval:topology:namesakes-agent": "node --experimental-strip-types evals/topology/namesakes-agent.ts",
+    "eval:halumem:prepare": "node --experimental-strip-types evals/halumem/prepare.ts",
+    "eval:halumem:agent-extract": "node --experimental-strip-types evals/halumem/agent-extract.ts",
+    "eval:halumem:promotion-audit": "node --experimental-strip-types evals/halumem/promotion-audit.ts",
+    "eval:halumem:score": "node --experimental-strip-types evals/halumem/score.ts",
     "eval:quality": "node --experimental-strip-types evals/memory-quality/run.ts",
     "eval:longmem": "node --experimental-strip-types evals/longmemeval/run.ts",
     "eval:gate": "node --experimental-strip-types evals/gate/run.ts",

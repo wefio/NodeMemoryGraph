@@ -16,6 +16,65 @@ Public benchmark scores do not replace the deterministic core suite. A memory
 system can answer benchmark questions correctly while corrupting provenance,
 exceeding its retrieval budget, or rebuilding an index unnecessarily.
 
+## HaluMem operation-level extraction and update audit
+
+HaluMem is evaluated separately from the OmniMemEval QA runner because its
+official operation protocol exposes the write set and update retrieval set.
+The checked-in report includes two matched natural slices comparing raw-message
+ingress with an Agent executing NMG's durable-write policy. Aggregate
+interference accuracy is always accompanied by its per-record decisions because
+the official judge can accept a labelled interference inference without the
+injected wording having been stored.
+
+```powershell
+npm run eval:halumem:prepare -- --users 1 --session-start 6 --sessions 1 --reset
+npm run eval:halumem:score -- --users 1 --workers 4
+npm run eval:halumem:promotion-audit -- --user 1 --origin-start 5 `
+  --origin-end 6 --observe-through 11 --reset 1
+```
+
+`promotion-audit` uses the real STG/posterior path. It admits only candidates
+with exact user evidence, asks later sessions for independent support or
+contradiction, verifies the returned user excerpt, and exports only candidates
+passing Core's configured consolidation gate. HaluMem contains no tool-success
+or answer-use outcomes; a zero-qualified run is a benchmark-coverage result, not
+a reason to weaken the product gate.
+
+`prepare` replays earlier sessions before emitting a bounded scored slice and
+writes the official `extracted_memories` / `memories_from_system` fields.
+`score` reuses HaluMem's official prompts and judgment functions, omits QA, and
+aggregates only metrics with a non-zero denominator. DeepSeek's valid bare JSON
+is accepted in addition to the fenced JSON required by upstream. Results and
+stores are ignored under `.benchmarks/halumem-nmg/`; see
+`docs/halumem-operation-evaluation-2026-08-11.md`.
+
+For a harness-policy ablation, first run
+`npm run eval:halumem:agent-extract -- --users 1 --through-session 6`, then pass
+its JSONL to `prepare` with `--agent-extractions`. The extractor sees only the
+dialogue and the current NMG memory policy. It never receives gold memory points
+or questions, and its cache key includes the policy hash and model.
+
+## Real-use controller calibration
+
+The optional Pi shadow bridge writes bounded local events. Audit and calibrate
+them with separate commands:
+
+```powershell
+npm run eval:controller-shadow
+npm run eval:controller-dataset
+npm run eval:controller-calibrate
+```
+
+New retrieval events include the exact versioned controller feature snapshot
+and Active Graph hard-budget envelope used at decision time. The dataset builder
+rejects older labelled rows that cannot replay those inputs. Calibration uses a
+chronological semantic-task split and writes a candidate artifact containing
+the feature protocol, data window, effective hyperparameters, held-out metrics,
+source-log fingerprint, and current-state rollback fingerprint. It never
+activates or overwrites runtime policy. With insufficient independently labelled
+real-use rows, the command exits with explicit blockers instead of training on
+benchmark or synthetic labels.
+
 ## Experiment logs
 
 This file intentionally keeps stable guidance and principles only. Raw run
@@ -95,9 +154,26 @@ reruns cheap).
 | LoCoMo              | Relational-memory gate        | temporal and causal links, multi-hop evidence, node-to-leaf expansion and event summarization      |
 | BEAM                | Scale and cache-pressure gate | progressive retrieval, cache misses, maintenance cost and growth from 128K through 10M tokens      |
 | Reasoning workspace | Lab scratchpad gate           | explicit task-state retention, Pi compaction recovery, overhead, and unsupported scratchpad claims |
+| SkillOpt policy     | Offline policy decision gate  | answer/expand/stop, noise folding, held-out policy selection, matched Pi promotion                   |
 
 The suites are reported separately. Their scores must not be averaged into one
 number because they measure different distributions and failure modes.
+
+## SkillOpt policy Lab
+
+`evals/skillopt` exports only de-identified observable retrieval state and
+explicit decision labels. It never exports memory statements or evidence. The
+official SkillOpt optimizer remains an ignored external checkout; NMG installs
+a thin adapter rather than vendoring or reimplementing it.
+
+```powershell
+npm run eval:skillopt:install
+npm run eval:skillopt:export
+```
+
+The exporter fails closed until natural train/validation/test minima are met.
+Use `--allow-insufficient` only for a file-layout/adapter smoke. See
+`docs/skillopt-policy-optimization.md`.
 
 ## Reproducible official-protocol workflow
 
@@ -177,6 +253,18 @@ signal.
 
 Other modes (`raw-session`, `flat-hybrid`, `nmg-nodes`, and `nmg-graph`) remain
 diagnostic ablations rather than members of the strict three-arm gate.
+
+The separate backend capability ablation runs the four architecture arms from
+the design checklist over one shared sample/corpus and budget:
+
+```powershell
+npm run eval:longmem -- backend-ablation 1
+```
+
+Its arms are `no-memory`, `flat-hybrid`, `nmg-lite` (`graphHops=0`), and
+`nmg-graph` (`graphHops=1`). Each row records both the complete effective prompt
+hash and a `taskPromptHash` covering the invariant question/instructions. This
+is a matched local development comparison, not a leaderboard run.
 
 ## Required measurements
 
@@ -300,3 +388,37 @@ available official data. Do not preserve ad-hoc model scores in this document:
 they become stale when sampling, prompts, retrieval policy, or model versions
 change. Every benchmark client uses `--no-extensions` and loads at most one
 explicit NMG instance; the no-memory control loads none.
+
+## Consolidation policy audit
+
+`npm run eval:consolidation` uses LoCoMo's official evidence IDs as independent
+positive task outcomes to audit the STG → LTG posterior gate and its retention
+hysteresis. It reports coverage and contradiction-to-retraction stress without
+calling an LLM. Absence from an evidence list is never treated as a negative
+claim label, so this audit deliberately does not report false-promotion
+precision. See `docs/consolidation-evaluation-2026-08-09.md`.
+
+## Topology identity-gate audit
+
+`npm run eval:topology` uses LoCoMo's stable speaker identities to construct
+same-person early/late node pairs and cross-person negative pairs. It measures
+the production `same_as` assessment gate, competing-identity withdrawal, and
+the invariant that assessment never mutates topology. Candidate generation is
+deliberately held constant, so the result is not an alias-resolution or
+end-to-end automatic-merge score. See
+`docs/topology-gate-evaluation-2026-08-09.md`.
+
+`npm run eval:topology:bpid` adds multi-field identity hard negatives, while
+`npm run eval:topology:namesakes` optionally reads the official CC BY 4.0
+Namesakes Entities JSONL to measure alias-like positive recall and rejection of
+same-name references to a different entity. Both report candidate-generation
+curves and remain read-only: neither score is allowed to authorize a merge.
+Namesakes data belongs under `.benchmarks/namesakes/data/` and is not committed.
+See `docs/topology-bpid-evaluation-2026-08-09.md` and
+`docs/topology-namesakes-evaluation.md`.
+
+The official LoCoMo scorer uses the environment created by
+`npm run benchmark:setup`. If that uv-managed interpreter cannot execute in the
+current sandbox, set `NMG_BENCHMARK_PYTHON` to one compatible Python environment
+containing the pinned scorer dependencies. NMG uses this single explicit path;
+it does not silently fall through across unrelated Python installations.

@@ -1,0 +1,74 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { SessionInjectionWindow } from "../../.pi/extensions/nmg/index.ts";
+import { NmgStore } from "../../src/core/store.ts";
+
+const directory = mkdtempSync(join(tmpdir(), "nmg-disclosure-eval-"));
+const store = new NmgStore(join(directory, "nmg.sqlite"));
+
+try {
+  for (let index = 0; index < 32; index += 1) {
+    store.remember({
+      statement:
+        `Atlas archive calibration record ${index}. ` +
+        `The checksum observation is channel-${index}; repeated operational detail `.repeat(4),
+      nodeName: "Atlas archive calibration",
+      memoryType: "event",
+      tier: 1,
+      importance: 0.5,
+      eventTime: `2026-07-${String((index % 28) + 1).padStart(2, "0")}`,
+    });
+  }
+
+  const common = {
+    maxTier: 1 as const,
+    limit: 32,
+    activeGraphBudget: { maxTokens: 20_000, maxEvidence: 32, maxLocalTier: 1 as const },
+  };
+  const full = store.searchContext("Atlas archive calibration checksum", {
+    ...common,
+    progressiveWarmDisclosure: false,
+  });
+  const progressive = store.searchContext("Atlas archive calibration checksum", {
+    ...common,
+    progressiveWarmDisclosure: true,
+  });
+
+  const window = new SessionInjectionWindow();
+  window.beginTurn("eval-session");
+  const firstInjection = window.format("eval-session", progressive, "header");
+  window.beginTurn("eval-session");
+  const repeatedInjection = window.format("eval-session", progressive, "header");
+
+  console.log(
+    JSON.stringify(
+      {
+        corpus: { tier1Records: 32 },
+        full: {
+          records: full.results.length,
+          estimatedTokens: full.activeGraph?.usage.estimatedTokens ?? 0,
+        },
+        progressive: {
+          records: progressive.results.length,
+          estimatedTokens: progressive.activeGraph?.usage.estimatedTokens ?? 0,
+          disclosure: progressive.progressiveDisclosure ?? null,
+        },
+        sessionWindow: {
+          firstHeaderCharacters: firstInjection.length,
+          repeatedHeaderCharacters: repeatedInjection.length,
+          savedCharacters: firstInjection.length - repeatedInjection.length,
+          repeatedUsesReferencesOnly: !repeatedInjection.includes("checksum observation"),
+        },
+        limitation:
+          "Synthetic deterministic workload measures disclosure mechanics, not answer quality or provider tokenization.",
+      },
+      null,
+      2,
+    ),
+  );
+} finally {
+  store.close();
+  rmSync(directory, { recursive: true, force: true });
+}

@@ -19,6 +19,7 @@ import {
   stagingDirFor,
 } from "../../../src/cli/archive-staging.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
+import { resolveSkillOptLabPolicy } from "../../../src/lab/skillopt-policy.ts";
 import type { MemoryContext, MemorySearchResult, MemoryTier } from "../../../src/core/types.ts";
 import { searchPreview } from "../../../src/integration/search-projection.ts";
 import { selectEvidence, type AgentHistoryMessage } from "../../../src/integration/evidence.ts";
@@ -47,7 +48,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const injectionWindow = new SessionInjectionWindow();
   const taskWindow = new SessionTaskWindow();
   const recallFlow = new SessionRecallFlow();
-  const toolTraceCapture = new SessionToolTraceCapture();
+  const runtimeAg = new SessionRuntimeAg();
   const controllerShadow = new ControllerShadowBridge(
     process.env.NMG_DATA_DIR || join(homedir(), ".nmg"),
   );
@@ -73,28 +74,39 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   // git commit via the bash tool is the strongest "milestone" signal available
   // to the extension; remember it so the next turn can offer NMG memory. The
   // detection moved from the pre-execution tool_call hook to tool_result so it
-  // is success-aware (only a commit that actually landed nudges). The same
-  // hook feeds low-priority PostToolUse memory (tool traces); those writes are
-  // fire-and-forget so they never delay the tool result that just returned.
+  // is success-aware (only a commit that actually landed nudges). Memorable
+  // tool outcomes stay in the session-local runtime AG; they are working state,
+  // not durable memories.
   pi.on("tool_result", async (event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
     if (isSuccessfulCommit(event)) commitNudgePending = true;
-    const params = toolTraceRememberParams(event, sessionId, projectDirectory());
-    if (!params) return;
-    if (!toolTraceCapture.note(sessionId, event.toolName, String(params.statement))) return;
-    void invoke("remember", params).catch(() => {
-      // Fire-and-forget: a failed trace write must never block the agent loop.
-    });
+    if (!isMemorableToolResult(event)) return;
+    runtimeAg.note(sessionId, event.toolName, summarizeToolResult(event).statement);
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
     injectionWindow.beginTurn(sessionId);
-    recallFlow.beginTurn(sessionId, event.prompt);
-    const nudge = popCompletionNudge(event.prompt);
+    const isNewUserTurn = recallFlow.beginTurn(sessionId, event.prompt);
+    const completionNudge = popCompletionNudge(event.prompt);
+    // Pi re-enters before_agent_start after tool results. A completed graph may
+    // already exist at that point, but it must be reviewed on the next user
+    // turn, not consumed by an internal tool loop from the same prompt.
+    const pendingFeedback = isNewUserTurn ? controllerShadow.pendingFeedback(sessionId) : null;
+    if (pendingFeedback) await controllerShadow.feedbackNudgeShown(sessionId, pendingFeedback);
+    const feedbackNudge = pendingFeedback
+      ? renderDisclosure(nmgPrompts.shadow_feedback_nudge, {
+          active_graph_id: pendingFeedback.activeGraphId,
+          semantic_task_id: pendingFeedback.semanticTaskId,
+        })
+      : "";
+    const nudge = [completionNudge, feedbackNudge].filter(Boolean).join("\n");
+    const runtimeContext = runtimeAg.format(sessionId);
     const recallQuery = taskWindow.prepare(sessionId, event.prompt);
     if (!recallQuery) {
-      return { systemPrompt: composeNmgSystemPrompt(event.systemPrompt, "", "", nudge) };
+      return {
+        systemPrompt: composeNmgSystemPrompt(event.systemPrompt, "", "", nudge, runtimeContext),
+      };
     }
     try {
       const context = (await invoke("search", {
@@ -113,7 +125,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const recalled = injectionWindow.format(sessionId, context, "header");
       await controllerShadow.retrieval(context, sessionId, "automatic", recalled);
       return {
-        systemPrompt: composeNmgSystemPrompt(event.systemPrompt, recalled, "", nudge),
+        systemPrompt: composeNmgSystemPrompt(
+          event.systemPrompt,
+          recalled,
+          "",
+          nudge,
+          runtimeContext,
+        ),
       };
     } catch (error) {
       return {
@@ -122,6 +140,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           "",
           `NMG unavailable: ${message(error)}`,
           nudge,
+          runtimeContext,
         ),
       };
     }
@@ -164,7 +183,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     injectionWindow.clear(sessionId);
     taskWindow.clear(sessionId);
     recallFlow.clear(sessionId);
-    toolTraceCapture.clear(sessionId);
+    runtimeAg.clear(sessionId);
     controllerShadow.clear(sessionId);
     if (!connectionPromise) return;
     const active = await connectionPromise.catch(() => undefined);
@@ -207,23 +226,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("session_before_compact", async (event, ctx) => {
+  pi.on("session_before_compact", async (_event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
     injectionWindow.clear(sessionId);
-    // Rescue the messages about to be compacted away before silent context
-    // loss. Pi already computed the doomed span (preparation.messagesToSummarize);
-    // we persist a bounded textual fragment as a low-tier event.
-    const params = compactRescueRememberParams(
-      event.preparation?.messagesToSummarize ?? [],
-      sessionId,
-      projectDirectory(),
-      event.reason,
-    );
-    if (params) {
-      void invoke("remember", params).catch(() => {
-        // Fire-and-forget: compaction must proceed even if the rescue fails.
-      });
-    }
+    runtimeAg.activateProjection(sessionId);
+    // Pi owns conversational compaction. The runtime AG remains in memory and
+    // is injected again on the next turn; compaction alone never promotes
+    // temporary state into durable NMG storage.
   });
 
   pi.registerTool({
@@ -238,6 +247,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             Type.Literal("supersede"),
             Type.Literal("relate"),
             Type.Literal("forget"),
+            Type.Literal("resolve"),
+            Type.Literal("reopen"),
             Type.Literal("feedback"),
           ],
           { description: nmgPrompts.remember_action_parameter_description },
@@ -302,6 +313,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ),
       relationConfidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
       resolutionReason: Type.Optional(Type.String()),
+      resolution: Type.Optional(
+        Type.Union([Type.Literal("open"), Type.Literal("resolved"), Type.Literal("reopened")]),
+      ),
+      openedAt: Type.Optional(Type.String()),
+      relatedMemoryIds: Type.Optional(Type.Array(Type.String())),
       memoryType: Type.Optional(
         Type.Union([
           Type.Literal("constraint"),
@@ -394,6 +410,23 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         return toolResult(
           resolved,
           "Memory withdrawn from normal retrieval. The tombstone remains for audit; this is not physical privacy erasure.",
+        );
+      }
+      if (params.action === "resolve" || params.action === "reopen") {
+        if (!params.memoryId) throw new Error(`action=${params.action} requires memoryId`);
+        const resolved = await invoke("resolveRemember", {
+          action: params.action,
+          memoryId: params.memoryId,
+          relatedMemoryIds: params.relatedMemoryIds,
+          reason: params.resolutionReason,
+          projectDir: projectDirectory(),
+          sessionId: ctx.sessionManager.getSessionId(),
+        });
+        return toolResult(
+          resolved,
+          params.action === "resolve"
+            ? "Open memory marked resolved; it is now eligible for ordinary retention policy."
+            : "Memory reopened and restored to indexed storage with its related evidence anchors.",
         );
       }
       if (params.action === "supersede") {
@@ -809,10 +842,11 @@ export class SessionRecallFlow {
     this.maxSearchesBeforeGet = Math.max(1, maxSearchesBeforeGet);
   }
 
-  beginTurn(sessionId: string, turnKey: string): void {
+  beginTurn(sessionId: string, turnKey: string): boolean {
     const current = this.#states.get(sessionId);
-    if (current?.turnKey === turnKey) return;
+    if (current?.turnKey === turnKey) return false;
     this.#states.set(sessionId, { turnKey, searches: 0 });
+    return true;
   }
 
   allowSearch(sessionId: string): boolean {
@@ -841,18 +875,22 @@ function injectionHash(result: MemoryContext["results"][number]): string {
   return createHash("sha256").update(content).digest("base64url");
 }
 
-export const MEMORY_POLICY = `<nmg_policy>\n${loadPrompts().memory_policy}\n</nmg_policy>`;
+const nmgPrompts = loadPrompts();
+export const MEMORY_POLICY_RESOLUTION = resolveSkillOptLabPolicy(nmgPrompts.memory_policy);
+export const MEMORY_POLICY = `<nmg_policy>\n${MEMORY_POLICY_RESOLUTION.text}\n</nmg_policy>`;
 
 export function composeNmgSystemPrompt(
   baseSystemPrompt: string,
   automaticRecall = "",
   status = "",
   nudge = "",
+  runtimeAg = "",
 ): string {
   return [
     baseSystemPrompt,
     MEMORY_POLICY,
     automaticRecall ? `<nmg_automatic_recall>\n${automaticRecall}\n</nmg_automatic_recall>` : "",
+    runtimeAg ? `<nmg_runtime_ag>\n${runtimeAg}\n</nmg_runtime_ag>` : "",
     nudge ? `<nmg_nudge>\n${nudge}\n</nmg_nudge>` : "",
     status ? `<nmg_status>${status}</nmg_status>` : "",
   ]
@@ -910,8 +948,6 @@ function isTaskContinuation(prompt: string): boolean {
   );
 }
 
-const nmgPrompts = loadPrompts();
-
 export function formatSearchHeaders(context: MemoryContext): string {
   if (context.results.length === 0) return "No matching NMG memory found.";
   const nextStep = formatProgressiveDisclosure(context) || nmgPrompts.get_hint;
@@ -927,6 +963,7 @@ export function formatSearchHeaders(context: MemoryContext): string {
       const forget = (memory.markers ?? []).some((marker) => marker.kind === "forget");
       return (
         `- ${(memory.markers ?? []).some((marker) => marker.kind === "external_source") ? "[external] " : ""}` +
+        `${memory.resolution === "open" || memory.resolution === "reopened" ? "[open] " : ""}` +
         `memory=${memory.id}; node=${node.canonicalName}; type=${memory.memoryType}; ` +
         `${recallMatchLabel(reason, hitTerms)}` +
         `${recallTimeLabel(memory)}` +
@@ -996,11 +1033,13 @@ export function formatMemoryContext(context: MemoryContext): string {
           : "";
       const external = (memory.markers ?? []).find((marker) => marker.kind === "external_source");
       const externalLabel = external ? `[external, ${memory.truthStatus}] ` : "";
+      const resolutionLabel =
+        memory.resolution === "open" || memory.resolution === "reopened" ? "[open] " : "";
       const externalSource = external?.attributes?.source
         ? `\n  EXTERNAL_SOURCE=${String(external.attributes.source)}; retrievedAt=${String(external.attributes.retrievedAt ?? "unknown")}`
         : "";
       return (
-        `- ${externalLabel}${memory.statement}\n  memory=${memory.id}; node=${node.canonicalName}; ` +
+        `- ${externalLabel}${resolutionLabel}${memory.statement}\n  memory=${memory.id}; node=${node.canonicalName}; ` +
         `type=${memory.memoryType}; truth=${memory.truthStatus}; scope=${JSON.stringify(memory.scope)}` +
         externalSource +
         source
@@ -1071,8 +1110,8 @@ function message(error: unknown): string {
 }
 
 /**
- * PostToolUse memory capture (first-principles: the tool result is the one
- * event that carries input + content + isError + per-tool details).
+ * PostToolUse runtime-state capture (the tool result is the one event that
+ * carries input + content + isError + per-tool details).
  */
 
 /** True only when a git commit actually landed, so a failed or no-op commit
@@ -1087,9 +1126,7 @@ export function isSuccessfulCommit(event: {
   const command = String((event.input as { command?: unknown })?.command ?? "");
   if (!/\bgit\s+commit\b/.test(command)) return false;
   const output = messageText(event.content);
-  return !/(?:nothing to commit|no changes added to commit|nothing added to commit)/iu.test(
-    output,
-  );
+  return !/(?:nothing to commit|no changes added to commit|nothing added to commit)/iu.test(output);
 }
 
 /** Only tool results with lasting information value are captured as traces. */
@@ -1144,117 +1181,60 @@ export function summarizeToolResult(event: {
   };
 }
 
-/** The exact low-tier remember payload for a memorable tool result, or null. */
-export function toolTraceRememberParams(
-  event: {
-    toolName: string;
-    isError: boolean;
-    content: unknown;
-    input?: unknown;
-  },
-  sessionId: string,
-  projectDir: string,
-): Record<string, unknown> | null {
-  if (!isMemorableToolResult(event)) return null;
-  const { statement, nodeName } = summarizeToolResult(event);
-  return {
-    statement,
-    nodeName,
-    memoryType: "event",
-    sourceActor: "system",
-    truthStatus: "asserted",
-    tier: 3,
-    importance: 0.1,
-    markers: [{ kind: "tool_trace", attributes: { tool: event.toolName } }],
-    scope: { project: projectDir },
-    writeReason: "post_tool_use",
-    projectDir,
-    sessionId,
-  };
-}
-
 /**
- * Bounded per-session guard against redundant low-tier tool traces. Identical
- * (tool, statement) pairs are written at most once per session; NMG's own
- * exact-duplicate skip is the backstop for anything that slips past here.
+ * Session-local projection of recent tool state. It deliberately has no daemon
+ * or SQLite path: explicit nmg_remember remains the durable-memory gate.
  */
-export class SessionToolTraceCapture {
-  readonly #recent = new Map<string, Set<string>>();
+export class SessionRuntimeAg {
+  readonly #recent = new Map<string, Array<{ key: string; statement: string }>>();
+  readonly #projected = new Set<string>();
   readonly maxPerSession: number;
+  readonly maxCharacters: number;
 
-  constructor(maxPerSession = 64) {
+  constructor(maxPerSession = 32, maxCharacters = 8000) {
     this.maxPerSession = Math.max(1, maxPerSession);
+    this.maxCharacters = Math.max(1, maxCharacters);
   }
 
   /** Returns true when this (tool, statement) pair is new for the session. */
   note(sessionId: string, toolName: string, statement: string): boolean {
     const key = `${toolName}\u0000${toolTraceHash(statement)}`;
-    let set = this.#recent.get(sessionId);
-    if (!set) {
-      set = new Set();
-      this.#recent.set(sessionId, set);
+    let entries = this.#recent.get(sessionId);
+    if (!entries) {
+      entries = [];
+      this.#recent.set(sessionId, entries);
     }
-    if (set.has(key)) return false;
-    set.add(key);
-    if (set.size > this.maxPerSession) set.delete(set.values().next().value!);
+    if (entries.some((entry) => entry.key === key)) return false;
+    entries.push({ key, statement });
+    while (
+      entries.length > this.maxPerSession ||
+      entries.reduce((sum, entry) => sum + entry.statement.length, 0) > this.maxCharacters
+    ) {
+      entries.shift();
+    }
     return true;
+  }
+
+  format(sessionId: string): string {
+    if (!this.#projected.has(sessionId)) return "";
+    const entries = this.#recent.get(sessionId) ?? [];
+    if (entries.length === 0) return "";
+    return [
+      "Session-local tool state (temporary; not durable memory):",
+      ...entries.map((entry) => `- ${entry.statement}`),
+    ].join("\n");
+  }
+
+  activateProjection(sessionId: string): void {
+    this.#projected.add(sessionId);
   }
 
   clear(sessionId: string): void {
     this.#recent.delete(sessionId);
+    this.#projected.delete(sessionId);
   }
 }
 
 function toolTraceHash(statement: string): string {
   return createHash("sha256").update(statement).digest("base64url");
-}
-
-/**
- * PreCompact rescue (first-principles: session_before_compact is the only
- * place that can intercept silent context loss; Pi already computed the doomed
- * span as preparation.messagesToSummarize).
- */
-export function summarizeSessionFragment(messages: readonly unknown[]): string {
-  const lines: string[] = [];
-  for (const message of messages) {
-    if (!message || typeof message !== "object") continue;
-    const candidate = message as { role?: unknown; content?: unknown };
-    const role = typeof candidate.role === "string" ? candidate.role : "?";
-    const content = messageText(candidate.content);
-    if (!content) continue;
-    lines.push(`${role}: ${content}`);
-  }
-  return lines.join("\n");
-}
-
-export function compactRescueStatement(
-  messages: readonly unknown[],
-  maxLength = 4000,
-): string {
-  return excerpt(summarizeSessionFragment(messages), maxLength);
-}
-
-/** The exact low-tier remember payload for a compact rescue, or null. */
-export function compactRescueRememberParams(
-  messages: readonly unknown[],
-  sessionId: string,
-  projectDir: string,
-  reason: string,
-): Record<string, unknown> | null {
-  const statement = compactRescueStatement(messages);
-  if (!statement.trim()) return null;
-  return {
-    statement,
-    nodeName: `session:${sessionId}`,
-    memoryType: "event",
-    sourceActor: "system",
-    truthStatus: "asserted",
-    tier: 2,
-    importance: 0.3,
-    markers: [{ kind: "compact_rescue", attributes: { sessionId, reason } }],
-    scope: { project: projectDir },
-    writeReason: "pre_compact_rescue",
-    projectDir,
-    sessionId,
-  };
 }

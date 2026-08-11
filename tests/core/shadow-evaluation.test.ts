@@ -56,6 +56,23 @@ test("shadow evaluation records retrieval, tool flow, actual use, outcome, and f
           learnedNodeIds: ["node-2", "node-1"],
           changed: true,
           trainingSteps: 7,
+          features: {
+            protocolVersion: 2,
+            global: [0.25],
+            memories: { "memory-1": [0.5] },
+            nodes: { "node-1": [0.75] },
+            edges: {},
+          },
+        },
+        budget: {
+          maxNodes: 8,
+          maxEdges: 12,
+          maxEvidence: 13,
+          maxTokens: 4_000,
+          maxGraphHops: 1,
+          maxLocalTier: 1,
+          maxTierBudget: 1,
+          maxLatencyMs: 500,
         },
         usage: {
           nodes: 2,
@@ -103,13 +120,30 @@ test("shadow evaluation records retrieval, tool flow, actual use, outcome, and f
     const events = readFileSync(path, "utf8")
       .trim()
       .split("\n")
-      .map((line) => JSON.parse(line) as { type: string; queryTaskId?: string; qpp?: unknown });
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            type: string;
+            queryTaskId?: string;
+            qpp?: unknown;
+            controllerFeatures?: { protocolVersion: number; global: number[] };
+            budget?: { maxEvidence: number };
+          },
+      );
     assert.deepEqual(
       events.map((event) => event.type),
       ["retrieval", "tool_flow", "use", "outcome", "feedback"],
     );
     assert.equal(events[0]?.queryTaskId, "query:preference");
     assert.ok(events[0]?.qpp);
+    assert.deepEqual(events[0]?.controllerFeatures, {
+      protocolVersion: 2,
+      global: [0.25],
+      memories: { "memory-1": [0.5] },
+      nodes: { "node-1": [0.75] },
+      edges: {},
+    });
+    assert.equal(events[0]?.budget?.maxEvidence, 13);
   } finally {
     await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
   }

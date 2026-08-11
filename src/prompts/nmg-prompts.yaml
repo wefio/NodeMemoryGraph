@@ -52,11 +52,14 @@ remember_action_parameter_description: >-
   older value of the new memory. Use relate to propose a semantic relationship
   without merging node identity; the proposal remains reversible and pending.
   Use forget only when the user explicitly asks to withdraw a selected memory.
+  Use resolve when an open question or dependency has been settled. Use reopen
+  when later evidence makes a resolved memory actionable again; provide the
+  related evidence memory IDs so the open structure stays attributable.
   Use feedback to record explicit task/retrieval labels for an activeGraphId;
   silence or lack of correction is not positive feedback.
 
 remember_memory_id_parameter_description: >-
-  For action=forget, the exact memory ID to withdraw from normal retrieval.
+  For action=forget, resolve, or reopen, the exact target memory ID.
   This creates an auditable logical deletion, not physical privacy erasure.
 
 remember_new_memory_id_parameter_description: >-
@@ -131,6 +134,15 @@ completion_nudge: >-
   available: you may recall relevant decisions (nmg_search) or save this
   turn's key conclusions (nmg_remember) if useful. This is only a reminder;
   it does not affect the current work.
+
+# Shadow-only, one-shot reminder on the turn after a retrieval outcome.
+shadow_feedback_nudge: >-
+  The previous NMG retrieval activeGraphId={active_graph_id} has completed and
+  remains unlabelled. If the preceding answer and tool evidence let you review
+  it, call nmg_remember action=feedback with semanticTaskId={semantic_task_id}
+  and explicit values for evidenceSufficient, expansionUseful, excessiveNoise,
+  and noMemoryNeeded. Omit the feedback call when any required label would be a
+  guess. Silence, task completion, and lack of user correction are not labels.
 
 # ---- 渐进披露（检索结果返回时附带） ---------------------------------------
 

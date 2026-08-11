@@ -19,6 +19,7 @@ export function compactSearchContext(context: MemoryContext) {
       id: result.memory.id,
       node: result.node.canonicalName,
       type: result.memory.memoryType,
+      resolution: result.memory.resolution,
       tier: result.memory.tier,
       preview: searchPreview(result.memory),
       matches:

@@ -7,6 +7,7 @@ import type {
   MemoryExportBundle,
   MemoryNodeKind,
   MemoryRecord,
+  MemoryResolution,
   MemoryResidence,
   MemoryScope,
   MemoryStorageState,
@@ -116,6 +117,9 @@ export interface NmgRememberParams {
   scope?: MemoryScope;
   validFrom?: string;
   validUntil?: string;
+  resolution?: MemoryResolution;
+  openedAt?: string;
+  relatedMemoryIds?: string[];
   evidenceRole?: "contradict" | "example" | "exception" | "origin" | "support" | "update";
   supersedesId?: string;
   residence?: MemoryResidence;
@@ -162,8 +166,29 @@ export interface NmgForgetRememberParams {
   sessionId?: string;
 }
 
+interface NmgResolutionRememberBase {
+  memoryId: string;
+  relatedMemoryIds?: string[];
+  reason?: string;
+  projectDir?: string;
+  sessionId?: string;
+}
+
+export interface NmgResolveMemoryParams extends NmgResolutionRememberBase {
+  action: "resolve";
+}
+
+export interface NmgReopenMemoryParams extends NmgResolutionRememberBase {
+  action: "reopen";
+}
+
+export type NmgResolutionRememberParams = NmgResolveMemoryParams | NmgReopenMemoryParams;
+
 export type NmgResolveRememberParams =
-  NmgSupersedeRememberParams | NmgRelateRememberParams | NmgForgetRememberParams;
+  | NmgSupersedeRememberParams
+  | NmgRelateRememberParams
+  | NmgForgetRememberParams
+  | NmgResolutionRememberParams;
 
 export interface NmgRecordClaimOutcomesParams extends RecordClaimOutcomesInput {
   projectDir?: string;
@@ -280,6 +305,13 @@ export type NmgMethodResult = {
         action: "forget";
         memoryId: string;
         deleted: boolean;
+      }
+    | {
+        action: "resolve" | "reopen";
+        memoryId: string;
+        resolution: MemoryResolution;
+        openedAt: string | null;
+        relatedMemoryIds: string[];
       };
   recordClaimOutcomes: {
     events: ClaimOutcomeEvent[];

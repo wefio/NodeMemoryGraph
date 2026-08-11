@@ -1,0 +1,30 @@
+_base_: ../_base_/default.yaml
+
+model:
+  backend: openai_compatible
+  reasoning_effort: off
+
+train:
+  batch_size: 8
+  accumulation: 1
+  num_epochs: 3
+
+gradient:
+  minibatch_size: 4
+  merge_batch_size: 4
+
+optimizer:
+  learning_rate: 3
+  skill_update_mode: patch
+
+evaluation:
+  use_gate: true
+  gate_metric: hard
+  eval_test: true
+
+env:
+  name: nmg_policy
+  split_dir: data/nmg_policy_split
+  skill_init: data/nmg_policy_split/initial_skill.md
+  workers: 4
+  max_completion_tokens: 256

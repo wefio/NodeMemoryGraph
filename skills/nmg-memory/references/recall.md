@@ -12,7 +12,8 @@
    [embedding](embedding.md)).
 
 Stop when evidence is sufficient. Use `nmg get` only for IDs likely to affect the
-answer.
+answer, and pass `--active-graph-id <ID_FROM_SEARCH>` so NMG can distinguish
+actual evidence use from a merely displayed candidate.
 
 ## Warm-memory continuation
 

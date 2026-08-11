@@ -1,5 +1,8 @@
 export interface ControllerEvaluationMetrics {
   trainingCases: number;
+  trainingEvidenceTargets?: number;
+  validationEvidenceTargets?: number;
+  overlappingEvidenceTargets?: number;
   candidateRecall: number;
   baselineRecall: number;
   learnedRecall: number;
@@ -11,6 +14,7 @@ export interface ControllerEvaluationMetrics {
 
 export interface ControllerGateOptions {
   minimumTrainingCases?: number;
+  minimumTrainingEvidenceTargets?: number;
   minimumCandidateRecall?: number;
   qualityTolerance?: number;
   latencyFactor?: number;
@@ -24,6 +28,8 @@ export interface ControllerEvaluationGate {
   };
   controllerGate: {
     enoughTrainingCases: boolean;
+    enoughEvidenceDiversity: boolean;
+    evidenceTargetsHeldOut: boolean;
     recallNotDegraded: boolean;
     precisionNotDegraded: boolean;
     inferenceCostBounded: boolean;
@@ -48,6 +54,8 @@ export function evaluateControllerGate(
   options: ControllerGateOptions = {},
 ): ControllerEvaluationGate {
   const minimumTrainingCases = options.minimumTrainingCases ?? 8;
+  const minimumTrainingEvidenceTargets =
+    options.minimumTrainingEvidenceTargets ?? minimumTrainingCases;
   const minimumCandidateRecall = options.minimumCandidateRecall ?? 0.8;
   const qualityTolerance = options.qualityTolerance ?? 0.01;
   const latencyFactor = options.latencyFactor ?? 4;
@@ -61,6 +69,11 @@ export function evaluateControllerGate(
 
   const controllerGate = {
     enoughTrainingCases: metrics.trainingCases >= minimumTrainingCases,
+    enoughEvidenceDiversity:
+      (metrics.trainingEvidenceTargets ?? metrics.trainingCases) >= minimumTrainingEvidenceTargets,
+    evidenceTargetsHeldOut:
+      (metrics.validationEvidenceTargets ?? 1) > 0 &&
+      (metrics.overlappingEvidenceTargets ?? 0) === 0,
     recallNotDegraded: metrics.learnedRecall + qualityTolerance >= metrics.baselineRecall,
     precisionNotDegraded: metrics.learnedPrecision + qualityTolerance >= metrics.baselinePrecision,
     inferenceCostBounded:
@@ -70,6 +83,8 @@ export function evaluateControllerGate(
   };
   controllerGate.passed =
     controllerGate.enoughTrainingCases &&
+    controllerGate.enoughEvidenceDiversity &&
+    controllerGate.evidenceTargetsHeldOut &&
     controllerGate.recallNotDegraded &&
     controllerGate.precisionNotDegraded &&
     controllerGate.inferenceCostBounded;

@@ -1,8 +1,12 @@
 import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 
-import type { ControllerShadowDecision } from "./controller-runtime.ts";
 import type {
+  ControllerShadowDecision,
+  ControllerShadowFeatureSnapshot,
+} from "./controller-runtime.ts";
+import type {
+  ActiveGraphBudget,
   ActiveGraphBudgetUsage,
   ActiveGraphSelection,
   QppTriggerDecision,
@@ -30,6 +34,10 @@ export interface ShadowRetrievalEvent extends ShadowEventBase {
   learnedNodeIds: string[];
   changed: boolean;
   controllerTrainingSteps: number;
+  /** Missing only on legacy events written before replayable feature capture. */
+  controllerFeatures?: ControllerShadowFeatureSnapshot;
+  /** Hard envelope active when the decision was observed; absent on legacy events. */
+  budget?: ActiveGraphBudget;
   costs: {
     retrievalLatencyMs: number;
     controllerLatencyMs: number;
@@ -39,6 +47,8 @@ export interface ShadowRetrievalEvent extends ShadowEventBase {
     estimatedTokens: number;
     nodesRead: number;
     edgesRead: number;
+    /** Missing only on legacy events written before budget replay support. */
+    graphHops?: number;
     deepestTier: number;
   };
 }
@@ -73,9 +83,9 @@ export interface ShadowFeedbackEvent extends ShadowEventBase {
 
 export interface ShadowToolFlowEvent extends ShadowEventBase {
   type: "tool_flow";
-  action: "search_suppressed";
-  reason: "evidence_progression_required";
-  query: string;
+  action: "search_suppressed" | "feedback_nudge_shown";
+  reason: "evidence_progression_required" | "next_user_turn_review";
+  query?: string;
 }
 
 export type ShadowEvaluationEvent =
@@ -119,6 +129,7 @@ export class ShadowEvaluationLog {
     selections: readonly ActiveGraphSelection[];
     qpp?: QppTriggerDecision;
     decision: ControllerShadowDecision;
+    budget: ActiveGraphBudget;
     usage: ActiveGraphBudgetUsage;
     controllerLatencyMs: number;
     injectedText?: string;
@@ -154,6 +165,8 @@ export class ShadowEvaluationLog {
       learnedNodeIds: input.decision.learnedNodeIds,
       changed: input.decision.changed,
       controllerTrainingSteps: input.decision.trainingSteps,
+      controllerFeatures: cloneControllerFeatures(input.decision.features),
+      budget: { ...input.budget },
       costs: {
         retrievalLatencyMs: input.usage.latencyMs,
         controllerLatencyMs: input.controllerLatencyMs,
@@ -163,6 +176,7 @@ export class ShadowEvaluationLog {
         estimatedTokens: input.usage.estimatedTokens,
         nodesRead: input.usage.nodes,
         edgesRead: input.usage.edges,
+        graphHops: input.usage.graphHops,
         deepestTier: input.usage.deepestTier,
       },
     });
@@ -243,7 +257,7 @@ export class ShadowEvaluationLog {
     sessionId: string;
     action: ShadowToolFlowEvent["action"];
     reason: ShadowToolFlowEvent["reason"];
-    query: string;
+    query?: string;
   }): boolean {
     return this.#append({
       version: 1,
@@ -282,6 +296,20 @@ export class ShadowEvaluationLog {
       if (existsSync(source)) renameSync(source, target);
     }
   }
+}
+
+function cloneControllerFeatures(
+  features: ControllerShadowFeatureSnapshot,
+): ControllerShadowFeatureSnapshot {
+  const cloneMap = (values: Record<string, number[]>): Record<string, number[]> =>
+    Object.fromEntries(Object.entries(values).map(([id, vector]) => [id, [...vector]]));
+  return {
+    protocolVersion: features.protocolVersion,
+    global: [...features.global],
+    memories: cloneMap(features.memories),
+    nodes: cloneMap(features.nodes),
+    edges: cloneMap(features.edges),
+  };
 }
 
 function finiteOrNull(value: number | undefined): number | null {

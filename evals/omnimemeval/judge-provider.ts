@@ -1,4 +1,4 @@
-import type { DuplicateCandidate, DuplicateJudgement } from "./types.ts";
+import type { DuplicateCandidate, DuplicateJudgement } from "../../src/core/types.ts";
 
 /**
  * External LLM judge consulted at write time on supersession candidates

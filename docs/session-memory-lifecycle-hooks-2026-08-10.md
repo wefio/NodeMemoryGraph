@@ -1,7 +1,7 @@
-# Session Memory 生命周期钩子（v2 · 2026-08 第一性原理重审）
+# Session Memory 生命周期钩子（v3 · 2026-08 工作记忆边界重审）
 
 > 从第一性原理重审：NMG 需要什么 → 每个需要挂哪个钩子 → 对照 Pi 实际 API 落地。
-> 上一版把 PostToolUse 写成 `tool_call_end`、把 compact 抢救写成读 `event.messages + compactThreshold`——都已核对真实 API 后修正（见「二、Pi 实际 API」）。
+> v2 已核对真实 Pi API；v3 进一步修正语义边界：工具结果属于会话工作状态，不因工具执行或上下文压缩而自动成为持久记忆。
 
 ## 一、第一性原理：NMG 需要什么
 
@@ -24,11 +24,11 @@ NMG 的使命 = 给 coding agent 持久、可检索的记忆。三个动作：
 |---|---|---|---|
 | 用户**显式**「记住 X」 | 最高 | `nmg_remember` 工具 | 无钩子 |
 | 用户**隐式**偏好/决定 | 高 | （缺口，见「五.2 未实现」） | 无自动路径 |
-| **工具执行结果** | 中 | `tool_result` | 唯一：只有它同时有 input + content + isError + 按工具 details |
+| **工具执行结果** | 会话工作状态 | `tool_result` | 唯一：只有它同时有 input + content + isError + 按工具 details；默认只进运行时 AG |
 | **轮/会话结局** | 高 | `agent_settled`（语义） | 唯一；但无 messages payload，需 `agent_end` 缓存 |
 | **会话归档** | 中 | `session_shutdown` | 唯一：daemon 死前必须归档 |
 | staging 补刷 | — | `session_start` | 唯一：上次会话后首次唤醒 |
-| **compact 前丢失片段** | 高 | `session_before_compact` | 唯一拦截点 |
+| **compact 前状态** | 工作上下文 | `session_before_compact` | 清理注入窗口；Pi 负责摘要，NMG 不自动持久化原始片段 |
 
 ## 二、Pi 实际 API（核对 `dist/core/extensions/types.d.ts`）
 
@@ -42,7 +42,7 @@ NMG 的使命 = 给 coding agent 持久、可检索的记忆。三个动作：
 | 会话 | `session_info_changed` | /name 改名 | ❌ |
 | 会话 | `session_before_switch` | /new /resume 前；可取消 | ❌ |
 | 会话 | `session_before_fork` | /fork /clone 前；可取消 | ❌ |
-| 会话 | `session_before_compact` | **preparation, branchEntries, reason, willRetry, signal**；可取消/自定义摘要 | ✅ 清理 + 抢救 |
+| 会话 | `session_before_compact` | **preparation, branchEntries, reason, willRetry, signal**；可取消/自定义摘要 | ✅ 清理注入窗口；运行时 AG 原样保留 |
 | 会话 | `session_compact` | compact 后 | ❌ |
 | 会话 | `session_shutdown` | 会话 teardown 前 | ✅ 归档 + 清理 |
 | 会话 | `session_before_tree` / `session_tree` | /tree 导航 | ❌ |
@@ -54,7 +54,7 @@ NMG 的使命 = 给 coding agent 持久、可检索的记忆。三个动作：
 | Turn/消息 | `message_start` / `message_update` / `message_end` | token 级热路径 | ❌ |
 | 工具 | `tool_execution_start` / `tool_execution_update` | 开始 / 流式部分输出 | ❌ |
 | 工具 | `tool_call` | 执行前，**可拦截**，input 可变 | ❌（已并入 tool_result） |
-| 工具 | `tool_result` | 执行后，**可改**；input + content + isError + details | ✅ PostToolUse 捕获 + nudge |
+| 工具 | `tool_result` | 执行后，**可改**；input + content + isError + details | ✅ 运行时 AG 捕获 + nudge |
 | 工具 | `tool_execution_end` | 完成；result + isError，**无 input** | ❌ |
 | Provider | `context` | 每次 LLM 调用前，可改 messages | ❌ |
 | Provider | `before_provider_request` / `before_provider_headers` / `after_provider_response` | 请求/响应层 | ❌ |
@@ -64,7 +64,7 @@ NMG 的使命 = 给 coding agent 持久、可检索的记忆。三个动作：
 
 **1. 没有 `tool_call_end`。** 工具生命周期是
 `tool_execution_start → tool_call(可拦截) → tool_execution_update → tool_result(可改) → tool_execution_end`。
-PostToolUse 的正确挂点是 `tool_result`：
+PostToolUse 运行时状态的正确挂点是 `tool_result`：
 
 ```ts
 pi.on("tool_result", async (event, ctx) => {
@@ -87,20 +87,20 @@ const { preparation, branchEntries, customInstructions, reason, willRetry, signa
 // reason: "manual" | "threshold" | "overflow"
 ```
 
-**`extractDoomedMessages` 整个不需要写**——Pi 已经算好边界，直接消费 `preparation.messagesToSummarize`。
+Pi 已经算好压缩边界；当前实现不复制该消息段。它只清理持久 recall 的注入窗口，并让 session-local runtime AG 继续存在。
 
 ## 三、最终实现布局
 
 ```
-tool_result ────────────  git commit 成功检测(nudge) + PostToolUse 记忆捕获   ← 取代 tool_call
-before_agent_start ─────  recall 注入 + nudge 消费（唯一正确）
+tool_result ────────────  git commit 成功检测(nudge) + 会话运行时 AG 更新   ← 取代 tool_call
+before_agent_start ─────  持久 recall + 运行时 AG 注入 + nudge 消费
 session_start ──────────  staging archive 刷写（唯一）
-session_before_compact ─  injection clear + compact 抢救（唯一拦截点）
+session_before_compact ─  injection clear；运行时 AG 保留；不自动持久化原文
 agent_end ──────────────  controller shadow outcome（需 messages）
-session_shutdown ───────  archive + daemon teardown + 捕获缓存清理（唯一）
+session_shutdown ───────  archive + daemon teardown + 运行时 AG 清理（唯一）
 ```
 
-### 1. `tool_result` —— 取代 `tool_call`（nudge 合并 + PostToolUse 捕获）
+### 1. `tool_result` —— 取代 `tool_call`（nudge 合并 + 运行时 AG 更新）
 
 - **nudge 从「命令匹配」改为「成功感知」**：`isError === false` 且输出不含 `nothing to commit` / `no changes added to commit` 才设标志（`isSuccessfulCommit`）。
 - **捕获过滤 `isMemorableToolResult`**：
@@ -108,65 +108,48 @@ session_shutdown ───────  archive + daemon teardown + 捕获缓存
   - ✅ edit / write（路径）
   - ✅ grep 有匹配
   - ❌ read、成功 ls/find、无匹配 grep
-- **去重 `SessionToolTraceCapture`**：按 (tool, statement-hash) 每 session 至多写一次（NMG 自身 exact-duplicate skip 兜底）。
-- **写入 fire-and-forget**（`.catch()` 吞错），绝不阻塞工具结果热路径。
-- 参数：`tier: 3` / `importance: 0.1` / marker `tool_trace` / `writeReason: "post_tool_use"`。
+- **`SessionRuntimeAg`**：按 (tool, statement-hash) 去重，以 32 条和 8,000 字符双上限维护 FIFO 小滑窗，并严格按 session 隔离。
+- 原工具结果仍在 Pi 上下文时不重复注入；`session_before_compact` 激活投影后，缓冲才通过 `<nmg_runtime_ag>` 注入，并明确标记为 temporary / not durable memory。
+- 不调用 daemon、不写 SQLite、不生成 `MemoryRecord`。只有模型或用户随后显式调用 `nmg_remember`，语义结果才可能进入 STG/LTG。
 
-### 2. `session_before_compact` —— 加抢救
+### 2. `session_before_compact` —— 保持边界
 
-- 保留 injection window 清理。
-- 新增：消费 `preparation.messagesToSummarize` → `summarizeSessionFragment` 拼接 → `compactRescueStatement` 截断 4KB（无 LLM 依赖）→ fire-and-forget 写入。
-- 参数：`tier: 2` / `importance: 0.3` / marker `compact_rescue`（含 reason）/ `writeReason: "pre_compact_rescue"`。
+- 清理持久 recall 的 injection window，使压缩后需要的记忆可以再次注入。
+- `SessionRuntimeAg` 继续留在进程内，因此近期工具状态在下一轮仍可见。
+- Pi 负责对话摘要。NMG 不再把 `messagesToSummarize` 原样拼接为 `asserted` 长期事件；上下文压缩本身不是持久化资格。
 
 ### 3. 不变的钩子
 
-`before_agent_start`（recall + nudge 消费）、`session_start`（staging 补刷）、`agent_end`（controller shadow outcome）、`session_shutdown`（归档 + daemon teardown + `toolTraceCapture.clear`）。
+`before_agent_start`（recall + runtime AG + nudge）、`session_start`（staging 补刷）、`agent_end`（controller shadow outcome）、`session_shutdown`（归档 + daemon teardown + `runtimeAg.clear`）。
 
 ## 四、刻意不做（设计决定，非缺陷）
 
 这些是明确的「不做」决策，不是待办：
 
 - ❌ **不做 SessionStart / UserPromptSubmit / Stop 钩子**：session_start 已刷 staging、用户 prompt 已在 before_agent_start、agent_end + session_shutdown 已覆盖 Stop。
+- ❌ **不让 `agent_settled` 自动生成结局记忆**：它没有完整消息载荷；缓存整轮消息再自动总结会复制 transcript、增加模型调用，并绕过 `remember` 的可归因语义边界。结局、决定和偏好仍由当前模型在有证据时主动调用 `nmg_remember`。
+- ❌ **不增加第二套隐式写入 LLM**：事实、偏好和约束可以由 Agent 自动识别并调用现有 `nmg_remember`，但 harness 不在后台另起一个不可见判断器。这样“自动使用工具”和“系统擅自写库”保持区分。
+- ❌ **不实现同工具延迟 flush**：工具状态已经是内存中的 FIFO 运行时投影，不存在持久写入次数需要合并；fail → fix → pass 的顺序本身是当前工作状态。
 
-## 五、未实现 / 待办（❌ 明确未做）
+## 五、后续评估项
 
-> 以下为本轮从第一性原理识别出但**尚未实现**的项，按优先级排序。每项都标注了触发点、原因和落地方式，需要时直接照此实现。
-
-### 1. `agent_settled` 迁移轮结局记忆 —— ❌ 未实现
-
-- **需要**：轮/会话「真结局」记忆（任务完成/失败、最终决策）。
-- **现状**：`agent_end` 之后 Pi 还可能 retry / auto-compact / 续跑，`agent_end` 记下的结局可能是半截的；但 `agent_settled`（真落定）**没有 messages payload**。
-- **阻塞点**：需 `agent_end` 先缓存 messages，`agent_settled` 消费。
-- **当前取舍**：controller shadow 是遥测而非用户记忆，暂留 `agent_end`，不动。未来做「对话结局记忆」时迁到 `agent_settled`。
-
-### 2. 用户隐式偏好/决定自动捕获 —— ❌ 未实现
-
-- **需要**：价值最高的记忆来源（用户偏好/决定）目前只能靠显式 `nmg_remember`，没有自动路径。
-- **落地方式**：`before_agent_start`（用户 prompt 已在此）或 `agent_settled`（对话结局）做 LLM 判断式摘要。
-- **阻塞点**：需要 LLM 调用，成本高、噪声控制难。
-- **提醒**：别让 tool trace（tier 3）喧宾夺主，这个缺口优先级更高。
-
-### 3. strict「同工具连发只记最后一次」 —— ❌ 未实现
-
-- **需要**：同一工具同一 session 连续调用（fail→fix→pass），当前 exact-dedupe 会各记一条。
-- **现状**：`SessionToolTraceCapture` 只做 exact-dedupe（(tool, statement-hash) 至多一次）。
-- **落地方式**：延迟 flush——挂起待写结果，下轮 `before_agent_start` / 出现不同工具 / `session_shutdown` 时冲刷，只写同工具最后一次结果。
-- **阻塞点**：需跨钩子状态与冲刷边界，当前为保持确定性未做。
+- 用真实 Pi 会话测量 runtime AG 在压缩后的任务连续性收益、注入 token 和噪声率。
+- 检查 32 条 / 8,000 字符是否足够；调整必须来自实际压缩轨迹，而不是拍脑袋扩容。
+- 检查哪些工具结果类型真的具备短期工作价值；无收益的过滤规则应删除。
 
 ## 六、实现清单（含未做项）
 
 | 项 | 改动 | 状态 |
 |---|---|---|
-| `tool_result` 钩子（合并 nudge + 捕获） | 取代 `tool_call` | ✅ 已实现 |
+| `tool_result` 钩子（合并 nudge + 运行时状态） | 取代 `tool_call` | ✅ 已实现 |
 | `isSuccessfulCommit` | 纯函数（成功感知 nudge） | ✅ 已实现，已测 |
 | `isMemorableToolResult` / `summarizeToolResult` | 纯函数过滤 + 摘要 | ✅ 已实现，已测 |
-| `toolTraceRememberParams` | 精确写入 payload | ✅ 已实现，已测 |
-| `SessionToolTraceCapture` | 按 session exact-dedupe | ✅ 已实现，已测 |
-| `session_before_compact` 抢救 | 消费 `messagesToSummarize` | ✅ 已实现 |
-| `summarizeSessionFragment` / `compactRescueStatement` / `compactRescueRememberParams` | 拼接截断 4KB，无 LLM | ✅ 已实现，已测 |
-| 测试 | 纯函数 + 注册 + nudge 端到端 | ✅ 已实现（28 通过） |
-| `agent_settled` 轮结局记忆 | 需 `agent_end` 缓存 messages | ❌ 未实现（见五.1） |
-| 用户隐式偏好/决定自动捕获 | LLM 判断式摘要 | ❌ 未实现（见五.2） |
-| strict「同工具连发只记最后一次」 | 延迟 flush | ❌ 未实现（见五.3） |
+| `SessionRuntimeAg` | session 隔离、去重、双预算小滑窗 | ✅ 已实现，已测 |
+| `<nmg_runtime_ag>` 注入 | 临时工具状态在轮间和压缩后可见 | ✅ 已实现，已测 |
+| `session_before_compact` 边界 | 清理 recall window，不自动持久化原文 | ✅ 已实现，已测 |
+| 测试 | 纯函数 + 注册 + nudge/运行时 AG 端到端 | ✅ 已实现 |
+| `agent_settled` 后台结局写入 | 会复制上下文并绕过语义边界 | ➖ 明确不做 |
+| 第二套隐式写入 LLM | Agent 直接调用 `nmg_remember` 即是自动路径 | ➖ 明确不做 |
+| strict 同工具延迟 flush | 运行时 FIFO 不写持久层 | ➖ 不再适用 |
 
-**前置已全部解决**：`tool_result` 事件存在（含所需字段）；`session_before_compact` 直接携带 doomed 消息，无需扩展 ExtensionAPI。
+**边界已确定**：`tool_result` 提供运行时状态，但不会自动成为记忆；`session_before_compact` 提供 doomed 消息，但 NMG 不因压缩而复制它们。持久化仍以显式 `nmg_remember` 为语义接入点。

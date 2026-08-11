@@ -86,6 +86,7 @@ query
   → sufficient? (QPP/coverage)  ── yes → done
   └─ no → search LTG (shared store)
        → merge, dedupe (by sourceMemoryId for cached copies)
+       → reconcile same-scope stateKey versions by event/valid/creation time
 ```
 
 - STG-first gives project-local hot memories priority and avoids touching
@@ -93,6 +94,10 @@ query
 - The insufficiency signal reuses the tiered-disclosure SPRT design
   (tiered-disclosure-design.md §2.2).
 - Budgets allocate across the two stores (maxEvidence split STG-first).
+- A current-state projection exposes only the newest `stateKey + canonical
+  scope` value across STG and LTG. LTG wins an exact timestamp tie as the
+  authoritative store. Historical time filters run before reconciliation, so
+  an older value remains available for an as-of query.
 - Scope pushdown and filterUsage apply per store — the same pipeline runs
   twice, once per database.
 
@@ -105,6 +110,7 @@ query
 | provisional STG still expires | project-local expiry, independent of cache |
 | LTG remains sole authority | `nmg_get` resolves through LTG for `sourceMemoryId` |
 | dual-store dedupe | cached copies dedupe by `sourceMemoryId` on merge |
+| cross-store state update | newest same-scope `stateKey` wins; historical filter preserves old value |
 
 ## 7. Phased rollout
 

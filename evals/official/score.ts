@@ -10,6 +10,7 @@ import {
   personaMemCorrect,
 } from "./protocol.ts";
 import { buildSnapshot, writeSnapshot } from "./snapshot.ts";
+import { officialPythonExecutable, probePython } from "./python.ts";
 
 type Benchmark = "beam" | "locomo" | "personamem";
 interface Prediction {
@@ -82,7 +83,14 @@ function scoreLocomo(rows: Prediction[]) {
     prediction: row.hypothesis,
     prediction_context: row.retrievedEvidenceIds ?? [],
   }));
-  const python = resolve(root, ".benchmarks", "python", "Scripts", "python.exe");
+  const python = officialPythonExecutable(root);
+  const probe = probePython(python);
+  if (!probe.available) {
+    throw new Error(
+      `LoCoMo official scorer Python is unavailable: ${python}\n${probe.error}\n` +
+        "Run npm run benchmark:setup or set NMG_BENCHMARK_PYTHON to a compatible environment.",
+    );
+  }
   const bridge = resolve(import.meta.dirname, "locomo_score.py");
   const result = spawnSync(python, [bridge], {
     cwd: root,

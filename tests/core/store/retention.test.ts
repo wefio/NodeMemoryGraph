@@ -120,3 +120,78 @@ test("session-private STG memories do not enter the shared LTG retention lifecyc
     );
   });
 });
+
+test("open memories remain indexed until explicitly resolved", () => {
+  withStore((store) => {
+    const anchor = store.remember({
+      statement: "Atlas deployment is blocked on the storage decision",
+      nodeName: "Atlas deployment",
+      memoryType: "event",
+      importance: 0.1,
+    });
+    const open = store.remember({
+      statement: "Decide whether Atlas should use SQLite or PostgreSQL",
+      nodeName: "Atlas database decision",
+      memoryType: "event",
+      importance: 0.1,
+      resolution: "open",
+      openedAt: "2025-01-01T00:00:00.000Z",
+      relatedMemoryIds: [anchor.memory.id],
+    });
+
+    assert.equal(open.memory.resolution, "open");
+    assert.equal(open.memory.openedAt, "2025-01-01T00:00:00.000Z");
+    assert.deepEqual(open.memory.relatedMemoryIds, [anchor.memory.id]);
+    assert.throws(
+      () => store.setMemoryStorageState(open.memory.id, "dormant"),
+      /open memories must be resolved before archival or quarantine/,
+    );
+    const future = new Date(Date.now() + 800 * 86_400_000);
+    assert.equal(
+      store
+        .retentionCandidates({ dormantAfterDays: 365, now: future })
+        .some((candidate) => candidate.memoryId === open.memory.id),
+      false,
+    );
+
+    const resolved = store.setMemoryResolution(open.memory.id, "resolved", {
+      reason: "The database choice was made.",
+    });
+    assert.equal(resolved.resolution, "resolved");
+    assert.equal(
+      store
+        .retentionCandidates({ dormantAfterDays: 365, now: future })
+        .some((candidate) => candidate.memoryId === open.memory.id),
+      true,
+    );
+
+    store.setMemoryStorageState(open.memory.id, "dormant");
+    const reopened = store.setMemoryResolution(open.memory.id, "reopened", {
+      relatedMemoryIds: [anchor.memory.id],
+      reason: "New evidence invalidated the choice.",
+    });
+    assert.equal(reopened.resolution, "reopened");
+    assert.equal(store.search("SQLite PostgreSQL")[0]?.memory.id, open.memory.id);
+  });
+});
+
+test("open STG memories do not expire before resolution", () => {
+  withStore((store) => {
+    const anchor = store.remember({
+      statement: "The current session is testing Atlas storage",
+      nodeName: "Atlas storage session",
+      residence: "stg",
+    });
+    const open = store.remember({
+      statement: "Check the Atlas storage benchmark result",
+      nodeName: "Atlas storage benchmark",
+      residence: "stg",
+      resolution: "open",
+      relatedMemoryIds: [anchor.memory.id],
+      expiresAt: "2000-01-01T00:00:00.000Z",
+    });
+    assert.deepEqual(store.expireShortTermMemories("2000-01-02T00:00:00.000Z"), []);
+    store.setMemoryResolution(open.memory.id, "resolved");
+    assert.deepEqual(store.expireShortTermMemories("2000-01-02T00:00:00.000Z"), [open.memory.id]);
+  });
+});

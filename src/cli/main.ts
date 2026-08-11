@@ -425,6 +425,9 @@ function humanResult(value: unknown): string {
   if ("storageState" in result && "memoryId" in result) {
     return `${String(result.memoryId)} is now ${String(result.storageState)}.\n`;
   }
+  if ("resolution" in result && "memoryId" in result) {
+    return `${String(result.memoryId)} is now ${String(result.resolution)}.\n`;
+  }
   if ("deleted" in result) {
     return result.deleted
       ? `Deleted semantic memory ${String((result.memory as { id: string }).id)}; source history was retained.\n`

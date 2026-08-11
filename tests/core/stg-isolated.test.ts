@@ -8,6 +8,7 @@ import {
   consolidateStgMemoryToLtg,
   copyLtgSubsetToStg,
   createStgStore,
+  mergeStgLtgContexts,
   searchStgFirst,
   stgStorePath,
 } from "../../src/core/stg.ts";
@@ -117,6 +118,64 @@ test("outcome-qualified STG memory can be copied into LTG without a cache loop",
           marker.kind === "consolidated_from_stg" &&
           marker.attributes?.sourceMemoryId === local.memory.id,
       ),
+    );
+  } finally {
+    ltg.close();
+    stg.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("STG/LTG projection keeps only the newest same-scope state version", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-stg-state-update-"));
+  const ltg = new NmgStore(join(directory, "ltg.sqlite"), new HashingVectorEmbedder());
+  const stg = createStgStore(directory, new HashingVectorEmbedder(), "session-update");
+  try {
+    const common = {
+      nodeName: "Running personal best",
+      memoryType: "state" as const,
+      stateKey: "running.charity_5k.personal_best",
+      scope: { person: "user", activity: "charity-5k" },
+    };
+    const previous = ltg.remember({
+      ...common,
+      statement: "The user's charity 5K personal best was 27:12.",
+      eventTime: "2023-05-23T13:01:00.000Z",
+      validFrom: "2023-05-23T13:01:00.000Z",
+    });
+    const latest = stg.remember({
+      ...common,
+      statement: "The user's charity 5K personal best is 25:50.",
+      eventTime: "2023-05-30T13:53:00.000Z",
+      validFrom: "2023-05-30T13:53:00.000Z",
+      residence: "stg",
+    });
+    const merged = mergeStgLtgContexts(
+      stg.searchContext("charity 5K personal best", { limit: 10 }),
+      ltg.searchContext("charity 5K personal best", { limit: 10 }),
+    );
+    const states = merged.results.filter(
+      (result) => result.memory.stateKey === common.stateKey,
+    );
+    assert.deepEqual(states.map((result) => result.memory.id), [latest.memory.id]);
+    assert.equal(merged.activeGraph?.memoryIds.includes(latest.memory.id), true);
+    assert.equal(merged.activeGraph?.memoryIds.length, merged.results.length);
+
+    const historical = mergeStgLtgContexts(
+      stg.searchContext("charity 5K personal best", {
+        limit: 10,
+        eventTimeTo: "2023-05-24T00:00:00.000Z",
+      }),
+      ltg.searchContext("charity 5K personal best", {
+        limit: 10,
+        eventTimeTo: "2023-05-24T00:00:00.000Z",
+      }),
+    );
+    assert.deepEqual(
+      historical.results
+        .filter((result) => result.memory.stateKey === common.stateKey)
+        .map((result) => result.memory.id),
+      [previous.memory.id],
     );
   } finally {
     ltg.close();

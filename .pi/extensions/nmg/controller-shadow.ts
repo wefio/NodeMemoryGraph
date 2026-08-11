@@ -12,7 +12,15 @@ interface ShadowDependencies {
 interface PendingContext {
   context: MemoryContext;
   retrievedAt: number;
+  useRecorded: boolean;
   outcomeRecorded: boolean;
+  feedbackRecorded: boolean;
+  feedbackNudgeShown: boolean;
+}
+
+export interface PendingShadowFeedback {
+  activeGraphId: string;
+  semanticTaskId: string;
 }
 
 /**
@@ -57,6 +65,7 @@ export class ControllerShadowBridge {
         selections: context.activeGraph.selections,
         qpp: context.activeGraph.qpp,
         decision,
+        budget: context.activeGraph.budget,
         usage: context.activeGraph.usage,
         controllerLatencyMs,
         injectedText,
@@ -85,11 +94,14 @@ export class ControllerShadowBridge {
     if (pending?.context.activeGraph?.sessionId !== sessionId) return false;
     try {
       const dependencies = await this.#dependencies();
-      return dependencies.log.feedback({
+      const recorded = dependencies.log.feedback({
         graphId: activeGraphId,
         sessionId,
         ...labels,
+        semanticTaskId: labels.semanticTaskId ?? pending.context.activeGraph?.taskId,
       });
+      if (recorded) pending.feedbackRecorded = true;
+      return recorded;
     } catch {
       return false;
     }
@@ -104,7 +116,7 @@ export class ControllerShadowBridge {
     if (!this.enabled || !activeGraphId) return;
     const pending = this.#contexts.get(activeGraphId);
     const context = pending?.context;
-    if (!context?.activeGraph || context.activeGraph.sessionId !== sessionId) return;
+    if (!pending || !context?.activeGraph || context.activeGraph.sessionId !== sessionId) return;
     try {
       const dependencies = await this.#dependencies();
       dependencies.log.use({
@@ -113,6 +125,7 @@ export class ControllerShadowBridge {
         requestedMemoryIds,
         usedMemoryIds,
       });
+      if (usedMemoryIds.length > 0) pending.useRecorded = true;
       dependencies.runtime.observeUse(context, usedMemoryIds);
     } catch {
       // Best-effort shadow learning; the daemon already owns canonical use attribution.
@@ -136,6 +149,26 @@ export class ControllerShadowBridge {
       });
     } catch {
       // Tool-flow telemetry is observational and must not affect Pi completion.
+    }
+  }
+
+  async feedbackNudgeShown(
+    sessionId: string,
+    pendingFeedback: PendingShadowFeedback,
+  ): Promise<void> {
+    if (!this.enabled) return;
+    const pending = this.#contexts.get(pendingFeedback.activeGraphId);
+    if (pending?.context.activeGraph?.sessionId !== sessionId) return;
+    try {
+      const dependencies = await this.#dependencies();
+      dependencies.log.toolFlow({
+        graphId: pendingFeedback.activeGraphId,
+        sessionId,
+        action: "feedback_nudge_shown",
+        reason: "next_user_turn_review",
+      });
+    } catch {
+      // Reminder telemetry is observational and must not affect the reminder.
     }
   }
 
@@ -165,6 +198,32 @@ export class ControllerShadowBridge {
     }
   }
 
+  /**
+   * Return one completed, still-unlabelled retrieval for next-turn review.
+   * Showing the reminder is one-shot; lack of feedback remains unknown rather
+   * than becoming an implicit negative or positive label.
+   */
+  pendingFeedback(sessionId: string): PendingShadowFeedback | null {
+    if (!this.enabled) return null;
+    const pending = [...this.#contexts.entries()]
+      .reverse()
+      .find(
+        ([, entry]) =>
+          entry.context.activeGraph?.sessionId === sessionId &&
+          entry.useRecorded &&
+          entry.outcomeRecorded &&
+          !entry.feedbackRecorded &&
+          !entry.feedbackNudgeShown,
+      );
+    if (!pending) return null;
+    const [activeGraphId, entry] = pending;
+    entry.feedbackNudgeShown = true;
+    return {
+      activeGraphId,
+      semanticTaskId: entry.context.activeGraph!.taskId,
+    };
+  }
+
   clear(sessionId: string): void {
     for (const [graphId, entry] of this.#contexts) {
       if (entry.context.activeGraph?.sessionId === sessionId) this.#contexts.delete(graphId);
@@ -190,7 +249,10 @@ export class ControllerShadowBridge {
     this.#contexts.set(graphId, {
       context,
       retrievedAt: performance.now(),
+      useRecorded: false,
       outcomeRecorded: false,
+      feedbackRecorded: false,
+      feedbackNudgeShown: false,
     });
     while (this.#contexts.size > this.#maxContexts) {
       this.#contexts.delete(this.#contexts.keys().next().value!);

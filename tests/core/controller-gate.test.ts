@@ -69,3 +69,17 @@ test("controller gate enforces training and bounded inference independently", ()
   assert.equal(gate.controllerGate.inferenceCostBounded, false);
   assert.equal(gate.controllerGate.passed, false);
 });
+
+test("controller gate rejects paraphrase inflation and evidence leakage", () => {
+  const gate = evaluateControllerGate({
+    ...healthyController,
+    trainingEvidenceTargets: 2,
+    validationEvidenceTargets: 1,
+    overlappingEvidenceTargets: 1,
+  });
+
+  assert.equal(gate.controllerGate.enoughEvidenceDiversity, false);
+  assert.equal(gate.controllerGate.evidenceTargetsHeldOut, false);
+  assert.equal(gate.controllerGate.passed, false);
+  assert.equal(gate.eligibility.shadow, false);
+});

@@ -62,6 +62,26 @@ class NmgClient:
             conversationId=conv_id,
         )
 
+    def add_with_result(
+        self,
+        messages: list[dict[str, Any]],
+        user_id: str,
+        conv_id: str | None = None,
+        batch_size: int | None = None,
+    ) -> dict[str, Any]:
+        """Add one conversation and return the memories actually materialized.
+
+        This is used by operation-level memory benchmarks.  The ordinary
+        OmniMemEval ``add`` contract intentionally remains write-only.
+        """
+        del batch_size
+        return self._request(
+            "add",
+            userId=user_id,
+            messages=messages,
+            conversationId=conv_id,
+        )
+
     def search(self, query: str, user_id: str, top_k: int) -> str:
         result = self._request(
             "search",
@@ -70,6 +90,17 @@ class NmgClient:
             topK=top_k,
         )
         return str(result.get("text", ""))
+
+    def search_with_result(
+        self, query: str, user_id: str, top_k: int
+    ) -> dict[str, Any]:
+        """Return structured candidates for update evaluation."""
+        return self._request(
+            "search",
+            userId=user_id,
+            query=query,
+            topK=top_k,
+        )
 
     def delete(self, user_id: str) -> None:
         self._request("delete", userId=user_id)

@@ -9,22 +9,19 @@ import { DEFAULT_HIERARCHICAL_ACTIVATION } from "../../src/core/hierarchical-act
 import { DEFAULT_ACTIVE_GRAPH_BUDGET } from "../../src/core/store/active-graph.ts";
 import {
   DEFAULT_CONSOLIDATION_POLICY,
+  DEFAULT_RETENTION_POLICY,
   DEFAULT_TOPOLOGY_POLICY,
-} from "../../src/core/store/graph.ts";
-import { DEFAULT_RETENTION_POLICY } from "../../src/core/store/maintenance.ts";
-import {
   MIN_WARM_DISCLOSURE_SIZE,
-  SUPERSEDE_SUCCESSOR_BOOST,
-  TEMPORAL_ASOF_BOOST,
-  TEMPORAL_ASOF_DECAY_DAYS,
-} from "../../src/core/store/retrieval.ts";
-import { DEFAULT_HYBRID_WEIGHTS } from "../../src/core/store/search-ranking.ts";
-import {
   NEAR_DUPLICATE_SCAN,
   NEAR_DUPLICATE_THRESHOLD,
   SUPERSEDE_CANDIDATE_MAX,
   SUPERSEDE_MIN_SHARED_TOKENS,
-} from "../../src/core/store/writes.ts";
+  SUPERSEDE_PREFILTER_MAX_TERMS,
+  SUPERSEDE_SUCCESSOR_BOOST,
+  TEMPORAL_ASOF_BOOST,
+  TEMPORAL_ASOF_DECAY_DAYS,
+} from "../../src/core/store/graph-policy.ts";
+import { DEFAULT_HYBRID_WEIGHTS } from "../../src/core/store/search-ranking.ts";
 
 export interface BenchmarkParameters {
   qpp: {
@@ -51,6 +48,7 @@ export interface BenchmarkParameters {
     nearDuplicateScan: number;
     supersedeMinimumSharedTokens: number;
     supersedeCandidateMaximum: number;
+    supersedePrefilterMaximumTerms: number;
   };
   graph: {
     edgeActivation: typeof DEFAULT_EDGE_ACTIVATION;
@@ -111,6 +109,7 @@ export function benchmarkParametersFromEnvironment(
       nearDuplicateScan: NEAR_DUPLICATE_SCAN,
       supersedeMinimumSharedTokens: SUPERSEDE_MIN_SHARED_TOKENS,
       supersedeCandidateMaximum: SUPERSEDE_CANDIDATE_MAX,
+      supersedePrefilterMaximumTerms: SUPERSEDE_PREFILTER_MAX_TERMS,
     },
     graph: {
       edgeActivation: { ...DEFAULT_EDGE_ACTIVATION },

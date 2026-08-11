@@ -259,12 +259,53 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           combinedScore: hybridScore(result.lexicalScore, result.vectorScore, edgeScore),
         };
       });
-      const rankedCandidates = [...direct, ...related]
+      const rankedMain = [...direct, ...related]
         .filter(
           (result, index, all) =>
             all.findIndex((candidate) => candidate.memory.id === result.memory.id) === index,
         )
         .sort((left, right) => contextUsefulness(query, right) - contextUsefulness(query, left));
+      const anchorMemoryIds = [
+        ...new Set(direct.slice(0, limit).map((result) => result.memory.id)),
+      ];
+      const openAttachments =
+        anchorMemoryIds.length === 0
+          ? []
+          : (
+              this.db
+                .prepare(
+                  `SELECT DISTINCT m.id, m.node_id
+                 FROM memory_records m, json_each(m.related_memory_ids_json) related
+                 WHERE m.resolution IN ('open', 'reopened')
+                   AND m.storage_state = 'indexed'
+                   AND m.status IN ('active', 'disputed')
+                   AND related.value IN (${anchorMemoryIds.map(() => "?").join(",")})
+                   AND (? IS NULL OR m.source_actor = ?)
+                 ORDER BY m.importance DESC, m.opened_at DESC
+                 LIMIT 2`,
+                )
+                .all(
+                  ...anchorMemoryIds,
+                  options.sourceActor ?? null,
+                  options.sourceActor ?? null,
+                ) as Row[]
+            ).flatMap((row) =>
+              this.resultsForNode(String(row.node_id), 3, 1, String(row.id), options.sourceActor),
+            );
+      const attachmentIds = new Set(openAttachments.map((result) => result.memory.id));
+      const mainWithoutAttachments = rankedMain.filter(
+        (result) => !attachmentIds.has(result.memory.id),
+      );
+      // Open structures are a small, attributable side-channel: keep the main
+      // ranking intact, then reserve at most two positions near the end of the
+      // normal first window. They remain ordinary budgeted evidence and never
+      // trigger a separate retrieval cascade.
+      const attachmentOffset = Math.max(1, Math.min(6, limit - openAttachments.length));
+      const rankedCandidates = [
+        ...mainWithoutAttachments.slice(0, attachmentOffset),
+        ...openAttachments,
+        ...mainWithoutAttachments.slice(attachmentOffset),
+      ];
       const rankedWarm = rankedCandidates.filter((candidate) => candidate.memory.tier === 1);
       const foldWarm =
         options.progressiveWarmDisclosure === true && rankedWarm.length >= MIN_WARM_DISCLOSURE_SIZE;
@@ -327,7 +368,9 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           nodeId: result.node.id,
           source: direct.some((item) => item.memory.id === result.memory.id)
             ? "direct"
-            : "graph_expansion",
+            : attachmentIds.has(result.memory.id)
+              ? "open_attachment"
+              : "graph_expansion",
           reason: recallReason(result),
           rank: index + 1,
           tier: result.memory.tier,
@@ -983,6 +1026,8 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
            m.markers_json AS m_markers_json,
            m.scope_json AS m_scope_json, m.valid_from AS m_valid_from,
            m.valid_until AS m_valid_until, m.status AS m_status,
+           m.resolution AS m_resolution, m.opened_at AS m_opened_at,
+           m.related_memory_ids_json AS m_related_memory_ids_json,
            m.residence AS m_residence, m.promoted_at AS m_promoted_at,
            m.expires_at AS m_expires_at,
            m.evidence_role AS m_evidence_role,

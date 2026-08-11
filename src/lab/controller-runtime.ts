@@ -29,6 +29,16 @@ export interface ControllerShadowDecision {
   learnedNodeIds: string[];
   changed: boolean;
   trainingSteps: number;
+  /** Exact, versioned inputs needed to replay this shadow decision offline. */
+  features: ControllerShadowFeatureSnapshot;
+}
+
+export interface ControllerShadowFeatureSnapshot {
+  protocolVersion: typeof CONTROLLER_FEATURE_PROTOCOL_VERSION;
+  global: number[];
+  memories: Record<string, number[]>;
+  nodes: Record<string, number[]>;
+  edges: Record<string, number[]>;
 }
 
 /** A real, bounded budget decision derived from a disposable candidate graph. */
@@ -103,6 +113,13 @@ export class ControllerRuntime {
       learnedNodeIds,
       changed: baselineNodeIds.some((nodeId, index) => learnedNodeIds[index] !== nodeId),
       trainingSteps: this.#controller.trainingSteps,
+      features: {
+        protocolVersion: sample.version,
+        global: [...sample.globalFeatures],
+        memories: cloneFeatureMap(sample.memoryFeatures),
+        nodes: cloneFeatureMap(sample.nodeFeatures),
+        edges: cloneFeatureMap(sample.edgeFeatures),
+      },
     };
   }
 
@@ -225,6 +242,10 @@ export class ControllerRuntime {
     writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`);
     renameSync(temporary, this.#path);
   }
+}
+
+function cloneFeatureMap(values: Record<string, number[]>): Record<string, number[]> {
+  return Object.fromEntries(Object.entries(values).map(([id, features]) => [id, [...features]]));
 }
 
 export function retainedMassIndices(scores: readonly number[], retainedMass = 0.98): number[] {

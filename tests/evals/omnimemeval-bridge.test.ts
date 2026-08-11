@@ -26,8 +26,12 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
           content: "In the previous chat, I assigned Admon the Sunday day shift.",
         },
       ],
-    })) as { added: number };
+    })) as { added: number; memories: string[] };
     assert.equal(added.added, 2);
+    assert.deepEqual(added.memories, [
+      "My telescope is named Kepler.",
+      "In the previous chat, I assigned Admon the Sunday day shift.",
+    ]);
 
     const alice = (await bridge.handle({
       id: 2,

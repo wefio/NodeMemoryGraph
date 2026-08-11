@@ -966,6 +966,8 @@ export class NmgStoreBase {
          m.markers_json AS m_markers_json,
          m.scope_json AS m_scope_json, m.valid_from AS m_valid_from,
          m.valid_until AS m_valid_until, m.status AS m_status,
+         m.resolution AS m_resolution, m.opened_at AS m_opened_at,
+         m.related_memory_ids_json AS m_related_memory_ids_json,
          m.residence AS m_residence, m.promoted_at AS m_promoted_at,
          m.expires_at AS m_expires_at,
          m.evidence_role AS m_evidence_role,

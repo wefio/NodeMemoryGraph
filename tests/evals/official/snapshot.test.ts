@@ -107,6 +107,7 @@ test("benchmark parameters record resolved QPP and embedding values without secr
       nearDuplicateScan: 50,
       supersedeMinimumSharedTokens: 1,
       supersedeCandidateMaximum: 10,
+      supersedePrefilterMaximumTerms: 64,
     },
     graph: {
       edgeActivation: { maxHops: 1, decay: 0.7, threshold: 0.02, learningRate: 0.05 },
@@ -173,6 +174,7 @@ test("benchmark parameters include runtime defaults when no overrides are suppli
       nearDuplicateScan: 50,
       supersedeMinimumSharedTokens: 1,
       supersedeCandidateMaximum: 10,
+      supersedePrefilterMaximumTerms: 64,
     },
     graph: {
       edgeActivation: { maxHops: 1, decay: 0.7, threshold: 0.02, learningRate: 0.05 },

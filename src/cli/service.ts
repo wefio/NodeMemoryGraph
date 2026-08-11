@@ -21,6 +21,7 @@ import {
   MEMORY_ACTORS,
   MEMORY_NODE_KINDS,
   MEMORY_RESIDENCES,
+  MEMORY_RESOLUTIONS,
   MEMORY_STORAGE_STATES,
   MEMORY_TYPES,
   RETRIEVAL_MODES,
@@ -328,6 +329,21 @@ export class NmgService {
         memoryId: params.memoryId,
         deleted: store.deleteMemory(params.memoryId) !== null,
       };
+    }
+    if (params.action === "resolve" || params.action === "reopen") {
+      const store = stores.find((candidate) => candidate.getMemory(params.memoryId) !== null);
+      if (!store) {
+        throw new NmgProtocolError("INVALID_PARAMS", `memory ${params.memoryId} does not exist`);
+      }
+      const state = store.setMemoryResolution(
+        params.memoryId,
+        params.action === "resolve" ? "resolved" : "reopened",
+        {
+          relatedMemoryIds: params.relatedMemoryIds,
+          reason: params.reason,
+        },
+      );
+      return { action: params.action, ...state };
     }
     const store = stores.find((candidate) => candidate.getMemory(params.newMemoryId) !== null);
     if (!store) {
@@ -724,6 +740,9 @@ function parseRememberParams(value: unknown): NmgRememberParams {
     validUntil: optionalString(params, "validUntil"),
     evidenceRole: optionalEnum(params, "evidenceRole", EVIDENCE_ROLES),
     supersedesId: optionalString(params, "supersedesId"),
+    resolution: optionalEnum(params, "resolution", MEMORY_RESOLUTIONS),
+    openedAt: optionalString(params, "openedAt"),
+    relatedMemoryIds: optionalStringArray(params, "relatedMemoryIds"),
     residence: optionalEnum(params, "residence", MEMORY_RESIDENCES),
     expiresAt: optionalString(params, "expiresAt"),
     writeReason: optionalString(params, "writeReason"),
@@ -812,10 +831,20 @@ function parseResolveRememberParams(value: unknown): NmgResolveRememberParams {
       sessionId: optionalString(params, "sessionId"),
     };
   }
+  if (action === "resolve" || action === "reopen") {
+    return {
+      action,
+      memoryId: requiredString(params, "memoryId"),
+      relatedMemoryIds: optionalStringArray(params, "relatedMemoryIds"),
+      reason: optionalString(params, "reason"),
+      projectDir: optionalString(params, "projectDir"),
+      sessionId: optionalString(params, "sessionId"),
+    };
+  }
   if (action !== "supersede") {
     throw new NmgProtocolError(
       "INVALID_PARAMS",
-      "resolveRemember action must be supersede, relate, or forget",
+      "resolveRemember action must be supersede, relate, forget, resolve, or reopen",
     );
   }
   return {

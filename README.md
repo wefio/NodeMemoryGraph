@@ -328,8 +328,22 @@ Send one prompt through a fresh headless Pi session:
 npm run pi:prompt -- "Remember that the RPC controller is used for NMG tests."
 ```
 
+For bounded same-session lifecycle tests, call the helper directly with repeated
+`--turn` flags (one Pi child and one owned daemon for the whole dialogue):
+
+```powershell
+node --experimental-strip-types scripts/pi-control.ts prompt `
+  --turn "Recall one durable decision and load its exact evidence." `
+  --turn "Review the preceding retrieval if all feedback labels are observable."
+```
+
 Each invocation uses a new Pi session but shares the project's
 `.nmg/nmg.sqlite`, which makes cross-session memory tests straightforward.
+The headless helper also isolates Pi settings under `.nmg/pi-agent`, loads only
+the allow-listed benchmark credentials from the ignored repository `.env`, and
+defaults to a 90-second prompt timeout plus 12 tool calls. Override these with
+`NMG_PI_AGENT_DIR`, `NMG_PI_TIMEOUT_MS`, and `NMG_PI_MAX_TOOL_CALLS`. These are
+test-runner safety limits, not NMG retrieval limits.
 The controller defaults to `deepseek/deepseek-v4-flash` with thinking disabled,
 uses `--no-extensions`, and explicitly loads only the NMG extension and its
 three stable tools. This prevents unrelated global permission extensions from

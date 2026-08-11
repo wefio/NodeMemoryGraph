@@ -223,6 +223,59 @@ test("remember forget resolution withdraws a selected memory from retrieval", as
   }
 });
 
+test("remember open, resolve, and reopen lifecycle survives service restart", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-open-memory-"));
+  const databasePath = join(directory, "nmg.sqlite");
+  const service = new NmgService({ databasePath, environment: {} });
+  let openMemoryId = "";
+  let anchorMemoryId = "";
+  try {
+    const anchor = await service.invoke("remember", {
+      statement: "Atlas storage choice blocks deployment.",
+      nodeName: "Atlas deployment blocker",
+    });
+    anchorMemoryId = anchor.memory.id;
+    const open = await service.invoke("remember", {
+      statement: "Choose the Atlas storage engine.",
+      nodeName: "Atlas storage decision",
+      resolution: "open",
+      relatedMemoryIds: [anchor.memory.id],
+    });
+    openMemoryId = open.memory.id;
+    assert.equal(open.memory.resolution, "open");
+
+    const resolved = await service.invoke("resolveRemember", {
+      action: "resolve",
+      memoryId: open.memory.id,
+      reason: "SQLite was selected.",
+    });
+    assert.equal(resolved.action, "resolve");
+    assert.equal(resolved.resolution, "resolved");
+
+    const reopened = await service.invoke("resolveRemember", {
+      action: "reopen",
+      memoryId: open.memory.id,
+      relatedMemoryIds: [anchor.memory.id],
+      reason: "A portability requirement changed.",
+    });
+    assert.equal(reopened.action, "reopen");
+    assert.equal(reopened.resolution, "reopened");
+    assert.deepEqual(reopened.relatedMemoryIds, [anchor.memory.id]);
+  } finally {
+    service.close();
+  }
+
+  const reopenedService = new NmgService({ databasePath, environment: {} });
+  try {
+    const context = await reopenedService.invoke("get", { memoryIds: [openMemoryId] });
+    assert.equal(context.results[0]?.memory.resolution, "reopened");
+    assert.deepEqual(context.results[0]?.memory.relatedMemoryIds, [anchorMemoryId]);
+  } finally {
+    reopenedService.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("memory export defaults can preserve user-owned memory with provenance", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-export-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });

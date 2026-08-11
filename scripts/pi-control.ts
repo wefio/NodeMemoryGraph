@@ -10,6 +10,7 @@ import {
 } from "../src/cli/daemon-client.ts";
 import { resolvePiControlPaths } from "./pi-paths.ts";
 import { hardTimeout } from "./pi-timeout.ts";
+import { parsePiPromptTurns } from "./pi-turns.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const cliPath = resolve(root, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
@@ -22,7 +23,7 @@ let helperDaemon: DaemonConnection | undefined;
 
 const [command, ...args] = process.argv.slice(2);
 if (command !== "state" && command !== "prompt") {
-  fail("Usage: npm run pi:state | npm run pi:prompt -- <message>");
+  fail("Usage: npm run pi:state | npm run pi:prompt -- <message> | npm run pi:prompt -- --turn <message> [--turn <message> ...]");
 }
 
 const client = new RpcClient({
@@ -80,19 +81,26 @@ try {
         )}\n`,
       );
     } else {
-      const message = args.join(" ").trim();
-      if (!message) fail("The prompt message must not be empty.");
-
-      await hardTimeout(promptUntilSettled(client, message), promptTimeoutMs, () => {
-        // Do not await abort: the RPC transport itself may be wedged. The
-        // outer finally calls client.stop(), which owns only this child.
-        void client.abort().catch(() => undefined);
-      });
-      if (toolLimitExceeded) {
-        throw new Error(`Pi exceeded the ${maximumToolCalls}-tool evaluation limit`);
+      let turns: string[];
+      try {
+        turns = parsePiPromptTurns(args);
+      } catch (error) {
+        fail(error instanceof Error ? error.message : String(error));
       }
-      const response = await client.getLastAssistantText();
-      process.stdout.write(`${response ?? ""}\n`);
+      const responses: string[] = [];
+      for (const message of turns) {
+        await hardTimeout(promptUntilSettled(client, message), promptTimeoutMs, () => {
+          // Do not await abort: the RPC transport itself may be wedged. The
+          // outer finally calls client.stop(), which owns only this child.
+          void client.abort().catch(() => undefined);
+        });
+        if (toolLimitExceeded) {
+          throw new Error(`Pi exceeded the ${maximumToolCalls}-tool evaluation limit`);
+        }
+        responses.push((await client.getLastAssistantText()) ?? "");
+      }
+      if (responses.length === 1) process.stdout.write(`${responses[0]}\n`);
+      else process.stdout.write(`${JSON.stringify({ responses }, null, 2)}\n`);
     }
   } finally {
     unsubscribe();

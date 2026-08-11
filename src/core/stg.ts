@@ -219,7 +219,7 @@ export function mergeStgLtgContexts(local: MemoryContext, shared: MemoryContext)
           seenLtg.has(String(marker.attributes?.sourceMemoryId ?? "")),
       ),
   );
-  const results = [...dedupedLocal, ...shared.results];
+  const results = reconcileStateVersions([...dedupedLocal, ...shared.results]);
   const activeGraph = mergeActiveGraphs(local.activeGraph, shared.activeGraph, results);
   return {
     results,
@@ -236,6 +236,49 @@ export function mergeStgLtgContexts(local: MemoryContext, shared: MemoryContext)
     timings: shared.timings,
     filterUsage: shared.filterUsage,
   };
+}
+
+/**
+ * STG and LTG are separate physical stores, so a new session-local state cannot
+ * update the status column of an older consolidated LTG row transactionally.
+ * Their runtime projection still must expose one current value per canonical
+ * state key and scope. Time decides; LTG wins an exact tie because it is the
+ * authoritative store. Historical filters have already been applied to each
+ * input context before this reconciliation.
+ */
+function reconcileStateVersions(results: MemoryContext["results"]): MemoryContext["results"] {
+  const winnerByState = new Map<string, MemoryContext["results"][number]>();
+  for (const result of results) {
+    if (result.memory.memoryType !== "state" || !result.memory.stateKey) continue;
+    const key = `${result.memory.stateKey}\0${canonicalScope(result.memory.scope)}`;
+    const current = winnerByState.get(key);
+    if (!current || compareStateRecency(result, current) > 0) winnerByState.set(key, result);
+  }
+  if (winnerByState.size === 0) return results;
+  const winners = new Set([...winnerByState.values()].map((result) => result.memory.id));
+  return results.filter(
+    (result) =>
+      result.memory.memoryType !== "state" ||
+      !result.memory.stateKey ||
+      winners.has(result.memory.id),
+  );
+}
+
+function compareStateRecency(
+  left: MemoryContext["results"][number],
+  right: MemoryContext["results"][number],
+): number {
+  const timestamp = (result: MemoryContext["results"][number]) =>
+    Date.parse(result.memory.validFrom ?? result.memory.eventTime ?? result.memory.createdAt);
+  const timeDifference = timestamp(left) - timestamp(right);
+  if (timeDifference !== 0) return timeDifference;
+  return Number(left.memory.residence === "ltg") - Number(right.memory.residence === "ltg");
+}
+
+function canonicalScope(scope: MemoryScope): string {
+  return JSON.stringify(
+    Object.fromEntries(Object.entries(scope).sort(([left], [right]) => left.localeCompare(right))),
+  );
 }
 
 function mergeActiveGraphs(

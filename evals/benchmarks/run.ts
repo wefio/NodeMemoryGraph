@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 
@@ -11,8 +11,10 @@ import { computeCitationSignal } from "../official/citation.ts";
 import { resolveBenchmarkData } from "../official/data-path.ts";
 import { gitRevision, sampleFingerprint } from "../official/reproducibility.ts";
 import { benchmarkParametersFromEnvironment } from "../official/parameters.ts";
+import { benchmarkCredentialEnvironment } from "../local-env.ts";
 import { loadBeam, loadLocomo, loadPersonaMem, stratifiedSample } from "./loaders.ts";
 import {
+  benchmarkIsolationArgs,
   controllerShadowEnvironment,
   isMatchedMode,
   matchedUserPrompt,
@@ -301,6 +303,9 @@ function answerPrompt(item: BenchmarkCase, itemMode: EvaluationMode, context: st
 }
 
 function createClient(dataDirectory?: string, itemMode?: EvaluationMode): RpcClient {
+  const piStateRoot = resolve(outputDirectory, "pi-state");
+  mkdirSync(piStateRoot, { recursive: true });
+  const piAgentDirectory = mkdtempSync(resolve(piStateRoot, "agent-"));
   return new RpcClient({
     cliPath: resolve(root, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js"),
     cwd: root,
@@ -308,6 +313,7 @@ function createClient(dataDirectory?: string, itemMode?: EvaluationMode): RpcCli
     model: "deepseek-v4-flash",
     env: {
       ...definedEnvironment(),
+      PI_CODING_AGENT_DIR: piAgentDirectory,
       ...(dataDirectory ? { NMG_DATA_DIR: dataDirectory } : {}),
       ...(isMatchedMode(itemMode) ? controllerShadowEnvironment(itemMode) : {}),
       ...(itemMode === "nmg-nodes" ? { NMG_GRAPH_HOPS: "0" } : {}),
@@ -317,19 +323,13 @@ function createClient(dataDirectory?: string, itemMode?: EvaluationMode): RpcCli
       "--offline",
       "--approve",
       "--no-session",
-      "--no-extensions",
+      ...benchmarkIsolationArgs(
+        dataDirectory ? resolve(root, ".pi/extensions/nmg/index.ts") : undefined,
+      ),
       "--model",
       "deepseek/deepseek-v4-flash",
       "--thinking",
       "off",
-      ...(dataDirectory
-        ? [
-            "--tools",
-            "nmg_remember,nmg_search,nmg_get",
-            "--extension",
-            resolve(root, ".pi/extensions/nmg/index.ts"),
-          ]
-        : ["--tools", "read"]),
     ],
   });
 }
@@ -473,9 +473,12 @@ async function mapConcurrent<Input, Output>(
 }
 
 function definedEnvironment(): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(process.env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
+  return {
+    ...benchmarkCredentialEnvironment(root),
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(
+        (entry): entry is [string, string] => entry[1] !== undefined,
+      ),
     ),
-  );
+  };
 }

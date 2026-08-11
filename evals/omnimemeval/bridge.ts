@@ -165,7 +165,7 @@ export class OmniMemEvalBridge {
     userId: string,
     messages: readonly OmniMessage[],
     conversationId?: string,
-  ): Promise<{ added: number }> {
+  ): Promise<{ added: number; memories: string[] }> {
     if (!Array.isArray(messages)) throw new Error("messages must be an array");
     const store = this.#store(userId);
     const conversation = conversationId?.trim() || batchIdentity(messages);
@@ -176,6 +176,7 @@ export class OmniMemEvalBridge {
       .join(" ")
       .slice(0, 1_500);
     let added = 0;
+    const memories: string[] = [];
     // Supersession judge tasks are collected during the (serial) write pass,
     // then the LLM calls run concurrently so the judge is not an ingestion
     // bottleneck; only the small applySupersession writes stay serial.
@@ -200,7 +201,7 @@ export class OmniMemEvalBridge {
       const forgetTarget = role === "user" ? explicitForgetTarget(message.content) : null;
       if (forgetTarget) {
         forgetMatchingMemories(store, forgetTarget);
-        store.remember({
+        const remembered = store.remember({
           statement: forgetTarget,
           markers: [{ kind: "forget", attributes: { effect: "revoke" } }],
           nodeName: "Revoked memory boundary",
@@ -218,6 +219,7 @@ export class OmniMemEvalBridge {
           writeReason: "explicit_user_forget_request",
           writeSource: "user",
         });
+        if (remembered.memory) memories.push(remembered.memory.statement);
         added += 1;
         continue;
       }
@@ -234,6 +236,7 @@ export class OmniMemEvalBridge {
         importance: role === "user" ? 0.6 : 0.4,
         scope: { benchmark: "OmniMemEval", user: userKey(userId) },
       });
+      if (remembered.memory) memories.push(remembered.memory.statement);
       // Simulate the NMG plugin's write path: when the new statement shares
       // tokens with same-scope memories, ask the external LLM judge whether
       // any candidate is a stale predecessor; if so mark it superseded so
@@ -291,7 +294,7 @@ export class OmniMemEvalBridge {
         }
       }
     }
-    return { added };
+    return { added, memories };
   }
 
   async #search(
@@ -574,7 +577,10 @@ function historyRole(role?: string): HistoryRole {
 }
 
 function memoryActor(role: HistoryRole): MemoryActor {
-  return role === "system" ? "agent" : role;
+  // "agent"/"explicit"/"session" are harness-internal roles with no memory
+  // actor equivalent; attribute them to the system rather than inventing an
+  // author category that MemoryActor does not model.
+  return role === "system" || role === "explicit" || role === "session" ? "system" : role;
 }
 
 function positiveNumber(value: number | undefined): number | undefined {

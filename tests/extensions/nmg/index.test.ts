@@ -5,8 +5,6 @@ import { join } from "node:path";
 import test from "node:test";
 
 import nmgExtension, {
-  compactRescueRememberParams,
-  compactRescueStatement,
   composeNmgSystemPrompt,
   formatMemoryContext,
   formatSearchHeaders,
@@ -18,11 +16,9 @@ import nmgExtension, {
   selectPiEvidenceSource,
   SessionInjectionWindow,
   SessionRecallFlow,
+  SessionRuntimeAg,
   SessionTaskWindow,
-  SessionToolTraceCapture,
-  summarizeSessionFragment,
   summarizeToolResult,
-  toolTraceRememberParams,
 } from "../../../.pi/extensions/nmg/index.ts";
 import { loadPrompts } from "../../../src/prompts/load.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
@@ -63,7 +59,7 @@ test("Pi adapter exposes only the stable tool surface", () => {
   assert.deepEqual([...extensionHarness().tools.keys()], ["nmg_remember", "nmg_get", "nmg_search"]);
 });
 
-test("PostToolUse registers on tool_result, not the old pre-execution tool_call", () => {
+test("runtime tool-state capture registers on tool_result, not pre-execution tool_call", () => {
   const { handlers } = extensionHarness();
   assert.equal(handlers.has("tool_result"), true);
   assert.equal(handlers.has("tool_call"), false);
@@ -75,12 +71,18 @@ test("remember feedback action stays on the stable tool surface and fails closed
   await assert.rejects(
     tools
       .get("nmg_remember")!
-      .execute("feedback-empty", { action: "feedback", activeGraphId: "graph-a" }, undefined, undefined, {
-        sessionManager,
-      }),
+      .execute(
+        "feedback-empty",
+        { action: "feedback", activeGraphId: "graph-a" },
+        undefined,
+        undefined,
+        {
+          sessionManager,
+        },
+      ),
     /at least one label/u,
   );
-  const result = await tools.get("nmg_remember")!.execute(
+  const result = (await tools.get("nmg_remember")!.execute(
     "feedback-disabled",
     {
       action: "feedback",
@@ -91,7 +93,7 @@ test("remember feedback action stays on the stable tool surface and fails closed
     undefined,
     undefined,
     { sessionManager },
-  ) as { details: { recorded: boolean }; content: Array<{ text: string }> };
+  )) as { details: { recorded: boolean }; content: Array<{ text: string }> };
   assert.equal(result.details.recorded, false);
   assert.match(result.content[0].text, /not recorded/u);
 });
@@ -127,6 +129,15 @@ test("controller shadow bridge is opt-in and learns only from explicit get use",
       readFileSync(join(directory, "controller-shadow-state.json"), "utf8"),
     ) as { observations: number };
     assert.equal(state.observations, 1);
+    await enabled.outcome("session-a", [
+      { role: "assistant", usage: { input: 120, output: 30 } },
+      { role: "toolResult" },
+    ]);
+    assert.deepEqual(enabled.pendingFeedback("session-a"), {
+      activeGraphId: context.activeGraph!.id,
+      semanticTaskId: context.activeGraph!.taskId,
+    });
+    assert.equal(enabled.pendingFeedback("session-a"), null, "feedback nudge is one-shot");
     assert.equal(
       await enabled.feedback(context.activeGraph!.id, "wrong-session", {
         evidenceSufficient: true,
@@ -144,10 +155,6 @@ test("controller shadow bridge is opt-in and learns only from explicit get use",
       }),
       true,
     );
-    await enabled.outcome("session-a", [
-      { role: "assistant", usage: { input: 120, output: 30 } },
-      { role: "toolResult" },
-    ]);
     // A repeated agent_end must not duplicate the same graph outcome.
     await enabled.outcome("session-a", []);
     const events = readFileSync(join(directory, "controller-shadow-events.jsonl"), "utf8")
@@ -166,15 +173,7 @@ test("controller shadow bridge is opt-in and learns only from explicit get use",
     assert.equal(flow.action, "search_suppressed");
     assert.equal(flow.query, "same query again");
     assert.equal(JSON.parse(events[2]!).type, "use");
-    const feedback = JSON.parse(events[3]!) as {
-      type: string;
-      taskSuccess: boolean;
-      evidenceSufficient: boolean;
-    };
-    assert.equal(feedback.type, "feedback");
-    assert.equal(feedback.taskSuccess, true);
-    assert.equal(feedback.evidenceSufficient, true);
-    const outcome = JSON.parse(events[4]!) as {
+    const outcome = JSON.parse(events[3]!) as {
       type: string;
       toolRounds: number;
       inputTokens: number;
@@ -184,6 +183,63 @@ test("controller shadow bridge is opt-in and learns only from explicit get use",
     assert.equal(outcome.toolRounds, 1);
     assert.equal(outcome.inputTokens, 120);
     assert.equal(outcome.outputTokens, 30);
+    const feedback = JSON.parse(events[4]!) as {
+      type: string;
+      semanticTaskId: string;
+      taskSuccess: boolean;
+      evidenceSufficient: boolean;
+    };
+    assert.equal(feedback.type, "feedback");
+    assert.equal(feedback.semanticTaskId, context.activeGraph!.taskId);
+    assert.equal(feedback.taskSuccess, true);
+    assert.equal(feedback.evidenceSufficient, true);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("shadow feedback review selects a used graph instead of a newer header-only graph", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-feedback-selection-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    const bridge = new ControllerShadowBridge(directory, true);
+    const saved = store.remember({ statement: "Atlas uses SQLite", nodeName: "Atlas" });
+    const used = store.searchContext("Atlas database", {
+      sessionId: "session-a",
+      persistTrace: false,
+    });
+    const headerOnly = store.searchContext("Atlas unrelated follow-up", {
+      sessionId: "session-a",
+      persistTrace: false,
+    });
+    await bridge.retrieval(used, "session-a", "tool");
+    await bridge.use(used.activeGraph!.id, "session-a", [saved.memory.id], [saved.memory.id]);
+    await bridge.retrieval(headerOnly, "session-a", "automatic");
+    await bridge.outcome("session-a", []);
+
+    const reminder = bridge.pendingFeedback("session-a");
+    assert.deepEqual(reminder, {
+      activeGraphId: used.activeGraph!.id,
+      semanticTaskId: used.activeGraph!.taskId,
+    });
+    await bridge.feedbackNudgeShown("session-a", reminder!);
+    const events = readFileSync(join(directory, "controller-shadow-events.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            type: string;
+            action?: string;
+            reason?: string;
+            graphId: string;
+          },
+      );
+    assert.equal(events.at(-1)?.type, "tool_flow");
+    assert.equal(events.at(-1)?.graphId, used.activeGraph!.id);
+    assert.equal(events.at(-1)?.action, "feedback_nudge_shown");
+    assert.equal(events.at(-1)?.reason, "next_user_turn_review");
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });
@@ -300,7 +356,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
   };
   try {
     const { handlers, tools } = extensionHarness();
-    const remember = await tools.get("nmg_remember")!.execute(
+    const remember = (await tools.get("nmg_remember")!.execute(
       "remember",
       {
         statement: "Atlas must use SQLite for offline operation.",
@@ -313,7 +369,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       undefined,
       undefined,
       { sessionManager },
-    ) as {
+    )) as {
       content: Array<{ text: string }>;
       details: {
         history: { sourceMessageId: string; content: string };
@@ -324,7 +380,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     assert.equal(remember.details.history.sourceMessageId, "user-atlas-storage");
     assert.equal(remember.details.history.content, "Atlas must use SQLite for offline operation.");
 
-    const oldDatabase = await tools.get("nmg_remember")!.execute(
+    const oldDatabase = (await tools.get("nmg_remember")!.execute(
       "remember-old-database",
       {
         statement: "Atlas uses PostgreSQL as its database.",
@@ -334,8 +390,8 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       undefined,
       undefined,
       { sessionManager },
-    ) as { details: { memory: { id: string } } };
-    const newDatabase = await tools.get("nmg_remember")!.execute(
+    )) as { details: { memory: { id: string } } };
+    const newDatabase = (await tools.get("nmg_remember")!.execute(
       "remember-new-database",
       {
         statement: "Atlas now uses SQLite as its database.",
@@ -345,10 +401,10 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       undefined,
       undefined,
       { sessionManager },
-    ) as { content: Array<{ text: string }>; details: { memory: { id: string } } };
+    )) as { content: Array<{ text: string }>; details: { memory: { id: string } } };
     assert.match(newDatabase.content[0].text, /possible older values/i);
     assert.match(newDatabase.content[0].text, /action=supersede/i);
-    const resolvedDatabase = await tools.get("nmg_remember")!.execute(
+    const resolvedDatabase = (await tools.get("nmg_remember")!.execute(
       "resolve-database",
       {
         action: "supersede",
@@ -359,17 +415,57 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       undefined,
       undefined,
       { sessionManager },
-    ) as { details: { applied: boolean } };
+    )) as { details: { applied: boolean } };
     assert.equal(resolvedDatabase.details.applied, true);
+
+    const openDecision = (await tools.get("nmg_remember")!.execute(
+      "remember-open-decision",
+      {
+        statement: "Re-evaluate Atlas storage after the portability test.",
+        nodeName: "Atlas storage follow-up",
+        resolution: "open",
+        relatedMemoryIds: [newDatabase.details.memory.id],
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    )) as { details: { memory: { id: string; resolution: string } } };
+    assert.equal(openDecision.details.memory.resolution, "open");
+    const closedDecision = (await tools.get("nmg_remember")!.execute(
+      "resolve-open-decision",
+      {
+        action: "resolve",
+        memoryId: openDecision.details.memory.id,
+        resolutionReason: "The portability test passed.",
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    )) as { details: { resolution: string } };
+    assert.equal(closedDecision.details.resolution, "resolved");
+    const reopenedDecision = (await tools.get("nmg_remember")!.execute(
+      "reopen-decision",
+      {
+        action: "reopen",
+        memoryId: openDecision.details.memory.id,
+        relatedMemoryIds: [newDatabase.details.memory.id],
+        resolutionReason: "A new platform requirement appeared.",
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    )) as { details: { resolution: string; relatedMemoryIds: string[] } };
+    assert.equal(reopenedDecision.details.resolution, "reopened");
+    assert.deepEqual(reopenedDecision.details.relatedMemoryIds, [newDatabase.details.memory.id]);
 
     const started = readServerState(serverStatePath(join(directory, "nmg.sqlite")));
     assert.equal(started?.transport, "http");
     assert.equal(isProcessAlive(started!.pid), true);
 
-    const recalled = await handlers.get("before_agent_start")!(
+    const recalled = (await handlers.get("before_agent_start")!(
       { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
       { sessionManager },
-    ) as { systemPrompt: string };
+    )) as { systemPrompt: string };
     assert.match(recalled.systemPrompt, /Atlas must use SQLite/);
     assert.match(recalled.systemPrompt, /NMG SEARCH HEADERS/);
     assert.match(recalled.systemPrompt, /fields: memory=id/);
@@ -377,17 +473,17 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     assert.doesNotMatch(recalled.systemPrompt, /tier=L\d/);
     assert.doesNotMatch(recalled.systemPrompt, /deepestTier/);
     assert.doesNotMatch(recalled.systemPrompt, /SOURCE=/);
-    const recalledAgain = await handlers.get("before_agent_start")!(
+    const recalledAgain = (await handlers.get("before_agent_start")!(
       { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
       { sessionManager },
-    ) as { systemPrompt: string };
+    )) as { systemPrompt: string };
     assert.match(recalledAgain.systemPrompt, /already_in_context=true/);
     assert.doesNotMatch(recalledAgain.systemPrompt, /Atlas must use SQLite/);
     await handlers.get("session_before_compact")!({}, { sessionManager });
-    const recalledAfterCompaction = await handlers.get("before_agent_start")!(
+    const recalledAfterCompaction = (await handlers.get("before_agent_start")!(
       { prompt: "What storage did we decide last time for Atlas?", systemPrompt: "base" },
       { sessionManager },
-    ) as { systemPrompt: string };
+    )) as { systemPrompt: string };
     assert.match(recalledAfterCompaction.systemPrompt, /Atlas must use SQLite/);
 
     // A successful git commit raises the completion nudge for the next turn;
@@ -401,10 +497,10 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       },
       { sessionManager },
     );
-    const nudged = await handlers.get("before_agent_start")!(
+    const nudged = (await handlers.get("before_agent_start")!(
       { prompt: "continue", systemPrompt: "base" },
       { sessionManager },
-    ) as { systemPrompt: string };
+    )) as { systemPrompt: string };
     assert.match(nudged.systemPrompt, /<nmg_nudge>/);
     const noOp = await handlers.get("tool_result")!(
       {
@@ -416,10 +512,27 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       { sessionManager },
     );
     assert.equal(noOp, undefined);
+    await handlers.get("tool_result")!(
+      {
+        toolName: "edit",
+        isError: false,
+        content: [{ type: "text", text: "ok" }],
+        input: { path: "src/storage.ts" },
+      },
+      { sessionManager },
+    );
+    const withRuntimeAg = (await handlers.get("before_agent_start")!(
+      { prompt: "continue", systemPrompt: "base" },
+      { sessionManager },
+    )) as { systemPrompt: string };
+    assert.match(withRuntimeAg.systemPrompt, /<nmg_runtime_ag>/);
+    assert.match(withRuntimeAg.systemPrompt, /Edited src\/storage\.ts/);
 
-    const searched = await tools
+    const searched = (await tools
       .get("nmg_search")!
-      .execute("search", { query: "Atlas database" }, undefined, undefined, { sessionManager }) as {
+      .execute("search", { query: "Atlas database" }, undefined, undefined, {
+        sessionManager,
+      })) as {
       content: Array<{ text: string }>;
       details: { activeGraph: { id: string } };
     };
@@ -448,11 +561,11 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       undefined,
       { sessionManager },
     );
-    const deepSearch = await tools
+    const deepSearch = (await tools
       .get("nmg_search")!
       .execute("search-deep", { query: "Atlas archive checksum" }, undefined, undefined, {
         sessionManager,
-      }) as { content: Array<{ text: string }> };
+      })) as { content: Array<{ text: string }> };
     assert.match(deepSearch.content[0].text, /BLAKE3/);
 
     await tools.get("nmg_remember")!.execute(
@@ -466,19 +579,19 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       undefined,
       { sessionManager },
     );
-    const sameSession = await tools
+    const sameSession = (await tools
       .get("nmg_search")!
       .execute("search-stg", { query: "scratch color cobalt" }, undefined, undefined, {
         sessionManager,
-      }) as { content: Array<{ text: string }> };
-    const otherSession = await tools
+      })) as { content: Array<{ text: string }> };
+    const otherSession = (await tools
       .get("nmg_search")!
       .execute("search-stg-other", { query: "scratch color cobalt" }, undefined, undefined, {
         sessionManager: {
           getSessionId: () => "other-session",
           getSessionFile: () => "other.jsonl",
         },
-      }) as { content: Array<{ text: string }> };
+      })) as { content: Array<{ text: string }> };
     assert.match(sameSession.content[0].text, /Session scratch/);
     assert.doesNotMatch(otherSession.content[0].text, /Session scratch/);
 
@@ -488,6 +601,12 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     assert.equal(remaining ? isProcessAlive(remaining.pid) : false, false);
     const store = new NmgStore(join(directory, "nmg.sqlite"));
     assert.equal(store.getMemory(oldDatabase.details.memory.id)?.status, "superseded");
+    assert.equal(
+      store
+        .exportMemories({ sourceActor: "system" })
+        .items.some((item) => item.memory.statement.includes("Edited src/storage.ts")),
+      false,
+    );
     try {
       assert.deepEqual(store.retrievalTrace(activeGraphId, "http-test-session")?.usefulMemoryIds, [
         remember.details.memory.id,
@@ -608,6 +727,28 @@ test("formatters visibly mark external provenance and trust", () => {
   assert.match(formatMemoryContext(context), /web:https:\/\/example\.com/);
 });
 
+test("formatters mark unresolved and reopened memories as open", () => {
+  const context = {
+    results: [
+      {
+        memory: {
+          id: "memory-open",
+          statement: "Verify Atlas portability.",
+          memoryType: "event",
+          tier: 1,
+          truthStatus: "asserted",
+          resolution: "reopened",
+          scope: { project: "atlas" },
+        },
+        node: { canonicalName: "Atlas portability" },
+        evidence: { content: "Verify Atlas portability." },
+      },
+    ],
+  } as never;
+  assert.match(formatSearchHeaders(context), /\[open\].*memory=memory-open/);
+  assert.match(formatMemoryContext(context), /\[open\] Verify Atlas portability/);
+});
+
 test("revoked records show metadata but withhold the statement", () => {
   const context = {
     results: [
@@ -666,19 +807,19 @@ test("session injection window reinjects changed and expired content", () => {
 
 test("session recall flow requires evidence progression after two searches", () => {
   const flow = new SessionRecallFlow();
-  flow.beginTurn("session-a", "first request");
+  assert.equal(flow.beginTurn("session-a", "first request"), true);
   assert.equal(flow.allowSearch("session-a"), true);
   assert.equal(flow.allowSearch("session-a"), true);
   assert.equal(flow.allowSearch("session-a"), false);
 
   // Pi emits before_agent_start again after each tool result. The same user
   // prompt must not reset the guard during those internal agent loops.
-  flow.beginTurn("session-a", "first request");
+  assert.equal(flow.beginTurn("session-a", "first request"), false);
   assert.equal(flow.allowSearch("session-a"), false);
 
   flow.recordGet("session-a");
   assert.equal(flow.allowSearch("session-a"), true);
-  flow.beginTurn("session-a", "second request");
+  assert.equal(flow.beginTurn("session-a", "second request"), true);
   assert.equal(flow.allowSearch("session-a"), true);
 });
 
@@ -882,65 +1023,35 @@ test("tool trace statement carries the path and tool node", () => {
   assert.match(bash.statement, /\[error\]/);
 });
 
-test("tool trace remember params are low-tier session events with markers", () => {
-  const params = toolTraceRememberParams(
-    { toolName: "edit", isError: false, content: [], input: { path: "src/a.ts" } },
-    "session-a",
-    "/project",
-  );
-  assert.equal(params?.tier, 3);
-  assert.equal(params?.importance, 0.1);
-  assert.equal(params?.writeReason, "post_tool_use");
-  assert.equal(params?.memoryType, "event");
-  assert.equal(params?.sourceActor, "system");
-  assert.equal(params?.sessionId, "session-a");
-  assert.deepEqual(params?.markers, [{ kind: "tool_trace", attributes: { tool: "edit" } }]);
-  assert.equal(
-    toolTraceRememberParams(
-      { toolName: "read", isError: false, content: [], input: {} },
-      "s",
-      "/p",
-    ),
-    null,
-  );
+test("runtime AG dedupes, bounds, isolates, and clears session tool state", () => {
+  const runtime = new SessionRuntimeAg(2, 80);
+  assert.equal(runtime.note("session-a", "bash", "Tool bash: first failure"), true);
+  assert.equal(runtime.note("session-a", "bash", "Tool bash: first failure"), false);
+  assert.equal(runtime.note("session-a", "edit", "Edited src/a.ts."), true);
+  assert.equal(runtime.format("session-a"), "");
+  runtime.activateProjection("session-a");
+  assert.match(runtime.format("session-a"), /first failure/);
+  assert.match(runtime.format("session-a"), /Edited src\/a\.ts/);
+
+  runtime.note("session-a", "bash", "Tool bash: latest test passed");
+  assert.doesNotMatch(runtime.format("session-a"), /first failure/);
+  assert.match(runtime.format("session-a"), /latest test passed/);
+  assert.equal(runtime.format("session-b"), "");
+
+  runtime.clear("session-a");
+  assert.equal(runtime.format("session-a"), "");
 });
 
-test("tool trace capture dedupes identical statements per session", () => {
-  const capture = new SessionToolTraceCapture();
-  assert.equal(capture.note("session-a", "bash", "Tool bash: npm test 1 failed"), true);
-  assert.equal(capture.note("session-a", "bash", "Tool bash: npm test 1 failed"), false);
-  assert.equal(capture.note("session-a", "bash", "Tool bash: npm test 2 passed"), true);
-  assert.equal(capture.note("session-b", "bash", "Tool bash: npm test 1 failed"), true);
-  capture.clear("session-a");
-  assert.equal(capture.note("session-a", "bash", "Tool bash: npm test 1 failed"), true);
-});
-
-test("compact rescue statement concatenates doomed messages and truncates", () => {
-  const fragment = summarizeSessionFragment([
-    { role: "assistant", content: "We decided Atlas uses SQLite with WAL mode." },
-    { role: "toolResult", content: [{ type: "text", text: "tests passed" }] },
-  ]);
-  assert.match(fragment, /assistant: We decided Atlas uses SQLite with WAL mode\./);
-  assert.match(fragment, /toolResult: tests passed/);
-
-  const long = compactRescueStatement([{ role: "user", content: "x".repeat(6000) }], 100);
-  assert.ok(long.length <= 100);
-  assert.match(long, /…$/);
-});
-
-test("compact rescue remember params mark the session node and reason", () => {
-  const params = compactRescueRememberParams(
-    [{ role: "assistant", content: "Decision: use SQLite." }],
-    "session-a",
-    "/project",
-    "threshold",
+test("runtime AG is presented as temporary state after durable recall", () => {
+  const output = composeNmgSystemPrompt(
+    "base",
+    "durable recall",
+    "",
+    "",
+    "Session-local tool state (temporary; not durable memory):\n- tests passed",
   );
-  assert.equal(params?.nodeName, "session:session-a");
-  assert.equal(params?.tier, 2);
-  assert.equal(params?.importance, 0.3);
-  assert.equal(params?.writeReason, "pre_compact_rescue");
-  assert.deepEqual(params?.markers, [
-    { kind: "compact_rescue", attributes: { sessionId: "session-a", reason: "threshold" } },
-  ]);
-  assert.equal(compactRescueRememberParams([], "s", "/p", "manual"), null);
+  assert.match(output, /<nmg_automatic_recall>\ndurable recall/);
+  assert.match(output, /<nmg_runtime_ag>/);
+  assert.match(output, /temporary; not durable memory/);
+  assert.ok(output.indexOf("durable recall") < output.indexOf("Session-local tool state"));
 });

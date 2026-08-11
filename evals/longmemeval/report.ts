@@ -4,7 +4,41 @@ export interface EvaluationResult {
   passed: boolean;
   repeat: number;
   durationMs?: number;
+  retrievalContextChars?: number;
   retrievalPassed?: boolean | null;
+  officialRetrieval?: { recallAny: number; recallAll: number; ndcg: number } | null;
+  answerTiming?: AnswerTiming;
+  tokenUsage?: TokenUsage;
+}
+
+export interface AnswerTiming {
+  startupMs: number;
+  promptMs: number;
+  modelStreamMs: number;
+  toolExecutionMs: number;
+  shutdownMs: number;
+}
+
+export interface AnswerTimingSummary extends AnswerTiming {
+  count: number;
+}
+
+export interface InjectedContextSummary {
+  count: number;
+  meanCharacters: number;
+  meanEstimatedTokens: number;
+}
+
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+}
+
+export interface TokenUsageSummary extends TokenUsage {
+  count: number;
 }
 
 export interface AccuracySummary {
@@ -130,6 +164,97 @@ export function summarizeLatencyByMode(
   );
 }
 
+export interface OfficialRetrievalSummary {
+  count: number;
+  recallAny: number;
+  recallAll: number;
+  ndcg: number;
+}
+
+export function summarizeTokenUsageByMode(
+  results: readonly EvaluationResult[],
+): Record<string, TokenUsageSummary | null> {
+  return Object.fromEntries(
+    [...new Set(results.map((result) => result.mode))].sort().map((mode) => {
+      const usages = results
+        .filter((result) => result.mode === mode)
+        .flatMap((result) => (result.tokenUsage ? [result.tokenUsage] : []));
+      if (usages.length === 0) return [mode, null];
+      return [
+        mode,
+        usages.reduce<TokenUsageSummary>(
+          (total, usage) => ({
+            count: total.count + 1,
+            input: total.input + usage.input,
+            output: total.output + usage.output,
+            cacheRead: total.cacheRead + usage.cacheRead,
+            cacheWrite: total.cacheWrite + usage.cacheWrite,
+            total: total.total + usage.total,
+          }),
+          { count: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        ),
+      ];
+    }),
+  );
+}
+
+export function summarizeAnswerTimingByMode(
+  results: readonly EvaluationResult[],
+): Record<string, AnswerTimingSummary | null> {
+  return Object.fromEntries(
+    [...new Set(results.map((result) => result.mode))].sort().map((mode) => {
+      const timings = results
+        .filter((result) => result.mode === mode)
+        .flatMap((result) => (result.answerTiming ? [result.answerTiming] : []));
+      if (timings.length === 0) return [mode, null];
+      const sum = timings.reduce<AnswerTiming>(
+        (total, timing) => ({
+          startupMs: total.startupMs + timing.startupMs,
+          promptMs: total.promptMs + timing.promptMs,
+          modelStreamMs: total.modelStreamMs + timing.modelStreamMs,
+          toolExecutionMs: total.toolExecutionMs + timing.toolExecutionMs,
+          shutdownMs: total.shutdownMs + timing.shutdownMs,
+        }),
+        { startupMs: 0, promptMs: 0, modelStreamMs: 0, toolExecutionMs: 0, shutdownMs: 0 },
+      );
+      return [
+        mode,
+        {
+          count: timings.length,
+          startupMs: Math.round(sum.startupMs / timings.length),
+          promptMs: Math.round(sum.promptMs / timings.length),
+          modelStreamMs: Math.round(sum.modelStreamMs / timings.length),
+          toolExecutionMs: Math.round(sum.toolExecutionMs / timings.length),
+          shutdownMs: Math.round(sum.shutdownMs / timings.length),
+        },
+      ];
+    }),
+  );
+}
+
+export function summarizeInjectedContextByMode(
+  results: readonly EvaluationResult[],
+): Record<string, InjectedContextSummary | null> {
+  return Object.fromEntries(
+    [...new Set(results.map((result) => result.mode))].sort().map((mode) => {
+      const sizes = results
+        .filter((result) => result.mode === mode && result.retrievalContextChars !== undefined)
+        .map((result) => result.retrievalContextChars!);
+      if (sizes.length === 0) return [mode, null];
+      const meanCharacters = sizes.reduce((sum, size) => sum + size, 0) / sizes.length;
+      return [
+        mode,
+        {
+          count: sizes.length,
+          meanCharacters: Math.round(meanCharacters),
+          // Benchmark-independent approximation. Provider usage remains separately reported.
+          meanEstimatedTokens: Math.ceil(meanCharacters / 4),
+        },
+      ];
+    }),
+  );
+}
+
 export function summarizeRetrievalByMode(
   results: readonly EvaluationResult[],
 ): Record<string, AccuracySummary | null> {
@@ -148,6 +273,36 @@ export function summarizeRetrievalByMode(
                 passed: result.retrievalPassed === true,
               })),
             ),
+      ];
+    }),
+  );
+}
+
+export function summarizeOfficialRetrievalByMode(
+  results: readonly EvaluationResult[],
+): Record<string, OfficialRetrievalSummary | null> {
+  return Object.fromEntries(
+    [...new Set(results.map((result) => result.mode))].sort().map((mode) => {
+      const metrics = results
+        .filter((result) => result.mode === mode)
+        .flatMap((result) => (result.officialRetrieval ? [result.officialRetrieval] : []));
+      if (metrics.length === 0) return [mode, null];
+      const sum = metrics.reduce(
+        (total, metric) => ({
+          recallAny: total.recallAny + metric.recallAny,
+          recallAll: total.recallAll + metric.recallAll,
+          ndcg: total.ndcg + metric.ndcg,
+        }),
+        { recallAny: 0, recallAll: 0, ndcg: 0 },
+      );
+      return [
+        mode,
+        {
+          count: metrics.length,
+          recallAny: sum.recallAny / metrics.length,
+          recallAll: sum.recallAll / metrics.length,
+          ndcg: sum.ndcg / metrics.length,
+        },
       ];
     }),
   );

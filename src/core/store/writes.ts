@@ -186,6 +186,9 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       scope?: MemoryScope;
       validFrom?: string;
       validUntil?: string;
+      resolution?: MemoryRecord["resolution"];
+      openedAt?: string;
+      relatedMemoryIds?: string[];
       evidenceRole?: MemoryRecord["evidenceRole"];
       supersedesId?: string;
       residence?: MemoryResidence;
@@ -199,6 +202,12 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         input.writeSource ?? (input.memoryType === "derived" ? "derived" : "core");
       const writeReason = input.writeReason?.trim() || defaultWriteReason(input, residence);
       const claimRollup = normalizeClaims(input.claims);
+      const resolution = input.resolution ?? "resolved";
+      const relatedMemoryIds = normalizeRelatedMemoryIds(input.relatedMemoryIds);
+      if (resolution !== "resolved" && relatedMemoryIds.length === 0) {
+        throw new Error("open memories require at least one relatedMemoryId");
+      }
+      requireRelatedMemories(this.db, relatedMemoryIds);
       const memory: MemoryRecord = {
         id: randomUUID(),
         nodeId: input.nodeId,
@@ -220,6 +229,9 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         validFrom: input.validFrom ?? createdAt,
         validUntil: input.validUntil ?? null,
         status: "active",
+        resolution,
+        openedAt: resolution === "resolved" ? null : (input.openedAt ?? createdAt),
+        relatedMemoryIds,
         residence,
         promotedAt: residence === "ltg" ? createdAt : null,
         expiresAt: input.expiresAt ?? null,
@@ -239,10 +251,11 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           `INSERT INTO memory_records
             (id, node_id, evidence_id, statement, memory_type, state_key,
              event_time, source_actor, truth_status, confidence, polarity, predicate_key, extract_method, claims_json, markers_json, scope_json, valid_from,
-             valid_until, status, residence, promoted_at, expires_at,
+             valid_until, status, resolution, opened_at, related_memory_ids_json,
+             residence, promoted_at, expires_at,
              evidence_role, supersedes_id, tier, importance,
              access_count, last_accessed_at, write_reason, write_source, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
         )
         .run(
           memory.id,
@@ -264,6 +277,9 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           memory.validFrom,
           memory.validUntil,
           memory.status,
+          memory.resolution,
+          memory.openedAt,
+          JSON.stringify(memory.relatedMemoryIds),
           memory.residence,
           memory.promotedAt,
           memory.expiresAt,
@@ -431,6 +447,9 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           scope: input.scope,
           validFrom: input.validFrom,
           validUntil: input.validUntil,
+          resolution: input.resolution,
+          openedAt: input.openedAt,
+          relatedMemoryIds: input.relatedMemoryIds,
           evidenceRole: input.evidenceRole ?? (supersedesId ? "update" : undefined),
           supersedesId,
           residence: input.residence,
@@ -1024,6 +1043,9 @@ function mapMemoryRow(row: Record<string, unknown>): MemoryRecord {
     validFrom: (row.valid_from as string) ?? null,
     validUntil: (row.valid_until as string) ?? null,
     status: (row.status as MemoryRecord["status"]) ?? "active",
+    resolution: (row.resolution as MemoryRecord["resolution"]) ?? "resolved",
+    openedAt: (row.opened_at as string) ?? null,
+    relatedMemoryIds: parse(row.related_memory_ids_json, []) as string[],
     residence: (row.residence as MemoryRecord["residence"]) ?? "stg",
     promotedAt: (row.promoted_at as string) ?? null,
     expiresAt: (row.expires_at as string) ?? null,
@@ -1037,4 +1059,15 @@ function mapMemoryRow(row: Record<string, unknown>): MemoryRecord {
     writeSource: (row.write_source as MemoryRecord["writeSource"]) ?? "core",
     createdAt: String(row.created_at),
   };
+}
+
+function normalizeRelatedMemoryIds(ids: readonly string[] | undefined): string[] {
+  return [...new Set((ids ?? []).map((id) => id.trim()).filter(Boolean))];
+}
+
+function requireRelatedMemories(db: DatabaseSync, ids: readonly string[]): void {
+  const exists = db.prepare("SELECT 1 FROM memory_records WHERE id = ?");
+  for (const id of ids) {
+    if (!exists.get(id)) throw new Error(`related memory ${id} does not exist`);
+  }
 }

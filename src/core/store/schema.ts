@@ -60,6 +60,10 @@ export function migrate(db: DatabaseSync): void {
       valid_from TEXT,
       valid_until TEXT,
       status TEXT NOT NULL DEFAULT 'active',
+      resolution TEXT NOT NULL DEFAULT 'resolved'
+        CHECK (resolution IN ('open', 'resolved', 'reopened')),
+      opened_at TEXT,
+      related_memory_ids_json TEXT NOT NULL DEFAULT '[]',
       residence TEXT NOT NULL DEFAULT 'ltg' CHECK (residence IN ('stg', 'ltg')),
       promoted_at TEXT,
       expires_at TEXT,
@@ -90,6 +94,17 @@ export function migrate(db: DatabaseSync): void {
       write_source TEXT NOT NULL,
       memory_type TEXT NOT NULL,
       requested_residence TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS memory_resolution_events (
+      id TEXT PRIMARY KEY,
+      memory_id TEXT NOT NULL REFERENCES memory_records(id),
+      from_resolution TEXT NOT NULL,
+      to_resolution TEXT NOT NULL,
+      opened_at TEXT,
+      related_memory_ids_json TEXT NOT NULL DEFAULT '[]',
+      reason TEXT,
       created_at TEXT NOT NULL
     );
 
@@ -490,6 +505,9 @@ export function ensureMemoryColumns(db: DatabaseSync): void {
     ["residence", "TEXT NOT NULL DEFAULT 'ltg'"],
     ["promoted_at", "TEXT"],
     ["expires_at", "TEXT"],
+    ["resolution", "TEXT NOT NULL DEFAULT 'resolved'"],
+    ["opened_at", "TEXT"],
+    ["related_memory_ids_json", "TEXT NOT NULL DEFAULT '[]'"],
     ["write_reason", "TEXT NOT NULL DEFAULT 'legacy_write'"],
     ["write_source", "TEXT NOT NULL DEFAULT 'core'"],
     ["storage_state", "TEXT NOT NULL DEFAULT 'indexed'"],

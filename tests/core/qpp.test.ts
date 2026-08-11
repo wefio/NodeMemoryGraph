@@ -26,6 +26,14 @@ interface CandidateOpts {
   isDirect?: boolean;
 }
 
+function cleanupDirectory(directory: string): void {
+  // Windows can transiently report ENOTEMPTY immediately after a SQLite handle
+  // closes while parallel tests and filesystem scanners are active. Node's
+  // built-in bounded retry handles that visibility race without hiding a
+  // persistent lock or product cleanup failure.
+  rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+}
+
 function candidate(opts: CandidateOpts = {}): QppCandidate {
   return {
     strength: opts.strength ?? 0.5,
@@ -249,7 +257,7 @@ test("searchContext records a shadow QPP decision on the trace (no behaviour cha
     }
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    cleanupDirectory(directory);
   }
 });
 
@@ -268,7 +276,7 @@ test("a trace recorded without qpp reads back qpp undefined (backward compatible
     assert.equal(trace.qpp, undefined);
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    cleanupDirectory(directory);
   }
 });
 
@@ -283,7 +291,7 @@ test("searchContextWithSecondPass: secondPass off returns the normal result", ()
     assert.equal(adaptive.results.length, normal.results.length);
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    cleanupDirectory(directory);
   }
 });
 
@@ -304,7 +312,7 @@ test("searchContextWithSecondPass: sufficient Top-1 stops at the first tier", ()
     assert.equal(result.activeGraph!.qpp?.expansion?.stoppedBecause, "sufficient");
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    cleanupDirectory(directory);
   }
 });
 
@@ -320,7 +328,7 @@ test("searchContextWithSecondPass: an exhausted candidate pool stops progressive
     assert.equal(result.activeGraph!.qpp?.expansion?.stoppedBecause, "candidate_pool_exhausted");
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    cleanupDirectory(directory);
   }
 });
 
@@ -365,7 +373,7 @@ test("searchContextWithSecondPass: qppThreshold forces trigger on a strong match
     );
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    cleanupDirectory(directory);
   }
 });
 
@@ -403,7 +411,7 @@ test("searchContextWithSecondPass: forced expansion walks Fibonacci tiers withou
     );
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    cleanupDirectory(directory);
   }
 });
 
@@ -434,7 +442,7 @@ test("searchContextWithSecondPass: limit is a hard cap on Fibonacci tiers", () =
     );
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    cleanupDirectory(directory);
   }
 });
 
@@ -473,7 +481,7 @@ test("searchContextWithSecondPass: strong top-gap early-stops to 3 records", () 
     assert.equal(result.activeGraph!.qpp?.expansion?.stages[0]?.targetEvidence, 3);
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    cleanupDirectory(directory);
   }
 });
 
@@ -506,7 +514,7 @@ test("searchContextWithSecondPass: default starts at the configured initial targ
     );
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    cleanupDirectory(directory);
   }
 });
 
@@ -535,6 +543,6 @@ test("searchContextWithSecondPass starts from a learned Fibonacci tier", () => {
     );
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    cleanupDirectory(directory);
   }
 });

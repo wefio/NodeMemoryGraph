@@ -11,6 +11,10 @@ import {
   normalizedKendallTauB,
   personaMemCorrect,
 } from "../../../evals/official/protocol.ts";
+import {
+  officialPythonExecutable,
+  probePython,
+} from "../../../evals/official/python.ts";
 
 test("PersonaMem uses the official single-option extraction rule", () => {
   assert.equal(personaMemCorrect("<final_answer>(b)</final_answer>", "(b)"), true);
@@ -58,10 +62,15 @@ test("LoCoMo bridge invokes the pinned official scorer when bootstrapped", (cont
   // bootstrap probe fail even on a fully bootstrapped checkout, so this test
   // silently skipped instead of ever exercising the official scorer.
   const root = resolve(import.meta.dirname, "../../..");
-  const python = resolve(root, ".benchmarks/python/Scripts/python.exe");
+  const python = officialPythonExecutable(root);
   const upstream = resolve(root, ".benchmarks/official/LoCoMo/task_eval/evaluation.py");
   if (!existsSync(python) || !existsSync(upstream)) {
     context.skip("run npm run benchmark:setup to enable official scorer parity");
+    return;
+  }
+  const probe = probePython(python);
+  if (!probe.available) {
+    context.skip(`official scorer Python cannot execute in this environment: ${probe.error}`);
     return;
   }
   const result = spawnSync(python, [resolve(root, "evals/official/locomo_score.py")], {

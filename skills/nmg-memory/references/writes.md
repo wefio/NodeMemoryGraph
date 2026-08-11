@@ -63,6 +63,35 @@ previous active state (same `state_key + scope`).
 Use `--type event --event-time <ISO_TIME>` for something that happened. If the
 event also changes current state, write both the event and the state.
 
+## Open, resolved, and reopened structures
+
+Use an open record for an attributable unresolved question, blocked decision,
+or reusable near-miss that must remain reachable across sessions. It must point
+to at least one existing memory in the same store:
+
+```text
+nmg remember "Verify Atlas on the remaining target platform." \
+  --node "Atlas portability follow-up" \
+  --type event \
+  --resolution open \
+  --related-memory <ATLAS_STORAGE_MEMORY_ID> \
+  --write-reason "Unresolved release blocker" \
+  --json
+```
+
+Open and reopened records remain indexed and are exempt from heat-based
+retention and STG expiry. Close or reopen them only on explicit evidence:
+
+```text
+nmg resolve <MEMORY_ID> --reason "The target platform test passed" --json
+nmg reopen <MEMORY_ID> --related-memory <ANCHOR_ID> \
+  --reason "A new target platform was added" --json
+```
+
+The transitions are audited. They do not delete or rewrite source history.
+Do not use open state for raw chain-of-thought, routine tool errors, or a generic
+task list.
+
 ## Advanced options
 
 | Option | When to use |
@@ -81,6 +110,9 @@ event also changes current state, write both the event and the state.
 | `--external-source web:URL|file:PATH` | Mark external provenance; defaults trust to `unverified` |
 | `--retrieved-at` / `--content-hash` | Timestamp and optional digest for an external source |
 | `--write-reason` | Why this write stays useful; appears in search results |
+| `--resolution open|resolved|reopened` | Lifecycle of an unresolved structure |
+| `--opened-at` | Optional explicit open timestamp; defaults to write time |
+| `--related-memory ID` | Repeatable anchor; required for open/reopened records |
 
 The full `--actor` set is `user`, `assistant`, `system`, `tool`.
 

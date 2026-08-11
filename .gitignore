@@ -8,6 +8,7 @@ coverage/
 .claude/.mcp-approvals.json
 .mcp.json
 .benchmarks/
+evals/topology/results/
 evals/scale/.tmp/
 evals/hierarchy-scale/.tmp/
 evals/results/

@@ -3,11 +3,15 @@ import test from "node:test";
 
 import {
   pairedAgainst,
+  summarizeAnswerTimingByMode,
   summarizeAccuracy,
   summarizeByMode,
   summarizeLatencyByMode,
+  summarizeInjectedContextByMode,
+  summarizeOfficialRetrievalByMode,
   summarizePipelineByMode,
   summarizeRetrievalByMode,
+  summarizeTokenUsageByMode,
 } from "../../../evals/longmemeval/report.ts";
 
 const rows = [
@@ -56,6 +60,80 @@ test("latency summaries expose mean and nearest-rank percentiles", () => {
   });
 });
 
+test("token summaries retain provider cache accounting", () => {
+  const summary = summarizeTokenUsageByMode([
+    {
+      questionId: "q1",
+      repeat: 0,
+      mode: "nmg",
+      passed: true,
+      tokenUsage: { input: 100, output: 20, cacheRead: 80, cacheWrite: 5, total: 205 },
+    },
+    {
+      questionId: "q2",
+      repeat: 0,
+      mode: "nmg",
+      passed: false,
+      tokenUsage: { input: 40, output: 10, cacheRead: 30, cacheWrite: 0, total: 80 },
+    },
+  ]).nmg;
+  assert.deepEqual(summary, {
+    count: 2,
+    input: 140,
+    output: 30,
+    cacheRead: 110,
+    cacheWrite: 5,
+    total: 285,
+  });
+});
+
+test("answer timing summaries separate model and tool execution", () => {
+  const summary = summarizeAnswerTimingByMode([
+    {
+      questionId: "q1",
+      repeat: 0,
+      mode: "nmg",
+      passed: true,
+      answerTiming: {
+        startupMs: 100,
+        promptMs: 1_000,
+        modelStreamMs: 800,
+        toolExecutionMs: 150,
+        shutdownMs: 50,
+      },
+    },
+    {
+      questionId: "q2",
+      repeat: 0,
+      mode: "nmg",
+      passed: true,
+      answerTiming: {
+        startupMs: 200,
+        promptMs: 2_000,
+        modelStreamMs: 1_400,
+        toolExecutionMs: 500,
+        shutdownMs: 100,
+      },
+    },
+  ]).nmg;
+  assert.deepEqual(summary, {
+    count: 2,
+    startupMs: 150,
+    promptMs: 1_500,
+    modelStreamMs: 1_100,
+    toolExecutionMs: 325,
+    shutdownMs: 75,
+  });
+});
+
+test("injected context summaries label token counts as estimates", () => {
+  const summary = summarizeInjectedContextByMode([
+    { questionId: "q1", repeat: 0, mode: "nmg", passed: true, retrievalContextChars: 400 },
+    { questionId: "q2", repeat: 0, mode: "nmg", passed: true, retrievalContextChars: 800 },
+  ]).nmg;
+  assert.deepEqual(summary, { count: 2, meanCharacters: 600, meanEstimatedTokens: 150 });
+});
+
 test("retrieval and answer outcomes are reported separately", () => {
   assert.equal(summarizeRetrievalByMode(rows).flat?.passed, 2);
   assert.deepEqual(summarizePipelineByMode(rows).flat, {
@@ -67,6 +145,26 @@ test("retrieval and answer outcomes are reported separately", () => {
     insufficientAnswerWrong: 1,
   });
   assert.equal(summarizePipelineByMode(rows).nmg?.evaluated, 2);
+});
+
+test("official retrieval summaries average official session metrics", () => {
+  const summary = summarizeOfficialRetrievalByMode([
+    {
+      questionId: "q1",
+      repeat: 0,
+      mode: "nmg",
+      passed: true,
+      officialRetrieval: { recallAny: 1, recallAll: 1, ndcg: 1 },
+    },
+    {
+      questionId: "q2",
+      repeat: 0,
+      mode: "nmg",
+      passed: false,
+      officialRetrieval: { recallAny: 1, recallAll: 0, ndcg: 0.5 },
+    },
+  ]).nmg;
+  assert.deepEqual(summary, { count: 2, recallAny: 1, recallAll: 0.5, ndcg: 0.75 });
 });
 
 test("paired comparison matches question and repeat", () => {

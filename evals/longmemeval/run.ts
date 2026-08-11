@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { RpcClient } from "@earendil-works/pi-coding-agent";
@@ -7,7 +7,11 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder, cosineSimilarity } from "../../src/core/vector.ts";
 import { indexExternalEmbeddings } from "../external-embeddings.ts";
+import { benchmarkCredentialEnvironment } from "../local-env.ts";
 import {
+  BACKEND_ABLATION_MODES,
+  benchmarkIsolationArgs,
+  counterbalancedOrder,
   controllerShadowEnvironment,
   isMatchedMode,
   matchedUserPrompt,
@@ -17,14 +21,22 @@ import { gitRevision, sampleFingerprint } from "../official/reproducibility.ts";
 import { benchmarkParametersFromEnvironment } from "../official/parameters.ts";
 import {
   pairedAgainst,
+  summarizeAnswerTimingByMode,
   summarizeAccuracy,
   summarizeByMode,
   summarizeLatencyByMode,
+  summarizeInjectedContextByMode,
+  summarizeOfficialRetrievalByMode,
   summarizePipelineByMode,
   summarizeRetrievalByMode,
+  summarizeTokenUsageByMode,
 } from "./report.ts";
-import { loadLongMemEval } from "./official.ts";
+import { loadLongMemEval, scoreLongMemRetrieval } from "./official.ts";
 import type { LongMemExample, LongMemTurn } from "./official.ts";
+import {
+  latestAutomaticRecallEvidence,
+  officialRetrievalForMemoryIds,
+} from "./retrieval-evidence.ts";
 
 interface SampleManifest {
   name: string;
@@ -33,6 +45,7 @@ interface SampleManifest {
 }
 
 type Mode =
+  | "backend-ablation"
   | "flat-hybrid"
   | "matched"
   | "nmg-auto"
@@ -111,9 +124,17 @@ const matchedRuns =
         runMatchedExample(example, repeat),
       )
     : [];
+const backendAblationRuns =
+  mode === "backend-ablation"
+    ? await mapConcurrent(trials, evalConcurrency(), ({ example, repeat }) =>
+        runBackendAblationExample(example, repeat),
+      )
+    : [];
 const results =
   mode === "matched"
     ? matchedRuns.flatMap((run) => run.results)
+    : mode === "backend-ablation"
+      ? backendAblationRuns.flatMap((run) => run.results)
     : await mapConcurrent(trials, evalConcurrency(), ({ example, repeat }) =>
         runExample(example, mode, undefined, 0, repeat),
       );
@@ -145,10 +166,17 @@ const report = {
   ...summarizeAccuracy(results),
   byMode: summarizeByMode(results),
   retrievalByMode: summarizeRetrievalByMode(results),
+  officialRetrievalByMode: summarizeOfficialRetrievalByMode(results),
   pipelineByMode: summarizePipelineByMode(results),
   latencyByMode: summarizeLatencyByMode(results),
-  preparations: matchedRuns.map((run) => run.preparation),
-  pairedAgainstNoMemory: mode === "matched" ? pairedAgainst(results, "no-memory") : {},
+  tokenUsageByMode: summarizeTokenUsageByMode(results),
+  answerTimingByMode: summarizeAnswerTimingByMode(results),
+  injectedContextByMode: summarizeInjectedContextByMode(results),
+  preparations: [...matchedRuns, ...backendAblationRuns].map((run) => run.preparation),
+  pairedAgainstNoMemory:
+    mode === "matched" || mode === "backend-ablation"
+      ? pairedAgainst(results, "no-memory")
+      : {},
   matchedProtocol:
     mode === "matched"
       ? {
@@ -158,6 +186,15 @@ const report = {
             "no extension vs deterministic NMG vs deterministic NMG with controller shadow logging",
           controllerAffectsRanking: false,
         }
+      : mode === "backend-ablation"
+        ? {
+            arms: BACKEND_ABLATION_MODES,
+            invariant:
+              "same case, model, thinking level, task instructions, question, source corpus, and context budget",
+            onlyDifference:
+              "no memory vs flat retrieval vs NMG node-local retrieval vs NMG graph expansion",
+            controllerAffectsRanking: false,
+          }
       : null,
   results,
 };
@@ -212,6 +249,51 @@ async function runMatchedExample(example: LongMemExample, repeat: number) {
   };
 }
 
+async function runBackendAblationExample(example: LongMemExample, repeat: number) {
+  const seedDirectory = resolve(
+    outputDirectory,
+    "nmg-seed",
+    example.question_id,
+    `repeat-${repeat}`,
+  );
+  mkdirSync(seedDirectory, { recursive: true });
+  const ingestStartedAt = performance.now();
+  const remembered = ingestRawEvidence(example, seedDirectory);
+  const ingestMs = Math.round(performance.now() - ingestStartedAt);
+  const indexStartedAt = performance.now();
+  await indexExternalEmbeddings(seedDirectory);
+  const indexMs = Math.round(performance.now() - indexStartedAt);
+  const results = [];
+  const executionOrder = counterbalancedOrder(
+    BACKEND_ABLATION_MODES,
+    `${example.question_id}:${repeat}`,
+  );
+  for (const arm of executionOrder) {
+    const armDirectory = arm.startsWith("nmg-")
+      ? resolve(outputDirectory, "arms", example.question_id, arm, `repeat-${repeat}`)
+      : undefined;
+    if (armDirectory) cpSync(seedDirectory, armDirectory, { recursive: true });
+    process.stderr.write(
+      `[longmemeval] ${example.question_id} ${arm} repeat=${repeat}: start\n`,
+    );
+    results.push(await runExample(example, arm, armDirectory, remembered, repeat));
+    process.stderr.write(
+      `[longmemeval] ${example.question_id} ${arm} repeat=${repeat}: done\n`,
+    );
+  }
+  return {
+    results,
+    preparation: {
+      questionId: example.question_id,
+      repeat,
+      remembered,
+      ingestMs,
+      indexMs,
+      totalMs: ingestMs + indexMs,
+    },
+  };
+}
+
 async function runExample(
   example: LongMemExample,
   runMode: Exclude<Mode, "matched">,
@@ -229,30 +311,39 @@ async function runExample(
   }
 
   const answerClient = createClient(runMode.startsWith("nmg-") ? nmgDirectory : undefined, runMode);
+  const liveTiming = observeAnswerTiming(answerClient);
   let hypothesis = "";
   let answerError: string | null = null;
   let answerEvents: AgentSessionEvent[] = [];
   try {
+    const startupStartedAt = performance.now();
     await answerClient.start();
     await answerClient.setThinkingLevel("low");
+    liveTiming.startupMs = performance.now() - startupStartedAt;
+    const promptStartedAt = performance.now();
     answerEvents = await answerClient.promptAndWait(
       answerPrompt(example, runMode),
       undefined,
       modelTimeout(),
     );
+    liveTiming.promptMs = performance.now() - promptStartedAt;
     hypothesis = (await answerClient.getLastAssistantText())?.trim() ?? "";
   } catch (error) {
     answerError = error instanceof Error ? error.message : String(error);
   } finally {
+    const shutdownStartedAt = performance.now();
     await answerClient.stop();
+    liveTiming.shutdownMs = performance.now() - shutdownStartedAt;
+    liveTiming.dispose();
   }
   const answerDurationMs = Math.round(performance.now() - startedAt);
+  const memoryPerformance = nmgDirectory ? readMemoryPerformance(nmgDirectory) : null;
 
-  const retrievalContext = retrievalJudgeEnabled()
-    ? retrievalEvidence(example, runMode, answerEvents)
-    : null;
+  const retrievalContext = retrievalEvidence(example, runMode, answerEvents, nmgDirectory);
   const retrievalJudgement =
-    retrievalContext === null ? null : await judgeRetrieval(example, retrievalContext.text);
+    retrievalContext === null || !retrievalJudgeEnabled()
+      ? null
+      : await judgeRetrieval(example, retrievalContext.text);
   const judgement = await judgeAnswer(example, hypothesis);
 
   return {
@@ -265,17 +356,110 @@ async function runExample(
     hypothesis,
     answerError,
     retrievalAvailable: retrievalContext !== null,
+    retrievalSource: retrievalContext?.source ?? null,
     retrievalContextChars: retrievalContext?.text.length ?? 0,
     retrievalToolCalls: retrievalContext?.toolCalls ?? 0,
+    officialRetrieval: retrievalContext?.officialMetrics ?? null,
     retrievalJudgement,
     retrievalPassed: retrievalJudgement === null ? null : judgementPassed(retrievalJudgement),
+    tokenUsage: collectTokenUsage(answerEvents),
+    answerTiming: liveTiming.snapshot(),
+    toolCalls: collectToolCalls(answerEvents),
+    memoryPerformance,
     judgement,
     passed: judgementPassed(judgement),
     remembered,
     userPromptHash: createHash("sha256").update(answerPrompt(example, runMode)).digest("hex"),
+    taskPromptHash: createHash("sha256")
+      .update(
+        matchedUserPrompt({
+          benchmark: "LongMemEval",
+          question: example.question,
+          questionDate: example.question_date,
+        }),
+      )
+      .digest("hex"),
     durationMs: answerDurationMs,
     evaluationDurationMs: Math.round(performance.now() - startedAt),
   };
+}
+
+function readMemoryPerformance(nmgDirectory: string) {
+  const store = new NmgStore(resolve(nmgDirectory, "nmg.sqlite"));
+  try {
+    return store
+      .perfAggregates()
+      .filter((aggregate) =>
+        aggregate.section.startsWith("search.") || aggregate.section === "relations",
+      )
+      .map((aggregate) => ({
+        section: aggregate.section,
+        count: aggregate.count,
+        meanMs: aggregate.count === 0 ? 0 : aggregate.sum / aggregate.count,
+      }));
+  } finally {
+    store.close();
+  }
+}
+
+function collectTokenUsage(events: readonly AgentSessionEvent[]) {
+  const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+  let found = false;
+  for (const event of events) {
+    if (event.type !== "message_end" || event.message.role !== "assistant") continue;
+    found = true;
+    total.input += event.message.usage.input;
+    total.output += event.message.usage.output;
+    total.cacheRead += event.message.usage.cacheRead;
+    total.cacheWrite += event.message.usage.cacheWrite;
+    total.total += event.message.usage.totalTokens;
+  }
+  return found ? total : undefined;
+}
+
+function collectToolCalls(events: readonly AgentSessionEvent[]) {
+  const counts: Record<string, number> = {};
+  for (const event of events) {
+    if (event.type !== "tool_execution_end") continue;
+    counts[event.toolName] = (counts[event.toolName] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function observeAnswerTiming(client: RpcClient) {
+  let modelStreamMs = 0;
+  let assistantStartedAt: number | null = null;
+  let toolExecutionMs = 0;
+  const toolStarts = new Map<string, number>();
+  const timing = {
+    startupMs: 0,
+    promptMs: 0,
+    shutdownMs: 0,
+    dispose: () => {},
+    snapshot: () => ({
+      startupMs: Math.round(timing.startupMs),
+      promptMs: Math.round(timing.promptMs),
+      modelStreamMs: Math.round(modelStreamMs),
+      toolExecutionMs: Math.round(toolExecutionMs),
+      shutdownMs: Math.round(timing.shutdownMs),
+    }),
+  };
+  timing.dispose = client.onEvent((event) => {
+    const now = performance.now();
+    if (event.type === "message_start" && event.message.role === "assistant") {
+      assistantStartedAt = now;
+    } else if (event.type === "message_end" && event.message.role === "assistant") {
+      if (assistantStartedAt !== null) modelStreamMs += now - assistantStartedAt;
+      assistantStartedAt = null;
+    } else if (event.type === "tool_execution_start") {
+      toolStarts.set(event.toolCallId, now);
+    } else if (event.type === "tool_execution_end") {
+      const startedAt = toolStarts.get(event.toolCallId);
+      if (startedAt !== undefined) toolExecutionMs += now - startedAt;
+      toolStarts.delete(event.toolCallId);
+    }
+  });
+  return timing;
 }
 
 async function ingestEvidence(example: LongMemExample, nmgDirectory: string): Promise<number> {
@@ -405,15 +589,27 @@ function retrievalEvidence(
   example: LongMemExample,
   runMode: Exclude<Mode, "matched">,
   events: AgentSessionEvent[],
-): { text: string; toolCalls: number } | null {
+  nmgDirectory?: string,
+): {
+  text: string;
+  source: "automatic_headers" | "direct_context" | "nmg_get";
+  toolCalls: number;
+  officialMetrics: ReturnType<typeof latestAutomaticRecallEvidence>["officialMetrics"];
+} | null {
   if (runMode === "oracle") {
-    return { text: formatHistory(example), toolCalls: 0 };
+    return { text: formatHistory(example), source: "direct_context", toolCalls: 0, officialMetrics: null };
   }
   if (runMode === "raw-session") {
-    return { text: retrieveRawSessions(example), toolCalls: 0 };
+    return { text: retrieveRawSessions(example), source: "direct_context", toolCalls: 0, officialMetrics: null };
   }
   if (runMode === "flat-hybrid") {
-    return { text: retrieveFlatTurns(example), toolCalls: 0 };
+    const flat = retrieveFlatTurnResult(example);
+    return {
+      text: flat.text,
+      source: "direct_context",
+      toolCalls: 0,
+      officialMetrics: scoreLongMemRetrieval(flat.rankedSessionIds, example.answer_session_ids),
+    };
   }
   if (
     runMode === "nmg-lite" ||
@@ -422,6 +618,13 @@ function retrievalEvidence(
     runMode === "nmg-deterministic" ||
     runMode === "nmg-shadow"
   ) {
+    const automatic = nmgDirectory
+      ? latestAutomaticRecallEvidence(
+          nmgDirectory,
+          example.question_id,
+          example.answer_session_ids,
+        )
+      : null;
     const outputs = events.flatMap((event) => {
       if (event.type !== "tool_execution_end" || event.toolName !== "nmg_get" || event.isError) {
         return [];
@@ -437,14 +640,40 @@ function retrievalEvidence(
         ) ?? []
       );
     });
-    return { text: outputs.join("\n\n"), toolCalls: outputs.length };
+    if (outputs.length > 0) {
+      const memoryIds = [
+        ...new Set(outputs.flatMap((output) => [...output.matchAll(/\bmemory=([^;\s]+)/g)].map((match) => match[1]!))),
+      ];
+      return {
+        text: outputs.join("\n\n"),
+        source: "nmg_get",
+        toolCalls: outputs.length,
+        officialMetrics: nmgDirectory
+          ? officialRetrievalForMemoryIds(
+              nmgDirectory,
+              memoryIds,
+              example.question_id,
+              example.answer_session_ids,
+            )
+          : null,
+      };
+    }
+    if (automatic) return automatic;
   }
-  // Automatic recall is injected before the model call and is not exposed by
-  // Pi's RPC event stream. Report it as unavailable instead of guessing.
   return null;
 }
 
 function answerPrompt(example: LongMemExample, runMode: Exclude<Mode, "matched">): string {
+  if (mode === "backend-ablation") {
+    const task = matchedUserPrompt({
+      benchmark: "LongMemEval",
+      question: example.question,
+      questionDate: example.question_date,
+    });
+    return runMode === "flat-hybrid"
+      ? `Retrieved conversation evidence:\n${retrieveFlatTurns(example)}\n\n${task}`
+      : task;
+  }
   if (isMatchedMode(runMode)) {
     return matchedUserPrompt({
       benchmark: "LongMemEval",
@@ -556,6 +785,12 @@ function retrieveRawSessions(example: LongMemExample): string {
 }
 
 function retrieveFlatTurns(example: LongMemExample): string {
+  return retrieveFlatTurnResult(example).text;
+}
+
+function retrieveFlatTurnResult(
+  example: LongMemExample,
+): { text: string; rankedSessionIds: string[] } {
   const embedder = new HashingVectorEmbedder(256);
   const queryVector = embedder.embed(example.question);
   const ranked = example.haystack_sessions
@@ -566,6 +801,7 @@ function retrieveFlatTurns(example: LongMemExample): string {
           `${turn.role}: ${turn.content}`;
         return {
           text,
+          sessionId: example.haystack_session_ids[sessionIndex] ?? String(sessionIndex),
           score:
             lexicalOverlap(example.question, text) * 0.55 +
             cosineSimilarity(queryVector, embedder.embed(text)) * 0.45,
@@ -573,10 +809,18 @@ function retrieveFlatTurns(example: LongMemExample): string {
       }),
     )
     .sort((left, right) => right.score - left.score);
-  return takeWithinBudget(
-    ranked.map((item) => item.text),
-    contextBudget(),
-  );
+  const selected: typeof ranked = [];
+  let used = 0;
+  for (const item of ranked) {
+    if (selected.length > 0 && used + item.text.length > contextBudget()) continue;
+    selected.push(item);
+    used += item.text.length;
+    if (used >= contextBudget()) break;
+  }
+  return {
+    text: selected.map((item) => item.text).join("\n\n"),
+    rankedSessionIds: [...new Set(selected.map((item) => item.sessionId))],
+  };
 }
 
 function lexicalOverlap(query: string, text: string): number {
@@ -636,6 +880,9 @@ function benchmarkType(example: LongMemExample): string {
 }
 
 function createClient(nmgDirectory?: string, runMode?: Exclude<Mode, "matched">): RpcClient {
+  const piStateRoot = resolve(outputDirectory, "pi-state");
+  mkdirSync(piStateRoot, { recursive: true });
+  const piAgentDirectory = mkdtempSync(resolve(piStateRoot, "agent-"));
   return new RpcClient({
     cliPath: resolve(root, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js"),
     cwd: root,
@@ -643,6 +890,7 @@ function createClient(nmgDirectory?: string, runMode?: Exclude<Mode, "matched">)
     model: "deepseek-v4-flash",
     env: {
       ...definedEnvironment(),
+      PI_CODING_AGENT_DIR: piAgentDirectory,
       ...(nmgDirectory ? { NMG_DATA_DIR: nmgDirectory } : {}),
       ...(isMatchedMode(runMode) ? controllerShadowEnvironment(runMode) : {}),
       ...(runMode === "nmg-lite"
@@ -655,19 +903,13 @@ function createClient(nmgDirectory?: string, runMode?: Exclude<Mode, "matched">)
       "--offline",
       "--approve",
       "--no-session",
-      "--no-extensions",
+      ...benchmarkIsolationArgs(
+        nmgDirectory ? resolve(root, ".pi/extensions/nmg/index.ts") : undefined,
+      ),
       "--model",
       "deepseek/deepseek-v4-flash",
       "--thinking",
       "off",
-      ...(nmgDirectory
-        ? [
-            "--tools",
-            "nmg_remember,nmg_search,nmg_get",
-            "--extension",
-            resolve(root, ".pi/extensions/nmg/index.ts"),
-          ]
-        : ["--tools", "read"]),
     ],
   });
 }
@@ -684,9 +926,10 @@ function parseMode(value: string | undefined): Mode {
   if (value === "nmg-lite") return "nmg-lite";
   if (value === "nmg-graph") return "nmg-graph";
   if (value === "matched") return "matched";
+  if (value === "backend-ablation") return "backend-ablation";
   if (value === "validate") return "validate";
   throw new Error(
-    `Unknown mode: ${value}. Use validate, matched, no-memory, raw-session, nmg-auto, ` +
+    `Unknown mode: ${value}. Use validate, matched, backend-ablation, no-memory, raw-session, nmg-auto, ` +
       `flat-hybrid, nmg-deterministic, nmg-shadow, nmg-lite, nmg-graph, oracle, ` +
       `or nmg-oracle.`,
   );
@@ -741,9 +984,12 @@ async function mapConcurrent<Input, Output>(
 }
 
 function definedEnvironment(): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(process.env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
+  return {
+    ...benchmarkCredentialEnvironment(root),
+    ...Object.fromEntries(
+      Object.entries(process.env).filter(
+        (entry): entry is [string, string] => entry[1] !== undefined,
+      ),
     ),
-  );
+  };
 }

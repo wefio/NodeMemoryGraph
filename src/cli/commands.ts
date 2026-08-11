@@ -19,6 +19,7 @@ import type {
   NmgMergeNodesParams,
   NmgPerfParams,
   NmgRememberParams,
+  NmgResolveRememberParams,
   NmgRollbackNodeTransformParams,
   NmgRetentionCandidatesParams,
   NmgSearchParams,
@@ -97,6 +98,9 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
       "expires-at",
       "write-reason",
       "source-ref",
+      "resolution",
+      "opened-at",
+      "related-memory",
     ],
     flags: [],
     usageDetail: `Remember options:
@@ -109,11 +113,30 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   --tier N                   Initial tier 0..3
   --importance N             Importance 0..1
   --residence VALUE          ltg or stg
+  --resolution VALUE         open, resolved, or reopened
+  --opened-at ISO            When the open structure was created
+  --related-memory ID        Repeatable evidence anchor; required for open/reopened
   --write-reason TEXT        Durable-write justification
   --external-source REF      External provenance: web:URL or file:PATH
   --retrieved-at ISO         External retrieval timestamp (default: now)
   --content-hash HASH        Optional external content hash`,
     buildParams: rememberParams,
+  },
+  {
+    method: "resolveRemember",
+    words: ["resolve"],
+    usageLine: "nmg resolve MEMORY_ID [--reason TEXT] [--json]",
+    options: ["reason", "project-dir", "session-id"],
+    flags: [],
+    buildParams: (values) => resolutionParams(values, "resolve"),
+  },
+  {
+    method: "resolveRemember",
+    words: ["reopen"],
+    usageLine: "nmg reopen MEMORY_ID --related-memory ID [options] [--json]",
+    options: ["reason", "related-memory", "project-dir", "session-id"],
+    flags: [],
+    buildParams: (values) => resolutionParams(values, "reopen"),
   },
   {
     method: "search",
@@ -158,8 +181,8 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   {
     method: "get",
     words: ["get"],
-    usageLine: "nmg get MEMORY_ID... [--graph-hops N] [--json]",
-    options: ["graph-hops", "project-dir", "session-id"],
+    usageLine: "nmg get MEMORY_ID... [--active-graph-id ID] [--graph-hops N] [--json]",
+    options: ["active-graph-id", "graph-hops", "project-dir", "session-id"],
     flags: [],
     buildParams: getParams,
   },
@@ -413,9 +436,26 @@ function rememberParams(values: OptionValues): NmgRememberParams {
     writeReason: firstOption(values, "write-reason"),
     sessionId: firstOption(values, "session-id"),
     sourceRef: firstOption(values, "source-ref"),
+    resolution: firstOption(values, "resolution"),
+    openedAt: firstOption(values, "opened-at"),
+    relatedMemoryIds: values.options.get("related-memory"),
     markers: externalMarker,
     projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
   }) as unknown as NmgRememberParams;
+}
+
+function resolutionParams(
+  values: OptionValues,
+  action: "resolve" | "reopen",
+): NmgResolveRememberParams {
+  return compactObject({
+    action,
+    memoryId: singlePositional(values, action),
+    relatedMemoryIds: values.options.get("related-memory"),
+    reason: firstOption(values, "reason"),
+    projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
+    sessionId: firstOption(values, "session-id"),
+  }) as unknown as NmgResolveRememberParams;
 }
 
 function searchParams(values: OptionValues): NmgSearchParams {
@@ -446,6 +486,7 @@ function getParams(values: OptionValues): NmgGetParams {
   if (memoryIds.length === 0) throw new Error("get requires at least one memory ID");
   return compactObject({
     memoryIds,
+    activeGraphId: firstOption(values, "active-graph-id"),
     graphHops: numericOption(values, "graph-hops"),
     projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
     sessionId: firstOption(values, "session-id"),

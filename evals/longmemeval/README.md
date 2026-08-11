@@ -38,15 +38,28 @@ cannot change a later trial. Reports include Wilson 95% accuracy intervals and
 paired win/loss/tie counts against `no-memory`, matched by question and repeat.
 They also separate per-mode answer latency from deterministic NMG ingestion and
 embedding-index preparation time. Each NMG arm receives an independent copy of
-the same deterministic seed corpus.
+the same deterministic seed corpus. Multi-arm runs rotate execution order
+deterministically by question and repeat so provider cold-start cost is not
+always charged to the same arm. `tokenUsageByMode` reports provider input,
+output, cache-read, cache-write, and total token accounting separately from
+latency. `answerTimingByMode` separately reports Pi startup, total prompt wall
+time, assistant model-stream time, tool execution time, and shutdown time.
+`injectedContextByMode` reports mean characters and an explicitly approximate
+four-characters-per-token estimate; it is not presented as provider tokenization.
+NMG search sections remain in each row's `memoryPerformance`, while corpus
+ingestion and embedding-index construction remain in `preparations`.
 
 Answer correctness and retrieval sufficiency are scored independently. The
 retrieval judge sees only the context actually injected by `raw-session`,
 `flat-hybrid`, or `oracle`, or the successful `nmg_get` output for explicit NMG
 modes. Reports include `retrievalByMode` and a pipeline matrix that distinguishes
 "sufficient evidence, wrong answer" from a true retrieval miss. Pi does not
-currently expose automatically injected recall through RPC, so `nmg-auto`
-retrieval is reported as unavailable instead of being inferred from its answer.
+expose automatically injected recall through RPC, so the evaluator reconstructs
+the compact injected headers from the persisted retrieval trace. For explicit
+`nmg_get`, official LongMemEval session recall is computed from the exact memory
+IDs actually loaded and their immutable `sourceRef` values. Reports expose this
+separately as `officialRetrievalByMode`; the LLM retrieval judge remains a
+diagnostic sufficiency measure rather than the official evidence metric.
 `durationMs` measures the answer call only; `evaluationDurationMs` also includes
 the two independent judge calls.
 
@@ -80,6 +93,11 @@ than discarding the whole experiment; judge failures receive one fresh retry.
   forcibly disabled by `NMG_GRAPH_HOPS=0`.
 - `nmg-graph`: the same NMG import with one-hop typed relation expansion.
 
+Answer agents run without built-in filesystem/shell tools, skills, context files,
+or prompt templates. NMG arms expose only the three NMG tools. This prevents an
+agent from searching the checked-out benchmark files or reading golden answers;
+the memory delivery mechanism is the only arm-specific information channel.
+
 `raw-session`, `flat-hybrid`, `nmg-auto`, `nmg-lite`, and `nmg-graph` remain
 separately runnable diagnostic ablations; they are not members of the strict
 matched gate.
@@ -91,6 +109,42 @@ It does not test the quality of automatic extraction or learned topology.
 
 Reports and per-question NMG databases are written under `results/`, which is
 also ignored by Git.
+
+## 2026-08-11 matched regression after controller telemetry changes
+
+Run `2026-08-11T07-34-42.046Z` repeated the seven-category, one-repeat strict
+matched gate with `deepseek/deepseek-v4-flash`, thinking off, four concurrent
+questions, no external embedding provider, QPP1 shadow, and a controller that
+could not affect ranking. The generic diagnostic judge and the separate
+LongMemEval protocol scorer produced:
+
+| Arm | Diagnostic | Protocol score | Evidence judge | Mean answer latency |
+|---|---:|---:|---:|---:|
+| No memory | 1/7 | 2/7 | n/a | 5.64 s |
+| Deterministic NMG | 4/7 | 4/7 | 4/7 | 10.35 s |
+| NMG + non-ranking shadow | 4/7 | 4/7 | 4/7 | 9.24 s |
+
+Both NMG arms passed the same four categories: abstention, knowledge update,
+single-session assistant evidence, and single-session user evidence. They both
+missed multi-session aggregation, preference retrieval, and temporal reasoning.
+Against no memory, each NMG arm had three candidate-only wins, zero
+baseline-only losses, one shared pass, and three shared failures. This is a
+small regression gate, not a leaderboard claim, but it shows no answer-quality
+regression from the shadow telemetry path.
+
+Official exact-evidence recall differed despite the non-ranking controller:
+deterministic NMG had `recallAny=5/7`, `recallAll=3/7`, and `NDCG=0.567`; shadow
+had `5/7`, `2/7`, and `0.538`. The model made different search/get choices and
+loaded different exact evidence even though retrieval ranking was unchanged.
+The equal 4/7 answer and evidence-judge scores therefore do not establish
+retrieval equivalence; repeated paired trials are still required before making
+a cost or recall claim.
+
+Provider totals were 133,327 tokens for deterministic NMG, 97,207 for shadow,
+and 5,136 for no memory, including 107,392, 82,304, and 1,408 cache-read tokens
+respectively. Mean injected context estimates were 1,404 and 657 tokens for the
+two NMG arms. These one-repeat cost differences are observations of Agent tool
+behaviour, not effects attributable to the non-ranking controller.
 
 ## Strict matched development run
 

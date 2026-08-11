@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -56,6 +57,9 @@ if (cases.length === 0) throw new Error("NMG_EVAL_CASE did not match a test case
 const runId = new Date().toISOString().replaceAll(":", "-");
 const runDirectory = resolve(import.meta.dirname, "results", runId);
 mkdirSync(runDirectory, { recursive: true });
+const skillOptPolicy = process.env.NMG_SKILLOPT_POLICY_PATH
+  ? readFileSync(resolve(process.env.NMG_SKILLOPT_POLICY_PATH), "utf8").trim()
+  : null;
 
 const concurrency = Math.max(
   1,
@@ -65,6 +69,12 @@ const results = await mapConcurrent(cases, concurrency, runCase);
 const report = {
   runId,
   model: "deepseek/deepseek-v4-flash",
+  policy: skillOptPolicy
+    ? {
+        source: "skillopt_lab",
+        sha256: createHash("sha256").update(skillOptPolicy).digest("hex"),
+      }
+    : { source: "canonical" },
   passed: results.filter((result) => result.passed).length,
   total: results.length,
   results,
@@ -233,6 +243,12 @@ function createClient(dataDirectory: string): RpcClient {
     env: {
       ...definedEnvironment(),
       NMG_DATA_DIR: dataDirectory,
+      ...(skillOptPolicy
+        ? {
+            NMG_SKILLOPT_EVAL: "1",
+            NMG_SKILLOPT_POLICY_B64: Buffer.from(skillOptPolicy).toString("base64url"),
+          }
+        : {}),
     },
     args: [
       "--offline",

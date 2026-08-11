@@ -24,6 +24,7 @@ import type {
   MemoryNodeKind,
   MemoryRecord,
   MemoryResidence,
+  MemoryResolution,
   MemoryStatus,
   MemoryStorageState,
   MemoryTier,
@@ -346,6 +347,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         .prepare(
           "SELECT id, node_id, status, statement, memory_type, state_key, event_time, " +
             "source_actor, truth_status, confidence, polarity, predicate_key, extract_method, claims_json, markers_json, scope_json, valid_from, valid_until, " +
+            "resolution, opened_at, related_memory_ids_json, " +
             "residence, promoted_at, expires_at, evidence_role, supersedes_id, " +
             "tier, importance, access_count, last_accessed_at, evidence_id, " +
             "write_reason, write_source, created_at " +
@@ -377,6 +379,9 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         validFrom: row.valid_from ? String(row.valid_from) : null,
         validUntil: row.valid_until ? String(row.valid_until) : null,
         status: String(row.status) as MemoryStatus,
+        resolution: String(row.resolution ?? "resolved") as MemoryRecord["resolution"],
+        openedAt: row.opened_at ? String(row.opened_at) : null,
+        relatedMemoryIds: parseStringArray(row.related_memory_ids_json),
         residence: String(row.residence ?? "ltg") as MemoryResidence,
         promotedAt: row.promoted_at ? String(row.promoted_at) : null,
         expiresAt: row.expires_at ? String(row.expires_at) : null,
@@ -475,7 +480,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
     ): MemoryStorageState {
       const row = this.db
         .prepare(
-          `SELECT id, node_id, evidence_id, statement, residence, storage_state
+          `SELECT id, node_id, evidence_id, statement, residence, storage_state, resolution
            FROM memory_records WHERE id = ?`,
         )
         .get(memoryId) as Row | undefined;
@@ -485,6 +490,9 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       }
       const current = String(row.storage_state ?? "indexed") as MemoryStorageState;
       if (current === target) return current;
+      if (String(row.resolution ?? "resolved") !== "resolved" && target !== "indexed") {
+        throw new Error("open memories must be resolved before archival or quarantine");
+      }
       const now = new Date();
       const quarantineUntil =
         target === "quarantine"
@@ -530,6 +538,99 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       }
     }
 
+    setMemoryResolution(
+      memoryId: string,
+      target: MemoryResolution,
+      options: { relatedMemoryIds?: string[]; reason?: string; openedAt?: string } = {},
+    ): {
+      memoryId: string;
+      resolution: MemoryResolution;
+      openedAt: string | null;
+      relatedMemoryIds: string[];
+    } {
+      const row = this.db
+        .prepare(
+          `SELECT resolution, opened_at, related_memory_ids_json, storage_state
+           FROM memory_records WHERE id = ?`,
+        )
+        .get(memoryId) as Row | undefined;
+      if (!row) throw new Error(`memory ${memoryId} does not exist`);
+      const previous = String(row.resolution ?? "resolved") as MemoryResolution;
+      const relatedMemoryIds = [
+        ...new Set(
+          (options.relatedMemoryIds ?? parseStringArray(row.related_memory_ids_json))
+            .map((id) => id.trim())
+            .filter(Boolean),
+        ),
+      ];
+      if (target !== "resolved" && relatedMemoryIds.length === 0) {
+        throw new Error("open memories require at least one relatedMemoryId");
+      }
+      const exists = this.db.prepare("SELECT 1 FROM memory_records WHERE id = ?");
+      for (const relatedId of relatedMemoryIds) {
+        if (!exists.get(relatedId)) throw new Error(`related memory ${relatedId} does not exist`);
+      }
+      if (target !== "resolved" && String(row.storage_state ?? "indexed") !== "indexed") {
+        this.setMemoryStorageState(memoryId, "indexed");
+      }
+      const openedAt =
+        target === "resolved"
+          ? row.opened_at
+            ? String(row.opened_at)
+            : null
+          : (options.openedAt ?? new Date().toISOString());
+      if (
+        previous === target &&
+        JSON.stringify(relatedMemoryIds) === String(row.related_memory_ids_json)
+      ) {
+        return { memoryId, resolution: target, openedAt, relatedMemoryIds };
+      }
+      const now = new Date().toISOString();
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db
+          .prepare(
+            `UPDATE memory_records
+             SET resolution = ?, opened_at = ?, related_memory_ids_json = ?,
+                 storage_state = CASE WHEN ? = 'resolved' THEN storage_state ELSE 'indexed' END,
+                 retention_changed_at = CASE WHEN ? = 'resolved' THEN retention_changed_at ELSE NULL END,
+                 quarantine_until = CASE WHEN ? = 'resolved' THEN quarantine_until ELSE NULL END
+             WHERE id = ?`,
+          )
+          .run(
+            target,
+            openedAt,
+            JSON.stringify(relatedMemoryIds),
+            target,
+            target,
+            target,
+            memoryId,
+          );
+        this.db
+          .prepare(
+            `INSERT INTO memory_resolution_events
+              (id, memory_id, from_resolution, to_resolution, opened_at,
+               related_memory_ids_json, reason, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            randomUUID(),
+            memoryId,
+            previous,
+            target,
+            openedAt,
+            JSON.stringify(relatedMemoryIds),
+            options.reason?.trim() || null,
+            now,
+          );
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+      return { memoryId, resolution: target, openedAt, relatedMemoryIds };
+    }
+
     /**
      * Produce a conservative dry-run report. Callers must explicitly apply the
      * returned transitions; this method never archives or deletes content.
@@ -561,6 +662,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
            FROM memory_records m
            WHERE m.residence = 'ltg'
              AND m.status IN ('active', 'inactive', 'superseded')
+             AND m.resolution = 'resolved'
              AND m.storage_state IN ('indexed', 'dormant')
              AND m.importance <= ?
              AND m.access_count <= ?
@@ -697,6 +799,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         .prepare(
           `SELECT id, node_id FROM memory_records
            WHERE residence = 'stg' AND status IN ('active', 'disputed')
+             AND resolution = 'resolved'
              AND expires_at IS NOT NULL AND expires_at <= ?
            ORDER BY expires_at, id LIMIT ?`,
         )

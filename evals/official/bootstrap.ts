@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { officialPythonExecutable } from "./python.ts";
 
 type Upstream = { repository: string; commit: string };
 
@@ -22,7 +23,7 @@ for (const [name, upstream] of Object.entries(manifest)) {
 
 const python = resolve(root, ".benchmarks", "python");
 run("uv", ["venv", "--python", "3.11", python]);
-const executable = resolve(python, "Scripts", "python.exe");
+const executable = officialPythonExecutable(root, {}, process.platform);
 run("uv", ["pip", "install", "--python", executable, "regex", "numpy", "nltk"]);
 process.stdout.write(`Official benchmark sources and Python are ready under ${resolve(root, ".benchmarks")}\n`);
 

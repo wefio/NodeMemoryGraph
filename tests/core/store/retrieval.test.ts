@@ -63,6 +63,47 @@ test("searchContext returns results sorted by contextUsefulness", () => {
   });
 });
 
+test("searchContext surfaces a bounded open memory beside its retrieved anchor", () => {
+  withStore((store) => {
+    const anchor = store.remember({
+      statement: "Atlas uses SQLite for local persistence",
+      nodeName: "Atlas storage",
+      memoryType: "fact",
+    });
+    for (let index = 0; index < 30; index += 1) {
+      store.remember({
+        statement: `Unrelated archive item ${index}`,
+        nodeName: `Archive ${index}`,
+        importance: 0.9,
+      });
+    }
+    const open = store.remember({
+      statement: "Verify portability on the remaining target platform",
+      nodeName: "Release verification backlog",
+      memoryType: "event",
+      importance: 0,
+      resolution: "open",
+      relatedMemoryIds: [anchor.memory.id],
+    });
+
+    const context = store.searchContext("Which database does Atlas use?", {
+      limit: 8,
+      retrievalMode: "fts5",
+    });
+    assert.ok(context.results.some((result) => result.memory.id === anchor.memory.id));
+    assert.ok(context.results.some((result) => result.memory.id === open.memory.id));
+    assert.equal(
+      context.results.find((result) => result.memory.id === open.memory.id)?.memory.resolution,
+      "open",
+    );
+    assert.equal(
+      context.activeGraph?.selections.find((selection) => selection.memoryId === open.memory.id)
+        ?.source,
+      "open_attachment",
+    );
+  });
+});
+
 test("searchContext populates activeGraph with budget, usage and trace id", () => {
   withStore((store) => {
     store.remember({

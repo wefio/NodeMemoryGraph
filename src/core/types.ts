@@ -128,6 +128,8 @@ export interface ClaimOutcomeEvent {
   createdAt: string;
 }
 export type MemoryStatus = "active" | "deleted" | "disputed" | "inactive" | "superseded";
+export const MEMORY_RESOLUTIONS = ["open", "resolved", "reopened"] as const;
+export type MemoryResolution = (typeof MEMORY_RESOLUTIONS)[number];
 export const EVIDENCE_ROLES = [
   "contradict",
   "example",
@@ -213,6 +215,12 @@ export interface MemoryRecord {
   validFrom: string | null;
   validUntil: string | null;
   status: MemoryStatus;
+  /** Whether this memory represents an unresolved structure or a closed result. */
+  resolution: MemoryResolution;
+  /** First/most-recent time the structure entered an open or reopened state. */
+  openedAt: string | null;
+  /** Stable memories whose neighbourhood should make this open item reachable. */
+  relatedMemoryIds: string[];
   residence: MemoryResidence;
   promotedAt: string | null;
   expiresAt: string | null;
@@ -224,6 +232,17 @@ export interface MemoryRecord {
   lastAccessedAt: string | null;
   writeReason: string;
   writeSource: MemoryWriteSource;
+  createdAt: string;
+}
+
+export interface MemoryResolutionEvent {
+  id: string;
+  memoryId: string;
+  fromResolution: MemoryResolution;
+  toResolution: MemoryResolution;
+  openedAt: string | null;
+  relatedMemoryIds: string[];
+  reason: string | null;
   createdAt: string;
 }
 
@@ -298,6 +317,9 @@ export interface RememberInput {
   scope?: MemoryScope;
   validFrom?: string;
   validUntil?: string;
+  resolution?: MemoryResolution;
+  openedAt?: string;
+  relatedMemoryIds?: string[];
   evidenceRole?: EvidenceRole;
   supersedesId?: string;
   residence?: MemoryResidence;
@@ -669,7 +691,7 @@ export interface ActiveGraphBudgetLedgerEntry {
 export interface ActiveGraphSelection {
   memoryId: string;
   nodeId: string;
-  source: "direct" | "graph_expansion";
+  source: "direct" | "graph_expansion" | "open_attachment";
   reason: RecallCue["reason"];
   rank: number;
   tier: MemoryTier;

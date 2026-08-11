@@ -126,11 +126,17 @@ nmg_remember(statement, type?, scope?)
 
 Automatic extraction may use the same write path. Privacy deletion, reindexing,
 graph editing, feedback inspection, and maintenance belong in CLI/UI/background
-operations rather than ordinary model tools.
+operations rather than ordinary model tools. The one exception is an explicit,
+session-owned calibration label submitted through `nmg_remember action=feedback`;
+it records adapter-owned evaluation metadata and never mutates memory truth or
+ranking. This action is currently a Pi shadow-controller integration, not an
+NMG Core/RPC method.
 
-The default Pi package exposes only these three tools. Graph editing, feedback,
+The default Pi package exposes only these three tools. Graph editing,
 rebalancing, consolidation, QPP, and experimental reasoning remain background,
-CLI, benchmark, or administrative concerns rather than Pi tools.
+CLI, benchmark, or administrative concerns. Explicit retrieval feedback is an
+action on the existing remember boundary, not a fourth tool or an automatic
+inference from user silence.
 
 ### 4.1 Agent-independent CLI and resident service
 
@@ -144,13 +150,29 @@ The CLI supports both one-shot administrative use and a resident mode:
 
 ```text
 nmg remember ...
-nmg search ... --json
-nmg get ... --json
+nmg search ... --compact-json  # agent-facing headers
+nmg search ... --json          # full diagnostics
+nmg get ... --active-graph-id <ID_FROM_SEARCH> --json
 nmg status --json
 nmg daemon start
 nmg daemon status
 nmg daemon stop
 ```
+
+`activeGraphId` is not decorative continuation metadata. Agent-independent
+clients must return it on exact `get` so the owning retrieval trace records
+which displayed candidates were actually used. Search/injection alone remains
+unlabelled; this prevents candidate exposure from becoming self-reinforcing
+positive feedback.
+
+This is the portable feedback boundary: every harness can submit actual-use
+attribution with `get(activeGraphId=...)` through the stable RPC. Labels such as
+task success, evidence sufficiency, expansion usefulness, and excessive noise
+depend on native answer, correction, token, and tool lifecycle events, so they
+remain harness-adapter telemetry. An adapter may write the versioned shadow log
+format and reuse the Lab exporter, but Core must not import `src/lab/` merely to
+make those experimental labels look transport-neutral. Silence or candidate
+exposure is never converted into a positive label.
 
 One-shot commands remain useful for people and diagnostics. Harnesses normally
 connect to the resident HTTP JSON-RPC service so the bounded in-memory working set,
@@ -253,6 +275,24 @@ or LTG lifecycle. A `MemoryNode` is a stable semantic address for a coherent
 group of records. Creating one permanent node for every new memory would
 reproduce a flat store with extra graph overhead and is not the target model.
 
+An unresolved structure is represented on the record itself, not as a new
+memory type. `resolution` is `resolved` by default and may be `open` or
+`reopened`; open records carry `openedAt` and one or more
+`relatedMemoryIds`. The related IDs are attributable anchors, not inferred graph
+edges. Open records remain indexed and are excluded from both LTG heat-based
+retention candidates and STG expiry. Explicit `resolve` returns them to normal
+retention; explicit `reopen` restores archived records to the searchable index.
+Every transition is appended to `memory_resolution_events`, preserving the
+reason and anchors without rewriting source history.
+
+Retrieval gives this state bounded reachability. When direct search retrieves an
+anchor, at most two related open records are inserted near the end of the normal
+first evidence window. They consume the same node, evidence, tier, and token
+budgets as every other AG record and do not start a second retrieval cascade.
+Pi renders them with `[open]`. The harness therefore guarantees reachability,
+but the Agent decides whether the unresolved item matters and must explicitly
+call `nmg_remember` with `action=resolve` or `action=reopen` to revise it.
+
 One record can contain several atomic facts. Following the chat.completions
 content-parts model, a record stays the single evidence unit (embeddings, FTS,
 provenance, and lifecycle all operate at record granularity) while carrying a
@@ -273,6 +313,18 @@ visibility but never rewrites the underlying `HistoryRecord`.
 AG contains references and query-local annotations, not authoritative copies.
 When AG is released, temporary nodes and edges disappear; only explicitly
 recorded usage outcomes, stability observations, and accepted writes survive.
+
+Harness-local execution observations follow the same rule. Recent tool errors,
+test outcomes, and edited paths may be projected into AG through a bounded
+session ring buffer so the model can use its immediate working state across
+turns and context compaction. While Pi still retains the original tool results,
+the buffer is not redundantly injected; compaction activates its bounded AG
+projection. These observations are not `MemoryRecord`s and are never written to
+SQLite merely because a tool ran, and disappear when the owning session ends.
+Only an explicit, semantically judged `nmg_remember` call may turn an outcome
+into STG/LTG memory. Pi remains responsible for conversational compaction; NMG
+must not copy the doomed raw message span into durable storage as an automatic
+"rescue" path.
 
 ### 5a. Influence permissions
 
@@ -489,6 +541,7 @@ projection may contain:
 - selected persistent relations;
 - temporary STG-to-LTG, LTG-to-LTG, or query-local relations used only for the
   current task.
+- bounded harness-local tool observations that remain virtual and session-owned.
 
 AG construction is query planning, not graph copying. It should first identify
 candidate nodes, then allocate local-content and relation budgets according to
@@ -570,6 +623,74 @@ Atomic-memory promotion and structural consolidation remain separate. A clear
 fact, preference, constraint, state, or explicit remember request may enter LTG
 immediately. New relations, derived concepts, aggregated strategies, and node
 merges/splits require the stronger stability process above.
+
+Because Pi session STG and shared LTG are physically separate SQLite stores,
+changing a row's `residence` flag is not cross-store consolidation. The runtime
+therefore treats consolidation as an explicit materialization step:
+
+```text
+independently attributable claim outcomes
+  -> per-claim posterior eligibility
+  -> STG consolidation candidate (shadow by default)
+  -> exact evidence + semantic record copied into LTG
+  -> LTG remember/dedup transaction
+```
+
+Retrieval frequency, repeated rendering, and silence never qualify a memory.
+Every atomic claim must pass minimum independent-vote, posterior-mean, and
+conservative-lower-bound gates. The copied LTG record carries a
+`consolidated_from_stg` marker pointing to its source memory; LTG's exact
+same-scope deduplication makes retry after interruption idempotent. Automatic
+actuation is deliberately disabled by default and requires
+`NMG_STG_AUTO_CONSOLIDATE=1`; candidate reporting remains available in shadow
+so natural-use precision and reversibility can be measured first.
+
+Physical separation also means a new STG state cannot transactionally mark an
+older consolidated LTG state superseded. The runtime STG/LTG projection
+therefore reconciles active records with the same canonical `stateKey + scope`
+and exposes only the newest event/valid/creation-time version; LTG wins an exact
+tie. Time filters are applied before reconciliation, preserving the older state
+for historical queries. This deterministic current-state invariant is separate
+from posterior consolidation retraction: a single authoritative update must not
+wait for several contradictory outcome votes before stale state disappears.
+
+The atomic lifecycle also has an explicit reverse path. Promotion uses the
+strict vote/mean/conservative-bound gate; an already materialized copy remains
+active while it satisfies lower retained-mean and retained-lower-bound
+thresholds. Once it falls below that hysteresis gate, NMG logically withdraws
+only the active LTG row whose `consolidated_from_stg.sourceMemoryId` matches the
+STG source. Manual or pre-existing LTG duplicates carry no such ownership marker
+and cannot be retracted by STG feedback. Requalification creates a new LTG
+version rather than reviving the withdrawn interpretation. The current cold
+start thresholds and the LoCoMo official-evidence coverage/reversal audit are
+recorded in `consolidation-evaluation-2026-08-09.md`; automatic actuation remains
+off because that dataset has no authoritative false-promotion labels.
+
+Identity maintenance uses an even stricter boundary. Repeated `same_as`
+judgments accumulate observations and provenance on one pending proposal. A
+read-only automation assessment requires a pending identity proposal, at least
+five observations, mean confidence of at least 0.98, at least four active
+evidence memories represented on both nodes, identical evidence scope, and no
+pending `distinct_from` or `contradicts` proposal. Passing this assessment is
+only eligibility: it neither accepts the proposal nor calls `mergeNodes`.
+Uncertain split and merge proposals remain pending for explicit review until a
+natural-data evaluation establishes an acceptable false-merge rate.
+
+The first natural-conversation gate audit is recorded in
+`topology-gate-evaluation-2026-08-09.md`. On LoCoMo speaker identities, 20/20
+injected same-person early/late candidates passed, 10/10 injected cross-person
+candidates were rejected by scope, all 20 eligible candidates lost eligibility
+after a competing `distinct_from` proposal, and assessment caused zero topology
+mutations. This validates the gate and its reversible proposal state, not
+automatic candidate generation, alias resolution, physical merge rollback, or
+end-to-end false-merge cost; those remain prerequisites for an actuator.
+
+The matched product probe in `matched-evaluation-2026-08-09.md` also found no
+answer-quality advantage for graph adaptation over NMG Lite (both 5/7) while
+Graph performed additional retrieval work. This small result is a product gate,
+not a universal benchmark claim: graph adaptation remains Lab-only and
+unattended topology mutation stays disabled unless a larger matched evaluation
+shows a reproducible benefit.
 
 #### 7.3.1 Edge strength is not one scalar
 
@@ -728,13 +849,19 @@ candidate pair
   -> reversible canonical view
 ```
 
-Acceptance does not physically delete either node. A versioned merge event
-records the input IDs, previous canonical mappings, decision relation, evidence,
-algorithm/model version, reviewer, and rollback state. Original records,
-evidence, and edges retain their original node IDs; query resolution follows a
-`canonical_id`/redirect view. Rollback removes that mapping. A later split
-reassigns only evidence with known provenance; ambiguous members remain under
-the old/common parent rather than being guessed into a child.
+Acceptance never physically deletes source nodes or evidence. The current
+explicit `mergeNodes` actuator does move memory ownership to a target node and
+rewrites its local relation neighbourhood, so each new merge also writes an
+exact rollback journal: source/target node snapshots, original memory
+assignments, and the complete pre/post relation sets. `node rollback` restores
+that state in one immediate transaction only if every moved memory, involved
+node status, and relation still matches the recorded post-merge state. It
+refuses to overwrite later edits. A newly created merge target remains as an
+inactive tombstone after rollback so stable IDs and audit history are not
+reused; a pre-existing target is restored exactly. Merge transforms created
+before journaling cannot be rolled back automatically. A later split reassigns
+only evidence with known provenance; ambiguous members remain under the
+old/common parent rather than being guessed into a child.
 
 Node kinds require different defaults:
 
@@ -746,6 +873,46 @@ Node kinds require different defaults:
 Because false merges are more destructive than missed merges, automated
 identity uses a high asymmetric-loss threshold. The default action for uncertain
 pairs is a typed link, not a merge.
+
+The BPID hard-negative audit (`topology-bpid-evaluation-2026-08-09.md`) shows
+why that threshold cannot be supplied by raw field similarity: even a `0.98`
+multi-field blocking score selected 19 false matches among 241 candidates while
+recalling only 222 of 4,333 true matches. Candidate generation and identity
+acceptance are therefore separate stages. A cheap blocker may bound semantic
+review, but its score is not accepted as calibrated merge confidence.
+
+The optional Namesakes adapter (`topology-namesakes-evaluation.md`) makes that
+separation explicit for ambiguous names. It uses labelled `Same`/`Other`
+mentions to report alias-like positive recall and exact-name negative rejection
+over a full threshold curve. It is a streaming, read-only Lab evaluation; it
+does not submit proposals or export a benchmark threshold into Core. The
+official Entities split was run in full (4,148 rows; 23,996 scored mentions).
+The local hashing baseline cannot separate aliases from namesakes: at threshold
+0.5 it gives 0.942 recall, 0.716 precision, and rejects only 0.026 of exact-name
+negatives; at 0.7 rejection rises to 0.684 while recall collapses to 0.304. It is
+therefore acceptable only as a broad candidate generator, never as merge
+confidence or an automatic topology actuator.
+
+A fixed ten-entity paired Agent probe additionally compared clean `Same`
+evidence with the identical evidence plus one high-scoring record taken from a
+separately resolved foreign entity page. Across five stochastic repeats and 50
+paired observations, DeepSeek V4 Flash exact attribution was 84% clean versus
+88% contaminated; five pairs became wrong, seven became correct, the exact
+McNemar p-value was 0.774, and no foreign record was accepted. The corrected
+probe therefore finds no stable downstream attribution effect on this small
+sample. Natural correction/recovery cost, larger-pair behavior, and end-to-end
+answer damage remain unmeasured. Automatic identity mutation remains off.
+
+The implemented `remember` boundary enforces that distinction. After saving a
+memory, an Agent may classify one bounded candidate as `same_entity`, `related`,
+`refines`, `conflict`, or `distinct`. NMG validates that both evidence memories
+belong to the same physical LTG or session-owned STG store, conservatively
+rejects identity/refinement/conflict claims with incompatible scope, and rejects
+conflicts whose explicit validity intervals do not overlap. It then stores a
+provenance-bearing **pending topology proposal**. `same_entity` creates a
+regulatory `same_as` proposal; it does not call `mergeNodes`, redirect an ID, or
+change either node's status. Proposal review and physical identity merge remain
+separate maintenance operations.
 
 ## 8. Information and communication interpretation
 
@@ -801,13 +968,13 @@ retrieval distortion enough to pay for its added complexity and maintenance.
 
 ## 9. Session capture and write path
 
-Completed Pi turns are checkpointed automatically. Message persistence is
-idempotent by stable `(session_id, source_message_id)`. Pi remains the owner of
-its complete append-only session history: NMG stores stable source references,
-message metadata, selected message content, and governed evidence rather than a
-new cumulative transcript snapshot after every turn. A future `HistoryProvider`
-boundary should resolve Pi or other harness references while allowing a managed
-copy mode for harnesses without durable history.
+Completed Pi turns are not copied automatically. Pi remains the owner of its
+complete session history. During an accepted `nmg_remember`, the adapter may
+resolve the LLM-selected evidence against the active Pi branch and retain only
+that exact excerpt with stable `(session_id, source_message_id)` provenance.
+NMG therefore stores governed evidence rather than a cumulative transcript
+snapshot. A future `HistoryProvider` boundary may resolve other harness
+references or provide managed copies for harnesses without durable history.
 
 Session storage and semantic extraction are separate:
 
@@ -828,23 +995,40 @@ unresolved obligation, captures a conflict/exception, or contains an
 irreproducible result. Otherwise Pi remains the temporary transcript owner and
 NMG keeps no second body copy.
 
-Admission has four outcomes:
+Admission has three current outcomes:
 
 ```text
 reference  source/message identity only; body remains in the harness
 excerpt    exact bounded source excerpt plus provenance
-full       complete source message when short or indivisibly important
 discard    no NMG history row
 ```
 
+The same stable Pi write tool also exposes explicit logical withdrawal:
+`nmg_remember action=forget` requires an exact memory ID and is intended only
+for an explicit user request. NMG marks the record deleted, removes it from
+normal retrieval and derived indexes, and retains a tombstone for audit. The
+CLI equivalent is `nmg memory delete MEMORY_ID`. Neither interface claims to be
+physical privacy erasure; full provenance and aggregate-signal erasure is a
+separate lifecycle operation.
+
+User-owned data is exportable without opening SQLite directly. `nmg memory
+export --json` emits a versioned `nmg.memory-export.v1` bundle containing each
+MemoryRecord, its MemoryNode, and all retained HistoryRecord evidence/provenance.
+The default actor filter is `user`; `--all-actors` and `--include-deleted`
+broaden the export explicitly so routine Agent/tool material and tombstones are
+not included accidentally.
+
 The default Pi path treats a successful governed `nmg_remember` write as the
 positive admission signal. The adapter resolves its exact `evidence` against
-the current Pi branch, binds the resulting HistoryRecord by stable source
-message ID, and stores the full source message only when bounded; long sources
-retain the exact excerpt with limited surrounding context. If the source cannot
-be resolved, the supplied evidence remains a self-contained fallback. This
-keeps important evidence after Pi deletes a session without paying to preserve
-ordinary conversation.
+the most recent bounded window of the current Pi branch, preserves the original
+case from the matched source, and binds the HistoryRecord by stable source
+message ID. The projection contract is versioned as `pi.branch.v1`; an
+incompatible Pi message shape fails closed to the self-contained evidence path
+rather than binding false provenance. Evidence longer than the deterministic excerpt bound is not copied
+through this path and should instead use an explicit external artifact
+reference. If the source cannot be resolved, the supplied evidence remains a
+self-contained explicit fallback. This keeps selected evidence after Pi deletes
+a session without paying to preserve ordinary conversation.
 
 Clear, stable user-stated facts, preferences, constraints, and replaceable
 states may become atomic LTG memories automatically. They do not need to wait for
@@ -855,6 +1039,31 @@ before structural consolidation. Casual chatter, credentials, secrets, and
 unverified model claims do not become verified semantic memory. Assistant
 content may be retained as unverified conversation evidence when it is useful to
 remember that it was said.
+
+### 9.1 `remember` as the semantic maintenance boundary
+
+`remember` is the deliberate LLM intervention point between semantic judgment
+and deterministic storage. The two sides have different responsibilities:
+
+| LLM / Agent                                                                                                                                                                                                   | NMG core                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Extract a self-contained statement; assign type, actor, time, scope, and importance; decide whether a returned candidate is the same meaning, a genuinely replaced old value, a related concept, or distinct. | Enforce admission policy, stable IDs, exact deduplication, scope/state invariants, provenance, transactions, index deltas, version history, and reversible graph changes. |
+
+The common path remains one call. NMG writes the governed atom and returns only
+a bounded set of ambiguous near-duplicate or supersession candidates. When a
+candidate requires semantic judgment, the Agent may submit a second phase
+through the same `nmg_remember` tool. The first implemented resolution is
+`supersede`: the Agent identifies the new and stale record; NMG verifies that
+both records exist in the same LTG or session-owned STG store and have identical
+scope before applying the versioned replacement. Similarity alone never
+authorizes replacement.
+
+Exact duplicates and stable `stateKey + scope` replacement remain deterministic
+and need no LLM round trip. Physical node merge, split, deletion, and arbitrary
+SQL mutation are not part of model-facing `remember`; they require stronger
+validation and remain reversible maintenance operations. This preserves a
+small tool surface while allowing model capability to improve semantic
+organization without moving database invariants into prompts.
 
 Tool output and logs are ephemeral by default. NMG does not duplicate their
 result bodies during session capture. A model or user may explicitly promote a
@@ -899,6 +1108,28 @@ Maintenance has three scopes:
    or during an idle period.
 3. **Neighbourhood:** batch nearby dirty nodes when they share records,
    embeddings, or likely topology work.
+
+The resident service implements the accumulated scope as an amortized queue.
+Writes increment durable per-node `memory_index_delta` rows and exact memory
+use increments `pending_access_count`; a small process-local counter avoids a
+database due-check after every call. On the first signal after daemon startup,
+and thereafter only when a threshold is crossed, an event-loop maintenance
+slice examines at most a bounded number of nodes. It rebalances tiers for due
+access changes, compacts due leaf blocks, acknowledges their Delta rows, and
+records `maintenance.batch` latency plus rows touched. Defaults are centralized
+in `src/integration/config.ts` and may be overridden with
+`NMG_MAINTENANCE_WRITE_THRESHOLD`, `NMG_MAINTENANCE_ACCESS_THRESHOLD`, and
+`NMG_MAINTENANCE_NODE_LIMIT`. A separately bounded semantic phase runs on the
+first daemon backlog check and then every configured number of productive local
+batches (`NMG_MAINTENANCE_SEMANTIC_EVERY`). It expires a limited number of STG
+records, reconciles a limited number of independently observed relation pairs,
+and generates—but never automatically accepts—a limited number of topology
+proposals. Failed slices leave durable counters intact for a later retry and
+never turn a successful `remember` into a failed write.
+
+Topology proposal acceptance remains an explicit semantic review. Edge
+stability can justify reversible relation consolidation or demotion, but it
+cannot establish node identity and therefore cannot authorize a node merge.
 
 SQLite is authoritative and should own transactions, content hashes, version
 markers, dirty queues, FTS, and crash recovery. NMG decides semantic grouping,
@@ -957,6 +1188,32 @@ Stable-ID `getContext` remains available for L4/L5 recovery. The conservative
 states, constraints, contradictions/exceptions, marked records, high-value or
 frequently used records, and evidence with surviving derivations. Automatic
 purge is deliberately not implemented.
+
+Physical privacy erasure is a separate, explicit operation with a stronger
+contract than logical withdrawal. Its implementation must run as one reviewed
+job and produce an erasure receipt containing only non-sensitive identifiers
+and counts. The required propagation order is:
+
+1. compute the unsupported derived-memory closure and freeze concurrent writes;
+2. remove memory/evidence links, deleting a HistoryRecord body only when no
+   surviving memory, relation, or audit obligation references it;
+3. remove vectors, FTS rows, leaf membership, ANN/cache entries, dirty deltas,
+   claim events/posteriors, and proposals based on erased evidence;
+4. delete retrieval traces that referenced the target rather than merely
+   editing result arrays, because their query text may repeat the private fact;
+5. invalidate and rebuild summaries, relation evidence, aliases, and empty nodes
+   whose material depended on erased content;
+6. reset non-subtractable learned node/edge/controller aggregates for affected
+   identities and invoke adapter-specific erasure hooks for shadow logs/caches;
+7. physically delete target and unsupported derived rows, then use SQLite
+   secure-delete/VACUUM or encrypted-key destruction for the deployment threat
+   model.
+
+Until that full job and adapter-hook contract exist, `forget`/`memory delete`
+must describe themselves as logical withdrawal. The logical path is tested to
+remove normal retrieval, FTS, record embeddings, leaf membership, index deltas,
+claim state, evidence links, unsupported derivations, in-process vector-cache
+entries, Active Graph references, and pending evidence-dependent proposals.
 
 ## 11. Progressive retrieval
 
@@ -1052,6 +1309,97 @@ themselves differentiable. Those graphs are semantic and runtime data
 structures. A controller may build an ephemeral differentiable projection from
 their numeric features, optimise its parameters, then hand the result back to
 ordinary budgeted graph selection.
+
+The Pi adapter now has an opt-in shadow bridge (`NMG_CONTROLLER_SHADOW=1`). It
+lazy-loads the controller only after a real retrieval, records the baseline and
+learned node order in a bounded log under `NMG_DATA_DIR`, and trains only when
+the Agent explicitly fetches records from that same session-owned Active Graph.
+The log records exact injected characters, a labelled token estimate, model
+usage, tool rounds, and end-to-end latency. The same session may attach explicit
+task/retrieval labels with `nmg_remember action=feedback`; cross-session graph
+IDs and disabled-shadow submissions fail closed. Missing feedback remains
+unknown rather than being interpreted as success.
+Automatic injection, rank position, and an uncorrected answer are not positive
+labels. Shadow decisions cannot change ranking, folding, expansion, or budgets.
+This closes the data path without making an unevaluated controller part of the
+product policy.
+
+Because answer-quality labels only become observable after an Agent turn, the
+Pi bridge keeps completed, exactly-used, unlabelled retrievals in session-local
+shadow state. On the next distinct user turn it exposes at most one one-shot
+review reminder containing the AG ID and stable query task ID. Internal Pi tool
+loops with the same user prompt cannot consume the reminder, and header-only
+automatic-recall graphs are not offered for feedback. The Agent may submit explicit
+`evidenceSufficient`, `expansionUseful`, `excessiveNoise`, and `noMemoryNeeded`
+labels through the existing remember feedback action. Missing review remains
+unknown; the bridge never converts completion, silence, exposure, or lack of a
+correction into a label. This is collection infrastructure, not controller
+activation.
+
+Reminder exposure is logged as a non-training `tool_flow/feedback_nudge_shown`
+event. This separates "the Agent skipped an observable reminder" from "no
+reminder was presented" without turning either case into a relevance label.
+Query-derived task IDs establish lifecycle separation, not semantic diversity;
+calibration must additionally require enough varied natural tasks and must not
+count paraphrases of one decision as broad evidence.
+
+The stable daemon already owns agent-neutral `search -> get(activeGraphId)` use
+attribution. The richer feedback action stays in the Pi adapter because only the
+harness can observe answer completion, user correction, tool rounds, and model
+usage. A future second adapter should implement the same versioned shadow-event
+contract rather than adding a Lab-dependent feedback method to `nmg.v1`.
+
+The same bounded log records harness-level progressive-disclosure interventions
+as separate `tool_flow` events. In particular, a third explicit search made
+without loading evidence is recorded as `search_suppressed`; it is not counted
+as a retrieval, a task success, or a relevance label. This makes prompt/tool
+loops measurable without contaminating controller training targets.
+
+Retrieval events retain the existing AG query fingerprint, QPP components and
+expansion stages, and per-selection scores. The offline controller-dataset
+exporter joins retrieval/use/outcome/feedback by graph, accepts only separately
+labelled rows, and performs a chronological split over whole
+`semanticTaskId` groups. Query fingerprints remain diagnostic identifiers and
+are never promoted to semantic-task labels. Sparse logs produce explicit
+blockers and cannot authorize a policy change.
+
+Task grouping alone is not a sufficient leakage barrier. Query-derived task IDs
+can differ for paraphrases that ultimately use the same memory. Calibration
+therefore also derives a conservative **primary evidence target** from the
+highest-ranked exact record that the Agent actually loaded from each Active
+Graph. The activation gate requires enough distinct primary targets in training
+without letting one multi-evidence task inflate the diversity count. Leakage is
+checked more strictly against the complete exact-use sets: any memory used by
+both training and validation rejects the split, even when it was not the primary
+record in either row. The primary target is a diversity proxy, not a claim that
+one record completely represents a semantic task; multi-evidence questions
+retain their complete exact-use set in the replay row.
+
+Every new retrieval event also stores the exact
+`CONTROLLER_FEATURE_PROTOCOL_VERSION` feature snapshot and the contemporaneous
+Active Graph hard-budget envelope. This is required for offline replay: labels,
+QPP scores, and observed cost alone cannot reconstruct the controller input or
+its normalized budget targets. Legacy rows without either snapshot are reported
+and excluded.
+
+`npm run eval:controller-calibrate` consumes only fully labelled chronological
+train/validation rows. It trains a fresh candidate, evaluates baseline versus
+residual learned node ranking plus the generic stop/expand head, reports
+retrieval/controller/end-to-end/token/tool costs, and writes an auditable
+candidate artifact with source-log fingerprint, feature version, effective
+configuration, data window, metrics, and rollback-state fingerprint. The
+artifact is never installed automatically and always reports
+`eligibleForActivation: false`; activation remains a later matched gate.
+
+Progressive disclosure also constrains tool sequence, not only returned text.
+Within one Pi user turn, automatic recall is free, but after two explicit
+searches without loading selected evidence the adapter folds another search
+into a request to call `nmg_get` or use a current-source tool. A successful
+exact get reopens search for a complementary hop. The guard is keyed by Pi
+session plus user prompt because `before_agent_start` also fires during internal
+tool loops; resetting on that lifecycle event alone would make the bound
+ineffective. This is a harness cost/safety boundary, not a relevance judgment
+and not a replacement for QPP.
 
 ### 12.1 UOp op catalogue
 
@@ -1561,20 +1909,42 @@ Important gaps between the prototype and the target plugin:
   lossless for the model: a needed candidate can remain folded unless the model
   explicitly unfolds the directory. A matched end-to-end test must measure
   answer quality, evidence use, extra tool calls, tokens, and latency;
-- the claim-level posterior outcome loop in section 5c remains design-only.
-  Retrieval/use/outcome events exist, but independent-task Beta-style counters
-  do not yet update claim confidence or retrieval ranking;
+- the claim-level posterior outcome loop in section 5c now has a shadow-mode
+  storage and RPC path: immutable extraction confidence seeds a weak Beta prior,
+  attributable supported/contradicted events are deduplicated by semantic task,
+  and the store exposes posterior mean plus a conservative lower bound. It does
+  not change extraction confidence or retrieval ranking. Automatic collection
+  of trustworthy task outcomes and real-use calibration remain open;
 - the ANN experiment has unacceptable recall on the near-duplicate workload;
 - automatic extraction evaluation and the matched full-history sample are not
   yet large enough to make a product-quality claim;
 - the four official benchmark adapters validate and use official-format parsing,
   but larger repeated official-protocol runs have not yet established NMG's
   general capability improvement;
+- the HaluMem operation-level adapter now measures extracted records,
+  interference rejection, and update retrieval with the official judges. Its
+  first natural slice exposed raw-message ingress pollution (0/1 interference
+  rejection and 0.683 all-candidate weighted accuracy). On the same slice an
+  Agent executing the current durable-write policy rejected the interference,
+  produced 12 rather than 30 candidates, achieved 1.0 candidate accuracy and
+  4/4 updates, but retained only 1/2 ordinary gold points. This supports keeping
+  semantic admission in the harness while requiring recall audits. A second
+  matched slice reduced 52 turns to 8 accurate candidates, retained 7/8
+  ordinary gold points, and updated 1/1 target. Its benchmark interference
+  aggregate also showed why gates must inspect attributable per-record outcomes:
+  an official judge may accept a labelled interference inference even when the
+  injected wording was never stored. A real STG posterior audit then admitted 17
+  attributable candidates from sessions 5–6 and observed sessions 7–11, but
+  found no later exact independent confirmation and therefore qualified zero. A
+  second sessions 1–2 / observations 3–11 window also qualified zero. This shows
+  both that HaluMem lacks product-like outcome labels and that some extracted
+  records remain too compound; it does not authorize weakening the posterior
+  gate or enabling unattended consolidation;
 - accepted topology proposals are an offline/Lab maintenance operation, not an
   unattended production mutation policy;
-- store-level deletion and dependency cleanup exist, but a user-facing privacy
-  deletion/export interface and erasure of every derived learned signal remain
-  P5 work;
+- Pi/CLI logical withdrawal and a versioned user-memory export now exist;
+  physical privacy erasure of every provenance copy and learned aggregate remains
+  gated future work;
 - automatic recall exposure is recorded as selection, not usefulness; without
   answer-level citations the harness cannot prove that injected memory changed
   the final answer. Agent-directed `nmg_get(activeGraphId=...)` is the current
@@ -1683,6 +2053,22 @@ promotion latency, relation precision, false-consolidation rate, consolidated
 subgraph reuse, AG node/edge/evidence counts, budget utilization, expansion
 steps, and marginal evidence gain per added token.
 
+### Offline text-space policy optimization
+
+NMG Lab may use SkillOpt to optimize the stable recall/write/tool-use policy,
+but never mutable memory contents. The trainable artifact begins as the
+`memory_policy` field in `nmg-prompts.yaml`; history, evidence, facts, STG/LTG/AG
+state, node identity, and edge identity are immutable evaluation inputs.
+
+The first adapter learns only the next progressive-recall decision (`answer`,
+`expand`, or `stop`) and whether noise should be folded from explicit shadow
+labels. It uses chronological whole-task train/validation/test splits. A
+SkillOpt validation win creates a candidate only: matched Pi+NMG answer,
+evidence, pollution, token, tool-call, and latency gates must also pass, after
+which adoption is a reviewed edit back into the YAML source of truth. Runtime
+NMG never loads `best_skill.md` automatically. See
+`skillopt-policy-optimization.md` for the protocol and current readiness.
+
 The current Pi regression, seven-category invariant suite, controlled topology
 ablation, and strict seven-question LongMemEval matched sample prove integration
 and mechanism behaviour, not general capability improvement. The matched sample
@@ -1718,6 +2104,26 @@ prompt, question IDs, source history, evidence-token budget, and judge. Answer
 quality is reported together with evidence recall, injected tokens, backend
 records read, graph/tier depth, end-to-end latency, and index/maintenance work.
 The complete adapter contract and rollout order live in `evals/README.md`.
+
+The 2026-08-11 strict LongMemEval matched regression used one fixed question
+from each of seven categories. The separate protocol scorer gave no memory
+`2/7`, deterministic NMG `4/7`, and NMG with non-ranking shadow telemetry
+`4/7`; the generic diagnostic scorer gave `1/7`, `4/7`, and `4/7`. Both NMG
+arms passed the same four categories and failed the same three, so the telemetry
+path showed no answer-quality regression in this bounded gate. Exact official
+evidence `recallAll` was `3/7` versus `2/7`, however, because the stochastic
+Agent chose different search/get sequences despite identical ranking policy.
+Consequently a one-repeat answer tie is a regression check, not proof of
+retrieval or cost equivalence. Full parameters, latency, context, and token
+accounting are recorded in `evals/longmemeval/README.md`.
+
+The complete Namesakes topology audit also includes a read-only streaming
+counterfactual. At hashing threshold 0.5, 94.74% of incoming non-anchor mentions
+would emit a proposal and false proposals would co-locate 6,450 foreign records
+across 2,307 of 3,975 entities. Threshold 0.7 still affects 1,479 entities and
+3,003 foreign records while positive recall falls to 30.39%. This quantifies
+online proposal prevalence and structural contamination, but not correction
+events or downstream answer damage; automatic identity mutation remains off.
 
 The first pinned OmniMemEval LongMemEval search-only smoke used the same seven
 fixed questions as the Pi run. Forced NMG search initially made five cases

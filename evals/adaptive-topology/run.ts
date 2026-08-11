@@ -64,6 +64,8 @@ for (let index = 0; index < cases; index += 1) {
         usefulMemoryIds: [entry.memory.id, evidence.memory.id],
       });
     }
+    // Pair signals are deferred to maintenance; drain before proposing.
+    store.drainPendingTraceSignals();
     const proposals = store.proposeTopologyChanges({
       minObservations: 3,
       minGain: 0.7,
