@@ -779,11 +779,22 @@ export class NmgService {
           missingMemoryIds: params.memoryIds.filter((id) => !found.has(id)),
         };
       }
-      const traceStore = [localStore, sharedStore]
-        .filter((store): store is NmgStore => store !== undefined)
-        .find((store) => store.retrievalTrace(activeGraphId, params.sessionId) !== null);
+      const stores = [localStore, sharedStore].filter(
+        (store): store is NmgStore => store !== undefined,
+      );
+      const traceStore = stores.find(
+        (store) => store.traceOwnership(activeGraphId, params.sessionId) === "owned",
+      );
       if (!traceStore) {
-        throw new NmgProtocolError("NOT_FOUND", `active graph ${activeGraphId} does not exist`);
+        const exists = stores.some(
+          (store) => store.traceOwnership(activeGraphId, params.sessionId) !== "absent",
+        );
+        throw new NmgProtocolError(
+          "NOT_FOUND",
+          exists
+            ? `active graph ${activeGraphId} belongs to another session`
+            : `active graph ${activeGraphId} does not exist`,
+        );
       }
       traceStore.recordActiveGraphUse(
         activeGraphId,
@@ -807,23 +818,36 @@ export class NmgService {
     const localStore = params.projectDir
       ? this.#getStgStore(params.projectDir, params.sessionId)
       : undefined;
-    const candidates = localStore ? [localStore, sharedStore] : [sharedStore];
-    const traceStore = candidates.find(
-      (store) => store.retrievalTrace(params.activeGraphId, params.sessionId) !== null,
+    // isTraceOwned never throws on a foreign trace (vs retrievalTrace which
+    // does), so a foreign-session trace in the STG cannot abort the search
+    // for the real owner in the LTG. Record on EVERY owning store, not just
+    // the first match: in a merged STG+LTG retrieval the same activeGraphId
+    // can carry a trace in both stores, and the LTG (authoritative) side must
+    // not lose its calibration sample.
+    const stores = localStore ? [localStore, sharedStore] : [sharedStore];
+    const owned = stores.filter(
+      (store) => store.traceOwnership(params.activeGraphId, params.sessionId) === "owned",
     );
-    if (!traceStore) {
+    if (owned.length === 0) {
+      const exists = stores.some(
+        (store) => store.traceOwnership(params.activeGraphId, params.sessionId) !== "absent",
+      );
       throw new NmgProtocolError(
         "NOT_FOUND",
-        `active graph ${params.activeGraphId} does not exist`,
+        exists
+          ? `active graph ${params.activeGraphId} belongs to another session`
+          : `active graph ${params.activeGraphId} does not exist`,
       );
     }
-    traceStore.recordActiveGraphUse(
-      params.activeGraphId,
-      { usedMemoryIds: params.usedMemoryIds },
-      params.sessionId,
-    );
-    if (params.usedMemoryIds.length > 0) {
-      this.#signalMaintenance(traceStore, "access", false, params.usedMemoryIds.length);
+    for (const store of owned) {
+      store.recordActiveGraphUse(
+        params.activeGraphId,
+        { usedMemoryIds: params.usedMemoryIds },
+        params.sessionId,
+      );
+      if (params.usedMemoryIds.length > 0) {
+        this.#signalMaintenance(store, "access", false, params.usedMemoryIds.length);
+      }
     }
     return { activeGraphId: params.activeGraphId, usedMemoryIds: params.usedMemoryIds };
   }

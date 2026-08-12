@@ -1426,6 +1426,25 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       return Number(deleted.changes);
     }
 
+    // Safe ownership probe for trace lookups that must not throw (e.g. an RPC
+    // walking candidate stores to find the one that owns a trace). Unlike
+    // retrievalTrace it never throws, so a foreign trace in an early candidate
+    // cannot abort the search for the real owner. Returns a tri-state so the
+    // caller can keep the diagnostics distinction between "trace is gone" and
+    // "trace exists but belongs to another session".
+    traceOwnership(id: string, sessionId?: string): "owned" | "foreign" | "absent" {
+      const row = this.db
+        .prepare("SELECT session_id FROM retrieval_traces WHERE id = ?")
+        .get(id) as Row | undefined;
+      if (!row) return "absent";
+      const owner =
+        row.session_id === null || row.session_id === undefined
+          ? null
+          : String(row.session_id);
+      if (owner !== null && owner !== sessionId?.trim()) return "foreign";
+      return "owned";
+    }
+
     retrievalTrace(id: string, sessionId?: string): RetrievalTrace | null {
       const row = this.db.prepare("SELECT * FROM retrieval_traces WHERE id = ?").get(id) as
         Row | undefined;

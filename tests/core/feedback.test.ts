@@ -52,3 +52,28 @@ test("deriveUsedMemoryIds: empty answer or empty statement is safe", () => {
   assert.deepEqual(deriveUsedMemoryIds("", [mkResult("a", "something distinctive")]), []);
   assert.deepEqual(deriveUsedMemoryIds("something distinctive", [mkResult("a", "")]), []);
 });
+
+test("deriveUsedMemoryIds: prompt-vs-answer differential drops prompt-shared tokens", () => {
+  // The answer only restates prompt words (recall follows the prompt, so this
+  // is a systematic false positive). With no prompt, the memory "looks used"
+  // at 100% overlap; once prompt tokens are subtracted the contribution is
+  // zero and the memory must NOT be labelled useful.
+  const results = [mkResult("a", "Atlas uses SQLite storage")];
+  const prompt = "Atlas uses SQLite storage?";
+  const answer = "Atlas uses SQLite storage.";
+  assert.deepEqual(deriveUsedMemoryIds(answer, results), ["a"], "sanity: without prompt it is used");
+  assert.deepEqual(
+    deriveUsedMemoryIds(answer, results, prompt),
+    [],
+    "prompt-shared restatement is not evidence the memory was used",
+  );
+});
+
+test("deriveUsedMemoryIds: new info beyond the prompt still counts as used", () => {
+  const results = [mkResult("a", "Atlas pins SQLite for offline operation")];
+  const prompt = "Which storage does Atlas use offline?";
+  const answer = "Atlas pins SQLite for offline operation.";
+  // pins/sqlite/operation are not in the prompt -> still >=half the memory's
+  // distinctive tokens appear in the (differenced) answer -> used survives.
+  assert.deepEqual(deriveUsedMemoryIds(answer, results, prompt), ["a"]);
+});

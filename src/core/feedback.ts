@@ -115,8 +115,18 @@ export function contentTokens(text: string): string[] {
 export function deriveUsedMemoryIds(
   answerText: string,
   results: readonly MemorySearchResult[],
+  promptText?: string,
 ): string[] {
   const answerTokens = new Set(contentTokens(answerText));
+  // Answer-vs-prompt differential: tokens that also appear in the prompt are
+  // NOT evidence the memory was used. Recall follows the prompt (memories are
+  // matched against it), so an answer that restates prompt words would be a
+  // systematic false positive — tau would fit "answer↔prompt word overlap"
+  // instead of retrieval quality. Drop prompt tokens from the contribution
+  // set before measuring memory overlap.
+  if (promptText) {
+    for (const token of contentTokens(promptText)) answerTokens.delete(token);
+  }
   return results
     .filter((result) => {
       const tokens = contentTokens(result.memory.statement);

@@ -66,7 +66,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const taskWindow = new SessionTaskWindow();
   const recallFlow = new SessionRecallFlow();
   const runtimeAg = new SessionRuntimeAg();
-  const agentUseFlow = new AgentUseFlow();
+  const agentUseFlow = new AgentUseFlow(32);
   const qpp1Mode = configuredQpp1Mode();
   const qpp2Mode = configuredQpp2Mode();
   const qpp2RetainedMass = configuredQpp2RetainedMass();
@@ -524,12 +524,17 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     // tau auto-calibration needs. Never throws; feedback must not break completion.
     try {
       const answerText = extractAnswerText(event.messages);
-      const pending = answerText ? agentUseFlow.consume(sessionId) : [];
-      if (pending.length > 0 && connectionPromise) {
+      const promptText = extractPromptText(event.messages);
+      // Always consume: a pending trace whose turn produced no assistant text
+      // must not be carried into the next turn (its label would be matched
+      // against the WRONG answer). Consuming drops it — better to lose a
+      // sample than to mislabel one.
+      const pending = agentUseFlow.consume(sessionId);
+      if (pending.length > 0 && answerText && connectionPromise) {
         const active = await connectionPromise.catch(() => undefined);
         if (active) {
           for (const { traceId, results } of pending) {
-            const usedMemoryIds = deriveUsedMemoryIds(answerText, results);
+            const usedMemoryIds = deriveUsedMemoryIds(answerText, results, promptText);
             if (usedMemoryIds.length === 0) continue;
             try {
               await invoke("recordActiveGraphUse", {
@@ -1680,6 +1685,17 @@ function extractAnswerText(messages: readonly unknown[]): string {
     if (!value || typeof value !== "object") continue;
     const message = value as { role?: unknown; content?: unknown };
     if (message.role !== "assistant" || typeof message.content !== "string") continue;
+    if (message.content.trim()) parts.push(message.content);
+  }
+  return parts.join("\n").trim();
+}
+
+function extractPromptText(messages: readonly unknown[]): string {
+  const parts: string[] = [];
+  for (const value of messages) {
+    if (!value || typeof value !== "object") continue;
+    const message = value as { role?: unknown; content?: unknown };
+    if (message.role !== "user" || typeof message.content !== "string") continue;
     if (message.content.trim()) parts.push(message.content);
   }
   return parts.join("\n").trim();
