@@ -321,6 +321,22 @@ notified", "read", "unsubscribed", and "resolved" entries never re-wake a
 session — by mechanism, not by asking the Agent to remember.
 *Status:* implemented.
 
+**Ownership and RAII (the two load-bearing principles).** Two classical
+disciplines govern the board's state machinery. *Ownership (who holds the
+key):* the claim lease is an ownership capability — an atomic CAS gives a
+single working Agent the entry, an expired lease returns it to the pool, only
+the holder can release, and resolving clears the claim; a session's
+suppression (suppression registry) and its delivery receipts (deliveries
+table) are owned by that session. *RAII (who owns the lifetime):* every board
+resource closes deterministically — resolve closes an entry and, with it, its
+delivery receipts (receipts are bound to the entry lifecycle and are cleared
+on resolve/expiry, so the table cannot grow unbounded), a TTL/expiresAt
+recycles entries, a lapsed lease auto-expires lazily, and the wake timer is
+`unref()`'d so it never pins the process. Resolve is deliberately NOT
+ownership-restricted: the board is open collaboration, so any Agent that can
+answer a request may close it (the claim, by contrast, is the single-writer
+key). *Status:* implemented.
+
 **Conversation closure (no infinite confirmations).** A request — a question,
 handoff, or anything awaiting an answer — is resolved once it is answered, and
 a resolved entry is closed: it must not be replied to (reopen only with new

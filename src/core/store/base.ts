@@ -179,6 +179,11 @@ export class NmgStoreBase {
          WHERE id = ? AND task_id = ?`,
       )
       .run(now, input.agentId, input.resolution ?? null, input.entryId, input.taskId);
+    // RAII: receipts are bound to the entry lifecycle. The wake loop only scans
+    // open entries, so a resolved entry's delivery receipts are dead state —
+    // clear them with the close so task_board_deliveries cannot grow without
+    // bound.
+    this.db.prepare("DELETE FROM task_board_deliveries WHERE entry_id = ?").run(input.entryId);
     return this.taskBoardEntry(input.entryId)!;
   }
   /** True when a board entry carries a live claim (holder set, lease not expired). */
@@ -343,12 +348,29 @@ export class NmgStoreBase {
       .run(input.sessionId, input.taskId);
   }
   pruneExpiredTaskBoardEntries(now = new Date().toISOString(), taskId?: string): number {
-    const result = taskId
-      ? this.db
+    // RAII: an expired entry's receipts die with it (same binding as resolve).
+    if (taskId) {
+      this.db
+        .prepare(
+          `DELETE FROM task_board_deliveries WHERE entry_id IN (
+             SELECT id FROM task_board_entries WHERE task_id = ? AND expires_at <= ?)`,
+        )
+        .run(taskId, now);
+      return Number(
+        this.db
           .prepare("DELETE FROM task_board_entries WHERE task_id = ? AND expires_at <= ?")
-          .run(taskId, now)
-      : this.db.prepare("DELETE FROM task_board_entries WHERE expires_at <= ?").run(now);
-    return Number(result.changes);
+          .run(taskId, now).changes,
+      );
+    }
+    this.db
+      .prepare(
+        `DELETE FROM task_board_deliveries WHERE entry_id IN (
+           SELECT id FROM task_board_entries WHERE expires_at <= ?)`,
+      )
+      .run(now);
+    return Number(
+      this.db.prepare("DELETE FROM task_board_entries WHERE expires_at <= ?").run(now).changes,
+    );
   }
   /** Directory of active named channels (the lobby). Excludes the world channel
    * itself and expired/fully-resolved channels; ordered most-recently-updated

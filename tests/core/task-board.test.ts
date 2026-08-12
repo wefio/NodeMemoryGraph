@@ -327,3 +327,43 @@ test("task board suppression registry is session-scoped and reversible", () => {
     assert.deepEqual(store.listTaskBoardSuppressions("session-a"), []);
   });
 });
+
+test("delivery receipts are RAII-bound: cleared when the entry resolves or expires", () => {
+  withStore((store) => {
+    const entry = store.putTaskBoardEntry({
+      taskId: "raii-resolve",
+      agentId: "sender",
+      kind: "question",
+      content: "receipt lifecycle via resolve",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    store.recordTaskBoardDelivery({ entryId: entry.id, sessionId: "sess-a" });
+    assert.equal(store.hasTaskBoardDelivery({ entryId: entry.id, sessionId: "sess-a" }), true);
+    store.resolveTaskBoardEntry({ taskId: "raii-resolve", entryId: entry.id, agentId: "sender" });
+    assert.equal(store.hasTaskBoardDelivery({ entryId: entry.id, sessionId: "sess-a" }), false);
+  });
+  withStore((store) => {
+    const expiring = store.putTaskBoardEntry({
+      taskId: "raii-expire",
+      agentId: "sender",
+      kind: "question",
+      content: "receipt lifecycle via expiry",
+      expiresAt: "2020-01-01T00:00:00.000Z", // already expired
+    });
+    store.recordTaskBoardDelivery({ entryId: expiring.id, sessionId: "sess-a" });
+    assert.equal(store.hasTaskBoardDelivery({ entryId: expiring.id, sessionId: "sess-a" }), true);
+    store.pruneExpiredTaskBoardEntries();
+    assert.equal(store.hasTaskBoardDelivery({ entryId: expiring.id, sessionId: "sess-a" }), false);
+    // The other delivery (for a live entry) survives a global prune.
+    const live = store.putTaskBoardEntry({
+      taskId: "raii-live",
+      agentId: "sender",
+      kind: "note",
+      content: "still open",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    store.recordTaskBoardDelivery({ entryId: live.id, sessionId: "sess-a" });
+    store.pruneExpiredTaskBoardEntries();
+    assert.equal(store.hasTaskBoardDelivery({ entryId: live.id, sessionId: "sess-a" }), true);
+  });
+});
