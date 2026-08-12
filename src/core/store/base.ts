@@ -27,6 +27,7 @@ import type {
   TopologyProposal,
   VectorEmbedder,
 } from "../types.ts";
+import { WORLD_BOARD_ID } from "../types.ts";
 import { histogramAdd } from "../perf.ts";
 import { Router } from "../router.ts";
 import { cosineSimilarity, HashingVectorEmbedder } from "../vector.ts";
@@ -186,6 +187,31 @@ export class NmgStoreBase {
           .run(taskId, now)
       : this.db.prepare("DELETE FROM task_board_entries WHERE expires_at <= ?").run(now);
     return Number(result.changes);
+  }
+  /** Directory of active named channels (the lobby). Excludes the world channel
+   * itself and expired/fully-resolved channels; ordered most-recently-updated
+   * first. Entry count counts open (non-expired, non-resolved) entries only. */
+  listTaskBoards(now = new Date().toISOString()): Array<{
+    taskId: string;
+    entryCount: number;
+    lastUpdatedAt: string;
+  }> {
+    this.pruneExpiredTaskBoardEntries(now);
+    return (
+      this.db
+        .prepare(
+          `SELECT task_id, COUNT(*) AS entry_count, MAX(created_at) AS last_updated_at
+           FROM task_board_entries
+           WHERE expires_at > ? AND status = 'open' AND task_id != ?
+           GROUP BY task_id
+           ORDER BY last_updated_at DESC`,
+        )
+        .all(now, WORLD_BOARD_ID) as Row[]
+    ).map((row) => ({
+      taskId: String(row.task_id),
+      entryCount: Number(row.entry_count),
+      lastUpdatedAt: String(row.last_updated_at),
+    }));
   }
   private taskBoardEntry(id: string): TaskBoardEntry | null {
     const row = this.db.prepare("SELECT * FROM task_board_entries WHERE id = ?").get(id) as

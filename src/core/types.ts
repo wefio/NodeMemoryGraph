@@ -628,7 +628,7 @@ export interface MemoryContext {
   results: MemorySearchResult[];
   relations: NodeRelation[];
   progressiveDisclosure?: {
-    strategy: "warm_halves";
+    strategy: "learned_retained_mass" | "warm_halves";
     rankedWarmCandidates: number;
     initiallyVisible: number;
     deferredMemoryIds: string[];
@@ -742,6 +742,9 @@ export interface ActiveGraph {
   createdAt: string;
 }
 
+/** The default Task Board channel when no explicit taskId is given: the shared
+ * world channel acts as a lobby, surfacing active named channels on read. */
+export const WORLD_BOARD_ID = "default";
 export const TASK_BOARD_KINDS = [
   "blocker",
   "decision",

@@ -49,13 +49,16 @@ remember_description: >-
   replaceable property within a stable scope; it is not a topic or grouping tag.
 
 board_description: >-
-  Coordinate through a temporary task-scoped blackboard shared by NMG clients.
-  Entries retain writer attribution, expire automatically, and can be read by a
-  task-local cursor or explicitly resolved. Blackboard content is projected into
-  the caller's private runtime context; it is not indexed as long-term memory.
-  Keep it minimal: taskId is the only channel boundary — prefer a new taskId (or
-  an nmg_remember record for durable knowledge) over new board features such as
-  DMs, mentions, groups, or pinning.
+  Coordinate through a temporary shared blackboard. Without a taskId, entries
+  land on the shared world channel, which every Agent reads by default; reading
+  the world channel also surfaces the lobby — active named channels you can
+  discover and join by name. Explicit taskIds open named channels. Entries
+  retain writer attribution (NMG_AGENT_ID), expire automatically, and can be
+  read by a task-local cursor or explicitly resolved. Blackboard content is
+  projected into the caller's private runtime context; it is not indexed as
+  long-term memory. Keep it minimal: taskId is the only channel boundary —
+  prefer a new taskId (or an nmg_remember record for durable knowledge) over
+  new board features such as DMs, mentions, groups, or pinning.
 
 board_action_parameter_description: >-
   Use put to publish one concise coordination entry, read to fetch entries after
@@ -63,10 +66,10 @@ board_action_parameter_description: >-
   not create semantic memory; use nmg_remember separately for durable knowledge.
 
 board_task_id_parameter_description: >-
-  Optional. Stable task identifier shared by collaborating Agents. It is the
-  blackboard isolation boundary, not a session ID or semantic memory scope.
-  When omitted, the board is scoped to the caller's own identity (agent
-  username or session), giving every agent a personal cross-session board.
+  Optional. Name of the channel to read or write. When omitted, entries land on
+  the shared world channel (the default), which every Agent reads; reading the
+  world channel also lists active named channels so you can discover and join
+  one by name.
 
 board_content_parameter_description: >-
   Concise task coordination state such as a goal, blocker, result, handoff,

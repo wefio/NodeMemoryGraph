@@ -106,3 +106,57 @@ test("task board content never enters semantic memory search", () => {
     assert.deepEqual(store.search("uniqueboardtoken"), []);
   });
 });
+
+test("task board lobby lists active named channels and hides the world channel", () => {
+  withStore((store) => {
+    const future = "2099-01-01T00:00:00.000Z";
+    store.putTaskBoardEntry({
+      taskId: "alpha",
+      agentId: "agent-a",
+      kind: "goal",
+      content: "Alpha channel goal.",
+      expiresAt: future,
+    });
+    store.putTaskBoardEntry({
+      taskId: "beta",
+      agentId: "agent-b",
+      kind: "note",
+      content: "Beta channel note.",
+      expiresAt: future,
+    });
+    // The world channel itself must not appear in the lobby directory.
+    store.putTaskBoardEntry({
+      taskId: "default",
+      agentId: "agent-c",
+      kind: "note",
+      content: "A lobby message.",
+      expiresAt: future,
+    });
+    // Expired channels are pruned before listing.
+    store.putTaskBoardEntry({
+      taskId: "gone",
+      agentId: "agent-d",
+      kind: "note",
+      content: "Expired.",
+      expiresAt: "2000-01-01T00:00:00.000Z",
+    });
+    // Fully resolved channels are not advertised as active.
+    const done = store.putTaskBoardEntry({
+      taskId: "done",
+      agentId: "agent-e",
+      kind: "result",
+      content: "Finished.",
+      expiresAt: future,
+    });
+    store.resolveTaskBoardEntry({ taskId: "done", entryId: done.id, agentId: "agent-e" });
+
+    const boards = store.listTaskBoards();
+    assert.deepEqual(
+      boards.map((board) => board.taskId).sort(),
+      ["alpha", "beta"],
+    );
+    const alpha = boards.find((board) => board.taskId === "alpha");
+    assert.equal(alpha?.entryCount, 1);
+    assert.ok(alpha?.lastUpdatedAt);
+  });
+});

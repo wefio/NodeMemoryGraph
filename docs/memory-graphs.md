@@ -262,21 +262,63 @@ not proof that the model used a memory. Pi's `session_before_compact` event
 clears the injection window so evidence removed by compaction can be rendered
 again.
 
-### Shared Task Board boundary
+### Shared Task Board (cross-Agent coordination, not a memory graph)
 
 One private AG cannot transmit state to another Agent. NMG therefore maintains
 an independent, task-scoped coordination table in the daemon. `nmg_board` and
-`nmg board put/read/resolve` operate on attributed, expiring entries identified
-by a shared `taskId`; reads return a task-local cursor so callers can avoid
-reinjecting old entries. Pi places read entries in the caller's bounded runtime
-AG projection.
+`nmg board put/read/resolve` operate on attributed, expiring entries; reads
+return a task-local cursor so callers avoid reinjecting old entries. Pi places
+read entries in the caller's bounded runtime AG projection.
 
 The board is deliberately outside `memory_records`, FTS, embeddings, QPP, and
-controller training. It may contain concise goals, questions, blockers, results,
-handoffs, or decisions, but not secrets or hidden chain-of-thought. Task Board
-content becomes durable semantic memory only through a separate, attributable
-`remember` operation. Current local sharing trusts callers that know the task ID;
-ACLs and multi-device transport remain future infrastructure.
+controller training. It may contain concise goals, questions, blockers,
+results, handoffs, or decisions, but not secrets or hidden chain-of-thought.
+Board content becomes durable semantic memory only through a separate,
+attributable `remember` operation. Current local sharing trusts callers that
+know the task ID; ACLs and multi-device transport remain future infrastructure.
+
+**Channel model — world channel + named channels.** `taskId` is a channel, not
+a visibility hierarchy. There is one *world channel* (the default when no
+`taskId` is given) and independently *named channels*; any Agent can read or
+write any channel it knows by name. The world channel acts as a lobby: reading
+it surfaces the names and recency of active named channels (a directory), so an
+Agent that does not know a channel name can still discover and join one. Naming
+is public; joining is implicit (read/write by name); there is deliberately no
+per-channel access control. *Status:* world channel with a lobby directory is a
+design proposal; today an omitted `taskId` falls back to a stable default board
+and there is no channel directory yet.
+
+**Writer identity.** Entries are attributed to the writing Agent so readers can
+tell which Agent posted each entry. `NMG_AGENT_ID` is the readable username;
+fallbacks are the session id, then the pid. *Status:* implemented.
+
+**Memory pointers.** An entry may carry `memory=<id>` references to LTG records
+instead of copying their content; a reader expands them with `nmg_get`. The
+board therefore transmits *references* to durable knowledge, never a second
+copy — consistent with "LTG is the only shared graph" (§1). *Status:* design
+proposal (the content field already accepts such ids informally; no structured
+pointer type, validation, or reader hint exists yet).
+
+**AG projection.** On read, entries are projected into the *reading* Agent's
+private runtime AG, never into any shared graph. *Status:* implemented.
+
+**Design lineage (not validated standards).**
+
+- the world channel is a *common ground* surface (Clark): shared, continually
+  aligned baseline facts for joint activity;
+- memory pointers implement a *transactive memory* pattern: the group knows
+  where knowledge lives and points to it rather than duplicating it;
+- the board as a whole is a bounded, expiring, group-visible coordination layer
+  between private AGs and per-Agent LTG — engineering precedents include
+  IRC-style channel discovery and recent "governed shared memory" proposals.
+  Treat these as lineage, not consensus: definitions vary and most sources are
+  preprints.
+
+**Guardrail.** The board must stay temporary and non-authoritative: entries
+expire (TTL), never enter LTG search, and become durable memory only through an
+explicit attributable `remember`. It is not, and must not become, a shared
+authoritative graph — that would break per-Agent memory ownership and the
+immutable-content red line.
 
 ### AG lifecycle: memory-resident, trace-persistent
 
@@ -468,7 +510,14 @@ Not yet implemented:
 - calibrated SPRT evaluation for tier opening;
 - learned temporal edge direction, contrastive unlearning, and automatic
   compression merge (see
-  [edge-activation-design.md](edge-activation-design.md)).
+  [edge-activation-design.md](edge-activation-design.md));
+- the Task Board world channel and its lobby directory (an omitted `taskId`
+  falls back to a stable default board today; discovering named channels from
+  the world channel is not implemented);
+- structured `memory=<id>` memory pointers on Task Board entries (the content
+  field accepts such ids informally; no pointer type, validation, or reader
+  expansion hint exists);
+- Task Board ACLs and multi-device transport (still future infrastructure).
 
 ## 9. Open questions
 

@@ -645,9 +645,9 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       { sessionManager },
     )) as { details: { entry: { agentId: string; taskId: string } } };
     // No explicit NMG_AGENT_ID and no taskId: the entry is attributed to the
-    // session id AND lands on that identity-scoped board (agent as username).
+    // session id (fallback identity) and lands on the shared world channel.
     assert.equal(boardPutSession.details.entry.agentId, "http-test-session");
-    assert.equal(boardPutSession.details.entry.taskId, "http-test-session");
+    assert.equal(boardPutSession.details.entry.taskId, "default");
     if (fallbackAgent === undefined) delete process.env.NMG_AGENT_ID;
     else process.env.NMG_AGENT_ID = fallbackAgent;
 
@@ -680,6 +680,17 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     )) as { content: Array<{ text: string }>; details: { entries: Array<{ id: string }> } };
     assert.deepEqual(boardRead.details.entries.map((entry) => entry.id), [boardPut.details.entry.id]);
     assert.match(boardRead.content[0].text, /Agent B should verify the parser tests/u);
+    // Reading the world channel (no taskId) surfaces the lobby directory of
+    // active named channels.
+    const worldRead = (await tools.get("nmg_board")!.execute(
+      "board-world-read",
+      { action: "read" },
+      undefined,
+      undefined,
+      { sessionManager: secondSessionManager },
+    )) as { content: Array<{ text: string }> };
+    assert.match(worldRead.content[0].text, /Active named channels/u);
+    assert.match(worldRead.content[0].text, /atlas-review/u);
     const boardProjection = (await handlers.get("before_agent_start")!(
       { prompt: "Continue the assigned review.", systemPrompt: "base" },
       { sessionManager: secondSessionManager },

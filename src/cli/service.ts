@@ -28,6 +28,7 @@ import {
   RETRIEVAL_MODES,
   TRUTH_STATUSES,
   VECTOR_GRANULARITIES,
+  type ActiveGraphBudget,
   type ClaimPosterior,
   type MemoryContext,
   type MemoryScope,
@@ -195,6 +196,12 @@ export class NmgService {
           return {
             action: "read",
             ...this.#getStore().readTaskBoard(parsed),
+          } as NmgMethodResult[M];
+        }
+        if (parsed.action === "list") {
+          return {
+            action: "list",
+            boards: this.#getStore().listTaskBoards(),
           } as NmgMethodResult[M];
         }
         return {
@@ -932,6 +939,8 @@ function parseSearchParams(value: unknown): NmgSearchParams {
     strongHitInitialTarget: optionalInteger(params, "strongHitInitialTarget", 1, 50),
     progressiveWarmDisclosure: optionalBoolean(params, "progressiveWarmDisclosure"),
     tieredDisclosure: optionalBoolean(params, "tieredDisclosure"),
+    persistTrace: optionalBoolean(params, "persistTrace"),
+    activeGraphBudget: optionalActiveGraphBudget(params, "activeGraphBudget"),
     perf: optionalBoolean(params, "perf"),
     projectDir: optionalString(params, "projectDir"),
     sessionId: optionalString(params, "sessionId"),
@@ -985,11 +994,15 @@ function parseSyncStgParams(value: unknown): NmgSyncStgParams {
 
 function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
   const params = objectParams(value);
-  const action = requiredEnum(params, "action", ["put", "read", "resolve"] as const);
+  const action = requiredEnum(params, "action", ["put", "read", "resolve", "list"] as const);
+  const agentId = requiredString(params, "agentId");
+  if (action === "list") {
+    return { action, agentId };
+  }
   const base = {
     action,
     taskId: requiredString(params, "taskId"),
-    agentId: requiredString(params, "agentId"),
+    agentId,
   };
   if (action === "put") {
     const expiresAt = optionalString(params, "expiresAt");
@@ -1234,6 +1247,25 @@ function optionalScope(params: Record<string, unknown>, key: string): MemoryScop
     throw new NmgProtocolError("INVALID_PARAMS", `${key} must be a string map`);
   }
   return value as MemoryScope;
+}
+
+function optionalActiveGraphBudget(
+  params: Record<string, unknown>,
+  key: string,
+): Partial<ActiveGraphBudget> | undefined {
+  const value = params[key];
+  if (value === undefined) return undefined;
+  const budget = objectParams(value);
+  return {
+    maxNodes: optionalInteger(budget, "maxNodes", 1, 50),
+    maxEdges: optionalInteger(budget, "maxEdges", 0, 100),
+    maxEvidence: optionalInteger(budget, "maxEvidence", 1, 50),
+    maxTokens: optionalInteger(budget, "maxTokens", 64, 100_000),
+    maxGraphHops: optionalInteger(budget, "maxGraphHops", 0, 3),
+    maxLocalTier: optionalInteger(budget, "maxLocalTier", 0, 3) as MemoryTier | undefined,
+    maxTierBudget: optionalInteger(budget, "maxTierBudget", 0, 50),
+    maxLatencyMs: optionalInteger(budget, "maxLatencyMs", 1, 60_000),
+  };
 }
 
 function optionalMarkers(params: Record<string, unknown>, key: string): MemoryMarker[] | undefined {

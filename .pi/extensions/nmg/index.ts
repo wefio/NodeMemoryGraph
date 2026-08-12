@@ -27,6 +27,7 @@ import type {
   MemorySearchResult,
   MemoryTier,
 } from "../../../src/core/types.ts";
+import { WORLD_BOARD_ID } from "../../../src/core/types.ts";
 import {
   configuredQpp1Mode,
   configuredQpp2Mode,
@@ -760,10 +761,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // across a session), then the pid as a last resort. A pid alone would
       // change every launch and fragment cross-session attribution.
       const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
-      // taskId is optional: without one the board is the caller's own
-      // identity-scoped board (agent username / session), so a user who gives
-      // no channel still gets a personal, cross-session consistent board.
-      const taskId = params.taskId?.trim() || agentId;
+      // taskId is optional: without one, entries land on the shared world
+      // channel (the lobby), which every Agent reads by default — no channel
+      // name needs to be agreed on in advance. Explicit taskIds open named
+      // channels that are surfaced in the world channel's lobby.
+      const taskId = params.taskId?.trim() || WORLD_BOARD_ID;
       const result = (await invoke("taskBoard", {
         ...params,
         taskId,
@@ -781,7 +783,18 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         }
         if (entries.length > 0) runtimeAg.activateProjection(sessionId);
       }
-      return toolResult(result, formatTaskBoardResult(result, taskId));
+      // Reading the world channel surfaces the lobby: the directory of active
+      // named channels, so an Agent that knows no channel name can discover
+      // and join one.
+      let directory: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> = [];
+      if (result.action === "read" && taskId === WORLD_BOARD_ID) {
+        const lobby = (await invoke("taskBoard", { action: "list", agentId })) as {
+          action: "list";
+          boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }>;
+        };
+        directory = lobby.boards ?? [];
+      }
+      return toolResult(result, formatTaskBoardResult(result, taskId, directory));
     },
   });
 }
@@ -1364,14 +1377,33 @@ interface TaskBoardToolResult {
   nextCursor?: number;
 }
 
-function formatTaskBoardResult(result: TaskBoardToolResult, taskId: string): string {
+function formatTaskBoardResult(
+  result: TaskBoardToolResult,
+  taskId: string,
+  directory: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> = [],
+): string {
   const entries = result.entries ?? (result.entry ? [result.entry] : []);
-  if (entries.length === 0) return `Task board ${taskId} has no matching entries.`;
-  const lines = entries.map(
-    (entry) =>
-      `- #${entry.sequence} ${entry.id} [${entry.kind}/${entry.status}] ${entry.agentId}: ${excerpt(entry.content, 500)}`,
-  );
-  if (result.action === "read") lines.push(`nextCursor=${String(result.nextCursor ?? 0)}`);
+  const lines: string[] = [];
+  if (directory.length > 0) {
+    lines.push("Active named channels (world channel lobby):");
+    for (const board of directory) {
+      lines.push(
+        `- ${board.taskId} (${board.entryCount} open · updated ${board.lastUpdatedAt.slice(0, 10)})`,
+      );
+    }
+    lines.push("");
+  }
+  if (entries.length === 0) {
+    lines.push(`Task board ${taskId} has no matching entries.`);
+  } else {
+    lines.push(
+      ...entries.map(
+        (entry) =>
+          `- #${entry.sequence} ${entry.id} [${entry.kind}/${entry.status}] ${entry.agentId}: ${excerpt(entry.content, 500)}`,
+      ),
+    );
+    if (result.action === "read") lines.push(`nextCursor=${String(result.nextCursor ?? 0)}`);
+  }
   lines.push("Temporary coordination only; use nmg_remember separately for durable knowledge.");
   return lines.join("\n");
 }

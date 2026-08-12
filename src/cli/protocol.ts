@@ -1,4 +1,5 @@
 import type {
+  ActiveGraphBudget,
   ClaimOutcomeEvent,
   ClaimPosterior,
   MemoryActor,
@@ -217,6 +218,10 @@ export interface NmgSearchParams {
   strongHitInitialTarget?: number;
   progressiveWarmDisclosure?: boolean;
   tieredDisclosure?: boolean;
+  /** Internal planning probes are not eligible for use feedback and must not persist a trace. */
+  persistTrace?: boolean;
+  /** Hard Active Graph envelope selected by a caller-side controller. */
+  activeGraphBudget?: Partial<ActiveGraphBudget>;
   perf?: boolean;
   projectDir?: string;
   sessionId?: string;
@@ -265,8 +270,16 @@ export interface NmgTaskBoardResolveParams extends NmgTaskBoardBase {
   resolution?: string;
 }
 
+export interface NmgTaskBoardListParams {
+  action: "list";
+  agentId: string;
+}
+
 export type NmgTaskBoardParams =
-  NmgTaskBoardPutParams | NmgTaskBoardReadParams | NmgTaskBoardResolveParams;
+  | NmgTaskBoardPutParams
+  | NmgTaskBoardReadParams
+  | NmgTaskBoardResolveParams
+  | NmgTaskBoardListParams;
 
 export interface NmgRetentionCandidatesParams {
   dormantAfterDays?: number;
@@ -368,7 +381,8 @@ export type NmgMethodResult = {
   syncStg: { copied: number; projectDir: string };
   taskBoard:
     | { action: "put" | "resolve"; entry: TaskBoardEntry }
-    | { action: "read"; entries: TaskBoardEntry[]; nextCursor: number };
+    | { action: "read"; entries: TaskBoardEntry[]; nextCursor: number }
+    | { action: "list"; boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> };
   shutdown: { shuttingDown: true };
 };
 
