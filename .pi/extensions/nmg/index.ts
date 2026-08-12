@@ -254,39 +254,52 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             writeWakeConfig({ ...current, enabled: false });
             ctx.ui.notify("黑板唤醒已关闭", "info");
             return;
-          case "status":
+          case "status": {
+            const budgetText = current.budget === 0 ? "不限制" : `${current.budget}/天`;
+            const cooldownText =
+              current.cooldownMs === 0 ? "无" : `${Math.round(current.cooldownMs / 60_000)} 分`;
             ctx.ui.notify(
-              `黑板唤醒：${current.enabled ? "开" : "关"} · 预算 ${current.budget}/天 · 冷却 ${Math.round(current.cooldownMs / 60_000)} 分 · 轮询 ${Math.round(current.intervalMs / 1_000)} 秒`,
+              `黑板唤醒：${current.enabled ? "开" : "关"} · 预算 ${budgetText} · 冷却 ${cooldownText} · 轮询 ${Math.round(current.intervalMs / 1_000)} 秒`,
               "info",
             );
             return;
-          case "budget":
+          }
+          case "budget": {
             if (!Number.isFinite(wval)) {
-              ctx.ui.notify("用法：/nmg wake budget N（1-100）", "warning");
+              ctx.ui.notify("用法：/nmg wake budget N（0=不限制）", "warning");
               return;
             }
-            writeWakeConfig({ ...current, budget: Math.max(1, Math.min(100, Math.round(wval))) });
-            ctx.ui.notify(`黑板唤醒预算已设为 ${current.budget}/天`, "info");
+            const budget = Math.max(0, Math.min(100, Math.round(wval)));
+            writeWakeConfig({ ...current, budget });
+            ctx.ui.notify(
+              `黑板唤醒预算已设为 ${budget === 0 ? "不限制" : `${budget}/天`}`,
+              "info",
+            );
             return;
-          case "cooldown":
+          }
+          case "cooldown": {
             if (!Number.isFinite(wval)) {
-              ctx.ui.notify("用法：/nmg wake cooldown M（分钟）", "warning");
+              ctx.ui.notify("用法：/nmg wake cooldown M（0=无冷却）", "warning");
               return;
             }
-            writeWakeConfig({
-              ...current,
-              cooldownMs: Math.max(30_000, Math.round(wval * 60_000)),
-            });
-            ctx.ui.notify(`黑板唤醒冷却已设为 ${Math.round(Math.max(30_000, Math.round(wval * 60_000)) / 60_000)} 分钟`, "info");
+            const cooldownMs = wval === 0 ? 0 : Math.max(30_000, Math.round(wval * 60_000));
+            writeWakeConfig({ ...current, cooldownMs });
+            ctx.ui.notify(
+              `黑板唤醒冷却已设为 ${cooldownMs === 0 ? "无" : `${Math.round(cooldownMs / 60_000)} 分钟`}`,
+              "info",
+            );
             return;
-          case "interval":
+          }
+          case "interval": {
             if (!Number.isFinite(wval)) {
-              ctx.ui.notify("用法：/nmg wake interval S（秒）", "warning");
+              ctx.ui.notify("用法：/nmg wake interval S（秒，最小 5）", "warning");
               return;
             }
-            writeWakeConfig({ ...current, intervalMs: Math.max(5_000, Math.round(wval * 1_000)) });
-            ctx.ui.notify(`黑板唤醒轮询已设为 ${Math.round(Math.max(5_000, Math.round(wval * 1_000)) / 1_000)} 秒`, "info");
+            const intervalMs = Math.max(5_000, Math.round(wval * 1_000));
+            writeWakeConfig({ ...current, intervalMs });
+            ctx.ui.notify(`黑板唤醒轮询已设为 ${Math.round(intervalMs / 1_000)} 秒`, "info");
             return;
+          }
           default: {
             const enabled = !current.enabled;
             writeWakeConfig({ ...current, enabled });
@@ -302,8 +315,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           return;
         }
         const wake = readWakeConfig();
+        const budgetText = wake.budget === 0 ? "不限制" : `${wake.budget}/天`;
+        const cooldownText =
+          wake.cooldownMs === 0 ? "无" : `${Math.round(wake.cooldownMs / 60_000)} 分`;
         ctx.ui.notify(
-          `NMG 菜单：/nmg recall（召回折叠 ${recallCollapsed ? "开" : "关"}） · /nmg wake on|off|status|budget N|cooldown M|interval S（唤醒 ${wake.enabled ? "开" : "关"}，预算 ${wake.budget}/天，冷却 ${Math.round(wake.cooldownMs / 60_000)} 分，轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
+          `NMG 菜单：/nmg recall（召回折叠 ${recallCollapsed ? "开" : "关"}） · /nmg wake on|off|status|budget N|cooldown M|interval S（唤醒 ${wake.enabled ? "开" : "关"}，预算 ${budgetText}，冷却 ${cooldownText}，轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
           "info",
         );
       }
@@ -337,66 +353,79 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       return;
     }
     if (choice.startsWith("唤醒：参数设置")) {
-      const param = await ctx.ui.select("唤醒参数", ["每日上限", "冷却（分钟）", "轮询（秒）"]);
+      // 挡位选择（select 预设值，避免随意输入溢出/无效）；自由数字只走命令形式
+      // （/nmg wake budget N 等，已有 clamp）。
+      const param = await ctx.ui.select("唤醒参数", ["每日上限", "冷却", "轮询"]);
       if (!param) return;
       const current = readWakeConfig();
       if (param === "每日上限") {
-        const value = await ctx.ui.input("每日唤醒上限（1-100）", String(current.budget));
-        const numeric = Number(value);
-        if (value !== undefined && Number.isFinite(numeric)) {
-          writeWakeConfig({
-            ...current,
-            budget: Math.max(1, Math.min(100, Math.round(numeric))),
-          });
-          ctx.ui.notify(`黑板唤醒预算已设为 ${current.budget}/天`, "info");
-        }
-      } else if (param === "冷却（分钟）") {
-        const value = await ctx.ui.input(
-          "冷却（分钟）",
-          String(Math.round(current.cooldownMs / 60_000)),
+        const option = await ctx.ui.select("每日唤醒上限", ["不限制", "3/天", "8/天", "15/天"]);
+        if (!option) return;
+        const budget = option === "不限制" ? 0 : Number(option.split("/")[0]);
+        writeWakeConfig({ ...current, budget });
+        ctx.ui.notify(
+          `黑板唤醒预算已设为 ${budget === 0 ? "不限制" : `${budget}/天`}`,
+          "info",
         );
-        const numeric = Number(value);
-        if (value !== undefined && Number.isFinite(numeric)) {
-          writeWakeConfig({
-            ...current,
-            cooldownMs: Math.max(30_000, Math.round(numeric * 60_000)),
-          });
-          ctx.ui.notify("黑板唤醒冷却已更新", "info");
-        }
-      } else if (param === "轮询（秒）") {
-        const value = await ctx.ui.input(
-          "轮询（秒）",
-          String(Math.round(current.intervalMs / 1_000)),
+      } else if (param === "冷却") {
+        const option = await ctx.ui.select("冷却", ["无", "10 分钟", "30 分钟", "1 小时"]);
+        if (!option) return;
+        const cooldownMs =
+          option === "无"
+            ? 0
+            : option === "10 分钟"
+              ? 600_000
+              : option === "30 分钟"
+                ? 1_800_000
+                : 3_600_000;
+        writeWakeConfig({ ...current, cooldownMs });
+        ctx.ui.notify(
+          `黑板唤醒冷却已设为 ${cooldownMs === 0 ? "无" : `${Math.round(cooldownMs / 60_000)} 分钟`}`,
+          "info",
         );
-        const numeric = Number(value);
-        if (value !== undefined && Number.isFinite(numeric)) {
-          writeWakeConfig({
-            ...current,
-            intervalMs: Math.max(5_000, Math.round(numeric * 1_000)),
-          });
-          ctx.ui.notify("黑板唤醒轮询已更新", "info");
-        }
+      } else if (param === "轮询") {
+        const option = await ctx.ui.select("轮询", ["5 秒", "30 秒", "60 秒", "5 分钟"]);
+        if (!option) return;
+        const intervalMs =
+          option === "5 秒"
+            ? 5_000
+            : option === "30 秒"
+              ? 30_000
+              : option === "60 秒"
+                ? 60_000
+                : 300_000;
+        writeWakeConfig({ ...current, intervalMs });
+        ctx.ui.notify(`黑板唤醒轮询已设为 ${Math.round(intervalMs / 1_000)} 秒`, "info");
       }
       return;
     }
     {
       const wake = readWakeConfig();
+      const budgetText = wake.budget === 0 ? "不限制" : `${wake.budget}/天`;
+      const cooldownText =
+        wake.cooldownMs === 0 ? "无" : `${Math.round(wake.cooldownMs / 60_000)} 分`;
       ctx.ui.notify(
-        `NMG：召回折叠 ${recallCollapsed ? "开" : "关"} · 唤醒 ${wake.enabled ? "开" : "关"}（预算 ${wake.budget}/天，冷却 ${Math.round(wake.cooldownMs / 60_000)} 分，轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
+        `NMG：召回折叠 ${recallCollapsed ? "开" : "关"} · 唤醒 ${wake.enabled ? "开" : "关"}（预算 ${budgetText}，冷却 ${cooldownText}，轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
         "info",
       );
     }
   };
   // 菜单项带当前状态，进子菜单前就看得见：召回折叠/展开、唤醒开/关、参数当前值。
+  // 预算/冷却支持 0（不限制/无），轮询保持最小 5 秒（0 无意义）。
   const nmgMenuOptions = (
     recallCollapsed: boolean,
     wake: ReturnType<typeof readWakeConfig>,
-  ): string[] => [
-    `召回：折叠/展开（当前 ${recallCollapsed ? "折叠" : "展开"}）`,
-    `唤醒：开启/关闭（当前 ${wake.enabled ? "开" : "关"}）`,
-    `唤醒：参数设置（预算 ${wake.budget}/天 · 冷却 ${Math.round(wake.cooldownMs / 60_000)} 分 · 轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
-    "查看状态",
-  ];
+  ): string[] => {
+    const budgetText = wake.budget === 0 ? "不限制" : `${wake.budget}/天`;
+    const cooldownText =
+      wake.cooldownMs === 0 ? "无" : `${Math.round(wake.cooldownMs / 60_000)} 分`;
+    return [
+      `召回：折叠/展开（当前 ${recallCollapsed ? "折叠" : "展开"}）`,
+      `唤醒：开启/关闭（当前 ${wake.enabled ? "开" : "关"}）`,
+      `唤醒：参数设置（预算 ${budgetText} · 冷却 ${cooldownText} · 轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
+      "查看状态",
+    ];
+  };
   pi.registerCommand("nmg", {
     description: "NMG 菜单：/nmg recall · wake on/off/status · wake budget N · wake cooldown M · wake interval S",
     getArgumentCompletions: (prefix) => {
@@ -406,9 +435,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         { value: "wake on", label: "wake on", description: "开启黑板唤醒" },
         { value: "wake off", label: "wake off", description: "关闭黑板唤醒" },
         { value: "wake status", label: "wake status", description: "显示唤醒配置" },
-        { value: "wake budget ", label: "wake budget N", description: "每日唤醒上限（1-100）" },
-        { value: "wake cooldown ", label: "wake cooldown M", description: "冷却分钟" },
-        { value: "wake interval ", label: "wake interval S", description: "轮询秒" },
+        { value: "wake budget ", label: "wake budget N", description: "每日唤醒上限（0=不限制）" },
+        { value: "wake cooldown ", label: "wake cooldown M", description: "冷却分钟（0=无）" },
+        { value: "wake interval ", label: "wake interval S", description: "轮询秒（最小 5）" },
       ];
       const normalized = prefix.trim();
       return items.filter((item) => item.value.startsWith(normalized));
@@ -1022,8 +1051,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const raw = JSON.parse(readFileSync(wakeConfigPath, "utf8")) as Partial<BoardWakeConfig>;
       return {
         enabled: raw.enabled === true,
-        budget: Math.max(1, Number(raw.budget) || 8),
-        cooldownMs: Math.max(30_000, Number(raw.cooldownMs) || 600_000),
+        // 0 = unlimited: budget 0 disables the daily cap, cooldownMs 0 removes the cooldown.
+        budget: raw.budget === 0 ? 0 : Math.max(1, Number(raw.budget) || 8),
+        cooldownMs: raw.cooldownMs === 0 ? 0 : Math.max(30_000, Number(raw.cooldownMs) || 600_000),
         intervalMs: Math.max(5_000, Number(raw.intervalMs) || 60_000),
       };
     } catch {
@@ -1056,13 +1086,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     if (!config.enabled) return;
     const state = loadWakeState();
     const now = Date.now();
-    if (now - state.lastWakeAt < config.cooldownMs) return;
+    if (config.cooldownMs > 0 && now - state.lastWakeAt < config.cooldownMs) return;
     const today = new Date(now).toISOString().slice(0, 10);
     if (state.budgetDate !== today) {
       state.budgetDate = today;
       state.budgetUsed = 0;
     }
-    if (state.budgetUsed >= config.budget) return;
+    if (config.budget > 0 && state.budgetUsed >= config.budget) return;
     if (latestAgentCtx?.isIdle && !latestAgentCtx.isIdle()) return;
     const sessionId = latestAgentCtx?.sessionManager.getSessionId() ?? "";
     const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;

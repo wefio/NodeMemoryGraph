@@ -1397,6 +1397,7 @@ test("/nmg wake parameter flow writes the config file via the menu", async () =>
         select: async (title: string, options: string[]) => {
           if (title === "NMG 控制台") return "唤醒：参数设置";
           if (title === "唤醒参数") return "每日上限";
+          if (title === "每日唤醒上限") return "3/天";
           return options[0];
         },
         input: async () => "5",
@@ -1407,7 +1408,7 @@ test("/nmg wake parameter flow writes the config file via the menu", async () =>
     const config = JSON.parse(
       readFileSync(join(dataDir, "board-wake.json"), "utf8"),
     ) as { budget: number };
-    assert.equal(config.budget, 5);
+    assert.equal(config.budget, 3);
   } finally {
     if (previous === undefined) delete process.env.NMG_DATA_DIR;
     else process.env.NMG_DATA_DIR = previous;
