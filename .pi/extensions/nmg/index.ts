@@ -1276,7 +1276,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // deliveries table under the sentinel session so an unanswered entry does
       // not re-broadcast every tick. The loop's own echo filter (sourceSessionId
       // === this session) stops the broadcaster from waking on its own post.
-      if (config.worldBroadcast && BROADCAST_KINDS.has(pick.kind)) {
+      if (
+        config.worldBroadcast &&
+        BROADCAST_KINDS.has(pick.kind) &&
+        !pick.content.startsWith(BROADCAST_PREFIX)
+      ) {
         await maybeBroadcastToWorld({
           invoke: invoke as (method: string, params: unknown) => Promise<unknown>,
           entry: pick,
@@ -1914,6 +1918,11 @@ interface TaskBoardToolResult {
 /** Sentinel deliveries-table session used to dedup world-channel broadcasts:
  * each entry is broadcast at most once, keyed on (entry, this sentinel). */
 export const WORLD_BROADCAST_SESSION = "world-broadcast";
+/** Content prefix marking a world-channel pull broadcast (meta: it announces
+ * another entry). Entries carrying it are never re-broadcast — otherwise a
+ * broadcast wakes a session, which broadcasts the broadcast, recursively
+ * flooding the world channel (observed live: #12→#13→#16…). */
+export const BROADCAST_PREFIX = "[NMG board 协作广播]";
 /** Collaboration kinds worth pulling other agents in on; note/result/decision
  * updates are not broadcast, to keep the world channel quiet. */
 export const BROADCAST_KINDS = new Set(["question", "blocker", "handoff"]);
@@ -1932,6 +1941,10 @@ export async function maybeBroadcastToWorld(input: {
   sessionId: string;
 }): Promise<boolean> {
   const { invoke, entry, agentId, sessionId } = input;
+  // A broadcast entry is meta — it announces another entry. Re-broadcasting it
+  // is how broadcast storms start (broadcast → wake → broadcast → …). The
+  // original entry gets one pull broadcast; the broadcast itself never does.
+  if (entry.content.startsWith(BROADCAST_PREFIX)) return false;
   const worldCheck = (await invoke("taskBoard", {
     action: "deliveryCheck",
     taskId: WORLD_BOARD_ID,

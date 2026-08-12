@@ -1507,3 +1507,29 @@ test("world-channel pull broadcast posts once and dedups per entry", async () =>
   assert.equal(again, false);
   assert.equal(calls.filter((call) => call.params.action === "put").length, 1);
 });
+
+test("a broadcast entry is never re-broadcast (no broadcast storm)", async () => {
+  let invoked = 0;
+  const mockInvoke = async () => {
+    invoked += 1;
+    return { delivered: [] };
+  };
+  const broadcastEntry = {
+    id: "broadcast-1",
+    sequence: 12,
+    agentId: "other-agent",
+    kind: "handoff",
+    status: "open",
+    content: "[NMG board 协作广播] 频道 task-x 有 #1 未认领的交接（open）：…",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    taskId: "default",
+  };
+  const posted = await maybeBroadcastToWorld({
+    invoke: mockInvoke as (method: string, params: unknown) => Promise<unknown>,
+    entry: broadcastEntry,
+    agentId: "me",
+    sessionId: "sess-1",
+  });
+  assert.equal(posted, false);
+  assert.equal(invoked, 0, "no daemon calls for a broadcast entry");
+});
