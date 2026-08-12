@@ -217,7 +217,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     const label = theme.fg("customMessageLabel", "\x1b[1m[nmg-context]\x1b[22m");
     const hint = theme.fg(
       "dim",
-      count ? `  ${count} 条召回 · /nmg-recall 展开` : "  /nmg-recall 展开",
+      count ? `  ${count} 条召回 · /nmg recall 展开` : "  /nmg recall 展开",
     );
     const box = new Box(options.outputPad, 1, (t) => theme.bg("customMessageBg", t));
     box.addChild(new Text(`${label}${hint}`, 0, 0));
@@ -322,11 +322,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       return items.filter((item) => item.value.startsWith(normalized));
     },
     handler: nmgMenuHandler,
-  });
-  // 兼容别名：/nmg-recall = /nmg recall（早期版本已在使用）。
-  pi.registerCommand("nmg-recall", {
-    description: "切换 nmg-context 召回消息的折叠/展开（= /nmg recall）",
-    handler: async (_args, ctx) => nmgMenuHandler("recall", ctx),
   });
 
   pi.on("session_start", async (_event, ctx) => {

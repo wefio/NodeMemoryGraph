@@ -145,10 +145,11 @@ test("search recommendation distinguishes advisory from hard guardrails", () => 
   assert.match(formatSearchRecommendation(context, "guardrail"), /guardrail_empty/u);
 });
 
-test("TUI registers the nmg-context renderer and nmg-recall command", () => {
+test("TUI registers the nmg-context renderer and the /nmg menu command", () => {
   const { messageRenderers, commands } = extensionHarness();
   assert.ok(messageRenderers.has("nmg-context"), "nmg-context message renderer should be registered");
-  assert.ok(commands.has("nmg-recall"), "nmg-recall command should be registered");
+  assert.ok(commands.has("nmg"), "/nmg menu command should be registered");
+  assert.ok(!commands.has("nmg-recall"), "standalone nmg-recall command should be folded into /nmg");
 });
 
 test("runtime tool-state capture registers on tool_result, not pre-execution tool_call", () => {
