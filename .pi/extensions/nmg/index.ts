@@ -1042,6 +1042,31 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           );
         }
         if (entries.length > 0) runtimeAg.activateProjection(sessionId);
+        // Reading is a delivery: write a receipt for every open, non-own-echo
+        // entry returned, so the wake loop does not re-push entries this
+        // session has already seen (flow constraint — 'already read' never
+        // re-wakes, per cross-agent feedback on world #9). Same echo boundary
+        // as the loop: the poster's own entries are never pushed anyway.
+        // await allSettled so receipts are durable before the read returns;
+        // a transient failure just risks one extra push (at-least-once).
+        const receipts = entries
+          .filter((entry) => {
+            if (entry.status !== "open") return false;
+            return !(
+              entry.sourceSessionId === sessionId ||
+              (entry.sourceSessionId == null && entry.agentId === agentId)
+            );
+          })
+          .map((entry) =>
+            invoke("taskBoard", {
+              action: "recordDelivery",
+              entryId: entry.id,
+              sessionId,
+              agentId,
+              source: "read",
+            }),
+          );
+        await Promise.allSettled(receipts);
       }
       // Reading the world channel surfaces the lobby: the directory of active
       // named channels, so an Agent that knows no channel name can discover

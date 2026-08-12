@@ -682,6 +682,23 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     )) as { content: Array<{ text: string }>; details: { entries: Array<{ id: string }> } };
     assert.deepEqual(boardRead.details.entries.map((entry) => entry.id), [boardPut.details.entry.id]);
     assert.match(boardRead.content[0].text, /Agent B should verify the parser tests/u);
+    // Reading writes a delivery receipt for open, non-own-echo entries: session
+    // B has now 'read' the handoff, so the wake loop will not re-push it.
+    // (Cross-agent feedback, world #9: already-read entries must not re-wake.)
+    {
+      const store = new NmgStore(join(directory, "nmg.sqlite"));
+      try {
+        assert.equal(
+          store.hasTaskBoardDelivery({
+            entryId: boardPut.details.entry.id,
+            sessionId: "http-test-session-b",
+          }),
+          true,
+        );
+      } finally {
+        store.close();
+      }
+    }
     // Reading the world channel (no taskId) surfaces the lobby directory of
     // active named channels.
     const worldRead = (await tools.get("nmg_board")!.execute(
