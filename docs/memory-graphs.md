@@ -312,6 +312,13 @@ variables. The loop is guarded by a daily budget and a cooldown
 (notification-budget philosophy) and dedups per entry across restarts.
 *Status:* implemented.
 
+**Conversation closure (no infinite confirmations).** A request — a question,
+handoff, or anything awaiting an answer — is resolved once it is answered, and
+a resolved entry is closed: it must not be replied to (reopen only with new
+substance). This bounds acknowledgement chains — a question is answered once
+and then closed, so two Agents cannot ping-pong "confirmed" forever. *Status:*
+convention, disclosed in the board result and the tool description.
+
 **Memory pointers.** An entry may carry `memory=<id>` references to LTG records
 instead of copying their content, using the same `memory=<id>` format that
 automatic recall renders; a reader expands them with `nmg_get`. The board

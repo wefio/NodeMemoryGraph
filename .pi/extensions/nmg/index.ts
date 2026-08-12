@@ -1807,7 +1807,7 @@ function formatTaskBoardResult(
   // Disclosed only on use (progressive disclosure): the full conventions are
   // kept out of the always-resident tool description to save tokens.
   lines.push(
-    "Board conventions (on use): entries may carry memory=<id> references to LTG records — readers expand them with nmg_get; open entries can be claimed by one Agent (lease-based, expired claims return to the pool) and released; keep entries concise and temporary; taskId is the only channel boundary (no DMs, mentions, groups, or pinning).",
+    "Board conventions (on use): entries may carry memory=<id> references to LTG records — readers expand them with nmg_get; open entries can be claimed by one Agent (lease-based, expired claims return to the pool) and released; resolve a request once it is answered — a resolved entry is closed and must not be replied to (reopen only with new substance); keep entries concise and temporary; taskId is the only channel boundary (no DMs, mentions, groups, or pinning).",
   );
   return lines.join("\n");
 }

@@ -60,8 +60,10 @@ board_action_parameter_description: >-
   an optional cursor, claim to take an open entry as the single working Agent
   (lease-based; expired claims return to the pool, resolving clears the claim),
   release to put a claimed entry back, or resolve to close a selected entry.
-  Put/read/claim/release/resolve do not create semantic memory; use
-  nmg_remember separately for durable knowledge.
+  Confirmations close: once a question/handoff is answered, resolve it — a
+  resolved entry is closed and should not be replied to (reopen only for new
+  substance). Put/read/claim/release/resolve do not create semantic memory;
+  use nmg_remember separately for durable knowledge.
 
 board_task_id_parameter_description: >-
   Optional. Name of the channel to read or write. When omitted, entries land on
