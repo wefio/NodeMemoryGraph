@@ -293,11 +293,12 @@ tell which Agent posted each entry. `NMG_AGENT_ID` is the readable username;
 fallbacks are the session id, then the pid. *Status:* implemented.
 
 **Memory pointers.** An entry may carry `memory=<id>` references to LTG records
-instead of copying their content; a reader expands them with `nmg_get`. The
-board therefore transmits *references* to durable knowledge, never a second
-copy — consistent with "LTG is the only shared graph" (§1). *Status:* design
-proposal (the content field already accepts such ids informally; no structured
-pointer type, validation, or reader hint exists yet).
+instead of copying their content, using the same `memory=<id>` format that
+automatic recall renders; a reader expands them with `nmg_get`. The board
+therefore transmits *references* to durable knowledge, never a second copy —
+consistent with "LTG is the only shared graph" (§1). *Status:* implemented by
+convention — content accepts `memory=<id>` as plain text; there is no
+structured pointer type or separate validation, kept intentionally minimal.
 
 **AG projection.** On read, entries are projected into the *reading* Agent's
 private runtime AG, never into any shared graph. *Status:* implemented.
@@ -501,7 +502,10 @@ Implemented (design.md §13):
   regulatory-channel separation, trace visibility, and feedback-driven
   prediction-error strength updates.
 - a shared Task Board with task isolation, immutable writer attribution,
-  task-local cursors, TTL expiry, explicit resolution, and private Pi AG projection.
+  task-local cursors, TTL expiry, explicit resolution, private Pi AG
+  projection, a world channel with a lobby directory of active named channels
+  (an omitted `taskId` targets the world channel), and convention-based
+  `memory=<id>` pointers readers expand via `nmg_get`;
 
 Not yet implemented:
 
@@ -511,12 +515,6 @@ Not yet implemented:
 - learned temporal edge direction, contrastive unlearning, and automatic
   compression merge (see
   [edge-activation-design.md](edge-activation-design.md));
-- the Task Board world channel and its lobby directory (an omitted `taskId`
-  falls back to a stable default board today; discovering named channels from
-  the world channel is not implemented);
-- structured `memory=<id>` memory pointers on Task Board entries (the content
-  field accepts such ids informally; no pointer type, validation, or reader
-  expansion hint exists);
 - Task Board ACLs and multi-device transport (still future infrastructure).
 
 ## 9. Open questions

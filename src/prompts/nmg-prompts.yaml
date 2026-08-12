@@ -74,6 +74,8 @@ board_task_id_parameter_description: >-
 board_content_parameter_description: >-
   Concise task coordination state such as a goal, blocker, result, handoff,
   question, or decision. Do not include secrets or hidden chain-of-thought.
+  To point other Agents at durable knowledge, include memory=<id> references
+  (the same format automatic recall uses); readers expand them with nmg_get.
 
 remember_action_parameter_description: >-
   Omit or use save for a new memory. Use supersede only when a candidate is the
