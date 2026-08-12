@@ -1186,7 +1186,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           const ownEcho =
             entry.sourceSessionId === sessionId ||
             (entry.sourceSessionId == null && entry.agentId === agentId);
-          if (entry.status === "open" && !ownEcho) {
+          if (
+            entry.status === "open" &&
+            !ownEcho &&
+            // Already claimed by this session: don't nudge the holder for work
+            // it is already doing — claim decides who works, notification
+            // decides who knows (the claimer already knows).
+            entry.claimedBy !== agentId
+          ) {
             candidates.push({ ...entry, taskId });
           }
         }
