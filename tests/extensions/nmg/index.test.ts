@@ -1520,6 +1520,7 @@ test("world-channel pull broadcast posts once and dedups per entry", async () =>
   assert.equal(put.params.kind, "handoff");
   assert.match(String(put.params.content), /协作广播/u);
   assert.equal(put.params.sourceSessionId, "sess-1");
+  assert.equal(put.params.ttlSeconds, 86_400, "broadcast is transient (RAII TTL)");
   const recorded = calls.find((call) => call.params.action === "recordDelivery")!;
   assert.equal(recorded.params.sessionId, "world-broadcast");
   assert.equal(recorded.params.entryId, "entry-1");

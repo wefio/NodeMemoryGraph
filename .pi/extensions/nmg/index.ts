@@ -1937,6 +1937,11 @@ export const WORLD_BROADCAST_SESSION = "world-broadcast";
  * broadcast wakes a session, which broadcasts the broadcast, recursively
  * flooding the world channel (observed live: #12→#13→#16…). */
 export const BROADCAST_PREFIX = "[NMG board 协作广播]";
+/** Broadcasts are transient pull notices: they announce another entry and must
+ * not outlive it. RAII: give them a short TTL so an unanswered broadcast is
+ * recycled (with its receipts) instead of accumulating as permanent open dead
+ * state on the world channel. */
+export const BROADCAST_TTL_SECONDS = 86_400;
 /** Collaboration kinds worth pulling other agents in on; note/result/decision
  * updates are not broadcast, to keep the world channel quiet. */
 export const BROADCAST_KINDS = new Set(["question", "blocker", "handoff"]);
@@ -1978,6 +1983,9 @@ export async function maybeBroadcastToWorld(input: {
     sourceSessionId: sessionId,
     kind: "handoff",
     content: broadcast,
+    // RAII: a broadcast is a transient pull notice — recycle it (with its
+    // receipts) after a day rather than leaving permanent open dead state.
+    ttlSeconds: BROADCAST_TTL_SECONDS,
   });
   await invoke("taskBoard", {
     action: "recordDelivery",
