@@ -1093,8 +1093,17 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       state.budgetUsed = 0;
     }
     if (config.budget > 0 && state.budgetUsed >= config.budget) return;
-    if (latestAgentCtx?.isIdle && !latestAgentCtx.isIdle()) return;
-    const sessionId = latestAgentCtx?.sessionManager.getSessionId() ?? "";
+    // A captured ctx goes stale after session replacement/reload; isIdle and
+    // getSessionId on a stale ctx throw, which must never crash the host. Guard
+    // them and skip this tick when the ctx is unusable.
+    let sessionId = "";
+    try {
+      if (latestAgentCtx?.isIdle && !latestAgentCtx.isIdle()) return;
+      sessionId = latestAgentCtx?.sessionManager.getSessionId() ?? "";
+    } catch {
+      return; // stale ctx — skip this tick, retry later
+    }
+    if (!sessionId) return;
     const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
     try {
       const candidates: Array<TaskBoardToolEntry & { taskId: string }> = [];
@@ -1167,9 +1176,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   // the loop still fires there, while test harnesses that load the extension
   // can exit normally.
   const wakeLoop = (): void => {
-    void scanBoardWake().finally(() => {
-      setTimeout(wakeLoop, readWakeConfig().intervalMs).unref();
-    });
+    void scanBoardWake()
+      .catch(() => {
+        // never leak an unhandled rejection from the background wake loop
+      })
+      .finally(() => {
+        setTimeout(wakeLoop, readWakeConfig().intervalMs).unref();
+      });
   };
   setTimeout(wakeLoop, readWakeConfig().intervalMs).unref();
 }
