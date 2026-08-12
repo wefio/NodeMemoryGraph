@@ -91,7 +91,9 @@ v2:  <project>/.nmg/stg.sqlite                           (每项目一文件)
 - **项目间**：不同项目不同文件，天然隔离（保持 v1 的项目边界）。
 - **项目内会话间**：`memory_records.session_id` 行过滤。
 - **LTG 缓存（cached_from_ltg）**：`session_id IS NULL`，项目内所有会话共享同一份（v1 中每会话一份是重复缓存）。
-- **provisional（会话私有）**：`session_id = 该会话`，检索时 `WHERE session_id IS NULL OR session_id = ?`。
+- **provisional（会话私有）**：`session_id = 该会话`。带 sessionId 检索时可见共享行 + 本会话私有行；**匿名读取（无 sessionId）只返回共享行（`session_id IS NULL`）**，私有行绝不可见。
+
+  > 真实环境验证（2026-08-12 重启后 daemon RPC）曾暴露：旧谓词 `(? IS NULL OR session_id IS NULL OR session_id = ?)` 在无 sessionId 时放行全部私有行（匿名搜索泄漏）。已修复为两分支谓词：有 sessionId → `(session_id IS NULL OR session_id = ?)`；无 sessionId → `session_id IS NULL`。所有读路径（searchWithVector/getMemory/getContext）统一此语义。LTG 行 `session_id IS NULL`，匿名读全局可见（服务层 LTG remember 强制 `session_id = null`）。
 
 ### 3.2 隔离语义（与 history 层对齐）
 
