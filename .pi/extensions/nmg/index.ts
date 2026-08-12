@@ -365,6 +365,19 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ctx.ui.notify(onOff === "开启" ? "黑板唤醒已开启" : "黑板唤醒已关闭", "info");
       return;
     }
+    if (choice.startsWith("唤醒：世界广播")) {
+      const onOff = await ctx.ui.select("世界频道协作广播", ["开启", "关闭"]);
+      if (!onOff) return;
+      const current = readWakeConfig();
+      writeWakeConfig({ ...current, worldBroadcast: onOff === "开启" });
+      ctx.ui.notify(
+        onOff === "开启"
+          ? "已开启世界频道协作广播：协作类新条目会同时发到世界频道拉其他 agent"
+          : "已关闭世界频道协作广播",
+        "info",
+      );
+      return;
+    }
     if (choice.startsWith("唤醒：参数设置")) {
       // 挡位选择（select 预设值，避免随意输入溢出/无效）；自由数字只走命令形式
       // （/nmg wake budget N 等，已有 clamp）。
@@ -435,12 +448,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     return [
       `召回：折叠/展开（当前 ${recallCollapsed ? "折叠" : "展开"}）`,
       `唤醒：开启/关闭（当前 ${wake.enabled ? "开" : "关"}）`,
-      `唤醒：参数设置（预算 ${budgetText} · 冷却 ${cooldownText} · 轮询 ${Math.round(wake.intervalMs / 1_000)} 秒 · 世界广播 ${wake.worldBroadcast ? "开" : "关"}）`,
+      `唤醒：世界广播（当前 ${wake.worldBroadcast ? "开" : "关"}）`,
+      `唤醒：参数设置（预算 ${budgetText} · 冷却 ${cooldownText} · 轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
       "查看状态",
     ];
   };
   pi.registerCommand("nmg", {
-    description: "NMG 菜单：/nmg recall · wake on/off/status · wake budget N · wake cooldown M · wake interval S",
+    description: "NMG 菜单：/nmg recall · wake on/off/status/world · wake budget N · wake cooldown M · wake interval S",
     getArgumentCompletions: (prefix) => {
       const items: AutocompleteItem[] = [
         { value: "recall", label: "recall", description: "切换 nmg-context 召回折叠/展开" },

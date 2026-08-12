@@ -69,12 +69,10 @@ function extensionHarness() {
 }
 
 test("Pi adapter exposes only the stable tool surface", () => {
-  assert.deepEqual([...extensionHarness().tools.keys()], [
-    "nmg_remember",
-    "nmg_get",
-    "nmg_search",
-    "nmg_board",
-  ]);
+  assert.deepEqual(
+    [...extensionHarness().tools.keys()],
+    ["nmg_remember", "nmg_get", "nmg_search", "nmg_board"],
+  );
 });
 
 test("QPP actuation keeps hard envelopes and learned folds lossless in the Active Graph", async () => {
@@ -114,7 +112,10 @@ test("QPP actuation keeps hard envelopes and learned folds lossless in the Activ
       0.98,
       false,
     );
-    assert.deepEqual(folded.results.map((result) => result.memory.id), [visibleId]);
+    assert.deepEqual(
+      folded.results.map((result) => result.memory.id),
+      [visibleId],
+    );
     assert.deepEqual(folded.progressiveDisclosure?.deferredMemoryIds, deferredIds);
     assert.deepEqual(folded.activeGraph?.memoryIds, context.activeGraph?.memoryIds);
     assert.equal(
@@ -148,9 +149,15 @@ test("search recommendation distinguishes advisory from hard guardrails", () => 
 
 test("TUI registers the nmg-context renderer and the /nmg menu command", () => {
   const { messageRenderers, commands } = extensionHarness();
-  assert.ok(messageRenderers.has("nmg-context"), "nmg-context message renderer should be registered");
+  assert.ok(
+    messageRenderers.has("nmg-context"),
+    "nmg-context message renderer should be registered",
+  );
   assert.ok(commands.has("nmg"), "/nmg menu command should be registered");
-  assert.ok(!commands.has("nmg-recall"), "standalone nmg-recall command should be folded into /nmg");
+  assert.ok(
+    !commands.has("nmg-recall"),
+    "standalone nmg-recall command should be folded into /nmg",
+  );
 });
 
 test("runtime tool-state capture registers on tool_result, not pre-execution tool_call", () => {
@@ -673,14 +680,15 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       ...sessionManager,
       getSessionId: () => "http-test-session-b",
     };
-    const boardRead = (await tools.get("nmg_board")!.execute(
-      "board-read",
-      { action: "read", taskId: "atlas-review" },
-      undefined,
-      undefined,
-      { sessionManager: secondSessionManager },
-    )) as { content: Array<{ text: string }>; details: { entries: Array<{ id: string }> } };
-    assert.deepEqual(boardRead.details.entries.map((entry) => entry.id), [boardPut.details.entry.id]);
+    const boardRead = (await tools
+      .get("nmg_board")!
+      .execute("board-read", { action: "read", taskId: "atlas-review" }, undefined, undefined, {
+        sessionManager: secondSessionManager,
+      })) as { content: Array<{ text: string }>; details: { entries: Array<{ id: string }> } };
+    assert.deepEqual(
+      boardRead.details.entries.map((entry) => entry.id),
+      [boardPut.details.entry.id],
+    );
     assert.match(boardRead.content[0].text, /Agent B should verify the parser tests/u);
     // Reading writes a delivery receipt for open, non-own-echo entries: session
     // B has now 'read' the handoff, so the wake loop will not re-push it.
@@ -701,24 +709,24 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     }
     // Reading the world channel (no taskId) surfaces the lobby directory of
     // active named channels.
-    const worldRead = (await tools.get("nmg_board")!.execute(
-      "board-world-read",
-      { action: "read" },
-      undefined,
-      undefined,
-      { sessionManager: secondSessionManager },
-    )) as { content: Array<{ text: string }> };
+    const worldRead = (await tools
+      .get("nmg_board")!
+      .execute("board-world-read", { action: "read" }, undefined, undefined, {
+        sessionManager: secondSessionManager,
+      })) as { content: Array<{ text: string }> };
     assert.match(worldRead.content[0].text, /Active named channels/u);
     assert.match(worldRead.content[0].text, /atlas-review/u);
     // Lease-based claiming: agent-b claims the open handoff, a third agent is
     // refused (diagnosed as already claimed), then agent-b releases it back.
-    const boardClaim = (await tools.get("nmg_board")!.execute(
-      "board-claim",
-      { action: "claim", taskId: "atlas-review", entryId: boardPut.details.entry.id },
-      undefined,
-      undefined,
-      { sessionManager: secondSessionManager },
-    )) as { details: { entry: { claimedBy: string | null; claimExpiresAt: string | null } } };
+    const boardClaim = (await tools
+      .get("nmg_board")!
+      .execute(
+        "board-claim",
+        { action: "claim", taskId: "atlas-review", entryId: boardPut.details.entry.id },
+        undefined,
+        undefined,
+        { sessionManager: secondSessionManager },
+      )) as { details: { entry: { claimedBy: string | null; claimExpiresAt: string | null } } };
     assert.equal(boardClaim.details.entry.claimedBy, "agent-b");
     assert.ok(boardClaim.details.entry.claimExpiresAt);
     // A third agent is refused (diagnosed as already claimed). Override the
@@ -726,42 +734,52 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     const wakeAgent = process.env.NMG_AGENT_ID;
     process.env.NMG_AGENT_ID = "agent-c";
     await assert.rejects(
-      tools.get("nmg_board")!.execute(
-        "board-claim-conflict",
-        { action: "claim", taskId: "atlas-review", entryId: boardPut.details.entry.id },
-        undefined,
-        undefined,
-        { sessionManager: { ...secondSessionManager, getSessionId: () => "http-test-session-c" } },
-      ),
+      tools
+        .get("nmg_board")!
+        .execute(
+          "board-claim-conflict",
+          { action: "claim", taskId: "atlas-review", entryId: boardPut.details.entry.id },
+          undefined,
+          undefined,
+          {
+            sessionManager: { ...secondSessionManager, getSessionId: () => "http-test-session-c" },
+          },
+        ),
       /already claimed/u,
     );
     if (wakeAgent === undefined) delete process.env.NMG_AGENT_ID;
     else process.env.NMG_AGENT_ID = wakeAgent;
-    const boardRelease = (await tools.get("nmg_board")!.execute(
-      "board-release",
-      { action: "release", taskId: "atlas-review", entryId: boardPut.details.entry.id },
-      undefined,
-      undefined,
-      { sessionManager: secondSessionManager },
-    )) as { details: { entry: { claimedBy: string | null } } };
+    const boardRelease = (await tools
+      .get("nmg_board")!
+      .execute(
+        "board-release",
+        { action: "release", taskId: "atlas-review", entryId: boardPut.details.entry.id },
+        undefined,
+        undefined,
+        { sessionManager: secondSessionManager },
+      )) as { details: { entry: { claimedBy: string | null } } };
     assert.equal(boardRelease.details.entry.claimedBy, null);
     // Session-scoped unsubscribe: agent-b opts out of wake notices for the
     // channel (suppression registry, do-not-send).
-    const boardUnsubscribe = (await tools.get("nmg_board")!.execute(
-      "board-unsubscribe",
-      { action: "unsubscribe", taskId: "atlas-review" },
-      undefined,
-      undefined,
-      { sessionManager: secondSessionManager },
-    )) as { content: Array<{ text: string }> };
+    const boardUnsubscribe = (await tools
+      .get("nmg_board")!
+      .execute(
+        "board-unsubscribe",
+        { action: "unsubscribe", taskId: "atlas-review" },
+        undefined,
+        undefined,
+        { sessionManager: secondSessionManager },
+      )) as { content: Array<{ text: string }> };
     assert.match(boardUnsubscribe.content[0].text, /已退订频道 atlas-review/u);
-    const boardSubscribe = (await tools.get("nmg_board")!.execute(
-      "board-subscribe",
-      { action: "subscribe", taskId: "atlas-review" },
-      undefined,
-      undefined,
-      { sessionManager: secondSessionManager },
-    )) as { content: Array<{ text: string }> };
+    const boardSubscribe = (await tools
+      .get("nmg_board")!
+      .execute(
+        "board-subscribe",
+        { action: "subscribe", taskId: "atlas-review" },
+        undefined,
+        undefined,
+        { sessionManager: secondSessionManager },
+      )) as { content: Array<{ text: string }> };
     assert.match(boardSubscribe.content[0].text, /已恢复订阅频道 atlas-review/u);
     const boardProjection = (await handlers.get("before_agent_start")!(
       { prompt: "Continue the assigned review.", systemPrompt: "base" },
@@ -1204,9 +1222,8 @@ function memoryContext(id: string, statement: string, evidence: string): MemoryC
 }
 
 test("composeNmgContextMessage: injects a completion nudge block when provided", async () => {
-  const { composeNmgContextMessage, composeNmgSystemPrompt } = await import(
-    "../../../.pi/extensions/nmg/index.ts",
-  );
+  const { composeNmgContextMessage, composeNmgSystemPrompt } =
+    await import("../../../.pi/extensions/nmg/index.ts");
   const out = composeNmgContextMessage("", "", "nudge text");
   assert.match(out, /<nmg_nudge>/);
   assert.match(out, /nudge text/);
@@ -1381,14 +1398,17 @@ test("runtime AG is presented as temporary state after durable recall", () => {
 test("/nmg with no arguments opens the interactive select menu", async () => {
   const { commands } = extensionHarness();
   const nmgCommand = commands.get("nmg") as {
-    handler: (args: string, ctx: {
-      hasUI: boolean;
-      ui: {
-        select: (...args: unknown[]) => Promise<unknown>;
-        input: (...args: unknown[]) => Promise<unknown>;
-        notify: (...args: unknown[]) => void;
-      };
-    }) => Promise<void>;
+    handler: (
+      args: string,
+      ctx: {
+        hasUI: boolean;
+        ui: {
+          select: (...args: unknown[]) => Promise<unknown>;
+          input: (...args: unknown[]) => Promise<unknown>;
+          notify: (...args: unknown[]) => void;
+        };
+      },
+    ) => Promise<void>;
   };
   assert.ok(nmgCommand, "/nmg command should be registered");
   const selectedTitles: string[] = [];
@@ -1408,7 +1428,10 @@ test("/nmg with no arguments opens the interactive select menu", async () => {
   };
   await nmgCommand.handler("", ctx);
   assert.deepEqual(selectedTitles, ["NMG 控制台"]);
-  assert.ok(notified.some((message) => /召回/.test(message)), "recall toggle should notify");
+  assert.ok(
+    notified.some((message) => /召回/.test(message)),
+    "recall toggle should notify",
+  );
 });
 
 test("/nmg wake parameter flow writes the config file via the menu", async () => {
@@ -1418,14 +1441,17 @@ test("/nmg wake parameter flow writes the config file via the menu", async () =>
   try {
     const { commands } = extensionHarness();
     const nmgCommand = commands.get("nmg") as {
-      handler: (args: string, ctx: {
-        hasUI: boolean;
-        ui: {
-          select: (title: string, options: string[]) => Promise<unknown>;
-          input: () => Promise<unknown>;
-          notify: (...args: unknown[]) => void;
-        };
-      }) => Promise<void>;
+      handler: (
+        args: string,
+        ctx: {
+          hasUI: boolean;
+          ui: {
+            select: (title: string, options: string[]) => Promise<unknown>;
+            input: () => Promise<unknown>;
+            notify: (...args: unknown[]) => void;
+          };
+        },
+      ) => Promise<void>;
     };
     const ctx = {
       hasUI: true,
@@ -1441,9 +1467,9 @@ test("/nmg wake parameter flow writes the config file via the menu", async () =>
       },
     };
     await nmgCommand.handler("", ctx);
-    const config = JSON.parse(
-      readFileSync(join(dataDir, "board-wake.json"), "utf8"),
-    ) as { budget: number };
+    const config = JSON.parse(readFileSync(join(dataDir, "board-wake.json"), "utf8")) as {
+      budget: number;
+    };
     assert.equal(config.budget, 3);
   } finally {
     if (previous === undefined) delete process.env.NMG_DATA_DIR;
@@ -1532,4 +1558,47 @@ test("a broadcast entry is never re-broadcast (no broadcast storm)", async () =>
   });
   assert.equal(posted, false);
   assert.equal(invoked, 0, "no daemon calls for a broadcast entry");
+});
+
+test("/nmg wake world toggle is reachable from the interactive menu", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "nmg-wake-world-"));
+  const previous = process.env.NMG_DATA_DIR;
+  process.env.NMG_DATA_DIR = dataDir;
+  try {
+    const { commands } = extensionHarness();
+    const nmgCommand = commands.get("nmg") as {
+      handler: (
+        args: string,
+        ctx: {
+          hasUI: boolean;
+          ui: {
+            select: (title: string, options: string[]) => Promise<unknown>;
+            input: () => Promise<unknown>;
+            notify: (...args: unknown[]) => void;
+          };
+        },
+      ) => Promise<void>;
+    };
+    const ctx = {
+      hasUI: true,
+      ui: {
+        select: async (title: string, options: string[]) => {
+          if (title === "NMG 控制台") return "唤醒：世界广播（当前 关）";
+          if (title === "世界频道协作广播") return "开启";
+          return options[0];
+        },
+        input: async () => "",
+        notify: () => {},
+      },
+    };
+    await nmgCommand.handler("", ctx);
+    const config = JSON.parse(readFileSync(join(dataDir, "board-wake.json"), "utf8")) as {
+      worldBroadcast: boolean;
+    };
+    assert.equal(config.worldBroadcast, true);
+  } finally {
+    if (previous === undefined) delete process.env.NMG_DATA_DIR;
+    else process.env.NMG_DATA_DIR = previous;
+    rmSync(dataDir, { recursive: true, force: true });
+  }
 });
