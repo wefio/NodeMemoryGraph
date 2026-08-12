@@ -14,6 +14,7 @@ import nmgExtension, {
   formatSearchHeaders,
   isMemorableToolResult,
   isSuccessfulCommit,
+  maybeBroadcastToWorld,
   MEMORY_POLICY,
   PI_BRANCH_SHAPE_VERSION,
   projectPiBranch,
@@ -1432,4 +1433,60 @@ test("/nmg wake parameter flow writes the config file via the menu", async () =>
     else process.env.NMG_DATA_DIR = previous;
     rmSync(dataDir, { recursive: true, force: true });
   }
+});
+
+test("world-channel pull broadcast posts once and dedups per entry", async () => {
+  const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  let delivered = false;
+  const mockInvoke = async (method: string, params: Record<string, unknown>) => {
+    calls.push({ method, params });
+    if (params.action === "deliveryCheck") {
+      return {
+        action: "deliveryCheck",
+        delivered: delivered ? ["entry-1"] : [],
+        suppressed: false,
+      };
+    }
+    if (params.action === "put") {
+      return { action: "put", entry: { id: "broadcast-1" } };
+    }
+    if (params.action === "recordDelivery") {
+      delivered = true;
+      return { action: "recordDelivery", recorded: true };
+    }
+    throw new Error(`unexpected invoke ${method} ${JSON.stringify(params)}`);
+  };
+  const entry = {
+    id: "entry-1",
+    sequence: 3,
+    agentId: "other-agent",
+    kind: "question",
+    status: "open",
+    content: "谁能帮忙？",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    taskId: "task-x",
+  };
+  const posted = await maybeBroadcastToWorld({
+    invoke: mockInvoke as (method: string, params: unknown) => Promise<unknown>,
+    entry,
+    agentId: "me",
+    sessionId: "sess-1",
+  });
+  assert.equal(posted, true);
+  const put = calls.find((call) => call.params.action === "put")!;
+  assert.equal(put.params.kind, "handoff");
+  assert.match(String(put.params.content), /协作广播/u);
+  assert.equal(put.params.sourceSessionId, "sess-1");
+  const recorded = calls.find((call) => call.params.action === "recordDelivery")!;
+  assert.equal(recorded.params.sessionId, "world-broadcast");
+  assert.equal(recorded.params.entryId, "entry-1");
+  // Already broadcast (deliveryCheck reports the sentinel receipt) → no second post.
+  const again = await maybeBroadcastToWorld({
+    invoke: mockInvoke as (method: string, params: unknown) => Promise<unknown>,
+    entry,
+    agentId: "me",
+    sessionId: "sess-1",
+  });
+  assert.equal(again, false);
+  assert.equal(calls.filter((call) => call.params.action === "put").length, 1);
 });

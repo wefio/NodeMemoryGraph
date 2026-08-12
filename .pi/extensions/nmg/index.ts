@@ -259,7 +259,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             const cooldownText =
               current.cooldownMs === 0 ? "无" : `${Math.round(current.cooldownMs / 60_000)} 分`;
             ctx.ui.notify(
-              `黑板唤醒：${current.enabled ? "开" : "关"} · 预算 ${budgetText} · 冷却 ${cooldownText} · 轮询 ${Math.round(current.intervalMs / 1_000)} 秒`,
+              `黑板唤醒：${current.enabled ? "开" : "关"} · 预算 ${budgetText} · 冷却 ${cooldownText} · 轮询 ${Math.round(current.intervalMs / 1_000)} 秒 · 世界广播 ${current.worldBroadcast ? "开" : "关"}`,
               "info",
             );
             return;
@@ -298,6 +298,19 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             const intervalMs = Math.max(5_000, Math.round(wval * 1_000));
             writeWakeConfig({ ...current, intervalMs });
             ctx.ui.notify(`黑板唤醒轮询已设为 ${Math.round(intervalMs / 1_000)} 秒`, "info");
+            return;
+          }
+          case "world": {
+            // 无参切换；0 关、1 开。
+            const world =
+              wvalRaw === "0" ? false : wvalRaw === "1" ? true : !current.worldBroadcast;
+            writeWakeConfig({ ...current, worldBroadcast: world });
+            ctx.ui.notify(
+              world
+                ? "已开启世界频道协作广播：协作类新条目会同时发到世界频道拉其他 agent"
+                : "已关闭世界频道协作广播",
+              "info",
+            );
             return;
           }
           default: {
@@ -422,7 +435,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     return [
       `召回：折叠/展开（当前 ${recallCollapsed ? "折叠" : "展开"}）`,
       `唤醒：开启/关闭（当前 ${wake.enabled ? "开" : "关"}）`,
-      `唤醒：参数设置（预算 ${budgetText} · 冷却 ${cooldownText} · 轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
+      `唤醒：参数设置（预算 ${budgetText} · 冷却 ${cooldownText} · 轮询 ${Math.round(wake.intervalMs / 1_000)} 秒 · 世界广播 ${wake.worldBroadcast ? "开" : "关"}）`,
       "查看状态",
     ];
   };
@@ -438,6 +451,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         { value: "wake budget ", label: "wake budget N", description: "每日唤醒上限（0=不限制）" },
         { value: "wake cooldown ", label: "wake cooldown M", description: "冷却分钟（0=无）" },
         { value: "wake interval ", label: "wake interval S", description: "轮询秒（最小 5）" },
+        {
+          value: "wake world",
+          label: "wake world",
+          description: "切换世界频道协作广播（1/0 开/关）",
+        },
       ];
       const normalized = prefix.trim();
       return items.filter((item) => item.value.startsWith(normalized));
@@ -1057,6 +1075,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     budget: number;
     cooldownMs: number;
     intervalMs: number;
+    /** When on, a collaboration-kind entry that wakes this session is also
+     * announced on the world channel so other agents can pull it in. */
+    worldBroadcast: boolean;
   }
   interface BoardWakeState {
     budgetDate: string;
@@ -1072,9 +1093,16 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         budget: raw.budget === 0 ? 0 : Math.max(1, Number(raw.budget) || 8),
         cooldownMs: raw.cooldownMs === 0 ? 0 : Math.max(30_000, Number(raw.cooldownMs) || 600_000),
         intervalMs: Math.max(5_000, Number(raw.intervalMs) || 60_000),
+        worldBroadcast: raw.worldBroadcast === true,
       };
     } catch {
-      return { enabled: false, budget: 8, cooldownMs: 600_000, intervalMs: 60_000 };
+      return {
+        enabled: false,
+        budget: 8,
+        cooldownMs: 600_000,
+        intervalMs: 60_000,
+        worldBroadcast: false,
+      };
     }
   };
   const writeWakeConfig = (config: BoardWakeConfig): void => {
@@ -1191,7 +1219,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       fresh.sort(
         (left, right) =>
           (rank[left.kind] ?? 9) - (rank[right.kind] ?? 9) ||
-          left.createdAt.localeCompare(right.createdAt),
+          String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? "")),
       );
       const pick = fresh[0]!;
       const excerpt =
@@ -1209,6 +1237,21 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         agentId,
         source: "wake",
       });
+      // Optional world-channel pull broadcast: when enabled and the entry is a
+      // collaboration kind, announce it on the world channel so OTHER agents
+      // notice and can pull it in. Broadcast is broadcast-style (a pull
+      // announcement, never addressed), deduped once per entry via the
+      // deliveries table under the sentinel session so an unanswered entry does
+      // not re-broadcast every tick. The loop's own echo filter (sourceSessionId
+      // === this session) stops the broadcaster from waking on its own post.
+      if (config.worldBroadcast && BROADCAST_KINDS.has(pick.kind)) {
+        await maybeBroadcastToWorld({
+          invoke: invoke as (method: string, params: unknown) => Promise<unknown>,
+          entry: pick,
+          agentId,
+          sessionId,
+        });
+      }
       state.budgetUsed += 1;
       state.lastWakeAt = now;
       saveWakeState(state);
@@ -1834,6 +1877,57 @@ interface TaskBoardToolResult {
   entry?: TaskBoardToolEntry;
   entries?: TaskBoardToolEntry[];
   nextCursor?: number;
+}
+
+/** Sentinel deliveries-table session used to dedup world-channel broadcasts:
+ * each entry is broadcast at most once, keyed on (entry, this sentinel). */
+export const WORLD_BROADCAST_SESSION = "world-broadcast";
+/** Collaboration kinds worth pulling other agents in on; note/result/decision
+ * updates are not broadcast, to keep the world channel quiet. */
+export const BROADCAST_KINDS = new Set(["question", "blocker", "handoff"]);
+
+/** Post a collaboration-pull broadcast on the world channel for an open entry
+ * that woke this session, so other agents notice and can pull it in.
+ * Broadcast is broadcast-style (a pull announcement, never addressed); the
+ * delivery receipt under WORLD_BROADCAST_SESSION dedups it (once per entry),
+ * and the wake loop's echo filter (sourceSessionId === this session) stops the
+ * broadcaster from waking on its own post. Returns true when a broadcast was
+ * actually posted. Injected `invoke` keeps the function unit-testable. */
+export async function maybeBroadcastToWorld(input: {
+  invoke: (method: string, params: unknown) => Promise<unknown>;
+  entry: TaskBoardToolEntry & { taskId: string };
+  agentId: string;
+  sessionId: string;
+}): Promise<boolean> {
+  const { invoke, entry, agentId, sessionId } = input;
+  const worldCheck = (await invoke("taskBoard", {
+    action: "deliveryCheck",
+    taskId: WORLD_BOARD_ID,
+    agentId,
+    sessionId: WORLD_BROADCAST_SESSION,
+    entryIds: [entry.id],
+  })) as { delivered: string[]; suppressed: boolean };
+  if (worldCheck.delivered.includes(entry.id)) return false;
+  const excerpt =
+    entry.content.length > 140 ? `${entry.content.slice(0, 140)}…` : entry.content;
+  const label = kindLabel(entry.kind);
+  const broadcast = `[NMG board 协作广播] 频道 ${entry.taskId} 有 #${entry.sequence} 未认领的${label}（open）：${excerpt}。有空的 agent 可用 nmg_board read taskId=${entry.taskId} 查看详情、claim 认领处理。`;
+  await invoke("taskBoard", {
+    action: "put",
+    taskId: WORLD_BOARD_ID,
+    agentId,
+    sourceSessionId: sessionId,
+    kind: "handoff",
+    content: broadcast,
+  });
+  await invoke("taskBoard", {
+    action: "recordDelivery",
+    entryId: entry.id,
+    sessionId: WORLD_BROADCAST_SESSION,
+    agentId,
+    source: "wake-broadcast",
+  });
+  return true;
 }
 
 function formatTaskBoardResult(
