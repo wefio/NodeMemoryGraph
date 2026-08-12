@@ -1101,7 +1101,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const seen = new Set(state.notified);
       const collect = (taskId: string, entries: TaskBoardToolEntry[] | undefined) => {
         for (const entry of entries ?? []) {
-          if (entry.status === "open" && !seen.has(entry.id)) {
+          // Skip entries this exact session posted — waking on your own message
+          // is an echo. The echo boundary is the session (sourceSessionId), not
+          // the agent id: sessions sharing one NMG_AGENT_ID must still notify
+          // each other. Null sourceSessionId (legacy rows) falls back to agentId.
+          const ownEcho =
+            entry.sourceSessionId === sessionId ||
+            (entry.sourceSessionId == null && entry.agentId === agentId);
+          if (entry.status === "open" && !seen.has(entry.id) && !ownEcho) {
             candidates.push({ ...entry, taskId });
           }
         }
@@ -1733,6 +1740,7 @@ interface TaskBoardToolEntry {
   id: string;
   sequence: number;
   agentId: string;
+  sourceSessionId?: string | null;
   kind: string;
   status: string;
   content: string;
