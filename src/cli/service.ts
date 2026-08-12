@@ -216,6 +216,41 @@ export class NmgService {
             entry: this.#getStore().releaseTaskBoardEntry(parsed),
           } as NmgMethodResult[M];
         }
+        if (parsed.action === "deliveryCheck") {
+          const store = this.#getStore();
+          return {
+            action: "deliveryCheck",
+            delivered: parsed.entryIds.filter((entryId) =>
+              store.hasTaskBoardDelivery({ entryId, sessionId: parsed.sessionId }),
+            ),
+            suppressed: store.isTaskBoardSuppressed({
+              sessionId: parsed.sessionId,
+              taskId: parsed.taskId,
+            }),
+          } as NmgMethodResult[M];
+        }
+        if (parsed.action === "recordDelivery") {
+          this.#getStore().recordTaskBoardDelivery({
+            entryId: parsed.entryId,
+            sessionId: parsed.sessionId,
+            source: parsed.source,
+          });
+          return { action: "recordDelivery", recorded: true } as NmgMethodResult[M];
+        }
+        if (parsed.action === "unsubscribe") {
+          this.#getStore().suppressTaskBoard({
+            sessionId: parsed.sessionId,
+            taskId: parsed.taskId,
+          });
+          return { action: "unsubscribe", taskId: parsed.taskId } as NmgMethodResult[M];
+        }
+        if (parsed.action === "subscribe") {
+          this.#getStore().unsuppressTaskBoard({
+            sessionId: parsed.sessionId,
+            taskId: parsed.taskId,
+          });
+          return { action: "subscribe", taskId: parsed.taskId } as NmgMethodResult[M];
+        }
         return {
           action: "resolve",
           entry: this.#getStore().resolveTaskBoardEntry(parsed),
@@ -1013,10 +1048,40 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
     "claim",
     "release",
     "list",
+    "deliveryCheck",
+    "recordDelivery",
+    "unsubscribe",
+    "subscribe",
   ] as const);
   const agentId = requiredString(params, "agentId");
   if (action === "list") {
     return { action, agentId };
+  }
+  if (action === "deliveryCheck") {
+    return {
+      action,
+      agentId,
+      sessionId: requiredString(params, "sessionId"),
+      taskId: requiredString(params, "taskId"),
+      entryIds: optionalStringArray(params, "entryIds") ?? [],
+    };
+  }
+  if (action === "recordDelivery") {
+    return {
+      action,
+      agentId,
+      sessionId: requiredString(params, "sessionId"),
+      entryId: requiredString(params, "entryId"),
+      source: optionalString(params, "source"),
+    };
+  }
+  if (action === "unsubscribe" || action === "subscribe") {
+    return {
+      action,
+      agentId,
+      sessionId: requiredString(params, "sessionId"),
+      taskId: requiredString(params, "taskId"),
+    };
   }
   const base = {
     action,

@@ -951,6 +951,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           Type.Literal("resolve"),
           Type.Literal("claim"),
           Type.Literal("release"),
+          Type.Literal("unsubscribe"),
+          Type.Literal("subscribe"),
         ],
         { description: nmgPrompts.board_action_parameter_description },
       ),
@@ -990,6 +992,22 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // name needs to be agreed on in advance. Explicit taskIds open named
       // channels that are surfaced in the world channel's lobby.
       const taskId = params.taskId?.trim() || WORLD_BOARD_ID;
+      // Unsubscribe/subscribe are session-scoped (whether THIS session keeps
+      // getting wake notices for a channel), handled apart from entry reads.
+      if (params.action === "unsubscribe" || params.action === "subscribe") {
+        const result = (await invoke("taskBoard", {
+          action: params.action,
+          taskId,
+          sessionId,
+          agentId,
+        })) as { action: "unsubscribe" | "subscribe"; taskId: string };
+        return toolResult(
+          result,
+          params.action === "unsubscribe"
+            ? `已退订频道 ${result.taskId}：不再收到该频道新条目的唤醒通知（用 nmg_board subscribe 恢复）。`
+            : `已恢复订阅频道 ${result.taskId}：继续接收该频道新条目的唤醒通知。`,
+        );
+      }
       const result = (await invoke("taskBoard", {
         ...params,
         taskId,
@@ -1041,7 +1059,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     intervalMs: number;
   }
   interface BoardWakeState {
-    notified: string[];
     budgetDate: string;
     budgetUsed: number;
     lastWakeAt: number;
@@ -1071,7 +1088,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     try {
       return JSON.parse(readFileSync(wakeStatePath, "utf8")) as BoardWakeState;
     } catch {
-      return { notified: [], budgetDate: "", budgetUsed: 0, lastWakeAt: 0 };
+      return { budgetDate: "", budgetUsed: 0, lastWakeAt: 0 };
     }
   };
   const saveWakeState = (state: BoardWakeState): void => {
@@ -1107,7 +1124,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
     try {
       const candidates: Array<TaskBoardToolEntry & { taskId: string }> = [];
-      const seen = new Set(state.notified);
       const collect = (taskId: string, entries: TaskBoardToolEntry[] | undefined) => {
         for (const entry of entries ?? []) {
           // Skip entries this exact session posted — waking on your own message
@@ -1117,7 +1133,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           const ownEcho =
             entry.sourceSessionId === sessionId ||
             (entry.sourceSessionId == null && entry.agentId === agentId);
-          if (entry.status === "open" && !seen.has(entry.id) && !ownEcho) {
+          if (entry.status === "open" && !ownEcho) {
             candidates.push({ ...entry, taskId });
           }
         }
@@ -1140,6 +1156,29 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         collect(board.taskId, read.entries);
       }
       if (candidates.length === 0) return;
+      // Delivery protocol: ask the daemon which candidates are already delivered
+      // to this session and which channels are suppressed (do-not-send), then
+      // keep only undelivered, non-suppressed ones.
+      const fresh: Array<TaskBoardToolEntry & { taskId: string }> = [];
+      for (const taskId of new Set(candidates.map((candidate) => candidate.taskId))) {
+        const check = (await invoke("taskBoard", {
+          action: "deliveryCheck",
+          taskId,
+          agentId,
+          sessionId,
+          entryIds: candidates
+            .filter((candidate) => candidate.taskId === taskId)
+            .map((candidate) => candidate.id),
+        })) as { delivered: string[]; suppressed: boolean };
+        if (check.suppressed) continue; // unsubscribed channel — skip entirely
+        const delivered = new Set(check.delivered);
+        for (const candidate of candidates) {
+          if (candidate.taskId === taskId && !delivered.has(candidate.id)) {
+            fresh.push(candidate);
+          }
+        }
+      }
+      if (fresh.length === 0) return;
       const rank: Record<string, number> = {
         question: 0,
         blocker: 1,
@@ -1149,19 +1188,27 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         decision: 5,
         result: 6,
       };
-      candidates.sort(
+      fresh.sort(
         (left, right) =>
           (rank[left.kind] ?? 9) - (rank[right.kind] ?? 9) ||
           left.createdAt.localeCompare(right.createdAt),
       );
-      const pick = candidates[0]!;
+      const pick = fresh[0]!;
       const excerpt =
         pick.content.length > 140 ? `${pick.content.slice(0, 140)}…` : pick.content;
       const label = kindLabel(pick.kind);
       pi.sendUserMessage(
         `[NMG board] 你订阅的频道 ${pick.taskId} 有新${label}：#${pick.sequence} — ${excerpt}（open，可认领）。需要的话用 nmg_board read 查看详情、claim 认领处理。`,
       );
-      state.notified.push(pick.id);
+      // Delivery receipt: this session has been reached for this entry, so the
+      // wake loop will not re-notify it (idempotent in the store).
+      await invoke("taskBoard", {
+        action: "recordDelivery",
+        entryId: pick.id,
+        sessionId,
+        agentId,
+        source: "wake",
+      });
       state.budgetUsed += 1;
       state.lastWakeAt = now;
       saveWakeState(state);

@@ -283,3 +283,47 @@ test("task board claims: only the holder releases; resolving clears the claim", 
     );
   });
 });
+
+test("task board delivery receipts are idempotent and drive re-notify suppression", () => {
+  withStore((store) => {
+    const entry = store.putTaskBoardEntry({
+      taskId: "deliveries-1",
+      agentId: "sender",
+      kind: "question",
+      content: "Any taker?",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    assert.equal(store.hasTaskBoardDelivery({ entryId: entry.id, sessionId: "session-a" }), false);
+    store.recordTaskBoardDelivery({ entryId: entry.id, sessionId: "session-a" });
+    assert.equal(store.hasTaskBoardDelivery({ entryId: entry.id, sessionId: "session-a" }), true);
+    // Idempotent: re-acking is not an error (UNIQUE(entry_id, session_id)).
+    store.recordTaskBoardDelivery({ entryId: entry.id, sessionId: "session-a" });
+    assert.equal(store.hasTaskBoardDelivery({ entryId: entry.id, sessionId: "session-a" }), true);
+    // Another session is not affected.
+    assert.equal(store.hasTaskBoardDelivery({ entryId: entry.id, sessionId: "session-b" }), false);
+  });
+});
+
+test("task board suppression registry is session-scoped and reversible", () => {
+  withStore((store) => {
+    assert.equal(store.isTaskBoardSuppressed({ sessionId: "session-a", taskId: "noisy" }), false);
+    store.suppressTaskBoard({ sessionId: "session-a", taskId: "noisy" });
+    assert.equal(store.isTaskBoardSuppressed({ sessionId: "session-a", taskId: "noisy" }), true);
+    // Idempotent opt-out.
+    store.suppressTaskBoard({ sessionId: "session-a", taskId: "noisy" });
+    assert.equal(store.isTaskBoardSuppressed({ sessionId: "session-a", taskId: "noisy" }), true);
+    // Session-scoped: session-b is not suppressed, other channels not affected.
+    assert.equal(store.isTaskBoardSuppressed({ sessionId: "session-b", taskId: "noisy" }), false);
+    store.suppressTaskBoard({ sessionId: "session-b", taskId: "other" });
+    assert.equal(store.isTaskBoardSuppressed({ sessionId: "session-a", taskId: "other" }), false);
+    // Listing returns this session's suppressions.
+    assert.deepEqual(
+      store.listTaskBoardSuppressions("session-a").map((item) => item.taskId),
+      ["noisy"],
+    );
+    // Re-subscribe removes it.
+    store.unsuppressTaskBoard({ sessionId: "session-a", taskId: "noisy" });
+    assert.equal(store.isTaskBoardSuppressed({ sessionId: "session-a", taskId: "noisy" }), false);
+    assert.deepEqual(store.listTaskBoardSuppressions("session-a"), []);
+  });
+});

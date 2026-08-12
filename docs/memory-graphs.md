@@ -309,7 +309,16 @@ recipient, so this is notification, not a DM or @. It is enabled and tuned via
 `~/.nmg/board-wake.json` (hand-edited or toggled through the `/nmg` TUI menu:
 `/nmg wake on|off|status|budget N|cooldown M|interval S`), no environment
 variables. The loop is guarded by a daily budget and a cooldown
-(notification-budget philosophy) and dedups per entry across restarts.
+(notification-budget philosophy).
+
+Delivery is a *flow constraint*, not a prompt rule. Every wake writes a
+**delivery receipt** (`task_board_deliveries`, idempotent per session+entry,
+cf. Pub/Sub ack semantics): once the loop wakes a session for an entry it does
+not re-notify it. A session can opt out of a channel via the **suppression
+registry** (`task_board_suppressions`, do-not-send, fed by `nmg_board
+unsubscribe`/`subscribe`), which is checked before every delivery. So "already
+notified", "read", "unsubscribed", and "resolved" entries never re-wake a
+session — by mechanism, not by asking the Agent to remember.
 *Status:* implemented.
 
 **Conversation closure (no infinite confirmations).** A request — a question,

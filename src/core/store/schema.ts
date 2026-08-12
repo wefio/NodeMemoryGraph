@@ -617,6 +617,34 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
       "ALTER TABLE task_board_entries ADD COLUMN claim_expires_at TEXT",
     );
   }
+  // Delivery receipts: which session a wake already reached for an entry — the
+  // authoritative "already notified, do not re-notify" record (replaces the
+  // ephemeral notified[] array in board-wake-state.json). (session_id,
+  // entry_id) is unique, so re-acking is idempotent, not an error (cf. Pub/Sub
+  // exactly-once semantics).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS task_board_deliveries (
+      id TEXT PRIMARY KEY,
+      entry_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'wake',
+      delivered_at TEXT NOT NULL,
+      UNIQUE(entry_id, session_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_board_deliveries_session
+      ON task_board_deliveries(session_id, entry_id);
+  `);
+  // Suppression registry (do-not-send list): a session opted out of wake
+  // notices for a channel. Fed by explicit unsubscribe; checked before every
+  // delivery (cf. email suppression lists).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS task_board_suppressions (
+      session_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      unsubscribed_at TEXT NOT NULL,
+      PRIMARY KEY (session_id, task_id)
+    );
+  `);
 }
 
 export function ensureEmbeddingTable(db: DatabaseSync): void {

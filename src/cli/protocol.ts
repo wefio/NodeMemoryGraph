@@ -287,13 +287,50 @@ export interface NmgTaskBoardListParams {
   agentId: string;
 }
 
+/** Wake-loop internal: which entries are already delivered to this session and
+ * whether the channel is suppressed for it. Kept out of the nmg_board tool. */
+export interface NmgTaskBoardDeliveryCheckParams {
+  action: "deliveryCheck";
+  agentId: string;
+  sessionId: string;
+  taskId: string;
+  entryIds: string[];
+}
+
+export interface NmgTaskBoardRecordDeliveryParams {
+  action: "recordDelivery";
+  agentId: string;
+  sessionId: string;
+  entryId: string;
+  source?: string;
+}
+
+/** Agent-facing: opt out of (or back into) wake notices for a channel. */
+export interface NmgTaskBoardUnsubscribeParams {
+  action: "unsubscribe";
+  agentId: string;
+  sessionId: string;
+  taskId: string;
+}
+
+export interface NmgTaskBoardSubscribeParams {
+  action: "subscribe";
+  agentId: string;
+  sessionId: string;
+  taskId: string;
+}
+
 export type NmgTaskBoardParams =
   | NmgTaskBoardPutParams
   | NmgTaskBoardReadParams
   | NmgTaskBoardResolveParams
   | NmgTaskBoardClaimParams
   | NmgTaskBoardReleaseParams
-  | NmgTaskBoardListParams;
+  | NmgTaskBoardListParams
+  | NmgTaskBoardDeliveryCheckParams
+  | NmgTaskBoardRecordDeliveryParams
+  | NmgTaskBoardUnsubscribeParams
+  | NmgTaskBoardSubscribeParams;
 
 export interface NmgRetentionCandidatesParams {
   dormantAfterDays?: number;
@@ -396,7 +433,14 @@ export type NmgMethodResult = {
   taskBoard:
     | { action: "put" | "resolve" | "claim" | "release"; entry: TaskBoardEntry }
     | { action: "read"; entries: TaskBoardEntry[]; nextCursor: number }
-    | { action: "list"; boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> };
+    | { action: "list"; boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> }
+    | {
+        action: "deliveryCheck";
+        delivered: string[];
+        suppressed: boolean;
+      }
+    | { action: "recordDelivery"; recorded: boolean }
+    | { action: "unsubscribe" | "subscribe"; taskId: string };
   shutdown: { shuttingDown: true };
 };
 

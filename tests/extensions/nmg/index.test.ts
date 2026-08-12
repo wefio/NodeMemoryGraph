@@ -727,6 +727,24 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       { sessionManager: secondSessionManager },
     )) as { details: { entry: { claimedBy: string | null } } };
     assert.equal(boardRelease.details.entry.claimedBy, null);
+    // Session-scoped unsubscribe: agent-b opts out of wake notices for the
+    // channel (suppression registry, do-not-send).
+    const boardUnsubscribe = (await tools.get("nmg_board")!.execute(
+      "board-unsubscribe",
+      { action: "unsubscribe", taskId: "atlas-review" },
+      undefined,
+      undefined,
+      { sessionManager: secondSessionManager },
+    )) as { content: Array<{ text: string }> };
+    assert.match(boardUnsubscribe.content[0].text, /已退订频道 atlas-review/u);
+    const boardSubscribe = (await tools.get("nmg_board")!.execute(
+      "board-subscribe",
+      { action: "subscribe", taskId: "atlas-review" },
+      undefined,
+      undefined,
+      { sessionManager: secondSessionManager },
+    )) as { content: Array<{ text: string }> };
+    assert.match(boardSubscribe.content[0].text, /已恢复订阅频道 atlas-review/u);
     const boardProjection = (await handlers.get("before_agent_start")!(
       { prompt: "Continue the assigned review.", systemPrompt: "base" },
       { sessionManager: secondSessionManager },

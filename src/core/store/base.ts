@@ -269,6 +269,79 @@ export class NmgStoreBase {
     }
     return this.taskBoardEntry(input.entryId)!;
   }
+  /** Record a delivery receipt: the wake loop reached this session for this
+   * entry. Idempotent (UNIQUE(entry_id, session_id)); re-acking is fine. */
+  recordTaskBoardDelivery(input: {
+    entryId: string;
+    sessionId: string;
+    source?: string;
+    now?: string;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO task_board_deliveries (id, entry_id, session_id, source, delivered_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        randomUUID(),
+        input.entryId,
+        input.sessionId,
+        input.source ?? "wake",
+        input.now ?? new Date().toISOString(),
+      );
+  }
+  /** True when a delivery receipt exists for this session + entry. */
+  hasTaskBoardDelivery(input: { entryId: string; sessionId: string }): boolean {
+    const row = this.db
+      .prepare("SELECT 1 FROM task_board_deliveries WHERE entry_id = ? AND session_id = ?")
+      .get(input.entryId, input.sessionId) as Row | undefined;
+    return row !== undefined;
+  }
+  /** Opt a session out of wake notices for a channel (do-not-send registry). */
+  suppressTaskBoard(input: { sessionId: string; taskId: string; now?: string }): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO task_board_suppressions (session_id, task_id, unsubscribed_at)
+         VALUES (?, ?, ?)`,
+      )
+      .run(
+        input.sessionId,
+        input.taskId,
+        input.now ?? new Date().toISOString(),
+      );
+  }
+  /** True when a session is suppressed for a channel (will not be woken for it). */
+  isTaskBoardSuppressed(input: { sessionId: string; taskId: string }): boolean {
+    const row = this.db
+      .prepare("SELECT 1 FROM task_board_suppressions WHERE session_id = ? AND task_id = ?")
+      .get(input.sessionId, input.taskId) as Row | undefined;
+    return row !== undefined;
+  }
+  /** All channels a session is suppressed on (for the /nmg wake menu). */
+  listTaskBoardSuppressions(sessionId: string): Array<{
+    taskId: string;
+    unsubscribedAt: string;
+  }> {
+    return (
+      this.db
+        .prepare(
+          `SELECT task_id, unsubscribed_at FROM task_board_suppressions
+           WHERE session_id = ? ORDER BY unsubscribed_at DESC`,
+        )
+        .all(sessionId) as Row[]
+    ).map((row) => ({
+      taskId: String(row.task_id),
+      unsubscribedAt: String(row.unsubscribed_at),
+    }));
+  }
+  /** Remove a session's suppression for a channel (re-subscribe). */
+  unsuppressTaskBoard(input: { sessionId: string; taskId: string }): void {
+    this.db
+      .prepare(
+        `DELETE FROM task_board_suppressions WHERE session_id = ? AND task_id = ?`,
+      )
+      .run(input.sessionId, input.taskId);
+  }
   pruneExpiredTaskBoardEntries(now = new Date().toISOString(), taskId?: string): number {
     const result = taskId
       ? this.db

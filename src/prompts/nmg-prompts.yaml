@@ -59,7 +59,9 @@ board_action_parameter_description: >-
   Use put to publish one concise coordination entry, read to fetch entries after
   an optional cursor, claim to take an open entry as the single working Agent
   (lease-based; expired claims return to the pool, resolving clears the claim),
-  release to put a claimed entry back, or resolve to close a selected entry.
+  release to put a claimed entry back, unsubscribe to stop receiving wake
+  notices for a channel (subscribe restores), or resolve to close a selected
+  entry.
   Confirmations close: once a question/handoff is answered, resolve it — a
   resolved entry is closed and should not be replied to (reopen only for new
   substance). Put/read/claim/release/resolve do not create semantic memory;
