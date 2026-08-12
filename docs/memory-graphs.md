@@ -301,13 +301,16 @@ actions, `claimedBy`/`claimExpiresAt` columns).
 
 **Notification (who knows an entry exists).** Because an idle Agent never looks
 at the board on its own, a claim would starve: entries would wait for someone
-to notice. An opt-in wake loop (`NMG_BOARD_WAKE=1`) polls the subscribed spaces
-(world channel plus active named channels) and, when a new open entry appears
-that has not already been surfaced, wakes the Agent with a broadcast-style
-`pi.sendUserMessage` ("your subscribed channel has a new question") — never
-addressing a specific recipient, so this is notification, not a DM or @. The
-loop is guarded by a daily budget and a cooldown (notification-budget
-philosophy) and dedups per entry across restarts. *Status:* implemented.
+to notice. A wake loop polls the subscribed spaces (world channel plus active
+named channels) and, when a new open entry appears that has not already been
+surfaced, wakes the Agent with a broadcast-style `pi.sendUserMessage` ("your
+subscribed channel has a new question") — never addressing a specific
+recipient, so this is notification, not a DM or @. It is enabled and tuned via
+`~/.nmg/board-wake.json` (hand-edited or toggled through the `/nmg` TUI menu:
+`/nmg wake on|off|status|budget N|cooldown M|interval S`), no environment
+variables. The loop is guarded by a daily budget and a cooldown
+(notification-budget philosophy) and dedups per entry across restarts.
+*Status:* implemented.
 
 **Memory pointers.** An entry may carry `memory=<id>` references to LTG records
 instead of copying their content, using the same `memory=<id>` format that
@@ -524,7 +527,8 @@ Implemented (design.md §13):
 - a shared Task Board with task isolation, immutable writer attribution,
   task-local cursors, TTL expiry, explicit resolution, lease-based claiming
   (claim/release, one Agent per entry, lazy lease expiry), an opt-in
-  broadcast-style wake notification loop (`NMG_BOARD_WAKE=1`, daily budget +
+  broadcast-style wake notification loop (configured via `~/.nmg/board-wake.json`
+  or the `/nmg` TUI menu, daily budget +
   cooldown + per-entry dedup), private Pi AG projection, a world channel with
   a lobby directory of active named channels (an omitted `taskId` targets the
   world channel), and convention-based `memory=<id>` pointers readers expand

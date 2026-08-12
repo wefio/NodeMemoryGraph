@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
@@ -222,17 +223,110 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     box.addChild(new Text(`${label}${hint}`, 0, 0));
     return box;
   });
-  pi.registerCommand("nmg-recall", {
-    description: "切换 nmg-context 召回消息的折叠/展开",
-    handler: async (_args, ctx) => {
-      recallCollapsed = !recallCollapsed;
-      ctx.ui.notify(
-        recallCollapsed
-          ? "nmg-context 已折叠（只显示 [nmg-context] chip）"
-          : "nmg-context 已展开（显示召回全文）",
-        "info",
-      );
+  // NMG 总二级/三级菜单。早期只有独立的 /nmg-recall 命令；现在统一收编到
+  // /nmg 下，保留 /nmg-recall 作为别名。状态只影响后续渲染与重开会话后的
+  // 历史恢复；已渲染的历史消息不重绘（pi 无公开 force-rerender）。
+  const nmgMenuHandler = async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
+    const parts = args.trim().split(/\s+/).filter(Boolean);
+    const [sub, ...rest] = parts;
+    const restText = rest.join(" ");
+    switch (sub) {
+      case "recall": {
+        recallCollapsed = !recallCollapsed;
+        ctx.ui.notify(
+          recallCollapsed
+            ? "nmg-context 已折叠（只显示 [nmg-context] chip）"
+            : "nmg-context 已展开（显示召回全文）",
+          "info",
+        );
+        return;
+      }
+      case "wake": {
+        const current = readWakeConfig();
+        const [wcmd, wvalRaw] = restText.split(/\s+/);
+        const wval = Number(wvalRaw);
+        switch (wcmd) {
+          case "on":
+            writeWakeConfig({ ...current, enabled: true });
+            ctx.ui.notify("黑板唤醒已开启（世界频道+活跃频道有新 open 条目会唤醒）", "info");
+            return;
+          case "off":
+            writeWakeConfig({ ...current, enabled: false });
+            ctx.ui.notify("黑板唤醒已关闭", "info");
+            return;
+          case "status":
+            ctx.ui.notify(
+              `黑板唤醒：${current.enabled ? "开" : "关"} · 预算 ${current.budget}/天 · 冷却 ${Math.round(current.cooldownMs / 60_000)} 分 · 轮询 ${Math.round(current.intervalMs / 1_000)} 秒`,
+              "info",
+            );
+            return;
+          case "budget":
+            if (!Number.isFinite(wval)) {
+              ctx.ui.notify("用法：/nmg wake budget N（1-100）", "warning");
+              return;
+            }
+            writeWakeConfig({ ...current, budget: Math.max(1, Math.min(100, Math.round(wval))) });
+            ctx.ui.notify(`黑板唤醒预算已设为 ${current.budget}/天`, "info");
+            return;
+          case "cooldown":
+            if (!Number.isFinite(wval)) {
+              ctx.ui.notify("用法：/nmg wake cooldown M（分钟）", "warning");
+              return;
+            }
+            writeWakeConfig({
+              ...current,
+              cooldownMs: Math.max(30_000, Math.round(wval * 60_000)),
+            });
+            ctx.ui.notify(`黑板唤醒冷却已设为 ${Math.round(Math.max(30_000, Math.round(wval * 60_000)) / 60_000)} 分钟`, "info");
+            return;
+          case "interval":
+            if (!Number.isFinite(wval)) {
+              ctx.ui.notify("用法：/nmg wake interval S（秒）", "warning");
+              return;
+            }
+            writeWakeConfig({ ...current, intervalMs: Math.max(5_000, Math.round(wval * 1_000)) });
+            ctx.ui.notify(`黑板唤醒轮询已设为 ${Math.round(Math.max(5_000, Math.round(wval * 1_000)) / 1_000)} 秒`, "info");
+            return;
+          default: {
+            const enabled = !current.enabled;
+            writeWakeConfig({ ...current, enabled });
+            ctx.ui.notify(enabled ? "黑板唤醒已开启" : "黑板唤醒已关闭", "info");
+          }
+        }
+        return;
+      }
+      default: {
+        // 无参数或未知子命令 → 总览（含当前配置，够用时不进子菜单）。
+        const wake = readWakeConfig();
+        ctx.ui.notify(
+          `NMG 菜单：/nmg recall（召回折叠 ${recallCollapsed ? "开" : "关"}） · /nmg wake on|off|status|budget N|cooldown M|interval S（唤醒 ${wake.enabled ? "开" : "关"}，预算 ${wake.budget}/天，冷却 ${Math.round(wake.cooldownMs / 60_000)} 分，轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
+          "info",
+        );
+      }
+    }
+  };
+  pi.registerCommand("nmg", {
+    description: "NMG 菜单：/nmg recall · wake on/off/status · wake budget N · wake cooldown M · wake interval S",
+    getArgumentCompletions: (prefix) => {
+      const items: AutocompleteItem[] = [
+        { value: "recall", label: "recall", description: "切换 nmg-context 召回折叠/展开" },
+        { value: "wake", label: "wake", description: "黑板唤醒开关/配置" },
+        { value: "wake on", label: "wake on", description: "开启黑板唤醒" },
+        { value: "wake off", label: "wake off", description: "关闭黑板唤醒" },
+        { value: "wake status", label: "wake status", description: "显示唤醒配置" },
+        { value: "wake budget ", label: "wake budget N", description: "每日唤醒上限（1-100）" },
+        { value: "wake cooldown ", label: "wake cooldown M", description: "冷却分钟" },
+        { value: "wake interval ", label: "wake interval S", description: "轮询秒" },
+      ];
+      const normalized = prefix.trim();
+      return items.filter((item) => item.value.startsWith(normalized));
     },
+    handler: nmgMenuHandler,
+  });
+  // 兼容别名：/nmg-recall = /nmg recall（早期版本已在使用）。
+  pi.registerCommand("nmg-recall", {
+    description: "切换 nmg-context 召回消息的折叠/展开（= /nmg recall）",
+    handler: async (_args, ctx) => nmgMenuHandler("recall", ctx),
   });
 
   pi.on("session_start", async (_event, ctx) => {
@@ -812,114 +906,148 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // ---- Board wake loop (opt-in via NMG_BOARD_WAKE=1) ----------------
+  // ---- Board wake loop (config file + /nmg-wake command) ------------
   // Notification for an idle Agent: poll the subscribed spaces (the world
   // channel plus active named channels), and when a new open entry appears
   // that has not already been surfaced, wake the Agent with a broadcast-style
   // pi.sendUserMessage ("your subscribed channel has a new question") — never
   // addressing a specific recipient. This is the notification half of the
   // claim+notify design: claims decide who works, notifications decide who
-  // knows. Guarded by a daily budget and a cooldown (notification budget
-  // philosophy), with per-entry dedup persisted across restarts.
-  if (process.env.NMG_BOARD_WAKE === "1") {
-    const wakeStatePath = join(resolveNmgDataDir(), "board-wake-state.json");
-    const wakeIntervalMs = Math.max(5_000, Number(process.env.NMG_BOARD_WAKE_INTERVAL_MS ?? 60_000));
-    const wakeBudget = Math.max(1, Number(process.env.NMG_BOARD_WAKE_BUDGET ?? 8));
-    const wakeCooldownMs = Math.max(30_000, Number(process.env.NMG_BOARD_WAKE_COOLDOWN_MS ?? 600_000));
-    interface BoardWakeState {
-      notified: string[];
-      budgetDate: string;
-      budgetUsed: number;
-      lastWakeAt: number;
+  // knows. Enabled and tuned via ~/.nmg/board-wake.json (edited by hand or
+  // toggled with /nmg-wake, which persists to the same file); dedup state is
+  // kept in board-wake-state.json. Defaults are conservative: off.
+  const wakeConfigPath = join(resolveNmgDataDir(), "board-wake.json");
+  const wakeStatePath = join(resolveNmgDataDir(), "board-wake-state.json");
+  interface BoardWakeConfig {
+    enabled: boolean;
+    budget: number;
+    cooldownMs: number;
+    intervalMs: number;
+  }
+  interface BoardWakeState {
+    notified: string[];
+    budgetDate: string;
+    budgetUsed: number;
+    lastWakeAt: number;
+  }
+  const readWakeConfig = (): BoardWakeConfig => {
+    try {
+      const raw = JSON.parse(readFileSync(wakeConfigPath, "utf8")) as Partial<BoardWakeConfig>;
+      return {
+        enabled: raw.enabled === true,
+        budget: Math.max(1, Number(raw.budget) || 8),
+        cooldownMs: Math.max(30_000, Number(raw.cooldownMs) || 600_000),
+        intervalMs: Math.max(5_000, Number(raw.intervalMs) || 60_000),
+      };
+    } catch {
+      return { enabled: false, budget: 8, cooldownMs: 600_000, intervalMs: 60_000 };
     }
-    const loadWakeState = (): BoardWakeState => {
-      try {
-        return JSON.parse(readFileSync(wakeStatePath, "utf8")) as BoardWakeState;
-      } catch {
-        return { notified: [], budgetDate: "", budgetUsed: 0, lastWakeAt: 0 };
-      }
-    };
-    const saveWakeState = (state: BoardWakeState): void => {
-      try {
-        writeFileSync(wakeStatePath, JSON.stringify(state), "utf8");
-      } catch {
-        // best-effort; losing dedup state only means an entry could re-notify
-      }
-    };
-    const scanBoardWake = async (): Promise<void> => {
-      const state = loadWakeState();
-      const now = Date.now();
-      if (now - state.lastWakeAt < wakeCooldownMs) return;
-      const today = new Date(now).toISOString().slice(0, 10);
-      if (state.budgetDate !== today) {
-        state.budgetDate = today;
-        state.budgetUsed = 0;
-      }
-      if (state.budgetUsed >= wakeBudget) return;
-      if (latestAgentCtx?.isIdle && !latestAgentCtx.isIdle()) return;
-      const sessionId = latestAgentCtx?.sessionManager.getSessionId() ?? "";
-      const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
-      try {
-        const candidates: Array<TaskBoardToolEntry & { taskId: string }> = [];
-        const seen = new Set(state.notified);
-        const collect = (taskId: string, entries: TaskBoardToolEntry[] | undefined) => {
-          for (const entry of entries ?? []) {
-            if (entry.status === "open" && !seen.has(entry.id)) {
-              candidates.push({ ...entry, taskId });
-            }
+  };
+  const writeWakeConfig = (config: BoardWakeConfig): void => {
+    try {
+      writeFileSync(wakeConfigPath, JSON.stringify(config, null, 2), "utf8");
+    } catch {
+      // best-effort; a read-only directory just means the toggle cannot persist
+    }
+  };
+  const loadWakeState = (): BoardWakeState => {
+    try {
+      return JSON.parse(readFileSync(wakeStatePath, "utf8")) as BoardWakeState;
+    } catch {
+      return { notified: [], budgetDate: "", budgetUsed: 0, lastWakeAt: 0 };
+    }
+  };
+  const saveWakeState = (state: BoardWakeState): void => {
+    try {
+      writeFileSync(wakeStatePath, JSON.stringify(state), "utf8");
+    } catch {
+      // best-effort; losing dedup state only means an entry could re-notify
+    }
+  };
+  const scanBoardWake = async (): Promise<void> => {
+    const config = readWakeConfig();
+    if (!config.enabled) return;
+    const state = loadWakeState();
+    const now = Date.now();
+    if (now - state.lastWakeAt < config.cooldownMs) return;
+    const today = new Date(now).toISOString().slice(0, 10);
+    if (state.budgetDate !== today) {
+      state.budgetDate = today;
+      state.budgetUsed = 0;
+    }
+    if (state.budgetUsed >= config.budget) return;
+    if (latestAgentCtx?.isIdle && !latestAgentCtx.isIdle()) return;
+    const sessionId = latestAgentCtx?.sessionManager.getSessionId() ?? "";
+    const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
+    try {
+      const candidates: Array<TaskBoardToolEntry & { taskId: string }> = [];
+      const seen = new Set(state.notified);
+      const collect = (taskId: string, entries: TaskBoardToolEntry[] | undefined) => {
+        for (const entry of entries ?? []) {
+          if (entry.status === "open" && !seen.has(entry.id)) {
+            candidates.push({ ...entry, taskId });
           }
-        };
-        const world = (await invoke("taskBoard", {
+        }
+      };
+      const world = (await invoke("taskBoard", {
+        action: "read",
+        taskId: WORLD_BOARD_ID,
+        agentId,
+      })) as TaskBoardToolResult;
+      collect(WORLD_BOARD_ID, world.entries);
+      const lobby = (await invoke("taskBoard", { action: "list", agentId })) as {
+        boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }>;
+      };
+      for (const board of lobby.boards ?? []) {
+        const read = (await invoke("taskBoard", {
           action: "read",
-          taskId: WORLD_BOARD_ID,
+          taskId: board.taskId,
           agentId,
         })) as TaskBoardToolResult;
-        collect(WORLD_BOARD_ID, world.entries);
-        const lobby = (await invoke("taskBoard", { action: "list", agentId })) as {
-          boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }>;
-        };
-        for (const board of lobby.boards ?? []) {
-          const read = (await invoke("taskBoard", {
-            action: "read",
-            taskId: board.taskId,
-            agentId,
-          })) as TaskBoardToolResult;
-          collect(board.taskId, read.entries);
-        }
-        if (candidates.length === 0) return;
-        const rank: Record<string, number> = {
-          question: 0,
-          blocker: 1,
-          handoff: 2,
-          goal: 3,
-          note: 4,
-          decision: 5,
-          result: 6,
-        };
-        candidates.sort(
-          (left, right) =>
-            (rank[left.kind] ?? 9) - (rank[right.kind] ?? 9) ||
-            left.createdAt.localeCompare(right.createdAt),
-        );
-        const pick = candidates[0]!;
-        const excerpt =
-          pick.content.length > 140 ? `${pick.content.slice(0, 140)}…` : pick.content;
-        const label = kindLabel(pick.kind);
-        pi.sendUserMessage(
-          `[NMG board] 你订阅的频道 ${pick.taskId} 有新${label}：#${pick.sequence} — ${excerpt}（open，可认领）。需要的话用 nmg_board read 查看详情、claim 认领处理。`,
-        );
-        state.notified.push(pick.id);
-        state.budgetUsed += 1;
-        state.lastWakeAt = now;
-        saveWakeState(state);
-      } catch {
-        // daemon unavailable or transient failure — retry next tick
+        collect(board.taskId, read.entries);
       }
-    };
-    setInterval(() => {
-      void scanBoardWake();
-    }, wakeIntervalMs);
-  }
+      if (candidates.length === 0) return;
+      const rank: Record<string, number> = {
+        question: 0,
+        blocker: 1,
+        handoff: 2,
+        goal: 3,
+        note: 4,
+        decision: 5,
+        result: 6,
+      };
+      candidates.sort(
+        (left, right) =>
+          (rank[left.kind] ?? 9) - (rank[right.kind] ?? 9) ||
+          left.createdAt.localeCompare(right.createdAt),
+      );
+      const pick = candidates[0]!;
+      const excerpt =
+        pick.content.length > 140 ? `${pick.content.slice(0, 140)}…` : pick.content;
+      const label = kindLabel(pick.kind);
+      pi.sendUserMessage(
+        `[NMG board] 你订阅的频道 ${pick.taskId} 有新${label}：#${pick.sequence} — ${excerpt}（open，可认领）。需要的话用 nmg_board read 查看详情、claim 认领处理。`,
+      );
+      state.notified.push(pick.id);
+      state.budgetUsed += 1;
+      state.lastWakeAt = now;
+      saveWakeState(state);
+    } catch {
+      // daemon unavailable or transient failure — retry next tick
+    }
+  };
+  // Wake 配置/开关通过总菜单 /nmg wake ... 操作（见 /nmg 命令注册），
+  // 写入 board-wake.json，与手改文件等价、重启保留。
+  // Re-arm with the configured interval so a hand edit to intervalMs applies.
+  // unref() keeps the timer from pinning the process alive — pi is resident so
+  // the loop still fires there, while test harnesses that load the extension
+  // can exit normally.
+  const wakeLoop = (): void => {
+    void scanBoardWake().finally(() => {
+      setTimeout(wakeLoop, readWakeConfig().intervalMs).unref();
+    });
+  };
+  setTimeout(wakeLoop, readWakeConfig().intervalMs).unref();
 }
 
 const EVIDENCE_SOURCE_WINDOW = 64;
