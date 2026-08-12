@@ -1405,6 +1405,11 @@ function formatTaskBoardResult(
     if (result.action === "read") lines.push(`nextCursor=${String(result.nextCursor ?? 0)}`);
   }
   lines.push("Temporary coordination only; use nmg_remember separately for durable knowledge.");
+  // Disclosed only on use (progressive disclosure): the full conventions are
+  // kept out of the always-resident tool description to save tokens.
+  lines.push(
+    "Board conventions (on use): entries may carry memory=<id> references to LTG records — readers expand them with nmg_get; keep entries concise and temporary; taskId is the only channel boundary (no DMs, mentions, groups, or pinning).",
+  );
   return lines.join("\n");
 }
 

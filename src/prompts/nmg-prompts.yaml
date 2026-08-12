@@ -49,16 +49,11 @@ remember_description: >-
   replaceable property within a stable scope; it is not a topic or grouping tag.
 
 board_description: >-
-  Coordinate through a temporary shared blackboard. Without a taskId, entries
-  land on the shared world channel, which every Agent reads by default; reading
-  the world channel also surfaces the lobby — active named channels you can
-  discover and join by name. Explicit taskIds open named channels. Entries
-  retain writer attribution (NMG_AGENT_ID), expire automatically, and can be
-  read by a task-local cursor or explicitly resolved. Blackboard content is
-  projected into the caller's private runtime context; it is not indexed as
-  long-term memory. Keep it minimal: taskId is the only channel boundary —
-  prefer a new taskId (or an nmg_remember record for durable knowledge) over
-  new board features such as DMs, mentions, groups, or pinning.
+  Coordinate through a temporary blackboard shared by NMG clients. Without a
+  taskId, entries land on the shared world channel; reading it lists active
+  named channels you can join by name. Entries expire automatically and retain
+  writer attribution (NMG_AGENT_ID). Use put/read/resolve; full conventions
+  (memory pointers, boundaries) are disclosed in each tool result.
 
 board_action_parameter_description: >-
   Use put to publish one concise coordination entry, read to fetch entries after
