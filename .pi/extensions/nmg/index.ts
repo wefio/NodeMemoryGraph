@@ -296,10 +296,95 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         return;
       }
       default: {
-        // 无参数或未知子命令 → 总览（含当前配置，够用时不进子菜单）。
+        // 无参数 → 交互式选择菜单（可上下键选，不用手敲）；未知子命令 → 总览提示。
+        if (parts.length === 0) {
+          await nmgInteractiveMenu(ctx);
+          return;
+        }
         const wake = readWakeConfig();
         ctx.ui.notify(
           `NMG 菜单：/nmg recall（召回折叠 ${recallCollapsed ? "开" : "关"}） · /nmg wake on|off|status|budget N|cooldown M|interval S（唤醒 ${wake.enabled ? "开" : "关"}，预算 ${wake.budget}/天，冷却 ${Math.round(wake.cooldownMs / 60_000)} 分，轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
+          "info",
+        );
+      }
+    }
+  };
+  // 交互式选择菜单：/nmg（无参数）弹出可上下键选的列表，避免手敲。带参数的
+  // 形式（/nmg recall、/nmg wake on 等）仍保留，供脚本/快捷路径直接调用。
+  const nmgInteractiveMenu = async (ctx: ExtensionCommandContext): Promise<void> => {
+    if (!ctx.hasUI || typeof ctx.ui.select !== "function") {
+      ctx.ui.notify(
+        "当前模式不支持交互菜单，可用：/nmg recall、/nmg wake on|off|status|budget N|cooldown M|interval S",
+        "warning",
+      );
+      return;
+    }
+    const choice = await ctx.ui.select("NMG 控制台", [
+      "召回：折叠/展开",
+      "唤醒：开启/关闭",
+      "唤醒：参数设置",
+      "查看状态",
+    ]);
+    if (!choice) return; // 用户取消
+    switch (choice) {
+      case "召回：折叠/展开":
+        await nmgMenuHandler("recall", ctx);
+        return;
+      case "唤醒：开启/关闭": {
+        const onOff = await ctx.ui.select("黑板唤醒", ["开启", "关闭"]);
+        if (!onOff) return;
+        const current = readWakeConfig();
+        writeWakeConfig({ ...current, enabled: onOff === "开启" });
+        ctx.ui.notify(onOff === "开启" ? "黑板唤醒已开启" : "黑板唤醒已关闭", "info");
+        return;
+      }
+      case "唤醒：参数设置": {
+        const param = await ctx.ui.select("唤醒参数", ["每日上限", "冷却（分钟）", "轮询（秒）"]);
+        if (!param) return;
+        const current = readWakeConfig();
+        if (param === "每日上限") {
+          const value = await ctx.ui.input("每日唤醒上限（1-100）", String(current.budget));
+          const numeric = Number(value);
+          if (value !== undefined && Number.isFinite(numeric)) {
+            writeWakeConfig({
+              ...current,
+              budget: Math.max(1, Math.min(100, Math.round(numeric))),
+            });
+            ctx.ui.notify(`黑板唤醒预算已设为 ${current.budget}/天`, "info");
+          }
+        } else if (param === "冷却（分钟）") {
+          const value = await ctx.ui.input(
+            "冷却（分钟）",
+            String(Math.round(current.cooldownMs / 60_000)),
+          );
+          const numeric = Number(value);
+          if (value !== undefined && Number.isFinite(numeric)) {
+            writeWakeConfig({
+              ...current,
+              cooldownMs: Math.max(30_000, Math.round(numeric * 60_000)),
+            });
+            ctx.ui.notify("黑板唤醒冷却已更新", "info");
+          }
+        } else if (param === "轮询（秒）") {
+          const value = await ctx.ui.input(
+            "轮询（秒）",
+            String(Math.round(current.intervalMs / 1_000)),
+          );
+          const numeric = Number(value);
+          if (value !== undefined && Number.isFinite(numeric)) {
+            writeWakeConfig({
+              ...current,
+              intervalMs: Math.max(5_000, Math.round(numeric * 1_000)),
+            });
+            ctx.ui.notify("黑板唤醒轮询已更新", "info");
+          }
+        }
+        return;
+      }
+      default: {
+        const wake = readWakeConfig();
+        ctx.ui.notify(
+          `NMG：召回折叠 ${recallCollapsed ? "开" : "关"} · 唤醒 ${wake.enabled ? "开" : "关"}（预算 ${wake.budget}/天，冷却 ${Math.round(wake.cooldownMs / 60_000)} 分，轮询 ${Math.round(wake.intervalMs / 1_000)} 秒）`,
           "info",
         );
       }

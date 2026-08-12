@@ -1341,3 +1341,76 @@ test("runtime AG is presented as temporary state after durable recall", () => {
   assert.match(output, /temporary; not durable memory/);
   assert.ok(output.indexOf("durable recall") < output.indexOf("Session-local tool state"));
 });
+
+test("/nmg with no arguments opens the interactive select menu", async () => {
+  const { commands } = extensionHarness();
+  const nmgCommand = commands.get("nmg") as {
+    handler: (args: string, ctx: {
+      hasUI: boolean;
+      ui: {
+        select: (...args: unknown[]) => Promise<unknown>;
+        input: (...args: unknown[]) => Promise<unknown>;
+        notify: (...args: unknown[]) => void;
+      };
+    }) => Promise<void>;
+  };
+  assert.ok(nmgCommand, "/nmg command should be registered");
+  const selectedTitles: string[] = [];
+  const notified: string[] = [];
+  const ctx = {
+    hasUI: true,
+    ui: {
+      select: async (title: string) => {
+        selectedTitles.push(title);
+        return "召回：折叠/展开";
+      },
+      input: async () => "5",
+      notify: (message: string) => {
+        notified.push(message);
+      },
+    },
+  };
+  await nmgCommand.handler("", ctx);
+  assert.deepEqual(selectedTitles, ["NMG 控制台"]);
+  assert.ok(notified.some((message) => /召回/.test(message)), "recall toggle should notify");
+});
+
+test("/nmg wake parameter flow writes the config file via the menu", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "nmg-wake-menu-"));
+  const previous = process.env.NMG_DATA_DIR;
+  process.env.NMG_DATA_DIR = dataDir;
+  try {
+    const { commands } = extensionHarness();
+    const nmgCommand = commands.get("nmg") as {
+      handler: (args: string, ctx: {
+        hasUI: boolean;
+        ui: {
+          select: (title: string, options: string[]) => Promise<unknown>;
+          input: () => Promise<unknown>;
+          notify: (...args: unknown[]) => void;
+        };
+      }) => Promise<void>;
+    };
+    const ctx = {
+      hasUI: true,
+      ui: {
+        select: async (title: string, options: string[]) => {
+          if (title === "NMG 控制台") return "唤醒：参数设置";
+          if (title === "唤醒参数") return "每日上限";
+          return options[0];
+        },
+        input: async () => "5",
+        notify: () => {},
+      },
+    };
+    await nmgCommand.handler("", ctx);
+    const config = JSON.parse(
+      readFileSync(join(dataDir, "board-wake.json"), "utf8"),
+    ) as { budget: number };
+    assert.equal(config.budget, 5);
+  } finally {
+    if (previous === undefined) delete process.env.NMG_DATA_DIR;
+    else process.env.NMG_DATA_DIR = previous;
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
