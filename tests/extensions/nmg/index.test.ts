@@ -978,6 +978,54 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
   }
 });
 
+test("remember from a board source attaches a board_origin marker", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-board-origin-"));
+  const previous = process.env.NMG_DATA_DIR;
+  const previousProject = process.env.NMG_PROJECT_DIR;
+  process.env.NMG_DATA_DIR = directory;
+  process.env.NMG_PROJECT_DIR = directory;
+  const sessionManager = {
+    getSessionId: () => "board-test-session",
+    getSessionFile: () => "session.jsonl",
+    getBranch: () => [],
+  };
+  try {
+    const { handlers, tools } = extensionHarness();
+    const saved = (await tools.get("nmg_remember")!.execute(
+      "remember-board-sourced",
+      {
+        statement: "Atlas pins SQLite for offline operation (board decision).",
+        nodeName: "Atlas storage",
+        memoryType: "constraint",
+        boardSource: { taskId: "board-origin-test-2026-08-12", entryId: "entry-42" },
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    )) as { details: { memory: { id: string } } };
+    const store = new NmgStore(join(directory, "nmg.sqlite"));
+    try {
+      const memory = store.getMemory(saved.details.memory.id);
+      assert.ok(memory, "board-sourced memory persisted");
+      const marker = memory.markers.find((candidate) => candidate.kind === "board_origin");
+      assert.ok(marker, "board_origin marker attached");
+      assert.equal(marker.attributes?.taskId, "board-origin-test-2026-08-12");
+      assert.equal(marker.attributes?.entryId, "entry-42");
+    } finally {
+      store.close();
+    }
+    await handlers.get("session_shutdown")!({}, { sessionManager });
+  } finally {
+    process.env.NMG_DATA_DIR = previous;
+    process.env.NMG_PROJECT_DIR = previousProject;
+    try {
+      rmSync(directory, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  }
+});
+
 test("formatters keep search headers compact and exact evidence separate", () => {
   const context = {
     results: [

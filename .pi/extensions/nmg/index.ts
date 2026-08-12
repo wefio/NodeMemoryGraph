@@ -706,6 +706,15 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           hash: Type.Optional(Type.String()),
         }),
       ),
+      boardSource: Type.Optional(
+        Type.Object(
+          {
+            taskId: Type.String({ description: "Task board channel the content came from" }),
+            entryId: Type.String({ description: "Task board entry the content came from" }),
+          },
+          { description: nmgPrompts.remember_board_source_parameter_description },
+        ),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (params.action === "feedback") {
@@ -802,7 +811,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       if (!params.statement?.trim() || !params.nodeName?.trim()) {
         throw new Error("saving a memory requires statement and nodeName");
       }
-      const { externalSource, ...memory } = params;
+      const { externalSource, boardSource, ...memory } = params;
       delete memory.action;
       delete memory.memoryId;
       delete memory.newMemoryId;
@@ -834,11 +843,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           `sourceActor=${sourceActor} requires an exact matching evidence excerpt from the current Pi session or an explicit externalSource`,
         );
       }
-      const result = await invoke("remember", {
-        ...memory,
-        sourceActor,
-        evidenceSource,
-        markers: externalSource
+      const markers = [
+        ...(externalSource
           ? [
               {
                 kind: "external_source",
@@ -847,9 +853,23 @@ export default function nmgExtension(pi: ExtensionAPI): void {
                   retrievedAt: externalSource.retrievedAt ?? new Date().toISOString(),
                   ...(externalSource.hash ? { hash: externalSource.hash } : {}),
                 },
-              },
+              } as const,
             ]
-          : undefined,
+          : []),
+        ...(boardSource
+          ? [
+              {
+                kind: "board_origin",
+                attributes: { taskId: boardSource.taskId, entryId: boardSource.entryId },
+              } as const,
+            ]
+          : []),
+      ];
+      const result = await invoke("remember", {
+        ...memory,
+        sourceActor,
+        evidenceSource,
+        markers: markers.length ? markers : undefined,
         projectDir: projectDirectory(),
         sessionId: ctx.sessionManager.getSessionId(),
       });

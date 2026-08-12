@@ -21,6 +21,7 @@ export interface NmgPrompts {
   remember_superseded_memory_id_parameter_description: string;
   remember_related_memory_id_parameter_description: string;
   remember_relation_judgement_parameter_description: string;
+  remember_board_source_parameter_description: string;
   node_name_parameter_description: string;
   state_key_parameter_description: string;
   external_source_parameter_description: string;
@@ -33,6 +34,7 @@ export interface NmgPrompts {
   search_query_parameter_description: string;
   search_queries_parameter_description: string;
   search_progression_required: string;
+  search_recommendation: string;
   completion_nudge: string;
   shadow_feedback_nudge: string;
   search_disclosure: string;
