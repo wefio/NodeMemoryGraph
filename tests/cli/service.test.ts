@@ -1024,3 +1024,46 @@ test("search protocol preserves Pi QPP evidence-window overrides", async () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("recordActiveGraphUse persists QPP implicit feedback (useful_memory_ids)", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-qpp-use-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    const saved = await service.invoke("remember", {
+      statement: "Atlas stores durable metadata in SQLite.",
+      nodeName: "Atlas storage",
+      memoryType: "fact",
+    });
+    const searched = (await service.invoke("search", {
+      query: "Atlas durable metadata",
+      sessionId: "session-a",
+    })) as { results: Array<{ memory: { id: string } }>; activeGraph?: { id: string } };
+    assert.ok(searched.activeGraph, "search produced an active graph");
+    const recorded = await service.invoke("recordActiveGraphUse", {
+      activeGraphId: searched.activeGraph.id,
+      usedMemoryIds: [saved.memory.id],
+      sessionId: "session-a",
+    });
+    assert.equal(recorded.activeGraphId, searched.activeGraph.id);
+    const store = new NmgStore(join(directory, "nmg.sqlite"));
+    try {
+      const trace = store.retrievalTrace(searched.activeGraph!.id, "session-a");
+      assert.ok(trace, "trace exists");
+      assert.deepEqual(trace.usefulMemoryIds, [saved.memory.id]);
+    } finally {
+      store.close();
+    }
+    // wrong session cannot write to another session's trace
+    await assert.rejects(
+      service.invoke("recordActiveGraphUse", {
+        activeGraphId: searched.activeGraph!.id,
+        usedMemoryIds: [saved.memory.id],
+        sessionId: "session-b",
+      }),
+      /session/i,
+    );
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

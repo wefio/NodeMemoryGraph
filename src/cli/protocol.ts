@@ -53,6 +53,7 @@ export const NMG_CAPABILITIES = [
 
 export const NMG_METHODS = [
   "get",
+  "recordActiveGraphUse",
   "hello",
   "perfAggregates",
   "pruneRetrievalTraces",
@@ -233,6 +234,21 @@ export interface NmgGetParams {
   /** Active Graph that recommended these IDs; enables owned actual-use feedback. */
   activeGraphId?: string;
   graphHops?: number;
+  projectDir?: string;
+  sessionId?: string;
+}
+
+/**
+ * QPP agent-end implicit feedback: the harness derives which recalled memories
+ * actually surfaced in the final answer (deriveUsedMemoryIds) and records them
+ * on the trace as useful_memory_ids. This powers Stage 1 rolling tau
+ * auto-calibration from production (qpp, useful) pairs (docs/retrieval-
+ * confidence-controller.md).
+ */
+export interface NmgRecordActiveGraphUseParams {
+  activeGraphId: string;
+  /** Memories whose statement tokens appeared in the final agent answer. */
+  usedMemoryIds: string[];
   projectDir?: string;
   sessionId?: string;
 }
@@ -427,6 +443,7 @@ export type NmgMethodResult = {
   };
   search: MemoryContext;
   get: MemoryContext & { missingMemoryIds: string[] };
+  recordActiveGraphUse: { activeGraphId: string; usedMemoryIds: string[] };
   retentionCandidates: { candidates: RetentionCandidate[] };
   setStorageState: { memoryId: string; storageState: MemoryStorageState };
   perfAggregates: PerfAggregate[];

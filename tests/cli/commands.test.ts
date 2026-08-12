@@ -30,6 +30,7 @@ test("every RPC method is exposed via the CLI or is intentionally RPC-only", () 
   // `nmg daemon stop` over HTTP — neither has a direct CLI command.
   const rpcOnly: readonly NmgMethod[] = [
     "hello",
+    "recordActiveGraphUse",
     "recordClaimOutcomes",
     "shutdown",
     "stgPurgeSession",

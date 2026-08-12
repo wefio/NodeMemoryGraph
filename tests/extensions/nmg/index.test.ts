@@ -1026,6 +1026,77 @@ test("remember from a board source attaches a board_origin marker", async () => 
   }
 });
 
+test("agent_end derives and persists useful memories on the trace", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-agent-end-use-"));
+  const previous = process.env.NMG_DATA_DIR;
+  const previousProject = process.env.NMG_PROJECT_DIR;
+  process.env.NMG_DATA_DIR = directory;
+  process.env.NMG_PROJECT_DIR = directory;
+  const sessionManager = {
+    getSessionId: () => "agent-end-session",
+    getSessionFile: () => "session.jsonl",
+    getBranch: () => [],
+  };
+  try {
+    const { handlers, tools } = extensionHarness();
+    await tools.get("nmg_remember")!.execute(
+      "remember-qpp",
+      {
+        statement: "Atlas pins SQLite for offline operation.",
+        nodeName: "Atlas storage",
+        memoryType: "constraint",
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    );
+    const searched = (await tools.get("nmg_search")!.execute(
+      "search-qpp",
+      { query: "Atlas offline storage" },
+      undefined,
+      undefined,
+      { sessionManager },
+    )) as {
+      details: {
+        results: Array<{ memory: { id: string } }>;
+        activeGraph?: { id: string };
+      };
+    };
+    assert.ok(searched.details.activeGraph, "search built an active graph");
+    // The final answer restates the memory's content -> deriveUsedMemoryIds
+    // should mark that memory as used when agent_end fires.
+    await handlers.get("agent_end")!(
+      {
+        messages: [
+          { role: "user", content: "Which storage does Atlas use offline?" },
+          { role: "assistant", content: "Atlas pins SQLite for offline operation." },
+        ],
+      },
+      { sessionManager },
+    );
+    const store = new NmgStore(join(directory, "nmg.sqlite"));
+    try {
+      const trace = store.retrievalTrace(searched.details.activeGraph!.id, "agent-end-session");
+      assert.ok(trace, "trace exists");
+      assert.ok(
+        trace.usefulMemoryIds.includes(searched.details.results[0].memory.id),
+        "memory surfaced in the answer is recorded as useful",
+      );
+    } finally {
+      store.close();
+    }
+    await handlers.get("session_shutdown")!({}, { sessionManager });
+  } finally {
+    process.env.NMG_DATA_DIR = previous;
+    process.env.NMG_PROJECT_DIR = previousProject;
+    try {
+      rmSync(directory, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  }
+});
+
 test("formatters keep search headers compact and exact evidence separate", () => {
   const context = {
     results: [

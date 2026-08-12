@@ -39,6 +39,7 @@ import {
 } from "../../../src/integration/config.ts";
 import { searchPreview } from "../../../src/integration/search-projection.ts";
 import { selectEvidence, type AgentHistoryMessage } from "../../../src/integration/evidence.ts";
+import { deriveUsedMemoryIds } from "../../../src/core/feedback.ts";
 import { ControllerShadowBridge, shadowEnabled } from "./controller-shadow.ts";
 
 /**
@@ -65,6 +66,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const taskWindow = new SessionTaskWindow();
   const recallFlow = new SessionRecallFlow();
   const runtimeAg = new SessionRuntimeAg();
+  const agentUseFlow = new AgentUseFlow();
   const qpp1Mode = configuredQpp1Mode();
   const qpp2Mode = configuredQpp2Mode();
   const qpp2RetainedMass = configuredQpp2RetainedMass();
@@ -91,7 +93,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const connection = (): Promise<DaemonConnection> =>
     (connectionPromise ??= connectDaemon(databasePath()));
   const invoke = async (
-    method: "get" | "remember" | "resolveRemember" | "search" | "taskBoard",
+    method:
+      | "get"
+      | "remember"
+      | "resolveRemember"
+      | "search"
+      | "taskBoard"
+      | "recordActiveGraphUse",
     params: Record<string, unknown>,
   ) => invokeDaemon(await connection(), method, params);
 
@@ -508,7 +516,37 @@ export default function nmgExtension(pi: ExtensionAPI): void {
 
   pi.on("agent_end", async (event, ctx) => {
     latestAgentCtx = ctx;
-    await controllerShadow.outcome(ctx.sessionManager.getSessionId(), event.messages);
+    const sessionId = ctx.sessionManager.getSessionId();
+    await controllerShadow.outcome(sessionId, event.messages);
+    // QPP implicit feedback (independent of the SkillOpt shadow bridge): derive
+    // which recalled memories actually surfaced in the final answer and persist
+    // them as useful_memory_ids on the trace — the (qpp, useful) pairs rolling
+    // tau auto-calibration needs. Never throws; feedback must not break completion.
+    try {
+      const answerText = extractAnswerText(event.messages);
+      const pending = answerText ? agentUseFlow.consume(sessionId) : [];
+      if (pending.length > 0 && connectionPromise) {
+        const active = await connectionPromise.catch(() => undefined);
+        if (active) {
+          for (const { traceId, results } of pending) {
+            const usedMemoryIds = deriveUsedMemoryIds(answerText, results);
+            if (usedMemoryIds.length === 0) continue;
+            try {
+              await invoke("recordActiveGraphUse", {
+                activeGraphId: traceId,
+                usedMemoryIds,
+                projectDir: projectDirectory(),
+                sessionId,
+              });
+            } catch {
+              // One trace failing must not stop the rest.
+            }
+          }
+        }
+      }
+    } catch {
+      // Implicit feedback must never break agent completion.
+    }
   });
 
   pi.on("session_shutdown", async (event, ctx) => {
@@ -517,6 +555,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     taskWindow.clear(sessionId);
     recallFlow.clear(sessionId);
     runtimeAg.clear(sessionId);
+    agentUseFlow.clear(sessionId);
     controllerShadow.clear(sessionId);
     if (!connectionPromise) return;
     const active = await connectionPromise.catch(() => undefined);
@@ -903,6 +942,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         params.memoryIds,
         result.results.map((entry) => entry.memory.id),
       );
+      agentUseFlow.note(ctx.sessionManager.getSessionId(), result);
       const text = injectionWindow.format(ctx.sessionManager.getSessionId(), result, "evidence");
       return toolResult(result, text || "No active memory found.");
     },
@@ -987,6 +1027,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       }
       const text = injectionWindow.format(sessionId, result, "header");
       await controllerShadow.retrieval(fullResult, sessionId, "tool", text);
+      agentUseFlow.note(sessionId, fullResult);
       return toolResult(result, text);
     },
   });
@@ -1585,6 +1626,65 @@ export class SessionTaskWindow {
  * it prevents repeated paraphrased searches when the model has not consumed
  * any returned evidence. A successful get opens the search phase again.
  */
+/**
+ * QPP agent-end feedback cache (docs/retrieval-confidence-controller.md Stage 1).
+ * Independent of the SkillOpt shadow bridge: it records which active graphs a
+ * session retrieved (traceId + recalled MemorySearchResults) so agent_end can
+ * derive used memories from the final answer and persist useful_memory_ids on
+ * the trace — the (qpp, useful) pairs rolling tau calibration needs. Normal
+ * close() already checkpoints, so no per-turn cost beyond the in-memory list.
+ */
+export class AgentUseFlow {
+  readonly #traces = new Map<
+    string,
+    Array<{ traceId: string; results: MemorySearchResult[] }>
+  >();
+  readonly maxPerSession: number;
+
+  constructor(maxPerSession = 8) {
+    this.maxPerSession = Math.max(1, maxPerSession);
+  }
+
+  note(sessionId: string, context: MemoryContext): void {
+    if (!context.activeGraph) return;
+    let list = this.#traces.get(sessionId);
+    if (!list) {
+      list = [];
+      this.#traces.set(sessionId, list);
+    }
+    const existing = list.find((entry) => entry.traceId === context.activeGraph!.id);
+    if (existing) {
+      existing.results = context.results;
+      return;
+    }
+    list.push({ traceId: context.activeGraph.id, results: context.results });
+    if (list.length > this.maxPerSession) list.shift();
+  }
+
+  /** All retrieved graphs for this session, cleared afterwards (one-shot). */
+  consume(sessionId: string): Array<{ traceId: string; results: MemorySearchResult[] }> {
+    const pending = this.#traces.get(sessionId) ?? [];
+    this.#traces.delete(sessionId);
+    return pending;
+  }
+
+  clear(sessionId: string): void {
+    this.#traces.delete(sessionId);
+  }
+}
+
+/** Concatenate assistant message content from an agent_end message list. */
+function extractAnswerText(messages: readonly unknown[]): string {
+  const parts: string[] = [];
+  for (const value of messages) {
+    if (!value || typeof value !== "object") continue;
+    const message = value as { role?: unknown; content?: unknown };
+    if (message.role !== "assistant" || typeof message.content !== "string") continue;
+    if (message.content.trim()) parts.push(message.content);
+  }
+  return parts.join("\n").trim();
+}
+
 export class SessionRecallFlow {
   readonly #states = new Map<string, { turnKey: string; searches: number }>();
   readonly maxSearchesBeforeGet: number;

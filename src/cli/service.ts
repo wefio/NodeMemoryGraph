@@ -50,6 +50,7 @@ import {
   NMG_PROTOCOL_VERSION,
   NmgProtocolError,
   type NmgGetParams,
+  type NmgRecordActiveGraphUseParams,
   type NmgHelloResult,
   type NmgDeleteMemoryParams,
   type NmgExportMemoriesParams,
@@ -127,6 +128,10 @@ export class NmgService {
         return (await this.#search(parseSearchParams(params))) as NmgMethodResult[M];
       case "get":
         return this.#get(parseGetParams(params)) as NmgMethodResult[M];
+      case "recordActiveGraphUse":
+        return this.#recordActiveGraphUse(
+          params as NmgRecordActiveGraphUseParams,
+        ) as NmgMethodResult[M];
       case "retentionCandidates":
         return {
           candidates: this.#getStore().retentionCandidates(parseRetentionCandidatesParams(params)),
@@ -791,6 +796,36 @@ export class NmgService {
       ...context,
       missingMemoryIds: params.memoryIds.filter((id) => !found.has(id)),
     };
+  }
+
+  #recordActiveGraphUse(
+    params: NmgRecordActiveGraphUseParams,
+  ): NmgMethodResult["recordActiveGraphUse"] {
+    // QPP agent-end implicit feedback (deriveUsedMemoryIds in the harness):
+    // record which recalled memories actually surfaced in the final answer.
+    const sharedStore = this.#getStore();
+    const localStore = params.projectDir
+      ? this.#getStgStore(params.projectDir, params.sessionId)
+      : undefined;
+    const candidates = localStore ? [localStore, sharedStore] : [sharedStore];
+    const traceStore = candidates.find(
+      (store) => store.retrievalTrace(params.activeGraphId, params.sessionId) !== null,
+    );
+    if (!traceStore) {
+      throw new NmgProtocolError(
+        "NOT_FOUND",
+        `active graph ${params.activeGraphId} does not exist`,
+      );
+    }
+    traceStore.recordActiveGraphUse(
+      params.activeGraphId,
+      { usedMemoryIds: params.usedMemoryIds },
+      params.sessionId,
+    );
+    if (params.usedMemoryIds.length > 0) {
+      this.#signalMaintenance(traceStore, "access", false, params.usedMemoryIds.length);
+    }
+    return { activeGraphId: params.activeGraphId, usedMemoryIds: params.usedMemoryIds };
   }
 
   #getStore(): NmgStore {
