@@ -105,6 +105,16 @@ test("v2: session-scoped search isolates provisional rows", () => {
     const bStatements = forB.results.map((r) => r.memory.statement);
     assert.ok(bStatements.some((s) => s.includes("legacy pipeline")), "B sees its own row");
     assert.ok(!bStatements.some((s) => s.includes("Atlas 2.0")), "B does not see A's row");
+
+    // anonymous read (no sessionId): provisional rows must NOT leak — only
+    // explicitly shared (session_id NULL) rows may surface without a session.
+    const anon = stg.searchContext("private plan", { maxTier: 3 });
+    const anonStatements = anon.results.map((r) => r.memory.statement);
+    assert.ok(
+      !anonStatements.some((s) => s.includes("Atlas 2.0")) &&
+        !anonStatements.some((s) => s.includes("legacy pipeline")),
+      "anonymous read does not see any session's provisional row",
+    );
   });
 });
 
@@ -137,6 +147,17 @@ test("v2: shared (session_id NULL) rows are visible to every session", () => {
       !bStatements.some((s) => s.includes("blackboard notes")),
       "session B does not see session A's provisional row",
     );
+    // anonymous read sees the shared cached row but not A's provisional row
+    const anon = stg.searchContext("shared", { maxTier: 3 });
+    const anonStatements = anon.results.map((r) => r.memory.statement);
+    assert.ok(
+      anonStatements.some((s) => s.includes("Atlas schema")),
+      "anonymous read sees the shared cached row",
+    );
+    assert.ok(
+      !anonStatements.some((s) => s.includes("blackboard notes")),
+      "anonymous read does not see session A's provisional row",
+    );
   });
 });
 
@@ -163,8 +184,9 @@ test("v2: getMemory exact access is session-scoped (no cross-session read)", () 
     assert.ok(stg.getMemory(a.memory.id, "session-a"));
     // another session cannot read A's provisional by id
     assert.equal(stg.getMemory(a.memory.id, "session-b"), null, "cross-session read denied");
-    // no sessionId -> no filter (caller opted out of isolation)
-    assert.ok(stg.getMemory(a.memory.id), "unfiltered read still allowed");
+    // anonymous read (no sessionId): provisional row invisible, shared visible
+    assert.equal(stg.getMemory(a.memory.id), null, "anonymous read of provisional denied");
+    assert.ok(stg.getMemory(shared.memory.id), "anonymous read of shared allowed");
     // shared rows visible to every session
     assert.ok(stg.getMemory(shared.memory.id, "session-b"));
   });
@@ -203,11 +225,23 @@ test("v2: purgeSession removes only that session's provisional rows", () => {
     assert.equal(stg.getMemory(a.memory.id), null);
     // B's row and the shared cache survive
     assert.ok(stg.getMemory(cached.memory.id));
+    // B's row survives under its own session; A's row is gone from its own
+    // session (physical purge, not just a visibility filter).
+    const forB = stg.searchContext("scratch", { sessionId: "session-b", maxTier: 3 }).results.map(
+      (r) => r.memory.statement,
+    );
+    assert.ok(forB.some((s) => s.includes("B's fresh")), "B's row kept");
+    const forA = stg.searchContext("scratch", { sessionId: "session-a", maxTier: 3 }).results.map(
+      (r) => r.memory.statement,
+    );
+    assert.ok(!forA.some((s) => s.includes("A's stale")), "A's row purged from its own session");
+    // anonymous read: private rows stay invisible (shared visibility is
+    // already covered by getMemory(cached.memory.id) above)
     const remaining = stg.searchContext("scratch", { maxTier: 3 }).results.map(
       (r) => r.memory.statement,
     );
-    assert.ok(remaining.some((s) => s.includes("B's fresh")), "B's row kept");
-    assert.ok(!remaining.some((s) => s.includes("A's stale")), "A's row purged");
+    assert.ok(!remaining.some((s) => s.includes("A's stale")), "A's row purged / invisible anonymously");
+    assert.ok(!remaining.some((s) => s.includes("B's fresh")), "anonymous does not see B's private row");
   });
 });
 
@@ -291,7 +325,10 @@ test("v2: checkpoint-on-open keeps WAL clean across reopen", () => {
     // checkpoint-on-open folds any residual WAL and reads still work.
     {
       const stg2 = createStgStore(directory, new HashingVectorEmbedder());
-      assert.equal(stg2.searchContext("survives", { maxTier: 3 }).results.length >= 1, true);
+      assert.equal(
+        stg2.searchContext("survives", { sessionId: "s1", maxTier: 3 }).results.length >= 1,
+        true,
+      );
       stg2.close();
     }
     assert.equal(existsSync(join(directory, ".nmg", "stg.sqlite-wal")), false);

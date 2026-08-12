@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
@@ -74,8 +74,19 @@ export class NmgStoreBase {
       // checkpoint-on-open: fold any -wal left behind by a force-exit shutdown
       // (where close() never ran) into the main DB and truncate it, so WAL can
       // never accumulate across restarts. SQLite auto-recovers WAL frames on
-      // open; TRUNCATE then resets the journal file (stg-v2 review ③a).
-      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      // open. Conditional on a non-empty -wal: normal close() already
+      // checkpoints, so the common open path skips the blocking TRUNCATE
+      // (stg-v2 review ③a; wal_checkpoint is synchronous disk I/O that stalls
+      // the event loop when the WAL is large).
+      if (existsSync(`${databasePath}-wal`)) {
+        try {
+          if (statSync(`${databasePath}-wal`).size > 0) {
+            this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+          }
+        } catch {
+          // best effort; a racing process may have removed the file
+        }
+      }
     } catch (error) {
       // A corrupt database makes PRAGMA/migrate throw while the underlying
       // handle is still open. Close it before propagating, or the file stays

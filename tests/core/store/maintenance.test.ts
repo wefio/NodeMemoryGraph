@@ -667,7 +667,7 @@ test("runSemanticMaintenance expires STG records and keeps topology changes prop
       statement: "expired session-local observation",
       nodeName: "expired session node",
       residence: "stg",
-        sessionId: "test-session",
+      sessionId: "test-session",
       expiresAt: "2020-01-01T00:00:00.000Z",
     });
     const result = store.runSemanticMaintenance({
@@ -676,7 +676,7 @@ test("runSemanticMaintenance expires STG records and keeps topology changes prop
       topologyNodeLimit: 1,
     });
     assert.deepEqual(result.expiredMemoryIds, [expired.memory.id]);
-    assert.equal(store.getMemory(expired.memory.id)?.status, "inactive");
+    assert.equal(store.getMemory(expired.memory.id, "test-session")?.status, "inactive");
     assert.deepEqual(result.proposedTopologyIds, []);
     assert.ok(
       store.perfAggregates().some((aggregate) => aggregate.section === "maintenance.semantic"),

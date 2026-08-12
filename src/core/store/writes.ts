@@ -121,12 +121,20 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       const content = requireText(input.content, "history content");
       const sourceMessageId = input.sourceMessageId?.trim() || null;
       if (sourceMessageId) {
-        if (!input.sessionId?.trim()) {
-          throw new Error("sourceMessageId requires sessionId");
-        }
-        const existing = this.db
-          .prepare("SELECT * FROM history_records WHERE session_id = ? AND source_message_id = ?")
-          .get(input.sessionId, sourceMessageId) as Row | undefined;
+        // Source-message deduplication is scoped by the row's session. LTG rows
+        // are session-global (session_id NULL), so their evidence traces dedupe
+        // against session_id IS NULL rather than requiring a sessionId.
+        const existing = input.sessionId?.trim()
+          ? (this.db
+              .prepare(
+                "SELECT * FROM history_records WHERE session_id = ? AND source_message_id = ?",
+              )
+              .get(input.sessionId, sourceMessageId) as Row | undefined)
+          : (this.db
+              .prepare(
+                "SELECT * FROM history_records WHERE session_id IS NULL AND source_message_id = ?",
+              )
+              .get(sourceMessageId) as Row | undefined);
         if (existing) {
           const record = mapHistory(existing);
           if (record.content !== content || record.role !== input.role) {
@@ -620,9 +628,9 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       // always visible). docs/stg-shared-store-v2 §3.2 / §3.6.
       const row = this.db
         .prepare(
-          "SELECT * FROM memory_records WHERE id = ? AND (? IS NULL OR session_id IS NULL OR session_id = ?) LIMIT 1",
+          "SELECT * FROM memory_records WHERE id = ? AND ((? IS NOT NULL AND (session_id IS NULL OR session_id = ?)) OR (? IS NULL AND session_id IS NULL)) LIMIT 1",
         )
-        .get(memoryId, sessionId ?? null, sessionId ?? null) as Row | undefined;
+        .get(memoryId, sessionId ?? null, sessionId ?? null, sessionId ?? null) as Row | undefined;
       return row ? mapMemoryRow(row) : null;
     }
 
@@ -985,7 +993,13 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
 function validateEvidenceSource(input: RememberInput): void {
   const source = input.evidenceSource;
   if (!source) return;
-  if (!input.sessionId?.trim()) throw new Error("evidenceSource requires sessionId");
+  // sessionId attribution is required only for session-private STG rows.
+  // LTG rows are project/session-global (session_id NULL) and the evidence
+  // excerpt stays attributable via sourceMessageId + sourceRef.
+  const residence = input.residence ?? defaultResidence(input);
+  if (residence === "stg" && !input.sessionId?.trim()) {
+    throw new Error("evidenceSource requires sessionId");
+  }
   if (!source.sourceMessageId?.trim()) {
     throw new Error("evidenceSource requires sourceMessageId");
   }

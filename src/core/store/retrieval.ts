@@ -675,10 +675,11 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
     getContext(memoryIds: readonly string[], graphHops = 0, sessionId?: string): MemoryContext {
       const ids = [...new Set(memoryIds)].slice(0, 50);
       const findNode = this.db.prepare(
-        "SELECT node_id FROM memory_records WHERE id = ? AND (? IS NULL OR session_id IS NULL OR session_id = ?)",
+        "SELECT node_id FROM memory_records WHERE id = ? AND ((? IS NOT NULL AND (session_id IS NULL OR session_id = ?)) OR (? IS NULL AND session_id IS NULL))",
       );
       const results = ids.flatMap((memoryId) => {
-        const row = findNode.get(memoryId, sessionId ?? null, sessionId ?? null) as Row | undefined;
+        const sid = sessionId ?? null;
+        const row = findNode.get(memoryId, sid, sid, sid) as Row | undefined;
         if (!row) return [];
         return this.resultsForNode(String(row.node_id), 3, 1, memoryId);
       });
@@ -1061,7 +1062,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
            AND (? IS NULL OR n.canonical_name = ?)
            AND (? IS NULL OR m.source_actor = ?)
            AND (? = 1 OR m.status IN ('active', 'disputed', 'superseded'))
-           AND (? IS NULL OR m.session_id IS NULL OR m.session_id = ?)
+           AND ((? IS NOT NULL AND (m.session_id IS NULL OR m.session_id = ?)) OR (? IS NULL AND m.session_id IS NULL))
            AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
            AND (? IS NULL OR m.event_time >= ?)
            AND (? IS NULL OR m.event_time <= ?)
@@ -1079,6 +1080,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           options.sourceActor ?? null,
           options.sourceActor ?? null,
           options.includeHistorical ? 1 : 0,
+          options.sessionId ?? null,
           options.sessionId ?? null,
           options.sessionId ?? null,
           ...(forcedCandidateIds.length === 0 && retrievalMode === "hybrid" ? ftsIds : []),

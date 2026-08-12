@@ -137,8 +137,9 @@ export function consolidateStgMemoryToLtg(
   stg: NmgStore,
   ltg: NmgStore,
   memoryId: string,
+  sessionId?: string,
 ): ReturnType<NmgStore["remember"]> {
-  const context = stg.getContext([memoryId], 0);
+  const context = stg.getContext([memoryId], 0, sessionId);
   const result = context.results.find((candidate) => candidate.memory.id === memoryId);
   if (!result) throw new Error(`STG memory ${memoryId} does not exist`);
   const { memory, node, evidence } = result;

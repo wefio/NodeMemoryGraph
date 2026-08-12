@@ -48,6 +48,7 @@ test("trace protocol joins STG, LTG and Active Graph into fixed bounded features
     const context = store.searchContext("route-alpha cobalt", {
       limit: 4,
       graphHops: 1,
+      sessionId: "test-session",
       activeGraphBudget: { maxNodes: 4, maxEdges: 4, maxEvidence: 4 },
     });
     assert.ok(context.activeGraph);

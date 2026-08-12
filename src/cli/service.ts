@@ -345,6 +345,9 @@ export class NmgService {
         : this.#getStore();
     const result = store.remember({
       ...memory,
+      // LTG rows are project/session-global: never attach a session_id. STG
+      // rows keep the caller's sessionId (escape-hatch validated in the store).
+      sessionId: store === this.#getStore() ? null : memory.sessionId,
       truthStatus: memory.truthStatus ?? (external ? "unverified" : undefined),
       writeReason: params.writeReason ?? `cli_confirmed_${params.memoryType ?? "fact"}`,
       writeSource: "user",
@@ -557,6 +560,7 @@ export class NmgService {
           consolidationCandidates,
           consolidatedMemories,
           retractedMemories,
+          input.sessionId,
         );
       }
       const missing = input.votes.find((vote) => !assigned.has(vote.memoryId));
@@ -604,6 +608,7 @@ export class NmgService {
         consolidationCandidates,
         consolidatedMemories,
         retractedMemories,
+        input.sessionId,
       );
     }
     return {
@@ -621,6 +626,7 @@ export class NmgService {
     candidates: string[],
     consolidated: Array<{ sourceMemoryId: string; memoryId: string }>,
     retracted: Array<{ sourceMemoryId: string; memoryId: string }>,
+    sessionId?: string,
   ): void {
     if (store === this.#getStore()) return;
     const policy = configuredStgConsolidationPolicy(this.#environment);
@@ -659,7 +665,7 @@ export class NmgService {
       }
       candidates.push(memoryId);
       if (!policy.enabled) continue;
-      const promoted = consolidateStgMemoryToLtg(store, this.#getStore(), memoryId);
+      const promoted = consolidateStgMemoryToLtg(store, this.#getStore(), memoryId, sessionId);
       if (
         promoted.memory.markers.some(
           (marker) =>

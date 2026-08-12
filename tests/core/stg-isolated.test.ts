@@ -108,8 +108,8 @@ test("outcome-qualified STG memory can be copied into LTG without a cache loop",
       residence: "stg",
       sessionId: "session-alpha",
     });
-    const first = consolidateStgMemoryToLtg(stg, ltg, local.memory.id);
-    const second = consolidateStgMemoryToLtg(stg, ltg, local.memory.id);
+    const first = consolidateStgMemoryToLtg(stg, ltg, local.memory.id, "session-alpha");
+    const second = consolidateStgMemoryToLtg(stg, ltg, local.memory.id, "session-alpha");
 
     assert.equal(first.memory.residence, "ltg");
     assert.equal(second.memory.id, first.memory.id, "retry uses exact deduplication");
@@ -154,7 +154,7 @@ test("STG/LTG projection keeps only the newest same-scope state version", () => 
       sessionId: "session-update",
     });
     const merged = mergeStgLtgContexts(
-      stg.searchContext("charity 5K personal best", { limit: 10 }),
+      stg.searchContext("charity 5K personal best", { limit: 10, sessionId: "session-update" }),
       ltg.searchContext("charity 5K personal best", { limit: 10 }),
     );
     const states = merged.results.filter(

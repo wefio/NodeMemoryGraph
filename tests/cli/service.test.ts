@@ -406,11 +406,13 @@ test("resident service isolates project STG while retaining LTG fallback", async
     const inA = await service.invoke("search", {
       query: "session branch blue",
       projectDir: projectA,
+      sessionId: "session-test",
     });
     assert.ok(inA.results.some((result) => result.memory.id === local.memory.id));
     const inB = await service.invoke("search", {
       query: "session branch blue",
       projectDir: projectB,
+      sessionId: "session-test",
     });
     assert.ok(!inB.results.some((result) => result.memory.id === local.memory.id));
 
@@ -422,6 +424,7 @@ test("resident service isolates project STG while retaining LTG fallback", async
     const expanded = await service.invoke("get", {
       memoryIds: [local.memory.id],
       projectDir: projectA,
+      sessionId: "session-test",
     });
     assert.equal(expanded.results[0]?.memory.id, local.memory.id);
     assert.deepEqual(expanded.missingMemoryIds, []);
@@ -476,7 +479,7 @@ test("resident service keeps mixed STG/LTG evidence in one AG and attributes bot
     const stg = new NmgStore(stgStorePath(projectDir, "session-alpha"));
     try {
       assert.ok(ltg.getContext([durable.memory.id]).results[0]!.memory.accessCount > 0);
-      assert.ok(stg.getContext([local.memory.id]).results[0]!.memory.accessCount > 0);
+      assert.ok(stg.getContext([local.memory.id], 0, "session-alpha").results[0]!.memory.accessCount > 0);
     } finally {
       ltg.close();
       stg.close();
