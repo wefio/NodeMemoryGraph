@@ -160,3 +160,126 @@ test("task board lobby lists active named channels and hides the world channel",
     assert.ok(alpha?.lastUpdatedAt);
   });
 });
+
+test("task board claims are lease-based: CAS, conflict, heartbeat, lazy expiry", () => {
+  withStore((store) => {
+    const task = store.putTaskBoardEntry({
+      taskId: "claim-1",
+      agentId: "sender",
+      kind: "question",
+      content: "Who owns the SkillOpt gate?",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+
+    // Open + unclaimed → claim succeeds with a lease.
+    const claimed = store.claimTaskBoardEntry({
+      taskId: "claim-1",
+      entryId: task.id,
+      agentId: "worker-a",
+      leaseSeconds: 600,
+      now: "2026-08-12T00:00:00.000Z",
+    });
+    assert.equal(claimed.claimedBy, "worker-a");
+    assert.equal(claimed.claimExpiresAt, "2026-08-12T00:10:00.000Z");
+    assert.equal(claimed.status, "open");
+
+    // Another agent → CAS loses with a conflict diagnosis.
+    assert.throws(
+      () =>
+        store.claimTaskBoardEntry({
+          taskId: "claim-1",
+          entryId: task.id,
+          agentId: "worker-b",
+          now: "2026-08-12T00:01:00.000Z",
+        }),
+      /already claimed by worker-a/,
+    );
+
+    // The holder re-claims → heartbeat refreshes the lease.
+    const heartbeated = store.claimTaskBoardEntry({
+      taskId: "claim-1",
+      entryId: task.id,
+      agentId: "worker-a",
+      leaseSeconds: 600,
+      now: "2026-08-12T00:05:00.000Z",
+    });
+    assert.equal(heartbeated.claimExpiresAt, "2026-08-12T00:15:00.000Z");
+
+    // After the lease lapses, another agent can claim (lazy expiry, no sweeper).
+    const stolen = store.claimTaskBoardEntry({
+      taskId: "claim-1",
+      entryId: task.id,
+      agentId: "worker-b",
+      leaseSeconds: 600,
+      now: "2026-08-12T00:16:00.000Z",
+    });
+    assert.equal(stolen.claimedBy, "worker-b");
+  });
+});
+
+test("task board claims: only the holder releases; resolving clears the claim", () => {
+  withStore((store) => {
+    const task = store.putTaskBoardEntry({
+      taskId: "claim-2",
+      agentId: "sender",
+      kind: "handoff",
+      content: "Verify the wake loop.",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    store.claimTaskBoardEntry({
+      taskId: "claim-2",
+      entryId: task.id,
+      agentId: "worker-a",
+      leaseSeconds: 600,
+      now: "2026-08-12T00:00:00.000Z",
+    });
+
+    // Non-holder release is refused.
+    assert.throws(
+      () =>
+        store.releaseTaskBoardEntry({
+          taskId: "claim-2",
+          entryId: task.id,
+          agentId: "worker-b",
+        }),
+      /not claimed by worker-b/,
+    );
+
+    // Holder releases → back to unclaimed, claimable by anyone.
+    const released = store.releaseTaskBoardEntry({
+      taskId: "claim-2",
+      entryId: task.id,
+      agentId: "worker-a",
+    });
+    assert.equal(released.claimedBy, null);
+    assert.equal(released.claimExpiresAt, null);
+
+    const reclaimed = store.claimTaskBoardEntry({
+      taskId: "claim-2",
+      entryId: task.id,
+      agentId: "worker-c",
+      leaseSeconds: 600,
+      now: "2026-08-12T00:01:00.000Z",
+    });
+    assert.equal(reclaimed.claimedBy, "worker-c");
+
+    // Resolving clears the claim, and a claim on a resolved entry is refused.
+    const resolved = store.resolveTaskBoardEntry({
+      taskId: "claim-2",
+      entryId: task.id,
+      agentId: "worker-c",
+      resolution: "done",
+    });
+    assert.equal(resolved.claimedBy, null);
+    assert.throws(
+      () =>
+        store.claimTaskBoardEntry({
+          taskId: "claim-2",
+          entryId: task.id,
+          agentId: "worker-d",
+          now: "2026-08-12T00:02:00.000Z",
+        }),
+      /already resolved/,
+    );
+  });
+});

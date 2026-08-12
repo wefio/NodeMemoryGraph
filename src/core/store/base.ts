@@ -174,10 +174,99 @@ export class NmgStoreBase {
     this.db
       .prepare(
         `UPDATE task_board_entries
-         SET status = 'resolved', resolved_at = ?, resolved_by = ?, resolution = ?
+         SET status = 'resolved', resolved_at = ?, resolved_by = ?, resolution = ?,
+             claimed_by = NULL, claimed_at = NULL, claim_expires_at = NULL
          WHERE id = ? AND task_id = ?`,
       )
       .run(now, input.agentId, input.resolution ?? null, input.entryId, input.taskId);
+    return this.taskBoardEntry(input.entryId)!;
+  }
+  /** True when a board entry carries a live claim (holder set, lease not expired). */
+  private taskBoardClaimLive(entry: TaskBoardEntry, now: string): boolean {
+    return (
+      entry.claimedBy !== null &&
+      entry.claimExpiresAt !== null &&
+      entry.claimExpiresAt > now
+    );
+  }
+  /**
+   * Lease-based claiming via a single atomic compare-and-set UPDATE. Succeeds
+   * when the entry is open and unclaimed (or its lease lapsed), or when the
+   * caller already holds it (a re-claim/heartbeat that refreshes the lease).
+   * Lease expiry is enforced lazily here — no background sweeper. On a losing
+   * CAS the failure is diagnosed against a fresh read so the caller is not
+   * sent chasing a holder that does not exist.
+   */
+  claimTaskBoardEntry(input: {
+    taskId: string;
+    entryId: string;
+    agentId: string;
+    leaseSeconds?: number;
+    now?: string;
+  }): TaskBoardEntry {
+    const now = input.now ?? new Date().toISOString();
+    this.pruneExpiredTaskBoardEntries(now, input.taskId);
+    const existing = this.taskBoardEntry(input.entryId);
+    if (!existing || existing.taskId !== input.taskId) {
+      throw new Error(`task board entry not found in task ${input.taskId}`);
+    }
+    const leaseSeconds = Math.min(
+      Math.max(input.leaseSeconds ?? 3600, 60),
+      86_400,
+    );
+    const expiresAt = new Date(Date.parse(now) + leaseSeconds * 1_000).toISOString();
+    const result = this.db
+      .prepare(
+        `UPDATE task_board_entries
+         SET claimed_by = ?, claimed_at = ?, claim_expires_at = ?
+         WHERE id = ? AND task_id = ?
+           AND status = 'open'
+           AND (
+             (claimed_by IS NULL OR claim_expires_at IS NULL OR claim_expires_at <= ?)
+             OR claimed_by = ?
+           )`,
+      )
+      .run(input.agentId, now, expiresAt, input.entryId, input.taskId, now, input.agentId);
+    if (Number(result.changes) === 0) {
+      // CAS lost — diagnose against a fresh read (do not trust the snapshot).
+      const current = this.taskBoardEntry(input.entryId)!;
+      if (current.status === "resolved") {
+        throw new Error(`task board entry ${input.entryId} already resolved`);
+      }
+      if (this.taskBoardClaimLive(current, now) && current.claimedBy !== input.agentId) {
+        throw new Error(
+          `task board entry ${input.entryId} already claimed by ${current.claimedBy}`,
+        );
+      }
+      throw new Error(`task board entry ${input.entryId} claim conflicted; retry`);
+    }
+    return this.taskBoardEntry(input.entryId)!;
+  }
+  /** Release a claim back to the open pool. Only the current holder may release. */
+  releaseTaskBoardEntry(input: {
+    taskId: string;
+    entryId: string;
+    agentId: string;
+  }): TaskBoardEntry {
+    const result = this.db
+      .prepare(
+        `UPDATE task_board_entries
+         SET claimed_by = NULL, claimed_at = NULL, claim_expires_at = NULL
+         WHERE id = ? AND task_id = ? AND claimed_by = ? AND status = 'open'`,
+      )
+      .run(input.entryId, input.taskId, input.agentId);
+    if (Number(result.changes) === 0) {
+      const existing = this.taskBoardEntry(input.entryId);
+      if (!existing || existing.taskId !== input.taskId) {
+        throw new Error(`task board entry not found in task ${input.taskId}`);
+      }
+      if (existing.status === "resolved") {
+        throw new Error(`task board entry ${input.entryId} already resolved`);
+      }
+      throw new Error(
+        `task board entry ${input.entryId} not claimed by ${input.agentId}`,
+      );
+    }
     return this.taskBoardEntry(input.entryId)!;
   }
   pruneExpiredTaskBoardEntries(now = new Date().toISOString(), taskId?: string): number {
@@ -1175,5 +1264,8 @@ function mapTaskBoardEntry(row: Row): TaskBoardEntry {
     resolvedAt: row.resolved_at === null ? null : String(row.resolved_at),
     resolvedBy: row.resolved_by === null ? null : String(row.resolved_by),
     resolution: row.resolution === null ? null : String(row.resolution),
+    claimedBy: row.claimed_by === null ? null : String(row.claimed_by),
+    claimedAt: row.claimed_at === null ? null : String(row.claimed_at),
+    claimExpiresAt: row.claim_expires_at === null ? null : String(row.claim_expires_at),
   };
 }

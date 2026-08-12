@@ -728,9 +728,16 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     label: "NMG Task Board",
     description: nmgPrompts.board_description,
     parameters: Type.Object({
-      action: Type.Union([Type.Literal("put"), Type.Literal("read"), Type.Literal("resolve")], {
-        description: nmgPrompts.board_action_parameter_description,
-      }),
+      action: Type.Union(
+        [
+          Type.Literal("put"),
+          Type.Literal("read"),
+          Type.Literal("resolve"),
+          Type.Literal("claim"),
+          Type.Literal("release"),
+        ],
+        { description: nmgPrompts.board_action_parameter_description },
+      ),
       taskId: Type.Optional(
         Type.String({ description: nmgPrompts.board_task_id_parameter_description }),
       ),
@@ -750,6 +757,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ),
       entryId: Type.Optional(Type.String()),
       resolution: Type.Optional(Type.String()),
+      leaseSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 86_400 })),
       afterCursor: Type.Optional(Type.Number({ minimum: 0 })),
       limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
       includeResolved: Type.Optional(Type.Boolean()),
@@ -1368,10 +1376,11 @@ interface TaskBoardToolEntry {
   kind: string;
   status: string;
   content: string;
+  claimedBy?: string | null;
 }
 
 interface TaskBoardToolResult {
-  action: "put" | "read" | "resolve";
+  action: "put" | "read" | "resolve" | "claim" | "release";
   entry?: TaskBoardToolEntry;
   entries?: TaskBoardToolEntry[];
   nextCursor?: number;
@@ -1397,10 +1406,10 @@ function formatTaskBoardResult(
     lines.push(`Task board ${taskId} has no matching entries.`);
   } else {
     lines.push(
-      ...entries.map(
-        (entry) =>
-          `- #${entry.sequence} ${entry.id} [${entry.kind}/${entry.status}] ${entry.agentId}: ${excerpt(entry.content, 500)}`,
-      ),
+      ...entries.map((entry) => {
+        const claim = entry.claimedBy ? ` [claimed by ${entry.claimedBy}]` : "";
+        return `- #${entry.sequence} ${entry.id} [${entry.kind}/${entry.status}]${claim} ${entry.agentId}: ${excerpt(entry.content, 500)}`;
+      }),
     );
     if (result.action === "read") lines.push(`nextCursor=${String(result.nextCursor ?? 0)}`);
   }
@@ -1408,7 +1417,7 @@ function formatTaskBoardResult(
   // Disclosed only on use (progressive disclosure): the full conventions are
   // kept out of the always-resident tool description to save tokens.
   lines.push(
-    "Board conventions (on use): entries may carry memory=<id> references to LTG records — readers expand them with nmg_get; keep entries concise and temporary; taskId is the only channel boundary (no DMs, mentions, groups, or pinning).",
+    "Board conventions (on use): entries may carry memory=<id> references to LTG records — readers expand them with nmg_get; open entries can be claimed by one Agent (lease-based, expired claims return to the pool) and released; keep entries concise and temporary; taskId is the only channel boundary (no DMs, mentions, groups, or pinning).",
   );
   return lines.join("\n");
 }

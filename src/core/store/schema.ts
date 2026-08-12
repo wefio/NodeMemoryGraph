@@ -473,6 +473,7 @@ export function migrate(db: DatabaseSync): void {
   ensurePerfAggregateColumns(db);
   ensureDeltaColumns(db);
   ensureBinaryVectors(db);
+  ensureTaskBoardColumns(db);
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_history_source_message
       ON history_records(session_id, source_message_id)
@@ -595,6 +596,26 @@ export function ensureHistoryColumns(db: DatabaseSync): void {
   );
   if (!existing.has("source_message_id")) {
     db.exec("ALTER TABLE history_records ADD COLUMN source_message_id TEXT");
+  }
+}
+
+/** Claim columns for task-board lease-based claiming (added after the fact). */
+export function ensureTaskBoardColumns(db: DatabaseSync): void {
+  const existing = new Set(
+    (db.prepare("PRAGMA table_info(task_board_entries)").all() as Row[]).map((row) =>
+      String(row.name),
+    ),
+  );
+  if (!existing.has("claimed_by")) {
+    db.exec("ALTER TABLE task_board_entries ADD COLUMN claimed_by TEXT");
+  }
+  if (!existing.has("claimed_at")) {
+    db.exec("ALTER TABLE task_board_entries ADD COLUMN claimed_at TEXT");
+  }
+  if (!existing.has("claim_expires_at")) {
+    db.exec(
+      "ALTER TABLE task_board_entries ADD COLUMN claim_expires_at TEXT",
+    );
   }
 }
 

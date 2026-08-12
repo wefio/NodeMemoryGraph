@@ -270,6 +270,18 @@ export interface NmgTaskBoardResolveParams extends NmgTaskBoardBase {
   resolution?: string;
 }
 
+export interface NmgTaskBoardClaimParams extends NmgTaskBoardBase {
+  action: "claim";
+  entryId: string;
+  /** Lease duration in seconds (clamped 60..86400, default 3600). */
+  leaseSeconds?: number;
+}
+
+export interface NmgTaskBoardReleaseParams extends NmgTaskBoardBase {
+  action: "release";
+  entryId: string;
+}
+
 export interface NmgTaskBoardListParams {
   action: "list";
   agentId: string;
@@ -279,6 +291,8 @@ export type NmgTaskBoardParams =
   | NmgTaskBoardPutParams
   | NmgTaskBoardReadParams
   | NmgTaskBoardResolveParams
+  | NmgTaskBoardClaimParams
+  | NmgTaskBoardReleaseParams
   | NmgTaskBoardListParams;
 
 export interface NmgRetentionCandidatesParams {
@@ -380,7 +394,7 @@ export type NmgMethodResult = {
   splitNode: NodeTransform;
   syncStg: { copied: number; projectDir: string };
   taskBoard:
-    | { action: "put" | "resolve"; entry: TaskBoardEntry }
+    | { action: "put" | "resolve" | "claim" | "release"; entry: TaskBoardEntry }
     | { action: "read"; entries: TaskBoardEntry[]; nextCursor: number }
     | { action: "list"; boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> };
   shutdown: { shuttingDown: true };

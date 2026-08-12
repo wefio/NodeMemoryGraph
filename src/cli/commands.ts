@@ -385,6 +385,43 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
     },
   },
   {
+    method: "taskBoard",
+    words: ["board", "claim"],
+    usageLine: "nmg board claim TASK_ID ENTRY_ID --agent AGENT [--lease-seconds N] [--json]",
+    options: ["agent", "lease-seconds"],
+    flags: [],
+    buildParams: (values): NmgTaskBoardParams => {
+      if (values.positionals.length !== 2) {
+        throw new Error("board claim requires TASK_ID and ENTRY_ID");
+      }
+      return compactObject({
+        action: "claim",
+        taskId: values.positionals[0],
+        entryId: values.positionals[1],
+        agentId: requiredOption(values, "agent"),
+        leaseSeconds: numericOption(values, "lease-seconds"),
+      }) as unknown as NmgTaskBoardParams;
+    },
+  },
+  {
+    method: "taskBoard",
+    words: ["board", "release"],
+    usageLine: "nmg board release TASK_ID ENTRY_ID --agent AGENT [--json]",
+    options: ["agent"],
+    flags: [],
+    buildParams: (values): NmgTaskBoardParams => {
+      if (values.positionals.length !== 2) {
+        throw new Error("board release requires TASK_ID and ENTRY_ID");
+      }
+      return compactObject({
+        action: "release",
+        taskId: values.positionals[0],
+        entryId: values.positionals[1],
+        agentId: requiredOption(values, "agent"),
+      }) as unknown as NmgTaskBoardParams;
+    },
+  },
+  {
     method: "syncStg",
     words: ["stg", "sync"],
     usageLine: "nmg stg sync --project-dir DIR --scope KEY=VALUE [--limit N] [--json]",

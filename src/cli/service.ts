@@ -204,6 +204,18 @@ export class NmgService {
             boards: this.#getStore().listTaskBoards(),
           } as NmgMethodResult[M];
         }
+        if (parsed.action === "claim") {
+          return {
+            action: "claim",
+            entry: this.#getStore().claimTaskBoardEntry(parsed),
+          } as NmgMethodResult[M];
+        }
+        if (parsed.action === "release") {
+          return {
+            action: "release",
+            entry: this.#getStore().releaseTaskBoardEntry(parsed),
+          } as NmgMethodResult[M];
+        }
         return {
           action: "resolve",
           entry: this.#getStore().resolveTaskBoardEntry(parsed),
@@ -994,7 +1006,14 @@ function parseSyncStgParams(value: unknown): NmgSyncStgParams {
 
 function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
   const params = objectParams(value);
-  const action = requiredEnum(params, "action", ["put", "read", "resolve", "list"] as const);
+  const action = requiredEnum(params, "action", [
+    "put",
+    "read",
+    "resolve",
+    "claim",
+    "release",
+    "list",
+  ] as const);
   const agentId = requiredString(params, "agentId");
   if (action === "list") {
     return { action, agentId };
@@ -1032,10 +1051,21 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
       includeResolved: optionalBoolean(params, "includeResolved"),
     };
   }
-  return {
+  const entryBase = {
     ...base,
     action,
     entryId: requiredString(params, "entryId"),
+  };
+  if (action === "claim") {
+    return {
+      ...entryBase,
+      action,
+      leaseSeconds: optionalInteger(params, "leaseSeconds", 60, 86_400),
+    };
+  }
+  return {
+    ...entryBase,
+    action,
     resolution: optionalString(params, "resolution"),
   };
 }

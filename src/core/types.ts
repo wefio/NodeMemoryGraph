@@ -772,6 +772,11 @@ export interface TaskBoardEntry {
   resolvedAt: string | null;
   resolvedBy: string | null;
   resolution: string | null;
+  /** Lease-based claim: the agent working this entry. A claim is live while
+   * claimedBy is set and claimExpiresAt is in the future. */
+  claimedBy: string | null;
+  claimedAt: string | null;
+  claimExpiresAt: string | null;
 }
 
 export interface RecallCue {
