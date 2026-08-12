@@ -284,13 +284,30 @@ write any channel it knows by name. The world channel acts as a lobby: reading
 it surfaces the names and recency of active named channels (a directory), so an
 Agent that does not know a channel name can still discover and join one. Naming
 is public; joining is implicit (read/write by name); there is deliberately no
-per-channel access control. *Status:* world channel with a lobby directory is a
-design proposal; today an omitted `taskId` falls back to a stable default board
-and there is no channel directory yet.
+per-channel access control. *Status:* implemented.
 
 **Writer identity.** Entries are attributed to the writing Agent so readers can
 tell which Agent posted each entry. `NMG_AGENT_ID` is the readable username;
 fallbacks are the session id, then the pid. *Status:* implemented.
+
+**Claiming (who works an entry).** An open entry can be claimed by exactly one
+Agent, so parallel Agents do not duplicate work on the same item. A claim is a
+single atomic compare-and-set `UPDATE` (open + unclaimed, or a lapsed lease,
+or the holder's own heartbeat) with a lease that expires; a losing CAS is
+diagnosed against a fresh read so callers are never sent chasing a holder that
+does not exist. Only the holder may release; resolving clears the claim; lease
+expiry is lazy (no background sweeper). *Status:* implemented (`claim`/`release`
+actions, `claimedBy`/`claimExpiresAt` columns).
+
+**Notification (who knows an entry exists).** Because an idle Agent never looks
+at the board on its own, a claim would starve: entries would wait for someone
+to notice. An opt-in wake loop (`NMG_BOARD_WAKE=1`) polls the subscribed spaces
+(world channel plus active named channels) and, when a new open entry appears
+that has not already been surfaced, wakes the Agent with a broadcast-style
+`pi.sendUserMessage` ("your subscribed channel has a new question") — never
+addressing a specific recipient, so this is notification, not a DM or @. The
+loop is guarded by a daily budget and a cooldown (notification-budget
+philosophy) and dedups per entry across restarts. *Status:* implemented.
 
 **Memory pointers.** An entry may carry `memory=<id>` references to LTG records
 instead of copying their content, using the same `memory=<id>` format that
@@ -505,10 +522,13 @@ Implemented (design.md §13):
   regulatory-channel separation, trace visibility, and feedback-driven
   prediction-error strength updates.
 - a shared Task Board with task isolation, immutable writer attribution,
-  task-local cursors, TTL expiry, explicit resolution, private Pi AG
-  projection, a world channel with a lobby directory of active named channels
-  (an omitted `taskId` targets the world channel), and convention-based
-  `memory=<id>` pointers readers expand via `nmg_get`;
+  task-local cursors, TTL expiry, explicit resolution, lease-based claiming
+  (claim/release, one Agent per entry, lazy lease expiry), an opt-in
+  broadcast-style wake notification loop (`NMG_BOARD_WAKE=1`, daily budget +
+  cooldown + per-entry dedup), private Pi AG projection, a world channel with
+  a lobby directory of active named channels (an omitted `taskId` targets the
+  world channel), and convention-based `memory=<id>` pointers readers expand
+  via `nmg_get`;
 
 Not yet implemented:
 

@@ -691,6 +691,41 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     )) as { content: Array<{ text: string }> };
     assert.match(worldRead.content[0].text, /Active named channels/u);
     assert.match(worldRead.content[0].text, /atlas-review/u);
+    // Lease-based claiming: agent-b claims the open handoff, a third agent is
+    // refused (diagnosed as already claimed), then agent-b releases it back.
+    const boardClaim = (await tools.get("nmg_board")!.execute(
+      "board-claim",
+      { action: "claim", taskId: "atlas-review", entryId: boardPut.details.entry.id },
+      undefined,
+      undefined,
+      { sessionManager: secondSessionManager },
+    )) as { details: { entry: { claimedBy: string | null; claimExpiresAt: string | null } } };
+    assert.equal(boardClaim.details.entry.claimedBy, "agent-b");
+    assert.ok(boardClaim.details.entry.claimExpiresAt);
+    // A third agent is refused (diagnosed as already claimed). Override the
+    // env identity so the conflict is not read as the holder heartbeating.
+    const wakeAgent = process.env.NMG_AGENT_ID;
+    process.env.NMG_AGENT_ID = "agent-c";
+    await assert.rejects(
+      tools.get("nmg_board")!.execute(
+        "board-claim-conflict",
+        { action: "claim", taskId: "atlas-review", entryId: boardPut.details.entry.id },
+        undefined,
+        undefined,
+        { sessionManager: { ...secondSessionManager, getSessionId: () => "http-test-session-c" } },
+      ),
+      /already claimed/u,
+    );
+    if (wakeAgent === undefined) delete process.env.NMG_AGENT_ID;
+    else process.env.NMG_AGENT_ID = wakeAgent;
+    const boardRelease = (await tools.get("nmg_board")!.execute(
+      "board-release",
+      { action: "release", taskId: "atlas-review", entryId: boardPut.details.entry.id },
+      undefined,
+      undefined,
+      { sessionManager: secondSessionManager },
+    )) as { details: { entry: { claimedBy: string | null } } };
+    assert.equal(boardRelease.details.entry.claimedBy, null);
     const boardProjection = (await handlers.get("before_agent_start")!(
       { prompt: "Continue the assigned review.", systemPrompt: "base" },
       { sessionManager: secondSessionManager },

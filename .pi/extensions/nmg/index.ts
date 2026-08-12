@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
@@ -71,6 +72,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     resolveNmgDataDir(),
     shadowEnabled() || qpp1Mode !== "off" || qpp2Mode !== "off",
   );
+  // Most recent event context, used by the board wake loop to test isIdle and
+  // to resolve the current session id outside an event handler.
+  let latestAgentCtx: ExtensionContext | undefined;
   // Weak completion nudge: a git commit (or an explicit completion phrase) is a
   // low-signal hint that NMG memory is available — a reminder, never a forced
   // action. Set by the tool_result hook, consumed once by before_agent_start.
@@ -232,6 +236,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    latestAgentCtx = ctx;
     // Flush archive entries staged by a previous session_shutdown. The daemon
     // is lazily started by the first invoke, so this cannot race teardown.
     // Failures keep the staging files for the next startup.
@@ -260,6 +265,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_end", async (event, ctx) => {
+    latestAgentCtx = ctx;
     await controllerShadow.outcome(ctx.sessionManager.getSessionId(), event.messages);
   });
 
@@ -805,6 +811,115 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       return toolResult(result, formatTaskBoardResult(result, taskId, directory));
     },
   });
+
+  // ---- Board wake loop (opt-in via NMG_BOARD_WAKE=1) ----------------
+  // Notification for an idle Agent: poll the subscribed spaces (the world
+  // channel plus active named channels), and when a new open entry appears
+  // that has not already been surfaced, wake the Agent with a broadcast-style
+  // pi.sendUserMessage ("your subscribed channel has a new question") — never
+  // addressing a specific recipient. This is the notification half of the
+  // claim+notify design: claims decide who works, notifications decide who
+  // knows. Guarded by a daily budget and a cooldown (notification budget
+  // philosophy), with per-entry dedup persisted across restarts.
+  if (process.env.NMG_BOARD_WAKE === "1") {
+    const wakeStatePath = join(resolveNmgDataDir(), "board-wake-state.json");
+    const wakeIntervalMs = Math.max(5_000, Number(process.env.NMG_BOARD_WAKE_INTERVAL_MS ?? 60_000));
+    const wakeBudget = Math.max(1, Number(process.env.NMG_BOARD_WAKE_BUDGET ?? 8));
+    const wakeCooldownMs = Math.max(30_000, Number(process.env.NMG_BOARD_WAKE_COOLDOWN_MS ?? 600_000));
+    interface BoardWakeState {
+      notified: string[];
+      budgetDate: string;
+      budgetUsed: number;
+      lastWakeAt: number;
+    }
+    const loadWakeState = (): BoardWakeState => {
+      try {
+        return JSON.parse(readFileSync(wakeStatePath, "utf8")) as BoardWakeState;
+      } catch {
+        return { notified: [], budgetDate: "", budgetUsed: 0, lastWakeAt: 0 };
+      }
+    };
+    const saveWakeState = (state: BoardWakeState): void => {
+      try {
+        writeFileSync(wakeStatePath, JSON.stringify(state), "utf8");
+      } catch {
+        // best-effort; losing dedup state only means an entry could re-notify
+      }
+    };
+    const scanBoardWake = async (): Promise<void> => {
+      const state = loadWakeState();
+      const now = Date.now();
+      if (now - state.lastWakeAt < wakeCooldownMs) return;
+      const today = new Date(now).toISOString().slice(0, 10);
+      if (state.budgetDate !== today) {
+        state.budgetDate = today;
+        state.budgetUsed = 0;
+      }
+      if (state.budgetUsed >= wakeBudget) return;
+      if (latestAgentCtx?.isIdle && !latestAgentCtx.isIdle()) return;
+      const sessionId = latestAgentCtx?.sessionManager.getSessionId() ?? "";
+      const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
+      try {
+        const candidates: Array<TaskBoardToolEntry & { taskId: string }> = [];
+        const seen = new Set(state.notified);
+        const collect = (taskId: string, entries: TaskBoardToolEntry[] | undefined) => {
+          for (const entry of entries ?? []) {
+            if (entry.status === "open" && !seen.has(entry.id)) {
+              candidates.push({ ...entry, taskId });
+            }
+          }
+        };
+        const world = (await invoke("taskBoard", {
+          action: "read",
+          taskId: WORLD_BOARD_ID,
+          agentId,
+        })) as TaskBoardToolResult;
+        collect(WORLD_BOARD_ID, world.entries);
+        const lobby = (await invoke("taskBoard", { action: "list", agentId })) as {
+          boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }>;
+        };
+        for (const board of lobby.boards ?? []) {
+          const read = (await invoke("taskBoard", {
+            action: "read",
+            taskId: board.taskId,
+            agentId,
+          })) as TaskBoardToolResult;
+          collect(board.taskId, read.entries);
+        }
+        if (candidates.length === 0) return;
+        const rank: Record<string, number> = {
+          question: 0,
+          blocker: 1,
+          handoff: 2,
+          goal: 3,
+          note: 4,
+          decision: 5,
+          result: 6,
+        };
+        candidates.sort(
+          (left, right) =>
+            (rank[left.kind] ?? 9) - (rank[right.kind] ?? 9) ||
+            left.createdAt.localeCompare(right.createdAt),
+        );
+        const pick = candidates[0]!;
+        const excerpt =
+          pick.content.length > 140 ? `${pick.content.slice(0, 140)}…` : pick.content;
+        const label = kindLabel(pick.kind);
+        pi.sendUserMessage(
+          `[NMG board] 你订阅的频道 ${pick.taskId} 有新${label}：#${pick.sequence} — ${excerpt}（open，可认领）。需要的话用 nmg_board read 查看详情、claim 认领处理。`,
+        );
+        state.notified.push(pick.id);
+        state.budgetUsed += 1;
+        state.lastWakeAt = now;
+        saveWakeState(state);
+      } catch {
+        // daemon unavailable or transient failure — retry next tick
+      }
+    };
+    setInterval(() => {
+      void scanBoardWake();
+    }, wakeIntervalMs);
+  }
 }
 
 const EVIDENCE_SOURCE_WINDOW = 64;
@@ -1377,6 +1492,28 @@ interface TaskBoardToolEntry {
   status: string;
   content: string;
   claimedBy?: string | null;
+  createdAt?: string;
+}
+
+function kindLabel(kind: string): string {
+  switch (kind) {
+    case "question":
+      return "问题";
+    case "blocker":
+      return "阻塞";
+    case "handoff":
+      return "交接";
+    case "goal":
+      return "目标";
+    case "note":
+      return "记录";
+    case "decision":
+      return "决定";
+    case "result":
+      return "结果";
+    default:
+      return "条目";
+  }
 }
 
 interface TaskBoardToolResult {
