@@ -296,9 +296,12 @@ fallbacks are the session id, then the pid. *Status:* implemented.
 instead of copying their content, using the same `memory=<id>` format that
 automatic recall renders; a reader expands them with `nmg_get`. The board
 therefore transmits *references* to durable knowledge, never a second copy —
-consistent with "LTG is the only shared graph" (§1). *Status:* implemented by
-convention — content accepts `memory=<id>` as plain text; there is no
-structured pointer type or separate validation, kept intentionally minimal.
+consistent with "LTG is the only shared graph" (§1). Pointers are progressive
+disclosure: the board carries only the short id, and content is fetched on
+demand via `nmg_get`, so reading the board never inflates context with the
+referenced memory bodies. *Status:* implemented by convention — content
+accepts `memory=<id>` as plain text; there is no structured pointer type or
+separate validation, kept intentionally minimal.
 
 **AG projection.** On read, entries are projected into the *reading* Agent's
 private runtime AG, never into any shared graph. *Status:* implemented.
