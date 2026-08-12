@@ -157,6 +157,7 @@ test("promoteMemory: promotes STG memory to LTG", () => {
       nodeName: "test hypothesis",
       memoryType: "derived",
       residence: "stg",
+        sessionId: "test-session",
     });
     assert.equal(saved.memory.residence, "stg");
     const promoted = store.promoteMemory(saved.memory.id, "verified by user", []);
@@ -203,6 +204,7 @@ test("demoteMemory: already-STG memory is returned unchanged", () => {
       nodeName: "hypothesis",
       memoryType: "derived",
       residence: "stg",
+        sessionId: "test-session",
     });
     assert.equal(saved.memory.residence, "stg");
     const demoted = store.demoteMemory(saved.memory.id, "already stg");
@@ -523,6 +525,7 @@ test("setMemoryStorageState: rejects STG memories", () => {
       nodeName: "session hypothesis",
       memoryType: "derived",
       residence: "stg",
+        sessionId: "test-session",
     });
     assert.throws(
       () => store.setMemoryStorageState(provisional.memory.id, "dormant"),
@@ -546,6 +549,7 @@ test("expireShortTermMemories: expires past-due STG memories", () => {
       nodeName: "expiring node",
       memoryType: "derived",
       residence: "stg",
+        sessionId: "test-session",
     });
     const past = new Date(Date.now() - 86_400_000).toISOString();
     const ids = store.expireShortTermMemories(past);
@@ -663,6 +667,7 @@ test("runSemanticMaintenance expires STG records and keeps topology changes prop
       statement: "expired session-local observation",
       nodeName: "expired session node",
       residence: "stg",
+        sessionId: "test-session",
       expiresAt: "2020-01-01T00:00:00.000Z",
     });
     const result = store.runSemanticMaintenance({
@@ -839,6 +844,7 @@ test("promoteMemory triggers a consolidation event visible via consolidationEven
       nodeName: "consolidation node",
       memoryType: "derived",
       residence: "stg",
+        sessionId: "test-session",
     });
     store.promoteMemory(saved.memory.id, "test promotion");
     const events = store.consolidationEvents();

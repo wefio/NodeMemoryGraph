@@ -348,7 +348,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
           "SELECT id, node_id, status, statement, memory_type, state_key, event_time, " +
             "source_actor, truth_status, confidence, polarity, predicate_key, extract_method, claims_json, markers_json, scope_json, valid_from, valid_until, " +
             "resolution, opened_at, related_memory_ids_json, " +
-            "residence, promoted_at, expires_at, evidence_role, supersedes_id, " +
+            "residence, session_id, promoted_at, expires_at, evidence_role, supersedes_id, " +
             "tier, importance, access_count, last_accessed_at, evidence_id, " +
             "write_reason, write_source, created_at " +
             "FROM memory_records WHERE id = ?",
@@ -383,6 +383,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         openedAt: row.opened_at ? String(row.opened_at) : null,
         relatedMemoryIds: parseStringArray(row.related_memory_ids_json),
         residence: String(row.residence ?? "ltg") as MemoryResidence,
+        sessionId: row.session_id ? String(row.session_id) : null,
         promotedAt: row.promoted_at ? String(row.promoted_at) : null,
         expiresAt: row.expires_at ? String(row.expires_at) : null,
         evidenceRole: String(row.evidence_role) as MemoryRecord["evidenceRole"],
@@ -466,6 +467,32 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         this.db.exec("ROLLBACK");
         throw error;
       }
+    }
+
+    /**
+     * Delete every provisional memory owned by one session (session_id match),
+     * reusing deleteMemory's full cascade (FTS/embeddings/traces/proposals).
+     * Shared rows (session_id NULL: cached_from_ltg / LTG) are untouched.
+     * Returns the number of memories removed. Used by STG session lifecycle:
+     * docs/stg-shared-store-v2-2026-08-12.md §3.3.
+     */
+    purgeSession(sessionId: string): number {
+      const rows = this.db
+        .prepare("SELECT id FROM memory_records WHERE session_id = ?")
+        .all(sessionId) as Row[];
+      let purged = 0;
+      for (const row of rows) {
+        const id = String(row.id);
+        if (this.deleteMemory(id)) {
+          // deleteMemory soft-deletes (status='deleted') while cleaning FTS /
+          // embeddings / traces. Session purge is a physical removal (STG is
+          // scratch: no audit value), so drop the row itself too — otherwise
+          // exact access still resolves it.
+          this.db.prepare("DELETE FROM memory_records WHERE id = ?").run(id);
+          purged += 1;
+        }
+      }
+      return purged;
     }
 
     /**

@@ -13,7 +13,6 @@
  * cached copies are search hints (marker, no re-verification) and are
  * refused by the promotion pipeline (loop guard in promoteMemory).
  */
-import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import type { MemoryContext, MemoryMarker, MemoryScope, SearchOptions } from "./types.ts";
@@ -25,19 +24,32 @@ export function cachedFromLtgMarker(sourceMemoryId: string, cachedAt: string): M
   return { kind: "cached_from_ltg", attributes: { sourceMemoryId, cachedAt } };
 }
 
-/** Session-private STG path. The hash prevents session IDs from becoming paths. */
-export function stgStorePath(projectDir: string, sessionId = "default"): string {
-  const sessionKey = createHash("sha256").update(sessionId).digest("hex").slice(0, 24);
-  return join(projectDir, ".nmg", "sessions", sessionKey, "stg.sqlite");
+/**
+ * STG v2 shared-store path: one file per project (docs/stg-shared-store-v2).
+ * Session isolation moved from physical files to memory_records.session_id row
+ * filtering; the sessionId parameter is retained for signature compatibility
+ * but no longer participates in the path.
+ */
+export function stgStorePath(projectDir: string, _sessionId = "default"): string {
+  return join(projectDir, ".nmg", "stg.sqlite");
 }
 
-/** Open (or create) one session's project STG. Deletable; recreating it is free. */
+/** Open (or create) the project's shared STG store. Deletable; recreating it is free. */
 export function createStgStore(
   projectDir: string,
   embedder?: VectorEmbedder,
-  sessionId = "default",
+  _sessionId = "default",
 ): NmgStore {
-  return new NmgStore(stgStorePath(projectDir, sessionId), embedder);
+  return new NmgStore(stgStorePath(projectDir), embedder);
+}
+
+/**
+ * Delete every provisional memory owned by one session from the project STG.
+ * Shared cached_from_ltg rows (session_id NULL) are kept — the session's own
+ * scratch work is what expires with it (docs/stg-shared-store-v2 §3.3).
+ */
+export function purgeSessionFromStg(stg: NmgStore, sessionId: string): number {
+  return stg.purgeSession(sessionId);
 }
 
 /**

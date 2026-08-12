@@ -68,6 +68,7 @@ export const NMG_METHODS = [
   "rollbackNodeTransform",
   "splitNode",
   "syncStg",
+  "stgPurgeSession",
   "taskBoard",
   "shutdown",
   "status",
@@ -241,6 +242,12 @@ export interface NmgSyncStgParams {
   sessionId?: string;
   scope: MemoryScope;
   limit?: number;
+}
+
+export interface NmgStgPurgeSessionParams {
+  projectDir: string;
+  /** Session whose provisional STG rows should be removed (kept: shared cached_from_ltg). */
+  sessionId: string;
 }
 
 interface NmgTaskBoardBase {
@@ -430,6 +437,7 @@ export type NmgMethodResult = {
   rollbackNodeTransform: NodeTransform;
   splitNode: NodeTransform;
   syncStg: { copied: number; projectDir: string };
+  stgPurgeSession: { purged: number; projectDir: string };
   taskBoard:
     | { action: "put" | "resolve" | "claim" | "release"; entry: TaskBoardEntry }
     | { action: "read"; entries: TaskBoardEntry[]; nextCursor: number }

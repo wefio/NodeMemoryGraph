@@ -29,6 +29,7 @@ test("trace protocol joins STG, LTG and Active Graph into fixed bounded features
       memoryType: "derived",
       truthStatus: "inferred",
       residence: "stg",
+        sessionId: "test-session",
       tier: 0,
     });
     const answer = store.remember({

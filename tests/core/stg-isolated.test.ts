@@ -51,6 +51,7 @@ test("Phase1: STG store is a separate file that can be deleted without touching 
       statement: "Provisional task fact",
       nodeName: "provisional",
       residence: "stg",
+      sessionId: "provisional-session",
     });
     assert.equal(provisional.memory.residence, "stg");
     stg.close();
@@ -105,6 +106,7 @@ test("outcome-qualified STG memory can be copied into LTG without a cache loop",
       evidence: "The user confirmed that Atlas stores durable metadata in SQLite.",
       scope: { project: "atlas" },
       residence: "stg",
+      sessionId: "session-alpha",
     });
     const first = consolidateStgMemoryToLtg(stg, ltg, local.memory.id);
     const second = consolidateStgMemoryToLtg(stg, ltg, local.memory.id);
@@ -149,6 +151,7 @@ test("STG/LTG projection keeps only the newest same-scope state version", () => 
       eventTime: "2023-05-30T13:53:00.000Z",
       validFrom: "2023-05-30T13:53:00.000Z",
       residence: "stg",
+      sessionId: "session-update",
     });
     const merged = mergeStgLtgContexts(
       stg.searchContext("charity 5K personal best", { limit: 10 }),
@@ -225,6 +228,7 @@ test("Phase2: cache markers carry sourceMemoryId for authority resolution", () =
       statement: "Cached copy",
       nodeName: "cache",
       residence: "stg",
+        sessionId: "test-session",
       markers: [marker],
     });
     const markerKind = saved.memory.markers.find((m) => m.kind === "cached_from_ltg");
@@ -236,14 +240,15 @@ test("Phase2: cache markers carry sourceMemoryId for authority resolution", () =
   });
 });
 
-test("Phase1: stgStorePath derives a deletable project-local file", () => {
+test("Phase1: stgStorePath derives a single project-local shared file", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-stg-path-"));
   try {
     const path = stgStorePath(directory);
-    assert.ok(path.startsWith(join(directory, ".nmg", "sessions")));
-    assert.notEqual(path, stgStorePath(directory, "another-session"));
+    assert.ok(path.startsWith(join(directory, ".nmg")));
+    // v2: one shared file per project — sessions share it (row-level isolation).
+    assert.equal(path, stgStorePath(directory, "another-session"));
     const stg = createStgStore(directory, new HashingVectorEmbedder());
-    stg.remember({ statement: "Local provisional", nodeName: "local" });
+    stg.remember({ statement: "Local provisional", nodeName: "local", sessionId: "session-a" });
     stg.close();
     assert.ok(existsSync(path), "STG file exists");
     rmSync(path, { force: true });

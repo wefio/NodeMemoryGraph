@@ -394,6 +394,7 @@ test("resident service isolates project STG while retaining LTG fallback", async
       statement: "Project A session branch is blue.",
       nodeName: "Session branch",
       residence: "stg",
+      sessionId: "session-test",
       projectDir: projectA,
     });
     const durable = await service.invoke("remember", {
@@ -510,7 +511,9 @@ test("resident service isolates STG by session inside one project", async () => 
     });
     assert.ok(alpha.results.some((result) => result.memory.id === local.memory.id));
     assert.ok(!beta.results.some((result) => result.memory.id === local.memory.id));
-    assert.notEqual(
+    // v2: one shared stg.sqlite per project — session isolation is row-level
+    // (session_id filter), not per-session files.
+    assert.equal(
       stgStorePath(projectDir, "session-alpha"),
       stgStorePath(projectDir, "session-beta"),
     );
@@ -999,6 +1002,20 @@ test("search protocol preserves Pi QPP evidence-window overrides", async () => {
       strongHitInitialTarget: 1,
     });
     assert.equal(searched.activeGraph?.qpp?.expansion?.stages[0]?.targetEvidence, 1);
+    const planned = await service.invoke("search", {
+      query: "Atlas deployment evidence",
+      limit: 5,
+      secondPass: false,
+      persistTrace: false,
+      activeGraphBudget: {
+        maxEvidence: 5,
+        maxTokens: 7_500,
+        maxNodes: 12,
+      },
+    });
+    assert.equal(planned.activeGraph?.budget.maxEvidence, 5);
+    assert.equal(planned.activeGraph?.budget.maxTokens, 7_500);
+    assert.equal(planned.activeGraph?.budget.maxNodes, 12);
   } finally {
     service.close();
     rmSync(directory, { recursive: true, force: true });

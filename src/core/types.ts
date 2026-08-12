@@ -226,6 +226,10 @@ export interface MemoryRecord {
   expiresAt: string | null;
   evidenceRole: EvidenceRole;
   supersedesId: string | null;
+  /** Owning session for STG-provisional rows; null = explicitly shared
+   *  (cached_from_ltg copies or LTG rows). Never nulled accidentally: see
+   *  stg-shared-store-v2 docs §3.6 escape-hatch rule. */
+  sessionId: string | null;
   tier: MemoryTier;
   importance: number;
   accessCount: number;
@@ -303,7 +307,11 @@ export interface RememberInput {
     sourceRef?: string;
   };
   evidenceHistoryId?: string;
-  sessionId?: string;
+  /** Owning session. REQUIRED when residence='stg' and not a cached_from_ltg
+   *  copy — a provisional write without an explicit sessionId is rejected
+   *  (string = session-private; null = explicitly shared; undefined = error).
+   *  docs/stg-shared-store-v2 §3.6. */
+  sessionId?: string | null;
   sourceRef?: string;
   tier?: MemoryTier;
   /**

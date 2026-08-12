@@ -114,7 +114,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
     appendHistory(input: {
       content: string;
       role: HistoryRole;
-      sessionId?: string;
+      sessionId?: string | null;
       sourceMessageId?: string;
       sourceRef?: string;
     }): HistoryRecord {
@@ -192,12 +192,28 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       evidenceRole?: MemoryRecord["evidenceRole"];
       supersedesId?: string;
       residence?: MemoryResidence;
+      sessionId?: string | null;
       expiresAt?: string;
       writeReason?: string;
       writeSource?: MemoryRecord["writeSource"];
     }): MemoryRecord {
       const createdAt = new Date().toISOString();
       const residence = input.residence ?? defaultResidence(input);
+      // Escape-hatch rule applies to EXPLICIT STG writes only: when a caller
+      // deliberately targets STG (residence: "stg") it must declare row
+      // ownership — string = session-private, null = explicitly shared.
+      // defaultResidence-derived STG (derived/inferred/assistant-unverified) is
+      // a system provisional path, not a "save-time bypass", so it is exempt.
+      if (
+        input.residence === "stg" &&
+        !(input.markers ?? []).some((marker) => marker.kind === "cached_from_ltg") &&
+        input.sessionId === undefined
+      ) {
+        throw new Error(
+          "Explicit STG (residence: \"stg\") provisional writes require an explicit sessionId — " +
+            "string = session-private, null = explicitly shared (escape-hatch rule)",
+        );
+      }
       const writeSource =
         input.writeSource ?? (input.memoryType === "derived" ? "derived" : "core");
       const writeReason = input.writeReason?.trim() || defaultWriteReason(input, residence);
@@ -233,6 +249,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         openedAt: resolution === "resolved" ? null : (input.openedAt ?? createdAt),
         relatedMemoryIds,
         residence,
+        sessionId: input.sessionId ?? null,
         promotedAt: residence === "ltg" ? createdAt : null,
         expiresAt: input.expiresAt ?? null,
         evidenceRole: input.evidenceRole ?? "support",
@@ -252,10 +269,10 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
             (id, node_id, evidence_id, statement, memory_type, state_key,
              event_time, source_actor, truth_status, confidence, polarity, predicate_key, extract_method, claims_json, markers_json, scope_json, valid_from,
              valid_until, status, resolution, opened_at, related_memory_ids_json,
-             residence, promoted_at, expires_at,
+             residence, session_id, promoted_at, expires_at,
              evidence_role, supersedes_id, tier, importance,
              access_count, last_accessed_at, write_reason, write_source, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
         )
         .run(
           memory.id,
@@ -281,6 +298,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           memory.openedAt,
           JSON.stringify(memory.relatedMemoryIds),
           memory.residence,
+          memory.sessionId,
           memory.promotedAt,
           memory.expiresAt,
           memory.evidenceRole,
@@ -453,6 +471,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           evidenceRole: input.evidenceRole ?? (supersedesId ? "update" : undefined),
           supersedesId,
           residence: input.residence,
+          sessionId: input.sessionId,
           expiresAt: input.expiresAt,
           writeReason: input.writeReason,
           writeSource: input.writeSource,
@@ -595,10 +614,15 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
     }
 
     /** Read one memory by id — used to confirm a feedback target's state. */
-    getMemory(memoryId: string): MemoryRecord | null {
+    getMemory(memoryId: string, sessionId?: string): MemoryRecord | null {
+      // session-scoped: when a sessionId is supplied, a provisional row owned
+      // by another session is invisible (shared rows with session_id NULL are
+      // always visible). docs/stg-shared-store-v2 §3.2 / §3.6.
       const row = this.db
-        .prepare("SELECT * FROM memory_records WHERE id = ? LIMIT 1")
-        .get(memoryId) as Row | undefined;
+        .prepare(
+          "SELECT * FROM memory_records WHERE id = ? AND (? IS NULL OR session_id IS NULL OR session_id = ?) LIMIT 1",
+        )
+        .get(memoryId, sessionId ?? null, sessionId ?? null) as Row | undefined;
       return row ? mapMemoryRow(row) : null;
     }
 
@@ -1047,6 +1071,7 @@ function mapMemoryRow(row: Record<string, unknown>): MemoryRecord {
     openedAt: (row.opened_at as string) ?? null,
     relatedMemoryIds: parse(row.related_memory_ids_json, []) as string[],
     residence: (row.residence as MemoryRecord["residence"]) ?? "stg",
+    sessionId: (row.session_id as string) ?? null,
     promotedAt: (row.promoted_at as string) ?? null,
     expiresAt: (row.expires_at as string) ?? null,
     evidenceRole: (row.evidence_role as MemoryRecord["evidenceRole"]) ?? "support",

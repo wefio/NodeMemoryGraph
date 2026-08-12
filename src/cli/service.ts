@@ -12,6 +12,7 @@ import {
   copyLtgSubsetToStg,
   createStgStore,
   mergeStgLtgContexts,
+  purgeSessionFromStg,
   retractStgConsolidation,
 } from "../core/stg.ts";
 import {
@@ -65,6 +66,7 @@ import {
   type NmgSplitNodeParams,
   type NmgStatusResult,
   type NmgSyncStgParams,
+  type NmgStgPurgeSessionParams,
   type NmgTaskBoardParams,
 } from "./protocol.ts";
 import { resolveNmgDataDir } from "./data-path.ts";
@@ -173,6 +175,14 @@ export class NmgService {
           ),
           projectDir: parsed.projectDir,
         } as NmgMethodResult[M];
+      }
+      case "stgPurgeSession": {
+        const parsed = parseStgPurgeSessionParams(params);
+        const purged = purgeSessionFromStg(
+          this.#getStgStore(parsed.projectDir, parsed.sessionId),
+          parsed.sessionId,
+        );
+        return { purged, projectDir: parsed.projectDir } as NmgMethodResult[M];
       }
       case "taskBoard": {
         const parsed = parseTaskBoardParams(params);
@@ -404,7 +414,9 @@ export class NmgService {
       ? [this.#getStgStore(params.projectDir, params.sessionId), this.#getStore()]
       : [this.#getStore()];
     if (params.action === "forget") {
-      const store = stores.find((candidate) => candidate.getMemory(params.memoryId) !== null);
+      const store = stores.find(
+        (candidate) => candidate.getMemory(params.memoryId, params.sessionId) !== null,
+      );
       if (!store) {
         throw new NmgProtocolError("INVALID_PARAMS", `memory ${params.memoryId} does not exist`);
       }
@@ -415,7 +427,9 @@ export class NmgService {
       };
     }
     if (params.action === "resolve" || params.action === "reopen") {
-      const store = stores.find((candidate) => candidate.getMemory(params.memoryId) !== null);
+      const store = stores.find(
+        (candidate) => candidate.getMemory(params.memoryId, params.sessionId) !== null,
+      );
       if (!store) {
         throw new NmgProtocolError("INVALID_PARAMS", `memory ${params.memoryId} does not exist`);
       }
@@ -429,16 +443,18 @@ export class NmgService {
       );
       return { action: params.action, ...state };
     }
-    const store = stores.find((candidate) => candidate.getMemory(params.newMemoryId) !== null);
+    const store = stores.find(
+      (candidate) => candidate.getMemory(params.newMemoryId, params.sessionId) !== null,
+    );
     if (!store) {
       throw new NmgProtocolError(
         "INVALID_PARAMS",
         `new memory ${params.newMemoryId} does not exist`,
       );
     }
-    const newer = store.getMemory(params.newMemoryId);
+    const newer = store.getMemory(params.newMemoryId, params.sessionId);
     if (params.action === "relate") {
-      const related = store.getMemory(params.relatedMemoryId);
+      const related = store.getMemory(params.relatedMemoryId, params.sessionId);
       if (!newer || !related) {
         throw new NmgProtocolError(
           "INVALID_PARAMS",
@@ -481,7 +497,7 @@ export class NmgService {
         proposal,
       };
     }
-    const stale = store.getMemory(params.supersededMemoryId);
+    const stale = store.getMemory(params.supersededMemoryId, params.sessionId);
     if (!newer || !stale) {
       throw new NmgProtocolError(
         "INVALID_PARAMS",
@@ -506,7 +522,7 @@ export class NmgService {
       action: "supersede",
       newMemoryId: params.newMemoryId,
       supersededMemoryId: params.supersededMemoryId,
-      applied: store.getMemory(params.supersededMemoryId)?.status === "superseded",
+      applied: store.getMemory(params.supersededMemoryId, params.sessionId)?.status === "superseded",
     };
   }
 
@@ -564,7 +580,9 @@ export class NmgService {
       : [this.#getStore()];
     const grouped = new Map<NmgStore, typeof input.votes>();
     for (const vote of input.votes) {
-      const store = stores.find((candidate) => candidate.getMemory(vote.memoryId) !== null);
+      const store = stores.find(
+        (candidate) => candidate.getMemory(vote.memoryId, params.sessionId) !== null,
+      );
       if (!store)
         throw new NmgProtocolError("INVALID_PARAMS", `memory ${vote.memoryId} does not exist`);
       const bucket = grouped.get(store) ?? [];
@@ -730,7 +748,7 @@ export class NmgService {
       : undefined;
     const shared = sharedStore.getContext(params.memoryIds, params.graphHops ?? 0);
     const local = localStore
-      ? localStore.getContext(params.memoryIds, params.graphHops ?? 0)
+      ? localStore.getContext(params.memoryIds, params.graphHops ?? 0, params.sessionId)
       : undefined;
     const context = local ? mergeStgLtgContexts(local, shared) : shared;
     const found = new Set(context.results.map((result) => result.memory.id));
@@ -773,13 +791,18 @@ export class NmgService {
     return (this.#store ??= new NmgStore(this.databasePath));
   }
 
-  #getStgStore(projectDir: string, sessionId = "cli"): NmgStore {
+  #getStgStore(projectDir: string, _sessionId = "cli"): NmgStore {
+    // STG v2 shared store: one NmgStore instance per project file
+    // (<project>/.nmg/stg.sqlite). Session isolation is row-level via
+    // memory_records.session_id (docs/stg-shared-store-v2 §3), so the
+    // sessionId parameter no longer selects a store. Call sites keep passing
+    // it for remember/search filtering — it is consumed by the store methods,
+    // not the file path.
     const resolved = resolve(projectDir);
-    const key = `${resolved}\0${sessionId}`;
-    let store = this.#stgStores.get(key);
+    let store = this.#stgStores.get(resolved);
     if (!store) {
-      store = createStgStore(resolved, undefined, sessionId);
-      this.#stgStores.set(key, store);
+      store = createStgStore(resolved, undefined, _sessionId);
+      this.#stgStores.set(resolved, store);
     }
     return store;
   }
@@ -1036,6 +1059,14 @@ function parseSyncStgParams(value: unknown): NmgSyncStgParams {
     sessionId: optionalString(params, "sessionId"),
     scope,
     limit: optionalInteger(params, "limit", 1, 200),
+  };
+}
+
+function parseStgPurgeSessionParams(value: unknown): NmgStgPurgeSessionParams {
+  const params = objectParams(value);
+  return {
+    projectDir: requiredString(params, "projectDir"),
+    sessionId: requiredString(params, "sessionId"),
   };
 }
 

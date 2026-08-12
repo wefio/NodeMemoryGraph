@@ -195,6 +195,7 @@ export function mapSearchResult(row: Row, score: number): MemorySearchResult {
       openedAt: row.m_opened_at ? String(row.m_opened_at) : null,
       relatedMemoryIds: parseStringArray(row.m_related_memory_ids_json),
       residence: String(row.m_residence ?? "ltg") as MemoryResidence,
+      sessionId: row.m_session_id ? String(row.m_session_id) : null,
       promotedAt: row.m_promoted_at ? String(row.m_promoted_at) : null,
       expiresAt: row.m_expires_at ? String(row.m_expires_at) : null,
       evidenceRole: String(row.m_evidence_role) as MemoryRecord["evidenceRole"],

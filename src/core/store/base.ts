@@ -71,6 +71,11 @@ export class NmgStoreBase {
         PRAGMA busy_timeout = 5000;
       `);
       migrate(this.db);
+      // checkpoint-on-open: fold any -wal left behind by a force-exit shutdown
+      // (where close() never ran) into the main DB and truncate it, so WAL can
+      // never accumulate across restarts. SQLite auto-recovers WAL frames on
+      // open; TRUNCATE then resets the journal file (stg-v2 review ③a).
+      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     } catch (error) {
       // A corrupt database makes PRAGMA/migrate throw while the underlying
       // handle is still open. Close it before propagating, or the file stays
@@ -85,6 +90,14 @@ export class NmgStoreBase {
   }
 
   close(): void {
+    // WAL checkpoint before close: without this the daemon's force-exit
+    // shutdown leaves -wal files behind (v1 measured ~1.5G across 1681
+    // session STG stores). TRUNCATE folds WAL into the main DB then resets it.
+    try {
+      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } catch {
+      // ignore — closing anyway
+    }
     this.db.close();
   }
   putTaskBoardEntry(input: {
@@ -1286,7 +1299,7 @@ export class NmgStoreBase {
          m.valid_until AS m_valid_until, m.status AS m_status,
          m.resolution AS m_resolution, m.opened_at AS m_opened_at,
          m.related_memory_ids_json AS m_related_memory_ids_json,
-         m.residence AS m_residence, m.promoted_at AS m_promoted_at,
+         m.residence AS m_residence, m.session_id AS m_session_id, m.promoted_at AS m_promoted_at,
          m.expires_at AS m_expires_at,
          m.evidence_role AS m_evidence_role,
          m.supersedes_id AS m_supersedes_id,

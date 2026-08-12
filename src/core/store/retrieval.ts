@@ -672,11 +672,13 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       );
     }
 
-    getContext(memoryIds: readonly string[], graphHops = 0): MemoryContext {
+    getContext(memoryIds: readonly string[], graphHops = 0, sessionId?: string): MemoryContext {
       const ids = [...new Set(memoryIds)].slice(0, 50);
-      const findNode = this.db.prepare("SELECT node_id FROM memory_records WHERE id = ?");
+      const findNode = this.db.prepare(
+        "SELECT node_id FROM memory_records WHERE id = ? AND (? IS NULL OR session_id IS NULL OR session_id = ?)",
+      );
       const results = ids.flatMap((memoryId) => {
-        const row = findNode.get(memoryId) as Row | undefined;
+        const row = findNode.get(memoryId, sessionId ?? null, sessionId ?? null) as Row | undefined;
         if (!row) return [];
         return this.resultsForNode(String(row.node_id), 3, 1, memoryId);
       });
@@ -1028,7 +1030,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
            m.valid_until AS m_valid_until, m.status AS m_status,
            m.resolution AS m_resolution, m.opened_at AS m_opened_at,
            m.related_memory_ids_json AS m_related_memory_ids_json,
-           m.residence AS m_residence, m.promoted_at AS m_promoted_at,
+           m.residence AS m_residence, m.session_id AS m_session_id, m.promoted_at AS m_promoted_at,
            m.expires_at AS m_expires_at,
            m.evidence_role AS m_evidence_role,
            m.supersedes_id AS m_supersedes_id,
@@ -1059,6 +1061,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
            AND (? IS NULL OR n.canonical_name = ?)
            AND (? IS NULL OR m.source_actor = ?)
            AND (? = 1 OR m.status IN ('active', 'disputed', 'superseded'))
+           AND (? IS NULL OR m.session_id IS NULL OR m.session_id = ?)
            AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
            AND (? IS NULL OR m.event_time >= ?)
            AND (? IS NULL OR m.event_time <= ?)
@@ -1076,6 +1079,8 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           options.sourceActor ?? null,
           options.sourceActor ?? null,
           options.includeHistorical ? 1 : 0,
+          options.sessionId ?? null,
+          options.sessionId ?? null,
           ...(forcedCandidateIds.length === 0 && retrievalMode === "hybrid" ? ftsIds : []),
           options.eventTimeFrom ?? null,
           options.eventTimeFrom ?? null,

@@ -55,6 +55,7 @@ export function migrate(db: DatabaseSync): void {
       extract_method TEXT CHECK (extract_method IN ('rule', 'llm')),
       claims_json TEXT,
       markers_json TEXT NOT NULL DEFAULT '[]',
+      session_id TEXT,
       predicate_key TEXT,
       scope_json TEXT NOT NULL DEFAULT '{}',
       valid_from TEXT,
@@ -546,6 +547,10 @@ export function ensureMemoryColumns(db: DatabaseSync): void {
   db.exec(
     `CREATE INDEX IF NOT EXISTS idx_memory_records_storage_state
      ON memory_records(storage_state, retention_changed_at)`,
+  );
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_memory_records_session
+     ON memory_records(session_id)`,
   );
 }
 
