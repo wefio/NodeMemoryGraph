@@ -267,6 +267,10 @@ export class NmgService {
           } as NmgMethodResult[M];
         }
         if (parsed.action === "unsubscribe") {
+          this.#getStore().unsubscribeTaskBoard({
+            sessionId: parsed.sessionId,
+            taskId: parsed.taskId,
+          });
           this.#getStore().suppressTaskBoard({
             sessionId: parsed.sessionId,
             taskId: parsed.taskId,
@@ -274,11 +278,21 @@ export class NmgService {
           return { action: "unsubscribe", taskId: parsed.taskId } as NmgMethodResult[M];
         }
         if (parsed.action === "subscribe") {
+          this.#getStore().subscribeTaskBoard({
+            sessionId: parsed.sessionId,
+            taskId: parsed.taskId,
+          });
           this.#getStore().unsuppressTaskBoard({
             sessionId: parsed.sessionId,
             taskId: parsed.taskId,
           });
           return { action: "subscribe", taskId: parsed.taskId } as NmgMethodResult[M];
+        }
+        if (parsed.action === "listSubscriptions") {
+          return {
+            action: "listSubscriptions",
+            subscriptions: this.#getStore().listTaskBoardSubscriptions(parsed.sessionId),
+          } as NmgMethodResult[M];
         }
         return {
           action: "resolve",
@@ -1172,6 +1186,7 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
     "claim",
     "release",
     "list",
+    "listSubscriptions",
     "deliveryCheck",
     "recordDelivery",
     "unsubscribe",
@@ -1180,6 +1195,13 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
   const agentId = requiredString(params, "agentId");
   if (action === "list") {
     return { action, agentId };
+  }
+  if (action === "listSubscriptions") {
+    return {
+      action,
+      agentId,
+      sessionId: requiredString(params, "sessionId"),
+    };
   }
   if (action === "deliveryCheck") {
     return {

@@ -334,7 +334,10 @@ export interface NmgTaskBoardRecordDeliveryParams {
   source?: string;
 }
 
-/** Agent-facing: opt out of (or back into) wake notices for a channel. */
+/** Agent-facing: join (subscribe) or leave (unsubscribe) a channel.
+ * Topic-based membership: a session receives wake notices only for the
+ * world channel (its default member channel) plus channels it subscribed to.
+ * Named channels never notify non-members. */
 export interface NmgTaskBoardUnsubscribeParams {
   action: "unsubscribe";
   agentId: string;
@@ -349,6 +352,14 @@ export interface NmgTaskBoardSubscribeParams {
   taskId: string;
 }
 
+/** Wake-loop internal: which named channels this session has joined, so the
+ * loop scans only member channels (never every active board). */
+export interface NmgTaskBoardListSubscriptionsParams {
+  action: "listSubscriptions";
+  agentId: string;
+  sessionId: string;
+}
+
 export type NmgTaskBoardParams =
   | NmgTaskBoardPutParams
   | NmgTaskBoardReadParams
@@ -360,7 +371,8 @@ export type NmgTaskBoardParams =
   | NmgTaskBoardDeliveryCheckParams
   | NmgTaskBoardRecordDeliveryParams
   | NmgTaskBoardUnsubscribeParams
-  | NmgTaskBoardSubscribeParams;
+  | NmgTaskBoardSubscribeParams
+  | NmgTaskBoardListSubscriptionsParams;
 
 export interface NmgRetentionCandidatesParams {
   dormantAfterDays?: number;
@@ -476,7 +488,11 @@ export type NmgMethodResult = {
         suppressed: boolean;
       }
     | { action: "recordDelivery"; recorded: boolean }
-    | { action: "unsubscribe" | "subscribe"; taskId: string };
+    | { action: "unsubscribe" | "subscribe"; taskId: string }
+    | {
+        action: "listSubscriptions";
+        subscriptions: Array<{ taskId: string; subscribedAt: string }>;
+      };
   shutdown: { shuttingDown: true };
 };
 

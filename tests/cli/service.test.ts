@@ -1157,3 +1157,79 @@ test("recordActiveGraphUse validates its RPC boundary and permits empty use", as
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("task board subscriptions are explicit membership: only joined channels wake", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-subs-"));
+  const databasePath = join(directory, "nmg.sqlite");
+  const service = new NmgService({ databasePath, environment: {} });
+  try {
+    // Not a member yet: listSubscriptions is empty.
+    const none = await service.invoke("taskBoard", {
+      action: "listSubscriptions",
+      agentId: "agent-a",
+      sessionId: "session-a",
+    });
+    assert.equal(none.action, "listSubscriptions");
+    if (none.action !== "listSubscriptions") throw new Error("expected listSubscriptions");
+    assert.deepEqual(none.subscriptions, []);
+
+    // Subscribe joins the channel; membership is per-session.
+    await service.invoke("taskBoard", {
+      action: "subscribe",
+      taskId: "review-x",
+      agentId: "agent-a",
+      sessionId: "session-a",
+    });
+    const joined = await service.invoke("taskBoard", {
+      action: "listSubscriptions",
+      agentId: "agent-a",
+      sessionId: "session-a",
+    });
+    if (joined.action !== "listSubscriptions") throw new Error("expected listSubscriptions");
+    assert.deepEqual(joined.subscriptions.map((item) => item.taskId), ["review-x"]);
+
+    // session-b never joined review-x.
+    const other = await service.invoke("taskBoard", {
+      action: "listSubscriptions",
+      agentId: "agent-b",
+      sessionId: "session-b",
+    });
+    if (other.action !== "listSubscriptions") throw new Error("expected listSubscriptions");
+    assert.deepEqual(other.subscriptions, []);
+
+    // Unsubscribe leaves the channel.
+    await service.invoke("taskBoard", {
+      action: "unsubscribe",
+      taskId: "review-x",
+      agentId: "agent-a",
+      sessionId: "session-a",
+    });
+    const left = await service.invoke("taskBoard", {
+      action: "listSubscriptions",
+      agentId: "agent-a",
+      sessionId: "session-a",
+    });
+    if (left.action !== "listSubscriptions") throw new Error("expected listSubscriptions");
+    assert.deepEqual(left.subscriptions, []);
+
+    // The world channel is the default member channel (never in the explicit
+    // subscription list, but still receivable unless suppressed).
+    const world = await service.invoke("taskBoard", {
+      action: "subscribe",
+      taskId: "default",
+      agentId: "agent-a",
+      sessionId: "session-a",
+    });
+    assert.equal(world.action, "subscribe");
+    const afterWorld = await service.invoke("taskBoard", {
+      action: "listSubscriptions",
+      agentId: "agent-a",
+      sessionId: "session-a",
+    });
+    if (afterWorld.action !== "listSubscriptions") throw new Error("expected listSubscriptions");
+    assert.deepEqual(afterWorld.subscriptions, [], "world channel is implicit, not explicit");
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

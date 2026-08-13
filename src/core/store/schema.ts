@@ -660,6 +660,18 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
     );
     CREATE INDEX IF NOT EXISTS idx_task_board_acks_entry
       ON task_board_acks(entry_id);
+    -- Explicit subscription registry (channel membership): a session that has
+    -- joined a named channel receives wake notices for it. Topic-based
+    -- pub/sub membership — the channel wakes only its members, never
+    -- non-members. The world channel is the default member channel for every
+    -- session (see task_board_suppressions for opting out of it); named
+    -- channels require an explicit subscribe to join.
+    CREATE TABLE IF NOT EXISTS task_board_subscriptions (
+      session_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      subscribed_at TEXT NOT NULL,
+      PRIMARY KEY (session_id, task_id)
+    );
   `);
 }
 

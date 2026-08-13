@@ -1098,6 +1098,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const taskId = params.taskId?.trim() || WORLD_BOARD_ID;
       // Unsubscribe/subscribe are session-scoped (whether THIS session keeps
       // getting wake notices for a channel), handled apart from entry reads.
+      // Topic-based membership: subscribe joins a channel (named channels only
+      // notify their members), unsubscribe leaves it. The world channel is the
+      // default member channel; unsubscribe there mutes the world channel.
       if (params.action === "unsubscribe" || params.action === "subscribe") {
         const result = (await invoke("taskBoard", {
           action: params.action,
@@ -1108,8 +1111,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         return toolResult(
           result,
           params.action === "unsubscribe"
-            ? `已退订频道 ${result.taskId}：不再收到该频道新条目的唤醒通知（用 nmg_board subscribe 恢复）。`
-            : `已恢复订阅频道 ${result.taskId}：继续接收该频道新条目的唤醒通知。`,
+            ? `已退出频道 ${result.taskId}：不再接收该频道新条目的唤醒通知（用 nmg_board subscribe 重新加入）。`
+            : `已加入频道 ${result.taskId}：接收该频道新条目的唤醒通知（未订阅的频道不会打扰你）。`,
         );
       }
       const result = (await invoke("taskBoard", {
@@ -1278,7 +1281,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             // Already claimed by this session: don't nudge the holder for work
             // it is already doing — claim decides who works, notification
             // decides who knows (the claimer already knows).
-            entry.claimedBy !== agentId
+            entry.claimedBy !== agentId &&
+            // Broadcast pull entries are announcements (meta), never a wake:
+            // they advertise a collaboration on a named channel and are meant
+            // to be found by reading the world channel, not pushed to every
+            // subscriber. Waking on them leaks named-channel activity to
+            // agents that never joined that channel.
+            !entry.content.startsWith(BROADCAST_PREFIX)
           ) {
             candidates.push({ ...entry, taskId });
           }
@@ -1290,10 +1299,17 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         agentId,
       })) as TaskBoardToolResult;
       collect(WORLD_BOARD_ID, world.entries);
-      const lobby = (await invoke("taskBoard", { action: "list", agentId })) as {
-        boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }>;
-      };
-      for (const board of lobby.boards ?? []) {
+      // Named channels: only channels this session explicitly subscribed to are
+      // scanned. Topic-based membership — a non-member never receives wake
+      // notices for a named channel, no matter how active it is. Discovery of
+      // new channels happens by reading the world channel lobby, then joining
+      // with subscribe.
+      const subs = (await invoke("taskBoard", {
+        action: "listSubscriptions",
+        agentId,
+        sessionId,
+      })) as { action: "listSubscriptions"; subscriptions: Array<{ taskId: string }> };
+      for (const board of subs.subscriptions ?? []) {
         const read = (await invoke("taskBoard", {
           action: "read",
           taskId: board.taskId,

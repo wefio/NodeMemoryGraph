@@ -356,7 +356,7 @@ export class NmgStoreBase {
       .prepare(
         `SELECT entry_id, agent_id FROM task_board_acks
          WHERE entry_id IN (${entryIds.map(() => "?").join(",")})
-         ORDER BY acknowledged_at ASC`,
+         ORDER BY acknowledged_at ASC, agent_id ASC`,
       )
       .all(...entryIds) as Row[];
     for (const row of rows) {
@@ -428,6 +428,57 @@ export class NmgStoreBase {
     this.db
       .prepare(`DELETE FROM task_board_suppressions WHERE session_id = ? AND task_id = ?`)
       .run(input.sessionId, input.taskId);
+  }
+  /** Explicitly join a channel: the session receives wake notices for it.
+   * Topic-based membership — the world channel is the default member channel
+   * (opt out via suppressTaskBoard), named channels require this to join.
+   * Idempotent (PRIMARY KEY (session_id, task_id)). */
+  subscribeTaskBoard(input: { sessionId: string; taskId: string; now?: string }): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO task_board_subscriptions (session_id, task_id, subscribed_at)
+         VALUES (?, ?, ?)`,
+      )
+      .run(
+        input.sessionId,
+        input.taskId,
+        input.now ?? new Date().toISOString(),
+      );
+  }
+  /** Leave a channel: stop receiving wake notices for it. */
+  unsubscribeTaskBoard(input: { sessionId: string; taskId: string }): void {
+    this.db
+      .prepare(`DELETE FROM task_board_subscriptions WHERE session_id = ? AND task_id = ?`)
+      .run(input.sessionId, input.taskId);
+  }
+  /** True when this session has explicitly subscribed to the channel. The
+   * world channel is implicitly subscribed for every session (membership is
+   * the default there); named channels require an explicit subscribe. */
+  isTaskBoardSubscribed(input: { sessionId: string; taskId: string }): boolean {
+    const row = this.db
+      .prepare(
+        "SELECT 1 FROM task_board_subscriptions WHERE session_id = ? AND task_id = ?",
+      )
+      .get(input.sessionId, input.taskId) as Row | undefined;
+    return row !== undefined;
+  }
+  /** Named channels this session has joined (wake-loop routing: only these
+   * named channels are scanned for this session, never all active boards). */
+  listTaskBoardSubscriptions(sessionId: string): Array<{
+    taskId: string;
+    subscribedAt: string;
+  }> {
+    return (
+      this.db
+        .prepare(
+          `SELECT task_id, subscribed_at FROM task_board_subscriptions
+           WHERE session_id = ? AND task_id != ? ORDER BY subscribed_at DESC`,
+        )
+        .all(sessionId, WORLD_BOARD_ID) as Row[]
+    ).map((row) => ({
+      taskId: String(row.task_id),
+      subscribedAt: String(row.subscribed_at),
+    }));
   }
   pruneExpiredTaskBoardEntries(now = new Date().toISOString(), taskId?: string): number {
     // RAII: an expired entry's receipts die with it (same binding as resolve).

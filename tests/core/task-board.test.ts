@@ -358,6 +358,37 @@ test("task board suppression registry is session-scoped and reversible", () => {
   });
 });
 
+test("task board subscriptions are explicit topic membership: join to be woken, leave to be silent", () => {
+  withStore((store) => {
+    // Named channel: not a member until subscribe (no implicit subscription).
+    assert.equal(store.isTaskBoardSubscribed({ sessionId: "session-a", taskId: "review-x" }), false);
+    assert.deepEqual(store.listTaskBoardSubscriptions("session-a"), []);
+    // Join the channel (idempotent).
+    store.subscribeTaskBoard({ sessionId: "session-a", taskId: "review-x" });
+    store.subscribeTaskBoard({ sessionId: "session-a", taskId: "review-x" });
+    assert.equal(store.isTaskBoardSubscribed({ sessionId: "session-a", taskId: "review-x" }), true);
+    assert.deepEqual(
+      store.listTaskBoardSubscriptions("session-a").map((item) => item.taskId),
+      ["review-x"],
+    );
+    // Membership is per-session: session-b never joined.
+    assert.equal(store.isTaskBoardSubscribed({ sessionId: "session-b", taskId: "review-x" }), false);
+    // Another channel joined by the same session.
+    store.subscribeTaskBoard({ sessionId: "session-a", taskId: "review-y" });
+    assert.deepEqual(
+      store.listTaskBoardSubscriptions("session-a").map((item) => item.taskId).sort(),
+      ["review-x", "review-y"],
+    );
+    // Leave: membership removed.
+    store.unsubscribeTaskBoard({ sessionId: "session-a", taskId: "review-x" });
+    assert.equal(store.isTaskBoardSubscribed({ sessionId: "session-a", taskId: "review-x" }), false);
+    assert.deepEqual(
+      store.listTaskBoardSubscriptions("session-a").map((item) => item.taskId),
+      ["review-y"],
+    );
+  });
+});
+
 test("delivery receipts are RAII-bound: cleared when the entry resolves or expires", () => {
   withStore((store) => {
     const entry = store.putTaskBoardEntry({
