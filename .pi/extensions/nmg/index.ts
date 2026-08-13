@@ -2105,10 +2105,7 @@ export function isBoardWakeCandidate(
   const liveClaim =
     entry.claimExpiresAt != null && new Date(entry.claimExpiresAt).getTime() > now.getTime();
   return (
-    entry.status === "open" &&
-    !ownEcho &&
-    !liveClaim &&
-    !entry.content.startsWith(BROADCAST_PREFIX)
+    entry.status === "open" && !ownEcho && !liveClaim && !entry.content.startsWith(BROADCAST_PREFIX)
   );
 }
 /** Broadcasts are transient pull notices: they announce another entry and must

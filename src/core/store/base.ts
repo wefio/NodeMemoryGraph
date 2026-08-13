@@ -1421,6 +1421,7 @@ export class NmgStoreBase {
     limit: number,
     memoryId?: string,
     sourceActor?: MemoryActor,
+    sessionId?: string | null,
   ): MemorySearchResult[] {
     const rows = this.db
       .prepare(
@@ -1463,6 +1464,8 @@ export class NmgStoreBase {
          AND (m.storage_state = 'indexed' OR ? IS NOT NULL)
          AND (? IS NULL OR m.id = ?)
          AND (? IS NULL OR m.source_actor = ?)
+         AND (? = 0 OR ((? IS NOT NULL AND (m.session_id IS NULL OR m.session_id = ?))
+           OR (? IS NULL AND m.session_id IS NULL)))
          AND m.status IN ('active', 'disputed')
          AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
          AND (m.valid_from IS NULL OR m.valid_from <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -1478,6 +1481,10 @@ export class NmgStoreBase {
         memoryId ?? null,
         sourceActor ?? null,
         sourceActor ?? null,
+        sessionId === undefined ? 0 : 1,
+        sessionId ?? null,
+        sessionId ?? null,
+        sessionId ?? null,
         limit,
       ) as Row[];
     return rows.map((row) => {

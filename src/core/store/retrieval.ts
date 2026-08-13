@@ -109,6 +109,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       limit: number,
       memoryId?: string,
       sourceActor?: string,
+      sessionId?: string | null,
     ) => MemorySearchResult[];
     declare protected ftsCandidatesInNodes: (
       query: string,
@@ -214,7 +215,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         }
       }
       const graphHops = Math.min(options.graphHops ?? 1, budget.maxGraphHops);
-      const relations = perf
+      const discoveredRelations = perf
         ? perf.measure(SECTION.relations, () =>
             this.getRelations(
               direct.map((result) => result.node.id),
@@ -234,22 +235,47 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           Math.max(seedActivations.get(result.node.id) ?? 0, activation),
         );
       }
-      const edgeProjection = propagateEdgeActivation(seedActivations, relations, {
-        maxHops: graphHops,
-      });
-      const relatedNodeIds = [
-        ...new Set(relations.flatMap((relation) => [relation.sourceNodeId, relation.targetNodeId])),
+      const discoveredRelatedNodeIds = [
+        ...new Set(
+          discoveredRelations.flatMap((relation) => [relation.sourceNodeId, relation.targetNodeId]),
+        ),
       ].filter((id) => !directNodeIds.has(id));
       const openedMaxTier = openedTiers.at(-1) ?? 0;
       const relatedRaw = perf
         ? perf.measure(SECTION.relatedExpansion, () =>
-            relatedNodeIds.flatMap((nodeId) =>
-              this.resultsForNode(nodeId, openedMaxTier, 2, undefined, options.sourceActor),
+            discoveredRelatedNodeIds.flatMap((nodeId) =>
+              this.resultsForNode(
+                nodeId,
+                openedMaxTier,
+                2,
+                undefined,
+                options.sourceActor,
+                options.sessionId ?? null,
+              ),
             ),
           )
-        : relatedNodeIds.flatMap((nodeId) =>
-            this.resultsForNode(nodeId, openedMaxTier, 2, undefined, options.sourceActor),
+        : discoveredRelatedNodeIds.flatMap((nodeId) =>
+            this.resultsForNode(
+              nodeId,
+              openedMaxTier,
+              2,
+              undefined,
+              options.sourceActor,
+              options.sessionId ?? null,
+            ),
           );
+      const readableNodeIds = new Set([
+        ...directNodeIds,
+        ...relatedRaw.map((result) => result.node.id),
+      ]);
+      const relations = discoveredRelations.filter(
+        (relation) =>
+          readableNodeIds.has(relation.sourceNodeId) && readableNodeIds.has(relation.targetNodeId),
+      );
+      const relatedNodeIds = [...readableNodeIds].filter((id) => !directNodeIds.has(id));
+      const edgeProjection = propagateEdgeActivation(seedActivations, relations, {
+        maxHops: graphHops,
+      });
       const related = relatedRaw.map((result) => {
         const edgeScore = edgeProjection.nodeActivations.get(result.node.id) ?? 0;
         if (edgeScore <= result.routeScore) return result;
@@ -281,6 +307,8 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                    AND m.status IN ('active', 'disputed')
                    AND related.value IN (${anchorMemoryIds.map(() => "?").join(",")})
                    AND (? IS NULL OR m.source_actor = ?)
+                   AND ((? IS NOT NULL AND (m.session_id IS NULL OR m.session_id = ?))
+                     OR (? IS NULL AND m.session_id IS NULL))
                  ORDER BY m.importance DESC, m.opened_at DESC
                  LIMIT 2`,
                 )
@@ -288,9 +316,19 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                   ...anchorMemoryIds,
                   options.sourceActor ?? null,
                   options.sourceActor ?? null,
+                  options.sessionId ?? null,
+                  options.sessionId ?? null,
+                  options.sessionId ?? null,
                 ) as Row[]
             ).flatMap((row) =>
-              this.resultsForNode(String(row.node_id), 3, 1, String(row.id), options.sourceActor),
+              this.resultsForNode(
+                String(row.node_id),
+                3,
+                1,
+                String(row.id),
+                options.sourceActor,
+                options.sessionId ?? null,
+              ),
             );
       const attachmentIds = new Set(openAttachments.map((result) => result.memory.id));
       const mainWithoutAttachments = rankedMain.filter(
@@ -681,13 +719,32 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         const sid = sessionId ?? null;
         const row = findNode.get(memoryId, sid, sid, sid) as Row | undefined;
         if (!row) return [];
-        return this.resultsForNode(String(row.node_id), 3, 1, memoryId);
+        return this.resultsForNode(
+          String(row.node_id),
+          3,
+          1,
+          memoryId,
+          undefined,
+          sessionId ?? null,
+        );
       });
+      const selectedNodeIds = [...new Set(results.map((result) => result.node.id))];
+      const discoveredRelations = this.getRelations(selectedNodeIds, graphHops);
+      const readableNodeIds = new Set(selectedNodeIds);
+      for (const nodeId of new Set(
+        discoveredRelations.flatMap((relation) => [relation.sourceNodeId, relation.targetNodeId]),
+      )) {
+        if (readableNodeIds.has(nodeId)) continue;
+        if (this.resultsForNode(nodeId, 3, 1, undefined, undefined, sessionId ?? null).length > 0) {
+          readableNodeIds.add(nodeId);
+        }
+      }
       return {
         results,
-        relations: this.getRelations(
-          [...new Set(results.map((result) => result.node.id))],
-          graphHops,
+        relations: discoveredRelations.filter(
+          (relation) =>
+            readableNodeIds.has(relation.sourceNodeId) &&
+            readableNodeIds.has(relation.targetNodeId),
         ),
       };
     }

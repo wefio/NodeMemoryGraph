@@ -118,6 +118,62 @@ test("v2: session-scoped search isolates provisional rows", () => {
   });
 });
 
+test("v2: derived retrieval paths cannot expose another session's provisional rows", () => {
+  withStg((_dir, stg) => {
+    const anchor = stg.remember({
+      statement: "Session A Atlas launch anchor uses the cobalt protocol.",
+      nodeName: "Atlas launch anchor",
+      residence: "stg",
+      sessionId: "session-a",
+    });
+    const graphNeighbor = stg.remember({
+      statement: "Session B private graph-expansion secret is marigold.",
+      nodeName: "Private graph neighbor",
+      residence: "stg",
+      sessionId: "session-b",
+    });
+    const openAttachment = stg.remember({
+      statement: "Session B private open attachment contains the obsidian code.",
+      nodeName: "Private open attachment",
+      residence: "stg",
+      sessionId: "session-b",
+      resolution: "open",
+      relatedMemoryIds: [anchor.memory.id],
+    });
+    stg.linkNodes({
+      sourceNodeId: anchor.node.id,
+      targetNodeId: graphNeighbor.node.id,
+      type: "related_to",
+      evidenceIds: [],
+    });
+
+    const context = stg.searchContext("Atlas cobalt protocol", {
+      sessionId: "session-a",
+      retrievalMode: "fts5",
+      graphHops: 1,
+      maxTier: 3,
+      limit: 8,
+    });
+    const resultIds = new Set(context.results.map((result) => result.memory.id));
+
+    assert.ok(resultIds.has(anchor.memory.id), "session A sees its own anchor");
+    assert.ok(!resultIds.has(graphNeighbor.memory.id), "graph expansion keeps session B private");
+    assert.ok(!resultIds.has(openAttachment.memory.id), "open attachment keeps session B private");
+    assert.ok(
+      !context.relations.some(
+        (relation) =>
+          relation.sourceNodeId === graphNeighbor.node.id ||
+          relation.targetNodeId === graphNeighbor.node.id,
+      ),
+      "relations do not disclose a private neighboring node",
+    );
+
+    const exact = stg.getContext([anchor.memory.id], 1, "session-a");
+    assert.deepEqual(exact.results.map((result) => result.memory.id), [anchor.memory.id]);
+    assert.equal(exact.relations.length, 0, "exact expansion also hides session B's relation");
+  });
+});
+
 test("v2: shared (session_id NULL) rows are visible to every session", () => {
   withStg((_dir, stg) => {
     stg.remember({
