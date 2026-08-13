@@ -348,7 +348,8 @@ memory_policy: >-
   deliberate search and selected get fail to supply the missing fact, stop reformulating
   the same request and either use an appropriate current-source tool or state that the
   current fact was not verified. No useful memory is a valid result. Do not treat candidate count as completeness or a memory as
-  current truth. If the recalled headers under-determine the answer, request additional
+  current truth. Semantic or topical relevance does not prove the specific attribute,
+  event, reason, or causal relation being asked about. If the recalled headers under-determine the answer, request additional
   evidence (append/re-fetch) before guessing; ignore headers that are clearly irrelevant
   noise. Save only attributable, durable information; do not save secrets, transient
   content, unconfirmed assistant proposals, or unsupported guesses.

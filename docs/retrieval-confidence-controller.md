@@ -138,7 +138,7 @@ Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**�
 
 ## 风险
 
-- **τ 非必需但有漂移**：Stage 0 触发已由 truncation/guardrail 免标定覆盖；τ 仅影响 `below_threshold` 选择性。τ 漂移由 rolling worker（生产 (qpp, useful)，非 eval）校准——worker 未实现前 τ 用占位 0.55。
+- **τ 非必需但有漂移**：Stage 0 触发已由 truncation/guardrail 免标定覆盖；τ 仅影响 `below_threshold` 选择性。τ 漂移由 rolling worker（生产 (qpp, useful)，非 eval）校准。worker 已生成 fail-closed shadow artifact；足量自然标签和 matched promotion 完成前，runtime 仍使用占位 0.55。
 - **隐式反馈噪声/稀疏**：matcher（≥50% token overlap；Han bigram）是 precision-favoured 起点——noisy labels → noisy τ；弱 reader 答案若语义改写过大、不复用可辨识片段，标签仍会稀疏。需监控 useful 率；优先结合 exact `get` 和显式反馈，必要时再以经过校准的 embedding 相似度提供候选信号，而不能直接把 injection/fetch 当作成功使用。
 - `variance` 高双解（清晰赢家 vs 噪声离群）——hybridScore 已 path-consistent；双解靠 Top1−Top2 差值辅助（标定时验证）。
 - 经典 QPP 在 dense/neural IR 上相关性掉 10%+（文献）；NMG 用 BGE dense+hybrid，靠 `intentCoverage`/`reasonHealth` 领域增强补偿——这两项是 vanilla QPP 没有的 typed-memory / provenance 信号，非冗余。但 benchmark 全 `conversation_evidence` ingest → intentCoverage 退化（恒 0.5），需类型化 ingest 才有信号。
