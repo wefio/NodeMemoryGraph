@@ -18,11 +18,11 @@ The capture and session-ownership plumbing is implemented. Controlled examples
 may validate plumbing but must not be counted as natural product evidence. This
 is enforced by `collectionOrigin`: ordinary Pi writes `natural`, the headless
 probe writes `controlled`, and legacy events without the field are excluded.
-As of 2026-08-14 the bounded shadow log contains 25 fully labelled
+As of 2026-08-14 the bounded shadow log contains 29 fully labelled
 natural graphs. Session-local latest-graph feedback removed fragile UUID
 copying, and online Pi blackboard audits now contribute ordinary multi-Agent
 supervision without launching controlled headless probes. The report contains
-634 events across 224 retrieval graphs and 25 semantic tasks. Before the latest
+748 events across 256 retrieval graphs and 35 semantic tasks. Before the latest
 negative-task batch, useful labels were strongly positive-skewed: only 3
 evidence-insufficient examples, 5 expansion-not-useful examples, 2
 excessive-noise positives, and 2 no-memory-needed positives; there are still
@@ -33,7 +33,7 @@ report and both dataset exporters now aggregate non-null labels across
 incremental feedback calls for the same graph; mixed controlled/natural
 provenance fails closed to controlled. This recovered valid existing feedback
 without inventing labels. This is real progress, not enough for calibration or
-promotion. These graphs come from only 10 independent session/task connected
+promotion. These graphs come from only 14 independent session/task connected
 groups because the online Pi agents were reused across tasks. Dataset splitting
 now keeps each connected component of the `sessionId`/`semanticTaskId` bipartite
 graph in one arm, preventing an old Pi conversation from leaking into train,
@@ -43,9 +43,17 @@ sessions, not more prompts sent to the already-open agents. A first fresh
 batch exposed a cross-process rotation race in the shared shadow JSONL: events
 were appended successfully and then lost when concurrent writers renamed the
 same files. Shadow append/rotation is now guarded by a short cross-process lock,
-with a four-process rotation regression test. The lost batch is not counted and
-must not be reconstructed from console output. The next natural
-tasks should preferentially cover irrelevant-memory, noisy-expansion,
+with a four-process rotation regression test. The lost batch was not
+reconstructed from console output; a fresh four-session rerun persisted all
+events and increased independent groups from 10 to 14. A separate four-session
+ordinary-work probe (code inspection, Git status, one test, and static counting)
+made zero explicit NMG tool calls but exposed automatic recall on all four turns,
+injecting 902-1,018 estimated tokens each. The existing `decideMemoryLoad` gate
+was not wired into Pi: the adapter treated every prompt of at least 40 characters
+as recall-worthy. Pi now applies the existing `retrieve|cue|none` decision;
+runtime A/B verification shows an ordinary code task receives no `nmg-context`
+while an explicit history question still receives automatic recall. The next
+natural tasks should preferentially cover irrelevant-memory, noisy-expansion,
 ambiguous-evidence, and correction
 scenarios instead of repeating successful recall audits.
 
@@ -65,7 +73,7 @@ scenarios instead of repeating successful recall audits.
 
 QPP1, QPP2, and search recommendation remain independently switchable. Their
 current constants are cold-start priors, not calibrated probabilities. The
-2026-08-14 report has 25 fully labelled natural graphs but only 10
+2026-08-14 report has 29 fully labelled natural graphs but only 14
 independent session/task groups, and still
 fails closed. This is enough to justify continuing collection, not enough to
 implement or promote rolling threshold calibration; use at least 50 balanced
@@ -111,7 +119,7 @@ boundary.
 - [ ] Reach the default readiness floor of 24 materially independent labelled
   retrieval tasks: 12 train, 6 chronological validation, and 6 untouched test,
   with sufficient action and noise-label diversity. The current exporter reports
-  10 independent groups split as 6 train, 2 validation, and 2 test; the gate
+  14 independent groups split as 10 train, 2 validation, and 2 test; the gate
   remains closed. A labelled graph or semantic task from a reused Pi session is
   not counted as an independent promotion task.
 - [ ] Run SkillOpt, then a matched Pi+NMG promotion experiment covering answer

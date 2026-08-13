@@ -152,15 +152,17 @@ relations, stale embeddings, and misleading search results.
 
 ## 5. Gate decision relies solely on regex patterns
 
-**Symptom:** `decideMemoryLoad` in `gate.ts` uses hardcoded Chinese and
-English regex patterns to decide whether a prompt needs memory retrieval.
+**Current boundary:** `decideMemoryLoad` in `gate.ts` is wired into Pi's
+automatic-recall path and uses a small explicit multilingual regex lexicon to
+decide whether a prompt needs memory retrieval. Ordinary tasks return `none`
+and inject no dynamic LTG context; explicit recall, optional planning cues, and
+bounded terse continuations remain supported.
 
 **Concern:**
 
-- **Coverage gaps:** there are no patterns for Japanese, Korean, Arabic,
-  Hindi, or any of the dozens of other languages that a multilingual model
-  may encounter. A user writing in French ("souviens-toi de...") will get
-  `mode: "none"` even though they are explicitly asking for recall.
+- **Coverage gaps:** the explicit lexicon covers Chinese, English, German,
+  French, Japanese, and Spanish, but not Korean, Arabic, Hindi, or the many
+  rephrasings within supported languages.
 - **Translation attacks:** a prompt that says "Translate the following to
   English and then answer: 我之前说过什么？" bypasses the Chinese patterns
   because the model may translate before the gate sees the Chinese text, or

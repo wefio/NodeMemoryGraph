@@ -1316,7 +1316,13 @@ from both storage tiers and the STG/LTG lifecycle:
 1. **Resident layer:** a very small query-independent seed of critical
    constraints and stable profile information placed into every relevant AG.
 2. **Automatic recall layer:** bounded dynamic selection from STG and LTG based
-   on the current query, task, scope, time, and available budget.
+   on the current query, task, scope, time, and available budget. A harness-side
+   memory gate first chooses `retrieve`, `cue`, or `none`; `none` must not search
+   or inject dynamic long-term memory. Ordinary code inspection, tests,
+   calculations, formatting, and other self-contained turns therefore remain
+   memory-free. The gate may retain bounded task anchors so a terse continuation
+   can recall the immediately preceding task without treating every substantive
+   prompt as a history query.
 3. **Agent-directed recall layer:** compact headers/cues that let the model call
    `nmg_search`, inspect costs, and expand the AG with exact details through
    `nmg_get`.

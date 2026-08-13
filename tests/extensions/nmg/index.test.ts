@@ -1566,18 +1566,19 @@ test("session task window carries bounded task context into terse continuations"
     "session-a",
     "Configure the pi-lsp extension to use the vendored language server implementation.",
   );
-  assert.match(first!, /pi-lsp extension/u);
+  assert.equal(first, null, "ordinary implementation work does not preload long-term memory");
 
   const continuation = window.prepare("session-a", "我 reload 了，你试试");
-  assert.match(continuation!, /reload/u);
-  assert.match(continuation!, /Recent task context:/u);
-  assert.match(continuation!, /vendored language server/u);
+  assert.match(continuation!.query, /reload/u);
+  assert.match(continuation!.query, /Recent task context:/u);
+  assert.match(continuation!.query, /vendored language server/u);
+  assert.equal(continuation!.reason, "task_continuation");
 
   const switched = window.prepare(
     "session-a",
     "Implement and test the unrelated billing export pipeline.",
   );
-  assert.doesNotMatch(switched!, /pi-lsp|vendored language server/u);
+  assert.equal(switched, null);
 
   assert.equal(window.prepare("session-b", "好的"), null);
 });
@@ -1585,9 +1586,27 @@ test("session task window carries bounded task context into terse continuations"
 test("session task window keeps explicit recall and clears session context", () => {
   const window = new SessionTaskWindow();
   window.prepare("session-a", "Implement and test the Atlas SQLite storage adapter.");
-  assert.match(window.prepare("session-a", "What did we decide last time?")!, /Atlas SQLite/u);
+  assert.match(
+    window.prepare("session-a", "What did we decide last time?")!.query,
+    /Atlas SQLite/u,
+  );
   window.clear("session-a");
-  assert.doesNotMatch(window.prepare("session-a", "What did we decide last time?")!, /Atlas/u);
+  assert.doesNotMatch(window.prepare("session-a", "What did we decide last time?")!.query, /Atlas/u);
+});
+
+test("session task window applies the memory gate to ordinary, cue, and recall prompts", () => {
+  const window = new SessionTaskWindow();
+  assert.equal(window.prepare("session-a", "Explain how acquireFileLock works."), null);
+
+  const cue = window.prepare("session-a", "How should we plan the next release?");
+  assert.equal(cue?.mode, "cue");
+  assert.equal(cue?.limit, 5);
+  assert.equal(cue?.graphHops, 0);
+
+  const recall = window.prepare("session-a", "What did we decide last time?");
+  assert.equal(recall?.mode, "retrieve");
+  assert.equal(recall?.limit, 12);
+  assert.equal(recall?.graphHops, 1);
 });
 
 function memoryContext(id: string, statement: string, evidence: string): MemoryContext {

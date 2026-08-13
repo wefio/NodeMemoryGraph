@@ -48,6 +48,7 @@ import {
   type SelectedEvidence,
 } from "../../../src/integration/evidence.ts";
 import { deriveUsedMemoryIds } from "../../../src/core/feedback.ts";
+import { decideMemoryLoad } from "../../../src/core/gate.ts";
 import {
   REASONING_EDGE_KINDS,
   REASONING_NODE_KINDS,
@@ -170,9 +171,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     const runtimeContext = [runtimeAg.format(sessionId), reasoningCheckpoint]
       .filter(Boolean)
       .join("\n");
-    const recallQuery = taskWindow.prepare(sessionId, event.prompt);
+    const recallRequest = taskWindow.prepare(sessionId, event.prompt);
     const dynamicContext = composeNmgContextMessage("", "", nudge, runtimeContext);
-    if (!recallQuery) {
+    if (!recallRequest) {
       return {
         systemPrompt: composeNmgSystemPrompt(event.systemPrompt),
         ...(dynamicContext
@@ -189,16 +190,16 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }
     try {
       let context = (await invoke("search", {
-        query: recallQuery,
+        query: recallRequest.query,
         projectDir: projectDirectory(),
         sessionId,
-        maxTier: configuredAutoRecallTier(),
-        limit: configuredAutoRecallLimit(),
+        maxTier: Math.min(configuredAutoRecallTier(), recallRequest.maxTier) as MemoryTier,
+        limit: Math.min(configuredAutoRecallLimit(), recallRequest.limit),
         initialEvidenceTarget: configuredInitialTarget(),
         strongHitTopGap: configuredStrongHitTopGap(),
         strongHitInitialTarget: configuredStrongHitInitialTarget(),
         secondPass: qpp2Mode === "active",
-        graphHops: 1,
+        graphHops: Math.min(1, recallRequest.graphHops),
         tieredDisclosure: true,
       })) as MemoryContext;
       const fullContext = context;
@@ -1962,6 +1963,15 @@ interface SessionTaskState {
   anchors: string[];
 }
 
+export interface SessionRecallRequest {
+  query: string;
+  mode: "retrieve" | "cue";
+  reason: string;
+  maxTier: MemoryTier;
+  limit: number;
+  graphHops: number;
+}
+
 /**
  * Bounded query-side task context for automatic recall. It does not inject
  * transcript text into the model and does not attempt semantic summarisation;
@@ -1978,28 +1988,33 @@ export class SessionTaskWindow {
     this.maxAnchorCharacters = Math.max(80, maxAnchorCharacters);
   }
 
-  prepare(sessionId: string, prompt: string): string | null {
+  prepare(sessionId: string, prompt: string): SessionRecallRequest | null {
     const normalized = normalizeTaskPrompt(prompt);
     if (!normalized) return null;
     const state = this.#state(sessionId);
-    const explicitRecall = hasExplicitRecallIntent(normalized);
+    const gate = decideMemoryLoad(normalized);
     const substantive = isSubstantiveTaskPrompt(normalized);
     const continuation = isTaskContinuation(normalized);
     const prior = state.anchors.join("\n");
-    const shouldRecall = explicitRecall || substantive || (continuation && prior.length > 0);
-    const usePriorContext = prior.length > 0 && (explicitRecall || continuation);
-    const query = shouldRecall
-      ? [normalized, usePriorContext ? `Recent task context:\n${prior}` : ""]
-          .filter(Boolean)
-          .join("\n")
-      : null;
+    const continuePriorTask = continuation && prior.length > 0;
+    const usePriorContext = prior.length > 0 && (gate.mode === "retrieve" || continuePriorTask);
 
     if (substantive) {
       const anchor = excerpt(normalized, this.maxAnchorCharacters);
       if (state.anchors.at(-1) !== anchor) state.anchors.push(anchor);
       while (state.anchors.length > this.maxAnchors) state.anchors.shift();
     }
-    return query;
+    if (gate.mode === "none" && !continuePriorTask) return null;
+    return {
+      query: [normalized, usePriorContext ? `Recent task context:\n${prior}` : ""]
+        .filter(Boolean)
+        .join("\n"),
+      mode: gate.mode === "none" ? "cue" : gate.mode,
+      reason: gate.mode === "none" ? "task_continuation" : gate.reason,
+      maxTier: (gate.mode === "none" ? 1 : gate.maxTier) as MemoryTier,
+      limit: gate.mode === "none" ? 5 : gate.limit,
+      graphHops: gate.mode === "none" ? 0 : gate.graphHops,
+    };
   }
 
   clear(sessionId: string): void {
@@ -2274,13 +2289,6 @@ export function formatSearchRecommendation(
     reason: qpp.reason,
     qpp: qpp.qpp.toFixed(3),
   });
-}
-
-function hasExplicitRecallIntent(normalized: string): boolean {
-  return [
-    /\b(previous(?:ly)?|before|earlier|last time|remember|recall|my preference|my project|we decided)\b/u,
-    /(?:之前|以前|上次|还记得|回忆|记忆|我的偏好|我们决定|项目决定|当前状态)/u,
-  ].some((pattern) => pattern.test(normalized));
 }
 
 function normalizeTaskPrompt(prompt: string): string {
