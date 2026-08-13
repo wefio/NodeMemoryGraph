@@ -17,6 +17,7 @@ import {
   readShadowEvents,
   resolveShadowEventPath,
 } from "./report.ts";
+import { independentGroups } from "./independence.ts";
 
 const REQUIRED_LABELS = [
   "evidenceSufficient",
@@ -95,26 +96,17 @@ export function buildShadowDataset(
     });
   }
 
-  const taskTimes = new Map<string, number>();
-  for (const row of joined) {
-    const timestamp = Date.parse(row.recordedAt);
-    taskTimes.set(
-      row.semanticTaskId,
-      Math.min(taskTimes.get(row.semanticTaskId) ?? Number.POSITIVE_INFINITY, timestamp),
-    );
-  }
-  const tasks = [...taskTimes].sort(
-    ([leftId, leftTime], [rightId, rightTime]) =>
-      leftTime - rightTime || leftId.localeCompare(rightId),
-  );
+  const groups = independentGroups(joined);
   const boundedFraction = Math.min(0.5, Math.max(0.05, validationFraction));
   const validationCount =
-    tasks.length < 2 ? 0 : Math.max(1, Math.ceil(tasks.length * boundedFraction));
-  const validationTasks = new Set(tasks.slice(tasks.length - validationCount).map(([id]) => id));
+    groups.length < 2 ? 0 : Math.max(1, Math.ceil(groups.length * boundedFraction));
+  const validationRows = new Set(
+    groups.slice(groups.length - validationCount).flatMap((group) => group.rowIndexes),
+  );
   const rows: ShadowDatasetRow[] = joined
-    .map((row): ShadowDatasetRow => ({
+    .map((row, index): ShadowDatasetRow => ({
       ...row,
-      split: validationTasks.has(row.semanticTaskId) ? "validation" : "train",
+      split: validationRows.has(index) ? "validation" : "train",
     }))
     .sort(
       (left, right) =>
@@ -128,14 +120,14 @@ export function buildShadowDataset(
       `${legacyGraphsWithoutReplayInputs} labelled graph(s) lack replayable controller inputs`,
     );
   }
-  if (tasks.length < 2) blockers.push("at least two independent semantic tasks are required");
+  if (groups.length < 2) blockers.push("at least two independent session/task groups are required");
   if (!rows.some((row) => row.split === "train")) blockers.push("no training split");
   if (!rows.some((row) => row.split === "validation")) blockers.push("no validation split");
   return {
     rows,
     tasks: {
-      total: tasks.length,
-      train: tasks.length - validationCount,
+      total: groups.length,
+      train: groups.length - validationCount,
       validation: validationCount,
     },
     excludedGraphs: byGraph.size - new Set(rows.map((row) => row.graphId)).size,

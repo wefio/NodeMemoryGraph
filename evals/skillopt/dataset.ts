@@ -8,6 +8,7 @@ import type {
   ShadowUseEvent,
 } from "../../src/lab/shadow-evaluation.ts";
 import { aggregateFeedbackByGraph } from "../controller-shadow/report.ts";
+import { independentGroups } from "../controller-shadow/independence.ts";
 
 export type RecallAction = "answer" | "expand" | "stop";
 export type SkillOptSplit = "train" | "val" | "test";
@@ -115,26 +116,29 @@ export function buildSkillOptPolicyDataset(
     });
   }
 
-  const taskTimes = new Map<string, number>();
-  for (const row of joined) {
-    const timestamp = Date.parse(row.retrieval.recordedAt);
-    taskTimes.set(
-      row.feedback.semanticTaskId!,
-      Math.min(taskTimes.get(row.feedback.semanticTaskId!) ?? Number.POSITIVE_INFINITY, timestamp),
-    );
-  }
-  const tasks = [...taskTimes].sort(
-    ([leftId, leftTime], [rightId, rightTime]) =>
-      leftTime - rightTime || leftId.localeCompare(rightId),
+  const groups = independentGroups(
+    joined.map((row) => ({
+      semanticTaskId: row.feedback.semanticTaskId!,
+      sessionId: row.retrieval.sessionId,
+      recordedAt: row.retrieval.recordedAt,
+    })),
   );
-  const splitByTask = chronologicalSplits(tasks.map(([id]) => id));
+  const required = {
+    tasks: options.minimumTasks ?? 24,
+    train: options.minimumTrainTasks ?? 12,
+    val: options.minimumValidationTasks ?? 6,
+    test: options.minimumTestTasks ?? 6,
+    action_classes: options.minimumActionClasses ?? 2,
+    noise_labels: options.minimumNoiseLabels ?? 2,
+  };
+  const splitByRow = chronologicalSplits(groups, required);
   const items = joined
-    .map(({ retrieval, feedback, use, outcome }): SkillOptPolicyItem => {
+    .map(({ retrieval, feedback, use, outcome }, index): SkillOptPolicyItem => {
       const expected = expectedDecision(feedback);
       return {
         id: retrieval.graphId,
         semantic_task_id: feedback.semanticTaskId!,
-        split: splitByTask.get(feedback.semanticTaskId!)!,
+        split: splitByRow.get(index)!,
         task_type: `${expected.recall_action}:${expected.fold_noise ? "fold" : "keep"}`,
         query: retrieval.query,
         state: {
@@ -166,20 +170,12 @@ export function buildSkillOptPolicyDataset(
     );
 
   const counts = {
-    train: new Set(items.filter((item) => item.split === "train").map(taskId)).size,
-    val: new Set(items.filter((item) => item.split === "val").map(taskId)).size,
-    test: new Set(items.filter((item) => item.split === "test").map(taskId)).size,
-    tasks: tasks.length,
+    train: groups.filter((group) => splitByRow.get(group.rowIndexes[0]!) === "train").length,
+    val: groups.filter((group) => splitByRow.get(group.rowIndexes[0]!) === "val").length,
+    test: groups.filter((group) => splitByRow.get(group.rowIndexes[0]!) === "test").length,
+    tasks: groups.length,
     action_classes: new Set(items.map((item) => item.expected.recall_action)).size,
     noise_labels: new Set(items.map((item) => item.expected.fold_noise)).size,
-  };
-  const required = {
-    tasks: options.minimumTasks ?? 24,
-    train: options.minimumTrainTasks ?? 12,
-    val: options.minimumValidationTasks ?? 6,
-    test: options.minimumTestTasks ?? 6,
-    action_classes: options.minimumActionClasses ?? 2,
-    noise_labels: options.minimumNoiseLabels ?? 2,
   };
   const blockers = (Object.keys(required) as Array<keyof typeof required>)
     .filter((key) => counts[key] < required[key])
@@ -194,24 +190,23 @@ export function buildSkillOptPolicyDataset(
   };
 }
 
-function chronologicalSplits(taskIds: readonly string[]): Map<string, SkillOptSplit> {
-  const count = taskIds.length;
+function chronologicalSplits(
+  groups: readonly { rowIndexes: number[] }[],
+  minimums: { train: number; val: number; test: number },
+): Map<number, SkillOptSplit> {
+  const count = groups.length;
   if (count === 0) return new Map();
-  if (count === 1) return new Map([[taskIds[0]!, "train"]]);
-  if (count === 2)
-    return new Map([
-      [taskIds[0]!, "train"],
-      [taskIds[1]!, "val"],
-    ]);
-  const validationCount = Math.max(1, Math.floor(count * 0.2));
-  const testCount = Math.max(1, Math.floor(count * 0.2));
+  if (count === 1) return new Map(groups[0]!.rowIndexes.map((index) => [index, "train"]));
+  const readinessCount = minimums.train + minimums.val + minimums.test;
+  const validationCount =
+    count >= readinessCount ? minimums.val : Math.max(1, Math.floor(count * 0.2));
+  const testCount =
+    count >= readinessCount ? minimums.test : Math.max(1, Math.floor(count * 0.2));
   const trainEnd = count - validationCount - testCount;
-  return new Map(
-    taskIds.map((taskId, index) => [
-      taskId,
-      index < trainEnd ? "train" : index < trainEnd + validationCount ? "val" : "test",
-    ]),
-  );
+  return new Map(groups.flatMap((group, index) => {
+    const split = index < trainEnd ? "train" : index < trainEnd + validationCount ? "val" : "test";
+    return group.rowIndexes.map((rowIndex) => [rowIndex, split] as const);
+  }));
 }
 
 function expectedDecision(feedback: ShadowFeedbackEvent): SkillOptPolicyItem["expected"] {
@@ -231,8 +226,4 @@ function hasRequiredLabels(feedback: ShadowFeedbackEvent): boolean {
 
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 16);
-}
-
-function taskId(item: SkillOptPolicyItem): string {
-  return item.semantic_task_id;
 }

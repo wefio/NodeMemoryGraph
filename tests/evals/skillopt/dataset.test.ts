@@ -53,6 +53,63 @@ test("SkillOpt policy dataset fails readiness on sparse natural labels", () => {
   assert.match(dataset.blockers.join("\n"), /tasks requires 24|val requires 6|test requires 6/u);
 });
 
+test("SkillOpt default readiness split reserves twelve train and six held-out tasks per arm", () => {
+  const events = Array.from({ length: 24 }, (_, index) =>
+    eventsFor(
+      `ready-${index}`,
+      `task-${String(index).padStart(2, "0")}`,
+      `2026-08-${String(index + 1).padStart(2, "0")}T00:00:00Z`,
+      index % 3 === 0,
+      index % 3 === 1,
+      index % 2 === 0,
+      index % 3 === 2,
+    ),
+  ).flat();
+
+  const dataset = buildSkillOptPolicyDataset(events);
+  assert.equal(dataset.ready, true);
+  assert.deepEqual(
+    {
+      train: dataset.counts.train,
+      val: dataset.counts.val,
+      test: dataset.counts.test,
+      tasks: dataset.counts.tasks,
+    },
+    { train: 12, val: 6, test: 6, tasks: 24 },
+  );
+});
+
+test("SkillOpt keeps every task from one reused session in one split", () => {
+  const events = [
+    ...eventsFor("shared-a", "task-a", "2026-08-01T00:00:00Z", true, false, false, false),
+    ...eventsFor("shared-b", "task-b", "2026-08-02T00:00:00Z", false, true, false, false),
+    ...eventsFor("other", "task-c", "2026-08-03T00:00:00Z", false, false, true, true),
+  ];
+  for (const event of events) {
+    if (event.graphId === "graph-shared-a" || event.graphId === "graph-shared-b") {
+      event.sessionId = "reused-pi-session";
+    }
+  }
+
+  const dataset = buildSkillOptPolicyDataset(events, {
+    minimumTasks: 2,
+    minimumTrainTasks: 1,
+    minimumValidationTasks: 1,
+    minimumTestTasks: 0,
+    minimumActionClasses: 1,
+    minimumNoiseLabels: 1,
+  });
+  assert.equal(dataset.counts.tasks, 2);
+  assert.equal(
+    new Set(
+      dataset.items
+        .filter((item) => item.semantic_task_id === "task-a" || item.semantic_task_id === "task-b")
+        .map((item) => item.split),
+    ).size,
+    1,
+  );
+});
+
 test("SkillOpt policy dataset excludes controlled and legacy-unclassified feedback", () => {
   const controlled = eventsFor(
     "controlled",

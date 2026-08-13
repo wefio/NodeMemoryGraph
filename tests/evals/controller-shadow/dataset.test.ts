@@ -67,6 +67,30 @@ test("shadow dataset joins labels submitted in separate feedback events", () => 
   assert.equal(dataset.rows[0]?.feedback.noMemoryNeeded, false);
 });
 
+test("shadow dataset keeps reused Pi sessions in one chronological split", () => {
+  const events = [
+    ...taskEvents("graph-a", "task-a", "2026-08-01T00:00:00.000Z"),
+    ...taskEvents("graph-b", "task-b", "2026-08-02T00:00:00.000Z"),
+    ...taskEvents("graph-c", "task-c", "2026-08-03T00:00:00.000Z"),
+  ];
+  for (const event of events) {
+    if (event.graphId === "graph-a" || event.graphId === "graph-b") {
+      event.sessionId = "reused-pi-session";
+    }
+  }
+
+  const dataset = buildShadowDataset(events, 0.5);
+  assert.equal(dataset.tasks.total, 2);
+  assert.equal(
+    new Set(
+      dataset.rows
+        .filter((row) => row.semanticTaskId === "task-a" || row.semanticTaskId === "task-b")
+        .map((row) => row.split),
+    ).size,
+    1,
+  );
+});
+
 function taskEvents(
   graphId: string,
   semanticTaskId: string,
