@@ -351,12 +351,29 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   },
   {
     method: "taskBoard",
+    words: ["board", "discover"],
+    usageLine: "nmg board discover --agent AGENT [--capabilities TEXT] [--json]",
+    options: ["agent", "capabilities"],
+    flags: [],
+    buildParams: (values): NmgTaskBoardParams => {
+      rejectPositionals(values, "board discover");
+      return compactObject({
+        action: "discover",
+        taskId: "default",
+        agentId: requiredOption(values, "agent"),
+        capabilities: firstOption(values, "capabilities"),
+      }) as unknown as NmgTaskBoardParams;
+    },
+  },
+  {
+    method: "taskBoard",
     words: ["board", "put"],
     usageLine: "nmg board put TASK_ID CONTENT --agent AGENT [options] [--json]",
     options: ["agent", "kind", "session-id", "to", "ttl-seconds", "expires-at"],
     flags: [],
     usageDetail: `Task board options:
   --agent ID                 Writer/reader identity (required)
+  --capabilities TEXT        Filter discover by an advertised capability substring
   --kind KIND                goal, note, question, result, handoff, decision, or blocker
   --to AGENT                 Wake only this stable agent name; omit to broadcast
   --ttl-seconds N            Lifetime from 60 seconds to 30 days (default: 1 day)

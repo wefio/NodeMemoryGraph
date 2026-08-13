@@ -150,3 +150,23 @@ test("CLI board put exposes directed delivery", () => {
     },
   );
 });
+
+test("CLI board discover exposes the system-layer agent roster", () => {
+  const command = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "board discover")!;
+  assert.deepEqual(
+    command.buildParams({
+      flags: new Set(),
+      options: new Map([
+        ["agent", ["dispatcher"]],
+        ["capabilities", ["audit"]],
+      ]),
+      positionals: [],
+    }),
+    {
+      action: "discover",
+      taskId: "default",
+      agentId: "dispatcher",
+      capabilities: "audit",
+    },
+  );
+});

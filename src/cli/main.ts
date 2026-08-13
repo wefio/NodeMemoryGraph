@@ -417,6 +417,21 @@ function parseOptions(args: readonly string[]): OptionValues {
 
 function humanResult(value: unknown): string {
   const result = value as Record<string, unknown>;
+  if (result.action === "discover" && Array.isArray(result.agents)) {
+    const agents = result.agents as Array<{
+      agentName: string;
+      capabilities: string | null;
+      lastSeenAt: string;
+    }>;
+    return agents.length === 0
+      ? "No online NMG agents match.\n"
+      : `${agents
+          .map(
+            (agent) =>
+              `${agent.agentName}\t${agent.capabilities ?? "-"}\tlastSeen=${agent.lastSeenAt}`,
+          )
+          .join("\n")}\n`;
+  }
   if (result.action === "read" && Array.isArray(result.entries)) {
     const entries = result.entries as Array<{
       sequence: number;
