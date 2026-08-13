@@ -237,11 +237,42 @@ export class NmgStoreBase {
     // bound. Acknowledgements die with the entry for the same reason.
     this.db.prepare("DELETE FROM task_board_deliveries WHERE entry_id = ?").run(input.entryId);
     this.db.prepare("DELETE FROM task_board_acks WHERE entry_id = ?").run(input.entryId);
+    // Reply-gated serial handoff: the outstanding actionable is done — promote
+    // the earliest pending to outstanding so the next one can be worked.
+    this.promoteNextSerialPending(input.taskId);
     return this.taskBoardEntry(input.entryId)!;
   }
   /** True when a board entry carries a live claim (holder set, lease not expired). */
   private taskBoardClaimLive(entry: TaskBoardEntry, now: string): boolean {
     return entry.claimedBy !== null && entry.claimExpiresAt !== null && entry.claimExpiresAt > now;
+  }
+  /**
+   * Reply-gated serial handoff: promote the earliest pending actionable to
+   * outstanding, unless an un-claimed outstanding already occupies the serial
+   * slot. An outstanding that is claimed ("回复=接手", someone is working it) or
+   * resolved no longer blocks; the claim/resolve/prune paths call this to let
+   * the queue move. A lapsed claim leaves the entry outstanding (still waiting
+   * to be claimed), so no promotion happens — correct: it is not yet replied.
+   */
+  private promoteNextSerialPending(taskId: string): void {
+    const hasUnclaimedOutstanding = this.db
+      .prepare(
+        "SELECT 1 FROM task_board_entries WHERE task_id = ? AND status = 'open' " +
+          "AND serial_state = 'outstanding' AND claimed_by IS NULL LIMIT 1",
+      )
+      .get(taskId);
+    if (hasUnclaimedOutstanding) return;
+    const pending = this.db
+      .prepare(
+        "SELECT id FROM task_board_entries WHERE task_id = ? AND status = 'open' " +
+          "AND serial_state = 'pending' ORDER BY sequence ASC LIMIT 1",
+      )
+      .get(taskId) as Row | undefined;
+    if (pending) {
+      this.db
+        .prepare("UPDATE task_board_entries SET serial_state = 'outstanding' WHERE id = ?")
+        .run(String(pending.id));
+    }
   }
   /**
    * Lease-based claiming via a single atomic compare-and-set UPDATE. Succeeds
@@ -290,6 +321,17 @@ export class NmgStoreBase {
         );
       }
       throw new Error(`task board entry ${input.entryId} claim conflicted; retry`);
+    }
+    // Reply-gated serial handoff: "回复=接手（claim）" — once the outstanding
+    // actionable is claimed by an agent, the claim is the reply that lets the
+    // next pending promote to outstanding (someone is working it, so it no
+    // longer occupies the serial slot). A claimed entry stops counting as the
+    // blocking outstanding.
+    if (existing.serialState === "outstanding") {
+      this.db
+        .prepare("UPDATE task_board_entries SET serial_state = NULL WHERE id = ?")
+        .run(input.entryId);
+      this.promoteNextSerialPending(input.taskId);
     }
     return this.taskBoardEntry(input.entryId)!;
   }
@@ -582,6 +624,8 @@ export class NmgStoreBase {
   }
   pruneExpiredTaskBoardEntries(now = new Date().toISOString(), taskId?: string): number {
     // RAII: an expired entry's receipts die with it (same binding as resolve).
+    // Serial handoff: if an expired entry was the blocking outstanding, promote
+    // the earliest pending of that channel after the delete.
     if (taskId) {
       this.db
         .prepare(
@@ -595,12 +639,24 @@ export class NmgStoreBase {
              SELECT id FROM task_board_entries WHERE task_id = ? AND expires_at <= ?)`,
         )
         .run(taskId, now);
-      return Number(
+      const changed = Number(
         this.db
           .prepare("DELETE FROM task_board_entries WHERE task_id = ? AND expires_at <= ?")
           .run(taskId, now).changes,
       );
+      this.promoteNextSerialPending(taskId);
+      return changed;
     }
+    // Collect channels whose blocking outstanding just expired, so their
+    // pending queue can move after the delete (idempotent per channel).
+    const expiredOutstandingTasks = (
+      this.db
+        .prepare(
+          "SELECT DISTINCT task_id FROM task_board_entries " +
+            "WHERE serial_state = 'outstanding' AND expires_at <= ?",
+        )
+        .all(now) as Row[]
+    ).map((row) => String(row.task_id));
     this.db
       .prepare(
         `DELETE FROM task_board_deliveries WHERE entry_id IN (
@@ -613,9 +669,11 @@ export class NmgStoreBase {
            SELECT id FROM task_board_entries WHERE expires_at <= ?)`,
       )
       .run(now);
-    return Number(
+    const changed = Number(
       this.db.prepare("DELETE FROM task_board_entries WHERE expires_at <= ?").run(now).changes,
     );
+    for (const t of expiredOutstandingTasks) this.promoteNextSerialPending(t);
+    return changed;
   }
   /** Directory of active named channels (the lobby). Excludes the world channel
    * itself and expired/fully-resolved channels; ordered most-recently-updated

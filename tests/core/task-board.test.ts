@@ -579,3 +579,58 @@ test("task board serial handoff: un-directed actionable is outstanding, next is 
     assert.equal(other.serialState, "outstanding");
   });
 });
+
+test("task board serial handoff promotes pending on claim, resolve, and expiry", () => {
+  withStore((store) => {
+    const putHandoff = (taskId: string, content: string, expiresAt: string) =>
+      store.putTaskBoardEntry({
+        taskId,
+        agentId: "sender",
+        kind: "handoff",
+        content,
+        expiresAt,
+      });
+    const stateOf = (store: NmgStore, id: string) => store.taskBoardEntry(id)!.serialState;
+
+    // — Claim drives promotion ("回复=接手"): claiming the outstanding lets the
+    // next pending promote; the claimed entry stops occupying the serial slot.
+    const c1 = putHandoff("serial-promo-1", "first", "2099-01-01T00:00:00.000Z");
+    const c2 = putHandoff("serial-promo-1", "second", "2099-01-01T00:00:00.000Z");
+    assert.equal(stateOf(store, c1.id), "outstanding");
+    assert.equal(stateOf(store, c2.id), "pending");
+    store.claimTaskBoardEntry({
+      taskId: "serial-promo-1",
+      entryId: c1.id,
+      agentId: "worker",
+      leaseSeconds: 60,
+    });
+    assert.equal(stateOf(store, c1.id), null); // claimed → no longer the slot
+    assert.equal(stateOf(store, c2.id), "outstanding"); // promoted
+
+    // — Resolve drives promotion: closing the outstanding promotes the next.
+    const r1 = putHandoff("serial-promo-2", "first", "2099-01-01T00:00:00.000Z");
+    const r2 = putHandoff("serial-promo-2", "second", "2099-01-01T00:00:00.000Z");
+    store.resolveTaskBoardEntry({
+      taskId: "serial-promo-2",
+      entryId: r1.id,
+      agentId: "worker",
+    });
+    assert.equal(stateOf(store, r2.id), "outstanding");
+
+    // — Expiry drives promotion: pruning the expired outstanding moves the
+    // pending up (RAII on the serial slot).
+    const past = new Date(Date.now() - 1000).toISOString();
+    const e1 = putHandoff("serial-promo-3", "first", past);
+    const e2 = putHandoff("serial-promo-3", "second", "2099-01-01T00:00:00.000Z");
+    store.pruneExpiredTaskBoardEntries(new Date().toISOString());
+    assert.equal(store.taskBoardEntry(e1.id), null); // pruned
+    assert.equal(stateOf(store, e2.id), "outstanding");
+
+    // — No pending to promote is a safe no-op (last outstanding resolved).
+    const n1 = putHandoff("serial-promo-4", "only", "2099-01-01T00:00:00.000Z");
+    store.resolveTaskBoardEntry({ taskId: "serial-promo-4", entryId: n1.id, agentId: "worker" });
+    // No throw, no phantom outstanding in a fresh channel.
+    const fresh = putHandoff("serial-promo-5", "fresh", "2099-01-01T00:00:00.000Z");
+    assert.equal(stateOf(store, fresh.id), "outstanding");
+  });
+});
