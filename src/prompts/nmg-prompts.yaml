@@ -60,11 +60,17 @@ board_action_parameter_description: >-
   an optional cursor, claim to take an open entry as the single working Agent
   (lease-based; expired claims return to the pool, resolving clears the claim),
   release to put a claimed entry back, unsubscribe to stop receiving wake
-  notices for a channel (subscribe restores), or resolve to close a selected
-  entry.
+  notices for a channel (subscribe restores), acknowledge to record that you
+  have seen and accepted an entry and owe no reply (pure state write — no
+  broadcast, no wake, and the acked entry stops re-notifying you), or resolve to
+  close a selected entry.
   Confirmations close: once a question/handoff is answered, resolve it — a
   resolved entry is closed and should not be replied to (reopen only for new
-  substance). Put/read/claim/release/resolve do not create semantic memory.
+  substance). Acknowledgement is the lightweight "确认但不用回": for a
+  result/note you accept, prefer acknowledge over posting a new reply entry —
+  acknowledgers are visible in read output (✅ acked by ...) and readers check
+  them on demand instead of being broadcast every Ack. Put/read/claim/release/
+  resolve/acknowledge do not create semantic memory.
   To persist a board conclusion as durable memory WITHOUT duplicating it:
   (1) nmg_search first — if the fact already exists as a memory, do not
       remember it again; point the board entry at it with memory=<id>.

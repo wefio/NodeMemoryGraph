@@ -1047,6 +1047,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           Type.Literal("put"),
           Type.Literal("read"),
           Type.Literal("resolve"),
+          Type.Literal("acknowledge"),
           Type.Literal("claim"),
           Type.Literal("release"),
           Type.Literal("unsubscribe"),
@@ -1073,6 +1074,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ),
       entryId: Type.Optional(Type.String()),
       resolution: Type.Optional(Type.String()),
+      reason: Type.Optional(Type.String()),
       leaseSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 86_400 })),
       afterCursor: Type.Optional(Type.Number({ minimum: 0 })),
       limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
@@ -1309,11 +1311,16 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           entryIds: candidates
             .filter((candidate) => candidate.taskId === taskId)
             .map((candidate) => candidate.id),
-        })) as { delivered: string[]; suppressed: boolean };
+        })) as { delivered: string[]; acked: string[]; suppressed: boolean };
         if (check.suppressed) continue; // unsubscribed channel — skip entirely
         const delivered = new Set(check.delivered);
+        const acked = new Set(check.acked ?? []);
         for (const candidate of candidates) {
-          if (candidate.taskId === taskId && !delivered.has(candidate.id)) {
+          if (
+            candidate.taskId === taskId &&
+            !delivered.has(candidate.id) &&
+            !acked.has(candidate.id)
+          ) {
             fresh.push(candidate);
           }
         }
@@ -2034,6 +2041,7 @@ interface TaskBoardToolEntry {
   status: string;
   content: string;
   claimedBy?: string | null;
+  ackedBy?: string[];
   createdAt?: string;
 }
 
@@ -2059,10 +2067,13 @@ function kindLabel(kind: string): string {
 }
 
 interface TaskBoardToolResult {
-  action: "put" | "read" | "resolve" | "claim" | "release";
+  action: "put" | "read" | "resolve" | "claim" | "release" | "acknowledge";
   entry?: TaskBoardToolEntry;
   entries?: TaskBoardToolEntry[];
   nextCursor?: number;
+  delivered?: string[];
+  acked?: string[];
+  suppressed?: boolean;
 }
 
 /** Sentinel deliveries-table session used to dedup world-channel broadcasts:
@@ -2155,7 +2166,11 @@ function formatTaskBoardResult(
     lines.push(
       ...entries.map((entry) => {
         const claim = entry.claimedBy ? ` [claimed by ${entry.claimedBy}]` : "";
-        return `- #${entry.sequence} ${entry.id} [${entry.kind}/${entry.status}]${claim} ${entry.agentId}: ${excerpt(entry.content, 500)}`;
+        const ack =
+          entry.ackedBy && entry.ackedBy.length > 0
+            ? ` (✅ acked by ${entry.ackedBy.join(", ")})`
+            : "";
+        return `- #${entry.sequence} ${entry.id} [${entry.kind}/${entry.status}]${claim}${ack} ${entry.agentId}: ${excerpt(entry.content, 500)}`;
       }),
     );
     if (result.action === "read") lines.push(`nextCursor=${String(result.nextCursor ?? 0)}`);

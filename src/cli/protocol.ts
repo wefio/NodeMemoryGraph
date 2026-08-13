@@ -293,6 +293,12 @@ export interface NmgTaskBoardResolveParams extends NmgTaskBoardBase {
   resolution?: string;
 }
 
+export interface NmgTaskBoardAcknowledgeParams extends NmgTaskBoardBase {
+  action: "acknowledge";
+  entryId: string;
+  reason?: string;
+}
+
 export interface NmgTaskBoardClaimParams extends NmgTaskBoardBase {
   action: "claim";
   entryId: string;
@@ -347,6 +353,7 @@ export type NmgTaskBoardParams =
   | NmgTaskBoardPutParams
   | NmgTaskBoardReadParams
   | NmgTaskBoardResolveParams
+  | NmgTaskBoardAcknowledgeParams
   | NmgTaskBoardClaimParams
   | NmgTaskBoardReleaseParams
   | NmgTaskBoardListParams
@@ -456,12 +463,13 @@ export type NmgMethodResult = {
   syncStg: { copied: number; projectDir: string };
   stgPurgeSession: { purged: number; projectDir: string };
   taskBoard:
-    | { action: "put" | "resolve" | "claim" | "release"; entry: TaskBoardEntry }
+    | { action: "put" | "resolve" | "claim" | "release" | "acknowledge"; entry: TaskBoardEntry }
     | { action: "read"; entries: TaskBoardEntry[]; nextCursor: number }
     | { action: "list"; boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> }
     | {
         action: "deliveryCheck";
         delivered: string[];
+        acked: string[];
         suppressed: boolean;
       }
     | { action: "recordDelivery"; recorded: boolean }

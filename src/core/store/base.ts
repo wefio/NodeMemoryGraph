@@ -177,10 +177,12 @@ export class NmgStoreBase {
         input.includeResolved ? 1 : 0,
         Math.max(1, Math.min(input.limit ?? 50, 200)),
       ) as Row[];
-    const entries = rows.map(mapTaskBoardEntry);
+    const rawEntries = rows.map(mapTaskBoardEntry);
+    const ackMap = this.taskBoardAckMap(rawEntries.map((entry) => entry.id));
+    for (const entry of rawEntries) entry.ackedBy = ackMap.get(entry.id) ?? [];
     return {
-      entries,
-      nextCursor: entries.at(-1)?.sequence ?? Math.max(0, input.afterCursor ?? 0),
+      entries: rawEntries,
+      nextCursor: rawEntries.at(-1)?.sequence ?? Math.max(0, input.afterCursor ?? 0),
     };
   }
   resolveTaskBoardEntry(input: {
@@ -206,8 +208,9 @@ export class NmgStoreBase {
     // RAII: receipts are bound to the entry lifecycle. The wake loop only scans
     // open entries, so a resolved entry's delivery receipts are dead state —
     // clear them with the close so task_board_deliveries cannot grow without
-    // bound.
+    // bound. Acknowledgements die with the entry for the same reason.
     this.db.prepare("DELETE FROM task_board_deliveries WHERE entry_id = ?").run(input.entryId);
+    this.db.prepare("DELETE FROM task_board_acks WHERE entry_id = ?").run(input.entryId);
     return this.taskBoardEntry(input.entryId)!;
   }
   /** True when a board entry carries a live claim (holder set, lease not expired). */
@@ -326,6 +329,76 @@ export class NmgStoreBase {
       .get(input.entryId, input.sessionId) as Row | undefined;
     return row !== undefined;
   }
+  /** Record an acknowledgement: the agent has seen and accepted this entry and
+   * owes no reply ("确认但不用回"). Idempotent (UNIQUE(entry_id, agent_id));
+   * re-acking updates the timestamp/reason. Pure state write — never triggers
+   * a broadcast or wake, and acked entries stop being wake candidates for the
+   * acking agent. */
+  acknowledgeTaskBoardEntry(input: {
+    entryId: string;
+    agentId: string;
+    reason?: string;
+    now?: string;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO task_board_acks (id, entry_id, agent_id, acknowledged_at, reason)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(entry_id, agent_id) DO UPDATE SET
+           acknowledged_at = excluded.acknowledged_at,
+           reason = excluded.reason`,
+      )
+      .run(
+        randomUUID(),
+        input.entryId,
+        input.agentId,
+        input.now ?? new Date().toISOString(),
+        input.reason ?? null,
+      );
+  }
+  /** Agent ids that have acknowledged each of the given entries (logical
+   * "N checkmarks" per entry). Empty map when no entryIds given. */
+  taskBoardAckMap(entryIds: string[]): Map<string, string[]> {
+    const result = new Map<string, string[]>();
+    if (entryIds.length === 0) return result;
+    const rows = this.db
+      .prepare(
+        `SELECT entry_id, agent_id FROM task_board_acks
+         WHERE entry_id IN (${entryIds.map(() => "?").join(",")})
+         ORDER BY acknowledged_at ASC`,
+      )
+      .all(...entryIds) as Row[];
+    for (const row of rows) {
+      const entryId = String(row.entry_id);
+      const list = result.get(entryId) ?? [];
+      list.push(String(row.agent_id));
+      result.set(entryId, list);
+    }
+    return result;
+  }
+  /** Which of the given entryIds have been acknowledged by any of the given
+   * agent ids. Wake-loop support: an acked entry must not be re-notified to the
+   * acking agent. */
+  taskBoardAckedIds(entryIds: string[], agentIds: string[]): Set<string> {
+    const result = new Set<string>();
+    if (entryIds.length === 0 || agentIds.length === 0) return result;
+    const rows = this.db
+      .prepare(
+        `SELECT entry_id FROM task_board_acks
+         WHERE entry_id IN (${entryIds.map(() => "?").join(",")})
+           AND agent_id IN (${agentIds.map(() => "?").join(",")})`,
+      )
+      .all(...entryIds, ...agentIds) as Row[];
+    for (const row of rows) result.add(String(row.entry_id));
+    return result;
+  }
+  /** Fetch a single board entry (with its ack list populated) scoped to a
+   * task id; null when the entry does not exist in that task. */
+  getTaskBoardEntryById(taskId: string, entryId: string): TaskBoardEntry | null {
+    const entry = this.taskBoardEntry(entryId);
+    if (!entry || entry.taskId !== taskId) return null;
+    return entry;
+  }
   /** Opt a session out of wake notices for a channel (do-not-send registry). */
   suppressTaskBoard(input: { sessionId: string; taskId: string; now?: string }): void {
     this.db
@@ -380,6 +453,12 @@ export class NmgStoreBase {
              SELECT id FROM task_board_entries WHERE task_id = ? AND expires_at <= ?)`,
         )
         .run(taskId, now);
+      this.db
+        .prepare(
+          `DELETE FROM task_board_acks WHERE entry_id IN (
+             SELECT id FROM task_board_entries WHERE task_id = ? AND expires_at <= ?)`,
+        )
+        .run(taskId, now);
       return Number(
         this.db
           .prepare("DELETE FROM task_board_entries WHERE task_id = ? AND expires_at <= ?")
@@ -389,6 +468,12 @@ export class NmgStoreBase {
     this.db
       .prepare(
         `DELETE FROM task_board_deliveries WHERE entry_id IN (
+           SELECT id FROM task_board_entries WHERE expires_at <= ?)`,
+      )
+      .run(now);
+    this.db
+      .prepare(
+        `DELETE FROM task_board_acks WHERE entry_id IN (
            SELECT id FROM task_board_entries WHERE expires_at <= ?)`,
       )
       .run(now);
@@ -424,7 +509,10 @@ export class NmgStoreBase {
   private taskBoardEntry(id: string): TaskBoardEntry | null {
     const row = this.db.prepare("SELECT * FROM task_board_entries WHERE id = ?").get(id) as
       Row | undefined;
-    return row ? mapTaskBoardEntry(row) : null;
+    if (!row) return null;
+    const entry = mapTaskBoardEntry(row);
+    entry.ackedBy = this.taskBoardAckMap([entry.id]).get(entry.id) ?? [];
+    return entry;
   }
   cascadeDerivedMemories(sourceMemoryId: string): void {
     const derivations = this.db
@@ -1386,5 +1474,6 @@ function mapTaskBoardEntry(row: Row): TaskBoardEntry {
     claimedBy: row.claimed_by === null ? null : String(row.claimed_by),
     claimedAt: row.claimed_at === null ? null : String(row.claimed_at),
     claimExpiresAt: row.claim_expires_at === null ? null : String(row.claim_expires_at),
+    ackedBy: [],
   };
 }

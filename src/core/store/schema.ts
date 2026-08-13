@@ -649,6 +649,19 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
       unsubscribed_at TEXT NOT NULL,
       PRIMARY KEY (session_id, task_id)
     );
+    -- Acknowledgment registry: an agent records that it has seen and accepted
+    -- an entry and owes no reply ("确认但不用回"). One row per (entry, agent).
+    -- Idempotent like deliveries; re-acking updates the timestamp/reason.
+    CREATE TABLE IF NOT EXISTS task_board_acks (
+      id TEXT PRIMARY KEY,
+      entry_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      acknowledged_at TEXT NOT NULL,
+      reason TEXT,
+      UNIQUE(entry_id, agent_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_board_acks_entry
+      ON task_board_acks(entry_id);
   `);
 }
 

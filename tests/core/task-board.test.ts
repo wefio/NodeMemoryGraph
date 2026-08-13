@@ -304,6 +304,36 @@ test("task board delivery receipts are idempotent and drive re-notify suppressio
   });
 });
 
+test("task board acknowledgements are per-agent, idempotent, visible on read, and RAII-bound", () => {
+  withStore((store) => {
+    const entry = store.putTaskBoardEntry({
+      taskId: "acks-1",
+      agentId: "sender",
+      kind: "result",
+      content: "QPP feeds tau calibration, not the SkillOpt gate.",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    // Fresh entry: no acks yet.
+    assert.deepEqual(entry.ackedBy, []);
+    assert.equal(store.taskBoardAckedIds([entry.id], ["agent-a"]).has(entry.id), false);
+    // Ack by two agents — logical "N checkmarks", physical rows.
+    store.acknowledgeTaskBoardEntry({ entryId: entry.id, agentId: "agent-a" });
+    store.acknowledgeTaskBoardEntry({ entryId: entry.id, agentId: "agent-b", reason: "agreed" });
+    // Re-ack is idempotent (UNIQUE(entry_id, agent_id)); updates reason/timestamp.
+    store.acknowledgeTaskBoardEntry({ entryId: entry.id, agentId: "agent-a" });
+    assert.equal(store.taskBoardAckedIds([entry.id], ["agent-a"]).has(entry.id), true);
+    assert.equal(store.taskBoardAckedIds([entry.id], ["agent-a", "agent-b"]).size, 1);
+    // Visible on read (the "N checkmarks" per entry).
+    const read = store.readTaskBoard({ taskId: "acks-1", includeResolved: true });
+    assert.deepEqual(read.entries[0]!.ackedBy, ["agent-a", "agent-b"]);
+    // An unrelated agent has not acked.
+    assert.equal(store.taskBoardAckedIds([entry.id], ["agent-c"]).has(entry.id), false);
+    // RAII: resolving the entry clears its acks (same binding as deliveries).
+    store.resolveTaskBoardEntry({ taskId: "acks-1", entryId: entry.id, agentId: "sender" });
+    assert.equal(store.taskBoardAckedIds([entry.id], ["agent-a", "agent-b"]).size, 0);
+  });
+});
+
 test("task board suppression registry is session-scoped and reversible", () => {
   withStore((store) => {
     assert.equal(store.isTaskBoardSuppressed({ sessionId: "session-a", taskId: "noisy" }), false);

@@ -233,11 +233,13 @@ export class NmgService {
         }
         if (parsed.action === "deliveryCheck") {
           const store = this.#getStore();
+          const sessionEntryIds = parsed.entryIds;
           return {
             action: "deliveryCheck",
             delivered: parsed.entryIds.filter((entryId) =>
               store.hasTaskBoardDelivery({ entryId, sessionId: parsed.sessionId }),
             ),
+            acked: [...store.taskBoardAckedIds(parsed.entryIds, [parsed.sessionId, parsed.agentId])],
             suppressed: store.isTaskBoardSuppressed({
               sessionId: parsed.sessionId,
               taskId: parsed.taskId,
@@ -251,6 +253,17 @@ export class NmgService {
             source: parsed.source,
           });
           return { action: "recordDelivery", recorded: true } as NmgMethodResult[M];
+        }
+        if (parsed.action === "acknowledge") {
+          this.#getStore().acknowledgeTaskBoardEntry({
+            entryId: parsed.entryId,
+            agentId: parsed.agentId,
+            reason: parsed.reason,
+          });
+          return {
+            action: "acknowledge",
+            entry: this.#getStore().getTaskBoardEntryById(parsed.taskId, parsed.entryId)!,
+          } as NmgMethodResult[M];
         }
         if (parsed.action === "unsubscribe") {
           this.#getStore().suppressTaskBoard({
@@ -1141,6 +1154,7 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
     "put",
     "read",
     "resolve",
+    "acknowledge",
     "claim",
     "release",
     "list",
@@ -1222,6 +1236,13 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
       ...entryBase,
       action,
       leaseSeconds: optionalInteger(params, "leaseSeconds", 60, 86_400),
+    };
+  }
+  if (action === "acknowledge") {
+    return {
+      ...entryBase,
+      action,
+      reason: optionalString(params, "reason"),
     };
   }
   return {

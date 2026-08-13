@@ -785,6 +785,10 @@ export interface TaskBoardEntry {
   claimedBy: string | null;
   claimedAt: string | null;
   claimExpiresAt: string | null;
+  /** Agent ids that have acknowledged (seen-and-accepted, no reply owed) this
+   * entry. Populated by the store on read/put/claim/release/resolve.
+   * Logical "N checkmarks" rendered from a physical row table. */
+  ackedBy: string[];
 }
 
 export interface RecallCue {

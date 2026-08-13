@@ -76,6 +76,68 @@ test("task board RPC shares temporary coordination without creating semantic mem
   }
 });
 
+test("task board acknowledge records a no-reply confirmation visible on read and to deliveryCheck", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-ack-"));
+  const databasePath = join(directory, "nmg.sqlite");
+  const service = new NmgService({ databasePath, environment: {} });
+  try {
+    const written = await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "acks",
+      agentId: "sender",
+      sourceSessionId: "session-sender",
+      kind: "result",
+      content: "QPP feeds tau calibration, not the SkillOpt gate.",
+      ttlSeconds: 3600,
+    });
+    if (written.action !== "put") throw new Error("expected put");
+
+    // Ack from two collaborators.
+    for (const agentId of ["agent-a", "agent-b"]) {
+      const acked = await service.invoke("taskBoard", {
+        action: "acknowledge",
+        taskId: "acks",
+        agentId,
+        entryId: written.entry.id,
+        reason: "agreed",
+      });
+      assert.equal(acked.action, "acknowledge");
+      if (acked.action !== "acknowledge") throw new Error("expected acknowledge");
+      assert.deepEqual(acked.entry.ackedBy, ["agent-a", "agent-b"].slice(0, agentId === "agent-a" ? 1 : 2));
+    }
+
+    // Read surfaces the N checkmarks.
+    const read = await service.invoke("taskBoard", {
+      action: "read",
+      taskId: "acks",
+      agentId: "agent-c",
+    });
+    if (read.action !== "read") throw new Error("expected read");
+    assert.deepEqual(read.entries[0]!.ackedBy, ["agent-a", "agent-b"]);
+
+    // deliveryCheck reports acked entries for the acking agents.
+    const check = (await service.invoke("taskBoard", {
+      action: "deliveryCheck",
+      taskId: "acks",
+      agentId: "agent-a",
+      sessionId: "agent-a",
+      entryIds: [written.entry.id],
+    })) as { action: "deliveryCheck"; acked: string[] };
+    assert.deepEqual(check.acked, [written.entry.id]);
+    const checkUnacked = (await service.invoke("taskBoard", {
+      action: "deliveryCheck",
+      taskId: "acks",
+      agentId: "agent-c",
+      sessionId: "agent-c",
+      entryIds: [written.entry.id],
+    })) as { action: "deliveryCheck"; acked: string[] };
+    assert.deepEqual(checkUnacked.acked, []);
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("resident service rolls back a journaled node merge", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-node-rollback-"));
   const databasePath = join(directory, "nmg.sqlite");
