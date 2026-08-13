@@ -295,6 +295,11 @@ export class NmgStoreBase {
     if (!existing || existing.taskId !== input.taskId) {
       throw new Error(`task board entry not found in task ${input.taskId}`);
     }
+    if (existing.serialState === "pending") {
+      throw new Error(
+        `task board entry ${input.entryId} is pending until the prior serial entry is claimed, resolved, or expires`,
+      );
+    }
     const leaseSeconds = Math.min(Math.max(input.leaseSeconds ?? 3600, 60), 86_400);
     const expiresAt = new Date(Date.parse(now) + leaseSeconds * 1_000).toISOString();
     const result = this.db

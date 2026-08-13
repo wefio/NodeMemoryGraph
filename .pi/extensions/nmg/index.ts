@@ -516,6 +516,21 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     } catch {
       // Daemon unavailable; staging files remain for the next startup.
     }
+    // System-layer identity registration (A2A AgentCard local edition): report
+    // this agent on session start so discover() can find it (the wake loop also
+    // heartbeats it each tick). Never wakes an LLM. Capabilities come from
+    // NMG_AGENT_CAPABILITIES (comma-separated) when set.
+    try {
+      const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
+      await invoke("taskBoard", {
+        action: "registerAgent",
+        agentName: agentId,
+        capabilities: process.env.NMG_AGENT_CAPABILITIES?.trim() || undefined,
+        supportedInterfaces: "pi",
+      });
+    } catch {
+      // best-effort: a daemon without registerAgent just skips registration.
+    }
   });
 
   pi.on("agent_end", async (event, ctx) => {
@@ -678,14 +693,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         }),
       ),
       claimOutcomeSource: Type.Optional(
-        Type.Union(
-          [
-            Type.Literal("user"),
-            Type.Literal("tool"),
-            Type.Literal("task"),
-          ],
-          { description: nmgPrompts.claim_outcome_source_parameter_description },
-        ),
+        Type.Union([Type.Literal("user"), Type.Literal("tool"), Type.Literal("task")], {
+          description: nmgPrompts.claim_outcome_source_parameter_description,
+        }),
       ),
       claimSourceLineage: Type.Optional(
         Type.String({ description: nmgPrompts.claim_source_lineage_parameter_description }),
@@ -813,11 +823,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         const sessionId = ctx.sessionManager.getSessionId();
         const evidenceSource =
           params.claimOutcomeSource === "user" || params.claimOutcomeSource === "tool"
-            ? selectPiEvidenceSource(
-                ctx.sessionManager,
-                params.evidence,
-                params.claimOutcomeSource,
-              )
+            ? selectPiEvidenceSource(ctx.sessionManager, params.evidence, params.claimOutcomeSource)
             : undefined;
         if (
           (params.claimOutcomeSource === "user" || params.claimOutcomeSource === "tool") &&
@@ -827,8 +833,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             `claimOutcomeSource=${params.claimOutcomeSource} requires an exact matching evidence excerpt from the current Pi session`,
           );
         }
-        const sourceLineage =
-          evidenceSource?.sourceMessageId ?? params.claimSourceLineage?.trim();
+        const sourceLineage = evidenceSource?.sourceMessageId ?? params.claimSourceLineage?.trim();
         if (!sourceLineage) {
           throw new Error("claimOutcomeSource=task requires claimSourceLineage");
         }
@@ -1152,6 +1157,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           Type.Literal("release"),
           Type.Literal("unsubscribe"),
           Type.Literal("subscribe"),
+          Type.Literal("discover"),
         ],
         { description: nmgPrompts.board_action_parameter_description },
       ),
@@ -1180,6 +1186,19 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
       includeResolved: Type.Optional(Type.Boolean()),
       ttlSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 2_592_000 })),
+      // A2A find→direct: put with to=<stable agent_name> wakes only that
+      // agent's LLM (others read-but-stay-silent). discover lists online
+      // agents so the caller can pick a to= target.
+      to: Type.Optional(
+        Type.String({
+          description:
+            "定向投递：stable agent_name 只唤醒该 agent；其他订阅者 read 可见但静默（需先 discover 选人）",
+        }),
+      ),
+      need: Type.Optional(Type.String({ description: "discover 的找人需求描述（可选）" })),
+      capabilities: Type.Optional(
+        Type.String({ description: "discover 按能力过滤（可选，如 'stg,audit'）" }),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const sessionId = ctx.sessionManager.getSessionId();
@@ -1360,6 +1379,20 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }
     if (!sessionId) return;
     const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
+    // System-layer identity heartbeat (A2A AgentCard local edition): refresh
+    // this agent's registry row each tick so discover() can find it. Never
+    // wakes an LLM — the registry is read on demand via discover. Capabilities
+    // come from NMG_AGENT_CAPABILITIES (comma-separated) when set.
+    try {
+      await invoke("taskBoard", {
+        action: "registerAgent",
+        agentName: agentId,
+        capabilities: process.env.NMG_AGENT_CAPABILITIES?.trim() || undefined,
+        supportedInterfaces: "pi",
+      });
+    } catch {
+      // best-effort: a daemon without the registerAgent method just skips it.
+    }
     try {
       const candidates: Array<TaskBoardToolEntry & { taskId: string }> = [];
       const collect = (taskId: string, entries: TaskBoardToolEntry[] | undefined) => {
@@ -2136,6 +2169,12 @@ interface TaskBoardToolEntry {
   content: string;
   claimedBy?: string | null;
   claimExpiresAt?: string | null;
+  /** Directed delivery (A2A find→direct): stable agent_name to wake. Others
+   * read-but-stay-silent. Null = ordinary broadcast to subscribers. */
+  to?: string | null;
+  /** Reply-gated serial handoff: 'pending' entries are queued and must not
+   * wake until the outstanding one is claimed/resolved. */
+  serialState?: "outstanding" | "pending" | "stale" | null;
   ackedBy?: string[];
   createdAt?: string;
 }
@@ -2162,12 +2201,19 @@ function kindLabel(kind: string): string {
 }
 
 interface TaskBoardToolResult {
-  action: "put" | "read" | "resolve" | "claim" | "release" | "acknowledge";
+  action: "put" | "read" | "resolve" | "claim" | "release" | "acknowledge" | "discover";
   entry?: TaskBoardToolEntry;
   entries?: TaskBoardToolEntry[];
   nextCursor?: number;
   delivered?: string[];
   acked?: string[];
+  /** discover: online agent roster (A2A discovery localised). */
+  agents?: Array<{
+    agentName: string;
+    description: string | null;
+    capabilities: string | null;
+    lastSeenAt: string;
+  }>;
   suppressed?: boolean;
 }
 
@@ -2203,11 +2249,22 @@ export function isBoardWakeCandidate(
     (entry.sourceSessionId == null && entry.agentId === input.agentId);
   const liveClaim =
     entry.claimExpiresAt != null && new Date(entry.claimExpiresAt).getTime() > now.getTime();
+  // Directed delivery (find→direct): an entry addressed to another stable
+  // agent_name never wakes me — only the addressee's LLM is woken. Everyone
+  // else sees it on read but stays silent.
+  const addressedToOther = entry.to != null && entry.to !== input.agentId;
+  // Reply-gated serial handoff: only the outstanding actionable wakes; pending
+  // entries sit in the queue (read-visible) until the outstanding one is
+  // claimed ("回复=接手") or resolved, which promotes them. Directed entries are
+  // exempt (serialState is null for them — parallel-safe).
+  const serialQueued = entry.serialState === "pending";
   return (
     entry.status === "open" &&
     BROADCAST_KINDS.has(entry.kind) &&
     !ownEcho &&
     !liveClaim &&
+    !addressedToOther &&
+    !serialQueued &&
     !entry.content.startsWith(BROADCAST_PREFIX)
   );
 }
@@ -2275,6 +2332,25 @@ function formatTaskBoardResult(
   taskId: string,
   directory: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> = [],
 ): string {
+  // discover: online agent roster (A2A find→direct). Rendered instead of
+  // entries so the caller can pick a to= target for a directed put.
+  if (result.action === "discover") {
+    const agents = result.agents ?? [];
+    const lines: string[] = ["在线 agent 名录（discover，按最近心跳）："];
+    if (agents.length === 0) {
+      lines.push("- 暂无在线 agent（各 hook/扩展需注册身份并心跳，NMG_AGENT_ID 或 agent 名）");
+    } else {
+      for (const agent of agents) {
+        const desc = agent.description ? ` — ${agent.description}` : "";
+        const caps = agent.capabilities ? ` [${agent.capabilities}]` : "";
+        lines.push(`- ${agent.agentName}${desc}${caps} (last ${agent.lastSeenAt.slice(0, 19)})`);
+      }
+    }
+    lines.push(
+      "用 nmg_board put ... to=<agent_name> 定向投递（只唤醒该 agent）；不指定 to 则广播给订阅者。",
+    );
+    return lines.join("\n");
+  }
   const entries = result.entries ?? (result.entry ? [result.entry] : []);
   const lines: string[] = [];
   if (directory.length > 0) {

@@ -1053,13 +1053,11 @@ test("agent_end derives and persists useful memories on the trace", async () => 
       undefined,
       { sessionManager },
     );
-    const searched = (await tools.get("nmg_search")!.execute(
-      "search-qpp",
-      { query: "Atlas offline storage" },
-      undefined,
-      undefined,
-      { sessionManager },
-    )) as {
+    const searched = (await tools
+      .get("nmg_search")!
+      .execute("search-qpp", { query: "Atlas offline storage" }, undefined, undefined, {
+        sessionManager,
+      })) as {
       details: {
         results: Array<{ memory: { id: string } }>;
         activeGraph?: { id: string };
@@ -1229,12 +1227,13 @@ test("Chinese automatic recall reaches agent_end use attribution and the shadow 
     const events = readFileSync(join(directory, "controller-shadow-events.jsonl"), "utf8")
       .trim()
       .split("\n")
-      .map((line) => JSON.parse(line) as { type: string; origin?: string; usedMemoryIds?: string[] });
+      .map(
+        (line) => JSON.parse(line) as { type: string; origin?: string; usedMemoryIds?: string[] },
+      );
     assert.ok(events.some((event) => event.type === "retrieval" && event.origin === "automatic"));
     assert.ok(
       events.some(
-        (event) =>
-          event.type === "use" && event.usedMemoryIds?.includes(saved.details.memory.id),
+        (event) => event.type === "use" && event.usedMemoryIds?.includes(saved.details.memory.id),
       ),
       "automatic recall is attributed when its content surfaces in the answer",
     );
@@ -1912,7 +1911,10 @@ test("isBoardWakeCandidate: live claim suppresses nudges, lapsed claim returns t
   // Resolved: no wake.
   assert.equal(wake({ status: "resolved" }), false);
   // Broadcast pull announcement: meta, no wake (subscription-leak fix).
-  assert.equal(wake({ content: "[NMG board 协作广播] 频道 x 有 #1 未认领的交接（open）：…" }), false);
+  assert.equal(
+    wake({ content: "[NMG board 协作广播] 频道 x 有 #1 未认领的交接（open）：…" }),
+    false,
+  );
   // Live claim by someone else: they are working it — no nudge for anyone.
   assert.equal(wake({ claimedBy: "other", claimExpiresAt: "2026-08-13T13:00:00.000Z" }), false);
   // Live claim by THIS agent: holder knows, no self-nudge.
@@ -1925,4 +1927,17 @@ test("isBoardWakeCandidate: live claim suppresses nudges, lapsed claim returns t
   assert.equal(wake({ claimedBy: "me", claimExpiresAt: "2026-08-13T11:00:00.000Z" }), true);
   // Legacy row with no claim expiry (claim fields absent): treat as unclaimed.
   assert.equal(wake({ claimedBy: "me", claimExpiresAt: null }), true);
+  // Directed delivery (find→direct): addressed to another stable agent_name —
+  // never wake me; I read-but-stay-silent.
+  assert.equal(wake({ to: "other" }), false);
+  // Directed to me: I am the addressee — wake.
+  assert.equal(wake({ to: "me" }), true);
+  // Reply-gated serial handoff: a pending actionable is queued behind the
+  // outstanding one ("回复=接手" — it promotes on claim/resolve) — no wake.
+  assert.equal(wake({ serialState: "pending" }), false);
+  // The outstanding actionable is the serial slot being worked — wake.
+  assert.equal(wake({ serialState: "outstanding" }), true);
+  // Directed entries are exempt from serial queuing (serialState null) — wake
+  // as ordinary actionable (point-to-point, parallel-safe).
+  assert.equal(wake({ to: "me", serialState: null }), true);
 });

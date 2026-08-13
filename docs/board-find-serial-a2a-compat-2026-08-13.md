@@ -1,6 +1,6 @@
 # NMG 黑板「先广播后定向 + 串行交接 + 系统层身份」设计与 A2A 兼容
 
-日期：2026-08-13 · 状态：设计（待实现）· 范围：task board（nmg_board）/ 扩展 / kimi-hook / claude adapter
+日期：2026-08-13 · 状态：Stage 1 已实现，身份自动注册与外部 A2A 网关待定 · 范围：task board（nmg_board）/ 扩展 / kimi-hook / claude adapter
 
 ## 1. 目标
 
@@ -11,10 +11,10 @@
 3. **广播噪音打穿 LLM**：广播/交接直接 wake 每个 agent 的 LLM，身份信息（谁在线/谁能做）也占用 LLM 上下文。
 
 设计原则（延续既有纪律）：
-- **系统层身份，LLM 零打扰**：身份注册、收到确认、串行放行信号都是系统（hook/扩展）自动的，不进 LLM 上下文。
+- **系统层身份，LLM 零打扰**：身份注册和心跳不进 LLM 上下文；串行放行采用可审计的 claim/resolve/expiry，不把“已投递”误当作“已接手”。
 - **广播找人 → 定向做事**：先广播发现"谁在线/谁能做"（不 wake 任何 LLM），再 `to=<agent>` 定向唤醒指定 LLM。
 - **命名操作非意外默认**：`to=` 是显式指定，不猜谁该收；串行是机制默认但定向天然豁免。
-- **回复 = 系统自动回复，先于 claim**：收到即自动 ack（不依赖 LLM 手动写回复），claim 是之后有意图的动作。
+- **接手 = claim**：delivery/ack 只表示到达或已读，不能释放串行槽；claim 才表示某个 Agent 已接手。
 
 ## 2. A2A 协议研究结论（2026-08-13，官方文档核实）
 
@@ -106,15 +106,15 @@ nmg_board put taskId="..." kind="handoff" content="..." to="codex"
 
 - 每个频道**同时最多一个 outstanding actionable**（handoff/question/blocker，未定向的）。
 - 新 actionable 进 **pending**（read 可见、状态 pending、不 wake）。
-- **放行条件** = 前驱被**系统自动回复**（hook 收到即 ack）或 **resolve**。
-- **超时 stale**：前驱超过 `NMG_BOARD_SERIAL_TIMEOUT_MS`（默认 30min）无自动回复 → 标记 stale + 放行下一个（防堵死，参考既有 24h broadcast TTL 的 RAII 思想）。
+- **放行条件** = 前驱被 **claim**、**resolve**，或条目自身 TTL 到期后被清理。
+- 当前不另设 serial timeout；队列复用 entry TTL，避免同时维护两个易冲突的过期时钟。
 - **定向交接豁免串行**（`to=<agent>` 是点对点分工，天然并行安全）。
 
-### 4.5 自动回复（系统层，先于 claim）
+### 4.5 投递回执与接手的边界
 
-- hook 收到 wake → **自动 ack**（"收到，系统确认"），不发给 LLM。
-- claim 是 agent 有意图的后续动作（LLM 决定）。
-- 串行放行用自动回复信号，不依赖 LLM 手动写。
+- hook 收到 wake 可以记录 delivery receipt；Agent 明确已读时可以 ack。
+- delivery/ack 均不代表任务已被承担，不驱动串行放行。
+- claim 是明确接手动作；claim/resolve/TTL expiry 才驱动串行队列。
 
 ## 5. 时序全景
 
@@ -123,9 +123,8 @@ nmg_board put taskId="..." kind="handoff" content="..." to="codex"
   → 广播找人 discover(系统身份回执, 零 LLM 打扰)
   → 身份汇总(谁在线/谁能做)
   → 定向 to=<agent>(wake 指定 LLM)
-  → 自动回复"收到"(先于 claim)
-  → claim 接手 → resolve 完成
-  → 放行下一个(串行队列)
+  → delivery/ack 记录到达或已读（不放行）
+  → claim 接手（放行下一个）→ resolve 完成
 ```
 
 ## 6. 数据模型变更
@@ -148,7 +147,7 @@ nmg_board put taskId="..." kind="handoff" content="..." to="codex"
    - `discover` action（新 action，复用 put/read 路径）。
    - 串行队列逻辑（`isBoardWakeCandidate` 附近加 outstanding/pending/stale 判定）。
    - 收到自动 ack（hook 侧）。
-4. **kimi-hook / claude adapter**：身份注册心跳 + 收到自动 ack（LLM 无感层，`kimi-plugin/nmg-hook.mjs` / `claude-plugins/nmg-memory/agents/memory-copilot.ts`）。
+4. **kimi-hook / claude adapter**：定向与 pending 唤醒过滤已接；身份自动注册/心跳仍待接线（`kimi-plugin/nmg-hook.mjs` / `claude-plugins/nmg-memory/agents/memory-copilot.ts`）。
 5. **prompts**：nmg_board 参数描述加 `to` / discover / 串行语义（`src/prompts/nmg-prompts.yaml` board_action_parameter_description）。
 6. **测试**：身份注册/定向 wake/串行放行/自动 ack 的纯函数测试（`tests/extensions/nmg/index.test.ts` 风格）。
 

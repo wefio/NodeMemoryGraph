@@ -1218,8 +1218,35 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
     "recordDelivery",
     "unsubscribe",
     "subscribe",
+    "registerAgent",
+    "heartbeat",
+    "discover",
   ] as const);
+  if (action === "registerAgent") {
+    return {
+      action,
+      agentName: requiredString(params, "agentName"),
+      description: optionalString(params, "description"),
+      version: optionalString(params, "version"),
+      url: optionalString(params, "url"),
+      capabilities: optionalString(params, "capabilities"),
+      skills: optionalString(params, "skills"),
+      supportedInterfaces: optionalString(params, "supportedInterfaces"),
+    };
+  }
+  if (action === "heartbeat") {
+    return { action, agentName: requiredString(params, "agentName") };
+  }
   const agentId = requiredString(params, "agentId");
+  if (action === "discover") {
+    return {
+      action,
+      taskId: requiredString(params, "taskId"),
+      agentId,
+      need: optionalString(params, "need"),
+      capabilities: optionalString(params, "capabilities"),
+    };
+  }
   if (action === "list") {
     return { action, agentId };
   }
@@ -1276,6 +1303,7 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
       content: requiredString(params, "content"),
       kind: optionalEnum(params, "kind", TASK_BOARD_KINDS),
       sourceSessionId: optionalString(params, "sourceSessionId"),
+      to: optionalString(params, "to"),
       ttlSeconds,
       expiresAt,
     };

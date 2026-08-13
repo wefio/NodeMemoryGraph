@@ -598,6 +598,16 @@ test("task board serial handoff promotes pending on claim, resolve, and expiry",
     const c2 = putHandoff("serial-promo-1", "second", "2099-01-01T00:00:00.000Z");
     assert.equal(stateOf(store, c1.id), "outstanding");
     assert.equal(stateOf(store, c2.id), "pending");
+    assert.throws(
+      () =>
+        store.claimTaskBoardEntry({
+          taskId: "serial-promo-1",
+          entryId: c2.id,
+          agentId: "queue-jumper",
+          leaseSeconds: 60,
+        }),
+      /pending until the prior serial entry/,
+    );
     store.claimTaskBoardEntry({
       taskId: "serial-promo-1",
       entryId: c1.id,
