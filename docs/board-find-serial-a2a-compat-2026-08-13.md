@@ -1,6 +1,6 @@
 # NMG 黑板「先广播后定向 + 串行交接 + 系统层身份」设计与 A2A 兼容
 
-日期：2026-08-13 · 状态：Stage 1 已实现，身份自动注册与外部 A2A 网关待定 · 范围：task board（nmg_board）/ 扩展 / kimi-hook / claude adapter
+日期：2026-08-13 · 状态：本地身份注册、发现、定向投递已接通；外部 A2A 网关待定 · 范围：task board（nmg_board）/ 扩展 / kimi-hook / claude adapter
 
 ## 1. 目标
 
@@ -147,7 +147,10 @@ nmg_board put taskId="..." kind="handoff" content="..." to="codex"
    - `discover` action（新 action，复用 put/read 路径）。
    - 串行队列逻辑（`isBoardWakeCandidate` 附近加 outstanding/pending/stale 判定）。
    - 收到自动 ack（hook 侧）。
-4. **kimi-hook / claude adapter**：定向与 pending 唤醒过滤已接；身份自动注册/心跳仍待接线（`kimi-plugin/nmg-hook.mjs` / `claude-plugins/nmg-memory/agents/memory-copilot.ts`）。
+4. **已完成 — kimi-hook / claude adapter**：MCP 工具暴露 `discover` 与定向
+   `to`，连接时注册并在黑板使用时心跳；Kimi 被动 hook 在每次用户提交时向
+   已存在的 daemon 报告身份，即使 wake 关闭也可被发现。两者都不因此注入
+   LLM 上下文或主动启动额外 daemon。
 5. **prompts**：nmg_board 参数描述加 `to` / discover / 串行语义（`src/prompts/nmg-prompts.yaml` board_action_parameter_description）。
 6. **测试**：身份注册/定向 wake/串行放行/自动 ack 的纯函数测试（`tests/extensions/nmg/index.test.ts` 风格）。
 

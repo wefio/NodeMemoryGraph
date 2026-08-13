@@ -105,7 +105,7 @@ server.registerTool(
       evidenceRole: z.enum(EVIDENCE_ROLES).optional(),
       tier: z.number().int().min(0).max(3).optional(),
       importance: z.number().min(0).max(1).optional(),
-      scope: z.record(z.string()).optional(),
+      scope: z.record(z.string(), z.string()).optional(),
       residence: z.enum(["ltg", "stg"]).optional(),
       writeReason: z.string().optional(),
       boardSource: z
@@ -161,12 +161,39 @@ interface BoardToolResult {
   entries?: BoardEntry[];
   nextCursor?: number;
   taskId?: string;
+  agents?: Array<{
+    agentName: string;
+    description: string | null;
+    capabilities: string | null;
+    lastSeenAt: string;
+  }>;
 }
 
 // Identity chain mirrors the Pi extension: NMG_AGENT_ID / NMG_SESSION_ID win,
 // then a per-server pid (one stdio server per host session, so pid ≈ session).
 const BOARD_SESSION_ID = process.env.NMG_SESSION_ID?.trim() || `mcp:${process.pid}`;
 const BOARD_AGENT_ID = process.env.NMG_AGENT_ID?.trim() || BOARD_SESSION_ID;
+const BOARD_AGENT_CAPABILITIES = process.env.NMG_AGENT_CAPABILITIES?.trim() || undefined;
+let lastBoardHeartbeatAt = 0;
+
+async function registerBoardAgent(): Promise<void> {
+  await invokeDaemon(connection, "taskBoard", {
+    action: "registerAgent",
+    agentName: BOARD_AGENT_ID,
+    capabilities: BOARD_AGENT_CAPABILITIES,
+    supportedInterfaces: "mcp",
+  });
+  lastBoardHeartbeatAt = Date.now();
+}
+
+async function heartbeatBoardAgent(): Promise<void> {
+  if (Date.now() - lastBoardHeartbeatAt < 60_000) return;
+  await invokeDaemon(connection, "taskBoard", {
+    action: "heartbeat",
+    agentName: BOARD_AGENT_ID,
+  });
+  lastBoardHeartbeatAt = Date.now();
+}
 
 server.registerTool(
   "nmg_board",
@@ -183,6 +210,7 @@ server.registerTool(
           "release",
           "subscribe",
           "unsubscribe",
+          "discover",
         ])
         .describe(nmgPrompts.board_action_parameter_description),
       taskId: z.string().optional().describe(nmgPrompts.board_task_id_parameter_description),
@@ -198,12 +226,24 @@ server.registerTool(
       limit: z.number().int().min(1).max(200).optional(),
       includeResolved: z.boolean().optional(),
       ttlSeconds: z.number().int().min(60).max(2_592_000).optional(),
+      to: z.string().optional().describe("Stable agent name returned by discover for directed put"),
+      capabilities: z.string().optional().describe("Capability substring used by discover"),
     },
   },
   async (params) => {
+    await heartbeatBoardAgent();
     // taskId is optional: without one, entries land on the shared world
     // channel (the lobby), which every agent reads by default.
     const taskId = params.taskId?.trim() || WORLD_BOARD_ID;
+    if (params.action === "discover") {
+      const result = (await invokeDaemon(connection, "taskBoard", {
+        action: "discover",
+        taskId,
+        agentId: BOARD_AGENT_ID,
+        capabilities: params.capabilities,
+      })) as BoardToolResult;
+      return { content: [{ type: "text", text: formatAgentRoster(result.agents ?? []) }] };
+    }
     if (params.action === "subscribe" || params.action === "unsubscribe") {
       const result = (await invokeDaemon(connection, "taskBoard", {
         action: params.action,
@@ -263,6 +303,7 @@ server.registerTool(
 // ── Lifecycle ──
 
 const connection = await connectDaemon(dbPath());
+await registerBoardAgent();
 const transport = new StdioServerTransport();
 await server.connect(transport);
 const done = async () => {
@@ -381,4 +422,16 @@ function formatBoard(
     "Board conventions (on use): entries may carry memory=<id> references to LTG records — readers expand them with nmg_get; open entries can be claimed by one Agent (lease-based, expired claims return to the pool) and released; resolve a request once it is answered — a resolved entry is closed and must not be replied to (reopen only with new substance); keep entries concise and temporary; taskId is the only channel boundary (no DMs, mentions, groups, or pinning).",
   );
   return lines.join("\n");
+}
+
+function formatAgentRoster(agents: NonNullable<BoardToolResult["agents"]>): string {
+  if (agents.length === 0) return "No online NMG agents match the requested capability.";
+  return [
+    "Online NMG agents:",
+    ...agents.map(
+      (agent) =>
+        `- ${agent.agentName}${agent.capabilities ? ` capabilities=${agent.capabilities}` : ""} lastSeen=${agent.lastSeenAt}`,
+    ),
+    "Use nmg_board action=put with to=<agent name> for directed delivery.",
+  ].join("\n");
 }

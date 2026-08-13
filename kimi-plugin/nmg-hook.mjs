@@ -165,6 +165,39 @@ async function rpcCall(lease, method, params) {
   return parsed.result;
 }
 
+function liveLease(dataDir) {
+  const lease = readJson(join(dataDir, "nmg.sqlite.server.json"));
+  if (!lease || lease.transport !== "http" || !lease.host || !lease.port || !lease.token) return null;
+  return pidAlive(lease.pid) ? lease : null;
+}
+
+export function kimiAgentIdentity(payload, environment = process.env) {
+  const sessionId = payload?.session_id ?? payload?.sessionId ?? "kimi-hook";
+  return {
+    sessionId,
+    agentId: environment.NMG_AGENT_ID?.trim() || sessionId,
+    capabilities: environment.NMG_AGENT_CAPABILITIES?.trim() || undefined,
+  };
+}
+
+/** Report Kimi's stable identity whenever a user turn gives the passive hook a
+ * chance to run. This is independent of wake being enabled: discovery belongs
+ * to the system layer and never injects context or wakes another model. */
+export async function reportAgentPresence(payload, options = {}) {
+  const dataDir = options.dataDir ?? process.env.NMG_DATA_DIR?.trim() ?? join(homedir(), ".nmg");
+  const lease = options.lease ?? liveLease(dataDir);
+  if (!lease && !options.rpc) return false;
+  const rpc = options.rpc ?? ((method, params) => rpcCall(lease, method, params));
+  const identity = kimiAgentIdentity(payload, options.environment ?? process.env);
+  await rpc("taskBoard", {
+    action: "registerAgent",
+    agentName: identity.agentId,
+    capabilities: identity.capabilities,
+    supportedInterfaces: "kimi-hook",
+  });
+  return true;
+}
+
 /**
  * Poll the task board for one undelivered open entry and format its wake
  * notice. Returns "" when there is nothing to say (or wake is off).
@@ -188,15 +221,13 @@ async function pollBoardWake(payload) {
   }
   if (budget > 0 && state.budgetUsed >= budget) return "";
 
-  const lease = readJson(join(dataDir, "nmg.sqlite.server.json"));
-  if (!lease || lease.transport !== "http" || !lease.host || !lease.port || !lease.token) return "";
-  if (!pidAlive(lease.pid)) return "";
+  const lease = liveLease(dataDir);
+  if (!lease) return "";
 
   // Kimi hook payloads carry session_id on Claude-compatible events; the
   // "kimi-hook" fallback intentionally shares receipts across sessions
   // rather than fragmenting dedup per process.
-  const sessionId = payload?.session_id ?? payload?.sessionId ?? "kimi-hook";
-  const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId;
+  const { sessionId, agentId } = kimiAgentIdentity(payload);
   const rpc = (method, params) => rpcCall(lease, method, params);
 
   const candidates = [];
@@ -272,6 +303,7 @@ async function runFromStdin() {
       output.push(NUDGE);
     }
     if (isPromptSubmit(payload)) {
+      await reportAgentPresence(payload).catch(() => false);
       const notice = await pollBoardWake(payload).catch(() => "");
       if (notice) output.push(notice);
     }

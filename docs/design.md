@@ -1948,7 +1948,9 @@ Implemented and verified in the current prototype:
 - a Lab-only, file-backed session reasoning workspace with bounded compaction
   checkpoints and explicit hypothesis/evidence status;
 - a task-scoped shared coordination board with attributed entries, TTL, cursor
-  reads, explicit resolution, CLI/RPC/Pi access, and no LTG/FTS indexing;
+  reads, explicit resolution, CLI/RPC/Pi/MCP/Kimi-hook access, a system-layer
+  online-agent registry, capability discovery and stable-name directed delivery,
+  and no LTG/FTS indexing;
 - a bounded `searchContext` result that approximates an early Active Graph by
   combining resident, automatic, and agent-directed recall;
 - explicit STG/LTG residence on memories and nodes, governed immediate atomic

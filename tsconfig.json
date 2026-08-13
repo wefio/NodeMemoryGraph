@@ -10,5 +10,10 @@
     "verbatimModuleSyntax": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", ".pi/extensions/**/*.ts", "tools/autodiff-benchmark.ts"]
+  "include": [
+    "src/**/*.ts",
+    ".pi/extensions/**/*.ts",
+    "claude-plugins/**/*.ts",
+    "tools/autodiff-benchmark.ts"
+  ]
 }

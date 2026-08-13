@@ -11,6 +11,10 @@
    所以通知到达时机是"下一条用户消息"而不是即时。协议与 Pi 完全一致：
    跳过自己的回声/已认领/广播条目，`deliveryCheck` 去重，
    通知后写 `recordDelivery` 回执，同一条目不重复打扰。
+3. **系统层身份**：每次 `UserPromptSubmit` 在已有 daemon 上报告 Kimi 的稳定
+   `NMG_AGENT_ID` 和可选 `NMG_AGENT_CAPABILITIES`。注册不要求开启 wake，不输出
+   上下文，也不会启动 daemon；因此 MCP 的 `nmg_board discover` 可以找到仅由
+   hook 在线的 Kimi 会话。
 
 Kimi 侧的工具面（`nmg_search` / `nmg_get` / `nmg_remember` / `nmg_board`）由
 MCP server 提供（`.mcp.json` 里的 `nmg` 条目），本目录只补事件钩子。

@@ -7,11 +7,15 @@ Durable-memory tools plus the task board, served over MCP stdio:
 - `nmg_remember` — save facts/preferences/constraints/states/events
   (`boardSource` marks a memory as distilled from a board entry)
 - `nmg_board` — task-board channels: put/read/resolve/acknowledge/claim/
-  release/subscribe/unsubscribe; no taskId means the shared world channel
-  (the lobby), reading it lists active named channels
+  release/subscribe/unsubscribe; `discover` lists online agents and `put` with
+  `to=<agent name>` performs directed delivery. No taskId means the shared world
+  channel (the lobby), reading it lists active named channels.
 
 Board identity: `NMG_AGENT_ID` / `NMG_SESSION_ID` env vars win; otherwise the
 server uses its own pid (`mcp:<pid>`), which is stable per host session.
+The server registers this identity when it connects and refreshes its heartbeat
+on board use. `NMG_AGENT_CAPABILITIES` is an optional comma-separated discovery
+hint.
 Reading open entries writes delivery receipts so wake loops never re-push
 what this session already saw.
 

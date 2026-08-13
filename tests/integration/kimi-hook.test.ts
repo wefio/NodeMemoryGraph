@@ -5,7 +5,11 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
 
-import { isBoardWakeCandidate } from "../../kimi-plugin/nmg-hook.mjs";
+import {
+  isBoardWakeCandidate,
+  kimiAgentIdentity,
+  reportAgentPresence,
+} from "../../kimi-plugin/nmg-hook.mjs";
 
 const hookPath = resolve(import.meta.dirname, "../../kimi-plugin/nmg-hook.mjs");
 
@@ -90,4 +94,44 @@ test("kimi hook nudges on completion keywords, git commit, and stays silent othe
     "",
   );
   assert.equal(runHook({ hook_event_name: "SessionStart" }), "");
+});
+
+test("kimi hook reports a stable discoverable agent identity without enabling wake", async () => {
+  assert.deepEqual(
+    kimiAgentIdentity(
+      { session_id: "kimi-session" },
+      { NMG_AGENT_ID: "kimi-reviewer", NMG_AGENT_CAPABILITIES: "review,typescript" },
+    ),
+    {
+      sessionId: "kimi-session",
+      agentId: "kimi-reviewer",
+      capabilities: "review,typescript",
+    },
+  );
+
+  const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  const reported = await reportAgentPresence(
+    { session_id: "kimi-session" },
+    {
+      dataDir: "unused",
+      environment: { NMG_AGENT_ID: "kimi-reviewer", NMG_AGENT_CAPABILITIES: "review" },
+      rpc: async (method: string, params: Record<string, unknown>) => {
+        calls.push({ method, params });
+        return {};
+      },
+    },
+  );
+
+  assert.equal(reported, true);
+  assert.deepEqual(calls, [
+    {
+      method: "taskBoard",
+      params: {
+        action: "registerAgent",
+        agentName: "kimi-reviewer",
+        capabilities: "review",
+        supportedInterfaces: "kimi-hook",
+      },
+    },
+  ]);
 });

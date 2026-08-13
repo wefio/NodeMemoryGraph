@@ -291,6 +291,16 @@ per-channel access control. *Status:* implemented.
 tell which Agent posted each entry. `NMG_AGENT_ID` is the readable username;
 fallbacks are the session id, then the pid. *Status:* implemented.
 
+**System identity and directed delivery.** Client adapters register their stable
+agent name and optional `NMG_AGENT_CAPABILITIES` outside model context. Pi does
+so at session start and on its wake loop; the MCP adapter registers on connect
+and heartbeats on board use; the passive Kimi hook reports presence on each user
+turn when a daemon already exists. `nmg_board discover` returns the online
+roster, optionally filtered by capability, and `put` with `to=<agent name>`
+wakes only that stable target while remaining read-visible to other clients.
+Registration, discovery, and heartbeat never wake an LLM. *Status:* implemented
+for Pi, MCP-compatible clients, and the Kimi event hook.
+
 **Claiming (who works an entry).** An open entry can be claimed by exactly one
 Agent, so parallel Agents do not duplicate work on the same item. A claim is a
 single atomic compare-and-set `UPDATE` (open + unclaimed, or a lapsed lease,
