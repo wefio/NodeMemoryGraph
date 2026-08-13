@@ -1,5 +1,10 @@
 # 批量训练负载 + 自动后端选择（cost model）实证 — 2026-08-10
 
+> **2026-08-13 implementation correction:** the GPU threshold below records an
+> exploratory hypothesis, not an executable backend. Because no WGSL backend
+> exists, `pickTier` now returns only `compiled-tape` or `interpreter`. A cost
+> model must not select a tier the runtime cannot execute.
+
 承接 docs/autodiff-operator-optimization-2026-08-10.md（§8.3 编译模式、§9 HPC 范式）。本探索把
 "编译一次+复用"范式推广到**批量训练**，并把 §8.2 的定性"适用窗口"落成**可自动执行的 cost model**
 （`src/lab/backend-selection.ts`）。
@@ -50,11 +55,12 @@
 → 编译模式追天花板（compile-once API：backward 复用 forward 结果）在大数组批量下可再省 ~1.7×。
 小数组（controller 49 节点）影响 ~3–5%，不显著。
 
-### 2.4 GPU 档（provisional）
+### 2.4 GPU 档（historical hypothesis, not selectable）
 
 最大的实测 CPU matmul（[1024,128]×[128,1] ≈ 0.26M flop，compiled 2202µs/step）仍 CPU 更快；
 GPU 的赢点在 kernel 启动 + DRAM 往返（MLX: 4k×4k 17× 是访存比），小 kernel 必输。因此 GPU
-阈值暂定 matmul ≥ 8M flop（Trueno-DB MIN_DATA_SIZE 式规则），**未校准**，待 WGSL 后端落地后重标。
+曾假设 matmul ≥ 8M flop 可作为候选阈值（Trueno-DB MIN_DATA_SIZE 式规则），但该阈值未校准，
+也没有对应的 WGSL 执行后端，因此不进入当前 cost model。待真实后端落地后重新测量，而不是提前选择。
 
 ## 3. Cost model：`src/lab/backend-selection.ts`
 
@@ -62,7 +68,6 @@ GPU 的赢点在 kernel 启动 + DRAM 往返（MLX: 4k×4k 17× 是访存比）�
 
 ```
 pickTier(metrics, context) →
-  GPU:   gpuAvailable && matmulFlops ≥ 8M   → "gpu-wgsl"（uncalibrated）
   编译:   reusable && expectedRuns ≥ 3      → "compiled-tape"
   否则:                                       → "interpreter"
 ```
@@ -73,7 +78,7 @@ pickTier(metrics, context) →
 **验证**（`.validate-selection.mjs`，全过）：
 - 实测 24/24 可复用单元 compiled 更快 ↔ pickTier 24/24 判 compiled-tape ✓
 - 单发 / expectedRuns<3 → interpreter（编译成本无法摊还）✓
-- GPU 分支：0.26M flop → compiled-tape；≥8M → gpu-wgsl ✓
+- 大矩阵仍只能选择真实存在的 CPU tier；不会返回不可执行的 GPU tier ✓
 
 ## 4. 什么时候用（触发条件）
 

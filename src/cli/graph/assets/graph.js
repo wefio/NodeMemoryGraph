@@ -17,7 +17,7 @@
 window.NmgGraph = (() => {
   const TAU = Math.PI * 2;
 
-  function mount(container, data, options = {}) {
+  function mount(container, data, _options = {}) {
     container.classList.add("nmg-graph");
     container.innerHTML = `
       <canvas id="canvas"></canvas>

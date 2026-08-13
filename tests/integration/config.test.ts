@@ -5,6 +5,10 @@ import {
   DEFAULT_MAINTENANCE_POLICY,
   DEFAULT_STG_CONSOLIDATION_POLICY,
   configuredMaintenancePolicy,
+  configuredQpp1Mode,
+  configuredQpp2Mode,
+  configuredQpp2RetainedMass,
+  configuredSearchRecommendationMode,
   configuredStgConsolidationPolicy,
 } from "../../src/integration/config.ts";
 
@@ -30,6 +34,23 @@ test("maintenance policy owns defaults and validates environment overrides", () 
       NMG_MAINTENANCE_NODE_LIMIT: "-2",
     }),
     DEFAULT_MAINTENANCE_POLICY,
+  );
+});
+
+test("QPP controls resolve from the supplied daemon environment", () => {
+  assert.equal(configuredQpp1Mode({}), "shadow");
+  assert.equal(configuredQpp1Mode({ NMG_CONTROLLER_SEARCH: "1" }), "active");
+  assert.equal(
+    configuredQpp1Mode({ NMG_CONTROLLER_SEARCH: "1", NMG_QPP1_MODE: "off" }),
+    "off",
+  );
+  assert.equal(configuredQpp2Mode({ NMG_QPP2_MODE: "active" }), "active");
+  assert.equal(configuredQpp2Mode({ NMG_QPP2_MODE: "invalid" }), "off");
+  assert.equal(configuredQpp2RetainedMass({ NMG_QPP2_RETAINED_MASS: "1.5" }), 1);
+  assert.equal(configuredQpp2RetainedMass({ NMG_QPP2_RETAINED_MASS: "bad" }), 0.98);
+  assert.equal(
+    configuredSearchRecommendationMode({ NMG_SEARCH_RECOMMENDATION: "guardrail" }),
+    "guardrail",
   );
 });
 

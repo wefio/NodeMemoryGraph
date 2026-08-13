@@ -1129,3 +1129,31 @@ test("recordActiveGraphUse persists QPP implicit feedback (useful_memory_ids)", 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("recordActiveGraphUse validates its RPC boundary and permits empty use", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-qpp-params-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    await assert.rejects(
+      service.invoke("recordActiveGraphUse", {
+        activeGraphId: "trace",
+        usedMemoryIds: "not-an-array",
+      }),
+      /usedMemoryIds must contain between 0 and 10000 non-empty strings/,
+    );
+    const searched = await service.invoke("search", {
+      query: "no matching memory is expected",
+      sessionId: "session-empty-use",
+    });
+    assert.ok(searched.activeGraph);
+    const recorded = await service.invoke("recordActiveGraphUse", {
+      activeGraphId: searched.activeGraph.id,
+      usedMemoryIds: [],
+      sessionId: "session-empty-use",
+    });
+    assert.deepEqual(recorded.usedMemoryIds, []);
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

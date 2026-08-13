@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -159,6 +159,35 @@ test("packaged one-shot commands remember, search, and get through the same data
     assert.equal(expanded.results[0]?.memory.id, remembered.memory.id);
     assert.equal(expanded.results[0]?.evidence.content, "User prefers concise answers");
     assert.deepEqual(expanded.missingMemoryIds, []);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("packaged graph command writes a self-contained HTML export", () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-process-graph-"));
+  const outputPath = join(directory, "exports", "memory-graph.html");
+  try {
+    runLauncher([
+      "remember",
+      "Atlas graph export integration marker",
+      "--node",
+      "Atlas graph export",
+      "--data-dir",
+      directory,
+      "--json",
+    ]);
+    const result = spawnSync(
+      process.execPath,
+      [launcher, "graph", "--data-dir", directory, "--out", outputPath],
+      { cwd: root, encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Wrote memory graph to/u);
+    assert.equal(existsSync(outputPath), true);
+    const html = readFileSync(outputPath, "utf8");
+    assert.match(html, /Atlas graph export integration marker/u);
+    assert.match(html, /<!doctype html>/iu);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -94,12 +98,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     (connectionPromise ??= connectDaemon(databasePath()));
   const invoke = async (
     method:
-      | "get"
-      | "remember"
-      | "resolveRemember"
-      | "search"
-      | "taskBoard"
-      | "recordActiveGraphUse",
+      "get" | "remember" | "resolveRemember" | "search" | "taskBoard" | "recordActiveGraphUse",
     params: Record<string, unknown>,
   ) => invokeDaemon(await connection(), method, params);
 
@@ -279,10 +278,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             }
             const budget = Math.max(0, Math.min(100, Math.round(wval)));
             writeWakeConfig({ ...current, budget });
-            ctx.ui.notify(
-              `黑板唤醒预算已设为 ${budget === 0 ? "不限制" : `${budget}/天`}`,
-              "info",
-            );
+            ctx.ui.notify(`黑板唤醒预算已设为 ${budget === 0 ? "不限制" : `${budget}/天`}`, "info");
             return;
           }
           case "cooldown": {
@@ -397,10 +393,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         if (!option) return;
         const budget = option === "不限制" ? 0 : Number(option.split("/")[0]);
         writeWakeConfig({ ...current, budget });
-        ctx.ui.notify(
-          `黑板唤醒预算已设为 ${budget === 0 ? "不限制" : `${budget}/天`}`,
-          "info",
-        );
+        ctx.ui.notify(`黑板唤醒预算已设为 ${budget === 0 ? "不限制" : `${budget}/天`}`, "info");
       } else if (param === "冷却") {
         const option = await ctx.ui.select("冷却", ["无", "10 分钟", "30 分钟", "1 小时"]);
         if (!option) return;
@@ -462,7 +455,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     ];
   };
   pi.registerCommand("nmg", {
-    description: "NMG 菜单：/nmg recall · wake on/off/status/world · wake budget N · wake cooldown M · wake interval S",
+    description:
+      "NMG 菜单：/nmg recall · wake on/off/status/world · wake budget N · wake cooldown M · wake interval S",
     getArgumentCompletions: (prefix) => {
       const items: AutocompleteItem[] = [
         { value: "recall", label: "recall", description: "切换 nmg-context 召回折叠/展开" },
@@ -1341,8 +1335,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? "")),
       );
       const pick = fresh[0]!;
-      const excerpt =
-        pick.content.length > 140 ? `${pick.content.slice(0, 140)}…` : pick.content;
+      const excerpt = pick.content.length > 140 ? `${pick.content.slice(0, 140)}…` : pick.content;
       const label = kindLabel(pick.kind);
       pi.sendUserMessage(
         `[NMG board] 你订阅的频道 ${pick.taskId} 有新${label}：#${pick.sequence} — ${excerpt}（open，可认领）。需要的话用 nmg_board read 查看详情、claim 认领处理。`,
@@ -1647,10 +1640,7 @@ export class SessionTaskWindow {
  * close() already checkpoints, so no per-turn cost beyond the in-memory list.
  */
 export class AgentUseFlow {
-  readonly #traces = new Map<
-    string,
-    Array<{ traceId: string; results: MemorySearchResult[] }>
-  >();
+  readonly #traces = new Map<string, Array<{ traceId: string; results: MemorySearchResult[] }>>();
   readonly maxPerSession: number;
 
   constructor(maxPerSession = 8) {
@@ -2119,8 +2109,7 @@ export async function maybeBroadcastToWorld(input: {
     entryIds: [entry.id],
   })) as { delivered: string[]; suppressed: boolean };
   if (worldCheck.delivered.includes(entry.id)) return false;
-  const excerpt =
-    entry.content.length > 140 ? `${entry.content.slice(0, 140)}…` : entry.content;
+  const excerpt = entry.content.length > 140 ? `${entry.content.slice(0, 140)}…` : entry.content;
   const label = kindLabel(entry.kind);
   const broadcast = `[NMG board 协作广播] 频道 ${entry.taskId} 有 #${entry.sequence} 未认领的${label}（open）：${excerpt}。有空的 agent 可用 nmg_board read taskId=${entry.taskId} 查看详情、claim 认领处理。`;
   await invoke("taskBoard", {

@@ -62,6 +62,11 @@ Shadow mode computes and logs the decision without acting on it — use it to
 observe, then flip to `active` once behavior is stable. Lab feedback for
 shadow evaluations:
 
+`active` is still fail-safe before supervision: an untrained controller cannot
+change QPP1 allocation or QPP2 listwise visibility. A caller-specified search
+limit overrides learned allocation/folding, while explicit `--second-pass`
+continues to request deterministic Fibonacci expansion.
+
 ```text
 /nmg-shadow-feedback last success|failure|corrected|uncorrected|unknown
 ```

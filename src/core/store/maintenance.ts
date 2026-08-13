@@ -1438,9 +1438,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         .get(id) as Row | undefined;
       if (!row) return "absent";
       const owner =
-        row.session_id === null || row.session_id === undefined
-          ? null
-          : String(row.session_id);
+        row.session_id === null || row.session_id === undefined ? null : String(row.session_id);
       if (owner !== null && owner !== sessionId?.trim()) return "foreign";
       return "owned";
     }

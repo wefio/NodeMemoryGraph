@@ -109,26 +109,28 @@ export function configuredGraphHops(fallback: number): number {
   return Number.isInteger(configured) ? Math.max(0, Math.min(configured, 3)) : fallback;
 }
 
-export function configuredQpp1Mode(): QppActuationMode {
-  const configured = parseMode(process.env.NMG_QPP1_MODE, ["off", "shadow", "active"]);
+export function configuredQpp1Mode(environment: NodeJS.ProcessEnv = process.env): QppActuationMode {
+  const configured = parseMode(environment.NMG_QPP1_MODE, ["off", "shadow", "active"]);
   if (configured) return configured;
-  if (process.env.NMG_CONTROLLER_SEARCH === "1") return "active";
-  if (process.env.NMG_CONTROLLER_SEARCH === "0") return "shadow";
+  if (environment.NMG_CONTROLLER_SEARCH === "1") return "active";
+  if (environment.NMG_CONTROLLER_SEARCH === "0") return "shadow";
   return "shadow";
 }
 
-export function configuredQpp2Mode(): QppActuationMode {
-  return parseMode(process.env.NMG_QPP2_MODE, ["off", "shadow", "active"]) ?? "off";
+export function configuredQpp2Mode(environment: NodeJS.ProcessEnv = process.env): QppActuationMode {
+  return parseMode(environment.NMG_QPP2_MODE, ["off", "shadow", "active"]) ?? "off";
 }
 
-export function configuredQpp2RetainedMass(): number {
-  const configured = Number(process.env.NMG_QPP2_RETAINED_MASS ?? 0.98);
+export function configuredQpp2RetainedMass(environment: NodeJS.ProcessEnv = process.env): number {
+  const configured = Number(environment.NMG_QPP2_RETAINED_MASS ?? 0.98);
   return Number.isFinite(configured) ? Math.max(0, Math.min(configured, 1)) : 0.98;
 }
 
-export function configuredSearchRecommendationMode(): SearchRecommendationMode {
+export function configuredSearchRecommendationMode(
+  environment: NodeJS.ProcessEnv = process.env,
+): SearchRecommendationMode {
   return (
-    parseMode(process.env.NMG_SEARCH_RECOMMENDATION, ["off", "advisory", "guardrail"]) ?? "off"
+    parseMode(environment.NMG_SEARCH_RECOMMENDATION, ["off", "advisory", "guardrail"]) ?? "off"
   );
 }
 

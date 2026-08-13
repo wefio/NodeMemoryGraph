@@ -130,7 +130,7 @@ export class NmgService {
         return this.#get(parseGetParams(params)) as NmgMethodResult[M];
       case "recordActiveGraphUse":
         return this.#recordActiveGraphUse(
-          params as NmgRecordActiveGraphUseParams,
+          parseRecordActiveGraphUseParams(params),
         ) as NmgMethodResult[M];
       case "retentionCandidates":
         return {
@@ -233,13 +233,14 @@ export class NmgService {
         }
         if (parsed.action === "deliveryCheck") {
           const store = this.#getStore();
-          const sessionEntryIds = parsed.entryIds;
           return {
             action: "deliveryCheck",
             delivered: parsed.entryIds.filter((entryId) =>
               store.hasTaskBoardDelivery({ entryId, sessionId: parsed.sessionId }),
             ),
-            acked: [...store.taskBoardAckedIds(parsed.entryIds, [parsed.sessionId, parsed.agentId])],
+            acked: [
+              ...store.taskBoardAckedIds(parsed.entryIds, [parsed.sessionId, parsed.agentId]),
+            ],
             suppressed: store.isTaskBoardSuppressed({
               sessionId: parsed.sessionId,
               taskId: parsed.taskId,
@@ -543,7 +544,8 @@ export class NmgService {
       action: "supersede",
       newMemoryId: params.newMemoryId,
       supersededMemoryId: params.supersededMemoryId,
-      applied: store.getMemory(params.supersededMemoryId, params.sessionId)?.status === "superseded",
+      applied:
+        store.getMemory(params.supersededMemoryId, params.sessionId)?.status === "superseded",
     };
   }
 
@@ -1121,6 +1123,18 @@ function parseGetParams(value: unknown): NmgGetParams {
     memoryIds: ids.map((id) => String(id).trim()),
     activeGraphId: optionalString(params, "activeGraphId"),
     graphHops: optionalInteger(params, "graphHops", 0, 3),
+    projectDir: optionalString(params, "projectDir"),
+    sessionId: optionalString(params, "sessionId"),
+  };
+}
+
+function parseRecordActiveGraphUseParams(value: unknown): NmgRecordActiveGraphUseParams {
+  const params = objectParams(value);
+  return {
+    activeGraphId: requiredString(params, "activeGraphId"),
+    // An empty list is meaningful negative feedback: recall happened, but no
+    // candidate was used in the final answer.
+    usedMemoryIds: requiredStringArray(params, "usedMemoryIds", 0, 10_000),
     projectDir: optionalString(params, "projectDir"),
     sessionId: optionalString(params, "sessionId"),
   };

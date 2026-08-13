@@ -82,6 +82,43 @@ export class ControllerShadowBridge {
     }
   }
 
+  /**
+   * Produce an active budget only after the controller has learned from at
+   * least one attributable use. A zero-step controller is an uninformative
+   * 0.5 prior and must never change product retrieval merely because active
+   * mode was selected.
+   */
+  async allocate(
+    context: MemoryContext,
+    minimum: import("../../../src/core/types.ts").ActiveGraphBudget,
+    normalMaximum: import("../../../src/core/types.ts").ActiveGraphBudget,
+    expandedMaximum: import("../../../src/core/types.ts").ActiveGraphBudget,
+  ): Promise<import("../../../src/lab/controller-runtime.ts").ControllerBudgetDecision | null> {
+    if (!this.enabled) return null;
+    try {
+      const { runtime } = await this.#dependencies();
+      return runtime.trainingSteps > 0
+        ? runtime.allocate(context, minimum, normalMaximum, expandedMaximum)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Learned listwise fold; like allocation, it is inert before supervision. */
+  async fold(
+    context: MemoryContext,
+    retainedMass: number,
+  ): Promise<import("../../../src/lab/controller-runtime.ts").ControllerMemoryFold | null> {
+    if (!this.enabled) return null;
+    try {
+      const { runtime } = await this.#dependencies();
+      return runtime.trainingSteps > 0 ? runtime.foldMemories(context, retainedMass) : null;
+    } catch {
+      return null;
+    }
+  }
+
   async feedback(
     activeGraphId: string,
     sessionId: string,

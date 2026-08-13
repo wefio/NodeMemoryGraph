@@ -22,8 +22,9 @@ NMG separates physical memory residence from runtime exposure:
 
 AG is not a third authoritative or shared memory graph. It is the private
 virtual memory space presented to one model session. Agents never write a
-shared AG or STG: collaboration occurs only through admitted LTG memories and
-their provenance.
+shared AG or STG: durable collaboration occurs through admitted LTG memories;
+temporary coordination occurs through the separate Task Board and is projected
+into each caller's private AG.
 
 > **Standalone reference:** the STG/LTG/AG model, its theoretical lineage
 > (Atkinson–Shiffrin 1968, Complementary Learning Systems 1995, ACT-R/SOAR,
@@ -198,8 +199,9 @@ second daemon for the same database is rejected, stale leases are recovered,
 and `Shutdown` performs the normal close path. PID termination is only a
 fallback when the HTTP endpoint cannot be reached.
 
-Protocol version `nmg.v1` exposes `Hello`, `Status`, `Remember`, `Search`,
-`Get`, and `Shutdown` over JSON-RPC 2.0. HTTP is the only resident protocol;
+Protocol version `nmg.v1` exposes the typed lifecycle, memory, retrieval,
+maintenance, STG-sync, and Task Board methods declared in `protocol.ts` over
+JSON-RPC 2.0. HTTP is the only resident protocol;
 NMG does not maintain a parallel NDJSON or platform-specific socket API.
 
 ### 4.2 Modular harness adapters
@@ -232,7 +234,7 @@ adapter, not part of the NMG data model.
 
 The Pi adapter is now a thin HTTP lifecycle/tool adapter. It lazily starts the
 daemon, reuses one connection (via the shared `http-client`) for automatic
-recall and the three stable tools, and
+recall and the four stable tools, and
 stops the daemon only when that adapter invocation owns it. It does not open
 SQLite, maintain indexes, or import graph/QPP implementations. No Rust/Python
 implementation is planned unless profiling later identifies a component that
@@ -1115,6 +1117,14 @@ events.
 Replaceable state uses a stable semantic `stateKey` plus canonical scope. A new
 active value supersedes the prior value without deleting historical evidence.
 
+> **预留接口（未实现，用户明确不需要）** — `RememberInput.judgeDuplicates`
+> (`DuplicateJudge`, `src/core/types.ts`) 允许 NMG 自身接入独立模型，在
+> `remember` 内联裁决 near-duplicate 的 merge/supersede，而非依赖调用方
+> Agent 的二阶段判断。当前为零实现（daemon RPC 与扩展均不传该字段，仓库内
+> 无 judge-provider）；裁决仍走上文“Agent 二阶段 supersede”路径。如需接通：
+> `NMG_JUDGE_*` 配置 + daemon 侧 judge-provider + judge 不可用时降级回算法
+> 候选。决策记录：LTG memory `54599c45`。
+
 ## 10. Incremental storage and index maintenance
 
 Writing a memory must not trigger a full vector/index rebuild.
@@ -1941,7 +1951,12 @@ Important gaps between the prototype and the target plugin:
   and false-promotion evaluation are stronger;
 - `MemoryGraphReasoner` remains a numerical Lab prototype that scores the
   global unvisited candidate set rather than following graph edges;
-- QPP1, QPP2, and search recommendation are now independently wired, but their
+- QPP1, QPP2, and search recommendation are independently wired at the Pi
+  boundary. QPP1 `active` performs a non-persistent planning probe and applies a
+  learned hard-bounded AG budget only after attributable controller training;
+  QPP2 `active` enables Fibonacci expansion and may fold a learned low-mass tail
+  without removing its IDs from the AG; an explicit caller limit disables that
+  fold. Search recommendation remains a trailing, optional model nudge. Their
   utility and cost are not yet sufficiently characterised. QPP1 budget
   prediction correlated poorly
   with the oracle Fibonacci tier in the full LoCoMo audit; QPP2 scores are

@@ -215,11 +215,7 @@ export class NmgStoreBase {
   }
   /** True when a board entry carries a live claim (holder set, lease not expired). */
   private taskBoardClaimLive(entry: TaskBoardEntry, now: string): boolean {
-    return (
-      entry.claimedBy !== null &&
-      entry.claimExpiresAt !== null &&
-      entry.claimExpiresAt > now
-    );
+    return entry.claimedBy !== null && entry.claimExpiresAt !== null && entry.claimExpiresAt > now;
   }
   /**
    * Lease-based claiming via a single atomic compare-and-set UPDATE. Succeeds
@@ -242,10 +238,7 @@ export class NmgStoreBase {
     if (!existing || existing.taskId !== input.taskId) {
       throw new Error(`task board entry not found in task ${input.taskId}`);
     }
-    const leaseSeconds = Math.min(
-      Math.max(input.leaseSeconds ?? 3600, 60),
-      86_400,
-    );
+    const leaseSeconds = Math.min(Math.max(input.leaseSeconds ?? 3600, 60), 86_400);
     const expiresAt = new Date(Date.parse(now) + leaseSeconds * 1_000).toISOString();
     const result = this.db
       .prepare(
@@ -295,9 +288,7 @@ export class NmgStoreBase {
       if (existing.status === "resolved") {
         throw new Error(`task board entry ${input.entryId} already resolved`);
       }
-      throw new Error(
-        `task board entry ${input.entryId} not claimed by ${input.agentId}`,
-      );
+      throw new Error(`task board entry ${input.entryId} not claimed by ${input.agentId}`);
     }
     return this.taskBoardEntry(input.entryId)!;
   }
@@ -406,11 +397,7 @@ export class NmgStoreBase {
         `INSERT OR IGNORE INTO task_board_suppressions (session_id, task_id, unsubscribed_at)
          VALUES (?, ?, ?)`,
       )
-      .run(
-        input.sessionId,
-        input.taskId,
-        input.now ?? new Date().toISOString(),
-      );
+      .run(input.sessionId, input.taskId, input.now ?? new Date().toISOString());
   }
   /** True when a session is suppressed for a channel (will not be woken for it). */
   isTaskBoardSuppressed(input: { sessionId: string; taskId: string }): boolean {
@@ -439,9 +426,7 @@ export class NmgStoreBase {
   /** Remove a session's suppression for a channel (re-subscribe). */
   unsuppressTaskBoard(input: { sessionId: string; taskId: string }): void {
     this.db
-      .prepare(
-        `DELETE FROM task_board_suppressions WHERE session_id = ? AND task_id = ?`,
-      )
+      .prepare(`DELETE FROM task_board_suppressions WHERE session_id = ? AND task_id = ?`)
       .run(input.sessionId, input.taskId);
   }
   pruneExpiredTaskBoardEntries(now = new Date().toISOString(), taskId?: string): number {

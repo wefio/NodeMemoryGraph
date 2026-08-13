@@ -29,6 +29,7 @@ const SECTIONS = [
   "search_query_parameter_description",
   "search_queries_parameter_description",
   "search_progression_required",
+  "search_recommendation",
   "search_disclosure",
   "mcp_search_disclosure",
   "get_disclosure",

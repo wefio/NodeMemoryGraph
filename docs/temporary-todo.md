@@ -77,6 +77,21 @@ observed:
   reviewed and implemented.
 - Full long-horizon reinforcement learning: only after a real sequential
   credit-assignment problem is demonstrated.
+- Reasoning-workspace activation, archival/resume, and STG/LTG promotion: only
+  after real interruption or compaction tasks show that the ordinary transcript
+  and AG are insufficient. The existing Lab prototype remains available.
+- Memory-Graph Reasoner edge-following and automatic inference: only after that
+  reasoning-workspace need is established; global scoring is a retained Lab
+  prototype, not a Lite dependency.
+- A SkillOpt `memory_maintenance_policy` and three-way content/scope/retrieval
+  defect attribution: only after the recall-policy readiness and promotion gate
+  is completed with natural labels.
+- Full physical privacy erasure, learned-aggregate reset, adapter erasure hooks,
+  and erasure receipts: before a privacy-erasure product claim, after threat
+  model and user-consent review. Current delete/forget is logical withdrawal.
+- GPU/WGSL execution for the tiny autodiff substrate: only after profiling finds
+  a workload that violates the CPU/WASM budget. Backend-selection estimates are
+  experimental and must not imply an executable GPU backend.
 
 ## Completion rule
 

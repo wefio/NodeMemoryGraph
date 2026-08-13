@@ -18,4 +18,14 @@ export default tseslint.config(
       "no-console": "off",
     },
   },
+  {
+    files: ["src/cli/graph/assets/**/*.js"],
+    languageOptions: {
+      globals: {
+        document: "readonly",
+        requestAnimationFrame: "readonly",
+        window: "readonly",
+      },
+    },
+  },
 );

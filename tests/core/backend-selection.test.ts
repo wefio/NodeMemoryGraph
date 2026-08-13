@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import {
   estimateGraphMetrics,
   pickTier,
-  GPU_MIN_MATMUL_FLOPS,
   type MetricNode,
 } from "../../src/lab/backend-selection.ts";
 
@@ -64,16 +63,12 @@ test("pickTier: single-shot or un-amortized → interpreter", () => {
   assert.match(pickTier(metrics, { reusable: true, expectedRuns: 1 }).reason, /not amortized/);
 });
 
-test("pickTier: GPU only above the (provisional) matmul threshold", () => {
-  const context = { reusable: true, expectedRuns: 200, gpuAvailable: true };
-  const small = estimateGraphMetrics(stackedNodes(128, 1024)); // 0.26M flop
-  assert.ok(small.matmulFlops < GPU_MIN_MATMUL_FLOPS);
-  assert.equal(pickTier(small, context).tier, "compiled-tape");
+test("pickTier: large graphs still select an executable CPU tier", () => {
+  const context = { reusable: true, expectedRuns: 200 };
   const big = estimateGraphMetrics([
     { rows: 1024, columns: 1024, isMatmul: true, matmulInner: 1024 },
   ]);
-  assert.ok(big.matmulFlops >= GPU_MIN_MATMUL_FLOPS);
   const decision = pickTier(big, context);
-  assert.equal(decision.tier, "gpu-wgsl");
-  assert.match(decision.reason, /uncalibrated/);
+  assert.equal(decision.tier, "compiled-tape");
+  assert.doesNotMatch(decision.reason, /GPU|WGSL/iu);
 });

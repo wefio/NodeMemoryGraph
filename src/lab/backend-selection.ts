@@ -7,16 +7,15 @@
 // one-time compile is amortized. Single-shot or non-reusable graphs must use
 // the interpreter (compile cost O(V) is never amortized).
 //
-// The GPU tier is provisional: wired to the in-process WebGPU (Dawn) backend but
-// uncalibrated (no WGSL backend exists yet). It applies the Trueno-DB-style
-// "compute must dominate transfer/launch" rule and should be re-calibrated the
-// day the WGSL tier lands.
+// GPU execution is deliberately absent from this selector. A cost model must
+// never return a tier that the runtime cannot execute. Add a GPU tier only when
+// an executable backend exists and has been calibrated against these CPU tiers.
 //
 // This module is deliberately UOp-free: callers (e.g. autodiff.ts) map their
 // graph nodes to MetricNode descriptors so the cost model stays testable and
 // independent of the internal IR representation.
 
-export type ExecutionTier = "interpreter" | "compiled-tape" | "gpu-wgsl";
+export type ExecutionTier = "interpreter" | "compiled-tape";
 
 /** One graph node, described for the cost model. */
 export interface MetricNode {
@@ -40,20 +39,12 @@ export interface ExecutionContext {
   reusable: boolean;
   /** expected future runs; amortizes a one-time O(V) compile */
   expectedRuns: number;
-  /** is the in-process WebGPU backend available? */
-  gpuAvailable?: boolean;
 }
 
 export interface TierDecision {
   tier: ExecutionTier;
   reason: string;
 }
-
-/** Minimum matmul work before GPU launch+transfer overhead can be beaten.
- *  Placeholder calibration — the largest measured CPU matmul
- *  ([1024,128]×[128,1] ≈ 0.5 MFLOP) is still CPU-faster, so the GPU bar is set
- *  an order of magnitude above that and flagged as uncalibrated. */
-export const GPU_MIN_MATMUL_FLOPS = 8_000_000;
 
 /** Compile must be amortized over at least this many runs (measured: compiled
  *  wins even for the smallest reusable loop, but a fresh compile costs O(V)). */
@@ -71,13 +62,6 @@ export function estimateGraphMetrics(nodes: readonly MetricNode[]): GraphMetrics
 
 /** Pick the fastest tier for a graph, with an auditable reason. */
 export function pickTier(metrics: GraphMetrics, context: ExecutionContext): TierDecision {
-  // GPU: compute must dominate transfer/launch overhead (Trueno-DB rule).
-  if (context.gpuAvailable && metrics.matmulFlops >= GPU_MIN_MATMUL_FLOPS) {
-    return {
-      tier: "gpu-wgsl",
-      reason: `matmul ${Math.round(metrics.matmulFlops / 1e6)}M flop ≥ ${GPU_MIN_MATMUL_FLOPS / 1e6}M threshold (uncalibrated; re-calibrate when WGSL backend lands)`,
-    };
-  }
   // Compiled: needs amortized compile + stable structure + persistent params.
   if (context.reusable && context.expectedRuns >= MIN_REUSE_FOR_COMPILE) {
     return {

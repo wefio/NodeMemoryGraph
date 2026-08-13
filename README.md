@@ -131,7 +131,9 @@ pi install <path-to-node-memory-graph>
 pi
 ```
 
-By default, the extension stores data in `.nmg/nmg.sqlite` under the current project. Set `NMG_DATA_DIR` to use another directory.
+By default, the extension stores shared LTG and Task Board data in
+`~/.nmg/nmg.sqlite`. Set `NMG_DATA_DIR` to use another directory. Project-local
+`.nmg/` data is reserved for isolated STG sessions and controlled/headless runs.
 
 The Pi adapter is deliberately thin. It lazily starts the local daemon over
 JSON-RPC/HTTP, reuses one connection for automatic recall and four stable
@@ -359,7 +361,7 @@ defaults to a 90-second prompt timeout plus 12 tool calls. Override these with
 test-runner safety limits, not NMG retrieval limits.
 The controller defaults to `deepseek/deepseek-v4-flash` with thinking disabled,
 uses `--no-extensions`, and explicitly loads only the NMG extension and its
-three stable tools. This prevents unrelated global permission extensions from
+four stable tools. This prevents unrelated global permission extensions from
 blocking non-interactive RPC tool calls. Set `NMG_PI_MODEL` to override the
 test model when needed.
 
@@ -367,7 +369,9 @@ QPP actuation is split into three independent controls:
 
 - `NMG_QPP1_MODE=off|shadow|active` controls the learned first candidate-pool
   allocation. It defaults to `shadow`; `active` may widen only an explicit
-  `nmg_search` that has no caller-specified limit.
+  `nmg_search` that has no caller-specified limit. It is fail-safe before the
+  controller has attributable training: the planning probe is non-persistent
+  and an untrained 0.5 prior cannot change retrieval.
 - `NMG_QPP2_MODE=off|shadow|active` controls Fibonacci progressive inspection
   and learned listwise folding within that candidate pool. It defaults to
   `off`; `shadow` retains QPP telemetry without changing the visible result,
@@ -376,8 +380,10 @@ QPP actuation is split into three independent controls:
   probability mass. `NMG_QPP2_RETAINED_MASS` defaults to `0.98`. A flat score
   distribution therefore stays wide; a steep distribution folds more.
   Lower-necessity candidates are grouped as a folded directory, not deleted,
-  and an explicit larger `limit` unfolds them. Top-1 is the only fixed safety
-  anchor.
+  and an explicit caller `limit` disables learned folding. The full candidate
+  set remains in the Active Graph for exact `nmg_get`; top-1 is the only fixed
+  safety anchor. Learned folding is inert until attributable controller
+  training exists.
 - `NMG_SEARCH_RECOMMENDATION=off|advisory|guardrail` controls whether an
   inadequate automatic recall recommends one deliberate `nmg_search` call to
   the model. It defaults to `off`; `guardrail` emits a recommendation only

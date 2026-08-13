@@ -218,7 +218,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         input.sessionId === undefined
       ) {
         throw new Error(
-          "Explicit STG (residence: \"stg\") provisional writes require an explicit sessionId — " +
+          'Explicit STG (residence: "stg") provisional writes require an explicit sessionId — ' +
             "string = session-private, null = explicitly shared (escape-hatch rule)",
         );
       }

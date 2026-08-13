@@ -199,6 +199,8 @@ function integerEnvironment(name: string, fallback: number): number {
 
 let memoizedDaemonCount: { key: string; at: number; count: number } | undefined;
 let daemonLimitWarningIssued = false;
+const DAEMON_READY_POLL_MS = 25;
+const DAEMON_READY_TIMEOUT_MS = 10_000;
 
 function readyState(statePath: string): ServerState | undefined {
   const state = readServerState(statePath);
@@ -208,12 +210,13 @@ function readyState(statePath: string): ServerState | undefined {
 }
 
 async function waitForState(statePath: string): Promise<ServerState> {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  const attempts = Math.ceil(DAEMON_READY_TIMEOUT_MS / DAEMON_READY_POLL_MS);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     const state = readyState(statePath);
     if (state) return state;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+    await new Promise((resolveWait) => setTimeout(resolveWait, DAEMON_READY_POLL_MS));
   }
-  throw new Error("NMG daemon did not become ready");
+  throw new Error(`NMG daemon did not become ready within ${DAEMON_READY_TIMEOUT_MS}ms`);
 }
 
 async function waitForProcessExit(pid: number): Promise<void> {

@@ -465,7 +465,10 @@ export type NmgMethodResult = {
   taskBoard:
     | { action: "put" | "resolve" | "claim" | "release" | "acknowledge"; entry: TaskBoardEntry }
     | { action: "read"; entries: TaskBoardEntry[]; nextCursor: number }
-    | { action: "list"; boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> }
+    | {
+        action: "list";
+        boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }>;
+      }
     | {
         action: "deliveryCheck";
         delivered: string[];

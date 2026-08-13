@@ -9,7 +9,8 @@
  * source tree (src/cli/graph/assets) and the compiled package
  * (dist/cli/graph/assets, copied by the build) work unchanged.
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 import { openInspectDb } from "./inspect-data.ts";
 import { readGraphData, type GraphData } from "./graph-data.ts";
@@ -52,6 +53,7 @@ export function exportGraphHtml(databasePath: string, outputPath: string): strin
   const db = openInspectDb(databasePath);
   try {
     const html = renderGraphHtml(readGraphData(db), loadGraphTemplates());
+    mkdirSync(dirname(outputPath), { recursive: true });
     writeFileSync(outputPath, html);
     return outputPath;
   } finally {

@@ -618,9 +618,7 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
     db.exec("ALTER TABLE task_board_entries ADD COLUMN claimed_at TEXT");
   }
   if (!existing.has("claim_expires_at")) {
-    db.exec(
-      "ALTER TABLE task_board_entries ADD COLUMN claim_expires_at TEXT",
-    );
+    db.exec("ALTER TABLE task_board_entries ADD COLUMN claim_expires_at TEXT");
   }
   // Delivery receipts: which session a wake already reached for an entry — the
   // authoritative "already notified, do not re-notify" record (replaces the
