@@ -15,6 +15,7 @@ import nmgExtension, {
   isMemorableToolResult,
   isSuccessfulCommit,
   maybeBroadcastToWorld,
+  isBoardWakeCandidate,
   MEMORY_POLICY,
   PI_BRANCH_SHAPE_VERSION,
   projectPiBranch,
@@ -1822,4 +1823,43 @@ test("/nmg wake world toggle is reachable from the interactive menu", async () =
     else process.env.NMG_DATA_DIR = previous;
     rmSync(dataDir, { recursive: true, force: true });
   }
+});
+
+test("isBoardWakeCandidate: live claim suppresses nudges, lapsed claim returns to pool (no starvation)", () => {
+  const now = new Date("2026-08-13T12:00:00.000Z");
+  const base = {
+    id: "entry-1",
+    sequence: 1,
+    agentId: "other",
+    sourceSessionId: "other-sess",
+    kind: "handoff",
+    status: "open",
+    content: "Any taker?",
+  };
+  const wake = (overrides: Record<string, unknown>) =>
+    isBoardWakeCandidate({ ...base, ...overrides } as Parameters<typeof isBoardWakeCandidate>[0], {
+      sessionId: "me-sess",
+      agentId: "me",
+      now,
+    });
+  // Unclaimed open entry from another session: wake.
+  assert.equal(wake({}), true);
+  // Own echo: never wake yourself.
+  assert.equal(wake({ sourceSessionId: "me-sess" }), false);
+  // Resolved: no wake.
+  assert.equal(wake({ status: "resolved" }), false);
+  // Broadcast pull announcement: meta, no wake (subscription-leak fix).
+  assert.equal(wake({ content: "[NMG board 协作广播] 频道 x 有 #1 未认领的交接（open）：…" }), false);
+  // Live claim by someone else: they are working it — no nudge for anyone.
+  assert.equal(wake({ claimedBy: "other", claimExpiresAt: "2026-08-13T13:00:00.000Z" }), false);
+  // Live claim by THIS agent: holder knows, no self-nudge.
+  assert.equal(wake({ claimedBy: "me", claimExpiresAt: "2026-08-13T13:00:00.000Z" }), false);
+  // Lapsed claim by someone else: lease expired, entry returns to the pool — wake.
+  assert.equal(wake({ claimedBy: "other", claimExpiresAt: "2026-08-13T11:00:00.000Z" }), true);
+  // Lapsed claim by THIS agent (the starvation case from the audit): the holder
+  // crashed/stopped and the lease lapsed; without liveness the entry would be
+  // permanently hidden from its former holder until TTL. Must wake.
+  assert.equal(wake({ claimedBy: "me", claimExpiresAt: "2026-08-13T11:00:00.000Z" }), true);
+  // Legacy row with no claim expiry (claim fields absent): treat as unclaimed.
+  assert.equal(wake({ claimedBy: "me", claimExpiresAt: null }), true);
 });

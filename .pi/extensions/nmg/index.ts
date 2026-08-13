@@ -1271,27 +1271,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const candidates: Array<TaskBoardToolEntry & { taskId: string }> = [];
       const collect = (taskId: string, entries: TaskBoardToolEntry[] | undefined) => {
         for (const entry of entries ?? []) {
-          // Skip entries this exact session posted — waking on your own message
-          // is an echo. The echo boundary is the session (sourceSessionId), not
-          // the agent id: sessions sharing one NMG_AGENT_ID must still notify
-          // each other. Null sourceSessionId (legacy rows) falls back to agentId.
-          const ownEcho =
-            entry.sourceSessionId === sessionId ||
-            (entry.sourceSessionId == null && entry.agentId === agentId);
-          if (
-            entry.status === "open" &&
-            !ownEcho &&
-            // Already claimed by this session: don't nudge the holder for work
-            // it is already doing — claim decides who works, notification
-            // decides who knows (the claimer already knows).
-            entry.claimedBy !== agentId &&
-            // Broadcast pull entries are announcements (meta), never a wake:
-            // they advertise a collaboration on a named channel and are meant
-            // to be found by reading the world channel, not pushed to every
-            // subscriber. Waking on them leaks named-channel activity to
-            // agents that never joined that channel.
-            !entry.content.startsWith(BROADCAST_PREFIX)
-          ) {
+          if (isBoardWakeCandidate(entry, { sessionId, agentId })) {
             candidates.push({ ...entry, taskId });
           }
         }
@@ -2062,6 +2042,7 @@ interface TaskBoardToolEntry {
   status: string;
   content: string;
   claimedBy?: string | null;
+  claimExpiresAt?: string | null;
   ackedBy?: string[];
   createdAt?: string;
 }
@@ -2105,6 +2086,31 @@ export const WORLD_BROADCAST_SESSION = "world-broadcast";
  * broadcast wakes a session, which broadcasts the broadcast, recursively
  * flooding the world channel (observed live: #12→#13→#16…). */
 export const BROADCAST_PREFIX = "[NMG board 协作广播]";
+
+/** Pure wake-candidate predicate for the board wake loop (exported for unit
+ * testing). An entry wakes a session when it is open, is not an echo of the
+ * receiving session, has NO live claim, and is not a broadcast pull
+ * announcement. Claim liveness matters: a lapsed claim (lease expired; holder
+ * crashed or stopped, no sweeper clears the column) returns the entry to the
+ * pool, so it must wake again rather than be permanently hidden from its
+ * former holder (audit finding 2026-08-13). */
+export function isBoardWakeCandidate(
+  entry: TaskBoardToolEntry,
+  input: { sessionId: string; agentId: string; now?: Date },
+): boolean {
+  const now = input.now ?? new Date();
+  const ownEcho =
+    entry.sourceSessionId === input.sessionId ||
+    (entry.sourceSessionId == null && entry.agentId === input.agentId);
+  const liveClaim =
+    entry.claimExpiresAt != null && new Date(entry.claimExpiresAt).getTime() > now.getTime();
+  return (
+    entry.status === "open" &&
+    !ownEcho &&
+    !liveClaim &&
+    !entry.content.startsWith(BROADCAST_PREFIX)
+  );
+}
 /** Broadcasts are transient pull notices: they announce another entry and must
  * not outlive it. RAII: give them a short TTL so an unanswered broadcast is
  * recycled (with its receipts) instead of accumulating as permanent open dead
