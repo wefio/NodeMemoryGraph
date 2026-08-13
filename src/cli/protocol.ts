@@ -278,6 +278,12 @@ export interface NmgTaskBoardPutParams extends NmgTaskBoardBase {
   sourceSessionId?: string;
   ttlSeconds?: number;
   expiresAt?: string;
+  /** Directed delivery (A2A-compatible find→direct protocol): stable
+   * agent_name that should be woken for this entry. Only that agent's LLM is
+   * woken; everyone else sees it on read but stays silent. Uses the stable
+   * agent name, never sessionId (session changes on reload). Omit = ordinary
+   * broadcast to subscribers. */
+  to?: string;
 }
 
 export interface NmgTaskBoardReadParams extends NmgTaskBoardBase {
@@ -360,6 +366,36 @@ export interface NmgTaskBoardListSubscriptionsParams {
   sessionId: string;
 }
 
+/** System-layer agent registration (A2A AgentCard local edition). Called by
+ * hooks/extensions on startup; never wakes an LLM. Fields aligned with A2A
+ * AgentCard so a future external-agent gateway maps with zero model change. */
+export interface NmgTaskBoardRegisterAgentParams {
+  action: "registerAgent";
+  agentName: string;
+  description?: string;
+  version?: string;
+  url?: string;
+  capabilities?: string;
+  skills?: string;
+  supportedInterfaces?: string;
+}
+
+/** System-layer heartbeat: refreshes last_seen_at so the agent stays online. */
+export interface NmgTaskBoardHeartbeatParams {
+  action: "heartbeat";
+  agentName: string;
+}
+
+/** Find-and-direct: broadcast a need to the system layer (hooks auto-reply
+ * identity, no LLM woken), optionally filtered by capabilities. Returns the
+ * online agents that can help — the roster used to pick `to=` for a directed
+ * put. A2A discovery semantics localised. */
+export interface NmgTaskBoardDiscoverParams extends NmgTaskBoardBase {
+  action: "discover";
+  need?: string;
+  capabilities?: string;
+}
+
 export type NmgTaskBoardParams =
   | NmgTaskBoardPutParams
   | NmgTaskBoardReadParams
@@ -372,7 +408,10 @@ export type NmgTaskBoardParams =
   | NmgTaskBoardRecordDeliveryParams
   | NmgTaskBoardUnsubscribeParams
   | NmgTaskBoardSubscribeParams
-  | NmgTaskBoardListSubscriptionsParams;
+  | NmgTaskBoardListSubscriptionsParams
+  | NmgTaskBoardRegisterAgentParams
+  | NmgTaskBoardHeartbeatParams
+  | NmgTaskBoardDiscoverParams;
 
 export interface NmgRetentionCandidatesParams {
   dormantAfterDays?: number;
@@ -492,6 +531,16 @@ export type NmgMethodResult = {
     | {
         action: "listSubscriptions";
         subscriptions: Array<{ taskId: string; subscribedAt: string }>;
+      }
+    | { action: "registerAgent" | "heartbeat"; agentName: string }
+    | {
+        action: "discover";
+        agents: Array<{
+          agentName: string;
+          description: string | null;
+          capabilities: string | null;
+          lastSeenAt: string;
+        }>;
       };
   shutdown: { shuttingDown: true };
 };

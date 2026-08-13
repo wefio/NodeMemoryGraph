@@ -43,8 +43,14 @@ test("task board shares attributed entries within one task and isolates other ta
     });
 
     const page = store.readTaskBoard({ taskId: "release-42" });
-    assert.deepEqual(page.entries.map((entry) => entry.id), [first.id, second.id]);
-    assert.deepEqual(page.entries.map((entry) => entry.agentId), ["scout-a", "scout-b"]);
+    assert.deepEqual(
+      page.entries.map((entry) => entry.id),
+      [first.id, second.id],
+    );
+    assert.deepEqual(
+      page.entries.map((entry) => entry.agentId),
+      ["scout-a", "scout-b"],
+    );
     assert.equal(page.entries[0]!.sourceSessionId, "session-a");
     assert.equal(page.nextCursor, 2);
     assert.equal(store.readTaskBoard({ taskId: "unrelated" }).entries.length, 1);
@@ -76,7 +82,10 @@ test("task board supports cursor reads, cross-agent resolution, and expiry", () 
     });
 
     const page = store.readTaskBoard({ taskId: "task-a", afterCursor: first.sequence });
-    assert.deepEqual(page.entries.map((entry) => entry.id), [second.id]);
+    assert.deepEqual(
+      page.entries.map((entry) => entry.id),
+      [second.id],
+    );
 
     const resolved = store.resolveTaskBoardEntry({
       taskId: "task-a",
@@ -151,10 +160,7 @@ test("task board lobby lists active named channels and hides the world channel",
     store.resolveTaskBoardEntry({ taskId: "done", entryId: done.id, agentId: "agent-e" });
 
     const boards = store.listTaskBoards();
-    assert.deepEqual(
-      boards.map((board) => board.taskId).sort(),
-      ["alpha", "beta"],
-    );
+    assert.deepEqual(boards.map((board) => board.taskId).sort(), ["alpha", "beta"]);
     const alpha = boards.find((board) => board.taskId === "alpha");
     assert.equal(alpha?.entryCount, 1);
     assert.ok(alpha?.lastUpdatedAt);
@@ -361,7 +367,10 @@ test("task board suppression registry is session-scoped and reversible", () => {
 test("task board subscriptions are explicit topic membership: join to be woken, leave to be silent", () => {
   withStore((store) => {
     // Named channel: not a member until subscribe (no implicit subscription).
-    assert.equal(store.isTaskBoardSubscribed({ sessionId: "session-a", taskId: "review-x" }), false);
+    assert.equal(
+      store.isTaskBoardSubscribed({ sessionId: "session-a", taskId: "review-x" }),
+      false,
+    );
     assert.deepEqual(store.listTaskBoardSubscriptions("session-a"), []);
     // Join the channel (idempotent).
     store.subscribeTaskBoard({ sessionId: "session-a", taskId: "review-x" });
@@ -372,16 +381,25 @@ test("task board subscriptions are explicit topic membership: join to be woken, 
       ["review-x"],
     );
     // Membership is per-session: session-b never joined.
-    assert.equal(store.isTaskBoardSubscribed({ sessionId: "session-b", taskId: "review-x" }), false);
+    assert.equal(
+      store.isTaskBoardSubscribed({ sessionId: "session-b", taskId: "review-x" }),
+      false,
+    );
     // Another channel joined by the same session.
     store.subscribeTaskBoard({ sessionId: "session-a", taskId: "review-y" });
     assert.deepEqual(
-      store.listTaskBoardSubscriptions("session-a").map((item) => item.taskId).sort(),
+      store
+        .listTaskBoardSubscriptions("session-a")
+        .map((item) => item.taskId)
+        .sort(),
       ["review-x", "review-y"],
     );
     // Leave: membership removed.
     store.unsubscribeTaskBoard({ sessionId: "session-a", taskId: "review-x" });
-    assert.equal(store.isTaskBoardSubscribed({ sessionId: "session-a", taskId: "review-x" }), false);
+    assert.equal(
+      store.isTaskBoardSubscribed({ sessionId: "session-a", taskId: "review-x" }),
+      false,
+    );
     assert.deepEqual(
       store.listTaskBoardSubscriptions("session-a").map((item) => item.taskId),
       ["review-y"],
@@ -426,5 +444,138 @@ test("delivery receipts are RAII-bound: cleared when the entry resolves or expir
     store.recordTaskBoardDelivery({ entryId: live.id, sessionId: "sess-a" });
     store.pruneExpiredTaskBoardEntries();
     assert.equal(store.hasTaskBoardDelivery({ entryId: live.id, sessionId: "sess-a" }), true);
+  });
+});
+
+test("task board agent registry: register/heartbeat/discover with capability filter", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-task-board-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  const originalOnlineMs = process.env.NMG_AGENT_ONLINE_MS;
+  try {
+    process.env.NMG_AGENT_ONLINE_MS = "600000";
+    store.registerTaskBoardAgent({
+      agentName: "codex",
+      description: "main coding agent",
+      version: "1.0.0",
+      capabilities: "stg,audit,blackboard",
+    });
+    store.registerTaskBoardAgent({
+      agentName: "kimi",
+      capabilities: "adapter,kimi-hook",
+    });
+
+    // discover returns all online agents, newest heartbeat first.
+    const all = store.discoverTaskBoardAgents({});
+    assert.deepEqual(all.map((a) => a.agentName).sort(), ["codex", "kimi"]);
+    const codexAgent = all.find((a) => a.agentName === "codex")!;
+    assert.equal(codexAgent.description, "main coding agent");
+
+    // capability filter narrows the roster (A2A discovery semantics).
+    const stg = store.discoverTaskBoardAgents({ capabilities: "stg" });
+    assert.deepEqual(
+      stg.map((a) => a.agentName),
+      ["codex"],
+    );
+    const none = store.discoverTaskBoardAgents({ capabilities: "nonexistent" });
+    assert.deepEqual(none, []);
+
+    // heartbeat keeps an agent online and bumps last_seen.
+    store.heartbeatTaskBoardAgent({ agentName: "kimi" });
+    const again = store.discoverTaskBoardAgents({});
+    assert.ok(again.find((a) => a.agentName === "kimi"));
+
+    // A tiny online window, after a real pause, drops everyone (last_seen in
+    // the past). Sleep avoids same-millisecond clock races.
+    process.env.NMG_AGENT_ONLINE_MS = "1";
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const stale = store.discoverTaskBoardAgents({});
+    assert.deepEqual(stale, []);
+  } finally {
+    if (originalOnlineMs === undefined) delete process.env.NMG_AGENT_ONLINE_MS;
+    else process.env.NMG_AGENT_ONLINE_MS = originalOnlineMs;
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("task board directed delivery stores the stable agent name in directed_to", () => {
+  withStore((store) => {
+    const directed = store.putTaskBoardEntry({
+      taskId: "dir-1",
+      agentId: "sender",
+      kind: "handoff",
+      content: "only codex should be woken",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      to: "codex",
+    });
+    assert.equal(directed.to, "codex");
+
+    const broadcast = store.putTaskBoardEntry({
+      taskId: "dir-1",
+      agentId: "sender",
+      kind: "note",
+      content: "to everyone",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    assert.equal(broadcast.to, null);
+
+    // read round-trips the directed_to column.
+    const read = store.readTaskBoard({ taskId: "dir-1" });
+    assert.equal(read.entries[0].to, "codex");
+    assert.equal(read.entries[1].to, null);
+  });
+});
+
+test("task board serial handoff: un-directed actionable is outstanding, next is pending", () => {
+  withStore((store) => {
+    const first = store.putTaskBoardEntry({
+      taskId: "serial-1",
+      agentId: "sender",
+      kind: "handoff",
+      content: "first actionable",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    assert.equal(first.serialState, "outstanding");
+
+    // A second un-directed actionable queues behind the outstanding one.
+    const second = store.putTaskBoardEntry({
+      taskId: "serial-1",
+      agentId: "sender",
+      kind: "question",
+      content: "queued",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    assert.equal(second.serialState, "pending");
+
+    // Directed actionables are exempt from serialisation (parallel-safe).
+    const directed = store.putTaskBoardEntry({
+      taskId: "serial-1",
+      agentId: "sender",
+      kind: "handoff",
+      content: "point-to-point",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      to: "kimi",
+    });
+    assert.equal(directed.serialState, null);
+
+    // Notify-only kinds are never serialised.
+    const note = store.putTaskBoardEntry({
+      taskId: "serial-1",
+      agentId: "sender",
+      kind: "note",
+      content: "fact",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    assert.equal(note.serialState, null);
+
+    // Different channels are independent.
+    const other = store.putTaskBoardEntry({
+      taskId: "serial-2",
+      agentId: "sender",
+      kind: "blocker",
+      content: "own queue",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    assert.equal(other.serialState, "outstanding");
   });
 });

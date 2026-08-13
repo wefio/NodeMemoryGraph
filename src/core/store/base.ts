@@ -123,6 +123,8 @@ export class NmgStoreBase {
     kind: TaskBoardKind;
     content: string;
     expiresAt: string;
+    /** Directed delivery: stable agent_name to wake for this entry. */
+    to?: string;
   }): TaskBoardEntry {
     const now = new Date().toISOString();
     this.pruneExpiredTaskBoardEntries(now, input.taskId);
@@ -135,12 +137,29 @@ export class NmgStoreBase {
         )
         .get(input.taskId) as Row;
       const sequence = Number(row.next_sequence);
+      // Reply-gated serial handoff: an un-directed actionable (handoff/
+      // question/blocker) is 'outstanding' if no other open un-directed
+      // actionable exists in this channel yet, else 'pending' (queued until
+      // the outstanding one is replied/resolved). Directed entries and
+      // notify-only kinds are not serialised (point-to-point, parallel-safe).
+      const actionable =
+        input.kind === "handoff" || input.kind === "question" || input.kind === "blocker";
+      let serialState: string | null = null;
+      if (actionable && input.to == null) {
+        const outstanding = this.db
+          .prepare(
+            "SELECT 1 FROM task_board_entries WHERE task_id = ? AND status = 'open' " +
+              "AND serial_state = 'outstanding' LIMIT 1",
+          )
+          .get(input.taskId);
+        serialState = outstanding ? "pending" : "outstanding";
+      }
       this.db
         .prepare(
           `INSERT INTO task_board_entries(
              id, task_id, sequence, agent_id, source_session_id, kind, content,
-             status, created_at, expires_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
+             status, created_at, expires_at, [to], serial_state
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -152,6 +171,8 @@ export class NmgStoreBase {
           input.content,
           now,
           input.expiresAt,
+          input.to ?? null,
+          serialState,
         );
       this.db.exec("COMMIT");
     } catch (error) {
@@ -318,6 +339,86 @@ export class NmgStoreBase {
         input.now ?? new Date().toISOString(),
       );
   }
+  /** System-layer agent registration (A2A AgentCard local edition). Called by
+   * hooks/extensions on startup + heartbeat. Upsert + refresh last_seen.
+   * Never wakes an LLM, never enters context. Fields aligned with A2A
+   * AgentCard (name/description/version/url/capabilities/skills/
+   * supportedInterfaces) so a future external-agent gateway maps with zero
+   * model change. */
+  registerTaskBoardAgent(input: {
+    agentName: string;
+    description?: string;
+    version?: string;
+    url?: string;
+    capabilities?: string;
+    skills?: string;
+    supportedInterfaces?: string;
+  }): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO task_board_agents(
+           agent_name, description, version, url, capabilities, skills,
+           supported_interfaces, last_seen_at, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(agent_name) DO UPDATE SET
+           description = excluded.description,
+           version = excluded.version,
+           url = excluded.url,
+           capabilities = excluded.capabilities,
+           skills = excluded.skills,
+           supported_interfaces = excluded.supported_interfaces,
+           last_seen_at = excluded.last_seen_at`,
+      )
+      .run(
+        input.agentName,
+        input.description ?? null,
+        input.version ?? null,
+        input.url ?? null,
+        input.capabilities ?? null,
+        input.skills ?? null,
+        input.supportedInterfaces ?? null,
+        now,
+        now,
+      );
+  }
+
+  /** System-layer heartbeat: refresh last_seen so the agent stays online. */
+  heartbeatTaskBoardAgent(input: { agentName: string }): void {
+    this.db
+      .prepare("UPDATE task_board_agents SET last_seen_at = ? WHERE agent_name = ?")
+      .run(new Date().toISOString(), input.agentName);
+  }
+
+  /** Find-and-direct roster: online agents, optionally filtered by a
+   * capabilities substring (A2A discovery semantics localised). Online =
+   * last_seen_at within NMG_AGENT_ONLINE_MS (default 10 min). Never wakes an
+   * LLM — this is the identity roster used to pick `to=` for a directed put. */
+  discoverTaskBoardAgents(input: { capabilities?: string }): Array<{
+    agentName: string;
+    description: string | null;
+    capabilities: string | null;
+    lastSeenAt: string;
+  }> {
+    const onlineMs = Number(process.env.NMG_AGENT_ONLINE_MS ?? 600_000);
+    const since = new Date(Date.now() - onlineMs).toISOString();
+    let sql =
+      "SELECT agent_name, description, capabilities, last_seen_at " +
+      "FROM task_board_agents WHERE last_seen_at >= ?";
+    const args: Array<string | number | null> = [since];
+    if (input.capabilities) {
+      sql += " AND capabilities LIKE ?";
+      args.push(`%${input.capabilities}%`);
+    }
+    sql += " ORDER BY last_seen_at DESC";
+    return (this.db.prepare(sql).all(...args) as Row[]).map((row) => ({
+      agentName: String(row.agent_name),
+      description: row.description === null ? null : String(row.description),
+      capabilities: row.capabilities === null ? null : String(row.capabilities),
+      lastSeenAt: String(row.last_seen_at),
+    }));
+  }
+
   /** True when a delivery receipt exists for this session + entry. */
   hasTaskBoardDelivery(input: { entryId: string; sessionId: string }): boolean {
     const row = this.db
@@ -1521,6 +1622,11 @@ function mapTaskBoardEntry(row: Row): TaskBoardEntry {
     claimedBy: row.claimed_by === null ? null : String(row.claimed_by),
     claimedAt: row.claimed_at === null ? null : String(row.claimed_at),
     claimExpiresAt: row.claim_expires_at === null ? null : String(row.claim_expires_at),
+    to: row.to === null ? null : String(row.to),
+    serialState:
+      row.serial_state === null
+        ? null
+        : (String(row.serial_state) as TaskBoardEntry["serialState"]),
     ackedBy: [],
   };
 }

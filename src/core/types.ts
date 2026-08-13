@@ -785,6 +785,16 @@ export interface TaskBoardEntry {
   claimedBy: string | null;
   claimedAt: string | null;
   claimExpiresAt: string | null;
+  /** Directed delivery (A2A-compatible find→direct): stable agent_name that
+   * should be woken for this entry. Others see it on read but stay silent.
+   * Null = ordinary broadcast to subscribers. Uses stable agent name, never
+   * sessionId. */
+  to: string | null;
+  /** Reply-gated serial handoff state: un-directed actionable entries are
+   * 'outstanding' (the one being worked) or 'pending' (queued until the
+   * outstanding one is replied/resolved); 'stale' after serial timeout.
+   * Directed entries and notify-only kinds are null. */
+  serialState: "outstanding" | "pending" | "stale" | null;
   /** Agent ids that have acknowledged (seen-and-accepted, no reply owed) this
    * entry. Populated by the store on read/put/claim/release/resolve.
    * Logical "N checkmarks" rendered from a physical row table. */

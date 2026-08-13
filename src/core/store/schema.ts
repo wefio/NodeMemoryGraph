@@ -671,6 +671,28 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
   if (!existing.has("claim_expires_at")) {
     db.exec("ALTER TABLE task_board_entries ADD COLUMN claim_expires_at TEXT");
   }
+  // Directed delivery (A2A-compatible find→direct protocol): entry.to is the
+  // stable agent_name (A2A AgentCard name) that should be woken for this
+  // entry. Only that agent's LLM is woken; everyone else sees it on read but
+  // stays silent. NULL/absent = ordinary broadcast to subscribers. Uses the
+  // stable agent name, never sessionId (session changes on reload). Column
+  // name stays `to` via SQLite bracket escaping ([to]) because `to` is a
+  // reserved word.
+  if (!existing.has("to")) {
+    db.exec("ALTER TABLE task_board_entries ADD COLUMN [to] TEXT");
+  }
+  // Reply-gated serial handoff state: per channel at most one outstanding
+  // actionable (handoff/question/blocker, un-directed). New actionables go
+  // 'pending' (read-visible, not woken) until the outstanding one is replied
+  // (system auto-ack, before claim) or resolved; stale after
+  // NMG_BOARD_SERIAL_TIMEOUT_MS so a never-answered handoff cannot deadlock
+  // the channel. Directed entries are exempt (point-to-point, parallel-safe).
+  if (!existing.has("serial_state")) {
+    db.exec(
+      "ALTER TABLE task_board_entries ADD COLUMN serial_state TEXT " +
+        "CHECK (serial_state IN ('outstanding', 'pending', 'stale'))",
+    );
+  }
   // Delivery receipts: which session a wake already reached for an entry — the
   // authoritative "already notified, do not re-notify" record (replaces the
   // ephemeral notified[] array in board-wake-state.json). (session_id,
@@ -722,6 +744,23 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
       task_id TEXT NOT NULL,
       subscribed_at TEXT NOT NULL,
       PRIMARY KEY (session_id, task_id)
+    );
+    -- Agent registry (A2A AgentCard local edition): each hook/extension
+    -- reports its identity + capabilities on startup and heartbeat. Fields
+    -- aligned with A2A AgentCard (name/description/version/url/capabilities/
+    -- skills/supportedInterfaces) so a future external-agent gateway maps with
+    -- zero model change. System-layer only: never wakes an LLM, never enters
+    -- context. Online = last_seen_at within NMG_AGENT_ONLINE_MS.
+    CREATE TABLE IF NOT EXISTS task_board_agents (
+      agent_name TEXT PRIMARY KEY,
+      description TEXT,
+      version TEXT,
+      url TEXT,
+      capabilities TEXT,
+      skills TEXT,
+      supported_interfaces TEXT,
+      last_seen_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
     );
   `);
 }

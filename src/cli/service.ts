@@ -204,6 +204,7 @@ export class NmgService {
               kind: parsed.kind ?? "note",
               content: parsed.content,
               expiresAt,
+              to: parsed.to,
             }),
           } as NmgMethodResult[M];
         }
@@ -287,6 +288,32 @@ export class NmgService {
             taskId: parsed.taskId,
           });
           return { action: "subscribe", taskId: parsed.taskId } as NmgMethodResult[M];
+        }
+        if (parsed.action === "registerAgent") {
+          this.#getStore().registerTaskBoardAgent({
+            agentName: parsed.agentName,
+            description: parsed.description,
+            version: parsed.version,
+            url: parsed.url,
+            capabilities: parsed.capabilities,
+            skills: parsed.skills,
+            supportedInterfaces: parsed.supportedInterfaces,
+          });
+          return { action: "registerAgent", agentName: parsed.agentName } as NmgMethodResult[M];
+        }
+        if (parsed.action === "heartbeat") {
+          this.#getStore().heartbeatTaskBoardAgent({
+            agentName: parsed.agentName,
+          });
+          return { action: "heartbeat", agentName: parsed.agentName } as NmgMethodResult[M];
+        }
+        if (parsed.action === "discover") {
+          return {
+            action: "discover",
+            agents: this.#getStore().discoverTaskBoardAgents({
+              capabilities: parsed.capabilities,
+            }),
+          } as NmgMethodResult[M];
         }
         if (parsed.action === "listSubscriptions") {
           return {
