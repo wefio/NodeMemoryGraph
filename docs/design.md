@@ -739,10 +739,15 @@ judgments accumulate observations and provenance on one pending proposal. A
 read-only automation assessment requires a pending identity proposal, at least
 five observations, mean confidence of at least 0.98, at least four active
 evidence memories represented on both nodes, identical evidence scope, and no
-pending `distinct_from` or `contradicts` proposal. Passing this assessment is
-only eligibility: it neither accepts the proposal nor calls `mergeNodes`.
-Uncertain split and merge proposals remain pending for explicit review until a
-natural-data evaluation establishes an acceptable false-merge rate.
+pending `distinct_from` or `contradicts` proposal. The scope must expose exactly
+one non-empty identity value, and its normalized canonical name must not already
+belong to an active node. Passing this assessment is only eligibility by default:
+automatic actuation is fail-closed unless `NMG_TOPOLOGY_AUTO_MERGE=1` is set.
+When explicitly enabled, semantic maintenance actuates at most one eligible
+`same_as` proposal per pass by default (configurable with
+`NMG_TOPOLOGY_AUTO_MERGE_LIMIT`, hard-capped at four), records the transform ID
+and any actuation error on the proposal, and uses the existing reversible merge
+journal. Uncertain split and merge proposals remain pending for explicit review.
 
 The first natural-conversation gate audit is recorded in
 `topology-gate-evaluation-2026-08-09.md`. On LoCoMo speaker identities, 20/20
@@ -750,8 +755,10 @@ injected same-person early/late candidates passed, 10/10 injected cross-person
 candidates were rejected by scope, all 20 eligible candidates lost eligibility
 after a competing `distinct_from` proposal, and assessment caused zero topology
 mutations. This validates the gate and its reversible proposal state, not
-automatic candidate generation, alias resolution, physical merge rollback, or
-end-to-end false-merge cost; those remain prerequisites for an actuator.
+automatic candidate generation, alias resolution, or end-to-end false-merge
+cost. The opt-in actuator and physical rollback now have deterministic coverage;
+natural false-merge and reversal evidence remain prerequisites for enabling it
+by default.
 
 The matched product probe in `matched-evaluation-2026-08-09.md` also found no
 answer-quality advantage for graph adaptation over NMG Lite (both 5/7) while
@@ -918,7 +925,8 @@ candidate pair
 ```
 
 Acceptance never physically deletes source nodes or evidence. The current
-explicit `mergeNodes` actuator does move memory ownership to a target node and
+explicit (or deliberately enabled, strongly gated automatic) `mergeNodes`
+actuator does move memory ownership to a target node and
 rewrites its local relation neighbourhood, so each new merge also writes an
 exact rollback journal: source/target node snapshots, original memory
 assignments, and the complete pre/post relation sets. `node rollback` restores

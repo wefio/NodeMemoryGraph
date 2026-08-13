@@ -57,12 +57,12 @@ data plus matched promotion evidence, not worker plumbing.
 
 The deterministic gates, rollback mechanisms, and controlled tests exist.
 Natural-data validation is the missing evidence, not another merge algorithm.
-An ordinary online-Pi audit on 2026-08-13 also confirmed that automatic merge
-actuation is not currently wired: `same_as` can accumulate into a pending
-proposal and pass a read-only eligibility assessment, but acceptance and
-`mergeNodes` remain explicit. The existing physical merge primitive must not be
-connected automatically until scope, temporal-state, same-name identity, and
-rollback outcomes are represented in that validation set.
+The automatic identity actuator is now wired behind the default-off
+`NMG_TOPOLOGY_AUTO_MERGE=1` switch. It accepts only strongly gated `same_as`
+proposals with one unambiguous scope identity, stores the resulting reversible
+transform on the proposal, and limits each maintenance pass. Do not enable it by
+default until scope, temporal-state, same-name identity, false-merge, and
+rollback outcomes are represented in the natural validation set.
 
 A second ordinary online-Pi audit found that the real stores had STG records but
 zero `claim_outcome_events`, zero claim posteriors, and therefore zero

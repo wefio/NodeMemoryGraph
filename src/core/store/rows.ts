@@ -100,6 +100,9 @@ export function mapTopologyProposal(row: Row): TopologyProposal {
     observations: Number(row.observations),
     estimatedGain: Number(row.estimated_gain),
     status: String(row.status) as TopologyProposal["status"],
+    actuatedTransformId: row.actuated_transform_id ? String(row.actuated_transform_id) : null,
+    actuationError: row.actuation_error ? String(row.actuation_error) : null,
+    actuatedAt: row.actuated_at ? String(row.actuated_at) : null,
     createdAt: String(row.created_at),
   };
 }

@@ -37,6 +37,7 @@ import type { Router } from "../router.ts";
 import type { Float32VectorCache } from "../vector-cache.ts";
 import { parseStringArray } from "./row-parse.ts";
 import {
+  canonicalNodeIdentity,
   clamp,
   mapActivation,
   mapConsolidationEvent,
@@ -296,6 +297,9 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
       const sourceNodeIds = [...new Set(input.sourceNodeIds)];
       if (sourceNodeIds.length < 2) throw new Error("merge requires at least two nodes");
       const sources = sourceNodeIds.map((id) => this.requireNode(id));
+      if (sources.some((source) => source.status !== "active")) {
+        throw new Error("merge sources must all be active");
+      }
       this.db.exec("BEGIN IMMEDIATE");
       try {
         const existingTarget = this.db
@@ -924,6 +928,8 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         expiryLimit?: number;
         pairLimit?: number;
         topologyNodeLimit?: number;
+        autoMerge?: boolean;
+        autoMergeLimit?: number;
       } = {},
     ): SemanticMaintenanceResult {
       const startedAt = nowMs();
@@ -935,6 +941,7 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         events: [],
       };
       let proposals: TopologyProposal[] = [];
+      const autoMergedTransformIds: string[] = [];
       timer.measure(SECTION.maintenanceSemantic, () => {
         // Materialize deferred retrieval-pair signals before any reader
         // (consolidation, topology proposals) consumes them. Bounded by the
@@ -949,6 +956,21 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
           pairLimit: options.pairLimit ?? 64,
           nodeLimit: options.topologyNodeLimit ?? 32,
         });
+        if (options.autoMerge) {
+          const limit = Math.max(1, Math.min(options.autoMergeLimit ?? 1, 4));
+          for (const proposal of this.topologyProposals("pending")) {
+            if (autoMergedTransformIds.length >= limit) break;
+            const assessment = this.assessAutomaticMergeProposal(proposal.id);
+            if (!assessment.eligible) continue;
+            try {
+              const actuation = this.actuateAutomaticMergeProposal(proposal.id);
+              autoMergedTransformIds.push(actuation.id);
+            } catch {
+              // The proposal keeps its actuation error for audit. One stale or
+              // concurrently claimed proposal must not block unrelated work.
+            }
+          }
+        }
       });
       timer.setTotal(nowMs() - startedAt);
       this.recordPerfAggregates(timer.snapshot());
@@ -958,11 +980,13 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         consolidatedRelationIds: consolidation.consolidatedRelations.map((item) => item.id),
         demotedRelationIds: consolidation.demotedRelations.map((item) => item.id),
         proposedTopologyIds: proposals.map((item) => item.id),
+        autoMergedTransformIds,
         rowsTouched:
           expiredMemoryIds.length +
           consolidation.consolidatedRelations.length +
           consolidation.demotedRelations.length +
-          proposals.length,
+          proposals.length +
+          autoMergedTransformIds.length,
         durationMs: timer.totalMs,
         createdAt: new Date().toISOString(),
       };
@@ -978,6 +1002,7 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
             ...result.consolidatedRelationIds,
             ...result.demotedRelationIds,
             ...result.proposedTopologyIds,
+            ...result.autoMergedTransformIds,
           ]).size,
           result.rowsTouched,
           JSON.stringify(result),
@@ -1231,6 +1256,28 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
           .map((item) => String(item.scope_json)),
       );
       if (scopes.size > 1) reasons.push("scope_mismatch");
+      let targetName: string | null = null;
+      if (scopes.size === 1) {
+        try {
+          const scope = JSON.parse([...scopes][0] ?? "{}") as Record<string, unknown>;
+          const identityValues = Object.entries(scope).filter(
+            ([, value]) => typeof value === "string" && value.trim().length > 0,
+          );
+          if (identityValues.length === 1) targetName = String(identityValues[0]![1]).trim();
+          else reasons.push("ambiguous_target_identity");
+        } catch {
+          reasons.push("invalid_scope_identity");
+        }
+      }
+      if (targetName) {
+        const canonicalIdentity = canonicalNodeIdentity(targetName);
+        const existingTarget = (
+          this.db.prepare("SELECT id, canonical_name FROM memory_nodes WHERE status = 'active'").all() as Row[]
+        ).find(
+          (candidate) => canonicalNodeIdentity(String(candidate.canonical_name)) === canonicalIdentity,
+        );
+        if (existingTarget) reasons.push("target_name_already_active");
+      }
       const proposedNodes = [...proposal.sourceNodeIds].sort().join("\0");
       const competing = (
         this.db
@@ -1249,8 +1296,41 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         proposalId,
         eligible: reasons.length === 0,
         reasons: [...new Set(reasons)],
+        targetName,
         policy: { minimumObservations, minimumEstimatedGain, minimumEvidenceMemories },
       };
+    }
+
+    actuateAutomaticMergeProposal(proposalId: string): NodeTransform {
+      const assessment = this.assessAutomaticMergeProposal(proposalId);
+      if (!assessment.eligible || !assessment.targetName) {
+        throw new Error(
+          `topology proposal ${proposalId} is not eligible for automatic merge: ${assessment.reasons.join(",")}`,
+        );
+      }
+      const proposal = this.topologyProposals("pending").find((item) => item.id === proposalId);
+      if (!proposal) throw new Error(`topology proposal ${proposalId} is not pending`);
+      try {
+        const transform = this.mergeNodes({
+          sourceNodeIds: proposal.sourceNodeIds,
+          targetName: assessment.targetName,
+        });
+        const actuatedAt = new Date().toISOString();
+        this.db
+          .prepare(
+            `UPDATE topology_proposals
+             SET status = 'accepted', actuated_transform_id = ?, actuation_error = NULL,
+                 actuated_at = ?
+             WHERE id = ? AND status = 'pending'`,
+          )
+          .run(transform.id, actuatedAt, proposalId);
+        return transform;
+      } catch (error) {
+        this.db
+          .prepare("UPDATE topology_proposals SET actuation_error = ? WHERE id = ? AND status = 'pending'")
+          .run(error instanceof Error ? error.message : String(error), proposalId);
+        throw error;
+      }
     }
 
     reviewTopologyProposal(proposalId: string, decision: "accept" | "reject"): TopologyProposal {

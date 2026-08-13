@@ -580,6 +580,7 @@ export interface SemanticMaintenanceResult {
   consolidatedRelationIds: string[];
   demotedRelationIds: string[];
   proposedTopologyIds: string[];
+  autoMergedTransformIds: string[];
   rowsTouched: number;
   durationMs: number;
   createdAt: string;
@@ -1048,6 +1049,9 @@ export interface TopologyProposal {
   observations: number;
   estimatedGain: number;
   status: "accepted" | "pending" | "rejected";
+  actuatedTransformId: string | null;
+  actuationError: string | null;
+  actuatedAt: string | null;
   createdAt: string;
 }
 
@@ -1055,6 +1059,7 @@ export interface TopologyAutomationAssessment {
   proposalId: string;
   eligible: boolean;
   reasons: string[];
+  targetName: string | null;
   policy: {
     minimumObservations: number;
     minimumEstimatedGain: number;

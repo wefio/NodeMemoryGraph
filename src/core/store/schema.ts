@@ -389,6 +389,9 @@ export function migrate(db: DatabaseSync): void {
       observations INTEGER NOT NULL,
       estimated_gain REAL NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
+      actuated_transform_id TEXT,
+      actuation_error TEXT,
+      actuated_at TEXT,
       created_at TEXT NOT NULL
     );
 
@@ -860,6 +863,14 @@ export function ensureTopologyProposalColumns(db: DatabaseSync): void {
     db.exec(
       "ALTER TABLE topology_proposals ADD COLUMN evidence_memory_ids_json TEXT NOT NULL DEFAULT '[]'",
     );
+  }
+  const additions: Array<[string, string]> = [
+    ["actuated_transform_id", "TEXT"],
+    ["actuation_error", "TEXT"],
+    ["actuated_at", "TEXT"],
+  ];
+  for (const [name, definition] of additions) {
+    if (!existing.has(name)) db.exec(`ALTER TABLE topology_proposals ADD COLUMN ${name} ${definition}`);
   }
 }
 

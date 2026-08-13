@@ -516,7 +516,7 @@ test("same-as and distinct-from are regulatory proposals, not traversal edges", 
   });
 });
 
-test("automatic merge gate accumulates evidence but never mutates topology", () => {
+test("automatic merge gate accumulates evidence without mutating topology by default", () => {
   withStore((store) => {
     const left = [0, 1, 2].map((index) =>
       store.remember({
@@ -554,6 +554,94 @@ test("automatic merge gate accumulates evidence but never mutates topology", () 
     assert.equal(proposal.observations, 5);
     assert.equal(store.topologyProposals("pending").length, 1);
     assert.equal(store.getRelations([left[0]!.node.id]).length, 0);
+  });
+});
+
+test("explicit automatic merge actuation is audited and rollbackable", () => {
+  withStore((store) => {
+    const left = [0, 1, 2].map((index) =>
+      store.remember({
+        statement: `Sam identity evidence A${index}`,
+        nodeName: "Sam A",
+        scope: { person: "sam" },
+      }),
+    );
+    const right = [0, 1, 2].map((index) =>
+      store.remember({
+        statement: `Sam identity evidence B${index}`,
+        nodeName: "Sam B",
+        scope: { person: "sam" },
+      }),
+    );
+    let proposal = store.proposeSemanticRelation({
+      sourceNodeId: left[0]!.node.id,
+      targetNodeId: right[0]!.node.id,
+      relationType: "same_as",
+      evidenceMemoryIds: [left[0]!.memory.id, right[0]!.memory.id],
+      confidence: 0.99,
+    });
+    for (let index = 0; index < 4; index += 1) {
+      proposal = store.proposeSemanticRelation({
+        sourceNodeId: left[0]!.node.id,
+        targetNodeId: right[0]!.node.id,
+        relationType: "same_as",
+        evidenceMemoryIds: [left[index % 3]!.memory.id, right[index % 3]!.memory.id],
+        confidence: 0.99,
+      });
+    }
+    const assessment = store.assessAutomaticMergeProposal(proposal.id);
+    assert.equal(assessment.eligible, true);
+    assert.equal(assessment.targetName, "sam");
+
+    const result = store.runSemanticMaintenance({ autoMerge: true, autoMergeLimit: 1 });
+    assert.equal(result.autoMergedTransformIds.length, 1);
+    const accepted = store.topologyProposals("accepted").find((item) => item.id === proposal.id);
+    assert.equal(accepted?.actuatedTransformId, result.autoMergedTransformIds[0]);
+    assert.ok(accepted?.actuatedAt);
+    assert.equal(accepted?.actuationError, null);
+    assert.equal(store.requireNode(left[0]!.node.id).status, "merged");
+    assert.equal(store.requireNode(right[0]!.node.id).status, "merged");
+
+    const rolledBack = store.rollbackNodeTransform(result.autoMergedTransformIds[0]!);
+    assert.ok(rolledBack.rolledBackAt);
+    assert.equal(store.requireNode(left[0]!.node.id).status, "active");
+    assert.equal(store.requireNode(right[0]!.node.id).status, "active");
+  });
+});
+
+test("automatic merge rejects ambiguous scope identity", () => {
+  withStore((store) => {
+    const left = store.remember({
+      statement: "Atlas database alias A",
+      nodeName: "Atlas DB A",
+      scope: { project: "atlas", component: "database" },
+    });
+    const right = store.remember({
+      statement: "Atlas database alias B",
+      nodeName: "Atlas DB B",
+      scope: { project: "atlas", component: "database" },
+    });
+    let proposal = store.proposeSemanticRelation({
+      sourceNodeId: left.node.id,
+      targetNodeId: right.node.id,
+      relationType: "same_as",
+      evidenceMemoryIds: [left.memory.id, right.memory.id],
+      confidence: 0.99,
+    });
+    for (let index = 0; index < 4; index += 1) {
+      proposal = store.proposeSemanticRelation({
+        sourceNodeId: left.node.id,
+        targetNodeId: right.node.id,
+        relationType: "same_as",
+        evidenceMemoryIds: [left.memory.id, right.memory.id],
+        confidence: 0.99,
+      });
+    }
+    const assessment = store.assessAutomaticMergeProposal(proposal.id, {
+      minimumEvidenceMemories: 2,
+    });
+    assert.equal(assessment.eligible, false);
+    assert.ok(assessment.reasons.includes("ambiguous_target_identity"));
   });
 });
 

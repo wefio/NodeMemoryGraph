@@ -150,8 +150,12 @@ export function rollbackProbe(pairs: readonly BpidPair[]): BpidTopologyReport["r
     const directory = mkdtempSync(join(tmpdir(), "nmg-bpid-rollback-"));
     const store = new NmgStore(join(directory, "nmg.sqlite"));
     try {
-      const left = rememberProfile(store, `left-${index}`, probe.pair.profile1);
-      const right = rememberProfile(store, `right-${index}`, probe.pair.profile2);
+      // The rollback probe injects one candidate identity namespace for the
+      // pair. BPID's pair label scores the outcome; raw profile fields remain
+      // candidate-generation evidence and never become an identity verdict.
+      const scope = { bpidCandidate: `candidate-${index}` };
+      const left = rememberProfile(store, `left-${index}`, probe.pair.profile1, scope);
+      const right = rememberProfile(store, `right-${index}`, probe.pair.profile2, scope);
       let proposalId = "";
       for (let observation = 0; observation < 5; observation += 1) {
         proposalId = store.proposeSemanticRelation({
@@ -212,6 +216,7 @@ function rememberProfile(
   store: NmgStore,
   nodeName: string,
   profile: BpidProfile,
+  scope: Record<string, string>,
 ): { nodeId: string; memoryIds: string[] } {
   const node = store.upsertNode({ canonicalName: nodeName, kind: "entity" });
   const statements = [
@@ -223,7 +228,7 @@ function rememberProfile(
   ];
   const memories = statements.map((statement) => {
     const history = store.appendHistory({ role: "explicit", content: statement });
-    return store.addMemory({ nodeId: node.id, evidenceId: history.id, statement });
+    return store.addMemory({ nodeId: node.id, evidenceId: history.id, statement, scope });
   });
   return {
     nodeId: node.id,

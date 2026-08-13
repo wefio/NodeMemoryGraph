@@ -461,6 +461,8 @@ export class NmgService {
             expiryLimit: policy.expiryLimit,
             pairLimit: policy.pairLimit,
             topologyNodeLimit: policy.topologyNodeLimit,
+            autoMerge: policy.autoMergeEnabled,
+            autoMergeLimit: policy.autoMergeLimit,
           });
         }
         if (result.consideredNodes >= nodeLimit) this.#signalMaintenance(store, kind, true);

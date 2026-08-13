@@ -19,12 +19,16 @@ test("maintenance policy owns defaults and validates environment overrides", () 
       NMG_MAINTENANCE_WRITE_THRESHOLD: "8",
       NMG_MAINTENANCE_ACCESS_THRESHOLD: "12",
       NMG_MAINTENANCE_NODE_LIMIT: "1000",
+      NMG_TOPOLOGY_AUTO_MERGE: "1",
+      NMG_TOPOLOGY_AUTO_MERGE_LIMIT: "99",
     }),
     {
       ...DEFAULT_MAINTENANCE_POLICY,
       writeThreshold: 8,
       accessThreshold: 12,
       nodeLimit: 64,
+      autoMergeEnabled: true,
+      autoMergeLimit: 4,
     },
   );
   assert.deepEqual(

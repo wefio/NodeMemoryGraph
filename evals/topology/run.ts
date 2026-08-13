@@ -227,7 +227,9 @@ function buildPersonFragments(
     const earlyTurns = turnsForSpeaker(sessions.slice(0, midpoint), speaker).slice(0, 3);
     const lateTurns = turnsForSpeaker(sessions.slice(midpoint), speaker).slice(0, 3);
     if (earlyTurns.length < 2 || lateTurns.length < 2) return [];
-    const scope = { conversation: sampleId, person: speaker };
+    // One scoped identity dimension is deliberate: the conversation prefix
+    // prevents same-name speakers in different samples from sharing identity.
+    const scope = { person: `${sampleId}:${speaker}` };
     return [{
       speaker,
       early: earlyTurns.map((turn, index) => store.remember({

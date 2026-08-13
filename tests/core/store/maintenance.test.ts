@@ -678,6 +678,7 @@ test("runSemanticMaintenance expires STG records and keeps topology changes prop
     assert.deepEqual(result.expiredMemoryIds, [expired.memory.id]);
     assert.equal(store.getMemory(expired.memory.id, "test-session")?.status, "inactive");
     assert.deepEqual(result.proposedTopologyIds, []);
+    assert.deepEqual(result.autoMergedTransformIds, []);
     assert.ok(
       store.perfAggregates().some((aggregate) => aggregate.section === "maintenance.semantic"),
     );

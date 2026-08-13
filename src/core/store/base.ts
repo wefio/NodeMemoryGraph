@@ -1479,7 +1479,16 @@ export class NmgStoreBase {
     return [...groups].map(([label, memoryIds]) => ({ label, memoryIds }));
   }
   insertTopologyProposal(
-    proposal: Omit<TopologyProposal, "createdAt" | "id" | "status" | "evidenceMemoryIds"> & {
+    proposal: Omit<
+      TopologyProposal,
+      | "actuatedAt"
+      | "actuatedTransformId"
+      | "actuationError"
+      | "createdAt"
+      | "id"
+      | "status"
+      | "evidenceMemoryIds"
+    > & {
       evidenceMemoryIds?: string[];
     },
   ): TopologyProposal {
@@ -1488,6 +1497,9 @@ export class NmgStoreBase {
       evidenceMemoryIds: [...new Set(proposal.evidenceMemoryIds ?? [])],
       id: randomUUID(),
       status: "pending",
+      actuatedTransformId: null,
+      actuationError: null,
+      actuatedAt: null,
       createdAt: new Date().toISOString(),
     };
     this.db

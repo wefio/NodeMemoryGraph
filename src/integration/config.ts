@@ -9,6 +9,8 @@ export interface MaintenancePolicyConfig {
   expiryLimit: number;
   pairLimit: number;
   topologyNodeLimit: number;
+  autoMergeEnabled: boolean;
+  autoMergeLimit: number;
 }
 
 export interface StgConsolidationPolicyConfig {
@@ -76,6 +78,8 @@ export const DEFAULT_MAINTENANCE_POLICY: MaintenancePolicyConfig = {
   expiryLimit: 256,
   pairLimit: 64,
   topologyNodeLimit: 32,
+  autoMergeEnabled: false,
+  autoMergeLimit: 1,
 };
 
 export function configuredMaintenancePolicy(
@@ -101,6 +105,11 @@ export function configuredMaintenancePolicy(
     expiryLimit: DEFAULT_MAINTENANCE_POLICY.expiryLimit,
     pairLimit: DEFAULT_MAINTENANCE_POLICY.pairLimit,
     topologyNodeLimit: DEFAULT_MAINTENANCE_POLICY.topologyNodeLimit,
+    autoMergeEnabled: environment.NMG_TOPOLOGY_AUTO_MERGE === "1",
+    autoMergeLimit: Math.min(
+      4,
+      positiveInteger(environment.NMG_TOPOLOGY_AUTO_MERGE_LIMIT, DEFAULT_MAINTENANCE_POLICY.autoMergeLimit),
+    ),
   };
 }
 
