@@ -179,6 +179,7 @@ let lastBoardHeartbeatAt = 0;
 async function registerBoardAgent(): Promise<void> {
   await invokeDaemon(connection, "taskBoard", {
     action: "registerAgent",
+    id: BOARD_AGENT_ID,
     agentName: BOARD_AGENT_ID,
     capabilities: BOARD_AGENT_CAPABILITIES,
     supportedInterfaces: "mcp",
@@ -190,7 +191,7 @@ async function heartbeatBoardAgent(): Promise<void> {
   if (Date.now() - lastBoardHeartbeatAt < 60_000) return;
   await invokeDaemon(connection, "taskBoard", {
     action: "heartbeat",
-    agentName: BOARD_AGENT_ID,
+    id: BOARD_AGENT_ID,
   });
   lastBoardHeartbeatAt = Date.now();
 }

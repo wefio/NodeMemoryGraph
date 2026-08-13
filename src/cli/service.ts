@@ -291,6 +291,7 @@ export class NmgService {
         }
         if (parsed.action === "registerAgent") {
           this.#getStore().registerTaskBoardAgent({
+            id: parsed.id,
             agentName: parsed.agentName,
             description: parsed.description,
             version: parsed.version,
@@ -299,13 +300,26 @@ export class NmgService {
             skills: parsed.skills,
             supportedInterfaces: parsed.supportedInterfaces,
           });
-          return { action: "registerAgent", agentName: parsed.agentName } as NmgMethodResult[M];
+          return {
+            action: "registerAgent",
+            agentName: parsed.agentName,
+            id: parsed.id,
+          } as NmgMethodResult[M];
         }
         if (parsed.action === "heartbeat") {
-          this.#getStore().heartbeatTaskBoardAgent({
+          this.#getStore().heartbeatTaskBoardAgent({ id: parsed.id });
+          return { action: "heartbeat", agentName: "", id: parsed.id } as NmgMethodResult[M];
+        }
+        if (parsed.action === "rename") {
+          this.#getStore().renameTaskBoardAgent({
+            id: parsed.id,
             agentName: parsed.agentName,
           });
-          return { action: "heartbeat", agentName: parsed.agentName } as NmgMethodResult[M];
+          return {
+            action: "rename",
+            agentName: parsed.agentName,
+            id: parsed.id,
+          } as NmgMethodResult[M];
         }
         if (parsed.action === "discover") {
           return {
@@ -1222,11 +1236,13 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
     "subscribe",
     "registerAgent",
     "heartbeat",
+    "rename",
     "discover",
   ] as const);
   if (action === "registerAgent") {
     return {
       action,
+      id: requiredString(params, "id"),
       agentName: requiredString(params, "agentName"),
       description: optionalString(params, "description"),
       version: optionalString(params, "version"),
@@ -1237,7 +1253,14 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
     };
   }
   if (action === "heartbeat") {
-    return { action, agentName: requiredString(params, "agentName") };
+    return { action, id: requiredString(params, "id") };
+  }
+  if (action === "rename") {
+    return {
+      action,
+      id: requiredString(params, "id"),
+      agentName: requiredString(params, "agentName"),
+    };
   }
   const agentId = requiredString(params, "agentId");
   if (action === "discover") {

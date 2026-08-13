@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type {
@@ -552,10 +552,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     // heartbeats it each tick). Never wakes an LLM. Capabilities come from
     // NMG_AGENT_CAPABILITIES (comma-separated) when set.
     try {
-      const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
+      const identity = loadOrCreateAgentIdentity(sessionId);
       await invoke("taskBoard", {
         action: "registerAgent",
-        agentName: agentId,
+        id: identity.id,
+        agentName: identity.agentName,
         capabilities: process.env.NMG_AGENT_CAPABILITIES?.trim() || undefined,
         supportedInterfaces: "pi",
       });
@@ -705,7 +706,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           ),
         ),
         importance: Type.Optional(
-          Type.Number({ minimum: 0, maximum: 1, description: nmgPrompts.reason_importance_parameter_description }),
+          Type.Number({
+            minimum: 0,
+            maximum: 1,
+            description: nmgPrompts.reason_importance_parameter_description,
+          }),
         ),
         evidenceRefs: Type.Optional(
           Type.Array(Type.String(), {
@@ -728,7 +733,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
         const sessionId = ctx.sessionManager.getSessionId();
         if (params.action === "add") {
-          if (!params.kind || !params.content) throw new Error("action=add requires kind and content");
+          if (!params.kind || !params.content)
+            throw new Error("action=add requires kind and content");
           const node = reasoningWorkspaces.add(sessionId, {
             kind: params.kind as ReasoningNodeKind,
             content: params.content,
@@ -737,11 +743,18 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             evidenceRefs: params.evidenceRefs,
           });
           const checkpoint = reasoningWorkspaces.checkpoint(sessionId);
-          return toolResult({ node, checkpoint }, `Reasoning node added: ${node.id}\n${checkpoint.text}`);
+          return toolResult(
+            { node, checkpoint },
+            `Reasoning node added: ${node.id}\n${checkpoint.text}`,
+          );
         }
         if (params.action === "update") {
           if (!params.nodeId) throw new Error("action=update requires nodeId");
-          if (params.content === undefined && params.status === undefined && params.importance === undefined) {
+          if (
+            params.content === undefined &&
+            params.status === undefined &&
+            params.importance === undefined
+          ) {
             throw new Error("action=update requires content, status, or importance");
           }
           const node = reasoningWorkspaces.update(sessionId, params.nodeId, {
@@ -750,7 +763,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             importance: params.importance,
           });
           const checkpoint = reasoningWorkspaces.checkpoint(sessionId);
-          return toolResult({ node, checkpoint }, `Reasoning node updated: ${node.id}\n${checkpoint.text}`);
+          return toolResult(
+            { node, checkpoint },
+            `Reasoning node updated: ${node.id}\n${checkpoint.text}`,
+          );
         }
         if (params.action === "link") {
           if (!params.sourceId || !params.targetId || !params.relation) {
@@ -1312,6 +1328,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           Type.Literal("unsubscribe"),
           Type.Literal("subscribe"),
           Type.Literal("discover"),
+          Type.Literal("rename"),
         ],
         { description: nmgPrompts.board_action_parameter_description },
       ),
@@ -1353,18 +1370,53 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       capabilities: Type.Optional(
         Type.String({ description: "discover 按能力过滤（可选，如 'stg,audit'）" }),
       ),
+      agentName: Type.Optional(
+        Type.String({ description: "rename 的新显示名（id 不变，reload 后保持）" }),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const sessionId = ctx.sessionManager.getSessionId();
       // Identity chain: explicit NMG_AGENT_ID wins, then the session id (stable
       // across a session), then the pid as a last resort. A pid alone would
       // change every launch and fragment cross-session attribution.
-      const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
+      const identity = loadOrCreateAgentIdentity(sessionId);
+      const agentId = identity.id;
+      const agentName = identity.agentName;
       // taskId is optional: without one, entries land on the shared world
       // channel (the lobby), which every Agent reads by default — no channel
       // name needs to be agreed on in advance. Explicit taskIds open named
       // channels that are surfaced in the world channel's lobby.
       const taskId = params.taskId?.trim() || WORLD_BOARD_ID;
+      // Runtime rename: change this agent's display name (id unchanged — it is
+      // the stable routing key). Persisted in the per-agent identity file so
+      // it survives reload; mirrored to the registry so discover shows it.
+      if (params.action === "rename") {
+        const newName = String(params.agentName ?? "").trim();
+        if (!newName) {
+          return toolResult(
+            { action: "rename", agentName, id: agentId },
+            `当前 agent 名：${agentName}（id=${agentId}）。用法：nmg_board rename <新名>`,
+          );
+        }
+        const anchor = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
+        const identityFile = join(resolveNmgDataDir(), "agents", anchor, "identity.json");
+        cachedIdentity = { id: agentId, agentName: newName };
+        try {
+          mkdirSync(join(resolveNmgDataDir(), "agents", anchor), { recursive: true });
+          writeFileSync(identityFile, JSON.stringify(cachedIdentity, null, 2), "utf8");
+        } catch {
+          // read-only dir — rename is in-memory only for this process
+        }
+        const result = (await invoke("taskBoard", {
+          action: "rename",
+          id: agentId,
+          agentName: newName,
+        })) as { action: "rename"; agentName: string; id: string };
+        return toolResult(
+          result,
+          `已改名：${result.agentName}（id=${result.id}）——reload 后保持；定向 to= 可用新名或 id。`,
+        );
+      }
       // Unsubscribe/subscribe are session-scoped (whether THIS session keeps
       // getting wake notices for a channel), handled apart from entry reads.
       // Topic-based membership: subscribe joins a channel (named channels only
@@ -1532,7 +1584,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       return; // stale ctx — skip this tick, retry later
     }
     if (!sessionId) return;
-    const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
+    const identity = loadOrCreateAgentIdentity(sessionId);
+    const agentId = identity.id;
+    const agentName = identity.agentName;
     // System-layer identity heartbeat (A2A AgentCard local edition): refresh
     // this agent's registry row each tick so discover() can find it. Never
     // wakes an LLM — the registry is read on demand via discover. Capabilities
@@ -1540,7 +1594,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     try {
       await invoke("taskBoard", {
         action: "registerAgent",
-        agentName: agentId,
+        id: identity.id,
+        agentName: identity.agentName,
         capabilities: process.env.NMG_AGENT_CAPABILITIES?.trim() || undefined,
         supportedInterfaces: "pi",
       });
@@ -1551,7 +1606,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const candidates: Array<TaskBoardToolEntry & { taskId: string }> = [];
       const collect = (taskId: string, entries: TaskBoardToolEntry[] | undefined) => {
         for (const entry of entries ?? []) {
-          if (isBoardWakeCandidate(entry, { sessionId, agentId })) {
+          if (isBoardWakeCandidate(entry, { sessionId, agentId, agentName })) {
             candidates.push({ ...entry, taskId });
           }
         }
@@ -1686,9 +1741,7 @@ const EVIDENCE_SOURCE_WINDOW = 64;
 export const PI_BRANCH_SHAPE_VERSION = "pi.branch.v1" as const;
 
 export type PiEvidenceResolutionReason =
-  | "branch_api_unavailable"
-  | "exact_excerpt_not_found"
-  | "incompatible_branch_shape";
+  "branch_api_unavailable" | "exact_excerpt_not_found" | "incompatible_branch_shape";
 
 export interface PiEvidenceResolution {
   version: typeof PI_BRANCH_SHAPE_VERSION;
@@ -2343,6 +2396,50 @@ function toolResult(details: unknown, text: string) {
   return { content: [{ type: "text" as const, text }], details };
 }
 
+interface AgentIdentity {
+  /** Stable unique routing key — never changes (industry practice: A2A
+   * AgentCard id, Microsoft resolve-by-id). Equal to the anchor on first
+   * creation. */
+  id: string;
+  /** Mutable display label — runtime-renamable via nmg_board rename. */
+  agentName: string;
+}
+
+let cachedIdentity: AgentIdentity | null = null;
+
+/** Stable agent identity: a persistent per-agent file under
+ * ~/.nmg/agents/<anchor>/identity.json, where anchor = NMG_AGENT_ID (the
+ * agent's own stable id, set by the agent itself) or the session id. The id
+ * (routing key) never changes; agentName is a mutable display label that a
+ * runtime `rename` updates. Multiple agents on one machine never collide
+ * because each has its own anchor directory. Survives reload (session-boundary
+ * fix): the identity file is re-read, so id and name persist across a pi
+ * restart. */
+function loadOrCreateAgentIdentity(sessionId: string): AgentIdentity {
+  if (cachedIdentity) return cachedIdentity;
+  const anchor = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
+  const dir = join(resolveNmgDataDir(), "agents", anchor);
+  const file = join(dir, "identity.json");
+  try {
+    const raw = JSON.parse(readFileSync(file, "utf8")) as AgentIdentity;
+    if (raw.id && raw.agentName) {
+      cachedIdentity = { id: raw.id, agentName: raw.agentName };
+      return cachedIdentity;
+    }
+  } catch {
+    // no identity file yet — create below
+  }
+  const identity: AgentIdentity = { id: anchor, agentName: anchor };
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, JSON.stringify(identity, null, 2), "utf8");
+  } catch {
+    // read-only directory — fall back to the in-memory identity
+  }
+  cachedIdentity = identity;
+  return identity;
+}
+
 interface TaskBoardToolEntry {
   id: string;
   sequence: number;
@@ -2393,6 +2490,7 @@ interface TaskBoardToolResult {
   acked?: string[];
   /** discover: online agent roster (A2A discovery localised). */
   agents?: Array<{
+    id: string;
     agentName: string;
     description: string | null;
     capabilities: string | null;
@@ -2425,7 +2523,7 @@ export const BROADCAST_PREFIX = "[NMG board 协作广播]";
  * former holder (audit finding 2026-08-13). */
 export function isBoardWakeCandidate(
   entry: TaskBoardToolEntry,
-  input: { sessionId: string; agentId: string; now?: Date },
+  input: { sessionId: string; agentId: string; agentName?: string; now?: Date },
 ): boolean {
   const now = input.now ?? new Date();
   const ownEcho =
@@ -2433,10 +2531,12 @@ export function isBoardWakeCandidate(
     (entry.sourceSessionId == null && entry.agentId === input.agentId);
   const liveClaim =
     entry.claimExpiresAt != null && new Date(entry.claimExpiresAt).getTime() > now.getTime();
-  // Directed delivery (find→direct): an entry addressed to another stable
-  // agent_name never wakes me — only the addressee's LLM is woken. Everyone
+  // Directed delivery (find→direct): an entry addressed to another agent
+  // never wakes me — only the addressee's LLM is woken. Matched against the
+  // stable id OR the mutable display name (both are the same agent). Everyone
   // else sees it on read but stays silent.
-  const addressedToOther = entry.to != null && entry.to !== input.agentId;
+  const addressedToOther =
+    entry.to != null && entry.to !== input.agentId && entry.to !== input.agentName;
   // Reply-gated serial handoff: only the outstanding actionable wakes; pending
   // entries sit in the queue (read-visible) until the outstanding one is
   // claimed ("回复=接手") or resolved, which promotes them. Directed entries are
@@ -2527,7 +2627,9 @@ function formatTaskBoardResult(
       for (const agent of agents) {
         const desc = agent.description ? ` — ${agent.description}` : "";
         const caps = agent.capabilities ? ` [${agent.capabilities}]` : "";
-        lines.push(`- ${agent.agentName}${desc}${caps} (last ${agent.lastSeenAt.slice(0, 19)})`);
+        lines.push(
+          `- ${agent.agentName}${desc}${caps} (id=${agent.id.slice(0, 8)}·last ${agent.lastSeenAt.slice(0, 19)})`,
+        );
       }
     }
     lines.push(

@@ -371,9 +371,12 @@ export interface NmgTaskBoardListSubscriptionsParams {
 
 /** System-layer agent registration (A2A AgentCard local edition). Called by
  * hooks/extensions on startup; never wakes an LLM. Fields aligned with A2A
- * AgentCard so a future external-agent gateway maps with zero model change. */
+ * AgentCard so a future external-agent gateway maps with zero model change.
+ * id = stable unique routing key (A2A AgentCard id field); agentName = mutable
+ * display label, runtime-renamable without changing the id. */
 export interface NmgTaskBoardRegisterAgentParams {
   action: "registerAgent";
+  id: string;
   agentName: string;
   description?: string;
   version?: string;
@@ -383,9 +386,18 @@ export interface NmgTaskBoardRegisterAgentParams {
   supportedInterfaces?: string;
 }
 
-/** System-layer heartbeat: refreshes last_seen_at so the agent stays online. */
+/** System-layer heartbeat: refresh last_seen_at for a stable id. */
 export interface NmgTaskBoardHeartbeatParams {
   action: "heartbeat";
+  id: string;
+}
+
+/** Runtime rename: change the display agent_name for a stable id (routing key
+ * unchanged). Industry practice: names are not unique/stable, so only the
+ * human-readable label is mutable. */
+export interface NmgTaskBoardRenameParams {
+  action: "rename";
+  id: string;
   agentName: string;
 }
 
@@ -414,6 +426,7 @@ export type NmgTaskBoardParams =
   | NmgTaskBoardListSubscriptionsParams
   | NmgTaskBoardRegisterAgentParams
   | NmgTaskBoardHeartbeatParams
+  | NmgTaskBoardRenameParams
   | NmgTaskBoardDiscoverParams;
 
 export interface NmgRetentionCandidatesParams {
@@ -535,10 +548,11 @@ export type NmgMethodResult = {
         action: "listSubscriptions";
         subscriptions: Array<{ taskId: string; subscribedAt: string }>;
       }
-    | { action: "registerAgent" | "heartbeat"; agentName: string }
+    | { action: "registerAgent" | "heartbeat" | "rename"; agentName: string; id: string }
     | {
         action: "discover";
         agents: Array<{
+          id: string;
           agentName: string;
           description: string | null;
           capabilities: string | null;

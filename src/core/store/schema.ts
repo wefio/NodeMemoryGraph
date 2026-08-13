@@ -748,14 +748,13 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
       subscribed_at TEXT NOT NULL,
       PRIMARY KEY (session_id, task_id)
     );
-    -- Agent registry (A2A AgentCard local edition): each hook/extension
-    -- reports its identity + capabilities on startup and heartbeat. Fields
-    -- aligned with A2A AgentCard (name/description/version/url/capabilities/
-    -- skills/supportedInterfaces) so a future external-agent gateway maps with
-    -- zero model change. System-layer only: never wakes an LLM, never enters
-    -- context. Online = last_seen_at within NMG_AGENT_ONLINE_MS.
+    -- Agent registry (A2A AgentCard local edition): stable unique id (routing)
+    -- + mutable display agent_name. Industry practice (A2A AgentCard id field,
+    -- Microsoft resolve-by-id): names are not unique/stable, so the registry is
+    -- keyed by id; agent_name is a human-readable, runtime-renamable label.
     CREATE TABLE IF NOT EXISTS task_board_agents (
-      agent_name TEXT PRIMARY KEY,
+      id TEXT PRIMARY KEY,
+      agent_name TEXT NOT NULL,
       description TEXT,
       version TEXT,
       url TEXT,
@@ -766,6 +765,40 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
       created_at TEXT NOT NULL
     );
   `);
+  // v2 migration: the registry was keyed by agent_name (session fallback);
+  // rebuild keyed by stable id with agent_name as display, backfilling id =
+  // agent_name so existing rows survive. Run before any new-code INSERT.
+  const agentColumns = db.prepare("PRAGMA table_info(task_board_agents)").all() as Row[];
+  if (!agentColumns.some((row) => String(row.name) === "id")) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec("ALTER TABLE task_board_agents RENAME TO task_board_agents_legacy");
+      db.exec(`CREATE TABLE task_board_agents (
+        id TEXT PRIMARY KEY,
+        agent_name TEXT NOT NULL,
+        description TEXT,
+        version TEXT,
+        url TEXT,
+        capabilities TEXT,
+        skills TEXT,
+        supported_interfaces TEXT,
+        last_seen_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`);
+      db.exec(`INSERT INTO task_board_agents (
+          id, agent_name, description, version, url, capabilities, skills,
+          supported_interfaces, last_seen_at, created_at
+        ) SELECT
+          agent_name, agent_name, description, version, url, capabilities, skills,
+          supported_interfaces, last_seen_at, created_at
+        FROM task_board_agents_legacy`);
+      db.exec("DROP TABLE task_board_agents_legacy");
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
 }
 
 export function ensureEmbeddingTable(db: DatabaseSync): void {
@@ -870,7 +903,8 @@ export function ensureTopologyProposalColumns(db: DatabaseSync): void {
     ["actuated_at", "TEXT"],
   ];
   for (const [name, definition] of additions) {
-    if (!existing.has(name)) db.exec(`ALTER TABLE topology_proposals ADD COLUMN ${name} ${definition}`);
+    if (!existing.has(name))
+      db.exec(`ALTER TABLE topology_proposals ADD COLUMN ${name} ${definition}`);
   }
 }
 

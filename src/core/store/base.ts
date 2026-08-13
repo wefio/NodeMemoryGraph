@@ -393,6 +393,7 @@ export class NmgStoreBase {
    * supportedInterfaces) so a future external-agent gateway maps with zero
    * model change. */
   registerTaskBoardAgent(input: {
+    id: string;
     agentName: string;
     description?: string;
     version?: string;
@@ -405,10 +406,11 @@ export class NmgStoreBase {
     this.db
       .prepare(
         `INSERT INTO task_board_agents(
-           agent_name, description, version, url, capabilities, skills,
+           id, agent_name, description, version, url, capabilities, skills,
            supported_interfaces, last_seen_at, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(agent_name) DO UPDATE SET
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           agent_name = excluded.agent_name,
            description = excluded.description,
            version = excluded.version,
            url = excluded.url,
@@ -418,6 +420,7 @@ export class NmgStoreBase {
            last_seen_at = excluded.last_seen_at`,
       )
       .run(
+        input.id,
         input.agentName,
         input.description ?? null,
         input.version ?? null,
@@ -430,11 +433,20 @@ export class NmgStoreBase {
       );
   }
 
-  /** System-layer heartbeat: refresh last_seen so the agent stays online. */
-  heartbeatTaskBoardAgent(input: { agentName: string }): void {
+  /** System-layer heartbeat: refresh last_seen so the agent stays online.
+   * Keyed by the stable id (never the mutable display name). */
+  heartbeatTaskBoardAgent(input: { id: string }): void {
     this.db
-      .prepare("UPDATE task_board_agents SET last_seen_at = ? WHERE agent_name = ?")
-      .run(new Date().toISOString(), input.agentName);
+      .prepare("UPDATE task_board_agents SET last_seen_at = ? WHERE id = ?")
+      .run(new Date().toISOString(), input.id);
+  }
+
+  /** Runtime rename: change the display agent_name for a stable id (the id is
+   * the routing key and never changes; only the human-readable label does). */
+  renameTaskBoardAgent(input: { id: string; agentName: string }): void {
+    this.db
+      .prepare("UPDATE task_board_agents SET agent_name = ? WHERE id = ?")
+      .run(input.agentName, input.id);
   }
 
   /** Find-and-direct roster: online agents, optionally filtered by a
@@ -442,6 +454,7 @@ export class NmgStoreBase {
    * last_seen_at within NMG_AGENT_ONLINE_MS (default 10 min). Never wakes an
    * LLM — this is the identity roster used to pick `to=` for a directed put. */
   discoverTaskBoardAgents(input: { capabilities?: string }): Array<{
+    id: string;
     agentName: string;
     description: string | null;
     capabilities: string | null;
@@ -450,7 +463,7 @@ export class NmgStoreBase {
     const onlineMs = Number(process.env.NMG_AGENT_ONLINE_MS ?? 600_000);
     const since = new Date(Date.now() - onlineMs).toISOString();
     let sql =
-      "SELECT agent_name, description, capabilities, last_seen_at " +
+      "SELECT id, agent_name, description, capabilities, last_seen_at " +
       "FROM task_board_agents WHERE last_seen_at >= ?";
     const args: Array<string | number | null> = [since];
     if (input.capabilities) {
@@ -459,6 +472,7 @@ export class NmgStoreBase {
     }
     sql += " ORDER BY last_seen_at DESC";
     return (this.db.prepare(sql).all(...args) as Row[]).map((row) => ({
+      id: String(row.id),
       agentName: String(row.agent_name),
       description: row.description === null ? null : String(row.description),
       capabilities: row.capabilities === null ? null : String(row.capabilities),

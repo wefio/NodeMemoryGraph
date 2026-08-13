@@ -454,20 +454,25 @@ test("task board agent registry: register/heartbeat/discover with capability fil
   try {
     process.env.NMG_AGENT_ONLINE_MS = "600000";
     store.registerTaskBoardAgent({
+      id: "codex-001",
       agentName: "codex",
       description: "main coding agent",
       version: "1.0.0",
       capabilities: "stg,audit,blackboard",
     });
     store.registerTaskBoardAgent({
+      id: "kimi-002",
       agentName: "kimi",
       capabilities: "adapter,kimi-hook",
     });
 
-    // discover returns all online agents, newest heartbeat first.
+    // discover returns all online agents, newest heartbeat first, keyed by
+    // stable id with a mutable display name.
     const all = store.discoverTaskBoardAgents({});
     assert.deepEqual(all.map((a) => a.agentName).sort(), ["codex", "kimi"]);
+    assert.deepEqual(all.map((a) => a.id).sort(), ["codex-001", "kimi-002"]);
     const codexAgent = all.find((a) => a.agentName === "codex")!;
+    assert.equal(codexAgent.id, "codex-001");
     assert.equal(codexAgent.description, "main coding agent");
 
     // capability filter narrows the roster (A2A discovery semantics).
@@ -479,10 +484,16 @@ test("task board agent registry: register/heartbeat/discover with capability fil
     const none = store.discoverTaskBoardAgents({ capabilities: "nonexistent" });
     assert.deepEqual(none, []);
 
-    // heartbeat keeps an agent online and bumps last_seen.
-    store.heartbeatTaskBoardAgent({ agentName: "kimi" });
+    // heartbeat keeps an agent online (keyed by id) and bumps last_seen.
+    store.heartbeatTaskBoardAgent({ id: "kimi-002" });
     const again = store.discoverTaskBoardAgents({});
     assert.ok(again.find((a) => a.agentName === "kimi"));
+
+    // Runtime rename changes only the display name; the id routing key is
+    // unchanged (industry practice: names are mutable, ids are stable).
+    store.renameTaskBoardAgent({ id: "codex-001", agentName: "codex-main" });
+    const renamed = store.discoverTaskBoardAgents({});
+    assert.ok(renamed.find((a) => a.id === "codex-001" && a.agentName === "codex-main"));
 
     // A tiny online window, after a real pause, drops everyone (last_seen in
     // the past). Sleep avoids same-millisecond clock races.

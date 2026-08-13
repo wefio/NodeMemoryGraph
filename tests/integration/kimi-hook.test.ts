@@ -128,6 +128,7 @@ test("kimi hook reports a stable discoverable agent identity without enabling wa
       method: "taskBoard",
       params: {
         action: "registerAgent",
+        id: "kimi-reviewer",
         agentName: "kimi-reviewer",
         capabilities: "review",
         supportedInterfaces: "kimi-hook",

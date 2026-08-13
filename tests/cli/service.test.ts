@@ -103,7 +103,10 @@ test("task board acknowledge records a no-reply confirmation visible on read and
       });
       assert.equal(acked.action, "acknowledge");
       if (acked.action !== "acknowledge") throw new Error("expected acknowledge");
-      assert.deepEqual(acked.entry.ackedBy, ["agent-a", "agent-b"].slice(0, agentId === "agent-a" ? 1 : 2));
+      assert.deepEqual(
+        acked.entry.ackedBy,
+        ["agent-a", "agent-b"].slice(0, agentId === "agent-a" ? 1 : 2),
+      );
     }
 
     // Read surfaces the N checkmarks.
@@ -541,7 +544,9 @@ test("resident service keeps mixed STG/LTG evidence in one AG and attributes bot
     const stg = new NmgStore(stgStorePath(projectDir, "session-alpha"));
     try {
       assert.ok(ltg.getContext([durable.memory.id]).results[0]!.memory.accessCount > 0);
-      assert.ok(stg.getContext([local.memory.id], 0, "session-alpha").results[0]!.memory.accessCount > 0);
+      assert.ok(
+        stg.getContext([local.memory.id], 0, "session-alpha").results[0]!.memory.accessCount > 0,
+      );
     } finally {
       ltg.close();
       stg.close();
@@ -1136,11 +1141,16 @@ test("task board RPC parses directed delivery and agent discovery actions", asyn
   try {
     const registered = await service.invoke("taskBoard", {
       action: "registerAgent",
+      id: "kimi-002",
       agentName: "kimi",
       capabilities: "audit,stg",
       supportedInterfaces: "kimi",
     });
-    assert.deepEqual(registered, { action: "registerAgent", agentName: "kimi" });
+    assert.deepEqual(registered, {
+      action: "registerAgent",
+      agentName: "kimi",
+      id: "kimi-002",
+    });
 
     const discovered = await service.invoke("taskBoard", {
       action: "discover",
@@ -1150,7 +1160,14 @@ test("task board RPC parses directed delivery and agent discovery actions", asyn
     });
     assert.equal(discovered.action, "discover");
     if (discovered.action !== "discover") throw new Error("expected discover");
-    assert.deepEqual(discovered.agents.map((agent) => agent.agentName), ["kimi"]);
+    assert.deepEqual(
+      discovered.agents.map((agent) => agent.agentName),
+      ["kimi"],
+    );
+    assert.deepEqual(
+      discovered.agents.map((agent) => agent.id),
+      ["kimi-002"],
+    );
 
     const written = await service.invoke("taskBoard", {
       action: "put",
@@ -1165,10 +1182,11 @@ test("task board RPC parses directed delivery and agent discovery actions", asyn
     assert.equal(written.entry.to, "kimi");
     assert.equal(written.entry.serialState, null);
 
-    assert.deepEqual(
-      await service.invoke("taskBoard", { action: "heartbeat", agentName: "kimi" }),
-      { action: "heartbeat", agentName: "kimi" },
-    );
+    assert.deepEqual(await service.invoke("taskBoard", { action: "heartbeat", id: "kimi-002" }), {
+      action: "heartbeat",
+      agentName: "",
+      id: "kimi-002",
+    });
   } finally {
     service.close();
     rmSync(directory, { recursive: true, force: true });
@@ -1231,7 +1249,10 @@ test("task board subscriptions are explicit membership: only joined channels wak
       sessionId: "session-a",
     });
     if (joined.action !== "listSubscriptions") throw new Error("expected listSubscriptions");
-    assert.deepEqual(joined.subscriptions.map((item) => item.taskId), ["review-x"]);
+    assert.deepEqual(
+      joined.subscriptions.map((item) => item.taskId),
+      ["review-x"],
+    );
 
     // session-b never joined review-x.
     const other = await service.invoke("taskBoard", {

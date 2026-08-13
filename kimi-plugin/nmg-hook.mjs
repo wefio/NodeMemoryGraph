@@ -167,7 +167,8 @@ async function rpcCall(lease, method, params) {
 
 function liveLease(dataDir) {
   const lease = readJson(join(dataDir, "nmg.sqlite.server.json"));
-  if (!lease || lease.transport !== "http" || !lease.host || !lease.port || !lease.token) return null;
+  if (!lease || lease.transport !== "http" || !lease.host || !lease.port || !lease.token)
+    return null;
   return pidAlive(lease.pid) ? lease : null;
 }
 
@@ -191,6 +192,7 @@ export async function reportAgentPresence(payload, options = {}) {
   const identity = kimiAgentIdentity(payload, options.environment ?? process.env);
   await rpc("taskBoard", {
     action: "registerAgent",
+    id: identity.agentId,
     agentName: identity.agentId,
     capabilities: identity.capabilities,
     supportedInterfaces: "kimi-hook",
