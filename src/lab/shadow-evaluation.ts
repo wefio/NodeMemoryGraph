@@ -1,4 +1,13 @@
-import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import { dirname } from "node:path";
 
 import type {
@@ -275,8 +284,11 @@ export class ShadowEvaluationLog {
   }
 
   #append(event: ShadowEvaluationEvent): boolean {
+    const lockPath = `${this.#path}.lock`;
+    let lock: number | null = null;
     try {
       mkdirSync(dirname(this.#path), { recursive: true });
+      lock = acquireFileLock(lockPath);
       const line = `${JSON.stringify(event)}\n`;
       if (
         existsSync(this.#path) &&
@@ -287,6 +299,18 @@ export class ShadowEvaluationLog {
       return true;
     } catch {
       return false;
+    } finally {
+      if (lock !== null) {
+        try {
+          closeSync(lock);
+        } finally {
+          try {
+            unlinkSync(lockPath);
+          } catch {
+            // Another cleanup path may already have removed a stale lock.
+          }
+        }
+      }
     }
   }
 
@@ -297,6 +321,26 @@ export class ShadowEvaluationLog {
       const source = index === 1 ? this.#path : `${this.#path}.${index - 1}`;
       const target = `${this.#path}.${index}`;
       if (existsSync(source)) renameSync(source, target);
+    }
+  }
+}
+
+const LOCK_WAIT = new Int32Array(new SharedArrayBuffer(4));
+
+function acquireFileLock(path: string, timeoutMs = 5_000): number {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      return openSync(path, "wx");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      try {
+        if (Date.now() - statSync(path).mtimeMs > 30_000) unlinkSync(path);
+      } catch {
+        // The owner may have released the lock between exists/stat/unlink.
+      }
+      if (Date.now() >= deadline) throw new Error(`shadow evaluation log lock timed out: ${path}`);
+      Atomics.wait(LOCK_WAIT, 0, 0, 10);
     }
   }
 }

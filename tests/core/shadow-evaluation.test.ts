@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
 import test from "node:test";
 
 import { ShadowEvaluationLog } from "../../src/lab/shadow-evaluation.ts";
@@ -168,3 +169,52 @@ test("shadow evaluation rotates bounded local logs", async () => {
     await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
   }
 });
+
+test("shadow evaluation serializes cross-process appends and rotation", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "nmg-shadow-multiprocess-"));
+  const path = join(directory, "shadow.jsonl");
+  const modulePath = new URL("../../src/lab/shadow-evaluation.ts", import.meta.url).href;
+  try {
+    await Promise.all(
+      Array.from({ length: 4 }, (_, processIndex) =>
+        runChild([
+          "--experimental-strip-types",
+          "--input-type=module",
+          "-e",
+          `import { ShadowEvaluationLog } from ${JSON.stringify(modulePath)};
+           const log = new ShadowEvaluationLog(${JSON.stringify(path)}, { maxBytes: 4096, retainedFiles: 8 });
+           for (let i = 0; i < 15; i += 1) {
+             if (!log.feedback({ graphId: \`p${processIndex}-g\${i}\`, sessionId: \`p${processIndex}\`, note: "x".repeat(40) })) process.exit(2);
+           }`,
+        ]),
+      ),
+    );
+    const graphIds = new Set<string>();
+    for (let suffix = 8; suffix >= 0; suffix -= 1) {
+      const file = suffix === 0 ? path : `${path}.${suffix}`;
+      try {
+        for (const line of readFileSync(file, "utf8").trim().split("\n").filter(Boolean)) {
+          graphIds.add((JSON.parse(line) as { graphId: string }).graphId);
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
+    assert.equal(graphIds.size, 60);
+  } finally {
+    await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
+  }
+});
+
+function runChild(args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, { stdio: ["ignore", "ignore", "pipe"] });
+    let error = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => (error += chunk));
+    child.once("error", reject);
+    child.once("exit", (code) =>
+      code === 0 ? resolve() : reject(new Error(`shadow writer exited ${code}: ${error}`)),
+    );
+  });
+}
