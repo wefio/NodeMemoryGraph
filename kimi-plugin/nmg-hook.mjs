@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * NMG write-reminder hook for Kimi Code CLI.
+ * NMG hook for Kimi Code CLI.
  *
  * Kimi Code hooks receive one JSON payload on stdin; for events that affect
  * the main flow (PreToolUse, Stop, UserPromptSubmit) stdout text is attached
@@ -9,15 +9,32 @@
  *
  * Events handled:
  *   UserPromptSubmit — completion keywords (done/完成了/收工/…) → nudge
+ *                      + task-board wake poll (see below)
  *   PreToolUse(Bash) — `git commit` in the command              → nudge
  *
- * The nudge is a weak reminder, mirroring the Pi extension's completion
- * nudge (src/prompts/nmg-prompts.yaml): NMG memory is available; never a
- * forced write. Exit 0 always — this hook never blocks.
+ * Board wake (degraded equivalent of the Pi extension's wake loop): Kimi
+ * hooks are event-driven with no background timer, so instead of pushing
+ * notices while idle, each UserPromptSubmit polls the daemon for new open
+ * entries on the world channel plus explicitly subscribed channels. Same
+ * protocol as Pi: own-echo entries are skipped, LIVE claims suppress the
+ * entry (a lapsed claim returns it to the pool and wakes again — matching the
+ * e68ce7b isBoardWakeCandidate fix), broadcast entries are never pushed,
+ * deliveryCheck filters already-notified ones, and a recordDelivery receipt
+ * is written for the picked entry so it never re-notifies. Budget and
+ * cooldown come from the shared <dataDir>/board-wake.json (enabled defaults
+ * to off); dedup state is per-host in kimi-board-wake-state.json.
+ *
+ * The hook is deliberately passive: it never starts a daemon. It only polls
+ * when a live HTTP lease exists (<dataDir>/nmg.sqlite.server.json with an
+ * alive pid). All failures are silent — exit 0 always.
  *
  * Payload shapes are defensive: the prompt may be a plain string or a
  * ContentPart[] array ({type:"text", text}); both are handled.
  */
+import { readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const NUDGE = [
   "<nmg_nudge>",
@@ -30,6 +47,22 @@ const NUDGE = [
 
 const COMPLETION_PATTERN =
   /(?:完成了|收工|搞定|结束|提交了|committed|done|finished|wrapped\s+up)/iu;
+
+const WORLD_BOARD_ID = "default";
+const BROADCAST_PREFIX = "[NMG board 协作广播]";
+const KIND_RANK = { question: 0, blocker: 1, handoff: 2, goal: 3, note: 4, decision: 5, result: 6 };
+const KIND_LABEL = {
+  question: "问题",
+  blocker: "阻塞",
+  handoff: "交接",
+  goal: "目标",
+  note: "记录",
+  decision: "决定",
+  result: "结果",
+};
+// Per-call ceiling: the UserPromptSubmit hook timeout is 5s and the poll is
+// several sequential RPCs, so each call gets a tight budget.
+const RPC_TIMEOUT_MS = 2_000;
 
 function promptText(payload) {
   const prompt = payload?.prompt;
@@ -58,17 +91,183 @@ function shouldNudge(payload) {
   return false;
 }
 
-let input = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk) => (input += chunk));
-process.stdin.on("end", () => {
+function isPromptSubmit(payload) {
+  const event = payload?.hook_event_name ?? payload?.event;
+  return event === "UserPromptSubmit";
+}
+
+/** Pure board-wake gate shared by the poller and tests. A claim suppresses a
+ * notice only while its lease is live; stale claim columns are lazy-expired by
+ * design and must return to the candidate pool. */
+export function isBoardWakeCandidate(entry, { sessionId, agentId, now = Date.now() }) {
+  const ownEcho =
+    entry.sourceSessionId === sessionId ||
+    (entry.sourceSessionId == null && entry.agentId === agentId);
+  const liveClaim = entry.claimExpiresAt != null && new Date(entry.claimExpiresAt).getTime() > now;
+  return (
+    entry.status === "open" &&
+    !ownEcho &&
+    !liveClaim &&
+    !String(entry.content ?? "").startsWith(BROADCAST_PREFIX)
+  );
+}
+
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function writeJson(path, value) {
+  try {
+    writeFileSync(path, JSON.stringify(value), "utf8");
+  } catch {
+    // best-effort; losing dedup state only means an entry could re-notify
+  }
+}
+
+function pidAlive(pid) {
+  try {
+    process.kill(Number(pid), 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+async function rpcCall(lease, method, params) {
+  const response = await fetch(`http://${lease.host}:${lease.port}/`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${lease.token}`,
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", method, params, id: 1 }),
+    signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
+  });
+  const parsed = await response.json();
+  if (parsed.error) throw new Error(parsed.error.message ?? "rpc error");
+  return parsed.result;
+}
+
+/**
+ * Poll the task board for one undelivered open entry and format its wake
+ * notice. Returns "" when there is nothing to say (or wake is off).
+ */
+async function pollBoardWake(payload) {
+  const dataDir = process.env.NMG_DATA_DIR?.trim() || join(homedir(), ".nmg");
+  const config = readJson(join(dataDir, "board-wake.json"));
+  if (config?.enabled !== true) return "";
+
+  const statePath = join(dataDir, "kimi-board-wake-state.json");
+  const state = readJson(statePath) ?? { budgetDate: "", budgetUsed: 0, lastWakeAt: 0 };
+  const now = Date.now();
+  const cooldownMs =
+    config.cooldownMs === 0 ? 0 : Math.max(30_000, Number(config.cooldownMs) || 600_000);
+  if (cooldownMs > 0 && now - Number(state.lastWakeAt || 0) < cooldownMs) return "";
+  const budget = config.budget === 0 ? 0 : Math.max(1, Number(config.budget) || 8);
+  const today = new Date(now).toISOString().slice(0, 10);
+  if (state.budgetDate !== today) {
+    state.budgetDate = today;
+    state.budgetUsed = 0;
+  }
+  if (budget > 0 && state.budgetUsed >= budget) return "";
+
+  const lease = readJson(join(dataDir, "nmg.sqlite.server.json"));
+  if (!lease || lease.transport !== "http" || !lease.host || !lease.port || !lease.token) return "";
+  if (!pidAlive(lease.pid)) return "";
+
+  // Kimi hook payloads carry session_id on Claude-compatible events; the
+  // "kimi-hook" fallback intentionally shares receipts across sessions
+  // rather than fragmenting dedup per process.
+  const sessionId = payload?.session_id ?? payload?.sessionId ?? "kimi-hook";
+  const agentId = process.env.NMG_AGENT_ID?.trim() || sessionId;
+  const rpc = (method, params) => rpcCall(lease, method, params);
+
+  const candidates = [];
+  const collect = (taskId, entries) => {
+    for (const entry of entries ?? []) {
+      if (isBoardWakeCandidate(entry, { sessionId, agentId, now })) {
+        candidates.push({ ...entry, taskId });
+      }
+    }
+  };
+  const world = await rpc("taskBoard", { action: "read", taskId: WORLD_BOARD_ID, agentId });
+  collect(WORLD_BOARD_ID, world?.entries);
+  const subs = await rpc("taskBoard", { action: "listSubscriptions", agentId, sessionId });
+  for (const board of subs?.subscriptions ?? []) {
+    if (!board.taskId || board.taskId === WORLD_BOARD_ID) continue;
+    const read = await rpc("taskBoard", { action: "read", taskId: board.taskId, agentId });
+    collect(board.taskId, read?.entries);
+  }
+  if (candidates.length === 0) return "";
+
+  const fresh = [];
+  for (const taskId of new Set(candidates.map((candidate) => candidate.taskId))) {
+    const check = await rpc("taskBoard", {
+      action: "deliveryCheck",
+      taskId,
+      agentId,
+      sessionId,
+      entryIds: candidates.filter((candidate) => candidate.taskId === taskId).map((c) => c.id),
+    });
+    if (check?.suppressed) continue;
+    const delivered = new Set(check?.delivered ?? []);
+    const acked = new Set(check?.acked ?? []);
+    for (const candidate of candidates) {
+      if (candidate.taskId === taskId && !delivered.has(candidate.id) && !acked.has(candidate.id)) {
+        fresh.push(candidate);
+      }
+    }
+  }
+  if (fresh.length === 0) return "";
+
+  fresh.sort(
+    (left, right) =>
+      (KIND_RANK[left.kind] ?? 9) - (KIND_RANK[right.kind] ?? 9) ||
+      String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? "")),
+  );
+  const pick = fresh[0];
+  // Receipt first: at-least-once notification beats a lost dedup write.
+  await rpc("taskBoard", {
+    action: "recordDelivery",
+    entryId: pick.id,
+    sessionId,
+    agentId,
+    source: "wake",
+  }).catch(() => {});
+  state.budgetUsed += 1;
+  state.lastWakeAt = now;
+  writeJson(statePath, state);
+
+  const excerpt = pick.content.length > 140 ? `${pick.content.slice(0, 140)}…` : pick.content;
+  const label = KIND_LABEL[pick.kind] ?? "条目";
+  return `[NMG board] 你订阅的频道 ${pick.taskId} 有新${label}：#${pick.sequence} — ${excerpt}（open，可认领）。需要的话用 nmg_board read 查看详情、claim 认领处理。`;
+}
+
+async function runFromStdin() {
+  let input = "";
+  process.stdin.setEncoding("utf8");
+  for await (const chunk of process.stdin) input += chunk;
   try {
     const payload = JSON.parse(input || "{}");
+    const output = [];
     if (shouldNudge(payload)) {
       // Plain stdout text is attached to the context; exit 0 = allow.
-      process.stdout.write(NUDGE);
+      output.push(NUDGE);
     }
+    if (isPromptSubmit(payload)) {
+      const notice = await pollBoardWake(payload).catch(() => "");
+      if (notice) output.push(notice);
+    }
+    if (output.length > 0) process.stdout.write(output.join("\n"));
   } catch {
     // A hook must never break the session: stay silent on malformed input.
   }
-});
+}
+
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  await runFromStdin();
+}

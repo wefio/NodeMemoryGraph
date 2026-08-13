@@ -1,10 +1,19 @@
 # NMG Memory MCP server
 
-Three durable-memory tools served over MCP stdio:
+Durable-memory tools plus the task board, served over MCP stdio:
 
 - `nmg_search` — compact memory headers (mid/node/type/tier/preview)
 - `nmg_get` — exact memory statements and source evidence
 - `nmg_remember` — save facts/preferences/constraints/states/events
+  (`boardSource` marks a memory as distilled from a board entry)
+- `nmg_board` — task-board channels: put/read/resolve/acknowledge/claim/
+  release/subscribe/unsubscribe; no taskId means the shared world channel
+  (the lobby), reading it lists active named channels
+
+Board identity: `NMG_AGENT_ID` / `NMG_SESSION_ID` env vars win; otherwise the
+server uses its own pid (`mcp:<pid>`), which is stable per host session.
+Reading open entries writes delivery receipts so wake loops never re-push
+what this session already saw.
 
 The MCP server manages the local daemon automatically (JSON-RPC over HTTP;
 start on connect, safe stop on exit, reuse if already running).
@@ -33,10 +42,7 @@ Register the server as a stdio transport:
     "nmg": {
       "type": "stdio",
       "command": "node",
-      "args": [
-        "--experimental-strip-types",
-        "claude-plugins/nmg-memory/agents/memory-copilot.ts"
-      ]
+      "args": ["--experimental-strip-types", "claude-plugins/nmg-memory/agents/memory-copilot.ts"]
     }
   }
 }

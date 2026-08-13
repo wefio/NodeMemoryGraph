@@ -1,18 +1,43 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
+
+import { isBoardWakeCandidate } from "../../kimi-plugin/nmg-hook.mjs";
 
 const hookPath = resolve(import.meta.dirname, "../../kimi-plugin/nmg-hook.mjs");
 
 function runHook(payload: unknown): string {
+  const dataDir = mkdtempSync(resolve(tmpdir(), "nmg-kimi-hook-test-"));
   const { status, stdout } = spawnSync(process.execPath, [hookPath], {
     input: JSON.stringify(payload),
     encoding: "utf8",
+    env: { ...process.env, NMG_DATA_DIR: dataDir },
   });
+  rmSync(dataDir, { recursive: true, force: true });
   assert.equal(status, 0);
   return stdout;
 }
+
+test("kimi board wake candidate respects echo, broadcast, and claim lease liveness", () => {
+  const now = Date.parse("2026-08-13T12:00:00.000Z");
+  const base = {
+    status: "open",
+    content: "Review the adapter",
+    agentId: "other",
+    sourceSessionId: "other-session",
+  };
+  const wake = (entry: Record<string, unknown>) =>
+    isBoardWakeCandidate({ ...base, ...entry }, { sessionId: "me", agentId: "me", now });
+
+  assert.equal(wake({}), true);
+  assert.equal(wake({ sourceSessionId: "me" }), false);
+  assert.equal(wake({ content: "[NMG board 协作广播] meta" }), false);
+  assert.equal(wake({ claimedBy: "worker", claimExpiresAt: "2026-08-13T13:00:00.000Z" }), false);
+  assert.equal(wake({ claimedBy: "worker", claimExpiresAt: "2026-08-13T11:00:00.000Z" }), true);
+});
 
 test("kimi hook nudges on completion keywords, git commit, and stays silent otherwise", () => {
   const keyword = runHook({ hook_event_name: "UserPromptSubmit", prompt: "完成了，收工" });
