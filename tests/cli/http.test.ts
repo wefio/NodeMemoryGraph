@@ -8,6 +8,7 @@ import test from "node:test";
 import { httpCall } from "../../src/cli/http-client.ts";
 import { httpHandler } from "../../src/cli/http-server.ts";
 import type { ServerState } from "../../src/cli/lifecycle.ts";
+import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
 
 type EphemeralServer = { state: ServerState };
@@ -54,7 +55,7 @@ function withServer(
 test("JSON-RPC over HTTP round-trips hello, remember, search, and get", async () => {
   await withServer(async (state) => {
     const hello = (await httpCall(state, "hello")) as { protocol: string };
-    assert.equal(hello.protocol, "nmg.v1");
+    assert.equal(hello.protocol, NMG_PROTOCOL_VERSION);
 
     const remembered = (await httpCall(state, "remember", {
       statement: "Atlas must use SQLite for offline operation.",

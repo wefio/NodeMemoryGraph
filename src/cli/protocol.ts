@@ -25,7 +25,10 @@ import type {
   TruthStatus,
 } from "../core/types.ts";
 
-export const NMG_PROTOCOL_VERSION = "nmg.v1" as const;
+// Bump only when a live daemon from the previous revision cannot faithfully
+// implement the current client contract. v2 adds directed task-board routing,
+// serial handoff state, and agent discovery.
+export const NMG_PROTOCOL_VERSION = "nmg.v2" as const;
 
 export const NMG_CAPABILITIES = [
   "hello",

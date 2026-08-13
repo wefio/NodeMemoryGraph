@@ -204,10 +204,13 @@ second daemon for the same database is rejected, stale leases are recovered,
 and `Shutdown` performs the normal close path. PID termination is only a
 fallback when the HTTP endpoint cannot be reached.
 
-Protocol version `nmg.v1` exposes the typed lifecycle, memory, retrieval,
+Protocol version `nmg.v2` exposes the typed lifecycle, memory, retrieval,
 maintenance, STG-sync, and Task Board methods declared in `protocol.ts` over
 JSON-RPC 2.0. HTTP is the only resident protocol;
 NMG does not maintain a parallel NDJSON or platform-specific socket API.
+The lease records the protocol version. Clients fail closed when a live daemon
+uses an incompatible protocol and require an explicit `nmg daemon restart` at a
+safe coordination point; they never replace a shared daemon automatically.
 
 ### 4.2 Modular harness adapters
 
@@ -1438,7 +1441,8 @@ The stable daemon already owns agent-neutral `search -> get(activeGraphId)` use
 attribution. The richer feedback action stays in the Pi adapter because only the
 harness can observe answer completion, user correction, tool rounds, and model
 usage. A future second adapter should implement the same versioned shadow-event
-contract rather than adding a Lab-dependent feedback method to `nmg.v1`.
+contract rather than adding a Lab-dependent feedback method to the stable daemon
+protocol.
 
 The same bounded log records harness-level progressive-disclosure interventions
 as separate `tool_flow` events. In particular, a third explicit search made
@@ -2327,7 +2331,7 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
    zero-configuration and not-yet-ready fallback. Node/leaf-only and the
    current union ranker are explicitly gated off after the LoCoMo ablation.
 5. **Complete:** expose the application boundary through an
-   agent-independent `nmg` CLI and cross-platform `nmg.v1`
+   agent-independent `nmg` CLI and cross-platform `nmg.v2`
    JSON-RPC-over-HTTP daemon. The Pi extension uses the same daemon through a
    persistent HTTP client and ownership-aware lifecycle.
 

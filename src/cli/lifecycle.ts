@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 export interface ServerState {
   pid: number;
   startedAt: string;
+  protocol?: string;
   transport?: "http";
   host?: string;
   port?: number;
@@ -99,6 +100,7 @@ export function readServerState(statePath: string): ServerState | undefined {
       ? {
           pid: Number(value.pid),
           startedAt: String(value.startedAt ?? ""),
+          protocol: typeof value.protocol === "string" ? value.protocol : undefined,
           transport: value.transport === "http" ? "http" : undefined,
           host: typeof value.host === "string" ? value.host : undefined,
           port: Number.isSafeInteger(value.port) ? Number(value.port) : undefined,

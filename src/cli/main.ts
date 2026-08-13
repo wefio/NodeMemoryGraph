@@ -14,6 +14,8 @@ import {
   type NmgSetStorageStateParams,
   type NmgSplitNodeParams,
   type NmgSyncStgParams,
+  type NmgHelloResult,
+  NMG_PROTOCOL_VERSION,
 } from "./protocol.ts";
 import {
   assertSpecOptions,
@@ -39,11 +41,14 @@ import { NmgService } from "./service.ts";
 import { histogramQuantile } from "../core/perf.ts";
 import type { MemoryContext } from "../core/types.ts";
 import { compactSearchContext } from "../integration/search-projection.ts";
+import { assertDaemonProtocol } from "./daemon-client.ts";
 
 // The CLI surface (synopsis, option details, known options/flags) is
 // assembled from the command registry in commands.ts; only the daemon
 // synopsis line is local because daemon commands are not RPC methods.
-const USAGE = cliUsage(["nmg daemon start|status|stop [--data-dir DIR | --db FILE] [--json]"]);
+const USAGE = cliUsage([
+  "nmg daemon start|restart|status|stop [--data-dir DIR | --db FILE] [--json]",
+]);
 
 export async function runCli(
   argv: readonly string[],
@@ -106,10 +111,19 @@ export async function runCli(
 
   try {
     const state = readServerState(serverStatePath(service.databasePath));
-    const result =
-      state?.transport === "http" && isProcessAlive(state.pid)
-        ? await httpCall(state, parsed.command, (parsed.params ?? {}) as Record<string, unknown>)
-        : await service.invoke(parsed.command, parsed.params);
+    let result: unknown;
+    if (state?.transport === "http" && isProcessAlive(state.pid)) {
+      if (state.protocol !== NMG_PROTOCOL_VERSION) {
+        assertDaemonProtocol((await httpCall(state, "hello")) as NmgHelloResult);
+      }
+      result = await httpCall(
+        state,
+        parsed.command,
+        (parsed.params ?? {}) as Record<string, unknown>,
+      );
+    } else {
+      result = await service.invoke(parsed.command, parsed.params);
+    }
     const output =
       parsed.compactJson && parsed.command === "search"
         ? compactSearchContext(result as MemoryContext)
@@ -150,6 +164,8 @@ async function runDaemonCommand(
       running: true,
       pid: existing.pid,
       endpoint: `${existing.host}:${existing.port}`,
+      compatible:
+        (status as Partial<NmgHelloResult> | undefined)?.protocol === NMG_PROTOCOL_VERSION,
       status,
     };
   }
@@ -168,11 +184,29 @@ async function runDaemonCommand(
     return stopServer(service.databasePath);
   }
 
-  if (command === "daemon-start") {
+  let restartedFrom: number | undefined;
+  if (command === "daemon-restart") {
+    if (existing?.transport === "http" && isProcessAlive(existing.pid)) {
+      restartedFrom = existing.pid;
+      await httpCall(existing, "shutdown");
+      await waitForProcessExit(existing.pid);
+    } else {
+      await stopServer(service.databasePath);
+    }
+    rmSync(statePath, { force: true });
+  }
+
+  if (command === "daemon-start" || command === "daemon-restart") {
     if (existing && isProcessAlive(existing.pid)) {
       try {
-        await httpCall(existing, "hello");
-        return { started: false, alreadyRunning: true, pid: existing.pid };
+        const hello = (await httpCall(existing, "hello")) as NmgHelloResult;
+        return {
+          started: false,
+          alreadyRunning: true,
+          pid: existing.pid,
+          compatible: hello.protocol === NMG_PROTOCOL_VERSION,
+          protocol: hello.protocol,
+        };
       } catch {
         rmSync(statePath, { force: true });
       }
@@ -190,9 +224,11 @@ async function runDaemonCommand(
     );
     child.unref();
     const state = await waitForState(statePath);
-    await httpCall(state, "hello");
+    assertDaemonProtocol((await httpCall(state, "hello")) as NmgHelloResult);
     return {
       started: true,
+      restarted: command === "daemon-restart",
+      restartedFrom,
       pid: state.pid,
       endpoint: `${state.host}:${state.port}`,
     };
@@ -241,7 +277,12 @@ async function waitForProcessExit(pid: number): Promise<void> {
   if (isProcessAlive(pid)) throw new Error(`NMG daemon pid ${pid} did not stop`);
 }
 
-type DaemonCommand = "daemon-run" | "daemon-start" | "daemon-status" | "daemon-stop";
+type DaemonCommand =
+  | "daemon-run"
+  | "daemon-start"
+  | "daemon-restart"
+  | "daemon-status"
+  | "daemon-stop";
 
 function isDaemonCommand(command: ParsedArguments["command"]): command is DaemonCommand {
   return command.startsWith("daemon-");
@@ -315,8 +356,8 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
 
 function daemonArguments(rest: readonly string[]): ParsedArguments {
   const action = rest[0];
-  if (!["run", "start", "status", "stop"].includes(action ?? "")) {
-    throw new Error("daemon requires start, status, or stop");
+  if (!["run", "start", "restart", "status", "stop"].includes(action ?? "")) {
+    throw new Error("daemon requires start, restart, status, or stop");
   }
   const values = parseOptions(rest.slice(1));
   const allowedFlags = new Set(action === "run" ? [] : ["json"]);
@@ -527,8 +568,12 @@ function humanResult(value: unknown): string {
 }
 
 function humanDaemonResult(result: Record<string, unknown>): string {
+  if (result.restarted)
+    return `Restarted NMG daemon from pid ${String(result.restartedFrom)} to pid ${String(result.pid)} at ${String(result.endpoint)}.\n`;
   if (result.started)
     return `Started NMG daemon pid ${String(result.pid)} at ${String(result.endpoint)}.\n`;
+  if (result.alreadyRunning && result.compatible === false)
+    return `NMG daemon pid ${String(result.pid)} uses incompatible protocol ${String(result.protocol ?? "unknown")}; run \`nmg daemon restart\` when active agents can reconnect.\n`;
   if (result.alreadyRunning) return `NMG daemon is already running (pid ${String(result.pid)}).\n`;
   if (result.running)
     return `NMG daemon pid ${String(result.pid)} is running at ${String(result.endpoint)}.\n`;

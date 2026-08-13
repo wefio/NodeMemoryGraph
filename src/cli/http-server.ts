@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 
 import type { ServerLease } from "./lifecycle.ts";
 import type { NmgMethod } from "./protocol.ts";
-import { NMG_METHODS, NmgProtocolError } from "./protocol.ts";
+import { NMG_METHODS, NMG_PROTOCOL_VERSION, NmgProtocolError } from "./protocol.ts";
 import { NmgService } from "./service.ts";
 
 const MAX_REQUEST_BYTES = 1_048_576;
@@ -62,7 +62,13 @@ export async function serveHttp(
   await listen(server);
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
-  lease.update({ transport: "http", host: "127.0.0.1", port, token });
+  lease.update({
+    transport: "http",
+    host: "127.0.0.1",
+    port,
+    token,
+    protocol: NMG_PROTOCOL_VERSION,
+  });
 
   await closed;
   lease.release();

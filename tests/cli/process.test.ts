@@ -435,6 +435,44 @@ test("HTTP daemon starts once, serves CLI requests, and stops cleanly", () => {
     assert.equal(status.running, true);
     assert.equal(status.pid, started.pid);
 
+    runLauncher([
+      "remember",
+      "A daemon restart must preserve this persistence marker.",
+      "--node",
+      "Daemon persistence",
+      "--type",
+      "fact",
+      "--json",
+      "--data-dir",
+      directory,
+    ]);
+
+    const restarted = runLauncher([
+      "daemon",
+      "restart",
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as {
+      started: boolean;
+      restarted: boolean;
+      restartedFrom: number;
+      pid: number;
+    };
+    assert.equal(restarted.started, true);
+    assert.equal(restarted.restarted, true);
+    assert.equal(restarted.restartedFrom, started.pid);
+    assert.notEqual(restarted.pid, started.pid);
+
+    const restartedSearch = runLauncher([
+      "search",
+      "daemon persistence marker",
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { results: unknown[] };
+    assert.equal(restartedSearch.results.length, 1, "restart preserves the database");
+
     const stopped = runLauncher(["daemon", "stop", "--json", "--data-dir", directory]) as {
       stopped: boolean;
     };

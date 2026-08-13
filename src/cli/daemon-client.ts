@@ -5,7 +5,11 @@ import { join, resolve } from "node:path";
 import { resolveNmgDataDir } from "./data-path.ts";
 import { httpCall } from "./http-client.ts";
 import { isProcessAlive, readServerState, serverStatePath, type ServerState } from "./lifecycle.ts";
-import type { NmgMethod } from "./protocol.ts";
+import {
+  NMG_PROTOCOL_VERSION,
+  type NmgHelloResult,
+  type NmgMethod,
+} from "./protocol.ts";
 
 const DEFAULT_DAEMON_LIMIT = 32;
 const DAEMON_COUNT_MEMO_MS = 1_000;
@@ -24,9 +28,11 @@ export async function connectDaemon(databasePath: string): Promise<DaemonConnect
   const existing = readyState(statePath);
   if (existing) {
     try {
-      await httpCall(existing, "hello");
+      const hello = (await httpCall(existing, "hello")) as NmgHelloResult;
+      assertDaemonProtocol(hello);
       return { startedByCaller: false, state: existing, databasePath };
-    } catch {
+    } catch (error) {
+      if (error instanceof NmgDaemonCompatibilityError) throw error;
       // The OS may have reused a stale descriptor's PID for an unrelated
       // process. Only an authenticated endpoint proves daemon identity.
       rmSync(statePath, { force: true });
@@ -44,8 +50,24 @@ export async function connectDaemon(databasePath: string): Promise<DaemonConnect
   child.unref();
 
   const state = await waitForState(statePath);
-  await httpCall(state, "hello");
+  assertDaemonProtocol((await httpCall(state, "hello")) as NmgHelloResult);
   return { startedByCaller: true, state, databasePath };
+}
+
+export class NmgDaemonCompatibilityError extends Error {
+  constructor(actualProtocol: unknown) {
+    super(
+      `NMG daemon protocol ${String(actualProtocol ?? "unknown")} is incompatible with client ` +
+        `${NMG_PROTOCOL_VERSION}; run \`nmg daemon restart\` when active agents can reconnect`,
+    );
+    this.name = "NmgDaemonCompatibilityError";
+  }
+}
+
+export function assertDaemonProtocol(hello: Pick<NmgHelloResult, "protocol">): void {
+  if (hello.protocol !== NMG_PROTOCOL_VERSION) {
+    throw new NmgDaemonCompatibilityError(hello.protocol);
+  }
 }
 
 export async function shutdownOwnedDaemon(connection: DaemonConnection): Promise<void> {
