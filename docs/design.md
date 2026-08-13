@@ -1,7 +1,7 @@
 # NMG design baseline
 
 **Status:** 0.9 / P3 runtime memory model implemented
-**Updated:** 2026-08-11
+**Updated:** 2026-08-13
 
 ## 1. Definition
 
@@ -2040,9 +2040,10 @@ Important gaps between the prototype and the target plugin:
 - the ANN experiment has unacceptable recall on the near-duplicate workload;
 - automatic extraction evaluation and the matched full-history sample are not
   yet large enough to make a product-quality claim;
-- the four official benchmark adapters validate and use official-format parsing,
-  but larger repeated official-protocol runs have not yet established NMG's
-  general capability improvement;
+- the four official benchmark adapters validate and use official-format parsing.
+  One full matched BEAM 100K run now establishes a dataset-specific capability
+  gain over empty retrieved context, but repeated runs and cross-suite evidence
+  are still required for a general capability claim;
 - the HaluMem operation-level adapter now measures extracted records,
   interference rejection, and update retrieval with the official judges. Its
   first natural slice exposed raw-message ingress pollution (0/1 interference
@@ -2158,10 +2159,14 @@ Current development evidence (updated 2026-07-30):
   and 400 questions: NMG with BGE record vectors, K=20, QPP2 off, and DeepSeek V4
   Flash as both reader and judge scored `0.6422 ± 0.3974`. Search latency was
   40.9 ms P50 and 185.1 ms P95; all 400 search, answer, and judge records
-  completed without skipping. This is an absolute backend result, not an NMG
-  improvement claim until the matched no-memory/raw-session arm is complete.
-  Full parameters, per-dimension scores, tokens, timing, and runner corrections
-  are recorded in `beam-100k-evaluation-2026-08-13.md`.
+  completed without skipping. A matched empty-retrieval-context control using
+  the same questions, prompt, reader, and judge scored `0.2724 ± 0.4086`; the
+  paired gain was `+0.3698` (20,000-sample descriptive paired-bootstrap 95%
+  interval `[+0.3205, +0.4183]`; 251 wins, 123 ties, 26 losses). Abstention
+  regressed by `-0.3875`, so this is evidence of dataset-specific utility, not a
+  blanket safety or generalization claim. Full parameters, per-dimension scores,
+  accounting caveats, timing, and runner corrections are recorded in
+  `beam-100k-evaluation-2026-08-13.md`.
 - reasoning-workspace development benchmark, three tasks with three repeats per
   condition using DeepSeek V4 Flash: full-context baseline and workspace both
   achieved 100% exact task success, while mean latency rose from 5.79 s to
@@ -2233,11 +2238,13 @@ merge.
 
 The current Pi regression, seven-category invariant suite, controlled topology
 ablation, and strict seven-question LongMemEval matched sample prove integration
-and mechanism behaviour, not general capability improvement. The matched sample
-did ingest every haystack session for each selected question, but its
-zero-configuration FTS/hashing path missed five of seven required evidence sets.
-A matched external-embedding run and a larger fixed sample with repeated model
-runs are required before claiming that NMG improves agent performance.
+and mechanism behaviour. The full matched BEAM 100K run additionally demonstrates
+a substantial gain over empty retrieved context for one fixed dataset/model/judge
+configuration. It does not yet prove cross-suite, cross-model, or repeated-run
+general capability improvement. The LongMemEval sample did ingest every haystack
+session for each selected question, but its zero-configuration FTS/hashing path
+missed five of seven required evidence sets. Cross-suite matched external-
+embedding runs and repeated model runs remain required for a broader claim.
 
 The public evaluation portfolio is deliberately complementary rather than a
 single composite leaderboard:

@@ -2,11 +2,12 @@
 
 ## Status
 
-The first full OmniMemEval BEAM 100K NMG run is complete. Search, answer,
-judge, metric, and report stages all produced usable artifacts. This is an NMG
-backend result, not yet a capability delta: a matched no-memory/raw-session arm
-with the same reader, prompt, questions, token budget, and judge is still
-required.
+The first full OmniMemEval BEAM 100K NMG run and a matched empty-memory control
+are complete. Both arms used the same 400 questions, answer prompt, reader, and
+judge. NMG scored **0.6422**, versus **0.2724** without retrieved memory, for a
+paired mean gain of **+0.3698**. This demonstrates the value of the retrieved
+NMG context on this fixed BEAM run; it does not isolate individual retrieval,
+storage, graph, or QPP mechanisms.
 
 ## Pinned configuration
 
@@ -18,7 +19,9 @@ required.
 - answer model: `deepseek-v4-flash`;
 - judge model: `deepseek-v4-flash`, one run per rubric item;
 - memory workers: 2;
-- LLM workers used by this run: 32;
+- NMG-arm LLM workers: 32;
+- empty-memory control: adaptive worker pool with minimum/initial 16 and maximum
+  32, checkpointed in groups of 4;
 - failed search/answer/judge skipping: all off.
 
 The ignored local artifact is:
@@ -28,7 +31,7 @@ The ignored local artifact is:
 under the local OmniMemEval checkout. Its replay config and environment snapshot
 contain the complete reproducibility metadata without live credentials.
 
-## Result
+## NMG result
 
 Overall Nugget Score: **0.6422 ± 0.3974** over 400 questions.
 
@@ -47,6 +50,39 @@ Overall Nugget Score: **0.6422 ± 0.3974** over 400 questions.
 
 Pipeline integrity was 400 successful records and zero failed or skipped
 records for each of search, answer, and evaluation.
+
+## Matched empty-memory control
+
+The control preserved every question, rubric, prompt, reader, and judge setting,
+but replaced retrieved context with the empty string. It is therefore an
+**empty-retrieval-context control**, not an official raw-session/full-history
+reader. Answer and evaluation both completed 400/400 with no failed or skipped
+records.
+
+| Dimension | NMG | Empty memory | Delta |
+|---|---:|---:|---:|
+| **overall** | **0.6422** | **0.2724** | **+0.3698** |
+| abstention | 0.6125 | 1.0000 | -0.3875 |
+| contradiction resolution | 0.7500 | 0.1156 | +0.6344 |
+| event ordering | 0.2606 | 0.0056 | +0.2551 |
+| information extraction | 0.7776 | 0.1365 | +0.6411 |
+| instruction following | 0.8438 | 0.5750 | +0.2688 |
+| knowledge update | 0.5750 | 0.0000 | +0.5750 |
+| multi-session reasoning | 0.6276 | 0.1129 | +0.5147 |
+| preference following | 0.9187 | 0.7063 | +0.2125 |
+| summarization | 0.3433 | 0.0471 | +0.2963 |
+| temporal reasoning | 0.7125 | 0.0250 | +0.6875 |
+
+On the 400 matched questions, NMG won 251, tied 123, and lost 26. A
+deterministic 20,000-sample paired bootstrap over per-question score differences
+gave a descriptive 95% interval of **[+0.3205, +0.4183]**. This interval was
+computed after the run and is not a preregistered confirmatory test.
+
+The abstention reversal is expected: with no context, refusing unsupported
+answers is often correct. NMG's lower abstention score means retrieved context
+also makes the reader answer some questions that should be refused. This is a
+real precision/safety regression to inspect, not a reason to hide the category
+inside the positive overall mean.
 
 ## Retrieval cost
 
@@ -89,7 +125,9 @@ The local OmniMemEval branch now:
 1. executes rubric calls through one bounded API pool;
 2. uses checkpointed question groups of 2–4 (default 4);
 3. writes each completed question atomically;
-4. defaults BEAM LLM concurrency to 16 and accepts ordinary 16–32 operation;
+4. supports a bounded adaptive LLM worker pool (minimum/initial 16, maximum 32):
+   sustained success grows the pool, while 429, timeout, and 5xx congestion
+   signals shrink it without falling below the configured minimum;
 5. reads and writes reports explicitly as UTF-8 on Windows;
 6. redacts both sides of replay environment diffs.
 
@@ -98,13 +136,23 @@ concurrency four and completed in 0.179 s with correct score aggregation.
 
 ## Interpretation and next gate
 
-The strongest categories are preference following and instruction following;
-event ordering and summarization are the clearest weaknesses. This run alone
-cannot say whether NMG improved the Agent, because model ability and judge
-variance are not controlled by a baseline comparison.
+The matched control supports the bounded claim that NMG-provided context improved
+answer quality on this fixed BEAM 100K run. The largest gains occur in temporal
+reasoning, information extraction, contradiction resolution, and knowledge
+update—the categories that most directly require prior evidence. Event ordering
+and summarization remain weak in absolute terms despite improving over the
+control.
 
-The next required benchmark step is a matched BEAM arm without NMG (or with the
-official raw-session baseline if that is the benchmark-defined comparison),
-using the exact same 400 questions, DeepSeek Flash answer/judge models, prompts,
-and accounting. Report the paired score delta together with evidence recall,
-tokens, and latency; do not compare this number against an unmatched run.
+Token comparison is not valid for this pair. The NMG arm ran in one process and
+its tracker contains all calls, while the empty-memory answer stage required
+several checkpoint resumes and each process overwrote `token_usage_answer.json`;
+the final file therefore contains only the last one-question invocation. The
+empty-memory judge file is complete because judging finished in one process.
+Future resumed runs must merge token ledgers instead of overwriting them before
+token-efficiency claims are made.
+
+The next benchmark gate is no longer another empty-memory run. It is (1) inspect
+the 26 paired regressions, especially abstention; (2) add cumulative token
+accounting across resumes; and (3) repeat the matched comparison or add an
+official raw-session/full-history arm if the intended claim concerns NMG versus
+another memory representation rather than NMG versus no retrieved evidence.
