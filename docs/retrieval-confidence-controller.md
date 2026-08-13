@@ -100,7 +100,11 @@ Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**�
 ### 3. 接入计算图本体（落点已就绪，近乎免造）
 - `differentiable-controller.ts:14` 已内置 `ControllerAction="expand"|"stop"`，`:3-11` 有 `CONTROLLER_BUDGET_DIMENSIONS`。
 - `controller-runtime.ts:107-148` `allocate()` 在 `action==="expand"` 时解锁 `expandedMaximum` 预算信封（独立预算、有上限）。
-- `ControllerRuntime` 当前只在 `index.ts` 导出、**未接入 `store.ts` 实时循环**；集成 = 在首趟候选边界调用 `runtime.allocate()` 并按 `action` 行动。
+- `ControllerRuntime` 已接入 Pi 检索控制边界：当 QPP1 处于 active 模式时，扩展在
+  首趟候选预算处调用 `ControllerShadowBridge.allocate()`，再把受硬信封约束的预算交给
+  搜索。它没有、也不应直接嵌入 `store.ts` 的数据访问循环；零训练步控制器不会改变
+  产品预算。尚未完成的是 rolling τ worker、自然数据校准和通过 matched shadow gate 后
+  的候选推广。
 - 把 `qpp` 作为新 feature 喂 `globalFeatures`（`controller-protocol.ts:19-52` 加 `qpp`，协议版本 1→2）；DC 过 gate 后从 globalFeatures 学化阈值取代手工/黑盒阈值。**默认只暴露 composite `qpp`**（Stage 2 只学阈值，见 §2）；数据足够时再暴露 `top1 / score_variance / intent_coverage / reason_health` 让 DC 隐式再加权。`globalFeatures` 全是标量统计量（`:140-173`），DC 在其上学习——梯度停在特征层，不穿过 ANN top-K 回传 embedder。
 
 ### 4. 预算与池

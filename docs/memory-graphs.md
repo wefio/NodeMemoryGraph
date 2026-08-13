@@ -3,9 +3,10 @@
 **Status:** consolidated design note
 
 Implementation note: isolated STG is wired through the core, daemon, CLI, and
-Pi adapter. It is stored per `projectDir + sessionId`; Pi propagates its native
-session identity through automatic recall and the memory tools.
-**Updated:** 2026-08-11
+Pi adapter. One physical STG database is stored per `projectDir`; records and
+derived retrieval paths are isolated by `sessionId` rows. Pi propagates its
+native session identity through automatic recall and the memory tools.
+**Updated:** 2026-08-13
 **Related:** [design.md](design.md) §1/§5/§6/§7.1, [tiered-disclosure-design.md](tiered-disclosure-design.md), [edge-activation-design.md](edge-activation-design.md)
 
 This document is the standalone reference for NMG's three-graph model:

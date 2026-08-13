@@ -1,7 +1,7 @@
 # STG Isolated Store（STG 独立库）
 
-**Status:** session-private core, daemon, CLI, and Pi adapter integration implemented
-**Updated:** 2026-08-01
+**Status:** project-local shared store with session-row isolation implemented
+**Updated:** 2026-08-13
 **Related:** [memory-graphs.md](memory-graphs.md) §1/§3/§5, [external-source-design.md](external-source-design.md), docs/design.md §1
 
 ## 1. Problem
@@ -27,7 +27,7 @@ task/project-local), not merely a residence flag:
 LTG (authoritative, shared, durable)          SQLite, shared location
       │  usage-driven copy (cached subset)
       ▼
-STG (session-private, deletable, cache+new)   SQLite, project/session folder
+STG (project-local, session-isolated, cache+new) SQLite, project folder
       │  query projection
       ▼
 AG (per-query memory)                         RAM, released with query
@@ -35,11 +35,18 @@ AG (per-query memory)                         RAM, released with query
 
 | Property | LTG | STG | AG |
 | --- | --- | --- | --- |
-| Location | shared store | **session folder** (`<project>/.nmg/sessions/<session-hash>/stg.sqlite`) | RAM |
+| Location | shared store | **project store** (`<project>/.nmg/stg.sqlite`), with `session_id` row isolation | RAM |
 | Authority | sole authoritative | local provisional + **cached LTG subset** | derived |
-| Lifecycle | durable | session lifecycle; **deleting the session folder drops it** | per query |
+| Lifecycle | durable | session lifecycle enforced per row; project-store cleanup removes all project STG | per query |
 | Write path | governed, durable | local fast writes | — |
 | Backed up? | yes (the only one that matters) | no (recreatable) | no |
+
+The original prototype used one physical database per session. The current v2
+layout deliberately shares one STG database per project so indexes and cached
+LTG subsets are not duplicated. Privacy remains session-level: every direct,
+exact, attachment, and graph-expansion read applies the caller's `session_id`;
+shared rows are visible only when explicitly written without a session owner.
+Physical co-location is not semantic sharing.
 
 ## 3. Cached LTG subset: cache, not replica
 
