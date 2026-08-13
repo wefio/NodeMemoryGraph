@@ -84,6 +84,46 @@ test("SkillOpt policy dataset excludes controlled and legacy-unclassified feedba
   assert.equal(dataset.excluded_graphs, 2);
 });
 
+test("SkillOpt policy dataset aggregates labels submitted incrementally", () => {
+  const events = eventsFor(
+    "incremental",
+    "task-incremental",
+    "2026-08-01T00:00:00Z",
+    false,
+    false,
+    true,
+    true,
+  );
+  const complete = events.pop();
+  if (complete?.type !== "feedback") throw new Error("fixture feedback missing");
+  for (const label of [
+    "evidenceSufficient",
+    "expansionUseful",
+    "excessiveNoise",
+    "noMemoryNeeded",
+  ] as const) {
+    events.push({
+      ...complete,
+      evidenceSufficient: null,
+      expansionUseful: null,
+      excessiveNoise: null,
+      noMemoryNeeded: null,
+      [label]: complete[label],
+    });
+  }
+
+  const dataset = buildSkillOptPolicyDataset(events, {
+    minimumTasks: 1,
+    minimumTrainTasks: 0,
+    minimumValidationTasks: 0,
+    minimumTestTasks: 0,
+    minimumActionClasses: 1,
+    minimumNoiseLabels: 1,
+  });
+  assert.equal(dataset.items.length, 1);
+  assert.deepEqual(dataset.items[0]?.expected, { recall_action: "stop", fold_noise: true });
+});
+
 function eventsFor(
   suffix: string,
   task: string,

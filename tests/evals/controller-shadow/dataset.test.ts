@@ -39,6 +39,34 @@ test("shadow dataset excludes incomplete labels and reports sparse-data blockers
   assert.match(dataset.blockers.join("\n"), /fully labelled|two independent|training|validation/u);
 });
 
+test("shadow dataset joins labels submitted in separate feedback events", () => {
+  const events = taskEvents("graph-incremental", "task-incremental", "2026-08-01T00:00:00.000Z");
+  const complete = events.pop();
+  if (complete?.type !== "feedback") throw new Error("fixture feedback missing");
+  for (const label of [
+    "evidenceSufficient",
+    "expansionUseful",
+    "excessiveNoise",
+    "noMemoryNeeded",
+  ] as const) {
+    events.push({
+      ...complete,
+      evidenceSufficient: null,
+      expansionUseful: null,
+      excessiveNoise: null,
+      noMemoryNeeded: null,
+      [label]: complete[label],
+    });
+  }
+
+  const dataset = buildShadowDataset(events);
+  assert.equal(dataset.rows.length, 1);
+  assert.equal(dataset.rows[0]?.feedback.evidenceSufficient, true);
+  assert.equal(dataset.rows[0]?.feedback.expansionUseful, false);
+  assert.equal(dataset.rows[0]?.feedback.excessiveNoise, false);
+  assert.equal(dataset.rows[0]?.feedback.noMemoryNeeded, false);
+});
+
 function taskEvents(
   graphId: string,
   semanticTaskId: string,

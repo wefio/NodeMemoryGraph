@@ -18,7 +18,7 @@ The capture and session-ownership plumbing is implemented. Controlled examples
 may validate plumbing but must not be counted as natural product evidence. This
 is enforced by `collectionOrigin`: ordinary Pi writes `natural`, the headless
 probe writes `controlled`, and legacy events without the field are excluded.
-As of 2026-08-13 the authoritative shadow report contains 12 fully labelled
+As of 2026-08-13 the authoritative shadow report contains 23 fully labelled
 natural graphs. Session-local latest-graph feedback removed fragile UUID
 copying, and online Pi blackboard audits now contribute ordinary multi-Agent
 supervision without launching controlled headless probes. The report contains
@@ -28,9 +28,12 @@ evidence-insufficient examples, 5 expansion-not-useful examples, 2
 excessive-noise positives, and 2 no-memory-needed positives; there are still
 no failed-task or user-correction-positive outcomes. Four independent negative
 tasks added four no-memory decisions, four insufficient-evidence decisions,
-four useless-expansion decisions, and two excessive-noise observations, but only
-two additional graphs met the exporter's complete attribution requirements.
-This is real progress, not enough for calibration or promotion. The next natural
+four useless-expansion decisions, and two excessive-noise observations. The
+report and both dataset exporters now aggregate non-null labels across
+incremental feedback calls for the same graph; mixed controlled/natural
+provenance fails closed to controlled. This recovered valid existing feedback
+without inventing labels. This is real progress, not enough for calibration or
+promotion. The next natural
 tasks should preferentially
 cover irrelevant-memory, noisy-expansion, ambiguous-evidence, and correction
 scenarios instead of repeating successful recall audits.
@@ -51,7 +54,7 @@ scenarios instead of repeating successful recall audits.
 
 QPP1, QPP2, and search recommendation remain independently switchable. Their
 current constants are cold-start priors, not calibrated probabilities. The
-2026-08-13 authoritative report has 12 fully labelled natural graphs and still
+2026-08-13 authoritative report has 23 fully labelled natural graphs and still
 fails closed. This is enough to justify continuing collection, not enough to
 implement or promote rolling threshold calibration; use at least 50 balanced
 positive/negative examples with a held-out time segment before moving the
@@ -96,7 +99,7 @@ boundary.
 - [ ] Reach the default readiness floor of 24 materially independent labelled
   retrieval tasks: 12 train, 6 chronological validation, and 6 untouched test,
   with sufficient action and noise-label diversity. The current exporter reports
-  12 tasks split as 8 train, 2 validation, and 2 test; the gate remains closed.
+  23 tasks split as 15 train, 4 validation, and 4 test; the gate remains closed.
 - [ ] Run SkillOpt, then a matched Pi+NMG promotion experiment covering answer
   quality, official evidence recall, pollution, tokens, tool calls, and latency.
   Adopt a winner only through reviewed edits to `src/prompts/nmg-prompts.yaml`.

@@ -7,6 +7,7 @@ import type {
   ShadowRetrievalEvent,
   ShadowUseEvent,
 } from "../../src/lab/shadow-evaluation.ts";
+import { aggregateFeedbackByGraph } from "../controller-shadow/report.ts";
 
 export type RecallAction = "answer" | "expand" | "stop";
 export type SkillOptSplit = "train" | "val" | "test";
@@ -89,13 +90,12 @@ export function buildSkillOptPolicyDataset(
     use: ShadowUseEvent | null;
     outcome: ShadowOutcomeEvent | null;
   }> = [];
-  for (const group of byGraph.values()) {
+  const feedbackByGraph = aggregateFeedbackByGraph(events);
+  for (const [graphId, group] of byGraph) {
     const retrieval = group.find(
       (event): event is ShadowRetrievalEvent => event.type === "retrieval",
     );
-    const feedback = [...group]
-      .reverse()
-      .find((event): event is ShadowFeedbackEvent => event.type === "feedback");
+    const feedback = feedbackByGraph.get(graphId);
     if (
       !retrieval ||
       feedback?.collectionOrigin !== "natural" ||

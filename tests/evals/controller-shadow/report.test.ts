@@ -118,6 +118,59 @@ test("shadow coverage excludes controlled and legacy feedback from the natural h
   });
 });
 
+test("shadow coverage aggregates incremental feedback labels per graph", () => {
+  const base = {
+    version: 1 as const,
+    graphId: "incremental",
+    sessionId: "session-1",
+    collectionOrigin: "natural" as const,
+    semanticTaskId: "task-incremental",
+    taskSuccess: null,
+    userCorrection: null,
+    evidenceSufficient: null,
+    expansionUseful: null,
+    excessiveNoise: null,
+    noMemoryNeeded: null,
+    type: "feedback" as const,
+  };
+  const events = [
+    { ...base, recordedAt: "2026-08-09T00:00:00.000Z", evidenceSufficient: false },
+    { ...base, recordedAt: "2026-08-09T00:00:01.000Z", expansionUseful: false },
+    { ...base, recordedAt: "2026-08-09T00:00:02.000Z", excessiveNoise: true },
+    { ...base, recordedAt: "2026-08-09T00:00:03.000Z", noMemoryNeeded: true },
+  ] as ShadowEvaluationEvent[];
+
+  const report = summarizeShadowEvents(events);
+  assert.equal(report.fullyLabelledGraphs, 1);
+});
+
+test("incremental feedback provenance fails closed when any event is controlled", () => {
+  const base = {
+    version: 1 as const,
+    graphId: "mixed-origin",
+    sessionId: "session-1",
+    semanticTaskId: "task-mixed",
+    taskSuccess: null,
+    userCorrection: null,
+    evidenceSufficient: true,
+    expansionUseful: false,
+    excessiveNoise: false,
+    noMemoryNeeded: false,
+    type: "feedback" as const,
+  };
+  const events = [
+    { ...base, recordedAt: "2026-08-09T00:00:00.000Z", collectionOrigin: "natural" },
+    { ...base, recordedAt: "2026-08-09T00:00:01.000Z", collectionOrigin: "controlled" },
+  ] as ShadowEvaluationEvent[];
+
+  const report = summarizeShadowEvents(events);
+  assert.deepEqual(report.fullyLabelledGraphsByOrigin, {
+    natural: 0,
+    controlled: 1,
+    legacy: 0,
+  });
+});
+
 test("shadow report uses the shared user-level data directory contract", () => {
   assert.equal(
     resolveShadowEventPath(undefined, {}),

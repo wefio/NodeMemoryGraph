@@ -43,6 +43,49 @@ export interface ShadowCoverageReport {
   blockers: string[];
 }
 
+const FEEDBACK_BOOLEAN_FIELDS = [
+  "taskSuccess",
+  "userCorrection",
+  "evidenceSufficient",
+  "expansionUseful",
+  "excessiveNoise",
+  "noMemoryNeeded",
+] as const;
+
+/**
+ * Fold incremental feedback for each graph. A later null means "not supplied",
+ * not "erase the earlier label". Mixed controlled/natural provenance fails
+ * closed to controlled so a probe can never become trainable through merging.
+ */
+export function aggregateFeedbackByGraph(
+  events: readonly ShadowEvaluationEvent[],
+): Map<string, ShadowFeedbackEvent> {
+  const aggregated = new Map<string, ShadowFeedbackEvent>();
+  for (const event of events) {
+    if (event.type !== "feedback") continue;
+    const current = aggregated.get(event.graphId);
+    if (!current) {
+      aggregated.set(event.graphId, { ...event });
+      continue;
+    }
+    const merged: ShadowFeedbackEvent = {
+      ...current,
+      ...event,
+      collectionOrigin:
+        current.collectionOrigin === "controlled" || event.collectionOrigin === "controlled"
+          ? "controlled"
+          : "natural",
+      semanticTaskId: event.semanticTaskId ?? current.semanticTaskId,
+      note: event.note ?? current.note,
+    };
+    for (const field of FEEDBACK_BOOLEAN_FIELDS) {
+      merged[field] = typeof event[field] === "boolean" ? event[field] : current[field];
+    }
+    aggregated.set(event.graphId, merged);
+  }
+  return aggregated;
+}
+
 export function summarizeShadowEvents(
   events: readonly ShadowEvaluationEvent[],
 ): ShadowCoverageReport {
@@ -61,7 +104,7 @@ export function summarizeShadowEvents(
       feedback.filter((event) => typeof event[label] === "boolean").length,
     ]),
   ) as ShadowCoverageReport["labels"];
-  const fullyLabelledFeedback = feedback.filter(
+  const fullyLabelledFeedback = [...aggregateFeedbackByGraph(events).values()].filter(
     (event) =>
       typeof event.semanticTaskId === "string" &&
       typeof event.evidenceSufficient === "boolean" &&

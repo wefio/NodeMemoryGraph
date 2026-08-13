@@ -12,7 +12,11 @@ import {
   CONTROLLER_FEATURE_COUNT,
   CONTROLLER_FEATURE_PROTOCOL_VERSION,
 } from "../../src/lab/controller-protocol.ts";
-import { readShadowEvents, resolveShadowEventPath } from "./report.ts";
+import {
+  aggregateFeedbackByGraph,
+  readShadowEvents,
+  resolveShadowEventPath,
+} from "./report.ts";
 
 const REQUIRED_LABELS = [
   "evidenceSufficient",
@@ -57,14 +61,13 @@ export function buildShadowDataset(
   }
 
   const joined: Omit<ShadowDatasetRow, "split">[] = [];
+  const feedbackByGraph = aggregateFeedbackByGraph(events);
   let legacyGraphsWithoutReplayInputs = 0;
   for (const [graphId, group] of byGraph) {
     const retrieval = group.find(
       (event): event is ShadowRetrievalEvent => event.type === "retrieval",
     );
-    const feedback = [...group]
-      .reverse()
-      .find((event): event is ShadowFeedbackEvent => event.type === "feedback");
+    const feedback = feedbackByGraph.get(graphId);
     if (
       !retrieval ||
       feedback?.collectionOrigin !== "natural" ||
