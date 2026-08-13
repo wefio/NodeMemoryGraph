@@ -39,7 +39,12 @@ for calibration or promotion.
   logged propensities or sequential credit-assignment evidence.
 
 QPP1, QPP2, and search recommendation remain independently switchable. Their
-current constants are cold-start priors, not calibrated probabilities.
+current constants are cold-start priors, not calibrated probabilities. A
+2026-08-13 natural-run audit found 289 QPP traces but only 7 traces with useful
+evidence labels (6 below the current 0.55 threshold). This is enough to justify
+continuing collection, not enough to implement or promote rolling threshold
+calibration; use at least 50 positive/negative examples with a held-out time
+segment before moving the threshold.
 
 ## 3. Validate unattended memory maintenance
 

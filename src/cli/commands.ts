@@ -353,11 +353,12 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
     method: "taskBoard",
     words: ["board", "put"],
     usageLine: "nmg board put TASK_ID CONTENT --agent AGENT [options] [--json]",
-    options: ["agent", "kind", "session-id", "ttl-seconds", "expires-at"],
+    options: ["agent", "kind", "session-id", "to", "ttl-seconds", "expires-at"],
     flags: [],
     usageDetail: `Task board options:
   --agent ID                 Writer/reader identity (required)
   --kind KIND                goal, note, question, result, handoff, decision, or blocker
+  --to AGENT                 Wake only this stable agent name; omit to broadcast
   --ttl-seconds N            Lifetime from 60 seconds to 30 days (default: 1 day)
   --expires-at ISO           Explicit expiry instead of --ttl-seconds
   --after-cursor N           Read only entries after this task-local sequence
@@ -373,6 +374,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
         agentId: requiredOption(values, "agent"),
         kind: firstOption(values, "kind"),
         sourceSessionId: firstOption(values, "session-id"),
+        to: firstOption(values, "to"),
         ttlSeconds: numericOption(values, "ttl-seconds"),
         expiresAt: firstOption(values, "expires-at"),
       }) as unknown as NmgTaskBoardParams;

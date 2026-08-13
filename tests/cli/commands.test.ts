@@ -129,3 +129,24 @@ test("CLI exposes explicit attributable claim outcomes", () => {
     },
   );
 });
+
+test("CLI board put exposes directed delivery", () => {
+  const command = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "board put")!;
+  assert.deepEqual(
+    command.buildParams({
+      flags: new Set(),
+      options: new Map([
+        ["agent", ["sender"]],
+        ["to", ["kimi"]],
+      ]),
+      positionals: ["default", "review", "this"],
+    }),
+    {
+      action: "put",
+      taskId: "default",
+      content: "review this",
+      agentId: "sender",
+      to: "kimi",
+    },
+  );
+});

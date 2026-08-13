@@ -85,14 +85,16 @@ Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**�
 - **rolling worker**（⬜ 待实现）：后台读近期 trace 的 (qpp, useful) 对，高 qpp 常不 useful（过自信）→ 抬 τ；低 qpp 常 useful（欠自信）→ 降 τ。无感自动，不依赖 eval。
 - **权重** `τ_v / w_ic / w_rh`：可选贝叶斯优化 on 同一生产 (qpp, useful) 对（非 eval）；DC 仍 shadow。
 
-**τ 标定方法**：起点 τ=`DEFAULT_QPP_THRESHOLD`(0.45) 占位（Stage 0 truncation/guardrail 已免标定覆盖触发，τ 仅影响 below_threshold 选择性）；rolling worker 用生产 (qpp, useful) 自适应。**不在 eval 数据集上标定**（作弊）——eval 只作离线 sanity（audit 脚本看分量 gradation/区分度，不调参）。
+**τ 标定方法**：起点 τ=`DEFAULT_QPP_THRESHOLD`(0.55) 占位（Stage 0 truncation/guardrail 已免标定覆盖触发，τ 仅影响 below_threshold 选择性）；rolling worker 用生产 (qpp, useful) 自适应。**不在 eval 数据集上标定**（作弊）——eval 只作离线 sanity（audit 脚本看分量 gradation/区分度，不调参）。
 
 **标定/分析流程**：
 1. **离线 audit**（`evals/omnimemeval/audit-qpp-signal.ts`）：从历史 trace 重算 qpp（hybridScore，离线纯函数）+ join outcome，看分量 gradation/区分度——**只诊断，不调参**（不作弊）。
 2. **rolling worker**（生产）：采近期 N 条 trace 的 (qpp, usefulMemoryIds)（隐式反馈已落）；统计高/低 qpp 的 useful 率；高 qpp useful 率低→抬 τ，低 qpp useful 率高→降 τ；滚动窗口无感更新。
 3. **权重调参输入**（生产数据）：Top1×reasonHealth 相关性（reasonHealth 近常数则降权）、variance 双解（Top1−Top2 差值辅助）、intentCoverage 中性值（0.5 系统性偏则改均值）。
 4. **sequencing**：Stage 0 Fibonacci plumbing ✅；隐式反馈 ✅；autodiff 首档预测 ✅；
-   rolling worker ⬜。
+   rolling worker ⬜。2026-08-13 自然运行审计有 289 条带 QPP trace，但只有 7 条
+   `useful_memory_ids` 正标签；其中 6 条 QPP 低于 0.55，说明校准可能有价值，也说明
+   当前分布太稀疏，不能可靠移动阈值。至少积累 50 条正反例并留出时间段验证后再实现。
 
 **Stage 2 — Gumbel-Sigmoid DC**
 阈值本身可微学化（Gumbel-Sigmoid 松弛 0/1 硬开关，梯度回传）；`Loss = 生成Loss + λ·搜索成本惩罚`；DC 出 shadow，**取代**（非并发）Stage 1 的 rolling τ，warm-start 自其值。**暴露范围**：默认只把 composite `qpp` 喂 DC globalFeatures → Stage 2 只学阈值，简单、小 eval N(≈500) 不易过拟合；数据足够时再暴露各分量让 DC 隐式再加权。Soft-Hard（REALM/可微 RAG，softmax top-k→注意力→与生成向量融合）太侵入（改 retrieval→gen 接口，NMG 返回 context 非融合向量），列替代不主推。
@@ -136,7 +138,7 @@ Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**�
 
 ## 风险
 
-- **τ 非必需但有漂移**：Stage 0 触发已由 truncation/guardrail 免标定覆盖；τ 仅影响 `below_threshold` 选择性。τ 漂移由 rolling worker（生产 (qpp, useful)，非 eval）校准——worker 未实现前 τ 用占位 0.45。
+- **τ 非必需但有漂移**：Stage 0 触发已由 truncation/guardrail 免标定覆盖；τ 仅影响 `below_threshold` 选择性。τ 漂移由 rolling worker（生产 (qpp, useful)，非 eval）校准——worker 未实现前 τ 用占位 0.55。
 - **隐式反馈噪声/稀疏**：matcher（≥50% token overlap；Han bigram）是 precision-favoured 起点——noisy labels → noisy τ；弱 reader 答案若语义改写过大、不复用可辨识片段，标签仍会稀疏。需监控 useful 率；优先结合 exact `get` 和显式反馈，必要时再以经过校准的 embedding 相似度提供候选信号，而不能直接把 injection/fetch 当作成功使用。
 - `variance` 高双解（清晰赢家 vs 噪声离群）——hybridScore 已 path-consistent；双解靠 Top1−Top2 差值辅助（标定时验证）。
 - 经典 QPP 在 dense/neural IR 上相关性掉 10%+（文献）；NMG 用 BGE dense+hybrid，靠 `intentCoverage`/`reasonHealth` 领域增强补偿——这两项是 vanilla QPP 没有的 typed-memory / provenance 信号，非冗余。但 benchmark 全 `conversation_evidence` ingest → intentCoverage 退化（恒 0.5），需类型化 ingest 才有信号。

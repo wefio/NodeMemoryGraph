@@ -46,6 +46,10 @@ test("kimi board wake candidate respects kind, echo, broadcast, and claim lease 
   assert.equal(wake({ content: "[NMG board 协作广播] meta" }), false);
   assert.equal(wake({ claimedBy: "worker", claimExpiresAt: "2026-08-13T13:00:00.000Z" }), false);
   assert.equal(wake({ claimedBy: "worker", claimExpiresAt: "2026-08-13T11:00:00.000Z" }), true);
+  assert.equal(wake({ to: "other-agent" }), false);
+  assert.equal(wake({ to: "me" }), true);
+  assert.equal(wake({ serialState: "pending" }), false);
+  assert.equal(wake({ serialState: "outstanding" }), true);
 });
 
 test("kimi hook nudges on completion keywords, git commit, and stays silent otherwise", () => {

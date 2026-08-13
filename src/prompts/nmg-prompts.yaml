@@ -67,6 +67,14 @@ board_action_parameter_description: >-
   acknowledge to record that you have seen and accepted an entry and owe no
   reply (pure state write — no broadcast, no wake, and the acked entry stops
   re-notifying you), or resolve to close a selected entry.
+  discover lists online agents (A2A roster, by capability) so you can pick a
+  target, then put ... to=<stable agent_name> for directed delivery — only that
+  agent's LLM is woken, everyone else reads but stays silent (find first via
+  discover, then direct). Un-directed actionable entries (handoff/question/
+  blocker) are serialised per channel: only one outstanding is pushed at a
+  time; later ones sit 'pending' (read-visible, silent) until the outstanding
+  one is claimed (接手=回复) or resolved, which promotes the next. Directed
+  entries are exempt (parallel-safe).
   kind decides wake routing: question/blocker/handoff ask for a response and
   WAKE subscribers; note/result/decision/goal are notify-only and SILENT (they
   record a fact, owe no reply, and are read on demand — never pushed). If you

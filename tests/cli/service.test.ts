@@ -1130,6 +1130,51 @@ test("recordActiveGraphUse persists QPP implicit feedback (useful_memory_ids)", 
   }
 });
 
+test("task board RPC parses directed delivery and agent discovery actions", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-board-discovery-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    const registered = await service.invoke("taskBoard", {
+      action: "registerAgent",
+      agentName: "kimi",
+      capabilities: "audit,stg",
+      supportedInterfaces: "kimi",
+    });
+    assert.deepEqual(registered, { action: "registerAgent", agentName: "kimi" });
+
+    const discovered = await service.invoke("taskBoard", {
+      action: "discover",
+      taskId: "default",
+      agentId: "requester",
+      capabilities: "stg",
+    });
+    assert.equal(discovered.action, "discover");
+    if (discovered.action !== "discover") throw new Error("expected discover");
+    assert.deepEqual(discovered.agents.map((agent) => agent.agentName), ["kimi"]);
+
+    const written = await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "default",
+      agentId: "requester",
+      kind: "handoff",
+      content: "Inspect STG isolation",
+      to: "kimi",
+    });
+    assert.equal(written.action, "put");
+    if (written.action !== "put") throw new Error("expected put");
+    assert.equal(written.entry.to, "kimi");
+    assert.equal(written.entry.serialState, null);
+
+    assert.deepEqual(
+      await service.invoke("taskBoard", { action: "heartbeat", agentName: "kimi" }),
+      { action: "heartbeat", agentName: "kimi" },
+    );
+  } finally {
+    service.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("recordActiveGraphUse validates its RPC boundary and permits empty use", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-qpp-params-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });

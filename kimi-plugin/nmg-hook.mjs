@@ -112,11 +112,15 @@ export function isBoardWakeCandidate(entry, { sessionId, agentId, now = Date.now
     entry.sourceSessionId === sessionId ||
     (entry.sourceSessionId == null && entry.agentId === agentId);
   const liveClaim = entry.claimExpiresAt != null && new Date(entry.claimExpiresAt).getTime() > now;
+  const addressedToOther = entry.to != null && entry.to !== agentId;
+  const serialQueued = entry.serialState === "pending";
   return (
     entry.status === "open" &&
     WAKE_KINDS.has(entry.kind) &&
     !ownEcho &&
     !liveClaim &&
+    !addressedToOther &&
+    !serialQueued &&
     !String(entry.content ?? "").startsWith(BROADCAST_PREFIX)
   );
 }
