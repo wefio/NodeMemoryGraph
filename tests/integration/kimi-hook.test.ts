@@ -21,10 +21,11 @@ function runHook(payload: unknown): string {
   return stdout;
 }
 
-test("kimi board wake candidate respects echo, broadcast, and claim lease liveness", () => {
+test("kimi board wake candidate respects kind, echo, broadcast, and claim lease liveness", () => {
   const now = Date.parse("2026-08-13T12:00:00.000Z");
   const base = {
     status: "open",
+    kind: "question",
     content: "Review the adapter",
     agentId: "other",
     sourceSessionId: "other-session",
@@ -33,6 +34,14 @@ test("kimi board wake candidate respects echo, broadcast, and claim lease livene
     isBoardWakeCandidate({ ...base, ...entry }, { sessionId: "me", agentId: "me", now });
 
   assert.equal(wake({}), true);
+  assert.equal(wake({ kind: "blocker" }), true);
+  assert.equal(wake({ kind: "handoff" }), true);
+  // Notify-only kinds are silent: pushing them is the acknowledgement storm.
+  assert.equal(wake({ kind: "note" }), false);
+  assert.equal(wake({ kind: "result" }), false);
+  assert.equal(wake({ kind: "decision" }), false);
+  assert.equal(wake({ kind: "goal" }), false);
+  assert.equal(wake({ kind: undefined }), false);
   assert.equal(wake({ sourceSessionId: "me" }), false);
   assert.equal(wake({ content: "[NMG board 协作广播] meta" }), false);
   assert.equal(wake({ claimedBy: "worker", claimExpiresAt: "2026-08-13T13:00:00.000Z" }), false);

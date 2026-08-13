@@ -19,8 +19,12 @@
  * protocol as Pi: own-echo entries are skipped, LIVE claims suppress the
  * entry (a lapsed claim returns it to the pool and wakes again — matching the
  * e68ce7b isBoardWakeCandidate fix), broadcast entries are never pushed,
- * deliveryCheck filters already-notified ones, and a recordDelivery receipt
- * is written for the picked entry so it never re-notifies. Budget and
+ * and only actionable kinds wake (question/blocker/handoff — matching the
+ * 3f9d62b notify-only-is-silent fix; pushing note/result/decision/goal is
+ * the acknowledgement storm, since every confirmation note would wake every
+ * session). deliveryCheck filters already-notified ones, and a
+ * recordDelivery receipt is written for the picked entry so it never
+ * re-notifies. Budget and
  * cooldown come from the shared <dataDir>/board-wake.json (enabled defaults
  * to off); dedup state is per-host in kimi-board-wake-state.json.
  *
@@ -50,7 +54,11 @@ const COMPLETION_PATTERN =
 
 const WORLD_BOARD_ID = "default";
 const BROADCAST_PREFIX = "[NMG board 协作广播]";
-const KIND_RANK = { question: 0, blocker: 1, handoff: 2, goal: 3, note: 4, decision: 5, result: 6 };
+// Wake routing: only kinds that ask for a response/action may push. The
+// notify-only kinds (goal/note/decision/result) are silent by convention —
+// same set as the Pi extension's BROADCAST_KINDS.
+const WAKE_KINDS = new Set(["question", "blocker", "handoff"]);
+const KIND_RANK = { question: 0, blocker: 1, handoff: 2 };
 const KIND_LABEL = {
   question: "问题",
   blocker: "阻塞",
@@ -98,7 +106,7 @@ function isPromptSubmit(payload) {
 
 /** Pure board-wake gate shared by the poller and tests. A claim suppresses a
  * notice only while its lease is live; stale claim columns are lazy-expired by
- * design and must return to the candidate pool. */
+ * design and must return to the candidate pool. Notify-only kinds never wake. */
 export function isBoardWakeCandidate(entry, { sessionId, agentId, now = Date.now() }) {
   const ownEcho =
     entry.sourceSessionId === sessionId ||
@@ -106,6 +114,7 @@ export function isBoardWakeCandidate(entry, { sessionId, agentId, now = Date.now
   const liveClaim = entry.claimExpiresAt != null && new Date(entry.claimExpiresAt).getTime() > now;
   return (
     entry.status === "open" &&
+    WAKE_KINDS.has(entry.kind) &&
     !ownEcho &&
     !liveClaim &&
     !String(entry.content ?? "").startsWith(BROADCAST_PREFIX)
