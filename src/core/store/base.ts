@@ -462,7 +462,7 @@ export class NmgStoreBase {
       .prepare(
         `SELECT entry_id, agent_id FROM task_board_acks
          WHERE entry_id IN (${entryIds.map(() => "?").join(",")})
-         ORDER BY acknowledged_at ASC, agent_id ASC`,
+         ORDER BY agent_id ASC`,
       )
       .all(...entryIds) as Row[];
     for (const row of rows) {
