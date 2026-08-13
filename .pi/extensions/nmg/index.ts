@@ -42,7 +42,11 @@ import {
   type SearchRecommendationMode,
 } from "../../../src/integration/config.ts";
 import { searchPreview } from "../../../src/integration/search-projection.ts";
-import { selectEvidence, type AgentHistoryMessage } from "../../../src/integration/evidence.ts";
+import {
+  selectEvidence,
+  type AgentHistoryMessage,
+  type SelectedEvidence,
+} from "../../../src/integration/evidence.ts";
 import { deriveUsedMemoryIds } from "../../../src/core/feedback.ts";
 import { ControllerShadowBridge, shadowEnabled } from "./controller-shadow.ts";
 
@@ -982,11 +986,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         throw new Error("externalSource.source must start with web: or file:");
       }
       const sourceActor = params.sourceActor ?? "assistant";
-      const evidenceSource = selectPiEvidenceSource(
+      const evidenceResolution = resolvePiEvidenceSource(
         ctx.sessionManager,
         params.evidence,
         sourceActor,
       );
+      const evidenceSource = evidenceResolution.source;
       if (sourceActor !== "assistant" && !evidenceSource && !externalSource) {
         throw new Error(
           `sourceActor=${sourceActor} requires an exact matching evidence excerpt from the current Pi session or an explicit externalSource`,
@@ -1010,6 +1015,18 @@ export default function nmgExtension(pi: ExtensionAPI): void {
               {
                 kind: "board_origin",
                 attributes: { taskId: boardSource.taskId, entryId: boardSource.entryId },
+              } as const,
+            ]
+          : []),
+        ...(params.evidence?.trim() && !evidenceSource && !externalSource
+          ? [
+              {
+                kind: "provenance_degraded",
+                attributes: {
+                  provider: "pi",
+                  historyReferenceVersion: evidenceResolution.version,
+                  reason: evidenceResolution.reason ?? "unbound_source",
+                },
               } as const,
             ]
           : []),
@@ -1531,6 +1548,17 @@ export default function nmgExtension(pi: ExtensionAPI): void {
 const EVIDENCE_SOURCE_WINDOW = 64;
 export const PI_BRANCH_SHAPE_VERSION = "pi.branch.v1" as const;
 
+export type PiEvidenceResolutionReason =
+  | "branch_api_unavailable"
+  | "exact_excerpt_not_found"
+  | "incompatible_branch_shape";
+
+export interface PiEvidenceResolution {
+  version: typeof PI_BRANCH_SHAPE_VERSION;
+  source?: SelectedEvidence;
+  reason?: PiEvidenceResolutionReason;
+}
+
 export function projectPiBranch(value: unknown): {
   version: typeof PI_BRANCH_SHAPE_VERSION;
   supported: boolean;
@@ -1566,14 +1594,33 @@ export function selectPiEvidenceSource(
   evidence: string | undefined,
   sourceActor: "assistant" | "system" | "tool" | "user",
 ) {
-  if (!evidence?.trim() || typeof sessionManager.getBranch !== "function") return undefined;
+  return resolvePiEvidenceSource(sessionManager, evidence, sourceActor).source;
+}
+
+export function resolvePiEvidenceSource(
+  sessionManager: {
+    getSessionId(): string;
+    getBranch?: () => unknown[];
+  },
+  evidence: string | undefined,
+  sourceActor: "assistant" | "system" | "tool" | "user",
+): PiEvidenceResolution {
+  if (!evidence?.trim()) return { version: PI_BRANCH_SHAPE_VERSION };
+  if (typeof sessionManager.getBranch !== "function") {
+    return { version: PI_BRANCH_SHAPE_VERSION, reason: "branch_api_unavailable" };
+  }
   const branch = projectPiBranch(sessionManager.getBranch());
-  if (!branch.supported) return undefined;
-  return selectEvidence(evidence, sourceActor, {
+  if (!branch.supported) {
+    return { version: branch.version, reason: "incompatible_branch_shape" };
+  }
+  const source = selectEvidence(evidence, sourceActor, {
     sessionId: sessionManager.getSessionId(),
     sourceRef: `pi-session:${sessionManager.getSessionId()};shape=${branch.version}`,
     messages: branch.messages,
   });
+  return source
+    ? { version: branch.version, source }
+    : { version: branch.version, reason: "exact_excerpt_not_found" };
 }
 
 function piHistoryMessage(value: unknown): AgentHistoryMessage | undefined {

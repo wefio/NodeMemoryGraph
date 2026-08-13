@@ -262,27 +262,27 @@ database handle will serialize or, worse, interleave.
 
 ---
 
-## 9. Pi evidence-source resolution is fragile
+## 9. Pi evidence-source resolution is versioned and fails visibly
 
-**Symptom:** selective evidence admission resolves an accepted
-`nmg_remember.evidence` against Pi's current `unknown[]` branch using
-type-narrowing casts (`entry as { type?: unknown; message?: unknown }`).
+**Status:** resolved at the adapter boundary. Selective evidence admission
+projects Pi's current `unknown[]` branch through one strict, versioned validator
+before attempting source binding.
 
-**Concern:** If Pi changes its internal session branch representation the
-resolver may fail to bind the exact source message. The durable memory remains
-safe because NMG falls back to the supplied evidence excerpt, but loses the
-stable Pi message identity and surrounding context.
+The history reference records provider `pi` and shape version `pi.branch.v1` in
+`sourceRef`. User/tool attribution still fails closed unless an exact source is
+bound. Assistant-authored fallback evidence remains admissible, but now carries
+a `provenance_degraded` marker with the expected history-reference version and
+an explicit reason (`branch_api_unavailable`, `incompatible_branch_shape`, or
+`exact_excerpt_not_found`). It is therefore never silently presented as a
+harness-verified excerpt.
 
-**Approaches:**
+**Remaining compatibility policy:**
 
-- **Add a JSON schema or TypeBox validator** for the session entry shape that
-  the extension depends on. Validate once per session before attempting source
-  binding.
-- **Version the history-reference format:** record the provider and source
-  schema version so future adapters can resolve or migrate references.
-- **Expose degraded provenance:** when exact source binding fails, record that
-  the evidence is a model-supplied fallback rather than silently presenting it
-  as a harness-verified source excerpt.
+- Bump the shape version when Pi changes its branch contract; add a migration
+  resolver only if old source identities must be reopened.
+- Keep validation local to each remember attempt. Session-level memoization is
+  unnecessary at the current bounded 64-entry window and would risk accepting a
+  changed branch shape after an extension hot reload.
 
 ---
 

@@ -19,6 +19,7 @@ import nmgExtension, {
   MEMORY_POLICY,
   PI_BRANCH_SHAPE_VERSION,
   projectPiBranch,
+  resolvePiEvidenceSource,
   selectPiEvidenceSource,
   SessionInjectionWindow,
   SessionRecallFlow,
@@ -449,6 +450,28 @@ test("Pi branch projection fails closed on an incompatible message shape", () =>
   );
 });
 
+test("Pi evidence resolution versions references and explains degraded provenance", () => {
+  const sessionManager = {
+    getSessionId: () => "session-a",
+    getBranch: () => [{ type: "message", id: 42, message: { role: "user", content: "x" } }],
+  };
+  assert.deepEqual(resolvePiEvidenceSource(sessionManager, "x", "user"), {
+    version: PI_BRANCH_SHAPE_VERSION,
+    reason: "incompatible_branch_shape",
+  });
+  assert.deepEqual(
+    resolvePiEvidenceSource(
+      { getSessionId: () => "session-a" },
+      "model supplied evidence",
+      "assistant",
+    ),
+    {
+      version: PI_BRANCH_SHAPE_VERSION,
+      reason: "branch_api_unavailable",
+    },
+  );
+});
+
 test("tool descriptions come from the prompt source of truth", () => {
   const { tools } = extensionHarness();
   const prompts = loadPrompts();
@@ -558,6 +581,31 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     assert.match(remember.content[0].text, /saved/i);
     assert.equal(remember.details.history.sourceMessageId, "user-atlas-storage");
     assert.equal(remember.details.history.content, "Atlas must use SQLite for offline operation.");
+
+    const degraded = (await tools.get("nmg_remember")!.execute(
+      "remember-degraded-provenance",
+      {
+        statement: "Atlas may benefit from periodic vacuuming.",
+        nodeName: "Atlas maintenance",
+        sourceActor: "assistant",
+        evidence: "Atlas may benefit from periodic vacuuming.",
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    )) as {
+      details: {
+        memory: { markers: Array<{ kind: string; attributes?: Record<string, unknown> }> };
+      };
+    };
+    const degradedMarker = degraded.details.memory.markers.find(
+      (marker) => marker.kind === "provenance_degraded",
+    );
+    assert.deepEqual(degradedMarker?.attributes, {
+      historyReferenceVersion: PI_BRANCH_SHAPE_VERSION,
+      provider: "pi",
+      reason: "exact_excerpt_not_found",
+    });
 
     const oldDatabase = (await tools.get("nmg_remember")!.execute(
       "remember-old-database",
