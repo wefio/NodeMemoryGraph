@@ -33,6 +33,11 @@ export interface ShadowCoverageReport {
   origins: { automatic: number; tool: number };
   injection: { characters: number; estimatedTokens: number };
   labels: Record<(typeof LABELS)[number], number>;
+  fullyLabelledGraphsByOrigin: {
+    natural: number;
+    controlled: number;
+    legacy: number;
+  };
   fullyLabelledGraphs: number;
   calibrationReady: false;
   blockers: string[];
@@ -56,18 +61,38 @@ export function summarizeShadowEvents(
       feedback.filter((event) => typeof event[label] === "boolean").length,
     ]),
   ) as ShadowCoverageReport["labels"];
-  const fullyLabelledGraphs = new Set(
-    feedback
-      .filter(
-        (event) =>
-          typeof event.semanticTaskId === "string" &&
-          typeof event.evidenceSufficient === "boolean" &&
-          typeof event.expansionUseful === "boolean" &&
-          typeof event.excessiveNoise === "boolean" &&
-          typeof event.noMemoryNeeded === "boolean",
-      )
-      .map((event) => event.graphId),
-  ).size;
+  const fullyLabelledFeedback = feedback.filter(
+    (event) =>
+      typeof event.semanticTaskId === "string" &&
+      typeof event.evidenceSufficient === "boolean" &&
+      typeof event.expansionUseful === "boolean" &&
+      typeof event.excessiveNoise === "boolean" &&
+      typeof event.noMemoryNeeded === "boolean",
+  );
+  const fullyLabelledGraphsByOrigin = {
+    natural: new Set(
+      fullyLabelledFeedback
+        .filter((event) => event.collectionOrigin === "natural")
+        .map((event) => event.graphId),
+    ).size,
+    controlled: new Set(
+      fullyLabelledFeedback
+        .filter((event) => event.collectionOrigin === "controlled")
+        .map((event) => event.graphId),
+    ).size,
+    legacy: new Set(
+      fullyLabelledFeedback
+        .filter(
+          (event) =>
+            event.collectionOrigin !== "natural" && event.collectionOrigin !== "controlled",
+        )
+        .map((event) => event.graphId),
+    ).size,
+  };
+  // Calibration accepts only ordinary natural use. Keep the headline metric on
+  // the same provenance contract as dataset.ts; report legacy/controlled
+  // coverage separately instead of silently treating it as trainable data.
+  const fullyLabelledGraphs = fullyLabelledGraphsByOrigin.natural;
   const timestamps = events
     .map((event) => event.recordedAt)
     .filter((value) => !Number.isNaN(Date.parse(value)))
@@ -111,6 +136,7 @@ export function summarizeShadowEvents(
       ),
     },
     labels,
+    fullyLabelledGraphsByOrigin,
     fullyLabelledGraphs,
     calibrationReady: false,
     blockers,

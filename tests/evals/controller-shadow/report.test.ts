@@ -46,6 +46,7 @@ test("shadow coverage keeps missing labels unknown and reports calibration block
     {
       ...base,
       type: "feedback",
+      collectionOrigin: "natural",
       semanticTaskId: "task-1",
       taskSuccess: null,
       userCorrection: true,
@@ -76,11 +77,45 @@ test("shadow coverage keeps missing labels unknown and reports calibration block
   assert.equal(report.labels.taskSuccess, 0);
   assert.equal(report.labels.userCorrection, 1);
   assert.equal(report.fullyLabelledGraphs, 1);
+  assert.deepEqual(report.fullyLabelledGraphsByOrigin, {
+    natural: 1,
+    controlled: 0,
+    legacy: 0,
+  });
   assert.equal(report.toolFlow, 2);
   assert.equal(report.searchSuppressed, 1);
   assert.equal(report.feedbackNudgesShown, 1);
   assert.equal(report.calibrationReady, false);
   assert.match(report.blockers.at(-1)!, /held-out/u);
+});
+
+test("shadow coverage excludes controlled and legacy feedback from the natural headline", () => {
+  const feedbackBase = {
+    version: 1 as const,
+    sessionId: "session-1",
+    recordedAt: "2026-08-09T00:00:00.000Z",
+    type: "feedback" as const,
+    semanticTaskId: "task-1",
+    taskSuccess: null,
+    userCorrection: null,
+    evidenceSufficient: true,
+    expansionUseful: false,
+    excessiveNoise: false,
+    noMemoryNeeded: false,
+  };
+  const events = [
+    { ...feedbackBase, graphId: "natural", collectionOrigin: "natural" },
+    { ...feedbackBase, graphId: "controlled", collectionOrigin: "controlled" },
+    { ...feedbackBase, graphId: "legacy" },
+  ] as unknown as ShadowEvaluationEvent[];
+
+  const report = summarizeShadowEvents(events);
+  assert.equal(report.fullyLabelledGraphs, 1);
+  assert.deepEqual(report.fullyLabelledGraphsByOrigin, {
+    natural: 1,
+    controlled: 1,
+    legacy: 1,
+  });
 });
 
 test("shadow report uses the shared user-level data directory contract", () => {
