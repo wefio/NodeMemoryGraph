@@ -1097,6 +1097,81 @@ test("agent_end derives and persists useful memories on the trace", async () => 
   }
 });
 
+test("automatic recall reaches agent_end use attribution and the shadow log", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-auto-use-"));
+  const previousData = process.env.NMG_DATA_DIR;
+  const previousProject = process.env.NMG_PROJECT_DIR;
+  const previousShadow = process.env.NMG_CONTROLLER_SHADOW;
+  process.env.NMG_DATA_DIR = directory;
+  process.env.NMG_PROJECT_DIR = directory;
+  process.env.NMG_CONTROLLER_SHADOW = "1";
+  const sessionManager = {
+    getSessionId: () => "automatic-use-session",
+    getSessionFile: () => "session.jsonl",
+    getBranch: () => [],
+  };
+  try {
+    const { handlers, tools } = extensionHarness();
+    const saved = (await tools.get("nmg_remember")!.execute(
+      "remember-auto-use",
+      {
+        statement: "Atlas pins SQLite for offline operation.",
+        nodeName: "Atlas storage",
+        memoryType: "constraint",
+        sourceActor: "user",
+        externalSource: { source: "file:test-fixture" },
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    )) as { details: { memory: { id: string } } };
+    const recalled = (await handlers.get("before_agent_start")!(
+      {
+        prompt: "Please recall which database choice was made for the Atlas project earlier.",
+        systemPrompt: "base",
+      },
+      { sessionManager },
+    )) as { message?: { content: string } };
+    assert.match(recalled.message?.content ?? "", /Atlas pins SQLite/u);
+
+    await handlers.get("agent_end")!(
+      {
+        messages: [
+          {
+            role: "user",
+            content: "Please recall which database choice was made for the Atlas project earlier.",
+          },
+          { role: "assistant", content: "Atlas pins SQLite for offline operation." },
+        ],
+      },
+      { sessionManager },
+    );
+
+    const events = readFileSync(join(directory, "controller-shadow-events.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; origin?: string; usedMemoryIds?: string[] });
+    assert.ok(events.some((event) => event.type === "retrieval" && event.origin === "automatic"));
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "use" && event.usedMemoryIds?.includes(saved.details.memory.id),
+      ),
+      "automatic recall is attributed when its content surfaces in the answer",
+    );
+    await handlers.get("session_shutdown")!({}, { sessionManager });
+  } finally {
+    process.env.NMG_DATA_DIR = previousData;
+    process.env.NMG_PROJECT_DIR = previousProject;
+    process.env.NMG_CONTROLLER_SHADOW = previousShadow;
+    try {
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+      // Windows can briefly retain daemon handles after shutdown.
+    }
+  }
+});
+
 test("formatters keep search headers compact and exact evidence separate", () => {
   const context = {
     results: [

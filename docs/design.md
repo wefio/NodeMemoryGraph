@@ -489,6 +489,18 @@ path. Their atomic content can be durable without committing speculative graph
 structure. Relations inferred from co-occurrence, reasoning, or one task remain
 in STG as observations or candidates until consolidation criteria are met.
 
+In the implemented path, ordinary `remember` deliberately creates no semantic
+edge. A search records co-retrieved node pairs as candidate observations; the Pi
+adapter then attributes the memories that materially surfaced in the final
+answer at `agent_end`. Only a pair that is useful across the configured minimum
+number of independent tasks and clears the stability threshold is consolidated
+as `related_to`. Explicit `remember(action="relate")` creates a reviewable
+topology proposal rather than bypassing this gate. `is_a` is created by a
+reviewed split, while `derived_from` records the provenance of an explicitly
+derived memory. Consequently, a young or unrelated store may correctly contain
+isolated nodes, but ordinary Pi use must still accumulate candidate observations
+and usefulness outcomes.
+
 > The provisional-memory rules, isolation requirements, STG-vs-Delta
 > distinction, and promotion/demotion thresholds are consolidated in
 > [memory-graphs.md](memory-graphs.md) §3–§6.
@@ -2003,10 +2015,13 @@ Important gaps between the prototype and the target plugin:
 - Pi/CLI logical withdrawal and a versioned user-memory export now exist;
   physical privacy erasure of every provenance copy and learned aggregate remains
   gated future work;
-- automatic recall exposure is recorded as selection, not usefulness; without
-  answer-level citations the harness cannot prove that injected memory changed
-  the final answer. Agent-directed `nmg_get(activeGraphId=...)` is the current
-  conservative usefulness signal.
+- automatic recall exposure is recorded as selection, and Pi now performs a
+  precision-favoured answer-to-evidence attribution at `agent_end`. A matching
+  answer records natural use (including negative empty-use observations) for the
+  retrieval trace and shadow controller. This is weaker than an explicit
+  citation or `nmg_get(activeGraphId=...)`, so it is suitable for conservative
+  stability evidence and calibration, not proof that memory causally changed the
+  answer;
 - stability currently consolidates a pairwise local subgraph as a typed
   `related_to` relation. Larger multi-edge motif consolidation remains an
   experiment rather than a P3 requirement.

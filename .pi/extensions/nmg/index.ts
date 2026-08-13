@@ -170,6 +170,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       }
       const recalled = injectionWindow.format(sessionId, context, "header");
       await controllerShadow.retrieval(fullContext, sessionId, "automatic", recalled);
+      // Automatic recall is still a retrieval trace. Keep it in the per-turn
+      // attribution window so agent_end can distinguish surfaced evidence from
+      // candidates that were merely injected.
+      agentUseFlow.note(sessionId, fullContext);
       const recordCount = (recalled.match(/memory=/g) ?? []).length;
       const searchNudge = formatSearchRecommendation(context, recommendationMode);
       const recallContext = composeNmgContextMessage(
@@ -524,12 +528,18 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // against the WRONG answer). Consuming drops it — better to lose a
       // sample than to mislabel one.
       const pending = agentUseFlow.consume(sessionId);
-      if (pending.length > 0 && answerText && connectionPromise) {
-        const active = await connectionPromise.catch(() => undefined);
-        if (active) {
-          for (const { traceId, results } of pending) {
-            const usedMemoryIds = deriveUsedMemoryIds(answerText, results, promptText);
-            if (usedMemoryIds.length === 0) continue;
+      if (pending.length > 0 && answerText) {
+        const active = connectionPromise
+          ? await connectionPromise.catch(() => undefined)
+          : undefined;
+        for (const { traceId, results } of pending) {
+          const requestedMemoryIds = results.map((entry) => entry.memory.id);
+          const usedMemoryIds = deriveUsedMemoryIds(answerText, results, promptText);
+          // The shadow log needs the same natural-use attribution as the
+          // canonical trace. An empty used set is meaningful negative evidence,
+          // not a reason to drop the observation.
+          await controllerShadow.use(traceId, sessionId, requestedMemoryIds, usedMemoryIds);
+          if (active) {
             try {
               await invoke("recordActiveGraphUse", {
                 activeGraphId: traceId,
