@@ -116,6 +116,35 @@ task list.
 
 The full `--actor` set is `user`, `assistant`, `system`, `tool`.
 
+## Claim outcomes and STG consolidation evidence
+
+Record an outcome only when an independently attributable user message, tool
+result, completed task, or benchmark explicitly supports or contradicts a saved
+claim:
+
+```text
+nmg claim outcome <MEMORY_ID> \
+  --outcome supported \
+  --source tool \
+  --source-lineage "tool-result:<stable-id>" \
+  --semantic-task-id "task:<stable-id>" \
+  --active-graph-id <AG_ID> \
+  --json
+```
+
+`--claim-index` may be repeated to select atomic claims; omit it to apply the
+outcome to all claims in the record. `--active-graph-id` is optional, but when
+present it proves that the memory was exposed by that session-owned AG. The Pi
+adapter exposes the same operation as `nmg_remember action=claim_outcome`.
+For a user/tool outcome, pass the smallest exact supporting or contradicting
+excerpt in `evidence`; Pi binds its real message ID and ignores invented lineage.
+For a completed-task outcome, pass a stable `claimSourceLineage` task ID.
+
+This is deliberately separate from retrieval feedback. Being retrieved, being
+quoted by the Agent, task completion, silence, and lack of correction are not
+claim support. Stable `source-lineage` and `semantic-task-id` values prevent one
+source or repeated turn from becoming several independent votes.
+
 ## Deleting a memory
 
 ```text

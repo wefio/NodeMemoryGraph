@@ -18,6 +18,7 @@ import type {
   NmgGetParams,
   NmgMergeNodesParams,
   NmgPerfParams,
+  NmgRecordClaimOutcomesParams,
   NmgRememberParams,
   NmgResolveRememberParams,
   NmgRollbackNodeTransformParams,
@@ -130,6 +131,33 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
     options: ["reason", "project-dir", "session-id"],
     flags: [],
     buildParams: (values) => resolutionParams(values, "resolve"),
+  },
+  {
+    method: "recordClaimOutcomes",
+    words: ["claim", "outcome"],
+    usageLine:
+      "nmg claim outcome MEMORY_ID --outcome supported|contradicted --source SOURCE --source-lineage ID --semantic-task-id ID [options] [--json]",
+    options: [
+      "outcome",
+      "source",
+      "source-lineage",
+      "semantic-task-id",
+      "claim-index",
+      "weight",
+      "active-graph-id",
+      "project-dir",
+      "session-id",
+    ],
+    flags: [],
+    usageDetail: `Claim outcome options:
+  --outcome VALUE            Explicit supported or contradicted result
+  --source SOURCE            user, tool, task, or benchmark
+  --source-lineage ID        Stable identity of the original evidence source
+  --semantic-task-id ID      Independent task identity used for vote deduplication
+  --claim-index N            Repeatable atomic claim index; omit for every claim
+  --weight N                 Reliability in (0,1], default 1
+  --active-graph-id ID       Restrict voting to evidence exposed by this AG`,
+    buildParams: claimOutcomeParams,
   },
   {
     method: "resolveRemember",
@@ -608,6 +636,33 @@ function getParams(values: OptionValues): NmgGetParams {
     projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
     sessionId: firstOption(values, "session-id"),
   }) as unknown as NmgGetParams;
+}
+
+function claimOutcomeParams(values: OptionValues): NmgRecordClaimOutcomesParams {
+  const memoryId = singlePositional(values, "claim outcome");
+  const claimIndexes = (values.options.get("claim-index") ?? []).map((value) => {
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      throw new Error("--claim-index must be a non-negative integer");
+    }
+    return parsed;
+  });
+  return compactObject({
+    semanticTaskId: requiredOption(values, "semantic-task-id"),
+    activeGraphId: firstOption(values, "active-graph-id"),
+    sessionId: firstOption(values, "session-id"),
+    projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
+    votes: [
+      compactObject({
+        memoryId,
+        claimIndexes: claimIndexes.length ? claimIndexes : undefined,
+        outcome: requiredOption(values, "outcome"),
+        source: requiredOption(values, "source"),
+        sourceLineage: requiredOption(values, "source-lineage"),
+        weight: numericOption(values, "weight"),
+      }),
+    ],
+  }) as unknown as NmgRecordClaimOutcomesParams;
 }
 
 function storageStateParams(

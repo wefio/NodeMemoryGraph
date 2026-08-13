@@ -39,8 +39,9 @@ get_description: >-
 
 remember_description: >-
   Save a durable record (fact, state, event, preference, constraint,
-  strategy), resolve a possible supersession, or attach explicit evaluation
-  feedback to a retrieval trace.
+  strategy), resolve a possible supersession, attach explicit evaluation
+  feedback to a retrieval trace, or record an attributable supported/contradicted
+  outcome for selected saved claims.
   You decide the semantic content and whether a candidate is truly an older
   value; NMG validates scope, identity, provenance, and applies the transaction.
   The record persists across sessions. Only save attributable information -
@@ -117,7 +118,10 @@ remember_action_parameter_description: >-
   Use resolve when an open question or dependency has been settled. Use reopen
   when later evidence makes a resolved memory actionable again; provide the
   related evidence memory IDs so the open structure stays attributable.
-  Use feedback to record explicit task/retrieval labels. Pass activeGraphId when
+  Use feedback to record explicit task/retrieval labels. Use claim_outcome only
+  after an attributable user, tool, or completed task explicitly supports or
+  contradicts selected saved claims; retrieval, use, silence, and task success
+  alone are not claim outcomes. Pass activeGraphId when
   labelling a specific older retrieval; omit it only to label the latest retrieval
   in the current Pi session. Silence or lack of correction is not positive feedback.
 
@@ -292,3 +296,23 @@ memory_policy: >-
   evidence (append/re-fetch) before guessing; ignore headers that are clearly irrelevant
   noise. Save only attributable, durable information; do not save secrets, transient
   content, unconfirmed assistant proposals, or unsupported guesses.
+
+claim_outcome_parameter_description: >-
+  Explicit result for selected saved claims: supported or contradicted. This is
+  evidence about the claim itself, not retrieval quality. Never infer support
+  merely because a memory was retrieved, used in an answer, or not corrected.
+
+claim_outcome_source_parameter_description: >-
+  Attribution class for the outcome: user, tool, or task. User/tool outcomes
+  require an exact evidence excerpt from the current Pi session; task outcomes
+  require claimSourceLineage. Benchmark outcomes are reserved for eval/CLI.
+
+claim_source_lineage_parameter_description: >-
+  Stable identity of an independently attributable completed task. For
+  user/tool outcomes Pi derives lineage from the exact evidence message instead
+  of trusting a model-provided ID. Reusing lineage prevents one source from
+  becoming multiple independent votes.
+
+claim_indexes_parameter_description: >-
+  Optional zero-based indexes of atomic claims within the memory. Omit to apply
+  the explicit outcome to every claim in that memory.

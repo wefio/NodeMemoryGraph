@@ -31,7 +31,6 @@ test("every RPC method is exposed via the CLI or is intentionally RPC-only", () 
   const rpcOnly: readonly NmgMethod[] = [
     "hello",
     "recordActiveGraphUse",
-    "recordClaimOutcomes",
     "shutdown",
     "stgPurgeSession",
   ];
@@ -95,5 +94,38 @@ test("CLI exact get preserves Active Graph use attribution", () => {
       positionals: ["memory-1", "memory-2"],
     }),
     { memoryIds: ["memory-1", "memory-2"], activeGraphId: "ag-1" },
+  );
+});
+
+test("CLI exposes explicit attributable claim outcomes", () => {
+  const command = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "claim outcome")!;
+  assert.deepEqual(
+    command.buildParams({
+      flags: new Set(),
+      options: new Map([
+        ["outcome", ["supported"]],
+        ["source", ["tool"]],
+        ["source-lineage", ["tool-run:42"]],
+        ["semantic-task-id", ["task:42"]],
+        ["claim-index", ["0", "2"]],
+        ["weight", ["0.8"]],
+        ["active-graph-id", ["ag-42"]],
+      ]),
+      positionals: ["memory-42"],
+    }),
+    {
+      semanticTaskId: "task:42",
+      activeGraphId: "ag-42",
+      votes: [
+        {
+          memoryId: "memory-42",
+          claimIndexes: [0, 2],
+          outcome: "supported",
+          source: "tool",
+          sourceLineage: "tool-run:42",
+          weight: 0.8,
+        },
+      ],
+    },
   );
 });

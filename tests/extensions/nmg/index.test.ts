@@ -1137,6 +1137,58 @@ test("Chinese automatic recall reaches agent_end use attribution and the shadow 
     )) as { message?: { content: string } };
     assert.match(recalled.message?.content ?? "", /用户偏好中文解释/u);
 
+    const claimOutcome = (await tools.get("nmg_remember")!.execute(
+      "claim-outcome-latest",
+      {
+        action: "claim_outcome",
+        memoryId: saved.details.memory.id,
+        claimOutcome: "supported",
+        claimOutcomeSource: "task",
+        claimSourceLineage: "task:user-pref-confirmation",
+        semanticTaskId: "task:user-pref-confirmation",
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    )) as {
+      details: {
+        events: Array<{ memoryId: string; outcome: string; sourceLineage: string }>;
+        posteriors: Array<{ memoryId: string; independentVoteCount: number }>;
+      };
+    };
+    assert.deepEqual(
+      claimOutcome.details.events.map((event) => ({
+        memoryId: event.memoryId,
+        outcome: event.outcome,
+        sourceLineage: event.sourceLineage,
+      })),
+      [
+        {
+          memoryId: saved.details.memory.id,
+          outcome: "supported",
+          sourceLineage: "task:user-pref-confirmation",
+        },
+      ],
+    );
+    assert.equal(claimOutcome.details.posteriors[0]?.independentVoteCount, 1);
+    await assert.rejects(
+      tools.get("nmg_remember")!.execute(
+        "claim-outcome-unbound-user",
+        {
+          action: "claim_outcome",
+          memoryId: saved.details.memory.id,
+          claimOutcome: "supported",
+          claimOutcomeSource: "user",
+          claimSourceLineage: "invented-message-id",
+          semanticTaskId: "task:unbound-user-vote",
+        },
+        undefined,
+        undefined,
+        { sessionManager },
+      ),
+      /exact matching evidence excerpt/u,
+    );
+
     await handlers.get("agent_end")!(
       {
         messages: [

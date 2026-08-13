@@ -701,6 +701,15 @@ actuation is deliberately disabled by default and requires
 `NMG_STG_AUTO_CONSOLIDATE=1`; candidate reporting remains available in shadow
 so natural-use precision and reversibility can be measured first.
 
+Claim outcomes enter through an explicit, attributable boundary rather than
+ordinary retrieval feedback. Pi exposes `nmg_remember action=claim_outcome`,
+and the agent-neutral CLI exposes `nmg claim outcome`; both require a semantic
+task ID, `supported|contradicted`, source class, and stable source lineage. An
+optional session-owned Active Graph restricts votes to records actually exposed
+by that retrieval. Retrieval, exact `get`, answer reuse, silence, and generic
+task success never create positive claim votes. This wiring makes posterior
+collection possible in ordinary use without weakening the promotion gate.
+
 Physical separation also means a new STG state cannot transactionally mark an
 older consolidated LTG state superseded. The runtime STG/LTG projection
 therefore reconciles active records with the same canonical `stateKey + scope`

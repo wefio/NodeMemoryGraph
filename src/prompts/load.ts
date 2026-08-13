@@ -31,6 +31,10 @@ export interface NmgPrompts {
   feedback_note_parameter_description: string;
   feedback_label_parameter_description: string;
   semantic_task_id_parameter_description: string;
+  claim_outcome_parameter_description: string;
+  claim_outcome_source_parameter_description: string;
+  claim_source_lineage_parameter_description: string;
+  claim_indexes_parameter_description: string;
   search_query_parameter_description: string;
   search_queries_parameter_description: string;
   search_progression_required: string;

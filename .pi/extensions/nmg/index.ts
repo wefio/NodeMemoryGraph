@@ -98,7 +98,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     (connectionPromise ??= connectDaemon(databasePath()));
   const invoke = async (
     method:
-      "get" | "remember" | "resolveRemember" | "search" | "taskBoard" | "recordActiveGraphUse",
+      | "get"
+      | "remember"
+      | "resolveRemember"
+      | "search"
+      | "taskBoard"
+      | "recordActiveGraphUse"
+      | "recordClaimOutcomes",
     params: Record<string, unknown>,
   ) => invokeDaemon(await connection(), method, params);
 
@@ -631,6 +637,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             Type.Literal("resolve"),
             Type.Literal("reopen"),
             Type.Literal("feedback"),
+            Type.Literal("claim_outcome"),
           ],
           { description: nmgPrompts.remember_action_parameter_description },
         ),
@@ -665,6 +672,30 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       semanticTaskId: Type.Optional(
         Type.String({ description: nmgPrompts.semantic_task_id_parameter_description }),
       ),
+      claimOutcome: Type.Optional(
+        Type.Union([Type.Literal("supported"), Type.Literal("contradicted")], {
+          description: nmgPrompts.claim_outcome_parameter_description,
+        }),
+      ),
+      claimOutcomeSource: Type.Optional(
+        Type.Union(
+          [
+            Type.Literal("user"),
+            Type.Literal("tool"),
+            Type.Literal("task"),
+          ],
+          { description: nmgPrompts.claim_outcome_source_parameter_description },
+        ),
+      ),
+      claimSourceLineage: Type.Optional(
+        Type.String({ description: nmgPrompts.claim_source_lineage_parameter_description }),
+      ),
+      claimIndexes: Type.Optional(
+        Type.Array(Type.Number({ minimum: 0 }), {
+          description: nmgPrompts.claim_indexes_parameter_description,
+        }),
+      ),
+      claimWeight: Type.Optional(Type.Number({ minimum: 0.000001, maximum: 1 })),
       statement: Type.Optional(Type.String()),
       nodeName: Type.Optional(
         Type.String({ description: nmgPrompts.node_name_parameter_description }),
@@ -765,6 +796,63 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (params.action === "claim_outcome") {
+        if (
+          !params.memoryId ||
+          !params.claimOutcome ||
+          !params.claimOutcomeSource ||
+          !params.semanticTaskId?.trim()
+        ) {
+          throw new Error(
+            "action=claim_outcome requires memoryId, claimOutcome, claimOutcomeSource, and semanticTaskId",
+          );
+        }
+        if (params.claimIndexes?.some((index) => !Number.isInteger(index))) {
+          throw new Error("claimIndexes must contain only non-negative integers");
+        }
+        const sessionId = ctx.sessionManager.getSessionId();
+        const evidenceSource =
+          params.claimOutcomeSource === "user" || params.claimOutcomeSource === "tool"
+            ? selectPiEvidenceSource(
+                ctx.sessionManager,
+                params.evidence,
+                params.claimOutcomeSource,
+              )
+            : undefined;
+        if (
+          (params.claimOutcomeSource === "user" || params.claimOutcomeSource === "tool") &&
+          !evidenceSource
+        ) {
+          throw new Error(
+            `claimOutcomeSource=${params.claimOutcomeSource} requires an exact matching evidence excerpt from the current Pi session`,
+          );
+        }
+        const sourceLineage =
+          evidenceSource?.sourceMessageId ?? params.claimSourceLineage?.trim();
+        if (!sourceLineage) {
+          throw new Error("claimOutcomeSource=task requires claimSourceLineage");
+        }
+        const result = await invoke("recordClaimOutcomes", {
+          semanticTaskId: params.semanticTaskId,
+          activeGraphId: params.activeGraphId,
+          sessionId,
+          projectDir: projectDirectory(),
+          votes: [
+            {
+              memoryId: params.memoryId,
+              claimIndexes: params.claimIndexes,
+              outcome: params.claimOutcome,
+              source: params.claimOutcomeSource,
+              sourceLineage,
+              weight: params.claimWeight,
+            },
+          ],
+        });
+        return toolResult(
+          result,
+          "Explicit attributable claim outcome recorded. Retrieval or answer use alone was not treated as support.",
+        );
+      }
       if (params.action === "feedback") {
         const sessionId = ctx.sessionManager.getSessionId();
         const activeGraphId =
@@ -880,6 +968,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       delete memory.noMemoryNeeded;
       delete memory.feedbackNote;
       delete memory.semanticTaskId;
+      delete memory.claimOutcome;
+      delete memory.claimOutcomeSource;
+      delete memory.claimSourceLineage;
+      delete memory.claimIndexes;
+      delete memory.claimWeight;
       if (externalSource && !/^(?:file|web):.+/u.test(externalSource.source)) {
         throw new Error("externalSource.source must start with web: or file:");
       }

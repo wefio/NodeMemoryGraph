@@ -18,7 +18,7 @@ The capture and session-ownership plumbing is implemented. Controlled examples
 may validate plumbing but must not be counted as natural product evidence. This
 is enforced by `collectionOrigin`: ordinary Pi writes `natural`, the headless
 probe writes `controlled`, and legacy events without the field are excluded.
-As of 2026-08-13 the ordinary-Pi shadow log contains 6 fully labelled natural
+As of 2026-08-13 the ordinary-Pi shadow log contains 7 fully labelled natural
 graphs. Session-local latest-graph feedback removed fragile UUID copying, and
 online Pi blackboard audits now contribute ordinary multi-Agent supervision
 without launching controlled headless probes. This is real progress, not enough
@@ -56,6 +56,16 @@ proposal and pass a read-only eligibility assessment, but acceptance and
 `mergeNodes` remain explicit. The existing physical merge primitive must not be
 connected automatically until scope, temporal-state, same-name identity, and
 rollback outcomes are represented in that validation set.
+
+A second ordinary online-Pi audit found that the real stores had STG records but
+zero `claim_outcome_events`, zero claim posteriors, and therefore zero
+consolidation candidates or reversals. The missing product boundary is now
+wired explicitly: Pi `nmg_remember action=claim_outcome` and CLI
+`nmg claim outcome` accept only attributable `supported|contradicted` results
+with stable source lineage and semantic-task identity. Ordinary retrieval,
+answer reuse, and silence still do not create votes. The default actuator remains
+off; natural precision and reversal evidence must now accumulate through this
+boundary.
 
 ## 4. Run the SkillOpt promotion gate
 
