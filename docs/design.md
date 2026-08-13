@@ -1403,19 +1403,22 @@ structures. A controller may build an ephemeral differentiable projection from
 their numeric features, optimise its parameters, then hand the result back to
 ordinary budgeted graph selection.
 
-The Pi adapter now has an opt-in shadow bridge (`NMG_CONTROLLER_SHADOW=1`). It
-lazy-loads the controller only after a real retrieval, records the baseline and
-learned node order in a bounded log under `NMG_DATA_DIR`, and trains only when
-the Agent explicitly fetches records from that same session-owned Active Graph.
-The log records exact injected characters, a labelled token estimate, model
-usage, tool rounds, and end-to-end latency. The same session may attach explicit
-task/retrieval labels with `nmg_remember action=feedback`; cross-session graph
-IDs and disabled-shadow submissions fail closed. Missing feedback remains
-unknown rather than being interpreted as success.
-Automatic injection, rank position, and an uncorrected answer are not positive
-labels. Shadow decisions cannot change ranking, folding, expansion, or budgets.
-This closes the data path without making an unevaluated controller part of the
-product policy.
+The Pi adapter has a lazy controller bridge. `NMG_CONTROLLER_SHADOW=1` enables
+telemetry without actuation; QPP1/QPP2 `active` are the explicit operator gates
+that permit a trained controller to allocate a bounded Active Graph budget or
+fold low learned-probability candidates. A zero-step controller is inert, and
+all active outputs remain inside hard minimum/normal/expanded envelopes.
+
+The bridge records baseline and learned node order in a bounded log under
+`NMG_DATA_DIR`. It trains from exact records fetched from the same
+session-owned Active Graph and from the conservative answer-to-memory actual-use
+matcher used by automatic recall. Injection, rank position, mere exposure, and
+silence are never positive labels. Explicit `nmg_remember action=feedback`
+labels remain a separate source for task success, evidence sufficiency,
+expansion utility, noise, and no-memory-needed judgments; cross-session graph
+IDs fail closed. Missing explicit feedback remains unknown. Thus shadow mode
+cannot change retrieval, while active QPP modes are an explicit experimental
+product choice rather than an automatic calibration promotion.
 
 All ordinary clients resolve the shadow log and database through one data-path
 contract: explicit `NMG_DATA_DIR` wins, otherwise the user-level `~/.nmg` store
@@ -1427,16 +1430,17 @@ memory from fragmenting by working directory while keeping benchmark state
 isolated.
 
 Because answer-quality labels only become observable after an Agent turn, the
-Pi bridge keeps completed, exactly-used, unlabelled retrievals in session-local
-shadow state. On the next distinct user turn it exposes at most one one-shot
+Pi bridge keeps completed retrievals with attributable use evidence and missing
+explicit task labels in session-local state. Use evidence may come from an exact
+`get` or the conservative answer matcher; automatic recall is therefore
+reviewable only when the answer appears to have used at least one of its
+memories. On the next distinct user turn the bridge exposes at most one one-shot
 review reminder containing the AG ID and stable query task ID. Internal Pi tool
-loops with the same user prompt cannot consume the reminder, and header-only
-automatic-recall graphs are not offered for feedback. The Agent may submit explicit
-`evidenceSufficient`, `expansionUseful`, `excessiveNoise`, and `noMemoryNeeded`
-labels through the existing remember feedback action. Missing review remains
-unknown; the bridge never converts completion, silence, exposure, or lack of a
-correction into a label. This is collection infrastructure, not controller
-activation.
+loops with the same user prompt cannot consume the reminder. The Agent may
+submit `evidenceSufficient`, `expansionUseful`, `excessiveNoise`, and
+`noMemoryNeeded` through the existing remember feedback action. Missing review
+remains unknown; completion, silence, exposure, or lack of a correction is not
+itself a label.
 
 Reminder exposure is logged as a non-training `tool_flow/feedback_nudge_shown`
 event. This separates "the Agent skipped an observable reminder" from "no
@@ -2150,6 +2154,14 @@ Current development evidence (updated 2026-07-30):
   and total add-plus-search time from 73.0 to 68.9 seconds. Shared all-actor
   ranking and fixed actor quotas were rejected because they added context and
   latency without improving recall.
+- full OmniMemEval BEAM 100K answer-and-judge run over the same 20 conversations
+  and 400 questions: NMG with BGE record vectors, K=20, QPP2 off, and DeepSeek V4
+  Flash as both reader and judge scored `0.6422 ± 0.3974`. Search latency was
+  40.9 ms P50 and 185.1 ms P95; all 400 search, answer, and judge records
+  completed without skipping. This is an absolute backend result, not an NMG
+  improvement claim until the matched no-memory/raw-session arm is complete.
+  Full parameters, per-dimension scores, tokens, timing, and runner corrections
+  are recorded in `beam-100k-evaluation-2026-08-13.md`.
 - reasoning-workspace development benchmark, three tasks with three repeats per
   condition using DeepSeek V4 Flash: full-context baseline and workspace both
   achieved 100% exact task success, while mean latency rose from 5.79 s to

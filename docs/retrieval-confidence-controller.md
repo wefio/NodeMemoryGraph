@@ -1,6 +1,6 @@
 # QPP × 可微计算图：触发式召回
 
-> 状态：Stage 0 已实现；Stage 1 rolling τ 的 shadow worker 已实现但数据门槛未满足；Stage 2 保持 shadow。
+> 状态：Stage 0 已实现；Stage 1 rolling τ 的 shadow worker 已实现但数据门槛未满足；多头可微控制器已可由用户显式启用，Stage 2 的校准阈值替代仍未推广。
 
 ## 定位
 
