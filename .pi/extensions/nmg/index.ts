@@ -1400,10 +1400,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         }
         const anchor = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
         const identityFile = join(resolveNmgDataDir(), "agents", anchor, "identity.json");
-        cachedIdentity = { id: agentId, agentName: newName };
+        const renamedIdentity = { id: agentId, agentName: newName };
+        cachedIdentities.set(anchor, renamedIdentity);
         try {
           mkdirSync(join(resolveNmgDataDir(), "agents", anchor), { recursive: true });
-          writeFileSync(identityFile, JSON.stringify(cachedIdentity, null, 2), "utf8");
+          writeFileSync(identityFile, JSON.stringify(renamedIdentity, null, 2), "utf8");
         } catch {
           // read-only dir — rename is in-memory only for this process
         }
@@ -2405,7 +2406,7 @@ interface AgentIdentity {
   agentName: string;
 }
 
-let cachedIdentity: AgentIdentity | null = null;
+const cachedIdentities = new Map<string, AgentIdentity>();
 
 /** Stable agent identity: a persistent per-agent file under
  * ~/.nmg/agents/<anchor>/identity.json, where anchor = NMG_AGENT_ID (the
@@ -2416,15 +2417,17 @@ let cachedIdentity: AgentIdentity | null = null;
  * fix): the identity file is re-read, so id and name persist across a pi
  * restart. */
 function loadOrCreateAgentIdentity(sessionId: string): AgentIdentity {
-  if (cachedIdentity) return cachedIdentity;
   const anchor = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
+  const cachedIdentity = cachedIdentities.get(anchor);
+  if (cachedIdentity) return cachedIdentity;
   const dir = join(resolveNmgDataDir(), "agents", anchor);
   const file = join(dir, "identity.json");
   try {
     const raw = JSON.parse(readFileSync(file, "utf8")) as AgentIdentity;
     if (raw.id && raw.agentName) {
-      cachedIdentity = { id: raw.id, agentName: raw.agentName };
-      return cachedIdentity;
+      const identity = { id: raw.id, agentName: raw.agentName };
+      cachedIdentities.set(anchor, identity);
+      return identity;
     }
   } catch {
     // no identity file yet — create below
@@ -2436,7 +2439,7 @@ function loadOrCreateAgentIdentity(sessionId: string): AgentIdentity {
   } catch {
     // read-only directory — fall back to the in-memory identity
   }
-  cachedIdentity = identity;
+  cachedIdentities.set(anchor, identity);
   return identity;
 }
 

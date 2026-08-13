@@ -591,6 +591,7 @@ test("NMG prompt keeps a stable policy prefix; dynamic recall goes to the traili
   assert.equal(second, stablePrefix);
   assert.match(MEMORY_POLICY, /does not decide answer truth or evidence completeness/);
   assert.match(MEMORY_POLICY, /No useful memory is a valid result/);
+  assert.match(MEMORY_POLICY, /Semantic or topical relevance does not prove/);
   assert.match(MEMORY_POLICY, /unconfirmed assistant proposals/);
 
   const dynamic = composeNmgContextMessage("first candidate");
