@@ -1182,6 +1182,28 @@ test("task board RPC parses directed delivery and agent discovery actions", asyn
     assert.equal(written.entry.to, "kimi");
     assert.equal(written.entry.serialState, null);
 
+    const named = await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "private-review",
+      agentId: "requester",
+      kind: "handoff",
+      content: "Review the private controller trace",
+      to: "kimi-002",
+    });
+    assert.equal(named.action, "put");
+    if (named.action !== "put") throw new Error("expected put");
+    const inbox = await service.invoke("taskBoard", {
+      action: "readDirected",
+      agentId: "kimi-002",
+      agentName: "kimi",
+    });
+    assert.equal(inbox.action, "readDirected");
+    if (inbox.action !== "readDirected") throw new Error("expected readDirected");
+    assert.deepEqual(
+      inbox.entries.map((entry) => entry.id),
+      [written.entry.id, named.entry.id],
+    );
+
     assert.deepEqual(await service.invoke("taskBoard", { action: "heartbeat", id: "kimi-002" }), {
       action: "heartbeat",
       agentName: "",
@@ -1221,7 +1243,7 @@ test("recordActiveGraphUse validates its RPC boundary and permits empty use", as
   }
 });
 
-test("task board subscriptions are explicit membership: only joined channels wake", async () => {
+test("task board subscriptions gate broadcast wake while directed delivery uses an inbox", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-subs-"));
   const databasePath = join(directory, "nmg.sqlite");
   const service = new NmgService({ databasePath, environment: {} });

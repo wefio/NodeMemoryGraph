@@ -211,6 +211,32 @@ export class NmgStoreBase {
       nextCursor: rawEntries.at(-1)?.sequence ?? Math.max(0, input.afterCursor ?? 0),
     };
   }
+  /** Open point-to-point entries addressed to this stable agent identity.
+   * Unlike channel reads, this inbox spans named boards so directed delivery
+   * does not require the recipient to discover and subscribe first. */
+  readDirectedTaskBoard(input: {
+    agentId: string;
+    agentName: string;
+    limit?: number;
+    now?: string;
+  }): TaskBoardEntry[] {
+    const now = input.now ?? new Date().toISOString();
+    this.pruneExpiredTaskBoardEntries(now);
+    const targets = [...new Set([input.agentId.trim(), input.agentName.trim()].filter(Boolean))];
+    if (targets.length === 0) return [];
+    const placeholders = targets.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM task_board_entries
+         WHERE status = 'open' AND expires_at > ? AND [to] IN (${placeholders})
+         ORDER BY created_at ASC, task_id ASC, sequence ASC LIMIT ?`,
+      )
+      .all(now, ...targets, Math.max(1, Math.min(input.limit ?? 50, 200))) as Row[];
+    const entries = rows.map(mapTaskBoardEntry);
+    const ackMap = this.taskBoardAckMap(entries.map((entry) => entry.id));
+    for (const entry of entries) entry.ackedBy = ackMap.get(entry.id) ?? [];
+    return entries;
+  }
   resolveTaskBoardEntry(input: {
     taskId: string;
     entryId: string;

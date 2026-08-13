@@ -26,9 +26,9 @@ import type {
 } from "../core/types.ts";
 
 // Bump only when a live daemon from the previous revision cannot faithfully
-// implement the current client contract. v2 adds directed task-board routing,
-// serial handoff state, and agent discovery.
-export const NMG_PROTOCOL_VERSION = "nmg.v2" as const;
+// implement the current client contract. v3 makes directed task-board delivery
+// independent of named-channel subscription through an internal target inbox.
+export const NMG_PROTOCOL_VERSION = "nmg.v3" as const;
 
 export const NMG_CAPABILITIES = [
   "hello",
@@ -47,6 +47,7 @@ export const NMG_CAPABILITIES = [
   "split-node",
   "sync-stg",
   "task-board",
+  "directed-task-board-inbox",
   "shutdown",
   "http",
   "json-rpc",
@@ -296,6 +297,15 @@ export interface NmgTaskBoardReadParams extends NmgTaskBoardBase {
   includeResolved?: boolean;
 }
 
+/** Wake-loop internal: open entries addressed to either the stable routing id
+ * or current display name, across all named channels. */
+export interface NmgTaskBoardReadDirectedParams {
+  action: "readDirected";
+  agentId: string;
+  agentName: string;
+  limit?: number;
+}
+
 export interface NmgTaskBoardResolveParams extends NmgTaskBoardBase {
   action: "resolve";
   entryId: string;
@@ -344,9 +354,9 @@ export interface NmgTaskBoardRecordDeliveryParams {
 }
 
 /** Agent-facing: join (subscribe) or leave (unsubscribe) a channel.
- * Topic-based membership: a session receives wake notices only for the
- * world channel (its default member channel) plus channels it subscribed to.
- * Named channels never notify non-members. */
+ * Topic-based membership controls broadcast wake notices: a session receives
+ * them only for the world channel plus channels it subscribed to. Explicit
+ * point-to-point entries use the separate directed inbox. */
 export interface NmgTaskBoardUnsubscribeParams {
   action: "unsubscribe";
   agentId: string;
@@ -414,6 +424,7 @@ export interface NmgTaskBoardDiscoverParams extends NmgTaskBoardBase {
 export type NmgTaskBoardParams =
   | NmgTaskBoardPutParams
   | NmgTaskBoardReadParams
+  | NmgTaskBoardReadDirectedParams
   | NmgTaskBoardResolveParams
   | NmgTaskBoardAcknowledgeParams
   | NmgTaskBoardClaimParams
@@ -532,6 +543,7 @@ export type NmgMethodResult = {
   taskBoard:
     | { action: "put" | "resolve" | "claim" | "release" | "acknowledge"; entry: TaskBoardEntry }
     | { action: "read"; entries: TaskBoardEntry[]; nextCursor: number }
+    | { action: "readDirected"; entries: TaskBoardEntry[] }
     | {
         action: "list";
         boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }>;

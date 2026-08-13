@@ -1605,9 +1605,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }
     try {
       const candidates: Array<TaskBoardToolEntry & { taskId: string }> = [];
+      const candidateIds = new Set<string>();
       const collect = (taskId: string, entries: TaskBoardToolEntry[] | undefined) => {
         for (const entry of entries ?? []) {
-          if (isBoardWakeCandidate(entry, { sessionId, agentId, agentName })) {
+          if (
+            !candidateIds.has(entry.id) &&
+            isBoardWakeCandidate(entry, { sessionId, agentId, agentName })
+          ) {
+            candidateIds.add(entry.id);
             candidates.push({ ...entry, taskId });
           }
         }
@@ -1618,6 +1623,18 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         agentId,
       })) as TaskBoardToolResult;
       collect(WORLD_BOARD_ID, world.entries);
+      // Point-to-point delivery is an inbox, not topic membership. A target
+      // must receive a directed handoff even before it has discovered or joined
+      // the sender's named channel.
+      const directed = (await invoke("taskBoard", {
+        action: "readDirected",
+        agentId,
+        agentName,
+      })) as { action: "readDirected"; entries: TaskBoardToolEntry[] };
+      for (const entry of directed.entries ?? []) {
+        const taskId = entry.taskId?.trim();
+        if (taskId) collect(taskId, [entry]);
+      }
       // Named channels: only channels this session explicitly subscribed to are
       // scanned. Topic-based membership — a non-member never receives wake
       // notices for a named channel, no matter how active it is. Discovery of
@@ -2445,6 +2462,7 @@ function loadOrCreateAgentIdentity(sessionId: string): AgentIdentity {
 
 interface TaskBoardToolEntry {
   id: string;
+  taskId?: string;
   sequence: number;
   agentId: string;
   sourceSessionId?: string | null;

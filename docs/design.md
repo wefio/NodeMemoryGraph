@@ -204,7 +204,7 @@ second daemon for the same database is rejected, stale leases are recovered,
 and `Shutdown` performs the normal close path. PID termination is only a
 fallback when the HTTP endpoint cannot be reached.
 
-Protocol version `nmg.v2` exposes the typed lifecycle, memory, retrieval,
+Protocol version `nmg.v3` exposes the typed lifecycle, memory, retrieval,
 maintenance, STG-sync, and Task Board methods declared in `protocol.ts` over
 JSON-RPC 2.0. HTTP is the only resident protocol;
 NMG does not maintain a parallel NDJSON or platform-specific socket API.
@@ -2366,7 +2366,7 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
    zero-configuration and not-yet-ready fallback. Node/leaf-only and the
    current union ranker are explicitly gated off after the LoCoMo ablation.
 5. **Complete:** expose the application boundary through an
-   agent-independent `nmg` CLI and cross-platform `nmg.v2`
+   agent-independent `nmg` CLI and cross-platform `nmg.v3`
    JSON-RPC-over-HTTP daemon. The Pi extension uses the same daemon through a
    persistent HTTP client and ownership-aware lifecycle.
 

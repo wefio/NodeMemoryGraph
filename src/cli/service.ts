@@ -214,6 +214,12 @@ export class NmgService {
             ...this.#getStore().readTaskBoard(parsed),
           } as NmgMethodResult[M];
         }
+        if (parsed.action === "readDirected") {
+          return {
+            action: "readDirected",
+            entries: this.#getStore().readDirectedTaskBoard(parsed),
+          } as NmgMethodResult[M];
+        }
         if (parsed.action === "list") {
           return {
             action: "list",
@@ -1224,6 +1230,7 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
   const action = requiredEnum(params, "action", [
     "put",
     "read",
+    "readDirected",
     "resolve",
     "acknowledge",
     "claim",
@@ -1274,6 +1281,14 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
   }
   if (action === "list") {
     return { action, agentId };
+  }
+  if (action === "readDirected") {
+    return {
+      action,
+      agentId,
+      agentName: requiredString(params, "agentName"),
+      limit: optionalInteger(params, "limit", 1, 200),
+    };
   }
   if (action === "listSubscriptions") {
     return {

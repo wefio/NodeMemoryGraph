@@ -116,6 +116,41 @@ test("task board content never enters semantic memory search", () => {
   });
 });
 
+test("directed inbox reaches its target across named channels without a subscription", () => {
+  withStore((store) => {
+    const target = store.putTaskBoardEntry({
+      taskId: "private-handoff",
+      agentId: "sender",
+      kind: "handoff",
+      content: "Inspect the controller gate.",
+      to: "pi-main",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    store.putTaskBoardEntry({
+      taskId: "other-channel",
+      agentId: "sender",
+      kind: "handoff",
+      content: "This belongs to another agent.",
+      to: "pi-other",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    store.putTaskBoardEntry({
+      taskId: "broadcast-only",
+      agentId: "sender",
+      kind: "handoff",
+      content: "Subscribers only.",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+
+    const entries = store.readDirectedTaskBoard({
+      agentId: "stable-agent-id",
+      agentName: "pi-main",
+    });
+    assert.deepEqual(entries.map((entry) => entry.id), [target.id]);
+    assert.equal(entries[0]!.taskId, "private-handoff");
+  });
+});
+
 test("task board lobby lists active named channels and hides the world channel", () => {
   withStore((store) => {
     const future = "2099-01-01T00:00:00.000Z";
