@@ -35,7 +35,7 @@
     "src/lab/skillopt-policy.ts"
   ],
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node -e \"require('node:fs').cpSync('src/cli/graph/assets','dist/cli/graph/assets',{recursive:true})\"",
     "check": "tsc --noEmit",
     "cli": "node --experimental-strip-types src/cli/main.ts",
     "lint": "eslint src/ .pi/extensions/",

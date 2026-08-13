@@ -198,6 +198,7 @@ npm run cli -- retention archive <memory-id>
 npm run cli -- retention quarantine <memory-id> --recovery-days 30
 npm run cli -- retention restore <memory-id>
 npm run cli -- memory delete <memory-id>
+npm run cli -- graph --out memory-graph.html
 npm run cli -- stg sync --project-dir . --scope project=nmg --limit 50
 npm run cli -- daemon start
 npm run cli -- daemon status
@@ -217,6 +218,15 @@ remains authoritative.
 Project STG is also session-private. Pi supplies its session ID automatically;
 CLI callers may add `--session-id ID`. Without it, CLI uses a separate `cli`
 administrative session rather than reading any Pi session's STG.
+
+`nmg graph` exports the node/relation projection as a single self-contained
+HTML file (default `nmg-graph.html`, override with `--out FILE`). It reads the
+database read-only — safe against a live daemon — and the page needs no server:
+force-directed canvas layout, drag/zoom, per-relation-type legend toggles,
+isolated-node highlighting, and a detail panel with each node's top statements.
+The view assets under `src/cli/graph/assets/` are plain templates
+(`template.html`, `graph.css`, `graph.js` exposing `NmgGraph.mount`) so the
+renderer can be reused with any `{nodes, edges}` payload.
 
 External evidence is opt-in and visibly marked:
 

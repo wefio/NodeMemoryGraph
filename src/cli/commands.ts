@@ -445,6 +445,22 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
       return undefined;
     },
   },
+  {
+    // Local read-only graph export — renders the node/relation projection
+    // into a self-contained HTML file; main.ts dispatches it.
+    local: true,
+    includeCommonFlags: false,
+    words: ["graph"],
+    usageLine: "nmg graph [--out FILE] [--data-dir DIR | --db FILE]",
+    options: ["out"],
+    flags: [],
+    usageDetail: `Graph export options:
+  --out FILE                 Output HTML file (default: nmg-graph.html)`,
+    buildParams: (values) => {
+      rejectPositionals(values, "graph");
+      return undefined;
+    },
+  },
 ];
 
 /** All option names any command accepts (drives parse-time typo rejection). */

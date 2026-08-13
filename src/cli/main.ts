@@ -82,10 +82,19 @@ export async function runCli(
       service.close();
     }
   }
-  if (parsed.command === "inspect") {
+  if (parsed.command === "inspect" || parsed.command === "graph") {
     try {
-      const { runInspectTui } = await import("./inspect-tui.ts");
-      await runInspectTui(service.databasePath);
+      if (parsed.command === "graph") {
+        const { exportGraphHtml } = await import("./graph-render.ts");
+        const outputPath = exportGraphHtml(
+          service.databasePath,
+          parsed.outPath ?? "nmg-graph.html",
+        );
+        io.stdout.write(`Wrote memory graph to ${outputPath}\n`);
+      } else {
+        const { runInspectTui } = await import("./inspect-tui.ts");
+        await runInspectTui(service.databasePath);
+      }
       return 0;
     } catch (error) {
       io.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -239,7 +248,7 @@ function isDaemonCommand(command: ParsedArguments["command"]): command is Daemon
 }
 
 interface ParsedArguments {
-  command: NmgMethod | DaemonCommand | "inspect" | "help";
+  command: NmgMethod | DaemonCommand | "inspect" | "graph" | "help";
   params?:
     | NmgRememberParams
     | NmgSearchParams
@@ -255,6 +264,8 @@ interface ParsedArguments {
   compactJson?: boolean;
   dataDirectory?: string;
   databasePath?: string;
+  /** Local `graph` command: output HTML path. */
+  outPath?: string;
 }
 
 function parseArguments(argv: readonly string[]): ParsedArguments {
@@ -281,14 +292,15 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
     throw new Error("--json and --compact-json are mutually exclusive");
   }
   if (spec.local) {
-    // Local commands (inspect) validate through the registry but dispatch
-    // directly — no RPC method, no params, no --json.
+    // Local commands (inspect, graph) validate through the registry but
+    // dispatch directly — no RPC method, no params, no --json.
     spec.buildParams(values);
     return {
-      command: "inspect",
+      command: spec.words[0] as "inspect" | "graph",
       json: false,
       dataDirectory: firstOption(values, "data-dir"),
       databasePath: optionalResolvedPath(firstOption(values, "db")),
+      outPath: optionalResolvedPath(firstOption(values, "out")),
     };
   }
   return {
