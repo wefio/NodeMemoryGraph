@@ -44,7 +44,9 @@ current constants are cold-start priors, not calibrated probabilities. A
 evidence labels (6 below the current 0.55 threshold). This is enough to justify
 continuing collection, not enough to implement or promote rolling threshold
 calibration; use at least 50 positive/negative examples with a held-out time
-segment before moving the threshold.
+segment before moving the threshold. The rolling worker and rollbackable shadow
+artifact now exist (`npm run eval:qpp-tau`); the unresolved item is trustworthy
+data plus matched promotion evidence, not worker plumbing.
 
 ## 3. Validate unattended memory maintenance
 

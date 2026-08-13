@@ -51,6 +51,7 @@
     "eval:controller-shadow": "node --experimental-strip-types evals/controller-shadow/report.ts",
     "eval:controller-dataset": "node --experimental-strip-types evals/controller-shadow/dataset.ts",
     "eval:controller-calibrate": "node --experimental-strip-types evals/controller-shadow/calibrate.ts",
+    "eval:qpp-tau": "node --experimental-strip-types evals/controller-shadow/tau-worker.ts",
     "eval:skillopt:export": "node --experimental-strip-types evals/skillopt/export.ts",
     "eval:skillopt:install": "node --experimental-strip-types evals/skillopt/install-adapter.ts",
     "eval:consolidation": "node --experimental-strip-types evals/consolidation/run.ts",
