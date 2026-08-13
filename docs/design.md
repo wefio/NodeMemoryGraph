@@ -1128,6 +1128,9 @@ events.
 
 Replaceable state uses a stable semantic `stateKey` plus canonical scope. A new
 active value supersedes the prior value without deleting historical evidence.
+Reuse the key only when the new value makes the old one no longer current; two
+values that can remain true together (for example a personal best and a target)
+are separate properties and require separate keys.
 
 > **预留接口（未实现，用户明确不需要）** — `RememberInput.judgeDuplicates`
 > (`DuplicateJudge`, `src/core/types.ts`) 允许 NMG 自身接入独立模型，在

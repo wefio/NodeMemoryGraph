@@ -1691,8 +1691,9 @@ function extractAnswerText(messages: readonly unknown[]): string {
   for (const value of messages) {
     if (!value || typeof value !== "object") continue;
     const message = value as { role?: unknown; content?: unknown };
-    if (message.role !== "assistant" || typeof message.content !== "string") continue;
-    if (message.content.trim()) parts.push(message.content);
+    if (message.role !== "assistant") continue;
+    const text = messageText(message.content).trim();
+    if (text) parts.push(text);
   }
   return parts.join("\n").trim();
 }
@@ -1702,8 +1703,9 @@ function extractPromptText(messages: readonly unknown[]): string {
   for (const value of messages) {
     if (!value || typeof value !== "object") continue;
     const message = value as { role?: unknown; content?: unknown };
-    if (message.role !== "user" || typeof message.content !== "string") continue;
-    if (message.content.trim()) parts.push(message.content);
+    if (message.role !== "user") continue;
+    const text = messageText(message.content).trim();
+    if (text) parts.push(text);
   }
   return parts.join("\n").trim();
 }

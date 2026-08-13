@@ -53,10 +53,13 @@ test("loadPrompts reads every prompt section from the yaml source", () => {
   }
 });
 
-test("stateKey guidance includes positive, negative, and supersession consequence", () => {
+test("stateKey guidance explains reuse, separation, scope, and supersession consequence", () => {
   const text = loadPrompts().state_key_parameter_description;
   assert.match(text, /Good:/u);
   assert.match(text, /Bad:/u);
+  assert.match(text, /Reuse the key when the new value makes the old value no longer current/u);
+  assert.match(text, /different keys when both values can remain true/u);
+  assert.match(text, /canonical scope/u);
   assert.match(text, /automatically supersedes/u);
   assert.match(text, /incorrectly retire/u);
 });

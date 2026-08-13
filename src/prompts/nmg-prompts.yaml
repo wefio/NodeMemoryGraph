@@ -136,11 +136,15 @@ node_name_parameter_description: >-
   they describe different properties.
 
 state_key_parameter_description: >-
-  Stable key for exactly one replaceable property within scope. Good:
-  pi-lsp.installation.path. Bad: pi-lsp-env used for installation path, tool
-  inventory, and patch policy. A newer state with the same key and canonical
-  scope automatically supersedes the previous active state, so a broad key can
-  incorrectly retire an unrelated state.
+  Stable key for exactly one replaceable property within one canonical scope.
+  Reuse the key when the new value makes the old value no longer current; for
+  example, running.charity_5k.personal_best changes from 27:12 to 25:50. Use
+  different keys when both values can remain true; for example, a personal best
+  and a target time are distinct properties. Good: pi-lsp.installation.path.
+  Bad: pi-lsp-env used for installation path, tool inventory, and patch policy.
+  A newer state with the same key and canonical scope automatically supersedes
+  the previous active state, so a broad or wrongly reused key can incorrectly
+  retire an unrelated state.
 
 external_source_parameter_description: >-
   External provenance reference beginning with web: or file:.

@@ -1139,9 +1139,17 @@ test("automatic recall reaches agent_end use attribution and the shadow log", as
         messages: [
           {
             role: "user",
-            content: "Please recall which database choice was made for the Atlas project earlier.",
+            content: [
+              {
+                type: "text",
+                text: "Please recall which database choice was made for the Atlas project earlier.",
+              },
+            ],
           },
-          { role: "assistant", content: "Atlas pins SQLite for offline operation." },
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "Atlas pins SQLite for offline operation." }],
+          },
         ],
       },
       { sessionManager },
