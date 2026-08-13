@@ -18,9 +18,11 @@ The capture and session-ownership plumbing is implemented. Controlled examples
 may validate plumbing but must not be counted as natural product evidence. This
 is enforced by `collectionOrigin`: ordinary Pi writes `natural`, the headless
 probe writes `controlled`, and legacy events without the field are excluded.
-As of 2026-08-13 the ordinary-Pi shadow log contains 3 fully labelled natural
-graphs (up from 2 after session-local latest-graph feedback removed fragile UUID
-copying). This is real progress, not enough for calibration or promotion.
+As of 2026-08-13 the ordinary-Pi shadow log contains 5 fully labelled natural
+graphs. Session-local latest-graph feedback removed fragile UUID copying, and
+online Pi blackboard audits now contribute ordinary multi-Agent supervision
+without launching controlled headless probes. This is real progress, not enough
+for calibration or promotion.
 
 ## 2. Calibrate retrieval and the differentiable controller
 
