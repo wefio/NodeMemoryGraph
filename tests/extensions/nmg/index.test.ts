@@ -1844,6 +1844,17 @@ test("isBoardWakeCandidate: live claim suppresses nudges, lapsed claim returns t
     });
   // Unclaimed open entry from another session: wake.
   assert.equal(wake({}), true);
+  // Notify-only kinds are silent: a note/result/decision/goal records a fact
+  // and owes no reply — waking on it is the acknowledgement storm (four
+  // agents confirming one fact each emit a note, and every note wakes every
+  // subscriber). Read on demand, never pushed.
+  for (const kind of ["note", "result", "decision", "goal"]) {
+    assert.equal(wake({ kind }), false, `${kind} must be silent`);
+  }
+  // Actionable kinds wake: question/blocker/handoff ask for a response.
+  for (const kind of ["question", "blocker", "handoff"]) {
+    assert.equal(wake({ kind }), true, `${kind} must wake`);
+  }
   // Own echo: never wake yourself.
   assert.equal(wake({ sourceSessionId: "me-sess" }), false);
   // Resolved: no wake.

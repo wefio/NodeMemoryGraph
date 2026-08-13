@@ -66,6 +66,13 @@ board_action_parameter_description: >-
   acknowledge to record that you have seen and accepted an entry and owe no
   reply (pure state write — no broadcast, no wake, and the acked entry stops
   re-notifying you), or resolve to close a selected entry.
+  kind decides wake routing: question/blocker/handoff ask for a response and
+  WAKE subscribers; note/result/decision/goal are notify-only and SILENT (they
+  record a fact, owe no reply, and are read on demand — never pushed). If you
+  need an answer or action, use question/handoff; never smuggle a request into
+  a note (a silent note asking for something starves). When a fact is already
+  confirmed, do not post a confirming note — acknowledge it (one ack is
+  enough; everyone confirming one fact is an acknowledgement storm).
   Confirmations close: once a question/handoff is answered, resolve it — a
   resolved entry is closed and should not be replied to (reopen only for new
   substance). Acknowledgement is the lightweight "确认但不用回": for a

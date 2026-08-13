@@ -2089,8 +2089,14 @@ export const BROADCAST_PREFIX = "[NMG board 协作广播]";
 
 /** Pure wake-candidate predicate for the board wake loop (exported for unit
  * testing). An entry wakes a session when it is open, is not an echo of the
- * receiving session, has NO live claim, and is not a broadcast pull
- * announcement. Claim liveness matters: a lapsed claim (lease expired; holder
+ * receiving session, has NO live claim, is not a broadcast pull announcement,
+ * AND its kind asks for a response/action — the same set as BROADCAST_KINDS
+ * (question/blocker/handoff). Notify-only kinds (note/result/decision/goal)
+ * are SILENT: they record a fact and owe no reply, so waking on them is the
+ * acknowledgement storm — N agents confirming one fact each emit a note, and
+ * every note wakes every subscriber (observed live: #36/#37/#38/#39 were four
+ * confirmations of the same fact). Notify-only entries are read on demand,
+ * never pushed. Claim liveness matters: a lapsed claim (lease expired; holder
  * crashed or stopped, no sweeper clears the column) returns the entry to the
  * pool, so it must wake again rather than be permanently hidden from its
  * former holder (audit finding 2026-08-13). */
@@ -2105,7 +2111,11 @@ export function isBoardWakeCandidate(
   const liveClaim =
     entry.claimExpiresAt != null && new Date(entry.claimExpiresAt).getTime() > now.getTime();
   return (
-    entry.status === "open" && !ownEcho && !liveClaim && !entry.content.startsWith(BROADCAST_PREFIX)
+    entry.status === "open" &&
+    BROADCAST_KINDS.has(entry.kind) &&
+    !ownEcho &&
+    !liveClaim &&
+    !entry.content.startsWith(BROADCAST_PREFIX)
   );
 }
 /** Broadcasts are transient pull notices: they announce another entry and must
