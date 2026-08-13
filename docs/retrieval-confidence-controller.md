@@ -81,7 +81,7 @@ guardrail 必触发条件（绝对地板，免标定）：
 
 **Stage 1 — rolling τ auto-calibration（无感自动标定，非 eval）**
 Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**——让 `below_threshold`（τ）触发更 selective（省检索），非激活前提。
-- **数据源（非 eval，不作弊）**：`agent_end` **隐式反馈**——匹配 agent 答案 ↔ 召回记忆（`src/core/feedback.ts: deriveUsedMemoryIds`，记忆 ≥50% content tokens 出现于答案 = used）→ `recordActiveGraphUse` 落 trace 的 `useful_memory_ids`。覆盖 AutoRecall（nmg_get 显式反馈不触发的路径）+ 记 actual-use（非 fetch-intent）。弱 reader 不需主动调 feedback 工具——系统侧自动。
+- **数据源（非 eval，不作弊）**：`agent_end` **隐式反馈**——匹配 agent 答案 ↔ 召回记忆（`src/core/feedback.ts: deriveUsedMemoryIds`，记忆 ≥50% content tokens 出现于答案 = used；拉丁文本用完整内容词，连续汉字用字符 bigram）→ `recordActiveGraphUse` 落 trace 的 `useful_memory_ids`。覆盖 AutoRecall（nmg_get 显式反馈不触发的路径）+ 记 actual-use（非 fetch-intent）。弱 reader 不需主动调 feedback 工具——系统侧自动。旧的无 use 标签 co-retrieval 不回填为 useful，避免把“看见过”误当成“使用过”。
 - **rolling worker**（⬜ 待实现）：后台读近期 trace 的 (qpp, useful) 对，高 qpp 常不 useful（过自信）→ 抬 τ；低 qpp 常 useful（欠自信）→ 降 τ。无感自动，不依赖 eval。
 - **权重** `τ_v / w_ic / w_rh`：可选贝叶斯优化 on 同一生产 (qpp, useful) 对（非 eval）；DC 仍 shadow。
 
@@ -133,7 +133,7 @@ Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**�
 ## 风险
 
 - **τ 非必需但有漂移**：Stage 0 触发已由 truncation/guardrail 免标定覆盖；τ 仅影响 `below_threshold` 选择性。τ 漂移由 rolling worker（生产 (qpp, useful)，非 eval）校准——worker 未实现前 τ 用占位 0.45。
-- **隐式反馈噪声/稀疏**：matcher（≥50% token overlap）是 precision-favoured 起点——noisy labels → noisy τ；弱 reader 答案若不引用召回记忆（泛化作答）→ 标签稀疏 → rolling 校准数据不足。需监控 useful 率，必要时加 embedding 相似度辅助匹配。
+- **隐式反馈噪声/稀疏**：matcher（≥50% token overlap；Han bigram）是 precision-favoured 起点——noisy labels → noisy τ；弱 reader 答案若语义改写过大、不复用可辨识片段，标签仍会稀疏。需监控 useful 率；优先结合 exact `get` 和显式反馈，必要时再以经过校准的 embedding 相似度提供候选信号，而不能直接把 injection/fetch 当作成功使用。
 - `variance` 高双解（清晰赢家 vs 噪声离群）——hybridScore 已 path-consistent；双解靠 Top1−Top2 差值辅助（标定时验证）。
 - 经典 QPP 在 dense/neural IR 上相关性掉 10%+（文献）；NMG 用 BGE dense+hybrid，靠 `intentCoverage`/`reasonHealth` 领域增强补偿——这两项是 vanilla QPP 没有的 typed-memory / provenance 信号，非冗余。但 benchmark 全 `conversation_evidence` ingest → intentCoverage 退化（恒 0.5），需类型化 ingest 才有信号。
 - 只攻"覆盖"半；"捞进来没排对/拼对"的 ranking/composition 半需另打，两者配套才完整。

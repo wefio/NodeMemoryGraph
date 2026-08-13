@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { NmgStore } from "../../../src/core/store.ts";
@@ -102,6 +103,62 @@ test("searchContext surfaces a bounded open memory beside its retrieved anchor",
       "open_attachment",
     );
   });
+});
+
+test("FTS5 retrieves a Chinese memory from a shorter overlapping phrase", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "用户偏好中文解释，并希望保留精确的技术细节。",
+      nodeName: "用户讲解偏好",
+      memoryType: "preference",
+    });
+
+    const context = store.searchContext("用户偏好中文解释", {
+      limit: 8,
+      retrievalMode: "fts5",
+    });
+
+    assert.ok(context.results.some((result) => result.memory.id === saved.memory.id));
+    const recallContext = store.searchContext("你还记得我偏好中文解释吗？", {
+      limit: 8,
+      retrievalMode: "fts5",
+    });
+    assert.ok(recallContext.results.some((result) => result.memory.id === saved.memory.id));
+  });
+});
+
+test("store open migrates a legacy raw Chinese FTS row exactly once", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-fts-migration-"));
+  const path = join(directory, "nmg.sqlite");
+  const statement = "用户偏好中文解释，并希望保留精确的技术细节。";
+  let store: NmgStore | null = new NmgStore(path);
+  try {
+    const saved = store.remember({
+      statement,
+      nodeName: "用户讲解偏好",
+      memoryType: "preference",
+    });
+    store.close();
+    store = null;
+
+    const db = new DatabaseSync(path);
+    db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(saved.memory.id);
+    db.prepare(
+      "INSERT INTO memory_fts(memory_id, statement, node_name, evidence) VALUES (?, ?, ?, ?)",
+    ).run(saved.memory.id, statement, "用户讲解偏好", statement);
+    db.prepare("UPDATE store_metadata SET value = 'legacy-raw' WHERE key = 'fts_text_format'").run();
+    db.close();
+
+    store = new NmgStore(path);
+    const context = store.searchContext("你还记得我偏好中文解释吗？", {
+      limit: 8,
+      retrievalMode: "fts5",
+    });
+    assert.ok(context.results.some((result) => result.memory.id === saved.memory.id));
+  } finally {
+    store?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("searchContext populates activeGraph with budget, usage and trace id", () => {

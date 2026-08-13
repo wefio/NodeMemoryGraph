@@ -22,6 +22,18 @@ test("contentTokens: numbers (any length) + len>=4 non-stopword words", () => {
   assert.deepEqual(contentTokens("I ran the 5K in 25 minutes"), ["5k", "25", "minutes"]);
 });
 
+test("contentTokens: Chinese text produces stable character bigrams", () => {
+  assert.deepEqual(contentTokens("用户偏好中文解释"), [
+    "用户",
+    "户偏",
+    "偏好",
+    "好中",
+    "中文",
+    "文解",
+    "解释",
+  ]);
+});
+
 test("deriveUsedMemoryIds: verbatim quote of the answer-bearing memory is detected", () => {
   const results = [
     mkResult("a", "My personal best time in the 5K was 25 minutes 50 seconds"),
@@ -76,4 +88,20 @@ test("deriveUsedMemoryIds: new info beyond the prompt still counts as used", () 
   // pins/sqlite/operation are not in the prompt -> still >=half the memory's
   // distinctive tokens appear in the (differenced) answer -> used survives.
   assert.deepEqual(deriveUsedMemoryIds(answer, results, prompt), ["a"]);
+});
+
+test("deriveUsedMemoryIds: Chinese automatic recall can be attributed from the answer", () => {
+  const results = [
+    mkResult("zh-used", "用户偏好中文解释，并希望保留精确的技术细节"),
+    mkResult("zh-unused", "用户在 Windows 环境中进行开发"),
+  ];
+
+  assert.deepEqual(
+    deriveUsedMemoryIds(
+      "我会继续使用中文解释，并保留精确的技术细节。",
+      results,
+      "请按用户偏好回答。",
+    ),
+    ["zh-used"],
+  );
 });

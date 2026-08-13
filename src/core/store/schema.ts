@@ -13,6 +13,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
+import { ftsIndexedText } from "./search-ranking.ts";
 import { encodeVector, parseVector } from "./vector-codec.ts";
 
 type Row = Record<string, string | number | Uint8Array | null>;
@@ -404,6 +405,11 @@ export function migrate(db: DatabaseSync): void {
       memory_id TEXT PRIMARY KEY REFERENCES memory_records(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS store_metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
     CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
       memory_id UNINDEXED,
       statement,
@@ -501,6 +507,51 @@ export function migrate(db: DatabaseSync): void {
     INSERT OR IGNORE INTO leaf_block_status(node_id, dirty, updated_at)
     SELECT id, 1, updated_at FROM memory_nodes WHERE status = 'active';
   `);
+  ensureFtsTextFormat(db);
+}
+
+const FTS_TEXT_FORMAT_KEY = "fts_text_format";
+const FTS_TEXT_FORMAT = "unicode61-han-bigram-v1";
+
+/** One-time, versioned rebuild; normal store opens perform one metadata lookup. */
+function ensureFtsTextFormat(db: DatabaseSync): void {
+  const current = db
+    .prepare("SELECT value FROM store_metadata WHERE key = ?")
+    .get(FTS_TEXT_FORMAT_KEY) as Row | undefined;
+  if (String(current?.value ?? "") === FTS_TEXT_FORMAT) return;
+
+  const rows = db
+    .prepare(
+      `SELECT m.id, m.statement, n.canonical_name, h.content
+       FROM memory_records m
+       JOIN memory_nodes n ON n.id = m.node_id
+       JOIN history_records h ON h.id = m.evidence_id
+       WHERE m.storage_state = 'indexed'`,
+    )
+    .all() as Row[];
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare("DELETE FROM memory_fts").run();
+    const insert = db.prepare(
+      "INSERT INTO memory_fts(memory_id, statement, node_name, evidence) VALUES (?, ?, ?, ?)",
+    );
+    for (const row of rows) {
+      insert.run(
+        String(row.id),
+        ftsIndexedText(String(row.statement)),
+        ftsIndexedText(String(row.canonical_name)),
+        ftsIndexedText(String(row.content)),
+      );
+    }
+    db.prepare(
+      `INSERT INTO store_metadata(key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ).run(FTS_TEXT_FORMAT_KEY, FTS_TEXT_FORMAT);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export function ensureMemoryColumns(db: DatabaseSync): void {

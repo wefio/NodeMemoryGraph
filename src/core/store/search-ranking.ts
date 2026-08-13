@@ -76,6 +76,23 @@ export function ftsExpression(query: string): string {
     .join(" OR ");
 }
 
+/**
+ * SQLite unicode61 keeps a contiguous Han run as one token. Append explicit
+ * character bigrams so a longer recall question can match a shorter Chinese
+ * phrase (and vice versa) without requiring a platform-specific tokenizer.
+ * The original text remains indexed for exact phrase and non-Han retrieval.
+ */
+export function ftsIndexedText(value: string): string {
+  const bigrams: string[] = [];
+  for (const match of value.matchAll(/\p{Script=Han}+/gu)) {
+    const run = match[0];
+    for (let index = 0; index < run.length - 1; index += 1) {
+      bigrams.push(run.slice(index, index + 2));
+    }
+  }
+  return bigrams.length > 0 ? `${value} ${[...new Set(bigrams)].join(" ")}` : value;
+}
+
 export function lexicalNodeScore(query: string, node: MemoryNode): number {
   if (!query) return 0;
   const haystack = normalize(`${node.canonicalName} ${node.summary}`);

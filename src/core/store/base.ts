@@ -36,7 +36,12 @@ import { migrate } from "./schema.ts";
 import { parseNumberArray } from "./row-parse.ts";
 import { encodeVector, storedVector } from "./vector-codec.ts";
 import { updateRelationStrength } from "../edge-activation.ts";
-import { ftsExpression, memoryEmbeddingText, type StoreRow as Row } from "./search-ranking.ts";
+import {
+  ftsExpression,
+  ftsIndexedText,
+  memoryEmbeddingText,
+  type StoreRow as Row,
+} from "./search-ranking.ts";
 
 import {
   identityTokens,
@@ -439,11 +444,7 @@ export class NmgStoreBase {
         `INSERT OR IGNORE INTO task_board_subscriptions (session_id, task_id, subscribed_at)
          VALUES (?, ?, ?)`,
       )
-      .run(
-        input.sessionId,
-        input.taskId,
-        input.now ?? new Date().toISOString(),
-      );
+      .run(input.sessionId, input.taskId, input.now ?? new Date().toISOString());
   }
   /** Leave a channel: stop receiving wake notices for it. */
   unsubscribeTaskBoard(input: { sessionId: string; taskId: string }): void {
@@ -456,9 +457,7 @@ export class NmgStoreBase {
    * the default there); named channels require an explicit subscribe. */
   isTaskBoardSubscribed(input: { sessionId: string; taskId: string }): boolean {
     const row = this.db
-      .prepare(
-        "SELECT 1 FROM task_board_subscriptions WHERE session_id = ? AND task_id = ?",
-      )
+      .prepare("SELECT 1 FROM task_board_subscriptions WHERE session_id = ? AND task_id = ?")
       .get(input.sessionId, input.taskId) as Row | undefined;
     return row !== undefined;
   }
@@ -1085,7 +1084,12 @@ export class NmgStoreBase {
       .prepare(
         "INSERT INTO memory_fts(memory_id, statement, node_name, evidence) VALUES (?, ?, ?, ?)",
       )
-      .run(memoryId, statement, node.canonicalName, evidence.content);
+      .run(
+        memoryId,
+        ftsIndexedText(statement),
+        ftsIndexedText(node.canonicalName),
+        ftsIndexedText(evidence.content),
+      );
     this.db
       .prepare("INSERT OR IGNORE INTO memory_fts_registry(memory_id) VALUES (?)")
       .run(memoryId);

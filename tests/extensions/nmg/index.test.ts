@@ -1097,7 +1097,7 @@ test("agent_end derives and persists useful memories on the trace", async () => 
   }
 });
 
-test("automatic recall reaches agent_end use attribution and the shadow log", async () => {
+test("Chinese automatic recall reaches agent_end use attribution and the shadow log", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-auto-use-"));
   const previousData = process.env.NMG_DATA_DIR;
   const previousProject = process.env.NMG_PROJECT_DIR;
@@ -1115,8 +1115,8 @@ test("automatic recall reaches agent_end use attribution and the shadow log", as
     const saved = (await tools.get("nmg_remember")!.execute(
       "remember-auto-use",
       {
-        statement: "Atlas pins SQLite for offline operation.",
-        nodeName: "Atlas storage",
+        statement: "用户偏好中文解释，并希望保留精确的技术细节。",
+        nodeName: "用户讲解偏好",
         memoryType: "constraint",
         sourceActor: "user",
         externalSource: { source: "file:test-fixture" },
@@ -1127,12 +1127,12 @@ test("automatic recall reaches agent_end use attribution and the shadow log", as
     )) as { details: { memory: { id: string } } };
     const recalled = (await handlers.get("before_agent_start")!(
       {
-        prompt: "Please recall which database choice was made for the Atlas project earlier.",
+        prompt: "你还记得我偏好中文解释吗？",
         systemPrompt: "base",
       },
       { sessionManager },
     )) as { message?: { content: string } };
-    assert.match(recalled.message?.content ?? "", /Atlas pins SQLite/u);
+    assert.match(recalled.message?.content ?? "", /用户偏好中文解释/u);
 
     await handlers.get("agent_end")!(
       {
@@ -1142,13 +1142,13 @@ test("automatic recall reaches agent_end use attribution and the shadow log", as
             content: [
               {
                 type: "text",
-                text: "Please recall which database choice was made for the Atlas project earlier.",
+                text: "你还记得我偏好中文解释吗？",
               },
             ],
           },
           {
             role: "assistant",
-            content: [{ type: "text", text: "Atlas pins SQLite for offline operation." }],
+            content: [{ type: "text", text: "我会使用中文解释，并保留精确的技术细节。" }],
           },
         ],
       },

@@ -92,18 +92,33 @@ const FEEDBACK_STOPWORDS = new Set([
   "each",
 ]);
 
-/** Distinctive content tokens: numbers (any length) + len>=4 non-stopword words. */
+/**
+ * Distinctive content tokens used by the conservative implicit-use heuristic.
+ *
+ * Latin text keeps whole words (numbers at any length; words at length >= 4).
+ * Contiguous Han text has no whitespace word boundary, so represent it with
+ * character bigrams. Bigrams retain local phrase information without the very
+ * high false-positive rate of single-character matching, and require no native
+ * tokenizer dependency in the Pi extension.
+ */
 export function contentTokens(text: string): string[] {
-  const tokens = text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
-  return [
-    ...new Set(
-      tokens.filter(
-        (token) =>
-          (/\d/.test(token) && token.length >= 1) ||
-          (token.length >= 4 && !FEEDBACK_STOPWORDS.has(token)),
-      ),
-    ),
-  ];
+  const segments = text.toLowerCase().match(/\p{Script=Han}+|[\p{L}\p{N}]+/gu) ?? [];
+  const tokens: string[] = [];
+  for (const segment of segments) {
+    if (/^\p{Script=Han}+$/u.test(segment)) {
+      for (let index = 0; index < segment.length - 1; index += 1) {
+        tokens.push(segment.slice(index, index + 2));
+      }
+      continue;
+    }
+    if (
+      (/\p{N}/u.test(segment) && segment.length >= 1) ||
+      (segment.length >= 4 && !FEEDBACK_STOPWORDS.has(segment))
+    ) {
+      tokens.push(segment);
+    }
+  }
+  return [...new Set(tokens)];
 }
 
 /**
@@ -118,6 +133,7 @@ export function deriveUsedMemoryIds(
   promptText?: string,
 ): string[] {
   const answerTokens = new Set(contentTokens(answerText));
+  const promptTokens = new Set<string>();
   // Answer-vs-prompt differential: tokens that also appear in the prompt are
   // NOT evidence the memory was used. Recall follows the prompt (memories are
   // matched against it), so an answer that restates prompt words would be a
@@ -125,11 +141,20 @@ export function deriveUsedMemoryIds(
   // instead of retrieval quality. Drop prompt tokens from the contribution
   // set before measuring memory overlap.
   if (promptText) {
-    for (const token of contentTokens(promptText)) answerTokens.delete(token);
+    for (const token of contentTokens(promptText)) {
+      promptTokens.add(token);
+      answerTokens.delete(token);
+    }
   }
   return results
     .filter((result) => {
-      const tokens = contentTokens(result.memory.statement);
+      // Score only the part of the memory that the prompt did not already
+      // supply. Keeping prompt-shared tokens in the denominator makes a longer
+      // recall question suppress true positives even when the answer contributes
+      // all of the memory's new information.
+      const tokens = contentTokens(result.memory.statement).filter(
+        (token) => !promptTokens.has(token),
+      );
       if (tokens.length === 0) return false;
       const overlap = tokens.filter((token) => answerTokens.has(token)).length;
       return overlap / tokens.length >= 0.5;

@@ -501,6 +501,14 @@ derived memory. Consequently, a young or unrelated store may correctly contain
 isolated nodes, but ordinary Pi use must still accumulate candidate observations
 and usefulness outcomes.
 
+Implicit answer attribution is deliberately conservative and language-aware:
+Latin text uses distinctive whole words, while contiguous Han text uses character
+bigrams. This avoids treating mere injection as use without making Chinese
+memories permanently invisible to consolidation. Exact `get` reads and explicit
+Agent feedback remain stronger evidence. Historical co-retrieval observations
+that lack a use label are not backfilled as useful: retrieval proves exposure,
+not material use, so only future attributable outcomes may raise edge stability.
+
 > The provisional-memory rules, isolation requirements, STG-vs-Delta
 > distinction, and promotion/demotion thresholds are consolidated in
 > [memory-graphs.md](memory-graphs.md) §3–§6.
