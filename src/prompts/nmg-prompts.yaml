@@ -110,8 +110,9 @@ remember_action_parameter_description: >-
   Use resolve when an open question or dependency has been settled. Use reopen
   when later evidence makes a resolved memory actionable again; provide the
   related evidence memory IDs so the open structure stays attributable.
-  Use feedback to record explicit task/retrieval labels for an activeGraphId;
-  silence or lack of correction is not positive feedback.
+  Use feedback to record explicit task/retrieval labels. Pass activeGraphId when
+  labelling a specific older retrieval; omit it only to label the latest retrieval
+  in the current Pi session. Silence or lack of correction is not positive feedback.
 
 remember_memory_id_parameter_description: >-
   For action=forget, resolve, or reopen, the exact target memory ID.
@@ -165,8 +166,9 @@ source_actor_parameter_description: >-
   evidence. Never mark an Assistant inference or summary as sourceActor=user.
 
 active_graph_id_parameter_description: >-
-  Optional activeGraphId returned by nmg_search. Pass it when available to
-  attribute actual memory use; it is not required to read a known memory ID.
+  Optional activeGraphId returned by nmg_search. For action=feedback, omit it to
+  target the latest retrieval owned by the current Pi session; pass it to label a
+  specific older retrieval. For nmg_get, pass it when available to attribute use.
 
 feedback_note_parameter_description: >-
   Optional concise reason for an explicit retrieval/task label. Do not include

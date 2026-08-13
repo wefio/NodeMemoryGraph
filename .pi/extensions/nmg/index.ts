@@ -766,7 +766,14 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (params.action === "feedback") {
-        if (!params.activeGraphId) throw new Error("action=feedback requires activeGraphId");
+        const sessionId = ctx.sessionManager.getSessionId();
+        const activeGraphId =
+          params.activeGraphId ?? controllerShadow.latestActiveGraphId(sessionId);
+        if (!activeGraphId) {
+          throw new Error(
+            "action=feedback requires an activeGraphId or a retrieval in the current Pi session",
+          );
+        }
         const labels = {
           taskSuccess: params.taskSuccess,
           userCorrection: params.userCorrection,
@@ -780,13 +787,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         if (Object.values(labels).every((value) => value === undefined)) {
           throw new Error("action=feedback requires at least one label or feedbackNote");
         }
-        const recorded = await controllerShadow.feedback(
-          params.activeGraphId,
-          ctx.sessionManager.getSessionId(),
-          labels,
-        );
+        const recorded = await controllerShadow.feedback(activeGraphId, sessionId, labels);
         return toolResult(
-          { recorded, activeGraphId: params.activeGraphId },
+          { recorded, activeGraphId },
           recorded
             ? "Retrieval feedback recorded for shadow calibration."
             : "Feedback was not recorded: controller shadow is disabled or the Active Graph belongs to another session.",

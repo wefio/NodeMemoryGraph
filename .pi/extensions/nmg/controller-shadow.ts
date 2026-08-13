@@ -152,6 +152,16 @@ export class ControllerShadowBridge {
     }
   }
 
+  /** Resolve an omitted feedback ID only inside the caller's Pi session. */
+  latestActiveGraphId(sessionId: string): string | null {
+    if (!this.enabled) return null;
+    return (
+      [...this.#contexts.entries()]
+        .reverse()
+        .find(([, entry]) => entry.context.activeGraph?.sessionId === sessionId)?.[0] ?? null
+    );
+  }
+
   async use(
     activeGraphId: string | undefined,
     sessionId: string,

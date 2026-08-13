@@ -288,6 +288,8 @@ test("controller shadow bridge is opt-in and learns only from explicit get use",
       { role: "assistant", usage: { input: 120, output: 30 } },
       { role: "toolResult" },
     ]);
+    assert.equal(enabled.latestActiveGraphId("session-a"), context.activeGraph!.id);
+    assert.equal(enabled.latestActiveGraphId("wrong-session"), null);
     assert.deepEqual(enabled.pendingFeedback("session-a"), {
       activeGraphId: context.activeGraph!.id,
       semanticTaskId: context.activeGraph!.taskId,
@@ -1154,6 +1156,22 @@ test("Chinese automatic recall reaches agent_end use attribution and the shadow 
       },
       { sessionManager },
     );
+
+    const feedback = (await tools.get("nmg_remember")!.execute(
+      "feedback-latest",
+      {
+        action: "feedback",
+        evidenceSufficient: true,
+        expansionUseful: false,
+        excessiveNoise: false,
+        noMemoryNeeded: false,
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    )) as { details: { recorded: boolean; activeGraphId: string } };
+    assert.equal(feedback.details.recorded, true);
+    assert.ok(feedback.details.activeGraphId);
 
     const events = readFileSync(join(directory, "controller-shadow-events.jsonl"), "utf8")
       .trim()

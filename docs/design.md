@@ -179,6 +179,11 @@ format and reuse the Lab exporter, but Core must not import `src/lab/` merely to
 make those experimental labels look transport-neutral. Silence or candidate
 exposure is never converted into a positive label.
 
+For Pi ergonomics, `nmg_remember(action="feedback")` may omit `activeGraphId`
+only to target the latest retrieval owned by that same Pi session. A supplied ID
+is still session-checked and remains necessary when reviewing an older graph.
+This avoids fragile UUID transcription without allowing cross-session labels.
+
 One-shot commands remain useful for people and diagnostics. Harnesses normally
 connect to the resident HTTP JSON-RPC service so the bounded in-memory working set,
 session/STG state, Active Graph continuations, node directory, and hot caches
