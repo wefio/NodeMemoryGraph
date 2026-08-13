@@ -18,11 +18,18 @@ The capture and session-ownership plumbing is implemented. Controlled examples
 may validate plumbing but must not be counted as natural product evidence. This
 is enforced by `collectionOrigin`: ordinary Pi writes `natural`, the headless
 probe writes `controlled`, and legacy events without the field are excluded.
-As of 2026-08-13 the ordinary-Pi shadow log contains 7 fully labelled natural
-graphs. Session-local latest-graph feedback removed fragile UUID copying, and
-online Pi blackboard audits now contribute ordinary multi-Agent supervision
-without launching controlled headless probes. This is real progress, not enough
-for calibration or promotion.
+As of 2026-08-13 the authoritative shadow report contains 10 fully labelled
+natural graphs. Session-local latest-graph feedback removed fragile UUID
+copying, and online Pi blackboard audits now contribute ordinary multi-Agent
+supervision without launching controlled headless probes. The report contains
+600 events across 216 retrieval graphs and 21 semantic tasks, but the useful
+labels remain strongly positive-skewed: only 3 evidence-insufficient examples,
+5 expansion-not-useful examples, 2 excessive-noise positives, and 2
+no-memory-needed positives were observed in the latest audit; there are still
+no failed-task or user-correction-positive outcomes. This is real progress, not
+enough for calibration or promotion. The next natural tasks should preferentially
+cover irrelevant-memory, noisy-expansion, ambiguous-evidence, and correction
+scenarios instead of repeating successful recall audits.
 
 ## 2. Calibrate retrieval and the differentiable controller
 
@@ -39,14 +46,14 @@ for calibration or promotion.
   logged propensities or sequential credit-assignment evidence.
 
 QPP1, QPP2, and search recommendation remain independently switchable. Their
-current constants are cold-start priors, not calibrated probabilities. A
-2026-08-13 natural-run audit found 289 QPP traces but only 7 traces with useful
-evidence labels (6 below the current 0.55 threshold). This is enough to justify
-continuing collection, not enough to implement or promote rolling threshold
-calibration; use at least 50 positive/negative examples with a held-out time
-segment before moving the threshold. The rolling worker and rollbackable shadow
-artifact now exist (`npm run eval:qpp-tau`); the unresolved item is trustworthy
-data plus matched promotion evidence, not worker plumbing.
+current constants are cold-start priors, not calibrated probabilities. The
+2026-08-13 authoritative report has 10 fully labelled natural graphs and still
+fails closed. This is enough to justify continuing collection, not enough to
+implement or promote rolling threshold calibration; use at least 50 balanced
+positive/negative examples with a held-out time segment before moving the
+threshold. The rolling worker and rollbackable shadow artifact now exist
+(`npm run eval:qpp-tau`); the unresolved item is trustworthy data plus matched
+promotion evidence, not worker plumbing.
 
 ## 3. Validate unattended memory maintenance
 
@@ -64,6 +71,12 @@ transform on the proposal, and limits each maintenance pass. Do not enable it by
 default until scope, temporal-state, same-name identity, false-merge, and
 rollback outcomes are represented in the natural validation set.
 
+The latest ordinary-Pi topology audit found one pending `refines` proposal,
+zero `same_as` or `distinct_from` relations, zero accepted or rejected identity
+proposals, and zero transforms or rollbacks. Before default enablement, natural
+validation must include true identity pairs, accepted merges, rejected false
+merges, scope conflicts, and competing `distinct_from`/`contradicts` evidence.
+
 A second ordinary online-Pi audit found that the real stores had STG records but
 zero `claim_outcome_events`, zero claim posteriors, and therefore zero
 consolidation candidates or reversals. The missing product boundary is now
@@ -78,7 +91,8 @@ boundary.
 
 - [ ] Reach the default readiness floor of 24 materially independent labelled
   retrieval tasks: 12 train, 6 chronological validation, and 6 untouched test,
-  with sufficient action and noise-label diversity.
+  with sufficient action and noise-label diversity. The current exporter reports
+  10 tasks split as 6 train, 2 validation, and 2 test; the gate remains closed.
 - [ ] Run SkillOpt, then a matched Pi+NMG promotion experiment covering answer
   quality, official evidence recall, pollution, tokens, tool calls, and latency.
   Adopt a winner only through reviewed edits to `src/prompts/nmg-prompts.yaml`.
