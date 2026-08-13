@@ -5,6 +5,13 @@ helps an agent maintain explicit task state. It is separate from LongMemEval,
 LoCoMo, PersonaMem, and BEAM because those suites do not call the reasoning
 workspace.
 
+The product adapter exposes `nmg_reason` only when
+`NMG_ENABLE_LAB_TOOLS=1`. Scratch nodes are stored in
+`NMG_DATA_DIR/reasoning/` per Pi session. Ordinary turns receive no automatic
+workspace injection; Pi compaction creates one durable marker, and the next turn
+receives one bounded checkpoint even if the extension process restarted. The
+tool never writes scratch state to STG or LTG.
+
 The benchmark compares the same model and user prompts in four conditions:
 
 1. full context without a workspace;

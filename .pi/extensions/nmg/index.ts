@@ -48,7 +48,16 @@ import {
   type SelectedEvidence,
 } from "../../../src/integration/evidence.ts";
 import { deriveUsedMemoryIds } from "../../../src/core/feedback.ts";
+import {
+  REASONING_EDGE_KINDS,
+  REASONING_NODE_KINDS,
+  REASONING_STATUSES,
+  type ReasoningEdgeKind,
+  type ReasoningNodeKind,
+  type ReasoningStatus,
+} from "../../../src/lab/reasoning-workspace.ts";
 import { ControllerShadowBridge, shadowEnabled } from "./controller-shadow.ts";
+import { PiReasoningWorkspaces } from "./reasoning-workspace.ts";
 
 /**
  * NMG Pi extension.
@@ -83,6 +92,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     resolveNmgDataDir(),
     shadowEnabled() || qpp1Mode !== "off" || qpp2Mode !== "off",
   );
+  const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
+  const reasoningWorkspaces = labToolsEnabled
+    ? new PiReasoningWorkspaces(join(resolveNmgDataDir(), "reasoning"))
+    : null;
   // Most recent event context, used by the board wake loop to test isIdle and
   // to resolve the current session id outside an event handler.
   let latestAgentCtx: ExtensionContext | undefined;
@@ -142,7 +155,21 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         })
       : "";
     const nudge = [completionNudge, feedbackNudge].filter(Boolean).join("\n");
-    const runtimeContext = runtimeAg.format(sessionId);
+    let reasoningCheckpoint = "";
+    if (reasoningWorkspaces) {
+      try {
+        reasoningCheckpoint =
+          reasoningWorkspaces.consumeCompactionCheckpoint(sessionId, {
+            maxNodes: 24,
+            maxChars: 6_000,
+          })?.text ?? "";
+      } catch (error) {
+        reasoningCheckpoint = `Reasoning workspace unavailable: ${message(error)}`;
+      }
+    }
+    const runtimeContext = [runtimeAg.format(sessionId), reasoningCheckpoint]
+      .filter(Boolean)
+      .join("\n");
     const recallQuery = taskWindow.prepare(sessionId, event.prompt);
     const dynamicContext = composeNmgContextMessage("", "", nudge, runtimeContext);
     if (!recallQuery) {
@@ -591,6 +618,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     runtimeAg.clear(sessionId);
     agentUseFlow.clear(sessionId);
     controllerShadow.clear(sessionId);
+    reasoningWorkspaces?.release(sessionId);
     if (!connectionPromise) return;
     const active = await connectionPromise.catch(() => undefined);
     if (!active) {
@@ -636,10 +664,119 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     const sessionId = ctx.sessionManager.getSessionId();
     injectionWindow.clear(sessionId);
     runtimeAg.activateProjection(sessionId);
+    reasoningWorkspaces?.markCompacted(sessionId);
     // Pi owns conversational compaction. The runtime AG remains in memory and
     // is injected again on the next turn; compaction alone never promotes
     // temporary state into durable NMG storage.
   });
+
+  if (reasoningWorkspaces) {
+    pi.registerTool({
+      name: "nmg_reason",
+      label: "NMG Reasoning Scratchpad",
+      description: nmgPrompts.reason_description,
+      parameters: Type.Object({
+        action: Type.Union(
+          [
+            Type.Literal("add"),
+            Type.Literal("update"),
+            Type.Literal("link"),
+            Type.Literal("checkpoint"),
+            Type.Literal("clear"),
+          ],
+          { description: nmgPrompts.reason_action_parameter_description },
+        ),
+        nodeId: Type.Optional(
+          Type.String({ description: nmgPrompts.reason_node_id_parameter_description }),
+        ),
+        kind: Type.Optional(
+          Type.Union(
+            REASONING_NODE_KINDS.map((kind) => Type.Literal(kind)),
+            { description: nmgPrompts.reason_kind_parameter_description },
+          ),
+        ),
+        content: Type.Optional(
+          Type.String({ description: nmgPrompts.reason_content_parameter_description }),
+        ),
+        status: Type.Optional(
+          Type.Union(
+            REASONING_STATUSES.map((status) => Type.Literal(status)),
+            { description: nmgPrompts.reason_status_parameter_description },
+          ),
+        ),
+        importance: Type.Optional(
+          Type.Number({ minimum: 0, maximum: 1, description: nmgPrompts.reason_importance_parameter_description }),
+        ),
+        evidenceRefs: Type.Optional(
+          Type.Array(Type.String(), {
+            description: nmgPrompts.reason_evidence_refs_parameter_description,
+          }),
+        ),
+        sourceId: Type.Optional(
+          Type.String({ description: nmgPrompts.reason_source_id_parameter_description }),
+        ),
+        targetId: Type.Optional(
+          Type.String({ description: nmgPrompts.reason_target_id_parameter_description }),
+        ),
+        relation: Type.Optional(
+          Type.Union(
+            REASONING_EDGE_KINDS.map((relation) => Type.Literal(relation)),
+            { description: nmgPrompts.reason_relation_parameter_description },
+          ),
+        ),
+      }),
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const sessionId = ctx.sessionManager.getSessionId();
+        if (params.action === "add") {
+          if (!params.kind || !params.content) throw new Error("action=add requires kind and content");
+          const node = reasoningWorkspaces.add(sessionId, {
+            kind: params.kind as ReasoningNodeKind,
+            content: params.content,
+            status: params.status as ReasoningStatus | undefined,
+            importance: params.importance,
+            evidenceRefs: params.evidenceRefs,
+          });
+          const checkpoint = reasoningWorkspaces.checkpoint(sessionId);
+          return toolResult({ node, checkpoint }, `Reasoning node added: ${node.id}\n${checkpoint.text}`);
+        }
+        if (params.action === "update") {
+          if (!params.nodeId) throw new Error("action=update requires nodeId");
+          if (params.content === undefined && params.status === undefined && params.importance === undefined) {
+            throw new Error("action=update requires content, status, or importance");
+          }
+          const node = reasoningWorkspaces.update(sessionId, params.nodeId, {
+            content: params.content,
+            status: params.status as ReasoningStatus | undefined,
+            importance: params.importance,
+          });
+          const checkpoint = reasoningWorkspaces.checkpoint(sessionId);
+          return toolResult({ node, checkpoint }, `Reasoning node updated: ${node.id}\n${checkpoint.text}`);
+        }
+        if (params.action === "link") {
+          if (!params.sourceId || !params.targetId || !params.relation) {
+            throw new Error("action=link requires sourceId, targetId, and relation");
+          }
+          const edge = reasoningWorkspaces.link(
+            sessionId,
+            params.sourceId,
+            params.targetId,
+            params.relation as ReasoningEdgeKind,
+          );
+          const checkpoint = reasoningWorkspaces.checkpoint(sessionId);
+          return toolResult(
+            { edge, checkpoint },
+            `Reasoning edge added: ${edge.sourceId} -[${edge.type}]-> ${edge.targetId}\n${checkpoint.text}`,
+          );
+        }
+        if (params.action === "clear") {
+          reasoningWorkspaces.clear(sessionId);
+          return toolResult({ cleared: true, sessionId }, "Reasoning scratchpad cleared.");
+        }
+        const checkpoint = reasoningWorkspaces.checkpoint(sessionId);
+        return toolResult({ checkpoint }, checkpoint.text);
+      },
+    });
+  }
 
   pi.registerTool({
     name: "nmg_remember",

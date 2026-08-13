@@ -1902,7 +1902,12 @@ long-term memory.
 
 The tool is Lab-only (`NMG_ENABLE_LAB_TOOLS=1`). NMG Lite keeps three durable-memory
 tools plus the independent task-board coordination tool, and the existing numerical MGR prototype remains available
-for independent experiments.
+for independent experiments. The Pi adapter now registers `nmg_reason` only
+under that flag. Its typed mutations are written atomically to the session file;
+`session_before_compact` records a durable one-shot marker, and the next
+`before_agent_start` consumes one bounded checkpoint. Extension shutdown releases
+only the in-process cache, so the same Pi session can resume after a process
+restart. No reasoning-tool path calls the semantic-memory daemon.
 
 An automatic input-capture and checkpoint-injection variant was implemented and
 rejected in July 2026. In a matched DeepSeek V4 Flash development run (three
@@ -1989,15 +1994,16 @@ Implemented and verified in the current prototype:
 
 Important gaps between the prototype and the target plugin:
 
-- the reasoning workspace has no learned or deterministic activation gate yet;
-  when exposed, the model may update it every turn even when the full transcript
-  is already sufficient;
+- the reasoning workspace has no learned automatic activation gate. This is now
+  an explicit product boundary rather than an unimplemented default: the tool is
+  absent unless Lab mode is enabled, the model decides whether to write it, and
+  NMG injects it only once after Pi compaction;
 - reasoning nodes distinguish type and status, but hypothesis writes are not
   yet required to cite evidence, and the system does not independently detect
   unsupported scratchpad claims;
-- reasoning checkpoints are bounded and session-persistent, but scratchpad
-  expiry, archive policy, cross-session task continuation, and explicit
-  promotion into STG/LTG remain undesigned or manual;
+- reasoning checkpoints are bounded, session-persistent, and resumable within
+  the same Pi session, but scratchpad expiry, archive policy, cross-session task
+  continuation, and explicit promotion into STG/LTG remain undesigned or manual;
 - the workspace exposes consolidation candidates in core code, but Pi does not
   automatically review or promote them; this is intentional until provenance
   and false-promotion evaluation are stronger;

@@ -56,6 +56,54 @@ board_description: >-
   writer attribution (NMG_AGENT_ID). Use put/read/resolve; full conventions
   (memory pointers, boundaries) are disclosed in each tool result.
 
+reason_description: >-
+  Maintain a session-private, auditable reasoning scratchpad containing typed
+  goals, observations, hypotheses, evidence, conclusions, decisions, open
+  questions, next actions, and explicit relations. It persists checkpoints
+  across Pi compaction and process restart but never writes scratch content into
+  durable semantic memory.
+
+reason_action_parameter_description: >-
+  add creates one typed scratch node; update changes one existing node; link
+  records one explicit relation; checkpoint returns a bounded current view;
+  clear deletes only this session's reasoning scratchpad.
+
+reason_node_id_parameter_description: >-
+  Stable reasoning-node ID returned by an earlier nmg_reason call. Required for
+  update and scoped to the current Pi session.
+
+reason_kind_parameter_description: >-
+  The role of a new scratch node in the current reasoning process. Required for
+  add; it is not a durable MemoryNode type.
+
+reason_content_parameter_description: >-
+  Concise scratch content for add, or replacement content for update. Keep
+  uncertainty explicit; scratch content is not verified fact.
+
+reason_status_parameter_description: >-
+  Epistemic or workflow status of the scratch node. supported means the node has
+  traceable support; rejected preserves a disproven path; resolved and
+  superseded keep lifecycle history.
+
+reason_importance_parameter_description: >-
+  Session-local checkpoint priority from 0 to 1. It affects bounded disclosure,
+  not truth, durability, or automatic promotion.
+
+reason_evidence_refs_parameter_description: >-
+  Optional stable references supporting a new scratch node, such as NMG memory
+  IDs, source-message IDs, file locations, or tool-result identities. References
+  are retained for audit but are not independently verified by this tool.
+
+reason_source_id_parameter_description: >-
+  Existing reasoning-node ID at the source of a relation. Required for link.
+
+reason_target_id_parameter_description: >-
+  Existing reasoning-node ID at the target of a relation. Required for link.
+
+reason_relation_parameter_description: >-
+  Explicit directed relation between two existing scratch nodes. Required for
+  link and scoped to the current Pi session.
+
 board_action_parameter_description: >-
   Use put to publish one concise coordination entry, read to fetch entries after
   an optional cursor, claim to take an open entry as the single working Agent

@@ -286,31 +286,21 @@ harness-verified excerpt.
 
 ---
 
-## 10. Topology proposals lack an automated acceptance policy
+## 10. Topology auto-acceptance is implemented but not promoted
 
-**Symptom:** The topology proposal system collects co-retrieval and ambiguity
-signals, proposes link and split operations, and supports explicit
-accept/reject — but only through the Lab tool `nmg_organize`. There is no
-background process that auto-accepts high-confidence proposals.
+**Status:** the actuator exists behind an explicit, default-off policy. Semantic
+maintenance can accept only a strongly gated `same_as` identity proposal when
+`NMG_TOPOLOGY_AUTO_MERGE=1`; it requires repeated high-confidence observations,
+balanced active evidence, one exact scope identity, no conflicting proposal, and
+no pre-existing canonical target. Each actuation records its transform and uses
+the reversible merge journal. Work is bounded to one proposal per maintenance
+pass by default and hard-capped at four.
 
-**Concern:** This is by design (the design document says "accepted topology
-proposals are an offline/Lab maintenance operation, not an unattended
-production mutation policy"). However, as the signal quality improves with
-scale, the gap between proposal generation and acceptance will widen.
-Hundreds of pending proposals with no review mechanism create clutter and
-missed opportunities.
-
-**Approaches:**
-
-- **Auto-accept threshold:** define a minimum observation count (e.g., 50)
-  and a minimum gain (e.g., 0.9) above which proposals are auto-accepted.
-  Below that, proposals remain pending for human review.
-- **Periodic review summary:** add a CLI command (`npx nmg proposals`) that
-  prints pending proposals ranked by estimated gain, so a human can batch
-  review.
-- **A/B apply-and-measure:** apply a proposal in a temporary branch, run the
-  last N queries that touched the affected nodes, and compare recall. Accept
-  only if recall improves. This is expensive but the safest automation path.
+**Remaining concern:** deterministic tests prove gating, audit linkage, bounded
+actuation, and rollback mechanics, but not the natural false-merge cost. The
+feature therefore remains opt-in until natural aliases, namesakes, temporal
+states, corrections, and reversals establish an acceptable precision floor.
+Pending non-identity links and splits still require explicit review.
 
 ---
 
@@ -327,7 +317,7 @@ missed opportunities.
 | 7 | ANN recall quality | Low | High |
 | 8 | Concurrency model | Low | Low (docs) |
 | 9 | Session serialization fragility | Medium | Low |
-| 10 | Topology auto-acceptance | Low | Medium |
+| 10 | Topology auto-acceptance promotion | Low | Natural-data gate |
 
 None of these are blockers for the current prototype stage. Items 1, 4, 5, and
 6 are the strongest candidates for P2 attention because they affect

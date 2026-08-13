@@ -12,6 +12,17 @@ export interface NmgPrompts {
   get_description: string;
   remember_description: string;
   board_description: string;
+  reason_description: string;
+  reason_action_parameter_description: string;
+  reason_node_id_parameter_description: string;
+  reason_kind_parameter_description: string;
+  reason_content_parameter_description: string;
+  reason_status_parameter_description: string;
+  reason_importance_parameter_description: string;
+  reason_evidence_refs_parameter_description: string;
+  reason_source_id_parameter_description: string;
+  reason_target_id_parameter_description: string;
+  reason_relation_parameter_description: string;
   board_action_parameter_description: string;
   board_task_id_parameter_description: string;
   board_content_parameter_description: string;

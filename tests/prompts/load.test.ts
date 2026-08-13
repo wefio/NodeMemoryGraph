@@ -8,6 +8,17 @@ const SECTIONS = [
   "get_description",
   "remember_description",
   "board_description",
+  "reason_description",
+  "reason_action_parameter_description",
+  "reason_node_id_parameter_description",
+  "reason_kind_parameter_description",
+  "reason_content_parameter_description",
+  "reason_status_parameter_description",
+  "reason_importance_parameter_description",
+  "reason_evidence_refs_parameter_description",
+  "reason_source_id_parameter_description",
+  "reason_target_id_parameter_description",
+  "reason_relation_parameter_description",
   "board_action_parameter_description",
   "board_task_id_parameter_description",
   "board_content_parameter_description",
@@ -75,6 +86,7 @@ test("tool descriptions are neutral: they state capability, not when to call", (
     "get_description",
     "remember_description",
     "board_description",
+    "reason_description",
   ] as const) {
     const text = prompts[key];
     assert.doesNotMatch(text, /\buse when\b/i, `${key} must not advise when to call`);

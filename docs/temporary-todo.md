@@ -105,9 +105,11 @@ observed:
   reviewed and implemented.
 - Full long-horizon reinforcement learning: only after a real sequential
   credit-assignment problem is demonstrated.
-- Reasoning-workspace activation, archival/resume, and STG/LTG promotion: only
-  after real interruption or compaction tasks show that the ordinary transcript
-  and AG are insufficient. The existing Lab prototype remains available.
+- Automatic reasoning-workspace capture, cross-session continuation, archival
+  policy, and STG/LTG promotion: only after real interruption or compaction tasks
+  show that the ordinary transcript and AG are insufficient. The explicit Lab
+  tool, same-session atomic persistence, process-restart resume, and one-shot
+  post-compaction checkpoint injection are implemented.
 - Memory-Graph Reasoner edge-following and automatic inference: only after that
   reasoning-workspace need is established; global scoring is a retained Lab
   prototype, not a Lite dependency.

@@ -71,10 +71,78 @@ function extensionHarness() {
 }
 
 test("Pi adapter exposes only the stable tool surface", () => {
-  assert.deepEqual(
-    [...extensionHarness().tools.keys()],
-    ["nmg_remember", "nmg_get", "nmg_search", "nmg_board"],
-  );
+  const previous = process.env.NMG_ENABLE_LAB_TOOLS;
+  delete process.env.NMG_ENABLE_LAB_TOOLS;
+  try {
+    assert.deepEqual(
+      [...extensionHarness().tools.keys()],
+      ["nmg_remember", "nmg_get", "nmg_search", "nmg_board"],
+    );
+  } finally {
+    if (previous === undefined) delete process.env.NMG_ENABLE_LAB_TOOLS;
+    else process.env.NMG_ENABLE_LAB_TOOLS = previous;
+  }
+});
+
+test("Lab reasoning tool persists scratch state and injects it only after compaction", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-reasoning-tool-"));
+  const previousData = process.env.NMG_DATA_DIR;
+  const previousLab = process.env.NMG_ENABLE_LAB_TOOLS;
+  process.env.NMG_DATA_DIR = directory;
+  process.env.NMG_ENABLE_LAB_TOOLS = "1";
+  try {
+    const { handlers, tools } = extensionHarness();
+    assert.deepEqual(
+      [...tools.keys()],
+      ["nmg_reason", "nmg_remember", "nmg_get", "nmg_search", "nmg_board"],
+    );
+    const sessionManager = {
+      getSessionId: () => "reasoning-session",
+      getSessionFile: () => "reasoning-session.jsonl",
+    };
+    const added = (await tools.get("nmg_reason")!.execute(
+      "reason-add",
+      {
+        action: "add",
+        kind: "hypothesis",
+        content: "The cache key may omit the project scope.",
+        importance: 0.8,
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    )) as { details: { node: { id: string } }; content: Array<{ text: string }> };
+    assert.match(added.details.node.id, /^reason_/u);
+    assert.match(added.content[0]!.text, /not verified fact/u);
+    assert.equal(existsSync(join(directory, "nmg.sqlite")), false);
+
+    const ordinary = (await handlers.get("before_agent_start")!(
+      { prompt: "continue", systemPrompt: "base" },
+      { sessionManager },
+    )) as { message?: { content: string } };
+    assert.doesNotMatch(ordinary.message?.content ?? "", /cache key may omit/u);
+
+    await handlers.get("session_before_compact")!({}, { sessionManager });
+    const afterCompaction = (await handlers.get("before_agent_start")!(
+      { prompt: "continue", systemPrompt: "base" },
+      { sessionManager },
+    )) as { message?: { content: string } };
+    assert.match(afterCompaction.message?.content ?? "", /cache key may omit/u);
+    assert.match(afterCompaction.message?.content ?? "", /auditable scratchpad, not verified fact/u);
+
+    const consumed = (await handlers.get("before_agent_start")!(
+      { prompt: "continue", systemPrompt: "base" },
+      { sessionManager },
+    )) as { message?: { content: string } };
+    assert.doesNotMatch(consumed.message?.content ?? "", /cache key may omit/u);
+    await handlers.get("session_shutdown")!({}, { sessionManager });
+  } finally {
+    if (previousData === undefined) delete process.env.NMG_DATA_DIR;
+    else process.env.NMG_DATA_DIR = previousData;
+    if (previousLab === undefined) delete process.env.NMG_ENABLE_LAB_TOOLS;
+    else process.env.NMG_ENABLE_LAB_TOOLS = previousLab;
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("QPP actuation keeps hard envelopes and learned folds lossless in the Active Graph", async () => {
