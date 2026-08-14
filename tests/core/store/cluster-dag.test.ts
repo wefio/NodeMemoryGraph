@@ -120,7 +120,7 @@ const CLUSTERS: Record<string, string[]> = {
 };
 
 const MIXIN_CHAIN_RE =
-  /class\s+NmgStore\s+extends\s+withGraph\(\s*withRetrieval\(\s*withWrites\(\s*withMaintenance\(\s*NmgStoreBase\s*\)\s*\)\s*\)\s*\)/;
+  /class\s+NmgStore\s+extends\s+withGraph\(\s*withAnalogy\(\s*withRetrieval\(\s*withWrites\(\s*withMaintenance\(\s*NmgStoreBase\s*\)\s*\)\s*\)\s*\)\s*,\s*\)\s*\{/;
 
 function methodDef(name: string, source: string, indent = 2): boolean {
   // Class method: `<indent>[protected ]name(` at class-member indent; also
@@ -234,6 +234,6 @@ test("cluster split: store.ts assembles the mixin chain in order", () => {
   // NmgStore must extend the mixin chain with every mixin, in fixed order.
   assert.ok(
     MIXIN_CHAIN_RE.test(text),
-    `${STORE} must define class NmgStore extends withGraph(withRetrieval(withWrites(withMaintenance(NmgStoreBase))))`,
+    `${STORE} must define class NmgStore extends withGraph(withAnalogy(withRetrieval(withWrites(withMaintenance(NmgStoreBase)))))`,
   );
 });
