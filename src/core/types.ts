@@ -467,6 +467,14 @@ export interface SearchOptions {
    *  the ranked hit(s): members with position in [minHit−window, maxHit+window]
    *  are appended. Omit for the whole chain. */
   chainExpansionWindow?: number;
+  /** Optional, caller-chosen recency decay (docs §3.4): when set, ranking
+   *  dampens each memory's combined score by 0.5^(age_days / half_life) based
+   *  on its event_time, so stale facts stop dominating current-value queries.
+   *  Default off — existing retrieval is unchanged; memories without an
+   *  event_time are never dampened. This is an explicit opt-in, never a
+   *  default re-rank (Mem0's knowledge-update regression is the cautionary
+   *  tale for making recency a silent default). */
+  recencyDecayHalfLifeDays?: number;
   taskId?: string;
   activeGraphBudget?: Partial<ActiveGraphBudget>;
   /** Maximum semantic nodes considered by hierarchical vector routing. */

@@ -1256,6 +1256,30 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             left.memory.tier - right.memory.tier ||
             right.memory.importance - left.memory.importance,
         );
+      // Optional recency decay (caller-chosen, default off): dampen older
+      // memories by 0.5^(age_days / half_life) so stale facts stop dominating
+      // current-value queries. Memories without event_time are never touched.
+      const decayHalfLife = options.recencyDecayHalfLifeDays;
+      // Skip decay for as-of/historical queries (eventTimeTo set): there the
+      // correct value is the one current AT that date, so damping old records
+      // would be wrong. Decay is only a current-value bias.
+      if (decayHalfLife !== undefined && decayHalfLife > 0 && !options.eventTimeTo) {
+        const nowMs = Date.now();
+        for (const result of filtered) {
+          const eventMs = result.memory.eventTime
+            ? Date.parse(result.memory.eventTime)
+            : Number.NaN;
+          if (Number.isNaN(eventMs)) continue;
+          const ageDays = Math.max(0, (nowMs - eventMs) / 86_400_000);
+          result.combinedScore *= Math.pow(0.5, ageDays / decayHalfLife);
+        }
+        filtered.sort(
+          (left, right) =>
+            right.combinedScore - left.combinedScore ||
+            left.memory.tier - right.memory.tier ||
+            right.memory.importance - left.memory.importance,
+        );
+      }
       // Temporal as-of ranking: a historical query (event-time window) asks for
       // the value that was current AT that date. The most relevant memories are
       // the ones whose event time is closest to the window's end (the

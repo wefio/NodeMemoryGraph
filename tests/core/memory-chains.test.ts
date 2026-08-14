@@ -280,3 +280,68 @@ test("chain member reports successorId when its memory is superseded (live refer
     assert.equal(member.successorId, successor.memory.id); // live reference
   });
 });
+
+test("recencyDecayHalfLifeDays dampens older memories (opt-in, default off)", () => {
+  withStore((store) => {
+    const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+    const byName = new Map<string, string>();
+    for (const [name, days] of [
+      ["最新", 0],
+      ["百天", 100],
+      ["千天", 1000],
+    ] as const) {
+      const r = store.remember({
+        nodeName: "项目",
+        nodeKind: "topic",
+        nodeSummary: "项目",
+        statement: `关于项目的${name}记忆`,
+        eventTime: daysAgo(days),
+        sessionId: "s1",
+        sourceActor: "user",
+      });
+      byName.set(name, r.memory.id);
+    }
+    // Default (no decay): the option is off, retrieval is unchanged.
+    const base = store.searchContext("项目 记忆", { limit: 3, sessionId: "s1" });
+    assert.equal(base.results.length, 3);
+
+    // With decay (half-life 100d): the 1000-day-old memory is dampened far more
+    // than the 100-day-old one.
+    const dec = store.searchContext("项目 记忆", {
+      limit: 3,
+      sessionId: "s1",
+      recencyDecayHalfLifeDays: 100,
+    });
+    const score = new Map<string, number>();
+    for (const r of dec.results) {
+      for (const [name, id] of byName) if (r.memory.id === id) score.set(name, r.combinedScore);
+    }
+    assert.ok(score.has("千天") && score.has("百天"));
+    assert.ok(score.get("千天")! < score.get("百天")!, "older memory dampened more");
+  });
+});
+
+test("recency decay is skipped for historical (eventTimeTo) queries", () => {
+  withStore((store) => {
+    for (const name of ["甲", "乙"]) {
+      store.remember({
+        nodeName: "历史",
+        nodeKind: "topic",
+        nodeSummary: "历史",
+        statement: `历史${name}记录`,
+        eventTime: "2024-05-01T00:00:00Z",
+        sessionId: "s1",
+        sourceActor: "user",
+      });
+    }
+    // Historical window with decay set: the decay path is skipped (no crash),
+    // and the windowed records still surface.
+    const c = store.searchContext("历史", {
+      limit: 5,
+      sessionId: "s1",
+      recencyDecayHalfLifeDays: 30,
+      eventTimeTo: "2024-12-31",
+    });
+    assert.ok(c.results.length >= 1);
+  });
+});
