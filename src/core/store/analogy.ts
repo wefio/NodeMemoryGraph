@@ -58,19 +58,19 @@ const DIRECTED_RELATIONS = new Set([
   "refines",
 ]);
 
-interface RelRow {
+export interface RelRow {
   source_node_id: string;
   target_node_id: string;
   relation_type: string;
   direction: string;
 }
-interface SupRow {
+export interface SupRow {
   id: string;
   node_id: string;
   supersedes_id: string;
 }
 
-function detectPatternCounts(
+export function detectPatternCounts(
   relations: RelRow[],
   supersedes: SupRow[],
   nodeSet: Set<string>,
