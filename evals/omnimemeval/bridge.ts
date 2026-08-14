@@ -377,7 +377,14 @@ export class OmniMemEvalBridge {
     // retrieved memory contradicts another memory (claims metadata), the
     // note is rendered into the context regardless of the caller.
     const notes = store.contradictionNotes(memories.map((m) => m.memoryId));
-    const projection = projectMemoryContext(memories, includeTime, notes);
+    // A/B/C experiment switch (docs: presentation-layer render modes).
+    // "numeric" is the default; env override lets the eval harness A/B/C the
+    // same questions without rebuilding.
+    const renderMode: MemoryRenderMode =
+      process.env.NMG_RENDER_MODE === "alpha" || process.env.NMG_RENDER_MODE === "none"
+        ? process.env.NMG_RENDER_MODE
+        : "numeric";
+    const projection = projectMemoryContext(memories, includeTime, notes, renderMode);
     appendFileSync(
       this.#perfLogPath,
       `${JSON.stringify({
@@ -450,10 +457,13 @@ export class OmniMemEvalBridge {
   }
 }
 
+export type MemoryRenderMode = "none" | "numeric" | "alpha";
+
 export function projectMemoryContext(
   memories: readonly OmniRetrievedMemory[],
   includeTime: boolean,
   notes: ReadonlyMap<string, string>,
+  renderMode: MemoryRenderMode = "numeric",
 ): { lines: string[]; hasForget: boolean } {
   const projectedKinds = new Set<string>();
   const lines: string[] = [];
@@ -483,9 +493,14 @@ export function projectMemoryContext(
         ? `[${visibleKinds.join(",")}] ${base}`
         : base;
     const note = notes.get(memory.memoryId);
-    // Numbered lines so the chain block below can reference members by index
-    // ("the model sees order, not an isolated list").
-    const numbered = `${lines.length + 1}. ${rendered}`;
+    // A/B/C render modes: "numeric" prefixes each line with 1., 2., … so the
+    // chain block can reference members by index (current behavior); "alpha"
+    // prefixes with A., B., … to avoid implying the retrieval rank is a
+    // chronological/event order; "none" renders bare lines and drops the
+    // chain block (no stable per-line label to reference).
+    const label =
+      renderMode === "alpha" ? String.fromCharCode(65 + lines.length) : String(lines.length + 1);
+    const numbered = renderMode === "none" ? rendered : `${label}. ${rendered}`;
     indexByMemory.set(memory.memoryId, lines.length);
     lines.push(note ? `${numbered}\n${note}` : numbered);
   }
@@ -515,14 +530,14 @@ export function projectMemoryContext(
       chains.set(membership.chainId, chain);
     }
   }
-  if (chains.size > 0) {
+  if (chains.size > 0 && renderMode !== "none") {
     lines.push("");
     for (const [chainId, chain] of chains) {
       chain.members.sort((a, b) => a.position - b.position);
       const seq = chain.members
         .map((member) => indexByMemory.get(member.id))
         .filter((i): i is number => i !== undefined)
-        .map((i) => `#${i + 1}`)
+        .map((i) => (renderMode === "alpha" ? `#${String.fromCharCode(65 + i)}` : `#${i + 1}`))
         .join(" → ");
       if (seq) {
         const label = chain.topic ? `${chain.chainType} chain: ${chain.topic}` : `${chain.chainType} chain`;

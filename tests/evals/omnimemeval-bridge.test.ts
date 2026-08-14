@@ -472,6 +472,66 @@ test("chain members render as numbered lines plus an independent chain block", (
     assert.deepEqual(refs, [1, 2, 3], "chain block references member line numbers in order");
     store.close();
   } finally {
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows handle-lock noise */ }
+  }
+});
+
+test("alpha render mode prefixes lines A/B/C and references chain members by letter", () => {
+  const root = mkdtempSync(join(tmpdir(), "chainrender-alpha-"));
+  try {
+    const store = new NmgStore(join(root, "nmg.sqlite"));
+    const cm: string[] = [];
+    for (const s of ["脚本误操作", "写入阻塞", "服务不可用"]) {
+      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: s, sessionId: "s1", sourceActor: "user" });
+      cm.push(m.memory.id);
+    }
+    const lc = store.createMemoryChain({ chainType: "logical", topic: "事故因果", ownerSessionId: "s1" });
+    cm.forEach((m, i) => store.addMemoryToChain({ chainId: lc.id, memoryId: m, position: i }));
+    const ctx = store.searchContext("脚本误操作", { sessionId: "s1", limit: 8, expandChains: true });
+    const memories = ctx.results.map((r) => ({
+      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
+      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
+      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
+    }));
+    const { lines } = projectMemoryContext(memories, false, new Map(), "alpha");
+    // Lines are prefixed with A., B., C. — not numeric.
+    assert.ok(/^[A-C]\. /.test(lines[0]!), "first line is letter-prefixed");
+    assert.ok(!/^\d+\. /.test(lines[0]!), "no numeric prefix in alpha mode");
+    const block = lines[lines.length - 1]!;
+    assert.match(block, /^\[logical chain\]/);
+    const refs = [...block.matchAll(/#([A-C])/g)].map((m) => m[1]);
+    assert.deepEqual(refs, ["A", "B", "C"], "chain block references members by letter in order");
+    store.close();
+  } finally {
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows handle-lock noise */ }
+  }
+});
+
+test("none render mode renders bare lines and drops the chain block", () => {
+  const root = mkdtempSync(join(tmpdir(), "chainrender-none-"));
+  try {
+    const store = new NmgStore(join(root, "nmg.sqlite"));
+    const cm: string[] = [];
+    for (const s of ["脚本误操作", "写入阻塞", "服务不可用"]) {
+      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: s, sessionId: "s1", sourceActor: "user" });
+      cm.push(m.memory.id);
+    }
+    const lc = store.createMemoryChain({ chainType: "logical", topic: "事故因果", ownerSessionId: "s1" });
+    cm.forEach((m, i) => store.addMemoryToChain({ chainId: lc.id, memoryId: m, position: i }));
+    const ctx = store.searchContext("脚本误操作", { sessionId: "s1", limit: 8, expandChains: true });
+    const memories = ctx.results.map((r) => ({
+      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
+      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
+      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
+    }));
+    const { lines } = projectMemoryContext(memories, false, new Map(), "none");
+    // Bare lines: no numeric/letter prefix.
+    assert.ok(!/^[0-9A-Z]\. /.test(lines[0]!), "no prefix in none mode");
+    // Chain block is dropped (no per-line label to reference).
+    const text = lines.join("\n");
+    assert.ok(!/\[.* chain\]/.test(text), "no chain block in none mode");
+    store.close();
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
