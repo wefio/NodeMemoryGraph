@@ -500,14 +500,47 @@ test("a memory in multiple chains renders in every chain block", () => {
     }));
     const { lines } = projectMemoryContext(memories, true, new Map());
     const text = lines.join("\n");
-    const temporal = text.match(/\[temporal chain\] (.*)/)?.[1] ?? "";
-    const logical = text.match(/\[logical chain\] (.*)/)?.[1] ?? "";
+    const temporal = text.match(/\[temporal chain:[^\]]*\] ([^\n]*)/)?.[1] ?? "";
+    const logical = text.match(/\[logical chain:[^\]]*\] ([^\n]*)/)?.[1] ?? "";
     const temporalRefs = [...temporal.matchAll(/#(\d+)/g)].map((x) => Number(x[1]));
     const logicalRefs = [...logical.matchAll(/#(\d+)/g)].map((x) => Number(x[1]));
     // The shared memory's line number appears in both chain blocks.
     const sharedLine = memories.findIndex((mm) => mm.memoryId === hit!.memory.id) + 1;
     assert.ok(temporalRefs.includes(sharedLine), "shared member in temporal chain block");
     assert.ok(logicalRefs.includes(sharedLine), "shared member in logical chain block");
+    store.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("multiple chains of the same type render with distinguishable topics", () => {
+  const root = mkdtempSync(join(tmpdir(), "mtopic-"));
+  try {
+    const store = new NmgStore(join(root, "nmg.sqlite"));
+    const mk = (name: string, stmt: string, et: string) =>
+      store.remember({ nodeName: name, nodeKind: "topic", nodeSummary: name, statement: stmt, sessionId: "s1", sourceActor: "user", eventTime: et });
+    const b1 = mk("预算", "2023预算6500万", "2023-01-01");
+    const b2 = mk("预算", "2024预算8000万", "2024-01-01");
+    const A = store.createMemoryChain({ chainType: "temporal", topic: "预算年度演进", ownerSessionId: "s1" });
+    store.addMemoryToChain({ chainId: A.id, memoryId: b1.memory.id, position: 0 });
+    store.addMemoryToChain({ chainId: A.id, memoryId: b2.memory.id, position: 1 });
+    const e1 = mk("事故", "故障凌晨发生", "2024-03-01");
+    const e2 = mk("事故", "故障次日恢复", "2024-03-02");
+    const C = store.createMemoryChain({ chainType: "temporal", topic: "事故时间线", ownerSessionId: "s1" });
+    store.addMemoryToChain({ chainId: C.id, memoryId: e1.memory.id, position: 0 });
+    store.addMemoryToChain({ chainId: C.id, memoryId: e2.memory.id, position: 1 });
+
+    const ctx = store.searchContext("2024年 故障时间", { sessionId: "s1", limit: 8, expandChains: true });
+    const memories = ctx.results.map((r) => ({
+      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement, markers: r.memory.markers,
+      eventTime: r.memory.eventTime, score: r.combinedScore, sourceRef: r.evidence.sourceRef,
+      chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType, chainMemberships: r.chainMemberships,
+    }));
+    const { lines } = projectMemoryContext(memories, true, new Map());
+    const text = lines.join("\n");
+    assert.match(text, /\[temporal chain: 预算年度演进\]/);
+    assert.match(text, /\[temporal chain: 事故时间线\]/);
     store.close();
   } finally {
     rmSync(root, { recursive: true, force: true });

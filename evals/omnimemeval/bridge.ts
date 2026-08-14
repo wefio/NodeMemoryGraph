@@ -35,6 +35,7 @@ type OmniRetrievedMemory = {
     chainId: string;
     position: number;
     chainType?: string;
+    topic?: string;
   }>;
 };
 
@@ -494,7 +495,7 @@ export function projectMemoryContext(
   // from the numbered lines so the memory list stays clean.
   const chains = new Map<
     string,
-    { chainType: string; members: Array<{ id: string; position: number }> }
+    { chainType: string; topic?: string; members: Array<{ id: string; position: number }> }
   >();
   for (const memory of memories) {
     // A memory can belong to several chains: render it in every chain block.
@@ -506,8 +507,10 @@ export function projectMemoryContext(
     for (const membership of memberships) {
       const chain = chains.get(membership.chainId) ?? {
         chainType: membership.chainType ?? "memory",
+        topic: membership.topic,
         members: [],
       };
+      if (!chain.topic && membership.topic) chain.topic = membership.topic;
       chain.members.push({ id: memory.memoryId, position: membership.position });
       chains.set(membership.chainId, chain);
     }
@@ -521,7 +524,10 @@ export function projectMemoryContext(
         .filter((i): i is number => i !== undefined)
         .map((i) => `#${i + 1}`)
         .join(" → ");
-      if (seq) lines.push(`[${chain.chainType} chain] ${seq}`);
+      if (seq) {
+        const label = chain.topic ? `${chain.chainType} chain: ${chain.topic}` : `${chain.chainType} chain`;
+        lines.push(`[${label}] ${seq}`);
+      }
     }
   }
   return { lines, hasForget: projectedKinds.has("forget") };

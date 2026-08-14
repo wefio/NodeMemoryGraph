@@ -730,23 +730,30 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           // the whole chain surfaced (hit + expansion) rather than only the
           // appended part. A memory can belong to several chains — collect all
           // memberships; chainId mirrors the first for single-chain callers.
-          const chainTypes = new Map<string, MemoryChainType>();
+          const chainMeta = new Map<
+            string,
+            { chainType: MemoryChainType; topic: string | null }
+          >();
           for (const cid of chainIds) {
             const cRow = this.db
-              .prepare("SELECT chain_type FROM memory_chains WHERE id = ?")
+              .prepare("SELECT chain_type, topic FROM memory_chains WHERE id = ?")
               .get(cid) as Row | undefined;
-            chainTypes.set(cid, (cRow?.chain_type as MemoryChainType) ?? "temporal");
+            chainMeta.set(cid, {
+              chainType: (cRow?.chain_type as MemoryChainType) ?? "temporal",
+              topic: (cRow?.topic as string | null) ?? null,
+            });
           }
           for (const result of context.results) {
             const memberships = chainOfExisting.get(result.memory.id);
             if (memberships && memberships.length > 0) {
               result.chainId = memberships[0].chainId;
               result.chainPosition = memberships[0].position;
-              result.chainType = chainTypes.get(memberships[0].chainId);
+              result.chainType = chainMeta.get(memberships[0].chainId)!.chainType;
               result.chainMemberships = memberships.map((ms) => ({
                 chainId: ms.chainId,
                 position: ms.position,
-                chainType: chainTypes.get(ms.chainId)!,
+                chainType: chainMeta.get(ms.chainId)!.chainType,
+                topic: chainMeta.get(ms.chainId)!.topic ?? undefined,
               }));
             }
           }
@@ -793,9 +800,16 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                 ...result,
                 chainId: cid,
                 chainPosition: pos,
-                chainType: cid ? chainTypes.get(cid) : undefined,
+                chainType: cid ? chainMeta.get(cid)!.chainType : undefined,
                 chainMemberships: cid
-                  ? [{ chainId: cid, position: pos ?? 0, chainType: chainTypes.get(cid)! }]
+                  ? [
+                      {
+                        chainId: cid,
+                        position: pos ?? 0,
+                        chainType: chainMeta.get(cid)!.chainType,
+                        topic: chainMeta.get(cid)!.topic ?? undefined,
+                      },
+                    ]
                   : undefined,
               });
             }

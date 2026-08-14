@@ -661,6 +661,8 @@ export interface MemorySearchResult {
     chainId: string;
     position: number;
     chainType: MemoryChainType;
+    /** Chain topic/name so multiple chains of the same type stay distinguishable. */
+    topic?: string;
   }>;
 }
 
