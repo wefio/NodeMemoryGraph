@@ -31,6 +31,8 @@ import {
   VECTOR_GRANULARITIES,
   type ActiveGraphBudget,
   type ClaimPosterior,
+  type MemoryChain,
+  type MemoryChainMember,
   type MemoryContext,
   type MemoryScope,
   type MemoryMarker,
@@ -49,6 +51,10 @@ import {
   MEMORY_RELATION_JUDGEMENTS,
   NMG_PROTOCOL_VERSION,
   NmgProtocolError,
+  type NmgChainAddParams,
+  type NmgChainCreateParams,
+  type NmgChainGetParams,
+  type NmgChainListParams,
   type NmgGetParams,
   type NmgRecordActiveGraphUseParams,
   type NmgHelloResult,
@@ -346,6 +352,14 @@ export class NmgService {
           entry: this.#getStore().resolveTaskBoardEntry(parsed),
         } as NmgMethodResult[M];
       }
+      case "chainCreate":
+        return this.#chainCreate(parseChainCreateParams(params)) as NmgMethodResult[M];
+      case "chainAdd":
+        return this.#chainAdd(parseChainAddParams(params)) as NmgMethodResult[M];
+      case "chainGet":
+        return this.#chainGet(parseChainGetParams(params)) as NmgMethodResult[M];
+      case "chainList":
+        return this.#chainList(parseChainListParams(params)) as NmgMethodResult[M];
       case "shutdown":
         this.#shutdownRequested = true;
         return { shuttingDown: true } as NmgMethodResult[M];
@@ -398,6 +412,36 @@ export class NmgService {
         reason: this.#embeddingError,
       },
     };
+  }
+
+  #chainCreate(params: NmgChainCreateParams): MemoryChain {
+    return this.#getStore().createMemoryChain({
+      chainType: params.chainType,
+      topic: params.topic,
+      ownerSessionId: params.ownerSessionId,
+    });
+  }
+
+  #chainAdd(params: NmgChainAddParams): MemoryChainMember {
+    return this.#getStore().addMemoryToChain({
+      chainId: params.chainId,
+      memoryId: params.memoryId,
+      position: params.position,
+      note: params.note,
+    });
+  }
+
+  #chainGet(
+    params: NmgChainGetParams,
+  ): { chain: MemoryChain; members: MemoryChainMember[] } | null {
+    return this.#getStore().getMemoryChain(params.chainId);
+  }
+
+  #chainList(params: NmgChainListParams): MemoryChain[] {
+    return this.#getStore().listMemoryChains({
+      chainType: params.chainType,
+      ownerSessionId: params.ownerSessionId,
+    });
   }
 
   #remember(params: NmgRememberParams): NmgMethodResult["remember"] {
@@ -1186,6 +1230,56 @@ function parseGetParams(value: unknown): NmgGetParams {
     memoryIds: ids.map((id) => String(id).trim()),
     activeGraphId: optionalString(params, "activeGraphId"),
     graphHops: optionalInteger(params, "graphHops", 0, 3),
+    projectDir: optionalString(params, "projectDir"),
+    sessionId: optionalString(params, "sessionId"),
+  };
+}
+
+function parseChainCreateParams(value: unknown): NmgChainCreateParams {
+  const params = objectParams(value);
+  const chainType = params.chainType;
+  if (chainType !== "temporal" && chainType !== "logical") {
+    throw new NmgProtocolError("INVALID_PARAMS", "chainType must be 'temporal' or 'logical'");
+  }
+  return {
+    chainType,
+    topic: requiredString(params, "topic"),
+    ownerSessionId: optionalString(params, "ownerSessionId"),
+    projectDir: optionalString(params, "projectDir"),
+    sessionId: optionalString(params, "sessionId"),
+  };
+}
+
+function parseChainAddParams(value: unknown): NmgChainAddParams {
+  const params = objectParams(value);
+  return {
+    chainId: requiredString(params, "chainId"),
+    memoryId: requiredString(params, "memoryId"),
+    position: optionalInteger(params, "position", 0, 100_000),
+    note: optionalString(params, "note"),
+    projectDir: optionalString(params, "projectDir"),
+    sessionId: optionalString(params, "sessionId"),
+  };
+}
+
+function parseChainGetParams(value: unknown): NmgChainGetParams {
+  const params = objectParams(value);
+  return {
+    chainId: requiredString(params, "chainId"),
+    projectDir: optionalString(params, "projectDir"),
+    sessionId: optionalString(params, "sessionId"),
+  };
+}
+
+function parseChainListParams(value: unknown): NmgChainListParams {
+  const params = objectParams(value);
+  const chainType = params.chainType;
+  if (chainType !== undefined && chainType !== "temporal" && chainType !== "logical") {
+    throw new NmgProtocolError("INVALID_PARAMS", "chainType must be 'temporal' or 'logical'");
+  }
+  return {
+    chainType: chainType as "temporal" | "logical" | undefined,
+    ownerSessionId: optionalString(params, "ownerSessionId"),
     projectDir: optionalString(params, "projectDir"),
     sessionId: optionalString(params, "sessionId"),
   };

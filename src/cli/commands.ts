@@ -508,6 +508,89 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
       return undefined;
     },
   },
+  {
+    method: "chainCreate",
+    words: ["chain", "create"],
+    usageLine: "nmg chain create --type temporal|logical --topic NAME [--owner SESSION] [--json]",
+    options: ["type", "topic", "owner", "project-dir", "session-id"],
+    flags: [],
+    usageDetail: `Chain create options:
+  --type TYPE              temporal | logical (required)
+  --topic NAME             Chain topic/name (required)
+  --owner SESSION          Owning session id (default: none)`,
+    buildParams: (values) => {
+      const type = requiredOption(values, "type");
+      if (type !== "temporal" && type !== "logical") {
+        throw new Error("--type must be 'temporal' or 'logical'");
+      }
+      return {
+        chainType: type,
+        topic: requiredOption(values, "topic"),
+        ownerSessionId: firstOption(values, "owner"),
+        projectDir: firstOption(values, "project-dir"),
+        sessionId: firstOption(values, "session-id"),
+      };
+    },
+  },
+  {
+    method: "chainAdd",
+    words: ["chain", "add"],
+    usageLine: "nmg chain add --chain ID --memory ID [--position N] [--note TEXT] [--json]",
+    options: ["chain", "memory", "position", "note", "project-dir", "session-id"],
+    flags: [],
+    usageDetail: `Chain add options:
+  --chain ID               Chain id (required)
+  --memory ID              Memory id to reference (required)
+  --position N             Explicit position (default: append)
+  --note TEXT              Optional per-member note`,
+    buildParams: (values) => {
+      const position = firstOption(values, "position");
+      return {
+        chainId: requiredOption(values, "chain"),
+        memoryId: requiredOption(values, "memory"),
+        position: position === undefined ? undefined : Number(position),
+        note: firstOption(values, "note"),
+        projectDir: firstOption(values, "project-dir"),
+        sessionId: firstOption(values, "session-id"),
+      };
+    },
+  },
+  {
+    method: "chainGet",
+    words: ["chain", "get"],
+    usageLine: "nmg chain get --chain ID [--json]",
+    options: ["chain", "project-dir", "session-id"],
+    flags: [],
+    usageDetail: `Chain get options:
+  --chain ID               Chain id (required)`,
+    buildParams: (values) => ({
+      chainId: requiredOption(values, "chain"),
+      projectDir: firstOption(values, "project-dir"),
+      sessionId: firstOption(values, "session-id"),
+    }),
+  },
+  {
+    method: "chainList",
+    words: ["chain", "list"],
+    usageLine: "nmg chain list [--type temporal|logical] [--owner SESSION] [--json]",
+    options: ["type", "owner", "project-dir", "session-id"],
+    flags: [],
+    usageDetail: `Chain list options:
+  --type TYPE              Filter by chain type
+  --owner SESSION          Filter by owner session`,
+    buildParams: (values) => {
+      const type = firstOption(values, "type");
+      if (type !== undefined && type !== "temporal" && type !== "logical") {
+        throw new Error("--type must be 'temporal' or 'logical'");
+      }
+      return {
+        chainType: type,
+        ownerSessionId: firstOption(values, "owner"),
+        projectDir: firstOption(values, "project-dir"),
+        sessionId: firstOption(values, "session-id"),
+      };
+    },
+  },
 ];
 
 /** All option names any command accepts (drives parse-time typo rejection). */

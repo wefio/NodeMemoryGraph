@@ -18,6 +18,10 @@ import type {
   NodeTransform,
   MemoryRecord,
   MemoryWriteEvent,
+  MemoryChain,
+  MemoryChainMember,
+  MemoryChainStatus,
+  MemoryChainType,
   MemorySearchResult,
   MemoryScope,
   MemoryTier,
@@ -648,6 +652,152 @@ export class NmgStoreBase {
       .prepare("SELECT 1 FROM task_board_subscriptions WHERE session_id = ? AND task_id = ?")
       .get(input.sessionId, input.taskId) as Row | undefined;
     return row !== undefined;
+  }
+
+  // ── memory chains (static ordered-reference DAG forests) ──
+
+  /** Create a new memory chain (temporal or logical). Chains are written
+   * explicitly under natural supervision — never auto-inferred. */
+  createMemoryChain(input: {
+    chainType: MemoryChainType;
+    topic: string;
+    ownerSessionId?: string;
+    now?: string;
+  }): MemoryChain {
+    const now = input.now ?? new Date().toISOString();
+    const chain: MemoryChain = {
+      id: randomUUID(),
+      chainType: input.chainType,
+      topic: input.topic,
+      ownerSessionId: input.ownerSessionId ?? null,
+      status: "active",
+      createdAt: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO memory_chains (id, chain_type, topic, owner_session_id, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(chain.id, chain.chainType, chain.topic, chain.ownerSessionId, chain.status, chain.createdAt);
+    return chain;
+  }
+
+  /** Append (or place at an explicit position) a memory reference in a chain.
+   * PK (chain_id, memory_id) makes membership idempotent per chain; a memory
+   * may join many chains (node reuse / cross-chain intersection). Time chains
+   * order by event_time — pass position derived from it; otherwise append. */
+  addMemoryToChain(input: {
+    chainId: string;
+    memoryId: string;
+    position?: number;
+    note?: string;
+    now?: string;
+  }): MemoryChainMember {
+    const now = input.now ?? new Date().toISOString();
+    const chain = this.getMemoryChain(input.chainId);
+    if (!chain) throw new Error(`memory chain not found: ${input.chainId}`);
+    let position = input.position;
+    if (position === undefined) {
+      const row = this.db
+        .prepare(
+          "SELECT COALESCE(MAX(position), 0) + 1 AS next FROM memory_chain_members WHERE chain_id = ?",
+        )
+        .get(input.chainId) as Row;
+      position = Number(row.next);
+    }
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO memory_chain_members (chain_id, memory_id, position, note, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(input.chainId, input.memoryId, position, input.note ?? null, now);
+    return {
+      chainId: input.chainId,
+      memoryId: input.memoryId,
+      position,
+      note: input.note ?? null,
+      createdAt: now,
+    };
+  }
+
+  /** Fetch a chain with all members in order (整链拉起). */
+  getMemoryChain(chainId: string): {
+    chain: MemoryChain;
+    members: MemoryChainMember[];
+  } | null {
+    const row = this.db
+      .prepare(
+        "SELECT id, chain_type, topic, owner_session_id, status, created_at FROM memory_chains WHERE id = ?",
+      )
+      .get(chainId) as Row | undefined;
+    if (!row) return null;
+    const members = (
+      this.db
+        .prepare(
+          `SELECT chain_id, memory_id, position, note, created_at FROM memory_chain_members
+           WHERE chain_id = ? ORDER BY position`,
+        )
+        .all(chainId) as Row[]
+    ).map((m) => ({
+      chainId: String(m.chain_id),
+      memoryId: String(m.memory_id),
+      position: Number(m.position),
+      note: m.note === null ? null : String(m.note),
+      createdAt: String(m.created_at),
+    }));
+    return {
+      chain: {
+        id: String(row.id),
+        chainType: String(row.chain_type) as MemoryChainType,
+        topic: String(row.topic),
+        ownerSessionId: row.owner_session_id === null ? null : String(row.owner_session_id),
+        status: String(row.status) as MemoryChainStatus,
+        createdAt: String(row.created_at),
+      },
+      members,
+    };
+  }
+
+  /** List chains, optionally filtered. */
+  listMemoryChains(input?: {
+    chainType?: MemoryChainType;
+    topic?: string;
+    ownerSessionId?: string;
+    limit?: number;
+  }): MemoryChain[] {
+    const where: string[] = [];
+    const params: Array<string | number> = [];
+    if (input?.chainType) {
+      where.push("chain_type = ?");
+      params.push(input.chainType);
+    }
+    if (input?.topic !== undefined) {
+      where.push("topic = ?");
+      params.push(input.topic);
+    }
+    if (input?.ownerSessionId !== undefined) {
+      where.push("owner_session_id = ?");
+      params.push(input.ownerSessionId);
+    }
+    const sql = `SELECT id, chain_type, topic, owner_session_id, status, created_at FROM memory_chains
+      ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY created_at DESC`;
+    const rows = this.db.prepare(sql).all(...params) as Row[];
+    const limit = input?.limit ?? rows.length;
+    return rows.slice(0, limit).map((row) => ({
+      id: String(row.id),
+      chainType: String(row.chain_type) as MemoryChainType,
+      topic: String(row.topic),
+      ownerSessionId: row.owner_session_id === null ? null : String(row.owner_session_id),
+      status: String(row.status) as MemoryChainStatus,
+      createdAt: String(row.created_at),
+    }));
+  }
+
+  /** Remove a memory reference from a chain. */
+  removeMemoryFromChain(input: { chainId: string; memoryId: string }): void {
+    this.db
+      .prepare("DELETE FROM memory_chain_members WHERE chain_id = ? AND memory_id = ?")
+      .run(input.chainId, input.memoryId);
   }
   /** Named channels this session has joined (wake-loop routing: only these
    * named channels are scanned for this session, never all active boards). */

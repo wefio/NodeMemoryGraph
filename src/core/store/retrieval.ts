@@ -685,6 +685,60 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           }
         }
       }
+      // Post-retrieval chain expansion: if any ranked result is a member of a
+      // memory chain, append the chain's other members (in chain order) so
+      // evolution/aggregation queries get the whole timeline, not just the
+      // single most-similar record. Retrieval ranking is untouched — this is a
+      // recall supplement on the evolution side (docs §3.1), never a re-rank.
+      if (options.expandChains && context.results.length > 0) {
+        const chainIds = new Set<string>();
+        const chainOfExisting = new Map<string, string>();
+        for (const result of context.results) {
+          const chainRows = this.db
+            .prepare("SELECT chain_id FROM memory_chain_members WHERE memory_id = ?")
+            .all(result.memory.id) as Row[];
+          for (const row of chainRows) {
+            chainIds.add(String(row.chain_id));
+            chainOfExisting.set(result.memory.id, String(row.chain_id));
+          }
+        }
+        if (chainIds.size > 0) {
+          // Mark members already in the ranked results too, so callers can see
+          // the whole chain surfaced (hit + expansion) rather than only the
+          // appended part.
+          for (const result of context.results) {
+            const chainId = chainOfExisting.get(result.memory.id);
+            if (chainId !== undefined) result.chainId = chainId;
+          }
+          const seen = new Set(context.results.map((result) => result.memory.id));
+          const toFetch: string[] = [];
+          const chainOf = new Map<string, string>();
+          for (const chainId of chainIds) {
+            const memberRows = this.db
+              .prepare(
+                "SELECT memory_id FROM memory_chain_members WHERE chain_id = ? ORDER BY position",
+              )
+              .all(chainId) as Row[];
+            for (const row of memberRows) {
+              const memberId = String(row.memory_id);
+              if (!seen.has(memberId)) {
+                seen.add(memberId);
+                toFetch.push(memberId);
+                chainOf.set(memberId, chainId);
+              }
+            }
+          }
+          if (toFetch.length > 0) {
+            const extra = this.getContext(toFetch, 0, options.sessionId);
+            for (const result of extra.results) {
+              context.results.push({
+                ...result,
+                chainId: chainOf.get(result.memory.id),
+              });
+            }
+          }
+        }
+      }
       return context;
     }
 

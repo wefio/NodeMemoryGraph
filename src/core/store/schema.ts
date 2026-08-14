@@ -799,6 +799,33 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
       throw error;
     }
   }
+
+  // ── Memory chains: static ordered-reference DAG forests over memory_records ──
+  // A chain is a small, independent, internally-acyclic sequence of memory
+  // references; node reuse gives cross-chain intersection (a memory may belong
+  // to many chains). Time chains order by event_time (position derived from it
+  // at write time); logical chains carry explicit write-time order. Chains store
+  // dependencies only — inference/reasoning is the reasoner's job, not theirs.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_chains (
+      id TEXT PRIMARY KEY,
+      chain_type TEXT NOT NULL CHECK (chain_type IN ('temporal', 'logical')),
+      topic TEXT NOT NULL,
+      owner_session_id TEXT,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS memory_chain_members (
+      chain_id TEXT NOT NULL REFERENCES memory_chains(id) ON DELETE CASCADE,
+      memory_id TEXT NOT NULL REFERENCES memory_records(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL,
+      note TEXT,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (chain_id, memory_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_chain_members_chain ON memory_chain_members(chain_id, position);
+    CREATE INDEX IF NOT EXISTS idx_chain_members_memory ON memory_chain_members(memory_id);
+  `);
 }
 
 export function ensureEmbeddingTable(db: DatabaseSync): void {

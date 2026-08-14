@@ -458,6 +458,11 @@ export interface SearchOptions {
   limit?: number;
   graphHops?: number;
   retrievalMode?: RetrievalMode;
+  /** Post-retrieval chain expansion: when a ranked result is a member of a
+   *  memory chain, pull the chain's other members and append them to the
+   *  context (in chain order). The retrieval ranking is left untouched — this
+   *  only closes the recall gap on evolution/aggregation queries. */
+  expandChains?: boolean;
   taskId?: string;
   activeGraphBudget?: Partial<ActiveGraphBudget>;
   /** Maximum semantic nodes considered by hierarchical vector routing. */
@@ -612,6 +617,11 @@ export interface MemorySearchResult {
    *  (first/highest-ranked occurrence) this result duplicates. Callers may
    *  drop these for rendering or keep them for evidence. */
   duplicateOf?: string;
+  /** Set on post-retrieval chain expansion: the chain this member was pulled
+   *  from. The retrieval ranking is untouched; chain members are appended
+   *  after the ranked results to close the recall gap on evolution/aggregation
+   *  queries (see docs/temporal-logical-chains-design-2026-08-13.md §3.1). */
+  chainId?: string;
 }
 
 export interface DeriveMemoryInput extends Omit<RememberInput, "evidence"> {
@@ -748,6 +758,34 @@ export interface ActiveGraph {
   usage: ActiveGraphBudgetUsage;
   /** Shadow QPP decision (Stage 0): computed, not yet acted on by searchContext. */
   qpp?: QppTriggerDecision;
+  createdAt: string;
+}
+
+/** Memory chains: static ordered-reference DAG forests over memory_records.
+ * A chain is a small, independent, internally-acyclic sequence of memory
+ * references; node reuse gives cross-chain intersection (a memory may belong
+ * to many chains). Chains store dependencies only — inference/reasoning is
+ * the reasoner's job, not theirs. Time chains order by event_time (position
+ * derived at write time); logical chains carry explicit write-time order.
+ * Written explicitly (natural supervision), never inferred automatically. */
+export const MEMORY_CHAIN_TYPES = ["temporal", "logical"] as const;
+export type MemoryChainType = (typeof MEMORY_CHAIN_TYPES)[number];
+export type MemoryChainStatus = "active" | "closed";
+
+export interface MemoryChain {
+  id: string;
+  chainType: MemoryChainType;
+  topic: string;
+  ownerSessionId: string | null;
+  status: MemoryChainStatus;
+  createdAt: string;
+}
+
+export interface MemoryChainMember {
+  chainId: string;
+  memoryId: string;
+  position: number;
+  note: string | null;
   createdAt: string;
 }
 

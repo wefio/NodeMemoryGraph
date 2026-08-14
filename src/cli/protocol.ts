@@ -3,6 +3,9 @@ import type {
   ClaimOutcomeEvent,
   ClaimPosterior,
   MemoryActor,
+  MemoryChain,
+  MemoryChainMember,
+  MemoryChainType,
   MemoryContext,
   MemoryMarker,
   MemoryExportBundle,
@@ -75,6 +78,10 @@ export const NMG_METHODS = [
   "syncStg",
   "stgPurgeSession",
   "taskBoard",
+  "chainCreate",
+  "chainAdd",
+  "chainGet",
+  "chainList",
   "shutdown",
   "status",
 ] as const;
@@ -238,6 +245,36 @@ export interface NmgGetParams {
   /** Active Graph that recommended these IDs; enables owned actual-use feedback. */
   activeGraphId?: string;
   graphHops?: number;
+  projectDir?: string;
+  sessionId?: string;
+}
+
+export interface NmgChainCreateParams {
+  chainType: MemoryChainType;
+  topic: string;
+  ownerSessionId?: string;
+  projectDir?: string;
+  sessionId?: string;
+}
+
+export interface NmgChainAddParams {
+  chainId: string;
+  memoryId: string;
+  position?: number;
+  note?: string;
+  projectDir?: string;
+  sessionId?: string;
+}
+
+export interface NmgChainGetParams {
+  chainId: string;
+  projectDir?: string;
+  sessionId?: string;
+}
+
+export interface NmgChainListParams {
+  chainType?: MemoryChainType;
+  ownerSessionId?: string;
   projectDir?: string;
   sessionId?: string;
 }
@@ -528,6 +565,10 @@ export type NmgMethodResult = {
   };
   search: MemoryContext;
   get: MemoryContext & { missingMemoryIds: string[] };
+  chainCreate: MemoryChain;
+  chainAdd: MemoryChainMember;
+  chainGet: { chain: MemoryChain; members: MemoryChainMember[] } | null;
+  chainList: MemoryChain[];
   recordActiveGraphUse: { activeGraphId: string; usedMemoryIds: string[] };
   retentionCandidates: { candidates: RetentionCandidate[] };
   setStorageState: { memoryId: string; storageState: MemoryStorageState };
