@@ -463,6 +463,10 @@ export interface SearchOptions {
    *  context (in chain order). The retrieval ranking is left untouched — this
    *  only closes the recall gap on evolution/aggregation queries. */
   expandChains?: boolean;
+  /** When expandChains is on, cap chain-member expansion to a window around
+   *  the ranked hit(s): members with position in [minHit−window, maxHit+window]
+   *  are appended. Omit for the whole chain. */
+  chainExpansionWindow?: number;
   taskId?: string;
   activeGraphBudget?: Partial<ActiveGraphBudget>;
   /** Maximum semantic nodes considered by hierarchical vector routing. */
@@ -787,6 +791,11 @@ export interface MemoryChainMember {
   position: number;
   note: string | null;
   createdAt: string;
+  /** Live-reference marker: when this member's memory has been superseded
+   *  (status 'superseded'), the active successor id. The chain keeps the
+   *  original snapshot (historical context) while pointing at the current
+   *  value — callers may follow or ignore it. */
+  successorId?: string;
 }
 
 /** The default Task Board channel when no explicit taskId is given: the shared

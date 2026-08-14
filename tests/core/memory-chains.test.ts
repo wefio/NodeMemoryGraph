@@ -201,3 +201,82 @@ test("expandChains does nothing for a hit outside any chain", () => {
     assert.ok(w.results.every((r) => r.chainId === undefined));
   });
 });
+
+test("chainExpansionWindow caps expansion to a window around the hit", () => {
+  withStore((store) => {
+    const mids: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const r = store.remember({
+        nodeName: "预算",
+        nodeKind: "topic",
+        nodeSummary: "预算",
+        statement: `预算阶段${i}`,
+        sessionId: "s1",
+        sourceActor: "user",
+      });
+      mids.push(r.memory.id);
+    }
+    const chain = store.createMemoryChain({
+      chainType: "temporal",
+      topic: "预算演进",
+      ownerSessionId: "s1",
+    });
+    mids.forEach((m, i) => store.addMemoryToChain({ chainId: chain.id, memoryId: m, position: i }));
+
+    // Hit lands on 阶段2 (position 2); window=1 keeps only positions 1..3.
+    const win = store.searchContext("阶段2", {
+      limit: 1,
+      sessionId: "s1",
+      expandChains: true,
+      chainExpansionWindow: 1,
+    });
+    const stmts = win.results.map((r) => r.memory.statement);
+    assert.ok(stmts.includes("预算阶段1"));
+    assert.ok(stmts.includes("预算阶段2"));
+    assert.ok(stmts.includes("预算阶段3"));
+    assert.ok(!stmts.includes("预算阶段0"));
+    assert.ok(!stmts.includes("预算阶段4"));
+
+    // Without a window the whole chain is appended.
+    const full = store.searchContext("阶段2", {
+      limit: 1,
+      sessionId: "s1",
+      expandChains: true,
+    });
+    assert.equal(full.results.length, 5);
+  });
+});
+
+test("chain member reports successorId when its memory is superseded (live reference)", () => {
+  withStore((store) => {
+    const first = store.remember({
+      nodeName: "项目",
+      nodeKind: "topic",
+      nodeSummary: "项目",
+      statement: "预算阶段0",
+      sessionId: "s1",
+      sourceActor: "user",
+    });
+    const chain = store.createMemoryChain({
+      chainType: "temporal",
+      topic: "演进",
+      ownerSessionId: "s1",
+    });
+    store.addMemoryToChain({ chainId: chain.id, memoryId: first.memory.id, position: 0 });
+    // Fresh chain member: no supersession yet.
+    assert.equal(store.getMemoryChain(chain.id)!.members[0]!.successorId, undefined);
+
+    const successor = store.remember({
+      nodeName: "项目",
+      nodeKind: "topic",
+      nodeSummary: "项目",
+      statement: "预算阶段0v2（最新）",
+      sessionId: "s1",
+      sourceActor: "user",
+      supersedesId: first.memory.id,
+    });
+    const member = store.getMemoryChain(chain.id)!.members[0]!;
+    assert.equal(member.memoryId, first.memory.id); // snapshot kept
+    assert.equal(member.successorId, successor.memory.id); // live reference
+  });
+});

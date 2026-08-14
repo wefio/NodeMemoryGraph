@@ -693,13 +693,19 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       if (options.expandChains && context.results.length > 0) {
         const chainIds = new Set<string>();
         const chainOfExisting = new Map<string, string>();
+        const hitPositions = new Map<string, number[]>();
         for (const result of context.results) {
           const chainRows = this.db
-            .prepare("SELECT chain_id FROM memory_chain_members WHERE memory_id = ?")
+            .prepare("SELECT chain_id, position FROM memory_chain_members WHERE memory_id = ?")
             .all(result.memory.id) as Row[];
           for (const row of chainRows) {
-            chainIds.add(String(row.chain_id));
-            chainOfExisting.set(result.memory.id, String(row.chain_id));
+            const cid = String(row.chain_id);
+            chainIds.add(cid);
+            chainOfExisting.set(result.memory.id, cid);
+            const pos = Number(row.position);
+            const arr = hitPositions.get(cid) ?? [];
+            arr.push(pos);
+            hitPositions.set(cid, arr);
           }
         }
         if (chainIds.size > 0) {
@@ -713,13 +719,27 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           const seen = new Set(context.results.map((result) => result.memory.id));
           const toFetch: string[] = [];
           const chainOf = new Map<string, string>();
+          // chainExpansionWindow: cap expansion to a window around the ranked
+          // hit(s) — members with position in [minHit−window, maxHit+window]
+          // are appended, so a long evolution chain does not blow the budget.
+          const window = options.chainExpansionWindow;
           for (const chainId of chainIds) {
             const memberRows = this.db
               .prepare(
-                "SELECT memory_id FROM memory_chain_members WHERE chain_id = ? ORDER BY position",
+                "SELECT memory_id, position FROM memory_chain_members WHERE chain_id = ? ORDER BY position",
               )
               .all(chainId) as Row[];
-            for (const row of memberRows) {
+            const hitPos = hitPositions.get(chainId) ?? [];
+            const selected =
+              window !== undefined && hitPos.length > 0
+                ? memberRows.filter((r) => {
+                    const p = Number(r.position);
+                    return (
+                      p >= Math.min(...hitPos) - window && p <= Math.max(...hitPos) + window
+                    );
+                  })
+                : memberRows;
+            for (const row of selected) {
               const memberId = String(row.memory_id);
               if (!seen.has(memberId)) {
                 seen.add(memberId);

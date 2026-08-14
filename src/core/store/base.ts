@@ -738,13 +738,32 @@ export class NmgStoreBase {
            WHERE chain_id = ? ORDER BY position`,
         )
         .all(chainId) as Row[]
-    ).map((m) => ({
-      chainId: String(m.chain_id),
-      memoryId: String(m.memory_id),
-      position: Number(m.position),
-      note: m.note === null ? null : String(m.note),
-      createdAt: String(m.created_at),
-    }));
+    ).map((m) => {
+      const memberId = String(m.memory_id);
+      // Live-reference marker: if this member's memory was superseded, point at
+      // its active successor while keeping the original snapshot (historical
+      // context) in the chain.
+      const statusRow = this.db
+        .prepare("SELECT status FROM memory_records WHERE id = ?")
+        .get(memberId) as Row | undefined;
+      let successorId: string | undefined;
+      if (statusRow && String(statusRow.status) === "superseded") {
+        const successor = this.db
+          .prepare(
+            "SELECT id FROM memory_records WHERE supersedes_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+          )
+          .get(memberId) as Row | undefined;
+        if (successor) successorId = String(successor.id);
+      }
+      return {
+        chainId: String(m.chain_id),
+        memoryId: memberId,
+        position: Number(m.position),
+        note: m.note === null ? null : String(m.note),
+        createdAt: String(m.created_at),
+        ...(successorId === undefined ? {} : { successorId }),
+      };
+    });
     return {
       chain: {
         id: String(row.id),
