@@ -321,31 +321,23 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
      * edges (i.e. the chain of records `memoryId` supersedes). Used for
      * write-time cycle defence in applySupersession: adding an edge
      * new→superseded forms a cycle exactly when `superseded` reaches `new`.
+     *
+     * Because supersedes_id is a single-valued column, every record has
+     * out-degree ≤ 1 — the supersede graph is a chain/forest, so the reachable
+     * set is exactly the chain obtained by walking `supersedes_id` level by
+     * level (PK lookups, O(depth·log N)). This avoids a full-table scan on
+     * every write-time defence check.
      */
     supersedeReachableFrom(memoryId: string): Set<string> {
-      const rows = this.db
-        .prepare(
-          `SELECT id, supersedes_id FROM memory_records WHERE supersedes_id IS NOT NULL`,
-        )
-        .all() as Row[];
-      const adj = new Map<string, string[]>();
-      for (const row of rows) {
-        const from = String(row.id);
-        const to = String(row.supersedes_id);
-        if (from === to) continue;
-        const list = adj.get(from);
-        if (list) list.push(to);
-        else adj.set(from, [to]);
-      }
       const seen = new Set<string>();
-      const stack = [memoryId];
-      while (stack.length > 0) {
-        const cur = stack.pop()!;
-        if (seen.has(cur)) continue;
+      const supersedeOf = this.db.prepare(
+        `SELECT supersedes_id FROM memory_records WHERE id = ?`,
+      );
+      let cur: string | null = memoryId;
+      while (cur !== null && !seen.has(cur)) {
         seen.add(cur);
-        for (const next of adj.get(cur) ?? []) {
-          if (!seen.has(next)) stack.push(next);
-        }
+        const row = supersedeOf.get(cur) as { supersedes_id: string | null } | undefined;
+        cur = row && row.supersedes_id != null ? String(row.supersedes_id) : null;
       }
       return seen;
     }

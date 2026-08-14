@@ -98,6 +98,42 @@ test("applySupersession rejects writes that would create a supersede cycle", () 
   });
 });
 
+test("supersedeReachableFrom walks a deep chain and defends at depth", () => {
+  withStore((store) => {
+    // Build a 5-deep supersede chain via remember supersedesId.
+    const ids: string[] = [];
+    let prev: string | null = null;
+    for (let i = 1; i <= 5; i++) {
+      const m = store.remember({
+        nodeName: "预算",
+        nodeKind: "topic",
+        nodeSummary: "预算",
+        statement: `深链预算v${i}`,
+        sessionId: "s1",
+        sourceActor: "user",
+        supersedesId: prev ?? undefined,
+      });
+      ids.push(m.memory.id);
+      prev = m.memory.id;
+    }
+    const [m1, m2, m3, m4, m5] = ids;
+    // Reachable set from the newest record is the whole chain.
+    const reach = store.supersedeReachableFrom(m5!);
+    assert.equal(reach.size, 5, "deep chain fully reachable");
+    assert.ok(reach.has(m1!) && reach.has(m5!), "chain head and tail present");
+    // Adding a normal successor on top is fine.
+    const m6 = store.remember({ nodeName: "预算", nodeKind: "topic", nodeSummary: "预算", statement: "深链预算v6", sessionId: "s1", sourceActor: "user" });
+    store.applySupersession({ newMemoryId: m6.memory.id, supersededMemoryId: m5! });
+    assert.deepEqual(store.detectGraphCycles().supersedeCycles, []);
+    // Closing the loop (m1 supersedes m6) is rejected: m6 reaches m1.
+    assert.throws(
+      () => store.applySupersession({ newMemoryId: m1!, supersededMemoryId: m6.memory.id }),
+      /supersede cycle/,
+      "deep-chain loop closure rejected at write time",
+    );
+  });
+});
+
 test("breakSupersedeCycle clears intra-cycle supersedes_id edges", () => {
   withStore((store) => {
     const c = store.remember({ nodeName: "X", nodeKind: "topic", nodeSummary: "x", statement: "预算5000版3", sessionId: "s1", sourceActor: "user" });
