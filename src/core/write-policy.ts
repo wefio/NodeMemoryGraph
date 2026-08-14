@@ -32,20 +32,33 @@ const TRANSIENT_PATTERNS = [
  * It intentionally rejects only high-confidence secrets and explicitly
  * non-persistent instructions. Semantic usefulness remains the model's job;
  * the harness owns the invariants that must not depend on model intelligence.
+ *
+ * Escape hatch (docs §3.6): `bypass` is the Rust-unsafe-style explicit
+ * opt-out — a caller that states a genuinely persistent preference/decision
+ * can pass bypass:true instead of rephrasing to dodge the transient-word
+ * filter (rephrasing would be an accidental, undesigned bypass). Secrets are
+ * never bypassable: the memory-safety invariant takes precedence over the
+ * caller's explicit request, exactly as Rust's unsafe cannot break the
+ * borrow-checker's guarantees it does not fully control.
  */
 export function assessMemoryWrite(input: {
   statement: string;
   evidence?: string;
   memoryType?: MemoryType;
+  bypass?: boolean;
 }): MemoryWriteAssessment {
   const text = `${input.statement}\n${input.evidence ?? ""}`;
   if (SECRET_PATTERNS.some((pattern) => pattern.test(text))) {
     return { allowed: false, reason: "secret" };
   }
+  // Explicit user refusal is as non-bypassable as a secret: an unsafe flag
+  // must never override the user's own "do not retain" instruction.
   if (DO_NOT_RETAIN_PATTERNS.some((pattern) => pattern.test(text))) {
     return { allowed: false, reason: "non_persistent_instruction" };
   }
-  if (input.memoryType !== "event" && TRANSIENT_PATTERNS.some((pattern) => pattern.test(text))) {
+  // Transient-word matches are the wording-false-positive zone; the explicit
+  // escape hatch may override these, never the two hard refusals above.
+  if (!input.bypass && input.memoryType !== "event" && TRANSIENT_PATTERNS.some((pattern) => pattern.test(text))) {
     return { allowed: false, reason: "non_persistent_instruction" };
   }
   return { allowed: true, reason: "allowed" };

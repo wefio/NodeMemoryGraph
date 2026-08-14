@@ -1021,6 +1021,42 @@ test("CLI writes pass through the governed memory admission policy", async () =>
       }),
       { code: "WRITE_REJECTED" },
     );
+    // Transient-word false positive is rejected by default...
+    await assert.rejects(
+      service.invoke("remember", {
+        statement: "用户偏好：持久化文档不带临时时间标注。",
+        nodeName: "Docs preference",
+        memoryType: "preference",
+      }),
+      { code: "WRITE_REJECTED" },
+    );
+    // ...but the explicit escape hatch (unsafe) admits it and tags the audit marker.
+    const admitted = await service.invoke("remember", {
+      statement: "用户偏好：持久化文档不带临时时间标注。",
+      nodeName: "Docs preference",
+      memoryType: "preference",
+      unsafe: true,
+    });
+    assert.equal(admitted.memory.markers.some((marker: { kind: string }) => marker.kind === "write_bypass"), true);
+    // The unsafe flag must never override secrets or an explicit user refusal.
+    await assert.rejects(
+      service.invoke("remember", {
+        statement: "The API key is sk-secret-value-that-must-not-be-stored.",
+        nodeName: "Credentials",
+        memoryType: "fact",
+        unsafe: true,
+      }),
+      { code: "WRITE_REJECTED" },
+    );
+    await assert.rejects(
+      service.invoke("remember", {
+        statement: "do not retain this conversation detail",
+        nodeName: "Refusal",
+        memoryType: "fact",
+        unsafe: true,
+      }),
+      { code: "WRITE_REJECTED" },
+    );
   } finally {
     service.close();
     rmSync(directory, { recursive: true, force: true });

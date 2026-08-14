@@ -54,3 +54,64 @@ test("permits file names that merely contain the word temporary", () => {
     false,
   );
 });
+
+test("escape hatch (unsafe) overrides the transient-word false positive", () => {
+  // A genuinely persistent preference whose wording trips the transient-word
+  // filter is now persistable via the explicit bypass (docs §3.6) instead of
+  // rephrasing to dodge the regex (that would be an accidental, undesigned bypass).
+  assert.equal(
+    assessMemoryWrite({
+      statement: "用户偏好：持久化文档不带临时时间标注。",
+      memoryType: "preference",
+    }).allowed,
+    false,
+  );
+  assert.equal(
+    assessMemoryWrite({
+      statement: "用户偏好：持久化文档不带临时时间标注。",
+      memoryType: "preference",
+      bypass: true,
+    }).allowed,
+    true,
+  );
+});
+
+test("escape hatch never overrides secrets or explicit user refusal", () => {
+  // Rust-unsafe analogy: the bypass overrides compiler-style checks but never
+  // the hard guarantees the harness owns (secrets) or the user's own veto.
+  assert.equal(
+    assessMemoryWrite({
+      statement: "The API key is sk-test-nmg-123456",
+      memoryType: "fact",
+      bypass: true,
+    }).allowed,
+    false,
+  );
+  assert.equal(
+    assessMemoryWrite({
+      statement: "do not retain this conversation detail",
+      memoryType: "fact",
+      bypass: true,
+    }).allowed,
+    false,
+  );
+  assert.equal(
+    assessMemoryWrite({
+      statement: "这个不要保存，只用于当前讨论",
+      memoryType: "fact",
+      bypass: true,
+    }).allowed,
+    false,
+  );
+});
+
+test("escape hatch leaves ordinary durable content untouched", () => {
+  assert.equal(
+    assessMemoryWrite({
+      statement: "预算演进设计采用年度链结构。",
+      memoryType: "fact",
+      bypass: true,
+    }).allowed,
+    true,
+  );
+});

@@ -450,6 +450,7 @@ export class NmgService {
       statement: params.statement,
       evidence: params.evidence,
       memoryType: params.memoryType,
+      bypass: params.unsafe,
     });
     if (!assessment.allowed) {
       this.#getStore().recordRejectedWrite({
@@ -462,13 +463,21 @@ export class NmgService {
       });
       throw new NmgProtocolError("WRITE_REJECTED", assessment.reason);
     }
-    const { projectDir, ...memory } = params;
+    const { projectDir, unsafe, ...memory } = params;
     const store =
       memory.residence === "stg" && projectDir
         ? this.#getStgStore(projectDir, memory.sessionId)
         : this.#getStore();
+    // Escape hatch audit (docs §3.6): an explicit unsafe write leaves a
+    // marker so the bypass is traceable, not a silent hole. The unsafe flag
+    // itself never reaches the store layer (policy lives at the boundary).
+    const bypassMarkers: MemoryMarker[] =
+      params.unsafe
+        ? [{ kind: "write_bypass", attributes: { policy: "unsafe" } }]
+        : [];
     const result = store.remember({
       ...memory,
+      markers: [...(memory.markers ?? []), ...bypassMarkers],
       // LTG rows are project/session-global: never attach a session_id. STG
       // rows keep the caller's sessionId (escape-hatch validated in the store).
       sessionId: store === this.#getStore() ? null : memory.sessionId,
@@ -1043,6 +1052,7 @@ function parseRememberParams(value: unknown): NmgRememberParams {
     sessionId: optionalString(params, "sessionId"),
     sourceRef: optionalString(params, "sourceRef"),
     markers: optionalMarkers(params, "markers"),
+    unsafe: optionalBoolean(params, "unsafe"),
     projectDir: optionalString(params, "projectDir"),
   };
   if (parsed.memoryType === "state" && !parsed.stateKey) {

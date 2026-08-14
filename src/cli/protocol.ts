@@ -124,6 +124,9 @@ export interface NmgRememberParams {
   sourceActor?: MemoryActor;
   truthStatus?: TruthStatus;
   evidence?: string;
+  /** Rust-unsafe-style escape hatch (docs §3.6): explicit opt-out of the
+   *  transient/instruction write policy. Secrets are never bypassable. */
+  unsafe?: boolean;
   evidenceSource?: {
     actor: MemoryActor;
     content: string;

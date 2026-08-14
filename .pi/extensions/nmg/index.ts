@@ -943,6 +943,15 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       importance: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
       scope: Type.Optional(Type.Record(Type.String(), Type.String())),
       residence: Type.Optional(Type.Union([Type.Literal("ltg"), Type.Literal("stg")])),
+      unsafe: Type.Optional(
+        Type.Boolean({
+          description:
+            "Rust-unsafe-style escape hatch (docs §3.6): explicitly opt out of " +
+            "the transient/instruction write policy (e.g. a genuine persistent " +
+            "preference whose wording trips the transient-word filter). Secrets " +
+            "are never bypassable.",
+        }),
+      ),
       expiresAt: Type.Optional(Type.String()),
       externalSource: Type.Optional(
         Type.Object({
