@@ -650,6 +650,10 @@ export interface MemorySearchResult {
    *  after the ranked results to close the recall gap on evolution/aggregation
    *  queries (see docs/temporal-logical-chains-design-2026-08-13.md §3.1). */
   chainId?: string;
+  /** Position of this member within its chain (0-based, chain order). */
+  chainPosition?: number;
+  /** Chain type (temporal / logical) — how the member order should be read. */
+  chainType?: MemoryChainType;
 }
 
 export interface DeriveMemoryInput extends Omit<RememberInput, "evidence"> {

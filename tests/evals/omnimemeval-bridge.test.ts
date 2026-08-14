@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { OmniMemEvalBridge } from "../../evals/omnimemeval/bridge.ts";
+import { OmniMemEvalBridge, projectMemoryContext } from "../../evals/omnimemeval/bridge.ts";
+import { NmgStore } from "../../src/core/store.ts";
 
 test("OmniMemEval bridge ingests and retrieves isolated user memories", async () => {
   const root = mkdtempSync(join(tmpdir(), "nmg-omni-"));
@@ -434,9 +435,43 @@ test("semantic retrieval exposes a tagged revocation boundary", async () => {
     // marker is projected to [forget] exactly once (projectMemoryContext
     // dedupes control markers) — the assertion is about the tagged boundary.
     assert.ok(revocations.length >= 1, "at least one tagged revocation surfaced");
-    assert.equal(result.text.match(/^\[forget\]/gm)?.length, 1);
+    // projectMemoryContext renders numbered lines ("N. [forget] ...") and
+    // dedupes control markers, so exactly one numbered [forget] line appears.
+    assert.equal(result.text.match(/^\d+\. \[forget\]/gm)?.length, 1);
   } finally {
     bridge.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("chain members render as numbered lines plus an independent chain block", () => {
+  const root = mkdtempSync(join(tmpdir(), "chainrender-"));
+  try {
+    const store = new NmgStore(join(root, "nmg.sqlite"));
+    const cm: string[] = [];
+    for (const s of ["脚本误操作", "写入阻塞", "服务不可用"]) {
+      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: s, sessionId: "s1", sourceActor: "user" });
+      cm.push(m.memory.id);
+    }
+    const lc = store.createMemoryChain({ chainType: "logical", topic: "事故因果", ownerSessionId: "s1" });
+    cm.forEach((m, i) => store.addMemoryToChain({ chainId: lc.id, memoryId: m, position: i }));
+    const ctx = store.searchContext("脚本误操作", { sessionId: "s1", limit: 8, expandChains: true });
+    const memories = ctx.results.map((r) => ({
+      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
+      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
+      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
+    }));
+    const { lines } = projectMemoryContext(memories, false, new Map());
+    const text = lines.join("\n");
+    // Numbered lines: every rendered memory is prefixed with a 1-based index.
+    assert.ok(/^\d+\. /.test(lines[0]!), "first line is numbered");
+    // Chain block: independent section referencing members by index in order.
+    const block = lines[lines.length - 1]!;
+    assert.match(block, /^\[logical chain\]/);
+    const refs = [...block.matchAll(/#(\d+)/g)].map((m) => Number(m[1]));
+    assert.deepEqual(refs, [1, 2, 3], "chain block references member line numbers in order");
+    store.close();
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

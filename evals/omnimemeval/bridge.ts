@@ -23,6 +23,13 @@ type OmniRetrievedMemory = {
   eventTime: string | null;
   score: number;
   sourceRef: string | null;
+  /** Post-retrieval chain expansion: which chain this member belongs to, its
+   *  position within the chain, and whether it is temporal or logical. The
+   *  presentation layer renders these as numbered lines + a chain block so
+   *  the model sees order (causal / chronological), not an isolated list. */
+  chainId?: string;
+  chainPosition?: number;
+  chainType?: string;
 };
 
 export interface OmniMessage {
@@ -335,6 +342,7 @@ export class OmniMemEvalBridge {
         qppThreshold: this.#qppThreshold,
         strongHitTopGap: this.#strongHitTopGap,
         strongHitInitialTarget: this.#strongHitInitialTarget,
+        expandChains: true,
         activeGraphBudget: {
           maxNodes: limit,
           maxEvidence: limit,
@@ -352,6 +360,9 @@ export class OmniMemEvalBridge {
       eventTime: result.memory.eventTime,
       score: result.combinedScore,
       sourceRef: result.evidence.sourceRef,
+      chainId: result.chainId,
+      chainPosition: result.chainPosition,
+      chainType: result.chainType,
     }));
     const includeTime = needsTemporalContext(query);
     // Contradiction annotations are NMG's own retrieval product: when a
@@ -431,13 +442,14 @@ export class OmniMemEvalBridge {
   }
 }
 
-function projectMemoryContext(
+export function projectMemoryContext(
   memories: readonly OmniRetrievedMemory[],
   includeTime: boolean,
   notes: ReadonlyMap<string, string>,
 ): { lines: string[]; hasForget: boolean } {
   const projectedKinds = new Set<string>();
   const lines: string[] = [];
+  const indexByMemory = new Map<string, number>();
   for (const memory of memories) {
     const controlKinds = [
       ...new Set(
@@ -463,7 +475,40 @@ function projectMemoryContext(
         ? `[${visibleKinds.join(",")}] ${base}`
         : base;
     const note = notes.get(memory.memoryId);
-    lines.push(note ? `${rendered}\n${note}` : rendered);
+    // Numbered lines so the chain block below can reference members by index
+    // ("the model sees order, not an isolated list").
+    const numbered = `${lines.length + 1}. ${rendered}`;
+    indexByMemory.set(memory.memoryId, lines.length);
+    lines.push(note ? `${numbered}\n${note}` : numbered);
+  }
+  // Independent chain block: members grouped per chain, ordered by their
+  // chain position (causal order for logical chains, chronological for
+  // temporal chains), referenced by line number. The chains stay separate
+  // from the numbered lines so the memory list stays clean.
+  const chains = new Map<
+    string,
+    { chainType: string; members: Array<{ id: string; position: number }> }
+  >();
+  for (const memory of memories) {
+    if (!memory.chainId) continue;
+    const chain = chains.get(memory.chainId) ?? {
+      chainType: memory.chainType ?? "memory",
+      members: [],
+    };
+    chain.members.push({ id: memory.memoryId, position: memory.chainPosition ?? 0 });
+    chains.set(memory.chainId, chain);
+  }
+  if (chains.size > 0) {
+    lines.push("");
+    for (const [chainId, chain] of chains) {
+      chain.members.sort((a, b) => a.position - b.position);
+      const seq = chain.members
+        .map((member) => indexByMemory.get(member.id))
+        .filter((i): i is number => i !== undefined)
+        .map((i) => `#${i + 1}`)
+        .join(" → ");
+      if (seq) lines.push(`[${chain.chainType} chain] ${seq}`);
+    }
   }
   return { lines, hasForget: projectedKinds.has("forget") };
 }

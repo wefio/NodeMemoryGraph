@@ -54,6 +54,7 @@ import type {
   HistoryRecord,
   MemoryContext,
   MemoryRecord,
+  MemoryChainType,
   MemorySearchResult,
   MemoryTier,
   NodeRelation,
@@ -703,7 +704,10 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       // recall supplement on the evolution side (docs §3.1), never a re-rank.
       if (options.expandChains && context.results.length > 0) {
         const chainIds = new Set<string>();
-        const chainOfExisting = new Map<string, string>();
+        const chainOfExisting = new Map<
+          string,
+          { chainId: string; position: number }
+        >();
         const hitPositions = new Map<string, number[]>();
         for (const result of context.results) {
           const chainRows = this.db
@@ -712,7 +716,10 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           for (const row of chainRows) {
             const cid = String(row.chain_id);
             chainIds.add(cid);
-            chainOfExisting.set(result.memory.id, cid);
+            chainOfExisting.set(result.memory.id, {
+              chainId: cid,
+              position: Number(row.position),
+            });
             const pos = Number(row.position);
             const arr = hitPositions.get(cid) ?? [];
             arr.push(pos);
@@ -723,13 +730,25 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           // Mark members already in the ranked results too, so callers can see
           // the whole chain surfaced (hit + expansion) rather than only the
           // appended part.
+          const chainTypes = new Map<string, MemoryChainType>();
+          for (const cid of chainIds) {
+            const cRow = this.db
+              .prepare("SELECT chain_type FROM memory_chains WHERE id = ?")
+              .get(cid) as Row | undefined;
+            chainTypes.set(cid, (cRow?.chain_type as MemoryChainType) ?? "temporal");
+          }
           for (const result of context.results) {
-            const chainId = chainOfExisting.get(result.memory.id);
-            if (chainId !== undefined) result.chainId = chainId;
+            const info = chainOfExisting.get(result.memory.id);
+            if (info !== undefined) {
+              result.chainId = info.chainId;
+              result.chainPosition = info.position;
+              result.chainType = chainTypes.get(info.chainId);
+            }
           }
           const seen = new Set(context.results.map((result) => result.memory.id));
           const toFetch: string[] = [];
           const chainOf = new Map<string, string>();
+          const chainPos = new Map<string, number>();
           // chainExpansionWindow: cap expansion to a window around the ranked
           // hit(s) — members with position in [minHit−window, maxHit+window]
           // are appended, so a long evolution chain does not blow the budget.
@@ -756,6 +775,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                 seen.add(memberId);
                 toFetch.push(memberId);
                 chainOf.set(memberId, chainId);
+                chainPos.set(memberId, Number(row.position));
               }
             }
           }
@@ -765,6 +785,8 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
               context.results.push({
                 ...result,
                 chainId: chainOf.get(result.memory.id),
+                chainPosition: chainPos.get(result.memory.id),
+                chainType: chainTypes.get(chainOf.get(result.memory.id)!),
               });
             }
           }
