@@ -706,7 +706,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         const chainIds = new Set<string>();
         const chainOfExisting = new Map<
           string,
-          { chainId: string; position: number }
+          Array<{ chainId: string; position: number }>
         >();
         const hitPositions = new Map<string, number[]>();
         for (const result of context.results) {
@@ -716,10 +716,9 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           for (const row of chainRows) {
             const cid = String(row.chain_id);
             chainIds.add(cid);
-            chainOfExisting.set(result.memory.id, {
-              chainId: cid,
-              position: Number(row.position),
-            });
+            const memberships = chainOfExisting.get(result.memory.id) ?? [];
+            memberships.push({ chainId: cid, position: Number(row.position) });
+            chainOfExisting.set(result.memory.id, memberships);
             const pos = Number(row.position);
             const arr = hitPositions.get(cid) ?? [];
             arr.push(pos);
@@ -729,7 +728,8 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         if (chainIds.size > 0) {
           // Mark members already in the ranked results too, so callers can see
           // the whole chain surfaced (hit + expansion) rather than only the
-          // appended part.
+          // appended part. A memory can belong to several chains — collect all
+          // memberships; chainId mirrors the first for single-chain callers.
           const chainTypes = new Map<string, MemoryChainType>();
           for (const cid of chainIds) {
             const cRow = this.db
@@ -738,11 +738,16 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             chainTypes.set(cid, (cRow?.chain_type as MemoryChainType) ?? "temporal");
           }
           for (const result of context.results) {
-            const info = chainOfExisting.get(result.memory.id);
-            if (info !== undefined) {
-              result.chainId = info.chainId;
-              result.chainPosition = info.position;
-              result.chainType = chainTypes.get(info.chainId);
+            const memberships = chainOfExisting.get(result.memory.id);
+            if (memberships && memberships.length > 0) {
+              result.chainId = memberships[0].chainId;
+              result.chainPosition = memberships[0].position;
+              result.chainType = chainTypes.get(memberships[0].chainId);
+              result.chainMemberships = memberships.map((ms) => ({
+                chainId: ms.chainId,
+                position: ms.position,
+                chainType: chainTypes.get(ms.chainId)!,
+              }));
             }
           }
           const seen = new Set(context.results.map((result) => result.memory.id));
@@ -782,11 +787,16 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           if (toFetch.length > 0) {
             const extra = this.getContext(toFetch, 0, options.sessionId);
             for (const result of extra.results) {
+              const cid = chainOf.get(result.memory.id);
+              const pos = chainPos.get(result.memory.id);
               context.results.push({
                 ...result,
-                chainId: chainOf.get(result.memory.id),
-                chainPosition: chainPos.get(result.memory.id),
-                chainType: chainTypes.get(chainOf.get(result.memory.id)!),
+                chainId: cid,
+                chainPosition: pos,
+                chainType: cid ? chainTypes.get(cid) : undefined,
+                chainMemberships: cid
+                  ? [{ chainId: cid, position: pos ?? 0, chainType: chainTypes.get(cid)! }]
+                  : undefined,
               });
             }
           }

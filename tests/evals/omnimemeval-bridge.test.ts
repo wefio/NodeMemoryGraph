@@ -475,3 +475,41 @@ test("chain members render as numbered lines plus an independent chain block", (
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a memory in multiple chains renders in every chain block", () => {
+  const root = mkdtempSync(join(tmpdir(), "multichain-"));
+  try {
+    const store = new NmgStore(join(root, "nmg.sqlite"));
+    const m = store.remember({ nodeName: "预算", nodeKind: "topic", nodeSummary: "预算", statement: "2024年度预算8000万", sessionId: "s1", sourceActor: "user", eventTime: "2024-01-01" });
+    const A = store.createMemoryChain({ chainType: "temporal", topic: "预算年度演进", ownerSessionId: "s1" });
+    const B = store.createMemoryChain({ chainType: "logical", topic: "预算依赖链", ownerSessionId: "s1" });
+    const m2023 = store.remember({ nodeName: "预算", nodeKind: "topic", nodeSummary: "预算", statement: "2023年度预算6500万", sessionId: "s1", sourceActor: "user", eventTime: "2023-01-01" });
+    store.addMemoryToChain({ chainId: A.id, memoryId: m2023.memory.id, position: 0 });
+    store.addMemoryToChain({ chainId: A.id, memoryId: m.memory.id, position: 1 });
+    const dep = store.remember({ nodeName: "选型", nodeKind: "topic", nodeSummary: "选型", statement: "技术选型依赖预算规模", sessionId: "s1", sourceActor: "user" });
+    store.addMemoryToChain({ chainId: B.id, memoryId: m.memory.id, position: 0 });
+    store.addMemoryToChain({ chainId: B.id, memoryId: dep.memory.id, position: 1 });
+
+    const ctx = store.searchContext("2024年预算", { sessionId: "s1", limit: 8, expandChains: true });
+    const hit = ctx.results.find((r) => r.memory.statement.includes("2024年度"));
+    assert.ok(hit && hit.chainMemberships && hit.chainMemberships.length === 2, "both memberships collected");
+    const memories = ctx.results.map((r) => ({
+      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement, markers: r.memory.markers,
+      eventTime: r.memory.eventTime, score: r.combinedScore, sourceRef: r.evidence.sourceRef,
+      chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType, chainMemberships: r.chainMemberships,
+    }));
+    const { lines } = projectMemoryContext(memories, true, new Map());
+    const text = lines.join("\n");
+    const temporal = text.match(/\[temporal chain\] (.*)/)?.[1] ?? "";
+    const logical = text.match(/\[logical chain\] (.*)/)?.[1] ?? "";
+    const temporalRefs = [...temporal.matchAll(/#(\d+)/g)].map((x) => Number(x[1]));
+    const logicalRefs = [...logical.matchAll(/#(\d+)/g)].map((x) => Number(x[1]));
+    // The shared memory's line number appears in both chain blocks.
+    const sharedLine = memories.findIndex((mm) => mm.memoryId === hit!.memory.id) + 1;
+    assert.ok(temporalRefs.includes(sharedLine), "shared member in temporal chain block");
+    assert.ok(logicalRefs.includes(sharedLine), "shared member in logical chain block");
+    store.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

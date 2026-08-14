@@ -654,6 +654,14 @@ export interface MemorySearchResult {
   chainPosition?: number;
   /** Chain type (temporal / logical) — how the member order should be read. */
   chainType?: MemoryChainType;
+  /** Full chain memberships for this result — a memory can belong to several
+   *  chains (e.g. a record in both a temporal and a logical chain). The first
+   *  entry mirrors chainId/chainPosition/chainType for single-chain callers. */
+  chainMemberships?: Array<{
+    chainId: string;
+    position: number;
+    chainType: MemoryChainType;
+  }>;
 }
 
 export interface DeriveMemoryInput extends Omit<RememberInput, "evidence"> {

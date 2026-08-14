@@ -30,6 +30,12 @@ type OmniRetrievedMemory = {
   chainId?: string;
   chainPosition?: number;
   chainType?: string;
+  /** Full chain memberships (a memory can belong to several chains). */
+  chainMemberships?: Array<{
+    chainId: string;
+    position: number;
+    chainType?: string;
+  }>;
 };
 
 export interface OmniMessage {
@@ -363,6 +369,7 @@ export class OmniMemEvalBridge {
       chainId: result.chainId,
       chainPosition: result.chainPosition,
       chainType: result.chainType,
+      chainMemberships: result.chainMemberships,
     }));
     const includeTime = needsTemporalContext(query);
     // Contradiction annotations are NMG's own retrieval product: when a
@@ -490,13 +497,20 @@ export function projectMemoryContext(
     { chainType: string; members: Array<{ id: string; position: number }> }
   >();
   for (const memory of memories) {
-    if (!memory.chainId) continue;
-    const chain = chains.get(memory.chainId) ?? {
-      chainType: memory.chainType ?? "memory",
-      members: [],
-    };
-    chain.members.push({ id: memory.memoryId, position: memory.chainPosition ?? 0 });
-    chains.set(memory.chainId, chain);
+    // A memory can belong to several chains: render it in every chain block.
+    const memberships =
+      memory.chainMemberships ??
+      (memory.chainId
+        ? [{ chainId: memory.chainId, position: memory.chainPosition ?? 0, chainType: memory.chainType }]
+        : []);
+    for (const membership of memberships) {
+      const chain = chains.get(membership.chainId) ?? {
+        chainType: membership.chainType ?? "memory",
+        members: [],
+      };
+      chain.members.push({ id: memory.memoryId, position: membership.position });
+      chains.set(membership.chainId, chain);
+    }
   }
   if (chains.size > 0) {
     lines.push("");
