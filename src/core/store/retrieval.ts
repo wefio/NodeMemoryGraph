@@ -278,9 +278,11 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       });
       const related = relatedRaw.map((result) => {
         const edgeScore = edgeProjection.nodeActivations.get(result.node.id) ?? 0;
-        if (edgeScore <= result.routeScore) return result;
+        const path = edgeProjection.paths.get(result.node.id);
+        const withPath = path && path.length > 0 ? { ...result, path } : result;
+        if (edgeScore <= result.routeScore) return withPath;
         return {
-          ...result,
+          ...withPath,
           routeScore: edgeScore,
           combinedScore: hybridScore(result.lexicalScore, result.vectorScore, edgeScore),
         };
@@ -290,7 +292,16 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           (result, index, all) =>
             all.findIndex((candidate) => candidate.memory.id === result.memory.id) === index,
         )
-        .sort((left, right) => contextUsefulness(query, right) - contextUsefulness(query, left));
+        .sort((left, right) => contextUsefulness(query, right) - contextUsefulness(query, left))
+        .map((result) => {
+          // Attach the multi-hop path to any result whose node was reached via
+          // graph activation (docs §7.1). Related results already carry it;
+          // direct hits that are also graph neighbours get it here. Seeds have
+          // an empty path, non-neighbours none — both stay path-less.
+          if (result.path) return result;
+          const path = edgeProjection.paths.get(result.node.id);
+          return path && path.length > 0 ? { ...result, path } : result;
+        });
       const anchorMemoryIds = [
         ...new Set(direct.slice(0, limit).map((result) => result.memory.id)),
       ];

@@ -609,6 +609,17 @@ export interface SessionArchive {
   createdAt: string;
 }
 
+/** One edge on a multi-hop activation path (docs §7.1). Source is the node
+ *  the activation propagated FROM, target is where it landed. hop is the
+ *  distance from the retrieval seed. */
+export interface EdgePathStep {
+  relationId: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  relationType: NodeRelationType;
+  hop: number;
+}
+
 export interface MemorySearchResult {
   memory: MemoryRecord;
   node: MemoryNode;
@@ -622,6 +633,11 @@ export interface MemorySearchResult {
    *  searchContext before the context is returned. Header formatters use it
    *  to tell the model why a candidate was recalled. */
   recallReason?: "hybrid_match" | "learned_route" | "lexical_match" | "vector_match";
+  /** Multi-hop path traceability: when this result reached via graph
+   *  activation propagation, the edge chain from a seed node to this record's
+   *  node (best-activation path). Lets the presentation layer explain "why
+   *  related" (docs §7.1 multi-hop path retrieval). Empty/absent for seed hits. */
+  path?: EdgePathStep[];
   /** Query terms that literally appear in the candidate (lexical matches).
    *  Empty for pure-semantic/route recalls. */
   hitTerms?: string[];

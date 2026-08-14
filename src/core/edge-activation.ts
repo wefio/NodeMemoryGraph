@@ -1,4 +1,4 @@
-import type { NodeRelation, NodeRelationType } from "./types.ts";
+import type { EdgePathStep, NodeRelation, NodeRelationType } from "./types.ts";
 
 export const DEFAULT_EDGE_ACTIVATION = {
   maxHops: 1,
@@ -19,6 +19,10 @@ export interface DerivedEdgeActivation {
 export interface EdgePropagationResult {
   nodeActivations: Map<string, number>;
   edges: DerivedEdgeActivation[];
+  /** Best-activation path per node (empty array for seeds). Multi-hop path
+   *  traceability for retrieval (docs §7.1): lets the presentation layer
+   *  explain "why is this node related" instead of only a numeric score. */
+  paths: Map<string, EdgePathStep[]>;
 }
 
 export function relationActivationDefaults(
@@ -78,6 +82,8 @@ export function propagateEdgeActivation(
   const nodeActivations = new Map(
     [...seeds].map(([nodeId, activation]) => [nodeId, clamp01(activation)] as const),
   );
+  const paths = new Map<string, EdgePathStep[]>();
+  for (const seedId of seeds.keys()) paths.set(seedId, []);
   const edgeById = new Map<string, DerivedEdgeActivation>();
 
   for (let hop = 1; hop <= maxHops; hop += 1) {
@@ -120,6 +126,16 @@ export function propagateEdgeActivation(
         if (relation.activationRule === "regulatory") continue;
         if (activation > (nodeActivations.get(to) ?? 0) && activation > (additions.get(to) ?? 0)) {
           additions.set(to, activation);
+          paths.set(to, [
+            ...(paths.get(from) ?? []),
+            {
+              relationId: relation.id,
+              sourceNodeId: from,
+              targetNodeId: to,
+              relationType: relation.type,
+              hop,
+            },
+          ]);
           changed = true;
         }
       }
@@ -134,6 +150,7 @@ export function propagateEdgeActivation(
       (left, right) =>
         right.activation - left.activation || left.relationId.localeCompare(right.relationId),
     ),
+    paths,
   };
 }
 
