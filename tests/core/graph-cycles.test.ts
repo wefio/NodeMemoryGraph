@@ -134,6 +134,31 @@ test("supersedeReachableFrom walks a deep chain and defends at depth", () => {
   });
 });
 
+test("supersede cycle detection handles loop + inflowing chain + independent chain", () => {
+  withStore((store) => {
+    const mk = (stmt: string) =>
+      store.remember({ nodeName: "X", nodeKind: "topic", nodeSummary: "x", statement: stmt, sessionId: "s1", sourceActor: "user" });
+    const [a, b, c] = [mk("环A"), mk("环B"), mk("环C")];
+    const db = (store as unknown as { db: { prepare: (sql: string) => { run: (...p: unknown[]) => void } } }).db;
+    // 3-cycle A→B→C→A (write path rejects cycles, so inject directly).
+    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(b.memory.id, a.memory.id);
+    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(c.memory.id, b.memory.id);
+    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(a.memory.id, c.memory.id);
+    // Inflowing chain X→A is NOT a cycle member.
+    const x = mk("链尾X");
+    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(a.memory.id, x.memory.id);
+    // Independent acyclic chain Y→Z.
+    const y = mk("Y"), z = mk("Z");
+    db.prepare("UPDATE memory_records SET supersedes_id = ? WHERE id = ?").run(z.memory.id, y.memory.id);
+
+    const r = store.detectGraphCycles();
+    assert.equal(r.supersedeCycles.length, 1, "exactly the 3-cycle, not inflow/independent chain");
+    const cyc = r.supersedeCycles[0]!;
+    assert.ok(cyc.includes(a.memory.id) && cyc.includes(b.memory.id) && cyc.includes(c.memory.id));
+    assert.ok(!cyc.includes(x.memory.id), "inflowing chain member is not part of the cycle");
+  });
+});
+
 test("breakSupersedeCycle clears intra-cycle supersedes_id edges", () => {
   withStore((store) => {
     const c = store.remember({ nodeName: "X", nodeKind: "topic", nodeSummary: "x", statement: "预算5000版3", sessionId: "s1", sourceActor: "user" });

@@ -298,21 +298,42 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
       }
       const relationCycles = findDirectedCycles(relationAdj);
 
+      // supersedes_id is single-valued → every record has out-degree ≤ 1, so
+      // the supersede graph is a chain/forest. Cycle detection therefore
+      // reduces to "walk each chain in its direction and look for an
+      // endpoint": reaching NULL (or an already-processed chain) is acyclic;
+      // walking back onto the current chain is a cycle. O(V), no adjacency
+      // map, no general DFS. (Relation cycles use findDirectedCycles because
+      // relations may branch — out-degree is not bounded.)
       const supersedeRows = this.db
         .prepare(
           `SELECT id, supersedes_id FROM memory_records WHERE supersedes_id IS NOT NULL`,
         )
         .all() as Row[];
-      const supersedeAdj = new Map<string, Array<{ to: string; edgeId: string }>>();
+      const supersedeNext = new Map<string, string>();
       for (const row of supersedeRows) {
         const from = String(row.id);
         const to = String(row.supersedes_id);
-        if (from === to) continue; // self-supersede is a degenerate case, not a cycle
-        const list = supersedeAdj.get(from) ?? [];
-        list.push({ to, edgeId: `${from}->${to}` });
-        supersedeAdj.set(from, list);
+        if (from !== to) supersedeNext.set(from, to); // skip degenerate self-edge
       }
-      const supersedeCycles = findDirectedCycles(supersedeAdj);
+      const chainState = new Map<string, 0 | 1 | 2>();
+      const supersedeCycles: string[][] = [];
+      for (const start of supersedeNext.keys()) {
+        if (chainState.has(start)) continue;
+        const chain: string[] = [];
+        let cur: string | null = start;
+        while (cur !== null && !chainState.has(cur)) {
+          chainState.set(cur, 1);
+          chain.push(cur);
+          cur = supersedeNext.get(cur) ?? null;
+        }
+        if (cur !== null && chainState.get(cur) === 1) {
+          // Walking back onto the current chain → elementary cycle.
+          const index = chain.indexOf(cur);
+          supersedeCycles.push(chain.slice(index));
+        }
+        for (const id of chain) chainState.set(id, 2);
+      }
       return { relationCycles, supersedeCycles };
     }
 
