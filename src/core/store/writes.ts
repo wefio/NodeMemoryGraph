@@ -86,6 +86,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       operation: "move" | "upsert",
       createdAt?: string,
     ) => void;
+    declare protected supersedeReachableFrom: (memoryId: string) => Set<string>;
     declare protected requireHistory: (historyId: string) => HistoryRecord;
     declare upsertNode: (input: {
       canonicalName: string;
@@ -536,6 +537,18 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       if (!stale) throw new Error(`memory ${input.supersededMemoryId} does not exist`);
       this.db.exec("BEGIN IMMEDIATE");
       try {
+        // Write-time cycle defence (docs §7.2): adding the edge
+        // new→superseded forms a cycle exactly when `superseded` already
+        // reaches `new` along supersedes_id edges. Reject the write instead of
+        // corrupting the supersede DAG (the caller can pick another candidate).
+        const reachable = this.supersedeReachableFrom(input.supersededMemoryId);
+        if (reachable.has(input.newMemoryId)) {
+          throw new Error(
+            `applySupersession would create a supersede cycle: ` +
+              `${input.newMemoryId} supersedes ${input.supersededMemoryId}, ` +
+              `but ${input.supersededMemoryId} already reaches ${input.newMemoryId}`,
+          );
+        }
         this.db
           .prepare("UPDATE memory_records SET status = 'superseded', valid_until = ? WHERE id = ?")
           .run(input.validUntil ?? new Date().toISOString(), input.supersededMemoryId);

@@ -258,6 +258,135 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
       }
     }
 
+    /**
+     * Detect directed cycles in static dependency edges — a maintenance
+     * diagnostic (docs §7.2). Supersede relations must be a DAG (a cycle means
+     * two records claim to supersede each other); relation cycles signal
+     * circular logic / feedback structures. Never mutates state; results are
+     * advisory labels only (the caller decides whether to act).
+     */
+    detectGraphCycles(): {
+      relationCycles: string[][];
+      supersedeCycles: string[][];
+    } {
+      const relationRows = this.db
+        .prepare(
+          `SELECT id, source_node_id, target_node_id, direction, relation_type
+           FROM node_relations WHERE status = 'consolidated'`,
+        )
+        .all() as Row[];
+      const relationAdj = new Map<string, Array<{ to: string; edgeId: string }>>();
+      for (const row of relationRows) {
+        // Symmetric relations (contradicts / same_as / distinct_from /
+        // related_to) legitimately appear as bidirectional pairs — a mutual
+        // contradiction is not an anomaly, so they never count as a cycle.
+        if (SYMMETRIC_RELATION_TYPES.has(String(row.relation_type))) continue;
+        const from = String(row.source_node_id);
+        const to = String(row.target_node_id);
+        const dir = String(row.direction);
+        const push = (src: string, dst: string) => {
+          const list = relationAdj.get(src) ?? [];
+          list.push({ to: dst, edgeId: String(row.id) });
+          relationAdj.set(src, list);
+        };
+        if (dir === "source->target") push(from, to);
+        else if (dir === "target->source") push(to, from);
+        else {
+          push(from, to);
+          push(to, from);
+        }
+      }
+      const relationCycles = findDirectedCycles(relationAdj);
+
+      const supersedeRows = this.db
+        .prepare(
+          `SELECT id, supersedes_id FROM memory_records WHERE supersedes_id IS NOT NULL`,
+        )
+        .all() as Row[];
+      const supersedeAdj = new Map<string, Array<{ to: string; edgeId: string }>>();
+      for (const row of supersedeRows) {
+        const from = String(row.id);
+        const to = String(row.supersedes_id);
+        if (from === to) continue; // self-supersede is a degenerate case, not a cycle
+        const list = supersedeAdj.get(from) ?? [];
+        list.push({ to, edgeId: `${from}->${to}` });
+        supersedeAdj.set(from, list);
+      }
+      const supersedeCycles = findDirectedCycles(supersedeAdj);
+      return { relationCycles, supersedeCycles };
+    }
+
+    /**
+     * All memory ids reachable from `memoryId` by following supersedes_id
+     * edges (i.e. the chain of records `memoryId` supersedes). Used for
+     * write-time cycle defence in applySupersession: adding an edge
+     * new→superseded forms a cycle exactly when `superseded` reaches `new`.
+     */
+    supersedeReachableFrom(memoryId: string): Set<string> {
+      const rows = this.db
+        .prepare(
+          `SELECT id, supersedes_id FROM memory_records WHERE supersedes_id IS NOT NULL`,
+        )
+        .all() as Row[];
+      const adj = new Map<string, string[]>();
+      for (const row of rows) {
+        const from = String(row.id);
+        const to = String(row.supersedes_id);
+        if (from === to) continue;
+        const list = adj.get(from);
+        if (list) list.push(to);
+        else adj.set(from, [to]);
+      }
+      const seen = new Set<string>();
+      const stack = [memoryId];
+      while (stack.length > 0) {
+        const cur = stack.pop()!;
+        if (seen.has(cur)) continue;
+        seen.add(cur);
+        for (const next of adj.get(cur) ?? []) {
+          if (!seen.has(next)) stack.push(next);
+        }
+      }
+      return seen;
+    }
+
+    /**
+     * Break a detected supersede cycle (docs §7.2): clear every supersedes_id
+     * inside the cycle that points at another member of the cycle, leaving
+     * edges to records outside the cycle intact. Supersede is a DAG by design,
+     * so a cycle is a deterministic data anomaly — safe to clear. Audit note:
+     * the cleared record ids are returned so the caller can record them.
+     */
+    breakSupersedeCycle(cycle: string[]): { cleared: string[] } {
+      const memberSet = new Set(cycle);
+      const rows = this.db
+        .prepare(
+          `SELECT id, supersedes_id FROM memory_records
+           WHERE supersedes_id IS NOT NULL`,
+        )
+        .all() as Row[];
+      const cleared: string[] = [];
+      const updater = this.db.prepare(
+        `UPDATE memory_records SET supersedes_id = NULL WHERE id = ?`,
+      );
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        for (const row of rows) {
+          const from = String(row.id);
+          const to = String(row.supersedes_id);
+          if (memberSet.has(from) && memberSet.has(to)) {
+            updater.run(from);
+            cleared.push(from);
+          }
+        }
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+      return { cleared };
+    }
+
     getRelations(nodeIds: string[], maxHops = 1): NodeRelation[] {
       const visitedNodes = new Set(nodeIds);
       const relations = new Map<string, NodeRelation>();
@@ -1374,4 +1503,69 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
       return { ...proposal, status: "accepted" };
     }
   };
+}
+
+/**
+ * Iterative three-colour DFS for directed cycles (docs §7.2). Returns each
+ * elementary cycle once as an ordered node-id sequence. Iterative (explicit
+ * stack of edge iterators) so large graphs cannot blow the call stack.
+ */
+/**
+ * Relation types whose bidirectional pairs are legitimate (docs §7.2): a
+ * mutual contradiction is a normal symmetric semantic, so these never count
+ * as cycles in detectGraphCycles.
+ */
+const SYMMETRIC_RELATION_TYPES = new Set([
+  "contradicts",
+  "same_as",
+  "distinct_from",
+  "related_to",
+]);
+
+function findDirectedCycles(
+  adj: Map<string, Array<{ to: string; edgeId: string }>>,
+): string[][] {
+  const GRAY = 1;
+  const BLACK = 2;
+  const color = new Map<string, number>();
+  const cycles: string[][] = [];
+  const seen = new Set<string>();
+
+  for (const start of adj.keys()) {
+    if (color.get(start) !== undefined) continue;
+    const stack: string[] = [];
+    const inStack = new Set<string>();
+    const iterators = new Map<string, Iterator<{ to: string; edgeId: string }>>();
+    const push = (nodeId: string) => {
+      stack.push(nodeId);
+      inStack.add(nodeId);
+      color.set(nodeId, GRAY);
+      iterators.set(nodeId, (adj.get(nodeId) ?? [])[Symbol.iterator]());
+    };
+    push(start);
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1]!;
+      const step = iterators.get(top)!.next();
+      if (step.done) {
+        stack.pop();
+        inStack.delete(top);
+        color.set(top, BLACK);
+        iterators.delete(top);
+        continue;
+      }
+      const { to } = step.value;
+      if (inStack.has(to)) {
+        const index = stack.indexOf(to);
+        const cycle = stack.slice(index).concat(to);
+        const key = [...cycle].sort().join("|");
+        if (!seen.has(key)) {
+          seen.add(key);
+          cycles.push(cycle);
+        }
+      } else if (color.get(to) === undefined) {
+        push(to);
+      }
+    }
+  }
+  return cycles;
 }
