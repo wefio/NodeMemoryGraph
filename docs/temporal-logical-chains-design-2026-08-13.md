@@ -125,9 +125,14 @@
 - **分层**：纯私密的草稿继续留本地文件 scratchpad（只有自己能读）；要共享 / 跨会话的用黑板私有频道。
 - **业界对齐**："默认私有、显式共享" ≈ **A2A / MCP 的资源授权模式**（最小暴露，显式授权才共享）。
 
-## 6. 待定项
-- 记忆生命周期/遗忘（decay）是否纳入呈现/排序层（借 Mem0 decay / FOREVER 概念）。
-- 公用节点被 supersede 时：链用活引用（跳新版本）还是快照引用（保留旧节点）。
-- 链长截取策略（整链拉起 token 上限 + 命中点窗口）。
-- memory-graph-reasoner 是否/如何接入链（或保持 lab 实验）。
-- 以自然监督数据积累验证"跨会话演进回顾"真实需求后再决定优先级（不刷分）。
+## 6. 待定项 / 已解决（2026-08-13）
+
+**已实现**：
+- ✅ **链长截取**：`SearchOptions.chainExpansionWindow`（命中点窗口 [minHit−window, maxHit+window]，默认整链）——commit d0a1cc0
+- ✅ **supersede 活/快照引用**：`getMemoryChain` 对已 superseded 成员返回 `successorId`（活引用指针）+ 保留原快照（历史上下文）——commit d0a1cc0
+- ✅ **记忆生命周期/遗忘（§3.4）**：`SearchOptions.recencyDecayHalfLifeDays`（可选，默认关；历史查询 eventTimeTo 跳过；无 event_time 不衰减）——commit fbc45e5
+
+**暂缓（按判断）**：
+- **memory-graph-reasoner 接入**：暂缓——reasoner 是 lab 实验（用户评价"不好用"、未接入运行时、依赖向量嵌入冷启动难）；链不绑定它，等其可用性提升再议。
+- **BEAM 验证**：需 bge embedder 环境（本地 Hashing 无法检索），环境就绪后做。
+- **自然数据验证**：以自然监督数据积累验证"跨会话演进回顾"真实需求后再决定优先级（不刷分）。
