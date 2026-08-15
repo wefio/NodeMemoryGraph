@@ -381,7 +381,7 @@ export class OmniMemEvalBridge {
     // "numeric" is the default; env override lets the eval harness A/B/C the
     // same questions without rebuilding.
     const renderMode: MemoryRenderMode =
-      process.env.NMG_RENDER_MODE === "alpha" || process.env.NMG_RENDER_MODE === "none"
+      process.env.NMG_RENDER_MODE === "id" || process.env.NMG_RENDER_MODE === "none"
         ? process.env.NMG_RENDER_MODE
         : "numeric";
     const projection = projectMemoryContext(memories, includeTime, notes, renderMode);
@@ -457,7 +457,25 @@ export class OmniMemEvalBridge {
   }
 }
 
-export type MemoryRenderMode = "none" | "numeric" | "alpha";
+export type MemoryRenderMode = "none" | "numeric" | "id";
+
+const UUID_SEGMENT_ENDS = [8, 13, 18, 23, 36];
+
+/** Shortest per-id prefix that is unique within the given id set. Extends by
+ *  UUID segment (8-4-4-4-12) until no other id in the set shares the prefix,
+ *  so rendered identifiers are short, stable and collision-free locally. */
+function shortestUniquePrefixes(ids: readonly string[]): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const id of ids) {
+    let prefix = "";
+    for (const end of UUID_SEGMENT_ENDS) {
+      prefix = id.slice(0, end);
+      if (!ids.some((other) => other !== id && other.startsWith(prefix))) break;
+    }
+    result.set(id, prefix);
+  }
+  return result;
+}
 
 export function projectMemoryContext(
   memories: readonly OmniRetrievedMemory[],
@@ -465,6 +483,8 @@ export function projectMemoryContext(
   notes: ReadonlyMap<string, string>,
   renderMode: MemoryRenderMode = "numeric",
 ): { lines: string[]; hasForget: boolean } {
+  const idPrefixes =
+    renderMode === "id" ? shortestUniquePrefixes(memories.map((m) => m.memoryId)) : new Map<string, string>();
   const projectedKinds = new Set<string>();
   const lines: string[] = [];
   const indexByMemory = new Map<string, number>();
@@ -493,14 +513,18 @@ export function projectMemoryContext(
         ? `[${visibleKinds.join(",")}] ${base}`
         : base;
     const note = notes.get(memory.memoryId);
-    // A/B/C render modes: "numeric" prefixes each line with 1., 2., … so the
-    // chain block can reference members by index (current behavior); "alpha"
-    // prefixes with A., B., … to avoid implying the retrieval rank is a
-    // chronological/event order; "none" renders bare lines and drops the
-    // chain block (no stable per-line label to reference).
-    const label =
-      renderMode === "alpha" ? String.fromCharCode(65 + lines.length) : String(lines.length + 1);
-    const numbered = renderMode === "none" ? rendered : `${label}. ${rendered}`;
+    // Render modes: "numeric" prefixes each line with 1., 2., … so the chain
+    // block can reference members by index; "id" prefixes with [<short-uuid>
+    // — a stable real memory identifier wrapped in <> so it cannot be mistaken
+    // for content; "none" renders bare lines and drops the chain block.
+    let numbered: string;
+    if (renderMode === "none") {
+      numbered = rendered;
+    } else if (renderMode === "id") {
+      numbered = `[<${idPrefixes.get(memory.memoryId)}>] ${rendered}`;
+    } else {
+      numbered = `${lines.length + 1}. ${rendered}`;
+    }
     indexByMemory.set(memory.memoryId, lines.length);
     lines.push(note ? `${numbered}\n${note}` : numbered);
   }
@@ -534,14 +558,29 @@ export function projectMemoryContext(
     lines.push("");
     for (const [chainId, chain] of chains) {
       chain.members.sort((a, b) => a.position - b.position);
-      const seq = chain.members
-        .map((member) => indexByMemory.get(member.id))
-        .filter((i): i is number => i !== undefined)
-        .map((i) => (renderMode === "alpha" ? `#${String.fromCharCode(65 + i)}` : `#${i + 1}`))
-        .join(" → ");
-      if (seq) {
-        const label = chain.topic ? `${chain.chainType} chain: ${chain.topic}` : `${chain.chainType} chain`;
-        lines.push(`[${label}] ${seq}`);
+      const label = chain.topic ? `${chain.chainType} chain: ${chain.topic}` : `${chain.chainType} chain`;
+      if (renderMode === "id") {
+        // Mermaid flowchart: adjacent-position members become directed edges.
+        // Reuses Mermaid's --> so structure is unambiguous, and the <> tags
+        // keep identifiers distinct from memory content.
+        const edges: string[] = [];
+        for (let i = 0; i + 1 < chain.members.length; i += 1) {
+          const a = idPrefixes.get(chain.members[i].id);
+          const b = idPrefixes.get(chain.members[i + 1].id);
+          if (a !== undefined && b !== undefined) edges.push(`  <${a}> --> <${b}>`);
+        }
+        if (edges.length > 0) {
+          lines.push(`[${label}]`);
+          lines.push("flowchart LR");
+          lines.push(...edges);
+        }
+      } else {
+        const seq = chain.members
+          .map((member) => indexByMemory.get(member.id))
+          .filter((i): i is number => i !== undefined)
+          .map((i) => `#${i + 1}`)
+          .join(" → ");
+        if (seq) lines.push(`[${label}] ${seq}`);
       }
     }
   }
