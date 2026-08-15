@@ -495,16 +495,16 @@ test("id render mode tags lines with <short-uuid> and renders the chain as a Mer
     }));
     const { lines } = projectMemoryContext(memories, false, new Map(), "id");
     // Lines are tagged [<short-uuid>] — not numeric, not a bare identifier.
-    assert.match(lines[0]!, /^\[<[0-9a-f]{8}>\] /, "first line is <short-uuid>-tagged");
+    assert.match(lines[0]!, /^<[0-9a-f]{8}> /, "first line is short-uuid-tagged");
     assert.ok(!/^\d+\. /.test(lines[0]!), "no numeric prefix in id mode");
     // Chain block is a Mermaid flowchart referencing the same short ids.
     const text = lines.join("\n");
     assert.match(text, /flowchart LR/, "chain block uses Mermaid flowchart");
-    const edges = [...text.matchAll(/<([0-9a-f]{8})> --> <([0-9a-f]{8})>/g)].map((m) => [m[1], m[2]]);
+    const edges = [...text.matchAll(/^\s+([0-9a-f]{8}) --> ([0-9a-f]{8})$/gm)].map((m) => [m[1], m[2]]);
     assert.equal(edges.length, 2, "two edges for three members");
     // Edges follow chain position order and reference ids that appear in lines.
     assert.equal(edges[0]![1], edges[1]![0], "adjacent members share the connecting id");
-    const tagged = [...text.matchAll(/^\[<([0-9a-f]{8})>\]/gm)].map((m) => m[1]);
+    const tagged = [...text.matchAll(/^<([0-9a-f]{8})>/gm)].map((m) => m[1]);
     for (const [a] of edges) assert.ok(tagged.includes(a), "edge source id appears in the tagged lines");
     store.close();
   } finally {
@@ -531,11 +531,37 @@ test("id render mode extends the prefix on collision until unique", () => {
     mk("bbbb2222-0000-0000-0000-000000000003", "第三个事故"),
   ];
   const { lines } = projectMemoryContext(memories, false, new Map(), "id");
-  assert.match(lines[0]!, /^\[<aaaa1111-1111>\] /, "colliding id extended to second segment");
-  assert.match(lines[1]!, /^\[<aaaa1111-2222>\] /, "colliding id extended to second segment");
-  assert.match(lines[2]!, /^\[<bbbb2222>\] /, "unique id keeps shortest prefix");
-  const tags = [...lines.join("\n").matchAll(/\[<([0-9a-f-]+)>\]/g)].map((m) => m[1]);
+  assert.match(lines[0]!, /^<aaaa1111-1111> /, "colliding id extended to second segment");
+  assert.match(lines[1]!, /^<aaaa1111-2222> /, "colliding id extended to second segment");
+  assert.match(lines[2]!, /^<bbbb2222> /, "unique id keeps shortest prefix");
+  const tags = [...lines.join("\n").matchAll(/<([0-9a-f-]+)>/g)].map((m) => m[1]);
   assert.equal(new Set(tags).size, tags.length, "all rendered id tags are unique");
+});
+
+test("id render mode renders temporal chains as a Mermaid timeline", () => {
+  const root = mkdtempSync(join(tmpdir(), "chainrender-timeline-"));
+  try {
+    const store = new NmgStore(join(root, "nmg.sqlite"));
+    const times = ["2024-03-15", "2024-03-16", "2024-03-17"];
+    const cm: string[] = [];
+    for (let i = 0; i < times.length; i += 1) {
+      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: `事件${i + 1}`, eventTime: times[i], sessionId: "s1", sourceActor: "user" });
+      cm.push(m.memory.id);
+    }
+    const tc = store.createMemoryChain({ chainType: "temporal", topic: "事故时间线", ownerSessionId: "s1" });
+    cm.forEach((m, i) => store.addMemoryToChain({ chainId: tc.id, memoryId: m, position: i }));
+    const ctx = store.searchContext("事件", { sessionId: "s1", limit: 8, expandChains: true });
+    const memories = ctx.results.map((r) => ({ memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement, markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore, sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType }));
+    const { lines } = projectMemoryContext(memories, true, new Map(), "id");
+    const text = lines.join("\n");
+    assert.match(text, /timeline/, "temporal chain renders as a Mermaid timeline");
+    const tls = [...text.matchAll(/^\s+(\S+) : ([0-9a-f]{8})$/gm)].map((m) => [m[1], m[2]]);
+    assert.equal(tls.length, 3, "three timeline entries");
+    assert.deepEqual(tls.map((t) => t[0]), ["2024-03-15", "2024-03-16", "2024-03-17"], "timeline in event-time order");
+    store.close();
+  } finally {
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows handle-lock noise */ }
+  }
 });
 
 test("none render mode renders bare lines and drops the chain block", () => {

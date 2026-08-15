@@ -521,7 +521,7 @@ export function projectMemoryContext(
     if (renderMode === "none") {
       numbered = rendered;
     } else if (renderMode === "id") {
-      numbered = `[<${idPrefixes.get(memory.memoryId)}>] ${rendered}`;
+      numbered = `<${idPrefixes.get(memory.memoryId)}> ${rendered}`;
     } else {
       numbered = `${lines.length + 1}. ${rendered}`;
     }
@@ -560,19 +560,32 @@ export function projectMemoryContext(
       chain.members.sort((a, b) => a.position - b.position);
       const label = chain.topic ? `${chain.chainType} chain: ${chain.topic}` : `${chain.chainType} chain`;
       if (renderMode === "id") {
-        // Mermaid flowchart: adjacent-position members become directed edges.
-        // Reuses Mermaid's --> so structure is unambiguous, and the <> tags
-        // keep identifiers distinct from memory content.
-        const edges: string[] = [];
-        for (let i = 0; i + 1 < chain.members.length; i += 1) {
-          const a = idPrefixes.get(chain.members[i].id);
-          const b = idPrefixes.get(chain.members[i + 1].id);
-          if (a !== undefined && b !== undefined) edges.push(`  <${a}> --> <${b}>`);
-        }
-        if (edges.length > 0) {
+        // Mermaid-flavoured chain block: logical chains render as a flowchart
+        // (adjacent-position members become directed edges), temporal chains as
+        // a timeline (time : member). Identifiers are short memory_id prefixes
+        // in [brackets]; semantics is what matters, not strict Mermaid parsing.
+        if (chain.chainType === "temporal") {
           lines.push(`[${label}]`);
-          lines.push("flowchart LR");
-          lines.push(...edges);
+          lines.push("timeline");
+          for (const member of chain.members) {
+            const p = idPrefixes.get(member.id);
+            if (p === undefined) continue;
+            const mem = memories.find((m) => m.memoryId === member.id);
+            const time = mem?.eventTime ?? String(member.position + 1);
+            lines.push(`  ${time} : ${p}`);
+          }
+        } else {
+          const edges: string[] = [];
+          for (let i = 0; i + 1 < chain.members.length; i += 1) {
+            const a = idPrefixes.get(chain.members[i].id);
+            const b = idPrefixes.get(chain.members[i + 1].id);
+            if (a !== undefined && b !== undefined) edges.push(`  ${a} --> ${b}`);
+          }
+          if (edges.length > 0) {
+            lines.push(`[${label}]`);
+            lines.push("flowchart LR");
+            lines.push(...edges);
+          }
         }
       } else {
         const seq = chain.members
