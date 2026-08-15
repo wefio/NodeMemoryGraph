@@ -381,7 +381,9 @@ export class OmniMemEvalBridge {
     // "numeric" is the default; env override lets the eval harness A/B/C the
     // same questions without rebuilding.
     const renderMode: MemoryRenderMode =
-      process.env.NMG_RENDER_MODE === "id" || process.env.NMG_RENDER_MODE === "none"
+      process.env.NMG_RENDER_MODE === "id" ||
+      process.env.NMG_RENDER_MODE === "idtime" ||
+      process.env.NMG_RENDER_MODE === "none"
         ? process.env.NMG_RENDER_MODE
         : "numeric";
     const chainEdges = new Map<string, Array<{ sourceMemoryId: string; targetMemoryId: string }>>();
@@ -463,7 +465,7 @@ export class OmniMemEvalBridge {
   }
 }
 
-export type MemoryRenderMode = "none" | "numeric" | "id";
+export type MemoryRenderMode = "none" | "numeric" | "id" | "idtime";
 
 const UUID_SEGMENT_ENDS = [8, 13, 18, 23, 36];
 
@@ -504,7 +506,9 @@ export function projectMemoryContext(
   chainEdges: ReadonlyMap<string, Array<{ sourceMemoryId: string; targetMemoryId: string }>> = new Map(),
 ): { lines: string[]; hasForget: boolean } {
   const idPrefixes =
-    renderMode === "id" ? shortestUniquePrefixes(memories.map((m) => m.memoryId)) : new Map<string, string>();
+    renderMode === "id" || renderMode === "idtime"
+      ? shortestUniquePrefixes(memories.map((m) => m.memoryId))
+      : new Map<string, string>();
   const projectedKinds = new Set<string>();
   const lines: string[] = [];
   const indexByMemory = new Map<string, number>();
@@ -523,8 +527,15 @@ export function projectMemoryContext(
     // Revoked records surface their metadata (id, time) but not their
     // statement: the model sees the revocation without content to cite.
     const forget = visibleKinds.includes("forget");
+    // Temporal-chain members carry their chronology in the chain's dedicated
+    // Mermaid timeline block (time : short-id), so their line drops the [time]
+    // tag to avoid duplicating the time dimension — except in "idtime" mode,
+    // which keeps [time] on every line and skips the timeline block entirely.
+    const isTemporalMember =
+      renderMode !== "idtime" &&
+      (memory.chainMemberships?.some((m) => m.chainType === "temporal") ?? false);
     const base =
-      includeTime && memory.eventTime
+      includeTime && memory.eventTime && !isTemporalMember
         ? `[${memory.eventTime}] ${memory.statement}`
         : memory.statement;
     const rendered = forget
@@ -540,7 +551,7 @@ export function projectMemoryContext(
     let numbered: string;
     if (renderMode === "none") {
       numbered = rendered;
-    } else if (renderMode === "id") {
+    } else if (renderMode === "id" || renderMode === "idtime") {
       const short = idPrefixes.get(memory.memoryId);
       numbered = short === undefined ? rendered : `<${columnLetter(lines.length)}:${short}> ${rendered}`;
     } else {
@@ -580,7 +591,11 @@ export function projectMemoryContext(
     for (const [chainId, chain] of chains) {
       chain.members.sort((a, b) => a.position - b.position);
       const label = chain.topic ? `${chain.chainType} chain: ${chain.topic}` : `${chain.chainType} chain`;
-      if (renderMode === "id") {
+      if (renderMode === "id" || renderMode === "idtime") {
+        // In "idtime" mode temporal chains render no Mermaid block at all —
+        // chronology lives on the line as [time]. Logical chains keep their
+        // flowchart.
+        if (renderMode === "idtime" && chain.chainType === "temporal") continue;
         // Mermaid-flavoured chain block. Explicit DAG edges (memory_chain_edges)
         // render the chain as a branching flowchart (`A --> B & C`); a purely
         // linear temporal chain renders as a timeline (time : member). When a

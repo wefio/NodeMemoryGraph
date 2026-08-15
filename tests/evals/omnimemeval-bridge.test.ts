@@ -551,13 +551,53 @@ test("id render mode renders temporal chains as a Mermaid timeline", () => {
     const tc = store.createMemoryChain({ chainType: "temporal", topic: "事故时间线", ownerSessionId: "s1" });
     cm.forEach((m, i) => store.addMemoryToChain({ chainId: tc.id, memoryId: m, position: i }));
     const ctx = store.searchContext("事件", { sessionId: "s1", limit: 8, expandChains: true });
-    const memories = ctx.results.map((r) => ({ memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement, markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore, sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType }));
+    const memories = ctx.results.map((r) => ({
+      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
+      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
+      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
+      chainMemberships: r.chainMemberships,
+    }));
     const { lines } = projectMemoryContext(memories, true, new Map(), "id");
     const text = lines.join("\n");
     assert.match(text, /timeline/, "temporal chain renders as a Mermaid timeline");
     const tls = [...text.matchAll(/^\s+(\S+) : ([0-9a-f]{8})$/gm)].map((m) => [m[1], m[2]]);
     assert.equal(tls.length, 3, "three timeline entries");
     assert.deepEqual(tls.map((t) => t[0]), ["2024-03-15", "2024-03-16", "2024-03-17"], "timeline in event-time order");
+    // Temporal-chain members drop the [time] tag on their line: chronology is
+    // owned by the dedicated timeline block, not duplicated per line.
+    assert.ok(!text.includes("[2024-03-15]"), "temporal member lines drop the [time] tag");
+    store.close();
+  } finally {
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows handle-lock noise */ }
+  }
+});
+
+test("idtime render mode keeps [time] on temporal member lines and drops the timeline block", () => {
+  const root = mkdtempSync(join(tmpdir(), "chainrender-idtime-"));
+  try {
+    const store = new NmgStore(join(root, "nmg.sqlite"));
+    const times = ["2024-03-15", "2024-03-16", "2024-03-17"];
+    const cm: string[] = [];
+    for (let i = 0; i < times.length; i += 1) {
+      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: `事件${i + 1}`, eventTime: times[i], sessionId: "s1", sourceActor: "user" });
+      cm.push(m.memory.id);
+    }
+    const tc = store.createMemoryChain({ chainType: "temporal", topic: "事故时间线", ownerSessionId: "s1" });
+    cm.forEach((m, i) => store.addMemoryToChain({ chainId: tc.id, memoryId: m, position: i }));
+    const ctx = store.searchContext("事件", { sessionId: "s1", limit: 8, expandChains: true });
+    const memories = ctx.results.map((r) => ({
+      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
+      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
+      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
+      chainMemberships: r.chainMemberships,
+    }));
+    const { lines } = projectMemoryContext(memories, true, new Map(), "idtime");
+    const text = lines.join("\n");
+    // Lines keep [time] even for temporal members.
+    assert.ok(text.includes("[2024-03-15]"), "temporal member lines keep [time] in idtime mode");
+    // No Mermaid timeline block — chronology lives on the line.
+    assert.ok(!text.includes("timeline"), "no timeline block in idtime mode");
+    assert.match(lines[0]!, /^<[A-Z]+:[0-9a-f]{8}> /, "lines are <letter:short-id>-tagged");
     store.close();
   } finally {
     try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows handle-lock noise */ }
