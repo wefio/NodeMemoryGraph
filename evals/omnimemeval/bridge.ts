@@ -483,6 +483,19 @@ function shortestUniquePrefixes(ids: readonly string[]): Map<string, string> {
   return result;
 }
 
+/** Spreadsheet-style column label (A, B, …, Z, AA, AB, …) for a 0-based
+ *  row index — the letter part of the `<A:short-id>` line tag. */
+function columnLetter(index: number): string {
+  let n = index + 1;
+  let s = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
 export function projectMemoryContext(
   memories: readonly OmniRetrievedMemory[],
   includeTime: boolean,
@@ -528,7 +541,8 @@ export function projectMemoryContext(
     if (renderMode === "none") {
       numbered = rendered;
     } else if (renderMode === "id") {
-      numbered = `<${idPrefixes.get(memory.memoryId)}> ${rendered}`;
+      const short = idPrefixes.get(memory.memoryId);
+      numbered = short === undefined ? rendered : `<${columnLetter(lines.length)}:${short}> ${rendered}`;
     } else {
       numbered = `${lines.length + 1}. ${rendered}`;
     }

@@ -495,7 +495,7 @@ test("id render mode tags lines with <short-uuid> and renders the chain as a Mer
     }));
     const { lines } = projectMemoryContext(memories, false, new Map(), "id");
     // Lines are tagged [<short-uuid>] — not numeric, not a bare identifier.
-    assert.match(lines[0]!, /^<[0-9a-f]{8}> /, "first line is short-uuid-tagged");
+    assert.match(lines[0]!, /^<[A-Z]+:[0-9a-f]{8}> /, "first line is <letter:short-uuid>-tagged");
     assert.ok(!/^\d+\. /.test(lines[0]!), "no numeric prefix in id mode");
     // Chain block is a Mermaid flowchart referencing the same short ids.
     const text = lines.join("\n");
@@ -504,7 +504,7 @@ test("id render mode tags lines with <short-uuid> and renders the chain as a Mer
     assert.equal(edges.length, 2, "two edges for three members");
     // Edges follow chain position order and reference ids that appear in lines.
     assert.equal(edges[0]![1], edges[1]![0], "adjacent members share the connecting id");
-    const tagged = [...text.matchAll(/^<([0-9a-f]{8})>/gm)].map((m) => m[1]);
+    const tagged = [...text.matchAll(/^<[A-Z]+:([0-9a-f]{8})>/gm)].map((m) => m[1]);
     for (const [a] of edges) assert.ok(tagged.includes(a), "edge source id appears in the tagged lines");
     store.close();
   } finally {
@@ -531,10 +531,10 @@ test("id render mode extends the prefix on collision until unique", () => {
     mk("bbbb2222-0000-0000-0000-000000000003", "第三个事故"),
   ];
   const { lines } = projectMemoryContext(memories, false, new Map(), "id");
-  assert.match(lines[0]!, /^<aaaa1111-1111> /, "colliding id extended to second segment");
-  assert.match(lines[1]!, /^<aaaa1111-2222> /, "colliding id extended to second segment");
-  assert.match(lines[2]!, /^<bbbb2222> /, "unique id keeps shortest prefix");
-  const tags = [...lines.join("\n").matchAll(/<([0-9a-f-]+)>/g)].map((m) => m[1]);
+  assert.match(lines[0]!, /^<[A-Z]+:aaaa1111-1111> /, "colliding id extended to second segment");
+  assert.match(lines[1]!, /^<[A-Z]+:aaaa1111-2222> /, "colliding id extended to second segment");
+  assert.match(lines[2]!, /^<[A-Z]+:bbbb2222> /, "unique id keeps shortest prefix");
+  const tags = [...lines.join("\n").matchAll(/<[A-Z]+:([0-9a-f-]+)>/g)].map((m) => m[1]);
   assert.equal(new Set(tags).size, tags.length, "all rendered id tags are unique");
 });
 
