@@ -384,7 +384,13 @@ export class OmniMemEvalBridge {
       process.env.NMG_RENDER_MODE === "id" || process.env.NMG_RENDER_MODE === "none"
         ? process.env.NMG_RENDER_MODE
         : "numeric";
-    const projection = projectMemoryContext(memories, includeTime, notes, renderMode);
+    const chainEdges = new Map<string, Array<{ sourceMemoryId: string; targetMemoryId: string }>>();
+    for (const e of context.chainEdges ?? []) {
+      const list = chainEdges.get(e.chainId) ?? [];
+      list.push({ sourceMemoryId: e.sourceMemoryId, targetMemoryId: e.targetMemoryId });
+      chainEdges.set(e.chainId, list);
+    }
+    const projection = projectMemoryContext(memories, includeTime, notes, renderMode, chainEdges);
     appendFileSync(
       this.#perfLogPath,
       `${JSON.stringify({
@@ -482,6 +488,7 @@ export function projectMemoryContext(
   includeTime: boolean,
   notes: ReadonlyMap<string, string>,
   renderMode: MemoryRenderMode = "numeric",
+  chainEdges: ReadonlyMap<string, Array<{ sourceMemoryId: string; targetMemoryId: string }>> = new Map(),
 ): { lines: string[]; hasForget: boolean } {
   const idPrefixes =
     renderMode === "id" ? shortestUniquePrefixes(memories.map((m) => m.memoryId)) : new Map<string, string>();
@@ -560,31 +567,83 @@ export function projectMemoryContext(
       chain.members.sort((a, b) => a.position - b.position);
       const label = chain.topic ? `${chain.chainType} chain: ${chain.topic}` : `${chain.chainType} chain`;
       if (renderMode === "id") {
-        // Mermaid-flavoured chain block: logical chains render as a flowchart
-        // (adjacent-position members become directed edges), temporal chains as
-        // a timeline (time : member). Identifiers are short memory_id prefixes
-        // in [brackets]; semantics is what matters, not strict Mermaid parsing.
-        if (chain.chainType === "temporal") {
-          lines.push(`[${label}]`);
-          lines.push("timeline");
-          for (const member of chain.members) {
-            const p = idPrefixes.get(member.id);
-            if (p === undefined) continue;
-            const mem = memories.find((m) => m.memoryId === member.id);
-            const time = mem?.eventTime ?? String(member.position + 1);
-            lines.push(`  ${time} : ${p}`);
+        // Mermaid-flavoured chain block. Explicit DAG edges (memory_chain_edges)
+        // render the chain as a branching flowchart (`A --> B & C`); a purely
+        // linear temporal chain renders as a timeline (time : member). When a
+        // chain has no explicit edges (legacy position-only membership) we fall
+        // back to adjacency between adjacent positions.
+        const edges = chainEdges.get(chainId);
+        if (edges && edges.length > 0) {
+          const adj = new Map<string, string[]>();
+          const inDeg = new Map<string, number>();
+          for (const e of edges) {
+            const list = adj.get(e.sourceMemoryId) ?? [];
+            list.push(e.targetMemoryId);
+            adj.set(e.sourceMemoryId, list);
+            inDeg.set(e.targetMemoryId, (inDeg.get(e.targetMemoryId) ?? 0) + 1);
           }
-        } else {
-          const edges: string[] = [];
-          for (let i = 0; i + 1 < chain.members.length; i += 1) {
-            const a = idPrefixes.get(chain.members[i].id);
-            const b = idPrefixes.get(chain.members[i + 1].id);
-            if (a !== undefined && b !== undefined) edges.push(`  ${a} --> ${b}`);
-          }
-          if (edges.length > 0) {
+          const isLinear =
+            [...adj.values()].every((ts) => ts.length <= 1) &&
+            [...inDeg.values()].every((d) => d <= 1) &&
+            edges.length === chain.members.length - 1;
+          if (chain.chainType === "temporal" && isLinear) {
+            // Walk the single path from the unique source for a chronological
+            // timeline; append any disconnected members by insertion order.
+            const posByMemory = new Map(chain.members.map((m) => [m.id, m.position]));
+            let cur = [...adj.keys()].find((s) => !inDeg.has(s));
+            const order: string[] = [];
+            while (cur !== undefined && !order.includes(cur)) {
+              order.push(cur);
+              cur = adj.get(cur)?.[0];
+            }
+            const walked = new Set(order);
+            for (const m of chain.members) if (!walked.has(m.id)) order.push(m.id);
+            lines.push(`[${label}]`);
+            lines.push("timeline");
+            for (const id of order) {
+              const p = idPrefixes.get(id);
+              if (p === undefined) continue;
+              const mem = memories.find((m) => m.memoryId === id);
+              const time = mem?.eventTime ?? String((posByMemory.get(id) ?? 0) + 1);
+              lines.push(`  ${time} : ${p}`);
+            }
+          } else {
             lines.push(`[${label}]`);
             lines.push("flowchart LR");
-            lines.push(...edges);
+            for (const [s, ts] of adj) {
+              const sp = idPrefixes.get(s);
+              if (sp === undefined) continue;
+              const targets = ts
+                .map((t) => idPrefixes.get(t))
+                .filter((x): x is string => x !== undefined);
+              if (targets.length === 0) continue;
+              lines.push(`  ${sp} --> ${targets.join(" & ")}`);
+            }
+          }
+        } else {
+          // Fallback: no explicit edges — use position order (legacy chains).
+          if (chain.chainType === "temporal") {
+            lines.push(`[${label}]`);
+            lines.push("timeline");
+            for (const member of chain.members) {
+              const p = idPrefixes.get(member.id);
+              if (p === undefined) continue;
+              const mem = memories.find((m) => m.memoryId === member.id);
+              const time = mem?.eventTime ?? String(member.position + 1);
+              lines.push(`  ${time} : ${p}`);
+            }
+          } else {
+            const fallback: string[] = [];
+            for (let i = 0; i + 1 < chain.members.length; i += 1) {
+              const a = idPrefixes.get(chain.members[i].id);
+              const b = idPrefixes.get(chain.members[i + 1].id);
+              if (a !== undefined && b !== undefined) fallback.push(`  ${a} --> ${b}`);
+            }
+            if (fallback.length > 0) {
+              lines.push(`[${label}]`);
+              lines.push("flowchart LR");
+              lines.push(...fallback);
+            }
           }
         }
       } else {

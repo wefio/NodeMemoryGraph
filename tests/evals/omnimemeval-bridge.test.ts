@@ -564,6 +564,46 @@ test("id render mode renders temporal chains as a Mermaid timeline", () => {
   }
 });
 
+test("id render mode renders a branching DAG chain as a Mermaid flowchart with forks", () => {
+  const root = mkdtempSync(join(tmpdir(), "chainrender-dag-"));
+  try {
+    const store = new NmgStore(join(root, "nmg.sqlite"));
+    const ids: string[] = [];
+    for (const s of ["根因：脚本误操作", "后果A：写入阻塞", "后果B：数据丢失", "后续：回滚恢复"]) {
+      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: s, sessionId: "s1", sourceActor: "user" });
+      ids.push(m.memory.id);
+    }
+    const [a, b, c, d] = ids;
+    const chain = store.createMemoryChain({ chainType: "logical", topic: "分叉事故", ownerSessionId: "s1" });
+    // a --> b, a --> c (branch), c --> d
+    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a, targetMemoryId: b });
+    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a, targetMemoryId: c });
+    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: c, targetMemoryId: d });
+    const ctx = store.searchContext("脚本误操作", { sessionId: "s1", limit: 8, expandChains: true });
+    const memories = ctx.results.map((r) => ({
+      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
+      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
+      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
+      chainMemberships: r.chainMemberships,
+    }));
+    const chainEdges = new Map<string, Array<{ sourceMemoryId: string; targetMemoryId: string }>>();
+    for (const e of ctx.chainEdges ?? []) {
+      const list = chainEdges.get(e.chainId) ?? [];
+      list.push({ sourceMemoryId: e.sourceMemoryId, targetMemoryId: e.targetMemoryId });
+      chainEdges.set(e.chainId, list);
+    }
+    const { lines } = projectMemoryContext(memories, true, new Map(), "id", chainEdges);
+    const text = lines.join("\n");
+    assert.match(text, /flowchart LR/, "branching chain renders as a flowchart");
+    assert.ok(text.includes(" & "), "fork is rendered with Mermaid & syntax");
+    const fork = [...text.matchAll(/^\s+([0-9a-f]{8}) --> ([0-9a-f]{8}) & ([0-9a-f]{8})$/gm)];
+    assert.equal(fork.length, 1, "one fork row: source --> t1 & t2");
+    store.close();
+  } finally {
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows handle-lock noise */ }
+  }
+});
+
 test("none render mode renders bare lines and drops the chain block", () => {
   const root = mkdtempSync(join(tmpdir(), "chainrender-none-"));
   try {

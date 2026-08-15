@@ -55,6 +55,7 @@ import type {
   MemoryContext,
   MemoryRecord,
   MemoryChainType,
+  MemoryChainEdgeType,
   MemorySearchResult,
   MemoryTier,
   NodeRelation,
@@ -726,6 +727,24 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           }
         }
         if (chainIds.size > 0) {
+          // Collect the DAG edges of every surfaced chain so the presentation
+          // layer can render branching (`A --> B & C`) rather than a linear
+          // position sequence. Adjacent in storage is not adjacency in the
+          // graph — edges are the structure.
+          const chainEdgesSql = this.db.prepare(
+            `SELECT chain_id, source_memory_id, target_memory_id, edge_type
+             FROM memory_chain_edges WHERE chain_id = ?`,
+          );
+          const edgeRows: Row[] = [];
+          for (const cid of chainIds) {
+            edgeRows.push(...(chainEdgesSql.all(cid) as Row[]));
+          }
+          context.chainEdges = edgeRows.map((r) => ({
+            chainId: String(r.chain_id),
+            sourceMemoryId: String(r.source_memory_id),
+            targetMemoryId: String(r.target_memory_id),
+            edgeType: String(r.edge_type) as MemoryChainEdgeType,
+          }));
           // Mark members already in the ranked results too, so callers can see
           // the whole chain surfaced (hit + expansion) rather than only the
           // appended part. A memory can belong to several chains — collect all

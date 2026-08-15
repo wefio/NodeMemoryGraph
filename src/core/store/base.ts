@@ -20,6 +20,8 @@ import type {
   MemoryWriteEvent,
   MemoryChain,
   MemoryChainMember,
+  MemoryChainEdge,
+  MemoryChainEdgeType,
   MemoryChainStatus,
   MemoryChainType,
   MemorySearchResult,
@@ -817,6 +819,169 @@ export class NmgStoreBase {
     this.db
       .prepare("DELETE FROM memory_chain_members WHERE chain_id = ? AND memory_id = ?")
       .run(input.chainId, input.memoryId);
+  }
+
+  // ── memory-chain DAG edges (pointers) ──
+
+  /** Read the directed edges of a chain (its DAG structure). */
+  getMemoryChainEdges(chainId: string): MemoryChainEdge[] {
+    const rows = this.db
+      .prepare(
+        `SELECT chain_id, source_memory_id, target_memory_id, edge_type, created_at
+         FROM memory_chain_edges WHERE chain_id = ?`,
+      )
+      .all(chainId) as Row[];
+    return rows.map((r) => ({
+      chainId: String(r.chain_id),
+      sourceMemoryId: String(r.source_memory_id),
+      targetMemoryId: String(r.target_memory_id),
+      edgeType: String(r.edge_type) as MemoryChainEdgeType,
+      createdAt: String(r.created_at),
+    }));
+  }
+
+  /** Add a directed edge source → target to a chain (a pointer). Enforces the
+   *  DAG invariant: the edge is rejected if it would create a cycle (target
+   *  already reaches source through existing edges). Endpoint memories are
+   *  auto-joined as members when absent, so edges can be added without a
+   *  separate member step. */
+  addMemoryChainEdge(input: {
+    chainId: string;
+    sourceMemoryId: string;
+    targetMemoryId: string;
+    edgeType?: MemoryChainEdgeType;
+    now?: string;
+  }): MemoryChainEdge {
+    const now = input.now ?? new Date().toISOString();
+    const chain = this.getMemoryChain(input.chainId);
+    if (!chain) throw new Error(`memory chain not found: ${input.chainId}`);
+    if (input.sourceMemoryId === input.targetMemoryId) {
+      throw new Error("memory chain edge must connect two distinct memories");
+    }
+    for (const id of [input.sourceMemoryId, input.targetMemoryId]) {
+      const exists = this.db.prepare("SELECT 1 FROM memory_records WHERE id = ?").get(id);
+      if (!exists) throw new Error(`memory record not found: ${id}`);
+    }
+    const edgeType = input.edgeType ?? "order";
+    // DAG check: does target already reach source through existing edges? If
+    // so, adding source → target would close a directed cycle — reject.
+    const adj = new Map<string, string[]>();
+    for (const e of this.getMemoryChainEdges(input.chainId)) {
+      const list = adj.get(e.sourceMemoryId) ?? [];
+      list.push(e.targetMemoryId);
+      adj.set(e.sourceMemoryId, list);
+    }
+    if (this.reaches(adj, input.targetMemoryId, input.sourceMemoryId, new Set())) {
+      throw new Error(
+        `memory chain edge ${input.sourceMemoryId} -> ${input.targetMemoryId} rejected: would create a cycle`,
+      );
+    }
+    // Auto-join endpoints as members (idempotent) so edges are self-contained.
+    const join = (memoryId: string) => {
+      const row = this.db
+        .prepare(
+          "SELECT COALESCE(MAX(position), 0) + 1 AS next FROM memory_chain_members WHERE chain_id = ?",
+        )
+        .get(input.chainId) as Row;
+      this.db
+        .prepare(
+          `INSERT OR IGNORE INTO memory_chain_members (chain_id, memory_id, position, note, created_at)
+           VALUES (?, ?, ?, NULL, ?)`,
+        )
+        .run(input.chainId, memoryId, Number(row.next), now);
+    };
+    join(input.sourceMemoryId);
+    join(input.targetMemoryId);
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO memory_chain_edges
+           (chain_id, source_memory_id, target_memory_id, edge_type, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(input.chainId, input.sourceMemoryId, input.targetMemoryId, edgeType, now);
+    return {
+      chainId: input.chainId,
+      sourceMemoryId: input.sourceMemoryId,
+      targetMemoryId: input.targetMemoryId,
+      edgeType,
+      createdAt: now,
+    };
+  }
+
+  /** Remove a directed edge from a chain. */
+  removeMemoryChainEdge(input: {
+    chainId: string;
+    sourceMemoryId: string;
+    targetMemoryId: string;
+  }): void {
+    this.db
+      .prepare(
+        "DELETE FROM memory_chain_edges WHERE chain_id = ? AND source_memory_id = ? AND target_memory_id = ?",
+      )
+      .run(input.chainId, input.sourceMemoryId, input.targetMemoryId);
+  }
+
+  /** Topological order of a chain's members over its DAG edges (Kahn).
+   *  Members with no incident edges are appended in insertion (position) order
+   *  so the whole chain is covered. Deterministic: ties break by position. */
+  topologicalChainOrder(chainId: string): string[] {
+    const chain = this.getMemoryChain(chainId);
+    const members = chain?.members ?? [];
+    const edges = this.getMemoryChainEdges(chainId);
+    const indegree = new Map<string, number>();
+    const out = new Map<string, string[]>();
+    const posByMemory = new Map<string, number>();
+    for (const m of members) posByMemory.set(m.memoryId, m.position);
+    for (const e of edges) {
+      indegree.set(e.targetMemoryId, (indegree.get(e.targetMemoryId) ?? 0) + 1);
+      if (!indegree.has(e.sourceMemoryId)) indegree.set(e.sourceMemoryId, 0);
+      const list = out.get(e.sourceMemoryId) ?? [];
+      list.push(e.targetMemoryId);
+      out.set(e.sourceMemoryId, list);
+    }
+    const queue: string[] = [];
+    const inQueue = new Set<string>();
+    const pushZero = () => {
+      const eligible = [...indegree.entries()]
+        .filter(([id, d]) => d === 0 && !inQueue.has(id))
+        .sort((a, b) => (posByMemory.get(a[0]) ?? 0) - (posByMemory.get(b[0]) ?? 0));
+      for (const [id] of eligible) {
+        queue.push(id);
+        inQueue.add(id);
+      }
+    };
+    pushZero();
+    const order: string[] = [];
+    while (queue.length > 0) {
+      const node = queue.shift()!;
+      order.push(node);
+      for (const next of out.get(node) ?? []) {
+        indegree.set(next, (indegree.get(next) ?? 1) - 1);
+        if ((indegree.get(next) ?? 0) === 0) pushZero();
+      }
+    }
+    const visited = new Set(order);
+    const rest = members
+      .filter((m) => !visited.has(m.memoryId))
+      .sort((a, b) => a.position - b.position)
+      .map((m) => m.memoryId);
+    return [...order, ...rest];
+  }
+
+  /** True if `from` can reach `to` following directed edges in `adj` (DFS). */
+  private reaches(
+    adj: Map<string, string[]>,
+    from: string,
+    to: string,
+    visited: Set<string>,
+  ): boolean {
+    if (from === to) return true;
+    if (visited.has(from)) return false;
+    visited.add(from);
+    for (const next of adj.get(from) ?? []) {
+      if (this.reaches(adj, next, to, visited)) return true;
+    }
+    return false;
   }
   /** Named channels this session has joined (wake-loop routing: only these
    * named channels are scanned for this session, never all active boards). */

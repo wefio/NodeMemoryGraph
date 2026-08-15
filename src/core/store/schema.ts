@@ -825,6 +825,20 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
     );
     CREATE INDEX IF NOT EXISTS idx_chain_members_chain ON memory_chain_members(chain_id, position);
     CREATE INDEX IF NOT EXISTS idx_chain_members_memory ON memory_chain_members(memory_id);
+    -- Directed edges of a memory chain (DAG): source → target pointers.
+    -- Branching = one source with several targets; merging = several sources
+    -- into one target. The DAG invariant (no cycle) is enforced at write time.
+    CREATE TABLE IF NOT EXISTS memory_chain_edges (
+      chain_id TEXT NOT NULL REFERENCES memory_chains(id) ON DELETE CASCADE,
+      source_memory_id TEXT NOT NULL REFERENCES memory_records(id) ON DELETE CASCADE,
+      target_memory_id TEXT NOT NULL REFERENCES memory_records(id) ON DELETE CASCADE,
+      edge_type TEXT NOT NULL DEFAULT 'order' CHECK (edge_type IN ('order')),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (chain_id, source_memory_id, target_memory_id),
+      CHECK (source_memory_id != target_memory_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_chain_edges_chain ON memory_chain_edges(chain_id);
+    CREATE INDEX IF NOT EXISTS idx_chain_edges_source ON memory_chain_edges(source_memory_id);
   `);
 }
 

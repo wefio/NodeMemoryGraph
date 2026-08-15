@@ -687,6 +687,16 @@ export interface RetrievalFilterUsage {
 
 export interface MemoryContext {
   results: MemorySearchResult[];
+  /** Chain edges (DAG) collected during expandChains: the directed edges of
+   *  every chain surfaced. Lets the presentation layer render a chain as a
+   *  DAG (branching `A --> B & C`) instead of a linear position sequence.
+   *  Absent when no chains were expanded. */
+  chainEdges?: Array<{
+    chainId: string;
+    sourceMemoryId: string;
+    targetMemoryId: string;
+    edgeType: MemoryChainEdgeType;
+  }>;
   relations: NodeRelation[];
   progressiveDisclosure?: {
     strategy: "learned_retained_mass" | "warm_halves";
@@ -834,6 +844,23 @@ export interface MemoryChainMember {
    *  original snapshot (historical context) while pointing at the current
    *  value — callers may follow or ignore it. */
   successorId?: string;
+}
+
+export const MEMORY_CHAIN_EDGE_TYPES = ["order"] as const;
+export type MemoryChainEdgeType = (typeof MEMORY_CHAIN_EDGE_TYPES)[number];
+
+/** A directed edge in a memory chain (DAG). Edges are pointers (source →
+ *  target). Temporal chains order by event time; logical chains carry explicit
+ *  causal/ordering pointers. Branching = one source with several targets (a
+ *  memory may fan out); merging = several sources into one target. Written
+ *  explicitly (natural supervision), never inferred. The DAG invariant (no
+ *  cycles) is enforced at write time. */
+export interface MemoryChainEdge {
+  chainId: string;
+  sourceMemoryId: string;
+  targetMemoryId: string;
+  edgeType: MemoryChainEdgeType;
+  createdAt: string;
 }
 
 /** The default Task Board channel when no explicit taskId is given: the shared

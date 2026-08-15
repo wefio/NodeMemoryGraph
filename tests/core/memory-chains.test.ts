@@ -345,3 +345,65 @@ test("recency decay is skipped for historical (eventTimeTo) queries", () => {
     assert.ok(c.results.length >= 1);
   });
 });
+
+test("addMemoryChainEdge writes a directed DAG edge and auto-joins endpoints as members", () => {
+  withStore((store) => {
+    const chain = store.createMemoryChain({ chainType: "logical", topic: "事故因果", ownerSessionId: "s1" });
+    const [a, b, c] = seedMemories(store, 3);
+    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a, targetMemoryId: b });
+    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: b, targetMemoryId: c });
+    const edges = store.getMemoryChainEdges(chain.id);
+    assert.equal(edges.length, 2);
+    assert.deepEqual(
+      edges.map((e) => [e.sourceMemoryId, e.targetMemoryId]),
+      [[a, b], [b, c]],
+    );
+    assert.equal(edges[0]!.edgeType, "order");
+    // Endpoints were auto-joined as members (no separate addMemoryToChain).
+    const fetched = store.getMemoryChain(chain.id)!;
+    assert.deepEqual(fetched.members.map((m) => m.memoryId).sort(), [a, b, c].sort());
+    // Remove an edge and confirm it is gone.
+    store.removeMemoryChainEdge({ chainId: chain.id, sourceMemoryId: b, targetMemoryId: c });
+    assert.equal(store.getMemoryChainEdges(chain.id).length, 1);
+  });
+});
+
+test("addMemoryChainEdge rejects an edge that would close a directed cycle", () => {
+  withStore((store) => {
+    const chain = store.createMemoryChain({ chainType: "logical", topic: "反馈回路", ownerSessionId: "s1" });
+    const [a, b, c] = seedMemories(store, 3);
+    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a, targetMemoryId: b });
+    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: b, targetMemoryId: c });
+    // c reaches a through b → a -> c would close a cycle.
+    assert.throws(() => {
+      store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: c, targetMemoryId: a });
+    }, /would create a cycle/);
+    assert.throws(() => {
+      store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: b, targetMemoryId: a });
+    }, /would create a cycle/);
+    // Self-loop is rejected outright.
+    assert.throws(() => {
+      store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a, targetMemoryId: a });
+    }, /distinct memories/);
+    // Unrelated edge is still fine.
+    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a, targetMemoryId: c });
+    assert.equal(store.getMemoryChainEdges(chain.id).length, 3);
+  });
+});
+
+test("topologicalChainOrder returns a deterministic DAG order (branching chain)", () => {
+  withStore((store) => {
+    const chain = store.createMemoryChain({ chainType: "logical", topic: "分叉事故", ownerSessionId: "s1" });
+    const [a, b, c, d] = seedMemories(store, 4);
+    // a --> b, a --> c (branch), c --> d
+    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a, targetMemoryId: b });
+    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a, targetMemoryId: c });
+    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: c, targetMemoryId: d });
+    const order = store.topologicalChainOrder(chain.id);
+    assert.equal(order[0], a, "single source first");
+    assert.equal(order.at(-1), d, "deepest target last");
+    assert.ok(order.indexOf(b) < order.indexOf(d), "b precedes d");
+    assert.ok(order.indexOf(c) < order.indexOf(d), "c precedes d");
+    assert.equal(new Set(order).size, order.length, "no duplicates");
+  });
+});
