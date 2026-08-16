@@ -326,33 +326,29 @@ export class OmniMemEvalBridge {
         }
       }
     }
-    // Eval-only chain injection (benchmark construction): after supersession
-    // settles so chains reference only final memories. Same-session
-    // conversation memories become a temporal chain (by eventTime) and/or a
-    // logical chain (by message order). Explicit, synthetic — not runtime
-    // auto-inference of chain direction.
-    if (this.#chainInjection !== "none" && dialogMemories.length > 0) {
+    // Chain-injection lock: logical only. BEAM 4-way A/B (2026-08-16): logical
+    // 0.6867 is the best; temporal 0.6755; both 0.5624 collapses from context
+    // bloat. The temporal/both branches are commented out as experiment record.
+    if (this.#chainInjection === "logical" && dialogMemories.length > 0) {
       const topic = `Conversation ${batchIdentity(messages)}`;
-      if (this.#chainInjection === "temporal" || this.#chainInjection === "both") {
-        const sorted = [...dialogMemories].sort((a, b) => {
-          const ta = a.eventTime ? Date.parse(a.eventTime) : Number.NaN;
-          const tb = b.eventTime ? Date.parse(b.eventTime) : Number.NaN;
-          const fa = Number.isFinite(ta);
-          const fb = Number.isFinite(tb);
-          if (fa && fb) return ta - tb;
-          if (fa) return -1;
-          if (fb) return 1;
-          return a.order - b.order;
-        });
-        const chain = store.createMemoryChain({ chainType: "temporal", topic, ownerSessionId: sessionId });
-        sorted.forEach((m, i) => store.addMemoryToChain({ chainId: chain.id, memoryId: m.memoryId, position: i }));
-      }
-      if (this.#chainInjection === "logical" || this.#chainInjection === "both") {
-        const chain = store.createMemoryChain({ chainType: "logical", topic, ownerSessionId: sessionId });
-        [...dialogMemories]
-          .sort((a, b) => a.order - b.order)
-          .forEach((m, i) => store.addMemoryToChain({ chainId: chain.id, memoryId: m.memoryId, position: i }));
-      }
+      // if (this.#chainInjection === "temporal" || this.#chainInjection === "both") {
+      //   const sorted = [...dialogMemories].sort((a, b) => {
+      //     const ta = a.eventTime ? Date.parse(a.eventTime) : Number.NaN;
+      //     const tb = b.eventTime ? Date.parse(b.eventTime) : Number.NaN;
+      //     const fa = Number.isFinite(ta);
+      //     const fb = Number.isFinite(tb);
+      //     if (fa && fb) return ta - tb;
+      //     if (fa) return -1;
+      //     if (fb) return 1;
+      //     return a.order - b.order;
+      //   });
+      //   const chain = store.createMemoryChain({ chainType: "temporal", topic, ownerSessionId: sessionId });
+      //   sorted.forEach((m, i) => store.addMemoryToChain({ chainId: chain.id, memoryId: m.memoryId, position: i }));
+      // }
+      const chain = store.createMemoryChain({ chainType: "logical", topic, ownerSessionId: sessionId });
+      [...dialogMemories]
+        .sort((a, b) => a.order - b.order)
+        .forEach((m, i) => store.addMemoryToChain({ chainId: chain.id, memoryId: m.memoryId, position: i }));
     }
     return { added, memories };
   }
@@ -896,11 +892,7 @@ async function run(): Promise<void> {
     strongHitInitialTarget: process.env.NMG_QPP_STRONG_HIT_INITIAL_TARGET
       ? Number(process.env.NMG_QPP_STRONG_HIT_INITIAL_TARGET)
       : undefined,
-    chainInjection: ["temporal", "logical", "both", "none"].includes(
-      process.env.NMG_CHAIN_INJECTION ?? "",
-    )
-      ? (process.env.NMG_CHAIN_INJECTION as "temporal" | "logical" | "both" | "none")
-      : "none",
+    chainInjection: process.env.NMG_CHAIN_INJECTION === "logical" ? "logical" : "none",
   });
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 

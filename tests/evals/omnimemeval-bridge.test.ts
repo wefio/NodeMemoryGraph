@@ -604,10 +604,10 @@ test("multiple chains of the same type render with distinguishable topics", () =
   }
 });
 
-test("chainInjection=both links same-session memories into temporal and logical chains", async () => {
+test("chainInjection=logical links same-session memories into a logical chain", async () => {
   const root = mkdtempSync(join(tmpdir(), "nmg-omni-chaininj-"));
   const bridge = new OmniMemEvalBridge(root, {
-    chainInjection: "both",
+    chainInjection: "logical",
     embeddingClient: {
       indexId: "chaininj@v1",
       async embedDocuments(inputs) {
@@ -641,15 +641,10 @@ test("chainInjection=both links same-session memories into temporal and logical 
       text: string;
       memories: Array<{ statement: string; chainMemberships?: Array<{ chainType?: string }> }>;
     };
-    const temporal = result.memories.find((m) =>
-      m.chainMemberships?.some((c) => c.chainType === "temporal"),
-    );
     const logical = result.memories.find((m) =>
       m.chainMemberships?.some((c) => c.chainType === "logical"),
     );
-    assert.ok(temporal, "temporal chain surfaced via expandChains");
-    assert.ok(logical, "logical chain surfaced via expandChains");
-    assert.match(result.text, /\[logical chain/);
+    assert.ok(logical, "logical chain surfaced via expandChains");    assert.match(result.text, /\[logical chain/);
     assert.match(result.text, /flowchart LR/);
     assert.doesNotMatch(result.text, /timeline/, "idtime renders no timeline block");
   } finally {
