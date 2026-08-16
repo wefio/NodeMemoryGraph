@@ -382,9 +382,9 @@ export class OmniMemEvalBridge {
     // retrieved memory contradicts another memory (claims metadata), the
     // note is rendered into the context regardless of the caller.
     const notes = store.contradictionNotes(memories.map((m) => m.memoryId));
-    // A/B/C experiment switch (docs: presentation-layer render modes).
-    // "numeric" is the default; env override lets the eval harness A/B/C the
-    // same questions without rebuilding.
+    // Default render mode is "idtime" (BEAM event_ordering 6-mode A/B, 2026-08-16:
+    // <A:short-id> [time] lines, no timeline block — the highest of six same-param
+    // variants). Env override lets the eval harness switch modes without rebuild.
     const renderMode: MemoryRenderMode =
       process.env.NMG_RENDER_MODE === "id" ||
       process.env.NMG_RENDER_MODE === "idbare" ||
@@ -392,7 +392,7 @@ export class OmniMemEvalBridge {
       process.env.NMG_RENDER_MODE === "alpha" ||
       process.env.NMG_RENDER_MODE === "none"
         ? process.env.NMG_RENDER_MODE
-        : "numeric";
+        : "idtime";
     const chainEdges = new Map<string, Array<{ sourceMemoryId: string; targetMemoryId: string }>>();
     for (const e of context.chainEdges ?? []) {
       const list = chainEdges.get(e.chainId) ?? [];
@@ -509,7 +509,7 @@ export function projectMemoryContext(
   memories: readonly OmniRetrievedMemory[],
   includeTime: boolean,
   notes: ReadonlyMap<string, string>,
-  renderMode: MemoryRenderMode = "numeric",
+  renderMode: MemoryRenderMode = "idtime",
   chainEdges: ReadonlyMap<string, Array<{ sourceMemoryId: string; targetMemoryId: string }>> = new Map(),
 ): { lines: string[]; hasForget: boolean } {
   const idPrefixes =

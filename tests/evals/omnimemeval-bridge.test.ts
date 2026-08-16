@@ -435,9 +435,10 @@ test("semantic retrieval exposes a tagged revocation boundary", async () => {
     // marker is projected to [forget] exactly once (projectMemoryContext
     // dedupes control markers) — the assertion is about the tagged boundary.
     assert.ok(revocations.length >= 1, "at least one tagged revocation surfaced");
-    // projectMemoryContext renders numbered lines ("N. [forget] ...") and
-    // dedupes control markers, so exactly one numbered [forget] line appears.
-    assert.equal(result.text.match(/^\d+\. \[forget\]/gm)?.length, 1);
+    // projectMemoryContext renders tagged lines ("<A:short-id> [forget] …" in
+    // the default idtime mode) and dedupes control markers, so exactly one
+    // tagged [forget] line appears.
+    assert.equal(result.text.match(/^<[A-Z]+:[0-9a-f]{8}> \[forget\]/gm)?.length, 1);
   } finally {
     bridge.close();
     rmSync(root, { recursive: true, force: true });
@@ -461,7 +462,7 @@ test("chain members render as numbered lines plus an independent chain block", (
       markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
       sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
     }));
-    const { lines } = projectMemoryContext(memories, false, new Map());
+    const { lines } = projectMemoryContext(memories, false, new Map(), "numeric");
     const text = lines.join("\n");
     // Numbered lines: every rendered memory is prefixed with a 1-based index.
     assert.ok(/^\d+\. /.test(lines[0]!), "first line is numbered");
@@ -759,7 +760,7 @@ test("a memory in multiple chains renders in every chain block", () => {
       eventTime: r.memory.eventTime, score: r.combinedScore, sourceRef: r.evidence.sourceRef,
       chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType, chainMemberships: r.chainMemberships,
     }));
-    const { lines } = projectMemoryContext(memories, true, new Map());
+    const { lines } = projectMemoryContext(memories, true, new Map(), "numeric");
     const text = lines.join("\n");
     const temporal = text.match(/\[temporal chain:[^\]]*\] ([^\n]*)/)?.[1] ?? "";
     const logical = text.match(/\[logical chain:[^\]]*\] ([^\n]*)/)?.[1] ?? "";
@@ -798,7 +799,7 @@ test("multiple chains of the same type render with distinguishable topics", () =
       eventTime: r.memory.eventTime, score: r.combinedScore, sourceRef: r.evidence.sourceRef,
       chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType, chainMemberships: r.chainMemberships,
     }));
-    const { lines } = projectMemoryContext(memories, true, new Map());
+    const { lines } = projectMemoryContext(memories, true, new Map(), "numeric");
     const text = lines.join("\n");
     assert.match(text, /\[temporal chain: 预算年度演进\]/);
     assert.match(text, /\[temporal chain: 事故时间线\]/);
