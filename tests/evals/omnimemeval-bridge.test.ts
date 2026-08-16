@@ -635,6 +635,39 @@ test("alpha render mode prefixes lines with A. B. C. and references chain member
   }
 });
 
+test("idbare render mode tags lines <short-id> [time] without the letter prefix and drops the timeline block", () => {
+  const root = mkdtempSync(join(tmpdir(), "chainrender-idbare-"));
+  try {
+    const store = new NmgStore(join(root, "nmg.sqlite"));
+    const times = ["2024-03-15", "2024-03-16", "2024-03-17"];
+    const cm: string[] = [];
+    for (let i = 0; i < times.length; i += 1) {
+      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: `事件${i + 1}`, eventTime: times[i], sessionId: "s1", sourceActor: "user" });
+      cm.push(m.memory.id);
+    }
+    const tc = store.createMemoryChain({ chainType: "temporal", topic: "事故时间线", ownerSessionId: "s1" });
+    cm.forEach((m, i) => store.addMemoryToChain({ chainId: tc.id, memoryId: m, position: i }));
+    const ctx = store.searchContext("事件", { sessionId: "s1", limit: 8, expandChains: true });
+    const memories = ctx.results.map((r) => ({
+      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
+      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
+      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
+      chainMemberships: r.chainMemberships,
+    }));
+    const { lines } = projectMemoryContext(memories, true, new Map(), "idbare");
+    const text = lines.join("\n");
+    // Lines keep [time] even for temporal members, tagged with a bare short-id.
+    assert.ok(text.includes("[2024-03-15]"), "temporal member lines keep [time] in idbare mode");
+    assert.match(lines[0]!, /^<[0-9a-f]{8}> /, "lines are <short-id>-tagged without a letter");
+    assert.ok(!/^<[A-Z]+:/.test(lines[0]!), "no letter prefix in idbare mode");
+    // No Mermaid timeline block.
+    assert.ok(!text.includes("timeline"), "no timeline block in idbare mode");
+    store.close();
+  } finally {
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows handle-lock noise */ }
+  }
+});
+
 test("id render mode renders a branching DAG chain as a Mermaid flowchart with forks", () => {
   const root = mkdtempSync(join(tmpdir(), "chainrender-dag-"));
   try {
