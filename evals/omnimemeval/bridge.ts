@@ -15,7 +15,7 @@ import { CachedOmniEmbeddingClient } from "./embedding-cache.ts";
 const nmgPrompts = loadPrompts();
 const PROJECTED_CONTROL_MARKERS = new Set(["forget"]);
 
-type OmniRetrievedMemory = {
+export type OmniRetrievedMemory = {
   memoryId: string;
   nodeId: string;
   statement: string;
@@ -37,6 +37,10 @@ type OmniRetrievedMemory = {
     chainType?: string;
     topic?: string;
   }>;
+  /** Bounded verbatim excerpt of the backing evidence record, so retrieval
+   *  audits can match gold evidence against the exact source text rather than
+   *  the rendered statement alone. */
+  evidenceExcerpt?: string;
 };
 
 export interface OmniMessage {
@@ -371,6 +375,7 @@ export class OmniMemEvalBridge {
       chainPosition: result.chainPosition,
       chainType: result.chainType,
       chainMemberships: result.chainMemberships,
+      evidenceExcerpt: result.evidence.content.slice(0, 500),
     }));
     const includeTime = needsTemporalContext(query);
     // Contradiction annotations are NMG's own retrieval product: when a
@@ -383,6 +388,7 @@ export class OmniMemEvalBridge {
     const renderMode: MemoryRenderMode =
       process.env.NMG_RENDER_MODE === "id" ||
       process.env.NMG_RENDER_MODE === "idtime" ||
+      process.env.NMG_RENDER_MODE === "alpha" ||
       process.env.NMG_RENDER_MODE === "none"
         ? process.env.NMG_RENDER_MODE
         : "numeric";
@@ -465,7 +471,7 @@ export class OmniMemEvalBridge {
   }
 }
 
-export type MemoryRenderMode = "none" | "numeric" | "id" | "idtime";
+export type MemoryRenderMode = "none" | "numeric" | "alpha" | "id" | "idtime";
 
 const UUID_SEGMENT_ENDS = [8, 13, 18, 23, 36];
 
@@ -551,6 +557,8 @@ export function projectMemoryContext(
     let numbered: string;
     if (renderMode === "none") {
       numbered = rendered;
+    } else if (renderMode === "alpha") {
+      numbered = `${String.fromCharCode(65 + lines.length)}. ${rendered}`;
     } else if (renderMode === "id" || renderMode === "idtime") {
       const short = idPrefixes.get(memory.memoryId);
       numbered = short === undefined ? rendered : `<${columnLetter(lines.length)}:${short}> ${rendered}`;
@@ -679,7 +687,7 @@ export function projectMemoryContext(
         const seq = chain.members
           .map((member) => indexByMemory.get(member.id))
           .filter((i): i is number => i !== undefined)
-          .map((i) => `#${i + 1}`)
+          .map((i) => (renderMode === "alpha" ? `#${String.fromCharCode(65 + i)}` : `#${i + 1}`))
           .join(" → ");
         if (seq) lines.push(`[${label}] ${seq}`);
       }

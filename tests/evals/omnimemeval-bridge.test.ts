@@ -604,6 +604,37 @@ test("idtime render mode keeps [time] on temporal member lines and drops the tim
   }
 });
 
+test("alpha render mode prefixes lines with A. B. C. and references chain members by letter", () => {
+  const root = mkdtempSync(join(tmpdir(), "chainrender-alpha-"));
+  try {
+    const store = new NmgStore(join(root, "nmg.sqlite"));
+    const cm: string[] = [];
+    for (const s of ["脚本误操作", "写入阻塞", "服务不可用"]) {
+      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: s, sessionId: "s1", sourceActor: "user" });
+      cm.push(m.memory.id);
+    }
+    const lc = store.createMemoryChain({ chainType: "logical", topic: "事故因果", ownerSessionId: "s1" });
+    cm.forEach((m, i) => store.addMemoryToChain({ chainId: lc.id, memoryId: m, position: i }));
+    const ctx = store.searchContext("脚本误操作", { sessionId: "s1", limit: 8, expandChains: true });
+    const memories = ctx.results.map((r) => ({
+      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
+      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
+      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
+      chainMemberships: r.chainMemberships,
+    }));
+    const { lines } = projectMemoryContext(memories, false, new Map(), "alpha");
+    assert.ok(/^[A-C]\. /.test(lines[0]!), "first line is letter-prefixed");
+    assert.ok(!/^\d+\. /.test(lines[0]!), "no numeric prefix in alpha mode");
+    const block = lines[lines.length - 1]!;
+    assert.match(block, /^\[logical chain/, "chain block has logical-chain header");
+    const refs = [...block.matchAll(/#([A-C])/g)].map((m) => m[1]);
+    assert.deepEqual(refs, ["A", "B", "C"], "chain block references members by letter in order");
+    store.close();
+  } finally {
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows handle-lock noise */ }
+  }
+});
+
 test("id render mode renders a branching DAG chain as a Mermaid flowchart with forks", () => {
   const root = mkdtempSync(join(tmpdir(), "chainrender-dag-"));
   try {
