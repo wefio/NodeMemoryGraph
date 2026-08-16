@@ -445,133 +445,13 @@ test("semantic retrieval exposes a tagged revocation boundary", async () => {
   }
 });
 
-test("chain members render as numbered lines plus an independent chain block", () => {
-  const root = mkdtempSync(join(tmpdir(), "chainrender-"));
-  try {
-    const store = new NmgStore(join(root, "nmg.sqlite"));
-    const cm: string[] = [];
-    for (const s of ["脚本误操作", "写入阻塞", "服务不可用"]) {
-      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: s, sessionId: "s1", sourceActor: "user" });
-      cm.push(m.memory.id);
-    }
-    const lc = store.createMemoryChain({ chainType: "logical", topic: "事故因果", ownerSessionId: "s1" });
-    cm.forEach((m, i) => store.addMemoryToChain({ chainId: lc.id, memoryId: m, position: i }));
-    const ctx = store.searchContext("脚本误操作", { sessionId: "s1", limit: 8, expandChains: true });
-    const memories = ctx.results.map((r) => ({
-      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
-      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
-      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
-    }));
-    const { lines } = projectMemoryContext(memories, false, new Map(), "numeric");
-    const text = lines.join("\n");
-    // Numbered lines: every rendered memory is prefixed with a 1-based index.
-    assert.ok(/^\d+\. /.test(lines[0]!), "first line is numbered");
-    // Chain block: independent section referencing members by index in order.
-    const block = lines[lines.length - 1]!;
-    assert.match(block, /^\[logical chain\]/);
-    const refs = [...block.matchAll(/#(\d+)/g)].map((m) => Number(m[1]));
-    assert.deepEqual(refs, [1, 2, 3], "chain block references member line numbers in order");
-    store.close();
-  } finally {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows handle-lock noise */ }
-  }
-});
+;
 
-test("id render mode tags lines with <short-uuid> and renders the chain as a Mermaid flowchart", () => {
-  const root = mkdtempSync(join(tmpdir(), "chainrender-id-"));
-  try {
-    const store = new NmgStore(join(root, "nmg.sqlite"));
-    const cm: string[] = [];
-    for (const s of ["脚本误操作", "写入阻塞", "服务不可用"]) {
-      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: s, sessionId: "s1", sourceActor: "user" });
-      cm.push(m.memory.id);
-    }
-    const lc = store.createMemoryChain({ chainType: "logical", topic: "事故因果", ownerSessionId: "s1" });
-    cm.forEach((m, i) => store.addMemoryToChain({ chainId: lc.id, memoryId: m, position: i }));
-    const ctx = store.searchContext("脚本误操作", { sessionId: "s1", limit: 8, expandChains: true });
-    const memories = ctx.results.map((r) => ({
-      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
-      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
-      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
-    }));
-    const { lines } = projectMemoryContext(memories, false, new Map(), "id");
-    // Lines are tagged [<short-uuid>] — not numeric, not a bare identifier.
-    assert.match(lines[0]!, /^<[A-Z]+:[0-9a-f]{8}> /, "first line is <letter:short-uuid>-tagged");
-    assert.ok(!/^\d+\. /.test(lines[0]!), "no numeric prefix in id mode");
-    // Chain block is a Mermaid flowchart referencing the same short ids.
-    const text = lines.join("\n");
-    assert.match(text, /flowchart LR/, "chain block uses Mermaid flowchart");
-    const edges = [...text.matchAll(/^\s+([0-9a-f]{8}) --> ([0-9a-f]{8})$/gm)].map((m) => [m[1], m[2]]);
-    assert.equal(edges.length, 2, "two edges for three members");
-    // Edges follow chain position order and reference ids that appear in lines.
-    assert.equal(edges[0]![1], edges[1]![0], "adjacent members share the connecting id");
-    const tagged = [...text.matchAll(/^<[A-Z]+:([0-9a-f]{8})>/gm)].map((m) => m[1]);
-    for (const [a] of edges) assert.ok(tagged.includes(a), "edge source id appears in the tagged lines");
-    store.close();
-  } finally {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows handle-lock noise */ }
-  }
-});
+;
 
-test("id render mode extends the prefix on collision until unique", () => {
-  // Two ids sharing the first segment: the renderer must extend to the second
-  // segment so each <tag> stays unique within the rendered set.
-  const mk = (memoryId: string, statement: string) => ({
-    memoryId,
-    nodeId: "n",
-    statement,
-    markers: [],
-    eventTime: null,
-    score: 1,
-    sourceRef: null,
-    chainMemberships: [{ chainId: "c1", position: 0, chainType: "logical" }],
-  });
-  const memories = [
-    mk("aaaa1111-1111-0000-0000-000000000001", "第一个事故"),
-    mk("aaaa1111-2222-0000-0000-000000000002", "第二个事故"),
-    mk("bbbb2222-0000-0000-0000-000000000003", "第三个事故"),
-  ];
-  const { lines } = projectMemoryContext(memories, false, new Map(), "id");
-  assert.match(lines[0]!, /^<[A-Z]+:aaaa1111-1111> /, "colliding id extended to second segment");
-  assert.match(lines[1]!, /^<[A-Z]+:aaaa1111-2222> /, "colliding id extended to second segment");
-  assert.match(lines[2]!, /^<[A-Z]+:bbbb2222> /, "unique id keeps shortest prefix");
-  const tags = [...lines.join("\n").matchAll(/<[A-Z]+:([0-9a-f-]+)>/g)].map((m) => m[1]);
-  assert.equal(new Set(tags).size, tags.length, "all rendered id tags are unique");
-});
+;
 
-test("id render mode renders temporal chains as a Mermaid timeline", () => {
-  const root = mkdtempSync(join(tmpdir(), "chainrender-timeline-"));
-  try {
-    const store = new NmgStore(join(root, "nmg.sqlite"));
-    const times = ["2024-03-15", "2024-03-16", "2024-03-17"];
-    const cm: string[] = [];
-    for (let i = 0; i < times.length; i += 1) {
-      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: `事件${i + 1}`, eventTime: times[i], sessionId: "s1", sourceActor: "user" });
-      cm.push(m.memory.id);
-    }
-    const tc = store.createMemoryChain({ chainType: "temporal", topic: "事故时间线", ownerSessionId: "s1" });
-    cm.forEach((m, i) => store.addMemoryToChain({ chainId: tc.id, memoryId: m, position: i }));
-    const ctx = store.searchContext("事件", { sessionId: "s1", limit: 8, expandChains: true });
-    const memories = ctx.results.map((r) => ({
-      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
-      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
-      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
-      chainMemberships: r.chainMemberships,
-    }));
-    const { lines } = projectMemoryContext(memories, true, new Map(), "id");
-    const text = lines.join("\n");
-    assert.match(text, /timeline/, "temporal chain renders as a Mermaid timeline");
-    const tls = [...text.matchAll(/^\s+(\S+) : ([0-9a-f]{8})$/gm)].map((m) => [m[1], m[2]]);
-    assert.equal(tls.length, 3, "three timeline entries");
-    assert.deepEqual(tls.map((t) => t[0]), ["2024-03-15", "2024-03-16", "2024-03-17"], "timeline in event-time order");
-    // Temporal-chain members drop the [time] tag on their line: chronology is
-    // owned by the dedicated timeline block, not duplicated per line.
-    assert.ok(!text.includes("[2024-03-15]"), "temporal member lines drop the [time] tag");
-    store.close();
-  } finally {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows handle-lock noise */ }
-  }
-});
+;
 
 test("idtime render mode keeps [time] on temporal member lines and drops the timeline block", () => {
   const root = mkdtempSync(join(tmpdir(), "chainrender-idtime-"));
@@ -605,69 +485,9 @@ test("idtime render mode keeps [time] on temporal member lines and drops the tim
   }
 });
 
-test("alpha render mode prefixes lines with A. B. C. and references chain members by letter", () => {
-  const root = mkdtempSync(join(tmpdir(), "chainrender-alpha-"));
-  try {
-    const store = new NmgStore(join(root, "nmg.sqlite"));
-    const cm: string[] = [];
-    for (const s of ["脚本误操作", "写入阻塞", "服务不可用"]) {
-      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: s, sessionId: "s1", sourceActor: "user" });
-      cm.push(m.memory.id);
-    }
-    const lc = store.createMemoryChain({ chainType: "logical", topic: "事故因果", ownerSessionId: "s1" });
-    cm.forEach((m, i) => store.addMemoryToChain({ chainId: lc.id, memoryId: m, position: i }));
-    const ctx = store.searchContext("脚本误操作", { sessionId: "s1", limit: 8, expandChains: true });
-    const memories = ctx.results.map((r) => ({
-      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
-      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
-      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
-      chainMemberships: r.chainMemberships,
-    }));
-    const { lines } = projectMemoryContext(memories, false, new Map(), "alpha");
-    assert.ok(/^[A-C]\. /.test(lines[0]!), "first line is letter-prefixed");
-    assert.ok(!/^\d+\. /.test(lines[0]!), "no numeric prefix in alpha mode");
-    const block = lines[lines.length - 1]!;
-    assert.match(block, /^\[logical chain/, "chain block has logical-chain header");
-    const refs = [...block.matchAll(/#([A-C])/g)].map((m) => m[1]);
-    assert.deepEqual(refs, ["A", "B", "C"], "chain block references members by letter in order");
-    store.close();
-  } finally {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows handle-lock noise */ }
-  }
-});
+;
 
-test("idbare render mode tags lines <short-id> [time] without the letter prefix and drops the timeline block", () => {
-  const root = mkdtempSync(join(tmpdir(), "chainrender-idbare-"));
-  try {
-    const store = new NmgStore(join(root, "nmg.sqlite"));
-    const times = ["2024-03-15", "2024-03-16", "2024-03-17"];
-    const cm: string[] = [];
-    for (let i = 0; i < times.length; i += 1) {
-      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: `事件${i + 1}`, eventTime: times[i], sessionId: "s1", sourceActor: "user" });
-      cm.push(m.memory.id);
-    }
-    const tc = store.createMemoryChain({ chainType: "temporal", topic: "事故时间线", ownerSessionId: "s1" });
-    cm.forEach((m, i) => store.addMemoryToChain({ chainId: tc.id, memoryId: m, position: i }));
-    const ctx = store.searchContext("事件", { sessionId: "s1", limit: 8, expandChains: true });
-    const memories = ctx.results.map((r) => ({
-      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
-      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
-      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
-      chainMemberships: r.chainMemberships,
-    }));
-    const { lines } = projectMemoryContext(memories, true, new Map(), "idbare");
-    const text = lines.join("\n");
-    // Lines keep [time] even for temporal members, tagged with a bare short-id.
-    assert.ok(text.includes("[2024-03-15]"), "temporal member lines keep [time] in idbare mode");
-    assert.match(lines[0]!, /^<[0-9a-f]{8}> /, "lines are <short-id>-tagged without a letter");
-    assert.ok(!/^<[A-Z]+:/.test(lines[0]!), "no letter prefix in idbare mode");
-    // No Mermaid timeline block.
-    assert.ok(!text.includes("timeline"), "no timeline block in idbare mode");
-    store.close();
-  } finally {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows handle-lock noise */ }
-  }
-});
+;
 
 test("id render mode renders a branching DAG chain as a Mermaid flowchart with forks", () => {
   const root = mkdtempSync(join(tmpdir(), "chainrender-dag-"));
@@ -697,7 +517,7 @@ test("id render mode renders a branching DAG chain as a Mermaid flowchart with f
       list.push({ sourceMemoryId: e.sourceMemoryId, targetMemoryId: e.targetMemoryId });
       chainEdges.set(e.chainId, list);
     }
-    const { lines } = projectMemoryContext(memories, true, new Map(), "id", chainEdges);
+    const { lines } = projectMemoryContext(memories, true, new Map(), "idtime", chainEdges);
     const text = lines.join("\n");
     assert.match(text, /flowchart LR/, "branching chain renders as a flowchart");
     assert.ok(text.includes(" & "), "fork is rendered with Mermaid & syntax");
@@ -709,34 +529,7 @@ test("id render mode renders a branching DAG chain as a Mermaid flowchart with f
   }
 });
 
-test("none render mode renders bare lines and drops the chain block", () => {
-  const root = mkdtempSync(join(tmpdir(), "chainrender-none-"));
-  try {
-    const store = new NmgStore(join(root, "nmg.sqlite"));
-    const cm: string[] = [];
-    for (const s of ["脚本误操作", "写入阻塞", "服务不可用"]) {
-      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: s, sessionId: "s1", sourceActor: "user" });
-      cm.push(m.memory.id);
-    }
-    const lc = store.createMemoryChain({ chainType: "logical", topic: "事故因果", ownerSessionId: "s1" });
-    cm.forEach((m, i) => store.addMemoryToChain({ chainId: lc.id, memoryId: m, position: i }));
-    const ctx = store.searchContext("脚本误操作", { sessionId: "s1", limit: 8, expandChains: true });
-    const memories = ctx.results.map((r) => ({
-      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
-      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
-      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
-    }));
-    const { lines } = projectMemoryContext(memories, false, new Map(), "none");
-    // Bare lines: no numeric/letter prefix.
-    assert.ok(!/^[0-9A-Z]\. /.test(lines[0]!), "no prefix in none mode");
-    // Chain block is dropped (no per-line label to reference).
-    const text = lines.join("\n");
-    assert.ok(!/\[.* chain\]/.test(text), "no chain block in none mode");
-    store.close();
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+;
 
 test("a memory in multiple chains renders in every chain block", () => {
   const root = mkdtempSync(join(tmpdir(), "multichain-"));
@@ -760,16 +553,18 @@ test("a memory in multiple chains renders in every chain block", () => {
       eventTime: r.memory.eventTime, score: r.combinedScore, sourceRef: r.evidence.sourceRef,
       chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType, chainMemberships: r.chainMemberships,
     }));
-    const { lines } = projectMemoryContext(memories, true, new Map(), "numeric");
+    const { lines } = projectMemoryContext(memories, true, new Map(), "idtime");
     const text = lines.join("\n");
-    const temporal = text.match(/\[temporal chain:[^\]]*\] ([^\n]*)/)?.[1] ?? "";
-    const logical = text.match(/\[logical chain:[^\]]*\] ([^\n]*)/)?.[1] ?? "";
-    const temporalRefs = [...temporal.matchAll(/#(\d+)/g)].map((x) => Number(x[1]));
-    const logicalRefs = [...logical.matchAll(/#(\d+)/g)].map((x) => Number(x[1]));
-    // The shared memory's line number appears in both chain blocks.
-    const sharedLine = memories.findIndex((mm) => mm.memoryId === hit!.memory.id) + 1;
-    assert.ok(temporalRefs.includes(sharedLine), "shared member in temporal chain block");
-    assert.ok(logicalRefs.includes(sharedLine), "shared member in logical chain block");
+    // idtime: temporal chains render no block; the shared member surfaces in
+    // the logical chain's flowchart and on its own tagged line.
+    assert.doesNotMatch(text, /\[temporal chain/, "temporal chain renders no block in idtime");
+    assert.match(text, /\[logical chain: 预算依赖链\]/);
+    assert.match(text, /flowchart LR/);
+    const sharedLine = memories.find((mm) => mm.memoryId === hit!.memory.id)!;
+    assert.ok(
+      lines.some((l) => l.includes("[2024-01-01]") && /<[A-Z]+:[0-9a-f]{8}>/.test(l)),
+      "shared member keeps a tagged [time] line",
+    );
     store.close();
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -784,12 +579,12 @@ test("multiple chains of the same type render with distinguishable topics", () =
       store.remember({ nodeName: name, nodeKind: "topic", nodeSummary: name, statement: stmt, sessionId: "s1", sourceActor: "user", eventTime: et });
     const b1 = mk("预算", "2023预算6500万", "2023-01-01");
     const b2 = mk("预算", "2024预算8000万", "2024-01-01");
-    const A = store.createMemoryChain({ chainType: "temporal", topic: "预算年度演进", ownerSessionId: "s1" });
+    const A = store.createMemoryChain({ chainType: "logical", topic: "预算年度演进", ownerSessionId: "s1" });
     store.addMemoryToChain({ chainId: A.id, memoryId: b1.memory.id, position: 0 });
     store.addMemoryToChain({ chainId: A.id, memoryId: b2.memory.id, position: 1 });
     const e1 = mk("事故", "故障凌晨发生", "2024-03-01");
     const e2 = mk("事故", "故障次日恢复", "2024-03-02");
-    const C = store.createMemoryChain({ chainType: "temporal", topic: "事故时间线", ownerSessionId: "s1" });
+    const C = store.createMemoryChain({ chainType: "logical", topic: "事故时间线", ownerSessionId: "s1" });
     store.addMemoryToChain({ chainId: C.id, memoryId: e1.memory.id, position: 0 });
     store.addMemoryToChain({ chainId: C.id, memoryId: e2.memory.id, position: 1 });
 
@@ -799,10 +594,10 @@ test("multiple chains of the same type render with distinguishable topics", () =
       eventTime: r.memory.eventTime, score: r.combinedScore, sourceRef: r.evidence.sourceRef,
       chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType, chainMemberships: r.chainMemberships,
     }));
-    const { lines } = projectMemoryContext(memories, true, new Map(), "numeric");
+    const { lines } = projectMemoryContext(memories, true, new Map(), "idtime");
     const text = lines.join("\n");
-    assert.match(text, /\[temporal chain: 预算年度演进\]/);
-    assert.match(text, /\[temporal chain: 事故时间线\]/);
+    assert.match(text, /\[logical chain: 预算年度演进\]/);
+    assert.match(text, /\[logical chain: 事故时间线\]/);
     store.close();
   } finally {
     rmSync(root, { recursive: true, force: true });

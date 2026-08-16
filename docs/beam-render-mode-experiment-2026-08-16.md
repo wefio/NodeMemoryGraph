@@ -32,6 +32,17 @@
 
 **决策**：默认渲染 `numeric → idtime`（commit `3838eece`）。
 
+## 代码落地：只留 idtime（commit 待填）
+
+实验定案后按用户要求只保留一个渲染模式：
+
+- `MemoryRenderMode` 类型保留 6 值 union（历史记录），但**运行时只有 idtime 生效**：
+  - `renderMode` 恒为 `"idtime"`（NMG_RENDER_MODE env 切换被注释）
+  - 行渲染只保留 `<字母:短id> [time]` 分支
+  - 链块只保留 idtime 逻辑（时间链不渲染块、逻辑链 Mermaid flowchart）
+  - 其他 5 个模式分支（none/numeric/alpha/id/idbare）全部**注释保留为实验记录**，不删除
+- 测试：删除 6 个非 idtime 渲染测试（numeric / id×3 / alpha / idbare / none），多链/同类型话题/DAG 分叉测试改写为 idtime 语义（时间链无块、逻辑链 flowchart、共享成员带标签行）——bridge 测试 17 → 10，全量 853 全绿。
+
 ## 相关论文调研
 
 ### RAG 位置偏差（数字序号的伤害机制）

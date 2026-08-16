@@ -382,17 +382,19 @@ export class OmniMemEvalBridge {
     // retrieved memory contradicts another memory (claims metadata), the
     // note is rendered into the context regardless of the caller.
     const notes = store.contradictionNotes(memories.map((m) => m.memoryId));
-    // Default render mode is "idtime" (BEAM event_ordering 6-mode A/B, 2026-08-16:
-    // <A:short-id> [time] lines, no timeline block — the highest of six same-param
-    // variants). Env override lets the eval harness switch modes without rebuild.
-    const renderMode: MemoryRenderMode =
-      process.env.NMG_RENDER_MODE === "id" ||
-      process.env.NMG_RENDER_MODE === "idbare" ||
-      process.env.NMG_RENDER_MODE === "idtime" ||
-      process.env.NMG_RENDER_MODE === "alpha" ||
-      process.env.NMG_RENDER_MODE === "none"
-        ? process.env.NMG_RENDER_MODE
-        : "idtime";
+    // Render-mode lock: only idtime is active (BEAM 6-mode same-param A/B,
+    // 2026-08-16: <A:short-id> [time] lines, no timeline block — highest of
+    // the six variants). The env override and the other five modes are kept
+    // below in commented form purely as the experiment record.
+    // const renderMode: MemoryRenderMode =
+    //   process.env.NMG_RENDER_MODE === "id" ||
+    //   process.env.NMG_RENDER_MODE === "idbare" ||
+    //   process.env.NMG_RENDER_MODE === "idtime" ||
+    //   process.env.NMG_RENDER_MODE === "alpha" ||
+    //   process.env.NMG_RENDER_MODE === "none"
+    //     ? process.env.NMG_RENDER_MODE
+    //     : "idtime";
+    const renderMode: MemoryRenderMode = "idtime";
     const chainEdges = new Map<string, Array<{ sourceMemoryId: string; targetMemoryId: string }>>();
     for (const e of context.chainEdges ?? []) {
       const list = chainEdges.get(e.chainId) ?? [];
@@ -512,10 +514,12 @@ export function projectMemoryContext(
   renderMode: MemoryRenderMode = "idtime",
   chainEdges: ReadonlyMap<string, Array<{ sourceMemoryId: string; targetMemoryId: string }>> = new Map(),
 ): { lines: string[]; hasForget: boolean } {
-  const idPrefixes =
-    renderMode === "id" || renderMode === "idbare" || renderMode === "idtime"
-      ? shortestUniquePrefixes(memories.map((m) => m.memoryId))
-      : new Map<string, string>();
+  // idtime always carries short-id prefixes (other modes commented out).
+  // const idPrefixes =
+  //   renderMode === "id" || renderMode === "idbare" || renderMode === "idtime"
+  //     ? shortestUniquePrefixes(memories.map((m) => m.memoryId))
+  //     : new Map<string, string>();
+  const idPrefixes = shortestUniquePrefixes(memories.map((m) => m.memoryId));
   const projectedKinds = new Set<string>();
   const lines: string[] = [];
   const indexByMemory = new Map<string, number>();
@@ -538,12 +542,14 @@ export function projectMemoryContext(
     // Mermaid timeline block (time : short-id), so their line drops the [time]
     // tag to avoid duplicating the time dimension — except in "idtime" mode,
     // which keeps [time] on every line and skips the timeline block entirely.
-    const isTemporalMember =
-      renderMode !== "idtime" &&
-      renderMode !== "idbare" &&
-      (memory.chainMemberships?.some((m) => m.chainType === "temporal") ?? false);
+    // idtime keeps [time] on every line, temporal-chain members included; the
+    // timeline block is dropped, so chronology lives entirely on the line.
+    // const isTemporalMember =
+    //   renderMode !== "idtime" &&
+    //   renderMode !== "idbare" &&
+    //   (memory.chainMemberships?.some((m) => m.chainType === "temporal") ?? false);
     const base =
-      includeTime && memory.eventTime && !isTemporalMember
+      includeTime && memory.eventTime
         ? `[${memory.eventTime}] ${memory.statement}`
         : memory.statement;
     const rendered = forget
@@ -556,20 +562,25 @@ export function projectMemoryContext(
     // block can reference members by index; "id" prefixes with [<short-uuid>
     // — a stable real memory identifier wrapped in <> so it cannot be mistaken
     // for content; "none" renders bare lines and drops the chain block.
-    let numbered: string;
-    if (renderMode === "none") {
-      numbered = rendered;
-    } else if (renderMode === "alpha") {
-      numbered = `${String.fromCharCode(65 + lines.length)}. ${rendered}`;
-    } else if (renderMode === "idbare") {
-      const short = idPrefixes.get(memory.memoryId);
-      numbered = short === undefined ? rendered : `<${short}> ${rendered}`;
-    } else if (renderMode === "id" || renderMode === "idtime") {
-      const short = idPrefixes.get(memory.memoryId);
-      numbered = short === undefined ? rendered : `<${columnLetter(lines.length)}:${short}> ${rendered}`;
-    } else {
-      numbered = `${lines.length + 1}. ${rendered}`;
-    }
+    // Render-mode lock: idtime only. The other five branches (none / alpha /
+    // idbare / id / numeric) are commented out — they are the experiment record
+    // from the 2026-08-16 A/B, superseded by idtime.
+    // let numbered: string;
+    // if (renderMode === "none") {
+    //   numbered = rendered;
+    // } else if (renderMode === "alpha") {
+    //   numbered = `${String.fromCharCode(65 + lines.length)}. ${rendered}`;
+    // } else if (renderMode === "idbare") {
+    //   const short = idPrefixes.get(memory.memoryId);
+    //   numbered = short === undefined ? rendered : `<${short}> ${rendered}`;
+    // } else if (renderMode === "id" || renderMode === "idtime") {
+    //   const short = idPrefixes.get(memory.memoryId);
+    //   numbered = short === undefined ? rendered : `<${columnLetter(lines.length)}:${short}> ${rendered}`;
+    // } else {
+    //   numbered = `${lines.length + 1}. ${rendered}`;
+    // }
+    const short = idPrefixes.get(memory.memoryId);
+    const numbered = short === undefined ? rendered : `<${columnLetter(lines.length)}:${short}> ${rendered}`;
     indexByMemory.set(memory.memoryId, lines.length);
     lines.push(note ? `${numbered}\n${note}` : numbered);
   }
@@ -599,16 +610,16 @@ export function projectMemoryContext(
       chains.set(membership.chainId, chain);
     }
   }
-  if (chains.size > 0 && renderMode !== "none") {
+  if (chains.size > 0) {
     lines.push("");
     for (const [chainId, chain] of chains) {
       chain.members.sort((a, b) => a.position - b.position);
       const label = chain.topic ? `${chain.chainType} chain: ${chain.topic}` : `${chain.chainType} chain`;
-      if (renderMode === "id" || renderMode === "idbare" || renderMode === "idtime") {
-        // In "idtime"/"idbare" modes temporal chains render no Mermaid block at
-        // all — chronology lives on the line as [time]. Logical chains keep
-        // their flowchart.
-        if ((renderMode === "idtime" || renderMode === "idbare") && chain.chainType === "temporal") continue;
+      // Render-mode lock: idtime — temporal chains render no block at all
+      // (chronology lives on the line as [time]); logical chains keep their
+      // Mermaid flowchart. The pre-idtime else branch (numbered "#N → #M"
+      // chain lines for numeric/alpha) is commented out below as record.
+      if (chain.chainType === "temporal") continue;
         // Mermaid-flavoured chain block. Explicit DAG edges (memory_chain_edges)
         // render the chain as a branching flowchart (`A --> B & C`); a purely
         // linear temporal chain renders as a timeline (time : member). When a
@@ -688,14 +699,13 @@ export function projectMemoryContext(
             }
           }
         }
-      } else {
-        const seq = chain.members
-          .map((member) => indexByMemory.get(member.id))
-          .filter((i): i is number => i !== undefined)
-          .map((i) => (renderMode === "alpha" ? `#${String.fromCharCode(65 + i)}` : `#${i + 1}`))
-          .join(" → ");
-        if (seq) lines.push(`[${label}] ${seq}`);
-      }
+      // } // pre-idtime numeric/alpha chain lines — commented out as record:
+      // const seq = chain.members
+      //   .map((member) => indexByMemory.get(member.id))
+      //   .filter((i): i is number => i !== undefined)
+      //   .map((i) => (renderMode === "alpha" ? `#${String.fromCharCode(65 + i)}` : `#${i + 1}`))
+      //   .join(" → ");
+      // if (seq) lines.push(`[${label}] ${seq}`);
     }
   }
   return { lines, hasForget: projectedKinds.has("forget") };
