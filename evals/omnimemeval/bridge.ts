@@ -896,6 +896,11 @@ async function run(): Promise<void> {
     strongHitInitialTarget: process.env.NMG_QPP_STRONG_HIT_INITIAL_TARGET
       ? Number(process.env.NMG_QPP_STRONG_HIT_INITIAL_TARGET)
       : undefined,
+    chainInjection: ["temporal", "logical", "both", "none"].includes(
+      process.env.NMG_CHAIN_INJECTION ?? "",
+    )
+      ? (process.env.NMG_CHAIN_INJECTION as "temporal" | "logical" | "both" | "none")
+      : "none",
   });
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 
