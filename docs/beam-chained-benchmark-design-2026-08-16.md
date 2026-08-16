@@ -80,3 +80,25 @@ createMemoryChain({ chainType: "logical", topic: <会话>, ownerSessionId })
 2. **逻辑链语义**：消息序 ≈ 因果序的近似度——合成数据里消息本来就是按时间/因果铺的，近似合理。
 3. **DAG 边**：先线性 position；后续要不要对逻辑链注入分叉边（同一 node 多分支）？
 4. **expandChains 开关**：为区分检索增强 vs 呈现，是否加 `expandChains=false` 对照？
+
+## 实验结果（2026-08-16，400 问全量，idtime + 新参数）
+
+| 组 | 整体 | event_ordering | summarization | info_extraction | multi_session | temporal_reasoning | instruction |
+|---|---|---|---|---|---|---|---|
+| none（基线） | 0.6568 | 0.1892 | 0.4652 | 0.7668 | 0.6595 | 0.6000 | 0.8000 |
+| temporal | 0.6755 (+1.87pp) | 0.2173 | **0.6958** | **0.8764** | **0.7363** | 0.5687 | 0.8125 |
+| logical | **0.6867 (+3.0pp)** | **0.2379** | 0.6891 | 0.8458 | 0.6400 | **0.6896** | **0.8708** |
+| both | 0.5624 (-9.4pp) | 0.0269 | 0.3181 | 0.7792 | 0.4530 | 0.6771 | 0.7125 |
+
+### 结论
+
+1. **单链注入提升真实有效**：logical +3.0pp、temporal +1.87pp；event_ordering +2.8~4.9pp；summarization 单链 **+23pp**（0.4652 → 0.69）。
+2. **链价值 = expandChains 检索增强**（不是渲染块）：temporal 链在 idtime 下不渲染块也提升——窗口展开把同链相邻记忆拉进上下文。
+3. **both 灾难性下降**（0.5624，event_ordering 0.0269 / summarization 0.3181 / multi_session 0.4530）——**双链上下文膨胀稀释 LLM 有效预算**，关键信息被淹没。
+4. **单链各有优势维度**：temporal 强 info_extraction / multi_session / summarization；logical 强 instruction / temporal_reasoning / event_ordering——**但不能叠加**。
+
+### 对真实链设计的启示
+
+- **单链策略**：检索只展开最相关的一条链，避免多链同时展开。
+- **链展开预算封顶**：`chainExpansionWindow` 是单链内预算；还需要**跨链总预算**（both 就是无跨链预算的教训）。
+- 真实链场景（codex-root 自然链）通常天然单链——此结论提示：**检索展开时若命中多条链，选相关性最高的一条**，而非全部展开。
