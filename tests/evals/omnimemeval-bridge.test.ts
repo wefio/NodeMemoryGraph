@@ -603,3 +603,57 @@ test("multiple chains of the same type render with distinguishable topics", () =
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("chainInjection=both links same-session memories into temporal and logical chains", async () => {
+  const root = mkdtempSync(join(tmpdir(), "nmg-omni-chaininj-"));
+  const bridge = new OmniMemEvalBridge(root, {
+    chainInjection: "both",
+    embeddingClient: {
+      indexId: "chaininj@v1",
+      async embedDocuments(inputs) {
+        return inputs.map((input) =>
+          /服务器|监控|磁盘/i.test(input) ? [1, 0] : [0, 1],
+        );
+      },
+      async embedQueries() {
+        return [[1, 0]];
+      },
+    },
+  });
+  try {
+    await bridge.handle({
+      id: 1,
+      op: "add",
+      userId: "alice",
+      messages: [
+        { role: "user", content: "我在2024年3月买了台服务器", chat_time: "2024-03-01T00:00:00+00:00" },
+        { role: "user", content: "6月部署了监控", chat_time: "2024-06-01T00:00:00+00:00" },
+        { role: "user", content: "9月升级了磁盘", chat_time: "2024-09-01T00:00:00+00:00" },
+      ],
+    });
+    const result = (await bridge.handle({
+      id: 2,
+      op: "search",
+      userId: "alice",
+      query: "服务器监控",
+      topK: 5,
+    })) as {
+      text: string;
+      memories: Array<{ statement: string; chainMemberships?: Array<{ chainType?: string }> }>;
+    };
+    const temporal = result.memories.find((m) =>
+      m.chainMemberships?.some((c) => c.chainType === "temporal"),
+    );
+    const logical = result.memories.find((m) =>
+      m.chainMemberships?.some((c) => c.chainType === "logical"),
+    );
+    assert.ok(temporal, "temporal chain surfaced via expandChains");
+    assert.ok(logical, "logical chain surfaced via expandChains");
+    assert.match(result.text, /\[logical chain/);
+    assert.match(result.text, /flowchart LR/);
+    assert.doesNotMatch(result.text, /timeline/, "idtime renders no timeline block");
+  } finally {
+    bridge.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

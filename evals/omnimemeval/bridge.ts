@@ -103,6 +103,12 @@ export interface OmniMemEvalBridgeOptions {
   perfLogPath?: string;
   /** Override the persistent content-addressed embedding cache location. */
   embeddingCachePath?: string;
+  /** Eval-only benchmark construction: after ingest, link same-session
+   *  conversation memories into chains. "temporal" orders by eventTime,
+   *  "logical" by message order, "both" creates both chains, "none"
+   *  (default) leaves BEAM chain-free. Synthetic, explicit benchmark
+   *  construction — not runtime auto-inference. */
+  chainInjection?: "temporal" | "logical" | "both" | "none";
 }
 
 /**
@@ -126,6 +132,7 @@ export class OmniMemEvalBridge {
   readonly #strongHitInitialTarget?: number;
   readonly #perfLogPath: string;
   readonly #judge?: JudgeClient;
+  readonly #chainInjection: "temporal" | "logical" | "both" | "none";
 
   constructor(root: string, options: OmniMemEvalBridgeOptions = {}) {
     this.#root = resolve(root);
@@ -147,6 +154,7 @@ export class OmniMemEvalBridge {
     this.#strongHitInitialTarget = positiveNumber(options.strongHitInitialTarget);
     this.#perfLogPath = resolve(options.perfLogPath ?? resolve(this.#root, "search-perf.jsonl"));
     this.#judge = createJudgeClientFromEnv();
+    this.#chainInjection = options.chainInjection ?? "none";
     mkdirSync(this.#root, { recursive: true });
   }
 
@@ -195,6 +203,9 @@ export class OmniMemEvalBridge {
       .slice(0, 1_500);
     let added = 0;
     const memories: string[] = [];
+    // Conversation-evidence memories of this add, kept in message order so the
+    // eval-only chain injection (below) can link them into chains.
+    const dialogMemories: Array<{ memoryId: string; eventTime?: string; order: number }> = [];
     // Supersession judge tasks are collected during the (serial) write pass,
     // then the LLM calls run concurrently so the judge is not an ingestion
     // bottleneck; only the small applySupersession writes stay serial.
@@ -254,7 +265,10 @@ export class OmniMemEvalBridge {
         importance: role === "user" ? 0.6 : 0.4,
         scope: { benchmark: "OmniMemEval", user: userKey(userId) },
       });
-      if (remembered.memory) memories.push(remembered.memory.statement);
+      if (remembered.memory) {
+        memories.push(remembered.memory.statement);
+        dialogMemories.push({ memoryId: remembered.memory.id, eventTime: message.chat_time, order: index });
+      }
       // Simulate the NMG plugin's write path: when the new statement shares
       // tokens with same-scope memories, ask the external LLM judge whether
       // any candidate is a stale predecessor; if so mark it superseded so
@@ -310,6 +324,34 @@ export class OmniMemEvalBridge {
             }
           }
         }
+      }
+    }
+    // Eval-only chain injection (benchmark construction): after supersession
+    // settles so chains reference only final memories. Same-session
+    // conversation memories become a temporal chain (by eventTime) and/or a
+    // logical chain (by message order). Explicit, synthetic — not runtime
+    // auto-inference of chain direction.
+    if (this.#chainInjection !== "none" && dialogMemories.length > 0) {
+      const topic = `Conversation ${batchIdentity(messages)}`;
+      if (this.#chainInjection === "temporal" || this.#chainInjection === "both") {
+        const sorted = [...dialogMemories].sort((a, b) => {
+          const ta = a.eventTime ? Date.parse(a.eventTime) : Number.NaN;
+          const tb = b.eventTime ? Date.parse(b.eventTime) : Number.NaN;
+          const fa = Number.isFinite(ta);
+          const fb = Number.isFinite(tb);
+          if (fa && fb) return ta - tb;
+          if (fa) return -1;
+          if (fb) return 1;
+          return a.order - b.order;
+        });
+        const chain = store.createMemoryChain({ chainType: "temporal", topic, ownerSessionId: sessionId });
+        sorted.forEach((m, i) => store.addMemoryToChain({ chainId: chain.id, memoryId: m.memoryId, position: i }));
+      }
+      if (this.#chainInjection === "logical" || this.#chainInjection === "both") {
+        const chain = store.createMemoryChain({ chainType: "logical", topic, ownerSessionId: sessionId });
+        [...dialogMemories]
+          .sort((a, b) => a.order - b.order)
+          .forEach((m, i) => store.addMemoryToChain({ chainId: chain.id, memoryId: m.memoryId, position: i }));
       }
     }
     return { added, memories };
