@@ -1,6 +1,6 @@
 /**
  * maintenance cluster of NmgStore methods — official TypeScript mixin pattern
- * (docs/store-cluster-split.md, cluster-dag.test.ts).
+ * (docs/design/store-cluster-split.md, cluster-dag.test.ts).
  *
  * The mixin adds the cluster's methods to any base class; store.ts assembles
  * NmgStore = withGraph(withRetrieval(withWrites(withMaintenance(Base)))).
@@ -19,6 +19,7 @@ import type {
   EmbeddingIndexHealth,
   HistoryRecord,
   LeafBlock,
+  LeafSummaryTask,
   MaintenanceBatchResult,
   MemoryNode,
   MemoryNodeKind,
@@ -52,6 +53,7 @@ import {
   failEmbeddingIndex,
 } from "./embedding-index.ts";
 import { parseNumberArray, parseStringArray } from "./row-parse.ts";
+import { ftsIndexedText } from "./search-ranking.ts";
 import {
   canonicalNodeIdentity,
   clamp,
@@ -474,7 +476,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
      * reusing deleteMemory's full cascade (FTS/embeddings/traces/proposals).
      * Shared rows (session_id NULL: cached_from_ltg / LTG) are untouched.
      * Returns the number of memories removed. Used by STG session lifecycle:
-     * docs/stg-shared-store-v2-2026-08-12.md §3.3.
+     * docs/design/stg-shared-store-v2-2026-08-12.md §3.3.
      */
     purgeSession(sessionId: string): number {
       const rows = this.db
@@ -753,7 +755,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
     ): MemoryRecord {
       const memory = this.requireActiveMemory(memoryId);
       if (memory.residence === "ltg") return memory;
-      // Loop guard (docs/stg-isolated-store.md §3): a cached_from_ltg memory is
+      // Loop guard (docs/design/stg-isolated-store.md §3): a cached_from_ltg memory is
       // already LTG content — promoting it would create a copy cycle. Refuse.
       if (memory.markers.some((marker) => marker.kind === "cached_from_ltg")) {
         throw new Error(
@@ -1774,6 +1776,122 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         .prepare("SELECT node_id FROM leaf_block_status WHERE dirty = 1 ORDER BY node_id")
         .all() as Row[];
       return rows.map((row) => String(row.node_id));
+    }
+
+    /** Membership fingerprint of a block: "count:id,id,…" in ordinal order.
+     *  Block ids are content-addressed (stableLeafBlockId), so a membership
+     *  change normally means a new block id — the key is a cheap guard for
+     *  in-place member status flips (active/disputed filtering). */
+    #leafMembersKey(blockId: string): string {
+      const row = this.db
+        .prepare(
+          `SELECT COUNT(*) || ':' || IFNULL(GROUP_CONCAT(memory_id, ','), '') AS key
+             FROM (SELECT lm.memory_id FROM memory_leaf_members lm
+                   JOIN memory_records m ON m.id = lm.memory_id
+                   WHERE lm.block_id = ? AND m.status IN ('active', 'disputed')
+                     AND m.storage_state = 'indexed'
+                   ORDER BY lm.ordinal)`,
+        )
+        .get(blockId) as Row;
+      return String(row.key);
+    }
+
+    /** Blocks whose semantic summary is missing or stale (membership changed
+     *  since it was written). The store stays LLM-free: an external
+     *  LeafSummaryProvider summarizes the returned tasks and persists results
+     *  via setLeafSummary. Scans blocks oldest-first so the longest-unsummarized
+     *  blocks go first. */
+    pendingLeafSummaries(
+      options: { limit?: number; scan?: number; statementCountCap?: number; statementCharCap?: number } = {},
+    ): LeafSummaryTask[] {
+      const limit = Math.max(1, Math.min(options.limit ?? 64, 512));
+      const scan = Math.max(limit, Math.min(options.scan ?? 2_048, 16_384));
+      const statementCountCap = Math.max(1, Math.min(options.statementCountCap ?? 48, 128));
+      const statementCharCap = Math.max(32, Math.min(options.statementCharCap ?? 400, 4_000));
+      const rows = this.db
+        .prepare(
+          `SELECT b.id, b.node_id, b.memory_count, b.semantic_members_key, n.canonical_name
+             FROM memory_leaf_blocks b
+             JOIN memory_nodes n ON n.id = b.node_id
+            WHERE n.status = 'active'
+            ORDER BY b.updated_at ASC, b.id ASC
+            LIMIT ?`,
+        )
+        .all(scan) as Row[];
+      const statementQuery = this.db.prepare(
+        `SELECT m.statement FROM memory_leaf_members lm
+           JOIN memory_records m ON m.id = lm.memory_id
+          WHERE lm.block_id = ? AND m.status IN ('active', 'disputed')
+            AND m.storage_state = 'indexed'
+          ORDER BY lm.ordinal LIMIT ?`,
+      );
+      const tasks: LeafSummaryTask[] = [];
+      for (const row of rows) {
+        if (tasks.length >= limit) break;
+        const blockId = String(row.id);
+        const membersKey = this.#leafMembersKey(blockId);
+        if (String(row.semantic_members_key ?? "") === membersKey) continue;
+        const statements = (statementQuery.all(blockId, statementCountCap) as Row[]).map(
+          (statement) => {
+            const text = String(statement.statement);
+            return text.length > statementCharCap ? `${text.slice(0, statementCharCap)}…` : text;
+          },
+        );
+        if (statements.length === 0) continue;
+        tasks.push({
+          blockId,
+          nodeId: String(row.node_id),
+          nodeName: String(row.canonical_name),
+          membersKey,
+          memoryCount: Number(row.memory_count),
+          statements,
+        });
+      }
+      return tasks;
+    }
+
+    /** Persist an externally written semantic summary for a block. Rejects
+     *  stale writes whose membership fingerprint no longer matches (the block
+     *  changed while the LLM call was in flight) — the caller re-collects via
+     *  pendingLeafSummaries. Bumps updated_at so the leaf-embedding staleness
+     *  check re-embeds the block with the semantic text, and (re)indexes the
+     *  summary into the block FTS table for lexical routing. */
+    setLeafSummary(
+      blockId: string,
+      summary: string,
+      model: string,
+      membersKey: string,
+    ): boolean {
+      const text = summary.trim();
+      if (!text) throw new Error("leaf summary must not be empty");
+      if (!model.trim()) throw new Error("leaf summary model is required");
+      const exists = this.db
+        .prepare("SELECT id FROM memory_leaf_blocks WHERE id = ?")
+        .get(blockId) as Row | undefined;
+      if (!exists) return false;
+      if (this.#leafMembersKey(blockId) !== membersKey) return false;
+      const now = new Date().toISOString();
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db
+          .prepare(
+            `UPDATE memory_leaf_blocks
+                SET semantic_summary = ?, semantic_summary_model = ?,
+                    semantic_members_key = ?, semantic_summary_at = ?, updated_at = ?
+              WHERE id = ?`,
+          )
+          .run(text, model.trim(), membersKey, now, now, blockId);
+        this.db.prepare("DELETE FROM memory_leaf_fts WHERE block_id = ?").run(blockId);
+        this.db
+          .prepare("INSERT INTO memory_leaf_fts(block_id, summary) VALUES (?, ?)")
+          .run(blockId, ftsIndexedText(text));
+        this.db.exec("COMMIT");
+        this.invalidateVectorCaches("leaf");
+        return true;
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
     }
 
     pendingIndexDelta(nodeId?: string, limit = 512): string[] {

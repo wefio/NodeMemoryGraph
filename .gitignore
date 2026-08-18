@@ -61,3 +61,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 results/
+
+# pnpm content-addressable store cache (never commit)
+.pnpm-store/

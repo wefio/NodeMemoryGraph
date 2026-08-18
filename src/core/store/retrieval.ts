@@ -1,6 +1,6 @@
 /**
  * retrieval cluster of NmgStore methods — official TypeScript mixin pattern
- * (docs/store-cluster-split.md, cluster-dag.test.ts).
+ * (docs/design/store-cluster-split.md, cluster-dag.test.ts).
  *
  * The mixin adds the cluster's methods to any base class; store.ts assembles
  * NmgStore = withGraph(withRetrieval(withWrites(withMaintenance(Base)))).
@@ -33,6 +33,7 @@ import {
 import { propagateEdgeActivation } from "../edge-activation.ts";
 import {
   contextUsefulness,
+  ftsExpression,
   hybridScore,
   lexicalScore,
   mergeSemanticCandidates,
@@ -835,6 +836,116 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           }
         }
       }
+      // Leaf-block summary routing (opt-in): blocks whose LLM-written semantic
+      // summary matches the query pull their members into the context verbatim,
+      // appended after ranked results and chain expansions. The summary is an
+      // index — matched against, never surfaced as a result — and the ranking
+      // above is untouched (same contract as chain expansion, docs §3.1).
+      if (options.leafBlockRouting) {
+        const maxMembers = Math.max(1, Math.min(options.leafBlockRoutingMaxMembers ?? 12, 50));
+        // Block hits come from the summary FTS index in every mode; with a
+        // semantic query vector the leaf-embedding route adds blocks whose
+        // summaries match semantically but share no terms with the query.
+        const hitBlockIds: string[] = [];
+        const pushHits = (ids: readonly string[]): void => {
+          for (const id of ids) {
+            if (!hitBlockIds.includes(id) && hitBlockIds.length < 3) hitBlockIds.push(id);
+          }
+        };
+        pushHits(this.routeLeafBlocksByFts(query, 3).map((hit) => hit.blockId));
+        if (semantic) {
+          pushHits(
+            this.routeLeafBlocksByVector(semantic.queryVector, semantic.model, [], 3).map(
+              (route) => route.block.id,
+            ),
+          );
+        }
+        // Only summarized blocks expand — the semantic summary is the index
+        // under test; structural-label blocks are not.
+        const summarized = new Set(
+          hitBlockIds.length === 0
+            ? []
+            : (
+                this.db
+                  .prepare(
+                    `SELECT id FROM memory_leaf_blocks
+                     WHERE semantic_summary IS NOT NULL
+                       AND id IN (${hitBlockIds.map(() => "?").join(",")})`,
+                  )
+                  .all(...hitBlockIds) as Row[]
+              ).map((row) => String(row.id)),
+        );
+        const expansions = hitBlockIds.filter((id) => summarized.has(id));
+        if (expansions.length > 0) {
+          const seen = new Set(context.results.map((result) => result.memory.id));
+          // Noise control: within a hit block, members with query-term overlap
+          // go first (score desc), ordinal order fills the per-block share;
+          // the appended set is emitted in ordinal order so chronology
+          // survives (event-ordering queries read order, not rank).
+          const queryText = normalize(query);
+          const terms = queryText.includes(" ")
+            ? queryText.split(" ").filter((term) => term.length >= 3)
+            : /[\u4e00-\u9fff]/u.test(queryText)
+              ? // CJK has no word boundaries: score by bigram shingles.
+                Array.from({ length: Math.max(0, queryText.length - 1) }, (_, i) =>
+                  queryText.slice(i, i + 2),
+                )
+              : // A single Latin word stays one term — bigramming it would
+                // substring-match half the lexicon.
+                [queryText];
+          const termScore = (statement: string): number => {
+            const haystack = normalize(statement);
+            return terms.reduce(
+              (score, term) => score + (term && haystack.includes(term) ? term.length : 0),
+              0,
+            );
+          };
+          const perBlock = Math.max(2, Math.ceil(maxMembers / expansions.length));
+          const toFetch: string[] = [];
+          const blockOf = new Map<string, string>();
+          for (const blockId of expansions) {
+            const memberRows = this.db
+              .prepare(
+                `SELECT lm.memory_id, lm.ordinal, m.statement
+                   FROM memory_leaf_members lm
+                   JOIN memory_records m ON m.id = lm.memory_id
+                  WHERE lm.block_id = ? ORDER BY lm.ordinal`,
+              )
+              .all(blockId) as Row[];
+            const ranked = memberRows
+              .map((row) => ({
+                memoryId: String(row.memory_id),
+                ordinal: Number(row.ordinal),
+                score: termScore(String(row.statement)),
+              }))
+              .filter((member) => !seen.has(member.memoryId));
+            const chosen = new Set(
+              ranked
+                .filter((member) => member.score > 0)
+                .sort((a, b) => b.score - a.score || a.ordinal - b.ordinal)
+                .slice(0, perBlock)
+                .map((member) => member.memoryId),
+            );
+            for (const member of ranked) {
+              if (chosen.size >= perBlock) break;
+              chosen.add(member.memoryId);
+            }
+            for (const member of ranked) {
+              if (toFetch.length >= maxMembers) break;
+              if (!chosen.has(member.memoryId)) continue;
+              seen.add(member.memoryId);
+              toFetch.push(member.memoryId);
+              blockOf.set(member.memoryId, blockId);
+            }
+            if (toFetch.length >= maxMembers) break;
+          }
+          if (toFetch.length > 0) {
+            for (const result of this.getContext(toFetch, 0, options.sessionId).results) {
+              context.results.push({ ...result, leafBlockId: blockOf.get(result.memory.id) });
+            }
+          }
+        }
+      }
       return context;
     }
 
@@ -846,7 +957,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
      * no ANN or lexical re-search occurs. This wrapper only provides explicit
      * opt-in.
      *
-     * See docs/retrieval-confidence-controller.md §2 Stage 0.
+     * See docs/design/retrieval-confidence-controller.md §2 Stage 0.
      */
     searchContextWithSecondPass(
       query: string,
@@ -1022,6 +1133,24 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         },
         [...new Set(candidateMemoryIds)].slice(0, 2_000),
       );
+    }
+
+    /** Lexical routing over the block semantic-summary FTS index. Only blocks
+     *  carrying an LLM-written summary are indexed, so this returns [] unless
+     *  a LeafSummaryProvider has run. FTS5 bm25 ranks lower-is-better; the
+     *  negated score descends with relevance. */
+    routeLeafBlocksByFts(query: string, limit = 3): Array<{ blockId: string; score: number }> {
+      const expression = ftsExpression(query);
+      if (!expression) return [];
+      const rows = this.db
+        .prepare(
+          `SELECT block_id, bm25(memory_leaf_fts) AS rank
+             FROM memory_leaf_fts
+            WHERE memory_leaf_fts MATCH ?
+            ORDER BY rank LIMIT ?`,
+        )
+        .all(expression, Math.max(1, Math.min(limit, 50))) as Row[];
+      return rows.map((row) => ({ blockId: String(row.block_id), score: -Number(row.rank) }));
     }
 
     searchLeafBlocks(

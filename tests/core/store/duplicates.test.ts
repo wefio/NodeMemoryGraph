@@ -166,6 +166,27 @@ test("remember: surfaces supersedeCandidates for shared-token same-scope memorie
   });
 });
 
+test("remember: supersedeScan: false skips the candidate scan", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Martin is currently Employed at healthcare",
+      nodeName: "work",
+      scope: { user: "a" },
+    });
+    const newer = store.remember({
+      statement: "Martin moved from being Employed to self-employed",
+      nodeName: "work",
+      scope: { user: "a" },
+      supersedeScan: false,
+    });
+    assert.equal(
+      newer.supersedeCandidates,
+      undefined,
+      "supersedeScan: false should not attach supersedeCandidates",
+    );
+  });
+});
+
 test("applySupersession: marks stale record superseded and wires pointers", () => {
   withStore((store) => {
     const stale = store.remember({

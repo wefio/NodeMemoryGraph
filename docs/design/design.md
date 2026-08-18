@@ -1833,7 +1833,7 @@ is "starting" but the fact is "never written"), and negations of
 necessity/ability are guidance, not factual denials.
 
 The canonicalisation blocker was then closed
-(`docs/predicate-key-canonicalization.md`,
+(`docs/design/predicate-key-canonicalization.md`,
 `evals/omnimemeval/polarity-canonicalize.py`): a strict key grammar on both
 layers (strip aspectual/modal wrappers, bare head-noun objects), LLM
 arbitration of embedding-similar key pairs (synonym merges like

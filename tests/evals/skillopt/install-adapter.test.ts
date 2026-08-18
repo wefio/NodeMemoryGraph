@@ -16,7 +16,12 @@ test("SkillOpt installer copies a thin adapter and patches both lazy registries 
     installSkillOptAdapter(directory);
     installSkillOptAdapter(directory);
     assert.equal(existsSync(join(directory, "skillopt", "envs", "nmg_policy", "adapter.py")), true);
-    assert.equal(existsSync(join(directory, "configs", "nmg_policy.yaml")), true);
+    const configPath = join(directory, "configs", "nmg_policy.yaml");
+    assert.equal(existsSync(configPath), true);
+    assert.match(readFileSync(configPath, "utf8"), /^_base_: _base_\/default\.yaml$/mu);
+    assert.match(readFileSync(configPath, "utf8"), /max_completion_tokens: 4096/u);
+    const rolloutPath = join(directory, "skillopt", "envs", "nmg_policy", "rollout.py");
+    assert.doesNotMatch(readFileSync(rolloutPath, "utf8"), /min\(max_completion_tokens, 256\)/u);
     for (const script of ["train.py", "eval_only.py"]) {
       const source = readFileSync(join(directory, "scripts", script), "utf8");
       assert.equal(source.match(/_ENV_REGISTRY\["nmg_policy"\]/gu)?.length, 1);

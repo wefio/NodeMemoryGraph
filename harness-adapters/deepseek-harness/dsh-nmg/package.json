@@ -1,0 +1,47 @@
+{
+  "name": "@nmg/dsh-nmg",
+  "description": "NMG long-term memory for DeepSeek Harness, as a community-standard dual-face host package: host half registers the five nmg tools + automatic recall over daemon JSON-RPC, browser half renders the theme-aware tool cards.",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/plugin/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/plugin/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml"
+  ],
+  "dependencies": {
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^5.7.0"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
+  }
+}

@@ -3,7 +3,7 @@
 **Status:** 设计定稿，待实现
 **Date:** 2026-08-12
 **Supersedes:** [stg-isolated-store.md](stg-isolated-store.md)（v1：session-private per-session 文件）
-**Related:** [memory-graphs.md](memory-graphs.md) §1/§3/§5, docs/design.md §1, `src/core/stg.ts`, `src/core/store/schema.ts`, `src/cli/service.ts`
+**Related:** [memory-graphs.md](memory-graphs.md) §1/§3/§5, docs/design/design.md §1, `src/core/stg.ts`, `src/core/store/schema.ts`, `src/cli/service.ts`
 
 ## 0. TL;DR
 

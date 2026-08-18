@@ -5,7 +5,7 @@ import test from "node:test";
 
 /**
  * Guard test for the NmgStore method-cluster split
- * (docs/store-cluster-split.md, phases 1–3).
+ * (docs/design/store-cluster-split.md, phases 1–3).
  *
  * The store's methods are moved out of `src/core/store.ts` into one file
  * per cluster (`src/core/store/<cluster>.ts`), each exporting a mixin
@@ -71,6 +71,7 @@ const CLUSTERS: Record<string, string[]> = {
     "searchByVectorCandidates",
     "searchHierarchyByVector",
     "searchLeafBlocks",
+    "routeLeafBlocksByFts",
     "searchNodeFirst",
   ],
   writes: [
@@ -97,6 +98,8 @@ const CLUSTERS: Record<string, string[]> = {
     "rebuildLeafBlocks",
     "rebuildDueLeafBlocks",
     "dirtyLeafNodeIds",
+    "pendingLeafSummaries",
+    "setLeafSummary",
     "pendingIndexDelta",
     "acknowledgeIndexDelta",
     "beginEmbeddingIndex",

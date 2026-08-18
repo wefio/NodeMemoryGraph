@@ -1,8 +1,8 @@
 /**
  * QPP (Query Performance Prediction) — post-retrieval confidence that the first
  * recall prefix returned enough evidence. Drives progressive expansion through
- * cumulative Fibonacci evidence tiers. See docs/fibonacci-progressive-recall.md
- * and docs/qpp-evidence-signal-experiments-2026-08-02.md.
+ * cumulative Fibonacci evidence tiers. See docs/design/fibonacci-progressive-recall.md
+ * and docs/experiments/qpp-evidence-signal-experiments-2026-08-02.md.
  *
  * This is an NQC-anchored variant: `C = Top1 + wNqc·NQC`. Top1 keeps the
  * absolute-strength anchor (a single strong hit is enough), NQC adds the

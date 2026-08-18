@@ -66,3 +66,57 @@ export async function syncRecordEmbeddings(
     throw error;
   }
 }
+
+/**
+ * Incrementally embeds leaf blocks missing from (or staler than) the selected
+ * external index. Block embedding text prefers the semantic summary when one
+ * was written (store.leafEmbeddingDocuments), so this is what makes the
+ * summary index reachable by vector routing, not only by block FTS.
+ */
+export async function syncLeafEmbeddings(
+  store: NmgStore,
+  client: RecordEmbeddingClient,
+  batchSize = 64,
+): Promise<RecordEmbeddingSyncResult> {
+  const limit = Math.max(1, Math.min(Math.trunc(batchSize), 2_048));
+  let indexed = 0;
+  store.beginEmbeddingIndex({
+    indexId: client.indexId,
+    model: client.model ?? client.indexId,
+    profile: client.profile ?? "external",
+    targets: ["leaves"],
+  });
+  try {
+    let cursor = "";
+    while (true) {
+      const documents = store.leafEmbeddingDocuments(cursor, limit, client.indexId);
+      if (documents.length === 0) break;
+      const vectors = await client.embedDocuments(documents.map((document) => document.text));
+      if (vectors.length !== documents.length) {
+        throw new Error(
+          `embedding provider returned ${vectors.length} vectors for ` +
+            `${documents.length} leaf blocks`,
+        );
+      }
+      store.upsertExternalLeafEmbeddings(
+        client.indexId,
+        documents.map((document, index) => {
+          const vector = vectors[index];
+          if (!vector?.length) {
+            throw new Error(`embedding provider returned an empty vector at index ${index}`);
+          }
+          return { blockId: document.blockId, vector };
+        }),
+      );
+      indexed += documents.length;
+      cursor = documents.at(-1)!.blockId;
+    }
+    store.completeEmbeddingIndex(client.indexId);
+    const health = store.embeddingIndexHealth(client.indexId);
+    if (!health) throw new Error(`embedding index ${client.indexId} has no health record`);
+    return { indexed, health };
+  } catch (error) {
+    store.failEmbeddingIndex(client.indexId, error);
+    throw error;
+  }
+}

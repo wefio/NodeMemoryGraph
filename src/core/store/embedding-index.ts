@@ -27,7 +27,19 @@ export function beginEmbeddingIndex(
   },
 ): void {
   const now = new Date().toISOString();
-  const targets = [...new Set(input.targets)].sort();
+  const existing = db
+    .prepare("SELECT targets_json FROM embedding_index_state WHERE index_id = ?")
+    .get(input.indexId) as { targets_json?: string } | undefined;
+  let prior: string[] = [];
+  try {
+    const parsed = JSON.parse(String(existing?.targets_json ?? "[]")) as unknown;
+    if (Array.isArray(parsed)) prior = parsed.map(String);
+  } catch {
+    prior = [];
+  }
+  // Partial syncs (records-only, leaves-only) share one index row: union the
+  // targets so a leaf sync does not erase the records target and vice versa.
+  const targets = [...new Set([...prior, ...input.targets])].sort();
   if (targets.length === 0) throw new Error("embedding index requires at least one target");
   db.prepare(
     `INSERT INTO embedding_index_state

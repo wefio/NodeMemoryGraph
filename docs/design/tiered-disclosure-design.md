@@ -2,7 +2,7 @@
 
 **Status:** deterministic QPP gate implemented; calibrated SPRT remains future work
 **Updated:** 2026-08-01
-**Related:** [edge-activation-design.md](edge-activation-design.md), [fibonacci-progressive-recall.md](fibonacci-progressive-recall.md), docs/design.md §7.1, §11
+**Related:** [edge-activation-design.md](edge-activation-design.md), [fibonacci-progressive-recall.md](fibonacci-progressive-recall.md), docs/design/design.md §7.1, §11
 
 ## 1. Problem
 
@@ -175,7 +175,7 @@ whether to `nmg_get` deeper.
 
 ## 4. Evaluation
 
-Falsifiable claims (consistent with docs/design.md §14 discipline):
+Falsifiable claims (consistent with docs/design/design.md §14 discipline):
 
 1. **Latency**: mean/P95 search latency does not regress; on queries whose
    evidence lives in tier 0, latency **drops** because deeper tiers are not

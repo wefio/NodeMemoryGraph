@@ -1,4 +1,4 @@
-_base_: ../_base_/default.yaml
+_base_: _base_/default.yaml
 
 model:
   backend: openai_compatible
@@ -27,4 +27,4 @@ env:
   split_dir: data/nmg_policy_split
   skill_init: data/nmg_policy_split/initial_skill.md
   workers: 4
-  max_completion_tokens: 256
+  max_completion_tokens: 4096

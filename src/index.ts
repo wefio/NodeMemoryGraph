@@ -4,7 +4,7 @@ export { OpenAIEmbeddingClient } from "./core/openai-embedding.ts";
 export { GeminiEmbeddingClient } from "./core/embedding-providers/gemini.ts";
 export { configuredProvider, createEmbeddingClientFromEnv } from "./core/embedding-provider.ts";
 export type { EmbeddingClient, EmbeddingProvider } from "./core/embedding-provider.ts";
-export { syncRecordEmbeddings } from "./core/embedding-sync.ts";
+export { syncLeafEmbeddings, syncRecordEmbeddings } from "./core/embedding-sync.ts";
 export type { RecordEmbeddingClient, RecordEmbeddingSyncResult } from "./core/embedding-sync.ts";
 export {
   configuredGraphHops,
@@ -18,6 +18,13 @@ export { retainEvidence } from "./integration/evidence.ts";
 export type { AgentHistoryMessage, AgentHistorySnapshot } from "./integration/evidence.ts";
 export { searchMemoryContext } from "./integration/search.ts";
 export type { QueryEmbeddingClient } from "./integration/search.ts";
+export {
+  createLeafSummaryProviderFromEnv,
+  drainLeafSummaries,
+  LEAF_SUMMARY_PROMPT_VERSION,
+  OpenAiLeafSummaryProvider,
+} from "./integration/leaf-summarizer.ts";
+export type { LeafSummaryDrainResult } from "./integration/leaf-summarizer.ts";
 export { UsearchAnnIndex } from "./core/ann.ts";
 export { decideMemoryLoad } from "./core/gate.ts";
 export { normalizeClaims } from "./core/claims.ts";
@@ -46,6 +53,8 @@ export type {
   ExternalLeafEmbedding,
   LeafBlock,
   LeafEmbeddingDocument,
+  LeafSummaryProvider,
+  LeafSummaryTask,
   MemoryRecord,
   MemoryResidence,
   MemoryScope,

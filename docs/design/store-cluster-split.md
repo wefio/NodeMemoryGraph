@@ -57,15 +57,16 @@ export class NmgStore
   routeNodes, routeNodesByVector, trainRouter, edgeStability, nodeActivation,
   relationActivation, reconcileConsolidation, consolidationEvents,
   proposeTopologyChanges, topologyProposals, reviewTopologyProposal
-- **retrieval (11)**：searchContext, searchContextWithSecondPass, getContext,
+- **retrieval (12)**：searchContext, searchContextWithSecondPass, getContext,
   residentKernel, recallCues, search, searchByVector, searchByVectorCandidates,
-  searchHierarchyByVector, searchLeafBlocks, searchNodeFirst
+  searchHierarchyByVector, searchLeafBlocks, routeLeafBlocksByFts, searchNodeFirst
 - **writes (9)**：remember, rememberInner, addMemory, appendHistory, deriveMemory,
   recordRejectedWrite, recordUsage, archiveSession, getSessionArchive
-- **maintenance (29)**：deleteMemory, setMemoryStorageState, retentionCandidates,
+- **maintenance (31)**：deleteMemory, setMemoryStorageState, retentionCandidates,
   promoteMemory, demoteMemory, expireShortTermMemories, memoryWriteEvents,
   getHistoryBySourceMessage, rebuildVectorIndex, rebuildLeafBlocks,
-  rebuildDueLeafBlocks, dirtyLeafNodeIds, pendingIndexDelta, acknowledgeIndexDelta,
+  rebuildDueLeafBlocks, dirtyLeafNodeIds, pendingLeafSummaries, setLeafSummary,
+  pendingIndexDelta, acknowledgeIndexDelta,
   beginEmbeddingIndex, completeEmbeddingIndex, failEmbeddingIndex,
   embeddingIndexHealth, contradictionNotes, recordRetrievalTrace, perfAggregates,
   retrievalTracesCount, pruneRetrievalTraces, retrievalTrace, recordActiveGraphUse,

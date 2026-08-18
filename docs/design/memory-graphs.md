@@ -476,7 +476,7 @@ Consumers (each reads the same persisted field):
 
 `selectivity` is measured after SQL but before sort, so it reflects what a
 future pushdown would actually save (see the index-decision sketch in
-docs/improvement-areas.md).
+docs/design/improvement-areas.md).
 
 ### AG lifecycle and the tiered disclosure design
 

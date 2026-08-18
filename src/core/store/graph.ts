@@ -1,6 +1,6 @@
 /**
  * Graph cluster of NmgStore methods — official TypeScript mixin pattern
- * (docs/store-cluster-split.md, cluster-dag.test.ts).
+ * (docs/design/store-cluster-split.md, cluster-dag.test.ts).
  *
  * The mixin adds the cluster's methods to any base class; store.ts assembles
  * NmgStore = withGraph(withRetrieval(withWrites(withMaintenance(Base)))).

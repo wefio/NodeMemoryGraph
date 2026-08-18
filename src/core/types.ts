@@ -321,6 +321,16 @@ export interface RememberInput {
    * ambiguous (near) cases. Not consulted when there are no candidates.
    */
   judgeDuplicates?: DuplicateJudge;
+  /**
+   * Compute RememberResult.supersedeCandidates (default: true). The scan is
+   * O(scope size) per write — instr() prefilter over all same-scope rows plus
+   * per-row token overlap — so bulk ingestion without a supersession judge
+   * (neither RememberInput.judgeDuplicates nor a caller consuming
+   * RememberResult.supersedeCandidates) should pass false to avoid quadratic
+   * ingest cost. near-duplicate detection is unaffected: it is bounded to the
+   * 50 most recent same-scope rows and drives exact-duplicate auto-skip.
+   */
+  supersedeScan?: boolean;
   importance?: number;
   scope?: MemoryScope;
   validFrom?: string;
@@ -467,6 +477,16 @@ export interface SearchOptions {
    *  the ranked hit(s): members with position in [minHit−window, maxHit+window]
    *  are appended. Omit for the whole chain. */
   chainExpansionWindow?: number;
+  /** Leaf-block summary routing: blocks carrying an LLM-written semantic
+   *  summary (see pendingLeafSummaries/setLeafSummary) are matched against the
+   *  query over a dedicated FTS index; members of hit blocks are appended to
+   *  the context verbatim, like chain expansion — the summary itself never
+   *  appears as a result and the ranking is untouched. Default off; a no-op
+   *  when no block has a semantic summary. */
+  leafBlockRouting?: boolean;
+  /** Cap on members appended by leafBlockRouting across all hit blocks
+   *  (default 12), so a summary hit cannot blow the context budget. */
+  leafBlockRoutingMaxMembers?: number;
   /** Optional, caller-chosen recency decay (docs §3.4): when set, ranking
    *  dampens each memory's combined score by 0.5^(age_days / half_life) based
    *  on its event_time, so stale facts stop dominating current-value queries.
@@ -532,6 +552,34 @@ export interface LeafBlock {
   memoryCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A leaf block whose membership changed since its semantic summary was
+ *  written (or which never had one). Produced by pendingLeafSummaries and
+ *  consumed by an external LeafSummaryProvider; the store itself stays
+ *  LLM-free and only persists the resulting text. */
+export interface LeafSummaryTask {
+  blockId: string;
+  nodeId: string;
+  nodeName: string;
+  /** Membership fingerprint at collection time ("count:id,id,…" in ordinal
+   *  order); setLeafSummary rejects stale writes when it no longer matches. */
+  membersKey: string;
+  memoryCount: number;
+  /** Member statements in block (ordinal) order, already length-capped. */
+  statements: readonly string[];
+}
+
+/** External LLM that writes retrieval-index summaries for leaf blocks.
+ *  Same provider pattern as the embedding/judge clients: NMG ships no model,
+ *  the caller configures an endpoint. The summary is index metadata — it is
+ *  matched against queries but never returned as evidence. */
+export interface LeafSummaryProvider {
+  readonly model: string;
+  summarize(input: {
+    nodeName: string;
+    statements: readonly string[];
+  }): Promise<string>;
 }
 
 export interface LeafEmbeddingDocument {
@@ -648,7 +696,7 @@ export interface MemorySearchResult {
   /** Set on post-retrieval chain expansion: the chain this member was pulled
    *  from. The retrieval ranking is untouched; chain members are appended
    *  after the ranked results to close the recall gap on evolution/aggregation
-   *  queries (see docs/temporal-logical-chains-design-2026-08-13.md §3.1). */
+   *  queries (see docs/design/temporal-logical-chains-design-2026-08-13.md §3.1). */
   chainId?: string;
   /** Position of this member within its chain (0-based, chain order). */
   chainPosition?: number;
@@ -664,6 +712,10 @@ export interface MemorySearchResult {
     /** Chain topic/name so multiple chains of the same type stay distinguishable. */
     topic?: string;
   }>;
+  /** Set on leaf-block summary routing (SearchOptions.leafBlockRouting): the
+   *  block whose semantic summary matched the query and pulled this member in.
+   *  Appended after ranked results; the summary itself is never a result. */
+  leafBlockId?: string;
 }
 
 export interface DeriveMemoryInput extends Omit<RememberInput, "evidence"> {

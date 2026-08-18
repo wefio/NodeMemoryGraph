@@ -91,7 +91,7 @@ nmg 核心不调 LLM。接入方两种方式：
 2. **候选 + 后置应用**（评测桥模式）：remember 返回 `supersedeCandidates`，调用方用任意 LLM（agent / 独立便宜模型 / 评测 LLM）判定后调 `applySupersession`。
 
 **反馈驱动**（0-annotation）：`store.recordFeedback({ supersede })` 在**回答后**应用 supersede——LLM 在反馈内，摄入时不做语义标注。完整设计见
-`docs/feedback-loop-design.md`（统一记忆维护反馈通道：nmg 自动 + LLM 主动）。
+`docs/design/feedback-loop-design.md`（统一记忆维护反馈通道：nmg 自动 + LLM 主动）。
 
 ## 验证
 

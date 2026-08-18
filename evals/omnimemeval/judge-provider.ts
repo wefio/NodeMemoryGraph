@@ -28,6 +28,9 @@ export interface OpenAiCompatibleJudgeOptions {
   /** DeepSeek-style reasoning: body gains thinking + reasoning_effort (no temperature). */
   thinking?: boolean;
   reasoningEffort?: "low" | "medium" | "high";
+  /** Hard output budget (max_tokens). The verdict JSON is well under 100
+   *  tokens; 1000 leaves generous headroom while capping runaway output. */
+  maxTokens?: number;
   /** Injectable fetch for tests. */
   fetch?: typeof fetch;
 }
@@ -99,6 +102,7 @@ export class OpenAiCompatibleJudgeClient implements JudgeClient {
   readonly #timeoutMs: number;
   readonly #thinking: boolean;
   readonly #reasoningEffort: "low" | "medium" | "high";
+  readonly #maxTokens: number;
   readonly #fetch: typeof fetch;
 
   constructor(options: OpenAiCompatibleJudgeOptions) {
@@ -108,6 +112,7 @@ export class OpenAiCompatibleJudgeClient implements JudgeClient {
     this.#timeoutMs = options.timeoutMs ?? 30_000;
     this.#thinking = options.thinking ?? false;
     this.#reasoningEffort = options.reasoningEffort ?? "high";
+    this.#maxTokens = options.maxTokens ?? 1_000;
     this.#fetch = options.fetch ?? globalThis.fetch;
   }
 
@@ -122,6 +127,7 @@ export class OpenAiCompatibleJudgeClient implements JudgeClient {
         { role: "user", content: buildUserMessage(input) },
       ],
       stream: false,
+      max_tokens: this.#maxTokens,
     };
     const deepSeekRequest = /deepseek/i.test(this.baseUrl) || /deepseek/i.test(this.model);
     if (this.#thinking) {
@@ -200,6 +206,7 @@ export function createJudgeClientFromEnv(
   const thinkingRaw = environment.NMG_JUDGE_THINKING?.trim().toLowerCase();
   const thinking = thinkingRaw === "1" || thinkingRaw === "enabled" || thinkingRaw === "true";
   const effort = (environment.NMG_JUDGE_REASONING_EFFORT?.trim() || "high").toLowerCase();
+  const maxTokensRaw = Number(environment.NMG_JUDGE_MAX_TOKENS?.trim());
   return new OpenAiCompatibleJudgeClient({
     baseUrl,
     apiKey,
@@ -207,5 +214,8 @@ export function createJudgeClientFromEnv(
     timeoutMs: Number.isFinite(timeoutMs) ? timeoutMs : 30_000,
     thinking,
     reasoningEffort: effort === "low" || effort === "medium" ? effort : "high",
+    ...(Number.isInteger(maxTokensRaw) && maxTokensRaw > 0
+      ? { maxTokens: maxTokensRaw }
+      : {}),
   });
 }

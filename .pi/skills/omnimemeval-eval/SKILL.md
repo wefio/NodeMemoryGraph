@@ -182,4 +182,4 @@ bash evals/omnimemeval/run-halumem.sh --env-file .env.nmg-bgefix --version halum
 - LME 基线（2026-08-04，commit 82ec4c7）：94.15 / 87.95 / 82.67 / answer 82.33
 - LME 防回退（2026-08-05，commit bbbeb32）：recall 三项逐位复现；answer 80.8（-1.53pp，judge 波动内）→ **无回退**
 - 结果目录：`.benchmarks/official/OmniMemEval/results/lme/nmg-lme500_bgefix_header_20260804/`（备份 `_bak_bgefix_header_20260804`）
-- 文档配套：`docs/lme-eval-notes-2026-08-05.md`、`docs/pmv2-eval-forget-design-2026-08-05.md`
+- 文档配套：`docs/experiments/lme-eval-notes-2026-08-05.md`、`docs/design/pmv2-eval-forget-design-2026-08-05.md`

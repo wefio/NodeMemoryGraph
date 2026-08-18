@@ -1,6 +1,6 @@
 /**
  * Constructor constraint for the method-cluster mixins (DAG split, see
- * cluster-dag.test.ts and docs/store-cluster-split.md).
+ * cluster-dag.test.ts and docs/design/store-cluster-split.md).
  *
  * Every cluster mixin takes a base constructor and returns a subclass:
  *

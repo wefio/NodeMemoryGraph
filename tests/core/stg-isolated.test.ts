@@ -16,7 +16,7 @@ import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder } from "../../src/core/vector.ts";
 
 /**
- * Design-driven tests for docs/stg-isolated-store.md (Phase 1 + 2).
+ * Design-driven tests for docs/design/stg-isolated-store.md (Phase 1 + 2).
  *
  * Phase 1: STG lives in a separate project-local SQLite file; deleting it
  *          must not touch LTG.

@@ -1,6 +1,6 @@
 # 渐进推荐：Fibonacci 档位替换固定 limit（QPP 信号修复）
 
-> 依据：`docs/qpp-evidence-signal-experiments-2026-08-02.md` 实验结论——检索信号预测
+> 依据：`docs/experiments/qpp-evidence-signal-experiments-2026-08-02.md` 实验结论——检索信号预测
 > "证据完备"最佳为 NQC 归一化离散度（AUC 0.667）；LLM 充分性判断（0.732）验证了
 > "判断证据够不够"可行，但判断者是消费者模型本身，故不做 NMG 内建 LLM judge，改为
 > **提示词驱动的按需追加**（`MEMORY_POLICY` 已授权：证据不足可请求追加、忽略无关头）。

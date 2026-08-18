@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
 import { createJudgeClientFromEnv, type JudgeClient } from "./judge-provider.ts";
-import { syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
+import { syncLeafEmbeddings, syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { loadPrompts, renderDisclosure } from "../../src/prompts/load.ts";
 import type { HistoryRole, MemoryActor, MemoryMarker, PerfSnapshot, DuplicateCandidate } from "../../src/core/types.ts";
@@ -101,6 +101,11 @@ export interface OmniMemEvalBridgeOptions {
   strongHitInitialTarget?: number;
   /** Persist core retrieval timings independently of disposable user databases. */
   perfLogPath?: string;
+  /** Leaf-block summary routing (SearchOptions.leafBlockRouting): queries are
+   *  matched against block semantic summaries and hit blocks pull their
+   *  verbatim members into the context. Requires summaries to have been
+   *  written via drainLeafSummaries; a no-op otherwise. */
+  leafBlockRouting?: boolean;
   /** Override the persistent content-addressed embedding cache location. */
   embeddingCachePath?: string;
   /** Eval-only benchmark construction: after ingest, link same-session
@@ -131,6 +136,7 @@ export class OmniMemEvalBridge {
   readonly #strongHitTopGap?: number;
   readonly #strongHitInitialTarget?: number;
   readonly #perfLogPath: string;
+  readonly #leafBlockRouting: boolean;
   readonly #judge?: JudgeClient;
   readonly #chainInjection: "temporal" | "logical" | "both" | "none";
 
@@ -153,6 +159,7 @@ export class OmniMemEvalBridge {
     this.#strongHitTopGap = finiteNumber(options.strongHitTopGap);
     this.#strongHitInitialTarget = positiveNumber(options.strongHitInitialTarget);
     this.#perfLogPath = resolve(options.perfLogPath ?? resolve(this.#root, "search-perf.jsonl"));
+    this.#leafBlockRouting = options.leafBlockRouting ?? false;
     this.#judge = createJudgeClientFromEnv();
     this.#chainInjection = options.chainInjection ?? "none";
     mkdirSync(this.#root, { recursive: true });
@@ -247,6 +254,7 @@ export class OmniMemEvalBridge {
           scope: { benchmark: "OmniMemEval", user: userKey(userId) },
           writeReason: "explicit_user_forget_request",
           writeSource: "user",
+          supersedeScan: this.#judge !== undefined,
         });
         if (remembered.memory) memories.push(remembered.memory.statement);
         added += 1;
@@ -264,6 +272,9 @@ export class OmniMemEvalBridge {
         tier: 2,
         importance: role === "user" ? 0.6 : 0.4,
         scope: { benchmark: "OmniMemEval", user: userKey(userId) },
+        // The supersede scan is only worth its O(scope) cost when a judge
+        // will consume the candidates; judge-less benchmark ingestion skips it.
+        supersedeScan: this.#judge !== undefined,
       });
       if (remembered.memory) {
         memories.push(remembered.memory.statement);
@@ -392,6 +403,7 @@ export class OmniMemEvalBridge {
         strongHitTopGap: this.#strongHitTopGap,
         strongHitInitialTarget: this.#strongHitInitialTarget,
         expandChains: true,
+        leafBlockRouting: this.#leafBlockRouting,
         activeGraphBudget: {
           maxNodes: limit,
           maxEvidence: limit,
@@ -476,14 +488,20 @@ export class OmniMemEvalBridge {
     const client = this.#embeddingClient;
     if (!client) return;
     const health = store.embeddingIndexHealth(client.indexId);
-    if (
+    const recordsDone =
       health?.status === "ready" &&
       health.targets.includes("records") &&
-      health.pending.records === 0
-    ) {
-      return;
-    }
-    await syncRecordEmbeddings(store, client, this.#embeddingBatchSize);
+      health.pending.records === 0;
+    // Leaf embeddings only matter when block-summary routing is on; their
+    // staleness includes semantic-summary writes (setLeafSummary bumps the
+    // block's updated_at), so summarized blocks are re-embedded once here.
+    const leavesDone =
+      !this.#leafBlockRouting ||
+      (health?.status === "ready" &&
+        health.targets.includes("leaves") &&
+        health.pending.leaves === 0);
+    if (!recordsDone) await syncRecordEmbeddings(store, client, this.#embeddingBatchSize);
+    if (!leavesDone) await syncLeafEmbeddings(store, client, this.#embeddingBatchSize);
   }
 
   #store(userId: string): NmgStore {

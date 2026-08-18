@@ -1,7 +1,7 @@
 # LME 评测流程 + 防回退验证（2026-08-05）
 
 > 固化 LongMemEval（500 问）评测的可复制流程与版本约定，避免每次重复踩坑。
-> 与 `docs/pmv2-eval-forget-design-2026-08-05.md`（pmv2）配套。
+> 与 `docs/design/pmv2-eval-forget-design-2026-08-05.md`（pmv2）配套。
 
 ---
 
@@ -69,7 +69,7 @@ bash evals/omnimemeval/run-lme.sh --env-file .env.nmg-bgefix --version <同基�
 | `scripts/longmemeval/lme_eval.py` | judge 批量 checkpoint | ✅ 已改（fork 本地） |
 | `scripts/utils/nlp_metrics.py` | extract_label_json 容错 | ✅ 已改（fork 本地） |
 | 主仓库 `evals/omnimemeval/run-lme.sh` | 环境/断点固化（8/4 已有） | 已有 |
-| 主仓库 `docs/pmv2-eval-forget-design-2026-08-05.md` | pmv2 配套文档 | 已有 |
+| 主仓库 `docs/design/pmv2-eval-forget-design-2026-08-05.md` | pmv2 配套文档 | 已有 |
 
 ## 五、结果目录
 

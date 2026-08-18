@@ -66,6 +66,7 @@
     "eval:halumem:promotion-audit": "node --experimental-strip-types evals/halumem/promotion-audit.ts",
     "eval:halumem:score": "node --experimental-strip-types evals/halumem/score.ts",
     "eval:quality": "node --experimental-strip-types evals/memory-quality/run.ts",
+    "eval:retrieval": "node --experimental-strip-types evals/retrieval/run.ts",
     "eval:longmem": "node --experimental-strip-types evals/longmemeval/run.ts",
     "eval:gate": "node --experimental-strip-types evals/gate/run.ts",
     "eval:disclosure": "node --experimental-strip-types evals/disclosure/run.ts",
@@ -113,7 +114,7 @@
     "eslint": "^10.7.0",
     "prettier": "^3.9.5",
     "typebox": "1.1.38",
-    "typescript": "5.9.3",
+    "typescript": "^5.9.3",
     "typescript-eslint": "^8.64.0"
   },
   "peerDependencies": {
@@ -129,7 +130,14 @@
   "dependencies": {
     "@earendil-works/pi-tui": "^0.80.10",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "node-domexception": "^1.0.0",
     "search-query-parser": "^1.6.0",
     "yaml": "^2.9.0"
+  },
+  "allowScripts": {
+    "typescript@5.9.3": true,
+    "@google/genai@1.52.0": true,
+    "protobufjs@7.6.5": true,
+    "usearch@2.26.0": true
   }
 }

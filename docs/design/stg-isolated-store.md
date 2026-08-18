@@ -2,7 +2,7 @@
 
 **Status:** project-local shared store with session-row isolation implemented
 **Updated:** 2026-08-13
-**Related:** [memory-graphs.md](memory-graphs.md) §1/§3/§5, [external-source-design.md](external-source-design.md), docs/design.md §1
+**Related:** [memory-graphs.md](memory-graphs.md) §1/§3/§5, [external-source-design.md](external-source-design.md), docs/design/design.md §1
 
 ## 1. Problem
 

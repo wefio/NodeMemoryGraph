@@ -1,6 +1,6 @@
 """Polarity extraction worker: spaCy rule layer + batched LLM fallback.
 
-Claims model (docs/predicate-key-canonicalization.md, chat.completions
+Claims model (docs/design/predicate-key-canonicalization.md, chat.completions
 parts analogy): a memory record is the evidence unit; each record carries
 a claims_json array of atomic claims, each with its own polarity /
 predicate_key / confidence. The record-level columns are a rollup cache

@@ -1,6 +1,6 @@
 /**
  * writes cluster of NmgStore methods — official TypeScript mixin pattern
- * (docs/store-cluster-split.md, cluster-dag.test.ts).
+ * (docs/design/store-cluster-split.md, cluster-dag.test.ts).
  *
  * The mixin adds the cluster's methods to any base class; store.ts assembles
  * NmgStore = withGraph(withRetrieval(withWrites(withMaintenance(Base)))).
@@ -370,11 +370,12 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         )
         .get(input.statement, scopeJson) as Record<string, unknown> | undefined;
       const dupCandidates = this.nearDuplicateCandidates(input.statement, scopeJson);
-      const supersedeCands = this.supersedeCandidates(
-        input.statement,
-        scopeJson,
-        input.polarity ?? null,
-      );
+      // The supersede scan is O(scope size) per write and its result is only
+      // consumed by an external judge; bulk ingestion without one skips it.
+      const supersedeCands =
+        input.supersedeScan === false
+          ? []
+          : this.supersedeCandidates(input.statement, scopeJson, input.polarity ?? null);
       if (dupExact) {
         const judge = input.judgeDuplicates;
         if (!judge || judge({ statement: input.statement, candidates: dupCandidates }).merge) {

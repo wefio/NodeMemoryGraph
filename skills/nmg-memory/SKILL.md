@@ -132,3 +132,5 @@ the model.
   [embedding](references/embedding.md)
 - For calibrating QPP from real Agent usage rather than benchmark-only data:
   [QPP calibration](references/qpp-calibration.md)
+- For writing an NMG adapter for a new harness (worked example: DeepSeek Harness):
+  [harness adapters](references/harness-adapters.md)

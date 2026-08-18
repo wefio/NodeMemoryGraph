@@ -1,6 +1,6 @@
 """LLM-arbitrated predicate_key canonicalization over claims (offline pass).
 
-Design: docs/predicate-key-canonicalization.md, mechanism 2 — now operating
+Design: docs/design/predicate-key-canonicalization.md, mechanism 2 — now operating
 on claims_json (atomic claims) instead of record-level columns.
 
 1. Flatten every record's claims_json into claim-level entries.

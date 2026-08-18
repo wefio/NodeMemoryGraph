@@ -46,7 +46,7 @@ writes the official `extracted_memories` / `memories_from_system` fields.
 aggregates only metrics with a non-zero denominator. DeepSeek's valid bare JSON
 is accepted in addition to the fenced JSON required by upstream. Results and
 stores are ignored under `.benchmarks/halumem-nmg/`; see
-`docs/halumem-operation-evaluation-2026-08-11.md`.
+`docs/experiments/halumem-operation-evaluation-2026-08-11.md`.
 
 For a harness-policy ablation, first run
 `npm run eval:halumem:agent-extract -- --users 1 --through-session 6`, then pass
@@ -81,20 +81,20 @@ This file intentionally keeps stable guidance and principles only. Raw run
 matrices, root-cause analyses, and protocol notes live in dated standalone
 logs under `docs/` (indexed here so new work can find prior evidence):
 
-- `docs/longmemeval-profile-regression-2026-08-03.md` — LongMemEval baseline
+- `docs/experiments/longmemeval-profile-regression-2026-08-03.md` — LongMemEval baseline
   "drift" (94.15% → 76.0%) root-caused to embedding profile config drift;
   BGE models now auto-select the bge-en prompt template. Full fixed-vs-dynamic
   matrix under the corrected config: 94.15%/87.95%/81.2% vs 95.19%/89.71%/82.3%
   (any-evidence recall / overall / answer accuracy).
-- `docs/qpp-evidence-signal-experiments-2026-08-02.md` — QPP trigger signal
+- `docs/experiments/qpp-evidence-signal-experiments-2026-08-02.md` — QPP trigger signal
   audit (top1 gap, cohesion, LLM sufficiency) and strong-hit evaluation.
-- `docs/locomo-evidence-mode-signal-2026-08-02.md` — LoCoMo official
+- `docs/experiments/locomo-evidence-mode-signal-2026-08-02.md` — LoCoMo official
   search-only protocol alignment and evidence-mode signal protocol.
-- `docs/qpp2-local-probe-experiment-2026-07-29.md` — local QPP2/elbow probe.
-- `docs/daemon-lifecycle-design.md` — daemon lifecycle hardening (timeout,
+- `docs/experiments/qpp2-local-probe-experiment-2026-07-29.md` — local QPP2/elbow probe.
+- `docs/design/daemon-lifecycle-design.md` — daemon lifecycle hardening (timeout,
   store cap as warning, restart fidelity) and its acceptance tests.
-- `docs/llm-sufficiency-recall-design.md` — LLM-sufficiency recall design.
-- `docs/lme-recall-headers-2026-08-04.md` — recall-header refinement verified as format-only (94.15/87.95/82.67 unchanged; answer acc 82.3%).
+- `docs/design/llm-sufficiency-recall-design.md` — LLM-sufficiency recall design.
+- `docs/experiments/lme-recall-headers-2026-08-04.md` — recall-header refinement verified as format-only (94.15/87.95/82.67 unchanged; answer acc 82.3%).
 
 ## Reproducible LongMemEval runs
 
@@ -173,7 +173,7 @@ npm run eval:skillopt:export
 
 The exporter fails closed until natural train/validation/test minima are met.
 Use `--allow-insufficient` only for a file-layout/adapter smoke. See
-`docs/skillopt-policy-optimization.md`.
+`docs/design/skillopt-policy-optimization.md`.
 
 ## Reproducible official-protocol workflow
 
@@ -307,7 +307,7 @@ NMG daemons started per arm are self-limiting: `NMG_DAEMON_IDLE_TIMEOUT_MS`
 many milliseconds without requests, and `NMG_DAEMON_LIMIT` (default `32`,
 `<=0` disables) warns on stderr when live daemon count exceeds the limit
 before spawning a new one. See
-[daemon-lifecycle-design.md](../docs/daemon-lifecycle-design.md).
+[daemon-lifecycle-design.md](../docs/design/daemon-lifecycle-design.md).
 
 `validate` performs parsing and sampling without model calls. A matched run
 performs three reader experiments per selected case and can take minutes;
@@ -396,7 +396,7 @@ positive task outcomes to audit the STG → LTG posterior gate and its retention
 hysteresis. It reports coverage and contradiction-to-retraction stress without
 calling an LLM. Absence from an evidence list is never treated as a negative
 claim label, so this audit deliberately does not report false-promotion
-precision. See `docs/consolidation-evaluation-2026-08-09.md`.
+precision. See `docs/experiments/consolidation-evaluation-2026-08-09.md`.
 
 ## Topology identity-gate audit
 
@@ -406,7 +406,7 @@ the production `same_as` assessment gate, competing-identity withdrawal, and
 the invariant that assessment never mutates topology. Candidate generation is
 deliberately held constant, so the result is not an alias-resolution or
 end-to-end automatic-merge score. See
-`docs/topology-gate-evaluation-2026-08-09.md`.
+`docs/experiments/topology-gate-evaluation-2026-08-09.md`.
 
 `npm run eval:topology:bpid` adds multi-field identity hard negatives, while
 `npm run eval:topology:namesakes` optionally reads the official CC BY 4.0
@@ -414,8 +414,8 @@ Namesakes Entities JSONL to measure alias-like positive recall and rejection of
 same-name references to a different entity. Both report candidate-generation
 curves and remain read-only: neither score is allowed to authorize a merge.
 Namesakes data belongs under `.benchmarks/namesakes/data/` and is not committed.
-See `docs/topology-bpid-evaluation-2026-08-09.md` and
-`docs/topology-namesakes-evaluation.md`.
+See `docs/experiments/topology-bpid-evaluation-2026-08-09.md` and
+`docs/experiments/topology-namesakes-evaluation.md`.
 
 The official LoCoMo scorer uses the environment created by
 `npm run benchmark:setup`. If that uv-managed interpreter cannot execute in the

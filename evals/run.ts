@@ -36,7 +36,6 @@ interface EvalResult {
   id: string;
   passed: boolean;
   writerRemembered: boolean;
-  sessionArchived: boolean;
   databaseVerified: boolean;
   readerLoadMode: MemoryLoadMode;
   readerSearched: boolean;
@@ -90,7 +89,6 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
 
   const errors: string[] = [];
   let writerRemembered = false;
-  let sessionArchived = false;
   let databaseVerified = false;
   const readerLoadMode = decideMemoryLoad(testCase.recall.prompt).mode;
   let readerSearched = false;
@@ -100,11 +98,9 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
 
   try {
     const writer = createClient(dataDirectory);
-    let writerSessionId = "";
     try {
       await writer.start();
       await writer.setThinkingLevel("low");
-      writerSessionId = (await writer.getState()).sessionId;
       const events = await writer.promptAndWait(writerPrompt(testCase), undefined, 180_000);
       writerRemembered = successfulToolCall(events, "nmg_remember");
       if (!writerRemembered && !(await writer.getLastAssistantText())?.trim()) {
@@ -126,8 +122,6 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
 
     const store = new NmgStore(resolve(dataDirectory, "nmg.sqlite"));
     try {
-      sessionArchived = store.getSessionArchive(writerSessionId) !== null;
-      if (!sessionArchived) errors.push("Writer session transcript was not archived.");
       const memoryExists = testCase.automaticWrite
         ? store
             .search(
@@ -206,13 +200,11 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
     id: testCase.id,
     passed:
       writerRemembered === (testCase.expectRemember ?? true) &&
-      sessionArchived &&
       databaseVerified &&
       answerMatched &&
       (!testCase.recall.requireSearchTool || readerLoadMode === "retrieve" || readerSearched) &&
       (!testCase.recall.requireGetTool || readerGot),
     writerRemembered,
-    sessionArchived,
     databaseVerified,
     readerLoadMode,
     readerSearched,
@@ -243,6 +235,7 @@ function createClient(dataDirectory: string): RpcClient {
     env: {
       ...definedEnvironment(),
       NMG_DATA_DIR: dataDirectory,
+      PI_CODING_AGENT_DIR: resolve(dataDirectory, "pi-agent"),
       ...(skillOptPolicy
         ? {
             NMG_SKILLOPT_EVAL: "1",

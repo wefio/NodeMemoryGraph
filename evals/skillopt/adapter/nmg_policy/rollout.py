@@ -46,7 +46,7 @@ def _rollout_one(item: dict, skill_content: str, prediction_dir: Path,
     prediction, usage = chat_target(
         system=skill_content,
         user=user,
-        max_completion_tokens=min(max_completion_tokens, 256),
+        max_completion_tokens=max(1, int(max_completion_tokens)),
     )
     parsed = _parse(prediction)
     expected = item.get("expected") or {}

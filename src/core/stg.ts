@@ -1,5 +1,5 @@
 /**
- * STG isolated store (docs/stg-isolated-store.md).
+ * STG isolated store (docs/design/stg-isolated-store.md).
  *
  * Three-storage model support without touching NmgStore internals:
  *   - createStgStore: open/create the session-private project STG SQLite (Phase 1)

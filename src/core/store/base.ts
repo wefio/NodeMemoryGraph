@@ -1262,7 +1262,7 @@ export class NmgStoreBase {
   ): LeafEmbeddingDocument[] {
     const rows = this.db
       .prepare(
-        `SELECT b.id, b.node_id, b.summary, n.canonical_name, n.summary AS node_summary
+        `SELECT b.id, b.node_id, b.summary, b.semantic_summary, n.canonical_name, n.summary AS node_summary
        FROM memory_leaf_blocks b JOIN memory_nodes n ON n.id = b.node_id
        WHERE b.id > ?
          AND (? IS NULL OR NOT EXISTS (
@@ -1280,7 +1280,9 @@ export class NmgStoreBase {
     return rows.map((row) => ({
       blockId: String(row.id),
       nodeId: String(row.node_id),
-      text: `${row.canonical_name}: ${row.summary}`,
+      // Prefer the LLM-written semantic summary when present; the structural
+      // label (scope/type/time range) is the no-LLM fallback.
+      text: `${row.canonical_name}: ${row.semantic_summary ?? row.summary}`,
     }));
   }
   upsertExternalLeafEmbeddings(model: string, embeddings: ExternalLeafEmbedding[]): number {

@@ -146,3 +146,39 @@ test("createJudgeClientFromEnv: NMG_JUDGE_DISABLED=1 disables even with eval con
   } as NodeJS.ProcessEnv);
   assert.equal(disabled, undefined);
 });
+
+test("judge: output budget defaults to 1000 and honors maxTokens", async () => {
+  const bodies: Array<Record<string, unknown>> = [];
+  const capture = (async (_url: unknown, init: unknown) => {
+    bodies.push(JSON.parse(String((init as { body?: unknown })?.body)));
+    return new Response(
+      JSON.stringify({ choices: [{ message: { content: '{"action":"keep"}' } }] }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }) as typeof fetch;
+
+  const defaultClient = new OpenAiCompatibleJudgeClient({
+    baseUrl: "https://x.example",
+    model: "m",
+    fetch: capture,
+  });
+  await defaultClient.judge({
+    statement: "s",
+    candidates: [],
+    supersedeCandidates: [candidate("c1", "t")],
+  });
+  assert.equal(bodies[0]?.["max_tokens"], 1000);
+
+  const custom = new OpenAiCompatibleJudgeClient({
+    baseUrl: "https://x.example",
+    model: "m",
+    maxTokens: 300,
+    fetch: capture,
+  });
+  await custom.judge({
+    statement: "s",
+    candidates: [],
+    supersedeCandidates: [candidate("c1", "t")],
+  });
+  assert.equal(bodies[1]?.["max_tokens"], 300);
+});

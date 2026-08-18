@@ -13,7 +13,7 @@ import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder } from "../../src/core/vector.ts";
 
 /**
- * STG Shared-Store v2 (docs/stg-shared-store-v2-2026-08-12.md):
+ * STG Shared-Store v2 (docs/design/stg-shared-store-v2-2026-08-12.md):
  *   - one shared stg.sqlite per project (physical), session isolation is
  *     row-level via memory_records.session_id (logical)
  *   - escape-hatch rule: provisional writes REQUIRE sessionId; shared

@@ -79,7 +79,7 @@ NMG daemon ── NMG core ── MemoryNode graph ── tiered MemoryRecord
              immutable HistoryRecord
 ```
 
-See [docs/design.md](docs/design.md) for the decisions and roadmap.
+See [docs/design/design.md](docs/design/design.md) for the decisions and roadmap.
 
 ## Claude Code plugin
 
@@ -495,7 +495,7 @@ The local retrieval controls are SQLite FTS5, deterministic hashing vectors,
 external vectors served through an OpenAI-compatible endpoint, and their hybrid.
 The external provider uses a resumable batch indexer; USearch provides the persistent HNSW ANN
 index only after the scale test demonstrates scan cost. Setup is documented in
-[docs/online-embeddings.md](docs/online-embeddings.md).
+[docs/design/online-embeddings.md](docs/design/online-embeddings.md).
 
 Example request to the agent:
 

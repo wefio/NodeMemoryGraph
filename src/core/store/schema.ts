@@ -482,6 +482,7 @@ export function migrate(db: DatabaseSync): void {
   ensureRetrievalTraceColumns(db);
   ensurePerfAggregateColumns(db);
   ensureDeltaColumns(db);
+  ensureLeafSummaryColumns(db);
   ensureBinaryVectors(db);
   ensureTaskBoardColumns(db);
   db.exec(`
@@ -617,6 +618,33 @@ export function ensureDeltaColumns(db: DatabaseSync): void {
   if (!columns.has("compacted")) {
     db.exec("ALTER TABLE memory_index_delta ADD COLUMN compacted INTEGER NOT NULL DEFAULT 0");
   }
+}
+
+/** Semantic block summaries: nullable LLM-written index text on leaf blocks
+ *  plus a dedicated FTS index over it. The structural `summary` column stays
+ *  untouched as the no-LLM fallback; `semantic_members_key` fingerprints the
+ *  membership the summary was written from so stale summaries are detectable. */
+export function ensureLeafSummaryColumns(db: DatabaseSync): void {
+  const columns = new Set(
+    (db.prepare("PRAGMA table_info(memory_leaf_blocks)").all() as Row[]).map((row) =>
+      String(row.name),
+    ),
+  );
+  if (!columns.has("semantic_summary")) {
+    db.exec(`
+      ALTER TABLE memory_leaf_blocks ADD COLUMN semantic_summary TEXT;
+      ALTER TABLE memory_leaf_blocks ADD COLUMN semantic_summary_model TEXT;
+      ALTER TABLE memory_leaf_blocks ADD COLUMN semantic_members_key TEXT;
+      ALTER TABLE memory_leaf_blocks ADD COLUMN semantic_summary_at TEXT;
+    `);
+  }
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS memory_leaf_fts USING fts5(
+      block_id UNINDEXED,
+      summary,
+      tokenize = 'unicode61'
+    );
+  `);
 }
 
 export function ensureBinaryVectors(db: DatabaseSync): void {

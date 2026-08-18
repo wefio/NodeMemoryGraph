@@ -2046,7 +2046,7 @@ export class SessionTaskWindow {
  * any returned evidence. A successful get opens the search phase again.
  */
 /**
- * QPP agent-end feedback cache (docs/retrieval-confidence-controller.md Stage 1).
+ * QPP agent-end feedback cache (docs/design/retrieval-confidence-controller.md Stage 1).
  * Independent of the SkillOpt shadow bridge: it records which active graphs a
  * session retrieved (traceId + recalled MemorySearchResults) so agent_end can
  * derive used memories from the final answer and persist useful_memory_ids on

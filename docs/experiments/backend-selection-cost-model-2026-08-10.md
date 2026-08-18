@@ -5,7 +5,7 @@
 > exists, `pickTier` now returns only `compiled-tape` or `interpreter`. A cost
 > model must not select a tier the runtime cannot execute.
 
-承接 docs/autodiff-operator-optimization-2026-08-10.md（§8.3 编译模式、§9 HPC 范式）。本探索把
+承接 docs/experiments/autodiff-operator-optimization-2026-08-10.md（§8.3 编译模式、§9 HPC 范式）。本探索把
 "编译一次+复用"范式推广到**批量训练**，并把 §8.2 的定性"适用窗口"落成**可自动执行的 cost model**
 （`src/lab/backend-selection.ts`）。
 
