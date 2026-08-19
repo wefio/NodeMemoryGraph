@@ -68,21 +68,34 @@ round 1: 节点启发式渐进（先高潜力节点）
 
 **互补闭环**：学习剪枝（收敛后启用，长期）＋ 摘要兜底（冷启动/未学节点，单次）＝ 混合方案“选择性剪枝”的落地；`examples` 门控防冷启动灾难。
 
-## 可学习路由融合（用户补充）
+## 分层解耦（用户定案，取代融合）
 
-NMG 已有完整学习回路：`maintenance` 从检索轨迹 `usedNodeIds` → `trainRouter(query, usefulNodeIds)` → 更新 `router_weights`（隐式反馈驱动）；`routeNodes` 已融合 `learned×0.7 + lexical×0.3`。摘要路由 `routeNodesByFts`（节点摘要 FTS）当前是独立路径。
-
-**统一节点启发式 = 融合三源**（混合方案 round 1 的节点排序打分）：
+用户定案：**不直接混合**，而是渐进为主 + 选择性剪枝，剪枝由可学习路由“慢慢减”驱动——两把刀分工、无直接作用。
 
 ```
-nodePriority = α·learned(router.score) + β·summary(routeNodesByFts) + γ·lexical(lexicalNodeScore)
+单次搜索 → 渐进式：摘要 + 词法即时排序（早停、兜底）—— learned 不参与
+学习路由 → 只拿走反馈信号做剪枝（长期缩小搜索池）
+长期 → 渐进（在缩小的池上）+ 剪枝（持续缩小池）共同作用；learned 不直接碰单次排序
 ```
 
-- **摘要（β）**：冷启动 / 语义即时 —— 渐进单次快
-- **学习（α）**：反馈积累 / 长期变准 —— 剪枝与优先长期稳（呼应“剪枝长期有用”)
-- **词法（γ）**：节点名基础兜底
-- 反馈回路已通（retrieval_trace → usedNodeIds → trainRouter）；摘要不参与训练（静态索引），学习只更新 learned 分量——**无需新基建**
-- 风险：α/β/γ 权重需实验校准；学习过拟合罕见查询（现有 learningRate clamp + examples 计数可衰减）
+**优势（vs 融合 α·learned+β·summary+γ·lexical）**：
+- 单次确定性：即时信号独立——可复现、易评测（学习状态不污染排序）
+- 冷启动：渐进纯即时，无未学节点排序问题
+- 风险隔离：学习坏只影响剪枝（可回退不剪 = 全库），不破坏单次逻辑
+- 独立验证：渐进测召回 / 剪枝测加速——互不污染
+- 长期累积：剪枝收敛 → 池小 → 渐进自然快
+
+**落地**：
+```
+长期（反馈回路，维护期）:
+  trainRouter(query, usedNodeIds) → 原型 → 剪枝强度 s(examples) 慢慢减
+  剪枝资格：examples ≥ N ∧ score < θ(s) ∧ 分布内（词法 guard）
+  自愈：兜底找回 gold → 负反馈降该节点 s
+单次（searchContext）:
+  pool = pruneNodePool(learned)      ← 学习间接作用（范围）
+  round 1 渐进：摘要+词法排序 → 早停（置信/预算）
+  不足 → 兜底含被剪节点（零召回最后防线）
+```
 
 ## 验证协议（大数据）
 
