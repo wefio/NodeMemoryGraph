@@ -31,6 +31,11 @@ import {
   LEAF_SUMMARY_PROMPT_VERSION,
 } from "../../src/integration/leaf-summarizer.ts";
 import {
+  createNodeSummaryProviderFromEnv,
+  drainNodeSummaries,
+  NODE_SUMMARY_PROMPT_VERSION,
+} from "../../src/integration/node-summarizer.ts";
+import {
   OmniMemEvalBridge,
   type OmniRetrievedMemory,
 } from "../omnimemeval/bridge.ts";
@@ -85,7 +90,8 @@ async function main(): Promise<void> {
     throw new Error("--hybrid requires NMG_EMBED_* environment variables");
   }
   const summaryProvider = options.summaries ? createLeafSummaryProviderFromEnv() : undefined;
-  if (options.summaries && !summaryProvider) {
+  const nodeSummaryProvider = options.summaries ? createNodeSummaryProviderFromEnv() : undefined;
+  if (options.summaries && (!summaryProvider || !nodeSummaryProvider)) {
     throw new Error("--summaries requires NMG_SUMMARY_* (or NMG_JUDGE_*) environment variables");
   }
 
@@ -103,9 +109,9 @@ async function main(): Promise<void> {
     );
     const storeRoot = await ensureIngested(spec, options.skipIngest);
     let summariesGenerated: number | undefined;
-    if (summaryProvider) {
-      summariesGenerated = await ensureSummaries(storeRoot, summaryProvider);
-      console.log(`leaf summaries ready (+${summariesGenerated} generated this run)`);
+    if (summaryProvider && nodeSummaryProvider) {
+      summariesGenerated = await ensureSummaries(storeRoot, summaryProvider, nodeSummaryProvider);
+      console.log(`leaf + node summaries ready (+${summariesGenerated} generated this run)`);
     }
     const bridge = new OmniMemEvalBridge(storeRoot, {
       embeddingClient,
@@ -243,6 +249,7 @@ async function ingestNow(
 async function ensureSummaries(
   storeRoot: string,
   provider: NonNullable<ReturnType<typeof createLeafSummaryProviderFromEnv>>,
+  nodeProvider: NonNullable<ReturnType<typeof createNodeSummaryProviderFromEnv>>,
 ): Promise<number> {
   const databases = readdirSync(storeRoot).filter((entry) => entry.endsWith(".sqlite"));
   let generated = 0;
@@ -251,7 +258,10 @@ async function ensureSummaries(
     try {
       store.rebuildLeafBlocks();
       const result = await drainLeafSummaries(store, provider, { batch: 32 });
-      generated += result.summarized;
+      // Node summaries consume the node's leaf-block summaries, so they drain
+      // after blocks get theirs (coarser tier under hysteresis).
+      const nodeResult = await drainNodeSummaries(store, nodeProvider, { batch: 8 });
+      generated += result.summarized + nodeResult.summarized;
     } finally {
       store.close();
     }
