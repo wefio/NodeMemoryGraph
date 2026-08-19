@@ -20,6 +20,7 @@ import type {
   HistoryRecord,
   LeafBlock,
   LeafSummaryTask,
+  NodeSummaryTask,
   MaintenanceBatchResult,
   MemoryNode,
   MemoryNodeKind,
@@ -1887,6 +1888,124 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
           .run(blockId, ftsIndexedText(text));
         this.db.exec("COMMIT");
         this.invalidateVectorCaches("leaf");
+        return true;
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+
+    /** Nodes whose semantic summary is missing or stale under hysteresis.
+     *  Input is the node's leaf-block summaries (never raw memories), so a
+     *  node only becomes pending once at least `minBlocks` of its blocks are
+     *  summarized. Refresh rules: no summary yet, or ≥ `newMembersThreshold`
+     *  new indexed members since generation, or any membership change after
+     *  `refreshMs`. No strict fingerprint — bounded staleness is the design. */
+    pendingNodeSummaries(
+      options: {
+        limit?: number;
+        scan?: number;
+        minBlocks?: number;
+        newMembersThreshold?: number;
+        refreshMs?: number;
+        statementCountCap?: number;
+        statementCharCap?: number;
+      } = {},
+    ): NodeSummaryTask[] {
+      const limit = Math.max(1, Math.min(options.limit ?? 32, 256));
+      const scan = Math.max(limit, Math.min(options.scan ?? 1_024, 16_384));
+      const minBlocks = Math.max(1, Math.min(options.minBlocks ?? 2, 32));
+      const newMembersThreshold = Math.max(1, Math.min(options.newMembersThreshold ?? 5, 512));
+      const refreshMs = Math.max(60_000, options.refreshMs ?? 86_400_000);
+      const statementCountCap = Math.max(1, Math.min(options.statementCountCap ?? 24, 128));
+      const statementCharCap = Math.max(32, Math.min(options.statementCharCap ?? 300, 4_000));
+      const rows = this.db
+        .prepare(
+          `SELECT id, canonical_name, semantic_summary, semantic_member_count,
+                  semantic_summary_at
+             FROM memory_nodes
+            WHERE status = 'active'
+            ORDER BY updated_at ASC, id ASC
+            LIMIT ?`,
+        )
+        .all(scan) as Row[];
+      const countQuery = this.db.prepare(
+        `SELECT COUNT(*) AS c FROM memory_records
+          WHERE node_id = ? AND status IN ('active', 'disputed')
+            AND storage_state = 'indexed'`,
+      );
+      const blockSummaryQuery = this.db.prepare(
+        `SELECT semantic_summary FROM memory_leaf_blocks
+          WHERE node_id = ? AND semantic_summary IS NOT NULL
+          ORDER BY updated_at ASC, id ASC LIMIT ?`,
+      );
+      const nowMs = Date.now();
+      const tasks: NodeSummaryTask[] = [];
+      for (const row of rows) {
+        if (tasks.length >= limit) break;
+        const nodeId = String(row.id);
+        const statements = (blockSummaryQuery.all(nodeId, statementCountCap) as Row[]).map(
+          (block) => {
+            const text = String(block.semantic_summary);
+            return text.length > statementCharCap ? `${text.slice(0, statementCharCap)}…` : text;
+          },
+        );
+        if (statements.length < minBlocks) continue;
+        const count = Number((countQuery.get(nodeId) as Row).c);
+        const previous = row.semantic_member_count == null ? null : Number(row.semantic_member_count);
+        if (previous === null) {
+          if (count === 0) continue;
+        } else {
+          const delta = count - previous;
+          const ageMs = row.semantic_summary_at
+            ? nowMs - Date.parse(String(row.semantic_summary_at))
+            : Number.POSITIVE_INFINITY;
+          if (delta < newMembersThreshold && !(delta !== 0 && ageMs >= refreshMs)) continue;
+        }
+        tasks.push({
+          nodeId,
+          nodeName: String(row.canonical_name),
+          memberCount: count,
+          statements,
+        });
+      }
+      return tasks;
+    }
+
+    /** Persist an externally written node summary. No stale rejection (unlike
+     *  setLeafSummary): the summary is index metadata under hysteresis, so a
+     *  slightly older membership baseline is acceptable — the recorded
+     *  memberCount simply becomes the new hysteresis baseline. (Re)indexes
+     *  into the node FTS table for lexical routing. */
+    setNodeSummary(
+      nodeId: string,
+      summary: string,
+      model: string,
+      memberCount: number,
+    ): boolean {
+      const text = summary.trim();
+      if (!text) throw new Error("node summary must not be empty");
+      if (!model.trim()) throw new Error("node summary model is required");
+      const exists = this.db
+        .prepare("SELECT id FROM memory_nodes WHERE id = ?")
+        .get(nodeId) as Row | undefined;
+      if (!exists) return false;
+      const now = new Date().toISOString();
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db
+          .prepare(
+            `UPDATE memory_nodes
+                SET semantic_summary = ?, semantic_summary_model = ?,
+                    semantic_member_count = ?, semantic_summary_at = ?
+              WHERE id = ?`,
+          )
+          .run(text, model.trim(), Math.max(0, Math.floor(memberCount)), now, nodeId);
+        this.db.prepare("DELETE FROM memory_node_fts WHERE node_id = ?").run(nodeId);
+        this.db
+          .prepare("INSERT INTO memory_node_fts(node_id, summary) VALUES (?, ?)")
+          .run(nodeId, ftsIndexedText(text));
+        this.db.exec("COMMIT");
         return true;
       } catch (error) {
         this.db.exec("ROLLBACK");

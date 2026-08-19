@@ -483,6 +483,7 @@ export function migrate(db: DatabaseSync): void {
   ensurePerfAggregateColumns(db);
   ensureDeltaColumns(db);
   ensureLeafSummaryColumns(db);
+  ensureNodeSummaryColumns(db);
   ensureBinaryVectors(db);
   ensureTaskBoardColumns(db);
   db.exec(`
@@ -641,6 +642,35 @@ export function ensureLeafSummaryColumns(db: DatabaseSync): void {
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS memory_leaf_fts USING fts5(
       block_id UNINDEXED,
+      summary,
+      tokenize = 'unicode61'
+    );
+  `);
+}
+
+/** Node-level semantic summaries: one LLM-written index text per node, built
+ *  from the node's leaf-block summaries. `semantic_member_count` records the
+ *  indexed member count at generation time — refresh is hysteresis-driven
+ *  (enough new members, or aged with any change), not fingerprint-strict,
+ *  because the summary is index metadata: bounded staleness costs a little
+ *  recall, never correctness. */
+export function ensureNodeSummaryColumns(db: DatabaseSync): void {
+  const columns = new Set(
+    (db.prepare("PRAGMA table_info(memory_nodes)").all() as Row[]).map((row) =>
+      String(row.name),
+    ),
+  );
+  if (!columns.has("semantic_summary")) {
+    db.exec(`
+      ALTER TABLE memory_nodes ADD COLUMN semantic_summary TEXT;
+      ALTER TABLE memory_nodes ADD COLUMN semantic_summary_model TEXT;
+      ALTER TABLE memory_nodes ADD COLUMN semantic_member_count INTEGER;
+      ALTER TABLE memory_nodes ADD COLUMN semantic_summary_at TEXT;
+    `);
+  }
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS memory_node_fts USING fts5(
+      node_id UNINDEXED,
       summary,
       tokenize = 'unicode61'
     );

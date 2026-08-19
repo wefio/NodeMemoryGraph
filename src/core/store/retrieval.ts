@@ -860,8 +860,27 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             ),
           );
         }
-        // Only summarized blocks expand — the semantic summary is the index
-        // under test; structural-label blocks are not.
+        // Node summaries are the coarser index tier: a node hit enqueues up
+        // to two of its blocks (largest first) behind the direct block hits.
+        // Node-routed blocks expand even without their own leaf summary —
+        // the node summary is the index that matched.
+        const nodeRouted = new Set<string>();
+        const nodeHits = this.routeNodesByFts(query, 2);
+        for (const nodeHit of nodeHits) {
+          const nodeBlocks = this.db
+            .prepare(
+              `SELECT id FROM memory_leaf_blocks
+                WHERE node_id = ? ORDER BY memory_count DESC, id ASC LIMIT 2`,
+            )
+            .all(nodeHit.nodeId) as Row[];
+          for (const block of nodeBlocks) {
+            const id = String(block.id);
+            if (!hitBlockIds.includes(id)) nodeRouted.add(id);
+            pushHits([id]);
+          }
+        }
+        // Only summarized blocks expand on a direct hit — the semantic summary
+        // is the index under test; structural-label blocks are not.
         const summarized = new Set(
           hitBlockIds.length === 0
             ? []
@@ -875,7 +894,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                   .all(...hitBlockIds) as Row[]
               ).map((row) => String(row.id)),
         );
-        const expansions = hitBlockIds.filter((id) => summarized.has(id));
+        const expansions = hitBlockIds.filter((id) => summarized.has(id) || nodeRouted.has(id));
         if (expansions.length > 0) {
           const seen = new Set(context.results.map((result) => result.memory.id));
           // Noise control: within a hit block, members with query-term overlap
@@ -1151,6 +1170,24 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         )
         .all(expression, Math.max(1, Math.min(limit, 50))) as Row[];
       return rows.map((row) => ({ blockId: String(row.block_id), score: -Number(row.rank) }));
+    }
+
+    /** Lexical routing over the node semantic-summary FTS index (the coarser
+     *  tier above leaf blocks). Only nodes carrying an LLM-written summary are
+     *  indexed. FTS5 bm25 ranks lower-is-better; the negated score descends
+     *  with relevance. */
+    routeNodesByFts(query: string, limit = 2): Array<{ nodeId: string; score: number }> {
+      const expression = ftsExpression(query);
+      if (!expression) return [];
+      const rows = this.db
+        .prepare(
+          `SELECT node_id, bm25(memory_node_fts) AS rank
+             FROM memory_node_fts
+            WHERE memory_node_fts MATCH ?
+            ORDER BY rank LIMIT ?`,
+        )
+        .all(expression, Math.max(1, Math.min(limit, 10))) as Row[];
+      return rows.map((row) => ({ nodeId: String(row.node_id), score: -Number(row.rank) }));
     }
 
     searchLeafBlocks(

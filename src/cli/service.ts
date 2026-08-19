@@ -10,7 +10,11 @@ import {
   createLeafSummaryProviderFromEnv,
   drainLeafSummaries,
 } from "../integration/leaf-summarizer.ts";
-import type { LeafSummaryProvider } from "../core/types.ts";
+import {
+  createNodeSummaryProviderFromEnv,
+  drainNodeSummaries,
+} from "../integration/node-summarizer.ts";
+import type { LeafSummaryProvider, NodeSummaryProvider } from "../core/types.ts";
 import { NmgStore } from "../core/store.ts";
 import {
   consolidateStgMemoryToLtg,
@@ -103,6 +107,8 @@ export class NmgService {
   #embeddingError: string | null = null;
   #summaryProvider: LeafSummaryProvider | undefined | null;
   readonly #summaryDrains = new Set<NmgStore>();
+  #nodeSummaryProvider: NodeSummaryProvider | undefined | null;
+  readonly #nodeSummaryDrains = new Set<NmgStore>();
   #shutdownRequested = false;
   readonly #maintenanceJobs = new Map<NmgStore, NodeJS.Immediate>();
   readonly #maintenanceSignals = new Map<
@@ -549,6 +555,9 @@ export class NmgService {
         // Blocks rebuilt above may lack (or have stale) semantic summaries;
         // drain a bounded slice. No-op unless NMG_SUMMARY_* / NMG_JUDGE_* is set.
         this.#drainLeafSummaries(store);
+        // Node summaries consume the node's leaf-block summaries (coarser
+        // tier), so they drain after blocks get their summaries.
+        this.#drainNodeSummaries(store);
       } catch {
         // Maintenance is opportunistic. Dirty/delta counters remain durable and
         // the next write can retry; a failed batch must not fail remember.
@@ -1045,9 +1054,9 @@ export class NmgService {
     return this.#summaryProvider ?? undefined;
   }
 
-  /** Post-maintenance, remember-triggered summary drain: bounded per pass and
-   *  serialized per store. The store side is sync and LLM-free; the async LLM
-   *  calls live here, outside the maintenance transaction. */
+  /** Post-maintenance, remember-triggered leaf summary drain: bounded per
+   *  pass and serialized per store. The store side is sync and LLM-free; the
+   *  async LLM calls live here, outside the maintenance transaction. */
   #drainLeafSummaries(store: NmgStore): void {
     const provider = this.#configuredSummaryProvider();
     if (!provider || this.#summaryDrains.has(store)) return;
@@ -1055,6 +1064,29 @@ export class NmgService {
     void drainLeafSummaries(store, provider, { batch: 16, maxCalls: 16 })
       .catch(() => undefined)
       .finally(() => this.#summaryDrains.delete(store));
+  }
+
+  #configuredNodeSummaryProvider(): NodeSummaryProvider | undefined {
+    if (this.#nodeSummaryProvider !== undefined) return this.#nodeSummaryProvider ?? undefined;
+    try {
+      this.#nodeSummaryProvider = createNodeSummaryProviderFromEnv(this.#environment) ?? null;
+    } catch {
+      // Summaries are opportunistic: a misconfigured endpoint must not break
+      // the daemon; the store simply keeps the structural fallback text.
+      this.#nodeSummaryProvider = null;
+    }
+    return this.#nodeSummaryProvider ?? undefined;
+  }
+
+  /** Post-maintenance node summary drain: coarser tier above leaf blocks, also
+   *  bounded per pass and serialized per store. Same env as leaf summaries. */
+  #drainNodeSummaries(store: NmgStore): void {
+    const provider = this.#configuredNodeSummaryProvider();
+    if (!provider || this.#nodeSummaryDrains.has(store)) return;
+    this.#nodeSummaryDrains.add(store);
+    void drainNodeSummaries(store, provider, { batch: 8, maxCalls: 8 })
+      .catch(() => undefined)
+      .finally(() => this.#nodeSummaryDrains.delete(store));
   }
 }
 

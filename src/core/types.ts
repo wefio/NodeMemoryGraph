@@ -570,11 +570,40 @@ export interface LeafSummaryTask {
   statements: readonly string[];
 }
 
+/** A node whose semantic summary is missing or stale under hysteresis rules
+ *  (new members since generation ≥ threshold, or aged past a refresh window
+ *  with any membership change). Node summaries consume the node's leaf-block
+ *  summaries, not raw memories — one cheap call per node. Unlike leaf tasks
+ *  there is no strict fingerprint: the summary is index metadata, so bounded
+ *  staleness is acceptable by design. */
+export interface NodeSummaryTask {
+  nodeId: string;
+  nodeName: string;
+  /** Indexed member count at collection time; persisted with the summary so
+   *  pendingNodeSummaries can apply the new-members hysteresis. */
+  memberCount: number;
+  /** Leaf-block semantic summaries of this node, already length-capped. */
+  statements: readonly string[];
+}
+
 /** External LLM that writes retrieval-index summaries for leaf blocks.
  *  Same provider pattern as the embedding/judge clients: NMG ships no model,
  *  the caller configures an endpoint. The summary is index metadata — it is
  *  matched against queries but never returned as evidence. */
 export interface LeafSummaryProvider {
+  readonly model: string;
+  summarize(input: {
+    nodeName: string;
+    statements: readonly string[];
+  }): Promise<string>;
+}
+
+/** External LLM that writes retrieval-index node summaries. Same provider
+ *  pattern as leaf summaries: the input is the node's leaf-block summaries
+ *  (never raw memories), so one call per node is short and cheap. Unlike leaf
+ *  tasks there is no strict fingerprint — the summary is index metadata under
+ *  hysteresis, so bounded staleness is acceptable by design. */
+export interface NodeSummaryProvider {
   readonly model: string;
   summarize(input: {
     nodeName: string;
