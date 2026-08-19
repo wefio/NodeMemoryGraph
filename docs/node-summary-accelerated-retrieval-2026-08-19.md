@@ -97,6 +97,23 @@ round 1: 节点启发式渐进（先高潜力节点）
   不足 → 兜底含被剪节点（零召回最后防线）
 ```
 
+## 摘要路由信号（用户新增，最佳实践调研 2026-08-19）
+
+**用途**：渐进1 摘要路由命中节点 → 对照真实召回 → 记录差异信号，给 IR 诊断 + 可学习路由当优化数据（冷启动监督源）。
+
+**粒度（两级，生产标准）**：
+- 明细 (query, node, routed, recalled, used) → `retrieval_traces` 扩展列（供 trainRouter 需 query、IR 诊断回溯）
+- 聚合 per-node routed/recalled count → `node_retrieval_signals` 加列（查询时快速信号 + monitor）
+- 不是二选一：明细可回溯重训、聚合可快速消费。
+
+**并入方式（不直接并入，防 bias 自我强化）**：
+- 隐式反馈有 position/exposure bias（node-routed 节点被特殊处理→更容易被用→正样本虚高）——直接当标签会自我强化（摘要路由命中→被召回→被训练→更命中，回声室）——Unbiased LTR (Joachims 系列) 核心警示。
+- 摘要路由 = **冷启动 profile**（RouteProfile arxiv 2605.00180 / SemSup 语义监督），不是训练标签。
+- trainRouter 正样本需**三重确认**：摘要命中 ∧ 真召回 ∧ 显式被用（usedNodeIds）才并入。
+- 独立记录（retrieval_traces 列），消费方解耦——IR 诊断独立可用。
+
+**消费方**：① IR 诊断（miss=routed∧!recalled → FTS/索引缺口）② trainRouter（三重确认正样本）③ 冷启动 profile（摘要命中标记候选相关，呈现层提示可选）。
+
 ## 验证协议（大数据）
 
 1. **规模**：LongMemEval 500 问 / LoCoMo（取单 store 记忆最多 user 代表大数据）。
