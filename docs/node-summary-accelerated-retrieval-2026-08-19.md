@@ -56,6 +56,22 @@ round 1: 节点启发式渐进（先高潜力节点）
 
 **C 混合（渐进为主 + 选择性剪枝）**：round 1 节点启发式渐进（复用现有 QPP 渐进披露），早停用现有置信/预算机制；不足时全库兜底。剪枝作为**长期可选项**（维护/索引层预剪枝 + per-query 自适应），不默认启用（避免无控制的召回牺牲）。实现前需大数据 profile：早停率（多少查询 round 1 足够）+ 加速比 + 零召回损失验证。
 
+## 可学习路由融合（用户补充）
+
+NMG 已有完整学习回路：`maintenance` 从检索轨迹 `usedNodeIds` → `trainRouter(query, usefulNodeIds)` → 更新 `router_weights`（隐式反馈驱动）；`routeNodes` 已融合 `learned×0.7 + lexical×0.3`。摘要路由 `routeNodesByFts`（节点摘要 FTS）当前是独立路径。
+
+**统一节点启发式 = 融合三源**（混合方案 round 1 的节点排序打分）：
+
+```
+nodePriority = α·learned(router.score) + β·summary(routeNodesByFts) + γ·lexical(lexicalNodeScore)
+```
+
+- **摘要（β）**：冷启动 / 语义即时 —— 渐进单次快
+- **学习（α）**：反馈积累 / 长期变准 —— 剪枝与优先长期稳（呼应“剪枝长期有用”)
+- **词法（γ）**：节点名基础兜底
+- 反馈回路已通（retrieval_trace → usedNodeIds → trainRouter）；摘要不参与训练（静态索引），学习只更新 learned 分量——**无需新基建**
+- 风险：α/β/γ 权重需实验校准；学习过拟合罕见查询（现有 learningRate clamp + examples 计数可衰减）
+
 ## 验证协议（大数据）
 
 1. **规模**：LongMemEval 500 问 / LoCoMo（取单 store 记忆最多 user 代表大数据）。
