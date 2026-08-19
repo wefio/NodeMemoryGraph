@@ -425,7 +425,7 @@ function apply(ctx) {
 			}
 		} catch {}
 	}
-	const sessionId = (process.env.DSH_SESSION_ID || "").trim() || "dsh";
+	const hostSessionId = (process.env.DSH_SESSION_ID || "").trim() || "dsh";
 	const projectName = workspaceRoot.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "dsh";
 	const WAKE_AGENT_ID = "dsh:" + projectName;
 	const WAKE_AGENT_NAME = projectName;
@@ -442,6 +442,13 @@ function apply(ctx) {
 		handoff: 2
 	};
 	const BROADCAST_PREFIX = "[NMG board 协作广播]";
+	const WORLD_BROADCAST_SESSION = "world-broadcast";
+	const BROADCAST_KINDS = /* @__PURE__ */ new Set([
+		"question",
+		"blocker",
+		"handoff"
+	]);
+	const BROADCAST_TTL_SECONDS = 86400;
 	const WAKE_INTERVAL_MS = clampInt(process.env.NMG_BOARD_WAKE_INTERVAL_SEC, 5, 3600, 30) * 1e3;
 	const wakeBatch = /* @__PURE__ */ new Map();
 	let wakeAgentRegistered = false;
@@ -470,10 +477,10 @@ function apply(ctx) {
 		if (existing.some((e) => wakeEntryKey(e) === key)) return;
 		wakeBatch.set(targetSessionId, [entry].concat(existing).slice(0, WAKE_MAX_ENTRIES));
 	}
-	function isWakeCandidate(entry) {
+	function isWakeCandidate(entry, extraTargets) {
 		const now = Date.now();
 		const liveClaim = entry.claimExpiresAt != null && new Date(entry.claimExpiresAt).getTime() > now;
-		const addressedToOther = entry.to != null && entry.to !== WAKE_AGENT_ID && entry.to !== WAKE_AGENT_NAME;
+		const addressedToOther = entry.to != null && entry.to !== WAKE_AGENT_ID && entry.to !== WAKE_AGENT_NAME && !(extraTargets && extraTargets.has(entry.to));
 		const serialQueued = entry.serialState === "pending";
 		return entry.status === "open" && WAKE_KINDS.has(entry.kind) && !liveClaim && !addressedToOther && !serialQueued && !String(entry.content || "").startsWith(BROADCAST_PREFIX);
 	}
@@ -483,6 +490,38 @@ function apply(ctx) {
 			if (next.length) wakeBatch.set(key, next);
 			else wakeBatch.delete(key);
 		}
+	}
+	async function maybeBroadcastToWorld(entry, agentId, sessionId) {
+		if (!entry || String(entry.content || "").startsWith(BROADCAST_PREFIX)) return false;
+		if (!BROADCAST_KINDS.has(entry.kind)) return false;
+		const worldCheck = await daemonCall("taskBoard", {
+			action: "deliveryCheck",
+			taskId: WAKE_WORLD_TASK,
+			agentId,
+			sessionId: WORLD_BROADCAST_SESSION,
+			entryIds: [wakeEntryKey(entry)]
+		});
+		if (worldCheck && Array.isArray(worldCheck.delivered) && worldCheck.delivered.includes(wakeEntryKey(entry))) return false;
+		const excerpt = String(entry.content || "").length > 140 ? String(entry.content || "").slice(0, 140) + "…" : String(entry.content || "");
+		const label = entry.kind === "question" ? "问题" : entry.kind === "blocker" ? "阻塞" : "交接";
+		const broadcast = "[NMG board 协作广播] 频道 " + (entry.taskId || "?") + " 有 #" + entry.sequence + " 未认领的" + label + "（open）：" + excerpt + "。有空的 agent 可用 nmg_board read taskId=" + (entry.taskId || "?") + " 查看详情、claim 认领处理。";
+		await daemonCall("taskBoard", {
+			action: "put",
+			taskId: WAKE_WORLD_TASK,
+			agentId,
+			sourceSessionId: sessionId,
+			kind: "handoff",
+			content: broadcast,
+			ttlSeconds: BROADCAST_TTL_SECONDS
+		});
+		await daemonCall("taskBoard", {
+			action: "recordDelivery",
+			entryId: wakeEntryKey(entry),
+			sessionId: WORLD_BROADCAST_SESSION,
+			agentId,
+			source: "wake-broadcast"
+		});
+		return true;
 	}
 	async function boardWakeOnce() {
 		if (!await ensureDaemon()) {
@@ -520,6 +559,35 @@ function apply(ctx) {
 					});
 				}
 			};
+			const agentsService = ctx.get("agents");
+			if (agentsService && typeof agentsService.list === "function") {
+				for (const agent of agentsService.list()) if (agent && agent.id) lastAgents.set(String(agent.id), agent);
+			}
+			const subagents = ctx.get("subagents");
+			const childTargets = /* @__PURE__ */ new Set();
+			const childMap = /* @__PURE__ */ new Map();
+			if (subagents && typeof subagents.listChildren === "function") for (const [parentSessionId, parent] of lastAgents) {
+				if (!parent) continue;
+				let children;
+				try {
+					children = await subagents.listChildren(parentSessionId);
+				} catch {
+					continue;
+				}
+				for (const child of children || []) {
+					if (!child || child.kind !== "child" || child.mode !== "continuable") continue;
+					const childId = String(child.id);
+					childTargets.add(childId);
+					childMap.set(childId, parent);
+					const childDirected = await daemonCall("taskBoard", {
+						action: "readDirected",
+						agentId: childId,
+						agentName: childId,
+						limit: WAKE_MAX_ENTRIES
+					});
+					collect(null, childDirected && childDirected.entries);
+				}
+			}
 			const directed = await daemonCall("taskBoard", {
 				action: "readDirected",
 				agentId: WAKE_AGENT_ID,
@@ -537,7 +605,7 @@ function apply(ctx) {
 			const subs = await daemonCall("taskBoard", {
 				action: "listSubscriptions",
 				agentId: WAKE_AGENT_ID,
-				sessionId
+				sessionId: hostSessionId
 			});
 			for (const board of subs && Array.isArray(subs.subscriptions) && subs.subscriptions || []) {
 				if (!board.taskId || board.taskId === WAKE_WORLD_TASK) continue;
@@ -549,12 +617,16 @@ function apply(ctx) {
 				});
 				collect(board.taskId, read && read.entries);
 			}
-			const mine = candidates.filter(isWakeCandidate);
+			const mine = candidates.filter((entry) => isWakeCandidate(entry, childTargets));
+			if (wakeConfig && wakeConfig.worldBroadcast) for (const entry of mine) try {
+				await maybeBroadcastToWorld(entry, WAKE_AGENT_ID, hostSessionId);
+			} catch {}
 			if (mine.length === 0) return;
 			for (const [agentSessionId, agent] of lastAgents) {
 				if (!agent || typeof agent.send !== "function") continue;
 				const theirs = mine.filter((entry) => {
-					return !(entry.sourceSessionId === agentSessionId || entry.sourceSessionId == null && entry.agentId === WAKE_AGENT_ID);
+					if (childTargets.has(String(entry.to || ""))) return false;
+					return !(entry.sourceSessionId === agentSessionId && entry.agentId === WAKE_AGENT_ID || entry.sourceSessionId === agentSessionId || entry.sourceSessionId == null && entry.agentId === WAKE_AGENT_ID);
 				});
 				if (theirs.length === 0) continue;
 				const fresh = [];
@@ -575,37 +647,85 @@ function apply(ctx) {
 				if (fresh.length === 0) continue;
 				fresh.sort((left, right) => (KIND_RANK[left.kind] ?? 9) - (KIND_RANK[right.kind] ?? 9) || String(left.createdAt || "").localeCompare(String(right.createdAt || "")));
 				const pick = fresh[0];
-				await daemonCall("taskBoard", {
+				pushWakeEntry(pick, agentSessionId);
+				if (wakeAgent(agent, pick)) await daemonCall("taskBoard", {
 					action: "recordDelivery",
 					agentId: WAKE_AGENT_ID,
 					sessionId: agentSessionId,
 					entryId: wakeEntryKey(pick),
 					source: "wake"
 				});
-				pushWakeEntry(pick, agentSessionId);
-				wakeAgent(agent, pick);
+			}
+			for (const [childId, parent] of childMap) {
+				const theirs = mine.filter((entry) => String(entry.to || "") === childId && entry.sourceSessionId !== childId);
+				if (theirs.length === 0) continue;
+				const fresh = [];
+				for (const taskId of new Set(theirs.map((c) => c.taskId))) {
+					const group = theirs.filter((c) => c.taskId === taskId);
+					const check = await daemonCall("taskBoard", {
+						action: "deliveryCheck",
+						agentId: childId,
+						sessionId: childId,
+						taskId: taskId || WAKE_WORLD_TASK,
+						entryIds: group.map(wakeEntryKey)
+					});
+					if (check && check.suppressed) continue;
+					const delivered = new Set(check && Array.isArray(check.delivered) && check.delivered || []);
+					const acked = new Set(check && Array.isArray(check.acked) && check.acked || []);
+					for (const entry of group) if (!delivered.has(wakeEntryKey(entry)) && !acked.has(wakeEntryKey(entry))) fresh.push(entry);
+				}
+				if (fresh.length === 0) continue;
+				fresh.sort((left, right) => (KIND_RANK[left.kind] ?? 9) - (KIND_RANK[right.kind] ?? 9) || String(left.createdAt || "").localeCompare(String(right.createdAt || "")));
+				const pick = fresh[0];
+				try {
+					await subagents.followup(parent, childId, [{
+						type: "text",
+						text: wakeMessageText(pick)
+					}], {
+						source: {
+							kind: "plugin",
+							plugin: "@nmg/dsh-nmg"
+						},
+						signal: AbortSignal.timeout(5e3)
+					});
+				} catch {
+					continue;
+				}
+				await daemonCall("taskBoard", {
+					action: "recordDelivery",
+					agentId: childId,
+					sessionId: childId,
+					entryId: wakeEntryKey(pick),
+					source: "wake"
+				});
+				pushWakeEntry(pick, childId);
 			}
 		} catch {
 			wakeAgentRegistered = false;
 		}
 	}
+	function wakeMessageText(entry) {
+		return "[NMG board] 新黑板条目 #" + entry.sequence + " [" + entry.kind + "] " + (entry.taskId || "?") + " by " + (entry.agentId || "?") + ":\n" + truncate(entry.content, 400);
+	}
 	function wakeAgent(agent, entry) {
-		if (!agent || typeof agent.send !== "function") return;
+		if (!agent || typeof agent.send !== "function") return false;
 		try {
-			const text = "[NMG board 唤醒] 新黑板条目 #" + entry.sequence + " [" + entry.kind + "] " + (entry.taskId || "?") + " by " + (entry.agentId || "?") + ":\n" + truncate(entry.content, 400) + "\n用 nmg_board claim 接手（claim=接手），或 nmg_board resolve 关闭。";
 			agent.send({
 				id: randomUUID(),
 				role: "user",
 				content: [{
 					type: "text",
-					text
+					text: wakeMessageText(entry)
 				}],
 				source: {
 					kind: "plugin",
 					plugin: "@nmg/dsh-nmg"
 				}
 			}, "next-turn", true);
-		} catch {}
+			return true;
+		} catch {
+			return false;
+		}
 	}
 	function wakeTextFor(agent) {
 		if (!agent) return "";
@@ -984,9 +1104,9 @@ function apply(ctx) {
 		},
 		output: textOutput,
 		async execute(args, exec) {
-			const agent = args.agentId || "dsh";
-			if (args.action === "put" && !args.taskId) return "nmg_board put requires taskId.";
-			if (args.action === "read" && !args.taskId) return "nmg_board read requires taskId.";
+			const agent = args.agentId || WAKE_AGENT_ID;
+			const sourceSessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId;
+			const taskId = args.taskId || WAKE_WORLD_TASK;
 			if ((args.action === "resolve" || args.action === "claim" || args.action === "release") && (!args.taskId || !args.entryId)) return "nmg_board " + args.action + " requires taskId and entryId.";
 			if (![
 				"put",
@@ -1007,31 +1127,33 @@ function apply(ctx) {
 				argv.push("--agent", agent);
 				if (args.capabilities) argv.push("--capabilities", args.capabilities);
 			} else if (args.action === "put") {
-				params.taskId = args.taskId;
+				params.taskId = taskId;
 				params.content = args.content || "";
 				if (args.kind) params.kind = args.kind;
 				if (args.to) params.to = args.to;
 				if (args.ttlSeconds != null) params.ttlSeconds = args.ttlSeconds;
-				argv.push(args.taskId, args.content || "");
+				params.sourceSessionId = sourceSessionId;
+				argv.push(taskId, args.content || "");
 				argv.push("--agent", agent);
+				argv.push("--session-id", sourceSessionId);
 				if (args.kind) argv.push("--kind", args.kind);
 				if (args.to) argv.push("--to", args.to);
 				if (args.ttlSeconds != null) argv.push("--ttl-seconds", String(args.ttlSeconds));
 			} else if (args.action === "read") {
-				params.taskId = args.taskId;
+				params.taskId = taskId;
 				if (args.afterCursor != null) params.afterCursor = args.afterCursor;
 				if (args.limit != null) params.limit = args.limit;
 				if (args.includeResolved) params.includeResolved = true;
-				argv.push(args.taskId, "--agent", agent);
+				argv.push(taskId, "--agent", agent);
 				if (args.afterCursor != null) argv.push("--after-cursor", String(args.afterCursor));
 				if (args.limit != null) argv.push("--limit", String(args.limit));
 				if (args.includeResolved) argv.push("--include-resolved");
 			} else {
-				params.taskId = args.taskId;
+				params.taskId = taskId;
 				params.entryId = args.entryId;
 				if (args.action === "resolve" && args.resolution) params.resolution = args.resolution;
 				if (args.action === "claim" && args.leaseSeconds != null) params.leaseSeconds = args.leaseSeconds;
-				argv.push(args.taskId, args.entryId, "--agent", agent);
+				argv.push(taskId, args.entryId, "--agent", agent);
 				if (args.action === "resolve" && args.resolution) argv.push("--resolution", args.resolution);
 				if (args.action === "claim" && args.leaseSeconds != null) argv.push("--lease-seconds", String(args.leaseSeconds));
 			}
@@ -1043,10 +1165,12 @@ function apply(ctx) {
 			if (data.action === "discover") {
 				const agents = Array.isArray(data.agents) ? data.agents : [];
 				if (!agents.length) return "No online NMG agents match.";
-				return "Online NMG agents:\n" + agents.map((a) => "- " + a.agentName + (a.capabilities ? " capabilities=" + a.capabilities : "") + " lastSeen=" + a.lastSeenAt).join("\n");
+				return "Online NMG agents [v2]:\n" + agents.map((a) => "- " + a.agentName + (a.capabilities ? " capabilities=" + a.capabilities : "") + " lastSeen=" + a.lastSeenAt).join("\n");
 			}
-			const lines = (Array.isArray(data.entries) ? data.entries : data.entry ? [data.entry] : []).map((e) => "- #" + e.sequence + " " + e.id + " [" + e.kind + "/" + e.status + "] " + e.agentId + ": " + truncate(e.content, 400));
-			if (data.action === "read" && data.nextCursor != null) lines.push("nextCursor=" + data.nextCursor);
+			const entries = Array.isArray(data.entries) ? data.entries : data.entry ? [data.entry] : [];
+			if (entries.length === 0 && data.action === "read") return "No matching board entries.";
+			const lines = entries.map((e) => "- #" + e.sequence + " " + e.id + " [" + e.kind + "/" + e.status + "] " + e.agentId + ": " + truncate(e.content, 400));
+			if (data.action === "read" && data.nextCursor != null && data.nextCursor !== 0) lines.push("nextCursor=" + data.nextCursor);
 			return lines.length ? lines.join("\n") : "No matching board entries.";
 		}
 	};
@@ -1190,12 +1314,6 @@ function apply(ctx) {
 	if (wakeRouteDisposer) disposers.push(wakeRouteDisposer);
 	return () => {
 		for (const dispose of disposers) if (typeof dispose === "function") dispose();
-		if (routeDisposer) try {
-			routeDisposer();
-		} catch {}
-		if (wakeRouteDisposer) try {
-			wakeRouteDisposer();
-		} catch {}
 		recallWindows.clear();
 		sessionTokenTotals.clear();
 		recallBatch.clear();
