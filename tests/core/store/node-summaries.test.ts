@@ -276,3 +276,67 @@ test("summary routing signal: routed but NOT recalled marks the IR gap", () => {
     );
   });
 });
+
+test("trainRouter: triple-confirmed nodes learn at twice the base rate", () => {
+  withStore((store) => {
+    store.remember({ statement: "user booked a flight to Tokyo", nodeName: "alpha", sourceActor: "user" });
+    store.remember({ statement: "user likes green tea", nodeName: "beta", sourceActor: "user" });
+    const aNode = store.searchContext("tokyo", { limit: 1 }).results[0]!.node;
+    const bNode = store.searchContext("green tea", { limit: 1 }).results[0]!.node;
+    const query = "tokyo flight travel";
+    // aNode is triple-confirmed (boosted lr), bNode is plain use.
+    store.trainRouter(query, [aNode.id, bNode.id], 0.2, [aNode.id]);
+    const readWeights = (nodeId: string): number[] => {
+      const row = (
+        (store as unknown as { db: import("node:sqlite").DatabaseSync }).db
+          .prepare("SELECT weights_json FROM router_weights WHERE node_id = ?")
+          .get(nodeId) as { weights_json: string }
+      );
+      return JSON.parse(row.weights_json) as number[];
+    };
+    // Cosine is scale-invariant: from a zero init, both nodes sit on the query
+    // direction after one update regardless of lr. The boosted lr instead shows
+    // up in the vector NORM (each update moves confirmed nodes farther).
+    const norm = (v: readonly number[]): number =>
+      Math.sqrt(v.reduce((s, x) => s + x * x, 0));
+    const normA = norm(readWeights(aNode.id));
+    const normB = norm(readWeights(bNode.id));
+    assert.ok(
+      normA > normB,
+      `confirmed node should move farther (normA=${normA.toFixed(3)} > normB=${normB.toFixed(3)})`,
+    );
+  });
+});
+
+test("summaryRouteGapReport: routed∧!recalled nodes surface as the IR gap", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "user booked a flight to Tokyo on 2026-06-15",
+      nodeName: "travel",
+      sourceActor: "user",
+    });
+    store.remember({
+      statement: "user reviews quarterly business plans every week",
+      nodeName: "plans",
+      sourceActor: "user",
+    });
+    store.rebuildLeafBlocks();
+    const travelNode = store.searchContext("tokyo", { limit: 1 }).results[0]!.node;
+    store.setNodeSummary(
+      travelNode.id,
+      "the user's travel plans and tech preferences",
+      "test-model",
+      1,
+    );
+    // Two queries both gap the travel node (summary-routed, base misses it).
+    store.searchContext("plans", { limit: 8, leafBlockRouting: true, leafBlockRoutingMaxMembers: 12 });
+    store.searchContext("plans", { limit: 8, leafBlockRouting: true, leafBlockRoutingMaxMembers: 12 });
+    const report = store.summaryRouteGapReport(10);
+    const travel = report.find((r) => r.nodeId === travelNode.id);
+    assert.ok(travel, "travel node appears in the gap report");
+    assert.equal(travel!.routed, 2);
+    assert.equal(travel!.recalled, 0);
+    assert.equal(travel!.gap, 2);
+    assert.equal(travel!.gapRatio, 1);
+  });
+});

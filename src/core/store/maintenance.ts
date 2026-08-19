@@ -131,7 +131,12 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
     ) => void;
     // cross-cluster (writes / graph)
     declare recordUsage: (memoryIds: string[]) => void;
-    declare trainRouter: (query: string, usefulNodeIds: string[], learningRate?: number) => void;
+    declare trainRouter: (
+      query: string,
+      usefulNodeIds: string[],
+      learningRate?: number,
+      confirmedNodeIds?: string[],
+    ) => void;
     declare reconcileConsolidation: (options?: {
       pairs?: readonly (readonly [string, string])[];
     }) => unknown;
@@ -1425,6 +1430,47 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       return Number(row.n);
     }
 
+    /** IR gap report from the summary-routing signal (diagnostic consumer):
+     *  for each node, how many times the node-summary FTS index matched it
+     *  (routed) and how many times it also reached the base result set
+     *  (recalled). gap = routed − recalled counts the times base retrieval
+     *  missed a node the summary index kept finding — those are exactly the
+     *  rescues the node-routed expansion performed. High-gap nodes point at
+     *  lexical/vector index holes worth fixing. */
+    summaryRouteGapReport(limit = 25): Array<{
+      nodeId: string;
+      routed: number;
+      recalled: number;
+      gap: number;
+      gapRatio: number;
+    }> {
+      const rows = this.db
+        .prepare("SELECT node_route_signal_json FROM retrieval_traces")
+        .all() as Row[];
+      const agg = new Map<string, { routed: number; recalled: number }>();
+      for (const row of rows) {
+        for (const signal of parseStoredJson(
+          row.node_route_signal_json,
+          [],
+        ) as NodeRouteSignalItem[]) {
+          const entry = agg.get(signal.nodeId) ?? { routed: 0, recalled: 0 };
+          if (signal.routed) entry.routed += 1;
+          if (signal.recalled) entry.recalled += 1;
+          agg.set(signal.nodeId, entry);
+        }
+      }
+      return [...agg.entries()]
+        .map(([nodeId, v]) => ({
+          nodeId,
+          routed: v.routed,
+          recalled: v.recalled,
+          gap: v.routed - v.recalled,
+          gapRatio: v.routed > 0 ? (v.routed - v.recalled) / v.routed : 0,
+        }))
+        .sort((a, b) => b.gap - a.gap)
+        .slice(0, limit);
+    }
+
     /**
      * Prune raw retrieval traces beyond the retention window. The window is
      * defined by age (default 30 days) and row count (default 10 000) — the
@@ -1655,7 +1701,23 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         throw error;
       }
       this.recordUsage(observedUsedMemoryIds);
-      if (usedNodeIds.size > 0) this.trainRouter(String(row.query), [...usedNodeIds]);
+      if (usedNodeIds.size > 0) {
+        // Triple-confirmation for the summary-routing supervision signal: only
+        // nodes that were summary-routed (routed ∧ recalled in this trace's
+        // node_route_signal_json) AND explicitly used are boosted in the
+        // router update. Summary hits alone never train the router — that
+        // would be exposure-biased (Unbiased-LTR echo-chamber guard).
+        const tripleConfirmed = new Set<string>();
+        for (const signal of parseStoredJson(
+          row.node_route_signal_json,
+          [],
+        ) as NodeRouteSignalItem[]) {
+          if (signal.routed && signal.recalled && usedNodeIds.has(signal.nodeId)) {
+            tripleConfirmed.add(signal.nodeId);
+          }
+        }
+        this.trainRouter(String(row.query), [...usedNodeIds], 0.2, [...tripleConfirmed]);
+      }
       // Outcome attribution is the point where co-retrieval becomes evidence.
       // Reconciliation remains conservative (independent-task threshold and
       // hysteresis live in the graph layer), but it must be invoked by a real

@@ -850,8 +850,14 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         .slice(0, Math.max(1, Math.min(limit, 50)));
     }
 
-    trainRouter(query: string, usefulNodeIds: string[], learningRate = 0.2): void {
+    trainRouter(
+      query: string,
+      usefulNodeIds: string[],
+      learningRate = 0.2,
+      confirmedNodeIds: string[] = [],
+    ): void {
       const uniqueIds = [...new Set(usefulNodeIds)];
+      const confirmed = new Set(confirmedNodeIds);
       const upsert = this.db.prepare(
         `INSERT INTO router_weights (node_id, model, dimensions, weights_json, examples, updated_at)
        VALUES (?, ?, ?, ?, 1, ?)
@@ -865,10 +871,17 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         for (const nodeId of uniqueIds) {
           this.requireNode(nodeId);
           const row = select.get(nodeId) as Row | undefined;
+          // Triple-confirmed nodes (summary-routed ∧ recalled ∧ explicitly used)
+          // carry double evidence, so they learn at twice the base rate;
+          // plain use stays at the base rate. Summary hits alone never train
+          // the router (exposure-bias echo-chamber guard).
+          const lr = confirmed.has(nodeId)
+            ? clamp(learningRate * 2, 0.001, 1)
+            : clamp(learningRate, 0.001, 1);
           const weights = this.router.update(
             query,
             row ? parseVector(row.weights_json) : undefined,
-            clamp(learningRate, 0.001, 1),
+            lr,
           );
           upsert.run(
             nodeId,
