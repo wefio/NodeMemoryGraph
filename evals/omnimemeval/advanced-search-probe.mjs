@@ -15,7 +15,7 @@ const uidArg = process.argv[2] ?? "132";
 const uid = /^\d+$/.test(uidArg) ? `lme_exper_user_lme500_bgefix_header_20260804_${uidArg}` : uidArg;
 const key = createHash("sha256").update(uid).digest("hex").slice(0, 24);
 const store = new NmgStore(join(".benchmarks/omnimemeval-nmg", `${key}.sqlite`));
-const embedding = new CachedOmniEmbeddingClient(".benchmarks/omnimemeval-nmg/embedding-cache.sqlite",
+const embedding = new CachedOmniEmbeddingClient(".benchmarks/shared-embedding-cache.sqlite",
   await createEmbeddingClientFromEnv());
 const opts = { limit: 20, maxTier: 3, graphHops: 1, vectorGranularity: "records",
   secondPass: false, progressiveWarmDisclosure: false,

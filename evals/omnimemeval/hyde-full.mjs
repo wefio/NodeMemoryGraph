@@ -23,7 +23,7 @@ import { CachedOmniEmbeddingClient } from "./embedding-cache.ts";
 const DATA = ".benchmarks/official/OmniMemEval/data/longmemeval/longmemeval_s_cleaned.json";
 const VERSION = "lme500_bgefix_header_20260804";
 const STORE_DIR = ".benchmarks/omnimemeval-nmg";
-const CACHE_PATH = ".benchmarks/omnimemeval-nmg/embedding-cache.sqlite";
+const CACHE_PATH = ".benchmarks/shared-embedding-cache.sqlite";
 const OUT = ".benchmarks/omnimemeval-nmg/hyde-full-results.json";
 const LIMIT = 20;
 const POOL_SIZE = 10;

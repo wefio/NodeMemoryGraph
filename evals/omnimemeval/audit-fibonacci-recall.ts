@@ -24,7 +24,7 @@ const KS = [1, 2, 3, 5, 8, 13, 21, 34];
 const ADAPTIVE_LIMITS = (process.argv[4] ?? "21").split(",").map(Number);
 const THRESHOLDS = (process.argv[5] ?? "0.7").split(",").map(Number);
 const JSON_OUT = process.argv[6] ?? ""; // per-question rows for K_need vs QPP analysis
-const EMBED_CACHE = "evals/results/embedding-cache.sqlite";
+const EMBED_CACHE = ".benchmarks/shared-embedding-cache.sqlite";
 const STORE_DIR = "evals/results/audit-stores";
 
 function evidenceRecall(results: MemoryContext["results"], diaIds: Set<string>): number {

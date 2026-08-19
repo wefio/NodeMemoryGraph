@@ -22,7 +22,7 @@ import { loadLocomo } from "../benchmarks/loaders.ts";
 const DATA = process.argv[2] ?? ".benchmarks/official/OmniMemEval/data/locomo/locomo10.json";
 const MAX_CASES = Number.parseInt(process.argv[3] ?? "2000", 10);
 const JSON_OUT = process.argv[4] ?? "evals/results/elbow-data.json";
-const EMBED_CACHE = "evals/results/embedding-cache.sqlite";
+const EMBED_CACHE = ".benchmarks/shared-embedding-cache.sqlite";
 const STORE_DIR = "evals/results/audit-stores";
 const TOPK = 34;
 

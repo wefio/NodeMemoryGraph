@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, rmSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
 import { createJudgeClientFromEnv, type JudgeClient } from "./judge-provider.ts";
@@ -14,6 +14,21 @@ import { CachedOmniEmbeddingClient } from "./embedding-cache.ts";
 
 const nmgPrompts = loadPrompts();
 const PROJECTED_CONTROL_MARKERS = new Set(["forget"]);
+
+/** Shared embedding cache for all evals. Embeddings are content-hashed
+ *  (index_id, input_kind, text_hash), so the same text under the same model
+ *  yields the same key in every eval — one cache serves them all and avoids a
+ *  new ~1GB duplicate per eval variant (measured 27% redundancy across caches
+ *  before merging; see evals/omnimemeval/merge-embedding-caches.mjs and
+ *  docs). Override per-eval with `embeddingCachePath` ONLY when true isolation
+ *  is required; otherwise reuse the shared cache. */
+const SHARED_EMBED_CACHE = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  ".benchmarks",
+  "shared-embedding-cache.sqlite",
+);
 
 export type OmniRetrievedMemory = {
   memoryId: string;
@@ -144,7 +159,7 @@ export class OmniMemEvalBridge {
     this.#root = resolve(root);
     if (options.embeddingClient) {
       this.#embeddingCache = new CachedOmniEmbeddingClient(
-        resolve(options.embeddingCachePath ?? resolve(this.#root, "embedding-cache.sqlite")),
+        resolve(options.embeddingCachePath ?? SHARED_EMBED_CACHE),
         options.embeddingClient,
       );
       this.#embeddingClient = this.#embeddingCache;

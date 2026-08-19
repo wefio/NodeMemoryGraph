@@ -367,11 +367,21 @@ each recorded phase. Large comparisons should use a version prefix so unrelated
 runs are not mixed.
 
 When an external embedding provider is configured, document and query vectors
-are cached by embedding index identity, input kind, and text hash in
-`.benchmarks/omnimemeval-nmg/embedding-cache.sqlite`. The cache is independent
-of disposable benchmark user databases, so repeated corpora and queries reuse
-vectors across users and runs. Changing the model or preprocessing contract
-changes the index identity and cannot reuse incompatible vectors.
+are cached by embedding index identity, input kind, and text hash in the
+**shared** cache `.benchmarks/shared-embedding-cache.sqlite` — one cache for
+all evals, not one per eval directory. The cache is independent of disposable
+benchmark user databases, so repeated corpora and queries reuse vectors across
+users and runs. Changing the model or preprocessing contract changes the index
+identity and cannot reuse incompatible vectors.
+
+**Boundary — do not create new per-eval embedding caches.** Before the merge,
+5 caches held 906k rows of which 248k (27%) were duplicates across eval
+variants (bge-union-k20 was 96% redundant with the main run). `bridge.ts`
+defaults to the shared cache; probe/audit scripts were repointed to it. Create
+a separate cache only when true isolation is required (different model or
+preprocessing), and merge it back afterwards with
+`evals/omnimemeval/merge-embedding-caches.mjs`. The old per-eval cache files
+(`embedding-cache.sqlite` in each eval directory) are obsolete once merged.
 
 On the Windows evaluation host, the offline BGE server is run from the existing
 `uv` script environment. Installing the CUDA PyTorch wheel into that environment

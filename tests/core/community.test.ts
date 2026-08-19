@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NmgStore } from "../../src/core/store.ts";
@@ -12,6 +12,7 @@ function withStore(run: (store: NmgStore) => void): void {
     run(store);
   } finally {
     store.close();
+    rmSync(dir, { force: true, recursive: true });
   }
 }
 

@@ -19,7 +19,7 @@ import { CachedOmniEmbeddingClient } from "./embedding-cache.ts";
 const DATA = ".benchmarks/official/OmniMemEval/data/longmemeval/longmemeval_s_cleaned.json";
 const VERSION = "lme500_bgefix_header_20260804"; // userId suffix matching existing stores
 const STORE_DIR = ".benchmarks/omnimemeval-nmg";
-const CACHE_PATH = ".benchmarks/omnimemeval-nmg/embedding-cache.sqlite";
+const CACHE_PATH = ".benchmarks/shared-embedding-cache.sqlite";
 const N = Number(process.argv[2] ?? "8"); // questions per batch
 const IDX_ARG = process.argv[3]; // comma list of explicit indices (baseline-only mode: "scan")
 const POOL_MODE = process.argv[4] === "pool"; // candidate-aware HyDE: feed top-10 baseline pool

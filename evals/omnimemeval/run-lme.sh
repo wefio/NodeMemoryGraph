@@ -150,7 +150,7 @@ echo "  strays killed"
 # run of a corpus), so the caller can start bge_server instead of failing mid-search.
 node -e '
 const { DatabaseSync } = require("node:sqlite");
-const db = new DatabaseSync(process.env.NMG_ROOT + "/.benchmarks/omnimemeval-nmg/embedding-cache.sqlite", { readOnly: true });
+const db = new DatabaseSync(process.env.NMG_ROOT + "/.benchmarks/shared-embedding-cache.sqlite", { readOnly: true });
 try {
   const rows = db.prepare("SELECT index_id, input_kind, COUNT(*) c FROM embedding_cache GROUP BY index_id, input_kind").all();
   for (const r of rows) console.log(`  cache ${r.index_id} ${r.input_kind}=${r.c}`);
