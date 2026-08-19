@@ -102,3 +102,15 @@ round 1: 节点启发式渐进（先高潜力节点）
 1. **规模**：LongMemEval 500 问 / LoCoMo（取单 store 记忆最多 user 代表大数据）。
 2. **指标**：早停率（round 1 命中率）；全库 vs 节点内候选规模/耗时；加速比；**召回损失**（gold 命中对比——C 必须零损失）。
 3. **通过标准**：早停率显著 && 召回零损失 → 实现 C（渐进默认 + 剪枝可选）；否则记录结论。
+
+## 最佳实践调研（2026-08-19）
+
+5 角度 web 调研，多数直接支持分层解耦设计：
+
+1. **单次 stateless + 长期累积学习 = 前沿共识**：RAG without Forgetting (arxiv 2602.05152) 明确 query-time adaptations 是 stateless（每次重算、无累积），只有 index-side 才有持久累积学习——我们的渐进（单次 stateless）＋ 学习剪枝（index-side 累积）正是此方向。GAM-RAG (arxiv 2603.01783) 从重复查询累积经验（training-free）。
+2. **级联尾段收益递减（生产警示）**：The Neural Base 2026：2-stage→cascade 尾收益 <0.3% 但 +50-200ms；dense retriever recall@100 已 85-92%——**渐进轮数要克制（1-2 级 + 兜底，勿无限加深）**。
+3. **聚类/块级剪枝 = 节点剪枝同构**：ASC (EMNLP 2024) 聚类级动态剪枝 + 概率 rank-safeness 保证（两参数控制）；Block-Max Pruning (arxiv 2405.01117) 块级剪枝——**剪枝阈值可借鉴概率保证而非纯经验阈值**。
+4. **从反馈学剪枝已验证**：MICO (COLING 2022) 从搜索日志学选择性搜索（最小监督）——正对应“从反馈学剪枝”；FLAIR (Microsoft) / DMA (Online RAG Alignment) 反馈学习。
+5. **scope-before-routing**：ShardMemo (arxiv 2601.21545) 先定范围再路由——对应我们“剪枝（定范围）先于渐进（搜索）”。
+
+**对设计的确认与微调**：分层解耦保持（前沿共识）；渐进轮数克制（1-2 级）；剪枝阈值借鉴概率保证；防遗忘用 examples 衰减 + hysteresis（已有，参照 L2R 终身学习 CIKM 2023）。
