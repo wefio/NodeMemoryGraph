@@ -60,6 +60,10 @@ export class Router {
   // ── per-node scoring (legacy, for lexical routing fallback) ──
 
   score(query: string, weights: readonly number[]): number {
+    // Empty weights = no learned signal yet. Skip embedding the query entirely
+    // (cosine against [] is 0 anyway) so cold-start nodes don't pay the hash
+    // embed cost on every search.
+    if (!weights || weights.length === 0) return 0;
     return cosineSimilarity(this.#embedder.embed(query), weights);
   }
 

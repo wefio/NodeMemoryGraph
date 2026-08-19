@@ -143,6 +143,48 @@ test("embedding templates require a text placeholder", () => {
   );
 });
 
+test("BAAI-prefixed and bare BGE model names share one index identity", () => {
+  const prefixed = new OpenAIEmbeddingClient({ model: "BAAI/bge-small-en-v1.5", profile: "bge-en" });
+  const bare = new OpenAIEmbeddingClient({ model: "bge-small-en-v1.5", profile: "bge-en" });
+  // Same model, two spellings → same normalized identity (one embedding index).
+  assert.equal(prefixed.indexId, bare.indexId);
+  assert.equal(prefixed.model, "bge-small-en-v1.5");
+  assert.equal(bare.model, "bge-small-en-v1.5");
+  assert.match(prefixed.indexId, /^bge-small-en-v1\.5@[0-9a-f]{12}$/);
+});
+
+test("API request still sends the raw configured model name", async () => {
+  let sentModel = "";
+  const server = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => (body += chunk));
+    request.on("end", () => {
+      sentModel = (JSON.parse(body) as { model: string }).model;
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ data: [{ index: 0, embedding: [1] }] }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const client = new OpenAIEmbeddingClient({
+      baseUrl: `http://127.0.0.1:${address.port}/v1`,
+      model: "BAAI/bge-small-en-v1.5",
+      profile: "bge-en",
+    });
+    await client.embedQueries(["query"]);
+    // Normalization only affects the index identity; the endpoint still
+    // receives the exact configured model name.
+    assert.equal(sentModel, "BAAI/bge-small-en-v1.5");
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
 test("embedding index identity includes the preprocessing contract", () => {
   const qwen = new OpenAIEmbeddingClient({ model: "shared-model", profile: "qwen3" });
   const plain = new OpenAIEmbeddingClient({ model: "shared-model", profile: "plain" });

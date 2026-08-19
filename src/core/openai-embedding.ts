@@ -38,7 +38,14 @@ const EMBEDDING_PROFILES: Record<
 export class OpenAIEmbeddingClient {
   readonly baseUrl: string;
   readonly apiKey?: string;
+  /** Normalized model name — the index identity used for memory_embeddings
+   *  matching and storage. BAAI/bge-small-en-v1.5 and bge-small-en-v1.5 are
+   *  the same model; normalizing keeps one model → one index identity, so two
+   *  eval runs pinning different spellings no longer split into duplicate
+   *  vectors. */
   readonly model: string;
+  /** Raw model name exactly as configured — what the API receives. */
+  readonly #apiModel: string;
   readonly indexId: string;
   readonly dimensions?: number;
   readonly profile: EmbeddingProfileName;
@@ -52,7 +59,9 @@ export class OpenAIEmbeddingClient {
   constructor(options: OpenAIEmbeddingClientOptions = {}) {
     this.baseUrl = (options.baseUrl ?? "http://127.0.0.1:8000/v1").replace(/\/$/u, "");
     this.apiKey = options.apiKey;
-    this.model = options.model ?? "Qwen/Qwen3-Embedding-0.6B";
+    const rawModel = options.model ?? "Qwen/Qwen3-Embedding-0.6B";
+    this.#apiModel = rawModel;
+    this.model = rawModel.replace(/^BAAI\//i, "");
     this.dimensions = options.dimensions;
     this.profile = options.profile ?? "qwen3";
     this.queryInstruction =
@@ -117,7 +126,7 @@ export class OpenAIEmbeddingClient {
         ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
       },
       body: JSON.stringify({
-        model: this.model,
+        model: this.#apiModel,
         input: inputs,
         ...(this.dimensions ? { dimensions: this.dimensions } : {}),
         ...extraBody,
