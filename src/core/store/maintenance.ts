@@ -31,6 +31,7 @@ import type {
   MemoryStorageState,
   MemoryTier,
   MemoryWriteEvent,
+  NodeRouteSignalItem,
   PerfAggregate,
   RebalanceResult,
   RecordClaimOutcomesInput,
@@ -1207,8 +1208,9 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
              relation_ids_json, task_id, active_graph_budget_json,
              active_graph_usage_json, selections_json, expansions_json,
              budget_ledger_json, qpp_json, timings_json, filter_usage_json,
+             node_route_signal_json,
              ambiguity, fallback_used, conflict_observed, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             id,
@@ -1230,6 +1232,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
             JSON.stringify(input.qpp ?? null),
             JSON.stringify(input.timings ?? {}),
             JSON.stringify(input.filterUsage ?? {}),
+            JSON.stringify(input.nodeRouteSignal ?? []),
             clamp(input.ambiguity ?? 0, 0, 1),
             input.fallbackUsed ? 1 : 0,
             input.conflictObserved ? 1 : 0,
@@ -1253,6 +1256,33 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
             clamp(input.ambiguity ?? 0, 0, 1),
             input.fallbackUsed ? 1 : 0,
             input.conflictObserved ? 1 : 0,
+            createdAt,
+          );
+        }
+        // Aggregate tier of the summary-routing signal: per-node counters of
+        // how often the node-summary FTS index matched (summary_routed_count)
+        // and how often such a node also reached the base result set
+        // (summary_recalled_count). routed - recalled per node is the IR gap.
+        // Updated inline here (hot path) because the observation is only
+        // known at search time; the per-query detail is already persisted in
+        // node_route_signal_json for offline diagnosis / router training.
+        const updateNodeSignal = this.db.prepare(
+          `INSERT INTO node_retrieval_signals
+            (node_id, query_count, ambiguity_sum, fallback_count,
+             conflict_count, summary_routed_count, summary_recalled_count,
+             updated_at)
+           VALUES (?, 0, 0, 0, 0, ?, ?, ?)
+           ON CONFLICT(node_id) DO UPDATE SET
+             summary_routed_count = summary_routed_count + excluded.summary_routed_count,
+             summary_recalled_count = summary_recalled_count + excluded.summary_recalled_count,
+             updated_at = excluded.updated_at`,
+        );
+        for (const signal of input.nodeRouteSignal ?? []) {
+          if (!signal.routed && !signal.recalled) continue;
+          updateNodeSignal.run(
+            signal.nodeId,
+            signal.routed ? 1 : 0,
+            signal.recalled ? 1 : 0,
             createdAt,
           );
         }
@@ -1485,6 +1515,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         qpp: parseQppDecision(row.qpp_json),
         timings: parseStoredJson(row.timings_json, null) ?? undefined,
         filterUsage: parseStoredJson(row.filter_usage_json, null) ?? undefined,
+        nodeRouteSignal: parseStoredJson(row.node_route_signal_json, []) as NodeRouteSignalItem[],
         createdAt: String(row.created_at),
       };
     }

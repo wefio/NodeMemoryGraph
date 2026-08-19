@@ -480,6 +480,7 @@ export function migrate(db: DatabaseSync): void {
   ensureRelationColumns(db);
   ensureTopologyProposalColumns(db);
   ensureRetrievalTraceColumns(db);
+  ensureNodeRetrievalSignalColumns(db);
   ensurePerfAggregateColumns(db);
   ensureDeltaColumns(db);
   ensureLeafSummaryColumns(db);
@@ -1033,9 +1034,34 @@ export function ensureRetrievalTraceColumns(db: DatabaseSync): void {
     // this trace have not been drained into node_pair_signals /
     // edge_task_observations yet (deferred to maintenance).
     ["signals_drained_at", "TEXT"],
+    // Per-query summary-routing signal (detailed tier): which nodes the
+    // node-summary FTS index matched and whether they also reached the base
+    // result set. Persisted from RetrievalTraceInput.nodeRouteSignal.
+    ["node_route_signal_json", "TEXT NOT NULL DEFAULT '[]'"],
   ];
   for (const [name, definition] of additions) {
     if (!existing.has(name))
       db.exec(`ALTER TABLE retrieval_traces ADD COLUMN ${name} ${definition}`);
+  }
+}
+
+/** Aggregate tier of the summary-routing signal: per-node counters of how
+ *  often the node-summary FTS index matched (summary_routed_count) and of
+ *  those matches, how often the node also reached the base result set
+ *  (summary_recalled_count). routed − recalled per node is the IR gap — the
+ *  summary index kept finding nodes the base retrieval missed. */
+export function ensureNodeRetrievalSignalColumns(db: DatabaseSync): void {
+  const existing = new Set(
+    (db.prepare("PRAGMA table_info(node_retrieval_signals)").all() as Row[]).map((row) =>
+      String(row.name),
+    ),
+  );
+  const additions: Array<[string, string]> = [
+    ["summary_routed_count", "INTEGER NOT NULL DEFAULT 0"],
+    ["summary_recalled_count", "INTEGER NOT NULL DEFAULT 0"],
+  ];
+  for (const [name, definition] of additions) {
+    if (!existing.has(name))
+      db.exec(`ALTER TABLE node_retrieval_signals ADD COLUMN ${name} ${definition}`);
   }
 }

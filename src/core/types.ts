@@ -1106,6 +1106,19 @@ export interface QppTriggerDecision {
   };
 }
 
+/** One summary-routing observation: a node the coarse node-summary FTS index
+ *  matched (routed) and whether it also made it into the base retrieval result
+ *  set (recalled). routed ∧ !recalled is the IR gap signal — the summary
+ *  index saw it but the base lexical/vector retrieval did not, so a later
+ *  node-routed expansion rescued it. Consumers: IR gap diagnosis and the
+ *  learnable router (as cold-start positives only under triple confirmation
+ *  with explicit use — see docs/node-summary-accelerated-retrieval). */
+export interface NodeRouteSignalItem {
+  nodeId: string;
+  routed: boolean;
+  recalled: boolean;
+}
+
 export interface RetrievalTraceInput {
   /** Harness session allowed to read or attribute use to this trace. */
   sessionId?: string | null;
@@ -1141,6 +1154,12 @@ export interface RetrievalTraceInput {
   timings?: PerfSnapshot;
   /** Effective filter dimensions and candidate reduction (multi-consumer). */
   filterUsage?: RetrievalFilterUsage;
+  /** Per-query summary-routing signal: which nodes the node-summary FTS index
+   *  matched (routed) and which of those also appear in resultNodeIds
+   *  (recalled). Optional; populated when leaf-block summary routing runs.
+   *  Persisted as retrieval_traces.node_route_signal_json (detailed tier) and
+   *  aggregated into node_retrieval_signals (count tier). */
+  nodeRouteSignal?: NodeRouteSignalItem[];
 }
 
 /** Long-term per-section performance aggregate (Welford online statistics).

@@ -61,6 +61,7 @@ import type {
   MemoryTier,
   NodeRelation,
   NodeRoute,
+  NodeRouteSignalItem,
   QppTriggerDecision,
   RecallCue,
   RecallIndex,
@@ -605,6 +606,20 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       const expansions = activeGraphExpansions(directSelectedNodeIds, persistentEdges, graphHops);
       const budgetLedger = activeGraphBudgetLedger(activeBudget, usage);
       const taskId = options.taskId?.trim() || stableTaskId(query);
+      // Summary-routing signal (diagnostic for IR + learnable router): which
+      // nodes the coarse node-summary FTS index matched (routed) and whether
+      // they also reached the base retrieval result set (recalled). routed ∧
+      // !recalled is the IR gap — the summary index saw it, base retrieval
+      // missed it, and the later node-routed expansion rescued it. Computed
+      // once here (before traceInput) and reused by the node-routed block
+      // expansion below so the FTS route runs a single time per query.
+      const nodeRouteSignal: NodeRouteSignalItem[] = options.leafBlockRouting
+        ? this.routeNodesByFts(query, 2).map((hit) => ({
+            nodeId: hit.nodeId,
+            routed: true,
+            recalled: results.some((result) => result.node.id === hit.nodeId),
+          }))
+        : [];
       const traceInput: RetrievalTraceInput = {
         sessionId: options.sessionId?.trim() || null,
         query,
@@ -626,6 +641,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         qpp: qppDecision,
         timings: perf?.snapshot(),
         filterUsage: filterUsage.dimensions.length > 0 ? filterUsage : undefined,
+        nodeRouteSignal,
       };
       // A controller probe is a private planning artifact, not an interaction the
       // model could have used. Persisting it would pollute online-learning labels
@@ -865,7 +881,13 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         // Node-routed blocks expand even without their own leaf summary —
         // the node summary is the index that matched.
         const nodeRouted = new Set<string>();
-        const nodeHits = this.routeNodesByFts(query, 2);
+        // nodeRouteSignal was computed earlier (before traceInput) to record
+        // the routed-vs-recalled signal; reuse it so the node-summary FTS
+        // route runs exactly once per query.
+        const nodeHits = nodeRouteSignal.map((signal) => ({
+          nodeId: signal.nodeId,
+          score: 0,
+        }));
         for (const nodeHit of nodeHits) {
           const nodeBlocks = this.db
             .prepare(

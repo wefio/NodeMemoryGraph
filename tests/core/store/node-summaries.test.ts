@@ -192,3 +192,87 @@ test("leafBlockRouting: node-summary hit expands node blocks even without leaf s
     );
   });
 });
+
+test("summary routing signal: routed+recalled detail persists and aggregates", () => {
+  withStore((store) => {
+    writeThree(store);
+    store.rebuildLeafBlocks();
+    summarizeAllBlocks(store);
+    const node = store.searchContext("neovim", { limit: 1 }).results[0]!.node;
+    // Index a node summary that shares terms with the query so the node-summary
+    // FTS route matches it ("tokyo flight" is also present in the raw statement,
+    // so the same node should ALSO be in the base result set → recalled=true).
+    store.setNodeSummary(node.id, "tokyo flight and neovim editor travel", "test-model", 3);
+
+    const ctx = store.searchContext("tokyo flight", {
+      limit: 8,
+      leafBlockRouting: true,
+      leafBlockRoutingMaxMembers: 12,
+    });
+    const trace = store.retrievalTrace(ctx.activeGraph!.id);
+    assert.ok(trace, "trace persisted");
+    assert.ok((trace!.nodeRouteSignal ?? []).length >= 1, "node-route signal recorded");
+    const signal = (trace!.nodeRouteSignal ?? []).find((s) => s.nodeId === node.id);
+    assert.ok(signal, "the routed node appears in the signal");
+    assert.equal(signal!.routed, true);
+    // "tokyo flight" is verbatim in the raw statement, so base lexical retrieval
+    // must also have pulled the node → recalled true.
+    assert.equal(signal!.recalled, true, "node in base result set is recalled");
+
+    // Aggregate tier: the node accumulated a routed (and recalled) counter.
+    const aggregate = (
+      (store as unknown as { db: import("node:sqlite").DatabaseSync }).db
+        .prepare(
+          `SELECT summary_routed_count, summary_recalled_count
+             FROM node_retrieval_signals WHERE node_id = ?`,
+        )
+        .get(node.id) as { summary_routed_count: number; summary_recalled_count: number }
+    );
+    assert.ok(aggregate.summary_routed_count >= 1, "routed count aggregated");
+    assert.ok(aggregate.summary_recalled_count >= 1, "recalled count aggregated");
+  });
+});
+
+test("summary routing signal: routed but NOT recalled marks the IR gap", () => {
+  withStore((store) => {
+    // Two distinct nodes. The travel node's summary carries an abstract word
+    // ("plans") that its raw statement does not; the plans node's raw statement
+    // DOES carry it, so base lexical retrieval pulls the plans node and skips
+    // the travel node — the node-summary FTS still matches the travel node.
+    store.remember({
+      statement: "user booked a flight to Tokyo on 2026-06-15",
+      nodeName: "travel",
+      sourceActor: "user",
+    });
+    store.remember({
+      statement: "user reviews quarterly business plans every week",
+      nodeName: "plans",
+      sourceActor: "user",
+    });
+    store.rebuildLeafBlocks();
+    const travelNode = store.searchContext("tokyo", { limit: 1 }).results[0]!.node;
+    assert.notEqual(travelNode.canonicalName, "plans", "the travel node is the target");
+    store.setNodeSummary(
+      travelNode.id,
+      "the user's travel plans and tech preferences",
+      "test-model",
+      1,
+    );
+
+    const ctx = store.searchContext("plans", {
+      limit: 8,
+      leafBlockRouting: true,
+      leafBlockRoutingMaxMembers: 12,
+    });
+    const trace = store.retrievalTrace(ctx.activeGraph!.id);
+    assert.ok(trace, "trace persisted");
+    const signal = (trace!.nodeRouteSignal ?? []).find((s) => s.nodeId === travelNode.id);
+    assert.ok(signal, "the summary-routed travel node appears in the signal");
+    assert.equal(signal!.routed, true);
+    assert.equal(
+      signal!.recalled,
+      false,
+      "summary-routed node missing from base results = IR gap (routed ∧ !recalled)",
+    );
+  });
+});
