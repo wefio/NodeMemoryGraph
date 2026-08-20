@@ -119,19 +119,19 @@ The evidence inventory is reproducible without touching the live stores:
 `npm run eval:natural-maintenance -- --project-dir <project>` opens every input
 SQLite database read-only and reports the exact claim, posterior, consolidation,
 proposal, transform, rollback, and maintenance-backlog counts. The latest
-Post-restart live traffic on 2026-08-20 found 285 LTG memories (242 active), one active project STG
+Post-restart live traffic on 2026-08-20 found 286 LTG memories (243 active), one active project STG
 memory, four LTG claim outcomes in three semantic tasks with two posteriors, zero
 STG→LTG materializations, one
-pending `refines` proposal, zero identity proposals/transforms/rollbacks, 17
+pending `refines` proposal, zero identity proposals/transforms/rollbacks, 13
 uncompacted index deltas, and 23 pending accesses. Claim outcomes now retain
 `natural|controlled|legacy` provenance: the current four events are one controlled
 smoke and three migrated legacy events, so the natural count remains zero. The
 first ordinary v5 search/get/write sequence reduced the distributed write backlog
-from 17 nodes to 14, validating the sparse-backlog drain. Subsequent smoke writes
-raised it to 17 deltas across 16 nodes again, so distributed write pressure is
-currently true while no individual node is due; the next ordinary write/maintenance
-pass must demonstrate another bounded drain. This does not claim consolidation
-quality. The remaining zeros are product-evidence
+from 17 nodes to 14. Subsequent smoke writes raised it to 17 deltas across 16
+nodes, and the next ordinary attributable v6 state write drained it again to 13
+deltas across 13 nodes, with a per-node maximum of one. Both distributed-pressure
+flags are false. This repeat validates bounded sparse-backlog maintenance without
+claiming consolidation quality. The remaining zeros are product-evidence
 gaps; the audit command and controlled tests do not convert them into natural
 validation.
 
