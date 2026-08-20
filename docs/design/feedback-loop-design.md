@@ -52,8 +52,16 @@ interface RecordFeedbackInput {
 
 `recordFeedback` 是写路径维护 API，不是 Active Graph 证据归因 API。AG 的三层
 观测分别通过 `recordActiveGraphDisclosure`、`answer_overlap` 诊断归因和
-`verified_evidence` 验证归因记录。面向模型的稳定 daemon RPC 只能写入
-`answer_overlap`，不得伪造验证证据。
+`verified_evidence` 验证归因记录。直接的
+`recordActiveGraphAttribution` daemon RPC 只能写入 `answer_overlap`，不得伪造
+验证证据；验证归因必须经过 `recordClaimOutcomes` 的 source、lineage、精确证据和
+Active Graph 暴露校验。
+
+Pi 在用户/工具 outcome 成功落库后，将同一图的累计支持集合写成
+`verified_claim_support` shadow attribution。省略图 ID 时，只能绑定到当前 Pi 会话中
+最新且确实包含该 memory 的图；没有匹配图时仍可保存 claim posterior，但不产生召回
+监督。`task` 来源可能是模型自行报告，因此在 Pi 中不自动进入 verified shadow target；
+官方 benchmark 由独立评测控制器写入。
 
 ## supersede 的两种模式
 

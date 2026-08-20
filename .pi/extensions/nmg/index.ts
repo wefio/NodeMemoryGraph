@@ -1009,9 +1009,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         if (!sourceLineage) {
           throw new Error("claimOutcomeSource=task requires claimSourceLineage");
         }
+        const activeGraphId =
+          params.activeGraphId ??
+          controllerShadow.latestActiveGraphIdForMemory(sessionId, params.memoryId) ??
+          undefined;
         const result = await invoke("recordClaimOutcomes", {
           semanticTaskId: params.semanticTaskId,
-          activeGraphId: params.activeGraphId,
+          activeGraphId,
           sessionId,
           projectDir: projectDirectory(),
           votes: [
@@ -1034,6 +1038,21 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             },
           ],
         });
+        const insertedEvents = (result as { events?: unknown[] }).events ?? [];
+        // Only independently attributable user/tool outcomes become evidence
+        // targets. A model-authored task label may update its explicit posterior,
+        // but cannot silently supervise the retrieval controller.
+        if (
+          insertedEvents.length > 0 &&
+          (params.claimOutcomeSource === "user" || params.claimOutcomeSource === "tool")
+        ) {
+          await controllerShadow.verifiedClaimOutcome(
+            activeGraphId,
+            sessionId,
+            params.memoryId,
+            params.claimOutcome,
+          );
+        }
         return toolResult(
           result,
           "Explicit attributable claim outcome recorded. Retrieval or answer use alone was not treated as support.",

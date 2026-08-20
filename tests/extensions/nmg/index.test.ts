@@ -376,6 +376,33 @@ test("controller shadow bridge logs answer attribution without learning from it"
       null,
       "answer overlap must not unlock active allocation",
     );
+    assert.equal(
+      await enabled.verifiedClaimOutcome(
+        context.activeGraph!.id,
+        "wrong-session",
+        saved.memory.id,
+        "supported",
+      ),
+      false,
+    );
+    assert.equal(
+      await enabled.verifiedClaimOutcome(
+        context.activeGraph!.id,
+        "session-a",
+        saved.memory.id,
+        "supported",
+      ),
+      true,
+    );
+    assert.equal(
+      await enabled.verifiedClaimOutcome(
+        context.activeGraph!.id,
+        "session-a",
+        saved.memory.id,
+        "contradicted",
+      ),
+      true,
+    );
     await enabled.outcome("session-a", [
       { role: "assistant", usage: { input: 120, output: 30 } },
       { role: "toolResult" },
@@ -409,7 +436,7 @@ test("controller shadow bridge logs answer attribution without learning from it"
     const events = readFileSync(join(directory, "controller-shadow-events.jsonl"), "utf8")
       .trim()
       .split("\n");
-    assert.equal(events.length, 6);
+    assert.equal(events.length, 8);
     const retrieval = JSON.parse(events[0]!) as {
       type: string;
       costs: { injectedCharacters: number; injectedEstimatedTokens: number };
@@ -423,7 +450,21 @@ test("controller shadow bridge logs answer attribution without learning from it"
     assert.equal(flow.query, "same query again");
     assert.equal(JSON.parse(events[2]!).type, "disclosure");
     assert.equal(JSON.parse(events[3]!).type, "attribution");
-    const outcome = JSON.parse(events[4]!) as {
+    const verifiedPositive = JSON.parse(events[4]!) as {
+      type: string;
+      method: string;
+      attributedMemoryIds: string[];
+    };
+    assert.equal(verifiedPositive.type, "attribution");
+    assert.equal(verifiedPositive.method, "verified_claim_support");
+    assert.deepEqual(verifiedPositive.attributedMemoryIds, [saved.memory.id]);
+    const verifiedNegative = JSON.parse(events[5]!) as {
+      method: string;
+      attributedMemoryIds: string[];
+    };
+    assert.equal(verifiedNegative.method, "verified_claim_support");
+    assert.deepEqual(verifiedNegative.attributedMemoryIds, []);
+    const outcome = JSON.parse(events[6]!) as {
       type: string;
       toolRounds: number;
       inputTokens: number;
@@ -433,7 +474,7 @@ test("controller shadow bridge logs answer attribution without learning from it"
     assert.equal(outcome.toolRounds, 1);
     assert.equal(outcome.inputTokens, 120);
     assert.equal(outcome.outputTokens, 30);
-    const feedback = JSON.parse(events[5]!) as {
+    const feedback = JSON.parse(events[7]!) as {
       type: string;
       collectionOrigin: string;
       semanticTaskId: string;
@@ -1274,7 +1315,16 @@ test("Chinese automatic recall reaches diagnostic answer attribution and the sha
   const sessionManager = {
     getSessionId: () => "automatic-use-session",
     getSessionFile: () => "session.jsonl",
-    getBranch: () => [],
+    getBranch: () => [
+      {
+        type: "message",
+        id: "user-chinese-preference",
+        message: {
+          role: "user",
+          content: "我偏好中文解释，并希望保留精确的技术细节。",
+        },
+      },
+    ],
   };
   try {
     const { handlers, tools } = extensionHarness();
@@ -1306,9 +1356,9 @@ test("Chinese automatic recall reaches diagnostic answer attribution and the sha
         action: "claim_outcome",
         memoryId: saved.details.memory.id,
         claimOutcome: "supported",
-        claimOutcomeSource: "task",
-        claimSourceLineage: "task:user-pref-confirmation",
+        claimOutcomeSource: "user",
         semanticTaskId: "task:user-pref-confirmation",
+        evidence: "我偏好中文解释，并希望保留精确的技术细节。",
       },
       undefined,
       undefined,
@@ -1329,11 +1379,25 @@ test("Chinese automatic recall reaches diagnostic answer attribution and the sha
         {
           memoryId: saved.details.memory.id,
           outcome: "supported",
-          sourceLineage: "task:user-pref-confirmation",
+          sourceLineage: "user-chinese-preference",
         },
       ],
     );
     assert.equal(claimOutcome.details.posteriors[0]?.independentVoteCount, 1);
+    await tools.get("nmg_remember")!.execute(
+      "claim-outcome-task-only",
+      {
+        action: "claim_outcome",
+        memoryId: saved.details.memory.id,
+        claimOutcome: "supported",
+        claimOutcomeSource: "task",
+        claimSourceLineage: "task:model-authored-observation",
+        semanticTaskId: "task:model-authored-observation",
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    );
     await assert.rejects(
       tools.get("nmg_remember")!.execute(
         "claim-outcome-unbound-user",
@@ -1397,6 +1461,7 @@ test("Chinese automatic recall reaches diagnostic answer attribution and the sha
           JSON.parse(line) as {
             type: string;
             origin?: string;
+            method?: string;
             attributedMemoryIds?: string[];
           },
       );
@@ -1405,9 +1470,20 @@ test("Chinese automatic recall reaches diagnostic answer attribution and the sha
       events.some(
         (event) =>
           event.type === "attribution" &&
+          event.method === "verified_claim_support" &&
           event.attributedMemoryIds?.includes(saved.details.memory.id),
       ),
-      "automatic recall is attributed when its content surfaces in the answer",
+      "an attributable user outcome supervises the exact automatically recalled memory",
+    );
+    assert.equal(
+      events.filter((event) => event.type === "attribution" && event.method === "verified_claim_support")
+        .length,
+      1,
+      "a model-authored task outcome does not silently create another verified target",
+    );
+    assert.ok(
+      events.some((event) => event.type === "attribution" && event.method === "answer_overlap"),
+      "agent-end answer overlap remains a separate diagnostic event",
     );
     assert.equal(
       existsSync(join(directory, "controller-shadow-state.json")),

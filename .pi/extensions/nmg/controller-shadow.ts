@@ -16,6 +16,7 @@ interface PendingContext {
   outcomeRecorded: boolean;
   feedbackRecorded: boolean;
   feedbackNudgeShown: boolean;
+  verifiedSupportedMemoryIds: Set<string>;
 }
 
 export interface PendingShadowFeedback {
@@ -166,6 +167,20 @@ export class ControllerShadowBridge {
     );
   }
 
+  /** Resolve the newest graph in this Pi session that actually exposed a memory. */
+  latestActiveGraphIdForMemory(sessionId: string, memoryId: string): string | null {
+    if (!this.enabled) return null;
+    return (
+      [...this.#contexts.entries()]
+        .reverse()
+        .find(
+          ([, entry]) =>
+            entry.context.activeGraph?.sessionId === sessionId &&
+            entry.context.activeGraph.memoryIds.includes(memoryId),
+        )?.[0] ?? null
+    );
+  }
+
   async disclosure(
     activeGraphId: string | undefined,
     sessionId: string,
@@ -211,6 +226,42 @@ export class ControllerShadowBridge {
       });
     } catch {
       // Best-effort diagnostic attribution; never break agent completion.
+    }
+  }
+
+  /**
+   * Persist a cumulative evidence target only after the daemon accepted an
+   * attributable user/tool claim outcome. Contradiction is an explicit negative,
+   * so it removes the memory from the supported set while still emitting an
+   * attribution event. The latest event therefore remains a complete target for
+   * the graph instead of losing earlier supported memories.
+   */
+  async verifiedClaimOutcome(
+    activeGraphId: string | undefined,
+    sessionId: string,
+    memoryId: string,
+    outcome: "supported" | "contradicted",
+  ): Promise<boolean> {
+    if (!this.enabled || !activeGraphId) return false;
+    const pending = this.#contexts.get(activeGraphId);
+    const graph = pending?.context.activeGraph;
+    if (!pending || !graph || graph.sessionId !== sessionId || !graph.memoryIds.includes(memoryId)) {
+      return false;
+    }
+    if (outcome === "supported") pending.verifiedSupportedMemoryIds.add(memoryId);
+    else pending.verifiedSupportedMemoryIds.delete(memoryId);
+    try {
+      const dependencies = await this.#dependencies();
+      return dependencies.log.attribution({
+        graphId: activeGraphId,
+        sessionId,
+        candidateMemoryIds: graph.memoryIds,
+        attributedMemoryIds: [...pending.verifiedSupportedMemoryIds],
+        method: "verified_claim_support",
+      });
+    } catch {
+      // Canonical claim evidence is already in SQLite; shadow export is best-effort.
+      return false;
     }
   }
 
@@ -335,6 +386,7 @@ export class ControllerShadowBridge {
       outcomeRecorded: false,
       feedbackRecorded: false,
       feedbackNudgeShown: false,
+      verifiedSupportedMemoryIds: new Set(),
     });
     while (this.#contexts.size > this.#maxContexts) {
       this.#contexts.delete(this.#contexts.keys().next().value!);

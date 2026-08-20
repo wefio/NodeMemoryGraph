@@ -102,12 +102,23 @@ answer reuse, and silence still do not create votes. The default actuator remain
 off; natural precision and reversal evidence must now accumulate through this
 boundary.
 
+The Pi bridge now also connects this boundary to controller supervision. After
+the daemon accepts an attributable user/tool outcome, Pi emits a cumulative
+`verified_claim_support` event for the exact current-session Active Graph that
+contained the memory. A model-authored `task` outcome updates its explicit claim
+posterior but cannot silently become a verified retrieval target. A live v5
+source-audit task exercised the canonical database path with one supported and
+one contradicted memory: both events retained the exact tool excerpt through a
+non-null `evidence_id`. The next ordinary Pi session must exercise the new
+shadow bridge after reloading the adapter.
+
 The evidence inventory is reproducible without touching the live stores:
 `npm run eval:natural-maintenance -- --project-dir <project>` opens every input
 SQLite database read-only and reports the exact claim, posterior, consolidation,
 proposal, transform, rollback, and maintenance-backlog counts. The latest
 Post-restart live traffic on 2026-08-20 found 283 LTG memories (240 active), one active project STG
-memory, zero claim outcomes/posteriors, zero STG→LTG materializations, one
+memory, two LTG claim outcomes in one semantic task with two posteriors, zero
+STG→LTG materializations, one
 pending `refines` proposal, zero identity proposals/transforms/rollbacks, 15
 uncompacted index deltas, and 21 pending accesses. The first ordinary v5
 search/get/write sequence reduced the distributed write backlog from 17 nodes to
