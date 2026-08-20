@@ -112,11 +112,20 @@ export interface ShadowFeedbackEvent extends ShadowEventBase {
 export interface ShadowToolFlowEvent extends ShadowEventBase {
   type: "tool_flow";
   action: "search_suppressed" | "feedback_nudge_shown" | "claim_outcome_nudge_shown";
-  reason:
-    | "evidence_progression_required"
-    | "next_user_turn_review"
-    | "next_user_turn_claim_review";
+  reason: "evidence_progression_required" | "next_user_turn_review" | "next_user_turn_claim_review";
   query?: string;
+}
+
+export interface ShadowActuationEvent extends ShadowEventBase {
+  version: 2;
+  type: "actuation";
+  action: "allocate" | "fold" | "rerank";
+  changed: boolean;
+  controllerTrainingSteps: number;
+  beforeMemoryIds?: string[];
+  afterMemoryIds?: string[];
+  beforeBudget?: ActiveGraphBudget;
+  afterBudget?: ActiveGraphBudget;
 }
 
 export type ShadowEvaluationEvent =
@@ -126,7 +135,8 @@ export type ShadowEvaluationEvent =
   | ShadowAttributionEvent
   | ShadowOutcomeEvent
   | ShadowFeedbackEvent
-  | ShadowToolFlowEvent;
+  | ShadowToolFlowEvent
+  | ShadowActuationEvent;
 
 export interface ShadowEvaluationLogOptions {
   maxBytes?: number;
@@ -322,6 +332,33 @@ export class ShadowEvaluationLog {
       action: input.action,
       reason: input.reason,
       query: input.query,
+    });
+  }
+
+  actuation(input: {
+    graphId: string;
+    sessionId: string;
+    action: ShadowActuationEvent["action"];
+    changed: boolean;
+    controllerTrainingSteps: number;
+    beforeMemoryIds?: readonly string[];
+    afterMemoryIds?: readonly string[];
+    beforeBudget?: ActiveGraphBudget;
+    afterBudget?: ActiveGraphBudget;
+  }): boolean {
+    return this.#append({
+      version: 2,
+      type: "actuation",
+      graphId: input.graphId,
+      sessionId: input.sessionId,
+      recordedAt: this.#now().toISOString(),
+      action: input.action,
+      changed: input.changed,
+      controllerTrainingSteps: input.controllerTrainingSteps,
+      beforeMemoryIds: input.beforeMemoryIds ? [...input.beforeMemoryIds] : undefined,
+      afterMemoryIds: input.afterMemoryIds ? [...input.afterMemoryIds] : undefined,
+      beforeBudget: input.beforeBudget ? { ...input.beforeBudget } : undefined,
+      afterBudget: input.afterBudget ? { ...input.afterBudget } : undefined,
     });
   }
 

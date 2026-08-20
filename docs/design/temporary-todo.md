@@ -89,9 +89,12 @@ the heuristic baseline and learned controller separately instead of comparing a
 combined learned path against a hard-coded zero baseline.
 
 The rolling worker and rollbackable shadow artifact already exist
-(`npm run eval:qpp-tau`). The unresolved requirement is evidence-diverse natural
-data plus a matched held-out shadow result, not worker plumbing or another fixed
-sample-count threshold.
+(`npm run eval:qpp-tau`). The matched runners now require an explicit frozen
+candidate through `NMG_CONTROLLER_CANDIDATE_STATE`, validate its feature protocol
+and non-zero training steps, hash it into the report, and copy it into only the
+candidate arm. The unresolved requirement is evidence-diverse natural data plus
+a sufficiently sized matched held-out result, not worker plumbing or another
+fixed sample-count threshold.
 
 Active/default eligibility now also has a separate fail-closed matched-product
 gate. It requires paired baseline/candidate task-success and evidence-sufficiency
@@ -112,13 +115,21 @@ same-repeat arm pair is complete and the candidate actually affected ranking.
 The controller evaluator can consume such an official score artifact through
 `NMG_CONTROLLER_MATCHED_PRODUCT_REPORT`.
 
-A one-question 2026-08-20 LongMemEval smoke run verified the full telemetry and
-official-scoring path. Both NMG arms answered correctly and loaded one of two
-official evidence sessions; the artifact correctly emitted no gate metrics with
-`candidate_does_not_affect_ranking`, because the existing shadow arm only logs.
-The remaining work is a true causal baseline/candidate matched protocol and
-evidence-diverse natural product observations—not measurement plumbing and not a
-join across OmniMemEval artifacts.
+The former observational smoke correctly emitted no gate metrics because its
+shadow arm only logged. The causal protocol now keeps QPP mechanics, corpus,
+prompt, model, and thinking fixed while the candidate alone receives a frozen
+trained controller. Runtime `allocate|fold|rerank` actuation is written as typed
+telemetry; every scored row carries its actuation summary; the aggregator rejects
+a contaminated baseline and refuses to trust a report-authored boolean.
+
+A one-question 2026-08-20 causal LongMemEval smoke (`6a1eabeb`) exercised a
+25-step candidate. It recorded two candidate actions with one real change and no
+baseline action. Both NMG arms answered correctly and retained identical official
+retrieval (recall 0.5, NDCG 0.613), while candidate disclosed 981 rather than
+3,368 characters. Official scoring therefore emitted the first causal typed
+product metrics. This proves the execution and scoring path, not candidate
+quality: the remaining work is a sufficiently sized, evidence-diverse matched
+held-out run plus natural product observations.
 
 ## 3. Validate unattended memory maintenance
 

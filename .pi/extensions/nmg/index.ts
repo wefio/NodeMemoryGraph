@@ -35,6 +35,7 @@ import type {
 } from "../../../src/core/types.ts";
 import { WORLD_BOARD_ID } from "../../../src/core/types.ts";
 import {
+  configuredControllerRerankMode,
   configuredQpp1Mode,
   configuredQpp2Mode,
   configuredQpp2RetainedMass,
@@ -57,7 +58,11 @@ import {
   type ReasoningNodeKind,
   type ReasoningStatus,
 } from "../../../src/lab/reasoning-workspace.ts";
-import { ControllerShadowBridge, shadowCollectionOrigin, shadowEnabled } from "./controller-shadow.ts";
+import {
+  ControllerShadowBridge,
+  shadowCollectionOrigin,
+  shadowEnabled,
+} from "./controller-shadow.ts";
 import { PiReasoningWorkspaces } from "./reasoning-workspace.ts";
 
 /**
@@ -88,10 +93,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const qpp1Mode = configuredQpp1Mode();
   const qpp2Mode = configuredQpp2Mode();
   const qpp2RetainedMass = configuredQpp2RetainedMass();
+  const controllerRerankMode = configuredControllerRerankMode();
   const recommendationMode = configuredSearchRecommendationMode();
   const controllerShadow = new ControllerShadowBridge(
     resolveNmgDataDir(),
-    shadowEnabled() || qpp1Mode !== "off" || qpp2Mode !== "off",
+    shadowEnabled() || qpp1Mode !== "off" || qpp2Mode !== "off" || controllerRerankMode !== "off",
   );
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
   const reasoningWorkspaces = labToolsEnabled
@@ -214,6 +220,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         graphHops: Math.min(1, recallRequest.graphHops),
         tieredDisclosure: true,
       })) as MemoryContext;
+      if (controllerRerankMode === "active") {
+        context = await controllerShadow.rerank(context);
+      }
       const fullContext = context;
       if (qpp2Mode === "active") {
         context = await applyLearnedFold(context, controllerShadow, qpp2RetainedMass, false);
@@ -1364,6 +1373,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         secondPass: params.secondPass ?? qpp2Mode === "active",
         ...(activeGraphBudget ? { activeGraphBudget, limit: activeGraphBudget.maxEvidence } : {}),
       })) as MemoryContext;
+      if (controllerRerankMode === "active") {
+        result = await controllerShadow.rerank(result);
+      }
       const fullResult = result;
       if (qpp2Mode === "active") {
         result = await applyLearnedFold(

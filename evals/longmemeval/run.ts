@@ -13,11 +13,16 @@ import {
   BACKEND_ABLATION_MODES,
   benchmarkIsolationArgs,
   counterbalancedOrder,
-  controllerShadowEnvironment,
+  controllerMatchedEnvironment,
   isMatchedMode,
   matchedUserPrompt,
   MATCHED_MODES,
 } from "../benchmarks/matched.ts";
+import {
+  installControllerCandidate,
+  loadControllerCandidate,
+  readControllerActuation,
+} from "../benchmarks/controller-candidate.ts";
 import { gitRevision, sampleFingerprint } from "../official/reproducibility.ts";
 import { benchmarkParametersFromEnvironment } from "../official/parameters.ts";
 import {
@@ -50,6 +55,7 @@ type Mode =
   | "flat-hybrid"
   | "matched"
   | "nmg-auto"
+  | "nmg-candidate"
   | "nmg-graph"
   | "nmg-lite"
   | "nmg-deterministic"
@@ -112,6 +118,10 @@ if (mode === "validate") {
   );
   process.exit(0);
 }
+const controllerCandidate =
+  mode === "matched" || mode === "nmg-candidate"
+    ? loadControllerCandidate(requiredControllerCandidatePath())
+    : null;
 const runId = new Date().toISOString().replaceAll(":", "-");
 const outputDirectory = resolve(import.meta.dirname, "results", runId);
 mkdirSync(outputDirectory, { recursive: true });
@@ -136,9 +146,9 @@ const results =
     ? matchedRuns.flatMap((run) => run.results)
     : mode === "backend-ablation"
       ? backendAblationRuns.flatMap((run) => run.results)
-    : await mapConcurrent(trials, evalConcurrency(), ({ example, repeat }) =>
-        runExample(example, mode, undefined, 0, repeat),
-      );
+      : await mapConcurrent(trials, evalConcurrency(), ({ example, repeat }) =>
+          runExample(example, mode, undefined, 0, repeat),
+        );
 const report = {
   runId,
   mode,
@@ -175,17 +185,28 @@ const report = {
   injectedContextByMode: summarizeInjectedContextByMode(results),
   preparations: [...matchedRuns, ...backendAblationRuns].map((run) => run.preparation),
   pairedAgainstNoMemory:
-    mode === "matched" || mode === "backend-ablation"
-      ? pairedAgainst(results, "no-memory")
-      : {},
+    mode === "matched" || mode === "backend-ablation" ? pairedAgainst(results, "no-memory") : {},
   matchedProtocol:
     mode === "matched"
       ? {
           arms: MATCHED_MODES,
           invariant: "same case, model, thinking level, user prompt, and initial NMG corpus",
           onlyDifference:
-            "no extension vs deterministic NMG vs deterministic NMG with controller shadow logging",
-          controllerAffectsRanking: false,
+            "no extension vs deterministic NMG vs the same NMG path with one frozen trained controller candidate",
+          controllerCandidate: controllerCandidate
+            ? {
+                sha256: controllerCandidate.sha256,
+                featureProtocolVersion: controllerCandidate.featureProtocolVersion,
+                trainingSteps: controllerCandidate.trainingSteps,
+              }
+            : null,
+          armEnvironments: {
+            "nmg-deterministic": controllerMatchedEnvironment("nmg-deterministic"),
+            "nmg-candidate": controllerMatchedEnvironment("nmg-candidate"),
+          },
+          controllerAffectsRanking: results.some(
+            (row) => row.mode === "nmg-candidate" && (row.controllerActuation?.changed ?? 0) > 0,
+          ),
         }
       : mode === "backend-ablation"
         ? {
@@ -196,7 +217,7 @@ const report = {
               "no memory vs flat retrieval vs NMG node-local retrieval vs NMG graph expansion",
             controllerAffectsRanking: false,
           }
-      : null,
+        : null,
   results,
 };
 
@@ -235,6 +256,9 @@ async function runMatchedExample(example: LongMemExample, repeat: number) {
       ? resolve(outputDirectory, "arms", example.question_id, matchedMode, `repeat-${repeat}`)
       : undefined;
     if (armDirectory) cpSync(seedDirectory, armDirectory, { recursive: true });
+    if (armDirectory && matchedMode === "nmg-candidate") {
+      installControllerCandidate(controllerCandidate!, armDirectory);
+    }
     results.push(await runExample(example, matchedMode, armDirectory, remembered, repeat));
   }
   return {
@@ -274,13 +298,9 @@ async function runBackendAblationExample(example: LongMemExample, repeat: number
       ? resolve(outputDirectory, "arms", example.question_id, arm, `repeat-${repeat}`)
       : undefined;
     if (armDirectory) cpSync(seedDirectory, armDirectory, { recursive: true });
-    process.stderr.write(
-      `[longmemeval] ${example.question_id} ${arm} repeat=${repeat}: start\n`,
-    );
+    process.stderr.write(`[longmemeval] ${example.question_id} ${arm} repeat=${repeat}: start\n`);
     results.push(await runExample(example, arm, armDirectory, remembered, repeat));
-    process.stderr.write(
-      `[longmemeval] ${example.question_id} ${arm} repeat=${repeat}: done\n`,
-    );
+    process.stderr.write(`[longmemeval] ${example.question_id} ${arm} repeat=${repeat}: done\n`);
   }
   return {
     results,
@@ -365,6 +385,7 @@ async function runExample(
     retrievalJudgement,
     retrievalPassed: retrievalJudgement === null ? null : judgementPassed(retrievalJudgement),
     tokenUsage: telemetry.tokenUsage,
+    controllerActuation: readControllerActuation(nmgDirectory),
     answerTiming: liveTiming.snapshot(),
     toolCalls: collectToolCalls(answerEvents),
     toolCallCount: telemetry.toolCalls,
@@ -393,8 +414,8 @@ function readMemoryPerformance(nmgDirectory: string) {
   try {
     return store
       .perfAggregates()
-      .filter((aggregate) =>
-        aggregate.section.startsWith("search.") || aggregate.section === "relations",
+      .filter(
+        (aggregate) => aggregate.section.startsWith("search.") || aggregate.section === "relations",
       )
       .map((aggregate) => ({
         section: aggregate.section,
@@ -586,10 +607,20 @@ function retrievalEvidence(
   officialMetrics: ReturnType<typeof latestAutomaticRecallEvidence>["officialMetrics"];
 } | null {
   if (runMode === "oracle") {
-    return { text: formatHistory(example), source: "direct_context", toolCalls: 0, officialMetrics: null };
+    return {
+      text: formatHistory(example),
+      source: "direct_context",
+      toolCalls: 0,
+      officialMetrics: null,
+    };
   }
   if (runMode === "raw-session") {
-    return { text: retrieveRawSessions(example), source: "direct_context", toolCalls: 0, officialMetrics: null };
+    return {
+      text: retrieveRawSessions(example),
+      source: "direct_context",
+      toolCalls: 0,
+      officialMetrics: null,
+    };
   }
   if (runMode === "flat-hybrid") {
     const flat = retrieveFlatTurnResult(example);
@@ -605,14 +636,11 @@ function retrievalEvidence(
     runMode === "nmg-graph" ||
     runMode === "nmg-oracle" ||
     runMode === "nmg-deterministic" ||
+    runMode === "nmg-candidate" ||
     runMode === "nmg-shadow"
   ) {
     const automatic = nmgDirectory
-      ? latestAutomaticRecallEvidence(
-          nmgDirectory,
-          example.question_id,
-          example.answer_session_ids,
-        )
+      ? latestAutomaticRecallEvidence(nmgDirectory, example.question_id, example.answer_session_ids)
       : null;
     const outputs = events.flatMap((event) => {
       if (event.type !== "tool_execution_end" || event.toolName !== "nmg_get" || event.isError) {
@@ -631,7 +659,11 @@ function retrievalEvidence(
     });
     if (outputs.length > 0) {
       const memoryIds = [
-        ...new Set(outputs.flatMap((output) => [...output.matchAll(/\bmemory=([^;\s]+)/g)].map((match) => match[1]!))),
+        ...new Set(
+          outputs.flatMap((output) =>
+            [...output.matchAll(/\bmemory=([^;\s]+)/g)].map((match) => match[1]!),
+          ),
+        ),
       ];
       return {
         text: outputs.join("\n\n"),
@@ -777,9 +809,10 @@ function retrieveFlatTurns(example: LongMemExample): string {
   return retrieveFlatTurnResult(example).text;
 }
 
-function retrieveFlatTurnResult(
-  example: LongMemExample,
-): { text: string; rankedSessionIds: string[] } {
+function retrieveFlatTurnResult(example: LongMemExample): {
+  text: string;
+  rankedSessionIds: string[];
+} {
   const embedder = new HashingVectorEmbedder(256);
   const queryVector = embedder.embed(example.question);
   const ranked = example.haystack_sessions
@@ -881,7 +914,8 @@ function createClient(nmgDirectory?: string, runMode?: Exclude<Mode, "matched">)
       ...definedEnvironment(),
       PI_CODING_AGENT_DIR: piAgentDirectory,
       ...(nmgDirectory ? { NMG_DATA_DIR: nmgDirectory } : {}),
-      ...(isMatchedMode(runMode) ? controllerShadowEnvironment(runMode) : {}),
+      ...(isMatchedMode(runMode) ? controllerMatchedEnvironment(runMode) : {}),
+      ...(runMode === "nmg-shadow" ? { NMG_CONTROLLER_SHADOW: "1" } : {}),
       ...(runMode === "nmg-lite"
         ? { NMG_GRAPH_HOPS: "0" }
         : runMode === "nmg-graph"
@@ -908,6 +942,7 @@ function parseMode(value: string | undefined): Mode {
   if (value === "oracle") return "oracle";
   if (value === "nmg-oracle") return "nmg-oracle";
   if (value === "nmg-auto") return "nmg-auto";
+  if (value === "nmg-candidate") return "nmg-candidate";
   if (value === "nmg-deterministic") return "nmg-deterministic";
   if (value === "nmg-shadow") return "nmg-shadow";
   if (value === "raw-session") return "raw-session";
@@ -919,9 +954,17 @@ function parseMode(value: string | undefined): Mode {
   if (value === "validate") return "validate";
   throw new Error(
     `Unknown mode: ${value}. Use validate, matched, backend-ablation, no-memory, raw-session, nmg-auto, ` +
-      `flat-hybrid, nmg-deterministic, nmg-shadow, nmg-lite, nmg-graph, oracle, ` +
+      `flat-hybrid, nmg-deterministic, nmg-candidate, nmg-shadow, nmg-lite, nmg-graph, oracle, ` +
       `or nmg-oracle.`,
   );
+}
+
+function requiredControllerCandidatePath(): string {
+  const path = process.env.NMG_CONTROLLER_CANDIDATE_STATE?.trim();
+  if (!path) {
+    throw new Error("Matched controller evaluation requires NMG_CONTROLLER_CANDIDATE_STATE");
+  }
+  return path;
 }
 
 function positiveInteger(value: string): number {

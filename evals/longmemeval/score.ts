@@ -18,7 +18,13 @@ interface Row {
   repeat: number;
   officialRetrieval: { recallAny: number; recallAll: number; recall: number; ndcg: number } | null;
   toolRounds: number;
-  tokenUsage: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number } | null;
+  tokenUsage: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  } | null;
   durationMs: number;
 }
 
@@ -29,7 +35,7 @@ const report = JSON.parse(readFileSync(resolve(directory, "report.json"), "utf8"
   codeRevision?: string | null;
   sampleFingerprint?: string | null;
   benchmarkParameters?: unknown;
-  matchedProtocol?: { controllerAffectsRanking?: boolean } | null;
+  matchedProtocol?: object | null;
 };
 const rows = [];
 for (const row of report.results) {
@@ -74,8 +80,7 @@ const output = {
   matchedProduct: report.matchedProtocol
     ? aggregateMatchedProductMetrics(rows, {
         baselineMode: "nmg-deterministic",
-        candidateMode: "nmg-shadow",
-        candidateAffectsRanking: report.matchedProtocol.controllerAffectsRanking === true,
+        candidateMode: "nmg-candidate",
       })
     : null,
   results: rows,

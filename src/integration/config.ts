@@ -108,7 +108,10 @@ export function configuredMaintenancePolicy(
     autoMergeEnabled: environment.NMG_TOPOLOGY_AUTO_MERGE === "1",
     autoMergeLimit: Math.min(
       4,
-      positiveInteger(environment.NMG_TOPOLOGY_AUTO_MERGE_LIMIT, DEFAULT_MAINTENANCE_POLICY.autoMergeLimit),
+      positiveInteger(
+        environment.NMG_TOPOLOGY_AUTO_MERGE_LIMIT,
+        DEFAULT_MAINTENANCE_POLICY.autoMergeLimit,
+      ),
     ),
   };
 }
@@ -128,6 +131,12 @@ export function configuredQpp1Mode(environment: NodeJS.ProcessEnv = process.env)
 
 export function configuredQpp2Mode(environment: NodeJS.ProcessEnv = process.env): QppActuationMode {
   return parseMode(environment.NMG_QPP2_MODE, ["off", "shadow", "active"]) ?? "off";
+}
+
+export function configuredControllerRerankMode(
+  environment: NodeJS.ProcessEnv = process.env,
+): QppActuationMode {
+  return parseMode(environment.NMG_CONTROLLER_RERANK, ["off", "shadow", "active"]) ?? "off";
 }
 
 export function configuredQpp2RetainedMass(environment: NodeJS.ProcessEnv = process.env): number {

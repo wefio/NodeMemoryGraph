@@ -16,11 +16,16 @@ import { collectAgentRunTelemetry } from "../agent-telemetry.ts";
 import { loadBeam, loadLocomo, loadPersonaMem, stratifiedSample } from "./loaders.ts";
 import {
   benchmarkIsolationArgs,
-  controllerShadowEnvironment,
+  controllerMatchedEnvironment,
   isMatchedMode,
   matchedUserPrompt,
   MATCHED_MODES,
 } from "./matched.ts";
+import {
+  installControllerCandidate,
+  loadControllerCandidate,
+  readControllerActuation,
+} from "./controller-candidate.ts";
 import type { BenchmarkCase, BenchmarkSession } from "./types.ts";
 
 type Benchmark = "beam" | "locomo" | "personamem";
@@ -28,6 +33,7 @@ type Mode =
   | "flat-hybrid"
   | "matched"
   | "nmg-auto"
+  | "nmg-candidate"
   | "nmg-deterministic"
   | "nmg-graph"
   | "nmg-nodes"
@@ -75,6 +81,11 @@ if (mode === "validate") {
   process.exit(0);
 }
 
+const controllerCandidate =
+  mode === "matched" || mode === "nmg-candidate"
+    ? loadControllerCandidate(requiredControllerCandidatePath())
+    : null;
+
 const runId = new Date().toISOString().replaceAll(":", "-");
 const outputDirectory = resolve(root, "evals", benchmark, "results", runId);
 mkdirSync(outputDirectory, { recursive: true });
@@ -93,6 +104,9 @@ const results = (
           ? resolve(outputDirectory, "arms", safeName(item.id), itemMode, String(repeat))
           : undefined;
         if (dataDirectory) cpSync(seedDirectory, dataDirectory, { recursive: true });
+        if (dataDirectory && itemMode === "nmg-candidate") {
+          installControllerCandidate(controllerCandidate!, dataDirectory);
+        }
         process.stderr.write(`[${benchmark}] ${item.id} ${itemMode} repeat=${repeat}: start\n`);
         rows.push(await evaluate(item, itemMode, dataDirectory, remembered, repeat));
         process.stderr.write(`[${benchmark}] ${item.id} ${itemMode} repeat=${repeat}: done\n`);
@@ -128,8 +142,21 @@ const report = {
           arms: modes,
           invariant: "same case, model, thinking level, user prompt, and initial NMG corpus",
           onlyDifference:
-            "no extension vs deterministic NMG vs deterministic NMG with controller shadow logging",
-          controllerAffectsRanking: false,
+            "no extension vs deterministic NMG vs the same NMG path with one frozen trained controller candidate",
+          controllerCandidate: controllerCandidate
+            ? {
+                sha256: controllerCandidate.sha256,
+                featureProtocolVersion: controllerCandidate.featureProtocolVersion,
+                trainingSteps: controllerCandidate.trainingSteps,
+              }
+            : null,
+          armEnvironments: {
+            "nmg-deterministic": controllerMatchedEnvironment("nmg-deterministic"),
+            "nmg-candidate": controllerMatchedEnvironment("nmg-candidate"),
+          },
+          controllerAffectsRanking: results.some(
+            (row) => row.mode === "nmg-candidate" && (row.controllerActuation?.changed ?? 0) > 0,
+          ),
         }
       : null,
   results,
@@ -203,6 +230,7 @@ async function evaluate(
           totalRetrieved: retrieval.sourceIds.length,
         }
       : null,
+    controllerActuation: readControllerActuation(dataDirectory),
   };
 }
 
@@ -325,7 +353,8 @@ function createClient(dataDirectory?: string, itemMode?: EvaluationMode): RpcCli
       ...definedEnvironment(),
       PI_CODING_AGENT_DIR: piAgentDirectory,
       ...(dataDirectory ? { NMG_DATA_DIR: dataDirectory } : {}),
-      ...(isMatchedMode(itemMode) ? controllerShadowEnvironment(itemMode) : {}),
+      ...(isMatchedMode(itemMode) ? controllerMatchedEnvironment(itemMode) : {}),
+      ...(itemMode === "nmg-shadow" ? { NMG_CONTROLLER_SHADOW: "1" } : {}),
       ...(itemMode === "nmg-nodes" ? { NMG_GRAPH_HOPS: "0" } : {}),
       ...(itemMode === "nmg-graph" ? { NMG_GRAPH_HOPS: "1" } : {}),
     },
@@ -423,6 +452,7 @@ function parseMode(value: string | undefined): Mode {
       "flat-hybrid",
       "matched",
       "nmg-auto",
+      "nmg-candidate",
       "nmg-deterministic",
       "nmg-graph",
       "nmg-nodes",
@@ -434,6 +464,14 @@ function parseMode(value: string | undefined): Mode {
   )
     return candidate as Mode;
   throw new Error(`Unknown benchmark mode: ${candidate}`);
+}
+
+function requiredControllerCandidatePath(): string {
+  const path = process.env.NMG_CONTROLLER_CANDIDATE_STATE?.trim();
+  if (!path) {
+    throw new Error("Matched controller evaluation requires NMG_CONTROLLER_CANDIDATE_STATE");
+  }
+  return path;
 }
 
 function positiveInteger(value: string): number {

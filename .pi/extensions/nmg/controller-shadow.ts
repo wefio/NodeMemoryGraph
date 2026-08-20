@@ -33,7 +33,8 @@ export interface PendingClaimOutcome {
 
 /**
  * Optional, lazy Pi bridge for the experimental differentiable controller.
- * It records disclosure separately from answer attribution and never changes retrieval.
+ * Observation is always safe; explicit allocate/fold/rerank calls are the only
+ * methods allowed to actuate a trained candidate.
  */
 export class ControllerShadowBridge {
   readonly enabled: boolean;
@@ -108,10 +109,23 @@ export class ControllerShadowBridge {
   ): Promise<import("../../../src/lab/controller-runtime.ts").ControllerBudgetDecision | null> {
     if (!this.enabled) return null;
     try {
-      const { runtime } = await this.#dependencies();
-      return runtime.trainingSteps > 0
-        ? runtime.allocate(context, minimum, normalMaximum, expandedMaximum)
-        : null;
+      const dependencies = await this.#dependencies();
+      const { runtime } = dependencies;
+      if (runtime.trainingSteps < 1 || !context.activeGraph) return null;
+      const decision = runtime.allocate(context, minimum, normalMaximum, expandedMaximum);
+      if (decision && context.activeGraph.sessionId) {
+        const before = context.activeGraph.budget;
+        dependencies.log.actuation({
+          graphId: context.activeGraph.id,
+          sessionId: context.activeGraph.sessionId,
+          action: "allocate",
+          changed: !sameBudget(before, decision.budget),
+          controllerTrainingSteps: decision.trainingSteps,
+          beforeBudget: before,
+          afterBudget: decision.budget,
+        });
+      }
+      return decision;
     } catch {
       return null;
     }
@@ -124,10 +138,71 @@ export class ControllerShadowBridge {
   ): Promise<import("../../../src/lab/controller-runtime.ts").ControllerMemoryFold | null> {
     if (!this.enabled) return null;
     try {
-      const { runtime } = await this.#dependencies();
-      return runtime.trainingSteps > 0 ? runtime.foldMemories(context, retainedMass) : null;
+      const dependencies = await this.#dependencies();
+      const { runtime } = dependencies;
+      if (runtime.trainingSteps < 1 || !context.activeGraph) return null;
+      const fold = runtime.foldMemories(context, retainedMass);
+      if (fold && context.activeGraph.sessionId) {
+        const beforeMemoryIds = context.results.map((result) => result.memory.id);
+        dependencies.log.actuation({
+          graphId: context.activeGraph.id,
+          sessionId: context.activeGraph.sessionId,
+          action: "fold",
+          changed: fold.foldedMemoryIds.length > 0,
+          controllerTrainingSteps: fold.trainingSteps,
+          beforeMemoryIds,
+          afterMemoryIds: fold.visibleMemoryIds,
+        });
+      }
+      return fold;
     } catch {
       return null;
+    }
+  }
+
+  /** Apply the learned node order while keeping each node's memory order stable. */
+  async rerank(context: MemoryContext): Promise<MemoryContext> {
+    if (!this.enabled || !context.activeGraph || context.results.length < 2) return context;
+    try {
+      const dependencies = await this.#dependencies();
+      const decision = dependencies.runtime.shadow(context);
+      if (!decision || decision.trainingSteps < 1) return context;
+      const nodeRank = new Map(decision.learnedNodeIds.map((nodeId, index) => [nodeId, index]));
+      const before = context.results.map((result) => result.memory.id);
+      const ranked = context.results
+        .map((result, index) => ({ result, index }))
+        .sort(
+          (left, right) =>
+            (nodeRank.get(left.result.node.id) ?? Number.MAX_SAFE_INTEGER) -
+              (nodeRank.get(right.result.node.id) ?? Number.MAX_SAFE_INTEGER) ||
+            left.index - right.index,
+        )
+        .map(({ result }) => result);
+      const after = ranked.map((result) => result.memory.id);
+      const changed = before.some((memoryId, index) => after[index] !== memoryId);
+      if (context.activeGraph.sessionId) {
+        dependencies.log.actuation({
+          graphId: context.activeGraph.id,
+          sessionId: context.activeGraph.sessionId,
+          action: "rerank",
+          changed,
+          controllerTrainingSteps: decision.trainingSteps,
+          beforeMemoryIds: before,
+          afterMemoryIds: after,
+        });
+      }
+      if (!changed) return context;
+      return {
+        ...context,
+        results: ranked,
+        activeGraph: {
+          ...context.activeGraph,
+          nodeIds: decision.learnedNodeIds,
+          memoryIds: after,
+        },
+      };
+    } catch {
+      return context;
     }
   }
 
@@ -252,7 +327,12 @@ export class ControllerShadowBridge {
     if (!this.enabled || !activeGraphId) return false;
     const pending = this.#contexts.get(activeGraphId);
     const graph = pending?.context.activeGraph;
-    if (!pending || !graph || graph.sessionId !== sessionId || !graph.memoryIds.includes(memoryId)) {
+    if (
+      !pending ||
+      !graph ||
+      graph.sessionId !== sessionId ||
+      !graph.memoryIds.includes(memoryId)
+    ) {
       return false;
     }
     if (outcome === "supported") pending.verifiedSupportedMemoryIds.add(memoryId);
@@ -475,6 +555,22 @@ function summarizeMessages(messages: readonly unknown[]): {
     }
   }
   return { inputTokens, outputTokens, toolRounds };
+}
+
+function sameBudget(
+  left: import("../../../src/core/types.ts").ActiveGraphBudget,
+  right: import("../../../src/core/types.ts").ActiveGraphBudget,
+): boolean {
+  return (
+    left.maxNodes === right.maxNodes &&
+    left.maxEdges === right.maxEdges &&
+    left.maxEvidence === right.maxEvidence &&
+    left.maxTokens === right.maxTokens &&
+    left.maxGraphHops === right.maxGraphHops &&
+    left.maxLocalTier === right.maxLocalTier &&
+    left.maxTierBudget === right.maxTierBudget &&
+    left.maxLatencyMs === right.maxLatencyMs
+  );
 }
 
 export function shadowEnabled(value = process.env.NMG_CONTROLLER_SHADOW): boolean {

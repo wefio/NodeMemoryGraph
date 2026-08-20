@@ -32,6 +32,7 @@ import { loadPrompts } from "../../../src/prompts/load.ts";
 import { isProcessAlive, readServerState, serverStatePath } from "../../../src/cli/lifecycle.ts";
 import { NmgStore } from "../../../src/core/store.ts";
 import type { MemoryContext } from "../../../src/core/types.ts";
+import { ControllerRuntime } from "../../../src/lab/controller-runtime.ts";
 import {
   ControllerShadowBridge,
   shadowEnabled,
@@ -499,6 +500,51 @@ test("controller shadow bridge logs answer attribution without learning from it"
   }
 });
 
+test("trained controller actuation is explicit, bounded, and auditable", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-controller-actuation-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    const memories = [
+      store.remember({ statement: "Atlas uses SQLite", nodeName: "Atlas" }),
+      store.remember({ statement: "Borealis uses PostgreSQL", nodeName: "Borealis" }),
+      store.remember({ statement: "Cygnus uses object storage", nodeName: "Cygnus" }),
+    ];
+    const context = store.searchContext("project storage database", {
+      sessionId: "candidate-session",
+      limit: 3,
+      persistTrace: false,
+    });
+    const runtime = new ControllerRuntime(join(directory, "controller-shadow-state.json"));
+    assert.equal(runtime.observeVerifiedEvidence(context, [memories[2]!.memory.id]), true);
+
+    const bridge = new ControllerShadowBridge(directory, true);
+    const envelopes = controllerBudgetEnvelopes(context);
+    assert.ok(
+      await bridge.allocate(
+        context,
+        envelopes.minimum,
+        envelopes.normalMaximum,
+        envelopes.expandedMaximum,
+      ),
+    );
+    await bridge.rerank(context);
+
+    const actuations = readFileSync(join(directory, "controller-shadow-events.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; action: string; changed: boolean });
+    assert.deepEqual(
+      actuations.map((event) => event.action),
+      ["allocate", "rerank"],
+    );
+    assert.ok(actuations.every((event) => event.type === "actuation"));
+    assert.ok(actuations.some((event) => event.changed));
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("shadow feedback review selects a disclosed graph instead of a newer header-only graph", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-feedback-selection-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
@@ -590,18 +636,23 @@ test("Pi injects the advisory claim-outcome review only on the next user turn", 
       undefined,
       { sessionManager },
     );
-    const searched = (await tools.get("nmg_search")!.execute(
-      "search-claim-review",
-      { query: "Atlas durable metadata SQLite", limit: 5 },
-      undefined,
-      undefined,
-      { sessionManager },
-    )) as { content: Array<{ text: string }> };
+    const searched = (await tools
+      .get("nmg_search")!
+      .execute(
+        "search-claim-review",
+        { query: "Atlas durable metadata SQLite", limit: 5 },
+        undefined,
+        undefined,
+        { sessionManager },
+      )) as { content: Array<{ text: string }> };
     assert.match(searched.content[0]?.text ?? "", /Atlas stores durable metadata in SQLite/u);
     await handlers.get("agent_end")!(
       {
         messages: [
-          { role: "user", content: [{ type: "text", text: "What database stores Atlas metadata?" }] },
+          {
+            role: "user",
+            content: [{ type: "text", text: "What database stores Atlas metadata?" }],
+          },
           { role: "assistant", content: [{ type: "text", text: "Atlas uses SQLite." }] },
         ],
       },
@@ -620,7 +671,10 @@ test("Pi injects the advisory claim-outcome review only on the next user turn", 
       { prompt: "I have a new observation about Atlas.", systemPrompt: "base" },
       { sessionManager },
     )) as { message?: { content: string } };
-    assert.doesNotMatch(sameTurnReentry.message?.content ?? "", /previous NMG retrieval.*action=claim_outcome/su);
+    assert.doesNotMatch(
+      sameTurnReentry.message?.content ?? "",
+      /previous NMG retrieval.*action=claim_outcome/su,
+    );
     await handlers.get("session_shutdown")!({}, { sessionManager });
   } finally {
     process.env.NMG_DATA_DIR = previousData;
@@ -1593,8 +1647,9 @@ test("Chinese automatic recall reaches diagnostic answer attribution and the sha
       "an attributable user outcome supervises the exact automatically recalled memory",
     );
     assert.equal(
-      events.filter((event) => event.type === "attribution" && event.method === "verified_claim_support")
-        .length,
+      events.filter(
+        (event) => event.type === "attribution" && event.method === "verified_claim_support",
+      ).length,
       1,
       "a model-authored task outcome does not silently create another verified target",
     );

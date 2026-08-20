@@ -24,6 +24,15 @@ function row(
     toolRounds: mode === "baseline" ? 1 : 2,
     tokenUsage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, total: 120 },
     durationMs: mode === "baseline" ? 500 : 600,
+    controllerActuation:
+      mode === "candidate"
+        ? {
+            attempted: 1,
+            changed: 1,
+            actions: { allocate: 0, fold: 0, rerank: 1 },
+            maxTrainingSteps: 3,
+          }
+        : null,
     ...overrides,
   };
 }
@@ -31,7 +40,7 @@ function row(
 test("emits typed gate metrics only for complete causal arm pairs", () => {
   const result = aggregateMatchedProductMetrics(
     [row("a", "baseline"), row("a", "candidate"), row("b", "baseline"), row("b", "candidate")],
-    { baselineMode: "baseline", candidateMode: "candidate", candidateAffectsRanking: true },
+    { baselineMode: "baseline", candidateMode: "candidate" },
   );
   assert.deepEqual(result.blockers, []);
   assert.equal(result.pairedCases, 2);
@@ -60,29 +69,43 @@ test("fails closed when the candidate is observational or labels are incomplete"
       row("a", "baseline"),
       row("a", "candidate", {
         rowScore: { taskScore: 0.5, taskSuccess: null, evidence: null },
+        controllerActuation: null,
       }),
     ],
-    { baselineMode: "baseline", candidateMode: "candidate", candidateAffectsRanking: false },
+    { baselineMode: "baseline", candidateMode: "candidate" },
   );
   assert.equal(result.metrics, null);
   assert.deepEqual(
     result.blockers.map((blocker) => blocker.code),
-    [
-      "candidate_does_not_affect_ranking",
-      "missing_binary_task_success",
-      "no_complete_pairs",
-    ],
+    ["candidate_does_not_affect_ranking", "missing_binary_task_success", "no_complete_pairs"],
   );
 });
 
 test("does not silently average an incomplete matched run", () => {
   const result = aggregateMatchedProductMetrics(
     [row("a", "baseline"), row("a", "candidate"), row("b", "baseline")],
-    { baselineMode: "baseline", candidateMode: "candidate", candidateAffectsRanking: true },
+    { baselineMode: "baseline", candidateMode: "candidate" },
   );
   assert.equal(result.pairedCases, 1);
   assert.equal(result.metrics, null);
   assert.deepEqual(result.blockers, [{ code: "missing_arm_pair", count: 1 }]);
+});
+
+test("rejects a contaminated baseline even when the candidate actuates", () => {
+  const contaminated = row("a", "baseline", {
+    controllerActuation: {
+      attempted: 1,
+      changed: 1,
+      actions: { allocate: 1, fold: 0, rerank: 0 },
+      maxTrainingSteps: 3,
+    },
+  });
+  const result = aggregateMatchedProductMetrics([contaminated, row("a", "candidate")], {
+    baselineMode: "baseline",
+    candidateMode: "candidate",
+  });
+  assert.equal(result.metrics, null);
+  assert.deepEqual(result.blockers, [{ code: "baseline_controller_actuation_detected", count: 1 }]);
 });
 
 test("extracts only complete gate-safe metrics from an official score artifact", () => {

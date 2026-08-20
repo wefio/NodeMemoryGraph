@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   DEFAULT_MAINTENANCE_POLICY,
   DEFAULT_STG_CONSOLIDATION_POLICY,
+  configuredControllerRerankMode,
   configuredMaintenancePolicy,
   configuredQpp1Mode,
   configuredQpp2Mode,
@@ -44,12 +45,11 @@ test("maintenance policy owns defaults and validates environment overrides", () 
 test("QPP controls resolve from the supplied daemon environment", () => {
   assert.equal(configuredQpp1Mode({}), "shadow");
   assert.equal(configuredQpp1Mode({ NMG_CONTROLLER_SEARCH: "1" }), "active");
-  assert.equal(
-    configuredQpp1Mode({ NMG_CONTROLLER_SEARCH: "1", NMG_QPP1_MODE: "off" }),
-    "off",
-  );
+  assert.equal(configuredQpp1Mode({ NMG_CONTROLLER_SEARCH: "1", NMG_QPP1_MODE: "off" }), "off");
   assert.equal(configuredQpp2Mode({ NMG_QPP2_MODE: "active" }), "active");
   assert.equal(configuredQpp2Mode({ NMG_QPP2_MODE: "invalid" }), "off");
+  assert.equal(configuredControllerRerankMode({}), "off");
+  assert.equal(configuredControllerRerankMode({ NMG_CONTROLLER_RERANK: "active" }), "active");
   assert.equal(configuredQpp2RetainedMass({ NMG_QPP2_RETAINED_MASS: "1.5" }), 1);
   assert.equal(configuredQpp2RetainedMass({ NMG_QPP2_RETAINED_MASS: "bad" }), 0.98);
   assert.equal(

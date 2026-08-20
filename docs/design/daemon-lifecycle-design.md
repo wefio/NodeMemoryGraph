@@ -143,7 +143,7 @@ stderr 会被 `RpcClient` 子进程捕获并透传到评测主进程，可观测
 
 ### 5.3 为什么默认 32
 
-评测并发上限 16（`NMG_BENCH_CONCURRENCY` 硬上限）× matched 模式每用例 2 个 nmg arm（nmg-deterministic + nmg-shadow）= **恰好 32 个合法在途 daemon**。因此：
+评测并发上限 16（`NMG_BENCH_CONCURRENCY` 硬上限）× matched 模式每用例 2 个 nmg arm（nmg-deterministic + nmg-candidate）= **恰好 32 个合法在途 daemon**。因此：
 
 - `32` = "一整套满并发评测的合法规模"，默认值下正常评测不误报；
 - 超过 32 即提示有泄漏/重复运行（上轮事故 1670 ≫ 32）；

@@ -43,3 +43,26 @@ roots; no daemon remained alive after the run.
 Future reports calculate official session recall for flat retrieval as well as
 NMG. This run predates that final reporting change, so its flat official cells
 remain `null` rather than being reconstructed after the fact.
+
+## Causal controller protocol update — 2026-08-20
+
+`matched` now means a causal controller comparison rather than a logging-only
+shadow arm. It requires a frozen, trained controller artifact:
+
+```bash
+NMG_CONTROLLER_CANDIDATE_STATE=/path/to/controller-shadow-state.json \
+  npm run eval:longmem -- matched 1
+```
+
+The deterministic and candidate NMG arms share QPP1/QPP2 mechanics, corpus,
+prompt, model, thinking level, and hard budgets. Only the candidate arm receives
+the validated controller state. The report records its SHA-256, feature protocol,
+training steps, per-arm environment, and runtime `allocate|fold|rerank` actions.
+Official scoring derives causal eligibility from those actions; it no longer
+trusts a static `controllerAffectsRanking` declaration.
+
+The one-question `6a1eabeb` smoke used the 25-step local candidate and recorded
+two actions, one of which changed the retrieval projection. Both NMG arms scored
+correctly with the same official retrieval (recall 0.5, NDCG 0.613); candidate
+disclosure fell from 3,368 to 981 characters. This is an execution-path check,
+not an estimate of controller quality or a leaderboard result.

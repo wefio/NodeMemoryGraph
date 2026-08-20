@@ -1480,10 +1480,11 @@ their numeric features, optimise its parameters, then hand the result back to
 ordinary budgeted graph selection.
 
 The Pi adapter has a lazy controller bridge. `NMG_CONTROLLER_SHADOW=1` enables
-telemetry without actuation; QPP1/QPP2 `active` are the explicit operator gates
-that permit a trained controller to allocate a bounded Active Graph budget or
-fold low learned-probability candidates. A zero-step controller is inert, and
-all active outputs remain inside hard minimum/normal/expanded envelopes.
+telemetry without actuation. QPP1/QPP2 `active` permit a trained controller to
+allocate a bounded Active Graph budget or fold low learned-probability
+candidates; `NMG_CONTROLLER_RERANK=active` separately permits stable learned
+node reranking. A zero-step controller is inert, and all active outputs remain
+inside hard minimum/normal/expanded envelopes.
 
 The bridge records baseline and learned node order in a bounded log under
 `NMG_DATA_DIR`. Exact records fetched from a session-owned Active Graph are
@@ -1550,12 +1551,17 @@ Only complete same-case/same-repeat arm pairs may aggregate into
 `ControllerMatchedProductMetrics`. Aggregation fails closed on a missing arm,
 missing binary task label, missing all-evidence label, mismatched evidence kind,
 missing token/tool/latency telemetry, or a candidate that did not actually
-affect ranking. An official score artifact with non-null gate-safe metrics can be
+affect retrieval. The matched runner requires an explicit frozen candidate
+state, checks its feature protocol and non-zero training steps, hashes it into
+the report, and copies it only into the candidate arm. Runtime
+`allocate|fold|rerank` actions are typed events; the scorer derives causal
+eligibility from these events and rejects any baseline actuation rather than
+trusting a report-authored boolean. An official score artifact with non-null gate-safe metrics can be
 fed into the offline controller evaluation through
 `NMG_CONTROLLER_MATCHED_PRODUCT_REPORT`; malformed or diagnostic-only artifacts
-remain absent from the product gate. The current deterministic-versus-shadow
-matched protocol deliberately reports `candidate_does_not_affect_ranking`, so it
-validates instrumentation but cannot authorize active/default routing.
+remain absent from the product gate. A one-question causal smoke proves this
+execution path; it does not establish candidate quality or authorize
+active/default routing.
 
 The same bounded log records harness-level progressive-disclosure interventions
 as separate `tool_flow` events. In particular, a third explicit search made
@@ -2500,10 +2506,11 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 1. **Complete:** Inbox/Delta retrieval and dirty-node local rebuild scheduling.
 2. **Complete:** stable leaf identities, Float32 binary vector storage, and a
    disposable contiguous appendable in-memory cache.
-3. **Complete at runner level:** the strict LongMemEval matched gate compares
-   no-memory, deterministic NMG, and NMG with a non-ranking shadow controller
-   using identical prompts and independent copies of one seed corpus. Larger
-   repeated capability runs remain ongoing benchmark work.
+3. **Complete at causal runner level:** the strict LongMemEval matched gate
+   compares no-memory, deterministic NMG, and NMG with one explicit frozen
+   trained controller using identical prompts and independent copies of one seed
+   corpus. Runtime actions, candidate hash/configuration, and contamination are
+   audited. Larger repeated capability runs remain ongoing benchmark work.
 4. **Complete:** deterministic temporal, aggregation, conflict, multi-hop,
    exact-detail, privacy, and memory-pollution cases.
 5. **Complete at adapter level:** LongMemEval, PersonaMem, LoCoMo, and BEAM have
@@ -2541,12 +2548,12 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
    local-subgraph consolidation into LTG with minimum
    evidence, hysteresis, cooldown, and explicit evaluation gates. Pi runs this
    conservative maintenance policy automatically after completed turns.
-6. **Autodiff complete as Lite infrastructure; controller separately gated:**
+6. **Autodiff and bounded actuation complete as Lite infrastructure; promotion separately gated:**
    implement a tinygrad-inspired UOp engine and a serializable multi-head
    controller for node, edge, STOP/EXPAND, and budget decisions. The numerical
-   substrate ships with Lite; controller activation in the Pi retrieval path
-   remains gated on a fixed feature contract and matched
-   evidence-recall/cost evaluation.
+   substrate ships with Lite; trained rerank/allocation/fold actuation is wired
+   behind explicit modes, while default activation remains gated on a fixed
+   feature contract and matched evidence-recall/cost evaluation.
 7. **Mechanism complete, utility evaluation open:** independently selectable QPP1
    allocation, QPP2 progressive folding, and search recommendation are wired
    through the Pi adapter. QPP2 preserves folded candidates in the Active Graph.

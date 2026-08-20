@@ -28,7 +28,13 @@ interface Prediction {
   officialMetadata: Record<string, unknown>;
   repeat: number;
   toolRounds: number;
-  tokenUsage: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number } | null;
+  tokenUsage: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  } | null;
   durationMs: number;
 }
 
@@ -40,7 +46,7 @@ const report = JSON.parse(readFileSync(resolve(runDirectory, "report.json"), "ut
   codeRevision?: string | null;
   sampleFingerprint?: string | null;
   benchmarkParameters?: unknown;
-  matchedProtocol?: { controllerAffectsRanking?: boolean } | null;
+  matchedProtocol?: object | null;
 };
 const scored =
   benchmark === "locomo"
@@ -59,8 +65,7 @@ const output = {
   matchedProduct: report.matchedProtocol
     ? aggregateMatchedProductMetrics(scored, {
         baselineMode: "nmg-deterministic",
-        candidateMode: "nmg-shadow",
-        candidateAffectsRanking: report.matchedProtocol.controllerAffectsRanking === true,
+        candidateMode: "nmg-candidate",
       })
     : null,
   results: scored,
@@ -154,7 +159,8 @@ async function scoreBeam(rows: Prediction[]) {
     for (const item of rubric) scores.push(await judgeBeamRubric(row, item));
     output.push({
       ...row,
-      officialScore: scores.length > 0 ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0,
+      officialScore:
+        scores.length > 0 ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0,
       rowScore: continuousRowScore(
         scores.length > 0 ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0,
       ),

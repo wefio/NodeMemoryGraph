@@ -1,6 +1,7 @@
 import type { ControllerMatchedProductMetrics } from "../../src/lab/controller-gate.ts";
 import type { AgentTokenUsage } from "../agent-telemetry.ts";
 import type { UnifiedRowScore } from "../official/unified-score.ts";
+import type { ControllerActuationSummary } from "./controller-candidate.ts";
 
 export interface MatchedProductRow {
   id?: string;
@@ -12,11 +13,13 @@ export interface MatchedProductRow {
   toolRounds: number;
   tokenUsage: AgentTokenUsage | null;
   durationMs: number;
+  controllerActuation?: ControllerActuationSummary | null;
 }
 
 export interface MatchedProductBlocker {
   code:
     | "candidate_does_not_affect_ranking"
+    | "baseline_controller_actuation_detected"
     | "duplicate_arm_row"
     | "missing_arm_pair"
     | "missing_binary_task_success"
@@ -40,17 +43,28 @@ export function aggregateMatchedProductMetrics(
   options: {
     baselineMode: string;
     candidateMode: string;
-    candidateAffectsRanking: boolean;
   },
 ): MatchedProductAggregation {
   const blockers = new Map<MatchedProductBlocker["code"], number>();
   const block = (code: MatchedProductBlocker["code"]) =>
     blockers.set(code, (blockers.get(code) ?? 0) + 1);
-  if (!options.candidateAffectsRanking) block("candidate_does_not_affect_ranking");
-
   const relevant = rows.filter(
     (row) => row.mode === options.baselineMode || row.mode === options.candidateMode,
   );
+  const baselineRows = relevant.filter((row) => row.mode === options.baselineMode);
+  const candidateRows = relevant.filter((row) => row.mode === options.candidateMode);
+  if (baselineRows.some((row) => (row.controllerActuation?.changed ?? 0) > 0)) {
+    block("baseline_controller_actuation_detected");
+  }
+  if (
+    !candidateRows.some(
+      (row) =>
+        (row.controllerActuation?.changed ?? 0) > 0 &&
+        (row.controllerActuation?.maxTrainingSteps ?? 0) > 0,
+    )
+  ) {
+    block("candidate_does_not_affect_ranking");
+  }
   const byKey = new Map<string, Partial<Record<"baseline" | "candidate", MatchedProductRow>>>();
   for (const row of relevant) {
     const id = row.caseId ?? row.questionId ?? row.id;

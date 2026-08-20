@@ -1,4 +1,4 @@
-export const MATCHED_MODES = ["no-memory", "nmg-deterministic", "nmg-shadow"] as const;
+export const MATCHED_MODES = ["no-memory", "nmg-deterministic", "nmg-candidate"] as const;
 export const BACKEND_ABLATION_MODES = [
   "no-memory",
   "flat-hybrid",
@@ -40,7 +40,8 @@ export function isMatchedMode(value: string): value is MatchedMode {
 /** Deterministic rotation prevents provider cold-start cost from always landing on one arm. */
 export function counterbalancedOrder<T>(items: readonly T[], key: string): T[] {
   if (items.length < 2) return [...items];
-  const offset = [...key].reduce((sum, character) => sum + character.codePointAt(0)!, 0) % items.length;
+  const offset =
+    [...key].reduce((sum, character) => sum + character.codePointAt(0)!, 0) % items.length;
   return [...items.slice(offset), ...items.slice(0, offset)];
 }
 
@@ -52,18 +53,28 @@ export function benchmarkIsolationArgs(nmgExtensionPath?: string): string[] {
     "--no-prompt-templates",
   ];
   return nmgExtensionPath
-    ? [
-        ...isolation,
-        "--tools",
-        "nmg_remember,nmg_search,nmg_get",
-        "--extension",
-        nmgExtensionPath,
-      ]
+    ? [...isolation, "--tools", "nmg_remember,nmg_search,nmg_get", "--extension", nmgExtensionPath]
     : [...isolation, "--no-tools"];
 }
 
-export function controllerShadowEnvironment(mode: MatchedMode): Record<string, string> {
-  if (mode === "nmg-deterministic") return { NMG_CONTROLLER_SHADOW: "0" };
-  if (mode === "nmg-shadow") return { NMG_CONTROLLER_SHADOW: "1" };
+export function controllerMatchedEnvironment(mode: MatchedMode): Record<string, string> {
+  if (mode === "nmg-deterministic") {
+    return {
+      // Both NMG arms record the same telemetry. The candidate state file is
+      // the only treatment difference.
+      NMG_CONTROLLER_SHADOW: "1",
+      NMG_QPP1_MODE: "active",
+      NMG_QPP2_MODE: "active",
+      NMG_CONTROLLER_RERANK: "active",
+    };
+  }
+  if (mode === "nmg-candidate") {
+    return {
+      NMG_CONTROLLER_SHADOW: "1",
+      NMG_QPP1_MODE: "active",
+      NMG_QPP2_MODE: "active",
+      NMG_CONTROLLER_RERANK: "active",
+    };
+  }
   return {};
 }
