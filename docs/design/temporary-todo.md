@@ -148,6 +148,15 @@ assessment for an eligible pair, a user/tool mismatch, and Assistant-authored
 evidence. This closes an audit-parity bug but does not supply the natural
 false-merge evidence required for default enablement.
 
+The same audit now distinguishes active and logically retracted STG→LTG
+materializations by reading the durable `consolidated_from_stg` marker on every
+LTG status, reports each source/target association, and flags duplicate active
+targets for one STG source. The regression covers idempotent materialization,
+idempotent retraction, retained deleted history, and exclusion of a same-text
+manual LTG row without the marker. This makes reversibility observable when
+natural examples arrive; the controlled fixture is not itself precision
+evidence.
+
 The latest ordinary-Pi topology audit found one pending `refines` proposal,
 zero `same_as` or `distinct_from` relations, zero accepted or rejected identity
 proposals, and zero transforms or rollbacks. Before default enablement, natural

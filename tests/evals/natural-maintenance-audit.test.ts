@@ -6,7 +6,7 @@ import test from "node:test";
 
 import { auditNaturalMaintenance } from "../../evals/natural-maintenance/audit.ts";
 import { NmgStore } from "../../src/core/store.ts";
-import { consolidateStgMemoryToLtg } from "../../src/core/stg.ts";
+import { consolidateStgMemoryToLtg, retractStgConsolidation } from "../../src/core/stg.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
 test("natural maintenance audit reads claim, consolidation, and topology evidence without mutation", () => {
@@ -16,6 +16,9 @@ test("natural maintenance audit reads claim, consolidation, and topology evidenc
   const ltg = new NmgStore(ltgPath);
   const stg = new NmgStore(stgPath);
   let stgMemoryId = "";
+  let retractedStgMemoryId = "";
+  let retractedLtgMemoryId = "";
+  let manualLtgMemoryId = "";
   const productionAssessments = new Map<
     string,
     { eligible: boolean; reasons: string[]; targetName: string | null }
@@ -67,7 +70,46 @@ test("natural maintenance audit reads claim, consolidation, and topology evidenc
         },
       ],
     });
-    consolidateStgMemoryToLtg(stg, ltg, local.memory.id, "session-natural");
+    const activeMaterialization = consolidateStgMemoryToLtg(
+      stg,
+      ltg,
+      local.memory.id,
+      "session-natural",
+    );
+    assert.equal(
+      consolidateStgMemoryToLtg(stg, ltg, local.memory.id, "session-natural").memory.id,
+      activeMaterialization.memory.id,
+      "repeated materialization is idempotent",
+    );
+    const retractable = stg.remember({
+      statement: "Atlas previously mirrored temporary metadata in JSON.",
+      nodeName: "Atlas temporary storage",
+      scope: { project: "atlas" },
+      residence: "stg",
+      sessionId: "session-natural",
+      sourceActor: "user",
+    });
+    retractedStgMemoryId = retractable.memory.id;
+    const materialized = consolidateStgMemoryToLtg(
+      stg,
+      ltg,
+      retractable.memory.id,
+      "session-natural",
+    );
+    retractedLtgMemoryId = materialized.memory.id;
+    assert.deepEqual(retractStgConsolidation(ltg, retractable.memory.id), [materialized.memory.id]);
+    assert.deepEqual(
+      retractStgConsolidation(ltg, retractable.memory.id),
+      [],
+      "retraction is idempotent",
+    );
+    manualLtgMemoryId = ltg.remember({
+      statement: "Atlas previously mirrored temporary metadata in JSON.",
+      nodeName: "Atlas manual storage note",
+      scope: { project: "atlas", source: "manual" },
+      residence: "ltg",
+      sourceActor: "user",
+    }).memory.id;
 
     const left = [0, 1, 2].map((index) =>
       ltg.remember({
@@ -172,7 +214,7 @@ test("natural maintenance audit reads claim, consolidation, and topology evidenc
     const report = auditNaturalMaintenance({
       ltgPath,
       stgPaths: [stgPath],
-      environment: {},
+      environment: { NMG_MAINTENANCE_WRITE_THRESHOLD: "64" },
       generatedAt: "2026-08-20T00:00:00.000Z",
     });
 
@@ -184,6 +226,25 @@ test("natural maintenance audit reads claim, consolidation, and topology evidenc
     assert.equal(report.stg[0]?.claims.naturalSemanticTasks, 3);
     assert.deepEqual(report.stg[0]?.claims.promotionCandidates, [stgMemoryId]);
     assert.equal(report.ltg.consolidatedFromStg[0]?.sourceMemoryId, stgMemoryId);
+    assert.deepEqual(report.ltg.stgConsolidation.byStatus, { active: 1, deleted: 1 });
+    assert.equal(report.ltg.stgConsolidation.total, 2);
+    assert.equal(report.ltg.stgConsolidation.active, 1);
+    assert.equal(report.ltg.stgConsolidation.retracted, 1);
+    assert.deepEqual(report.ltg.stgConsolidation.duplicateActiveSourceMemoryIds, []);
+    assert.ok(
+      report.ltg.stgConsolidation.materializations.some(
+        (item) =>
+          item.memoryId === retractedLtgMemoryId &&
+          item.sourceMemoryId === retractedStgMemoryId &&
+          item.status === "deleted",
+      ),
+    );
+    assert.equal(
+      report.ltg.stgConsolidation.materializations.some((item) => item.memoryId === manualLtgMemoryId),
+      false,
+      "a manual LTG row without the source marker is not a materialization",
+    );
+    assert.equal(report.evidenceGaps.includes("no_stg_consolidation_retractions"), false);
     assert.equal(report.ltg.topology.proposalsByRelation.same_as, 3);
     assert.equal(report.ltg.topology.pendingAutomaticMergeAssessments.length, 3);
     for (const actual of report.ltg.topology.pendingAutomaticMergeAssessments) {
@@ -204,7 +265,7 @@ test("natural maintenance audit reads claim, consolidation, and topology evidenc
       ),
     );
     assert.equal(report.ltg.maintenanceBacklog.distributedWritePressure, false);
-    assert.equal(report.policy.maintenance.writeThreshold, 16);
+    assert.equal(report.policy.maintenance.writeThreshold, 64);
     assert.equal(report.evidenceGaps.includes("no_stg_claim_outcomes"), false);
     assert.equal(statSync(ltgPath).size, ltgBefore.size);
     assert.equal(statSync(ltgPath).mtimeMs, ltgBefore.mtimeMs);

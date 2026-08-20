@@ -77,6 +77,18 @@ export interface NaturalMaintenanceAudit {
       rollbacks: number;
     };
     consolidatedFromStg: Array<{ memoryId: string; sourceMemoryId: string }>;
+    stgConsolidation: {
+      materializations: Array<{
+        memoryId: string;
+        sourceMemoryId: string;
+        status: string;
+      }>;
+      byStatus: Record<string, number>;
+      total: number;
+      active: number;
+      retracted: number;
+      duplicateActiveSourceMemoryIds: string[];
+    };
   };
   stg: StoreAudit[];
   evidenceGaps: string[];
@@ -117,6 +129,12 @@ export function auditNaturalMaintenance(options: NaturalMaintenanceAuditOptions)
   if (naturalClaimEvents === 0) evidenceGaps.push("no_stg_claim_outcomes");
   if (candidates === 0) evidenceGaps.push("no_stg_consolidation_candidates");
   if (ltgDetails.consolidatedFromStg.length === 0) evidenceGaps.push("no_materialized_stg_to_ltg_examples");
+  if (ltgDetails.stgConsolidation.retracted === 0) {
+    evidenceGaps.push("no_stg_consolidation_retractions");
+  }
+  if (ltgDetails.stgConsolidation.duplicateActiveSourceMemoryIds.length > 0) {
+    evidenceGaps.push("duplicate_active_stg_materializations");
+  }
   if ((ltgDetails.topology.proposalsByRelation.same_as ?? 0) === 0) {
     evidenceGaps.push("no_identity_merge_proposals");
   }
@@ -257,12 +275,36 @@ function auditLtgDetails(
     ? allRows(db, "SELECT * FROM node_transform_journals")
     : [];
   const relations = tableExists(db, "node_relations") ? allRows(db, "SELECT * FROM node_relations") : [];
-  const consolidatedFromStg = tableExists(db, "memory_records")
-    ? allRows(db, "SELECT id, markers_json FROM memory_records WHERE status = 'active'").flatMap((row) => {
+  const stgMaterializations = tableExists(db, "memory_records")
+    ? allRows(db, "SELECT id, status, markers_json FROM memory_records").flatMap((row) => {
         const sourceMemoryId = consolidatedSource(row.markers_json);
-        return sourceMemoryId ? [{ memoryId: String(row.id), sourceMemoryId }] : [];
+        return sourceMemoryId
+          ? [{ memoryId: String(row.id), sourceMemoryId, status: String(row.status) }]
+          : [];
       })
     : [];
+  const consolidatedFromStg = stgMaterializations
+    .filter((item) => item.status === "active")
+    .map(({ memoryId, sourceMemoryId }) => ({ memoryId, sourceMemoryId }));
+  const activeBySource = new Map<string, number>();
+  for (const materialization of stgMaterializations) {
+    if (materialization.status !== "active") continue;
+    activeBySource.set(
+      materialization.sourceMemoryId,
+      (activeBySource.get(materialization.sourceMemoryId) ?? 0) + 1,
+    );
+  }
+  const stgConsolidation = {
+    materializations: stgMaterializations,
+    byStatus: countBy(stgMaterializations, "status"),
+    total: stgMaterializations.length,
+    active: consolidatedFromStg.length,
+    retracted: stgMaterializations.filter((item) => item.status === "deleted").length,
+    duplicateActiveSourceMemoryIds: [...activeBySource.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([sourceMemoryId]) => sourceMemoryId)
+      .sort(),
+  };
   return {
     maintenanceBacklog,
     topology: {
@@ -277,6 +319,7 @@ function auditLtgDetails(
       rollbacks: journals.filter((row) => row.rolled_back_at !== null).length,
     },
     consolidatedFromStg,
+    stgConsolidation,
   };
 }
 
@@ -304,6 +347,14 @@ function emptyLtgDetails(): Omit<NaturalMaintenanceAudit["ltg"], keyof StoreAudi
       rollbacks: 0,
     },
     consolidatedFromStg: [],
+    stgConsolidation: {
+      materializations: [],
+      byStatus: {},
+      total: 0,
+      active: 0,
+      retracted: 0,
+      duplicateActiveSourceMemoryIds: [],
+    },
   };
 }
 
@@ -477,7 +528,11 @@ function numberValue(value: SQLOutputValue | undefined): number {
   return Number.isFinite(number) ? number : 0;
 }
 
-function countBy(rows: readonly Row[], key: string, fallback = "unknown"): Record<string, number> {
+function countBy(
+  rows: readonly Record<string, unknown>[],
+  key: string,
+  fallback = "unknown",
+): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const row of rows) {
     const value = row[key];
