@@ -443,9 +443,23 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         let supersededNodeId: string | undefined;
         if (supersedesId) {
           const previous = this.db
-            .prepare("SELECT node_id FROM memory_records WHERE id = ?")
+            .prepare("SELECT node_id, scope_json, status FROM memory_records WHERE id = ?")
             .get(supersedesId) as Row | undefined;
           if (!previous) throw new Error(`memory ${supersedesId} does not exist`);
+          if (String(previous.status) === "deleted") {
+            throw new Error("deleted memories cannot participate in supersession");
+          }
+          if (String(previous.scope_json) !== serializeScope(input.scope ?? {})) {
+            throw new Error("supersession requires identical memory scope");
+          }
+          const existingSuccessor = this.db
+            .prepare("SELECT id FROM memory_records WHERE supersedes_id = ? LIMIT 1")
+            .get(supersedesId) as Row | undefined;
+          if (existingSuccessor) {
+            throw new Error(
+              `memory ${supersedesId} is already superseded by ${String(existingSuccessor.id)}`,
+            );
+          }
           supersededNodeId = String(previous.node_id);
           this.db
             .prepare(
@@ -529,15 +543,44 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       validUntil?: string;
     }): void {
       const newer = this.db
-        .prepare("SELECT id, node_id FROM memory_records WHERE id = ?")
+        .prepare(
+          "SELECT id, node_id, scope_json, status, supersedes_id FROM memory_records WHERE id = ?",
+        )
         .get(input.newMemoryId) as Row | undefined;
       if (!newer) throw new Error(`memory ${input.newMemoryId} does not exist`);
       const stale = this.db
-        .prepare("SELECT node_id FROM memory_records WHERE id = ?")
+        .prepare("SELECT id, node_id, scope_json, status FROM memory_records WHERE id = ?")
         .get(input.supersededMemoryId) as Row | undefined;
       if (!stale) throw new Error(`memory ${input.supersededMemoryId} does not exist`);
+      if (input.newMemoryId === input.supersededMemoryId) {
+        throw new Error("a memory cannot supersede itself");
+      }
+      if (String(newer.status) === "deleted" || String(stale.status) === "deleted") {
+        throw new Error("deleted memories cannot participate in supersession");
+      }
+      if (String(newer.scope_json) !== String(stale.scope_json)) {
+        throw new Error("supersession requires identical memory scope");
+      }
       this.db.exec("BEGIN IMMEDIATE");
       try {
+        const existingPredecessor = newer.supersedes_id
+          ? String(newer.supersedes_id)
+          : null;
+        if (existingPredecessor && existingPredecessor !== input.supersededMemoryId) {
+          throw new Error(
+            `memory ${input.newMemoryId} already supersedes ${existingPredecessor}`,
+          );
+        }
+        const existingSuccessor = this.db
+          .prepare(
+            "SELECT id FROM memory_records WHERE supersedes_id = ? AND id <> ? LIMIT 1",
+          )
+          .get(input.supersededMemoryId, input.newMemoryId) as Row | undefined;
+        if (existingSuccessor) {
+          throw new Error(
+            `memory ${input.supersededMemoryId} is already superseded by ${String(existingSuccessor.id)}`,
+          );
+        }
         // Write-time cycle defence (docs §7.2): adding the edge
         // new→superseded forms a cycle exactly when `superseded` already
         // reaches `new` along supersedes_id edges. Reject the write instead of
@@ -551,7 +594,11 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           );
         }
         this.db
-          .prepare("UPDATE memory_records SET status = 'superseded', valid_until = ? WHERE id = ?")
+          .prepare(
+            `UPDATE memory_records
+             SET status = 'superseded', valid_until = COALESCE(valid_until, ?)
+             WHERE id = ?`,
+          )
           .run(input.validUntil ?? new Date().toISOString(), input.supersededMemoryId);
         this.db
           .prepare(

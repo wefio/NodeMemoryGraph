@@ -114,6 +114,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       memoryId?: string,
       sourceActor?: string,
       sessionId?: string | null,
+      includeHistorical?: boolean,
     ) => MemorySearchResult[];
     declare protected ftsCandidatesInNodes: (
       query: string,
@@ -1577,67 +1578,68 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         filterUsage.candidatesAfter = filtered.length;
         filterUsage.selectivity = rows.length > 0 ? 1 - filtered.length / rows.length : 0;
       }
-      // Supersession successor surfacing: a superseded candidate's active
-      // successor (the topic's current value) is surfaced with a recency boost
-      // and the superseded record itself is dropped. The successor can rank
-      // low on its own — its wording often differs from the query (e.g.
-      // "moved from employed to self-employed" vs "current employment
-      // status") — so the boost makes the current value visible and the model
-      // answers with the live value instead of a stale one. Only in the
-      // default (non-historical) view; includeHistorical keeps superseded rows.
+      // Supersession successor surfacing: a stale lexical hit is an anchor for
+      // the version chain, not an answer. Resolve the full reverse chain to the
+      // value current now (or at eventTimeTo), then materialize that exact row
+      // even when its wording did not enter the original lexical/vector pool.
+      // This also deduplicates A<-B<-C chains where several stale candidates
+      // resolve to C. Explicit includeHistorical bypasses this projection.
       let surfacedResults = filtered;
       if (!options.includeHistorical) {
-        let sawSuperseded = false;
-        const successorBoost = new Map<string, number>();
-        const kept: MemorySearchResult[] = [];
+        const byId = new Map(filtered.map((result) => [result.memory.id, result]));
+        const kept = new Map<string, MemorySearchResult>();
+        const keepBest = (candidate: MemorySearchResult) => {
+          const current = kept.get(candidate.memory.id);
+          if (!current || candidate.combinedScore > current.combinedScore) {
+            kept.set(candidate.memory.id, candidate);
+          }
+        };
         for (const result of filtered) {
           if (result.memory.status !== "superseded") {
-            kept.push(result);
+            keepBest(result);
             continue;
           }
-          sawSuperseded = true;
-          const successor = this.db
-            .prepare(
-              `SELECT id, event_time FROM memory_records
-               WHERE supersedes_id = ? AND status = 'active'
-               ORDER BY created_at DESC LIMIT 1`,
-            )
-            .get(result.memory.id) as Row | undefined;
-          if (successor) {
-            // A historical query (event-time window) asks for the value that
-            // was current AT that date. If the successor's own event time is
-            // after the window, the successor had not happened yet at the
-            // asked-for date — keep the superseded record (it WAS the current
-            // value then) instead of replacing it. Only replace when the
-            // successor falls inside the window (or there is no window).
-            const successorInWindow =
-              !options.eventTimeTo ||
-              !successor.event_time ||
-              Date.parse(String(successor.event_time)) <= Date.parse(String(options.eventTimeTo));
-            if (successorInWindow) {
-              const key = String(successor.id);
-              successorBoost.set(key, (successorBoost.get(key) ?? 0) + SUPERSEDE_SUCCESSOR_BOOST);
-            } else {
-              kept.push(result);
-            }
-          } else {
-            // No active successor — keep the superseded record so a historical
-            // query can still surface the value that was current then.
-            kept.push(result);
+          const target = this.resolveSupersessionTarget(result.memory.id, options.eventTimeTo);
+          if (!target || String(target.id) === result.memory.id) {
+            // An orphaned stale row is never a current answer. It remains
+            // recoverable through includeHistorical; for an as-of query the
+            // seed itself can still be the correct historical value.
+            if (options.eventTimeTo) keepBest(result);
+            continue;
           }
-        }
-        if (sawSuperseded) {
-          for (const result of kept) {
-            const boost = successorBoost.get(result.memory.id);
-            if (boost) result.combinedScore += boost;
+          const targetId = String(target.id);
+          const materialized =
+            byId.get(targetId) ??
+            this.resultsForNode(
+              String(target.node_id),
+              maxTier,
+              1,
+              targetId,
+              options.sourceActor,
+              options.sessionId ?? null,
+              Boolean(options.eventTimeTo),
+            )[0];
+          if (!materialized || !matchesScope(materialized.memory.scope, options.scope)) {
+            if (options.eventTimeTo) keepBest(result);
+            continue;
           }
-          surfacedResults = kept.sort(
-            (left, right) =>
-              right.combinedScore - left.combinedScore ||
-              left.memory.tier - right.memory.tier ||
-              right.memory.importance - left.memory.importance,
-          );
+          keepBest({
+            ...materialized,
+            lexicalScore: Math.max(materialized.lexicalScore, result.lexicalScore),
+            vectorScore: Math.max(materialized.vectorScore, result.vectorScore),
+            routeScore: Math.max(materialized.routeScore, result.routeScore),
+            combinedScore: Math.max(
+              materialized.combinedScore,
+              result.combinedScore + SUPERSEDE_SUCCESSOR_BOOST,
+            ),
+          });
         }
+        surfacedResults = [...kept.values()].sort(
+          (left, right) =>
+            right.combinedScore - left.combinedScore ||
+            left.memory.tier - right.memory.tier ||
+            right.memory.importance - left.memory.importance,
+        );
       }
       const results = surfacedResults.slice(0, limit);
       for (const result of results) {
@@ -1645,6 +1647,45 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         result.evidenceRecords = this.evidenceRecords(result.memory.evidenceIds);
       }
       return results;
+    }
+
+    private resolveSupersessionTarget(memoryId: string, eventTimeTo?: string): Row | undefined {
+      const lineage = `
+        WITH RECURSIVE lineage(id, node_id, status, event_time, created_at, depth, path) AS (
+          SELECT id, node_id, status, event_time, created_at, 0, ',' || id || ','
+          FROM memory_records WHERE id = ?
+          UNION ALL
+          SELECT m.id, m.node_id, m.status, m.event_time, m.created_at,
+                 lineage.depth + 1, lineage.path || m.id || ','
+          FROM memory_records m
+          JOIN lineage ON m.supersedes_id = lineage.id
+          WHERE lineage.depth < 256
+            AND instr(lineage.path, ',' || m.id || ',') = 0
+        )`;
+      if (!eventTimeTo) {
+        return this.db
+          .prepare(
+            `${lineage}
+             SELECT id, node_id, status, event_time, created_at, depth
+             FROM lineage
+             WHERE depth > 0 AND status = 'active'
+             ORDER BY COALESCE(event_time, created_at) DESC, created_at DESC, depth DESC
+             LIMIT 1`,
+          )
+          .get(memoryId) as Row | undefined;
+      }
+      return this.db
+        .prepare(
+          `${lineage}
+           SELECT id, node_id, status, event_time, created_at, depth
+           FROM lineage
+           WHERE status IN ('active', 'disputed', 'superseded')
+             AND (event_time IS NULL OR event_time <= ?)
+           ORDER BY CASE WHEN event_time IS NULL THEN 1 ELSE 0 END,
+                    event_time DESC, created_at DESC, depth DESC
+           LIMIT 1`,
+        )
+        .get(memoryId, eventTimeTo) as Row | undefined;
     }
   };
 }

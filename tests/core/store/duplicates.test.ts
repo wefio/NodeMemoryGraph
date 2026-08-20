@@ -211,6 +211,124 @@ test("applySupersession: marks stale record superseded and wires pointers", () =
   });
 });
 
+test("applySupersession: identical writes are idempotent", () => {
+  withStore((store) => {
+    const stale = store.remember({
+      statement: "user timezone is UTC",
+      nodeName: "profile",
+      scope: { user: "a" },
+    });
+    const fresh = store.remember({
+      statement: "user timezone is UTC plus eight",
+      nodeName: "profile",
+      scope: { user: "a" },
+    });
+    const firstValidUntil = "2026-01-01T00:00:00Z";
+    store.applySupersession({
+      newMemoryId: fresh.memory.id,
+      supersededMemoryId: stale.memory.id,
+      validUntil: firstValidUntil,
+    });
+    store.applySupersession({
+      newMemoryId: fresh.memory.id,
+      supersededMemoryId: stale.memory.id,
+      validUntil: "2030-01-01T00:00:00Z",
+    });
+
+    assert.equal(store.getMemory(fresh.memory.id)?.supersedesId, stale.memory.id);
+    assert.equal(store.getMemory(stale.memory.id)?.validUntil, firstValidUntil);
+  });
+});
+
+test("applySupersession: rejects predecessor overwrite and successor branching", () => {
+  withStore((store) => {
+    const oldA = store.remember({
+      statement: "user plan is bronze",
+      nodeName: "plan",
+      scope: { user: "a" },
+    });
+    const oldB = store.remember({
+      statement: "user support tier is basic",
+      nodeName: "support",
+      scope: { user: "a" },
+    });
+    const fresh = store.remember({
+      statement: "user plan is now gold",
+      nodeName: "plan",
+      scope: { user: "a" },
+    });
+    store.applySupersession({
+      newMemoryId: fresh.memory.id,
+      supersededMemoryId: oldA.memory.id,
+    });
+
+    assert.throws(
+      () =>
+        store.applySupersession({
+          newMemoryId: fresh.memory.id,
+          supersededMemoryId: oldB.memory.id,
+        }),
+      /already supersedes/,
+    );
+    assert.equal(store.getMemory(oldB.memory.id)?.status, "active");
+
+    const competing = store.remember({
+      statement: "user plan changed to platinum",
+      nodeName: "plan",
+      scope: { user: "a" },
+    });
+    assert.throws(
+      () =>
+        store.applySupersession({
+          newMemoryId: competing.memory.id,
+          supersededMemoryId: oldA.memory.id,
+        }),
+      /already superseded by/,
+    );
+    assert.equal(store.getMemory(competing.memory.id)?.supersedesId, null);
+  });
+});
+
+test("remember: explicit supersedesId enforces scope and a single successor", () => {
+  withStore((store) => {
+    const stale = store.remember({
+      statement: "workspace mode is compact",
+      nodeName: "workspace",
+      scope: { project: "atlas" },
+    });
+    const fresh = store.remember({
+      statement: "workspace mode is expanded",
+      nodeName: "workspace",
+      scope: { project: "atlas" },
+      supersedesId: stale.memory.id,
+    });
+    assert.equal(fresh.memory.supersedesId, stale.memory.id);
+
+    assert.throws(
+      () =>
+        store.remember({
+          statement: "workspace mode is focused",
+          nodeName: "workspace",
+          scope: { project: "atlas" },
+          supersedesId: stale.memory.id,
+        }),
+      /already superseded by/,
+    );
+    assert.throws(
+      () =>
+        store.applySupersession({
+          newMemoryId: store.remember({
+            statement: "another project uses expanded mode",
+            nodeName: "workspace",
+            scope: { project: "borealis" },
+          }).memory.id,
+          supersededMemoryId: stale.memory.id,
+        }),
+      /identical memory scope/,
+    );
+  });
+});
+
 test("searchContext: as-of ranking lifts the record current at the asked date", () => {
   withStore((store) => {
     const old2026 = store.remember({
@@ -309,6 +427,94 @@ test("searchContext: historical query keeps a superseded value when its successo
     assert.ok(
       !stc.some((s) => s.includes("senior engineer")),
       "current query drops superseded mid",
+    );
+  });
+});
+
+test("retrieval: stale lexical anchor materializes a low-overlap successor across a deep chain", () => {
+  withStore((store) => {
+    const oldV = store.remember({
+      statement: "legacy codename orion archive token",
+      nodeName: "account-state",
+      scope: { user: "a" },
+      eventTime: "2020-01-01T00:00:00Z",
+    });
+    const midV = store.remember({
+      statement: "profile changed to platinum membership",
+      nodeName: "account-state",
+      scope: { user: "a" },
+      eventTime: "2025-01-01T00:00:00Z",
+    });
+    const newV = store.remember({
+      statement: "account now uses emerald service class",
+      nodeName: "account-state",
+      scope: { user: "a" },
+      eventTime: "2030-01-01T00:00:00Z",
+    });
+    store.applySupersession({ newMemoryId: midV.memory.id, supersededMemoryId: oldV.memory.id });
+    store.applySupersession({ newMemoryId: newV.memory.id, supersededMemoryId: midV.memory.id });
+
+    const current = store.search("orion", {
+      scope: { user: "a" },
+      retrievalMode: "fts5",
+      limit: 5,
+    });
+    assert.deepEqual(
+      current.map((result) => result.memory.id),
+      [newV.memory.id],
+      "the active chain head must be inserted even though it did not match the lexical query",
+    );
+
+    const historical = store.search("orion", {
+      scope: { user: "a" },
+      retrievalMode: "fts5",
+      eventTimeTo: "2026-01-01T00:00:00Z",
+      limit: 5,
+    });
+    assert.deepEqual(
+      historical.map((result) => result.memory.id),
+      [midV.memory.id],
+      "the version current at the requested date must be materialized",
+    );
+  });
+});
+
+test("retrieval: orphaned superseded rows stay out of current results", () => {
+  withStore((store) => {
+    const stale = store.remember({
+      statement: "obsolete lighthouse routing mode",
+      nodeName: "routing",
+      scope: { user: "a" },
+      eventTime: "2020-01-01T00:00:00Z",
+    });
+    const fresh = store.remember({
+      statement: "current routing uses harbor mode",
+      nodeName: "routing",
+      scope: { user: "a" },
+      eventTime: "2025-01-01T00:00:00Z",
+    });
+    store.applySupersession({
+      newMemoryId: fresh.memory.id,
+      supersededMemoryId: stale.memory.id,
+    });
+    store.deleteMemory(fresh.memory.id);
+
+    assert.equal(
+      store.search("lighthouse", {
+        scope: { user: "a" },
+        retrievalMode: "fts5",
+      }).length,
+      0,
+    );
+    assert.deepEqual(
+      store
+        .search("lighthouse", {
+          scope: { user: "a" },
+          retrievalMode: "fts5",
+          eventTimeTo: "2021-01-01T00:00:00Z",
+        })
+        .map((result) => result.memory.id),
+      [stale.memory.id],
     );
   });
 });
@@ -448,4 +654,3 @@ test("remember: no polarity metadata means no polarity-flip boost (baseline unch
     assert.ok(hit, "shared-token recall still works without polarity metadata");
   });
 });
-

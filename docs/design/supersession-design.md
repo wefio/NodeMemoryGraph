@@ -59,10 +59,22 @@ store.applySupersession({
 // 事务（BEGIN IMMEDIATE）
 ```
 
+`applySupersession` 维护单一版本链而不是任意分支图：新旧记录必须是同一
+scope、均未删除且不能相同；一个新记录不能改写为指向另一个前驱，一个旧
+记录也不能再接第二个直接后继。重复提交同一 `(new, old)` 关系是幂等的，
+不会重写第一次确定的 `valid_until`。这些约束防止后置 judge 重试或重复反馈
+把已标记为 superseded 的记录留成无后继孤儿。
+
 ### 检索侧（`src/core/store/retrieval.ts`）
 
-- 候选 SQL 已过滤 `status='superseded'`
-- 若候选是 superseded 且 `!includeHistorical`，查它的 active 后继（`supersedes_id` 链）带出并加权（`SUPERSEDE_SUCCESSOR_BOOST`）——新值能被检索到，即使它自身的排序分低
+- 候选阶段允许旧记录作为旧措辞的检索锚点；最终投影才决定当前/历史可见值。
+- 若候选是 superseded 且 `!includeHistorical`，沿完整 `supersedes_id` 反向链
+  找到当前 active 版本，或找到 `eventTimeTo` 时刻有效的版本。目标记录即使
+  没进入原始 lexical/vector 候选池，也会按稳定 ID 物化并继承锚点得分及
+  `SUPERSEDE_SUCCESSOR_BOOST`。
+- 多个旧锚点解析到同一链头时按 memory ID 去重。没有可达 active 后继的
+  孤立旧记录不会成为“当前”答案，但仍可通过 `includeHistorical` 或时间窗
+  查询恢复。
 
 ## judge 实现（归评测侧，非 nmg 核心）
 

@@ -1189,8 +1189,12 @@ candidate requires semantic judgment, the Agent may submit a second phase
 through the same `nmg_remember` tool. The first implemented resolution is
 `supersede`: the Agent identifies the new and stale record; NMG verifies that
 both records exist in the same LTG or session-owned STG store and have identical
-scope before applying the versioned replacement. Similarity alone never
-authorizes replacement.
+scope before applying the versioned replacement. The write is idempotent and
+enforces one direct predecessor and one direct successor per version, preventing
+feedback retries from overwriting a chain link. Retrieval may use stale wording
+as an anchor, but resolves the full chain and materializes the current or
+requested as-of version before disclosure. Similarity alone never authorizes
+replacement.
 
 Exact duplicates and stable `stateKey + scope` replacement remain deterministic
 and need no LLM round trip. Physical node merge, split, deletion, and arbitrary

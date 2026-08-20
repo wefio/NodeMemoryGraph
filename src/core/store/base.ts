@@ -1974,6 +1974,7 @@ export class NmgStoreBase {
     memoryId?: string,
     sourceActor?: MemoryActor,
     sessionId?: string | null,
+    includeHistorical = false,
   ): MemorySearchResult[] {
     const rows = this.db
       .prepare(
@@ -2018,10 +2019,13 @@ export class NmgStoreBase {
          AND (? IS NULL OR m.source_actor = ?)
          AND (? = 0 OR ((? IS NOT NULL AND (m.session_id IS NULL OR m.session_id = ?))
            OR (? IS NULL AND m.session_id IS NULL)))
-         AND m.status IN ('active', 'disputed')
+         AND m.status IN ('active', 'disputed', 'superseded')
+         AND (? = 1 OR m.status IN ('active', 'disputed'))
          AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         AND (m.valid_from IS NULL OR m.valid_from <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         AND (m.valid_until IS NULL OR m.valid_until > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         AND (? = 1 OR (
+           (m.valid_from IS NULL OR m.valid_from <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+           AND (m.valid_until IS NULL OR m.valid_until > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ))
        ORDER BY m.tier ASC, m.importance DESC, m.created_at DESC
        LIMIT ?`,
       )
@@ -2037,6 +2041,8 @@ export class NmgStoreBase {
         sessionId ?? null,
         sessionId ?? null,
         sessionId ?? null,
+        includeHistorical ? 1 : 0,
+        includeHistorical ? 1 : 0,
         limit,
       ) as Row[];
     return rows.map((row) => {
