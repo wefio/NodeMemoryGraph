@@ -464,6 +464,7 @@ npm run eval:longmem -- no-memory 1
 npm run eval:longmem -- oracle 1
 npm run eval:longmem -- nmg-oracle 1
 npm run eval:longmem -- matched 1
+npm run benchmark:score:longmem -- <result-directory>
 ```
 
 See [evals/longmemeval/README.md](evals/longmemeval/README.md) for methodology,
@@ -482,12 +483,20 @@ npm run eval:beam -- validate 1
 npm run eval:locomo -- matched 1
 npm run eval:personamem -- matched 1
 npm run eval:beam -- matched 1
+npm run benchmark:score -- <locomo|personamem|beam> <result-directory>
 ```
 
 `validate` parses official local data and reports stratified samples without a
 model call. Dataset placement and overrides are documented in each adapter's
 README. The common experiment contract, metrics, and ablations are documented
 in [evals/README.md](evals/README.md).
+
+Matched rows retain exact Pi tool rounds, tool calls, provider token usage, and
+answer latency. Official scoring adds a lossless `rowScore`; task success and
+evidence sufficiency remain `null` when the upstream protocol does not define
+them. The scored artifact also contains a fail-closed `matchedProduct` audit.
+The current `nmg-shadow` arm does not alter ranking, so its audit intentionally
+reports `candidate_does_not_affect_ranking` instead of product-gate metrics.
 
 Older LongMemEval diagnostic ablations compared raw-session, flat-hybrid, Lite,
 and Graph variants. They predate the strict three-arm protocol and remain

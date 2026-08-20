@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -26,6 +26,7 @@ import { gitRevision, sampleFingerprint } from "../official/reproducibility.ts";
 import { resolveBenchmarkData } from "../official/data-path.ts";
 import { loadBeam, loadLocomo, stratifiedSample } from "../benchmarks/loaders.ts";
 import type { BenchmarkCase } from "../benchmarks/types.ts";
+import { matchedProductMetricsFromArtifact } from "../benchmarks/product-metrics.ts";
 
 type SupportedBenchmark = "beam" | "locomo";
 const QPP2_FEATURE_COUNT = 15;
@@ -131,6 +132,14 @@ const adaptiveQpp2Tradeoff98 = summarizeCompression(
 const candidateRecall = average(rows.map((row) => row.candidateRecall));
 const latencyTolerance = Number.parseFloat(process.env.NMG_CONTROLLER_LATENCY_FACTOR ?? "4");
 const recallTolerance = Number.parseFloat(process.env.NMG_CONTROLLER_RECALL_TOLERANCE ?? "0.01");
+const matchedProductArtifactPath = process.env.NMG_CONTROLLER_MATCHED_PRODUCT_REPORT
+  ? resolve(root, process.env.NMG_CONTROLLER_MATCHED_PRODUCT_REPORT)
+  : null;
+const matchedProduct = matchedProductArtifactPath
+  ? matchedProductMetricsFromArtifact(
+      JSON.parse(readFileSync(matchedProductArtifactPath, "utf8")) as unknown,
+    )
+  : null;
 const gate = evaluateControllerGate(
   {
     trainingCases: train.length,
@@ -141,6 +150,7 @@ const gate = evaluateControllerGate(
     learnedPrecision: learned.precision,
     baselineInferenceMs: baseline.inferenceMs,
     learnedInferenceMs: learned.inferenceMs,
+    ...(matchedProduct ? { matchedProduct } : {}),
   },
   {
     latencyFactor: latencyTolerance,
@@ -172,6 +182,8 @@ const report = {
     vectorGranularity: vectorGranularity(),
     leafBlockSize: candidateLimit("NMG_CONTROLLER_LEAF_BLOCK_SIZE", 32),
     learnedResidualWeight: residualWeight(),
+    matchedProductArtifact: matchedProductArtifactPath,
+    matchedProductAccepted: matchedProduct !== null,
   },
   cases: { total: prepared.length, train: train.length, test: test.length },
   candidateRecall,

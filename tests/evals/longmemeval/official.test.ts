@@ -35,6 +35,7 @@ test("scores LongMemEval retrieval from official session IDs", () => {
   assert.deepEqual(scoreLongMemRetrieval(["x", "s2", "s1"], ["s1", "s2"]), {
     recallAny: 1,
     recallAll: 1,
+    recall: 1,
     ndcg: (1 / Math.log2(3) + 1 / Math.log2(4)) /
       (1 / Math.log2(2) + 1 / Math.log2(3)),
   });

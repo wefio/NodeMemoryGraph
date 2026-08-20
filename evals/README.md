@@ -85,6 +85,22 @@ activates or overwrites runtime policy. With insufficient independently labelled
 real-use rows, the command exits with explicit blockers instead of training on
 benchmark or synthetic labels.
 
+Matched benchmark scoring uses the same fail-closed rule. Each official scored
+row preserves `taskScore`, nullable binary `taskSuccess`, typed/nullable evidence
+sufficiency, Pi tool rounds, provider tokens, and answer latency. A complete
+causal arm comparison emits `matchedProduct.metrics`; partial labels, unpaired
+rows, or an observational candidate emit blockers and `metrics: null`. To attach
+a valid scored artifact to an offline controller gate run:
+
+```powershell
+$env:NMG_CONTROLLER_MATCHED_PRODUCT_REPORT = "evals/.../official-score.json"
+npm run eval:controller -- locomo 4
+```
+
+This imports only the typed metrics. It does not merge benchmark rows into the
+natural shadow-training dataset, and a shadow-only artifact is rejected because
+the candidate did not affect ranking.
+
 ## Experiment logs
 
 This file intentionally keeps stable guidance and principles only. Raw run

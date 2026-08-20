@@ -6,7 +6,7 @@ export interface EvaluationResult {
   durationMs?: number;
   retrievalContextChars?: number;
   retrievalPassed?: boolean | null;
-  officialRetrieval?: { recallAny: number; recallAll: number; ndcg: number } | null;
+  officialRetrieval?: { recallAny: number; recallAll: number; recall: number; ndcg: number } | null;
   answerTiming?: AnswerTiming;
   tokenUsage?: TokenUsage;
 }
@@ -168,6 +168,7 @@ export interface OfficialRetrievalSummary {
   count: number;
   recallAny: number;
   recallAll: number;
+  recall: number;
   ndcg: number;
 }
 
@@ -291,9 +292,10 @@ export function summarizeOfficialRetrievalByMode(
         (total, metric) => ({
           recallAny: total.recallAny + metric.recallAny,
           recallAll: total.recallAll + metric.recallAll,
+          recall: total.recall + metric.recall,
           ndcg: total.ndcg + metric.ndcg,
         }),
-        { recallAny: 0, recallAll: 0, ndcg: 0 },
+        { recallAny: 0, recallAll: 0, recall: 0, ndcg: 0 },
       );
       return [
         mode,
@@ -301,6 +303,7 @@ export function summarizeOfficialRetrievalByMode(
           count: metrics.length,
           recallAny: sum.recallAny / metrics.length,
           recallAll: sum.recallAll / metrics.length,
+          recall: sum.recall / metrics.length,
           ndcg: sum.ndcg / metrics.length,
         },
       ];

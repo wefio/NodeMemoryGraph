@@ -154,17 +154,23 @@ test("official retrieval summaries average official session metrics", () => {
       repeat: 0,
       mode: "nmg",
       passed: true,
-      officialRetrieval: { recallAny: 1, recallAll: 1, ndcg: 1 },
+      officialRetrieval: { recallAny: 1, recallAll: 1, recall: 1, ndcg: 1 },
     },
     {
       questionId: "q2",
       repeat: 0,
       mode: "nmg",
       passed: false,
-      officialRetrieval: { recallAny: 1, recallAll: 0, ndcg: 0.5 },
+      officialRetrieval: { recallAny: 1, recallAll: 0, recall: 0.5, ndcg: 0.5 },
     },
   ]).nmg;
-  assert.deepEqual(summary, { count: 2, recallAny: 1, recallAll: 0.5, ndcg: 0.75 });
+  assert.deepEqual(summary, {
+    count: 2,
+    recallAny: 1,
+    recallAll: 0.5,
+    recall: 0.75,
+    ndcg: 0.75,
+  });
 });
 
 test("paired comparison matches question and repeat", () => {

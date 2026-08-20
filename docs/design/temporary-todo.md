@@ -92,15 +92,23 @@ success alone is not a causal policy target. The unresolved work is to collect
 matched natural arms and feed these typed metrics into the gate; offline replay
 cannot substitute for that product evidence.
 
-The existing matched benchmark runner cannot populate this gate without new
-measurement. It preserves case/prompt/model parity and records answer text,
-reference/evidence IDs, citation signals, and whole-run duration, but it has no
-official per-row task-success result, independent evidence-sufficiency label,
-tool-round count, or model token usage. OmniMemEval reports some answer,
-retrieval, and context-token metrics in separate artifacts, not in the same
-baseline/controller pair. These partial fields must not be joined into synthetic
-matched product evidence. A future matched run must capture the five typed gate
-metrics per arm from one case identity and one scorer/telemetry path.
+The matched runners now capture exact Pi tool rounds, tool calls, provider token
+usage, prompt latency, and answer lifecycle latency. Official scoring emits a
+lossless nullable row shape: continuous BEAM/LoCoMo scores are not relabelled as
+binary success, PersonaMem has no invented evidence label, and LongMemEval keeps
+its official session-ID any/all/recall/NDCG evidence metrics. A fail-closed paired
+aggregator emits the five typed product-gate metrics only when every same-case,
+same-repeat arm pair is complete and the candidate actually affected ranking.
+The controller evaluator can consume such an official score artifact through
+`NMG_CONTROLLER_MATCHED_PRODUCT_REPORT`.
+
+A one-question 2026-08-20 LongMemEval smoke run verified the full telemetry and
+official-scoring path. Both NMG arms answered correctly and loaded one of two
+official evidence sessions; the artifact correctly emitted no gate metrics with
+`candidate_does_not_affect_ranking`, because the existing shadow arm only logs.
+The remaining work is a true causal baseline/candidate matched protocol and
+evidence-diverse natural product observations—not measurement plumbing and not a
+join across OmniMemEval artifacts.
 
 ## 3. Validate unattended memory maintenance
 

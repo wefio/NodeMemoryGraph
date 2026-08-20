@@ -22,6 +22,7 @@ export interface LongMemExample {
 export interface OfficialRetrievalMetrics {
   recallAny: number;
   recallAll: number;
+  recall: number;
   ndcg: number;
 }
 
@@ -40,6 +41,7 @@ export function scoreLongMemRetrieval(
   const retrieved = rankedSessionIds.filter((id) => relevant.has(id));
   const recallAny = retrieved.length > 0 ? 1 : 0;
   const recallAll = new Set(retrieved).size === relevant.size ? 1 : 0;
+  const recall = new Set(retrieved).size / relevant.size;
   const dcg = rankedSessionIds.reduce(
     (sum, id, index) => sum + (relevant.has(id) ? 1 / Math.log2(index + 2) : 0),
     0,
@@ -48,7 +50,7 @@ export function scoreLongMemRetrieval(
     (sum, _id, index) => sum + 1 / Math.log2(index + 2),
     0,
   );
-  return { recallAny, recallAll, ndcg: ideal === 0 ? 0 : dcg / ideal };
+  return { recallAny, recallAll, recall, ndcg: ideal === 0 ? 0 : dcg / ideal };
 }
 
 export function longMemEvalJudgePrompt(

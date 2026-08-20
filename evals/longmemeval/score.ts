@@ -5,6 +5,8 @@ import { RpcClient } from "@earendil-works/pi-coding-agent";
 
 import { longMemEvalJudgePrompt } from "./official.ts";
 import { buildSnapshot, writeSnapshot } from "../official/snapshot.ts";
+import { binaryRowScore } from "../official/unified-score.ts";
+import { aggregateMatchedProductMetrics } from "../benchmarks/product-metrics.ts";
 
 interface Row {
   questionId: string;
@@ -13,6 +15,11 @@ interface Row {
   reference: string;
   hypothesis: string;
   mode: string;
+  repeat: number;
+  officialRetrieval: { recallAny: number; recallAll: number; recall: number; ndcg: number } | null;
+  toolRounds: number;
+  tokenUsage: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number } | null;
+  durationMs: number;
 }
 
 const root = resolve(import.meta.dirname, "../..");
@@ -22,10 +29,27 @@ const report = JSON.parse(readFileSync(resolve(directory, "report.json"), "utf8"
   codeRevision?: string | null;
   sampleFingerprint?: string | null;
   benchmarkParameters?: unknown;
+  matchedProtocol?: { controllerAffectsRanking?: boolean } | null;
 };
 const rows = [];
 for (const row of report.results) {
-  rows.push({ ...row, officialScore: await judge(row) });
+  const officialScore = await judge(row);
+  rows.push({
+    ...row,
+    officialScore,
+    rowScore: binaryRowScore(
+      officialScore,
+      row.officialRetrieval
+        ? {
+            kind: "id",
+            any: row.officialRetrieval.recallAny,
+            all: row.officialRetrieval.recallAll,
+            recall: row.officialRetrieval.recall,
+            ndcg: row.officialRetrieval.ndcg,
+          }
+        : null,
+    ),
+  });
 }
 const byMode = Object.fromEntries(
   [...new Set(rows.map((row) => row.mode))].map((mode) => {
@@ -47,6 +71,13 @@ const output = {
   upstream: JSON.parse(readFileSync(resolve(root, "evals/official/upstreams.json"), "utf8"))
     .LongMemEval,
   byMode,
+  matchedProduct: report.matchedProtocol
+    ? aggregateMatchedProductMetrics(rows, {
+        baselineMode: "nmg-deterministic",
+        candidateMode: "nmg-shadow",
+        candidateAffectsRanking: report.matchedProtocol.controllerAffectsRanking === true,
+      })
+    : null,
   results: rows,
 };
 writeFileSync(resolve(directory, "official-score.json"), `${JSON.stringify(output, null, 2)}\n`);

@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import { collectAgentRunTelemetry } from "../agent-telemetry.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder, cosineSimilarity } from "../../src/core/vector.ts";
 import { indexExternalEmbeddings } from "../external-embeddings.ts";
@@ -340,6 +341,7 @@ async function runExample(
   const memoryPerformance = nmgDirectory ? readMemoryPerformance(nmgDirectory) : null;
 
   const retrievalContext = retrievalEvidence(example, runMode, answerEvents, nmgDirectory);
+  const telemetry = collectAgentRunTelemetry(answerEvents);
   const retrievalJudgement =
     retrievalContext === null || !retrievalJudgeEnabled()
       ? null
@@ -362,9 +364,11 @@ async function runExample(
     officialRetrieval: retrievalContext?.officialMetrics ?? null,
     retrievalJudgement,
     retrievalPassed: retrievalJudgement === null ? null : judgementPassed(retrievalJudgement),
-    tokenUsage: collectTokenUsage(answerEvents),
+    tokenUsage: telemetry.tokenUsage,
     answerTiming: liveTiming.snapshot(),
     toolCalls: collectToolCalls(answerEvents),
+    toolCallCount: telemetry.toolCalls,
+    toolRounds: telemetry.toolRounds,
     memoryPerformance,
     judgement,
     passed: judgementPassed(judgement),
@@ -400,21 +404,6 @@ function readMemoryPerformance(nmgDirectory: string) {
   } finally {
     store.close();
   }
-}
-
-function collectTokenUsage(events: readonly AgentSessionEvent[]) {
-  const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
-  let found = false;
-  for (const event of events) {
-    if (event.type !== "message_end" || event.message.role !== "assistant") continue;
-    found = true;
-    total.input += event.message.usage.input;
-    total.output += event.message.usage.output;
-    total.cacheRead += event.message.usage.cacheRead;
-    total.cacheWrite += event.message.usage.cacheWrite;
-    total.total += event.message.usage.totalTokens;
-  }
-  return found ? total : undefined;
 }
 
 function collectToolCalls(events: readonly AgentSessionEvent[]) {

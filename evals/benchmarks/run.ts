@@ -12,6 +12,7 @@ import { resolveBenchmarkData } from "../official/data-path.ts";
 import { gitRevision, sampleFingerprint } from "../official/reproducibility.ts";
 import { benchmarkParametersFromEnvironment } from "../official/parameters.ts";
 import { benchmarkCredentialEnvironment } from "../local-env.ts";
+import { collectAgentRunTelemetry } from "../agent-telemetry.ts";
 import { loadBeam, loadLocomo, loadPersonaMem, stratifiedSample } from "./loaders.ts";
 import {
   benchmarkIsolationArgs,
@@ -159,10 +160,15 @@ async function evaluate(
   const prompt = answerPrompt(item, itemMode, retrieval.text);
   let hypothesis = "";
   let answerError: string | null = null;
+  let promptDurationMs: number | null = null;
+  let telemetry = collectAgentRunTelemetry([]);
   try {
     await client.start();
     await client.setThinkingLevel("low");
-    await client.promptAndWait(prompt, undefined, timeout());
+    const promptStartedAt = performance.now();
+    const events = await client.promptAndWait(prompt, undefined, timeout());
+    promptDurationMs = Math.round(performance.now() - promptStartedAt);
+    telemetry = collectAgentRunTelemetry(events);
     hypothesis = (await client.getLastAssistantText())?.trim() ?? "";
   } catch (error) {
     answerError = error instanceof Error ? error.message : String(error);
@@ -186,7 +192,11 @@ async function evaluate(
     injectedCharacters: retrieval.text.length,
     userPromptHash: createHash("sha256").update(prompt).digest("hex"),
     sourceTurns: item.sessions.reduce((sum, session) => sum + session.turns.length, 0),
+    promptDurationMs,
     durationMs: Math.round(performance.now() - startedAt),
+    toolCalls: telemetry.toolCalls,
+    toolRounds: telemetry.toolRounds,
+    tokenUsage: telemetry.tokenUsage,
     citation: retrieval.sourceIds
       ? {
           citedCount: computeCitationSignal(hypothesis, retrieval.evidenceById).citedCount,

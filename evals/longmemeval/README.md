@@ -63,6 +63,15 @@ diagnostic sufficiency measure rather than the official evidence metric.
 `durationMs` measures the answer call only; `evaluationDurationMs` also includes
 the two independent judge calls.
 
+Every answer row also records `toolCallCount` and `toolRounds`; a round is one Pi
+model turn that returned at least one tool result. The separate official scorer
+adds binary `taskSuccess` plus typed session-ID evidence any/all/recall/NDCG. It
+then audits same-question/same-repeat deterministic and candidate arms. Because
+the current `nmg-shadow` arm cannot change ranking, the expected result is
+`matchedProduct.metrics: null` with the
+`candidate_does_not_affect_ranking` blocker. This proves the measurement path,
+not controller activation quality.
+
 The retrieval judge is enabled by default. Set
 `NMG_LONGMEM_RETRIEVAL_JUDGE=off` for lower-cost throughput runs; retrieval and
 pipeline summaries will then be unavailable while answer scoring remains intact.

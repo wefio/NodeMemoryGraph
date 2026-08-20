@@ -1535,6 +1535,28 @@ usage. A future second adapter should implement the same versioned shadow-event
 contract rather than adding a Lab-dependent feedback method to the stable daemon
 protocol.
 
+Controller activation evidence uses one scored-artifact contract rather than
+joining unrelated benchmark summaries. Every matched Pi row records prompt-to-
+settled and whole-answer latency, tool dispatches, tool-bearing model rounds, and
+provider input/output/cache token usage from the exact Pi event stream. Official
+scorers add a `rowScore` that always preserves the benchmark's numeric task score
+while making binary `taskSuccess` nullable: PersonaMem and LongMemEval provide a
+binary task label, whereas BEAM partial rubric/Kendall scores and LoCoMo's
+continuous official score do not. Evidence sufficiency is likewise nullable and
+typed by provenance (`id` or diagnostic `text`); missing labels are never
+converted to zero.
+
+Only complete same-case/same-repeat arm pairs may aggregate into
+`ControllerMatchedProductMetrics`. Aggregation fails closed on a missing arm,
+missing binary task label, missing all-evidence label, mismatched evidence kind,
+missing token/tool/latency telemetry, or a candidate that did not actually
+affect ranking. An official score artifact with non-null gate-safe metrics can be
+fed into the offline controller evaluation through
+`NMG_CONTROLLER_MATCHED_PRODUCT_REPORT`; malformed or diagnostic-only artifacts
+remain absent from the product gate. The current deterministic-versus-shadow
+matched protocol deliberately reports `candidate_does_not_affect_ranking`, so it
+validates instrumentation but cannot authorize active/default routing.
+
 The same bounded log records harness-level progressive-disclosure interventions
 as separate `tool_flow` events. In particular, a third explicit search made
 without loading evidence is recorded as `search_suppressed`; it is not counted

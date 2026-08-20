@@ -11,6 +11,8 @@ import {
 } from "./protocol.ts";
 import { buildSnapshot, writeSnapshot } from "./snapshot.ts";
 import { officialPythonExecutable, probePython } from "./python.ts";
+import { binaryRowScore, continuousRowScore, scoreEvidenceIds } from "./unified-score.ts";
+import { aggregateMatchedProductMetrics } from "../benchmarks/product-metrics.ts";
 
 type Benchmark = "beam" | "locomo" | "personamem";
 interface Prediction {
@@ -24,6 +26,10 @@ interface Prediction {
   evidenceIds?: string[];
   retrievedEvidenceIds?: string[] | null;
   officialMetadata: Record<string, unknown>;
+  repeat: number;
+  toolRounds: number;
+  tokenUsage: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number } | null;
+  durationMs: number;
 }
 
 const root = resolve(import.meta.dirname, "../..");
@@ -34,6 +40,7 @@ const report = JSON.parse(readFileSync(resolve(runDirectory, "report.json"), "ut
   codeRevision?: string | null;
   sampleFingerprint?: string | null;
   benchmarkParameters?: unknown;
+  matchedProtocol?: { controllerAffectsRanking?: boolean } | null;
 };
 const scored =
   benchmark === "locomo"
@@ -49,6 +56,13 @@ const output = {
   leaderboardComparable: false,
   upstream: upstreamInfo(benchmark),
   ...summarize(scored),
+  matchedProduct: report.matchedProtocol
+    ? aggregateMatchedProductMetrics(scored, {
+        baselineMode: "nmg-deterministic",
+        candidateMode: "nmg-shadow",
+        candidateAffectsRanking: report.matchedProtocol.controllerAffectsRanking === true,
+      })
+    : null,
   results: scored,
 };
 writeFileSync(resolve(runDirectory, "official-score.json"), `${JSON.stringify(output, null, 2)}\n`);
@@ -69,10 +83,10 @@ process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
 process.stderr.write(`snapshot: ${snapshotPath}\n`);
 
 function scorePersonaMem(rows: Prediction[]) {
-  return rows.map((row) => ({
-    ...row,
-    officialScore: personaMemCorrect(row.hypothesis, row.reference) ? 1 : 0,
-  }));
+  return rows.map((row) => {
+    const officialScore = personaMemCorrect(row.hypothesis, row.reference) ? 1 : 0;
+    return { ...row, officialScore, rowScore: binaryRowScore(officialScore) };
+  });
 }
 
 function scoreLocomo(rows: Prediction[]) {
@@ -110,6 +124,10 @@ function scoreLocomo(rows: Prediction[]) {
     ...row,
     officialScore: parsed.scores[index],
     retrievalRecall: row.retrievedEvidenceIds === null ? null : parsed.recalls[index],
+    rowScore: continuousRowScore(
+      parsed.scores[index]!,
+      scoreEvidenceIds(row.retrievedEvidenceIds, row.evidenceIds),
+    ),
   }));
 }
 
@@ -126,6 +144,7 @@ async function scoreBeam(rows: Prediction[]) {
       output.push({
         ...row,
         officialScore: tauNorm,
+        rowScore: continuousRowScore(tauNorm),
         tauNorm,
         candidateOrder,
       });
@@ -135,8 +154,10 @@ async function scoreBeam(rows: Prediction[]) {
     for (const item of rubric) scores.push(await judgeBeamRubric(row, item));
     output.push({
       ...row,
-      officialScore:
+      officialScore: scores.length > 0 ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0,
+      rowScore: continuousRowScore(
         scores.length > 0 ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0,
+      ),
       rubricScores: scores,
     });
   }
