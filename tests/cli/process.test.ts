@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
 import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
+import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
 const root = resolve(import.meta.dirname, "../..");
 const launcher = resolve(root, "bin/nmg.mjs");
@@ -45,7 +46,7 @@ test("search compact JSON exposes bounded headers without exact evidence", () =>
     assert.equal(compact.results, undefined);
     assert.equal(compact.activeGraph, undefined);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -91,7 +92,7 @@ test("search prints a per-phase perf line by default and omits it with --no-perf
     assert.ok(parsed.timings, "json search carries timings");
     assert.ok(parsed.timings!.timings["search.direct"] >= 0);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -115,7 +116,7 @@ test("packaged launcher runs one-shot status without creating storage", () => {
     assert.equal(status.storage.exists, false);
     assert.equal(status.storage.loaded, false);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -160,7 +161,7 @@ test("packaged one-shot commands remember, search, and get through the same data
     assert.equal(expanded.results[0]?.evidence.content, "User prefers concise answers");
     assert.deepEqual(expanded.missingMemoryIds, []);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -189,7 +190,7 @@ test("packaged graph command writes a self-contained HTML export", () => {
     assert.match(html, /Atlas graph export integration marker/u);
     assert.match(html, /<!doctype html>/iu);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -251,7 +252,7 @@ test("packaged node rollback restores a journaled merge", () => {
       ]),
     );
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -320,7 +321,7 @@ test("CLI writes and reads project STG and exposes scoped sync", () => {
     ]) as { copied: number };
     assert.equal(synced.copied, 1);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -345,7 +346,7 @@ test("CLI writes external provenance as an unverified marker", () => {
     assert.equal(remembered.memory.truthStatus, "unverified");
     assert.equal(remembered.memory.markers[0]?.kind, "external_source");
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -486,7 +487,7 @@ test("HTTP daemon starts once, serves CLI requests, and stops cleanly", () => {
       cwd: root,
       encoding: "utf8",
     });
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -508,7 +509,7 @@ test("daemon exits after idle timeout and removes its lease", async () => {
       "idle exit released the server lease",
     );
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -530,7 +531,7 @@ test("daemon idle timer is refreshed by requests", async () => {
     assert.equal(second.running, true, "the status request refreshed the idle timer");
   } finally {
     runLauncher(["daemon", "stop", "--json", "--data-dir", directory]);
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -572,7 +573,7 @@ test("daemon re-spawns on the same database after idle exit with data intact", a
     assert.equal(searched.results[0]?.memory.statement, "Idle-respawn probe memory");
   } finally {
     runLauncher(["daemon", "stop", "--json", "--data-dir", directory]);
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -599,7 +600,7 @@ test("daemon re-spawns over a stale lease file from a dead process", () => {
     assert.notEqual(started.pid, deadPid);
   } finally {
     runLauncher(["daemon", "stop", "--json", "--data-dir", directory]);
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -646,7 +647,7 @@ test("connectDaemon warns when live daemon count exceeds NMG_DAEMON_LIMIT", () =
     for (const live of liveDirectories) {
       runLauncher(["daemon", "stop", "--json", "--data-dir", live]);
     }
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -685,7 +686,7 @@ test("daemon client replaces a stale descriptor whose pid was reused", () => {
     assert.equal(result.started, true);
     assert.notEqual(result.pid, process.pid);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -720,7 +721,7 @@ test("daemon count ignores stale descriptors whose pid was reused", () => {
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.trim(), "0");
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -761,7 +762,7 @@ test("invokeDaemon reconnects after the daemon dies mid-session", () => {
     assert.equal(parsed.reconnected, true, "a fresh daemon process was spawned after death");
     assert.equal(parsed.found, true, "sqlite memory survived daemon death");
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 

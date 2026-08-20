@@ -26,7 +26,7 @@ import {
   stagingDirFor,
 } from "../../../src/cli/archive-staging.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
-import { resolveSkillOptLabPolicy } from "../../../src/lab/skillopt-policy.ts";
+import { resolveSkillOptPolicyChannels } from "../../../src/lab/skillopt-policy.ts";
 import type {
   ActiveGraphBudget,
   MemoryContext,
@@ -2156,8 +2156,8 @@ function injectionHash(result: MemoryContext["results"][number]): string {
 }
 
 const nmgPrompts = loadPrompts();
-export const MEMORY_POLICY_RESOLUTION = resolveSkillOptLabPolicy(nmgPrompts.memory_policy);
-export const MEMORY_POLICY = `<nmg_policy>\n${MEMORY_POLICY_RESOLUTION.text}\n</nmg_policy>`;
+export const SKILLOPT_POLICY_CHANNELS = resolveSkillOptPolicyChannels(nmgPrompts.memory_policy);
+export const MEMORY_POLICY = `<nmg_policy>\n${SKILLOPT_POLICY_CHANNELS.agent.text}\n</nmg_policy>`;
 
 /**
  * Stable prefix only: base system prompt + static memory policy.

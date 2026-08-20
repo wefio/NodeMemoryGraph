@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,6 +8,7 @@ import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { stgStorePath } from "../../src/core/stg.ts";
+import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
 test("status and hello do not create or open the database", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-status-"));
@@ -23,7 +24,7 @@ test("status and hello do not create or open the database", async () => {
     assert.equal(existsSync(databasePath), false);
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -72,7 +73,7 @@ test("task board RPC shares temporary coordination without creating semantic mem
     }
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -137,7 +138,7 @@ test("task board acknowledge records a no-reply confirmation visible on read and
     assert.deepEqual(checkUnacked.acked, []);
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -173,7 +174,7 @@ test("resident service rolls back a journaled node merge", async () => {
     }
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -201,7 +202,7 @@ test("resident service remembers, searches, and expands exact evidence", async (
     assert.deepEqual(expanded.missingMemoryIds, ["missing-memory"]);
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -238,7 +239,7 @@ test("remember resolution lets an external semantic judge apply a validated supe
     assert.equal(stale?.memory.status, "superseded");
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -273,7 +274,7 @@ test("remember relation resolution creates a reversible proposal without merging
     );
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -302,7 +303,7 @@ test("remember relation resolution rejects identity claims across conflicting sc
     );
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -333,7 +334,7 @@ test("remember forget resolution withdraws a selected memory from retrieval", as
     );
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -386,7 +387,7 @@ test("remember open, resolve, and reopen lifecycle survives service restart", as
     assert.deepEqual(context.results[0]?.memory.relatedMemoryIds, [anchorMemoryId]);
   } finally {
     reopenedService.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -417,7 +418,7 @@ test("memory export defaults can preserve user-owned memory with provenance", as
     assert.equal(exported.items[0]?.evidence[0]?.sourceRef, "pi-session:example");
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -445,7 +446,7 @@ test("resident service records claim outcomes without changing extraction confid
     assert.equal(result.posteriors[0]?.independentVoteCount, 1);
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -496,7 +497,7 @@ test("resident service isolates project STG while retaining LTG fallback", async
     assert.ok(existsSync(stgStorePath(projectA, "cli")));
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -553,7 +554,7 @@ test("resident service keeps mixed STG/LTG evidence in one AG and attributes bot
     }
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -589,7 +590,7 @@ test("resident service isolates STG by session inside one project", async () => 
     );
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -629,7 +630,7 @@ test("resident service attributes nmg_get use only to the owning session", async
     }
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -657,7 +658,7 @@ test("resident service syncs a scoped LTG working set into project STG idempoten
     assert.equal(second.copied, 0);
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    removeTempDirectory(directory);
   }
 });
 
@@ -730,7 +731,7 @@ test("STG consolidation stays shadow by default and can be enabled after strong 
     }
   } finally {
     active.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -812,7 +813,7 @@ test("automatic STG consolidation retracts only its own LTG copy when posterior 
     );
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    removeTempDirectory(directory);
   }
 });
 
@@ -881,7 +882,7 @@ test("STG correction never retracts a pre-existing manual LTG duplicate", async 
     );
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    removeTempDirectory(directory);
   }
 });
 
@@ -922,7 +923,7 @@ test("resident service exposes explicit retention and deletion maintenance", asy
     );
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -948,7 +949,7 @@ test("remember schedules thresholded maintenance after returning", async () => {
     assert.ok(aggregates.some((aggregate) => aggregate.section === "maintenance.semantic"));
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -969,7 +970,7 @@ test("service validates method parameters", async () => {
     );
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -1005,7 +1006,7 @@ test("external source markers persist and default trust to unverified", async ()
     );
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -1059,7 +1060,7 @@ test("CLI writes pass through the governed memory admission policy", async () =>
     );
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -1085,7 +1086,7 @@ test("an unbuilt optional embedding index degrades without blocking lexical sear
     assert.equal(searched.retrieval?.reason, "embedding_index_not_ready");
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -1124,7 +1125,7 @@ test("search protocol preserves Pi QPP evidence-window overrides", async () => {
     assert.equal(planned.activeGraph?.budget.maxNodes, 12);
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -1167,7 +1168,7 @@ test("recordActiveGraphUse persists QPP implicit feedback (useful_memory_ids)", 
     );
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -1247,7 +1248,7 @@ test("task board RPC parses directed delivery and agent discovery actions", asyn
     });
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -1275,7 +1276,7 @@ test("recordActiveGraphUse validates its RPC boundary and permits empty use", as
     assert.deepEqual(recorded.usedMemoryIds, []);
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -1354,6 +1355,6 @@ test("task board subscriptions gate broadcast wake while directed delivery uses 
     assert.deepEqual(afterWorld.subscriptions, [], "world channel is implicit, not explicit");
   } finally {
     service.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });

@@ -116,10 +116,10 @@ boundary.
 
 ## 4. Separate controller policy from the Agent answer policy
 
-- [ ] Give the progressive-recall controller its own invocation/policy channel,
-  or define and test a projection that cannot leak controller protocol into the
-  user-facing answer. Do not install a controller-only SkillOpt artifact as the
-  global NMG memory policy.
+- [x] Give the progressive-recall controller its own policy channel that cannot
+  leak controller protocol into the user-facing answer. A SkillOpt candidate may
+  alter only `SKILLOPT_POLICY_CHANNELS.controller`; the answering Agent always
+  receives the reviewed canonical YAML through `SKILLOPT_POLICY_CHANNELS.agent`.
 
 The original readiness and promotion experiment are complete. The formal export
 passes at 12 train, 6 chronological validation, and 6 untouched test tasks. An
@@ -129,8 +129,10 @@ gate then rejected the candidate: canonical policy passed 6/6 cases, while the
 candidate passed 4/6 and emitted internal `recall_action`/`fold_noise` JSON in
 user answers. This is useful evidence that the offline controller contract and
 the global Agent policy are different artifacts. The canonical YAML was not
-changed. The Lab candidate hook remains an explicit promotion test, not a
-production loader.
+changed. The two channels are now physically separate and covered by a
+candidate-isolation regression. The Lab candidate is not applied to the
+answering Agent; until a typed controller actuator consumes it, controller
+quality is evaluated only through the isolated SkillOpt adapter.
 
 ## Explicitly deferred — not missing current work
 

@@ -8,6 +8,7 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 import { decideMemoryLoad, NmgStore } from "../src/index.ts";
 import type { MemoryLoadMode, MemoryTier } from "../src/core/types.ts";
+import { attemptedToolCall, successfulToolCall } from "./tool-events.ts";
 
 interface EvalCase {
   id: string;
@@ -43,6 +44,8 @@ interface EvalResult {
   readerLoadMode: MemoryLoadMode;
   readerSearched: boolean;
   readerGot: boolean;
+  readerSearchAttempted: boolean;
+  readerGetAttempted: boolean;
   answerMatched: boolean;
   answer: string;
   errors: string[];
@@ -76,12 +79,16 @@ const results = await mapConcurrent(cases, concurrency, runCase);
 const report = {
   runId,
   model: "deepseek/deepseek-v4-flash",
-  policy: skillOptPolicy
-    ? {
-        source: "skillopt_lab",
-        sha256: createHash("sha256").update(skillOptPolicy).digest("hex"),
-      }
-    : { source: "canonical" },
+  policy: {
+    answer: { source: "canonical" },
+    controller: skillOptPolicy
+      ? {
+          source: "skillopt_lab",
+          sha256: createHash("sha256").update(skillOptPolicy).digest("hex"),
+          appliedToAnswerAgent: false,
+        }
+      : { source: "canonical", appliedToAnswerAgent: false },
+  },
   passed: results.filter((result) => result.passed).length,
   total: results.length,
   results,
@@ -101,6 +108,8 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
   const readerLoadMode = decideMemoryLoad(testCase.recall.prompt).mode;
   let readerSearched = false;
   let readerGot = false;
+  let readerSearchAttempted = false;
+  let readerGetAttempted = false;
   let answerMatched = false;
   let answer = "";
 
@@ -175,6 +184,8 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
       await reader.start();
       await reader.setThinkingLevel("low");
       const events = await reader.promptAndWait(testCase.recall.prompt, undefined, 180_000);
+      readerSearchAttempted = attemptedToolCall(events, "nmg_search");
+      readerGetAttempted = attemptedToolCall(events, "nmg_get");
       readerSearched = successfulToolCall(events, "nmg_search");
       readerGot = successfulToolCall(events, "nmg_get");
       answer = (await reader.getLastAssistantText())?.trim() ?? "";
@@ -196,10 +207,10 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
       if (testCase.recall.requireGetTool && !readerGot) {
         errors.push("Reader did not complete the required nmg_get call.");
       }
-      if (testCase.recall.forbidSearchTool && readerSearched) {
+      if (testCase.recall.forbidSearchTool && readerSearchAttempted) {
         errors.push("Reader searched NMG for a task marked as memory-independent.");
       }
-      if (testCase.recall.forbidGetTool && readerGot) {
+      if (testCase.recall.forbidGetTool && readerGetAttempted) {
         errors.push("Reader loaded NMG evidence for a task marked as memory-independent.");
       }
       if (!answerMatched) errors.push("Reader answer did not contain all expected terms.");
@@ -218,13 +229,15 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
       answerMatched &&
       (!testCase.recall.requireSearchTool || readerLoadMode === "retrieve" || readerSearched) &&
       (!testCase.recall.requireGetTool || readerGot) &&
-      (!testCase.recall.forbidSearchTool || !readerSearched) &&
-      (!testCase.recall.forbidGetTool || !readerGot),
+      (!testCase.recall.forbidSearchTool || !readerSearchAttempted) &&
+      (!testCase.recall.forbidGetTool || !readerGetAttempted),
     writerRemembered,
     databaseVerified,
     readerLoadMode,
     readerSearched,
     readerGot,
+    readerSearchAttempted,
+    readerGetAttempted,
     answerMatched,
     answer,
     errors,
@@ -281,19 +294,6 @@ function writerPrompt(testCase: EvalCase): string {
     "Do not alter, translate, or summarize any value.",
     "After the tool succeeds, answer only SAVED.",
   ].join("\n");
-}
-
-function successfulToolCall(events: AgentSessionEvent[], toolName: string): boolean {
-  return events.some(
-    (event) =>
-      event.type === "tool_execution_end" &&
-      event.toolName === toolName &&
-      !event.isError &&
-      !(
-        toolName === "nmg_remember" &&
-        (event.result as { details?: { saved?: boolean } } | undefined)?.details?.saved === false
-      ),
-  );
 }
 
 function summarizeEvents(events: AgentSessionEvent[]): string {

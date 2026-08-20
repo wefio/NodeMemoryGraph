@@ -25,6 +25,7 @@ import nmgExtension, {
   SessionRecallFlow,
   SessionRuntimeAg,
   SessionTaskWindow,
+  SKILLOPT_POLICY_CHANNELS,
   summarizeToolResult,
 } from "../../../.pi/extensions/nmg/index.ts";
 import { loadPrompts } from "../../../src/prompts/load.ts";
@@ -583,12 +584,15 @@ test("tool parameter descriptions come from the prompt source of truth", () => {
 });
 
 test("NMG prompt keeps a stable policy prefix; dynamic recall goes to the trailing message", () => {
+  const canonical = loadPrompts().memory_policy;
   const first = composeNmgSystemPrompt("base");
   const second = composeNmgSystemPrompt("base");
   const stablePrefix = `base\n\n${MEMORY_POLICY}`;
 
   assert.equal(first, stablePrefix);
   assert.equal(second, stablePrefix);
+  assert.equal(SKILLOPT_POLICY_CHANNELS.agent.text, canonical);
+  assert.equal(MEMORY_POLICY, `<nmg_policy>\n${canonical}\n</nmg_policy>`);
   assert.match(MEMORY_POLICY, /does not decide answer truth or evidence completeness/);
   assert.match(MEMORY_POLICY, /No useful memory is a valid result/);
   assert.match(MEMORY_POLICY, /Semantic or topical relevance does not prove/);

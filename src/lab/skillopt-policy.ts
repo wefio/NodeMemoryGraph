@@ -15,6 +15,28 @@ export interface SkillOptPolicyResolution {
   sha256: string;
 }
 
+export interface SkillOptPolicyChannels {
+  /** Stable natural-language policy visible to the answering Agent. */
+  agent: SkillOptPolicyResolution;
+  /** Lab-only policy for an isolated progressive-recall controller invocation. */
+  controller: SkillOptPolicyResolution;
+}
+
+/**
+ * Keep the answering Agent and the controller on physically separate policy
+ * channels. A SkillOpt candidate may change only `controller`; `agent` always
+ * resolves from the reviewed YAML source of truth.
+ */
+export function resolveSkillOptPolicyChannels(
+  canonicalAgentPolicy: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): SkillOptPolicyChannels {
+  return {
+    agent: resolved(canonicalAgentPolicy, "canonical"),
+    controller: resolveSkillOptLabPolicy(canonicalAgentPolicy, environment),
+  };
+}
+
 /**
  * Resolve an explicitly isolated SkillOpt candidate. Production and ordinary
  * Pi processes always receive the canonical YAML policy. The candidate is an

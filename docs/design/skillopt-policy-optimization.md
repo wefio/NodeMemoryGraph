@@ -56,12 +56,13 @@ changing only the policy. It must report:
 - unnecessary search and expansion;
 - injected tokens, tool calls, and end-to-end latency.
 
-The candidate is adopted only after its controller contract has a dedicated
-runtime boundary and the matched gate passes. A reviewed YAML edit remains the
-only production adoption path; NMG does not load `best_skill.md` in production,
-so there is no second mutable prompt source. Until the dedicated controller
-boundary exists, the candidate-policy hook is a deliberately adversarial Lab
-promotion test, not a deployment mechanism.
+The Agent and controller now have separate policy channels. The answering Agent
+always receives the reviewed YAML; a Lab candidate can populate only the
+controller channel and cannot alter the system prompt. A reviewed YAML edit
+remains the only production adoption path for the Agent policy, and NMG does not
+load `best_skill.md` in production. The current text candidate is evaluated by
+the isolated SkillOpt adapter; it is not a runtime actuator until its decision is
+projected through a typed controller boundary and passes the matched gate.
 
 ## Data readiness
 
@@ -161,8 +162,8 @@ process so UTF-8 JSON is not decoded through the legacy system code page. Load
 the chosen provider credentials into the process environment; do not store them
 in SkillOpt output or committed configuration.
 
-An accepted offline candidate can be exercised against NMG's existing Pi cases
-without changing the canonical YAML:
+The answer-path isolation regression can be exercised against NMG's existing Pi
+cases without changing the canonical YAML:
 
 ```powershell
 $env:NMG_SKILLOPT_POLICY_PATH = "C:\path\to\best_skill.md"
@@ -170,10 +171,13 @@ npm run eval:agents
 Remove-Item Env:NMG_SKILLOPT_POLICY_PATH
 ```
 
-The runner encodes the candidate into an explicitly marked Lab-only child
-environment and records only its SHA-256 in the report. The Pi extension rejects
-missing, tiny, oversized, or runtime-tag-injecting candidate policies. Ordinary
-Pi processes ignore the candidate mechanism.
+The runner encodes the candidate into an explicitly marked Lab-only controller
+channel and records only its SHA-256 in the report. The report also states that
+the candidate was not applied to the answering Agent. This run proves absence of
+prompt leakage; it does not measure candidate controller quality. The isolated
+SkillOpt adapter measures that decision surface. The Pi extension rejects
+missing, tiny, oversized, or runtime-tag-injecting candidates, and ordinary Pi
+processes ignore the candidate mechanism.
 
 ## What this experiment can and cannot prove
 
