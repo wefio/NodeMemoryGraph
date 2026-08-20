@@ -51,6 +51,7 @@
     "eval:adaptive": "node --experimental-strip-types evals/adaptive-topology/run.ts",
     "eval:controller": "node --experimental-strip-types evals/controller/run.ts",
     "eval:controller-shadow": "node --experimental-strip-types evals/controller-shadow/report.ts",
+    "eval:natural-maintenance": "node --experimental-strip-types evals/natural-maintenance/audit.ts",
     "eval:controller-dataset": "node --experimental-strip-types evals/controller-shadow/dataset.ts",
     "eval:controller-calibrate": "node --experimental-strip-types evals/controller-shadow/calibrate.ts",
     "eval:qpp-tau": "node --experimental-strip-types evals/controller-shadow/tau-worker.ts",

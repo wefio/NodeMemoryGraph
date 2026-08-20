@@ -82,7 +82,7 @@ longer needed for persistent use.
 Build and install:
 
 ```powershell
-cd harness-adapters/deepseek-harness/dsh-nmg
+cd dsh/dsh-nmg
 pnpm install
 pnpm build                 # lib/index.js (node half) + lib/client.js (browser bundle)
 dsh plugin --profile web add "link:C:/.../dsh-nmg"   # adds bundle to the web profile

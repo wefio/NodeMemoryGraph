@@ -1,6 +1,6 @@
 # dsh-nmg bundle patch: inserts the dual-face plugin row into the web profile.
 # Applied as a profile bundle layer (`dsh.bundle.patch` manifest field); install with
-#   dsh plugin --profile web add link:C:/Documents/GitHub/NodeMemoryGraph/harness-adapters/deepseek-harness/dsh-nmg
+#   dsh plugin --profile web add link:C:/Documents/GitHub/NodeMemoryGraph/dsh/dsh-nmg
 #
 # The row is a bare plugin by package name: the node half (exports ".") runs in
 # the host process (tools + automatic recall over daemon JSON-RPC), and the

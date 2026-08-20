@@ -416,6 +416,21 @@ calling an LLM. Absence from an evidence list is never treated as a negative
 claim label, so this audit deliberately does not report false-promotion
 precision. See `docs/experiments/consolidation-evaluation-2026-08-09.md`.
 
+For ordinary product data, run the separate read-only evidence inventory:
+
+```powershell
+npm run eval:natural-maintenance -- --project-dir C:/path/to/project
+```
+
+It opens the authoritative LTG and project STG SQLite files in read-only mode,
+reports claim outcomes/posteriors, STG promotion and retention candidates,
+materialized STG→LTG markers, maintenance backlog, topology proposals, identity
+gate reasons, transforms, and rollbacks. It never records outcomes, runs
+maintenance, promotes memories, or actuates a merge. Missing evidence is emitted
+as an explicit `evidenceGaps` list; a clean command run is not evidence that
+natural precision or reversibility has been validated. Use repeatable `--stg`
+arguments when auditing more than one project-local STG.
+
 ## Topology identity-gate audit
 
 `npm run eval:topology` uses LoCoMo's stable speaker identities to construct

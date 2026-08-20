@@ -114,6 +114,16 @@ answer reuse, and silence still do not create votes. The default actuator remain
 off; natural precision and reversal evidence must now accumulate through this
 boundary.
 
+The evidence inventory is now reproducible without touching the live stores:
+`npm run eval:natural-maintenance -- --project-dir <project>` opens every input
+SQLite database read-only and reports the exact claim, posterior, consolidation,
+proposal, transform, rollback, and maintenance-backlog counts. The 2026-08-20
+snapshot of the ordinary stores found 251 LTG memories (210 active), one active
+project STG memory, zero claim outcomes/posteriors, zero STG→LTG materializations,
+one pending `refines` proposal, zero identity proposals/transforms/rollbacks, 249
+uncompacted index deltas, and 32 pending accesses. These remain evidence gaps;
+the audit command does not convert absent natural outcomes into validation.
+
 ## 4. Separate controller policy from the Agent answer policy
 
 - [x] Give the progressive-recall controller its own policy channel that cannot

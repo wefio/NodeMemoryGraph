@@ -78,7 +78,7 @@ So an NMG adapter's tools go in an agent preset.
 > community-standard dual-face package (node half hosts the tools + recall in the
 > host composition; browser half ships the cards through the
 > `window.__ModuleLoader__` bundle handoff). See
-> `harness-adapters/deepseek-harness/dsh-nmg/` — `tsdown` emits
+> `dsh/dsh-nmg/` — `tsdown` emits
 > `lib/index.js` + `lib/client.js`, install with
 > `dsh plugin --profile web add link:<path>`, restart the host, then retire the
 > legacy preset (they register the same tool names). This supersedes the preset
