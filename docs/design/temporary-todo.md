@@ -92,6 +92,16 @@ success alone is not a causal policy target. The unresolved work is to collect
 matched natural arms and feed these typed metrics into the gate; offline replay
 cannot substitute for that product evidence.
 
+The existing matched benchmark runner cannot populate this gate without new
+measurement. It preserves case/prompt/model parity and records answer text,
+reference/evidence IDs, citation signals, and whole-run duration, but it has no
+official per-row task-success result, independent evidence-sufficiency label,
+tool-round count, or model token usage. OmniMemEval reports some answer,
+retrieval, and context-token metrics in separate artifacts, not in the same
+baseline/controller pair. These partial fields must not be joined into synthetic
+matched product evidence. A future matched run must capture the five typed gate
+metrics per arm from one case identity and one scorer/telemetry path.
+
 ## 3. Validate unattended memory maintenance
 
 - [ ] Measure STG-to-LTG consolidation precision and reversibility on natural
