@@ -378,7 +378,9 @@ function acquireFileLock(path: string, timeoutMs = 5_000): number {
       } catch {
         // The owner may have released the lock between exists/stat/unlink.
       }
-      if (Date.now() >= deadline) throw new Error(`shadow evaluation log lock timed out: ${path}`);
+      if (Date.now() >= deadline) {
+        throw new Error(`shadow evaluation log lock timed out: ${path}`, { cause: error });
+      }
       Atomics.wait(LOCK_WAIT, 0, 0, 10);
     }
   }

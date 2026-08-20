@@ -507,7 +507,8 @@ export class NmgService {
       });
       throw new NmgProtocolError("WRITE_REJECTED", assessment.reason);
     }
-    const { projectDir, unsafe, ...memory } = params;
+    const { projectDir, ...memory } = params;
+    delete memory.unsafe;
     const store =
       memory.residence === "stg" && projectDir
         ? this.#getStgStore(projectDir, memory.sessionId)
