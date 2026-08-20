@@ -38,6 +38,17 @@ corrections and failed outcomes; more binary sufficiency labels alone will not
 unlock calibration. API answer overlap and black-box counterfactual response
 differences remain diagnostics and must not fill this gap.
 
+The stable Agent memory policy now exposes the claim-outcome boundary instead
+of leaving it discoverable only through an action parameter description. It
+asks for an exact current-session user message or successful tool result that
+independently supports or contradicts a disclosed claim, and explicitly rejects
+retrieval, answer reuse, task completion, silence, and lack of correction as
+claim evidence. An isolated two-turn Pi probe verified search -> exact get ->
+independent user confirmation -> `claim_outcome=supported`; the event retained
+its evidence record and `controlled` origin. This proves prompt discoverability
+and provenance plumbing, but it remains controlled evidence and does not close
+the natural-data collection item.
+
 Automatic recall now applies the existing `retrieve|cue|none` load gate. Pi also
 enforces a per-turn construction-process budget (three searches, five total
 search/get calls, exact-evidence progression, and no-gain stopping), preventing

@@ -351,7 +351,10 @@ memory_policy: >-
   current truth. Semantic or topical relevance does not prove the specific attribute,
   event, reason, or causal relation being asked about. If the recalled headers under-determine the answer, request additional
   evidence (append/re-fetch) before guessing; ignore headers that are clearly irrelevant
-  noise. Save only attributable, durable information; do not save secrets, transient
+  noise. When an exact current-session user message or successful tool result independently
+  supports or contradicts a disclosed saved claim, record nmg_remember action=claim_outcome
+  with that exact excerpt; otherwise omit it. Retrieval, answer reuse, task completion,
+  silence, or lack of correction are not claim evidence. Save only attributable, durable information; do not save secrets, transient
   content, unconfirmed assistant proposals, or unsupported guesses.
 
 claim_outcome_parameter_description: >-

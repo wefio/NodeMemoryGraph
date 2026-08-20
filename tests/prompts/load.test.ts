@@ -107,6 +107,16 @@ test("memory policy stops repeated searches for live-source facts", () => {
   assert.match(prompts.memory_policy, /stop reformulating/u);
 });
 
+test("memory policy exposes the independently verified claim-outcome boundary", () => {
+  const text = loadPrompts().memory_policy;
+  assert.match(text, /nmg_remember action=claim_outcome/u);
+  assert.match(text, /exact current-session user message or successful tool result/u);
+  assert.match(text, /independently supports or contradicts/u);
+  assert.match(text, /otherwise omit it/u);
+  assert.match(text, /Retrieval, answer reuse, task completion/u);
+  assert.match(text, /silence, or lack of correction are not claim evidence/u);
+});
+
 test("disclosures keep placeholders for runtime substitution", () => {
   const prompts = loadPrompts();
   assert.match(prompts.search_disclosure, /\{count\}/);
