@@ -1074,9 +1074,11 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
     }
 
     /**
-     * Execute one bounded maintenance slice over nodes whose accumulated write
-     * Delta or access counter crossed a threshold. The counters already live on
-     * the write/read paths, so ordinary remember/get calls only enqueue work.
+     * Execute one bounded maintenance slice. A locally hot node is immediately
+     * due; global write/access pressure also drains the largest/oldest small-node
+     * backlogs so a graph of many sparse nodes cannot starve maintenance forever.
+     * The counters already live on the write/read paths, so ordinary
+     * remember/get calls only enqueue work.
      */
     runDueMaintenance(
       options: {
@@ -1092,22 +1094,43 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       const nodeLimit = Math.max(1, Math.min(options.nodeLimit ?? 4, 64));
       const rows = this.db
         .prepare(
-          `SELECT n.id AS node_id,
-                  (SELECT COUNT(*) FROM memory_index_delta d
-                    WHERE d.node_id = n.id AND d.compacted = 0) AS pending_writes,
-                  (SELECT COALESCE(SUM(m.pending_access_count), 0)
-                     FROM memory_records m WHERE m.node_id = n.id) AS pending_accesses,
-                  COALESCE((SELECT MIN(d.created_at) FROM memory_index_delta d
-                    WHERE d.node_id = n.id AND d.compacted = 0), n.updated_at) AS oldest
-             FROM memory_nodes n
-            WHERE n.status = 'active'
-              AND ((SELECT COUNT(*) FROM memory_index_delta d
-                     WHERE d.node_id = n.id AND d.compacted = 0) >= ?
-                OR (SELECT COALESCE(SUM(m.pending_access_count), 0)
-                      FROM memory_records m WHERE m.node_id = n.id) >= ?)
-            ORDER BY oldest, n.id LIMIT ?`,
+          `WITH pressure AS (
+             SELECT
+               (SELECT COUNT(*) FROM memory_index_delta d
+                  JOIN memory_nodes active_write_node ON active_write_node.id = d.node_id
+                 WHERE d.compacted = 0 AND active_write_node.status = 'active') AS total_pending_writes,
+               (SELECT COALESCE(SUM(m.pending_access_count), 0) FROM memory_records m
+                  JOIN memory_nodes active_access_node ON active_access_node.id = m.node_id
+                 WHERE active_access_node.status = 'active') AS total_pending_accesses
+           ), candidates AS (
+             SELECT n.id AS node_id,
+                    (SELECT COUNT(*) FROM memory_index_delta d
+                      WHERE d.node_id = n.id AND d.compacted = 0) AS pending_writes,
+                    (SELECT COALESCE(SUM(m.pending_access_count), 0)
+                       FROM memory_records m WHERE m.node_id = n.id) AS pending_accesses,
+                    COALESCE((SELECT MIN(d.created_at) FROM memory_index_delta d
+                      WHERE d.node_id = n.id AND d.compacted = 0), n.updated_at) AS oldest
+               FROM memory_nodes n WHERE n.status = 'active'
+           )
+           SELECT candidates.*, pressure.total_pending_writes, pressure.total_pending_accesses
+             FROM candidates CROSS JOIN pressure
+            WHERE pending_writes >= ? OR pending_accesses >= ?
+               OR (total_pending_writes >= ? AND pending_writes > 0)
+               OR (total_pending_accesses >= ? AND pending_accesses > 0)
+            ORDER BY
+              CASE WHEN pending_writes >= ? OR pending_accesses >= ? THEN 0 ELSE 1 END,
+              pending_writes DESC, pending_accesses DESC, oldest, node_id
+            LIMIT ?`,
         )
-        .all(writeThreshold, accessThreshold, nodeLimit) as Row[];
+        .all(
+          writeThreshold,
+          accessThreshold,
+          writeThreshold,
+          accessThreshold,
+          writeThreshold,
+          accessThreshold,
+          nodeLimit,
+        ) as Row[];
 
       const startedAt = nowMs();
       const timer = new PerfTimer();
@@ -1120,13 +1143,19 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       timer.measure(SECTION.maintenance, () => {
         for (const row of rows) {
           const nodeId = String(row.node_id);
-          if (Number(row.pending_accesses) >= accessThreshold) {
+          const accessDue =
+            Number(row.pending_accesses) >= accessThreshold ||
+            (Number(row.total_pending_accesses) >= accessThreshold && Number(row.pending_accesses) > 0);
+          const writeDue =
+            Number(row.pending_writes) >= writeThreshold ||
+            (Number(row.total_pending_writes) >= writeThreshold && Number(row.pending_writes) > 0);
+          if (accessDue) {
             const result = this.rebalanceNode(nodeId, options.capacities);
             rebalancedNodeIds.push(nodeId);
             changedMemoryIds.push(...result.changedMemoryIds);
             rowsTouched += result.processedMemoryCount;
           }
-          if (Number(row.pending_writes) >= writeThreshold) {
+          if (writeDue) {
             const blocks = this.rebuildLeafBlocks(nodeId, options.blockSize ?? 32);
             const acknowledged = this.acknowledgeIndexDelta([nodeId]);
             compactedNodeIds.push(nodeId);

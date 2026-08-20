@@ -953,6 +953,41 @@ test("remember schedules thresholded maintenance after returning", async () => {
   }
 });
 
+test("service maintenance bounds a write backlog distributed across small nodes", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-distributed-maintenance-"));
+  const databasePath = join(directory, "nmg.sqlite");
+  const service = new NmgService({
+    databasePath,
+    environment: {
+      NMG_MAINTENANCE_WRITE_THRESHOLD: "4",
+      NMG_MAINTENANCE_ACCESS_THRESHOLD: "32",
+      NMG_MAINTENANCE_NODE_LIMIT: "2",
+    },
+  });
+  try {
+    for (let index = 0; index < 5; index += 1) {
+      await service.invoke("remember", {
+        statement: `Distributed service write ${index}`,
+        nodeName: `Distributed service node ${index}`,
+      });
+    }
+    await new Promise<void>((resolve) => setImmediate(() => setImmediate(resolve)));
+  } finally {
+    service.close();
+  }
+
+  const reader = new NmgStore(databasePath);
+  try {
+    assert.ok(
+      reader.pendingIndexDelta().length < 4,
+      "recursive bounded slices reduce global backlog below its trigger threshold",
+    );
+  } finally {
+    reader.close();
+    removeTempDirectory(directory);
+  }
+});
+
 test("service validates method parameters", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-errors-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });

@@ -123,6 +123,19 @@ project STG memory, zero claim outcomes/posteriors, zero STG→LTG materializati
 one pending `refines` proposal, zero identity proposals/transforms/rollbacks, 249
 uncompacted index deltas, and 32 pending accesses. These remain evidence gaps;
 the audit command does not convert absent natural outcomes into validation.
+The same snapshot exposed a separate physical-maintenance defect: all 249 write
+deltas and 32 accesses were spread across nodes below the old per-node thresholds,
+so successful maintenance runs repeatedly considered zero nodes. Local
+maintenance now uses a dual trigger: hot nodes remain immediately due, while
+global pressure drains bounded largest/oldest sparse-node slices until only a
+below-threshold tail remains. The audit reports both local due counts and
+distributed pressure; this fix changes physical compaction only and does not
+weaken the natural-evidence gates above.
+
+On a consistent backup of the ordinary LTG database, 37 bounded maintenance
+slices reduced pending write deltas from 249 to 15 and pending accesses from 32
+to 26, leaving both totals below their configured triggers. The authoritative
+database was opened read-only and was not modified by this validation.
 
 ## 4. Separate controller policy from the Agent answer policy
 

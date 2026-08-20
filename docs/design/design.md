@@ -1220,6 +1220,17 @@ and generates—but never automatically accepts—a limited number of topology
 proposals. Failed slices leave durable counters intact for a later retry and
 never turn a successful `remember` into a failed write.
 
+The due check is deliberately a dual trigger. A single hot node is selected as
+soon as its own write or access counter reaches the corresponding threshold. If
+many sparse nodes keep every local counter below the threshold but their global
+pending total reaches it, the same bounded slice selects the largest then oldest
+non-empty node backlogs. The resident service schedules another bounded slice
+while a full `nodeLimit` batch was consumed, so pressure falls below the global
+threshold without an unbounded synchronous pass. A below-threshold tail remains
+deferred; it is bounded rather than permanently growing. This preserves local
+Huffman-style rebalancing while preventing small-node graphs from starving Base
+compaction.
+
 Topology proposal acceptance remains an explicit semantic review. Edge
 stability can justify reversible relation consolidation or demotion, but it
 cannot establish node identity and therefore cannot authorize a node merge.

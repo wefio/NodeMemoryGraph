@@ -661,6 +661,45 @@ test("runDueMaintenance compacts write deltas and rebalances access changes with
   });
 });
 
+test("runDueMaintenance drains distributed write pressure without requiring one hot node", () => {
+  withStore((store) => {
+    for (let index = 0; index < 16; index += 1) {
+      store.remember({
+        statement: `distributed write ${index}`,
+        nodeName: `distributed node ${index}`,
+      });
+    }
+
+    const first = store.runDueMaintenance({ writeThreshold: 16, accessThreshold: 32, nodeLimit: 4 });
+    assert.equal(first.consideredNodes, 4);
+    assert.equal(first.compactedNodeIds.length, 4);
+    assert.equal(store.pendingIndexDelta().length, 12, "global pressure drains to a bounded tail");
+
+    const second = store.runDueMaintenance({ writeThreshold: 16, accessThreshold: 32, nodeLimit: 4 });
+    assert.equal(second.consideredNodes, 0, "a below-threshold tail does not hot-loop");
+  });
+});
+
+test("runDueMaintenance drains distributed access pressure without requiring one hot node", () => {
+  withStore((store) => {
+    const memories = Array.from({ length: 32 }, (_, index) =>
+      store.remember({
+        statement: `distributed access ${index}`,
+        nodeName: `access node ${index}`,
+      }),
+    );
+    store.runDueMaintenance({ writeThreshold: 1, accessThreshold: 32, nodeLimit: 64 });
+    store.recordUsage(memories.map((saved) => saved.memory.id));
+
+    const first = store.runDueMaintenance({ writeThreshold: 16, accessThreshold: 32, nodeLimit: 4 });
+    assert.equal(first.consideredNodes, 4);
+    assert.equal(first.rebalancedNodeIds.length, 4);
+
+    const second = store.runDueMaintenance({ writeThreshold: 16, accessThreshold: 32, nodeLimit: 4 });
+    assert.equal(second.consideredNodes, 0, "remaining global access pressure is below threshold");
+  });
+});
+
 test("runSemanticMaintenance expires STG records and keeps topology changes proposal-only", () => {
   withStore((store) => {
     const expired = store.remember({

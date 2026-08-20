@@ -7,7 +7,9 @@ import { resolveNmgDataDir } from "../../src/cli/data-path.ts";
 import { canonicalNodeIdentity } from "../../src/core/store/rows.ts";
 import { parseStringArray } from "../../src/core/store/row-parse.ts";
 import {
+  configuredMaintenancePolicy,
   configuredStgConsolidationPolicy,
+  type MaintenancePolicyConfig,
   type StgConsolidationPolicyConfig,
 } from "../../src/integration/config.ts";
 
@@ -45,9 +47,23 @@ export interface StoreAudit {
 export interface NaturalMaintenanceAudit {
   generatedAt: string;
   readOnly: true;
-  policy: StgConsolidationPolicyConfig;
+  policy: {
+    stgConsolidation: StgConsolidationPolicyConfig;
+    maintenance: MaintenancePolicyConfig;
+  };
   ltg: StoreAudit & {
-    maintenanceBacklog: { indexDeltas: number; pendingAccesses: number };
+    maintenanceBacklog: {
+      indexDeltas: number;
+      pendingAccesses: number;
+      activeNodesWithWrites: number;
+      activeNodesWithAccesses: number;
+      writeDueNodes: number;
+      accessDueNodes: number;
+      largestNodeWrites: number;
+      largestNodeAccesses: number;
+      distributedWritePressure: boolean;
+      distributedAccessPressure: boolean;
+    };
     topology: {
       proposalsByStatus: Record<string, number>;
       proposalsByRelation: Record<string, number>;
@@ -80,10 +96,14 @@ const EMPTY_STORE_COUNTS = {
  * databases are reported rather than created, and no maintenance actuator runs.
  */
 export function auditNaturalMaintenance(options: NaturalMaintenanceAuditOptions): NaturalMaintenanceAudit {
-  const policy = configuredStgConsolidationPolicy(options.environment ?? process.env);
-  const ltg = auditStore(resolve(options.ltgPath), policy);
-  const ltgDetails = ltg.exists ? withReadOnlyDatabase(ltg.path, auditLtgDetails) : emptyLtgDetails();
-  const stg = [...new Set(options.stgPaths ?? [])].map((path) => auditStore(resolve(path), policy));
+  const environment = options.environment ?? process.env;
+  const stgPolicy = configuredStgConsolidationPolicy(environment);
+  const maintenancePolicy = configuredMaintenancePolicy(environment);
+  const ltg = auditStore(resolve(options.ltgPath), stgPolicy);
+  const ltgDetails = ltg.exists
+    ? withReadOnlyDatabase(ltg.path, (db) => auditLtgDetails(db, maintenancePolicy))
+    : emptyLtgDetails();
+  const stg = [...new Set(options.stgPaths ?? [])].map((path) => auditStore(resolve(path), stgPolicy));
   const evidenceGaps: string[] = [];
   const naturalClaimEvents = stg.reduce((sum, store) => sum + store.claims.outcomeEvents, 0);
   const candidates = stg.reduce((sum, store) => sum + store.claims.promotionCandidates.length, 0);
@@ -104,7 +124,7 @@ export function auditNaturalMaintenance(options: NaturalMaintenanceAuditOptions)
   return {
     generatedAt: options.generatedAt ?? new Date().toISOString(),
     readOnly: true,
-    policy,
+    policy: { stgConsolidation: stgPolicy, maintenance: maintenancePolicy },
     ltg: { ...ltg, ...ltgDetails },
     stg,
     evidenceGaps,
@@ -169,14 +189,43 @@ function auditStore(path: string, policy: StgConsolidationPolicyConfig): StoreAu
   });
 }
 
-function auditLtgDetails(db: DatabaseSync): Omit<NaturalMaintenanceAudit["ltg"], keyof StoreAudit> {
+function auditLtgDetails(
+  db: DatabaseSync,
+  maintenancePolicy: MaintenancePolicyConfig,
+): Omit<NaturalMaintenanceAudit["ltg"], keyof StoreAudit> {
+  const backlogRows =
+    tableExists(db, "memory_nodes") &&
+    tableExists(db, "memory_records") &&
+    tableExists(db, "memory_index_delta")
+      ? allRows(
+          db,
+          `SELECT n.id,
+                  (SELECT COUNT(*) FROM memory_index_delta d
+                    WHERE d.node_id = n.id AND d.compacted = 0) AS writes,
+                  (SELECT COALESCE(SUM(m.pending_access_count), 0) FROM memory_records m
+                    WHERE m.node_id = n.id) AS accesses
+             FROM memory_nodes n WHERE n.status = 'active'`,
+        )
+      : [];
+  const indexDeltas = backlogRows.reduce((sum, row) => sum + numberValue(row.writes), 0);
+  const pendingAccesses = backlogRows.reduce((sum, row) => sum + numberValue(row.accesses), 0);
+  const writeDueNodes = backlogRows.filter(
+    (row) => numberValue(row.writes) >= maintenancePolicy.writeThreshold,
+  ).length;
+  const accessDueNodes = backlogRows.filter(
+    (row) => numberValue(row.accesses) >= maintenancePolicy.accessThreshold,
+  ).length;
   const maintenanceBacklog = {
-    indexDeltas: tableExists(db, "memory_index_delta")
-      ? numberValue(singleRow(db, "SELECT COUNT(*) AS count FROM memory_index_delta WHERE compacted = 0").count)
-      : 0,
-    pendingAccesses: tableExists(db, "memory_records")
-      ? numberValue(singleRow(db, "SELECT COALESCE(SUM(pending_access_count), 0) AS count FROM memory_records").count)
-      : 0,
+    indexDeltas,
+    pendingAccesses,
+    activeNodesWithWrites: backlogRows.filter((row) => numberValue(row.writes) > 0).length,
+    activeNodesWithAccesses: backlogRows.filter((row) => numberValue(row.accesses) > 0).length,
+    writeDueNodes,
+    accessDueNodes,
+    largestNodeWrites: Math.max(0, ...backlogRows.map((row) => numberValue(row.writes))),
+    largestNodeAccesses: Math.max(0, ...backlogRows.map((row) => numberValue(row.accesses))),
+    distributedWritePressure: indexDeltas >= maintenancePolicy.writeThreshold && writeDueNodes === 0,
+    distributedAccessPressure: pendingAccesses >= maintenancePolicy.accessThreshold && accessDueNodes === 0,
   };
   const proposals = tableExists(db, "topology_proposals")
     ? allRows(db, "SELECT * FROM topology_proposals ORDER BY created_at, id")
@@ -211,7 +260,18 @@ function auditLtgDetails(db: DatabaseSync): Omit<NaturalMaintenanceAudit["ltg"],
 
 function emptyLtgDetails(): Omit<NaturalMaintenanceAudit["ltg"], keyof StoreAudit> {
   return {
-    maintenanceBacklog: { indexDeltas: 0, pendingAccesses: 0 },
+    maintenanceBacklog: {
+      indexDeltas: 0,
+      pendingAccesses: 0,
+      activeNodesWithWrites: 0,
+      activeNodesWithAccesses: 0,
+      writeDueNodes: 0,
+      accessDueNodes: 0,
+      largestNodeWrites: 0,
+      largestNodeAccesses: 0,
+      distributedWritePressure: false,
+      distributedAccessPressure: false,
+    },
     topology: {
       proposalsByStatus: {},
       proposalsByRelation: {},

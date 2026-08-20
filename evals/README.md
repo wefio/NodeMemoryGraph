@@ -430,6 +430,8 @@ maintenance, promotes memories, or actuates a merge. Missing evidence is emitted
 as an explicit `evidenceGaps` list; a clean command run is not evidence that
 natural precision or reversibility has been validated. Use repeatable `--stg`
 arguments when auditing more than one project-local STG.
+`maintenanceBacklog` distinguishes locally due nodes from distributed global
+pressure, so a high total cannot be mistaken for one hot node.
 
 ## Topology identity-gate audit
 

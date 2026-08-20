@@ -97,6 +97,8 @@ test("natural maintenance audit reads claim, consolidation, and topology evidenc
     assert.equal(report.ltg.topology.proposalsByRelation.same_as, 1);
     assert.equal(report.ltg.topology.pendingAutomaticMergeAssessments.length, 1);
     assert.equal(report.ltg.topology.pendingAutomaticMergeAssessments[0]?.eligible, true);
+    assert.equal(report.ltg.maintenanceBacklog.distributedWritePressure, false);
+    assert.equal(report.policy.maintenance.writeThreshold, 16);
     assert.equal(report.evidenceGaps.includes("no_stg_claim_outcomes"), false);
     assert.equal(statSync(ltgPath).size, ltgBefore.size);
     assert.equal(statSync(ltgPath).mtimeMs, ltgBefore.mtimeMs);

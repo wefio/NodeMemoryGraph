@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +11,7 @@ import {
   stageArchive,
   stagingDirFor,
 } from "../../src/cli/archive-staging.ts";
+import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
 function freshDir(): string {
   return mkdtempSync(join(tmpdir(), "nmg-staging-"));
@@ -34,7 +35,7 @@ test("stageArchive writes atomically and pendingArchives reads it back", () => {
   assert.equal(pending[0].reason, "quit");
   // No .tmp leftovers.
   assert.ok(!readdirSync(dir).some((name) => name.endsWith(".tmp")));
-  rmSync(dir, { recursive: true, force: true });
+  removeTempDirectory(dir);
 });
 
 test("stageArchive is idempotent per sessionId (overwrite, one file)", () => {
@@ -44,7 +45,7 @@ test("stageArchive is idempotent per sessionId (overwrite, one file)", () => {
   const pending = pendingArchives(dir);
   assert.equal(pending.length, 1);
   assert.equal(pending[0].summary, "updated");
-  rmSync(dir, { recursive: true, force: true });
+  removeTempDirectory(dir);
 });
 
 test("pendingArchives drops corrupt files defensively", () => {
@@ -55,7 +56,7 @@ test("pendingArchives drops corrupt files defensively", () => {
   assert.equal(pending.length, 1);
   // Corrupt file was removed.
   assert.ok(!readdirSync(dir).includes("corrupt.json"));
-  rmSync(dir, { recursive: true, force: true });
+  removeTempDirectory(dir);
 });
 
 test("flushArchives deletes each entry only after its flush succeeds", async () => {
@@ -69,7 +70,7 @@ test("flushArchives deletes each entry only after its flush succeeds", async () 
   assert.equal(n, 2);
   assert.deepEqual(flushed.sort(), ["sess_abc123", "sess_other"]);
   assert.equal(pendingArchives(dir).length, 0);
-  rmSync(dir, { recursive: true, force: true });
+  removeTempDirectory(dir);
 });
 
 test("flushArchives keeps the file when flush fails (resume next startup)", async () => {
@@ -82,7 +83,7 @@ test("flushArchives keeps the file when flush fails (resume next startup)", asyn
   );
   // Entry remains staged for the next startup.
   assert.equal(pendingArchives(dir).length, 1);
-  rmSync(dir, { recursive: true, force: true });
+  removeTempDirectory(dir);
 });
 
 test("archiveOrStage remembers on success and stages on failure/timeout", async () => {
@@ -102,7 +103,7 @@ test("archiveOrStage remembers on success and stages on failure/timeout", async 
   assert.equal(staged, "staged");
   assert.equal(pendingArchives(dir).length, 1);
   assert.equal(pendingArchives(dir)[0].sessionId, "sess_fail");
-  rmSync(dir, { recursive: true, force: true });
+  removeTempDirectory(dir);
 });
 
 test("archiveOrStage never throws (shutdown must proceed to teardown)", async () => {
@@ -117,7 +118,7 @@ test("archiveOrStage never throws (shutdown must proceed to teardown)", async ()
     50,
   );
   assert.equal(result, "staged");
-  rmSync(dir, { recursive: true, force: true });
+  removeTempDirectory(dir);
 });
 
 test("stagingDirFor scopes to the project", () => {
