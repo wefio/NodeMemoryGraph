@@ -1272,6 +1272,7 @@ function parseRecordClaimOutcomesParams(value: unknown): NmgRecordClaimOutcomesP
     activeGraphId: optionalString(params, "activeGraphId"),
     sessionId: optionalString(params, "sessionId"),
     projectDir: optionalString(params, "projectDir"),
+    collectionOrigin: optionalEnum(params, "collectionOrigin", ["controlled", "natural"]),
     votes: rawVotes.map((rawVote) => {
       const vote = objectParams(rawVote);
       return {

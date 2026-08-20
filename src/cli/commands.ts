@@ -152,6 +152,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
       "session-id",
       "evidence",
       "source-ref",
+      "collection-origin",
     ],
     flags: [],
     usageDetail: `Claim outcome options:
@@ -160,6 +161,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   --source-lineage ID        Stable identity of the original evidence source
   --evidence TEXT            Exact user/tool evidence excerpt to retain
   --source-ref REF           Optional durable reference for the evidence excerpt
+  --collection-origin VALUE  natural (default) or controlled probe/benchmark
   --semantic-task-id ID      Independent task identity used for vote deduplication
   --claim-index N            Repeatable atomic claim index; omit for every claim
   --weight N                 Reliability in (0,1], default 1
@@ -828,6 +830,7 @@ function claimOutcomeParams(values: OptionValues): NmgRecordClaimOutcomesParams 
     activeGraphId: firstOption(values, "active-graph-id"),
     sessionId,
     projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
+    collectionOrigin: firstOption(values, "collection-origin"),
     votes: [
       compactObject({
         memoryId,

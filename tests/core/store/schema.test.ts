@@ -67,6 +67,7 @@ test("migrate creates the core graph tables", () => {
       ),
     );
     assert.ok(claimOutcomeColumns.has("evidence_id"));
+    assert.ok(claimOutcomeColumns.has("collection_origin"));
   });
 });
 
@@ -120,5 +121,25 @@ test("migrate adds session, disclosure, and attribution columns to legacy retrie
       columns.has("attributed_memory_ids_json"),
       "expected retrieval_traces.attributed_memory_ids_json after migrate",
     );
+  });
+});
+
+test("migrate marks pre-provenance claim outcomes as legacy", () => {
+  withDatabase((db) => {
+    db.exec(`
+      CREATE TABLE claim_outcome_events (
+        id TEXT PRIMARY KEY,
+        semantic_task_id TEXT NOT NULL,
+        evidence_id TEXT,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO claim_outcome_events (id, semantic_task_id, created_at)
+      VALUES ('claim-old', 'task-old', '2026-08-01T00:00:00.000Z');
+    `);
+    migrate(db);
+    const row = db
+      .prepare("SELECT collection_origin FROM claim_outcome_events WHERE id = 'claim-old'")
+      .get() as { collection_origin: string } | undefined;
+    assert.equal(row?.collection_origin, "legacy");
   });
 });

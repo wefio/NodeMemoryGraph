@@ -31,11 +31,12 @@ import type {
 } from "../core/types.ts";
 
 // Bump only when a live daemon from the previous revision cannot faithfully
-// implement the current client contract. v5 replaces the ambiguous
+// implement the current client contract. v5 replaced the ambiguous
 // recordActiveGraphUse RPC with diagnostic-only recordActiveGraphAttribution;
 // a v4 daemon would otherwise accept the connection and reject that method at
-// agent_end, silently losing telemetry because the adapter is best-effort.
-export const NMG_PROTOCOL_VERSION = "nmg.v5" as const;
+// agent_end. v6 preserves natural/controlled provenance on claim outcomes;
+// a v5 daemon would silently discard the optional field and contaminate audits.
+export const NMG_PROTOCOL_VERSION = "nmg.v6" as const;
 
 export const NMG_CAPABILITIES = [
   "hello",
@@ -62,6 +63,7 @@ export const NMG_CAPABILITIES = [
   "lexical-retrieval",
   "optional-embedding-retrieval",
   "diagnostic-answer-attribution",
+  "claim-outcome-origin-provenance",
 ] as const;
 
 export const NMG_METHODS = [

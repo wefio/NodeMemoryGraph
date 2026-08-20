@@ -142,6 +142,8 @@ export function migrate(db: DatabaseSync): void {
       source TEXT NOT NULL CHECK (source IN ('benchmark', 'task', 'tool', 'user')),
       source_lineage TEXT NOT NULL,
       evidence_id TEXT REFERENCES history_records(id) ON DELETE SET NULL,
+      collection_origin TEXT NOT NULL DEFAULT 'legacy'
+        CHECK (collection_origin IN ('controlled', 'legacy', 'natural')),
       outcome TEXT NOT NULL CHECK (outcome IN ('supported', 'contradicted')),
       weight REAL NOT NULL CHECK (weight > 0 AND weight <= 1),
       active_graph_id TEXT REFERENCES retrieval_traces(id) ON DELETE SET NULL,
@@ -728,6 +730,11 @@ export function ensureClaimOutcomeColumns(db: DatabaseSync): void {
   if (!existing.has("evidence_id")) {
     db.exec(
       "ALTER TABLE claim_outcome_events ADD COLUMN evidence_id TEXT REFERENCES history_records(id) ON DELETE SET NULL",
+    );
+  }
+  if (!existing.has("collection_origin")) {
+    db.exec(
+      "ALTER TABLE claim_outcome_events ADD COLUMN collection_origin TEXT NOT NULL DEFAULT 'legacy' CHECK (collection_origin IN ('controlled', 'legacy', 'natural'))",
     );
   }
 }

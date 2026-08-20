@@ -63,6 +63,10 @@ Pi 在用户/工具 outcome 成功落库后，将同一图的累计支持集合�
 监督。`task` 来源可能是模型自行报告，因此在 Pi 中不自动进入 verified shadow target；
 官方 benchmark 由独立评测控制器写入。
 
+claim outcome 还必须保存 `collectionOrigin=natural|controlled|legacy`。普通产品使用为
+`natural`，受控探针和 benchmark 为 `controlled`，迁移前无法证明来源的记录为 `legacy`。
+自然维护审计只能用 `natural` 事件证明精度或可逆性；总事件数仅用于存储审计。
+
 ## supersede 的两种模式
 
 1. **完整取代**（new + old）：调用方知道新值 id → `applySupersession`——旧值

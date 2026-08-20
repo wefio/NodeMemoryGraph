@@ -36,6 +36,9 @@ export interface StoreAudit {
   claims: {
     outcomeEvents: number;
     semanticTasks: number;
+    outcomeEventsByOrigin: Record<string, number>;
+    naturalOutcomeEvents: number;
+    naturalSemanticTasks: number;
     posteriors: number;
     memoriesWithPosteriors: number;
     promotionCandidates: string[];
@@ -84,6 +87,9 @@ const EMPTY_STORE_COUNTS = {
   claims: {
     outcomeEvents: 0,
     semanticTasks: 0,
+    outcomeEventsByOrigin: {} as Record<string, number>,
+    naturalOutcomeEvents: 0,
+    naturalSemanticTasks: 0,
     posteriors: 0,
     memoriesWithPosteriors: 0,
     promotionCandidates: [] as string[],
@@ -105,7 +111,7 @@ export function auditNaturalMaintenance(options: NaturalMaintenanceAuditOptions)
     : emptyLtgDetails();
   const stg = [...new Set(options.stgPaths ?? [])].map((path) => auditStore(resolve(path), stgPolicy));
   const evidenceGaps: string[] = [];
-  const naturalClaimEvents = stg.reduce((sum, store) => sum + store.claims.outcomeEvents, 0);
+  const naturalClaimEvents = stg.reduce((sum, store) => sum + store.claims.naturalOutcomeEvents, 0);
   const candidates = stg.reduce((sum, store) => sum + store.claims.promotionCandidates.length, 0);
   if (stg.length === 0 || stg.every((store) => !store.exists)) evidenceGaps.push("no_stg_store_observed");
   if (naturalClaimEvents === 0) evidenceGaps.push("no_stg_claim_outcomes");
@@ -162,6 +168,19 @@ function auditStore(path: string, policy: StgConsolidationPolicyConfig): StoreAu
           "SELECT COUNT(*) AS events, COUNT(DISTINCT semantic_task_id) AS tasks FROM claim_outcome_events",
         )
       : {};
+    const hasCollectionOrigin = columnExists(db, "claim_outcome_events", "collection_origin");
+    const outcomeOrigins = tableExists(db, "claim_outcome_events") && hasCollectionOrigin
+      ? allRows(
+          db,
+          `SELECT collection_origin AS origin, COUNT(*) AS events,
+                  COUNT(DISTINCT semantic_task_id) AS tasks
+             FROM claim_outcome_events GROUP BY collection_origin`,
+        )
+      : [];
+    const outcomeEventsByOrigin = Object.fromEntries(
+      outcomeOrigins.map((row) => [String(row.origin), numberValue(row.events)]),
+    );
+    const naturalOutcome = outcomeOrigins.find((row) => String(row.origin) === "natural");
     if (!tableExists(db, "claim_outcome_events")) warnings.push("claim_outcome_events_table_missing");
     const grouped = groupPosteriors(posteriorRows);
     return {
@@ -175,6 +194,9 @@ function auditStore(path: string, policy: StgConsolidationPolicyConfig): StoreAu
       claims: {
         outcomeEvents: numberValue(outcome.events),
         semanticTasks: numberValue(outcome.tasks),
+        outcomeEventsByOrigin,
+        naturalOutcomeEvents: numberValue(naturalOutcome?.events),
+        naturalSemanticTasks: numberValue(naturalOutcome?.tasks),
         posteriors: posteriorRows.length,
         memoriesWithPosteriors: grouped.size,
         promotionCandidates: [...grouped.entries()]
@@ -408,6 +430,13 @@ function withReadOnlyDatabase<T>(path: string, run: (db: DatabaseSync) => T): T 
 
 function tableExists(db: DatabaseSync, table: string): boolean {
   return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
+}
+
+function columnExists(db: DatabaseSync, table: string, column: string): boolean {
+  if (!tableExists(db, table)) return false;
+  return (db.prepare(`PRAGMA table_info(${table})`).all() as Row[]).some(
+    (row) => String(row.name) === column,
+  );
 }
 
 function allRows(db: DatabaseSync, sql: string, ...params: Array<string | number>): Row[] {

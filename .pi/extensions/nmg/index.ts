@@ -57,7 +57,7 @@ import {
   type ReasoningNodeKind,
   type ReasoningStatus,
 } from "../../../src/lab/reasoning-workspace.ts";
-import { ControllerShadowBridge, shadowEnabled } from "./controller-shadow.ts";
+import { ControllerShadowBridge, shadowCollectionOrigin, shadowEnabled } from "./controller-shadow.ts";
 import { PiReasoningWorkspaces } from "./reasoning-workspace.ts";
 
 /**
@@ -1018,6 +1018,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           activeGraphId,
           sessionId,
           projectDir: projectDirectory(),
+          collectionOrigin: shadowCollectionOrigin(),
           votes: [
             {
               memoryId: params.memoryId,

@@ -129,6 +129,7 @@ test("CLI exposes explicit attributable claim outcomes", () => {
         ["session-id", ["session-42"]],
         ["evidence", ["The schema reports SQLite."]],
         ["source-ref", ["tool:sqlite-schema"]],
+        ["collection-origin", ["controlled"]],
       ]),
       positionals: ["memory-42"],
     }),
@@ -136,6 +137,7 @@ test("CLI exposes explicit attributable claim outcomes", () => {
       semanticTaskId: "task:42",
       activeGraphId: "ag-42",
       sessionId: "session-42",
+      collectionOrigin: "controlled",
       votes: [
         {
           memoryId: "memory-42",

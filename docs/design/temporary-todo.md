@@ -22,12 +22,14 @@ plumbing but cannot count as natural product evidence: ordinary Pi writes
 collection origin are excluded. A cross-process lock protects JSONL rotation.
 
 As of the latest 2026-08-20 read-only audit, the bounded shadow log contains
-1,073 events, 337 retrieval graphs, and 52 fully labelled natural graphs. It
-contains zero disclosure, diagnostic-attribution, or verified-attribution events
-from the pre-v5 collection window. The source and installed Skill now require
-`nmg.v5` and fail closed instead of silently dropping the renamed attribution
+1,078 events, 338 retrieval graphs, and 52 fully labelled natural graphs. A
+controlled ordinary-Pi smoke produced the first disclosure, one
+`verified_claim_support`, one diagnostic `answer_overlap`, and an outcome with
+measured tool rounds, tokens, and latency; it is excluded from natural labels.
+The source and installed Skill now require
+`nmg.v6` and fail closed instead of silently dropping attribution or claim-origin
 RPC. The shared daemon was explicitly restarted on 2026-08-20 and is now a
-compatible v5 process, so subsequent ordinary Pi sessions can exercise the new
+compatible v6 process, so subsequent ordinary Pi sessions can exercise the new
 event path. Existing labels meet the provisional sample-count target but do not
 supply useful-evidence targets in the held-out segment. New
 collection must therefore emphasize tasks where the Agent receives explicit
@@ -109,22 +111,27 @@ contained the memory. A model-authored `task` outcome updates its explicit claim
 posterior but cannot silently become a verified retrieval target. A live v5
 source-audit task exercised the canonical database path with one supported and
 one contradicted memory: both events retained the exact tool excerpt through a
-non-null `evidence_id`. The next ordinary Pi session must exercise the new
-shadow bridge after reloading the adapter.
+non-null `evidence_id`. A controlled ordinary-Pi run after adapter reload then
+proved the complete search → exact get → tool-source outcome → verified shadow
+attribution path without being counted as natural calibration evidence.
 
 The evidence inventory is reproducible without touching the live stores:
 `npm run eval:natural-maintenance -- --project-dir <project>` opens every input
 SQLite database read-only and reports the exact claim, posterior, consolidation,
 proposal, transform, rollback, and maintenance-backlog counts. The latest
-Post-restart live traffic on 2026-08-20 found 283 LTG memories (240 active), one active project STG
-memory, two LTG claim outcomes in one semantic task with two posteriors, zero
+Post-restart live traffic on 2026-08-20 found 285 LTG memories (242 active), one active project STG
+memory, four LTG claim outcomes in three semantic tasks with two posteriors, zero
 STG→LTG materializations, one
-pending `refines` proposal, zero identity proposals/transforms/rollbacks, 15
-uncompacted index deltas, and 21 pending accesses. The first ordinary v5
-search/get/write sequence reduced the distributed write backlog from 17 nodes to
-14, below the global threshold; both distributed-pressure flags are now false.
-This validates the sparse-backlog drain on live storage without claiming
-consolidation quality. The remaining zeros are product-evidence
+pending `refines` proposal, zero identity proposals/transforms/rollbacks, 17
+uncompacted index deltas, and 23 pending accesses. Claim outcomes now retain
+`natural|controlled|legacy` provenance: the current four events are one controlled
+smoke and three migrated legacy events, so the natural count remains zero. The
+first ordinary v5 search/get/write sequence reduced the distributed write backlog
+from 17 nodes to 14, validating the sparse-backlog drain. Subsequent smoke writes
+raised it to 17 deltas across 16 nodes again, so distributed write pressure is
+currently true while no individual node is due; the next ordinary write/maintenance
+pass must demonstrate another bounded drain. This does not claim consolidation
+quality. The remaining zeros are product-evidence
 gaps; the audit command and controlled tests do not convert them into natural
 validation.
 

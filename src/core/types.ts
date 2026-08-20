@@ -89,6 +89,8 @@ export const CLAIM_OUTCOMES = ["supported", "contradicted"] as const;
 export type ClaimOutcome = (typeof CLAIM_OUTCOMES)[number];
 export const CLAIM_OUTCOME_SOURCES = ["benchmark", "task", "tool", "user"] as const;
 export type ClaimOutcomeSource = (typeof CLAIM_OUTCOME_SOURCES)[number];
+export const EVIDENCE_COLLECTION_ORIGINS = ["controlled", "legacy", "natural"] as const;
+export type EvidenceCollectionOrigin = (typeof EVIDENCE_COLLECTION_ORIGINS)[number];
 
 export interface ClaimOutcomeEvidenceSource {
   actor: MemoryActor;
@@ -118,6 +120,8 @@ export interface RecordClaimOutcomesInput {
   votes: ClaimOutcomeVoteInput[];
   activeGraphId?: string;
   sessionId?: string;
+  /** Distinguishes ordinary product evidence from probes and migrated rows. */
+  collectionOrigin?: Exclude<EvidenceCollectionOrigin, "legacy">;
 }
 
 export interface ClaimPosterior {
@@ -141,6 +145,7 @@ export interface ClaimOutcomeEvent {
   source: ClaimOutcomeSource;
   sourceLineage: string;
   evidenceId: string | null;
+  collectionOrigin: EvidenceCollectionOrigin;
   outcome: ClaimOutcome;
   weight: number;
   activeGraphId: string | null;

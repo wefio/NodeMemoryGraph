@@ -57,6 +57,7 @@ test("claim posterior preserves its prior and deduplicates repeated semantic tas
     });
     assert.equal(first.events.length, 1);
     assert.ok(first.events[0]?.evidenceId);
+    assert.equal(first.events[0]?.collectionOrigin, "natural");
     assert.deepEqual(store.getHistoryBySourceMessage("session-atlas-db", "sqlite-inspection-1"), {
       id: first.events[0]?.evidenceId,
       sessionId: "session-atlas-db",
@@ -109,6 +110,7 @@ test("claim posterior preserves its prior and deduplicates repeated semantic tas
         event.source,
         event.sourceLineage,
         event.evidenceId,
+        event.collectionOrigin,
         event.outcome,
       ]),
       [
@@ -117,9 +119,10 @@ test("claim posterior preserves its prior and deduplicates repeated semantic tas
           "tool",
           "sqlite-inspection-1",
           first.events[0]?.evidenceId,
+          "natural",
           "supported",
         ],
-        ["task-atlas-db-2", "user", "user-correction-2", null, "contradicted"],
+        ["task-atlas-db-2", "user", "user-correction-2", null, "natural", "contradicted"],
       ],
       "posterior evidence remains attributable and auditable",
     );

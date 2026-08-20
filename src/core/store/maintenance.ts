@@ -162,6 +162,9 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       posteriors: ClaimPosterior[];
     } {
       const semanticTaskId = requireText(input.semanticTaskId, "semanticTaskId");
+      const collectionOrigin =
+        input.collectionOrigin ??
+        (input.votes.some((vote) => vote.source === "benchmark") ? "controlled" : "natural");
       if (input.votes.length === 0) return { events: [], posteriors: [] };
       let permittedMemoryIds: Set<string> | null = null;
       if (input.activeGraphId) {
@@ -273,8 +276,9 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
             .prepare(
               `INSERT OR IGNORE INTO claim_outcome_events
                 (id, memory_id, claim_index, semantic_task_id, source,
-                 source_lineage, evidence_id, outcome, weight, active_graph_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 source_lineage, evidence_id, collection_origin, outcome, weight,
+                 active_graph_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
             .run(
               id,
@@ -284,6 +288,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
               item.source,
               item.sourceLineage,
               evidenceId,
+              collectionOrigin,
               item.outcome,
               item.weight,
               input.activeGraphId ?? null,
@@ -330,6 +335,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
             source: item.source,
             sourceLineage: item.sourceLineage,
             evidenceId,
+            collectionOrigin,
             outcome: item.outcome,
             weight: item.weight,
             activeGraphId: input.activeGraphId ?? null,
@@ -372,6 +378,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         source: String(row.source) as ClaimOutcomeEvent["source"],
         sourceLineage: String(row.source_lineage),
         evidenceId: row.evidence_id ? String(row.evidence_id) : null,
+        collectionOrigin: String(row.collection_origin ?? "legacy") as ClaimOutcomeEvent["collectionOrigin"],
         outcome: String(row.outcome) as ClaimOutcomeEvent["outcome"],
         weight: Number(row.weight),
         activeGraphId: row.active_graph_id ? String(row.active_graph_id) : null,

@@ -458,6 +458,7 @@ test("resident service records claim outcomes without changing extraction confid
     assert.equal(remembered.memory.writeSource, "agent");
     const result = await service.invoke("recordClaimOutcomes", {
       semanticTaskId: "atlas-verification-1",
+      collectionOrigin: "controlled",
       votes: [
         {
           memoryId: remembered.memory.id,
@@ -476,6 +477,7 @@ test("resident service records claim outcomes without changing extraction confid
     });
     assert.equal(result.events.length, 1);
     assert.ok(result.events[0]?.evidenceId);
+    assert.equal(result.events[0]?.collectionOrigin, "controlled");
     assert.equal(result.posteriors[0]?.priorConfidence, 0.5);
     assert.equal(result.posteriors[0]?.independentVoteCount, 1);
   } finally {

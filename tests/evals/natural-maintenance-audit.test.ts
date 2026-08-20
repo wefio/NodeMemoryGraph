@@ -38,6 +38,7 @@ test("natural maintenance audit reads claim, consolidation, and topology evidenc
     for (let index = 1; index <= 3; index += 1) {
       stg.recordClaimOutcomes({
         semanticTaskId: `natural-task-${index}`,
+        collectionOrigin: "natural",
         votes: [
           {
             memoryId: local.memory.id,
@@ -49,6 +50,19 @@ test("natural maintenance audit reads claim, consolidation, and topology evidenc
         ],
       });
     }
+    stg.recordClaimOutcomes({
+      semanticTaskId: "controlled-smoke",
+      collectionOrigin: "controlled",
+      votes: [
+        {
+          memoryId: local.memory.id,
+          claimIndexes: [0],
+          outcome: "supported",
+          source: "task",
+          sourceLineage: "controlled-source",
+        },
+      ],
+    });
     consolidateStgMemoryToLtg(stg, ltg, local.memory.id, "session-natural");
 
     const left = [0, 1, 2].map((index) =>
@@ -90,8 +104,11 @@ test("natural maintenance audit reads claim, consolidation, and topology evidenc
     });
 
     assert.equal(report.readOnly, true);
-    assert.equal(report.stg[0]?.claims.outcomeEvents, 3);
-    assert.equal(report.stg[0]?.claims.semanticTasks, 3);
+    assert.equal(report.stg[0]?.claims.outcomeEvents, 4);
+    assert.equal(report.stg[0]?.claims.semanticTasks, 4);
+    assert.deepEqual(report.stg[0]?.claims.outcomeEventsByOrigin, { controlled: 1, natural: 3 });
+    assert.equal(report.stg[0]?.claims.naturalOutcomeEvents, 3);
+    assert.equal(report.stg[0]?.claims.naturalSemanticTasks, 3);
     assert.deepEqual(report.stg[0]?.claims.promotionCandidates, [stgMemoryId]);
     assert.equal(report.ltg.consolidatedFromStg[0]?.sourceMemoryId, stgMemoryId);
     assert.equal(report.ltg.topology.proposalsByRelation.same_as, 1);
