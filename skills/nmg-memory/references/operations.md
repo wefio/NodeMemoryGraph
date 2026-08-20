@@ -12,8 +12,9 @@ node bin/nmg.mjs <command>
 
 ## Ownership-safe lifecycle
 
-Run `nmg daemon status --json` before starting. If already running, reuse it and
-leave it running. If this invocation starts it, stop it during cleanup.
+Run `nmg daemon status --json` before starting. Reuse a running daemon only when
+`compatible=true`, and leave it running. If this invocation starts a stopped
+daemon, stop it during cleanup.
 
 ```text
 nmg daemon start --json
@@ -22,6 +23,12 @@ nmg daemon stop --json
 ```
 
 The Pi adapter performs this ownership tracking automatically.
+
+An incompatible live daemon is an explicit coordination boundary. Do not stop,
+restart, or replace it automatically: it may be shared by another Agent. Report
+the old and required protocol versions and ask the owner/user to run
+`nmg daemon restart` at a safe point. Once restarted, reconnect normally; never
+fall back to an older RPC name or silently omit the failed operation.
 
 ## Storage selection
 
@@ -48,8 +55,9 @@ The command is idempotent. It copies authoritative LTG content into
 
 ## Failure handling
 
-1. Check daemon status.
-2. Retry one start if it is stopped.
+1. Check daemon status, including `compatible`.
+2. Retry one start only if it is stopped. If it is incompatible, request a
+   coordinated restart instead of starting another daemon.
 3. Confirm the selected data directory/database is consistent.
 4. Use `nmg status --json` to inspect storage and embedding health.
 5. If retrieval embedding is degraded, lexical recall may still work.

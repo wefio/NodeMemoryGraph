@@ -31,9 +31,11 @@ import type {
 } from "../core/types.ts";
 
 // Bump only when a live daemon from the previous revision cannot faithfully
-// implement the current client contract. v4 adds the topology-proposal
-// administration surface.
-export const NMG_PROTOCOL_VERSION = "nmg.v4" as const;
+// implement the current client contract. v5 replaces the ambiguous
+// recordActiveGraphUse RPC with diagnostic-only recordActiveGraphAttribution;
+// a v4 daemon would otherwise accept the connection and reject that method at
+// agent_end, silently losing telemetry because the adapter is best-effort.
+export const NMG_PROTOCOL_VERSION = "nmg.v5" as const;
 
 export const NMG_CAPABILITIES = [
   "hello",
@@ -59,6 +61,7 @@ export const NMG_CAPABILITIES = [
   "json-rpc",
   "lexical-retrieval",
   "optional-embedding-retrieval",
+  "diagnostic-answer-attribution",
 ] as const;
 
 export const NMG_METHODS = [
