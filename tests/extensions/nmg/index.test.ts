@@ -415,6 +415,11 @@ test("controller shadow bridge logs answer attribution without learning from it"
     });
     assert.equal(enabled.pendingFeedback("session-a"), null, "feedback nudge is one-shot");
     assert.equal(
+      enabled.pendingClaimOutcome("session-a"),
+      null,
+      "an already verified claim outcome must suppress the advisory claim reminder",
+    );
+    assert.equal(
       await enabled.feedback(context.activeGraph!.id, "wrong-session", {
         evidenceSufficient: true,
       }),
@@ -524,6 +529,13 @@ test("shadow feedback review selects a disclosed graph instead of a newer header
       semanticTaskId: used.activeGraph!.taskId,
     });
     await bridge.feedbackNudgeShown("session-a", reminder!);
+    const claimReminder = bridge.pendingClaimOutcome("session-a");
+    assert.deepEqual(claimReminder, {
+      activeGraphId: used.activeGraph!.id,
+      semanticTaskId: used.activeGraph!.taskId,
+    });
+    assert.equal(bridge.pendingClaimOutcome("session-a"), null, "claim reminder is one-shot");
+    await bridge.claimOutcomeNudgeShown("session-a", claimReminder!);
     const events = readFileSync(join(directory, "controller-shadow-events.jsonl"), "utf8")
       .trim()
       .split("\n")
@@ -536,13 +548,89 @@ test("shadow feedback review selects a disclosed graph instead of a newer header
             graphId: string;
           },
       );
+    assert.equal(events.at(-2)?.type, "tool_flow");
+    assert.equal(events.at(-2)?.graphId, used.activeGraph!.id);
+    assert.equal(events.at(-2)?.action, "feedback_nudge_shown");
+    assert.equal(events.at(-2)?.reason, "next_user_turn_review");
     assert.equal(events.at(-1)?.type, "tool_flow");
     assert.equal(events.at(-1)?.graphId, used.activeGraph!.id);
-    assert.equal(events.at(-1)?.action, "feedback_nudge_shown");
-    assert.equal(events.at(-1)?.reason, "next_user_turn_review");
+    assert.equal(events.at(-1)?.action, "claim_outcome_nudge_shown");
+    assert.equal(events.at(-1)?.reason, "next_user_turn_claim_review");
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Pi injects the advisory claim-outcome review only on the next user turn", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-claim-review-"));
+  const previousData = process.env.NMG_DATA_DIR;
+  const previousProject = process.env.NMG_PROJECT_DIR;
+  const previousShadow = process.env.NMG_CONTROLLER_SHADOW;
+  process.env.NMG_DATA_DIR = directory;
+  process.env.NMG_PROJECT_DIR = directory;
+  process.env.NMG_CONTROLLER_SHADOW = "1";
+  const sessionManager = {
+    getSessionId: () => "claim-review-session",
+    getSessionFile: () => "session.jsonl",
+    getBranch: () => [],
+  };
+  try {
+    const { handlers, tools } = extensionHarness();
+    await tools.get("nmg_remember")!.execute(
+      "remember-claim-review",
+      {
+        statement: "Atlas stores durable metadata in SQLite.",
+        nodeName: "Atlas storage",
+        memoryType: "fact",
+        sourceActor: "tool",
+        externalSource: { source: "file:test-fixture" },
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    );
+    const searched = (await tools.get("nmg_search")!.execute(
+      "search-claim-review",
+      { query: "Atlas durable metadata SQLite", limit: 5 },
+      undefined,
+      undefined,
+      { sessionManager },
+    )) as { content: Array<{ text: string }> };
+    assert.match(searched.content[0]?.text ?? "", /Atlas stores durable metadata in SQLite/u);
+    await handlers.get("agent_end")!(
+      {
+        messages: [
+          { role: "user", content: [{ type: "text", text: "What database stores Atlas metadata?" }] },
+          { role: "assistant", content: [{ type: "text", text: "Atlas uses SQLite." }] },
+        ],
+      },
+      { sessionManager },
+    );
+
+    const nextTurn = (await handlers.get("before_agent_start")!(
+      { prompt: "I have a new observation about Atlas.", systemPrompt: "base" },
+      { sessionManager },
+    )) as { message?: { content: string } };
+    assert.match(nextTurn.message?.content ?? "", /action=claim_outcome/u);
+    assert.match(nextTurn.message?.content ?? "", /successful tool result/u);
+    assert.match(nextTurn.message?.content ?? "", /failed tool output are not claim evidence/u);
+
+    const sameTurnReentry = (await handlers.get("before_agent_start")!(
+      { prompt: "I have a new observation about Atlas.", systemPrompt: "base" },
+      { sessionManager },
+    )) as { message?: { content: string } };
+    assert.doesNotMatch(sameTurnReentry.message?.content ?? "", /previous NMG retrieval.*action=claim_outcome/su);
+    await handlers.get("session_shutdown")!({}, { sessionManager });
+  } finally {
+    process.env.NMG_DATA_DIR = previousData;
+    process.env.NMG_PROJECT_DIR = previousProject;
+    process.env.NMG_CONTROLLER_SHADOW = previousShadow;
+    try {
+      rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+      // Windows can briefly retain daemon handles after shutdown.
+    }
   }
 });
 
@@ -563,6 +651,24 @@ test("Pi evidence projection retains only an exact bounded source excerpt", () =
           content: [{ type: "text", text: "Please remember that Atlas uses SQLite offline." }],
         },
       },
+      {
+        type: "message",
+        id: "tool-failed",
+        message: {
+          role: "toolResult",
+          content: [{ type: "text", text: "The failed probe reported PostgreSQL." }],
+          isError: true,
+        },
+      },
+      {
+        type: "message",
+        id: "tool-success",
+        message: {
+          role: "toolResult",
+          content: [{ type: "text", text: "Verified that Atlas uses SQLite offline." }],
+          isError: false,
+        },
+      },
     ],
   };
   assert.deepEqual(selectPiEvidenceSource(sessionManager, "Atlas uses SQLite", "user"), {
@@ -572,6 +678,17 @@ test("Pi evidence projection retains only an exact bounded source excerpt", () =
     sourceRef: `pi-session:session-a;shape=${PI_BRANCH_SHAPE_VERSION}`,
   });
   assert.equal(selectPiEvidenceSource(sessionManager, "routine assistant", "user"), undefined);
+  assert.equal(
+    selectPiEvidenceSource(sessionManager, "failed probe reported PostgreSQL", "tool"),
+    undefined,
+    "failed tool output is not attributable claim evidence",
+  );
+  assert.deepEqual(selectPiEvidenceSource(sessionManager, "Atlas uses SQLite offline", "tool"), {
+    actor: "tool",
+    content: "Atlas uses SQLite offline",
+    sourceMessageId: "tool-success",
+    sourceRef: `pi-session:session-a;shape=${PI_BRANCH_SHAPE_VERSION}`,
+  });
 });
 
 test("Pi branch projection fails closed on an incompatible message shape", () => {

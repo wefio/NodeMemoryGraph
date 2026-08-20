@@ -315,13 +315,38 @@ function assessAutomaticMerge(db: DatabaseSync, proposal: Row): AutomaticMergeAu
   if (numberValue(proposal.estimated_gain) < 0.98) reasons.push("insufficient_confidence");
   if (evidenceMemoryIds.length < 4) reasons.push("insufficient_evidence_memories");
   const evidenceRows = evidenceMemoryIds.map((id) =>
-    db.prepare("SELECT node_id, scope_json, status FROM memory_records WHERE id = ?").get(id) as Row | undefined,
+    db
+      .prepare(
+        "SELECT node_id, scope_json, status, source_actor FROM memory_records WHERE id = ?",
+      )
+      .get(id) as Row | undefined,
   );
   if (evidenceRows.some((row) => !row || String(row.status) !== "active")) {
     reasons.push("missing_or_inactive_evidence");
   }
   if (sourceNodeIds.some((nodeId) => !evidenceRows.some((row) => String(row?.node_id ?? "") === nodeId))) {
     reasons.push("evidence_not_balanced_across_nodes");
+  }
+  const evidenceByNode = new Map<string, Set<string>>();
+  for (const row of evidenceRows) {
+    if (!row) continue;
+    const nodeId = String(row.node_id);
+    const actor = String(row.source_actor);
+    const actors = evidenceByNode.get(nodeId) ?? new Set<string>();
+    actors.add(actor);
+    evidenceByNode.set(nodeId, actors);
+    if (actor !== "user" && actor !== "tool") reasons.push("untrusted_evidence_actor");
+  }
+  const sourceActorSets = sourceNodeIds
+    .map((nodeId) => evidenceByNode.get(nodeId) ?? new Set<string>())
+    .filter((actors) => actors.size > 0);
+  if (
+    sourceActorSets.length === sourceNodeIds.length &&
+    ![...sourceActorSets[0]!].some((actor) =>
+      sourceActorSets.slice(1).every((actors) => actors.has(actor)),
+    )
+  ) {
+    reasons.push("source_actor_mismatch_across_nodes");
   }
   const scopes = new Set(evidenceRows.filter(Boolean).map((row) => String(row?.scope_json ?? "{}")));
   if (scopes.size > 1) reasons.push("scope_mismatch");

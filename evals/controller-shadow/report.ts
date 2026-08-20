@@ -30,6 +30,7 @@ export interface ShadowCoverageReport {
   toolFlow: number;
   searchSuppressed: number;
   feedbackNudgesShown: number;
+  claimOutcomeNudgesShown: number;
   graphs: number;
   queryTasks: number;
   semanticTasks: number;
@@ -171,6 +172,9 @@ export function summarizeShadowEvents(
     ).length,
     feedbackNudgesShown: events.filter(
       (event) => event.type === "tool_flow" && event.action === "feedback_nudge_shown",
+    ).length,
+    claimOutcomeNudgesShown: events.filter(
+      (event) => event.type === "tool_flow" && event.action === "claim_outcome_nudge_shown",
     ).length,
     graphs: graphs.size,
     queryTasks: queryTasks.size,

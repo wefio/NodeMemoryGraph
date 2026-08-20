@@ -49,6 +49,16 @@ its evidence record and `controlled` origin. This proves prompt discoverability
 and provenance plumbing, but it remains controlled evidence and does not close
 the natural-data collection item.
 
+Ordinary Pi now also emits a one-shot next-user-turn reminder for a completed
+Active Graph that disclosed memory but has no attributable claim outcome. The
+reminder is advisory and repeats the same fail-closed boundary: only an exact
+current user excerpt or a successful tool result may support or contradict a
+specific disclosed memory. Failed tool results are excluded from Pi evidence
+projection, and answer overlap, task completion, silence, or lack of correction
+remain non-evidence. Reminder display is separately counted in the shadow report.
+This closes the discoverability and successful-tool plumbing gap; it does not
+manufacture a natural label or complete the collection item above.
+
 Automatic recall now applies the existing `retrieve|cue|none` load gate. Pi also
 enforces a per-turn construction-process budget (three searches, five total
 search/get calls, exact-evidence progression, and no-gain stopping), preventing
@@ -129,6 +139,14 @@ local provenance-class safety gate; its natural false-rejection/false-acceptance
 cost still needs measurement. Do not enable it by
 default until scope, temporal-state, same-name identity, false-merge, and
 rollback outcomes are represented in the natural validation set.
+
+The read-only natural-maintenance audit now applies the same source-actor gate as
+the production automatic-merge assessment: evidence must be user/tool authored,
+and both candidate nodes must share at least one source-actor class. A regression
+compares audit eligibility, reasons, and target identity against the production
+assessment for an eligible pair, a user/tool mismatch, and Assistant-authored
+evidence. This closes an audit-parity bug but does not supply the natural
+false-merge evidence required for default enablement.
 
 The latest ordinary-Pi topology audit found one pending `refines` proposal,
 zero `same_as` or `distinct_from` relations, zero accepted or rejected identity

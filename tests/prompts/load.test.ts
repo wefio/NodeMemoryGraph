@@ -45,6 +45,7 @@ const SECTIONS = [
   "search_queries_parameter_description",
   "search_progression_required",
   "search_recommendation",
+  "shadow_claim_outcome_nudge",
   "search_disclosure",
   "mcp_search_disclosure",
   "get_disclosure",
@@ -115,6 +116,16 @@ test("memory policy exposes the independently verified claim-outcome boundary", 
   assert.match(text, /otherwise omit it/u);
   assert.match(text, /Retrieval, answer reuse, task completion/u);
   assert.match(text, /silence, or lack of correction are not claim evidence/u);
+});
+
+test("claim-outcome reminder is advisory and keeps the exact evidence boundary", () => {
+  const text = loadPrompts().shadow_claim_outcome_nudge;
+  assert.match(text, /current user message or a successful tool result/u);
+  assert.match(text, /independently and unambiguously supports or contradicts/u);
+  assert.match(text, /claimOutcomeSource=user/u);
+  assert.match(text, /exact evidence excerpt/u);
+  assert.match(text, /Otherwise omit the call/u);
+  assert.match(text, /failed tool output are not claim evidence/u);
 });
 
 test("disclosures keep placeholders for runtime substitution", () => {

@@ -155,7 +155,19 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           semantic_task_id: pendingFeedback.semanticTaskId,
         })
       : "";
-    const nudge = [completionNudge, feedbackNudge].filter(Boolean).join("\n");
+    const pendingClaimOutcome = isNewUserTurn
+      ? controllerShadow.pendingClaimOutcome(sessionId)
+      : null;
+    if (pendingClaimOutcome) {
+      await controllerShadow.claimOutcomeNudgeShown(sessionId, pendingClaimOutcome);
+    }
+    const claimOutcomeNudge = pendingClaimOutcome
+      ? renderDisclosure(nmgPrompts.shadow_claim_outcome_nudge, {
+          active_graph_id: pendingClaimOutcome.activeGraphId,
+          semantic_task_id: pendingClaimOutcome.semanticTaskId,
+        })
+      : "";
+    const nudge = [completionNudge, feedbackNudge, claimOutcomeNudge].filter(Boolean).join("\n");
     let reasoningCheckpoint = "";
     if (reasoningWorkspaces) {
       try {
@@ -1896,11 +1908,12 @@ function piHistoryMessage(value: unknown): AgentHistoryMessage | undefined {
   const entry = value as {
     type?: unknown;
     id?: unknown;
-    message?: { role?: unknown; content?: unknown };
+    message?: { role?: unknown; content?: unknown; isError?: unknown };
   };
   if (entry.type !== "message" || typeof entry.id !== "string" || !entry.message) {
     return undefined;
   }
+  if (entry.message.role === "toolResult" && entry.message.isError !== false) return undefined;
   const actor =
     entry.message.role === "user"
       ? "user"

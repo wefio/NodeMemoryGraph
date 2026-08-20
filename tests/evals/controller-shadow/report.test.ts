@@ -84,6 +84,12 @@ test("shadow coverage keeps missing labels unknown and reports calibration block
       action: "feedback_nudge_shown",
       reason: "next_user_turn_review",
     },
+    {
+      ...base,
+      type: "tool_flow",
+      action: "claim_outcome_nudge_shown",
+      reason: "next_user_turn_claim_review",
+    },
   ];
   const report = summarizeShadowEvents(events);
   assert.equal(report.retrievals, 1);
@@ -98,9 +104,10 @@ test("shadow coverage keeps missing labels unknown and reports calibration block
     controlled: 0,
     legacy: 0,
   });
-  assert.equal(report.toolFlow, 2);
+  assert.equal(report.toolFlow, 3);
   assert.equal(report.searchSuppressed, 1);
   assert.equal(report.feedbackNudgesShown, 1);
+  assert.equal(report.claimOutcomeNudgesShown, 1);
   assert.equal(report.attributions, 2);
   assert.equal(report.diagnosticAttributions, 1);
   assert.equal(report.verifiedAttributions, 1);

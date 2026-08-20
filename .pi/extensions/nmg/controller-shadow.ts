@@ -16,10 +16,17 @@ interface PendingContext {
   outcomeRecorded: boolean;
   feedbackRecorded: boolean;
   feedbackNudgeShown: boolean;
+  verifiedClaimOutcomeRecorded: boolean;
+  claimOutcomeNudgeShown: boolean;
   verifiedSupportedMemoryIds: Set<string>;
 }
 
 export interface PendingShadowFeedback {
+  activeGraphId: string;
+  semanticTaskId: string;
+}
+
+export interface PendingClaimOutcome {
   activeGraphId: string;
   semanticTaskId: string;
 }
@@ -250,15 +257,20 @@ export class ControllerShadowBridge {
     }
     if (outcome === "supported") pending.verifiedSupportedMemoryIds.add(memoryId);
     else pending.verifiedSupportedMemoryIds.delete(memoryId);
+    // The caller invokes this only after the canonical daemon accepted the
+    // attributable outcome. Suppress the reminder even if best-effort shadow
+    // logging fails; otherwise a telemetry failure could prompt a duplicate vote.
+    pending.verifiedClaimOutcomeRecorded = true;
     try {
       const dependencies = await this.#dependencies();
-      return dependencies.log.attribution({
+      const recorded = dependencies.log.attribution({
         graphId: activeGraphId,
         sessionId,
         candidateMemoryIds: graph.memoryIds,
         attributedMemoryIds: [...pending.verifiedSupportedMemoryIds],
         method: "verified_claim_support",
       });
+      return recorded;
     } catch {
       // Canonical claim evidence is already in SQLite; shadow export is best-effort.
       return false;
@@ -299,6 +311,26 @@ export class ControllerShadowBridge {
         sessionId,
         action: "feedback_nudge_shown",
         reason: "next_user_turn_review",
+      });
+    } catch {
+      // Reminder telemetry is observational and must not affect the reminder.
+    }
+  }
+
+  async claimOutcomeNudgeShown(
+    sessionId: string,
+    pendingClaimOutcome: PendingClaimOutcome,
+  ): Promise<void> {
+    if (!this.enabled) return;
+    const pending = this.#contexts.get(pendingClaimOutcome.activeGraphId);
+    if (pending?.context.activeGraph?.sessionId !== sessionId) return;
+    try {
+      const dependencies = await this.#dependencies();
+      dependencies.log.toolFlow({
+        graphId: pendingClaimOutcome.activeGraphId,
+        sessionId,
+        action: "claim_outcome_nudge_shown",
+        reason: "next_user_turn_claim_review",
       });
     } catch {
       // Reminder telemetry is observational and must not affect the reminder.
@@ -357,6 +389,32 @@ export class ControllerShadowBridge {
     };
   }
 
+  /**
+   * Return one completed disclosure that still lacks independently attributable
+   * claim evidence. The reminder is deliberately advisory: the next user turn
+   * may contain no eligible evidence, which remains unknown rather than a label.
+   */
+  pendingClaimOutcome(sessionId: string): PendingClaimOutcome | null {
+    if (!this.enabled) return null;
+    const pending = [...this.#contexts.entries()]
+      .reverse()
+      .find(
+        ([, entry]) =>
+          entry.context.activeGraph?.sessionId === sessionId &&
+          entry.disclosureRecorded &&
+          entry.outcomeRecorded &&
+          !entry.verifiedClaimOutcomeRecorded &&
+          !entry.claimOutcomeNudgeShown,
+      );
+    if (!pending) return null;
+    const [activeGraphId, entry] = pending;
+    entry.claimOutcomeNudgeShown = true;
+    return {
+      activeGraphId,
+      semanticTaskId: entry.context.activeGraph!.taskId,
+    };
+  }
+
   clear(sessionId: string): void {
     for (const [graphId, entry] of this.#contexts) {
       if (entry.context.activeGraph?.sessionId === sessionId) this.#contexts.delete(graphId);
@@ -386,6 +444,8 @@ export class ControllerShadowBridge {
       outcomeRecorded: false,
       feedbackRecorded: false,
       feedbackNudgeShown: false,
+      verifiedClaimOutcomeRecorded: false,
+      claimOutcomeNudgeShown: false,
       verifiedSupportedMemoryIds: new Set(),
     });
     while (this.#contexts.size > this.#maxContexts) {

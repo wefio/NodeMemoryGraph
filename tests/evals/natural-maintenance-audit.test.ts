@@ -16,6 +16,10 @@ test("natural maintenance audit reads claim, consolidation, and topology evidenc
   const ltg = new NmgStore(ltgPath);
   const stg = new NmgStore(stgPath);
   let stgMemoryId = "";
+  const productionAssessments = new Map<
+    string,
+    { eligible: boolean; reasons: string[]; targetName: string | null }
+  >();
   try {
     const local = stg.remember({
       statement: "Atlas stores durable metadata in SQLite.",
@@ -70,6 +74,7 @@ test("natural maintenance audit reads claim, consolidation, and topology evidenc
         statement: `Sam identity evidence A${index}`,
         nodeName: "Sam A",
         scope: { person: "sam" },
+        sourceActor: "user",
       }),
     );
     const right = [0, 1, 2].map((index) =>
@@ -77,15 +82,83 @@ test("natural maintenance audit reads claim, consolidation, and topology evidenc
         statement: `Sam identity evidence B${index}`,
         nodeName: "Sam B",
         scope: { person: "sam" },
+        sourceActor: "user",
       }),
     );
+    let eligibleProposal: ReturnType<NmgStore["proposeSemanticRelation"]> | undefined;
     for (let index = 0; index < 5; index += 1) {
-      ltg.proposeSemanticRelation({
+      eligibleProposal = ltg.proposeSemanticRelation({
         sourceNodeId: left[0]!.node.id,
         targetNodeId: right[0]!.node.id,
         relationType: "same_as",
         evidenceMemoryIds: [left[index % 3]!.memory.id, right[index % 3]!.memory.id],
         confidence: 0.99,
+      });
+    }
+    const mismatchedLeft = [0, 1].map((index) =>
+      ltg.remember({
+        statement: `Robin user identity evidence ${index}`,
+        nodeName: "Robin user source",
+        scope: { person: "robin" },
+        sourceActor: "user",
+      }),
+    );
+    const mismatchedRight = [0, 1].map((index) =>
+      ltg.remember({
+        statement: `Robin tool identity evidence ${index}`,
+        nodeName: "Robin tool source",
+        scope: { person: "robin" },
+        sourceActor: "tool",
+      }),
+    );
+    let mismatchedProposal: ReturnType<NmgStore["proposeSemanticRelation"]> | undefined;
+    for (let index = 0; index < 5; index += 1) {
+      mismatchedProposal = ltg.proposeSemanticRelation({
+        sourceNodeId: mismatchedLeft[0]!.node.id,
+        targetNodeId: mismatchedRight[0]!.node.id,
+        relationType: "same_as",
+        evidenceMemoryIds: [
+          mismatchedLeft[index % 2]!.memory.id,
+          mismatchedRight[index % 2]!.memory.id,
+        ],
+        confidence: 0.99,
+      });
+    }
+    const untrustedLeft = [0, 1].map((index) =>
+      ltg.remember({
+        statement: `Taylor assistant identity evidence A${index}`,
+        nodeName: "Taylor assistant A",
+        scope: { person: "taylor" },
+        sourceActor: "assistant",
+      }),
+    );
+    const untrustedRight = [0, 1].map((index) =>
+      ltg.remember({
+        statement: `Taylor assistant identity evidence B${index}`,
+        nodeName: "Taylor assistant B",
+        scope: { person: "taylor" },
+        sourceActor: "assistant",
+      }),
+    );
+    let untrustedProposal: ReturnType<NmgStore["proposeSemanticRelation"]> | undefined;
+    for (let index = 0; index < 5; index += 1) {
+      untrustedProposal = ltg.proposeSemanticRelation({
+        sourceNodeId: untrustedLeft[0]!.node.id,
+        targetNodeId: untrustedRight[0]!.node.id,
+        relationType: "same_as",
+        evidenceMemoryIds: [
+          untrustedLeft[index % 2]!.memory.id,
+          untrustedRight[index % 2]!.memory.id,
+        ],
+        confidence: 0.99,
+      });
+    }
+    for (const proposal of [eligibleProposal!, mismatchedProposal!, untrustedProposal!]) {
+      const assessment = ltg.assessAutomaticMergeProposal(proposal.id);
+      productionAssessments.set(proposal.id, {
+        eligible: assessment.eligible,
+        reasons: assessment.reasons,
+        targetName: assessment.targetName,
       });
     }
   } finally {
@@ -111,9 +184,25 @@ test("natural maintenance audit reads claim, consolidation, and topology evidenc
     assert.equal(report.stg[0]?.claims.naturalSemanticTasks, 3);
     assert.deepEqual(report.stg[0]?.claims.promotionCandidates, [stgMemoryId]);
     assert.equal(report.ltg.consolidatedFromStg[0]?.sourceMemoryId, stgMemoryId);
-    assert.equal(report.ltg.topology.proposalsByRelation.same_as, 1);
-    assert.equal(report.ltg.topology.pendingAutomaticMergeAssessments.length, 1);
-    assert.equal(report.ltg.topology.pendingAutomaticMergeAssessments[0]?.eligible, true);
+    assert.equal(report.ltg.topology.proposalsByRelation.same_as, 3);
+    assert.equal(report.ltg.topology.pendingAutomaticMergeAssessments.length, 3);
+    for (const actual of report.ltg.topology.pendingAutomaticMergeAssessments) {
+      const expected = productionAssessments.get(actual.proposalId);
+      assert.ok(expected, `production assessment exists for ${actual.proposalId}`);
+      assert.equal(actual.eligible, expected.eligible);
+      assert.deepEqual(actual.reasons, expected.reasons);
+      assert.equal(actual.targetName, expected.targetName);
+    }
+    assert.ok(
+      report.ltg.topology.pendingAutomaticMergeAssessments.some((assessment) =>
+        assessment.reasons.includes("source_actor_mismatch_across_nodes"),
+      ),
+    );
+    assert.ok(
+      report.ltg.topology.pendingAutomaticMergeAssessments.some((assessment) =>
+        assessment.reasons.includes("untrusted_evidence_actor"),
+      ),
+    );
     assert.equal(report.ltg.maintenanceBacklog.distributedWritePressure, false);
     assert.equal(report.policy.maintenance.writeThreshold, 16);
     assert.equal(report.evidenceGaps.includes("no_stg_claim_outcomes"), false);

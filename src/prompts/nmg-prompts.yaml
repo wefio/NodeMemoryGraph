@@ -284,6 +284,18 @@ shadow_feedback_nudge: >-
   and noMemoryNeeded. Omit the feedback call when any required label would be a
   guess. Silence, task completion, and lack of user correction are not labels.
 
+# Shadow-only, one-shot request to inspect the next turn for attributable claim evidence.
+shadow_claim_outcome_nudge: >-
+  The previous NMG retrieval activeGraphId={active_graph_id} disclosed saved
+  memory and completed under semanticTaskId={semantic_task_id}. Inspect only the
+  current user message or a successful tool result from this new turn. If it
+  independently and unambiguously supports or contradicts one of that graph's
+  disclosed saved claims, call nmg_remember action=claim_outcome with the exact
+  memoryId, activeGraphId, semanticTaskId, claimOutcomeSource=user or
+  claimOutcomeSource=tool, and an exact evidence excerpt. Otherwise omit the call. Answer overlap, retrieval,
+  task success, silence, lack of correction, and failed tool output are not
+  claim evidence.
+
 # ---- 渐进披露（检索结果返回时附带） ---------------------------------------
 
 search_disclosure: |

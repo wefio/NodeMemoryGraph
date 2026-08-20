@@ -111,8 +111,11 @@ export interface ShadowFeedbackEvent extends ShadowEventBase {
 
 export interface ShadowToolFlowEvent extends ShadowEventBase {
   type: "tool_flow";
-  action: "search_suppressed" | "feedback_nudge_shown";
-  reason: "evidence_progression_required" | "next_user_turn_review";
+  action: "search_suppressed" | "feedback_nudge_shown" | "claim_outcome_nudge_shown";
+  reason:
+    | "evidence_progression_required"
+    | "next_user_turn_review"
+    | "next_user_turn_claim_review";
   query?: string;
 }
 
