@@ -5,9 +5,12 @@ not a memory editor and it is not part of ordinary Pi inference.
 
 ## Trainable and immutable state
 
-The currently implemented trainable artifact is the stable natural-language
-policy that tells an Agent how to use progressive recall. The initial artifact is copied from
-`src/prompts/nmg-prompts.yaml:memory_policy`.
+The implemented adapter trains a **controller-only decision policy**. It is
+initialized from `src/prompts/nmg-prompts.yaml:memory_policy`, but its evaluator
+asks for a strict machine-readable `recall_action`/`fold_noise` decision. That
+artifact is not interchangeable with the global natural-language policy seen by
+the answering Agent. The first matched promotion run demonstrated this boundary
+by catching controller JSON leaking into user answers.
 
 SkillOpt may propose bounded edits concerning:
 
@@ -53,9 +56,12 @@ changing only the policy. It must report:
 - unnecessary search and expansion;
 - injected tokens, tool calls, and end-to-end latency.
 
-The candidate is adopted only by manually updating `nmg-prompts.yaml`. NMG does
-not load `best_skill.md` in production, so there is no second mutable prompt
-source.
+The candidate is adopted only after its controller contract has a dedicated
+runtime boundary and the matched gate passes. A reviewed YAML edit remains the
+only production adoption path; NMG does not load `best_skill.md` in production,
+so there is no second mutable prompt source. Until the dedicated controller
+boundary exists, the candidate-policy hook is a deliberately adversarial Lab
+promotion test, not a deployment mechanism.
 
 ## Data readiness
 
@@ -89,8 +95,29 @@ The extension and exporter previously used different default shadow paths. This
 was fixed on 2026-08-11 by a shared resolver: ordinary use defaults to `~/.nmg`,
 while controlled helpers explicitly select project-local `.nmg`. Historical
 counts from either file are snapshots and must be re-exported before making a
-readiness claim. At the time of this update the formal gate remains **not
-demonstrated ready**.
+readiness claim. The 2026-08-20 formal export is ready with 24 independent tasks:
+12 train, 6 chronological validation, and 6 untouched test, with both required
+action classes and both noise-label values.
+
+## First official optimization and promotion result
+
+The first official SkillOpt run used DeepSeek V4 Flash through an
+OpenAI-compatible endpoint, seed 42, three epochs, batch size 8, four rollout and
+analyst workers, and a 4096-token target completion budget. On the fixed split:
+
+- validation hard accuracy improved from 1/6 to 4/6 at step 9;
+- untouched test hard accuracy improved from 1/6 to 2/6 (soft accuracy 3/6);
+- the run made 258 model calls and used 1,254,494 tokens (775,127 prompt and
+  479,367 completion tokens).
+
+The offline gain did not pass the matched Agent gate. With the same Pi model and
+six integration cases, the canonical policy passed 6/6 while candidate SHA-256
+`8133cc870189c451dac4548fe68d49388d7fb4353b17b1ad89cfbeb16f5618b1`
+passed 4/6. The candidate replaced two user answers with controller JSON and
+prefixed other answers with the same internal protocol. It was rejected and the
+canonical YAML was left unchanged. This result validates the two-stage gate and
+invalidates the assumption that a controller-optimized text can be installed
+verbatim as the Agent's global memory policy.
 
 ## Proposed maintenance-policy extension
 
@@ -129,7 +156,10 @@ manifest with source/policy hashes and immutable boundaries under
 After the dataset is ready, install SkillOpt's Python environment according to
 its upstream documentation and run its patched `configs/nmg_policy.yaml`. The
 adapter uses SkillOpt's configured target/optimizer backends and never opens the
-NMG SQLite database.
+NMG SQLite database. On Windows, set `PYTHONUTF8=1` for the official Python
+process so UTF-8 JSON is not decoded through the legacy system code page. Load
+the chosen provider credentials into the process environment; do not store them
+in SkillOpt output or committed configuration.
 
 An accepted offline candidate can be exercised against NMG's existing Pi cases
 without changing the canonical YAML:

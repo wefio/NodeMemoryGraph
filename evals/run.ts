@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { loadEnvFile } from "node:process";
 
 import { RpcClient } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
@@ -29,6 +30,8 @@ interface EvalCase {
     forbiddenTerms?: string[];
     requireSearchTool: boolean;
     requireGetTool?: boolean;
+    forbidSearchTool?: boolean;
+    forbidGetTool?: boolean;
   };
 }
 
@@ -46,6 +49,11 @@ interface EvalResult {
 }
 
 const root = resolve(import.meta.dirname, "..");
+const localEnvPath = resolve(root, ".env");
+if (existsSync(localEnvPath)) loadEnvFile(localEnvPath);
+if (!process.env.DEEPSEEK_API_KEY) {
+  throw new Error("eval:agents requires DEEPSEEK_API_KEY in the environment or project .env");
+}
 const allCases = JSON.parse(
   readFileSync(resolve(import.meta.dirname, "cases/core.json"), "utf8"),
 ) as EvalCase[];
@@ -188,6 +196,12 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
       if (testCase.recall.requireGetTool && !readerGot) {
         errors.push("Reader did not complete the required nmg_get call.");
       }
+      if (testCase.recall.forbidSearchTool && readerSearched) {
+        errors.push("Reader searched NMG for a task marked as memory-independent.");
+      }
+      if (testCase.recall.forbidGetTool && readerGot) {
+        errors.push("Reader loaded NMG evidence for a task marked as memory-independent.");
+      }
       if (!answerMatched) errors.push("Reader answer did not contain all expected terms.");
     } finally {
       await reader.stop();
@@ -203,7 +217,9 @@ async function runCase(testCase: EvalCase): Promise<EvalResult> {
       databaseVerified &&
       answerMatched &&
       (!testCase.recall.requireSearchTool || readerLoadMode === "retrieve" || readerSearched) &&
-      (!testCase.recall.requireGetTool || readerGot),
+      (!testCase.recall.requireGetTool || readerGot) &&
+      (!testCase.recall.forbidSearchTool || !readerSearched) &&
+      (!testCase.recall.forbidGetTool || !readerGot),
     writerRemembered,
     databaseVerified,
     readerLoadMode,

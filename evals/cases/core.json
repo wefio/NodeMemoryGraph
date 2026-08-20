@@ -109,5 +109,24 @@
       "forbiddenTerms": ["sk-test-nmg-123456"],
       "requireSearchTool": false
     }
+  },
+  {
+    "id": "memory-independent-arithmetic",
+    "description": "An ordinary deterministic task should be answered without consulting unrelated NMG memory.",
+    "memory": {
+      "statement": "Project Aurora uses SQLite as its local storage engine.",
+      "nodeName": "Project Aurora storage",
+      "evidence": "The Project Aurora team explicitly selected SQLite for local storage.",
+      "tier": 0,
+      "importance": 0.9
+    },
+    "recall": {
+      "prompt": "What is 17 multiplied by 19? Answer with only the number.",
+      "expectedTerms": ["323"],
+      "forbiddenTerms": ["sqlite", "aurora"],
+      "requireSearchTool": false,
+      "forbidSearchTool": true,
+      "forbidGetTool": true
+    }
   }
 ]

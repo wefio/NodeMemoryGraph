@@ -2205,18 +2205,26 @@ probe is fixed to `controlled`, and pre-field legacy events remain `unknown`.
 Only fully labelled natural outcomes may enter controller calibration or the
 formal SkillOpt split. Controlled outcomes remain valid engineering smoke data.
 
-NMG Lab may use SkillOpt to optimize the stable recall/write/tool-use policy,
-but never mutable memory contents. The trainable artifact begins as the
-`memory_policy` field in `nmg-prompts.yaml`; history, evidence, facts, STG/LTG/AG
-state, node identity, and edge identity are immutable evaluation inputs.
+NMG Lab may use SkillOpt to optimize a controller-only recall decision policy,
+but never mutable memory contents. The current adapter seeds that artifact from
+the `memory_policy` field in `nmg-prompts.yaml`, then evaluates a strict
+machine-readable decision contract. That controller artifact is not the same as
+the global natural-language policy used by the answering Agent. History,
+evidence, facts, STG/LTG/AG state, node identity, and edge identity remain
+immutable evaluation inputs.
 
 The first adapter learns only the next progressive-recall decision (`answer`,
 `expand`, or `stop`) and whether noise should be folded from explicit shadow
 labels. It uses chronological whole-task train/validation/test splits. A
 SkillOpt validation win creates a candidate only: matched Pi+NMG answer,
 evidence, pollution, token, tool-call, and latency gates must also pass, after
-which adoption is a reviewed edit back into the YAML source of truth. Runtime
-NMG never loads `best_skill.md` automatically. See
+which adoption also requires a dedicated controller invocation/policy boundary
+that cannot leak protocol into the user answer. Adoption remains a reviewed edit
+back into the YAML source of truth. Runtime NMG never loads `best_skill.md`
+automatically. The first official run improved offline validation and test
+scores, but the matched Pi gate regressed from canonical 6/6 to candidate 4/6
+because `recall_action` JSON appeared in user answers; the candidate was rejected
+and canonical YAML was unchanged. See
 `skillopt-policy-optimization.md` for the protocol and current readiness.
 
 A second, separate candidate artifact is the proposed
@@ -2236,8 +2244,11 @@ rewrite, supersede, split, or merge proposals must retain evidence and use the
 existing journal where supported.
 
 **Implementation status:** explicit feedback collection, natural/controlled
-provenance, journaled node-merge rollback, and the recall-policy SkillOpt adapter
-are implemented. The maintenance-policy artifact, three-way attribution,
+provenance, journaled node-merge rollback, the recall-policy SkillOpt adapter,
+formal data gate, first official optimization, and matched rejection gate are
+implemented. A dedicated controller runtime policy channel is not implemented;
+the Lab candidate hook intentionally tests and rejects unsafe global-policy
+replacement. The maintenance-policy artifact, three-way attribution,
 long-horizon score, and proposal-to-store channel are not implemented. STG/LTG
 context composition is implemented, but it is not a reversible persistent STG
 merge.

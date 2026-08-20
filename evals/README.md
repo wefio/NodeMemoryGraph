@@ -16,6 +16,16 @@ Public benchmark scores do not replace the deterministic core suite. A memory
 system can answer benchmark questions correctly while corrupting provenance,
 exceeding its retrieval budget, or rebuilding an index unnecessarily.
 
+## Pi Agent integration cases
+
+Run `npm run eval:agents` for fresh-process Pi+NMG write/read cases. The runner
+loads `DEEPSEEK_API_KEY` from the process environment or the project `.env`,
+isolates Pi identity and NMG storage per case, and fails fast when credentials
+are unavailable. The suite includes both memory-dependent questions and ordinary
+memory-independent work. A no-memory case must produce the correct answer while
+making no `nmg_search` or `nmg_get` call, so NMG is checked for interference as
+well as recall.
+
 ## HaluMem operation-level extraction and update audit
 
 HaluMem is evaluated separately from the OmniMemEval QA runner because its

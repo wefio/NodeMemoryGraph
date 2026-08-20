@@ -18,11 +18,11 @@ The capture and session-ownership plumbing is implemented. Controlled examples
 may validate plumbing but must not be counted as natural product evidence. This
 is enforced by `collectionOrigin`: ordinary Pi writes `natural`, the headless
 probe writes `controlled`, and legacy events without the field are excluded.
-As of 2026-08-14 the bounded shadow log contains 29 fully labelled
+As of 2026-08-20 the bounded shadow log contains 39 fully labelled
 natural graphs. Session-local latest-graph feedback removed fragile UUID
 copying, and online Pi blackboard audits now contribute ordinary multi-Agent
 supervision without launching controlled headless probes. The report contains
-748 events across 256 retrieval graphs and 35 semantic tasks. Before the latest
+897 events across 299 retrieval graphs and 45 semantic tasks. Before the latest
 negative-task batch, useful labels were strongly positive-skewed: only 3
 evidence-insufficient examples, 5 expansion-not-useful examples, 2
 excessive-noise positives, and 2 no-memory-needed positives; there are still
@@ -33,8 +33,8 @@ report and both dataset exporters now aggregate non-null labels across
 incremental feedback calls for the same graph; mixed controlled/natural
 provenance fails closed to controlled. This recovered valid existing feedback
 without inventing labels. This is real progress, not enough for calibration or
-promotion. These graphs come from only 14 independent session/task connected
-groups because the online Pi agents were reused across tasks. Dataset splitting
+promotion. The formal SkillOpt exporter now finds 24 independent session/task
+connected groups. Dataset splitting
 now keeps each connected component of the `sessionId`/`semanticTaskId` bipartite
 graph in one arm, preventing an old Pi conversation from leaking into train,
 validation, and test. New promotion evidence must therefore come from fresh Pi
@@ -73,9 +73,9 @@ scenarios instead of repeating successful recall audits.
 
 QPP1, QPP2, and search recommendation remain independently switchable. Their
 current constants are cold-start priors, not calibrated probabilities. The
-2026-08-14 report has 29 fully labelled natural graphs but only 14
-independent session/task groups, and still
-fails closed. This is enough to justify continuing collection, not enough to
+2026-08-20 report has 39 fully labelled natural graphs across 24 independent
+session/task groups and still fails the calibration gate. This is enough to
+justify continuing collection, not enough to
 implement or promote rolling threshold calibration; use at least 50 balanced
 positive/negative examples with a held-out time segment before moving the
 threshold. The rolling worker and rollbackable shadow artifact now exist
@@ -114,21 +114,23 @@ answer reuse, and silence still do not create votes. The default actuator remain
 off; natural precision and reversal evidence must now accumulate through this
 boundary.
 
-## 4. Run the SkillOpt promotion gate
+## 4. Separate controller policy from the Agent answer policy
 
-- [ ] Reach the default readiness floor of 24 materially independent labelled
-  retrieval tasks: 12 train, 6 chronological validation, and 6 untouched test,
-  with sufficient action and noise-label diversity. The current exporter reports
-  14 independent groups split as 10 train, 2 validation, and 2 test; the gate
-  remains closed. A labelled graph or semantic task from a reused Pi session is
-  not counted as an independent promotion task.
-- [ ] Run SkillOpt, then a matched Pi+NMG promotion experiment covering answer
-  quality, official evidence recall, pollution, tokens, tool calls, and latency.
-  Adopt a winner only through reviewed edits to `src/prompts/nmg-prompts.yaml`.
+- [ ] Give the progressive-recall controller its own invocation/policy channel,
+  or define and test a projection that cannot leak controller protocol into the
+  user-facing answer. Do not install a controller-only SkillOpt artifact as the
+  global NMG memory policy.
 
-The offline adapter, de-identified exporter, fail-closed readiness gate, and
-isolated candidate-policy hook are implemented. `--allow-insufficient` is only
-an adapter smoke test and never authorizes training or promotion.
+The original readiness and promotion experiment are complete. The formal export
+passes at 12 train, 6 chronological validation, and 6 untouched test tasks. An
+official three-epoch SkillOpt run improved held-out validation hard accuracy from
+1/6 to 4/6 and untouched test hard accuracy from 1/6 to 2/6. The matched Pi+NMG
+gate then rejected the candidate: canonical policy passed 6/6 cases, while the
+candidate passed 4/6 and emitted internal `recall_action`/`fold_noise` JSON in
+user answers. This is useful evidence that the offline controller contract and
+the global Agent policy are different artifacts. The canonical YAML was not
+changed. The Lab candidate hook remains an explicit promotion test, not a
+production loader.
 
 ## Explicitly deferred — not missing current work
 

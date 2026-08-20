@@ -121,7 +121,10 @@ test("OmniMemEval batches pending record vectors before search", async () => {
       return inputs.map(() => [1, 0]);
     },
   };
-  let bridge = new OmniMemEvalBridge(root, { embeddingClient });
+  let bridge = new OmniMemEvalBridge(root, {
+    embeddingClient,
+    embeddingCachePath: join(root, "embedding-cache.sqlite"),
+  });
   try {
     await bridge.handle({
       id: 1,
