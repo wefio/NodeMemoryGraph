@@ -1393,7 +1393,9 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
       const evidenceRows = proposal.evidenceMemoryIds.map(
         (memoryId) =>
           this.db
-            .prepare("SELECT node_id, scope_json, status FROM memory_records WHERE id = ?")
+            .prepare(
+              "SELECT node_id, scope_json, status, source_actor FROM memory_records WHERE id = ?",
+            )
             .get(memoryId) as Row | undefined,
       );
       if (evidenceRows.some((candidate) => !candidate || candidate.status !== "active")) {
@@ -1404,6 +1406,27 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
           reasons.push("evidence_not_balanced_across_nodes");
           break;
         }
+      }
+      const evidenceByNode = new Map<string, Set<string>>();
+      for (const candidate of evidenceRows) {
+        if (!candidate) continue;
+        const nodeId = String(candidate.node_id);
+        const actor = String(candidate.source_actor);
+        const actors = evidenceByNode.get(nodeId) ?? new Set<string>();
+        actors.add(actor);
+        evidenceByNode.set(nodeId, actors);
+        if (actor !== "user" && actor !== "tool") reasons.push("untrusted_evidence_actor");
+      }
+      const sourceActorSets = proposal.sourceNodeIds
+        .map((nodeId) => evidenceByNode.get(nodeId) ?? new Set<string>())
+        .filter((actors) => actors.size > 0);
+      if (
+        sourceActorSets.length === proposal.sourceNodeIds.length &&
+        ![...sourceActorSets[0]!].some((actor) =>
+          sourceActorSets.slice(1).every((actors) => actors.has(actor)),
+        )
+      ) {
+        reasons.push("source_actor_mismatch_across_nodes");
       }
       const scopes = new Set(
         evidenceRows

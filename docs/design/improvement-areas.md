@@ -293,8 +293,9 @@ harness-verified excerpt.
 **Status:** the actuator exists behind an explicit, default-off policy. Semantic
 maintenance can accept only a strongly gated `same_as` identity proposal when
 `NMG_TOPOLOGY_AUTO_MERGE=1`; it requires repeated high-confidence observations,
-balanced active evidence, one exact scope identity, no conflicting proposal, and
-no pre-existing canonical target. Each actuation records its transform and uses
+balanced active user/tool evidence with a shared source-actor class, one exact
+scope identity, no conflicting proposal, and no pre-existing canonical target.
+Each actuation records its transform and uses
 the reversible merge journal. Work is bounded to one proposal per maintenance
 pass by default and hard-capped at four.
 

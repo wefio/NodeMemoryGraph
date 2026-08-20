@@ -645,6 +645,88 @@ test("automatic merge rejects ambiguous scope identity", () => {
   });
 });
 
+test("automatic merge requires trusted source-actor alignment across nodes", () => {
+  withStore((store) => {
+    const left = [0, 1].map((index) =>
+      store.remember({
+        statement: `Sam user identity evidence ${index}`,
+        nodeName: "Sam User Source",
+        scope: { person: "sam" },
+        sourceActor: "user",
+      }),
+    );
+    const right = [0, 1].map((index) =>
+      store.remember({
+        statement: `Sam tool identity evidence ${index}`,
+        nodeName: "Sam Tool Source",
+        scope: { person: "sam" },
+        sourceActor: "tool",
+      }),
+    );
+    let proposal = store.proposeSemanticRelation({
+      sourceNodeId: left[0]!.node.id,
+      targetNodeId: right[0]!.node.id,
+      relationType: "same_as",
+      evidenceMemoryIds: [left[0]!.memory.id, right[0]!.memory.id],
+      confidence: 0.99,
+    });
+    for (let index = 0; index < 4; index += 1) {
+      proposal = store.proposeSemanticRelation({
+        sourceNodeId: left[0]!.node.id,
+        targetNodeId: right[0]!.node.id,
+        relationType: "same_as",
+        evidenceMemoryIds: [left[index % 2]!.memory.id, right[index % 2]!.memory.id],
+        confidence: 0.99,
+      });
+    }
+
+    const assessment = store.assessAutomaticMergeProposal(proposal.id, {
+      minimumEvidenceMemories: 4,
+    });
+    assert.equal(assessment.eligible, false);
+    assert.ok(assessment.reasons.includes("source_actor_mismatch_across_nodes"));
+  });
+});
+
+test("automatic merge rejects assistant-authored identity evidence", () => {
+  withStore((store) => {
+    const left = store.remember({
+      statement: "Sam assistant identity evidence A",
+      nodeName: "Sam Assistant A",
+      scope: { person: "sam" },
+      sourceActor: "assistant",
+    });
+    const right = store.remember({
+      statement: "Sam assistant identity evidence B",
+      nodeName: "Sam Assistant B",
+      scope: { person: "sam" },
+      sourceActor: "assistant",
+    });
+    let proposal = store.proposeSemanticRelation({
+      sourceNodeId: left.node.id,
+      targetNodeId: right.node.id,
+      relationType: "same_as",
+      evidenceMemoryIds: [left.memory.id, right.memory.id],
+      confidence: 0.99,
+    });
+    for (let index = 0; index < 4; index += 1) {
+      proposal = store.proposeSemanticRelation({
+        sourceNodeId: left.node.id,
+        targetNodeId: right.node.id,
+        relationType: "same_as",
+        evidenceMemoryIds: [left.memory.id, right.memory.id],
+        confidence: 0.99,
+      });
+    }
+
+    const assessment = store.assessAutomaticMergeProposal(proposal.id, {
+      minimumEvidenceMemories: 2,
+    });
+    assert.equal(assessment.eligible, false);
+    assert.ok(assessment.reasons.includes("untrusted_evidence_actor"));
+  });
+});
+
 test("reviewTopologyProposal throws for nonexistent proposal", () => {
   withStore((store) => {
     assert.throws(

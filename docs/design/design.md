@@ -784,7 +784,10 @@ judgments accumulate observations and provenance on one pending proposal. A
 read-only automation assessment requires a pending identity proposal, at least
 five observations, mean confidence of at least 0.98, at least four active
 evidence memories represented on both nodes, identical evidence scope, and no
-pending `distinct_from` or `contradicts` proposal. The scope must expose exactly
+pending `distinct_from` or `contradicts` proposal. Identity evidence must come
+from user or tool sources, and the two nodes must share at least one source-actor
+class; Assistant/system-authored identity guesses and disjoint provenance classes
+cannot drive an automatic merge. The scope must expose exactly
 one non-empty identity value, and its normalized canonical name must not already
 belong to an active node. Passing this assessment is only eligibility by default:
 automatic actuation is fail-closed unless `NMG_TOPOLOGY_AUTO_MERGE=1` is set.

@@ -95,7 +95,11 @@ Natural-data validation is the missing evidence, not another merge algorithm.
 The automatic identity actuator is now wired behind the default-off
 `NMG_TOPOLOGY_AUTO_MERGE=1` switch. It accepts only strongly gated `same_as`
 proposals with one unambiguous scope identity, stores the resulting reversible
-transform on the proposal, and limits each maintenance pass. Do not enable it by
+transform on the proposal, and limits each maintenance pass. The assessment now
+also rejects Assistant/system-authored identity evidence and requires the two
+candidate nodes to share at least one user/tool source-actor class. This is a
+local provenance-class safety gate; its natural false-rejection/false-acceptance
+cost still needs measurement. Do not enable it by
 default until scope, temporal-state, same-name identity, false-merge, and
 rollback outcomes are represented in the natural validation set.
 
