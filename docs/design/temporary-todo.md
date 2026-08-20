@@ -83,6 +83,15 @@ The rolling worker and rollbackable shadow artifact already exist
 data plus a matched held-out shadow result, not worker plumbing or another fixed
 sample-count threshold.
 
+Active/default eligibility now also has a separate fail-closed matched-product
+gate. It requires paired baseline/candidate task-success and evidence-sufficiency
+rates plus bounded mean tool rounds, tokens, and end-to-end latency; absent
+matched measurements cannot pass. Tool rounds deliberately remain outside the
+AG budget head because they include non-NMG tools, while observational task
+success alone is not a causal policy target. The unresolved work is to collect
+matched natural arms and feed these typed metrics into the gate; offline replay
+cannot substitute for that product evidence.
+
 ## 3. Validate unattended memory maintenance
 
 - [ ] Measure STG-to-LTG consolidation precision and reversibility on natural

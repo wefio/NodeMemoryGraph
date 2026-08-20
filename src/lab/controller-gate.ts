@@ -10,6 +10,21 @@ export interface ControllerEvaluationMetrics {
   learnedPrecision: number;
   baselineInferenceMs: number;
   learnedInferenceMs: number;
+  matchedProduct?: ControllerMatchedProductMetrics;
+}
+
+export interface ControllerMatchedProductMetrics {
+  cases: number;
+  baseline: ControllerProductArmMetrics;
+  learned: ControllerProductArmMetrics;
+}
+
+export interface ControllerProductArmMetrics {
+  taskSuccessRate: number;
+  evidenceSufficiencyRate: number;
+  meanToolRounds: number;
+  meanTokens: number;
+  meanEndToEndLatencyMs: number;
 }
 
 export interface ControllerGateOptions {
@@ -19,6 +34,12 @@ export interface ControllerGateOptions {
   qualityTolerance?: number;
   latencyFactor?: number;
   minimumInferenceMs?: number;
+  minimumMatchedProductCases?: number;
+  productQualityTolerance?: number;
+  productCostFactor?: number;
+  minimumToolRoundAllowance?: number;
+  minimumTokenAllowance?: number;
+  minimumEndToEndLatencyMs?: number;
 }
 
 export interface ControllerEvaluationGate {
@@ -35,6 +56,16 @@ export interface ControllerEvaluationGate {
     inferenceCostBounded: boolean;
     passed: boolean;
   };
+  productGate: {
+    hasMatchedEvidence: boolean;
+    enoughMatchedCases: boolean;
+    taskSuccessNotDegraded: boolean;
+    evidenceSufficiencyNotDegraded: boolean;
+    toolRoundsBounded: boolean;
+    tokensBounded: boolean;
+    endToEndLatencyBounded: boolean;
+    passed: boolean;
+  };
   eligibility: {
     shadow: boolean;
     active: boolean;
@@ -47,7 +78,10 @@ export interface ControllerEvaluationGate {
  *
  * A controller may run in shadow mode once its own held-out gate passes. It may
  * affect active/default retrieval only when the upstream candidate generator
- * also meets its recall target.
+ * meets its recall target and a matched product comparison preserves task and
+ * evidence quality within bounded end-to-end tool, token, and latency cost.
+ * Missing matched evidence fails closed rather than treating offline replay as
+ * a causal product evaluation.
  */
 export function evaluateControllerGate(
   metrics: ControllerEvaluationMetrics,
@@ -60,6 +94,12 @@ export function evaluateControllerGate(
   const qualityTolerance = options.qualityTolerance ?? 0.01;
   const latencyFactor = options.latencyFactor ?? 4;
   const minimumInferenceMs = options.minimumInferenceMs ?? 0.25;
+  const minimumMatchedProductCases = options.minimumMatchedProductCases ?? 8;
+  const productQualityTolerance = options.productQualityTolerance ?? qualityTolerance;
+  const productCostFactor = options.productCostFactor ?? 1.25;
+  const minimumToolRoundAllowance = options.minimumToolRoundAllowance ?? 1;
+  const minimumTokenAllowance = options.minimumTokenAllowance ?? 256;
+  const minimumEndToEndLatencyMs = options.minimumEndToEndLatencyMs ?? 250;
 
   const retrievalGate = {
     candidateRecallAdequate: metrics.candidateRecall >= minimumCandidateRecall,
@@ -89,10 +129,55 @@ export function evaluateControllerGate(
     controllerGate.precisionNotDegraded &&
     controllerGate.inferenceCostBounded;
 
-  const active = controllerGate.passed && retrievalGate.passed;
+  const matched = metrics.matchedProduct;
+  const productGate = {
+    hasMatchedEvidence: matched !== undefined,
+    enoughMatchedCases: (matched?.cases ?? 0) >= minimumMatchedProductCases,
+    taskSuccessNotDegraded:
+      matched !== undefined &&
+      matched.learned.taskSuccessRate + productQualityTolerance >=
+        matched.baseline.taskSuccessRate,
+    evidenceSufficiencyNotDegraded:
+      matched !== undefined &&
+      matched.learned.evidenceSufficiencyRate + productQualityTolerance >=
+        matched.baseline.evidenceSufficiencyRate,
+    toolRoundsBounded:
+      matched !== undefined &&
+      matched.learned.meanToolRounds <=
+        Math.max(
+          matched.baseline.meanToolRounds * productCostFactor,
+          matched.baseline.meanToolRounds + minimumToolRoundAllowance,
+        ),
+    tokensBounded:
+      matched !== undefined &&
+      matched.learned.meanTokens <=
+        Math.max(
+          matched.baseline.meanTokens * productCostFactor,
+          matched.baseline.meanTokens + minimumTokenAllowance,
+        ),
+    endToEndLatencyBounded:
+      matched !== undefined &&
+      matched.learned.meanEndToEndLatencyMs <=
+        Math.max(
+          minimumEndToEndLatencyMs,
+          matched.baseline.meanEndToEndLatencyMs * productCostFactor,
+        ),
+    passed: false,
+  };
+  productGate.passed =
+    productGate.hasMatchedEvidence &&
+    productGate.enoughMatchedCases &&
+    productGate.taskSuccessNotDegraded &&
+    productGate.evidenceSufficiencyNotDegraded &&
+    productGate.toolRoundsBounded &&
+    productGate.tokensBounded &&
+    productGate.endToEndLatencyBounded;
+
+  const active = controllerGate.passed && retrievalGate.passed && productGate.passed;
   return {
     retrievalGate,
     controllerGate,
+    productGate,
     eligibility: {
       shadow: controllerGate.passed,
       active,

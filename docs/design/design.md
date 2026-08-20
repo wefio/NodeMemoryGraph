@@ -1577,6 +1577,17 @@ configuration, data window, metrics, and rollback-state fingerprint. The
 artifact is never installed automatically and always reports
 `eligibleForActivation: false`; activation remains a later matched gate.
 
+That later gate is now explicit and has three independent parts. The retrieval
+gate protects upstream candidate recall; the controller gate protects held-out
+ranking/control quality and inference latency; and the product gate requires a
+matched baseline/candidate comparison with enough paired cases. The product gate
+fails closed when matched evidence is absent and requires non-degraded task
+success and evidence sufficiency together with bounded mean tool rounds, tokens,
+and end-to-end latency. These product costs are not added to the AG allocation
+head: tool rounds include non-NMG tools, and observational task success does not
+identify the causal effect of a memory action. Hard AG and harness limits remain
+outside the differentiable graph.
+
 Progressive disclosure also constrains tool sequence, not only returned text.
 Within one Pi user turn, automatic recall is free, but after two explicit
 searches without loading selected evidence the adapter folds another search
@@ -2109,7 +2120,10 @@ Important gaps between the prototype and the target plugin:
 - QPP2 folding is lossless at the store/Active-Graph layer but not necessarily
   lossless for the model: a needed candidate can remain folded unless the model
   explicitly unfolds the directory. A matched end-to-end test must measure
-  answer quality, evidence use, extra tool calls, tokens, and latency;
+  answer quality, evidence use, extra tool calls, tokens, and latency. The
+  activation gate now has typed inputs and fail-closed checks for those paired
+  product measurements, but no current natural run supplies the two matched
+  arms, so this is evaluation work rather than an authorization to activate;
 - the claim-level posterior outcome loop in section 5c now has a shadow-mode
   storage and RPC path: immutable extraction confidence seeds a weak Beta prior,
   attributable supported/contradicted events are deduplicated by semantic task,
