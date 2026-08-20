@@ -28,6 +28,7 @@ import type {
   NmgSplitNodeParams,
   NmgSyncStgParams,
   NmgTaskBoardParams,
+  NmgTopologyProposalParams,
 } from "./protocol.ts";
 
 export interface OptionValues {
@@ -100,6 +101,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
       "expires-at",
       "write-reason",
       "source-ref",
+      "write-source",
       "resolution",
       "opened-at",
       "related-memory",
@@ -119,6 +121,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   --opened-at ISO            When the open structure was created
   --related-memory ID        Repeatable evidence anchor; required for open/reopened
   --write-reason TEXT        Durable-write justification
+  --write-source SOURCE      Submission channel; defaults to user for the CLI
   --external-source REF      External provenance: web:URL or file:PATH
   --retrieved-at ISO         External retrieval timestamp (default: now)
   --content-hash HASH        Optional external content hash`,
@@ -147,12 +150,16 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
       "active-graph-id",
       "project-dir",
       "session-id",
+      "evidence",
+      "source-ref",
     ],
     flags: [],
     usageDetail: `Claim outcome options:
   --outcome VALUE            Explicit supported or contradicted result
   --source SOURCE            user, tool, task, or benchmark
   --source-lineage ID        Stable identity of the original evidence source
+  --evidence TEXT            Exact user/tool evidence excerpt to retain
+  --source-ref REF           Optional durable reference for the evidence excerpt
   --semantic-task-id ID      Independent task identity used for vote deduplication
   --claim-index N            Repeatable atomic claim index; omit for every claim
   --weight N                 Reliability in (0,1], default 1
@@ -323,6 +330,62 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   have not changed since the merge. Older unjournaled transforms cannot be restored.`,
     buildParams: (values): NmgRollbackNodeTransformParams => ({
       transformId: singlePositional(values, "node rollback"),
+    }),
+  },
+  {
+    method: "topologyProposal",
+    words: ["topology", "proposals"],
+    usageLine: "nmg topology proposals [--status pending|accepted|rejected] [--json]",
+    options: ["status"],
+    flags: [],
+    usageDetail: `Topology proposal administration:
+  proposals                    List proposals, pending by default
+  assess PROPOSAL_ID           Check whether automatic merge safeguards pass
+  review PROPOSAL_ID           Record an explicit accept or reject decision
+  actuate PROPOSAL_ID          Execute an eligible accepted merge proposal`,
+    buildParams: (values): NmgTopologyProposalParams => {
+      rejectPositionals(values, "topology proposals");
+      return {
+        action: "list",
+        status: firstOption(values, "status") as "accepted" | "pending" | "rejected" | undefined,
+      };
+    },
+  },
+  {
+    method: "topologyProposal",
+    words: ["topology", "assess"],
+    usageLine: "nmg topology assess PROPOSAL_ID [policy options] [--json]",
+    options: ["minimum-observations", "minimum-estimated-gain", "minimum-evidence-memories"],
+    flags: [],
+    buildParams: (values): NmgTopologyProposalParams => ({
+      action: "assess",
+      proposalId: singlePositional(values, "topology assess"),
+      minimumObservations: numericOption(values, "minimum-observations"),
+      minimumEstimatedGain: numericOption(values, "minimum-estimated-gain"),
+      minimumEvidenceMemories: numericOption(values, "minimum-evidence-memories"),
+    }),
+  },
+  {
+    method: "topologyProposal",
+    words: ["topology", "review"],
+    usageLine: "nmg topology review PROPOSAL_ID --decision accept|reject [--json]",
+    options: ["decision"],
+    flags: [],
+    buildParams: (values): NmgTopologyProposalParams => ({
+      action: "review",
+      proposalId: singlePositional(values, "topology review"),
+      decision: requiredOption(values, "decision") as "accept" | "reject",
+    }),
+  },
+  {
+    method: "topologyProposal",
+    words: ["topology", "actuate"],
+    usageLine: "nmg topology actuate PROPOSAL_ID [--json]",
+    options: [],
+    flags: [],
+    buildParams: (values): NmgTopologyProposalParams => ({
+      action: "actuate",
+      proposalId: singlePositional(values, "topology actuate"),
     }),
   },
   {
@@ -683,6 +746,7 @@ function rememberParams(values: OptionValues): NmgRememberParams {
     writeReason: firstOption(values, "write-reason"),
     sessionId: firstOption(values, "session-id"),
     sourceRef: firstOption(values, "source-ref"),
+    writeSource: firstOption(values, "write-source") ?? "user",
     resolution: firstOption(values, "resolution"),
     openedAt: firstOption(values, "opened-at"),
     relatedMemoryIds: values.options.get("related-memory"),
@@ -749,18 +813,37 @@ function claimOutcomeParams(values: OptionValues): NmgRecordClaimOutcomesParams 
     }
     return parsed;
   });
+  const source = requiredOption(values, "source");
+  const sourceLineage = requiredOption(values, "source-lineage");
+  const sessionId = firstOption(values, "session-id");
+  const evidence = firstOption(values, "evidence");
+  if (evidence && source !== "user" && source !== "tool") {
+    throw new Error("--evidence is only valid with --source user or tool");
+  }
+  if (evidence && !sessionId) {
+    throw new Error("--evidence requires --session-id so its provenance remains attributable");
+  }
   return compactObject({
     semanticTaskId: requiredOption(values, "semantic-task-id"),
     activeGraphId: firstOption(values, "active-graph-id"),
-    sessionId: firstOption(values, "session-id"),
+    sessionId,
     projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
     votes: [
       compactObject({
         memoryId,
         claimIndexes: claimIndexes.length ? claimIndexes : undefined,
         outcome: requiredOption(values, "outcome"),
-        source: requiredOption(values, "source"),
-        sourceLineage: requiredOption(values, "source-lineage"),
+        source,
+        sourceLineage,
+        evidenceSource: evidence
+          ? compactObject({
+              actor: source,
+              content: evidence,
+              sessionId,
+              sourceMessageId: sourceLineage,
+              sourceRef: firstOption(values, "source-ref"),
+            })
+          : undefined,
         weight: numericOption(values, "weight"),
       }),
     ],

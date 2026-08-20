@@ -43,7 +43,15 @@ export const MEMORY_STORAGE_STATES = ["dormant", "indexed", "quarantine"] as con
 export type MemoryStorageState = (typeof MEMORY_STORAGE_STATES)[number];
 export const MEMORY_RESIDENCES = ["ltg", "stg"] as const;
 export type MemoryResidence = (typeof MEMORY_RESIDENCES)[number];
-export type MemoryWriteSource = "agent" | "automatic" | "core" | "derived" | "import" | "user";
+export const MEMORY_WRITE_SOURCES = [
+  "agent",
+  "automatic",
+  "core",
+  "derived",
+  "import",
+  "user",
+] as const;
+export type MemoryWriteSource = (typeof MEMORY_WRITE_SOURCES)[number];
 export const MEMORY_TYPES = [
   "constraint",
   "conversation_evidence",
@@ -82,6 +90,14 @@ export type ClaimOutcome = (typeof CLAIM_OUTCOMES)[number];
 export const CLAIM_OUTCOME_SOURCES = ["benchmark", "task", "tool", "user"] as const;
 export type ClaimOutcomeSource = (typeof CLAIM_OUTCOME_SOURCES)[number];
 
+export interface ClaimOutcomeEvidenceSource {
+  actor: MemoryActor;
+  content: string;
+  sessionId: string;
+  sourceMessageId: string;
+  sourceRef?: string;
+}
+
 /** One independently attributable result applied to selected claims. */
 export interface ClaimOutcomeVoteInput {
   memoryId: string;
@@ -91,6 +107,8 @@ export interface ClaimOutcomeVoteInput {
   source: ClaimOutcomeSource;
   /** Stable identity of the original user/tool/eval source, used for audit. */
   sourceLineage: string;
+  /** Exact admitted user/tool excerpt retained independently of the transcript. */
+  evidenceSource?: ClaimOutcomeEvidenceSource;
   /** Reliability in (0,1]. Defaults to 1 for explicit strong signals. */
   weight?: number;
 }
@@ -122,6 +140,7 @@ export interface ClaimOutcomeEvent {
   semanticTaskId: string;
   source: ClaimOutcomeSource;
   sourceLineage: string;
+  evidenceId: string | null;
   outcome: ClaimOutcome;
   weight: number;
   activeGraphId: string | null;
@@ -592,10 +611,7 @@ export interface NodeSummaryTask {
  *  matched against queries but never returned as evidence. */
 export interface LeafSummaryProvider {
   readonly model: string;
-  summarize(input: {
-    nodeName: string;
-    statements: readonly string[];
-  }): Promise<string>;
+  summarize(input: { nodeName: string; statements: readonly string[] }): Promise<string>;
 }
 
 /** External LLM that writes retrieval-index node summaries. Same provider
@@ -605,10 +621,7 @@ export interface LeafSummaryProvider {
  *  hysteresis, so bounded staleness is acceptable by design. */
 export interface NodeSummaryProvider {
   readonly model: string;
-  summarize(input: {
-    nodeName: string;
-    statements: readonly string[];
-  }): Promise<string>;
+  summarize(input: { nodeName: string; statements: readonly string[] }): Promise<string>;
 }
 
 export interface LeafEmbeddingDocument {

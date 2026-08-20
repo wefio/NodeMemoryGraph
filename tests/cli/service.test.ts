@@ -267,6 +267,31 @@ test("remember relation resolution creates a reversible proposal without merging
     assert.equal(resolved.proposal.relationType, "refines");
     assert.deepEqual(resolved.proposal.evidenceMemoryIds, [specific.memory.id, general.memory.id]);
 
+    const listed = await service.invoke("topologyProposal", { action: "list" });
+    assert.deepEqual(
+      listed.proposals.map((proposal) => proposal.id),
+      [resolved.proposal.id],
+    );
+    const assessment = await service.invoke("topologyProposal", {
+      action: "assess",
+      proposalId: resolved.proposal.id,
+    });
+    assert.equal(assessment.assessment.proposalId, resolved.proposal.id);
+    assert.equal(assessment.assessment.eligible, false);
+    const reviewed = await service.invoke("topologyProposal", {
+      action: "review",
+      proposalId: resolved.proposal.id,
+      decision: "accept",
+    });
+    assert.equal(reviewed.proposal.status, "accepted");
+    await assert.rejects(
+      service.invoke("topologyProposal", {
+        action: "actuate",
+        proposalId: resolved.proposal.id,
+      }),
+      /automatic merge/i,
+    );
+
     const search = await service.invoke("search", { query: "Atlas storage", limit: 10 });
     assert.deepEqual(
       new Set(search.results.map((entry) => entry.memory.id)),
@@ -430,6 +455,7 @@ test("resident service records claim outcomes without changing extraction confid
       statement: "Atlas uses SQLite.",
       nodeName: "Atlas database",
     });
+    assert.equal(remembered.memory.writeSource, "agent");
     const result = await service.invoke("recordClaimOutcomes", {
       semanticTaskId: "atlas-verification-1",
       votes: [
@@ -438,10 +464,18 @@ test("resident service records claim outcomes without changing extraction confid
           outcome: "supported",
           source: "tool",
           sourceLineage: "sqlite-schema-check",
+          evidenceSource: {
+            actor: "tool",
+            content: "The inspected schema declares SQLite.",
+            sessionId: "atlas-verification-session",
+            sourceMessageId: "sqlite-schema-check",
+            sourceRef: "tool:sqlite-schema",
+          },
         },
       ],
     });
     assert.equal(result.events.length, 1);
+    assert.ok(result.events[0]?.evidenceId);
     assert.equal(result.posteriors[0]?.priorConfidence, 0.5);
     assert.equal(result.posteriors[0]?.independentVoteCount, 1);
   } finally {
@@ -1073,7 +1107,10 @@ test("CLI writes pass through the governed memory admission policy", async () =>
       memoryType: "preference",
       unsafe: true,
     });
-    assert.equal(admitted.memory.markers.some((marker: { kind: string }) => marker.kind === "write_bypass"), true);
+    assert.equal(
+      admitted.memory.markers.some((marker: { kind: string }) => marker.kind === "write_bypass"),
+      true,
+    );
     // The unsafe flag must never override secrets or an explicit user refusal.
     await assert.rejects(
       service.invoke("remember", {

@@ -87,7 +87,7 @@ export function calibrateShadowController(
     learnedRecall: learned.recall,
     baselinePrecision: baseline.precision,
     learnedPrecision: learned.precision,
-    baselineInferenceMs: 0,
+    baselineInferenceMs: average(evaluated.map((row) => row.baselineInferenceMs)),
     learnedInferenceMs: average(evaluated.map((row) => row.inferenceMs)),
   });
 
@@ -116,6 +116,7 @@ export function calibrateShadowController(
       baseline,
       learned,
       controlAccuracy,
+      baselineMeanInferenceMs: average(evaluated.map((row) => row.baselineInferenceMs)),
       meanInferenceMs: average(evaluated.map((row) => row.inferenceMs)),
       costs: summarizeCosts(validation),
     },
@@ -200,13 +201,13 @@ function evaluateRow(
   residualWeight: number,
   topNodes: number,
 ) {
-  const started = performance.now();
   const features = row.retrieval.controllerFeatures!;
   const useful = new Set(
     row.retrieval.selections
       .filter((selection) => row.use?.usedMemoryIds.includes(selection.memoryId))
       .map((selection) => selection.nodeId),
   );
+  const baselineStarted = performance.now();
   const baselineScores = new Map<string, number>();
   for (const selection of row.retrieval.selections) {
     baselineScores.set(
@@ -218,6 +219,8 @@ function evaluateRow(
     Object.keys(features.nodes),
     (id) => baselineScores.get(id) ?? 0,
   ).slice(0, topNodes);
+  const baselineInferenceMs = performance.now() - baselineStarted;
+  const learnedStarted = performance.now();
   const learnedIds = rank(
     Object.keys(features.nodes),
     (id) =>
@@ -225,12 +228,13 @@ function evaluateRow(
   ).slice(0, topNodes);
   const target = controlTargetFor(row);
   const controlCorrect = target ? controller.chooseControl(features.global).action === target : true;
-  const inferenceMs = performance.now() - started;
+  const inferenceMs = performance.now() - learnedStarted;
   return {
     candidateRecall: useful.size === 0 ? 1 : intersection(Object.keys(features.nodes), useful) / useful.size,
     baseline: counts(baselineIds, useful),
     learned: counts(learnedIds, useful),
     controlCorrect,
+    baselineInferenceMs,
     inferenceMs,
   };
 }

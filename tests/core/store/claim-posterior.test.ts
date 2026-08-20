@@ -45,10 +45,28 @@ test("claim posterior preserves its prior and deduplicates repeated semantic tas
           outcome: "supported",
           source: "tool",
           sourceLineage: "sqlite-inspection-1",
+          evidenceSource: {
+            actor: "tool",
+            content: "The inspected Atlas database reports SQLite.",
+            sessionId: "session-atlas-db",
+            sourceMessageId: "sqlite-inspection-1",
+            sourceRef: "tool:sqlite-inspection",
+          },
         },
       ],
     });
     assert.equal(first.events.length, 1);
+    assert.ok(first.events[0]?.evidenceId);
+    assert.deepEqual(store.getHistoryBySourceMessage("session-atlas-db", "sqlite-inspection-1"), {
+      id: first.events[0]?.evidenceId,
+      sessionId: "session-atlas-db",
+      sourceMessageId: "sqlite-inspection-1",
+      role: "tool",
+      content: "The inspected Atlas database reports SQLite.",
+      sourceRef: "tool:sqlite-inspection",
+      createdAt: store.getHistoryBySourceMessage("session-atlas-db", "sqlite-inspection-1")
+        ?.createdAt,
+    });
     assert.equal(first.posteriors[0]?.priorConfidence, 0.8);
     assert.equal(first.posteriors[0]?.independentVoteCount, 1);
     assert.ok(first.posteriors[0]!.mean > 0.7);
@@ -90,11 +108,18 @@ test("claim posterior preserves its prior and deduplicates repeated semantic tas
         event.semanticTaskId,
         event.source,
         event.sourceLineage,
+        event.evidenceId,
         event.outcome,
       ]),
       [
-        ["task-atlas-db-1", "tool", "sqlite-inspection-1", "supported"],
-        ["task-atlas-db-2", "user", "user-correction-2", "contradicted"],
+        [
+          "task-atlas-db-1",
+          "tool",
+          "sqlite-inspection-1",
+          first.events[0]?.evidenceId,
+          "supported",
+        ],
+        ["task-atlas-db-2", "user", "user-correction-2", null, "contradicted"],
       ],
       "posterior evidence remains attributable and auditable",
     );

@@ -141,6 +141,7 @@ export function migrate(db: DatabaseSync): void {
       semantic_task_id TEXT NOT NULL,
       source TEXT NOT NULL CHECK (source IN ('benchmark', 'task', 'tool', 'user')),
       source_lineage TEXT NOT NULL,
+      evidence_id TEXT REFERENCES history_records(id) ON DELETE SET NULL,
       outcome TEXT NOT NULL CHECK (outcome IN ('supported', 'contradicted')),
       weight REAL NOT NULL CHECK (weight > 0 AND weight <= 1),
       active_graph_id TEXT REFERENCES retrieval_traces(id) ON DELETE SET NULL,
@@ -475,6 +476,7 @@ export function migrate(db: DatabaseSync): void {
   `);
   ensureMemoryColumns(db);
   ensureHistoryColumns(db);
+  ensureClaimOutcomeColumns(db);
   ensureEmbeddingTable(db);
   ensureNodeColumns(db);
   ensureRelationColumns(db);
@@ -657,9 +659,7 @@ export function ensureLeafSummaryColumns(db: DatabaseSync): void {
  *  recall, never correctness. */
 export function ensureNodeSummaryColumns(db: DatabaseSync): void {
   const columns = new Set(
-    (db.prepare("PRAGMA table_info(memory_nodes)").all() as Row[]).map((row) =>
-      String(row.name),
-    ),
+    (db.prepare("PRAGMA table_info(memory_nodes)").all() as Row[]).map((row) => String(row.name)),
   );
   if (!columns.has("semantic_summary")) {
     db.exec(`
@@ -714,6 +714,19 @@ export function ensureHistoryColumns(db: DatabaseSync): void {
   );
   if (!existing.has("source_message_id")) {
     db.exec("ALTER TABLE history_records ADD COLUMN source_message_id TEXT");
+  }
+}
+
+export function ensureClaimOutcomeColumns(db: DatabaseSync): void {
+  const existing = new Set(
+    (db.prepare("PRAGMA table_info(claim_outcome_events)").all() as Row[]).map((row) =>
+      String(row.name),
+    ),
+  );
+  if (!existing.has("evidence_id")) {
+    db.exec(
+      "ALTER TABLE claim_outcome_events ADD COLUMN evidence_id TEXT REFERENCES history_records(id) ON DELETE SET NULL",
+    );
   }
 }
 

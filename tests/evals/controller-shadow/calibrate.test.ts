@@ -28,6 +28,7 @@ test("shadow calibration trains a replayable candidate without activating it", (
   assert.equal(result.rows.validation, 1);
   assert.equal(result.eligibleForActivation, false);
   assert.equal(result.validation.candidateRecall, 1);
+  assert.ok(Number.isFinite(result.validation.baselineMeanInferenceMs));
   assert.ok(Number.isFinite(result.validation.meanInferenceMs));
   assert.ok(result.validation.costs.injectedTokens > 0);
   assert.deepEqual(result.evidenceDiversity, {

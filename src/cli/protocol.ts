@@ -17,11 +17,13 @@ import type {
   MemoryStorageState,
   MemoryTier,
   MemoryType,
+  MemoryWriteSource,
   NodeTransform,
   PerfAggregate,
   RememberResult,
   RecordClaimOutcomesInput,
   RetentionCandidate,
+  TopologyAutomationAssessment,
   TopologyProposal,
   TaskBoardEntry,
   TaskBoardKind,
@@ -29,9 +31,9 @@ import type {
 } from "../core/types.ts";
 
 // Bump only when a live daemon from the previous revision cannot faithfully
-// implement the current client contract. v3 makes directed task-board delivery
-// independent of named-channel subscription through an internal target inbox.
-export const NMG_PROTOCOL_VERSION = "nmg.v3" as const;
+// implement the current client contract. v4 adds the topology-proposal
+// administration surface.
+export const NMG_PROTOCOL_VERSION = "nmg.v4" as const;
 
 export const NMG_CAPABILITIES = [
   "hello",
@@ -48,6 +50,7 @@ export const NMG_CAPABILITIES = [
   "merge-nodes",
   "rollback-node-transform",
   "split-node",
+  "topology-proposals",
   "sync-stg",
   "task-board",
   "directed-task-board-inbox",
@@ -75,6 +78,7 @@ export const NMG_METHODS = [
   "mergeNodes",
   "rollbackNodeTransform",
   "splitNode",
+  "topologyProposal",
   "syncStg",
   "stgPurgeSession",
   "taskBoard",
@@ -146,6 +150,8 @@ export interface NmgRememberParams {
   residence?: MemoryResidence;
   expiresAt?: string;
   writeReason?: string;
+  /** Submission channel; distinct from sourceActor content attribution. */
+  writeSource?: MemoryWriteSource;
   sessionId?: string;
   sourceRef?: string;
   markers?: MemoryMarker[];
@@ -530,6 +536,18 @@ export interface NmgRollbackNodeTransformParams {
   transformId: string;
 }
 
+export type NmgTopologyProposalParams =
+  | { action: "list"; status?: TopologyProposal["status"] }
+  | {
+      action: "assess";
+      proposalId: string;
+      minimumObservations?: number;
+      minimumEstimatedGain?: number;
+      minimumEvidenceMemories?: number;
+    }
+  | { action: "review"; proposalId: string; decision: "accept" | "reject" }
+  | { action: "actuate"; proposalId: string };
+
 export type NmgMethodResult = {
   hello: NmgHelloResult;
   status: NmgStatusResult;
@@ -582,6 +600,11 @@ export type NmgMethodResult = {
   mergeNodes: NodeTransform;
   rollbackNodeTransform: NodeTransform;
   splitNode: NodeTransform;
+  topologyProposal:
+    | { action: "list"; proposals: TopologyProposal[] }
+    | { action: "assess"; assessment: TopologyAutomationAssessment }
+    | { action: "review"; proposal: TopologyProposal }
+    | { action: "actuate"; transform: NodeTransform };
   syncStg: { copied: number; projectDir: string };
   stgPurgeSession: { purged: number; projectDir: string };
   taskBoard:

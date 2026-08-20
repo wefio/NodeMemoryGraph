@@ -200,6 +200,10 @@ npm run cli -- retention archive <memory-id>
 npm run cli -- retention quarantine <memory-id> --recovery-days 30
 npm run cli -- retention restore <memory-id>
 npm run cli -- memory delete <memory-id>
+npm run cli -- topology proposals
+npm run cli -- topology assess <proposal-id>
+npm run cli -- topology review <proposal-id> --decision accept
+npm run cli -- topology actuate <proposal-id>
 npm run cli -- graph --out memory-graph.html
 npm run cli -- stg sync --project-dir . --scope project=nmg --limit 50
 npm run cli -- daemon start
@@ -216,6 +220,13 @@ directory, or `--db` to select one SQLite file. `remember` requires a stable
 `remember`, `search`, and `get` when they may touch isolated STG. `stg sync`
 copies a usage-ranked scoped LTG working set into that STG idempotently; LTG
 remains authoritative.
+
+CLI `remember` writes are attributed to submission channel `user` by default;
+adapter/RPC callers default to `agent` and should set `writeSource` explicitly
+when forwarding another channel. This is independent from `sourceActor`, which
+states who authored the evidence content. `nmg claim outcome` can retain an exact
+user/tool excerpt with `--evidence`, `--session-id`, and `--source-lineage`; its
+event then remains auditable even if the original harness transcript disappears.
 
 Project STG is also session-private. Pi supplies its session ID automatically;
 CLI callers may add `--session-id ID`. Without it, CLI uses a separate `cli`
@@ -251,7 +262,8 @@ endpoint and a random local bearer token are recorded beside the selected
 SQLite database. The same implementation runs on Windows, macOS, and Linux.
 
 The service also carries administrative retention, deletion, merge, and split
-RPCs so a running daemon remains the only database writer. These are CLI/admin
+RPCs, plus reviewable topology-proposal list/assessment/review/actuation, so a
+running daemon remains the only database writer. These are CLI/admin
 capabilities, not extra model-facing Pi tools. Retention candidate selection is
 a dry run; moving a memory to L4/L5 or deleting its semantic interpretation
 requires an explicit command. `memory delete` retains immutable source history.
@@ -266,6 +278,12 @@ existing node. Broader semantic merges are not performed from embedding
 similarity alone. They require accumulated evidence and use reversible
 transform/redirect records; the low-level merge/split RPCs remain an
 administrative recovery surface rather than routine user work.
+
+Pi bounds agent-directed recall per user turn independently of the AG content
+budget: three searches, five total search/get calls, no more than two searches
+without exact-evidence progression, and termination after two consecutive
+searches add no candidate IDs. A new user turn resets the guard. These limits
+prevent a compact AG from being built through an unbounded tool loop.
 
 ## Agent Skill
 

@@ -129,7 +129,10 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
       { sessionManager },
     )) as { message?: { content: string } };
     assert.match(afterCompaction.message?.content ?? "", /cache key may omit/u);
-    assert.match(afterCompaction.message?.content ?? "", /auditable scratchpad, not verified fact/u);
+    assert.match(
+      afterCompaction.message?.content ?? "",
+      /auditable scratchpad, not verified fact/u,
+    );
 
     const consumed = (await handlers.get("before_agent_start")!(
       { prompt: "continue", systemPrompt: "base" },
@@ -648,12 +651,28 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       content: Array<{ text: string }>;
       details: {
         history: { sourceMessageId: string; content: string };
-        memory: { id: string };
+        memory: { id: string; writeSource: string };
       };
     };
     assert.match(remember.content[0].text, /saved/i);
     assert.equal(remember.details.history.sourceMessageId, "user-atlas-storage");
     assert.equal(remember.details.history.content, "Atlas must use SQLite for offline operation.");
+    assert.equal(remember.details.memory.writeSource, "agent");
+    const claimOutcome = (await tools.get("nmg_remember")!.execute(
+      "claim-user-evidence",
+      {
+        action: "claim_outcome",
+        memoryId: remember.details.memory.id,
+        claimOutcome: "supported",
+        claimOutcomeSource: "user",
+        semanticTaskId: "task:atlas-storage-confirmation",
+        evidence: "Atlas must use SQLite for offline operation.",
+      },
+      undefined,
+      undefined,
+      { sessionManager },
+    )) as { details: { events: Array<{ evidenceId: string | null }> } };
+    assert.ok(claimOutcome.details.events[0]?.evidenceId);
 
     const degraded = (await tools.get("nmg_remember")!.execute(
       "remember-degraded-provenance",
@@ -1538,15 +1557,19 @@ test("session recall flow requires evidence progression after two searches", () 
   const flow = new SessionRecallFlow();
   assert.equal(flow.beginTurn("session-a", "first request"), true);
   assert.equal(flow.allowSearch("session-a"), true);
+  flow.recordSearch("session-a", ["memory-1"]);
   assert.equal(flow.allowSearch("session-a"), true);
+  flow.recordSearch("session-a", ["memory-2"]);
   assert.equal(flow.allowSearch("session-a"), false);
+  assert.equal(flow.searchBlockReason("session-a"), "evidence_progression_required");
 
   // Pi emits before_agent_start again after each tool result. The same user
   // prompt must not reset the guard during those internal agent loops.
   assert.equal(flow.beginTurn("session-a", "first request"), false);
   assert.equal(flow.allowSearch("session-a"), false);
 
-  flow.recordGet("session-a");
+  assert.equal(flow.allowGet("session-a"), true);
+  flow.recordGet("session-a", ["memory-1"]);
   assert.equal(flow.allowSearch("session-a"), true);
   assert.equal(flow.beginTurn("session-a", "second request"), true);
   assert.equal(flow.allowSearch("session-a"), true);
@@ -1562,6 +1585,34 @@ test("session recall flow isolates and clears session state", () => {
 
   flow.clear("session-a");
   assert.equal(flow.allowSearch("session-a"), true);
+});
+
+test("session recall flow stops repeated candidates and enforces a hard tool budget", () => {
+  const noGain = new SessionRecallFlow(2, 5, 6, 2);
+  noGain.beginTurn("session-a", "request");
+  assert.equal(noGain.allowSearch("session-a"), true);
+  noGain.recordSearch("session-a", ["memory-1"]);
+  assert.equal(noGain.allowGet("session-a"), true);
+  noGain.recordGet("session-a", ["memory-1"]);
+  assert.equal(noGain.allowSearch("session-a"), true);
+  noGain.recordSearch("session-a", ["memory-1"]);
+  assert.equal(noGain.allowSearch("session-a"), true);
+  noGain.recordSearch("session-a", ["memory-1"]);
+  assert.equal(noGain.allowSearch("session-a"), false);
+  assert.equal(noGain.searchBlockReason("session-a"), "no_new_evidence");
+
+  const hardCap = new SessionRecallFlow(3, 4, 4, 4);
+  hardCap.beginTurn("session-b", "request");
+  assert.equal(hardCap.allowGet("session-b"), true);
+  hardCap.recordGet("session-b", ["memory-1"]);
+  assert.equal(hardCap.allowGet("session-b"), true);
+  hardCap.recordGet("session-b", ["memory-2"]);
+  assert.equal(hardCap.allowSearch("session-b"), true);
+  hardCap.recordSearch("session-b", ["memory-3"]);
+  assert.equal(hardCap.allowGet("session-b"), true);
+  hardCap.recordGet("session-b", ["memory-3"]);
+  assert.equal(hardCap.allowGet("session-b"), false);
+  assert.equal(hardCap.searchBlockReason("session-b"), "recall_tool_budget_exhausted");
 });
 
 test("session task window carries bounded task context into terse continuations", () => {
@@ -1595,7 +1646,10 @@ test("session task window keeps explicit recall and clears session context", () 
     /Atlas SQLite/u,
   );
   window.clear("session-a");
-  assert.doesNotMatch(window.prepare("session-a", "What did we decide last time?")!.query, /Atlas/u);
+  assert.doesNotMatch(
+    window.prepare("session-a", "What did we decide last time?")!.query,
+    /Atlas/u,
+  );
 });
 
 test("session task window applies the memory gate to ordinary, cue, and recall prompts", () => {

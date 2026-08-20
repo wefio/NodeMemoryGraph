@@ -61,6 +61,12 @@ test("migrate creates the core graph tables", () => {
     for (const expected of ["resolution", "opened_at", "related_memory_ids_json"]) {
       assert.ok(memoryColumns.has(expected), `expected memory_records.${expected}`);
     }
+    const claimOutcomeColumns = new Set(
+      (db.prepare("PRAGMA table_info(claim_outcome_events)").all() as Array<{ name: string }>).map(
+        (row) => row.name,
+      ),
+    );
+    assert.ok(claimOutcomeColumns.has("evidence_id"));
   });
 });
 

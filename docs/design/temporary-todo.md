@@ -14,48 +14,27 @@ closed.
   no-memory-needed separately. Silence or an uncorrected answer remains
   `unknown`, not success.
 
-The capture and session-ownership plumbing is implemented. Controlled examples
-may validate plumbing but must not be counted as natural product evidence. This
-is enforced by `collectionOrigin`: ordinary Pi writes `natural`, the headless
-probe writes `controlled`, and legacy events without the field are excluded.
-As of 2026-08-20 the bounded shadow log contains 39 fully labelled
-natural graphs. Session-local latest-graph feedback removed fragile UUID
-copying, and online Pi blackboard audits now contribute ordinary multi-Agent
-supervision without launching controlled headless probes. The report contains
-897 events across 299 retrieval graphs and 45 semantic tasks. Before the latest
-negative-task batch, useful labels were strongly positive-skewed: only 3
-evidence-insufficient examples, 5 expansion-not-useful examples, 2
-excessive-noise positives, and 2 no-memory-needed positives; there are still
-no failed-task or user-correction-positive outcomes. Four independent negative
-tasks added four no-memory decisions, four insufficient-evidence decisions,
-four useless-expansion decisions, and two excessive-noise observations. The
-report and both dataset exporters now aggregate non-null labels across
-incremental feedback calls for the same graph; mixed controlled/natural
-provenance fails closed to controlled. This recovered valid existing feedback
-without inventing labels. This is real progress, not enough for calibration or
-promotion. The formal SkillOpt exporter now finds 24 independent session/task
-connected groups. Dataset splitting
-now keeps each connected component of the `sessionId`/`semanticTaskId` bipartite
-graph in one arm, preventing an old Pi conversation from leaking into train,
-validation, and test. New promotion evidence must therefore come from fresh Pi
-sessions, not more prompts sent to the already-open agents. A first fresh
-`pi -p` session validated this path and exited cleanly. The following four-way
-batch exposed a cross-process rotation race in the shared shadow JSONL: events
-were appended successfully and then lost when concurrent writers renamed the
-same files. Shadow append/rotation is now guarded by a short cross-process lock,
-with a four-process rotation regression test. The lost batch was not
-reconstructed from console output; a fresh four-session rerun persisted all
-events and increased independent groups from 10 to 14. A separate four-session
-ordinary-work probe (code inspection, Git status, one test, and static counting)
-made zero explicit NMG tool calls but exposed automatic recall on all four turns,
-injecting 902-1,018 estimated tokens each. The existing `decideMemoryLoad` gate
-was not wired into Pi: the adapter treated every prompt of at least 40 characters
-as recall-worthy. Pi now applies the existing `retrieve|cue|none` decision;
-runtime A/B verification shows an ordinary code task receives no `nmg-context`
-while an explicit history question still receives automatic recall. The next
-natural tasks should preferentially cover irrelevant-memory, noisy-expansion,
-ambiguous-evidence, and correction
-scenarios instead of repeating successful recall audits.
+The capture, session-ownership, provenance, aggregation, and chronological
+task-group splitting plumbing is implemented. Controlled examples may validate
+plumbing but cannot count as natural product evidence: ordinary Pi writes
+`natural`, headless probes write `controlled`, and legacy events without a
+collection origin are excluded. A cross-process lock protects JSONL rotation.
+
+As of 2026-08-20 the bounded shadow log contains 1,057 events, 333 retrieval
+graphs, and 50 fully labelled natural graphs in 34 independent session/task
+groups (27 train, 7 chronological validation). The four label distributions are
+30/20 evidence-sufficient/insufficient, 24/26 expansion-useful/not-useful,
+19/31 excessive-noise/clean, and 9/41 no-memory-needed/memory-needed. This meets
+the provisional sample-count target but does not supply useful-evidence targets
+in the held-out segment. New collection must therefore emphasize tasks where the
+Agent loads and actually uses attributable exact evidence, along with natural
+corrections and failed outcomes; more binary sufficiency labels alone will not
+unlock calibration.
+
+Automatic recall now applies the existing `retrieve|cue|none` load gate. Pi also
+enforces a per-turn construction-process budget (three searches, five total
+search/get calls, exact-evidence progression, and no-gain stopping), preventing
+repeated tool expansion from bypassing the final AG projection budget.
 
 ## 2. Calibrate retrieval and the differentiable controller
 
@@ -73,14 +52,18 @@ scenarios instead of repeating successful recall audits.
 
 QPP1, QPP2, and search recommendation remain independently switchable. Their
 current constants are cold-start priors, not calibrated probabilities. The
-2026-08-20 report has 39 fully labelled natural graphs across 24 independent
-session/task groups and still fails the calibration gate. This is enough to
-justify continuing collection, not enough to
-implement or promote rolling threshold calibration; use at least 50 balanced
-positive/negative examples with a held-out time segment before moving the
-threshold. The rolling worker and rollbackable shadow artifact now exist
-(`npm run eval:qpp-tau`); the unresolved item is trustworthy data plus matched
-promotion evidence, not worker plumbing.
+2026-08-20 chronological calibration used 43 training rows and 7 validation
+rows. Its control accuracy was 0.857 and learned-controller inference averaged
+0.036 ms, but the gate correctly rejected promotion: training had only one
+primary useful-evidence target and validation had none. Baseline and learned
+precision/recall were consequently both zero. The calibration runner now times
+the heuristic baseline and learned controller separately instead of comparing a
+combined learned path against a hard-coded zero baseline.
+
+The rolling worker and rollbackable shadow artifact already exist
+(`npm run eval:qpp-tau`). The unresolved requirement is evidence-diverse natural
+data plus a matched held-out shadow result, not worker plumbing or another fixed
+sample-count threshold.
 
 ## 3. Validate unattended memory maintenance
 
@@ -114,28 +97,17 @@ answer reuse, and silence still do not create votes. The default actuator remain
 off; natural precision and reversal evidence must now accumulate through this
 boundary.
 
-The evidence inventory is now reproducible without touching the live stores:
+The evidence inventory is reproducible without touching the live stores:
 `npm run eval:natural-maintenance -- --project-dir <project>` opens every input
 SQLite database read-only and reports the exact claim, posterior, consolidation,
-proposal, transform, rollback, and maintenance-backlog counts. The 2026-08-20
-snapshot of the ordinary stores found 251 LTG memories (210 active), one active
-project STG memory, zero claim outcomes/posteriors, zero STG→LTG materializations,
-one pending `refines` proposal, zero identity proposals/transforms/rollbacks, 249
-uncompacted index deltas, and 32 pending accesses. These remain evidence gaps;
-the audit command does not convert absent natural outcomes into validation.
-The same snapshot exposed a separate physical-maintenance defect: all 249 write
-deltas and 32 accesses were spread across nodes below the old per-node thresholds,
-so successful maintenance runs repeatedly considered zero nodes. Local
-maintenance now uses a dual trigger: hot nodes remain immediately due, while
-global pressure drains bounded largest/oldest sparse-node slices until only a
-below-threshold tail remains. The audit reports both local due counts and
-distributed pressure; this fix changes physical compaction only and does not
-weaken the natural-evidence gates above.
-
-On a consistent backup of the ordinary LTG database, 37 bounded maintenance
-slices reduced pending write deltas from 249 to 15 and pending accesses from 32
-to 26, leaving both totals below their configured triggers. The authoritative
-database was opened read-only and was not modified by this validation.
+proposal, transform, rollback, and maintenance-backlog counts. The latest
+2026-08-20 snapshot found 279 LTG memories (238 active), one active project STG
+memory, zero claim outcomes/posteriors, zero STG→LTG materializations, one
+pending `refines` proposal, zero identity proposals/transforms/rollbacks, 15
+uncompacted index deltas, and 17 pending accesses. Both distributed-pressure
+flags are now false after the bounded sparse-backlog drain fix. These remaining
+zeros are product-evidence gaps; the audit command and controlled tests do not
+convert them into natural validation.
 
 ## 4. Separate controller policy from the Agent answer policy
 

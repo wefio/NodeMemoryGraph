@@ -238,6 +238,13 @@ nodes first, then allocate local-content and relation budgets according to
 expected usefulness. The model can request progressive expansion, but the
 harness enforces the total budget and provenance boundary.
 
+The harness also enforces a separate per-turn construction-process budget. Pi
+currently allows at most three searches and five total search/get calls, requires
+exact-evidence progression after two searches, and stops after two consecutive
+searches introduce no new candidate IDs. Thus a small final AG cannot be reached
+through an unbounded tool loop. These counters are session-local, reset on a new
+user turn, and remain hard limits outside learned/QPP budget allocation.
+
 AG contains references and query-local annotations, not authoritative
 copies. When AG is released, temporary nodes and edges disappear; only
 explicitly recorded usage outcomes, stability observations, and accepted

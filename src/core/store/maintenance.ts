@@ -88,6 +88,13 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
 
     // base-helper / cross-cluster members (resolved at assembly time)
     declare protected cascadeDerivedMemories: (sourceMemoryId: string) => void;
+    declare appendHistory: (input: {
+      content: string;
+      role: HistoryRecord["role"];
+      sessionId?: string | null;
+      sourceMessageId?: string;
+      sourceRef?: string;
+    }) => HistoryRecord;
     declare protected upsertFts: (
       memoryId: string,
       statement: string,
@@ -175,6 +182,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         outcome: "supported" | "contradicted";
         source: ClaimOutcomeEvent["source"];
         sourceLineage: string;
+        evidenceSource: RecordClaimOutcomesInput["votes"][number]["evidenceSource"];
         weight: number;
       }> = [];
       for (const vote of input.votes) {
@@ -203,6 +211,23 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
           throw new Error("claim outcome weight must be in (0,1]");
         }
         const sourceLineage = requireText(vote.sourceLineage, "sourceLineage");
+        const evidenceSource = vote.evidenceSource;
+        if (evidenceSource) {
+          if (vote.source !== "user" && vote.source !== "tool") {
+            throw new Error("claim outcome evidenceSource requires source user or tool");
+          }
+          if (evidenceSource.actor !== vote.source) {
+            throw new Error("claim outcome evidence actor must match its source");
+          }
+          if (
+            requireText(evidenceSource.sourceMessageId, "evidenceSource.sourceMessageId") !==
+            sourceLineage
+          ) {
+            throw new Error("claim outcome evidence sourceMessageId must match sourceLineage");
+          }
+          requireText(evidenceSource.content, "evidenceSource.content");
+          requireText(evidenceSource.sessionId, "evidenceSource.sessionId");
+        }
         for (const claimIndex of [...new Set(indexes)]) {
           const claim = claims[claimIndex];
           if (!claim || !Number.isInteger(claimIndex) || claimIndex < 0) {
@@ -222,6 +247,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
             outcome: vote.outcome,
             source: vote.source,
             sourceLineage,
+            evidenceSource,
             weight,
           });
         }
@@ -234,12 +260,21 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       try {
         for (const item of prepared) {
           const id = randomUUID();
+          const evidenceId = item.evidenceSource
+            ? this.appendHistory({
+                content: item.evidenceSource.content,
+                role: item.evidenceSource.actor,
+                sessionId: item.evidenceSource.sessionId,
+                sourceMessageId: item.evidenceSource.sourceMessageId,
+                sourceRef: item.evidenceSource.sourceRef,
+              }).id
+            : null;
           const inserted = this.db
             .prepare(
               `INSERT OR IGNORE INTO claim_outcome_events
                 (id, memory_id, claim_index, semantic_task_id, source,
-                 source_lineage, outcome, weight, active_graph_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 source_lineage, evidence_id, outcome, weight, active_graph_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
             .run(
               id,
@@ -248,6 +283,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
               semanticTaskId,
               item.source,
               item.sourceLineage,
+              evidenceId,
               item.outcome,
               item.weight,
               input.activeGraphId ?? null,
@@ -293,6 +329,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
             semanticTaskId,
             source: item.source,
             sourceLineage: item.sourceLineage,
+            evidenceId,
             outcome: item.outcome,
             weight: item.weight,
             activeGraphId: input.activeGraphId ?? null,
@@ -334,6 +371,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         semanticTaskId: String(row.semantic_task_id),
         source: String(row.source) as ClaimOutcomeEvent["source"],
         sourceLineage: String(row.source_lineage),
+        evidenceId: row.evidence_id ? String(row.evidence_id) : null,
         outcome: String(row.outcome) as ClaimOutcomeEvent["outcome"],
         weight: Number(row.weight),
         activeGraphId: row.active_graph_id ? String(row.active_graph_id) : null,
@@ -1145,7 +1183,8 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
           const nodeId = String(row.node_id);
           const accessDue =
             Number(row.pending_accesses) >= accessThreshold ||
-            (Number(row.total_pending_accesses) >= accessThreshold && Number(row.pending_accesses) > 0);
+            (Number(row.total_pending_accesses) >= accessThreshold &&
+              Number(row.pending_accesses) > 0);
           const writeDue =
             Number(row.pending_writes) >= writeThreshold ||
             (Number(row.total_pending_writes) >= writeThreshold && Number(row.pending_writes) > 0);
@@ -1925,7 +1964,12 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
      *  via setLeafSummary. Scans blocks oldest-first so the longest-unsummarized
      *  blocks go first. */
     pendingLeafSummaries(
-      options: { limit?: number; scan?: number; statementCountCap?: number; statementCharCap?: number } = {},
+      options: {
+        limit?: number;
+        scan?: number;
+        statementCountCap?: number;
+        statementCharCap?: number;
+      } = {},
     ): LeafSummaryTask[] {
       const limit = Math.max(1, Math.min(options.limit ?? 64, 512));
       const scan = Math.max(limit, Math.min(options.scan ?? 2_048, 16_384));
@@ -1979,12 +2023,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
      *  pendingLeafSummaries. Bumps updated_at so the leaf-embedding staleness
      *  check re-embeds the block with the semantic text, and (re)indexes the
      *  summary into the block FTS table for lexical routing. */
-    setLeafSummary(
-      blockId: string,
-      summary: string,
-      model: string,
-      membersKey: string,
-    ): boolean {
+    setLeafSummary(blockId: string, summary: string, model: string, membersKey: string): boolean {
       const text = summary.trim();
       if (!text) throw new Error("leaf summary must not be empty");
       if (!model.trim()) throw new Error("leaf summary model is required");
@@ -2074,7 +2113,8 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         );
         if (statements.length < minBlocks) continue;
         const count = Number((countQuery.get(nodeId) as Row).c);
-        const previous = row.semantic_member_count == null ? null : Number(row.semantic_member_count);
+        const previous =
+          row.semantic_member_count == null ? null : Number(row.semantic_member_count);
         if (previous === null) {
           if (count === 0) continue;
         } else {
@@ -2099,18 +2139,12 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
      *  slightly older membership baseline is acceptable — the recorded
      *  memberCount simply becomes the new hysteresis baseline. (Re)indexes
      *  into the node FTS table for lexical routing. */
-    setNodeSummary(
-      nodeId: string,
-      summary: string,
-      model: string,
-      memberCount: number,
-    ): boolean {
+    setNodeSummary(nodeId: string, summary: string, model: string, memberCount: number): boolean {
       const text = summary.trim();
       if (!text) throw new Error("node summary must not be empty");
       if (!model.trim()) throw new Error("node summary model is required");
-      const exists = this.db
-        .prepare("SELECT id FROM memory_nodes WHERE id = ?")
-        .get(nodeId) as Row | undefined;
+      const exists = this.db.prepare("SELECT id FROM memory_nodes WHERE id = ?").get(nodeId) as
+        Row | undefined;
       if (!exists) return false;
       const now = new Date().toISOString();
       this.db.exec("BEGIN IMMEDIATE");

@@ -607,6 +607,16 @@ candidate nodes, then allocate local-content and relation budgets according to
 expected usefulness. The model can request progressive expansion, but the
 harness enforces the total budget and provenance boundary.
 
+The projection budget and the **construction-process budget** are separate.
+Bounding the final AG does not prevent an Agent from repeatedly issuing searches
+that rediscover the same candidates. The Pi adapter therefore also bounds each
+user turn to three explicit searches and five total recall tool calls, permits at
+most two searches without an intervening exact-evidence progression, and stops
+after two consecutive searches add no candidate IDs. A new user turn resets this
+ephemeral guard. These are deterministic harness limits outside QPP and the
+differentiable controller; learned allocation may choose a smaller AG but cannot
+relax them.
+
 ### 7.2 Node and edge activation
 
 Node activation manages current working memory. A target scoring family is:
@@ -712,6 +722,11 @@ optional session-owned Active Graph restricts votes to records actually exposed
 by that retrieval. Retrieval, exact `get`, answer reuse, silence, and generic
 task success never create positive claim votes. This wiring makes posterior
 collection possible in ordinary use without weakening the promotion gate.
+When Pi admits a user/tool outcome, it validates an exact current-session excerpt
+and stores that excerpt as a deduplicated `HistoryRecord`; the outcome event keeps
+its `evidenceId`. Removing or compacting the Pi transcript therefore does not
+leave a posterior vote backed only by a dangling message ID. Task and benchmark
+votes may retain lineage without copying arbitrary generated text.
 
 Physical separation also means a new STG state cannot transactionally mark an
 older consolidated LTG state superseded. The runtime STG/LTG projection
@@ -988,7 +1003,11 @@ conflicts whose explicit validity intervals do not overlap. It then stores a
 provenance-bearing **pending topology proposal**. `same_entity` creates a
 regulatory `same_as` proposal; it does not call `mergeNodes`, redirect an ID, or
 change either node's status. Proposal review and physical identity merge remain
-separate maintenance operations.
+separate maintenance operations. The daemon exposes one typed topology-proposal
+administration RPC, and the CLI provides `topology proposals`, `assess`, `review`,
+and `actuate`. Assessment is read-only; review records an explicit decision; and
+actuation still accepts only an eligible accepted automatic merge proposal.
+These operations remain outside the Pi model-facing tool surface.
 
 ## 8. Information and communication interpretation
 
@@ -1337,6 +1356,13 @@ from both storage tiers and the STG/LTG lifecycle:
 3. **Agent-directed recall layer:** compact headers/cues that let the model call
    `nmg_search`, inspect costs, and expand the AG with exact details through
    `nmg_get`.
+
+The third layer is additionally bounded as a tool process, not just as returned
+information. Repeated candidate sets count as no progress, an exact `get` only
+unlocks further search when it loads previously unseen evidence, and hard
+per-turn search/tool ceilings terminate loops even when QPP keeps recommending
+expansion. Progressive disclosure therefore governs both content volume and the
+number of disclosure actions.
 
 Candidate generation should compose independent signals:
 

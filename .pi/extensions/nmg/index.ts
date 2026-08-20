@@ -533,6 +533,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           statement: archiveStatement(entry),
           nodeName: archiveNodeName(entry),
           memoryType: "event",
+          writeSource: "automatic",
           eventTime: entry.archivedAt,
           sourceActor: "system",
           truthStatus: "asserted",
@@ -1016,6 +1017,15 @@ export default function nmgExtension(pi: ExtensionAPI): void {
               outcome: params.claimOutcome,
               source: params.claimOutcomeSource,
               sourceLineage,
+              evidenceSource: evidenceSource
+                ? {
+                    actor: evidenceSource.actor,
+                    content: evidenceSource.content,
+                    sessionId,
+                    sourceMessageId: evidenceSource.sourceMessageId,
+                    sourceRef: evidenceSource.sourceRef,
+                  }
+                : undefined,
               weight: params.claimWeight,
             },
           ],
@@ -1197,6 +1207,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const result = await invoke("remember", {
         ...memory,
         sourceActor,
+        writeSource: "agent",
         evidenceSource,
         markers: markers.length ? markers : undefined,
         projectDir: projectDirectory(),
@@ -1220,15 +1231,25 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       graphHops: Type.Optional(Type.Number({ minimum: 0, maximum: 3 })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const sessionId = ctx.sessionManager.getSessionId();
+      if (!recallFlow.allowGet(sessionId)) {
+        return toolResult(
+          { getSuppressed: true, reason: "recall_tool_budget_exhausted" },
+          "Recall tool budget exhausted for this user turn. Answer from the evidence already loaded or state what remains uncertain.",
+        );
+      }
       const result = (await invoke("get", {
         ...params,
         projectDir: projectDirectory(),
-        sessionId: ctx.sessionManager.getSessionId(),
+        sessionId,
       })) as MemoryContext;
-      recallFlow.recordGet(ctx.sessionManager.getSessionId());
+      recallFlow.recordGet(
+        sessionId,
+        result.results.map((entry) => entry.memory.id),
+      );
       await controllerShadow.use(
         params.activeGraphId,
-        ctx.sessionManager.getSessionId(),
+        sessionId,
         params.memoryIds,
         result.results.map((entry) => entry.memory.id),
       );
@@ -1269,8 +1290,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const sessionId = ctx.sessionManager.getSessionId();
       if (!recallFlow.allowSearch(sessionId)) {
         await controllerShadow.searchSuppressed(sessionId, params.query);
+        const reason = recallFlow.searchBlockReason(sessionId);
         return toolResult(
-          { searchSuppressed: true, reason: "evidence_progression_required" },
+          { searchSuppressed: true, reason },
           nmgPrompts.search_progression_required,
         );
       }
@@ -1315,6 +1337,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           params.limit !== undefined,
         );
       }
+      recallFlow.recordSearch(
+        sessionId,
+        result.results.map((entry) => entry.memory.id),
+      );
       const text = injectionWindow.format(sessionId, result, "header");
       await controllerShadow.retrieval(fullResult, sessionId, "tool", text);
       agentUseFlow.note(sessionId, fullResult);
@@ -2115,34 +2141,109 @@ function extractPromptText(messages: readonly unknown[]): string {
 }
 
 export class SessionRecallFlow {
-  readonly #states = new Map<string, { turnKey: string; searches: number }>();
+  readonly #states = new Map<
+    string,
+    {
+      turnKey: string;
+      searchesSinceGet: number;
+      searchCalls: number;
+      recallCalls: number;
+      consecutiveNoGain: number;
+      candidateIds: Set<string>;
+      loadedIds: Set<string>;
+    }
+  >();
   readonly maxSearchesBeforeGet: number;
+  readonly maxSearchCalls: number;
+  readonly maxRecallCalls: number;
+  readonly maxConsecutiveNoGain: number;
 
-  constructor(maxSearchesBeforeGet = 2) {
+  constructor(
+    maxSearchesBeforeGet = 2,
+    maxSearchCalls = 3,
+    maxRecallCalls = 5,
+    maxConsecutiveNoGain = 2,
+  ) {
     this.maxSearchesBeforeGet = Math.max(1, maxSearchesBeforeGet);
+    this.maxSearchCalls = Math.max(this.maxSearchesBeforeGet, maxSearchCalls);
+    this.maxRecallCalls = Math.max(this.maxSearchCalls, maxRecallCalls);
+    this.maxConsecutiveNoGain = Math.max(1, maxConsecutiveNoGain);
   }
 
   beginTurn(sessionId: string, turnKey: string): boolean {
     const current = this.#states.get(sessionId);
     if (current?.turnKey === turnKey) return false;
-    this.#states.set(sessionId, { turnKey, searches: 0 });
+    this.#states.set(sessionId, this.#newState(turnKey));
     return true;
   }
 
   allowSearch(sessionId: string): boolean {
-    const current = this.#states.get(sessionId) ?? { turnKey: "", searches: 0 };
-    if (current.searches >= this.maxSearchesBeforeGet) return false;
-    this.#states.set(sessionId, { ...current, searches: current.searches + 1 });
+    const current = this.#state(sessionId);
+    if (this.searchBlockReason(sessionId) !== null) return false;
+    current.searchesSinceGet += 1;
+    current.searchCalls += 1;
+    current.recallCalls += 1;
     return true;
   }
 
-  recordGet(sessionId: string): void {
-    const current = this.#states.get(sessionId) ?? { turnKey: "", searches: 0 };
-    this.#states.set(sessionId, { ...current, searches: 0 });
+  searchBlockReason(sessionId: string): string | null {
+    const current = this.#state(sessionId);
+    if (current.recallCalls >= this.maxRecallCalls) return "recall_tool_budget_exhausted";
+    if (current.searchCalls >= this.maxSearchCalls) return "search_budget_exhausted";
+    if (current.consecutiveNoGain >= this.maxConsecutiveNoGain) return "no_new_evidence";
+    if (current.searchesSinceGet >= this.maxSearchesBeforeGet) {
+      return "evidence_progression_required";
+    }
+    return null;
+  }
+
+  recordSearch(sessionId: string, memoryIds: readonly string[]): void {
+    const current = this.#state(sessionId);
+    const newIds = memoryIds.filter((memoryId) => !current.candidateIds.has(memoryId));
+    for (const memoryId of memoryIds) current.candidateIds.add(memoryId);
+    current.consecutiveNoGain = newIds.length > 0 ? 0 : current.consecutiveNoGain + 1;
+  }
+
+  allowGet(sessionId: string): boolean {
+    const current = this.#state(sessionId);
+    if (current.recallCalls >= this.maxRecallCalls) return false;
+    current.recallCalls += 1;
+    return true;
+  }
+
+  recordGet(sessionId: string, memoryIds: readonly string[]): void {
+    const current = this.#state(sessionId);
+    const newIds = memoryIds.filter((memoryId) => !current.loadedIds.has(memoryId));
+    for (const memoryId of memoryIds) current.loadedIds.add(memoryId);
+    if (newIds.length > 0) {
+      current.searchesSinceGet = 0;
+      current.consecutiveNoGain = 0;
+    }
   }
 
   clear(sessionId: string): void {
     this.#states.delete(sessionId);
+  }
+
+  #state(sessionId: string) {
+    let current = this.#states.get(sessionId);
+    if (!current) {
+      current = this.#newState("");
+      this.#states.set(sessionId, current);
+    }
+    return current;
+  }
+
+  #newState(turnKey: string) {
+    return {
+      turnKey,
+      searchesSinceGet: 0,
+      searchCalls: 0,
+      recallCalls: 0,
+      consecutiveNoGain: 0,
+      candidateIds: new Set<string>(),
+      loadedIds: new Set<string>(),
+    };
   }
 }
 

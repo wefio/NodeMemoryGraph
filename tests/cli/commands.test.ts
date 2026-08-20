@@ -97,6 +97,22 @@ test("CLI exact get preserves Active Graph use attribution", () => {
   );
 });
 
+test("CLI remember attributes the submission channel to the user by default", () => {
+  const command = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "remember")!;
+  assert.deepEqual(
+    command.buildParams({
+      flags: new Set(),
+      options: new Map([["node", ["Atlas storage"]]]),
+      positionals: ["Atlas", "uses", "SQLite."],
+    }),
+    {
+      statement: "Atlas uses SQLite.",
+      nodeName: "Atlas storage",
+      writeSource: "user",
+    },
+  );
+});
+
 test("CLI exposes explicit attributable claim outcomes", () => {
   const command = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "claim outcome")!;
   assert.deepEqual(
@@ -110,12 +126,16 @@ test("CLI exposes explicit attributable claim outcomes", () => {
         ["claim-index", ["0", "2"]],
         ["weight", ["0.8"]],
         ["active-graph-id", ["ag-42"]],
+        ["session-id", ["session-42"]],
+        ["evidence", ["The schema reports SQLite."]],
+        ["source-ref", ["tool:sqlite-schema"]],
       ]),
       positionals: ["memory-42"],
     }),
     {
       semanticTaskId: "task:42",
       activeGraphId: "ag-42",
+      sessionId: "session-42",
       votes: [
         {
           memoryId: "memory-42",
@@ -123,10 +143,63 @@ test("CLI exposes explicit attributable claim outcomes", () => {
           outcome: "supported",
           source: "tool",
           sourceLineage: "tool-run:42",
+          evidenceSource: {
+            actor: "tool",
+            content: "The schema reports SQLite.",
+            sessionId: "session-42",
+            sourceMessageId: "tool-run:42",
+            sourceRef: "tool:sqlite-schema",
+          },
           weight: 0.8,
         },
       ],
     },
+  );
+});
+
+test("CLI exposes topology proposal administration without raw database access", () => {
+  const byName = (name: string) => NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === name)!;
+  assert.deepEqual(
+    byName("topology proposals").buildParams({
+      flags: new Set(),
+      options: new Map([["status", ["accepted"]]]),
+      positionals: [],
+    }),
+    { action: "list", status: "accepted" },
+  );
+  assert.deepEqual(
+    byName("topology assess").buildParams({
+      flags: new Set(),
+      options: new Map([
+        ["minimum-observations", ["4"]],
+        ["minimum-estimated-gain", ["0.25"]],
+        ["minimum-evidence-memories", ["3"]],
+      ]),
+      positionals: ["proposal-1"],
+    }),
+    {
+      action: "assess",
+      proposalId: "proposal-1",
+      minimumObservations: 4,
+      minimumEstimatedGain: 0.25,
+      minimumEvidenceMemories: 3,
+    },
+  );
+  assert.deepEqual(
+    byName("topology review").buildParams({
+      flags: new Set(),
+      options: new Map([["decision", ["accept"]]]),
+      positionals: ["proposal-1"],
+    }),
+    { action: "review", proposalId: "proposal-1", decision: "accept" },
+  );
+  assert.deepEqual(
+    byName("topology actuate").buildParams({
+      flags: new Set(),
+      options: new Map(),
+      positionals: ["proposal-1"],
+    }),
+    { action: "actuate", proposalId: "proposal-1" },
   );
 });
 

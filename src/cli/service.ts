@@ -34,6 +34,7 @@ import {
   MEMORY_RESOLUTIONS,
   MEMORY_STORAGE_STATES,
   MEMORY_TYPES,
+  MEMORY_WRITE_SOURCES,
   TASK_BOARD_KINDS,
   RETRIEVAL_MODES,
   TRUTH_STATUSES,
@@ -84,6 +85,7 @@ import {
   type NmgSyncStgParams,
   type NmgStgPurgeSessionParams,
   type NmgTaskBoardParams,
+  type NmgTopologyProposalParams,
 } from "./protocol.ts";
 import { resolveNmgDataDir } from "./data-path.ts";
 
@@ -189,6 +191,35 @@ export class NmgService {
         ) as NmgMethodResult[M];
       case "splitNode":
         return this.#getStore().splitNode(parseSplitNodeParams(params)) as NmgMethodResult[M];
+      case "topologyProposal": {
+        const parsed = parseTopologyProposalParams(params);
+        if (parsed.action === "list") {
+          return {
+            action: "list",
+            proposals: this.#getStore().topologyProposals(parsed.status),
+          } as NmgMethodResult[M];
+        }
+        if (parsed.action === "assess") {
+          return {
+            action: "assess",
+            assessment: this.#getStore().assessAutomaticMergeProposal(parsed.proposalId, {
+              minimumObservations: parsed.minimumObservations,
+              minimumEstimatedGain: parsed.minimumEstimatedGain,
+              minimumEvidenceMemories: parsed.minimumEvidenceMemories,
+            }),
+          } as NmgMethodResult[M];
+        }
+        if (parsed.action === "review") {
+          return {
+            action: "review",
+            proposal: this.#getStore().reviewTopologyProposal(parsed.proposalId, parsed.decision),
+          } as NmgMethodResult[M];
+        }
+        return {
+          action: "actuate",
+          transform: this.#getStore().actuateAutomaticMergeProposal(parsed.proposalId),
+        } as NmgMethodResult[M];
+      }
       case "syncStg": {
         const parsed = parseSyncStgParams(params);
         return {
@@ -469,7 +500,7 @@ export class NmgService {
       this.#getStore().recordRejectedWrite({
         policyReason: assessment.reason,
         writeReason: params.writeReason ?? `cli_rejected_${params.memoryType ?? "fact"}`,
-        writeSource: "user",
+        writeSource: params.writeSource ?? "agent",
         memoryType: params.memoryType,
         requestedResidence: params.residence,
         sessionId: params.sessionId,
@@ -484,10 +515,9 @@ export class NmgService {
     // Escape hatch audit (docs §3.6): an explicit unsafe write leaves a
     // marker so the bypass is traceable, not a silent hole. The unsafe flag
     // itself never reaches the store layer (policy lives at the boundary).
-    const bypassMarkers: MemoryMarker[] =
-      params.unsafe
-        ? [{ kind: "write_bypass", attributes: { policy: "unsafe" } }]
-        : [];
+    const bypassMarkers: MemoryMarker[] = params.unsafe
+      ? [{ kind: "write_bypass", attributes: { policy: "unsafe" } }]
+      : [];
     const result = store.remember({
       ...memory,
       markers: [...(memory.markers ?? []), ...bypassMarkers],
@@ -496,7 +526,7 @@ export class NmgService {
       sessionId: store === this.#getStore() ? null : memory.sessionId,
       truthStatus: memory.truthStatus ?? (external ? "unverified" : undefined),
       writeReason: params.writeReason ?? `cli_confirmed_${params.memoryType ?? "fact"}`,
-      writeSource: "user",
+      writeSource: params.writeSource ?? "agent",
     });
     this.#signalMaintenance(store, "write");
     return result;
@@ -1115,6 +1145,7 @@ function parseRememberParams(value: unknown): NmgRememberParams {
     residence: optionalEnum(params, "residence", MEMORY_RESIDENCES),
     expiresAt: optionalString(params, "expiresAt"),
     writeReason: optionalString(params, "writeReason"),
+    writeSource: optionalEnum(params, "writeSource", MEMORY_WRITE_SOURCES),
     sessionId: optionalString(params, "sessionId"),
     sourceRef: optionalString(params, "sourceRef"),
     markers: optionalMarkers(params, "markers"),
@@ -1246,9 +1277,26 @@ function parseRecordClaimOutcomesParams(value: unknown): NmgRecordClaimOutcomesP
         outcome: requiredEnum(vote, "outcome", CLAIM_OUTCOMES),
         source: requiredEnum(vote, "source", CLAIM_OUTCOME_SOURCES),
         sourceLineage: requiredString(vote, "sourceLineage"),
+        evidenceSource: optionalClaimOutcomeEvidenceSource(vote, "evidenceSource"),
         weight: optionalNumber(vote, "weight", Number.EPSILON, 1),
       };
     }),
+  };
+}
+
+function optionalClaimOutcomeEvidenceSource(
+  params: Record<string, unknown>,
+  key: string,
+): NmgRecordClaimOutcomesParams["votes"][number]["evidenceSource"] {
+  const value = params[key];
+  if (value === undefined) return undefined;
+  const source = objectParams(value);
+  return {
+    actor: requiredEnum(source, "actor", MEMORY_ACTORS),
+    content: requiredString(source, "content"),
+    sessionId: requiredString(source, "sessionId"),
+    sourceMessageId: requiredString(source, "sourceMessageId"),
+    sourceRef: optionalString(source, "sourceRef"),
   };
 }
 
@@ -1607,6 +1655,35 @@ function parseSplitNodeParams(value: unknown): NmgSplitNodeParams {
       };
     }),
   };
+}
+
+function parseTopologyProposalParams(value: unknown): NmgTopologyProposalParams {
+  const params = objectParams(value);
+  const action = requiredEnum(params, "action", ["list", "assess", "review", "actuate"] as const);
+  if (action === "list") {
+    return {
+      action,
+      status: optionalEnum(params, "status", ["accepted", "pending", "rejected"] as const),
+    };
+  }
+  const proposalId = requiredString(params, "proposalId");
+  if (action === "assess") {
+    return {
+      action,
+      proposalId,
+      minimumObservations: optionalInteger(params, "minimumObservations", 1, 1_000_000),
+      minimumEstimatedGain: optionalNumber(params, "minimumEstimatedGain", 0, 1),
+      minimumEvidenceMemories: optionalInteger(params, "minimumEvidenceMemories", 1, 1_000_000),
+    };
+  }
+  if (action === "review") {
+    return {
+      action,
+      proposalId,
+      decision: requiredEnum(params, "decision", ["accept", "reject"] as const),
+    };
+  }
+  return { action, proposalId };
 }
 
 function objectParams(value: unknown): Record<string, unknown> {

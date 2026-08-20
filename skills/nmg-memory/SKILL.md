@@ -120,6 +120,12 @@ switch to `--retrieval-mode hybrid` (semantic path; see
 [embedding](references/embedding.md)). Do not load all candidate evidence into
 the model.
 
+Pi also applies a per-user-turn process budget: at most three searches and five
+total search/get calls. Two searches without exact-evidence progression require a
+`get`; two consecutive searches returning no new candidate IDs stop recall. Do
+not work around these guards by paraphrasing the same query. Answer from the
+loaded evidence, state the remaining uncertainty, or wait for a new user turn.
+
 ## When to read the manual
 
 - For exact write forms, state replacement, scope, or evidence:
