@@ -131,6 +131,20 @@ product metrics. This proves the execution and scoring path, not candidate
 quality: the remaining work is a sufficiently sized, evidence-diverse matched
 held-out run plus natural product observations.
 
+The fixed 14-question `development-v1` causal run now supplies the first
+gate-sized, evidence-diverse held-out engineering comparison. The 25-step
+candidate changed ranking in all 14 cases and improved official answer accuracy
+from 9/14 to 12/14, official evidence sufficiency from 9/14 to 11/14, mean
+session recall from 0.762 to 0.905, and NDCG from 0.769 to 0.858. It also raised
+mean tokens from 17,850 to 24,068, end-to-end latency from 9.00 s to 11.26 s,
+and tool rounds from 2.07 to 2.36. The controller-quality gate passed, but token
+and latency bounds failed; the independent small LoCoMo retrieval gate also
+failed. Eligibility therefore remains shadow-only. The 14-pair answer gain is
+not statistically conclusive (exact two-sided McNemar p=0.25), and this local
+development manifest is neither natural product evidence nor a leaderboard
+split. The unresolved requirement is matched natural observations with explicit
+evidence outcomes and acceptable costs, not another execution-path smoke.
+
 ## 3. Validate unattended memory maintenance
 
 - [ ] Measure STG-to-LTG consolidation precision and reversibility on natural

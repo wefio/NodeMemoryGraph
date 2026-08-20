@@ -66,3 +66,37 @@ two actions, one of which changed the retrieval projection. Both NMG arms scored
 correctly with the same official retrieval (recall 0.5, NDCG 0.613); candidate
 disclosure fell from 3,368 to 981 characters. This is an execution-path check,
 not an estimate of controller quality or a leaderboard result.
+
+## Evidence-diverse development comparison — 2026-08-20
+
+The next causal run used the fixed `development-v1` manifest: 14 LongMemEval-S
+questions, two from each of seven question categories, one repeat, four
+question-level workers, retrieval judging enabled, and the same 25-step frozen
+candidate (`sha256:1560273cd79c933a0f733d149ead4e0a328a6279868defe243e4371b4c1441f3`).
+All 14 candidate cases recorded at least one ranking-changing controller action.
+The run and official score are under
+`evals/longmemeval/results/2026-08-20T11-53-32.753Z/`; generated result files are
+ignored by Git.
+
+| Arm | Official answer accuracy | Official evidence sufficiency | Mean tool rounds | Mean tokens | Mean end-to-end latency |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| No memory | 2/14 (14.3%) | n/a | 0.00 | 766 | 4.69 s |
+| Deterministic NMG | 9/14 (64.3%) | 9/14 (64.3%) | 2.07 | 17,850 | 9.00 s |
+| Frozen candidate NMG | 12/14 (85.7%) | 11/14 (78.6%) | 2.36 | 24,068 | 11.26 s |
+
+The candidate gained three answer wins and no answer losses against deterministic
+NMG. Mean official session recall increased from 0.762 to 0.905 and NDCG from
+0.769 to 0.858. The diagnostic retrieval-sufficiency judge was more optimistic
+(7/14 to 12/14), but promotion uses the official ID-based evidence metric above.
+This 14-pair result meets the product gate's minimum case count, but the paired
+answer difference is still statistically weak (exact two-sided McNemar p=0.25)
+and the manifest is a local development sample, not a leaderboard split.
+
+The gain was not free. Relative to deterministic NMG, mean tokens increased by
+34.8%, mean end-to-end latency by 25.2%, and mean tool rounds by 13.8%. Feeding
+the official score into `eval:controller` therefore passed the controller-quality
+gate but failed the product gate's token and latency bounds. The independent
+20-case LoCoMo retrieval gate also failed on recall, leaving eligibility at
+`shadow=true`, `active=false`, and `defaultPi=false`. This run closes the missing
+gate-sized, evidence-diverse causal engineering comparison; it does not replace
+matched natural Pi observations or justify promotion.
