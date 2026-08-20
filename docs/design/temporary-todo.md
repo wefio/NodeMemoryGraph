@@ -21,14 +21,17 @@ plumbing but cannot count as natural product evidence: ordinary Pi writes
 `natural`, headless probes write `controlled`, and legacy events without a
 collection origin are excluded. A cross-process lock protects JSONL rotation.
 
-As of 2026-08-20 the bounded shadow log contains 1,057 events, 333 retrieval
-graphs, and 50 fully labelled natural graphs in 34 independent session/task
-groups (27 train, 7 chronological validation). The four label distributions are
-30/20 evidence-sufficient/insufficient, 24/26 expansion-useful/not-useful,
-19/31 excessive-noise/clean, and 9/41 no-memory-needed/memory-needed. This meets
-the provisional sample-count target but does not supply useful-evidence targets
-in the held-out segment. New collection must therefore emphasize tasks where the
-Agent receives explicit evidence confirmation or a tool-verifiable outcome, along with natural
+As of the latest 2026-08-20 read-only audit, the bounded shadow log contains
+1,073 events, 337 retrieval graphs, and 52 fully labelled natural graphs. It
+contains zero disclosure, diagnostic-attribution, or verified-attribution events
+from the pre-v5 collection window. The source and installed Skill now require
+`nmg.v5` and fail closed instead of silently dropping the renamed attribution
+RPC. The shared daemon was explicitly restarted on 2026-08-20 and is now a
+compatible v5 process, so subsequent ordinary Pi sessions can exercise the new
+event path. Existing labels meet the provisional sample-count target but do not
+supply useful-evidence targets in the held-out segment. New
+collection must therefore emphasize tasks where the Agent receives explicit
+evidence confirmation or a tool-verifiable outcome, along with natural
 corrections and failed outcomes; more binary sufficiency labels alone will not
 unlock calibration. API answer overlap and black-box counterfactual response
 differences remain diagnostics and must not fill this gap.
@@ -103,13 +106,16 @@ The evidence inventory is reproducible without touching the live stores:
 `npm run eval:natural-maintenance -- --project-dir <project>` opens every input
 SQLite database read-only and reports the exact claim, posterior, consolidation,
 proposal, transform, rollback, and maintenance-backlog counts. The latest
-2026-08-20 snapshot found 279 LTG memories (238 active), one active project STG
+Post-restart live traffic on 2026-08-20 found 283 LTG memories (240 active), one active project STG
 memory, zero claim outcomes/posteriors, zero STG→LTG materializations, one
 pending `refines` proposal, zero identity proposals/transforms/rollbacks, 15
-uncompacted index deltas, and 17 pending accesses. Both distributed-pressure
-flags are now false after the bounded sparse-backlog drain fix. These remaining
-zeros are product-evidence gaps; the audit command and controlled tests do not
-convert them into natural validation.
+uncompacted index deltas, and 21 pending accesses. The first ordinary v5
+search/get/write sequence reduced the distributed write backlog from 17 nodes to
+14, below the global threshold; both distributed-pressure flags are now false.
+This validates the sparse-backlog drain on live storage without claiming
+consolidation quality. The remaining zeros are product-evidence
+gaps; the audit command and controlled tests do not convert them into natural
+validation.
 
 ## 4. Separate controller policy from the Agent answer policy
 
