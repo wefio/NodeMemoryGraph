@@ -34,9 +34,9 @@ test("shadow calibration trains a replayable candidate without activating it", (
   assert.deepEqual(result.evidenceDiversity, {
     primaryTrainingTargets: 1,
     primaryValidationTargets: 1,
-    exactTrainingTargets: 2,
-    exactValidationTargets: 2,
-    overlappingExactTargets: 2,
+    exactAttributionTrainingTargets: 2,
+    exactAttributionValidationTargets: 2,
+    overlappingExactAttributionTargets: 2,
   });
   assert.equal(result.gate.controllerGate.enoughEvidenceDiversity, false);
   assert.equal(result.gate.controllerGate.evidenceTargetsHeldOut, false);
@@ -60,9 +60,9 @@ test("shadow calibration catches leakage through non-primary exact evidence", ()
   assert.deepEqual(result.evidenceDiversity, {
     primaryTrainingTargets: 4,
     primaryValidationTargets: 1,
-    exactTrainingTargets: 5,
-    exactValidationTargets: 2,
-    overlappingExactTargets: 1,
+    exactAttributionTrainingTargets: 5,
+    exactAttributionValidationTargets: 2,
+    overlappingExactAttributionTargets: 1,
   });
   assert.equal(result.gate.controllerGate.evidenceTargetsHeldOut, false);
 });
@@ -136,13 +136,14 @@ function eventsFor(
   return [
     retrieval,
     {
-      version: 1,
-      type: "use",
+      version: 2,
+      type: "attribution",
       graphId,
       sessionId: retrieval.sessionId,
       recordedAt,
-      requestedMemoryIds: [primaryMemoryId, "memory-shared"],
-      usedMemoryIds: [primaryMemoryId, "memory-shared"],
+      candidateMemoryIds: [primaryMemoryId, "memory-shared"],
+      attributedMemoryIds: [primaryMemoryId, "memory-shared"],
+      method: "verified_claim_support",
     },
     {
       version: 1,

@@ -1,21 +1,25 @@
 # NMG 记忆维护反馈（Feedback Loop）设计
 
-> 一个统一的"记忆维护反馈"通道：**nmg 自动兜底 + LLM 主动增强**。写路径不做
-> 语义标注（0-annotation ingest），语义判断（过时/取代/检索意图）后置到反馈，
-> LLM 在反馈内。该边界用于避免把可靠性寄托在 Agent 自觉写入、稳定记住记录
-> ID，或一次性召回行为上。
+> 一个统一的"记忆维护反馈"通道：**NMG 自动记录可观测事实，LLM/用户/
+> 工具只在各自能验证的边界内提供判断**。写路径不强制语义标注
+> （0-annotation ingest），过时、取代和检索意图等语义判断可在 `remember`/
+> 反馈接入点中由 LLM 补充。该边界同时防止把 API 模型的回答表面行为误当成
+> 因果证据。
 
 ## 定位
 
-反馈通道解决三件事：
+反馈通道解决三类不同的事，不得混用：
 
-| 信号 | 谁提供 | 解决的 kimi 反馈 |
-|---|---|---|
-| `used`（用了哪些记忆） | **nmg 自动**（回答匹配推导）+ LLM 可补 | #1 写入靠自觉 → 检索使用不靠自觉 |
-| `supersede`（旧值过时/被取代） | **LLM 主动**（语义判断） | 动态更新：旧值不再作为当前答案 |
-| `retrieveHints`（该被什么词检索到） | **LLM 主动**（检索意图只有写入者知道） | #2 中英混合召回弱 → agent 给等价检索词 |
+| 信号                                       | 谁提供                                       | 可以驱动什么                               |
+| ------------------------------------------ | -------------------------------------------- | ------------------------------------------ |
+| `disclosure`（哪些精确记忆已给模型）       | **NMG 自动**                                 | 读取统计、下一轮反馈复查选择；不是答案归因 |
+| `answer_overlap`（回答与记忆文本表面重合） | **NMG 诊断器**                               | 审计和测量诊断；不训练控制器，不改图和层级 |
+| `verified_evidence`（可验证证据与结果）    | **用户明确反馈、成功工具结果或官方评测标注** | 控制器监督、边后验、长期巩固               |
+| `supersede`（旧值过时/被取代）             | **LLM 主动**（语义判断）                     | 动态更新：旧值不再作为当前答案             |
+| `retrieveHints`（该被什么词检索到）        | **LLM 主动**（检索意图只有写入者知道）       | #2 中英混合召回弱 → agent 给等价检索词     |
 
-分工的本质：**nmg 自动做能推导的（可确定性推导），LLM 主动做需要理解的（语义/意图）**。
+分工的本质：**NMG 自动记录它能直接观测的，LLM 主动做需要理解的语义判断，
+但只有独立可验证的结果才能作为学习和图巩固证据**。
 
 ## API
 
@@ -24,8 +28,11 @@ recordFeedback(input: RecordFeedbackInput): void;
 
 interface RecordFeedbackInput {
   sessionId?: string;
-  /** 回答实际用到的检索记忆。nmg 也可用 deriveUsedMemoryIds 自动推导。 */
-  usedMemoryIds?: string[];
+  /**
+   * 由调用方明确报告的访问需求信号。只更新 access_count / last_accessed_at，
+   * 不证明 API 模型因果使用，也不能代替 verified_evidence。
+   */
+  attributedMemoryIds?: string[];
   /**
    * LLM 判定的一条旧值被取代。
    * - 给 newMemoryId  → 完整 supersession（旧值 superseded，指针指向新值）
@@ -42,6 +49,11 @@ interface RecordFeedbackInput {
 ```
 
 软信号：反馈里任何无效目标（缺失/已删除/已 superseded）都被忽略，绝不抛给调用方。
+
+`recordFeedback` 是写路径维护 API，不是 Active Graph 证据归因 API。AG 的三层
+观测分别通过 `recordActiveGraphDisclosure`、`answer_overlap` 诊断归因和
+`verified_evidence` 验证归因记录。面向模型的稳定 daemon RPC 只能写入
+`answer_overlap`，不得伪造验证证据。
 
 ## supersede 的两种模式
 
@@ -75,8 +87,12 @@ supersession（记忆取代）是 nmg 写路径能力：单值属性的"旧→�
 ## 评测桥模拟
 
 评测桥模拟 agent 调 recordFeedback：
-- `used`：评测桥可不给（nmg 自动推导）；
+
+- `attributedMemoryIds`：评测桥默认不给；它只是显式访问需求，不是正确性标注；
 - `supersede`：评测桥用评测 LLM（judge）判断 → 传 old（+ 可能 new）——信息来自
   对话/检索，非 golden，公平；
 - `retrieveHints`：评测桥可选（用 judge 提取记忆检索词）——默认不给（nmg 自动
   检索为主）。
+
+官方 benchmark 若有与问题对齐的支持证据标注，可由评测控制器直接写入
+`verified_evidence`。它与回答模型分离，因此可用于控制器和召回策略评估。

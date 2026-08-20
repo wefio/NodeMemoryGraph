@@ -59,7 +59,11 @@ test("Phase1: STG store is a separate file that can be deleted without touching 
     // Deleting the STG file must not affect the LTG store.
     rmSync(stgPath, { force: true });
     const reopened = new NmgStore(join(directory, "nmg.sqlite"), new HashingVectorEmbedder());
-    assert.equal(reopened.search("Durable fact", { maxTier: 3 }).length, 1, "LTG survives STG deletion");
+    assert.equal(
+      reopened.search("Durable fact", { maxTier: 3 }).length,
+      1,
+      "LTG survives STG deletion",
+    );
     reopened.close();
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -157,10 +161,11 @@ test("STG/LTG projection keeps only the newest same-scope state version", () => 
       stg.searchContext("charity 5K personal best", { limit: 10, sessionId: "session-update" }),
       ltg.searchContext("charity 5K personal best", { limit: 10 }),
     );
-    const states = merged.results.filter(
-      (result) => result.memory.stateKey === common.stateKey,
+    const states = merged.results.filter((result) => result.memory.stateKey === common.stateKey);
+    assert.deepEqual(
+      states.map((result) => result.memory.id),
+      [latest.memory.id],
     );
-    assert.deepEqual(states.map((result) => result.memory.id), [latest.memory.id]);
     assert.equal(merged.activeGraph?.memoryIds.includes(latest.memory.id), true);
     assert.equal(merged.activeGraph?.memoryIds.length, merged.results.length);
 
@@ -187,7 +192,7 @@ test("STG/LTG projection keeps only the newest same-scope state version", () => 
   }
 });
 
-test("Phase2: usage-driven copy selects the used project memory", () => {
+test("Phase2: access-driven copy selects the accessed project memory", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-stg-usage-"));
   const ltg = new NmgStore(join(directory, "nmg.sqlite"), new HashingVectorEmbedder());
   const stg = createStgStore(directory, new HashingVectorEmbedder());
@@ -209,8 +214,8 @@ test("Phase2: usage-driven copy selects the used project memory", () => {
     const sourceIds = copied.flatMap((result) =>
       result.memory.markers.map((marker) => marker.attributes?.sourceMemoryId),
     );
-    assert.ok(sourceIds.includes(hot.memory.id), "used memory copied");
-    assert.ok(!sourceIds.includes(cold.memory.id), "unused memory not copied");
+    assert.ok(sourceIds.includes(hot.memory.id), "accessed memory copied");
+    assert.ok(!sourceIds.includes(cold.memory.id), "unaccessed memory not copied");
   } finally {
     ltg.close();
     stg.close();
@@ -228,7 +233,7 @@ test("Phase2: cache markers carry sourceMemoryId for authority resolution", () =
       statement: "Cached copy",
       nodeName: "cache",
       residence: "stg",
-        sessionId: "test-session",
+      sessionId: "test-session",
       markers: [marker],
     });
     const markerKind = saved.memory.markers.find((m) => m.kind === "cached_from_ltg");
@@ -263,8 +268,8 @@ test("Phase2: copyLtgSubsetToStg copies usage-ranked project LTG with markers", 
   const ltg = new NmgStore(join(directory, "nmg.sqlite"), new HashingVectorEmbedder());
   const stg = createStgStore(directory, new HashingVectorEmbedder());
   try {
-    // Project-scoped memories: one heavily used, one cold.
-    const used = ltg.remember({
+    // Project-scoped memories: one explicitly accessed, one cold.
+    const accessed = ltg.remember({
       statement: "Project atlas uses SQLite",
       nodeName: "atlas storage",
       scope: { project: "atlas" },
@@ -280,8 +285,8 @@ test("Phase2: copyLtgSubsetToStg copies usage-ranked project LTG with markers", 
       nodeName: "nmg runtime",
       scope: { project: "nmg" },
     });
-    // Simulate usage: used memory gets more access.
-    ltg.recordUsage([used.memory.id]);
+    // Simulate an explicit access event.
+    ltg.recordUsage([accessed.memory.id]);
 
     const written = copyLtgSubsetToStg(ltg, stg, {
       scope: { project: "atlas" },
@@ -295,15 +300,20 @@ test("Phase2: copyLtgSubsetToStg copies usage-ranked project LTG with markers", 
       "every copy carries cached_from_ltg",
     );
     const copiedStatements = copied.map((r) => r.memory.statement);
-    assert.ok(copiedStatements.some((s) => s.includes("SQLite")), "project content copied");
+    assert.ok(
+      copiedStatements.some((s) => s.includes("SQLite")),
+      "project content copied",
+    );
     assert.ok(
       !copiedStatements.some((s) => s.includes("uses Pi")),
       "other project content NOT copied",
     );
-    // The usage-ranked first memory is present (highest access_count).
+    // The access-ranked first memory is present (highest access_count).
     assert.ok(
-      copied.some((r) => r.memory.markers.some((m) => m.attributes?.sourceMemoryId === used.memory.id)),
-      "used memory copied with sourceMemoryId",
+      copied.some((r) =>
+        r.memory.markers.some((m) => m.attributes?.sourceMemoryId === accessed.memory.id),
+      ),
+      "accessed memory copied with sourceMemoryId",
     );
     const countBefore = copied.length;
     assert.equal(
@@ -353,7 +363,9 @@ test("Phase3: searchStgFirst returns STG hits directly and falls back to LTG", (
     );
 
     const merged = searchStgFirst(ltg, stg, "Project atlas hot memory", { qppThreshold: 2 });
-    const matching = merged.results.filter((result) => result.memory.statement === hot.memory.statement);
+    const matching = merged.results.filter(
+      (result) => result.memory.statement === hot.memory.statement,
+    );
     assert.equal(matching.length, 1, "cached copy and LTG authority are deduplicated");
     assert.equal(matching[0]?.memory.id, hot.memory.id, "LTG authority wins the merge");
     assert.deepEqual(

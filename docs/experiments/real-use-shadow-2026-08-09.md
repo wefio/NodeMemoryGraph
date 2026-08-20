@@ -1,7 +1,10 @@
 # Pi controller-shadow smoke — 2026-08-09
 
 This is a single natural Agent-use observation, not a calibration dataset or a
-capability score.
+capability score. Terminology and trust boundaries were tightened after this
+run: events originally called `exact-use` are legacy ambiguous observations,
+not proof that the API model causally used a memory and not valid evidence
+supervision.
 
 ## Setup
 
@@ -18,7 +21,7 @@ shadow log captured:
 
 - 1 automatic recall;
 - 8 explicit searches;
-- 2 exact-use events;
+- 2 legacy events then called exact-use;
 - 9 completed Agent-turn outcome telemetry events;
 - 8,686 actually injected characters (about 2,175 tokens using the labelled
   four-characters-per-token estimate);
@@ -141,11 +144,12 @@ The first live multi-turn probe exposed two lifecycle errors. Pi invokes
 marked shown inside the same user turn before the next user message. A single
 answer can also create both an automatic header graph and an explicit
 `search -> get` graph; selecting the newest graph could therefore request labels
-for a graph with no exact-use attribution. The bridge now checks for feedback
-only once per distinct `(session, user prompt)` and offers only graphs with a
-non-empty exact-use event. Deterministic tests cover both conditions.
+for a graph whose evidence was never disclosed. The bridge now checks for
+feedback only once per distinct `(session, user prompt)` and offers only graphs
+with a non-empty disclosure event. Deterministic tests cover both conditions.
 
-The bounded log now contains 48 retrieval graphs, 11 exact-use events, 48
+The historical bounded log contained 48 retrieval graphs, 11 events then named
+"exact-use" (now conservatively treated as disclosure or diagnostic attribution), 48
 outcome records, four feedback events, three fully labelled graphs, and three
 query-derived task IDs. The new observability event was also verified end to
 end: one `feedback_nudge_shown` event precedes a feedback event for the same AG.
@@ -163,8 +167,8 @@ and replay boundary, not statistical sufficiency. The latest resulting
 - learned precision/recall: `0.333 / 1.0`;
 - control accuracy: `1.0` on the single validation row;
 - mean controller inference: about `0.14 ms`;
-- evidence diversity: two primary training targets and one primary validation
-  target; the complete exact-use sets contain seven and two targets, with one
+- historical evidence diversity: two primary training targets and one primary validation
+  target; the legacy ambiguous sets contain seven and two targets, with one
   target appearing in both splits;
 - controller gate: failed because two training cases and two distinct training
   evidence targets are insufficient, and because the shared evidence target
@@ -181,15 +185,19 @@ three semantically independent natural tasks. Query hashes must therefore not be
 used as a diversity claim; future calibration needs a materially broader set of
 ordinary Pi work even though the exporter can already form a legal split.
 
-The calibration gate now enforces this distinction mechanically. In addition
-to whole-task chronological splitting, it derives one conservative primary
-evidence target per row from the first rank-ordered exact record that the Agent
-actually used. It requires at least eight distinct primary training targets,
+The calibration gate now enforces a stricter distinction mechanically. In
+addition to whole-task chronological splitting, current code derives one
+conservative primary evidence target per row from the first rank-ordered exact
+record supported by `verified_claim_support`. It requires at least eight
+distinct primary training targets,
 which prevents one multi-evidence task from inflating diversity. Separately, it
-rejects any overlap between the complete training and validation exact-use sets,
+rejects any overlap between the complete training and validation verified-attribution sets,
 including non-primary evidence. The current artifact reports
 `primaryTrainingTargets=2`, `primaryValidationTargets=1`,
-`exactTrainingTargets=7`, `exactValidationTargets=2`, and
+historical `exactTrainingTargets=7`, `exactValidationTargets=2`, and
 `overlappingExactTargets=1`, so it fails closed even though query-derived task
 IDs form a syntactically valid split. Primary evidence is only a diversity
 proxy; it does not assert that multi-evidence tasks have a single ground truth.
+Those historical counts came from the superseded ambiguous event format and
+must not be used to activate a controller. New collection requires independently
+verified claim support.

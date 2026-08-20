@@ -20,7 +20,11 @@ const LABELS = [
 export interface ShadowCoverageReport {
   events: number;
   retrievals: number;
-  uses: number;
+  legacyUses: number;
+  disclosures: number;
+  attributions: number;
+  diagnosticAttributions: number;
+  verifiedAttributions: number;
   outcomes: number;
   feedback: number;
   toolFlow: number;
@@ -150,7 +154,15 @@ export function summarizeShadowEvents(
   return {
     events: events.length,
     retrievals: retrievals.length,
-    uses: events.filter((event) => event.type === "use").length,
+    legacyUses: events.filter((event) => event.type === "use").length,
+    disclosures: events.filter((event) => event.type === "disclosure").length,
+    attributions: events.filter((event) => event.type === "attribution").length,
+    diagnosticAttributions: events.filter(
+      (event) => event.type === "attribution" && event.method === "answer_overlap",
+    ).length,
+    verifiedAttributions: events.filter(
+      (event) => event.type === "attribution" && event.method === "verified_claim_support",
+    ).length,
     outcomes: events.filter((event) => event.type === "outcome").length,
     feedback: feedback.length,
     toolFlow: events.filter((event) => event.type === "tool_flow").length,
@@ -198,7 +210,9 @@ export function readShadowEvents(path: string): ShadowEvaluationEvent[] {
       .flatMap((line) => {
         try {
           const event = JSON.parse(line) as ShadowEvaluationEvent;
-          return event?.version === 1 && typeof event.graphId === "string" ? [event] : [];
+          return (event?.version === 1 || event?.version === 2) && typeof event.graphId === "string"
+            ? [event]
+            : [];
         } catch {
           return [];
         }

@@ -457,14 +457,17 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         this.db.prepare("DELETE FROM memory_leaf_members WHERE memory_id = ?").run(memoryId);
         const traceRows = this.db
           .prepare(
-            `SELECT id, result_memory_ids_json, useful_memory_ids_json,
+            `SELECT id, result_memory_ids_json, disclosed_memory_ids_json,
+                    attributed_memory_ids_json,
+                    useful_memory_ids_json,
                     contradicted_memory_ids_json, rejected_memory_ids_json
              FROM retrieval_traces`,
           )
           .all() as Row[];
         const updateTrace = this.db.prepare(
           `UPDATE retrieval_traces
-           SET result_memory_ids_json = ?, useful_memory_ids_json = ?,
+           SET result_memory_ids_json = ?, disclosed_memory_ids_json = ?,
+               attributed_memory_ids_json = ?, useful_memory_ids_json = ?,
                contradicted_memory_ids_json = ?, rejected_memory_ids_json = ?
            WHERE id = ?`,
         );
@@ -475,6 +478,8 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
             );
           updateTrace.run(
             withoutDeleted(trace.result_memory_ids_json),
+            withoutDeleted(trace.disclosed_memory_ids_json),
+            withoutDeleted(trace.attributed_memory_ids_json),
             withoutDeleted(trace.useful_memory_ids_json),
             withoutDeleted(trace.contradicted_memory_ids_json),
             withoutDeleted(trace.rejected_memory_ids_json),
@@ -1276,14 +1281,15 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
           .prepare(
             `INSERT INTO retrieval_traces
             (id, session_id, query, result_memory_ids_json, result_node_ids_json,
-             expanded_node_ids_json, useful_memory_ids_json,
+             expanded_node_ids_json, disclosed_memory_ids_json, attributed_memory_ids_json,
+             useful_memory_ids_json,
              contradicted_memory_ids_json, rejected_memory_ids_json,
              relation_ids_json, task_id, active_graph_budget_json,
              active_graph_usage_json, selections_json, expansions_json,
              budget_ledger_json, qpp_json, timings_json, filter_usage_json,
              node_route_signal_json,
              ambiguity, fallback_used, conflict_observed, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             id,
@@ -1292,6 +1298,8 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
             JSON.stringify([...new Set(input.resultMemoryIds)]),
             JSON.stringify(nodeIds),
             JSON.stringify([...new Set(input.expandedNodeIds ?? [])]),
+            JSON.stringify([...new Set(input.disclosedMemoryIds ?? [])]),
+            JSON.stringify([...new Set(input.attributedMemoryIds ?? [])]),
             JSON.stringify([...new Set(input.usefulMemoryIds ?? [])]),
             JSON.stringify([...new Set(input.contradictedMemoryIds ?? [])]),
             JSON.stringify([...new Set(input.rejectedMemoryIds ?? [])]),
@@ -1604,6 +1612,8 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         resultNodeIds: parseStringArray(row.result_node_ids_json),
         expandedNodeIds: parseStringArray(row.expanded_node_ids_json),
         relationIds: parseStringArray(row.relation_ids_json),
+        disclosedMemoryIds: parseStringArray(row.disclosed_memory_ids_json),
+        attributedMemoryIds: parseStringArray(row.attributed_memory_ids_json),
         usefulMemoryIds: parseStringArray(row.useful_memory_ids_json),
         contradictedMemoryIds: parseStringArray(row.contradicted_memory_ids_json),
         rejectedMemoryIds: parseStringArray(row.rejected_memory_ids_json),
@@ -1634,37 +1644,65 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       };
     }
 
-    recordActiveGraphUse(
+    /**
+     * Record exact evidence disclosed to the model. Disclosure is observable,
+     * but it is not answer attribution and must not affect topology or controller
+     * supervision.
+     */
+    recordActiveGraphDisclosure(
+      activeGraphId: string,
+      disclosedMemoryIds: readonly string[],
+      sessionId?: string,
+    ): void {
+      const row = this.db
+        .prepare("SELECT * FROM retrieval_traces WHERE id = ?")
+        .get(activeGraphId) as Row | undefined;
+      if (!row) throw new Error(`active graph ${activeGraphId} does not exist`);
+      this.assertTraceOwner(row, sessionId);
+      const resultMemoryIds = new Set(parseStringArray(row.result_memory_ids_json));
+      const observed = [...new Set(disclosedMemoryIds)].filter((id) => resultMemoryIds.has(id));
+      const disclosed = [
+        ...new Set([...parseStringArray(row.disclosed_memory_ids_json), ...observed]),
+      ];
+      this.db
+        .prepare("UPDATE retrieval_traces SET disclosed_memory_ids_json = ? WHERE id = ?")
+        .run(JSON.stringify(disclosed), activeGraphId);
+      this.recordUsage(observed);
+    }
+
+    recordActiveGraphAttribution(
       activeGraphId: string,
       input: {
-        usedMemoryIds: readonly string[];
+        method: "answer_overlap" | "verified_evidence";
+        attributedMemoryIds: readonly string[];
         contradictedMemoryIds?: readonly string[];
         rejectedMemoryIds?: readonly string[];
       },
       sessionId?: string,
     ): void {
       const startedAt = nowMs();
-      this.recordActiveGraphUseInner(activeGraphId, input, sessionId);
-      // Record the use-attribution span on the same trace row (best-effort —
+      this.recordActiveGraphAttributionInner(activeGraphId, input, sessionId);
+      // Record the attribution span on the same trace row (best-effort —
       // the span is diagnostic, never a reason to fail the call).
       try {
         this.db
           .prepare(
             `UPDATE retrieval_traces SET timings_json = json_patch(timings_json, ?) WHERE id = ?`,
           )
-          .run(JSON.stringify({ use: { totalMs: nowMs() - startedAt } }), activeGraphId);
+          .run(JSON.stringify({ attribution: { totalMs: nowMs() - startedAt } }), activeGraphId);
       } catch {
         /* trace timing is diagnostic; ignore write failure */
       }
     }
 
-    // Moved up from NmgStoreBase: its only caller is recordActiveGraphUse
+    // Moved up from NmgStoreBase: its only caller is recordActiveGraphAttribution
     // (this cluster), and it calls recordUsage (writes) and trainRouter
     // (graph) — keeping it in base forced two upward stubs.
-    protected recordActiveGraphUseInner(
+    protected recordActiveGraphAttributionInner(
       activeGraphId: string,
       input: {
-        usedMemoryIds: readonly string[];
+        method: "answer_overlap" | "verified_evidence";
+        attributedMemoryIds: readonly string[];
         contradictedMemoryIds?: readonly string[];
         rejectedMemoryIds?: readonly string[];
       },
@@ -1676,17 +1714,31 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       if (!row) throw new Error(`active graph ${activeGraphId} does not exist`);
       this.assertTraceOwner(row, sessionId);
       const resultMemoryIds = new Set(parseStringArray(row.result_memory_ids_json));
-      const observedUsedMemoryIds = [...new Set(input.usedMemoryIds)].filter((id) =>
+      const observedAttributedMemoryIds = [...new Set(input.attributedMemoryIds)].filter((id) =>
         resultMemoryIds.has(id),
       );
+      const attributedMemoryIds = [
+        ...new Set([
+          ...parseStringArray(row.attributed_memory_ids_json),
+          ...observedAttributedMemoryIds,
+        ]),
+      ];
+      this.db
+        .prepare("UPDATE retrieval_traces SET attributed_memory_ids_json = ? WHERE id = ?")
+        .run(JSON.stringify(attributedMemoryIds), activeGraphId);
+      // Answer overlap is a black-box diagnostic over a provider-controlled API
+      // model. It is not causal evidence and must never feed topology, hierarchy,
+      // or differentiable-controller learning.
+      if (input.method === "answer_overlap") return;
+      const observedVerifiedMemoryIds = observedAttributedMemoryIds;
       const observedContradictedMemoryIds = [...new Set(input.contradictedMemoryIds ?? [])].filter(
         (id) => resultMemoryIds.has(id),
       );
       const observedRejectedMemoryIds = [...new Set(input.rejectedMemoryIds ?? [])].filter((id) =>
         resultMemoryIds.has(id),
       );
-      const usedMemoryIds = [
-        ...new Set([...parseStringArray(row.useful_memory_ids_json), ...observedUsedMemoryIds]),
+      const verifiedMemoryIds = [
+        ...new Set([...parseStringArray(row.useful_memory_ids_json), ...observedVerifiedMemoryIds]),
       ];
       const contradictedMemoryIds = [
         ...new Set([
@@ -1700,9 +1752,9 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
           ...observedRejectedMemoryIds,
         ]),
       ];
-      const usedNodeIds = new Set(this.nodeIdsForMemories(usedMemoryIds));
+      const verifiedNodeIds = new Set(this.nodeIdsForMemories(verifiedMemoryIds));
       const contradictedNodeIds = new Set(this.nodeIdsForMemories(contradictedMemoryIds));
-      const observedUsedNodeIds = new Set(this.nodeIdsForMemories(observedUsedMemoryIds));
+      const observedVerifiedNodeIds = new Set(this.nodeIdsForMemories(observedVerifiedMemoryIds));
       const observedContradictedNodeIds = new Set(
         this.nodeIdsForMemories(observedContradictedMemoryIds),
       );
@@ -1720,20 +1772,20 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
            WHERE id = ?`,
           )
           .run(
-            JSON.stringify(usedMemoryIds),
+            JSON.stringify(verifiedMemoryIds),
             JSON.stringify(contradictedMemoryIds),
             JSON.stringify(rejectedMemoryIds),
             activeGraphId,
           );
         this.recordNodeOutcomes(
-          observedUsedNodeIds,
+          observedVerifiedNodeIds,
           observedContradictedNodeIds,
           observedRejectedNodeIds,
           now,
         );
         this.recordEdgeOutcomes(
           relationIds,
-          observedUsedNodeIds,
+          observedVerifiedNodeIds,
           observedContradictedNodeIds,
           observedRejectedNodeIds,
           now,
@@ -1743,7 +1795,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
           for (let right = left + 1; right < resultNodeIds.length; right += 1) {
             const pair = [resultNodeIds[left]!, resultNodeIds[right]!] as const;
             observedPairs.push(pair);
-            const usefulFlag = usedNodeIds.has(pair[0]) && usedNodeIds.has(pair[1]) ? 1 : 0;
+            const usefulFlag = verifiedNodeIds.has(pair[0]) && verifiedNodeIds.has(pair[1]) ? 1 : 0;
             const contradictedFlag =
               contradictedNodeIds.has(pair[0]) || contradictedNodeIds.has(pair[1]) ? 1 : 0;
             // Pair signals may not have been drained into edge_task_observations
@@ -1768,11 +1820,11 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         this.db.exec("ROLLBACK");
         throw error;
       }
-      this.recordUsage(observedUsedMemoryIds);
-      if (usedNodeIds.size > 0) {
+      this.recordUsage(observedVerifiedMemoryIds);
+      if (verifiedNodeIds.size > 0) {
         // Triple-confirmation for the summary-routing supervision signal: only
         // nodes that were summary-routed (routed ∧ recalled in this trace's
-        // node_route_signal_json) AND explicitly used are boosted in the
+        // node_route_signal_json) AND explicitly verified are boosted in the
         // router update. Summary hits alone never train the router — that
         // would be exposure-biased (Unbiased-LTR echo-chamber guard).
         const tripleConfirmed = new Set<string>();
@@ -1780,11 +1832,11 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
           row.node_route_signal_json,
           [],
         ) as NodeRouteSignalItem[]) {
-          if (signal.routed && signal.recalled && usedNodeIds.has(signal.nodeId)) {
+          if (signal.routed && signal.recalled && verifiedNodeIds.has(signal.nodeId)) {
             tripleConfirmed.add(signal.nodeId);
           }
         }
-        this.trainRouter(String(row.query), [...usedNodeIds], 0.2, [...tripleConfirmed]);
+        this.trainRouter(String(row.query), [...verifiedNodeIds], 0.2, [...tripleConfirmed]);
       }
       // Outcome attribution is the point where co-retrieval becomes evidence.
       // Reconciliation remains conservative (independent-task threshold and

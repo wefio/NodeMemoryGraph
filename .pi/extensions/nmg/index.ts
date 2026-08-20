@@ -47,7 +47,7 @@ import {
   type AgentHistoryMessage,
   type SelectedEvidence,
 } from "../../../src/integration/evidence.ts";
-import { deriveUsedMemoryIds } from "../../../src/core/feedback.ts";
+import { deriveAnswerOverlapMemoryIds } from "../../../src/core/feedback.ts";
 import { decideMemoryLoad } from "../../../src/core/gate.ts";
 import {
   REASONING_EDGE_KINDS,
@@ -84,7 +84,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const taskWindow = new SessionTaskWindow();
   const recallFlow = new SessionRecallFlow();
   const runtimeAg = new SessionRuntimeAg();
-  const agentUseFlow = new AgentUseFlow(32);
+  const agentAttributionFlow = new AgentAttributionFlow(32);
   const qpp1Mode = configuredQpp1Mode();
   const qpp2Mode = configuredQpp2Mode();
   const qpp2RetainedMass = configuredQpp2RetainedMass();
@@ -121,7 +121,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       | "resolveRemember"
       | "search"
       | "taskBoard"
-      | "recordActiveGraphUse"
+      | "recordActiveGraphAttribution"
       | "recordClaimOutcomes",
     params: Record<string, unknown>,
   ) => invokeDaemon(await connection(), method, params);
@@ -211,7 +211,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // Automatic recall is still a retrieval trace. Keep it in the per-turn
       // attribution window so agent_end can distinguish surfaced evidence from
       // candidates that were merely injected.
-      agentUseFlow.note(sessionId, fullContext);
+      agentAttributionFlow.note(sessionId, fullContext);
       const recordCount = (recalled.match(/memory=/g) ?? []).length;
       const searchNudge = formatSearchRecommendation(context, recommendationMode);
       const recallContext = composeNmgContextMessage(
@@ -571,10 +571,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     latestAgentCtx = ctx;
     const sessionId = ctx.sessionManager.getSessionId();
     await controllerShadow.outcome(sessionId, event.messages);
-    // QPP implicit feedback (independent of the SkillOpt shadow bridge): derive
-    // which recalled memories actually surfaced in the final answer and persist
-    // them as useful_memory_ids on the trace — the (qpp, useful) pairs rolling
-    // tau auto-calibration needs. Never throws; feedback must not break completion.
+    // Diagnostic answer-overlap attribution (independent of the SkillOpt shadow
+    // bridge): derive which recalled memories visibly surfaced in the final
+    // answer. Provider/model behaviour may drift, so this signal is stored only
+    // as attributed_memory_ids and never trains QPP, topology, or the controller.
     try {
       const answerText = extractAnswerText(event.messages);
       const promptText = extractPromptText(event.messages);
@@ -582,23 +582,27 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // must not be carried into the next turn (its label would be matched
       // against the WRONG answer). Consuming drops it — better to lose a
       // sample than to mislabel one.
-      const pending = agentUseFlow.consume(sessionId);
+      const pending = agentAttributionFlow.consume(sessionId);
       if (pending.length > 0 && answerText) {
         const active = connectionPromise
           ? await connectionPromise.catch(() => undefined)
           : undefined;
         for (const { traceId, results } of pending) {
           const requestedMemoryIds = results.map((entry) => entry.memory.id);
-          const usedMemoryIds = deriveUsedMemoryIds(answerText, results, promptText);
-          // The shadow log needs the same natural-use attribution as the
-          // canonical trace. An empty used set is meaningful negative evidence,
-          // not a reason to drop the observation.
-          await controllerShadow.use(traceId, sessionId, requestedMemoryIds, usedMemoryIds);
+          const attributedMemoryIds = deriveAnswerOverlapMemoryIds(answerText, results, promptText);
+          // The shadow log mirrors the same heuristic diagnostic. An empty set is
+          // still useful for coverage analysis, but is not a training negative.
+          await controllerShadow.attribution(
+            traceId,
+            sessionId,
+            requestedMemoryIds,
+            attributedMemoryIds,
+          );
           if (active) {
             try {
-              await invoke("recordActiveGraphUse", {
+              await invoke("recordActiveGraphAttribution", {
                 activeGraphId: traceId,
-                usedMemoryIds,
+                attributedMemoryIds,
                 projectDir: projectDirectory(),
                 sessionId,
               });
@@ -619,7 +623,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     taskWindow.clear(sessionId);
     recallFlow.clear(sessionId);
     runtimeAg.clear(sessionId);
-    agentUseFlow.clear(sessionId);
+    agentAttributionFlow.clear(sessionId);
     controllerShadow.clear(sessionId);
     reasoningWorkspaces?.release(sessionId);
     if (!connectionPromise) return;
@@ -1247,13 +1251,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         sessionId,
         result.results.map((entry) => entry.memory.id),
       );
-      await controllerShadow.use(
+      await controllerShadow.disclosure(
         params.activeGraphId,
         sessionId,
         params.memoryIds,
         result.results.map((entry) => entry.memory.id),
       );
-      agentUseFlow.note(ctx.sessionManager.getSessionId(), result);
+      agentAttributionFlow.note(ctx.sessionManager.getSessionId(), result);
       const text = injectionWindow.format(ctx.sessionManager.getSessionId(), result, "evidence");
       return toolResult(result, text || "No active memory found.");
     },
@@ -1343,7 +1347,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       );
       const text = injectionWindow.format(sessionId, result, "header");
       await controllerShadow.retrieval(fullResult, sessionId, "tool", text);
-      agentUseFlow.note(sessionId, fullResult);
+      agentAttributionFlow.note(sessionId, fullResult);
       return toolResult(result, text);
     },
   });
@@ -2072,14 +2076,14 @@ export class SessionTaskWindow {
  * any returned evidence. A successful get opens the search phase again.
  */
 /**
- * QPP agent-end feedback cache (docs/design/retrieval-confidence-controller.md Stage 1).
- * Independent of the SkillOpt shadow bridge: it records which active graphs a
- * session retrieved (traceId + recalled MemorySearchResults) so agent_end can
- * derive used memories from the final answer and persist useful_memory_ids on
- * the trace — the (qpp, useful) pairs rolling tau calibration needs. Normal
- * close() already checkpoints, so no per-turn cost beyond the in-memory list.
+ * Agent-end diagnostic-attribution cache. Independent of the SkillOpt shadow
+ * bridge, it records which active graphs a session retrieved so agent_end can
+ * derive answer overlap and persist attributed_memory_ids. The signal is useful
+ * for coverage and feedback targeting but cannot train QPP or the controller.
+ * Normal close() already checkpoints, so there is no per-turn cost beyond the
+ * bounded in-memory list.
  */
-export class AgentUseFlow {
+export class AgentAttributionFlow {
   readonly #traces = new Map<string, Array<{ traceId: string; results: MemorySearchResult[] }>>();
   readonly maxPerSession: number;
 

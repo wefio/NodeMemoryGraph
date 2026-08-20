@@ -146,6 +146,16 @@ function taskEvents(
   return [
     retrieval,
     {
+      version: 2,
+      type: "attribution",
+      graphId,
+      sessionId: retrieval.sessionId,
+      recordedAt,
+      candidateMemoryIds: ["memory-1"],
+      attributedMemoryIds: ["memory-1"],
+      method: "verified_claim_support",
+    },
+    {
       version: 1,
       type: "feedback",
       collectionOrigin: "natural",
@@ -172,4 +182,33 @@ test("shadow dataset rejects labelled legacy rows that cannot replay controller 
   assert.equal(dataset.rows.length, 0);
   assert.equal(dataset.legacyGraphsWithoutReplayInputs, 1);
   assert.match(dataset.blockers.join("\n"), /replayable controller inputs/u);
+});
+
+test("legacy use events remain audit-only and cannot supervise evidence ranking", () => {
+  const events = taskEvents("graph-use-v1", "task-use-v1", "2026-08-01T00:00:00.000Z");
+  events.splice(1, 1, {
+    version: 1,
+    type: "use",
+    graphId: "graph-use-v1",
+    sessionId: "session-graph-use-v1",
+    recordedAt: "2026-08-01T00:00:00.000Z",
+    requestedMemoryIds: ["memory-1"],
+    usedMemoryIds: ["memory-1"],
+  });
+  const dataset = buildShadowDataset(events);
+  assert.equal(dataset.rows.length, 1, "feedback remains usable for control labels");
+  assert.equal(dataset.rows[0]?.attribution, null);
+  assert.equal(dataset.graphsWithoutVerifiedAttribution, 1);
+  assert.match(dataset.blockers.join("\n"), /lack verified claim attribution/u);
+});
+
+test("answer-overlap attribution remains diagnostic and cannot supervise evidence ranking", () => {
+  const events = taskEvents("graph-overlap", "task-overlap", "2026-08-01T00:00:00.000Z");
+  const attribution = events[1];
+  if (attribution?.type !== "attribution") throw new Error("fixture attribution missing");
+  attribution.method = "answer_overlap";
+  const dataset = buildShadowDataset(events);
+  assert.equal(dataset.rows.length, 1, "explicit feedback can still supervise control labels");
+  assert.equal(dataset.rows[0]?.attribution, null);
+  assert.equal(dataset.graphsWithoutVerifiedAttribution, 1);
 });

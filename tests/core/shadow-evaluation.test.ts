@@ -8,7 +8,7 @@ import test from "node:test";
 
 import { ShadowEvaluationLog } from "../../src/lab/shadow-evaluation.ts";
 
-test("shadow evaluation records retrieval, tool flow, actual use, outcome, and feedback", async () => {
+test("shadow evaluation separates retrieval, disclosure, attribution, outcome, and feedback", async () => {
   const directory = await mkdtemp(join(tmpdir(), "nmg-shadow-"));
   const path = join(directory, "shadow.jsonl");
   const log = new ShadowEvaluationLog(path, {
@@ -98,11 +98,18 @@ test("shadow evaluation records retrieval, tool flow, actual use, outcome, and f
       reason: "evidence_progression_required",
       query: "same query again",
     });
-    log.use({
+    log.disclosure({
       graphId: "graph-1",
       sessionId: "session-1",
       requestedMemoryIds: ["memory-1", "missing"],
-      usedMemoryIds: ["memory-1"],
+      disclosedMemoryIds: ["memory-1"],
+    });
+    log.attribution({
+      graphId: "graph-1",
+      sessionId: "session-1",
+      candidateMemoryIds: ["memory-1"],
+      attributedMemoryIds: ["memory-1"],
+      method: "answer_overlap",
     });
     log.outcome({
       graphId: "graph-1",
@@ -133,7 +140,7 @@ test("shadow evaluation records retrieval, tool flow, actual use, outcome, and f
       );
     assert.deepEqual(
       events.map((event) => event.type),
-      ["retrieval", "tool_flow", "use", "outcome", "feedback"],
+      ["retrieval", "tool_flow", "disclosure", "attribution", "outcome", "feedback"],
     );
     assert.equal(events[0]?.queryTaskId, "query:preference");
     assert.ok(events[0]?.qpp);

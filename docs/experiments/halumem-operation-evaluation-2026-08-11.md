@@ -38,15 +38,15 @@ The selected sixth session contains 30 dialogue turns, two ordinary gold memory
 points, one interference memory, and four updates. The preceding five sessions
 were replayed but not scored.
 
-| Metric | Result |
-|---|---:|
-| full expected-memory recall | 1.000 |
-| importance-weighted recall | 1.000 |
-| official target accuracy | 0.875 |
-| all-candidate weighted accuracy | 0.683 |
-| official extraction F1 | 0.933 |
-| interference rejection | 0/1 |
-| correct updates | 3/4 |
+| Metric                          | Result |
+| ------------------------------- | -----: |
+| full expected-memory recall     |  1.000 |
+| importance-weighted recall      |  1.000 |
+| official target accuracy        |  0.875 |
+| all-candidate weighted accuracy |  0.683 |
+| official extraction F1          |  0.933 |
+| interference rejection          |    0/1 |
+| correct updates                 |    3/4 |
 
 The official target-accuracy denominator includes only candidates whose fields
 occur in the gold memories. Consequently extraction F1 can remain high while
@@ -101,14 +101,14 @@ npm run eval:halumem:score -- --users 1 --workers 4 `
 
 On the same sixth-session slice:
 
-| Metric | Raw-message ingress | Agent-filtered ingress |
-|---|---:|---:|
-| extracted candidates | 30 | 12 |
-| full expected-memory recall | 1.000 | 0.500 |
-| all-candidate weighted accuracy | 0.683 | 1.000 |
-| interference rejection | 0/1 | 1/1 |
-| correct updates | 3/4 | 4/4 |
-| official extraction F1 | 0.933 | 0.667 |
+| Metric                          | Raw-message ingress | Agent-filtered ingress |
+| ------------------------------- | ------------------: | ---------------------: |
+| extracted candidates            |                  30 |                     12 |
+| full expected-memory recall     |               1.000 |                  0.500 |
+| all-candidate weighted accuracy |               0.683 |                  1.000 |
+| interference rejection          |                 0/1 |                    1/1 |
+| correct updates                 |                 3/4 |                    4/4 |
+| official extraction F1          |               0.933 |                  0.667 |
 
 The Agent boundary eliminates the observed pollution and improves update
 handling, but over-filters one gold point: the user's optimism that a changed
@@ -128,14 +128,14 @@ same two arms were run on user 1, session 5. The preceding four sessions were
 replayed in both stores. This session contains 52 dialogue turns, eight ordinary
 memory points, two benchmark interference points, and one update.
 
-| Metric | Raw-message ingress | Agent-filtered ingress |
-|---|---:|---:|
-| extracted candidates | 52 | 8 |
-| full expected-memory recall | 1.000 | 0.875 |
-| all-candidate weighted accuracy | 0.971 | 1.000 |
-| interference rejection | 0/2 | 0/2 |
-| correct updates | 1/1 | 1/1 |
-| official extraction F1 | 1.000 | 0.933 |
+| Metric                          | Raw-message ingress | Agent-filtered ingress |
+| ------------------------------- | ------------------: | ---------------------: |
+| extracted candidates            |                  52 |                      8 |
+| full expected-memory recall     |               1.000 |                  0.875 |
+| all-candidate weighted accuracy |               0.971 |                  1.000 |
+| interference rejection          |                 0/2 |                    0/2 |
+| correct updates                 |                 1/1 |                    1/1 |
+| official extraction F1          |               1.000 |                  0.933 |
 
 The filtered arm again removes the large candidate surplus while preserving a
 high proportion of the ordinary evidence. Its one missed ordinary point is an
@@ -186,9 +186,9 @@ npm run eval:halumem:promotion-audit -- --user 1 `
 ```
 
 | Origin sessions | Later sessions | STG candidates | Rejected at origin | Independent votes | Qualified |
-|---|---:|---:|---:|---:|---:|
-| 5–6 | 7–11 | 17 | 3 | 0 | 0 |
-| 1–2 | 3–11 | 16 | 0 | 0 | 0 |
+| --------------- | -------------: | -------------: | -----------------: | ----------------: | --------: |
+| 5–6             |           7–11 |             17 |                  3 |                 0 |         0 |
+| 1–2             |           3–11 |             16 |                  0 |                 0 |         0 |
 
 This is a useful negative result. Some themes recur, but later user messages
 often support only one component of a broad earlier candidate. For example, a
@@ -198,8 +198,8 @@ reach target. Weakening the vote rule would convert topical recurrence into
 self-reinforcement, which violates the posterior design.
 
 HaluMem therefore provides an operation-level admission and update gate, but
-does not provide the successful tool outcomes, answer-use attribution, or
-explicit repeated confirmations needed to calibrate NMG's default posterior
+does not provide the successful tool outcomes, independently verified evidence
+attribution, or explicit repeated confirmations needed to calibrate NMG's default posterior
 promotion policy. The zero-qualified result does not mean STG is broken; it
 means this benchmark cannot by itself authorize automatic consolidation. It also
 adds an extraction requirement: independently changeable qualifiers should be

@@ -66,7 +66,7 @@ import {
   type NmgChainGetParams,
   type NmgChainListParams,
   type NmgGetParams,
-  type NmgRecordActiveGraphUseParams,
+  type NmgRecordActiveGraphAttributionParams,
   type NmgHelloResult,
   type NmgDeleteMemoryParams,
   type NmgExportMemoriesParams,
@@ -149,9 +149,9 @@ export class NmgService {
         return (await this.#search(parseSearchParams(params))) as NmgMethodResult[M];
       case "get":
         return this.#get(parseGetParams(params)) as NmgMethodResult[M];
-      case "recordActiveGraphUse":
-        return this.#recordActiveGraphUse(
-          parseRecordActiveGraphUseParams(params),
+      case "recordActiveGraphAttribution":
+        return this.#recordActiveGraphAttribution(
+          parseRecordActiveGraphAttributionParams(params),
         ) as NmgMethodResult[M];
       case "retentionCandidates":
         return {
@@ -948,10 +948,14 @@ export class NmgService {
       const parts = this.#activeGraphParts.get(activeGraphId);
       if (parts) {
         for (const part of parts) {
-          const usedMemoryIds = [...found].filter((id) => part.memoryIds.has(id));
-          part.store.recordActiveGraphUse(part.traceId, { usedMemoryIds }, params.sessionId);
-          if (usedMemoryIds.length > 0) {
-            this.#signalMaintenance(part.store, "access", false, usedMemoryIds.length);
+          const disclosedMemoryIds = [...found].filter((id) => part.memoryIds.has(id));
+          part.store.recordActiveGraphDisclosure(
+            part.traceId,
+            disclosedMemoryIds,
+            params.sessionId,
+          );
+          if (disclosedMemoryIds.length > 0) {
+            this.#signalMaintenance(part.store, "access", false, disclosedMemoryIds.length);
           }
         }
         return {
@@ -976,11 +980,7 @@ export class NmgService {
             : `active graph ${activeGraphId} does not exist`,
         );
       }
-      traceStore.recordActiveGraphUse(
-        activeGraphId,
-        { usedMemoryIds: [...found] },
-        params.sessionId,
-      );
+      traceStore.recordActiveGraphDisclosure(activeGraphId, [...found], params.sessionId);
       if (found.size > 0) this.#signalMaintenance(traceStore, "access", false, found.size);
     }
     return {
@@ -989,11 +989,11 @@ export class NmgService {
     };
   }
 
-  #recordActiveGraphUse(
-    params: NmgRecordActiveGraphUseParams,
-  ): NmgMethodResult["recordActiveGraphUse"] {
-    // QPP agent-end implicit feedback (deriveUsedMemoryIds in the harness):
-    // record which recalled memories actually surfaced in the final answer.
+  #recordActiveGraphAttribution(
+    params: NmgRecordActiveGraphAttributionParams,
+  ): NmgMethodResult["recordActiveGraphAttribution"] {
+    // Agent-end answer-overlap attribution. This is diagnostic telemetry,
+    // not QPP supervision or proof of causal model reliance.
     const sharedStore = this.#getStore();
     const localStore = params.projectDir
       ? this.#getStgStore(params.projectDir, params.sessionId)
@@ -1003,7 +1003,7 @@ export class NmgService {
     // for the real owner in the LTG. Record on EVERY owning store, not just
     // the first match: in a merged STG+LTG retrieval the same activeGraphId
     // can carry a trace in both stores, and the LTG (authoritative) side must
-    // not lose its calibration sample.
+    // not lose its diagnostic trace.
     const stores = localStore ? [localStore, sharedStore] : [sharedStore];
     const owned = stores.filter(
       (store) => store.traceOwnership(params.activeGraphId, params.sessionId) === "owned",
@@ -1020,16 +1020,19 @@ export class NmgService {
       );
     }
     for (const store of owned) {
-      store.recordActiveGraphUse(
+      store.recordActiveGraphAttribution(
         params.activeGraphId,
-        { usedMemoryIds: params.usedMemoryIds },
+        {
+          method: "answer_overlap",
+          attributedMemoryIds: params.attributedMemoryIds,
+        },
         params.sessionId,
       );
-      if (params.usedMemoryIds.length > 0) {
-        this.#signalMaintenance(store, "access", false, params.usedMemoryIds.length);
-      }
     }
-    return { activeGraphId: params.activeGraphId, usedMemoryIds: params.usedMemoryIds };
+    return {
+      activeGraphId: params.activeGraphId,
+      attributedMemoryIds: params.attributedMemoryIds,
+    };
   }
 
   #getStore(): NmgStore {
@@ -1409,13 +1412,15 @@ function parseChainListParams(value: unknown): NmgChainListParams {
   };
 }
 
-function parseRecordActiveGraphUseParams(value: unknown): NmgRecordActiveGraphUseParams {
+function parseRecordActiveGraphAttributionParams(
+  value: unknown,
+): NmgRecordActiveGraphAttributionParams {
   const params = objectParams(value);
   return {
     activeGraphId: requiredString(params, "activeGraphId"),
-    // An empty list is meaningful negative feedback: recall happened, but no
-    // candidate was used in the final answer.
-    usedMemoryIds: requiredStringArray(params, "usedMemoryIds", 0, 10_000),
+    // An empty list is meaningful diagnostic coverage: recall happened, but
+    // no candidate wording overlapped the final answer. It is not a negative label.
+    attributedMemoryIds: requiredStringArray(params, "attributedMemoryIds", 0, 10_000),
     projectDir: optionalString(params, "projectDir"),
     sessionId: optionalString(params, "sessionId"),
   };

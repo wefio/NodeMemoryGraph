@@ -2,7 +2,7 @@
  * Answer-level citation signal.
  *
  * Benchmarks currently record whether a memory was retrieved but not whether
- * the model actually used it in its answer. A model might ignore retrieved
+ * its text visibly surfaced in the answer. A model might ignore retrieved
  * evidence entirely and answer from its own knowledge, which the official score
  * would not distinguish from a retrieval-aided answer.
  *
@@ -15,7 +15,8 @@
  *
  * The signal is cheap enough to compute for every benchmark case and is written
  * into predictions alongside retrievedEvidenceIds so downstream analysis can
- * tell the difference between "retrieved and used" and "retrieved but ignored."
+ * compare "retrieved with visible overlap" against "retrieved without visible
+ * overlap." It must not be interpreted as causal model-use attribution.
  */
 
 export interface CitationSignal {
@@ -43,7 +44,11 @@ export function computeCitationSignal(
   for (const [id, text] of retrievedEvidence) {
     if (textOverlapsAnswer(text, answer)) cited.add(id);
   }
-  return { citedCount: cited.size, totalRetrieved: retrievedEvidence.size, citedEvidenceIds: cited };
+  return {
+    citedCount: cited.size,
+    totalRetrieved: retrievedEvidence.size,
+    citedEvidenceIds: cited,
+  };
 }
 
 function textOverlapsAnswer(evidence: string, answer: string): boolean {

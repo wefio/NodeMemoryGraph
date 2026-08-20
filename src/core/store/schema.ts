@@ -275,6 +275,8 @@ export function migrate(db: DatabaseSync): void {
       result_memory_ids_json TEXT NOT NULL,
       result_node_ids_json TEXT NOT NULL,
       expanded_node_ids_json TEXT NOT NULL,
+      disclosed_memory_ids_json TEXT NOT NULL DEFAULT '[]',
+      attributed_memory_ids_json TEXT NOT NULL DEFAULT '[]',
       useful_memory_ids_json TEXT NOT NULL,
       contradicted_memory_ids_json TEXT NOT NULL DEFAULT '[]',
       rejected_memory_ids_json TEXT NOT NULL DEFAULT '[]',
@@ -1031,6 +1033,8 @@ export function ensureRetrievalTraceColumns(db: DatabaseSync): void {
     // session_id was added to CREATE TABLE with session isolation (P0) but
     // missing here, so pre-isolation databases never received the column.
     ["session_id", "TEXT"],
+    ["disclosed_memory_ids_json", "TEXT NOT NULL DEFAULT '[]'"],
+    ["attributed_memory_ids_json", "TEXT NOT NULL DEFAULT '[]'"],
     ["contradicted_memory_ids_json", "TEXT NOT NULL DEFAULT '[]'"],
     ["rejected_memory_ids_json", "TEXT NOT NULL DEFAULT '[]'"],
     ["relation_ids_json", "TEXT NOT NULL DEFAULT '[]'"],

@@ -208,19 +208,15 @@ export class ControllerRuntime {
     return true;
   }
 
-  /**
-   * Train from the smallest reliable Pi-side signal: records explicitly fetched
-   * from the same Active Graph. This deliberately does not interpret automatic
-   * injection, retrieval rank, or an uncorrected answer as successful use.
-   */
-  observeUse(
+  /** Train only from auditable user/tool/official-benchmark evidence. */
+  observeVerifiedEvidence(
     context: MemoryContext,
-    usedMemoryIds: readonly string[],
+    verifiedMemoryIds: readonly string[],
     learningRate = 0.03,
   ): boolean {
     if (!context.activeGraph) return false;
     const visible = new Set(context.activeGraph.memoryIds);
-    const usefulMemoryIds = [...new Set(usedMemoryIds)].filter((id) => visible.has(id));
+    const usefulMemoryIds = [...new Set(verifiedMemoryIds)].filter((id) => visible.has(id));
     if (usefulMemoryIds.length === 0) return false;
     return this.observe(
       context,
@@ -305,6 +301,8 @@ function traceFromActiveGraph(context: MemoryContext): RetrievalTrace {
     resultNodeIds: graph.nodeIds,
     expandedNodeIds: graph.expansions.map((expansion) => expansion.targetNodeId),
     relationIds: graph.expansions.map((expansion) => expansion.relationId),
+    disclosedMemoryIds: [],
+    attributedMemoryIds: [],
     usefulMemoryIds: [],
     contradictedMemoryIds: [],
     rejectedMemoryIds: [],

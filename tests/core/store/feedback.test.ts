@@ -77,14 +77,14 @@ test("recordFeedback: invalid supersede target is a soft no-op (never throws)", 
   });
 });
 
-test("recordFeedback: usedMemoryIds bumps access_count", () => {
+test("recordFeedback: attributedMemoryIds bumps access_count", () => {
   withStore((store) => {
     const mem = store.remember({
       statement: "Martin prefers spicy food.",
       nodeName: "pref",
       scope: { user: "a" },
     });
-    store.recordFeedback({ usedMemoryIds: [mem.memory.id] });
+    store.recordFeedback({ attributedMemoryIds: [mem.memory.id] });
     assert.equal(
       store.getMemory(mem.memory.id)?.accessCount,
       1,
@@ -104,9 +104,7 @@ test("recordFeedback: retrieveHints stored as retrieveHint markers", () => {
       retrieveHints: [{ memoryId: mem.memory.id, hints: ["辣", "spicy"] }],
     });
     const markers = store.getMemory(mem.memory.id)?.markers ?? [];
-    const hints = markers
-      .filter((m) => m.kind === "retrieveHint")
-      .map((m) => m.attributes?.value);
+    const hints = markers.filter((m) => m.kind === "retrieveHint").map((m) => m.attributes?.value);
     assert.deepEqual(hints, ["辣", "spicy"], "retrieveHints stored as retrieveHint markers");
   });
 });

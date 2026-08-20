@@ -55,10 +55,10 @@ export function purgeSessionFromStg(stg: NmgStore, sessionId: string): number {
 /**
  * Phase 2 — usage-driven copy of LTG content into the STG store.
  *
- * Selects LTG memories that match the project scope, ranked by actual use
+ * Selects LTG memories that match the project scope, ranked by observed access
  * (access_count, tie-broken by recency), and copies the top `limit` into
  * `stg` with a cached_from_ltg marker. Not a blind L1/L2 copy: only
- * project-scoped content is eligible, and the rank is usage, so a
+ * project-scoped content is eligible, and the rank is access demand, so a
  * globally-hot-but-project-cold memory is not copied.
  *
  * Idempotent: a memory already cached (same sourceMemoryId marker) is

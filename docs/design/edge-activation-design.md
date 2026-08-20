@@ -165,8 +165,9 @@ than leaving edge activation only in Lab:
   activation as a graph-expansion route score;
 - Active Graph traces expose derived activation for audit, but it is not
   written back to `node_relations`;
-- explicit `recordActiveGraphUse()` feedback updates strength by prediction
-  error. Mere selection or missing feedback does not count as a negative.
+- explicit verified-evidence attribution updates strength by prediction error.
+  Mere selection, disclosure, API answer overlap, or missing feedback does not
+  count as a positive or negative.
 
 Learned temporal direction, contrastive batch unlearning, an eighth
 `HierarchicalActivation` score head, and automatic compression merge from

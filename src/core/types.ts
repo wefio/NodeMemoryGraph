@@ -443,8 +443,11 @@ export type DuplicateJudge = (input: {
  */
 export interface RecordFeedbackInput {
   sessionId?: string;
-  /** Retrieval memories the caller's answer actually used (access signals). */
-  usedMemoryIds?: string[];
+  /**
+   * Retrieval memories attributed to the answer by an explicit caller-side
+   * method. This is an access signal, not proof of causal model reliance.
+   */
+  attributedMemoryIds?: string[];
   /**
    * Caller-judged supersession: supersededMemoryId is the stale predecessor.
    * With newMemoryId → full supersession (pointer to the new value); without
@@ -1144,6 +1147,15 @@ export interface RetrievalTraceInput {
   ambiguity?: number;
   fallbackUsed?: boolean;
   conflictObserved?: boolean;
+  /** Exact records disclosed to the model through an evidence load. */
+  disclosedMemoryIds?: string[];
+  /**
+   * Records heuristically attributed to an API-model answer. This is diagnostic
+   * telemetry only: provider/model behaviour may drift, so it must not train the
+   * controller or alter graph stability.
+   */
+  attributedMemoryIds?: string[];
+  /** Records backed by explicit user, tool, or official-benchmark evidence. */
   usefulMemoryIds?: string[];
   contradictedMemoryIds?: string[];
   rejectedMemoryIds?: string[];
@@ -1197,6 +1209,8 @@ export interface RetrievalTrace extends RetrievalTraceInput {
   taskId: string;
   expandedNodeIds: string[];
   relationIds: string[];
+  disclosedMemoryIds: string[];
+  attributedMemoryIds: string[];
   usefulMemoryIds: string[];
   contradictedMemoryIds: string[];
   rejectedMemoryIds: string[];

@@ -18,11 +18,11 @@ state.
 
 ## 1. The three graphs
 
-| Graph | Ownership | Content | Lifetime |
-| --- | --- | --- | --- |
-| **STG** | private to one Agent session | new, provisional, task-local, or not-yet-consolidated semantic information | session; expiry is a policy decision |
-| **LTG** | the only shared graph | durable atomic memories and consolidated semantic structure | persistent |
-| **AG** | private, per-Agent/per-session | budget-constrained runtime projection from that session's STG and the shared LTG, with optional temporary cross-graph relations | one query/task; released after |
+| Graph   | Ownership                      | Content                                                                                                                         | Lifetime                             |
+| ------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| **STG** | private to one Agent session   | new, provisional, task-local, or not-yet-consolidated semantic information                                                      | session; expiry is a policy decision |
+| **LTG** | the only shared graph          | durable atomic memories and consolidated semantic structure                                                                     | persistent                           |
+| **AG**  | private, per-Agent/per-session | budget-constrained runtime projection from that session's STG and the shared LTG, with optional temporary cross-graph relations | one query/task; released after       |
 
 AG is **not** a third authoritative or shared memory graph. It is the private
 virtual memory space presented to one model session. Agents never write a
@@ -76,14 +76,13 @@ modern memory theories with a long evidence base.
 
 ### 2.1 Atkinson–Shiffrin multi-store model (1968)
 
-The three-stage sensory / short-term / long-term store (Atkinson & Shiffrin,
-1968) is the structural ancestor:
+The three-stage sensory / short-term / long-term store (Atkinson & Shiffrin, 1968) is the structural ancestor:
 
-| NMG | Atkinson–Shiffrin | Notes |
-| --- | --- | --- |
-| AG | working memory (~20 s, 7±2 chunks) | current task context, limited capacity, attention-gated |
-| STG | short-term store | temporary; enters LTM only through consolidation/rehearsal |
-| LTG | long-term store | near-unlimited capacity; semantic/episodic/procedural subdivisions |
+| NMG | Atkinson–Shiffrin                  | Notes                                                              |
+| --- | ---------------------------------- | ------------------------------------------------------------------ |
+| AG  | working memory (~20 s, 7±2 chunks) | current task context, limited capacity, attention-gated            |
+| STG | short-term store                   | temporary; enters LTM only through consolidation/rehearsal         |
+| LTG | long-term store                    | near-unlimited capacity; semantic/episodic/procedural subdivisions |
 
 The A-S point that information enters STM only when attended and reaches LTM
 only through consolidation is exactly NMG's governed write path
@@ -92,13 +91,13 @@ only through consolidation is exactly NMG's governed write path
 ### 2.2 Complementary Learning Systems (McClelland, McNaughton & O'Reilly, 1995)
 
 The deepest mechanism-level correspondence. CLS (Psychological Review 102,
-419–457; PMID 7624455) explains *why* two learning systems are needed:
+419–457; PMID 7624455) explains _why_ two learning systems are needed:
 
-| NMG | CLS | Mechanism |
-| --- | --- | --- |
-| STG | hippocampus | fast encoding, sparse, temporary, interference-prone |
-| LTG | neocortex | slow integration, overlapping, persistent, robust to interference |
-| STG→LTG promotion | systems consolidation | hippocampal replay drives cortical integration |
+| NMG               | CLS                   | Mechanism                                                         |
+| ----------------- | --------------------- | ----------------------------------------------------------------- |
+| STG               | hippocampus           | fast encoding, sparse, temporary, interference-prone              |
+| LTG               | neocortex             | slow integration, overlapping, persistent, robust to interference |
+| STG→LTG promotion | systems consolidation | hippocampal replay drives cortical integration                    |
 
 Consequences for NMG design:
 
@@ -131,12 +130,12 @@ provenance/verification layer that is NMG's differentiator.
 
 ### 2.5 Boundary notes
 
-- AG is not exactly A-S short-term memory: AG is a *projection from* the
+- AG is not exactly A-S short-term memory: AG is a _projection from_ the
   long-term store conditioned on the query, not a raw capture buffer. The
   closer cognitive analogue is the focus of attention within working
   memory (Cowan's focused-attention view, capacity ≈ 4 chunks) — noted as
   a pointer, not verified in this pass.
-- CLS's fast system is prone to forgetting; NMG's STG is a *semantic*
+- CLS's fast system is prone to forgetting; NMG's STG is a _semantic_
   provisional store, not raw traces. NMG's immutable HistoryRecord layer is
   closer to CLS's episodic traces; STG/LTG are its semantic
   interpretations (design.md §5).
@@ -261,12 +260,13 @@ session shutdown. It is context-cache metadata, not a third graph and not an
 authoritative usage outcome.
 
 Every persisted AG trace carries its owning harness `sessionId`. Trace reads,
-expansion attribution, and actual-use feedback must present the same identity;
+disclosure, diagnostic attribution, and verified feedback must present the same identity;
 cross-session access is rejected before any learning or stability signal is
 updated. Pi exposes the owned `activeGraphId` in `nmg_search` headers and sends
-it back with an explicit `nmg_get`, making exact evidence expansion the
-conservative actual-use signal. Automatic recall remains selection/exposure,
-not proof that the model used a memory. Pi's `session_before_compact` event
+it back with an explicit `nmg_get`, making exact evidence expansion observable
+disclosure. Automatic recall and answer overlap remain diagnostic exposure,
+not proof that the model used a memory. Only verified user/tool/benchmark
+outcomes may train. Pi's `session_before_compact` event
 clears the injection window so evidence removed by compaction can be rendered
 again.
 
@@ -286,17 +286,17 @@ attributable `remember` operation. Current local sharing trusts callers that
 know the task ID; ACLs and multi-device transport remain future infrastructure.
 
 **Channel model — world channel + named channels.** `taskId` is a channel, not
-a visibility hierarchy. There is one *world channel* (the default when no
-`taskId` is given) and independently *named channels*; any Agent can read or
+a visibility hierarchy. There is one _world channel_ (the default when no
+`taskId` is given) and independently _named channels_; any Agent can read or
 write any channel it knows by name. The world channel acts as a lobby: reading
 it surfaces the names and recency of active named channels (a directory), so an
 Agent that does not know a channel name can still discover and join one. Naming
 is public; joining is implicit (read/write by name); there is deliberately no
-per-channel access control. *Status:* implemented.
+per-channel access control. _Status:_ implemented.
 
 **Writer identity.** Entries are attributed to the writing Agent so readers can
 tell which Agent posted each entry. `NMG_AGENT_ID` is the readable username;
-fallbacks are the session id, then the pid. *Status:* implemented.
+fallbacks are the session id, then the pid. _Status:_ implemented.
 
 **System identity and directed delivery.** Client adapters register their stable
 agent name and optional `NMG_AGENT_CAPABILITIES` outside model context. Pi does
@@ -305,7 +305,7 @@ and heartbeats on board use; the passive Kimi hook reports presence on each user
 turn when a daemon already exists. `nmg_board discover` returns the online
 roster, optionally filtered by capability, and `put` with `to=<agent name>`
 wakes only that stable target while remaining read-visible to other clients.
-Registration, discovery, and heartbeat never wake an LLM. *Status:* implemented
+Registration, discovery, and heartbeat never wake an LLM. _Status:_ implemented
 for Pi, MCP-compatible clients, and the Kimi event hook.
 
 **Claiming (who works an entry).** An open entry can be claimed by exactly one
@@ -314,7 +314,7 @@ single atomic compare-and-set `UPDATE` (open + unclaimed, or a lapsed lease,
 or the holder's own heartbeat) with a lease that expires; a losing CAS is
 diagnosed against a fresh read so callers are never sent chasing a holder that
 does not exist. Only the holder may release; resolving clears the claim; lease
-expiry is lazy (no background sweeper). *Status:* implemented (`claim`/`release`
+expiry is lazy (no background sweeper). _Status:_ implemented (`claim`/`release`
 actions, `claimedBy`/`claimExpiresAt` columns).
 
 **Notification (who knows an entry exists).** Because an idle Agent never looks
@@ -329,7 +329,7 @@ recipient, so this is notification, not a DM or @. It is enabled and tuned via
 variables. The loop is guarded by a daily budget and a cooldown
 (notification-budget philosophy).
 
-Delivery is a *flow constraint*, not a prompt rule. Every wake writes a
+Delivery is a _flow constraint_, not a prompt rule. Every wake writes a
 **delivery receipt** (`task_board_deliveries`, idempotent per session+entry,
 cf. Pub/Sub ack semantics): once the loop wakes a session for an entry it does
 not re-notify it. A session can opt out of a channel via the **suppression
@@ -337,15 +337,15 @@ registry** (`task_board_suppressions`, do-not-send, fed by `nmg_board
 unsubscribe`/`subscribe`), which is checked before every delivery. So "already
 notified", "read", "unsubscribed", and "resolved" entries never re-wake a
 session — by mechanism, not by asking the Agent to remember.
-*Status:* implemented.
+_Status:_ implemented.
 
 **Ownership and RAII (the two load-bearing principles).** Two classical
-disciplines govern the board's state machinery. *Ownership (who holds the
-key):* the claim lease is an ownership capability — an atomic CAS gives a
+disciplines govern the board's state machinery. _Ownership (who holds the
+key):_ the claim lease is an ownership capability — an atomic CAS gives a
 single working Agent the entry, an expired lease returns it to the pool, only
 the holder can release, and resolving clears the claim; a session's
 suppression (suppression registry) and its delivery receipts (deliveries
-table) are owned by that session. *RAII (who owns the lifetime):* every board
+table) are owned by that session. _RAII (who owns the lifetime):_ every board
 resource closes deterministically — resolve closes an entry and, with it, its
 delivery receipts (receipts are bound to the entry lifecycle and are cleared
 on resolve/expiry, so the table cannot grow unbounded), a TTL/expiresAt
@@ -353,34 +353,34 @@ recycles entries, a lapsed lease auto-expires lazily, and the wake timer is
 `unref()`'d so it never pins the process. Resolve is deliberately NOT
 ownership-restricted: the board is open collaboration, so any Agent that can
 answer a request may close it (the claim, by contrast, is the single-writer
-key). *Status:* implemented.
+key). _Status:_ implemented.
 
 **Conversation closure (no infinite confirmations).** A request — a question,
 handoff, or anything awaiting an answer — is resolved once it is answered, and
 a resolved entry is closed: it must not be replied to (reopen only with new
 substance). This bounds acknowledgement chains — a question is answered once
-and then closed, so two Agents cannot ping-pong "confirmed" forever. *Status:*
+and then closed, so two Agents cannot ping-pong "confirmed" forever. _Status:_
 convention, disclosed in the board result and the tool description.
 
 **Memory pointers.** An entry may carry `memory=<id>` references to LTG records
 instead of copying their content, using the same `memory=<id>` format that
 automatic recall renders; a reader expands them with `nmg_get`. The board
-therefore transmits *references* to durable knowledge, never a second copy —
+therefore transmits _references_ to durable knowledge, never a second copy —
 consistent with "LTG is the only shared graph" (§1). Pointers are progressive
 disclosure: the board carries only the short id, and content is fetched on
 demand via `nmg_get`, so reading the board never inflates context with the
-referenced memory bodies. *Status:* implemented by convention — content
+referenced memory bodies. _Status:_ implemented by convention — content
 accepts `memory=<id>` as plain text; there is no structured pointer type or
 separate validation, kept intentionally minimal.
 
-**AG projection.** On read, entries are projected into the *reading* Agent's
-private runtime AG, never into any shared graph. *Status:* implemented.
+**AG projection.** On read, entries are projected into the _reading_ Agent's
+private runtime AG, never into any shared graph. _Status:_ implemented.
 
 **Design lineage (not validated standards).**
 
-- the world channel is a *common ground* surface (Clark): shared, continually
+- the world channel is a _common ground_ surface (Clark): shared, continually
   aligned baseline facts for joint activity;
-- memory pointers implement a *transactive memory* pattern: the group knows
+- memory pointers implement a _transactive memory_ pattern: the group knows
   where knowledge lives and points to it rather than duplicating it;
 - the board as a whole is a bounded, expiring, group-visible coordination layer
   between private AGs and per-Agent LTG — engineering precedents include
@@ -397,18 +397,20 @@ immutable-content red line.
 ### AG lifecycle: memory-resident, trace-persistent
 
 AG itself is **pure memory, released with the session**. What persists is
-not a copy of AG but its **usage trace**: which nodes/edges/records were
-rendered, expanded, fetched via `nmg_get`, and actually used in the task.
+not a copy of AG but its **observation trace**: which nodes/edges/records were
+selected, rendered, expanded, fetched via `nmg_get`, diagnostically matched to
+an answer, and independently verified or rejected. These stages are separate;
+API-answer overlap is not proof of causal use.
 
 The trace is not bookkeeping — it is the input to persistence decisions.
-Active content is a *candidate signal* for persistence, not persistence
+Active content is a _candidate signal_ for persistence, not persistence
 itself:
 
 ```text
 STG + LTG ──project──▶ AG (memory-resident, released with session)
-                            │ render / expand / nmg_get / adopt
+                            │ render / expand / nmg_get / verify
                             ▼
-                       usage trace (persistent)
+                    observation trace (persistent)
                             │ dedupe by session/task/source lineage
                             │ + outcome attribution (design.md §5c)
                             ▼
@@ -440,7 +442,7 @@ theories give this a name (candidate status; not yet adopted as design):
 
 - **Intention superiority effect** (Goschke & Kuhl 1993; Marsh et al. 1999,
   PMID 10226441): intentions to perform an activity are stored in a
-  *heightened state of activation*, and once fulfilled are *inhibited*
+  _heightened state of activation_, and once fulfilled are _inhibited_
   relative to neutral material. Resident constraints are exactly unfinished
   intentions: persistently high activation until satisfied, suppressed after.
   This justifies both the "always resident" property and the post-satisfaction
@@ -472,14 +474,14 @@ decisions):
 
 Consumers (each reads the same persisted field):
 
-| Consumer | Question answered |
-| --- | --- |
-| Index decision | does a dimension get used enough and reduce candidates enough to justify an index? (`usage rate × selectivity × latency share`) |
-| Budget projection (controller) | filtered queries have smaller candidate pools — budget dimensions can tighten |
-| QPP calibration | filtered queries carry different top1/variance semantics; thresholds may differ |
-| Router learning | filter context is a routing signal: within one scope, node ranking should be stable |
-| Retention | a scope never filtered for is a candidate for cold demotion |
-| Agent feedback | "slow because unscoped" → suggest `--scope` to narrow |
+| Consumer                       | Question answered                                                                                                               |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| Index decision                 | does a dimension get used enough and reduce candidates enough to justify an index? (`usage rate × selectivity × latency share`) |
+| Budget projection (controller) | filtered queries have smaller candidate pools — budget dimensions can tighten                                                   |
+| QPP calibration                | filtered queries carry different top1/variance semantics; thresholds may differ                                                 |
+| Router learning                | filter context is a routing signal: within one scope, node ranking should be stable                                             |
+| Retention                      | a scope never filtered for is a candidate for cold demotion                                                                     |
+| Agent feedback                 | "slow because unscoped" → suggest `--scope` to narrow                                                                           |
 
 `selectivity` is measured after SQL but before sort, so it reflects what a
 future pushdown would actually save (see the index-decision sketch in

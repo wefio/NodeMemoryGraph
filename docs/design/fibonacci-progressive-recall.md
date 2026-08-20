@@ -63,8 +63,8 @@ stoppedBecause
 - 多跳查询被错误早停，遗漏后续证据。
 
 只观察已经触发的扩展还不能发现全部错误早停。仍需要少量受控探索，例如让一部分
-“Top-1 已充分”的查询在 shadow 模式继续计算更深档位，并用 benchmark 证据标签、
-实际使用记录或任务结果判断额外内容是否有价值。
+“Top-1 已充分”的查询在 shadow 模式继续计算更深档位，并用官方 benchmark 证据、
+用户确认或工具验证判断额外内容是否有价值。API 回答重合只用于诊断，不能替代这些标签。
 
 ## 与旧 Stage 0 的区别
 
@@ -94,5 +94,5 @@ Top-1 → QPP → Top-2 → QPP → Top-3 → QPP → Top-5 → …
 - 当前只渐进扩展 evidence，图关系仍按首次 `graphHops` 计算；
 - 第一次 Top-1 probe 将 QPP 分量和查询意图送入现有 autodiff 控制器；
 - evidence budget head 输出连续值并映射到 Fibonacci 首档；
-- 最深实际使用 rank 作为首档深度训练目标，二重 QPP负责继续扩展；
+- 最深 verified-evidence rank 作为首档深度训练目标，二重 QPP负责继续扩展；
 - 旧版控制器状态会为新增特征零填充，保留既有参数。

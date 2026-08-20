@@ -5,10 +5,11 @@ in Git; durable behavior and decisions belong in the design, Skill, or operating
 documents. Remove an item here as soon as it is implemented or deliberately
 closed.
 
-## 1. Collect trustworthy real-use supervision
+## 1. Collect trustworthy verified-evidence supervision
 
 - [ ] Accumulate materially independent Pi+NMG tasks with retrieval, exact
-  `get`, expansion depth, actual evidence use, outcome/correction, injected
+  `get` disclosure, expansion depth, user/tool-verified evidence,
+  outcome/correction, injected
   tokens, tool rounds, and end-to-end latency.
 - [ ] Label evidence sufficiency, expansion usefulness, excessive noise, and
   no-memory-needed separately. Silence or an uncorrected answer remains
@@ -27,9 +28,10 @@ groups (27 train, 7 chronological validation). The four label distributions are
 19/31 excessive-noise/clean, and 9/41 no-memory-needed/memory-needed. This meets
 the provisional sample-count target but does not supply useful-evidence targets
 in the held-out segment. New collection must therefore emphasize tasks where the
-Agent loads and actually uses attributable exact evidence, along with natural
+Agent receives explicit evidence confirmation or a tool-verifiable outcome, along with natural
 corrections and failed outcomes; more binary sufficiency labels alone will not
-unlock calibration.
+unlock calibration. API answer overlap and black-box counterfactual response
+differences remain diagnostics and must not fill this gap.
 
 Automatic recall now applies the existing `retrieve|cue|none` load gate. Pi also
 enforces a per-turn construction-process budget (three searches, five total

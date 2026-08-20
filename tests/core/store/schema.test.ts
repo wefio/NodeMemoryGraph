@@ -98,7 +98,7 @@ test("migrate preserves existing rows when re-run", () => {
   });
 });
 
-test("migrate adds retrieval_traces.session_id to pre-isolation databases", () => {
+test("migrate adds session, disclosure, and attribution columns to legacy retrieval traces", () => {
   // Regression: session_id was added to CREATE TABLE with session isolation
   // (P0) but not to ensureRetrievalTraceColumns, so databases created before
   // that change never received the column and every traced search failed with
@@ -112,5 +112,13 @@ test("migrate adds retrieval_traces.session_id to pre-isolation databases", () =
       ),
     );
     assert.ok(columns.has("session_id"), "expected retrieval_traces.session_id after migrate");
+    assert.ok(
+      columns.has("disclosed_memory_ids_json"),
+      "expected retrieval_traces.disclosed_memory_ids_json after migrate",
+    );
+    assert.ok(
+      columns.has("attributed_memory_ids_json"),
+      "expected retrieval_traces.attributed_memory_ids_json after migrate",
+    );
   });
 });

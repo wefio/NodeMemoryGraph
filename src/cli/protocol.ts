@@ -63,7 +63,7 @@ export const NMG_CAPABILITIES = [
 
 export const NMG_METHODS = [
   "get",
-  "recordActiveGraphUse",
+  "recordActiveGraphAttribution",
   "hello",
   "perfAggregates",
   "pruneRetrievalTraces",
@@ -240,7 +240,7 @@ export interface NmgSearchParams {
   strongHitInitialTarget?: number;
   progressiveWarmDisclosure?: boolean;
   tieredDisclosure?: boolean;
-  /** Internal planning probes are not eligible for use feedback and must not persist a trace. */
+  /** Internal planning probes are not eligible for feedback and must not persist a trace. */
   persistTrace?: boolean;
   /** Hard Active Graph envelope selected by a caller-side controller. */
   activeGraphBudget?: Partial<ActiveGraphBudget>;
@@ -251,7 +251,7 @@ export interface NmgSearchParams {
 
 export interface NmgGetParams {
   memoryIds: string[];
-  /** Active Graph that recommended these IDs; enables owned actual-use feedback. */
+  /** Active Graph that recommended these IDs; enables session-owned disclosure tracking. */
   activeGraphId?: string;
   graphHops?: number;
   projectDir?: string;
@@ -289,16 +289,15 @@ export interface NmgChainListParams {
 }
 
 /**
- * QPP agent-end implicit feedback: the harness derives which recalled memories
- * actually surfaced in the final answer (deriveUsedMemoryIds) and records them
- * on the trace as useful_memory_ids. This powers Stage 1 rolling tau
- * auto-calibration from production (qpp, useful) pairs (docs/retrieval-
- * confidence-controller.md).
+ * Agent-end diagnostic attribution: the harness derives which recalled memories
+ * visibly surfaced in the final answer (deriveAnswerOverlapMemoryIds) and records
+ * them as attributed_memory_ids. Provider/model behaviour may drift; this RPC
+ * cannot create useful evidence, train routing, or alter graph stability.
  */
-export interface NmgRecordActiveGraphUseParams {
+export interface NmgRecordActiveGraphAttributionParams {
   activeGraphId: string;
-  /** Memories whose statement tokens appeared in the final agent answer. */
-  usedMemoryIds: string[];
+  /** Memories whose statement tokens appeared in the final agent answer (diagnostic only). */
+  attributedMemoryIds: string[];
   projectDir?: string;
   sessionId?: string;
 }
@@ -590,7 +589,7 @@ export type NmgMethodResult = {
   chainAdd: MemoryChainMember;
   chainGet: { chain: MemoryChain; members: MemoryChainMember[] } | null;
   chainList: MemoryChain[];
-  recordActiveGraphUse: { activeGraphId: string; usedMemoryIds: string[] };
+  recordActiveGraphAttribution: { activeGraphId: string; attributedMemoryIds: string[] };
   retentionCandidates: { candidates: RetentionCandidate[] };
   setStorageState: { memoryId: string; storageState: MemoryStorageState };
   perfAggregates: PerfAggregate[];

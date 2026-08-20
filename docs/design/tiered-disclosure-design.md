@@ -186,8 +186,9 @@ Falsifiable claims (consistent with docs/design/design.md §14 discipline):
 3. **Context economy**: average returned-token estimate falls because tier-1+
    records are no longer co-retrieved on shallow queries. Measured by
    `nmg search --json` token estimate + QPP shadow traces.
-4. **Tier dynamics**: deep-tier open rate correlates with actual usefulness
-   (the access counter feeds rebalance); a tier opened often gets promoted.
+4. **Tier dynamics**: deep-tier open rate reflects repeated access demand (not
+   semantic usefulness); the disclosure/access counter feeds rebalance, while
+   useful evidence remains a separate verified signal.
 
 Acceptance: gate passes 1–3 with no regression in the matched no-memory
 baseline (benchmark discipline §"Always run the matched no-memory baseline").

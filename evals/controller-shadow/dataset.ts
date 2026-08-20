@@ -3,20 +3,16 @@ import { pathToFileURL } from "node:url";
 
 import type {
   ShadowEvaluationEvent,
+  ShadowAttributionEvent,
   ShadowFeedbackEvent,
   ShadowOutcomeEvent,
   ShadowRetrievalEvent,
-  ShadowUseEvent,
 } from "../../src/lab/shadow-evaluation.ts";
 import {
   CONTROLLER_FEATURE_COUNT,
   CONTROLLER_FEATURE_PROTOCOL_VERSION,
 } from "../../src/lab/controller-protocol.ts";
-import {
-  aggregateFeedbackByGraph,
-  readShadowEvents,
-  resolveShadowEventPath,
-} from "./report.ts";
+import { aggregateFeedbackByGraph, readShadowEvents, resolveShadowEventPath } from "./report.ts";
 import { independentGroups } from "./independence.ts";
 
 const REQUIRED_LABELS = [
@@ -33,7 +29,7 @@ export interface ShadowDatasetRow {
   sessionId: string;
   recordedAt: string;
   retrieval: ShadowRetrievalEvent;
-  use: ShadowUseEvent | null;
+  attribution: ShadowAttributionEvent | null;
   outcome: ShadowOutcomeEvent | null;
   feedback: ShadowFeedbackEvent;
 }
@@ -43,6 +39,7 @@ export interface ShadowDataset {
   tasks: { total: number; train: number; validation: number };
   excludedGraphs: number;
   legacyGraphsWithoutReplayInputs: number;
+  graphsWithoutVerifiedAttribution: number;
   blockers: string[];
 }
 
@@ -64,6 +61,7 @@ export function buildShadowDataset(
   const joined: Omit<ShadowDatasetRow, "split">[] = [];
   const feedbackByGraph = aggregateFeedbackByGraph(events);
   let legacyGraphsWithoutReplayInputs = 0;
+  let graphsWithoutVerifiedAttribution = 0;
   for (const [graphId, group] of byGraph) {
     const retrieval = group.find(
       (event): event is ShadowRetrievalEvent => event.type === "retrieval",
@@ -80,14 +78,21 @@ export function buildShadowDataset(
       legacyGraphsWithoutReplayInputs += 1;
       continue;
     }
+    const attribution =
+      [...group]
+        .reverse()
+        .find(
+          (event): event is ShadowAttributionEvent =>
+            event.type === "attribution" && event.method === "verified_claim_support",
+        ) ?? null;
+    if (!attribution) graphsWithoutVerifiedAttribution += 1;
     joined.push({
       semanticTaskId: feedback.semanticTaskId,
       graphId,
       sessionId: retrieval.sessionId,
       recordedAt: retrieval.recordedAt,
       retrieval,
-      use:
-        [...group].reverse().find((event): event is ShadowUseEvent => event.type === "use") ?? null,
+      attribution,
       outcome:
         [...group]
           .reverse()
@@ -120,6 +125,12 @@ export function buildShadowDataset(
       `${legacyGraphsWithoutReplayInputs} labelled graph(s) lack replayable controller inputs`,
     );
   }
+  if (graphsWithoutVerifiedAttribution > 0) {
+    blockers.push(
+      `${graphsWithoutVerifiedAttribution} labelled graph(s) lack verified claim attribution; ` +
+        "they are control-label-only and cannot supervise evidence ranking or budgets",
+    );
+  }
   if (groups.length < 2) blockers.push("at least two independent session/task groups are required");
   if (!rows.some((row) => row.split === "train")) blockers.push("no training split");
   if (!rows.some((row) => row.split === "validation")) blockers.push("no validation split");
@@ -132,6 +143,7 @@ export function buildShadowDataset(
     },
     excludedGraphs: byGraph.size - new Set(rows.map((row) => row.graphId)).size,
     legacyGraphsWithoutReplayInputs,
+    graphsWithoutVerifiedAttribution,
     blockers,
   };
 }

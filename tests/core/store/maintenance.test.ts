@@ -157,7 +157,7 @@ test("promoteMemory: promotes STG memory to LTG", () => {
       nodeName: "test hypothesis",
       memoryType: "derived",
       residence: "stg",
-        sessionId: "test-session",
+      sessionId: "test-session",
     });
     assert.equal(saved.memory.residence, "stg");
     const promoted = store.promoteMemory(saved.memory.id, "verified by user", []);
@@ -204,7 +204,7 @@ test("demoteMemory: already-STG memory is returned unchanged", () => {
       nodeName: "hypothesis",
       memoryType: "derived",
       residence: "stg",
-        sessionId: "test-session",
+      sessionId: "test-session",
     });
     assert.equal(saved.memory.residence, "stg");
     const demoted = store.demoteMemory(saved.memory.id, "already stg");
@@ -387,9 +387,9 @@ test("perfAggregates: hot path records search.direct and trace after a searchCon
   });
 });
 
-// ── recordActiveGraphUse ──
+// ── recordActiveGraphAttribution ──
 
-test("recordActiveGraphUse: records usage on a trace", () => {
+test("recordActiveGraphAttribution: records usage on a trace", () => {
   withStore((store) => {
     const saved = store.remember({
       statement: "active graph test memory",
@@ -402,10 +402,11 @@ test("recordActiveGraphUse: records usage on a trace", () => {
       resultMemoryIds: [saved.memory.id],
       resultNodeIds: [saved.memory.nodeId],
     });
-    // recordActiveGraphUse should not throw on a valid trace id
+    // recordActiveGraphAttribution should not throw on a valid trace id
     assert.doesNotThrow(() => {
-      store.recordActiveGraphUse(traceId, {
-        usedMemoryIds: [saved.memory.id],
+      store.recordActiveGraphAttribution(traceId, {
+        method: "verified_evidence",
+        attributedMemoryIds: [saved.memory.id],
       });
     });
   });
@@ -431,16 +432,16 @@ test("retrieval traces and Active Graph feedback enforce session ownership", () 
     );
     assert.throws(
       () =>
-        store.recordActiveGraphUse(
+        store.recordActiveGraphAttribution(
           activeGraphId,
-          { usedMemoryIds: [saved.memory.id] },
+          { method: "verified_evidence", attributedMemoryIds: [saved.memory.id] },
           "session-beta",
         ),
       /belongs to another session/,
     );
-    store.recordActiveGraphUse(
+    store.recordActiveGraphAttribution(
       activeGraphId,
-      { usedMemoryIds: [saved.memory.id] },
+      { method: "verified_evidence", attributedMemoryIds: [saved.memory.id] },
       "session-alpha",
     );
     assert.deepEqual(store.retrievalTrace(activeGraphId, "session-alpha")?.usefulMemoryIds, [
@@ -449,7 +450,7 @@ test("retrieval traces and Active Graph feedback enforce session ownership", () 
   });
 });
 
-test("recordActiveGraphUse: survives non-existent active graph id gracefully", () => {
+test("recordActiveGraphAttribution: survives non-existent active graph id gracefully", () => {
   withStore((store) => {
     const saved = store.remember({
       statement: "bad graph test",
@@ -457,10 +458,11 @@ test("recordActiveGraphUse: survives non-existent active graph id gracefully", (
       memoryType: "fact",
       sourceActor: "user",
     });
-    // Non-trace-id as activeGraphId should throw from recordActiveGraphUseInner
+    // Non-trace-id as activeGraphId should throw from recordActiveGraphAttributionInner
     assert.throws(() => {
-      store.recordActiveGraphUse("non-existent-id", {
-        usedMemoryIds: [saved.memory.id],
+      store.recordActiveGraphAttribution("non-existent-id", {
+        method: "verified_evidence",
+        attributedMemoryIds: [saved.memory.id],
       });
     });
   });
@@ -525,7 +527,7 @@ test("setMemoryStorageState: rejects STG memories", () => {
       nodeName: "session hypothesis",
       memoryType: "derived",
       residence: "stg",
-        sessionId: "test-session",
+      sessionId: "test-session",
     });
     assert.throws(
       () => store.setMemoryStorageState(provisional.memory.id, "dormant"),
@@ -549,7 +551,7 @@ test("expireShortTermMemories: expires past-due STG memories", () => {
       nodeName: "expiring node",
       memoryType: "derived",
       residence: "stg",
-        sessionId: "test-session",
+      sessionId: "test-session",
     });
     const past = new Date(Date.now() - 86_400_000).toISOString();
     const ids = store.expireShortTermMemories(past);
@@ -661,6 +663,35 @@ test("runDueMaintenance compacts write deltas and rebalances access changes with
   });
 });
 
+test("answer-overlap attribution is diagnostic and cannot train graph state", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "API answers may repeat retrieved wording",
+      nodeName: "API attribution boundary",
+      memoryType: "fact",
+      sourceActor: "user",
+    });
+    const context = store.searchContext("retrieved wording", { limit: 4 });
+    const traceId = context.activeGraph!.id;
+    const before = store.nodeActivation(saved.node.id);
+
+    store.recordActiveGraphAttribution(traceId, {
+      method: "answer_overlap",
+      attributedMemoryIds: [saved.memory.id],
+    });
+
+    const trace = store.retrievalTrace(traceId);
+    assert.deepEqual(trace?.attributedMemoryIds, [saved.memory.id]);
+    assert.deepEqual(trace?.usefulMemoryIds, []);
+    const after = store.nodeActivation(saved.node.id);
+    assert.equal(after.selectedCount, before.selectedCount);
+    assert.equal(after.expandedCount, before.expandedCount);
+    assert.equal(after.usedCount, before.usedCount);
+    assert.equal(after.contradictedCount, before.contradictedCount);
+    assert.equal(after.rejectedCount, before.rejectedCount);
+  });
+});
+
 test("runDueMaintenance drains distributed write pressure without requiring one hot node", () => {
   withStore((store) => {
     for (let index = 0; index < 16; index += 1) {
@@ -670,12 +701,20 @@ test("runDueMaintenance drains distributed write pressure without requiring one 
       });
     }
 
-    const first = store.runDueMaintenance({ writeThreshold: 16, accessThreshold: 32, nodeLimit: 4 });
+    const first = store.runDueMaintenance({
+      writeThreshold: 16,
+      accessThreshold: 32,
+      nodeLimit: 4,
+    });
     assert.equal(first.consideredNodes, 4);
     assert.equal(first.compactedNodeIds.length, 4);
     assert.equal(store.pendingIndexDelta().length, 12, "global pressure drains to a bounded tail");
 
-    const second = store.runDueMaintenance({ writeThreshold: 16, accessThreshold: 32, nodeLimit: 4 });
+    const second = store.runDueMaintenance({
+      writeThreshold: 16,
+      accessThreshold: 32,
+      nodeLimit: 4,
+    });
     assert.equal(second.consideredNodes, 0, "a below-threshold tail does not hot-loop");
   });
 });
@@ -691,11 +730,19 @@ test("runDueMaintenance drains distributed access pressure without requiring one
     store.runDueMaintenance({ writeThreshold: 1, accessThreshold: 32, nodeLimit: 64 });
     store.recordUsage(memories.map((saved) => saved.memory.id));
 
-    const first = store.runDueMaintenance({ writeThreshold: 16, accessThreshold: 32, nodeLimit: 4 });
+    const first = store.runDueMaintenance({
+      writeThreshold: 16,
+      accessThreshold: 32,
+      nodeLimit: 4,
+    });
     assert.equal(first.consideredNodes, 4);
     assert.equal(first.rebalancedNodeIds.length, 4);
 
-    const second = store.runDueMaintenance({ writeThreshold: 16, accessThreshold: 32, nodeLimit: 4 });
+    const second = store.runDueMaintenance({
+      writeThreshold: 16,
+      accessThreshold: 32,
+      nodeLimit: 4,
+    });
     assert.equal(second.consideredNodes, 0, "remaining global access pressure is below threshold");
   });
 });
@@ -884,7 +931,7 @@ test("promoteMemory triggers a consolidation event visible via consolidationEven
       nodeName: "consolidation node",
       memoryType: "derived",
       residence: "stg",
-        sessionId: "test-session",
+      sessionId: "test-session",
     });
     store.promoteMemory(saved.memory.id, "test promotion");
     const events = store.consolidationEvents();
@@ -942,8 +989,9 @@ test("feedback before drain still records observations and drives consolidation"
       resultNodeIds: [alpha.node.id, beta.node.id],
     });
     // No drain: feedback must still upsert the edge observation itself.
-    store.recordActiveGraphUse(traceId, {
-      usedMemoryIds: [alpha.memory.id, beta.memory.id],
+    store.recordActiveGraphAttribution(traceId, {
+      method: "verified_evidence",
+      attributedMemoryIds: [alpha.memory.id, beta.memory.id],
     });
     assert.equal(store.edgeStability(alpha.node.id, beta.node.id).independentTasks, 1);
     assert.equal(store.edgeStability(alpha.node.id, beta.node.id).usefulTasks, 1);

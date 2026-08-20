@@ -24,7 +24,7 @@ import type {
 export type ShadowRetrievalOrigin = "automatic" | "tool";
 
 interface ShadowEventBase {
-  version: 1;
+  version: 1 | 2;
   graphId: string;
   sessionId: string;
   recordedAt: string;
@@ -62,10 +62,28 @@ export interface ShadowRetrievalEvent extends ShadowEventBase {
   };
 }
 
+/** Legacy ambiguous event. It may represent disclosure or answer overlap and is audit-only. */
 export interface ShadowUseEvent extends ShadowEventBase {
   type: "use";
   requestedMemoryIds: string[];
   usedMemoryIds: string[];
+}
+
+export interface ShadowDisclosureEvent extends ShadowEventBase {
+  version: 2;
+  type: "disclosure";
+  requestedMemoryIds: string[];
+  disclosedMemoryIds: string[];
+}
+
+export type ShadowAttributionMethod = "answer_overlap" | "verified_claim_support";
+
+export interface ShadowAttributionEvent extends ShadowEventBase {
+  version: 2;
+  type: "attribution";
+  candidateMemoryIds: string[];
+  attributedMemoryIds: string[];
+  method: ShadowAttributionMethod;
 }
 
 export interface ShadowOutcomeEvent extends ShadowEventBase {
@@ -101,6 +119,8 @@ export interface ShadowToolFlowEvent extends ShadowEventBase {
 export type ShadowEvaluationEvent =
   | ShadowRetrievalEvent
   | ShadowUseEvent
+  | ShadowDisclosureEvent
+  | ShadowAttributionEvent
   | ShadowOutcomeEvent
   | ShadowFeedbackEvent
   | ShadowToolFlowEvent;
@@ -192,20 +212,39 @@ export class ShadowEvaluationLog {
     });
   }
 
-  use(input: {
+  disclosure(input: {
     graphId: string;
     sessionId: string;
     requestedMemoryIds: readonly string[];
-    usedMemoryIds: readonly string[];
+    disclosedMemoryIds: readonly string[];
   }): boolean {
     return this.#append({
-      version: 1,
-      type: "use",
+      version: 2,
+      type: "disclosure",
       graphId: input.graphId,
       sessionId: input.sessionId,
       recordedAt: this.#now().toISOString(),
       requestedMemoryIds: [...input.requestedMemoryIds],
-      usedMemoryIds: [...input.usedMemoryIds],
+      disclosedMemoryIds: [...input.disclosedMemoryIds],
+    });
+  }
+
+  attribution(input: {
+    graphId: string;
+    sessionId: string;
+    candidateMemoryIds: readonly string[];
+    attributedMemoryIds: readonly string[];
+    method: ShadowAttributionMethod;
+  }): boolean {
+    return this.#append({
+      version: 2,
+      type: "attribution",
+      graphId: input.graphId,
+      sessionId: input.sessionId,
+      recordedAt: this.#now().toISOString(),
+      candidateMemoryIds: [...input.candidateMemoryIds],
+      attributedMemoryIds: [...input.attributedMemoryIds],
+      method: input.method,
     });
   }
 

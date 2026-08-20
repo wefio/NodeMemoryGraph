@@ -19,13 +19,13 @@
 
 ## 1. 机制现状（代码）
 
-| 机制 | 代码 | 评测状态 |
-|---|---|---|
-| **位置** = `[...direct, ...related].sort(contextUsefulness 降序)` | `retrieval.ts:267-272` | 生效（排序重排，**direct 不保底**） |
-| contextUsefulness = combinedScore + 意图 bonus | `search-ranking.ts:5` | 生效（list/recommend/assistant 三类意图） |
-| **时机①** warm_halves（tier1≥5 折叠一半，另一半 `deferredMemoryIds` 标记） | `retrieval.ts:274-281, 585-593` | **永不触发**（评测全 tier2，progressiveDisclosure=null） |
-| **时机②** QPP 第二遍（Fibonacci 逐步加证据） | `retrieval.ts:345-430` + `active-graph.ts:79` | **评测关**（env `NMG_QPP_SECOND_PASS=0`） |
-| **时机③** budget 裁剪（maxTokens 超限裁尾部） | `retrieval.ts:295-315` | 生效（20 条 → 13 条，6000 token 满） |
+| 机制                                                                       | 代码                                          | 评测状态                                                 |
+| -------------------------------------------------------------------------- | --------------------------------------------- | -------------------------------------------------------- |
+| **位置** = `[...direct, ...related].sort(contextUsefulness 降序)`          | `retrieval.ts:267-272`                        | 生效（排序重排，**direct 不保底**）                      |
+| contextUsefulness = combinedScore + 意图 bonus                             | `search-ranking.ts:5`                         | 生效（list/recommend/assistant 三类意图）                |
+| **时机①** warm_halves（tier1≥5 折叠一半，另一半 `deferredMemoryIds` 标记） | `retrieval.ts:274-281, 585-593`               | **永不触发**（评测全 tier2，progressiveDisclosure=null） |
+| **时机②** QPP 第二遍（Fibonacci 逐步加证据）                               | `retrieval.ts:345-430` + `active-graph.ts:79` | **评测关**（env `NMG_QPP_SECOND_PASS=0`）                |
+| **时机③** budget 裁剪（maxTokens 超限裁尾部）                              | `retrieval.ts:295-315`                        | 生效（20 条 → 13 条，6000 token 满）                     |
 
 **披露预算（评测 bridge）**：`limit=min(trunc(top_k),50)=20`、`maxTokens=max(1000, limit*300)=6000`、`maxEvidence=20`——6000 token 只够 ~13 条对话证据（每条 ~450 token）。
 
@@ -33,10 +33,10 @@
 
 数据源：`results/halumem/nmg-supersession_trial19/nmg_hm_search_results.json`（真实评测渲染上下文）+ `progressive-disclosure-probe.mjs`（大 budget 看全序）。
 
-| 查询 | 检索排序位置 | 评测披露 |
-|---|---|---|
-| query 2 "How did Martin's **promotion** on April 25, 2033 impact..." | promotion 排 **#1** | ✓ 披露第 1 条（词法命中先行） |
-| query 1 "What is Martin Mark's current **job title** as of June 15, 2033?" | promotion 排 **#34**（大 budget probe） | ✗ **不在披露的 13 条** |
+| 查询                                                                       | 检索排序位置                            | 评测披露                      |
+| -------------------------------------------------------------------------- | --------------------------------------- | ----------------------------- |
+| query 2 "How did Martin's **promotion** on April 25, 2033 impact..."       | promotion 排 **#1**                     | ✓ 披露第 1 条（词法命中先行） |
+| query 1 "What is Martin Mark's current **job title** as of June 15, 2033?" | promotion 排 **#34**（大 budget probe） | ✗ **不在披露的 13 条**        |
 
 **query 1 实锤**：披露的 13 条全部是 2033-05-10 的泛化对话（"I'm considering exploring new career paths..."、"These efforts could definitely enhance my role..."），对 "current job title" 毫无帮助；真正的答案（2033-04-25 "promoted to Executive Director"）被挤出披露。
 
@@ -49,11 +49,11 @@
               └→ 即使触发也到不了 #34（hardLimit=min(limit=20, maxEvidence) 被 limit 压住）
 ```
 
-| 层 | 问题 | 证据 |
-|---|---|---|
-| ① 检索排序 | promotion 词法 0（"job title" vs "promoted to Executive Director"）+ 向量弱 → 排 #34 | probe（limit 50 全序 #34） |
-| ② QPP 触发保守 | 只判断"有没有检索到 + 意图覆盖"，不判断"内容是否真正相关"；query 1 无 list/recommend/assistant 缺口 → 认为 13 条"足够" | timings `search.secondPass: 0.15ms` |
-| ③ **hardLimit 矛盾** | 注释"limit 是 recommended 不是硬 cap"（retrieval.ts:345），实现 `hardLimit = max(1, min(requestedLimit, maximum.maxEvidence))` 却仍被 caller limit 封顶 → Fibonacci 13→21>20 停 | retrieval.ts:348-350 |
+| 层                   | 问题                                                                                                                                                                            | 证据                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| ① 检索排序           | promotion 词法 0（"job title" vs "promoted to Executive Director"）+ 向量弱 → 排 #34                                                                                            | probe（limit 50 全序 #34）          |
+| ② QPP 触发保守       | 只判断"有没有检索到 + 意图覆盖"，不判断"内容是否真正相关"；query 1 无 list/recommend/assistant 缺口 → 认为 13 条"足够"                                                          | timings `search.secondPass: 0.15ms` |
+| ③ **hardLimit 矛盾** | 注释"limit 是 recommended 不是硬 cap"（retrieval.ts:345），实现 `hardLimit = max(1, min(requestedLimit, maximum.maxEvidence))` 却仍被 caller limit 封顶 → Fibonacci 13→21>20 停 | retrieval.ts:348-350                |
 
 ## 4. direct 保底概念澄清
 
@@ -72,18 +72,19 @@ Kimi 官方说明的目标是避免一次携带全部工具定义造成的 token
 并让核心工具的顶层声明固定不变。
 
 Kimi 当前把这种动态加载能力限定在 `kimi-k3`。NMG 只借鉴其“稳定发现入口
-+ 按需展开完整能力”的协议思想，不把自身实现绑定到 Kimi 模型或它的消息
-格式。
+
+- 按需展开完整能力”的协议思想，不把自身实现绑定到 Kimi 模型或它的消息
+  格式。
 
 这与 NMG 的内容展开相似，但不能混为一个机制：
 
-| Kimi 能力披露 | NMG 对应层 | 当前状态 / 差距 |
-|---|---|---|
-| 核心工具固定在顶层 | `nmg_search` / `nmg_get` / `nmg_remember` 是稳定三工具面 | 已做；声明规模很小，暂无必要再把三者藏到工具目录后面 |
-| `search_tools` 返回候选工具简介 | Skill metadata / harness 工具目录提示 Agent 存在 NMG | Codex Skill 可做发现层；Pi 目前直接暴露三工具 |
-| 追加匹配工具的完整声明 | Agent 调用 `nmg_search` 后只得到 memory headers | 不同层：前者披露能力 schema，后者披露记忆候选 |
-| 保留已加载工具声明 | 会话 AG 窗口保留已注入 memory IDs | 目标相似，但保留对象不同；不能用 AG 命中率代替工具缓存命中率 |
-| 追加而不修改旧前缀 | 固定 policy 前缀 + 动态 recall 尾部 | Pi 已采用稳定 policy；需要实测 provider cache tokens，而非仅检查字符串顺序 |
+| Kimi 能力披露                   | NMG 对应层                                               | 当前状态 / 差距                                                            |
+| ------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------- |
+| 核心工具固定在顶层              | `nmg_search` / `nmg_get` / `nmg_remember` 是稳定三工具面 | 已做；声明规模很小，暂无必要再把三者藏到工具目录后面                       |
+| `search_tools` 返回候选工具简介 | Skill metadata / harness 工具目录提示 Agent 存在 NMG     | Codex Skill 可做发现层；Pi 目前直接暴露三工具                              |
+| 追加匹配工具的完整声明          | Agent 调用 `nmg_search` 后只得到 memory headers          | 不同层：前者披露能力 schema，后者披露记忆候选                              |
+| 保留已加载工具声明              | 会话 AG 窗口保留已注入 memory IDs                        | 目标相似，但保留对象不同；不能用 AG 命中率代替工具缓存命中率               |
+| 追加而不修改旧前缀              | 固定 policy 前缀 + 动态 recall 尾部                      | Pi 已采用稳定 policy；需要实测 provider cache tokens，而非仅检查字符串顺序 |
 
 ### 5.1 完整的 NMG 渐进式披露链
 
@@ -117,7 +118,7 @@ HaluMem backend track 从 `search()` 开始，不能证明前两步有效。
 按优先级/成本：
 
 - **A. 修 hardLimit 矛盾**（实锤 bug，通用正确）：QPP 追加应突破第一遍 limit（用 expanded maxEvidence 而非 caller limit 封顶）——改一行，让"按需追加"在 QPP 触发时真能扩容到 #34 这类候选。
-- **B. 评测开 secondPass**：bridge 默认开（`options.secondPass ?? true`），评测 env 显式 `NMG_QPP_SECOND_PASS=0`——评测模拟实际使用应开。
+- **B. 评测开 secondPass**：bridge 默认开（`options.secondPass ?? true`），评测 env 显式 `NMG_QPP_SECOND_PASS=0`——评测产品检索路径时应开。
 - **C. QPP 触发增强**：判断"内容是否真正相关"（如披露内容与 query 的语义/覆盖缺口），而非只看意图家族覆盖——结构性但复杂，需设计讨论。
 - **D. direct 保底**（评估中发现的结构性缺口）：selection 层保证 direct 一定在披露内；同时暴露 source 标记便于诊断。
 

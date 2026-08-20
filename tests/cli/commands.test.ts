@@ -30,7 +30,7 @@ test("every RPC method is exposed via the CLI or is intentionally RPC-only", () 
   // `nmg daemon stop` over HTTP — neither has a direct CLI command.
   const rpcOnly: readonly NmgMethod[] = [
     "hello",
-    "recordActiveGraphUse",
+    "recordActiveGraphAttribution",
     "shutdown",
     "stgPurgeSession",
   ];
@@ -85,7 +85,7 @@ test("CLI exposes explicit resolve and reopen lifecycle operations", () => {
   );
 });
 
-test("CLI exact get preserves Active Graph use attribution", () => {
+test("CLI exact get preserves Active Graph disclosure attribution", () => {
   const get = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "get")!;
   assert.deepEqual(
     get.buildParams({

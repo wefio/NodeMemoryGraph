@@ -426,8 +426,9 @@ async function prepareCase(item: BenchmarkCase, corpus: PreparedCorpus): Promise
     const rejectedMemoryIds = context.results
       .map((result) => result.memory.id)
       .filter((id) => !usefulMemoryIds.includes(id));
-    store.recordActiveGraphUse(context.activeGraph.id, {
-      usedMemoryIds: usefulMemoryIds,
+    store.recordActiveGraphAttribution(context.activeGraph.id, {
+      method: "verified_evidence",
+      attributedMemoryIds: usefulMemoryIds,
       rejectedMemoryIds,
     });
     const trace = store.retrievalTrace(context.activeGraph.id);

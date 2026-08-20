@@ -29,7 +29,7 @@ test("trace protocol joins STG, LTG and Active Graph into fixed bounded features
       memoryType: "derived",
       truthStatus: "inferred",
       residence: "stg",
-        sessionId: "test-session",
+      sessionId: "test-session",
       tier: 0,
     });
     const answer = store.remember({
@@ -81,8 +81,9 @@ test("trace protocol joins STG, LTG and Active Graph into fixed bounded features
         },
       ],
     });
-    store.recordActiveGraphUse(traceId, {
-      usedMemoryIds: [answer.memory.id],
+    store.recordActiveGraphAttribution(traceId, {
+      method: "verified_evidence",
+      attributedMemoryIds: [answer.memory.id],
       rejectedMemoryIds: [entry.memory.id],
     });
     const trace = store.retrievalTrace(traceId);
@@ -142,8 +143,9 @@ test("all-negative retrieval feedback does not teach the controller to stop earl
     const saved = store.remember({ statement: "An unrelated detail", nodeName: "Detail" });
     const context = store.searchContext("unrelated detail");
     assert.ok(context.activeGraph);
-    store.recordActiveGraphUse(context.activeGraph.id, {
-      usedMemoryIds: [],
+    store.recordActiveGraphAttribution(context.activeGraph.id, {
+      method: "verified_evidence",
+      attributedMemoryIds: [],
       rejectedMemoryIds: [saved.memory.id],
     });
     const trace = store.retrievalTrace(context.activeGraph.id);

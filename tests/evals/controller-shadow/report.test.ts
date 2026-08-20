@@ -57,6 +57,22 @@ test("shadow coverage keeps missing labels unknown and reports calibration block
     },
     {
       ...base,
+      version: 2,
+      type: "attribution",
+      candidateMemoryIds: ["memory-1"],
+      attributedMemoryIds: ["memory-1"],
+      method: "answer_overlap",
+    },
+    {
+      ...base,
+      version: 2,
+      type: "attribution",
+      candidateMemoryIds: ["memory-1"],
+      attributedMemoryIds: ["memory-1"],
+      method: "verified_claim_support",
+    },
+    {
+      ...base,
       type: "tool_flow",
       action: "search_suppressed",
       reason: "evidence_progression_required",
@@ -85,6 +101,9 @@ test("shadow coverage keeps missing labels unknown and reports calibration block
   assert.equal(report.toolFlow, 2);
   assert.equal(report.searchSuppressed, 1);
   assert.equal(report.feedbackNudgesShown, 1);
+  assert.equal(report.attributions, 2);
+  assert.equal(report.diagnosticAttributions, 1);
+  assert.equal(report.verifiedAttributions, 1);
   assert.equal(report.calibrationReady, false);
   assert.match(report.blockers.at(-1)!, /held-out/u);
 });

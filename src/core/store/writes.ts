@@ -574,14 +574,14 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
      * simulating one) supplies semantic judgements AFTER answering, so NMG
      * needs no polarity/claims annotation at ingest time (0-annotation).
      *
-     * - usedMemoryIds → recordUsage (access_count / last_accessed_at)
+     * - attributedMemoryIds → recordUsage (access_count / last_accessed_at)
      * - supersede     → applySupersession (mark the stale predecessor
      *   superseded). Soft signal: an invalid target (missing / already
      *   superseded / deleted) is ignored, never thrown to the caller.
      */
     recordFeedback(input: RecordFeedbackInput): void {
-      if (input.usedMemoryIds?.length) {
-        this.recordUsage(input.usedMemoryIds);
+      if (input.attributedMemoryIds?.length) {
+        this.recordUsage(input.attributedMemoryIds);
       }
       if (input.supersede) {
         const { supersededMemoryId, newMemoryId } = input.supersede;

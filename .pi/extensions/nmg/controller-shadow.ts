@@ -12,7 +12,7 @@ interface ShadowDependencies {
 interface PendingContext {
   context: MemoryContext;
   retrievedAt: number;
-  useRecorded: boolean;
+  disclosureRecorded: boolean;
   outcomeRecorded: boolean;
   feedbackRecorded: boolean;
   feedbackNudgeShown: boolean;
@@ -25,7 +25,7 @@ export interface PendingShadowFeedback {
 
 /**
  * Optional, lazy Pi bridge for the experimental differentiable controller.
- * It records and learns from explicit get use but never changes retrieval.
+ * It records disclosure separately from answer attribution and never changes retrieval.
  */
 export class ControllerShadowBridge {
   readonly enabled: boolean;
@@ -61,6 +61,10 @@ export class ControllerShadowBridge {
       const controllerLatencyMs = performance.now() - startedAt;
       if (!decision) return;
       this.#rememberContext(context.activeGraph.id, context);
+      if (injectedText.trim()) {
+        const pending = this.#contexts.get(context.activeGraph.id);
+        if (pending) pending.disclosureRecorded = true;
+      }
       dependencies.log.retrieval({
         graphId: context.activeGraph.id,
         sessionId,
@@ -84,7 +88,7 @@ export class ControllerShadowBridge {
 
   /**
    * Produce an active budget only after the controller has learned from at
-   * least one attributable use. A zero-step controller is an uninformative
+   * least one verified evidence outcome. A zero-step controller is an uninformative
    * 0.5 prior and must never change product retrieval merely because active
    * mode was selected.
    */
@@ -162,11 +166,11 @@ export class ControllerShadowBridge {
     );
   }
 
-  async use(
+  async disclosure(
     activeGraphId: string | undefined,
     sessionId: string,
     requestedMemoryIds: readonly string[],
-    usedMemoryIds: readonly string[],
+    disclosedMemoryIds: readonly string[],
   ): Promise<void> {
     if (!this.enabled || !activeGraphId) return;
     const pending = this.#contexts.get(activeGraphId);
@@ -174,16 +178,39 @@ export class ControllerShadowBridge {
     if (!pending || !context?.activeGraph || context.activeGraph.sessionId !== sessionId) return;
     try {
       const dependencies = await this.#dependencies();
-      dependencies.log.use({
+      const recorded = dependencies.log.disclosure({
         graphId: activeGraphId,
         sessionId,
         requestedMemoryIds,
-        usedMemoryIds,
+        disclosedMemoryIds,
       });
-      if (usedMemoryIds.length > 0) pending.useRecorded = true;
-      dependencies.runtime.observeUse(context, usedMemoryIds);
+      if (recorded && disclosedMemoryIds.length > 0) pending.disclosureRecorded = true;
     } catch {
-      // Best-effort shadow learning; the daemon already owns canonical use attribution.
+      // Best-effort disclosure telemetry; the daemon owns the canonical trace.
+    }
+  }
+
+  async attribution(
+    activeGraphId: string | undefined,
+    sessionId: string,
+    candidateMemoryIds: readonly string[],
+    attributedMemoryIds: readonly string[],
+  ): Promise<void> {
+    if (!this.enabled || !activeGraphId) return;
+    const pending = this.#contexts.get(activeGraphId);
+    const context = pending?.context;
+    if (!pending || !context?.activeGraph || context.activeGraph.sessionId !== sessionId) return;
+    try {
+      const dependencies = await this.#dependencies();
+      dependencies.log.attribution({
+        graphId: activeGraphId,
+        sessionId,
+        candidateMemoryIds,
+        attributedMemoryIds,
+        method: "answer_overlap",
+      });
+    } catch {
+      // Best-effort diagnostic attribution; never break agent completion.
     }
   }
 
@@ -265,7 +292,7 @@ export class ControllerShadowBridge {
       .find(
         ([, entry]) =>
           entry.context.activeGraph?.sessionId === sessionId &&
-          entry.useRecorded &&
+          entry.disclosureRecorded &&
           entry.outcomeRecorded &&
           !entry.feedbackRecorded &&
           !entry.feedbackNudgeShown,
@@ -304,7 +331,7 @@ export class ControllerShadowBridge {
     this.#contexts.set(graphId, {
       context,
       retrievedAt: performance.now(),
-      useRecorded: false,
+      disclosureRecorded: false,
       outcomeRecorded: false,
       feedbackRecorded: false,
       feedbackNudgeShown: false,

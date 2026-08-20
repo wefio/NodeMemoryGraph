@@ -1367,7 +1367,7 @@ test("STG and LTG lifecycle preserves IDs, evidence, expiry, and audit history",
   });
 });
 
-test("Active Graph enforces a shared budget and records actual memory use", () => {
+test("Active Graph enforces a shared budget and records verified evidence outcomes", () => {
   withStore((store) => {
     store.remember({
       statement: "ORCHID alpha detail",
@@ -1419,7 +1419,10 @@ test("Active Graph enforces a shared budget and records actual memory use", () =
     assert.deepEqual(trace?.selections, context.activeGraph.selections);
     assert.deepEqual(trace?.budgetLedger, context.activeGraph.budgetLedger);
 
-    store.recordActiveGraphUse(context.activeGraph.id, { usedMemoryIds: [selected.memory.id] });
+    store.recordActiveGraphAttribution(context.activeGraph.id, {
+      method: "verified_evidence",
+      attributedMemoryIds: [selected.memory.id],
+    });
     assert.equal(store.nodeActivation(selected.node.id).usedCount, 1);
     assert.equal(store.nodeActivation(selected.node.id).selectedCount, 1);
     assert.ok(store.nodeActivation(selected.node.id).score > beforeUse);
@@ -1472,8 +1475,9 @@ test("edge stability deduplicates tasks and drives auditable reversible consolid
         resultMemoryIds: [alpha.memory.id, beta.memory.id],
         resultNodeIds: [alpha.node.id, beta.node.id],
       });
-      store.recordActiveGraphUse(traceId, {
-        usedMemoryIds: contradicted ? [] : [alpha.memory.id, beta.memory.id],
+      store.recordActiveGraphAttribution(traceId, {
+        method: "verified_evidence",
+        attributedMemoryIds: contradicted ? [] : [alpha.memory.id, beta.memory.id],
         contradictedMemoryIds: contradicted ? [alpha.memory.id] : [],
       });
     };
@@ -1489,7 +1493,7 @@ test("edge stability deduplicates tasks and drives auditable reversible consolid
     assert.equal(stable.score > 0.99, true);
 
     // The third independent, useful task crosses the default stability gate.
-    // Real AG-use attribution now invokes conservative reconciliation itself.
+    // Verified AG evidence attribution invokes conservative reconciliation itself.
     const relation = store.getRelations([alpha.node.id], 1)[0]!;
     assert.equal(relation.consolidationSource, "stability");
     assert.equal(relation.status, "consolidated");

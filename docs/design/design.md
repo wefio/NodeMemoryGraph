@@ -166,18 +166,21 @@ nmg daemon stop
 
 `activeGraphId` is not decorative continuation metadata. Agent-independent
 clients must return it on exact `get` so the owning retrieval trace records
-which displayed candidates were actually used. Search/injection alone remains
-unlabelled; this prevents candidate exposure from becoming self-reinforcing
-positive feedback.
+which candidates were **disclosed**. Search, injection, and exact loading are
+observable exposure states, not evidence that an API model relied on a record.
+Keeping them separate prevents candidate exposure from becoming
+self-reinforcing positive feedback.
 
-This is the portable feedback boundary: every harness can submit actual-use
-attribution with `get(activeGraphId=...)` through the stable RPC. Labels such as
+This is the portable observation boundary. `get(activeGraphId=...)` records
+disclosure through the stable RPC. An adapter may additionally record
+answer-to-memory overlap, but that is provider-dependent diagnostic telemetry,
+not proof of causal use and not a training label. Only auditable user
+confirmation, tool-verified outcomes, and official benchmark evidence may mark
+records useful/contradicted and train routing or graph stability. Labels such as
 task success, evidence sufficiency, expansion usefulness, and excessive noise
 depend on native answer, correction, token, and tool lifecycle events, so they
-remain harness-adapter telemetry. An adapter may write the versioned shadow log
-format and reuse the Lab exporter, but Core must not import `src/lab/` merely to
-make those experimental labels look transport-neutral. Silence or candidate
-exposure is never converted into a positive label.
+remain harness-adapter telemetry. Silence or candidate exposure is never
+converted into a positive label.
 
 For Pi ergonomics, `nmg_remember(action="feedback")` may omit `activeGraphId`
 only to target the latest retrieval owned by that same Pi session. A supplied ID
@@ -425,23 +428,21 @@ must inspect applicability and contrary evidence before acting.
 
 Claim `confidence` today is a prior — the extractor's self-assessment at write
 time. A memory system earns the word "experience" only when that number is
-corrected by what happened when the memory was used. This loop is the one
-capability no LLM can provide on its own: outcome information (did the task
-succeed after this memory was retrieved and rendered?) is produced after and
-outside the model's inference, so only the external store can capture it and
-write it back. Model upgrades improve the prior; they can never close this
-loop.
+corrected by an outcome that can be attributed to a claim. Retrieval and
+rendering alone do not supply that attribution. The external harness can capture
+user confirmation, tool validation, and benchmark evidence after inference;
+model upgrades improve the prior but cannot replace this auditable loop.
 
 Mechanism (minimal, deterministic):
 
-1. **Usage logging.** Each retrieval that renders a record into an Active
-   Graph appends `(record_id, claim_id, query/task id, timestamp)` to a usage
-   ledger. Rendering, not just ranking, counts — an unrendered candidate
-   exerted no influence.
-2. **Outcome attribution.** When the enclosing task/session closes with a
-   success/failure signal (explicit user feedback, eval verdict, or task
-   status), every rendered claim receives one outcome vote. Outcomes are
-   recorded as events with provenance, never as silent in-place edits.
+1. **Observation logging.** Retrieval, disclosure, and heuristic answer overlap
+   are separate events. They support latency, coverage, and interaction analysis
+   but do not create usefulness votes.
+2. **Verified outcome attribution.** A claim receives a vote only when the
+   caller identifies both the claim and an auditable outcome source: explicit
+   user confirmation/correction, a validating tool result, or official
+   benchmark evidence. Broad task success is not sprayed across every rendered
+   claim. Outcomes are provenance-bearing events, never silent in-place edits.
 3. **Posterior update.** Claim confidence becomes
    `posterior = f(extraction prior, accumulated outcome votes)` — a Beta-style
    running update keeps the storage to two counters per claim and stays
@@ -451,16 +452,34 @@ Mechanism (minimal, deterministic):
    prior: repeatedly useful memories surface more easily; memories that
    correlate with failures sink toward archival review rather than being
    deleted (history stays immutable).
-5. **Credit discipline.** Correlation is not causation — a memory co-rendered
-   with a failure is a suspect, not a culprit. Votes from the same session or
-   task are discounted, and a claim's posterior is only trusted after a
-   minimum number of independent usages (hysteresis), so early noise cannot
-   bury a good memory.
+5. **Credit discipline.** Correlation is not causation. API-model answer overlap,
+   counterfactual response differences, tool-call presence, and uncorrected
+   completion remain diagnostics because model/provider drift makes them poor
+   portable labels. Verified votes from the same task are deduplicated, and a
+   posterior is trusted only after enough independent observations.
 
 This loop also answers, at claim granularity, part of the open routing
 question in section 17: the usefulness signal lives on the claim, not on the
 router's selection, so reinforcing a good memory does not require reinforcing
 the path that found it.
+
+### 5d. Optional interaction profile, not a hidden user model
+
+NMG does not currently maintain a learned user model. A future adapter may keep
+a small, explicit **interaction profile** when repeated cross-task behaviour
+shows a stable preference for recall depth or interaction style—for example,
+the user repeatedly requests more results, stops after shallow evidence, or
+corrects overly aggressive recall. Such black-box behavioural measurement is
+about the user's observable choices, not an API model's hidden cognition.
+
+The profile may tune user-scoped defaults such as evidence budget, automatic
+recall aggressiveness, or whether to recommend another search. It must use
+decay, a minimum number of independent tasks, inspectable features, and reset/
+export controls. A single interaction remains telemetry. The profile may never
+change fact truth, claim confidence, graph stability, node merging, or global
+controller weights; those continue to require verified evidence. Until this
+need is demonstrated, the event log is sufficient and no new subsystem is
+implemented.
 
 ## 6. STG/LTG connectivity and provisional memory
 
@@ -499,23 +518,23 @@ in STG as observations or candidates until consolidation criteria are met.
 
 In the implemented path, ordinary `remember` deliberately creates no semantic
 edge. A search records co-retrieved node pairs as candidate observations; the Pi
-adapter then attributes the memories that materially surfaced in the final
-answer at `agent_end`. Only a pair that is useful across the configured minimum
-number of independent tasks and clears the stability threshold is consolidated
-as `related_to`. Explicit `remember(action="relate")` creates a reviewable
+adapter records answer overlap at `agent_end` only as a diagnostic attribution.
+Only a pair backed by verified useful evidence across the configured minimum
+number of independent tasks and clearing the stability threshold may be
+consolidated as `related_to`. Explicit `remember(action="relate")` creates a reviewable
 topology proposal rather than bypassing this gate. `is_a` is created by a
 reviewed split, while `derived_from` records the provenance of an explicitly
 derived memory. Consequently, a young or unrelated store may correctly contain
 isolated nodes, but ordinary Pi use must still accumulate candidate observations
-and usefulness outcomes.
+and later verified outcomes.
 
-Implicit answer attribution is deliberately conservative and language-aware:
+Implicit answer attribution is deliberately conservative and language-aware,
+but remains diagnostic:
 Latin text uses distinctive whole words, while contiguous Han text uses character
-bigrams. This avoids treating mere injection as use without making Chinese
-memories permanently invisible to consolidation. Exact `get` reads and explicit
-Agent feedback remain stronger evidence. Historical co-retrieval observations
-that lack a use label are not backfilled as useful: retrieval proves exposure,
-not material use, so only future attributable outcomes may raise edge stability.
+bigrams. It helps audit whether retrieved text surfaced and select which
+retrieval to ask the user about. Neither it nor exact `get` reads can raise edge
+stability. Historical co-retrieval observations are not backfilled as useful:
+only future user-, tool-, or benchmark-verified outcomes may do so.
 
 > The provisional-memory rules, isolation requirements, STG-vs-Delta
 > distinction, and promotion/demotion thresholds are consolidated in
@@ -638,9 +657,12 @@ A_e(t) = f(A_source, A_target, relation_type, q_t, task_t, path_cost)
 
 Activation is fast-changing and query-local. A highly active node or edge is
 not thereby true, durable, or stable. Conversely, a stable LTG constraint may
-remain inactive in an unrelated task. AG should record which nodes and edges
-were selected, expanded, actually used, contradicted, or rejected so later
-maintenance can distinguish retrieval from utility.
+remain inactive in an unrelated task. AG should separately record which nodes
+and edges were selected, which exact evidence was disclosed, which records only
+overlapped the answer, and which evidence was independently verified,
+contradicted, or rejected. Only the final class can supervise persistence and
+controller learning; selection, disclosure, and API-answer overlap remain
+observations rather than utility claims.
 
 ### 7.3 Edge stability and structural consolidation
 
@@ -1453,10 +1475,13 @@ fold low learned-probability candidates. A zero-step controller is inert, and
 all active outputs remain inside hard minimum/normal/expanded envelopes.
 
 The bridge records baseline and learned node order in a bounded log under
-`NMG_DATA_DIR`. It trains from exact records fetched from the same
-session-owned Active Graph and from the conservative answer-to-memory actual-use
-matcher used by automatic recall. Injection, rank position, mere exposure, and
-silence are never positive labels. Explicit `nmg_remember action=feedback`
+`NMG_DATA_DIR`. Exact records fetched from a session-owned Active Graph are
+logged as disclosure; the conservative answer-to-memory matcher used by
+automatic recall is logged as diagnostic attribution. Neither trains the
+controller. Evidence ranking and budget heads train only from verified
+user/tool/official-benchmark evidence joined offline. Injection, rank position,
+mere exposure, answer overlap, and silence are never positive labels. Explicit
+`nmg_remember action=feedback`
 labels remain a separate source for task success, evidence sufficiency,
 expansion utility, noise, and no-memory-needed judgments; cross-session graph
 IDs fail closed. Missing explicit feedback remains unknown. Thus shadow mode
@@ -1473,11 +1498,10 @@ memory from fragmenting by working directory while keeping benchmark state
 isolated.
 
 Because answer-quality labels only become observable after an Agent turn, the
-Pi bridge keeps completed retrievals with attributable use evidence and missing
-explicit task labels in session-local state. Use evidence may come from an exact
-`get` or the conservative answer matcher; automatic recall is therefore
-reviewable only when the answer appears to have used at least one of its
-memories. On the next distinct user turn the bridge exposes at most one one-shot
+Pi bridge keeps completed retrievals whose evidence was actually disclosed and
+whose explicit task labels are missing in session-local state. Diagnostic answer
+overlap does not participate in this choice. On the next distinct user turn the
+bridge exposes at most one one-shot
 review reminder containing the AG ID and stable query task ID. Internal Pi tool
 loops with the same user prompt cannot consume the reminder. The Agent may
 submit `evidenceSufficient`, `expansionUseful`, `excessiveNoise`, and
@@ -1492,8 +1516,9 @@ Query-derived task IDs establish lifecycle separation, not semantic diversity;
 calibration must additionally require enough varied natural tasks and must not
 count paraphrases of one decision as broad evidence.
 
-The stable daemon already owns agent-neutral `search -> get(activeGraphId)` use
-attribution. The richer feedback action stays in the Pi adapter because only the
+The stable daemon already owns agent-neutral `search -> get(activeGraphId)`
+disclosure tracking and diagnostic answer attribution. The richer feedback
+action stays in the Pi adapter because only the
 harness can observe answer completion, user correction, tool rounds, and model
 usage. A future second adapter should implement the same versioned shadow-event
 contract rather than adding a Lab-dependent feedback method to the stable daemon
@@ -1507,23 +1532,23 @@ loops measurable without contaminating controller training targets.
 
 Retrieval events retain the existing AG query fingerprint, QPP components and
 expansion stages, and per-selection scores. The offline controller-dataset
-exporter joins retrieval/use/outcome/feedback by graph, accepts only separately
-labelled rows, and performs a chronological split over whole
+exporter joins retrieval/disclosure/attribution/outcome/feedback by graph,
+accepts only separately labelled rows, and performs a chronological split over whole
 `semanticTaskId` groups. Query fingerprints remain diagnostic identifiers and
 are never promoted to semantic-task labels. Sparse logs produce explicit
 blockers and cannot authorize a policy change.
 
 Task grouping alone is not a sufficient leakage barrier. Query-derived task IDs
-can differ for paraphrases that ultimately use the same memory. Calibration
-therefore also derives a conservative **primary evidence target** from the
-highest-ranked exact record that the Agent actually loaded from each Active
-Graph. The activation gate requires enough distinct primary targets in training
+can differ for paraphrases that share the same evidence. Calibration therefore
+derives a conservative **primary evidence target** only from verified claim
+support, never from loading or answer overlap. The activation gate requires
+enough distinct primary targets in training
 without letting one multi-evidence task inflate the diversity count. Leakage is
-checked more strictly against the complete exact-use sets: any memory used by
+checked more strictly against the complete verified-evidence sets: any memory used by
 both training and validation rejects the split, even when it was not the primary
 record in either row. The primary target is a diversity proxy, not a claim that
 one record completely represents a semantic task; multi-evidence questions
-retain their complete exact-use set in the replay row.
+retain their complete verified-evidence set in the replay row.
 
 Every new retrieval event also stores the exact
 `CONTROLLER_FEATURE_PROTOCOL_VERSION` feature snapshot and the contemporaneous
@@ -2111,13 +2136,12 @@ Important gaps between the prototype and the target plugin:
 - Pi/CLI logical withdrawal and a versioned user-memory export now exist;
   physical privacy erasure of every provenance copy and learned aggregate remains
   gated future work;
-- automatic recall exposure is recorded as selection, and Pi now performs a
-  precision-favoured answer-to-evidence attribution at `agent_end`. A matching
-  answer records natural use (including negative empty-use observations) for the
-  retrieval trace and shadow controller. This is weaker than an explicit
-  citation or `nmg_get(activeGraphId=...)`, so it is suitable for conservative
-  stability evidence and calibration, not proof that memory causally changed the
-  answer;
+- automatic recall exposure is recorded as selection, and Pi performs a
+  precision-favoured answer-to-evidence attribution at `agent_end`. Matching and
+  empty overlap observations are diagnostic only: they neither train the shadow
+  controller nor alter stability. Exact `get` records disclosure, not use.
+  Stability and evidence-ranking supervision require explicit user outcomes,
+  tool validation, or official benchmark evidence;
 - stability currently consolidates a pairwise local subgraph as a typed
   `related_to` relation. Larger multi-edge motif consolidation remains an
   experiment rather than a P3 requirement.
@@ -2159,13 +2183,13 @@ Current development evidence (updated 2026-07-30):
 - 287 automated tests cover UOp autodiff, the differentiable controller,
   hierarchical activation, the retained memory-graph reasoner prototype,
   reasoning-workspace persistence and checkpoint injection, P3 lifecycle,
-  budget enforcement, actual-use activation, independent-task deduplication,
+  budget enforcement, disclosure/verified-evidence separation, independent-task deduplication,
   reversible consolidation, write-policy audit, Active Graph traces, official
   benchmark adapters, and schema migration. Test files live in `tests/core/`,
   `tests/evals/`, and `tests/extensions/nmg/`.
 - a clean DeepSeek V4 Flash Pi process wrote a unique LTG fact, a second process
   recovered it through `nmg_search -> activeGraphId -> nmg_get`, and the store
-  recorded one selection and one actual use; isolated test data was removed
+  recorded one selection and one exact disclosure; isolated test data was removed
   afterwards and `PRAGMA foreign_key_check` remained clean;
 - strict three-arm LongMemEval development gate over one fixed question from
   each of seven categories, scored separately with the pinned official protocol:

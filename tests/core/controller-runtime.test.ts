@@ -13,7 +13,7 @@ import { DifferentiableController } from "../../src/lab/differentiable-controlle
 import { fibonacciEvidenceBudgets } from "../../src/core/store/active-graph.ts";
 import { NmgStore } from "../../src/core/store.ts";
 
-test("controller runtime learns from actual-use traces and persists exact state", () => {
+test("controller runtime learns from verified-evidence traces and persists exact state", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-controller-runtime-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
   const statePath = join(directory, "controller.json");
@@ -26,7 +26,10 @@ test("controller runtime learns from actual-use traces and persists exact state"
     assert.ok(before);
     assert.equal(before.trainingSteps, 0);
 
-    store.recordActiveGraphUse(context.activeGraph.id, { usedMemoryIds: [saved.memory.id] });
+    store.recordActiveGraphAttribution(context.activeGraph.id, {
+      method: "verified_evidence",
+      attributedMemoryIds: [saved.memory.id],
+    });
     const trace = store.retrievalTrace(context.activeGraph.id);
     assert.ok(trace);
     assert.equal(runtime.observe(context, trace), true);
@@ -43,7 +46,7 @@ test("controller runtime learns from actual-use traces and persists exact state"
   }
 });
 
-test("controller runtime can learn directly from an explicit Active Graph get", () => {
+test("controller runtime can learn directly from verified Active Graph evidence", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-controller-use-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
   try {
@@ -54,8 +57,11 @@ test("controller runtime can learn directly from an explicit Active Graph get", 
       persistTrace: false,
     });
     const runtime = new ControllerRuntime(join(directory, "controller.json"));
-    assert.equal(runtime.observeUse(context, ["not-visible"]), false);
-    assert.equal(runtime.observeUse(context, [saved.memory.id, saved.memory.id]), true);
+    assert.equal(runtime.observeVerifiedEvidence(context, ["not-visible"]), false);
+    assert.equal(
+      runtime.observeVerifiedEvidence(context, [saved.memory.id, saved.memory.id]),
+      true,
+    );
     assert.equal(runtime.observations, 1);
     assert.equal(runtime.trainingSteps, 1);
   } finally {

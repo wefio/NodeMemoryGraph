@@ -47,7 +47,7 @@ export class NmgStore
 | `Constructor` 必须 `new (...args: any[])` | `never[]` 触发 TS2545（mixin 构造器须 `...args: any[]` rest 透传） |
 | 基类用 **stub**（签名 + `throw`）而非 `abstract` | 测试用 `node --experimental-strip-types` 直接跑源码，而 strip-types 不支持 abstract 方法（须 abstract class，不可实例化） |
 | 字段 `#private` → `protected` | `#` 跨文件类不可访问；mixin 不能声明 protected 属性但可访问基类 protected 字段（Phase 0 已剥离 422 处） |
-| ~~基类调簇方法处声明 stub~~（2026-08-03 已消除） | 原 3 处反向调用（`recordActiveGraphUseInner`→recordUsage/trainRouter、`searchWithVector`→routeNodes、`redirectRelations`→linkNodes）的根因是 helper 放错了层；已分别上移到唯一消费簇（maintenance / retrieval / graph），stub 全部删除，基类不再依赖簇方法 |
+| ~~基类调簇方法处声明 stub~~（2026-08-03 已消除） | 原 3 处反向调用（现名 `recordActiveGraphAttributionInner`→recordUsage/trainRouter、`searchWithVector`→routeNodes、`redirectRelations`→linkNodes）的根因是 helper 放错了层；已分别上移到唯一消费簇（maintenance / retrieval / graph），stub 全部删除，基类不再依赖簇方法 |
 | mixin 链顺序 graph ⊃ retrieval ⊃ writes ⊃ maintenance ⊃ Base | 依赖图无环（graph→maintenance；retrieval→graph,maintenance；writes→maintenance,graph；maintenance→∅），跨簇调用走原型链 |
 | 簇文件不 import store.ts / base.ts / 兄弟簇 | 模块图保持 DAG，只 import 类型/工具模块 |
 
@@ -69,7 +69,8 @@ export class NmgStore
   pendingIndexDelta, acknowledgeIndexDelta,
   beginEmbeddingIndex, completeEmbeddingIndex, failEmbeddingIndex,
   embeddingIndexHealth, contradictionNotes, recordRetrievalTrace, perfAggregates,
-  retrievalTracesCount, pruneRetrievalTraces, retrievalTrace, recordActiveGraphUse,
+  retrievalTracesCount, pruneRetrievalTraces, retrievalTrace,
+  recordActiveGraphDisclosure, recordActiveGraphAttribution,
   recordConsolidationEvent, rebalanceNode, rebalanceDueNodes, upsertNode
 - **Base (50)**：构造/close + 16 外部 embedding API + routeLeafBlocksByVector +
   33 共享 protected helpers（requireNode、searchWithVector、markIndexDelta 等）

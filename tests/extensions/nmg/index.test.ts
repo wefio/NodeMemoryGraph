@@ -302,7 +302,7 @@ test("remember cannot attribute an unbound Assistant inference to the user", asy
   );
 });
 
-test("controller shadow bridge is opt-in and learns only from explicit get use", async () => {
+test("controller shadow bridge logs answer attribution without learning from it", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-controller-shadow-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
   // Isolate the ambient NMG_CONTROLLER_SHADOW: running tests under the
@@ -337,26 +337,44 @@ test("controller shadow bridge is opt-in and learns only from explicit get use",
     await enabled.retrieval(context, "session-a", "tool", "injected header");
     await enabled.searchSuppressed("wrong-session", "ignored query");
     await enabled.searchSuppressed("session-a", "same query again");
-    await enabled.use(
+    await enabled.attribution(
       context.activeGraph!.id,
       "wrong-session",
       [saved.memory.id],
       [saved.memory.id],
     );
     assert.equal(existsSync(join(directory, "controller-shadow-state.json")), false);
-    await enabled.use(context.activeGraph!.id, "session-a", [saved.memory.id], [saved.memory.id]);
-    const state = JSON.parse(
-      readFileSync(join(directory, "controller-shadow-state.json"), "utf8"),
-    ) as { observations: number };
-    assert.equal(state.observations, 1);
-    assert.ok(
+    await enabled.disclosure(
+      context.activeGraph!.id,
+      "session-a",
+      [saved.memory.id],
+      [saved.memory.id],
+    );
+    assert.equal(
+      existsSync(join(directory, "controller-shadow-state.json")),
+      false,
+      "disclosure alone must not train the controller",
+    );
+    await enabled.attribution(
+      context.activeGraph!.id,
+      "session-a",
+      [saved.memory.id],
+      [saved.memory.id],
+    );
+    assert.equal(
+      existsSync(join(directory, "controller-shadow-state.json")),
+      false,
+      "answer overlap is diagnostic and must not persist controller state",
+    );
+    assert.equal(
       await enabled.allocate(
         context,
         envelopes.minimum,
         envelopes.normalMaximum,
         envelopes.expandedMaximum,
       ),
-      "explicit use supervision unlocks active allocation",
+      null,
+      "answer overlap must not unlock active allocation",
     );
     await enabled.outcome("session-a", [
       { role: "assistant", usage: { input: 120, output: 30 } },
@@ -391,7 +409,7 @@ test("controller shadow bridge is opt-in and learns only from explicit get use",
     const events = readFileSync(join(directory, "controller-shadow-events.jsonl"), "utf8")
       .trim()
       .split("\n");
-    assert.equal(events.length, 5);
+    assert.equal(events.length, 6);
     const retrieval = JSON.parse(events[0]!) as {
       type: string;
       costs: { injectedCharacters: number; injectedEstimatedTokens: number };
@@ -403,8 +421,9 @@ test("controller shadow bridge is opt-in and learns only from explicit get use",
     assert.equal(flow.type, "tool_flow");
     assert.equal(flow.action, "search_suppressed");
     assert.equal(flow.query, "same query again");
-    assert.equal(JSON.parse(events[2]!).type, "use");
-    const outcome = JSON.parse(events[3]!) as {
+    assert.equal(JSON.parse(events[2]!).type, "disclosure");
+    assert.equal(JSON.parse(events[3]!).type, "attribution");
+    const outcome = JSON.parse(events[4]!) as {
       type: string;
       toolRounds: number;
       inputTokens: number;
@@ -414,7 +433,7 @@ test("controller shadow bridge is opt-in and learns only from explicit get use",
     assert.equal(outcome.toolRounds, 1);
     assert.equal(outcome.inputTokens, 120);
     assert.equal(outcome.outputTokens, 30);
-    const feedback = JSON.parse(events[4]!) as {
+    const feedback = JSON.parse(events[5]!) as {
       type: string;
       collectionOrigin: string;
       semanticTaskId: string;
@@ -434,7 +453,7 @@ test("controller shadow bridge is opt-in and learns only from explicit get use",
   }
 });
 
-test("shadow feedback review selects a used graph instead of a newer header-only graph", async () => {
+test("shadow feedback review selects a disclosed graph instead of a newer header-only graph", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-feedback-selection-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
   try {
@@ -449,7 +468,12 @@ test("shadow feedback review selects a used graph instead of a newer header-only
       persistTrace: false,
     });
     await bridge.retrieval(used, "session-a", "tool");
-    await bridge.use(used.activeGraph!.id, "session-a", [saved.memory.id], [saved.memory.id]);
+    await bridge.disclosure(
+      used.activeGraph!.id,
+      "session-a",
+      [saved.memory.id],
+      [saved.memory.id],
+    );
     await bridge.retrieval(headerOnly, "session-a", "automatic");
     await bridge.outcome("session-a", []);
 
@@ -1085,9 +1109,9 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       false,
     );
     try {
-      assert.deepEqual(store.retrievalTrace(activeGraphId, "http-test-session")?.usefulMemoryIds, [
-        remember.details.memory.id,
-      ]);
+      const trace = store.retrievalTrace(activeGraphId, "http-test-session");
+      assert.deepEqual(trace?.disclosedMemoryIds, [remember.details.memory.id]);
+      assert.deepEqual(trace?.usefulMemoryIds, []);
     } finally {
       // Close the in-process store first so the daemon's SQLite close (WAL
       // checkpoint) is not blocked by our own connection; then shut the owned
@@ -1169,7 +1193,7 @@ test("remember from a board source attaches a board_origin marker", async () => 
   }
 });
 
-test("agent_end derives and persists useful memories on the trace", async () => {
+test("agent_end derives and persists answer-overlap attribution on the trace", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-agent-end-use-"));
   const previous = process.env.NMG_DATA_DIR;
   const previousProject = process.env.NMG_PROJECT_DIR;
@@ -1204,8 +1228,8 @@ test("agent_end derives and persists useful memories on the trace", async () => 
       };
     };
     assert.ok(searched.details.activeGraph, "search built an active graph");
-    // The final answer restates the memory's content -> deriveUsedMemoryIds
-    // should mark that memory as used when agent_end fires.
+    // The final answer restates the memory's content -> deriveAnswerOverlapMemoryIds
+    // should attribute that memory by answer overlap when agent_end fires.
     await handlers.get("agent_end")!(
       {
         messages: [
@@ -1220,9 +1244,10 @@ test("agent_end derives and persists useful memories on the trace", async () => 
       const trace = store.retrievalTrace(searched.details.activeGraph!.id, "agent-end-session");
       assert.ok(trace, "trace exists");
       assert.ok(
-        trace.usefulMemoryIds.includes(searched.details.results[0].memory.id),
-        "memory surfaced in the answer is recorded as useful",
+        trace.attributedMemoryIds.includes(searched.details.results[0].memory.id),
+        "memory surfaced in the answer is recorded as heuristic attribution",
       );
+      assert.deepEqual(trace.usefulMemoryIds, [], "answer overlap is not verified evidence");
     } finally {
       store.close();
     }
@@ -1238,7 +1263,7 @@ test("agent_end derives and persists useful memories on the trace", async () => 
   }
 });
 
-test("Chinese automatic recall reaches agent_end use attribution and the shadow log", async () => {
+test("Chinese automatic recall reaches diagnostic answer attribution and the shadow log", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-auto-use-"));
   const previousData = process.env.NMG_DATA_DIR;
   const previousProject = process.env.NMG_PROJECT_DIR;
@@ -1368,14 +1393,26 @@ test("Chinese automatic recall reaches agent_end use attribution and the shadow 
       .trim()
       .split("\n")
       .map(
-        (line) => JSON.parse(line) as { type: string; origin?: string; usedMemoryIds?: string[] },
+        (line) =>
+          JSON.parse(line) as {
+            type: string;
+            origin?: string;
+            attributedMemoryIds?: string[];
+          },
       );
     assert.ok(events.some((event) => event.type === "retrieval" && event.origin === "automatic"));
     assert.ok(
       events.some(
-        (event) => event.type === "use" && event.usedMemoryIds?.includes(saved.details.memory.id),
+        (event) =>
+          event.type === "attribution" &&
+          event.attributedMemoryIds?.includes(saved.details.memory.id),
       ),
       "automatic recall is attributed when its content surfaces in the answer",
+    );
+    assert.equal(
+      existsSync(join(directory, "controller-shadow-state.json")),
+      false,
+      "API answer overlap must not train or persist the differentiable controller",
     );
     await handlers.get("session_shutdown")!({}, { sessionManager });
   } finally {

@@ -50,7 +50,9 @@ export function calibrateShadowController(
   const train = rows.filter((row) => row.split === "train");
   const validation = rows.filter((row) => row.split === "validation");
   if (train.length === 0 || validation.length === 0) {
-    throw new Error("shadow calibration requires non-empty chronological train and validation rows");
+    throw new Error(
+      "shadow calibration requires non-empty chronological train and validation rows",
+    );
   }
 
   const controller = new DifferentiableController(
@@ -72,8 +74,8 @@ export function calibrateShadowController(
   const controlAccuracy = average(evaluated.map((row) => Number(row.controlCorrect)));
   const trainingPrimaryTargets = primaryEvidenceTargets(train);
   const validationPrimaryTargets = primaryEvidenceTargets(validation);
-  const trainingExactTargets = exactUseEvidenceTargets(train);
-  const validationExactTargets = exactUseEvidenceTargets(validation);
+  const trainingExactTargets = exactAttributionEvidenceTargets(train);
+  const validationExactTargets = exactAttributionEvidenceTargets(validation);
   const overlappingExactTargets = new Set(
     [...validationExactTargets].filter((target) => trainingExactTargets.has(target)),
   );
@@ -98,13 +100,16 @@ export function calibrateShadowController(
     evidenceDiversity: {
       primaryTrainingTargets: trainingPrimaryTargets.size,
       primaryValidationTargets: validationPrimaryTargets.size,
-      exactTrainingTargets: trainingExactTargets.size,
-      exactValidationTargets: validationExactTargets.size,
-      overlappingExactTargets: overlappingExactTargets.size,
+      exactAttributionTrainingTargets: trainingExactTargets.size,
+      exactAttributionValidationTargets: validationExactTargets.size,
+      overlappingExactAttributionTargets: overlappingExactTargets.size,
     },
     dataWindow: {
       from: rows.map((row) => row.recordedAt).sort()[0]!,
-      to: rows.map((row) => row.recordedAt).sort().at(-1)!,
+      to: rows
+        .map((row) => row.recordedAt)
+        .sort()
+        .at(-1)!,
     },
     training: {
       steps: controller.trainingSteps,
@@ -130,7 +135,7 @@ export function calibrateShadowController(
 function primaryEvidenceTargets(rows: readonly ShadowDatasetRow[]): Set<string> {
   const targets = new Set<string>();
   for (const row of rows) {
-    const used = new Set(row.use?.usedMemoryIds ?? []);
+    const used = new Set(row.attribution?.attributedMemoryIds ?? []);
     const primary = [...row.retrieval.selections]
       .sort((left, right) => left.rank - right.rank)
       .find((selection) => used.has(selection.memoryId));
@@ -139,13 +144,13 @@ function primaryEvidenceTargets(rows: readonly ShadowDatasetRow[]): Set<string> 
   return targets;
 }
 
-function exactUseEvidenceTargets(rows: readonly ShadowDatasetRow[]): Set<string> {
-  return new Set(rows.flatMap((row) => row.use?.usedMemoryIds ?? []));
+function exactAttributionEvidenceTargets(rows: readonly ShadowDatasetRow[]): Set<string> {
+  return new Set(rows.flatMap((row) => row.attribution?.attributedMemoryIds ?? []));
 }
 
 function trainingExample(row: ShadowDatasetRow): ControllerTrainingExample | null {
   const features = row.retrieval.controllerFeatures!;
-  const used = new Set(row.use?.usedMemoryIds ?? []);
+  const used = new Set(row.attribution?.attributedMemoryIds ?? []);
   const selections = row.retrieval.selections;
   const usedSelections = selections.filter((selection) => used.has(selection.memoryId));
   const usefulNodes = new Set(usedSelections.map((selection) => selection.nodeId));
@@ -153,7 +158,8 @@ function trainingExample(row: ShadowDatasetRow): ControllerTrainingExample | nul
   const nodes = binaryExamples(features.nodes, usefulNodes);
   const controlTarget = controlTargetFor(row);
   const budgetTargets = budgetTargetsFor(row, usedSelections, usefulNodes);
-  if (memoryPairs.length === 0 && nodes.length === 0 && !controlTarget && !budgetTargets) return null;
+  if (memoryPairs.length === 0 && nodes.length === 0 && !controlTarget && !budgetTargets)
+    return null;
   return {
     memoryPairs,
     nodes,
@@ -164,7 +170,8 @@ function trainingExample(row: ShadowDatasetRow): ControllerTrainingExample | nul
 
 function controlTargetFor(row: ShadowDatasetRow): "expand" | "stop" | null {
   if (row.feedback.expansionUseful === true) return "expand";
-  if (row.feedback.evidenceSufficient === true || row.feedback.noMemoryNeeded === true) return "stop";
+  if (row.feedback.evidenceSufficient === true || row.feedback.noMemoryNeeded === true)
+    return "stop";
   // Insufficient evidence with an unhelpful local expansion may require a new
   // search route. Do not collapse that future action into the generic stop head.
   return null;
@@ -175,6 +182,7 @@ function budgetTargetsFor(
   selections: readonly ActiveGraphSelection[],
   usefulNodes: ReadonlySet<string>,
 ): number[] | null {
+  if (!row.attribution) return null;
   if (selections.length === 0) return null;
   const budget = row.retrieval.budget!;
   const tokens = selections.reduce((sum, selection) => sum + selection.estimatedTokens, 0);
@@ -204,7 +212,7 @@ function evaluateRow(
   const features = row.retrieval.controllerFeatures!;
   const useful = new Set(
     row.retrieval.selections
-      .filter((selection) => row.use?.usedMemoryIds.includes(selection.memoryId))
+      .filter((selection) => row.attribution?.attributedMemoryIds.includes(selection.memoryId))
       .map((selection) => selection.nodeId),
   );
   const baselineStarted = performance.now();
@@ -215,22 +223,26 @@ function evaluateRow(
       Math.max(baselineScores.get(selection.nodeId) ?? 0, selection.scores.usefulness),
     );
   }
-  const baselineIds = rank(
-    Object.keys(features.nodes),
-    (id) => baselineScores.get(id) ?? 0,
-  ).slice(0, topNodes);
+  const baselineIds = rank(Object.keys(features.nodes), (id) => baselineScores.get(id) ?? 0).slice(
+    0,
+    topNodes,
+  );
   const baselineInferenceMs = performance.now() - baselineStarted;
   const learnedStarted = performance.now();
   const learnedIds = rank(
     Object.keys(features.nodes),
     (id) =>
-      (baselineScores.get(id) ?? 0) + residualWeight * (controller.scoreNode(features.nodes[id]!) - 0.5),
+      (baselineScores.get(id) ?? 0) +
+      residualWeight * (controller.scoreNode(features.nodes[id]!) - 0.5),
   ).slice(0, topNodes);
   const target = controlTargetFor(row);
-  const controlCorrect = target ? controller.chooseControl(features.global).action === target : true;
+  const controlCorrect = target
+    ? controller.chooseControl(features.global).action === target
+    : true;
   const inferenceMs = performance.now() - learnedStarted;
   return {
-    candidateRecall: useful.size === 0 ? 1 : intersection(Object.keys(features.nodes), useful) / useful.size,
+    candidateRecall:
+      useful.size === 0 ? 1 : intersection(Object.keys(features.nodes), useful) / useful.size,
     baseline: counts(baselineIds, useful),
     learned: counts(learnedIds, useful),
     controlCorrect,
@@ -256,7 +268,10 @@ function pairwise(
 
 function binaryExamples(features: Record<string, number[]>, useful: ReadonlySet<string>) {
   if (useful.size === 0) return [];
-  return Object.entries(features).map(([id, vector]) => ({ features: vector, target: useful.has(id) }));
+  return Object.entries(features).map(([id, vector]) => ({
+    features: vector,
+    target: useful.has(id),
+  }));
 }
 
 function summarizeCosts(rows: readonly ShadowDatasetRow[]) {

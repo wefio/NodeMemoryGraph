@@ -2,10 +2,10 @@ import { createHash } from "node:crypto";
 
 import type {
   ShadowEvaluationEvent,
+  ShadowAttributionEvent,
   ShadowFeedbackEvent,
   ShadowOutcomeEvent,
   ShadowRetrievalEvent,
-  ShadowUseEvent,
 } from "../../src/lab/shadow-evaluation.ts";
 import { aggregateFeedbackByGraph } from "../controller-shadow/report.ts";
 import { independentGroups } from "../controller-shadow/independence.ts";
@@ -23,7 +23,7 @@ export interface SkillOptPolicyItem {
     origin: ShadowRetrievalEvent["origin"];
     candidate_count: number;
     selected_count: number;
-    exact_use_count: number;
+    exact_attribution_count: number;
     qpp_trigger: boolean | null;
     qpp_reason: string | null;
     deepest_tier: number;
@@ -88,7 +88,7 @@ export function buildSkillOptPolicyDataset(
   const joined: Array<{
     retrieval: ShadowRetrievalEvent;
     feedback: ShadowFeedbackEvent;
-    use: ShadowUseEvent | null;
+    attribution: ShadowAttributionEvent | null;
     outcome: ShadowOutcomeEvent | null;
   }> = [];
   const feedbackByGraph = aggregateFeedbackByGraph(events);
@@ -107,8 +107,10 @@ export function buildSkillOptPolicyDataset(
     joined.push({
       retrieval,
       feedback,
-      use:
-        [...group].reverse().find((event): event is ShadowUseEvent => event.type === "use") ?? null,
+      attribution:
+        [...group]
+          .reverse()
+          .find((event): event is ShadowAttributionEvent => event.type === "attribution") ?? null,
       outcome:
         [...group]
           .reverse()
@@ -133,7 +135,7 @@ export function buildSkillOptPolicyDataset(
   };
   const splitByRow = chronologicalSplits(groups, required);
   const items = joined
-    .map(({ retrieval, feedback, use, outcome }, index): SkillOptPolicyItem => {
+    .map(({ retrieval, feedback, attribution, outcome }, index): SkillOptPolicyItem => {
       const expected = expectedDecision(feedback);
       return {
         id: retrieval.graphId,
@@ -145,7 +147,7 @@ export function buildSkillOptPolicyDataset(
           origin: retrieval.origin,
           candidate_count: retrieval.candidateMemoryIds.length,
           selected_count: retrieval.selections.length,
-          exact_use_count: use?.usedMemoryIds.length ?? 0,
+          exact_attribution_count: attribution?.attributedMemoryIds.length ?? 0,
           qpp_trigger: retrieval.qpp?.trigger ?? null,
           qpp_reason: retrieval.qpp?.reason ?? null,
           deepest_tier: retrieval.costs.deepestTier,
@@ -200,13 +202,15 @@ function chronologicalSplits(
   const readinessCount = minimums.train + minimums.val + minimums.test;
   const validationCount =
     count >= readinessCount ? minimums.val : Math.max(1, Math.floor(count * 0.2));
-  const testCount =
-    count >= readinessCount ? minimums.test : Math.max(1, Math.floor(count * 0.2));
+  const testCount = count >= readinessCount ? minimums.test : Math.max(1, Math.floor(count * 0.2));
   const trainEnd = count - validationCount - testCount;
-  return new Map(groups.flatMap((group, index) => {
-    const split = index < trainEnd ? "train" : index < trainEnd + validationCount ? "val" : "test";
-    return group.rowIndexes.map((rowIndex) => [rowIndex, split] as const);
-  }));
+  return new Map(
+    groups.flatMap((group, index) => {
+      const split =
+        index < trainEnd ? "train" : index < trainEnd + validationCount ? "val" : "test";
+      return group.rowIndexes.map((rowIndex) => [rowIndex, split] as const);
+    }),
+  );
 }
 
 function expectedDecision(feedback: ShadowFeedbackEvent): SkillOptPolicyItem["expected"] {

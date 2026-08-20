@@ -146,7 +146,9 @@ test("store open migrates a legacy raw Chinese FTS row exactly once", () => {
     db.prepare(
       "INSERT INTO memory_fts(memory_id, statement, node_name, evidence) VALUES (?, ?, ?, ?)",
     ).run(saved.memory.id, statement, "用户讲解偏好", statement);
-    db.prepare("UPDATE store_metadata SET value = 'legacy-raw' WHERE key = 'fts_text_format'").run();
+    db.prepare(
+      "UPDATE store_metadata SET value = 'legacy-raw' WHERE key = 'fts_text_format'",
+    ).run();
     db.close();
 
     store = new NmgStore(path);
@@ -305,7 +307,7 @@ test("Active Graph exposes derived edge activation without storing it on the rel
   });
 });
 
-test("explicit Active Graph use updates edge strength through prediction error", () => {
+test("verified Active Graph evidence updates edge strength through prediction error", () => {
   withStore((store) => {
     const source = store.remember({ statement: "Orchid alpha", nodeName: "Orchid alpha" });
     const target = store.remember({ statement: "Orchid beta", nodeName: "Orchid beta" });
@@ -319,8 +321,9 @@ test("explicit Active Graph use updates edge strength through prediction error",
     assert.ok(context.results.some((result) => result.memory.id === source.memory.id));
     assert.ok(context.results.some((result) => result.memory.id === target.memory.id));
 
-    store.recordActiveGraphUse(context.activeGraph!.id, {
-      usedMemoryIds: [source.memory.id, target.memory.id],
+    store.recordActiveGraphAttribution(context.activeGraph!.id, {
+      method: "verified_evidence",
+      attributedMemoryIds: [source.memory.id, target.memory.id],
     });
 
     assert.ok(store.getRelations([source.node.id])[0]!.strength > relation.strength);

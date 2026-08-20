@@ -628,7 +628,7 @@ test("resident service isolates STG by session inside one project", async () => 
   }
 });
 
-test("resident service attributes nmg_get use only to the owning session", async () => {
+test("resident service records nmg_get disclosure only for the owning session", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-owned-ag-"));
   const service = new NmgService({ databasePath: join(directory, "ltg.sqlite"), environment: {} });
   try {
@@ -656,9 +656,9 @@ test("resident service attributes nmg_get use only to the owning session", async
     });
     const reader = new NmgStore(join(directory, "ltg.sqlite"));
     try {
-      assert.deepEqual(reader.retrievalTrace(activeGraphId, "session-alpha")?.usefulMemoryIds, [
-        remembered.memory.id,
-      ]);
+      const trace = reader.retrievalTrace(activeGraphId, "session-alpha");
+      assert.deepEqual(trace?.disclosedMemoryIds, [remembered.memory.id]);
+      assert.deepEqual(trace?.usefulMemoryIds, [], "disclosure is not answer attribution");
     } finally {
       reader.close();
     }
@@ -1201,7 +1201,7 @@ test("search protocol preserves Pi QPP evidence-window overrides", async () => {
   }
 });
 
-test("recordActiveGraphUse persists QPP implicit feedback (useful_memory_ids)", async () => {
+test("recordActiveGraphAttribution persists API answer overlap as diagnostic attribution only", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-qpp-use-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
   try {
@@ -1215,9 +1215,9 @@ test("recordActiveGraphUse persists QPP implicit feedback (useful_memory_ids)", 
       sessionId: "session-a",
     })) as { results: Array<{ memory: { id: string } }>; activeGraph?: { id: string } };
     assert.ok(searched.activeGraph, "search produced an active graph");
-    const recorded = await service.invoke("recordActiveGraphUse", {
+    const recorded = await service.invoke("recordActiveGraphAttribution", {
       activeGraphId: searched.activeGraph.id,
-      usedMemoryIds: [saved.memory.id],
+      attributedMemoryIds: [saved.memory.id],
       sessionId: "session-a",
     });
     assert.equal(recorded.activeGraphId, searched.activeGraph.id);
@@ -1225,15 +1225,16 @@ test("recordActiveGraphUse persists QPP implicit feedback (useful_memory_ids)", 
     try {
       const trace = store.retrievalTrace(searched.activeGraph!.id, "session-a");
       assert.ok(trace, "trace exists");
-      assert.deepEqual(trace.usefulMemoryIds, [saved.memory.id]);
+      assert.deepEqual(trace.attributedMemoryIds, [saved.memory.id]);
+      assert.deepEqual(trace.usefulMemoryIds, []);
     } finally {
       store.close();
     }
     // wrong session cannot write to another session's trace
     await assert.rejects(
-      service.invoke("recordActiveGraphUse", {
+      service.invoke("recordActiveGraphAttribution", {
         activeGraphId: searched.activeGraph!.id,
-        usedMemoryIds: [saved.memory.id],
+        attributedMemoryIds: [saved.memory.id],
         sessionId: "session-b",
       }),
       /session/i,
@@ -1324,28 +1325,28 @@ test("task board RPC parses directed delivery and agent discovery actions", asyn
   }
 });
 
-test("recordActiveGraphUse validates its RPC boundary and permits empty use", async () => {
+test("recordActiveGraphAttribution validates its RPC boundary and permits empty attribution", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-qpp-params-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
   try {
     await assert.rejects(
-      service.invoke("recordActiveGraphUse", {
+      service.invoke("recordActiveGraphAttribution", {
         activeGraphId: "trace",
-        usedMemoryIds: "not-an-array",
+        attributedMemoryIds: "not-an-array",
       }),
-      /usedMemoryIds must contain between 0 and 10000 non-empty strings/,
+      /attributedMemoryIds must contain between 0 and 10000 non-empty strings/,
     );
     const searched = await service.invoke("search", {
       query: "no matching memory is expected",
       sessionId: "session-empty-use",
     });
     assert.ok(searched.activeGraph);
-    const recorded = await service.invoke("recordActiveGraphUse", {
+    const recorded = await service.invoke("recordActiveGraphAttribution", {
       activeGraphId: searched.activeGraph.id,
-      usedMemoryIds: [],
+      attributedMemoryIds: [],
       sessionId: "session-empty-use",
     });
-    assert.deepEqual(recorded.usedMemoryIds, []);
+    assert.deepEqual(recorded.attributedMemoryIds, []);
   } finally {
     service.close();
     removeTempDirectory(directory);

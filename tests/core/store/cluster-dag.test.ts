@@ -112,7 +112,7 @@ const CLUSTERS: Record<string, string[]> = {
     "retrievalTracesCount",
     "pruneRetrievalTraces",
     "retrievalTrace",
-    "recordActiveGraphUse",
+    "recordActiveGraphAttribution",
     "recordConsolidationEvent",
     "rebalanceNode",
     "rebalanceDueNodes",

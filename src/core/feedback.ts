@@ -1,12 +1,16 @@
 /**
- * Implicit feedback — derive which retrieved memories an answer actually used,
- * for rolling τ calibration without relying on the agent to call nmg_feedback.
+ * Answer-overlap attribution — derive which retrieved memories visibly
+ * surfaced in an answer,
+ * as bounded diagnostic telemetry without relying on the agent to call
+ * nmg_feedback.
  *
  * The weak reader (deepseek-v4-flash) rarely calls feedback tools, and AutoRecall
  * mode never calls nmg_get (so nmg_get's explicit feedback never fires). This
- * module matches the agent's answer text against the retrieved memory statements
- * to infer actual use. Precision-favoured: a noisy matcher yields noisy
- * calibration labels, not eval cheating (no eval outcomes are used).
+ * module matches the agent's answer text against the retrieved memory statements.
+ * This is not proof of causal use. Precision-favoured: a noisy matcher yields noisy
+ * diagnostics. It must not become controller, topology, hierarchy, or evidence
+ * supervision: provider-controlled API-model behavior is neither causal use nor
+ * a portable property of the memory system.
  */
 import type { MemorySearchResult } from "./types.ts";
 
@@ -93,7 +97,7 @@ const FEEDBACK_STOPWORDS = new Set([
 ]);
 
 /**
- * Distinctive content tokens used by the conservative implicit-use heuristic.
+ * Distinctive content tokens used by the conservative answer-overlap diagnostic.
  *
  * Latin text keeps whole words (numbers at any length; words at length >= 4).
  * Contiguous Han text has no whitespace word boundary, so represent it with
@@ -122,12 +126,12 @@ export function contentTokens(text: string): string[] {
 }
 
 /**
- * A memory is "used" if >= half of its distinctive content tokens appear in the
+ * A memory is attributed by overlap if >= half of its distinctive content tokens appear in the
  * answer. Catches both verbatim quotes and paraphrases; the 0.5 threshold is a
- * reasoned default (tunable by inspection, NOT by eval outcomes — that would be
- * cheating). Returns the memory IDs that pass.
+ * reasoned diagnostic default (tunable by inspection, NOT by eval outcomes —
+ * that would be cheating). Returns the memory IDs that pass.
  */
-export function deriveUsedMemoryIds(
+export function deriveAnswerOverlapMemoryIds(
   answerText: string,
   results: readonly MemorySearchResult[],
   promptText?: string,
