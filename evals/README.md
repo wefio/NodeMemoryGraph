@@ -193,6 +193,51 @@ shared embedding cache is what actually makes reruns cheap).
 The suites are reported separately. Their scores must not be averaged into one
 number because they measure different distributions and failure modes.
 
+## Official-protocol benchmark commands
+
+The npm entry points below are the README-independent reproduction surface.
+Dataset placement and overrides are documented in each adapter's README under
+`evals/`; `validate` parses official local data and reports stratified samples
+without a model call.
+
+```bash
+# LongMemEval development comparison (also see "Reproducible LongMemEval runs")
+npm run eval:longmem -- no-memory 1
+npm run eval:longmem -- oracle 1
+npm run eval:longmem -- nmg-oracle 1
+npm run eval:longmem -- matched 1
+npm run benchmark:score:longmem -- <result-directory>
+
+# LoCoMo / PersonaMem / BEAM share one runner and the same matched modes
+npm run eval:locomo -- validate 1
+npm run eval:personamem -- validate 1
+npm run eval:beam -- validate 1
+
+npm run eval:locomo -- matched 1
+npm run eval:personamem -- matched 1
+npm run eval:beam -- matched 1
+npm run benchmark:score -- <locomo|personamem|beam> <result-directory>
+
+# Deterministic invariants and ablations (no model call)
+npm run eval:quality
+npm run eval:adaptive
+
+# Scale ladder: 100 / 1K / 10K / 100K memories (see evals/scale/README.md)
+npm run eval:scale
+```
+
+Matched rows retain exact Pi tool rounds, tool calls, provider token usage, and
+answer latency. Official scoring adds a lossless `rowScore`; task success and
+evidence sufficiency remain `null` when the upstream protocol does not define
+them. The scored artifact also contains a fail-closed `matchedProduct` audit.
+The current `nmg-shadow` arm does not alter ranking, so its audit intentionally
+reports `candidate_does_not_affect_ranking` instead of product-gate metrics.
+
+Older LongMemEval diagnostic ablations compared raw-session, flat-hybrid, Lite,
+and Graph variants. They predate the strict three-arm protocol and remain
+documented only as historical mechanism evidence, not as current matched-gate
+or benchmark claims.
+
 ## SkillOpt policy Lab
 
 `evals/skillopt` exports only de-identified observable retrieval state and

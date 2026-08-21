@@ -20,6 +20,7 @@ import {
 import {
   assertSpecOptions,
   cliCommandGroup,
+  cliCommandUsage,
   cliUsage,
   firstOption,
   optionalResolvedPath,
@@ -65,7 +66,11 @@ export async function runCli(
     return 2;
   }
   if (parsed.command === "help") {
-    io.stdout.write(USAGE);
+    if (parsed.helpTopic) {
+      io.stdout.write(cliCommandUsage(parsed.helpTopic) ?? USAGE);
+    } else {
+      io.stdout.write(USAGE);
+    }
     return 0;
   }
 
@@ -286,6 +291,8 @@ function isDaemonCommand(command: ParsedArguments["command"]): command is Daemon
 
 interface ParsedArguments {
   command: NmgMethod | DaemonCommand | "inspect" | "graph" | "help";
+  /** When set, help is scoped to this top-level command instead of global. */
+  helpTopic?: string;
   params?:
     | NmgRememberParams
     | NmgSearchParams
@@ -306,10 +313,19 @@ interface ParsedArguments {
 }
 
 function parseArguments(argv: readonly string[]): ParsedArguments {
-  if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) {
+  if (argv.length === 0) {
     return { command: "help", json: false };
   }
   const [command, ...rest] = argv;
+  // `nmg --help` prints the global synopsis; `nmg <command> --help` prints a
+  // focused usage for that command so agents can discover real option names
+  // without reading source.
+  if (command === "--help" || command === "-h") {
+    return { command: "help", json: false };
+  }
+  if (rest.includes("--help") || rest.includes("-h")) {
+    return { command: "help", helpTopic: command, json: false };
+  }
   if (command === "help") {
     if (rest.length > 0) throw new Error("help does not accept arguments");
     return { command: "help", json: false };

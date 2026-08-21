@@ -472,108 +472,20 @@ Optional human-labelled feedback can be attached to the latest retrieval:
 Use `failure`, `corrected`, or `unknown` as appropriate. NMG does not infer
 correctness from fluent model output.
 
-## Agent evaluation
+## Results
 
-Benchmark results on the official OmniMemEval user-memory suite (BEAM 100K
-complete at 66.57 nugget; LongMemEval / LoCoMo / PersonaMem v2 / HaluMem in
-progress) are recorded in
-[docs/benchmark-results.md](docs/benchmark-results.md), following the official
-results snapshot format.
+On the official OmniMemEval user-memory suite, NMG scores 66.57 nugget on
+BEAM 100K (LongMemEval / LoCoMo / PersonaMem v2 / HaluMem runs in progress),
+recorded with judge-model caveats in the official snapshot format:
+[docs/benchmark-results.md](docs/benchmark-results.md).
 
-The Agent-to-Agent-style regression suite runs independent cases in parallel.
-Within each case, a Writer Pi process receives a user turn and a fresh Reader
-Pi process attempts recall from the same isolated NMG database.
+Reproduction lives with the evaluation code, not here: dataset placement,
+matched-arm protocol, scoring, and per-suite commands are documented in
+[evals/README.md](evals/README.md) and each adapter's README under `evals/`.
 
-```powershell
-npm run eval:agents
-```
-
-The suite pins `deepseek/deepseek-v4-flash`, uses low thinking, verifies actual
-tool completion, session archives, SQLite evidence, recall, and negative write
-policy behavior. Current cases cover explicit hot/cold memory, automatic stable
-preferences, project constraints, transient instructions, and synthetic
-secrets. Reports are written under ignored `evals/results/`.
-
-The local three-layer regression currently passes 6/6 cases. Dynamic-context
-measurement reports approximately 74% fewer characters for recall cues than a
-full eight-memory block; the resident kernel remains a separate fixed budget.
-
-### LongMemEval
-
-The official cleaned LongMemEval-S and oracle datasets can be placed under
-`evals/longmemeval/data/`. The adapter supports deterministic development runs
-and a matched full-haystack comparison:
-
-```powershell
-npm run eval:longmem -- no-memory 1
-npm run eval:longmem -- oracle 1
-npm run eval:longmem -- nmg-oracle 1
-npm run eval:longmem -- matched 1
-npm run benchmark:score:longmem -- <result-directory>
-```
-
-See [evals/longmemeval/README.md](evals/longmemeval/README.md) for methodology,
-limitations, and the initial seven-question smoke-test results.
-
-### Complementary memory benchmarks
-
-LoCoMo, PersonaMem, and BEAM use one shared runner and the same matched modes as
-the LongMemEval development comparison:
-
-```powershell
-npm run eval:locomo -- validate 1
-npm run eval:personamem -- validate 1
-npm run eval:beam -- validate 1
-
-npm run eval:locomo -- matched 1
-npm run eval:personamem -- matched 1
-npm run eval:beam -- matched 1
-npm run benchmark:score -- <locomo|personamem|beam> <result-directory>
-```
-
-`validate` parses official local data and reports stratified samples without a
-model call. Dataset placement and overrides are documented in each adapter's
-README. The common experiment contract, metrics, and ablations are documented
-in [evals/README.md](evals/README.md).
-
-Matched rows retain exact Pi tool rounds, tool calls, provider token usage, and
-answer latency. Official scoring adds a lossless `rowScore`; task success and
-evidence sufficiency remain `null` when the upstream protocol does not define
-them. The scored artifact also contains a fail-closed `matchedProduct` audit.
-The current `nmg-shadow` arm does not alter ranking, so its audit intentionally
-reports `candidate_does_not_affect_ranking` instead of product-gate metrics.
-
-Older LongMemEval diagnostic ablations compared raw-session, flat-hybrid, Lite,
-and Graph variants. They predate the strict three-arm protocol and remain
-documented only as historical mechanism evidence, not as current matched-gate
-or benchmark claims.
-
-Run deterministic P1 memory invariants and P2 topology ablation with:
-
-```powershell
-npm run eval:quality
-npm run eval:adaptive
-```
-
-### Scale and cache breakthrough
-
-`npm run eval:scale` runs the same queries at 100, 1K, 10K, and 100K memories,
-placing the answers before newer distractors so cold evidence falls outside the
-legacy 500-row working set. It reports accuracy, returned-token estimate,
-P50/P95 latency, tier hit rate, ingestion throughput, and index maintenance
-cost. See [evals/scale/README.md](evals/scale/README.md).
-
-The local retrieval controls are SQLite FTS5, deterministic hashing vectors,
-external vectors served through an OpenAI-compatible endpoint, and their hybrid.
-The external provider uses a resumable batch indexer; USearch provides the persistent HNSW ANN
-index only after the scale test demonstrates scan cost. Setup is documented in
-[docs/design/online-embeddings.md](docs/design/online-embeddings.md).
-
-Example request to the agent:
-
-```text
-Remember that NMG uses Pi as its agent harness and SQLite as its local source of truth.
-```
+The fast agent-level regression (`npm run eval:agents`) runs fresh-process
+Writer/Reader Pi pairs against an isolated NMG database and currently passes
+6/6 cases; reports land under ignored `evals/results/`.
 
 ## Security boundary
 

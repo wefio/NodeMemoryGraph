@@ -690,20 +690,31 @@ export function assertSpecOptions(spec: CliCommandSpec, values: OptionValues): v
   }
 }
 
+/** Common option block shared by global and per-command usage. */
+const COMMON_OPTIONS_TEXT = `Common options:
+  --data-dir DIR             NMG data directory (default: NMG_DATA_DIR or ~/.nmg)
+  --db FILE                  Explicit SQLite database path
+  --scope KEY=VALUE          Repeatable or comma-separated scope filter
+  --project-dir DIR          Project-local STG root (stores .nmg/stg.sqlite)
+  --json                     Emit the full machine-readable result`;
+
 /** USAGE text assembled from the registry (daemon line is appended by main). */
 export function cliUsage(extraLines: readonly string[] = []): string {
   const synopsis = [
     ...NMG_CLI_COMMANDS.map((spec) => `  ${spec.usageLine}`),
     ...extraLines.map((line) => `  ${line}`),
   ].join("\n");
-  const common = `Common options:
-  --data-dir DIR             NMG data directory (default: NMG_DATA_DIR or ~/.nmg)
-  --db FILE                  Explicit SQLite database path
-  --scope KEY=VALUE          Repeatable or comma-separated scope filter
-  --project-dir DIR          Project-local STG root (stores .nmg/stg.sqlite)
-  --json                     Emit the full machine-readable result`;
   const details = NMG_CLI_COMMANDS.flatMap((spec) => (spec.usageDetail ? [spec.usageDetail] : []));
-  return `NMG command line\n\nUsage:\n${synopsis}\n\n${[common, ...details].join("\n\n")}\n`;
+  return `NMG command line\n\nUsage:\n${synopsis}\n\n${[COMMON_OPTIONS_TEXT, ...details].join("\n\n")}\n`;
+}
+
+/** Focused usage for one top-level command; undefined when unknown. */
+export function cliCommandUsage(word: string): string | undefined {
+  const group = cliCommandGroup(word);
+  if (group.length === 0) return undefined;
+  const synopsis = group.map((spec) => `  ${spec.usageLine}`).join("\n");
+  const details = group.flatMap((spec) => (spec.usageDetail ? [spec.usageDetail] : []));
+  return `NMG command line — ${word}\n\nUsage:\n${synopsis}\n\n${[COMMON_OPTIONS_TEXT, ...details].filter(Boolean).join("\n\n")}\n`;
 }
 
 function rememberParams(values: OptionValues): NmgRememberParams {

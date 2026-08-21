@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   CLI_KNOWN_FLAGS,
   CLI_KNOWN_OPTIONS,
+  cliCommandUsage,
   cliUsage,
   NMG_CLI_COMMANDS,
 } from "../../src/cli/commands.ts";
@@ -244,4 +245,25 @@ test("CLI board discover exposes the system-layer agent roster", () => {
       capabilities: "audit",
     },
   );
+});
+
+test("per-command help renders a focused usage for the command group", () => {
+  const focused = cliCommandUsage("search");
+  assert.ok(focused, "search must have a command-scoped usage");
+  assert.match(focused!, /NMG command line — search/);
+  assert.match(focused!, /nmg search QUERY/);
+  // The focused page must expand what the global synopsis hides behind
+  // "[options]" — agents discover real flag names here, not from source.
+  assert.match(focused!, /--max-tier N/);
+  assert.match(focused!, /--compact-json/);
+  assert.match(focused!, /Common options:/);
+});
+
+test("per-command help groups multi-word commands and rejects unknown ones", () => {
+  const board = cliCommandUsage("board");
+  assert.ok(board);
+  for (const sub of ["discover", "put", "read", "resolve", "claim", "release"]) {
+    assert.match(board!, new RegExp(`nmg board ${sub}`));
+  }
+  assert.equal(cliCommandUsage("definitely-not-a-command"), undefined);
 });

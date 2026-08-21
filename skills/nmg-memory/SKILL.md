@@ -46,6 +46,10 @@ an operation or encountering its named special case.
    nmg get <MEMORY_ID...> --active-graph-id <ID_FROM_SEARCH> --project-dir . --json
    ```
 
+   Field paths: `--compact-json` returns `candidates[].id` plus a top-level
+   `activeGraphId`; `--json` returns `results[].memory.id` and the graph id at
+   `activeGraph.id`. Pass that graph id back as `--active-graph-id` on `get`.
+
 5. Save durable information with `nmg remember`. Automatically save stable facts,
    preferences, constraints, current states, significant events, and reusable
    strategies. Preserve attribution, time, and scope when they affect meaning.
