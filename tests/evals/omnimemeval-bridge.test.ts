@@ -172,7 +172,13 @@ test("OmniMemEval batches pending record vectors before search", async () => {
 
     await bridge.handle({ id: 6, op: "delete", userId: "alice" });
     bridge.close();
-    bridge = new OmniMemEvalBridge(root, { embeddingClient });
+    // Same isolated cache path as the first bridge: the assertion is that the
+    // content-addressed cache survives user deletion, not that the host's
+    // shared cache happens to contain the text.
+    bridge = new OmniMemEvalBridge(root, {
+      embeddingClient,
+      embeddingCachePath: join(root, "embedding-cache.sqlite"),
+    });
     await bridge.handle({
       id: 7,
       op: "add",

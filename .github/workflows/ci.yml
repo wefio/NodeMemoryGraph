@@ -72,6 +72,13 @@ jobs:
 
       - run: npm ci
 
+      # bin/nmg.mjs (the daemon entrypoint the chaos probe spawns) imports
+      # dist/cli/main.js — without a build the spawned daemon dies instantly
+      # with MODULE_NOT_FOUND, hidden by stdio:"ignore", and the ready-wait
+      # times out.
+      - name: Build
+        run: npm run build
+
       - name: Chaos tests (Windows)
         # Hosted runners start node cold; give the daemon-ready wait extra headroom.
         env:
