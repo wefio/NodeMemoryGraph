@@ -1,6 +1,8 @@
 # Node Memory Graph (NMG)
 
-> **Your agent may change. Your memory doesn't have to.**
+English | [简体中文](README.zh-CN.md)
+
+> **Your agent may change. Your memory doesn't have to.****
 
 NMG is a local-first, long-term memory layer for AI agents. Durable memory lives
 in one SQLite file on your machine — not in someone's cloud.
@@ -152,11 +154,12 @@ and excerpt-only evidence — to constrain token consumption.
 
 ```powershell
 npm install
-npx claude   # .mcp.json is auto-discovered inside the project
 ```
 
-No explicit plugin install is required. After the first connection approval,
-NMG memory is available in every session under this project.
+Start Claude Code inside this project as you normally would — the root
+`.mcp.json` is auto-discovered, so no explicit plugin install is required.
+After the first connection approval, NMG memory is available in every session
+under this project.
 
 ## Try it
 

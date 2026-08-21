@@ -69,16 +69,25 @@ npm run cli -- remember "User prefers concise answers" --node "Response preferen
 npm run cli -- search "How should answers be written?"
 ```
 
-Claude Code 用户在本仓库目录内 `npx claude` 即可自动发现 MCP 配置；Pi 用户
-见英文版 [Try it](README.md#try-it)；其他 agent 把
-[skills/nmg-memory/SKILL.md](skills/nmg-memory/SKILL.md) 交给它读。
+Claude Code 用户在本项目目录内正常启动 Claude Code 即可——根目录 `.mcp.json`
+会被自动发现，无需显式安装插件；Pi 用户见英文版 [Try it](README.md#try-it)；
+其他 agent 把 [skills/nmg-memory/SKILL.md](skills/nmg-memory/SKILL.md) 交给它读。
+
+## 结果
+
+在官方 OmniMemEval 用户记忆套件上，NMG 在 BEAM 100K 得分 66.57 nugget
+（LongMemEval / LoCoMo / PersonaMem v2 / HaluMem 进行中），含 judge 模型差异
+说明，按官方快照格式记录于
+[docs/benchmark-results.md](docs/benchmark-results.md)。
+
+复现随评测代码走，不在 README：数据放置、matched-arm 协议、打分与各套件
+命令见 [evals/README.md](evals/README.md) 及 `evals/` 下各 adapter 的 README。
 
 ## 更多文档
 
-架构图、四工具面、CLI 全量命令、Skill 说明、评测结果与安全边界见
+架构图、四工具面、CLI 全量命令、Skill 说明与安全边界见
 [英文版 README](README.md)；设计决策见
-[docs/design/design.md](docs/design/design.md)，基准测试结果见
-[docs/benchmark-results.md](docs/benchmark-results.md)。
+[docs/design/design.md](docs/design/design.md)。
 
 ## License
 
