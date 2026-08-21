@@ -30,8 +30,8 @@ other way:
 - **Free.** No billing surface at all: FTS5 retrieval is built in, the local
   embedding path costs nothing, and there is no account to upgrade.
 - **Real, not conceptual.** A CLI, a JSON-RPC daemon, an MCP server, working
-  adapters for three harnesses, and 900+ green tests. NMG is used daily across
-  sessions as its own development memory.
+  adapters for three harnesses — and NMG is used daily across sessions as its
+  own development memory, not demonstrated once in a demo.
 
 **Honest boundary:** NMG is not plug-and-play yet. Native integrations need
 setup, and generic agents use the CLI + Skill path. But it is deliberately
