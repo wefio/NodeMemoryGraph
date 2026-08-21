@@ -103,7 +103,7 @@
     "pi:state": "node --experimental-strip-types scripts/pi-control.ts state",
     "bench:autodiff": "node --experimental-strip-types tools/autodiff-benchmark.ts",
     "test": "node --experimental-strip-types --test --test-concurrency=4 \"tests/**/*.test.ts\"",
-    "test:chaos": "node --experimental-strip-types --test \"tests/chaos/*.test.ts\"",
+    "test:chaos": "npm run build && node --experimental-strip-types --test \"tests/chaos/*.test.ts\"",
     "test:cg": "node --experimental-strip-types --test tests/core/autodiff.test.ts tests/core/differentiable-controller.test.ts tests/core/hierarchical-activation.test.ts tests/core/memory-graph-reasoner.test.ts tests/core/fork-merge.test.ts tests/core/robustness.test.ts"
   },
   "devDependencies": {
