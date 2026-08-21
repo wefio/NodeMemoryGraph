@@ -435,6 +435,12 @@ correctness from fluent model output.
 
 ## Agent evaluation
 
+Benchmark results on the official OmniMemEval user-memory suite (BEAM 100K
+complete at 66.57 nugget; LongMemEval / LoCoMo / PersonaMem v2 / HaluMem in
+progress) are recorded in
+[docs/benchmark-results.md](docs/benchmark-results.md), following the official
+results snapshot format.
+
 The Agent-to-Agent-style regression suite runs independent cases in parallel.
 Within each case, a Writer Pi process receives a user turn and a fresh Reader
 Pi process attempts recall from the same isolated NMG database.
