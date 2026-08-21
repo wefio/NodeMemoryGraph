@@ -563,18 +563,12 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       }
       this.db.exec("BEGIN IMMEDIATE");
       try {
-        const existingPredecessor = newer.supersedes_id
-          ? String(newer.supersedes_id)
-          : null;
+        const existingPredecessor = newer.supersedes_id ? String(newer.supersedes_id) : null;
         if (existingPredecessor && existingPredecessor !== input.supersededMemoryId) {
-          throw new Error(
-            `memory ${input.newMemoryId} already supersedes ${existingPredecessor}`,
-          );
+          throw new Error(`memory ${input.newMemoryId} already supersedes ${existingPredecessor}`);
         }
         const existingSuccessor = this.db
-          .prepare(
-            "SELECT id FROM memory_records WHERE supersedes_id = ? AND id <> ? LIMIT 1",
-          )
+          .prepare("SELECT id FROM memory_records WHERE supersedes_id = ? AND id <> ? LIMIT 1")
           .get(input.supersededMemoryId, input.newMemoryId) as Row | undefined;
         if (existingSuccessor) {
           throw new Error(

@@ -13,12 +13,7 @@
  */
 import type { DatabaseSync } from "node:sqlite";
 import type { Constructor } from "./store-ctor.ts";
-import {
-  detectPatternCounts,
-  type StructurePattern,
-  type RelRow,
-  type SupRow,
-} from "./analogy.ts";
+import { detectPatternCounts, type StructurePattern, type RelRow, type SupRow } from "./analogy.ts";
 
 export type SubgraphSuggestionKind =
   | "EVOLUTION_CHAIN"
@@ -49,9 +44,7 @@ const SUGGESTION_ACTIONS: Record<SubgraphSuggestionKind, string> = {
   AGGREGATION_STRUCTURE: "确认聚合结构（is_a / part_of 是否完整）",
 };
 
-function suggestPatternActions(
-  counts: Record<StructurePattern, number>,
-): SubgraphSuggestion[] {
+function suggestPatternActions(counts: Record<StructurePattern, number>): SubgraphSuggestion[] {
   const suggestions: SubgraphSuggestion[] = [];
   const push = (kind: SubgraphSuggestionKind, evidence: string) => {
     suggestions.push({ kind, evidence, suggestedAction: SUGGESTION_ACTIONS[kind] });

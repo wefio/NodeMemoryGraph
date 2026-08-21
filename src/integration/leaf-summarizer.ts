@@ -62,10 +62,7 @@ export class OpenAiLeafSummaryProvider implements LeafSummaryProvider {
     this.#fetch = options.fetch ?? globalThis.fetch;
   }
 
-  async summarize(input: {
-    nodeName: string;
-    statements: readonly string[];
-  }): Promise<string> {
+  async summarize(input: { nodeName: string; statements: readonly string[] }): Promise<string> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: [

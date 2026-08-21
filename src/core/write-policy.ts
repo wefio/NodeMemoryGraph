@@ -58,7 +58,11 @@ export function assessMemoryWrite(input: {
   }
   // Transient-word matches are the wording-false-positive zone; the explicit
   // escape hatch may override these, never the two hard refusals above.
-  if (!input.bypass && input.memoryType !== "event" && TRANSIENT_PATTERNS.some((pattern) => pattern.test(text))) {
+  if (
+    !input.bypass &&
+    input.memoryType !== "event" &&
+    TRANSIENT_PATTERNS.some((pattern) => pattern.test(text))
+  ) {
     return { allowed: false, reason: "non_persistent_instruction" };
   }
   return { allowed: true, reason: "allowed" };

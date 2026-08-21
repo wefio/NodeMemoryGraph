@@ -7,7 +7,5 @@ import { withAnalogy } from "./store/analogy.ts";
 import { withCommunity } from "./store/community.ts";
 
 export class NmgStore extends withGraph(
-  withAnalogy(
-    withCommunity(withRetrieval(withWrites(withMaintenance(NmgStoreBase)))),
-  ),
+  withAnalogy(withCommunity(withRetrieval(withWrites(withMaintenance(NmgStoreBase))))),
 ) {}

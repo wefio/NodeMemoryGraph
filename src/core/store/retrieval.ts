@@ -723,10 +723,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       // recall supplement on the evolution side (docs §3.1), never a re-rank.
       if (options.expandChains && context.results.length > 0) {
         const chainIds = new Set<string>();
-        const chainOfExisting = new Map<
-          string,
-          Array<{ chainId: string; position: number }>
-        >();
+        const chainOfExisting = new Map<string, Array<{ chainId: string; position: number }>>();
         const hitPositions = new Map<string, number[]>();
         for (const result of context.results) {
           const chainRows = this.db
@@ -767,10 +764,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           // the whole chain surfaced (hit + expansion) rather than only the
           // appended part. A memory can belong to several chains — collect all
           // memberships; chainId mirrors the first for single-chain callers.
-          const chainMeta = new Map<
-            string,
-            { chainType: MemoryChainType; topic: string | null }
-          >();
+          const chainMeta = new Map<string, { chainType: MemoryChainType; topic: string | null }>();
           for (const cid of chainIds) {
             const cRow = this.db
               .prepare("SELECT chain_type, topic FROM memory_chains WHERE id = ?")
@@ -813,9 +807,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
               window !== undefined && hitPos.length > 0
                 ? memberRows.filter((r) => {
                     const p = Number(r.position);
-                    return (
-                      p >= Math.min(...hitPos) - window && p <= Math.max(...hitPos) + window
-                    );
+                    return p >= Math.min(...hitPos) - window && p <= Math.max(...hitPos) + window;
                   })
                 : memberRows;
             for (const row of selected) {

@@ -278,11 +278,7 @@ async function waitForProcessExit(pid: number): Promise<void> {
 }
 
 type DaemonCommand =
-  | "daemon-run"
-  | "daemon-start"
-  | "daemon-restart"
-  | "daemon-status"
-  | "daemon-stop";
+  "daemon-run" | "daemon-start" | "daemon-restart" | "daemon-status" | "daemon-stop";
 
 function isDaemonCommand(command: ParsedArguments["command"]): command is DaemonCommand {
   return command.startsWith("daemon-");

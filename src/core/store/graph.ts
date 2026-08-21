@@ -306,9 +306,7 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
       // map, no general DFS. (Relation cycles use findDirectedCycles because
       // relations may branch — out-degree is not bounded.)
       const supersedeRows = this.db
-        .prepare(
-          `SELECT id, supersedes_id FROM memory_records WHERE supersedes_id IS NOT NULL`,
-        )
+        .prepare(`SELECT id, supersedes_id FROM memory_records WHERE supersedes_id IS NOT NULL`)
         .all() as Row[];
       const supersedeNext = new Map<string, string>();
       for (const row of supersedeRows) {
@@ -351,9 +349,7 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
      */
     supersedeReachableFrom(memoryId: string): Set<string> {
       const seen = new Set<string>();
-      const supersedeOf = this.db.prepare(
-        `SELECT supersedes_id FROM memory_records WHERE id = ?`,
-      );
+      const supersedeOf = this.db.prepare(`SELECT supersedes_id FROM memory_records WHERE id = ?`);
       let cur: string | null = memoryId;
       while (cur !== null && !seen.has(cur)) {
         seen.add(cur);
@@ -1450,9 +1446,12 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
       if (targetName) {
         const canonicalIdentity = canonicalNodeIdentity(targetName);
         const existingTarget = (
-          this.db.prepare("SELECT id, canonical_name FROM memory_nodes WHERE status = 'active'").all() as Row[]
+          this.db
+            .prepare("SELECT id, canonical_name FROM memory_nodes WHERE status = 'active'")
+            .all() as Row[]
         ).find(
-          (candidate) => canonicalNodeIdentity(String(candidate.canonical_name)) === canonicalIdentity,
+          (candidate) =>
+            canonicalNodeIdentity(String(candidate.canonical_name)) === canonicalIdentity,
         );
         if (existingTarget) reasons.push("target_name_already_active");
       }
@@ -1505,7 +1504,9 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         return transform;
       } catch (error) {
         this.db
-          .prepare("UPDATE topology_proposals SET actuation_error = ? WHERE id = ? AND status = 'pending'")
+          .prepare(
+            "UPDATE topology_proposals SET actuation_error = ? WHERE id = ? AND status = 'pending'",
+          )
           .run(error instanceof Error ? error.message : String(error), proposalId);
         throw error;
       }
@@ -1564,16 +1565,9 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
  * mutual contradiction is a normal symmetric semantic, so these never count
  * as cycles in detectGraphCycles.
  */
-const SYMMETRIC_RELATION_TYPES = new Set([
-  "contradicts",
-  "same_as",
-  "distinct_from",
-  "related_to",
-]);
+const SYMMETRIC_RELATION_TYPES = new Set(["contradicts", "same_as", "distinct_from", "related_to"]);
 
-function findDirectedCycles(
-  adj: Map<string, Array<{ to: string; edgeId: string }>>,
-): string[][] {
+function findDirectedCycles(adj: Map<string, Array<{ to: string; edgeId: string }>>): string[][] {
   const GRAY = 1;
   const BLACK = 2;
   const color = new Map<string, number>();

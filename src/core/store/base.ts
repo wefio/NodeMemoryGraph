@@ -680,7 +680,14 @@ export class NmgStoreBase {
         `INSERT INTO memory_chains (id, chain_type, topic, owner_session_id, status, created_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
       )
-      .run(chain.id, chain.chainType, chain.topic, chain.ownerSessionId, chain.status, chain.createdAt);
+      .run(
+        chain.id,
+        chain.chainType,
+        chain.topic,
+        chain.ownerSessionId,
+        chain.status,
+        chain.createdAt,
+      );
     return chain;
   }
 

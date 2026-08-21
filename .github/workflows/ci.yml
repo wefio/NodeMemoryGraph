@@ -1,5 +1,11 @@
 name: CI
 
+# Scope: keyless, self-contained checks only (typecheck/lint/format/unit
+# tests/coverage/build/package). Everything that needs API keys or local
+# benchmark data — eval:* and benchmark:* scripts, OmniMemEval suites,
+# summary/judge providers — is a local-only concern and deliberately NOT run
+# here; cloud has no keys and no benchmark data by design.
+
 on:
   push:
     branches: [main]
@@ -21,6 +27,14 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # Build (tsc emit) — the check step is --noEmit only; emit-level
+      # breakage (prepack/publish path) must fail in CI too.
+      - name: Build
+        run: npm run build
+
+      - name: Package integrity
+        run: npm run package:check
 
       - name: Type check
         run: npm run check
@@ -59,4 +73,7 @@ jobs:
       - run: npm ci
 
       - name: Chaos tests (Windows)
+        # Hosted runners start node cold; give the daemon-ready wait extra headroom.
+        env:
+          NMG_DAEMON_READY_TIMEOUT_MS: "60000"
         run: npm run test:chaos

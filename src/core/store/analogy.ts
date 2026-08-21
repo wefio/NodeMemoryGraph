@@ -15,11 +15,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Constructor } from "./store-ctor.ts";
 
 export type StructurePattern =
-  | "EVOLUTION"
-  | "CONTRADICTION"
-  | "DEPENDENCY"
-  | "FEEDBACK"
-  | "AGGREGATION";
+  "EVOLUTION" | "CONTRADICTION" | "DEPENDENCY" | "FEEDBACK" | "AGGREGATION";
 
 export const STRUCTURE_PATTERNS: readonly StructurePattern[] = [
   "EVOLUTION",

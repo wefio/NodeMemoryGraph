@@ -1,12 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -68,7 +61,7 @@ export class PiReasoningWorkspaces {
     sessionId: string,
     options: { maxNodes?: number; maxChars?: number } = {},
   ): ReasoningCheckpoint {
-    return (this.#workspace(sessionId, true)!).checkpoint(options);
+    return this.#workspace(sessionId, true)!.checkpoint(options);
   }
 
   /** Mark an existing workspace for one bounded injection after Pi compaction. */
@@ -135,7 +128,10 @@ export class PiReasoningWorkspaces {
 
   #save(workspace: ReasoningWorkspace): void {
     mkdirSync(this.directory, { recursive: true });
-    this.#writeAtomic(this.#statePath(workspace.sessionId), JSON.stringify(workspace.toJSON(), null, 2));
+    this.#writeAtomic(
+      this.#statePath(workspace.sessionId),
+      JSON.stringify(workspace.toJSON(), null, 2),
+    );
   }
 
   #writeAtomic(path: string, content: string): void {

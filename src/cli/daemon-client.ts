@@ -5,11 +5,7 @@ import { join, resolve } from "node:path";
 import { resolveNmgDataDir } from "./data-path.ts";
 import { httpCall } from "./http-client.ts";
 import { isProcessAlive, readServerState, serverStatePath, type ServerState } from "./lifecycle.ts";
-import {
-  NMG_PROTOCOL_VERSION,
-  type NmgHelloResult,
-  type NmgMethod,
-} from "./protocol.ts";
+import { NMG_PROTOCOL_VERSION, type NmgHelloResult, type NmgMethod } from "./protocol.ts";
 
 const DEFAULT_DAEMON_LIMIT = 32;
 const DAEMON_COUNT_MEMO_MS = 1_000;
@@ -222,7 +218,9 @@ function integerEnvironment(name: string, fallback: number): number {
 let memoizedDaemonCount: { key: string; at: number; count: number } | undefined;
 let daemonLimitWarningIssued = false;
 const DAEMON_READY_POLL_MS = 25;
-const DAEMON_READY_TIMEOUT_MS = 10_000;
+// Env-tunable: hosted CI Windows runners start node cold (Defender scan, cold
+// pnpm/node cache) and can exceed the 10s default before the daemon answers.
+const DAEMON_READY_TIMEOUT_MS = integerEnvironment("NMG_DAEMON_READY_TIMEOUT_MS", 10_000);
 
 function readyState(statePath: string): ServerState | undefined {
   const state = readServerState(statePath);

@@ -71,10 +71,7 @@ export class OpenAiNodeSummaryProvider implements NodeSummaryProvider {
     this.#fetch = options.fetch ?? globalThis.fetch;
   }
 
-  async summarize(input: {
-    nodeName: string;
-    statements: readonly string[];
-  }): Promise<string> {
+  async summarize(input: { nodeName: string; statements: readonly string[] }): Promise<string> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: [
@@ -188,8 +185,7 @@ export async function drainNodeSummaries(
   const batch = Math.max(1, Math.min(options.batch ?? 32, 256));
   const concurrency = Math.max(1, Math.min(options.concurrency ?? 8, 32));
   const maxCalls = Math.max(1, options.maxCalls ?? Number.POSITIVE_INFINITY);
-  const pendingOptions =
-    options.minBlocks === undefined ? {} : { minBlocks: options.minBlocks };
+  const pendingOptions = options.minBlocks === undefined ? {} : { minBlocks: options.minBlocks };
   let summarized = 0;
   let failed = 0;
   let calls = 0;

@@ -135,8 +135,7 @@ export function evaluateControllerGate(
     enoughMatchedCases: (matched?.cases ?? 0) >= minimumMatchedProductCases,
     taskSuccessNotDegraded:
       matched !== undefined &&
-      matched.learned.taskSuccessRate + productQualityTolerance >=
-        matched.baseline.taskSuccessRate,
+      matched.learned.taskSuccessRate + productQualityTolerance >= matched.baseline.taskSuccessRate,
     evidenceSufficiencyNotDegraded:
       matched !== undefined &&
       matched.learned.evidenceSufficiencyRate + productQualityTolerance >=

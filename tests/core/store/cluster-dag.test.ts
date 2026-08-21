@@ -122,8 +122,10 @@ const CLUSTERS: Record<string, string[]> = {
   ],
 };
 
+// Applied to whitespace-stripped source (see assertion below), so the pattern
+// is written compactly and matches prettier's wrapped form as well as single-line.
 const MIXIN_CHAIN_RE =
-  /class\s+NmgStore\s+extends\s+withGraph\(\s*withAnalogy\(\s*withCommunity\(\s*withRetrieval\(\s*withWrites\(\s*withMaintenance\(\s*NmgStoreBase\s*\)\s*\)\s*\)\s*\)\s*,\s*\)\s*,\s*\)\s*\{/;
+  /classNmgStoreextendswithGraph\(withAnalogy\(withCommunity\(withRetrieval\(withWrites\(withMaintenance\(NmgStoreBase\)\)\)\)\),\)\{/;
 
 function methodDef(name: string, source: string, indent = 2): boolean {
   // Class method: `<indent>[protected ]name(` at class-member indent; also
@@ -236,7 +238,9 @@ test("cluster split: store.ts assembles the mixin chain in order", () => {
   assert.ok(exportDef(FINAL_ANCHOR, text), `${FINAL_ANCHOR} must be defined in ${STORE}`);
   // NmgStore must extend the mixin chain with every mixin, in fixed order.
   assert.ok(
-    MIXIN_CHAIN_RE.test(text),
+    // Match against whitespace-stripped source so the assertion is formatting-
+    // independent (prettier may wrap the mixin chain across lines).
+    MIXIN_CHAIN_RE.test(text.replace(/\s+/gu, "")),
     `${STORE} must define class NmgStore extends withGraph(withAnalogy(withCommunity(withRetrieval(withWrites(withMaintenance(NmgStoreBase))))))`,
   );
 });

@@ -378,7 +378,9 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         source: String(row.source) as ClaimOutcomeEvent["source"],
         sourceLineage: String(row.source_lineage),
         evidenceId: row.evidence_id ? String(row.evidence_id) : null,
-        collectionOrigin: String(row.collection_origin ?? "legacy") as ClaimOutcomeEvent["collectionOrigin"],
+        collectionOrigin: String(
+          row.collection_origin ?? "legacy",
+        ) as ClaimOutcomeEvent["collectionOrigin"],
         outcome: String(row.outcome) as ClaimOutcomeEvent["outcome"],
         weight: Number(row.weight),
         activeGraphId: row.active_graph_id ? String(row.active_graph_id) : null,
