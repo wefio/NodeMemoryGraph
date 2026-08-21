@@ -1,33 +1,55 @@
 # Node Memory Graph (NMG)
 
-NMG is a local-first long-term memory layer with modular harness adapters. The
-first adapter targets the [Pi agent harness](https://github.com/earendil-works/pi),
-while Agent-independent integration modules own evidence admission, retrieval,
-and configuration. NMG stores mutable semantic memory over immutable evidence
-and retrieves a small, progressively deeper subset instead of flattening all
-history into one global prompt.
+> **Your agent may change. Your memory doesn't have to.**
 
-The current prototype focuses on the semantic memory contract before storage
-optimization:
+NMG is a local-first, long-term memory layer for AI agents. Durable memory lives
+in one SQLite file on your machine — not in someone's cloud.
 
-- SQLite is the local source of truth.
-- Facts, preferences, constraints, states, events, strategies, and
-  conversational evidence have distinct types and usage rules.
-- Memory type, scope, and influence permission are orthogonal: presentation
-  preferences cannot change facts, behavioural signals remain non-binding, and
-  constraints apply only inside their active scope.
-- Repeated outcome-linked episodes may consolidate into transferable
-  experience. NMG returns its situation, outcome, applicability, limitations,
-  counterexamples, and evidence, but never creates or silently updates a Skill,
-  prompt, runbook, script, or other behavioural artifact.
-- Stable user-stated facts, preferences, constraints, and states are written
-  automatically; explicit writes remain available.
-- Governed memory writes retain the supporting Pi message or a bounded exact
-  excerpt by stable source identity; ordinary conversation, cumulative
-  transcripts, and transient tool output are not copied into NMG.
-- Pi uses three execution layers: a small query-independent resident kernel,
-  dynamic automatic recall for explicit memory questions, and compressed recall
-  cues that let the agent decide whether to call `nmg_search`.
+```text
+No account.
+No hosted memory service.
+No subscription.
+No agent-platform lock-in.
+
+Just a local memory layer your agents can use.
+```
+
+Many memory products need an account, an API key, a hosted service, or a
+dedicated agent platform — and some never leave the paper stage. NMG goes the
+other way:
+
+- **Own the memory layer.** Agents come and go — Pi today, another harness
+  tomorrow. NMG exists independently of all of them; adapters are replaceable,
+  the store is not tied to any product. This is also why the multi-agent task
+  board passes memory *IDs*, not content: memory outlives any single agent.
+- **Local and private.** All durable memory lives in one SQLite file you can
+  back up by copying. Retrieval works with zero configuration (SQLite FTS5);
+  the optional semantic layer runs a local embedding model, or a free-tier
+  cloud embedder if you prefer — only the text to embed ever leaves the
+  machine, never the store.
+- **Free.** No billing surface at all: FTS5 retrieval is built in, the local
+  embedding path costs nothing, and there is no account to upgrade.
+- **Real, not conceptual.** A CLI, a JSON-RPC daemon, an MCP server, working
+  adapters for three harnesses, and 900+ green tests. NMG is used daily across
+  sessions as its own development memory.
+
+**Honest boundary:** NMG is not plug-and-play yet. Native integrations need
+setup, and generic agents use the CLI + Skill path. But it is deliberately
+*agent-friendly to integrate*: if your agent can use a CLI, it can probably use
+NMG; if it can write plugins, it can integrate NMG itself from the stable
+JSON-RPC boundary.
+
+| Your setup | Path |
+|---|---|
+| [Pi](https://github.com/earendil-works/pi) | Native extension ([Try it](#try-it)) |
+| Claude Code | Local MCP plugin ([Claude Code plugin](#claude-code-plugin)) |
+| DeepSeek Harness | Cordis plugin ([dsh/](dsh/README.md)) |
+| Any other agent | CLI + [Skill](skills/nmg-memory/SKILL.md) ([Agent-independent CLI](#agent-independent-cli), [Agent Skill](#agent-skill)) |
+| Custom harness | Build an adapter on the HTTP JSON-RPC boundary ([Headless control](#headless-pi-control)) |
+
+NMG stores mutable semantic memory over immutable evidence and retrieves a
+small, progressively deeper subset instead of flattening all history into one
+global prompt.
 - Ordinary prompts load no dynamic long-term memory. Automatic retrieval
   overfetches and type-reranks candidates before applying the final record budget.
 - Stable `stateKey` values identify one replaceable property—not a topic or
@@ -80,6 +102,23 @@ NMG daemon ── NMG core ── MemoryNode graph ── tiered MemoryRecord
 ```
 
 See [docs/design/design.md](docs/design/design.md) for the decisions and roadmap.
+
+### Semantic memory contract
+
+- Facts, preferences, constraints, states, events, strategies, and
+  conversational evidence have distinct types and usage rules. Memory type,
+  scope, and influence permission are orthogonal: presentation preferences
+  cannot change facts, behavioural signals remain non-binding, and constraints
+  apply only inside their active scope.
+- Stable user-stated facts, preferences, constraints, and states are written
+  automatically; explicit writes remain available. Governed writes retain the
+  supporting message or a bounded exact excerpt by stable source identity;
+  ordinary conversation, cumulative transcripts, and transient tool output are
+  not copied into NMG.
+- Repeated outcome-linked episodes may consolidate into transferable
+  experience — situation, outcome, applicability, limitations, counterexamples,
+  evidence — but NMG never creates or silently updates a Skill, prompt,
+  runbook, script, or other behavioural artifact.
 
 ## Claude Code plugin
 
