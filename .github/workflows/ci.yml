@@ -17,7 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: ["22", "23"]
+        # 22 = active LTS, 24 = current LTS line. Odd-numbered (non-LTS)
+        # releases go EOL quickly (23 died 2025-06) and hung both jobs for
+        # 3h on hosted runners, so they are deliberately not in the matrix.
+        node-version: ["22", "24"]
 
     steps:
       - uses: actions/checkout@v4
@@ -59,9 +62,10 @@ jobs:
     # exact incidents they reproduce), so run them on Windows explicitly.
     # Ubuntu coverage comes from the ci job's npm test (tests/** glob).
     runs-on: windows-latest
+    timeout-minutes: 30
     strategy:
       matrix:
-        node-version: ["22", "23"]
+        node-version: ["22", "24"]
 
     steps:
       - uses: actions/checkout@v4
