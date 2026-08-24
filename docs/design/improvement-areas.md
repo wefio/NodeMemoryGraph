@@ -8,7 +8,7 @@ code review and evaluation. Each item includes the observed symptom, the
 underlying concern, and one or more concrete approaches. Items are grouped by
 impact rather than priority.
 
-## Status audit — 2026-08-11
+## Status audit — 2026-08-24
 
 The detailed notes below preserve the problem history. Current status is:
 
@@ -21,7 +21,7 @@ The detailed notes below preserve the problem history. Current status is:
 | 5 | Regex-only recall gate | **Open.** English/Chinese deterministic coverage is tested; multilingual semantic gating and measured false-positive/false-negative rates are not. |
 | 6 | Test coverage | **Substantially improved.** The listed Chinese, graph, split, cache, deletion, QPP mode/recommendation/folding, and controller-actuation paths have deterministic coverage. Real Pi schema drift and natural topology adaptation remain important gaps. |
 | 7 | ANN recall | **Deferred by evidence.** Exact local scan remains the default; the current ANN path must not be promoted without a recall/latency crossover. |
-| 8 | Concurrency model | **Open.** Current runtime assumes one Pi extension event loop and one synchronous SQLite handle. |
+| 8 | Concurrency model | **Resolved for the current daemon architecture.** One resident daemon is the application-level authority; synchronous SQLite phases are serialized while external calls may overlap without holding transactions. |
 | 9 | Session serialization | **Partial.** Capture is automatic and idempotent; Pi projection has a fail-closed `pi.branch.v1` shape contract and tests, but it is still hand-validated from `unknown` rather than negotiated with an upstream schema. |
 | 10 | Topology acceptance | **Intentionally Lab/manual.** Proposal creation and explicit review work; unattended mutation lacks a precision gate. |
 
@@ -307,19 +307,18 @@ Pending non-identity links and splits still require explicit review.
 
 | # | Area | Severity | Effort |
 |---|---|---|---|
-| 1 | Store file decomposition | Medium | Medium |
-| 2 | Coarse cache invalidation | Low | Low |
-| 3 | Router expressiveness | Medium | High |
-| 4 | Privacy deletion | High | High |
-| 5 | Regex-only gate decision | Medium | Medium |
-| 6 | Test coverage gaps | Medium | Medium |
-| 7 | ANN recall quality | Low | High |
-| 8 | Concurrency model | Low | Low (docs) |
-| 9 | Session serialization fragility | Medium | Low |
-| 10 | Topology auto-acceptance promotion | Low | Natural-data gate |
+| 1 | Store file decomposition | Resolved | Reopen on measured maintenance cost |
+| 2 | Coarse cache invalidation | Resolved | Reopen on measured rebuild cost |
+| 3 | Router promotion | Open, gated | Natural matched evidence |
+| 4 | Physical privacy erasure | Deferred product work | High |
+| 5 | Regex-only gate calibration | Open | Measured multilingual set |
+| 6 | Natural/integration coverage | Open | Ongoing |
+| 7 | ANN recall quality | Deferred | Recall/latency crossover |
+| 8 | Concurrency model | Resolved | Reopen on measured contention |
+| 9 | Upstream Pi schema negotiation | Partial | Upstream contract dependent |
+| 10 | Topology auto-acceptance promotion | Open, gated | Natural-data gate |
 
-None of these are blockers for the current prototype stage. Items 1, 4, 5, and
-6 are the strongest candidates for P2 attention because they affect
-maintainability (1), user trust (4), multilingual correctness (5), and
-regression safety (6) — all of which matter before NMG ships as a default Pi
-plugin.
+None of the open items blocks the current opt-in prototype. The next actionable
+work is evidence collection for controller/topology promotion and measured gate
+coverage. Physical erasure, ANN replacement, and a different concurrency
+architecture stay deferred until their product or scale prerequisite appears.

@@ -79,3 +79,24 @@ test("clear removes only the selected session scratchpad", () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("Pi reasoning manager persists an idempotent exact add", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-reasoning-idempotent-"));
+  try {
+    const manager = new PiReasoningWorkspaces(directory);
+    const first = manager.add("session-a", { kind: "next_action", content: "Run the tests" });
+    const replay = manager.add("session-a", {
+      kind: "next_action",
+      content: " Run   the tests ",
+    });
+
+    assert.equal(replay.id, first.id);
+    assert.equal(manager.checkpoint("session-a").nodes.length, 1);
+    const disk = JSON.parse(readFileSync(manager.statePath("session-a"), "utf8")) as {
+      nodes: unknown[];
+    };
+    assert.equal(disk.nodes.length, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

@@ -132,6 +132,12 @@ export class ReasoningWorkspace {
   addNode(input: AddReasoningNodeInput): ReasoningNode {
     const content = compactContent(input.content, 4_000);
     if (!content) throw new Error("Reasoning node content cannot be empty");
+    // Tool retries must not grow the scratch graph. Semantic evolution is an
+    // explicit update: only an exact kind/content replay is idempotent here.
+    const existing = [...this.nodes.values()].find(
+      (node) => node.kind === input.kind && node.content === content,
+    );
+    if (existing) return structuredClone(existing);
     const now = new Date().toISOString();
     const node: ReasoningNode = {
       id: `reason_${randomUUID()}`,

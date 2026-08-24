@@ -2081,6 +2081,12 @@ The current prototype merely
 reports those candidates; it does not automatically promote scratch state into
 long-term memory.
 
+Within one session, `add` is retry-idempotent for an exact normalized
+`kind + content` pair. A repeated call reuses the existing node without merging
+new status, importance, or evidence; semantic evolution and additional evidence
+must use explicit `update`. This prevents tool retries from inflating the graph
+while keeping changes auditable.
+
 The tool is Lab-only (`NMG_ENABLE_LAB_TOOLS=1`). NMG Lite keeps three durable-memory
 tools plus the independent task-board coordination tool, and the existing numerical MGR prototype remains available
 for independent experiments. The Pi adapter now registers `nmg_reason` only
@@ -2292,9 +2298,9 @@ product value. If Graph does not beat Lite, graph adaptation remains a Lab
 feature. If a learned router does not beat deterministic routing, it remains
 optional.
 
-Current development evidence (updated 2026-07-30):
+Current development evidence (updated 2026-08-24):
 
-- 287 automated tests cover UOp autodiff, the differentiable controller,
+- 948 automated tests cover UOp autodiff, the differentiable controller,
   hierarchical activation, the retained memory-graph reasoner prototype,
   reasoning-workspace persistence and checkpoint injection, P3 lifecycle,
   budget enforcement, disclosure/verified-evidence separation, independent-task deduplication,
@@ -2636,8 +2642,10 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
    transitively anchored support; cycles cannot manufacture evidence; reference
    removal cannot orphan a supported descendant; checkpoints mark unsupported
    hypotheses explicitly. External source truth remains a harness/tool concern.
-4. Add update deduplication, stale-node retirement, task-completion archival,
-   and explicit workspace reset/resume semantics.
+4. **Partially complete:** exact add retries are idempotent, explicit `clear`
+   resets only the owning session, and process restart resumes the same session.
+   Stale-node retirement, task-completion archival, and cross-session task resume
+   remain policy decisions; they are not automatic defaults.
 5. Keep measuring the explicit workspace on tasks with real interruption or
    compaction risk; do not treat synthetic success as justification for default
    activation.
@@ -2683,8 +2691,6 @@ The next work should reduce uncertainty rather than add another subsystem:
 
 - Can a future deterministic gate identify the narrow tasks that benefit from
   an explicit reasoning workspace without injecting it into ordinary turns?
-- Which reasoning-node kinds require direct evidence references, and how should
-  unsupported hypotheses be labelled, expired, or excluded from checkpoints?
 - When a task ends, should its workspace be deleted, archived as an event, or
   reviewed for selective STG/LTG promotion?
 - How should a task resume across a new Pi session without treating every prior
@@ -2702,17 +2708,14 @@ The next work should reduce uncertainty rather than add another subsystem:
   and how should repeated evidence from the same session be discounted?
 - Which stability threshold, evidence coverage, and hysteresis margin justify
   consolidating a local subgraph into LTG?
-- How should an Active Graph allocate token, node, edge, evidence, graph-hop,
-  local-tier, and latency budgets, and what marginal-gain rule should stop its
-  expansion?
+- How should the implemented Active Graph budget allocator and marginal-gain
+  stopping signals be calibrated on independent natural outcomes?
 - How should QPP1 depth and QPP2 retained mass be calibrated from independent
   outcome evidence rather than benchmark labels or the controller's own prior
   selections?
 - When a QPP recommendation is emitted, what bounded policy prevents repeated
   low-value searches while still allowing a genuinely multi-part query to
   continue?
-- Can a consolidated LTG relation be demoted or reopened when later evidence
-  changes its scope, and how is that transition audited?
 - Which rare safety/user constraints must remain pinned regardless of access
   frequency?
 - At what measured node/leaf count does exact contiguous vector scan stop

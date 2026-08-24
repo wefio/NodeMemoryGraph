@@ -66,9 +66,10 @@ reason_description: >-
   Unsupported hypotheses remain visibly marked as unsupported after compaction.
 
 reason_action_parameter_description: >-
-  add creates one typed scratch node; update changes one existing node; link
-  records one explicit relation; checkpoint returns a bounded current view;
-  clear deletes only this session's reasoning scratchpad.
+  add creates one typed scratch node and idempotently reuses an exact same-kind,
+  same-content node; update is required for semantic change; link records one
+  explicit relation; checkpoint returns a bounded current view; clear deletes
+  only this session's reasoning scratchpad.
 
 reason_node_id_parameter_description: >-
   Stable reasoning-node ID returned by an earlier nmg_reason call. Required for

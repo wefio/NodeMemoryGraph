@@ -90,6 +90,23 @@ test("reasoning workspace state round-trips without changing graph identity", ()
   assert.deepEqual(restored.toJSON(), workspace.toJSON());
 });
 
+test("exact reasoning-node retries are idempotent while kinds remain distinct", () => {
+  const workspace = new ReasoningWorkspace("session-idempotent-add");
+  const first = workspace.addNode({ kind: "observation", content: "  A test   failed. " });
+  const replay = workspace.addNode({
+    kind: "observation",
+    content: "A test failed.",
+    importance: 1,
+    evidenceRefs: ["tool:retry-must-not-mutate"],
+  });
+  const hypothesis = workspace.addNode({ kind: "hypothesis", content: "A test failed." });
+
+  assert.equal(replay.id, first.id);
+  assert.deepEqual(replay, first);
+  assert.notEqual(hypothesis.id, first.id);
+  assert.equal(workspace.toJSON().nodes.length, 2);
+});
+
 test("only supported, attributable conclusions and decisions consolidate", () => {
   const workspace = new ReasoningWorkspace("session-consolidation");
   const evidence = workspace.addNode({
