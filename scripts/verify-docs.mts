@@ -8,6 +8,9 @@ export interface DocumentationReport {
   warnings: string[];
 }
 
+// Implements docs/README.md#ci-contract. That documented table owns policy;
+// this file only translates its mechanically checkable rules into diagnostics.
+
 const lifecycle = new Set(["proposed", "implemented", "rejected", "archived"]);
 const publicPairs = [
   ["README.md", "README.zh-CN.md"],

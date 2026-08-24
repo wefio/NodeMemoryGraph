@@ -37,8 +37,10 @@ editing. Use its Chinese counterpart when Chinese wording is part of the task.
 6. **Keep status honest.** Separate implemented, validated, enabled, default,
    deferred, and out-of-scope states. A passing controlled test is not natural
    product evidence; an experiment result is not a default-policy decision.
-7. **Verify.** Run `npm run docs:check`, then the code or evaluation checks needed
-   by the underlying change. Review warnings rather than hiding them.
+7. **Verify.** Apply the [CI contract](../../docs/README.md#ci-contract), then run
+   `npm run docs:check` and the code or evaluation checks needed by the underlying
+   change. Review warnings rather than hiding them. If automation policy must
+   change, update the contract first and the verifier second.
 
 ## Boundaries
 

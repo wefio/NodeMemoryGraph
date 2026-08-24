@@ -74,3 +74,23 @@ changes. The check intentionally enforces only structural errors; translation
 drift and missing decision translations are warnings for human review. In CI,
 only public/canonical entry breakage and malformed decision records block the
 build; internal and experimental document issues remain advisory.
+
+## CI contract
+
+This section is the policy owner for automated documentation checks. Change this
+table before changing `scripts/verify-docs.mts`; the script implements these
+rules and must not invent additional policy.
+
+| Rule | Scope | CI result |
+|---|---|---|
+| English/Chinese entry files both exist | root README, docs index, decision index | error |
+| H1 and local links are valid | root README, docs index, normative design baseline, completion audit, decision indexes and records, each Skill entry | error |
+| Lifecycle status and required sections match the directory | decision records | error |
+| H1 and local links are valid | all other docs and Skill references | warning |
+| Content documents live under `design/`, `decisions/`, or `experiments/` | direct children of `docs/` other than README and AGENTS | warning |
+| Decision translation exists and paired heading structures remain broadly aligned | bilingual pairs | warning |
+| Translation quality, design correctness, experimental conclusions, and prose style | all documents | not automated |
+
+An error means the repository's documented public or normative interface is
+broken in a mechanically reproducible way. A warning is maintenance input for an
+Agent or reviewer and must not fail CI.
