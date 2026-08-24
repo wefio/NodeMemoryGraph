@@ -45,7 +45,7 @@
     "lint:fix": "eslint --fix src/ .pi/extensions/ claude-plugins/",
     "format": "prettier --write \"src/**/*.ts\" \".pi/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \".pi/**/*.ts\"",
-    "test:coverage": "c8 node --experimental-strip-types --test --test-concurrency=4 \"tests/**/*.test.ts\"",
+    "test:coverage": "c8 node --experimental-strip-types --test \"tests/**/*.test.ts\"",
     "eval:agents": "node --experimental-strip-types evals/run.ts",
     "hotspot:modules": "node --experimental-strip-types scripts/hotspot-files.ts",
     "perf:hotspots": "node --experimental-strip-types scripts/perf-hotspots.ts",
