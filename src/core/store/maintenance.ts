@@ -42,6 +42,7 @@ import type {
   VectorEmbedder,
 } from "../types.ts";
 import { PerfTimer, SECTION, nowMs } from "../perf.ts";
+import { intersectScopes, validityIntervalsOverlap } from "../semantic-domain.ts";
 import { DEFAULT_RETENTION_POLICY } from "./graph-policy.ts";
 
 import { blockTiers, huffmanDepths } from "../hierarchy.ts";
@@ -2283,7 +2284,13 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
                 c1.value ->> 'text' AS own_text,
                 c2.value ->> 'text' AS other_text,
                 m1.rowid AS own_rowid,
-                m2.rowid AS other_rowid
+                m2.rowid AS other_rowid,
+                m1.scope_json AS own_scope_json,
+                m2.scope_json AS other_scope_json,
+                m1.valid_from AS own_valid_from,
+                m1.valid_until AS own_valid_until,
+                m2.valid_from AS other_valid_from,
+                m2.valid_until AS other_valid_until
            FROM memory_records m1
            JOIN json_each(m1.claims_json) c1
            JOIN memory_records m2
@@ -2294,33 +2301,55 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
             AND c1.value ->> 'polarity' IN ('affirmative', 'negative')
             AND c2.value ->> 'polarity' IN ('affirmative', 'negative')
             AND c1.value ->> 'polarity' <> c2.value ->> 'polarity'
-            AND NOT EXISTS (
-              SELECT 1
-                FROM json_each(m1.scope_json) s1
-                JOIN json_each(m2.scope_json) s2 ON s1.key = s2.key
-               WHERE CAST(s1.value AS TEXT) <> CAST(s2.value AS TEXT)
-            )
             AND (m1.rowid <> m2.rowid OR c1.key < c2.key)
           ORDER BY m2.rowid
-          LIMIT 1`,
+          LIMIT 32`,
       );
       for (const id of memoryIds) {
-        const row = stmt.get(id) as
-          | {
-              pred_key: string;
-              own_text: string;
-              other_text: string;
-              own_rowid: number;
-              other_rowid: number;
-            }
-          | undefined;
+        const rows = stmt.all(id) as Array<{
+          pred_key: string;
+          own_text: string;
+          other_text: string;
+          own_rowid: number;
+          other_rowid: number;
+          own_scope_json: string;
+          other_scope_json: string;
+          own_valid_from: string | null;
+          own_valid_until: string | null;
+          other_valid_from: string | null;
+          other_valid_until: string | null;
+        }>;
+        const row = rows.find((candidate) => {
+          const scope = intersectScopes(
+            parseScope(candidate.own_scope_json),
+            parseScope(candidate.other_scope_json),
+          );
+          return (
+            scope !== null &&
+            validityIntervalsOverlap(
+              { validFrom: candidate.own_valid_from, validUntil: candidate.own_valid_until },
+              {
+                validFrom: candidate.other_valid_from,
+                validUntil: candidate.other_valid_until,
+              },
+            )
+          );
+        });
         if (!row) continue;
         const ownIsEarlier = row.own_rowid <= row.other_rowid;
         const earlierText = ownIsEarlier ? row.own_text : row.other_text;
         const laterText = ownIsEarlier ? row.other_text : row.own_text;
+        const overlapScope = intersectScopes(
+          parseScope(row.own_scope_json),
+          parseScope(row.other_scope_json),
+        );
+        const scopeQualifier =
+          overlapScope && Object.keys(overlapScope).length > 0
+            ? ` within scope ${JSON.stringify(overlapScope)}`
+            : "";
         notes.set(
           id,
-          `[NMG note: contradictory memories about '${row.pred_key}': ` +
+          `[NMG note: contradictory memories about '${row.pred_key}'${scopeQualifier}: ` +
             `"${earlierText}" vs later "${laterText}" -- flag this to the user.]`,
         );
       }

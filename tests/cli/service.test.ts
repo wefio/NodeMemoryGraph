@@ -332,6 +332,53 @@ test("remember relation resolution rejects identity claims across conflicting sc
   }
 });
 
+test("remember conflict resolution accepts scope intersections but rejects adjacent validity", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-relate-domain-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    const broad = await service.invoke("remember", {
+      statement: "The service uses SQLite.",
+      nodeName: "Service database",
+      validFrom: "2026-01-01T00:00:00.000Z",
+      validUntil: "2026-03-01T00:00:00.000Z",
+    });
+    const scoped = await service.invoke("remember", {
+      statement: "Atlas does not use SQLite.",
+      nodeName: "Atlas database",
+      scope: { project: "atlas" },
+      validFrom: "2026-02-01T00:00:00.000Z",
+      validUntil: "2026-03-01T00:00:00.000Z",
+    });
+    const accepted = await service.invoke("resolveRemember", {
+      action: "relate",
+      newMemoryId: scoped.memory.id,
+      relatedMemoryId: broad.memory.id,
+      relationJudgement: "conflict",
+    });
+    assert.equal(accepted.action, "relate");
+    assert.equal(accepted.proposal.relationType, "contradicts");
+
+    const later = await service.invoke("remember", {
+      statement: "Atlas uses Postgres from March.",
+      nodeName: "Atlas database later",
+      scope: { project: "atlas" },
+      validFrom: "2026-03-01T00:00:00.000Z",
+    });
+    await assert.rejects(
+      service.invoke("resolveRemember", {
+        action: "relate",
+        newMemoryId: later.memory.id,
+        relatedMemoryId: broad.memory.id,
+        relationJudgement: "conflict",
+      }),
+      /requires overlapping validity/u,
+    );
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
 test("remember forget resolution withdraws a selected memory from retrieval", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-forget-remember-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });

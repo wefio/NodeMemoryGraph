@@ -60,6 +60,7 @@ import type {
   Polarity,
   RecordFeedbackInput,
 } from "../types.ts";
+import { assertTemporalValidity } from "../semantic-domain.ts";
 
 export function withWrites<TBase extends Constructor>(Base: TBase) {
   return class extends Base {
@@ -207,6 +208,12 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       writeSource?: MemoryRecord["writeSource"];
     }): MemoryRecord {
       const createdAt = new Date().toISOString();
+      const validFrom = input.validFrom ?? createdAt;
+      assertTemporalValidity({
+        eventTime: input.eventTime,
+        validFrom,
+        validUntil: input.validUntil,
+      });
       const residence = input.residence ?? defaultResidence(input);
       // Escape-hatch rule applies to EXPLICIT STG writes only: when a caller
       // deliberately targets STG (residence: "stg") it must declare row
@@ -251,7 +258,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         claims: claimRollup ? claimRollup.claims : null,
         markers: normalizeMarkers(input.markers),
         scope: input.scope ?? {},
-        validFrom: input.validFrom ?? createdAt,
+        validFrom,
         validUntil: input.validUntil ?? null,
         status: "active",
         resolution,

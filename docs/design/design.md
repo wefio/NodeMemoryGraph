@@ -363,6 +363,26 @@ visible as one across messages. At query time, `contradictionNotes()` renders
 each detected pair as a note appended to the retrieved statement, so the
 answer-stage reader sees the flag without any harness-side changes.
 
+Scope and time use one deterministic compatibility model throughout ingestion,
+relation proposals, and contradiction rendering:
+
+- a scope object is a conjunction of exact `key=value` constraints;
+- two scopes overlap when no key constrained by both has different values;
+- their intersection is the union of both compatible constraint maps, so a
+  broad user-wide record and a project-scoped record conflict only inside the
+  project intersection rather than globally;
+- validity is the half-open interval `[validFrom, validUntil)`, with a missing
+  end treated as unbounded;
+- adjacent intervals do not overlap and therefore describe temporal succession,
+  not a simultaneous contradiction;
+- malformed, empty, or reversed explicit ranges fail at the write boundary.
+
+Query-time contradiction notes require both a compatible scope intersection and
+overlapping validity. When the overlap is narrower than either source record,
+the rendered note carries the intersected scope. `supersedes` remains the normal
+representation for sequential state changes; `contradicts` is reserved for
+opposed claims that can be true or false in the same semantic domain.
+
 STG and LTG describe semantic residence, not separate truth systems. Promotion
 should preserve the same stable record/node identity and provenance rather than
 copying content into a second graph. Demotion or expiry changes normal
@@ -2300,7 +2320,7 @@ optional.
 
 Current development evidence (updated 2026-08-24):
 
-- 948 automated tests cover UOp autodiff, the differentiable controller,
+- 952 automated tests cover UOp autodiff, the differentiable controller,
   hierarchical activation, the retained memory-graph reasoner prototype,
   reasoning-workspace persistence and checkpoint injection, P3 lifecycle,
   budget enforcement, disclosure/verified-evidence separation, independent-task deduplication,
@@ -2699,7 +2719,6 @@ The next work should reduce uncertainty rather than add another subsystem:
   refinement?
 - Which deterministic relation types are safe to establish immediately, and
   which always require confirmation?
-- How should interval conflicts and partial scope overlap be represented?
 - What feedback proves a retrieved memory was useful without reinforcing the
   router's own prior selections?
 - What STG retention, expiry, and demotion policy preserves useful provisional

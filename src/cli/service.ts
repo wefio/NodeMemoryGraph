@@ -50,6 +50,7 @@ import {
   type SearchOptions,
 } from "../core/types.ts";
 import { assessMemoryWrite } from "../core/write-policy.ts";
+import { scopesOverlap, validityIntervalsOverlap } from "../core/semantic-domain.ts";
 import { searchMemoryContext } from "../integration/search.ts";
 import {
   configuredMaintenancePolicy,
@@ -663,14 +664,17 @@ export class NmgService {
       }
       if (
         ["conflict", "refines", "same_entity"].includes(params.relationJudgement) &&
-        !compatibleScope(newer.scope, related.scope)
+        !scopesOverlap(newer.scope, related.scope)
       ) {
         throw new NmgProtocolError(
           "INVALID_PARAMS",
           `${params.relationJudgement} requires non-conflicting scope; use distinct for different entities or retain both memories`,
         );
       }
-      if (params.relationJudgement === "conflict" && !overlappingValidity(newer, related)) {
+      if (
+        params.relationJudgement === "conflict" &&
+        !validityIntervalsOverlap(newer, related)
+      ) {
         throw new NmgProtocolError(
           "INVALID_PARAMS",
           "conflict requires overlapping validity; sequential values should remain temporal states or use supersede",
@@ -1204,26 +1208,6 @@ function parseExportMemoriesParams(value: unknown): NmgExportMemoriesParams {
     sourceActor: optionalEnum(params, "sourceActor", MEMORY_ACTORS),
     includeDeleted: optionalBoolean(params, "includeDeleted"),
   };
-}
-
-function compatibleScope(left: MemoryScope, right: MemoryScope): boolean {
-  return Object.entries(left).every(
-    ([key, value]) => right[key] === undefined || right[key] === value,
-  );
-}
-
-function overlappingValidity(
-  left: { eventTime: string | null; validFrom: string | null; validUntil: string | null },
-  right: { eventTime: string | null; validFrom: string | null; validUntil: string | null },
-): boolean {
-  const interval = (memory: typeof left) => {
-    const start = Date.parse(memory.validFrom ?? memory.eventTime ?? "0001-01-01T00:00:00.000Z");
-    const end = Date.parse(memory.validUntil ?? memory.eventTime ?? "9999-12-31T23:59:59.999Z");
-    return { start, end };
-  };
-  const a = interval(left);
-  const b = interval(right);
-  return a.start <= b.end && b.start <= a.end;
 }
 
 function parseResolveRememberParams(value: unknown): NmgResolveRememberParams {

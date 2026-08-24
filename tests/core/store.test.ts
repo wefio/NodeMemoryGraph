@@ -1647,6 +1647,78 @@ test("contradictionNotes flags claim pairs with opposite polarity in temporal or
       store.contradictionNotes([otherProject.memory.id, scopedPositive.memory.id]).size,
       0,
     );
+
+    const broadNegative = store.remember({
+      statement: "user: I have never written Flask routes",
+      nodeName: "beam",
+      validFrom: "2026-01-01T00:00:00.000Z",
+      validUntil: "2026-04-01T00:00:00.000Z",
+      claims: [
+        {
+          text: "user has never written Flask routes",
+          polarity: "negative",
+          predicateKey: "user_scoped_route",
+          confidence: 0.9,
+          extractMethod: "rule",
+        },
+      ],
+    });
+    const atlasPositive = store.remember({
+      statement: "user: I wrote a Flask route in Atlas",
+      nodeName: "beam",
+      scope: { project: "atlas" },
+      validFrom: "2026-02-01T00:00:00.000Z",
+      validUntil: "2026-03-01T00:00:00.000Z",
+      claims: [
+        {
+          text: "user wrote a Flask route",
+          polarity: "affirmative",
+          predicateKey: "user_scoped_route",
+          confidence: 0.9,
+          extractMethod: "rule",
+        },
+      ],
+    });
+    assert.match(
+      store
+        .contradictionNotes([broadNegative.memory.id, atlasPositive.memory.id])
+        .get(broadNegative.memory.id) ?? "",
+      /within scope \{"project":"atlas"\}/u,
+    );
+
+    const laterNegative = store.remember({
+      statement: "user: I stopped writing Flask routes after April",
+      nodeName: "beam",
+      validFrom: "2026-04-01T00:00:00.000Z",
+      claims: [
+        {
+          text: "user does not write Flask routes",
+          polarity: "negative",
+          predicateKey: "user_temporal_route",
+          confidence: 0.9,
+          extractMethod: "rule",
+        },
+      ],
+    });
+    const earlierPositive = store.remember({
+      statement: "user: I wrote Flask routes in March",
+      nodeName: "beam",
+      validFrom: "2026-03-01T00:00:00.000Z",
+      validUntil: "2026-04-01T00:00:00.000Z",
+      claims: [
+        {
+          text: "user writes Flask routes",
+          polarity: "affirmative",
+          predicateKey: "user_temporal_route",
+          confidence: 0.9,
+          extractMethod: "rule",
+        },
+      ],
+    });
+    assert.equal(
+      store.contradictionNotes([laterNegative.memory.id, earlierPositive.memory.id]).size,
+      0,
+    );
   });
 });
 
