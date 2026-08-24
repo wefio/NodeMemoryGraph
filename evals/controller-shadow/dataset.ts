@@ -43,6 +43,31 @@ export interface ShadowDataset {
   blockers: string[];
 }
 
+export interface ShadowDatasetSummary {
+  rows: number;
+  rowsBySplit: { train: number; validation: number };
+  tasks: ShadowDataset["tasks"];
+  excludedGraphs: number;
+  legacyGraphsWithoutReplayInputs: number;
+  graphsWithoutVerifiedAttribution: number;
+  blockers: string[];
+}
+
+export function summarizeShadowDataset(dataset: ShadowDataset): ShadowDatasetSummary {
+  return {
+    rows: dataset.rows.length,
+    rowsBySplit: {
+      train: dataset.rows.filter((row) => row.split === "train").length,
+      validation: dataset.rows.filter((row) => row.split === "validation").length,
+    },
+    tasks: dataset.tasks,
+    excludedGraphs: dataset.excludedGraphs,
+    legacyGraphsWithoutReplayInputs: dataset.legacyGraphsWithoutReplayInputs,
+    graphsWithoutVerifiedAttribution: dataset.graphsWithoutVerifiedAttribution,
+    blockers: dataset.blockers,
+  };
+}
+
 /**
  * Join shadow events without inventing labels, then split whole semantic tasks
  * chronologically. Repeated attempts of one task can never leak across splits.
@@ -169,8 +194,12 @@ function hasReplayableFeatures(retrieval: ShadowRetrievalEvent): boolean {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const path = resolveShadowEventPath(process.argv[2]);
+  const args = process.argv.slice(2);
+  const compact = args.includes("--compact");
+  const positional = args.filter((arg) => arg !== "--compact");
+  const path = resolveShadowEventPath(positional[0]);
+  const dataset = buildShadowDataset(readShadowEvents(path));
   process.stdout.write(
-    `${JSON.stringify({ path, ...buildShadowDataset(readShadowEvents(path)) }, null, 2)}\n`,
+    `${JSON.stringify({ path, ...(compact ? summarizeShadowDataset(dataset) : dataset) }, null, 2)}\n`,
   );
 }

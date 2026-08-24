@@ -21,17 +21,25 @@ plumbing but cannot count as natural product evidence: ordinary Pi writes
 `natural`, headless probes write `controlled`, and legacy events without a
 collection origin are excluded. A cross-process lock protects JSONL rotation.
 
-As of the latest 2026-08-20 read-only audit, the bounded shadow log contains
-1,078 events, 338 retrieval graphs, and 52 fully labelled natural graphs. A
-controlled ordinary-Pi smoke produced the first disclosure, one
-`verified_claim_support`, one diagnostic `answer_overlap`, and an outcome with
-measured tool rounds, tokens, and latency; it is excluded from natural labels.
+As of the latest 2026-08-24 read-only audit, the bounded shadow log contains
+1,111 events, 345 retrieval graphs, and still only 52 fully labelled natural
+graphs. It contains one disclosure, one `verified_claim_support`, eight
+diagnostic attributions, and 342 outcomes. The joined controller dataset has 52
+rows across 36 independent tasks (44/8 rows and 28/8 tasks in chronological
+train/validation splits), but all 52 rows lack verified claim attribution. They
+can supervise control labels only, not evidence ranking or budgets. The dataset
+and calibration CLIs now support `--compact`, so this blocker can be audited
+without printing every replay row.
+
+A controlled ordinary-Pi smoke produced the first disclosure, one verified
+attribution, and an outcome with measured tool rounds, tokens, and latency; it
+is excluded from natural labels.
 The source and installed Skill now require
 `nmg.v6` and fail closed instead of silently dropping attribution or claim-origin
 RPC. The shared daemon was explicitly restarted on 2026-08-20 and is now a
 compatible v6 process, so subsequent ordinary Pi sessions can exercise the new
 event path. Existing labels meet the provisional sample-count target but do not
-supply useful-evidence targets in the held-out segment. New
+supply verified useful-evidence targets in either split. New
 collection must therefore emphasize tasks where the Agent receives explicit
 evidence confirmation or a tool-verifiable outcome, along with natural
 corrections and failed outcomes; more binary sufficiency labels alone will not
@@ -213,21 +221,22 @@ The evidence inventory is reproducible without touching the live stores:
 `npm run eval:natural-maintenance -- --project-dir <project>` opens every input
 SQLite database read-only and reports the exact claim, posterior, consolidation,
 proposal, transform, rollback, and maintenance-backlog counts. The latest
-Post-restart live traffic on 2026-08-20 found 286 LTG memories (243 active), one active project STG
+2026-08-24 live audit found 296 LTG memories (253 active), one active project STG
 memory, four LTG claim outcomes in three semantic tasks with two posteriors, zero
-STG→LTG materializations, one
-pending `refines` proposal, zero identity proposals/transforms/rollbacks, 13
-uncompacted index deltas, and 23 pending accesses. Claim outcomes now retain
+STG→LTG materializations, one pending `refines` proposal, zero identity
+proposals/transforms/rollbacks, 14 uncompacted index deltas, and 23 pending
+accesses. Claim outcomes now retain
 `natural|controlled|legacy` provenance: the current four events are one controlled
 smoke and three migrated legacy events, so the natural count remains zero. The
 first ordinary v5 search/get/write sequence reduced the distributed write backlog
 from 17 nodes to 14. Subsequent smoke writes raised it to 17 deltas across 16
 nodes, and the next ordinary attributable v6 state write drained it again to 13
-deltas across 13 nodes, with a per-node maximum of one. Both distributed-pressure
-flags are false. This repeat validates bounded sparse-backlog maintenance without
-claiming consolidation quality. The remaining zeros are product-evidence
-gaps; the audit command and controlled tests do not convert them into natural
-validation.
+deltas across 13 nodes, with a per-node maximum of one. The current audit has 14
+active nodes with writes, a maximum of one pending write per node, and no
+distributed write or access pressure. This repeat validates bounded
+sparse-backlog maintenance without claiming consolidation quality. The remaining
+zeros are product-evidence gaps; the audit command and controlled tests do not
+convert them into natural validation.
 
 ## 4. Separate controller policy from the Agent answer policy
 

@@ -11,7 +11,11 @@ import {
   type ControllerTrainingExample,
 } from "../../src/lab/differentiable-controller.ts";
 import type { ActiveGraphSelection } from "../../src/core/types.ts";
-import { buildShadowDataset, type ShadowDatasetRow } from "./dataset.ts";
+import {
+  buildShadowDataset,
+  summarizeShadowDataset,
+  type ShadowDatasetRow,
+} from "./dataset.ts";
 import { readShadowEvents, resolveShadowEventPath } from "./report.ts";
 
 export interface ShadowCalibrationOptions {
@@ -343,14 +347,21 @@ function writeAtomic(path: string, value: unknown): void {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const eventPath = resolveShadowEventPath(process.argv[2]);
+  const args = process.argv.slice(2);
+  const compact = args.includes("--compact");
+  const positional = args.filter((arg) => arg !== "--compact");
+  const eventPath = resolveShadowEventPath(positional[0]);
   const dataset = buildShadowDataset(readShadowEvents(eventPath));
   const resultPath = resolve(
-    process.argv[3] ??
+    positional[1] ??
       `evals/controller-shadow/results/${new Date().toISOString().replaceAll(":", "-")}.json`,
   );
   if (dataset.blockers.length > 0) {
-    const blocked = { status: "blocked", eventPath, dataset };
+    const blocked = {
+      status: "blocked",
+      eventPath,
+      dataset: compact ? summarizeShadowDataset(dataset) : dataset,
+    };
     process.stdout.write(`${JSON.stringify(blocked, null, 2)}\n`);
     process.exitCode = 2;
   } else {

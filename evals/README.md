@@ -71,8 +71,8 @@ them with separate commands:
 
 ```powershell
 npm run eval:controller-shadow
-npm run eval:controller-dataset
-npm run eval:controller-calibrate
+npm run eval:controller-dataset -- --compact
+npm run eval:controller-calibrate -- --compact
 ```
 
 New retrieval events include the exact versioned controller feature snapshot
@@ -84,6 +84,10 @@ source-log fingerprint, and current-state rollback fingerprint. It never
 activates or overwrites runtime policy. With insufficient independently labelled
 real-use rows, the command exits with explicit blockers instead of training on
 benchmark or synthetic labels.
+
+The compact form reports row/split/task counts and blockers without dumping
+every replay row into the terminal. Omit `--compact` when the complete joined
+dataset is intentionally needed for an audit or export.
 
 Matched benchmark scoring uses the same fail-closed rule. Each official scored
 row preserves `taskScore`, nullable binary `taskSuccess`, typed/nullable evidence

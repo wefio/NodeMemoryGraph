@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildShadowDataset } from "../../../evals/controller-shadow/dataset.ts";
+import {
+  buildShadowDataset,
+  summarizeShadowDataset,
+} from "../../../evals/controller-shadow/dataset.ts";
 import type {
   ShadowEvaluationEvent,
   ShadowRetrievalEvent,
@@ -26,6 +29,22 @@ test("shadow dataset joins labels and keeps semantic tasks in one chronological 
     new Set(["validation"]),
   );
   assert.equal(dataset.blockers.length, 0);
+});
+
+test("shadow dataset summary retains audit counts without materializing row payloads", () => {
+  const dataset = buildShadowDataset([
+    ...taskEvents("graph-a", "task-a", "2026-08-01T00:00:00.000Z"),
+    ...taskEvents("graph-b", "task-b", "2026-08-02T00:00:00.000Z"),
+  ]);
+  assert.deepEqual(summarizeShadowDataset(dataset), {
+    rows: 2,
+    rowsBySplit: { train: 1, validation: 1 },
+    tasks: { total: 2, train: 1, validation: 1 },
+    excludedGraphs: 0,
+    legacyGraphsWithoutReplayInputs: 0,
+    graphsWithoutVerifiedAttribution: 0,
+    blockers: [],
+  });
 });
 
 test("shadow dataset excludes incomplete labels and reports sparse-data blockers", () => {
