@@ -58,6 +58,11 @@ export interface BenchmarkParameters {
   activeGraph: typeof DEFAULT_ACTIVE_GRAPH_BUDGET;
   retention: typeof DEFAULT_RETENTION_POLICY;
   controller: typeof DEFAULT_HIERARCHICAL_ACTIVATION;
+  controllerRuntime: {
+    mode: "off" | "shadow" | "controlled" | "active";
+    stateConfigured: boolean;
+    activationReceiptConfigured: boolean;
+  };
   embeddings: {
     enabled: boolean;
     provider: string | null;
@@ -119,6 +124,15 @@ export function benchmarkParametersFromEnvironment(
     activeGraph: { ...DEFAULT_ACTIVE_GRAPH_BUDGET },
     retention: { ...DEFAULT_RETENTION_POLICY },
     controller: { ...DEFAULT_HIERARCHICAL_ACTIVATION },
+    controllerRuntime: {
+      mode: mode(
+        environment.NMG_CONTROLLER_RUNTIME_MODE,
+        ["off", "shadow", "controlled", "active"],
+        "shadow",
+      ),
+      stateConfigured: Boolean(environment.NMG_CONTROLLER_RUNTIME_STATE?.trim()),
+      activationReceiptConfigured: Boolean(environment.NMG_CONTROLLER_ACTIVATION_RECEIPT?.trim()),
+    },
     embeddings: {
       enabled: embeddingProvider !== null,
       provider: embeddingProvider,

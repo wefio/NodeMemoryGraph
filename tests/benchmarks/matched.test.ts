@@ -58,12 +58,16 @@ test("matched benchmark keeps QPP mechanics equal and changes only the frozen co
   assert.deepEqual(controllerMatchedEnvironment("no-memory"), {});
   assert.deepEqual(controllerMatchedEnvironment("nmg-deterministic"), {
     NMG_CONTROLLER_SHADOW: "1",
+    NMG_CONTROLLER_RUNTIME_MODE: "controlled",
+    NMG_SHADOW_COLLECTION_ORIGIN: "controlled",
     NMG_QPP1_MODE: "active",
     NMG_QPP2_MODE: "active",
     NMG_CONTROLLER_RERANK: "active",
   });
   assert.deepEqual(controllerMatchedEnvironment("nmg-candidate"), {
     NMG_CONTROLLER_SHADOW: "1",
+    NMG_CONTROLLER_RUNTIME_MODE: "controlled",
+    NMG_SHADOW_COLLECTION_ORIGIN: "controlled",
     NMG_QPP1_MODE: "active",
     NMG_QPP2_MODE: "active",
     NMG_CONTROLLER_RERANK: "active",

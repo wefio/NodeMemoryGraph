@@ -63,6 +63,8 @@ export function controllerMatchedEnvironment(mode: MatchedMode): Record<string, 
       // Both NMG arms record the same telemetry. The candidate state file is
       // the only treatment difference.
       NMG_CONTROLLER_SHADOW: "1",
+      NMG_CONTROLLER_RUNTIME_MODE: "controlled",
+      NMG_SHADOW_COLLECTION_ORIGIN: "controlled",
       NMG_QPP1_MODE: "active",
       NMG_QPP2_MODE: "active",
       NMG_CONTROLLER_RERANK: "active",
@@ -71,6 +73,8 @@ export function controllerMatchedEnvironment(mode: MatchedMode): Record<string, 
   if (mode === "nmg-candidate") {
     return {
       NMG_CONTROLLER_SHADOW: "1",
+      NMG_CONTROLLER_RUNTIME_MODE: "controlled",
+      NMG_SHADOW_COLLECTION_ORIGIN: "controlled",
       NMG_QPP1_MODE: "active",
       NMG_QPP2_MODE: "active",
       NMG_CONTROLLER_RERANK: "active",

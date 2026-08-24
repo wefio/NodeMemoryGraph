@@ -589,7 +589,8 @@ Implemented (design.md §13):
 Not yet implemented:
 
 - promotion of the implemented Lab AG budget projection into the default Lite
-  policy (the controller and QPP shadow traces already exist);
+  policy (the typed runtime boundary now exists and defaults to shadow; no
+  candidate has passed the natural matched-evidence gate for active/default use);
 - calibrated SPRT evaluation for tier opening;
 - learned temporal edge direction, contrastive unlearning, and automatic
   compression merge (see

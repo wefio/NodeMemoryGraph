@@ -5,6 +5,7 @@ import {
   DEFAULT_MAINTENANCE_POLICY,
   DEFAULT_STG_CONSOLIDATION_POLICY,
   configuredControllerRerankMode,
+  configuredControllerRuntimeMode,
   configuredMaintenancePolicy,
   configuredQpp1Mode,
   configuredQpp2Mode,
@@ -50,6 +51,9 @@ test("QPP controls resolve from the supplied daemon environment", () => {
   assert.equal(configuredQpp2Mode({ NMG_QPP2_MODE: "invalid" }), "off");
   assert.equal(configuredControllerRerankMode({}), "off");
   assert.equal(configuredControllerRerankMode({ NMG_CONTROLLER_RERANK: "active" }), "active");
+  assert.equal(configuredControllerRuntimeMode({}), "shadow");
+  assert.equal(configuredControllerRuntimeMode({ NMG_CONTROLLER_RUNTIME_MODE: "active" }), "active");
+  assert.equal(configuredControllerRuntimeMode({ NMG_CONTROLLER_RUNTIME_MODE: "invalid" }), "shadow");
   assert.equal(configuredQpp2RetainedMass({ NMG_QPP2_RETAINED_MASS: "1.5" }), 1);
   assert.equal(configuredQpp2RetainedMass({ NMG_QPP2_RETAINED_MASS: "bad" }), 0.98);
   assert.equal(

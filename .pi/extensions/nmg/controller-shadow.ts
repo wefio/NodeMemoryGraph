@@ -5,8 +5,14 @@ import type { MemoryContext } from "../../../src/core/types.ts";
 type ShadowOrigin = "automatic" | "tool";
 
 interface ShadowDependencies {
-  runtime: import("../../../src/lab/controller-runtime.ts").ControllerRuntime;
+  channel: import("../../../src/integration/controller-channel.ts").ControllerPolicyChannel;
   log: import("../../../src/lab/shadow-evaluation.ts").ShadowEvaluationLog;
+}
+
+export interface ControllerBridgeOptions {
+  mode?: import("../../../src/integration/controller-channel.ts").ControllerRuntimeMode;
+  statePath?: string;
+  activationReceiptPath?: string;
 }
 
 interface PendingContext {
@@ -44,6 +50,7 @@ export class ControllerShadowBridge {
   readonly #contexts = new Map<string, PendingContext>();
   readonly #maxContexts: number;
   readonly #collectionOrigin: "controlled" | "natural";
+  readonly #controllerOptions: ControllerBridgeOptions;
   #dependenciesPromise: Promise<ShadowDependencies> | undefined;
 
   constructor(
@@ -51,11 +58,13 @@ export class ControllerShadowBridge {
     enabled = shadowEnabled(),
     maxContexts = 128,
     collectionOrigin = shadowCollectionOrigin(),
+    controllerOptions: ControllerBridgeOptions = {},
   ) {
     this.#dataDirectory = dataDirectory;
     this.enabled = enabled;
     this.#maxContexts = Math.max(1, maxContexts);
     this.#collectionOrigin = collectionOrigin;
+    this.#controllerOptions = controllerOptions;
   }
 
   async retrieval(
@@ -68,7 +77,7 @@ export class ControllerShadowBridge {
     try {
       const dependencies = await this.#dependencies();
       const startedAt = performance.now();
-      const decision = dependencies.runtime.shadow(context);
+      const decision = dependencies.channel.shadow(context);
       const controllerLatencyMs = performance.now() - startedAt;
       if (!decision) return;
       this.#rememberContext(context.activeGraph.id, context);
@@ -108,9 +117,9 @@ export class ControllerShadowBridge {
     if (!this.enabled) return null;
     try {
       const dependencies = await this.#dependencies();
-      const { runtime } = dependencies;
-      if (runtime.trainingSteps < 1 || !context.activeGraph) return null;
-      const decision = runtime.allocate(context, minimum, normalMaximum, expandedMaximum);
+      const { channel } = dependencies;
+      if (!channel.descriptor.canActuate || !context.activeGraph) return null;
+      const decision = channel.allocate(context, minimum, normalMaximum, expandedMaximum);
       if (decision && context.activeGraph.sessionId) {
         const before = context.activeGraph.budget;
         dependencies.log.actuation({
@@ -119,6 +128,9 @@ export class ControllerShadowBridge {
           action: "allocate",
           changed: !sameBudget(before, decision.budget),
           controllerTrainingSteps: decision.trainingSteps,
+          controllerMode: channel.descriptor.mode as "controlled" | "active",
+          candidateSha256: channel.descriptor.candidateSha256 ?? undefined,
+          featureProtocolVersion: channel.descriptor.featureProtocolVersion,
           beforeBudget: before,
           afterBudget: decision.budget,
         });
@@ -137,9 +149,9 @@ export class ControllerShadowBridge {
     if (!this.enabled) return null;
     try {
       const dependencies = await this.#dependencies();
-      const { runtime } = dependencies;
-      if (runtime.trainingSteps < 1 || !context.activeGraph) return null;
-      const fold = runtime.foldMemories(context, retainedMass);
+      const { channel } = dependencies;
+      if (!channel.descriptor.canActuate || !context.activeGraph) return null;
+      const fold = channel.fold(context, retainedMass);
       if (fold && context.activeGraph.sessionId) {
         const beforeMemoryIds = context.results.map((result) => result.memory.id);
         dependencies.log.actuation({
@@ -148,6 +160,9 @@ export class ControllerShadowBridge {
           action: "fold",
           changed: fold.foldedMemoryIds.length > 0,
           controllerTrainingSteps: fold.trainingSteps,
+          controllerMode: channel.descriptor.mode as "controlled" | "active",
+          candidateSha256: channel.descriptor.candidateSha256 ?? undefined,
+          featureProtocolVersion: channel.descriptor.featureProtocolVersion,
           beforeMemoryIds,
           afterMemoryIds: fold.visibleMemoryIds,
         });
@@ -163,7 +178,9 @@ export class ControllerShadowBridge {
     if (!this.enabled || !context.activeGraph || context.results.length < 2) return context;
     try {
       const dependencies = await this.#dependencies();
-      const decision = dependencies.runtime.shadow(context);
+      const { channel } = dependencies;
+      if (!channel.descriptor.canActuate) return context;
+      const decision = channel.shadow(context);
       if (!decision || decision.trainingSteps < 1) return context;
       const nodeRank = new Map(decision.learnedNodeIds.map((nodeId, index) => [nodeId, index]));
       const before = context.results.map((result) => result.memory.id);
@@ -185,6 +202,9 @@ export class ControllerShadowBridge {
           action: "rerank",
           changed,
           controllerTrainingSteps: decision.trainingSteps,
+          controllerMode: channel.descriptor.mode as "controlled" | "active",
+          candidateSha256: channel.descriptor.candidateSha256 ?? undefined,
+          featureProtocolVersion: channel.descriptor.featureProtocolVersion,
           beforeMemoryIds: before,
           afterMemoryIds: after,
         });
@@ -505,12 +525,22 @@ export class ControllerShadowBridge {
 
   async #dependencies(): Promise<ShadowDependencies> {
     return (this.#dependenciesPromise ??= Promise.all([
-      import("../../../src/lab/controller-runtime.ts"),
+      import("../../../src/integration/controller-channel.ts"),
+      import("../../../src/integration/config.ts"),
       import("../../../src/lab/shadow-evaluation.ts"),
-    ]).then(([runtimeModule, logModule]) => ({
-      runtime: new runtimeModule.ControllerRuntime(
-        join(this.#dataDirectory, "controller-shadow-state.json"),
-      ),
+    ]).then(([channelModule, configModule, logModule]) => ({
+      channel: new channelModule.ControllerPolicyChannel({
+        mode:
+          this.#controllerOptions.mode ?? configModule.configuredControllerRuntimeMode(process.env),
+        statePath:
+          this.#controllerOptions.statePath ??
+          process.env.NMG_CONTROLLER_RUNTIME_STATE ??
+          join(this.#dataDirectory, "controller-shadow-state.json"),
+        activationReceiptPath:
+          this.#controllerOptions.activationReceiptPath ??
+          process.env.NMG_CONTROLLER_ACTIVATION_RECEIPT,
+        collectionOrigin: this.#collectionOrigin,
+      }),
       log: new logModule.ShadowEvaluationLog(
         join(this.#dataDirectory, "controller-shadow-events.jsonl"),
       ),

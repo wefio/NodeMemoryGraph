@@ -122,6 +122,9 @@ export interface ShadowActuationEvent extends ShadowEventBase {
   action: "allocate" | "fold" | "rerank";
   changed: boolean;
   controllerTrainingSteps: number;
+  controllerMode?: "controlled" | "active";
+  candidateSha256?: string;
+  featureProtocolVersion?: number;
   beforeMemoryIds?: string[];
   afterMemoryIds?: string[];
   beforeBudget?: ActiveGraphBudget;
@@ -341,6 +344,9 @@ export class ShadowEvaluationLog {
     action: ShadowActuationEvent["action"];
     changed: boolean;
     controllerTrainingSteps: number;
+    controllerMode?: "controlled" | "active";
+    candidateSha256?: string;
+    featureProtocolVersion?: number;
     beforeMemoryIds?: readonly string[];
     afterMemoryIds?: readonly string[];
     beforeBudget?: ActiveGraphBudget;
@@ -355,6 +361,9 @@ export class ShadowEvaluationLog {
       action: input.action,
       changed: input.changed,
       controllerTrainingSteps: input.controllerTrainingSteps,
+      controllerMode: input.controllerMode,
+      candidateSha256: input.candidateSha256,
+      featureProtocolVersion: input.featureProtocolVersion,
       beforeMemoryIds: input.beforeMemoryIds ? [...input.beforeMemoryIds] : undefined,
       afterMemoryIds: input.afterMemoryIds ? [...input.afterMemoryIds] : undefined,
       beforeBudget: input.beforeBudget ? { ...input.beforeBudget } : undefined,

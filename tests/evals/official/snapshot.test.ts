@@ -74,6 +74,9 @@ test("benchmark parameters record resolved QPP and embedding values without secr
     NMG_QPP_STRONG_HIT_INITIAL_TARGET: "5",
     NMG_QPP_THRESHOLD: "0.4",
     NMG_GRAPH_HOPS: "2",
+    NMG_CONTROLLER_RUNTIME_MODE: "controlled",
+    NMG_CONTROLLER_RUNTIME_STATE: "candidate.json",
+    NMG_CONTROLLER_ACTIVATION_RECEIPT: "must-not-record-path.json",
     NMG_EMBED_BASE_URL: "http://localhost:8000/v1",
     NMG_EMBED_API_KEY: "must-not-appear",
     NMG_EMBED_MODEL: "BAAI/bge-small-en-v1.5",
@@ -136,6 +139,11 @@ test("benchmark parameters record resolved QPP and embedding values without secr
       maximumAccessCount: 1,
     },
     controller: { temporalAlpha: 0.3, reasoningBeta: 0.5 },
+    controllerRuntime: {
+      mode: "controlled",
+      stateConfigured: true,
+      activationReceiptConfigured: true,
+    },
     embeddings: {
       enabled: true,
       provider: "openai",
@@ -146,6 +154,7 @@ test("benchmark parameters record resolved QPP and embedding values without secr
     },
   });
   assert.doesNotMatch(JSON.stringify(parameters), /must-not-appear/);
+  assert.doesNotMatch(JSON.stringify(parameters), /must-not-record-path/);
 });
 
 test("benchmark parameters include runtime defaults when no overrides are supplied", () => {
@@ -203,6 +212,11 @@ test("benchmark parameters include runtime defaults when no overrides are suppli
       maximumAccessCount: 1,
     },
     controller: { temporalAlpha: 0.3, reasoningBeta: 0.5 },
+    controllerRuntime: {
+      mode: "shadow",
+      stateConfigured: false,
+      activationReceiptConfigured: false,
+    },
     embeddings: {
       enabled: false,
       provider: null,

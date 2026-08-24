@@ -291,9 +291,12 @@ candidate passed 4/6 and emitted internal `recall_action`/`fold_noise` JSON in
 user answers. This is useful evidence that the offline controller contract and
 the global Agent policy are different artifacts. The canonical YAML was not
 changed. The two channels are now physically separate and covered by a
-candidate-isolation regression. The Lab candidate is not applied to the
-answering Agent; until a typed controller actuator consumes it, controller
-quality is evaluated only through the isolated SkillOpt adapter.
+candidate-isolation regression. A typed runtime actuator now consumes only
+numeric allocate/fold/rerank decisions and defaults to shadow. Controlled
+actuation requires controlled provenance; production actuation requires an
+approval receipt binding the exact candidate, feature protocol, retrieval,
+controller, product, and rollback artifacts. No candidate has been promoted to
+active/default use: that remains blocked on sufficient natural matched evidence.
 
 ## Explicitly deferred — not missing current work
 

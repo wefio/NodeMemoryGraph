@@ -463,6 +463,26 @@ QPP actuation is split into three independent controls:
   the model. It defaults to `off`; `guardrail` emits a recommendation only
   for hard failures such as empty, fallback-only, or very weak recall.
 
+Those switches select which retrieval capability may be used; they do not by
+themselves authorize a learned candidate to change product retrieval. The
+separate controller runtime channel is fail closed:
+
+- `NMG_CONTROLLER_RUNTIME_MODE=off|shadow|controlled|active` defaults to
+  `shadow`. `off` performs no learned scoring. `shadow` records decisions but
+  cannot allocate, fold, or rerank.
+- `controlled` is only for explicitly marked experiments. It requires a trained
+  state at `NMG_CONTROLLER_RUNTIME_STATE` and
+  `NMG_SHADOW_COLLECTION_ORIGIN=controlled`.
+- `active` is the production actuation boundary. It requires the same exact
+  trained state plus `NMG_CONTROLLER_ACTIVATION_RECEIPT`, a reviewed JSON
+  receipt binding the candidate SHA-256, feature-protocol version, retrieval,
+  controller, and product gate artifacts, and a rollback artifact. Missing,
+  changed, or incomplete artifacts make the controller inert.
+
+The channel passes only typed numeric decisions to retrieval. Candidate policy,
+receipt contents, and controller protocol are never inserted into the Agent's
+answer context.
+
 NMG reports each module's scores, quality, and cost but does not choose an
 operator's policy or search for a preferred combination. Enabling QPP1, QPP2,
 or recommendations—and composing them—is an explicit user/operator decision.

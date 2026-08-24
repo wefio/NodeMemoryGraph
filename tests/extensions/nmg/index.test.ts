@@ -33,6 +33,7 @@ import { isProcessAlive, readServerState, serverStatePath } from "../../../src/c
 import { NmgStore } from "../../../src/core/store.ts";
 import type { MemoryContext } from "../../../src/core/types.ts";
 import { ControllerRuntime } from "../../../src/lab/controller-runtime.ts";
+import { CONTROLLER_FEATURE_PROTOCOL_VERSION } from "../../../src/lab/controller-protocol.ts";
 import {
   ControllerShadowBridge,
   shadowEnabled,
@@ -517,7 +518,9 @@ test("trained controller actuation is explicit, bounded, and auditable", async (
     const runtime = new ControllerRuntime(join(directory, "controller-shadow-state.json"));
     assert.equal(runtime.observeVerifiedEvidence(context, [memories[2]!.memory.id]), true);
 
-    const bridge = new ControllerShadowBridge(directory, true);
+    const bridge = new ControllerShadowBridge(directory, true, 128, "controlled", {
+      mode: "controlled",
+    });
     const envelopes = controllerBudgetEnvelopes(context);
     assert.ok(
       await bridge.allocate(
@@ -532,12 +535,29 @@ test("trained controller actuation is explicit, bounded, and auditable", async (
     const actuations = readFileSync(join(directory, "controller-shadow-events.jsonl"), "utf8")
       .trim()
       .split("\n")
-      .map((line) => JSON.parse(line) as { type: string; action: string; changed: boolean });
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            type: string;
+            action: string;
+            changed: boolean;
+            controllerMode: string;
+            candidateSha256: string;
+            featureProtocolVersion: number;
+          },
+      );
     assert.deepEqual(
       actuations.map((event) => event.action),
       ["allocate", "rerank"],
     );
     assert.ok(actuations.every((event) => event.type === "actuation"));
+    assert.ok(actuations.every((event) => event.controllerMode === "controlled"));
+    assert.ok(actuations.every((event) => event.candidateSha256.length === 64));
+    assert.ok(
+      actuations.every(
+        (event) => event.featureProtocolVersion === CONTROLLER_FEATURE_PROTOCOL_VERSION,
+      ),
+    );
     assert.ok(actuations.some((event) => event.changed));
   } finally {
     store.close();

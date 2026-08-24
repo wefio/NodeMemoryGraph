@@ -139,6 +139,15 @@ export function configuredControllerRerankMode(
   return parseMode(environment.NMG_CONTROLLER_RERANK, ["off", "shadow", "active"]) ?? "off";
 }
 
+export function configuredControllerRuntimeMode(
+  environment: NodeJS.ProcessEnv = process.env,
+): import("./controller-channel.ts").ControllerRuntimeMode {
+  return (
+    parseMode(environment.NMG_CONTROLLER_RUNTIME_MODE, ["off", "shadow", "controlled", "active"]) ??
+    "shadow"
+  );
+}
+
 export function configuredQpp2RetainedMass(environment: NodeJS.ProcessEnv = process.env): number {
   const configured = Number(environment.NMG_QPP2_RETAINED_MASS ?? 0.98);
   return Number.isFinite(configured) ? Math.max(0, Math.min(configured, 1)) : 0.98;

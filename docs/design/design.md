@@ -1483,12 +1483,23 @@ structures. A controller may build an ephemeral differentiable projection from
 their numeric features, optimise its parameters, then hand the result back to
 ordinary budgeted graph selection.
 
-The Pi adapter has a lazy controller bridge. `NMG_CONTROLLER_SHADOW=1` enables
-telemetry without actuation. QPP1/QPP2 `active` permit a trained controller to
-allocate a bounded Active Graph budget or fold low learned-probability
-candidates; `NMG_CONTROLLER_RERANK=active` separately permits stable learned
-node reranking. A zero-step controller is inert, and all active outputs remain
-inside hard minimum/normal/expanded envelopes.
+The Pi adapter has a lazy controller bridge behind a typed runtime policy
+channel. `NMG_CONTROLLER_SHADOW=1` enables collection, while the independent
+runtime mode determines authority: `off` performs no learned scoring; `shadow`
+may score and log but cannot actuate; `controlled` may actuate only inside an
+explicitly marked controlled evaluation; and `active` additionally requires a
+reviewed activation receipt. The receipt binds the exact trained-state hash,
+feature-protocol version, retrieval/controller/product gate artifacts, and a
+rollback artifact. Missing or modified artifacts fail closed. QPP1/QPP2
+`active` and `NMG_CONTROLLER_RERANK=active` therefore expose capabilities, not
+authority by themselves. A zero-step controller is inert, and all active
+outputs remain inside hard minimum/normal/expanded envelopes.
+
+Only typed numeric `allocate`, `fold`, and stable rerank decisions cross this
+channel. Candidate policy text, activation metadata, controller protocol, and
+gate artifacts never enter the answering Agent's prompt. Controlled and active
+actuation logs include mode, feature-protocol version, and candidate hash so a
+run can be attributed to the exact learned artifact.
 
 The bridge records baseline and learned node order in a bounded log under
 `NMG_DATA_DIR`. Exact records fetched from a session-owned Active Graph are
@@ -2364,9 +2375,11 @@ existing journal where supported.
 **Implementation status:** explicit feedback collection, natural/controlled
 provenance, journaled node-merge rollback, the recall-policy SkillOpt adapter,
 formal data gate, first official optimization, and matched rejection gate are
-implemented. A dedicated controller runtime policy channel is not implemented;
-the Lab candidate hook intentionally tests and rejects unsafe global-policy
-replacement. The maintenance-policy artifact, three-way attribution,
+implemented. The dedicated controller runtime policy channel is implemented and
+defaults to shadow-only operation; controlled evaluation requires controlled
+provenance, while production actuation requires a hash-bound three-gate approval
+receipt and rollback artifact. Promotion of any candidate into active/default
+operation still requires real matched evidence. The maintenance-policy artifact, three-way attribution,
 long-horizon score, and proposal-to-store channel are not implemented. STG/LTG
 context composition is implemented, but it is not a reversible persistent STG
 merge.
