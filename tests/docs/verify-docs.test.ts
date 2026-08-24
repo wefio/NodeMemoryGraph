@@ -68,3 +68,10 @@ test("a missing public bilingual index fails", () => {
   const report = verifyDocumentation(root);
   assert.ok(report.errors.some((error) => error.includes("missing public bilingual document")));
 });
+
+test("uncategorized documentation content at docs root fails", () => {
+  const root = fixture();
+  writeFileSync(join(root, "docs", "orphan.md"), "# Orphan\n");
+  const report = verifyDocumentation(root);
+  assert.ok(report.errors.some((error) => error.includes("must live in design/")));
+});

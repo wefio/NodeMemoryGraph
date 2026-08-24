@@ -627,14 +627,12 @@ export type NmgMethodResult = {
   chainRemove: { removed: boolean };
   chainEdgeAdd: MemoryChainEdge;
   chainEdgeRemove: { removed: boolean };
-  chainGet:
-    | {
-        chain: MemoryChain;
-        members: MemoryChainMember[];
-        edges: MemoryChainEdge[];
-        topologicalOrder: string[];
-      }
-    | null;
+  chainGet: {
+    chain: MemoryChain;
+    members: MemoryChainMember[];
+    edges: MemoryChainEdge[];
+    topologicalOrder: string[];
+  } | null;
   chainList: MemoryChain[];
   recordActiveGraphAttribution: { activeGraphId: string; attributedMemoryIds: string[] };
   retentionCandidates: { candidates: RetentionCandidate[] };

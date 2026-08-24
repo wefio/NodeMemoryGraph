@@ -164,6 +164,15 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
     checkLocalLinks(root, path, text, report);
 
     const parts = display.split("/");
+    if (
+      parts[0] === "docs" &&
+      parts.length === 2 &&
+      !new Set(["README.md", "README.zh-CN.md", "AGENTS.md"]).has(parts[1])
+    ) {
+      report.errors.push(
+        `${display}: documentation content must live in design/, decisions/, or experiments/`,
+      );
+    }
     if (parts[0] === "docs" && parts[1] === "decisions" && lifecycle.has(parts[2])) {
       checkDecision(path, text, parts[2], report);
     }

@@ -20,7 +20,9 @@
 
 - **`design/`**：架构、数据模型、算法和流程契约。
 - **`decisions/`**：带生命周期的设计与流程决策，见 [decisions/README.zh-CN.md](decisions/README.zh-CN.md)。
-- **`experiments/`**：测量证据。运行报告通常命名为 `<topic>-<date>.md`。
+- **`experiments/`**：测量证据。运行报告通常命名为 `<topic>-<date>.md`。相关入口包括
+  [节点摘要加速检索调研](experiments/node-summary-accelerated-retrieval-2026-08-19.md)
+  和当前 [benchmark 结果汇总](experiments/benchmark-results.md)。
 
 简化判断：NMG *怎样工作或应该怎样工作* 写入 `design/`；*为什么这样选择* 写入 `decisions/`；*实际测到了什么* 写入 `experiments/`。
 

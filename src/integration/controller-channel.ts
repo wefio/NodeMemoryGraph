@@ -67,12 +67,19 @@ export class ControllerPolicyChannel {
       throw new Error(`controller ${options.mode} mode requires a candidate state: ${statePath}`);
     }
     if (options.mode === "controlled" && options.collectionOrigin !== "controlled") {
-      throw new Error("controller controlled mode requires NMG_SHADOW_COLLECTION_ORIGIN=controlled");
+      throw new Error(
+        "controller controlled mode requires NMG_SHADOW_COLLECTION_ORIGIN=controlled",
+      );
     }
 
     this.#runtime = new ControllerRuntime(statePath);
-    if ((options.mode === "controlled" || options.mode === "active") && this.#runtime.trainingSteps < 1) {
-      throw new Error(`controller ${options.mode} mode requires at least one verified training step`);
+    if (
+      (options.mode === "controlled" || options.mode === "active") &&
+      this.#runtime.trainingSteps < 1
+    ) {
+      throw new Error(
+        `controller ${options.mode} mode requires at least one verified training step`,
+      );
     }
 
     let activationReceiptPath: string | null = null;
@@ -120,7 +127,9 @@ export function validateControllerActivationReceipt(
   candidateStatePath: string,
 ): ControllerActivationReceipt {
   const absoluteReceiptPath = resolve(receiptPath);
-  const receipt = JSON.parse(readFileSync(absoluteReceiptPath, "utf8")) as ControllerActivationReceipt;
+  const receipt = JSON.parse(
+    readFileSync(absoluteReceiptPath, "utf8"),
+  ) as ControllerActivationReceipt;
   if (receipt.version !== 1 || receipt.status !== "approved") {
     throw new Error("controller activation receipt is not an approved version-1 receipt");
   }
@@ -147,7 +156,9 @@ export function validateControllerActivationReceipt(
     dirname(absoluteReceiptPath),
   );
   if (receipt.rollbackTarget.sha256 === candidateSha256) {
-    throw new Error("controller activation rollback target must differ from the selected candidate");
+    throw new Error(
+      "controller activation rollback target must differ from the selected candidate",
+    );
   }
   // A rollback promise is meaningful only when the runtime can actually load
   // the referenced prior state. Zero-step deterministic states remain valid.

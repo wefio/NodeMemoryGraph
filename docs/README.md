@@ -43,6 +43,9 @@ copying the whole implementation narrative.
   [baseline](experiments/retrieval-quality-baseline-2026-08-16.md) →
   [hybrid](experiments/retrieval-quality-hybrid-2026-08-16.md) →
   [summaries + stacked](experiments/retrieval-quality-summaries-2026-08-18.md).
+  Related records include the
+  [node-summary acceleration research](experiments/node-summary-accelerated-retrieval-2026-08-19.md)
+  and the current [benchmark result summary](experiments/benchmark-results.md).
 
 Rule of thumb: *how NMG works or should work* belongs in `design/`; *why this
 choice was made* belongs in `decisions/`; *what was measured* belongs in

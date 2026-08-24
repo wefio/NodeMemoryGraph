@@ -386,7 +386,7 @@ Graph 提升到 50 条 / 约 10,000 token 以做聚合或多跳工作。自动�
 在官方 OmniMemEval 用户记忆套件上，NMG 在 BEAM 100K 得分 66.57 nugget
 （LongMemEval / LoCoMo / PersonaMem v2 / HaluMem 进行中），含 judge 模型差异
 说明，按官方快照格式记录于
-[docs/benchmark-results.md](docs/benchmark-results.md)。
+[docs/experiments/benchmark-results.md](docs/experiments/benchmark-results.md)。
 
 复现随评测代码走，不在 README：数据放置、matched-arm 协议、打分与各套件
 命令见 [evals/README.md](evals/README.md) 及 `evals/` 下各 adapter 的 README。

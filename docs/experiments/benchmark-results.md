@@ -1,8 +1,8 @@
 # NMG Benchmark Results
 
-NMG results on the [OmniMemEval](../.benchmarks/official/OmniMemEval/README.md)
+NMG results on the [OmniMemEval](../../.benchmarks/official/OmniMemEval/README.md)
 user-memory benchmark suite, recorded in the same format as the official
-[results snapshot](../.benchmarks/official/OmniMemEval/docs/user_memory/results.md)
+[results snapshot](../../.benchmarks/official/OmniMemEval/docs/user_memory/results.md)
 so that rows are comparable in structure.
 
 Status: **partial**. One benchmark (BEAM 100K) has a complete current-code run;

@@ -127,7 +127,9 @@ export class PiReasoningWorkspaces {
       const statePath = join(this.directory, entry.name);
       if (now - statSync(statePath).mtimeMs <= boundedIdleMs) continue;
       try {
-        const state = JSON.parse(readFileSync(statePath, "utf8")) as Partial<ReasoningWorkspaceState>;
+        const state = JSON.parse(
+          readFileSync(statePath, "utf8"),
+        ) as Partial<ReasoningWorkspaceState>;
         if (typeof state.sessionId === "string") this.#open.delete(state.sessionId);
       } catch {
         // An old malformed Lab scratchpad is still safe to remove by filename.

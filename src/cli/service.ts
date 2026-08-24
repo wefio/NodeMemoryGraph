@@ -534,9 +534,7 @@ export class NmgService {
     return { removed: store.removeMemoryChainEdge(params) };
   }
 
-  #chainGet(
-    params: NmgChainGetParams,
-  ): NmgMethodResult["chainGet"] {
+  #chainGet(params: NmgChainGetParams): NmgMethodResult["chainGet"] {
     const { store, ownerSessionId } = this.#chainStore(params);
     const result = store.getMemoryChain(params.chainId);
     if (!result) return null;
@@ -584,10 +582,7 @@ export class NmgService {
       throw new NmgProtocolError("NOT_FOUND", `memory chain ${chainId} does not exist`);
     }
     if (ownerSessionId !== undefined && result.chain.ownerSessionId !== ownerSessionId) {
-      throw new NmgProtocolError(
-        "NOT_FOUND",
-        `memory chain ${chainId} belongs to another session`,
-      );
+      throw new NmgProtocolError("NOT_FOUND", `memory chain ${chainId} belongs to another session`);
     }
   }
 
@@ -771,10 +766,7 @@ export class NmgService {
           `${params.relationJudgement} requires non-conflicting scope; use distinct for different entities or retain both memories`,
         );
       }
-      if (
-        params.relationJudgement === "conflict" &&
-        !validityIntervalsOverlap(newer, related)
-      ) {
+      if (params.relationJudgement === "conflict" && !validityIntervalsOverlap(newer, related)) {
         throw new NmgProtocolError(
           "INVALID_PARAMS",
           "conflict requires overlapping validity; sequential values should remain temporal states or use supersede",

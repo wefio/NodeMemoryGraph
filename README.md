@@ -543,7 +543,7 @@ correctness from fluent model output.
 On the official OmniMemEval user-memory suite, NMG scores 66.57 nugget on
 BEAM 100K (LongMemEval / LoCoMo / PersonaMem v2 / HaluMem runs in progress),
 recorded with judge-model caveats in the official snapshot format:
-[docs/benchmark-results.md](docs/benchmark-results.md).
+[docs/experiments/benchmark-results.md](docs/experiments/benchmark-results.md).
 
 Reproduction lives with the evaluation code, not here: dataset placement,
 matched-arm protocol, scoring, and per-suite commands are documented in
