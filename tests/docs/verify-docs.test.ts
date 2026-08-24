@@ -50,7 +50,10 @@ test("implemented decisions require status and sections", () => {
   const root = fixture();
   const directory = join(root, "docs", "decisions", "implemented");
   mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, "incomplete.md"), "# Incomplete\n\n**Status:** proposed\n");
+  writeFileSync(
+    join(directory, "2026-08-24-incomplete.md"),
+    "# Incomplete\n\n**Status:** proposed\n",
+  );
   const report = verifyDocumentation(root);
   assert.ok(report.errors.some((error) => error.includes("Status must match")));
   assert.ok(report.errors.some((error) => error.includes("missing section")));
@@ -61,13 +64,80 @@ test("a missing decision translation warns but does not fail", () => {
   const directory = join(root, "docs", "decisions", "implemented");
   mkdirSync(directory, { recursive: true });
   writeFileSync(
-    join(directory, "choice.md"),
+    join(directory, "2026-08-24-choice.md"),
     "# Choice\n\n**Status:** implemented\n\n## Problem\nP\n\n## Decision\nD\n\n" +
       "## Alternatives considered\nA\n\n## Consequences\nC\n",
   );
   const report = verifyDocumentation(root);
   assert.deepEqual(report.errors, []);
   assert.ok(report.warnings.some((warning) => warning.includes("counterpart")));
+});
+
+test("decision filenames and lifecycle locations are unique", () => {
+  const root = fixture();
+  const content =
+    "# Choice\n\n**Status:** implemented\n\n## Problem\nP\n\n## Decision\nD\n\n" +
+    "## Alternatives considered\nA\n\n## Consequences\nC\n";
+  for (const lifecycle of ["implemented", "archived"]) {
+    const directory = join(root, "docs", "decisions", lifecycle);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, "bad name.md"), content);
+    writeFileSync(join(directory, "2026-08-24-choice.md"), content);
+  }
+  const report = verifyDocumentation(root);
+  assert.ok(report.errors.some((error) => error.includes("YYYY-MM-DD-kebab-case")));
+  assert.ok(report.errors.some((error) => error.includes("multiple lifecycle directories")));
+});
+
+test("decision status is exact and required sections are non-empty", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "decisions", "implemented");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, "2026-08-24-choice.md"),
+    "# Choice\n\n**Status:** implemented-but-unverified\n\n## Problem\n\n## Decision\nD\n\n" +
+      "## Alternatives considered\nA\n\n## Consequences\nC\n",
+  );
+  const report = verifyDocumentation(root);
+  assert.ok(report.errors.some((error) => error.includes("Status must match")));
+  assert.ok(report.errors.some((error) => error.includes("empty section 'Problem")));
+});
+
+test("Skill frontmatter name and description are contractual", () => {
+  const root = fixture();
+  const directory = join(root, "skills", "memory-tool");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, "SKILL.md"),
+    "---\nname: wrong-name\ndescription:\n---\n\n# Memory tool\n",
+  );
+  const report = verifyDocumentation(root);
+  assert.ok(report.errors.some((error) => error.includes("Skill name must match directory")));
+  assert.ok(report.errors.some((error) => error.includes("Skill description must be non-empty")));
+});
+
+test("bilingual decisions warn when they do not link to each other", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "decisions", "implemented");
+  mkdirSync(directory, { recursive: true });
+  const body =
+    "**Status:** implemented\n\n## Problem\nP\n\n## Decision\nD\n\n" +
+    "## Alternatives considered\nA\n\n## Consequences\nC\n";
+  writeFileSync(join(directory, "2026-08-24-choice.md"), `# Choice\n\n${body}`);
+  writeFileSync(join(directory, "2026-08-24-choice.zh-CN.md"), `# 选择\n\n${body}`);
+  const report = verifyDocumentation(root);
+  assert.deepEqual(report.errors, []);
+  assert.ok(report.warnings.some((warning) => warning.includes("must link to each other")));
+});
+
+test("undated experiment filenames are advisory", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "experiments");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "evaluation.md"), "# Evaluation\n");
+  const report = verifyDocumentation(root);
+  assert.deepEqual(report.errors, []);
+  assert.ok(report.warnings.some((warning) => warning.includes("should end in -YYYY-MM-DD")));
 });
 
 test("a missing public bilingual index fails", () => {

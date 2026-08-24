@@ -1,10 +1,8 @@
 name: CI
 
-# Scope: keyless, self-contained checks only (typecheck/lint/format/unit
-# tests/coverage/build/package). Everything that needs API keys or local
-# benchmark data — eval:* and benchmark:* scripts, OmniMemEval suites,
-# summary/judge providers — is a local-only concern and deliberately NOT run
-# here; cloud has no keys and no benchmark data by design.
+# Scope: keyless, self-contained checks only. Everything that needs API keys or
+# local benchmark data — eval:* and benchmark:* scripts, OmniMemEval suites,
+# summary/judge providers — stays local by design.
 
 on:
   push:
@@ -12,82 +10,101 @@ on:
   pull_request:
     branches: [main]
 
-jobs:
-  ci:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        # 22 = active LTS, 24 = current LTS line. Odd-numbered (non-LTS)
-        # releases go EOL quickly (23 died 2025-06) and hung both jobs for
-        # 3h on hosted runners, so they are deliberately not in the matrix.
-        node-version: ["22", "24"]
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
+jobs:
+  static:
+    name: Static and package contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: "24"
           cache: npm
-
       - run: npm ci
-
-      # Build (tsc emit) — the check step is --noEmit only; emit-level
-      # breakage (prepack/publish path) must fail in CI too.
       - name: Build
         run: npm run build
+      - name: Package integrity
+        run: npm run package:check
+      - name: Type check
+        run: npm run check
+      - name: Lint
+        run: npm run lint
+      - name: Format check
+        run: npm run format:check
+      - name: Documentation contracts
+        run: npm run docs:check
+      - name: Dependency audit
+        run: npm audit --production --audit-level=high
 
+  tests:
+    name: Unit tests and coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Unit tests with coverage
+        run: npm run test:coverage
+
+  node-compat:
+    name: Node 22 compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.19.0"
+          cache: npm
+      - run: npm ci
+      - name: Build and type check
+        run: npm run build && npm run check
       - name: Package integrity
         run: npm run package:check
 
-      - name: Type check
-        run: npm run check
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Format check
-        run: npm run format:check
-
-      - name: Documentation contracts
-        run: npm run docs:check
-
-      - name: Unit tests
-        run: npm test
-
-      - name: Coverage
-        run: npm run test:coverage
-
-      - name: Audit
-        run: npm audit --production --audit-level=high
-
   chaos:
-    # Chaos tests are Windows-sensitive (EPERM file pins, WAL locking — the
-    # exact incidents they reproduce), so run them on Windows explicitly.
-    # Ubuntu coverage comes from the ci job's npm test (tests/** glob).
+    name: Windows chaos tests
+    # These reproduce Windows-specific EPERM file pins and WAL locking. One
+    # supported runtime is enough here; Node compatibility is checked above.
     runs-on: windows-latest
     timeout-minutes: 30
-    strategy:
-      matrix:
-        node-version: ["22", "24"]
-
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: "24"
           cache: npm
-
       - run: npm ci
-
-      # bin/nmg.mjs (the daemon entrypoint the chaos probe spawns) imports
-      # dist/cli/main.js — without a build the spawned daemon dies instantly
-      # with MODULE_NOT_FOUND, hidden by stdio:"ignore", and the ready-wait
-      # times out.
       - name: Build
         run: npm run build
-
       - name: Chaos tests (Windows)
-        # Hosted runners start node cold; give the daemon-ready wait extra headroom.
         env:
           NMG_DAEMON_READY_TIMEOUT_MS: "60000"
         run: npm run test:chaos
+
+  all-checks-passed:
+    name: All checks passed
+    if: ${{ always() }}
+    needs: [static, tests, node-compat, chaos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required jobs
+        env:
+          STATIC_RESULT: ${{ needs.static.result }}
+          TESTS_RESULT: ${{ needs.tests.result }}
+          NODE_COMPAT_RESULT: ${{ needs.node-compat.result }}
+          CHAOS_RESULT: ${{ needs.chaos.result }}
+        run: |
+          test "$STATIC_RESULT" = success
+          test "$TESTS_RESULT" = success
+          test "$NODE_COMPAT_RESULT" = success
+          test "$CHAOS_RESULT" = success
