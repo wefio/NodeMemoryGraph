@@ -42,6 +42,7 @@ import {
   type ActiveGraphBudget,
   type ClaimPosterior,
   type MemoryChain,
+  type MemoryChainEdge,
   type MemoryChainMember,
   type MemoryContext,
   type MemoryScope,
@@ -64,8 +65,11 @@ import {
   NmgProtocolError,
   type NmgChainAddParams,
   type NmgChainCreateParams,
+  type NmgChainEdgeAddParams,
+  type NmgChainEdgeRemoveParams,
   type NmgChainGetParams,
   type NmgChainListParams,
+  type NmgChainRemoveParams,
   type NmgGetParams,
   type NmgRecordActiveGraphAttributionParams,
   type NmgHelloResult,
@@ -413,6 +417,12 @@ export class NmgService {
         return this.#chainCreate(parseChainCreateParams(params)) as NmgMethodResult[M];
       case "chainAdd":
         return this.#chainAdd(parseChainAddParams(params)) as NmgMethodResult[M];
+      case "chainRemove":
+        return this.#chainRemove(parseChainRemoveParams(params)) as NmgMethodResult[M];
+      case "chainEdgeAdd":
+        return this.#chainEdgeAdd(parseChainEdgeAddParams(params)) as NmgMethodResult[M];
+      case "chainEdgeRemove":
+        return this.#chainEdgeRemove(parseChainEdgeRemoveParams(params)) as NmgMethodResult[M];
       case "chainGet":
         return this.#chainGet(parseChainGetParams(params)) as NmgMethodResult[M];
       case "chainList":
@@ -472,15 +482,29 @@ export class NmgService {
   }
 
   #chainCreate(params: NmgChainCreateParams): MemoryChain {
-    return this.#getStore().createMemoryChain({
+    const { store, ownerSessionId } = this.#chainStore(params);
+    if (
+      ownerSessionId !== undefined &&
+      params.ownerSessionId !== undefined &&
+      params.ownerSessionId !== ownerSessionId
+    ) {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        "an STG chain owner must match the requesting session",
+      );
+    }
+    return store.createMemoryChain({
       chainType: params.chainType,
       topic: params.topic,
-      ownerSessionId: params.ownerSessionId,
+      ownerSessionId: ownerSessionId ?? params.ownerSessionId,
     });
   }
 
   #chainAdd(params: NmgChainAddParams): MemoryChainMember {
-    return this.#getStore().addMemoryToChain({
+    const { store, ownerSessionId } = this.#chainStore(params);
+    this.#assertChainAccess(store, params.chainId, ownerSessionId);
+    this.#assertChainMemoryAccess(store, params.memoryId, ownerSessionId);
+    return store.addMemoryToChain({
       chainId: params.chainId,
       memoryId: params.memoryId,
       position: params.position,
@@ -488,17 +512,90 @@ export class NmgService {
     });
   }
 
+  #chainRemove(params: NmgChainRemoveParams): { removed: boolean } {
+    const { store, ownerSessionId } = this.#chainStore(params);
+    this.#assertChainAccess(store, params.chainId, ownerSessionId);
+    return { removed: store.removeMemoryFromChain(params) };
+  }
+
+  #chainEdgeAdd(params: NmgChainEdgeAddParams): MemoryChainEdge {
+    const { store, ownerSessionId } = this.#chainStore(params);
+    this.#assertChainAccess(store, params.chainId, ownerSessionId);
+    this.#assertChainMemoryAccess(store, params.sourceMemoryId, ownerSessionId);
+    this.#assertChainMemoryAccess(store, params.targetMemoryId, ownerSessionId);
+    return store.addMemoryChainEdge(params);
+  }
+
+  #chainEdgeRemove(params: NmgChainEdgeRemoveParams): { removed: boolean } {
+    const { store, ownerSessionId } = this.#chainStore(params);
+    this.#assertChainAccess(store, params.chainId, ownerSessionId);
+    return { removed: store.removeMemoryChainEdge(params) };
+  }
+
   #chainGet(
     params: NmgChainGetParams,
-  ): { chain: MemoryChain; members: MemoryChainMember[] } | null {
-    return this.#getStore().getMemoryChain(params.chainId);
+  ): NmgMethodResult["chainGet"] {
+    const { store, ownerSessionId } = this.#chainStore(params);
+    const result = store.getMemoryChain(params.chainId);
+    if (!result) return null;
+    this.#assertChainAccess(store, params.chainId, ownerSessionId);
+    return {
+      ...result,
+      edges: store.getMemoryChainEdges(params.chainId),
+      topologicalOrder: store.topologicalChainOrder(params.chainId),
+    };
   }
 
   #chainList(params: NmgChainListParams): MemoryChain[] {
-    return this.#getStore().listMemoryChains({
+    const { store, ownerSessionId } = this.#chainStore(params);
+    if (
+      ownerSessionId !== undefined &&
+      params.ownerSessionId !== undefined &&
+      params.ownerSessionId !== ownerSessionId
+    ) {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        "an STG chain owner filter must match the requesting session",
+      );
+    }
+    return store.listMemoryChains({
       chainType: params.chainType,
-      ownerSessionId: params.ownerSessionId,
+      ownerSessionId: ownerSessionId ?? params.ownerSessionId,
     });
+  }
+
+  #chainStore(params: { projectDir?: string; sessionId?: string }): {
+    store: NmgStore;
+    ownerSessionId?: string;
+  } {
+    if (!params.projectDir) return { store: this.#getStore() };
+    const ownerSessionId = params.sessionId?.trim() || "cli";
+    return {
+      store: this.#getStgStore(params.projectDir, ownerSessionId),
+      ownerSessionId,
+    };
+  }
+
+  #assertChainAccess(store: NmgStore, chainId: string, ownerSessionId?: string): void {
+    const result = store.getMemoryChain(chainId);
+    if (!result) {
+      throw new NmgProtocolError("NOT_FOUND", `memory chain ${chainId} does not exist`);
+    }
+    if (ownerSessionId !== undefined && result.chain.ownerSessionId !== ownerSessionId) {
+      throw new NmgProtocolError(
+        "NOT_FOUND",
+        `memory chain ${chainId} belongs to another session`,
+      );
+    }
+  }
+
+  #assertChainMemoryAccess(store: NmgStore, memoryId: string, ownerSessionId?: string): void {
+    if (!store.getMemory(memoryId, ownerSessionId)) {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        `memory ${memoryId} does not exist in the chain's storage and session scope`,
+      );
+    }
   }
 
   #remember(params: NmgRememberParams): NmgMethodResult["remember"] {
@@ -1382,6 +1479,43 @@ function parseChainAddParams(value: unknown): NmgChainAddParams {
     memoryId: requiredString(params, "memoryId"),
     position: optionalInteger(params, "position", 0, 100_000),
     note: optionalString(params, "note"),
+    projectDir: optionalString(params, "projectDir"),
+    sessionId: optionalString(params, "sessionId"),
+  };
+}
+
+function parseChainRemoveParams(value: unknown): NmgChainRemoveParams {
+  const params = objectParams(value);
+  return {
+    chainId: requiredString(params, "chainId"),
+    memoryId: requiredString(params, "memoryId"),
+    projectDir: optionalString(params, "projectDir"),
+    sessionId: optionalString(params, "sessionId"),
+  };
+}
+
+function parseChainEdgeAddParams(value: unknown): NmgChainEdgeAddParams {
+  const params = objectParams(value);
+  const edgeType = params.edgeType;
+  if (edgeType !== undefined && edgeType !== "order") {
+    throw new NmgProtocolError("INVALID_PARAMS", "edgeType must be 'order'");
+  }
+  return {
+    chainId: requiredString(params, "chainId"),
+    sourceMemoryId: requiredString(params, "sourceMemoryId"),
+    targetMemoryId: requiredString(params, "targetMemoryId"),
+    edgeType: edgeType as "order" | undefined,
+    projectDir: optionalString(params, "projectDir"),
+    sessionId: optionalString(params, "sessionId"),
+  };
+}
+
+function parseChainEdgeRemoveParams(value: unknown): NmgChainEdgeRemoveParams {
+  const params = objectParams(value);
+  return {
+    chainId: requiredString(params, "chainId"),
+    sourceMemoryId: requiredString(params, "sourceMemoryId"),
+    targetMemoryId: requiredString(params, "targetMemoryId"),
     projectDir: optionalString(params, "projectDir"),
     sessionId: optionalString(params, "sessionId"),
   };

@@ -26,7 +26,11 @@
 | Emmimal/temporal-rag | 工程库 | post-retrieval 时间层（validity/kind/decay/event gate/自适应权重）——**与 NMG supersedes 结构同构，工程化成熟** |
 | MMR（1998） | 经典 | 多样性重排 `MMR = λ·Sim(Q) − (1−λ)·max Sim(D_j)`，防单话题占满窗口 |
 
-**综合判断**：NMG 的时间/逻辑链基础设施（`eventTime`、`supersedes_id`+status、`related_memory_ids`+claim_outcome、node 聚类、QPP）**已齐全**，缺的是编排方法，不新建结构。
+**当时的初步判断（已被后续实现修正）**：最初认为 `eventTime`、
+`supersedes_id`、相关记忆和 QPP 足以承担编排，不必新增结构。后续设计发现，
+这些字段无法稳定表达“同一记录属于多条有序路径、路径内分叉/汇合、整链或窗口
+拉起”的静态引用语义，因此增加了独立 `MemoryChain`/member/edge 结构。当前规范
+以主设计 §7.6 为准。
 
 ### 第三轮补强
 | 来源 | 类型 | 对设计的意义 |

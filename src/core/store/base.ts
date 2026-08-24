@@ -822,10 +822,24 @@ export class NmgStoreBase {
   }
 
   /** Remove a memory reference from a chain. */
-  removeMemoryFromChain(input: { chainId: string; memoryId: string }): void {
-    this.db
-      .prepare("DELETE FROM memory_chain_members WHERE chain_id = ? AND memory_id = ?")
-      .run(input.chainId, input.memoryId);
+  removeMemoryFromChain(input: { chainId: string; memoryId: string }): boolean {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db
+        .prepare(
+          `DELETE FROM memory_chain_edges
+           WHERE chain_id = ? AND (source_memory_id = ? OR target_memory_id = ?)`,
+        )
+        .run(input.chainId, input.memoryId, input.memoryId);
+      const result = this.db
+        .prepare("DELETE FROM memory_chain_members WHERE chain_id = ? AND memory_id = ?")
+        .run(input.chainId, input.memoryId);
+      this.db.exec("COMMIT");
+      return result.changes > 0;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   // ── memory-chain DAG edges (pointers) ──
@@ -920,12 +934,13 @@ export class NmgStoreBase {
     chainId: string;
     sourceMemoryId: string;
     targetMemoryId: string;
-  }): void {
-    this.db
+  }): boolean {
+    const result = this.db
       .prepare(
         "DELETE FROM memory_chain_edges WHERE chain_id = ? AND source_memory_id = ? AND target_memory_id = ?",
       )
       .run(input.chainId, input.sourceMemoryId, input.targetMemoryId);
+    return result.changes > 0;
   }
 
   /** Topological order of a chain's members over its DAG edges (Kahn).

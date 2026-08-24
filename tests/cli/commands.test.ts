@@ -98,6 +98,65 @@ test("CLI exact get preserves Active Graph disclosure attribution", () => {
   );
 });
 
+test("CLI exposes complete memory-chain member and edge operations", () => {
+  const byName = (name: string) => NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === name)!;
+  const scoped = new Map([
+    ["chain", ["chain-1"]],
+    ["project-dir", ["C:/atlas"]],
+    ["session-id", ["session-a"]],
+  ]);
+  assert.deepEqual(
+    byName("chain remove").buildParams({
+      flags: new Set(),
+      options: new Map([...scoped, ["memory", ["memory-1"]]]),
+      positionals: [],
+    }),
+    {
+      chainId: "chain-1",
+      memoryId: "memory-1",
+      projectDir: "C:/atlas",
+      sessionId: "session-a",
+    },
+  );
+  assert.deepEqual(
+    byName("chain edge add").buildParams({
+      flags: new Set(),
+      options: new Map([
+        ...scoped,
+        ["from", ["memory-1"]],
+        ["to", ["memory-2"]],
+      ]),
+      positionals: [],
+    }),
+    {
+      chainId: "chain-1",
+      sourceMemoryId: "memory-1",
+      targetMemoryId: "memory-2",
+      edgeType: "order",
+      projectDir: "C:/atlas",
+      sessionId: "session-a",
+    },
+  );
+  assert.deepEqual(
+    byName("chain edge remove").buildParams({
+      flags: new Set(),
+      options: new Map([
+        ...scoped,
+        ["from", ["memory-1"]],
+        ["to", ["memory-2"]],
+      ]),
+      positionals: [],
+    }),
+    {
+      chainId: "chain-1",
+      sourceMemoryId: "memory-1",
+      targetMemoryId: "memory-2",
+      projectDir: "C:/atlas",
+      sessionId: "session-a",
+    },
+  );
+});
+
 test("CLI remember attributes the submission channel to the user by default", () => {
   const command = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "remember")!;
   assert.deepEqual(

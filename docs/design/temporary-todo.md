@@ -35,10 +35,11 @@ A controlled ordinary-Pi smoke produced the first disclosure, one verified
 attribution, and an outcome with measured tool rounds, tokens, and latency; it
 is excluded from natural labels.
 The source and installed Skill now require
-`nmg.v6` and fail closed instead of silently dropping attribution or claim-origin
-RPC. The shared daemon was explicitly restarted on 2026-08-20 and is now a
-compatible v6 process, so subsequent ordinary Pi sessions can exercise the new
-event path. Existing labels meet the provisional sample-count target but do not
+`nmg.v7` and fail closed instead of silently dropping attribution, claim-origin,
+or complete memory-chain RPC semantics. The shared daemon was explicitly
+restarted for v6 on 2026-08-20; after the v7 chain boundary lands, an operator
+must again restart any still-running v6 daemon at a safe coordination point.
+Existing labels meet the provisional sample-count target but do not
 supply verified useful-evidence targets in either split. New
 collection must therefore emphasize tasks where the Agent receives explicit
 evidence confirmation or a tool-verifiable outcome, along with natural

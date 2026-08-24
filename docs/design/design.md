@@ -264,8 +264,8 @@ across independent OS processes, or parallel execution of synchronous SQLite
 work. Read replicas or a worker-thread database queue remain performance options
 only if measurements show the event-loop writer exceeds its latency budget.
 
-Protocol version `nmg.v6` exposes the typed lifecycle, memory, retrieval,
-maintenance, STG-sync, and Task Board methods declared in `protocol.ts` over
+Protocol version `nmg.v7` exposes the typed lifecycle, memory, retrieval,
+maintenance, STG-sync, memory-chain, and Task Board methods declared in `protocol.ts` over
 JSON-RPC 2.0. HTTP is the only resident protocol;
 NMG does not maintain a parallel NDJSON or platform-specific socket API.
 The lease records the protocol version. Clients fail closed when a live daemon
@@ -279,6 +279,10 @@ at Agent completion and would preserve the old, unsafe training semantics.
 outcome events. Connecting the current adapter to v5 would silently discard that
 optional field and contaminate natural-maintenance audits, so clients again fail
 closed until an explicitly coordinated restart.
+`nmg.v7` completes the memory-chain boundary with member removal, explicit DAG
+edge mutation, structured edge reads, topological order, and STG session routing.
+A v6 daemon exposes only the earlier partial chain API, so v7 clients do not
+silently downgrade.
 
 ### 4.2 Modular harness adapters
 
@@ -1139,6 +1143,56 @@ administration RPC, and the CLI provides `topology proposals`, `assess`, `review
 and `actuate`. Assessment is read-only; review records an explicit decision; and
 actuation still accepts only an eligible accepted automatic merge proposal.
 These operations remain outside the Pi model-facing tool surface.
+
+### 7.6 Static temporal and logical memory chains
+
+Relations answer which semantic nodes are associated. Some recall tasks also
+need a bounded, ordered slice of exact memory records: a state history, event
+sequence, explicit dependency path, or a branching/merging plan. NMG represents
+that structure as an optional **memory chain** over existing `MemoryRecord` IDs.
+A chain is not another truth store and does not copy evidence.
+
+```text
+MemoryChain
+  type: temporal | logical
+  topic
+  optional ownerSessionId
+  ordered member references
+  optional directed order edges (DAG)
+```
+
+The two types have different write authority:
+
+- A **temporal chain** orders records using explicit event time or another
+  attributable sequence. Timestamp order may be derived mechanically; missing
+  event time must not be invented.
+- A **logical chain** stores only an explicit or naturally supervised order or
+  dependency. Similarity, co-retrieval, message adjacency, or model speculation
+  cannot create a causal edge.
+
+A memory may join multiple chains. Each chain's directed `order` edges must
+remain acyclic; branching and merging are allowed. Adding an edge joins its
+endpoint memories idempotently. Removing a member removes incident pointers via
+the database integrity rules but never deletes the underlying memory or evidence.
+When a member is superseded, chain reads retain the historical member and expose
+its active `successorId`, preserving both snapshot and live-reference semantics.
+
+Chains obey physical memory residence. LTG chains are durable/shared. A chain in
+a project STG is owned by one session: create/list/get/member/edge operations are
+routed to that project's STG and reject a foreign owner. The chain itself does
+not promote STG content or bypass the normal consolidation policy.
+
+Retrieval uses chains only after an ordinary query has found a member. It appends
+a bounded window of neighbouring members as recall supplements without globally
+reranking the original hits. The caller can then request exact evidence using the
+normal Active Graph budget. Chain expansion therefore improves ordered context;
+it does not prove relevance, causality, correctness, or answer sufficiency.
+
+The stable daemon/CLI administration boundary supports chain create/list/get,
+member add/remove, edge add/remove, structured edge reads, and deterministic
+topological order. These operations are intentionally absent from the default Pi
+model tool surface: a harness may add a higher-level workflow when its domain can
+provide trustworthy chain supervision.
 
 ## 8. Information and communication interpretation
 
@@ -2216,6 +2270,9 @@ Implemented and verified in the current prototype:
   evidence links, and source-message identities;
 - state supersession, event time, actor/truth status, scope, merge/split, and
   redirects;
+- static temporal/logical memory chains over reusable record IDs, with bounded
+  post-retrieval expansion, live successor pointers, acyclic order edges,
+  complete daemon/CLI administration, and session-owned STG isolation;
 - resident/automatic/cue execution layers;
 - a Lab-only, file-backed session reasoning workspace with bounded compaction
   checkpoints and explicit hypothesis/evidence status;
@@ -2651,7 +2708,7 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
    zero-configuration and not-yet-ready fallback. Node/leaf-only and the
    current union ranker are explicitly gated off after the LoCoMo ablation.
 5. **Complete:** expose the application boundary through an
-   agent-independent `nmg` CLI and cross-platform `nmg.v6`
+   agent-independent `nmg` CLI and cross-platform `nmg.v7`
    JSON-RPC-over-HTTP daemon. The Pi extension uses the same daemon through a
    persistent HTTP client and ownership-aware lifecycle.
 

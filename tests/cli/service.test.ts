@@ -677,6 +677,148 @@ test("resident service isolates STG by session inside one project", async () => 
   }
 });
 
+test("resident service exposes complete LTG memory-chain DAG operations", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-chain-ltg-"));
+  const service = new NmgService({ databasePath: join(directory, "ltg.sqlite"), environment: {} });
+  try {
+    const first = await service.invoke("remember", {
+      statement: "Atlas migration starts with an inventory.",
+      nodeName: "Atlas migration inventory",
+    });
+    const second = await service.invoke("remember", {
+      statement: "Atlas migration validates the converted database.",
+      nodeName: "Atlas migration validation",
+    });
+    const chain = await service.invoke("chainCreate", {
+      chainType: "logical",
+      topic: "Atlas migration",
+    });
+    await service.invoke("chainEdgeAdd", {
+      chainId: chain.id,
+      sourceMemoryId: first.memory.id,
+      targetMemoryId: second.memory.id,
+    });
+    const loaded = await service.invoke("chainGet", { chainId: chain.id });
+    assert.deepEqual(loaded?.topologicalOrder, [first.memory.id, second.memory.id]);
+    assert.equal(loaded?.members.length, 2, "edge endpoints auto-join the chain");
+    assert.equal(loaded?.edges.length, 1);
+
+    assert.deepEqual(
+      await service.invoke("chainEdgeRemove", {
+        chainId: chain.id,
+        sourceMemoryId: first.memory.id,
+        targetMemoryId: second.memory.id,
+      }),
+      { removed: true },
+    );
+    await service.invoke("chainEdgeAdd", {
+      chainId: chain.id,
+      sourceMemoryId: first.memory.id,
+      targetMemoryId: second.memory.id,
+    });
+    assert.deepEqual(
+      await service.invoke("chainRemove", {
+        chainId: chain.id,
+        memoryId: first.memory.id,
+      }),
+      { removed: true },
+    );
+    const reduced = await service.invoke("chainGet", { chainId: chain.id });
+    assert.deepEqual(reduced?.topologicalOrder, [second.memory.id]);
+    assert.equal(reduced?.edges.length, 0, "member removal also removes incident chain edges");
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("resident service keeps STG memory chains inside their owning session", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-chain-stg-"));
+  const projectDir = join(directory, "project");
+  const service = new NmgService({ databasePath: join(directory, "ltg.sqlite"), environment: {} });
+  try {
+    const first = await service.invoke("remember", {
+      statement: "Session alpha first scratch decision.",
+      nodeName: "Session alpha decision one",
+      residence: "stg",
+      projectDir,
+      sessionId: "session-alpha",
+    });
+    const second = await service.invoke("remember", {
+      statement: "Session alpha second scratch decision.",
+      nodeName: "Session alpha decision two",
+      residence: "stg",
+      projectDir,
+      sessionId: "session-alpha",
+    });
+    const chain = await service.invoke("chainCreate", {
+      chainType: "temporal",
+      topic: "Session alpha scratch sequence",
+      projectDir,
+      sessionId: "session-alpha",
+    });
+    assert.equal(chain.ownerSessionId, "session-alpha");
+    await service.invoke("chainAdd", {
+      chainId: chain.id,
+      memoryId: first.memory.id,
+      projectDir,
+      sessionId: "session-alpha",
+    });
+    await service.invoke("chainAdd", {
+      chainId: chain.id,
+      memoryId: second.memory.id,
+      projectDir,
+      sessionId: "session-alpha",
+    });
+    const alpha = await service.invoke("chainGet", {
+      chainId: chain.id,
+      projectDir,
+      sessionId: "session-alpha",
+    });
+    assert.equal(alpha?.members.length, 2);
+    assert.equal(
+      (
+        await service.invoke("chainList", {
+          projectDir,
+          sessionId: "session-alpha",
+        })
+      ).length,
+      1,
+    );
+    assert.equal((await service.invoke("chainList", {})).length, 0, "chain was not written to LTG");
+    assert.equal(
+      (
+        await service.invoke("chainList", {
+          projectDir,
+          sessionId: "session-beta",
+        })
+      ).length,
+      0,
+    );
+    await assert.rejects(
+      service.invoke("chainGet", {
+        chainId: chain.id,
+        projectDir,
+        sessionId: "session-beta",
+      }),
+      /belongs to another session/u,
+    );
+    await assert.rejects(
+      service.invoke("chainCreate", {
+        chainType: "logical",
+        topic: "forged owner",
+        ownerSessionId: "session-beta",
+        projectDir,
+        sessionId: "session-alpha",
+      }),
+      /owner must match/u,
+    );
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
 test("resident service records nmg_get disclosure only for the owning session", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-owned-ag-"));
   const service = new NmgService({ databasePath: join(directory, "ltg.sqlite"), environment: {} });

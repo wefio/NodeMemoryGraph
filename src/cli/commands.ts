@@ -621,6 +621,59 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
     },
   },
   {
+    method: "chainRemove",
+    words: ["chain", "remove"],
+    usageLine: "nmg chain remove --chain ID --memory ID [--json]",
+    options: ["chain", "memory", "project-dir", "session-id"],
+    flags: [],
+    usageDetail: `Chain remove options:
+  --chain ID               Chain id (required)
+  --memory ID              Memory id to remove (required)`,
+    buildParams: (values) => ({
+      chainId: requiredOption(values, "chain"),
+      memoryId: requiredOption(values, "memory"),
+      projectDir: firstOption(values, "project-dir"),
+      sessionId: firstOption(values, "session-id"),
+    }),
+  },
+  {
+    method: "chainEdgeAdd",
+    words: ["chain", "edge", "add"],
+    usageLine: "nmg chain edge add --chain ID --from MEMORY --to MEMORY [--json]",
+    options: ["chain", "from", "to", "project-dir", "session-id"],
+    flags: [],
+    usageDetail: `Chain edge add options:
+  --chain ID               Chain id (required)
+  --from MEMORY            Source memory id (required)
+  --to MEMORY              Target memory id (required)`,
+    buildParams: (values) => ({
+      chainId: requiredOption(values, "chain"),
+      sourceMemoryId: requiredOption(values, "from"),
+      targetMemoryId: requiredOption(values, "to"),
+      edgeType: "order" as const,
+      projectDir: firstOption(values, "project-dir"),
+      sessionId: firstOption(values, "session-id"),
+    }),
+  },
+  {
+    method: "chainEdgeRemove",
+    words: ["chain", "edge", "remove"],
+    usageLine: "nmg chain edge remove --chain ID --from MEMORY --to MEMORY [--json]",
+    options: ["chain", "from", "to", "project-dir", "session-id"],
+    flags: [],
+    usageDetail: `Chain edge remove options:
+  --chain ID               Chain id (required)
+  --from MEMORY            Source memory id (required)
+  --to MEMORY              Target memory id (required)`,
+    buildParams: (values) => ({
+      chainId: requiredOption(values, "chain"),
+      sourceMemoryId: requiredOption(values, "from"),
+      targetMemoryId: requiredOption(values, "to"),
+      projectDir: firstOption(values, "project-dir"),
+      sessionId: firstOption(values, "session-id"),
+    }),
+  },
+  {
     method: "chainGet",
     words: ["chain", "get"],
     usageLine: "nmg chain get --chain ID [--json]",

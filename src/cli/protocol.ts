@@ -4,6 +4,8 @@ import type {
   ClaimPosterior,
   MemoryActor,
   MemoryChain,
+  MemoryChainEdge,
+  MemoryChainEdgeType,
   MemoryChainMember,
   MemoryChainType,
   MemoryContext,
@@ -36,7 +38,9 @@ import type {
 // a v4 daemon would otherwise accept the connection and reject that method at
 // agent_end. v6 preserves natural/controlled provenance on claim outcomes;
 // a v5 daemon would silently discard the optional field and contaminate audits.
-export const NMG_PROTOCOL_VERSION = "nmg.v6" as const;
+// v7 completes the chain contract (DAG edges, member removal, and structured
+// reads); a v6 daemon only implements the earlier partial chain surface.
+export const NMG_PROTOCOL_VERSION = "nmg.v7" as const;
 
 export const NMG_CAPABILITIES = [
   "hello",
@@ -64,6 +68,7 @@ export const NMG_CAPABILITIES = [
   "optional-embedding-retrieval",
   "diagnostic-answer-attribution",
   "claim-outcome-origin-provenance",
+  "memory-chains",
 ] as const;
 
 export const NMG_METHODS = [
@@ -89,6 +94,9 @@ export const NMG_METHODS = [
   "taskBoard",
   "chainCreate",
   "chainAdd",
+  "chainRemove",
+  "chainEdgeAdd",
+  "chainEdgeRemove",
   "chainGet",
   "chainList",
   "shutdown",
@@ -276,6 +284,30 @@ export interface NmgChainAddParams {
   memoryId: string;
   position?: number;
   note?: string;
+  projectDir?: string;
+  sessionId?: string;
+}
+
+export interface NmgChainRemoveParams {
+  chainId: string;
+  memoryId: string;
+  projectDir?: string;
+  sessionId?: string;
+}
+
+export interface NmgChainEdgeAddParams {
+  chainId: string;
+  sourceMemoryId: string;
+  targetMemoryId: string;
+  edgeType?: MemoryChainEdgeType;
+  projectDir?: string;
+  sessionId?: string;
+}
+
+export interface NmgChainEdgeRemoveParams {
+  chainId: string;
+  sourceMemoryId: string;
+  targetMemoryId: string;
   projectDir?: string;
   sessionId?: string;
 }
@@ -592,7 +624,17 @@ export type NmgMethodResult = {
   get: MemoryContext & { missingMemoryIds: string[] };
   chainCreate: MemoryChain;
   chainAdd: MemoryChainMember;
-  chainGet: { chain: MemoryChain; members: MemoryChainMember[] } | null;
+  chainRemove: { removed: boolean };
+  chainEdgeAdd: MemoryChainEdge;
+  chainEdgeRemove: { removed: boolean };
+  chainGet:
+    | {
+        chain: MemoryChain;
+        members: MemoryChainMember[];
+        edges: MemoryChainEdge[];
+        topologicalOrder: string[];
+      }
+    | null;
   chainList: MemoryChain[];
   recordActiveGraphAttribution: { activeGraphId: string; attributedMemoryIds: string[] };
   retentionCandidates: { candidates: RetentionCandidate[] };

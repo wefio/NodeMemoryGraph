@@ -77,6 +77,9 @@ global prompt.
   semantic graph changes.
 - Scope, validity intervals, conflicts, and superseded states remain
   traceable instead of deleting earlier evidence.
+- Optional temporal/logical chains reuse existing memory IDs to preserve ordered
+  histories or explicitly supervised dependency DAGs. Retrieval can expand a
+  bounded neighbouring window without treating order as inferred truth.
 - Cloud sync is deferred. External embeddings are optional and served through
   an OpenAI-compatible endpoint; execution isolation remains a Pi plugin concern.
 - An experimental framework-free differentiable controller uses a small lazy
@@ -259,6 +262,11 @@ npm run cli -- topology proposals
 npm run cli -- topology assess <proposal-id>
 npm run cli -- topology review <proposal-id> --decision accept
 npm run cli -- topology actuate <proposal-id>
+npm run cli -- chain create --type logical --topic "Atlas migration"
+npm run cli -- chain edge add --chain <chain-id> --from <memory-id> --to <memory-id>
+npm run cli -- chain get --chain <chain-id>
+npm run cli -- chain edge remove --chain <chain-id> --from <memory-id> --to <memory-id>
+npm run cli -- chain remove --chain <chain-id> --memory <memory-id>
 npm run cli -- graph --out memory-graph.html
 npm run cli -- stg sync --project-dir . --scope project=nmg --limit 50
 npm run cli -- daemon start
@@ -286,6 +294,13 @@ event then remains auditable even if the original harness transcript disappears.
 Project STG is also session-private. Pi supplies its session ID automatically;
 CLI callers may add `--session-id ID`. Without it, CLI uses a separate `cli`
 administrative session rather than reading any Pi session's STG.
+
+Memory chains are an administrative/harness surface, not an extra default Pi
+tool. `chain create/list/get`, member add/remove, and edge add/remove operate on
+LTG unless `--project-dir` is supplied. Project STG chains are automatically
+owned by `--session-id` (or the isolated `cli` session) and cannot be inspected
+or mutated by another session. Logical edges must be explicitly supplied; NMG
+does not infer causality from similarity or conversation order.
 
 `nmg graph` exports the node/relation projection as a single self-contained
 HTML file (default `nmg-graph.html`, override with `--out FILE`). It reads the
