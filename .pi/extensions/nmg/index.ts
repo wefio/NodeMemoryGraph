@@ -1033,6 +1033,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         const activeGraphId =
           params.activeGraphId ??
           controllerShadow.latestActiveGraphIdForMemory(sessionId, params.memoryId) ??
+          agentAttributionFlow.latestActiveGraphIdForMemories(sessionId, [params.memoryId]) ??
           undefined;
         const result = await invoke("recordClaimOutcomes", {
           semanticTaskId: params.semanticTaskId,
@@ -1283,8 +1284,13 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           "Recall tool budget exhausted for this user turn. Answer from the evidence already loaded or state what remains uncertain.",
         );
       }
+      const activeGraphId =
+        params.activeGraphId ??
+        agentAttributionFlow.latestActiveGraphIdForMemories(sessionId, params.memoryIds) ??
+        undefined;
       const result = (await invoke("get", {
         ...params,
+        activeGraphId,
         projectDir: projectDirectory(),
         sessionId,
       })) as MemoryContext;
@@ -1293,7 +1299,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         result.results.map((entry) => entry.memory.id),
       );
       await controllerShadow.disclosure(
-        params.activeGraphId,
+        activeGraphId,
         sessionId,
         params.memoryIds,
         result.results.map((entry) => entry.memory.id),
@@ -2150,6 +2156,18 @@ export class AgentAttributionFlow {
     }
     list.push({ traceId: context.activeGraph.id, results: context.results });
     if (list.length > this.maxPerSession) list.shift();
+  }
+
+  latestActiveGraphIdForMemories(sessionId: string, memoryIds: readonly string[]): string | null {
+    if (memoryIds.length === 0) return null;
+    const requested = new Set(memoryIds);
+    const traces = this.#traces.get(sessionId) ?? [];
+    for (let index = traces.length - 1; index >= 0; index -= 1) {
+      const trace = traces[index]!;
+      const available = new Set(trace.results.map((result) => result.memory.id));
+      if ([...requested].every((memoryId) => available.has(memoryId))) return trace.traceId;
+    }
+    return null;
   }
 
   /** All retrieved graphs for this session, cleared afterwards (one-shot). */

@@ -1256,7 +1256,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       .get("nmg_get")!
       .execute(
         "get",
-        { memoryIds: [remember.details.memory.id], activeGraphId },
+        { memoryIds: [remember.details.memory.id] },
         undefined,
         undefined,
         { sessionManager },

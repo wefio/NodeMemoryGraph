@@ -1,11 +1,15 @@
 import {
+  closeSync,
   cpSync,
   existsSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -55,6 +59,17 @@ export function syncNmgSkill(target: string): SkillSyncReport {
   const resolvedTarget = safeTarget(target);
   const parent = dirname(resolvedTarget);
   mkdirSync(parent, { recursive: true });
+  const releaseLock = acquireSyncLock(parent);
+  try {
+    recoverInterruptedSync(resolvedTarget);
+    return synchronizeUnderLock(resolvedTarget);
+  } finally {
+    releaseLock();
+  }
+}
+
+function synchronizeUnderLock(resolvedTarget: string): SkillSyncReport {
+  const parent = dirname(resolvedTarget);
   const suffix = `${process.pid}-${Date.now()}`;
   const staging = join(parent, `.nmg-memory.sync-${suffix}`);
   const backup = join(parent, `.nmg-memory.backup-${suffix}`);
@@ -77,6 +92,93 @@ export function syncNmgSkill(target: string): SkillSyncReport {
   }
 
   return { ...inspectNmgSkill(resolvedTarget), synchronized: true };
+}
+
+export function recoverInterruptedSync(target: string): void {
+  const resolvedTarget = safeTarget(target);
+  const parent = dirname(resolvedTarget);
+  if (!existsSync(parent)) return;
+
+  const entries = readdirSync(parent);
+  const backups = entries.filter((entry) => entry.startsWith(".nmg-memory.backup-"));
+  const staging = entries.filter((entry) => entry.startsWith(".nmg-memory.sync-"));
+
+  if (!existsSync(resolvedTarget) && backups.length > 0) {
+    const newestBackup = backups.reduce((newest, entry) =>
+      statSync(join(parent, entry)).mtimeMs > statSync(join(parent, newest)).mtimeMs ? entry : newest,
+    );
+    renameSync(join(parent, newestBackup), resolvedTarget);
+    backups.splice(backups.indexOf(newestBackup), 1);
+  }
+
+  for (const entry of [...backups, ...staging]) {
+    rmSync(join(parent, entry), { recursive: true, force: true });
+  }
+}
+
+function acquireSyncLock(parent: string): () => void {
+  const lockPath = join(parent, ".nmg-memory.sync.lock");
+  const lockValue = JSON.stringify({
+    pid: process.pid,
+    createdAt: Date.now(),
+    token: `${process.pid}-${Date.now()}-${Math.random()}`,
+  });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const descriptor = openSync(lockPath, "wx");
+      try {
+        writeFileSync(descriptor, lockValue);
+      } finally {
+        closeSync(descriptor);
+      }
+      return () => removeLockIfUnchanged(lockPath, lockValue);
+    } catch (error) {
+      if (!isAlreadyExistsError(error)) throw error;
+      const observedLock = readLock(lockPath);
+      const owner = lockOwner(observedLock);
+      if (owner !== undefined && processIsAlive(owner)) {
+        throw new Error(`NMG Skill sync already running in process ${owner}`);
+      }
+      removeLockIfUnchanged(lockPath, observedLock);
+    }
+  }
+  throw new Error(`unable to acquire NMG Skill sync lock: ${lockPath}`);
+}
+
+function readLock(lockPath: string): string {
+  try {
+    return readFileSync(lockPath, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function lockOwner(lockValue: string): number | undefined {
+  try {
+    const value = JSON.parse(lockValue) as { pid?: unknown };
+    return typeof value.pid === "number" && Number.isInteger(value.pid) && value.pid > 0
+      ? value.pid
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function removeLockIfUnchanged(lockPath: string, expected: string): void {
+  if (readLock(lockPath) === expected) rmSync(lockPath, { force: true });
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function isAlreadyExistsError(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === "EEXIST";
 }
 
 function safeTarget(target: string): string {
@@ -110,8 +212,19 @@ function optionValue(args: string[], name: string): string | undefined {
   return value;
 }
 
+function validateArgs(args: string[]): void {
+  const allowed = new Set(["--check", "--target"]);
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]!;
+    if (!argument.startsWith("--")) throw new Error(`unexpected argument: ${argument}`);
+    if (!allowed.has(argument)) throw new Error(`unknown option: ${argument}`);
+    if (argument === "--target") index += 1;
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const args = process.argv.slice(2);
+  validateArgs(args);
   const target = optionValue(args, "--target") ?? join(homedir(), ".agents", "skills", "nmg-memory");
   const check = args.includes("--check");
   const report = check ? inspectNmgSkill(target) : syncNmgSkill(target);

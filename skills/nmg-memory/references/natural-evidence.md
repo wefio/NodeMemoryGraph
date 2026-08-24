@@ -24,7 +24,10 @@ identity. It does not infer success from silence.
 During a real task:
 
 1. Search normally and pass the returned `activeGraphId` to exact `get` calls.
-   This distinguishes candidates shown from evidence actually disclosed.
+   This distinguishes candidates shown from evidence actually disclosed. The Pi
+   adapter can recover an omitted ID from its bounded, session-owned search
+   trace; other harnesses must preserve it explicitly, and Agents should still
+   pass it when available rather than depend on recovery.
 2. Let the task proceed normally. Do not ask extra questions merely to create a
    training example.
 3. When an outcome is directly observable, record only the known fields:

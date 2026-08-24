@@ -77,11 +77,22 @@ collect the missing data during real work and act when it matures. It documents
 passive shadow capture, exact search→get attribution, partial/unknown label
 semantics, claim evidence, compact readiness audits, candidate calibration,
 matched quality/cost gates, rollback, and the stricter consolidation/identity
-merge boundary. Two Skill eval cases cover natural tool-verified outcomes and
-fail-closed calibration. `skill:nmg:sync` atomically installs the complete Skill
-and `skill:nmg:check` detects source/install drift; the current user-level copy is
-in sync. This automates collection and future Agent action but does not convert
-the current sparse observations into natural validation.
+merge boundary. Two Skill eval definitions describe natural tool-verified
+outcomes and fail-closed calibration; repository tests validate their schema and
+required cases, while execution remains the responsibility of a Skill-capable
+Agent eval harness. `skill:nmg:sync` uses a single-writer, recoverable directory
+swap to install the complete Skill, and `skill:nmg:check` detects source/install
+drift; the current user-level copy is in sync. This automates collection and
+future Agent action but does not convert the current sparse observations into
+natural validation.
+
+A real ordinary Pi audit then exposed one harness gap: the model performed
+`search` and exact `get` but omitted the returned `activeGraphId`, so the new
+disclosure produced only diagnostic attribution and no verified training target.
+The Pi adapter now recovers an omitted ID from its bounded session-owned search
+trace for `get` and `claim_outcome`; explicit IDs remain the portable contract
+for other harnesses. This repairs provenance continuity but does not infer a
+claim outcome or turn task success into evidence.
 
 ## 2. Calibrate retrieval and the differentiable controller
 
