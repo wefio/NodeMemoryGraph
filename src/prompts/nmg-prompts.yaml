@@ -61,7 +61,9 @@ reason_description: >-
   goals, observations, hypotheses, evidence, conclusions, decisions, open
   questions, next actions, and explicit relations. It persists checkpoints
   across Pi compaction and process restart but never writes scratch content into
-  durable semantic memory.
+  durable semantic memory. Evidence nodes require stable source references;
+  supported nodes require either such a reference or an anchored support path.
+  Unsupported hypotheses remain visibly marked as unsupported after compaction.
 
 reason_action_parameter_description: >-
   add creates one typed scratch node; update changes one existing node; link
@@ -90,9 +92,12 @@ reason_importance_parameter_description: >-
   not truth, durability, or automatic promotion.
 
 reason_evidence_refs_parameter_description: >-
-  Optional stable references supporting a new scratch node, such as NMG memory
-  IDs, source-message IDs, file locations, or tool-result identities. References
-  are retained for audit but are not independently verified by this tool.
+  Stable references supporting a new or updated scratch node, such as NMG memory
+  IDs, source-message IDs, file locations, or tool-result identities. Required
+  for evidence nodes and for directly supported nodes; alternatively mark a node
+  supported only after linking an already anchored source with supports or
+  derived_from. References are retained for audit but are not independently
+  verified by this tool.
 
 reason_source_id_parameter_description: >-
   Existing reasoning-node ID at the source of a relation. Required for link.

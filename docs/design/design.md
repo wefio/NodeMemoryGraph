@@ -2029,12 +2029,22 @@ model or tool result
 
 NMG does not replace Pi's compactor. `session_compact` only checkpoints the
 workspace, while `before_agent_start` injects at most a fixed node and character
-budget. Hypotheses retain their status and must not be treated as facts.
+budget. Each checkpoint line carries both lifecycle status and a structural
+support state: `referenced`, `linked`, or `unsupported`. Hypotheses retain their
+status and unsupported hypotheses remain explicitly marked rather than being
+presented as established facts.
 Rejected paths are kept when useful so the model does not repeat disproven
 work.
 
 Only supported, high-importance conclusions or decisions with traceable
-evidence are eligible for later LTG consolidation. The current prototype merely
+evidence are eligible for later LTG consolidation. New `evidence` nodes require
+at least one stable external reference. A node may become `supported` only when
+it has such a reference itself or an incoming `supports`/`derived_from` path
+whose source is transitively reference-anchored; cycles cannot manufacture
+support. Removing a reference is rejected when it would orphan an already
+supported downstream node. NMG retains reference identifiers for audit but does
+not claim that the scratchpad independently verified the referenced source.
+The current prototype merely
 reports those candidates; it does not automatically promote scratch state into
 long-term memory.
 
@@ -2138,9 +2148,11 @@ Important gaps between the prototype and the target plugin:
   an explicit product boundary rather than an unimplemented default: the tool is
   absent unless Lab mode is enabled, the model decides whether to write it, and
   NMG injects it only once after Pi compaction;
-- reasoning nodes distinguish type and status, but hypothesis writes are not
-  yet required to cite evidence, and the system does not independently detect
-  unsupported scratchpad claims;
+- reasoning nodes distinguish type, lifecycle status, and structural support.
+  Evidence nodes require stable references; supported nodes require direct or
+  transitively anchored support; unsupported hypotheses are marked in every
+  checkpoint and cannot enter consolidation. Reference existence/truth is still
+  the caller's responsibility rather than an independently verified claim;
 - reasoning checkpoints are bounded, session-persistent, and resumable within
   the same Pi session, but scratchpad expiry, archive policy, cross-session task
   continuation, and explicit promotion into STG/LTG remain undesigned or manual;
@@ -2586,9 +2598,11 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 2. **Rejected after experiment:** automatic user-input capture and ordinary-turn
    checkpoint injection. It added latency and regressed compacted-task accuracy.
    Do not restore it without a new benchmark and a materially different design.
-3. Require stronger provenance for evidence/conclusion nodes and prevent
-   unsupported hypotheses from being promoted or presented as established
-   facts.
+3. **Complete at the structural provenance boundary:** evidence nodes require
+   stable references; supported conclusions/decisions require direct or
+   transitively anchored support; cycles cannot manufacture evidence; reference
+   removal cannot orphan a supported descendant; checkpoints mark unsupported
+   hypotheses explicitly. External source truth remains a harness/tool concern.
 4. Add update deduplication, stale-node retirement, task-completion archival,
    and explicit workspace reset/resume semantics.
 5. Keep measuring the explicit workspace on tasks with real interruption or

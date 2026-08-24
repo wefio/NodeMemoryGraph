@@ -14,15 +14,16 @@ test("reasoning checkpoints preserve an explicit inference chain", () => {
     kind: "evidence",
     content: "The compiler reports a missing generated file",
     importance: 0.8,
+    evidenceRefs: ["tool:compiler-output"],
   });
   const conclusion = workspace.addNode({
     kind: "conclusion",
     content: "Code generation did not run",
-    status: "supported",
     importance: 0.9,
   });
   workspace.link(goal.id, evidence.id, "next_step");
   workspace.link(evidence.id, conclusion.id, "supports");
+  workspace.updateNode(conclusion.id, { status: "supported" });
 
   const checkpoint = workspace.checkpoint();
 
@@ -38,6 +39,7 @@ test("rejected hypotheses and the evidence rejecting them survive compaction", (
     kind: "evidence",
     content: "The network probe succeeds",
     importance: 0.9,
+    evidenceRefs: ["tool:network-probe"],
   });
   const hypothesis = workspace.addNode({
     kind: "hypothesis",
@@ -93,17 +95,16 @@ test("only supported, attributable conclusions and decisions consolidate", () =>
   const evidence = workspace.addNode({
     kind: "evidence",
     content: "Three runs produce the same result",
+    evidenceRefs: ["tool:test-run-3"],
   });
   const conclusion = workspace.addNode({
     kind: "conclusion",
     content: "The result is reproducible",
-    status: "supported",
     importance: 0.9,
   });
   workspace.addNode({
     kind: "conclusion",
     content: "An unsupported guess",
-    status: "supported",
     importance: 0.9,
   });
   workspace.addNode({
@@ -114,9 +115,70 @@ test("only supported, attributable conclusions and decisions consolidate", () =>
     evidenceRefs: ["history-1"],
   });
   workspace.link(evidence.id, conclusion.id, "supports");
+  workspace.updateNode(conclusion.id, { status: "supported" });
 
   assert.deepEqual(
     workspace.consolidationCandidates().map((node) => node.id),
     [conclusion.id],
   );
+});
+
+test("supported state requires an externally anchored support path", () => {
+  const workspace = new ReasoningWorkspace("session-support-boundary");
+  const hypothesis = workspace.addNode({
+    kind: "hypothesis",
+    content: "The cache is stale",
+  });
+  assert.throws(
+    () => workspace.updateNode(hypothesis.id, { status: "supported" }),
+    /requires a stable evidence reference or an anchored/u,
+  );
+  assert.match(workspace.checkpoint().text, /hypothesis\/active\/support=unsupported/u);
+
+  const observation = workspace.addNode({
+    kind: "observation",
+    content: "The cache key differs from the stored key",
+    evidenceRefs: ["file:cache-report.json"],
+  });
+  workspace.link(observation.id, hypothesis.id, "supports");
+  assert.equal(workspace.updateNode(hypothesis.id, { status: "supported" }).status, "supported");
+  assert.equal(workspace.supportState(hypothesis.id), "linked");
+});
+
+test("evidence nodes require references and support cycles cannot manufacture evidence", () => {
+  const workspace = new ReasoningWorkspace("session-no-self-support");
+  assert.throws(
+    () => workspace.addNode({ kind: "evidence", content: "An unattributed claim" }),
+    /require at least one stable evidence reference/u,
+  );
+  const first = workspace.addNode({ kind: "hypothesis", content: "First guess" });
+  const second = workspace.addNode({ kind: "conclusion", content: "Second guess" });
+  workspace.link(first.id, second.id, "supports");
+  workspace.link(second.id, first.id, "supports");
+  assert.equal(workspace.supportState(first.id), "unsupported");
+  assert.equal(workspace.supportState(second.id), "unsupported");
+  assert.throws(
+    () => workspace.updateNode(second.id, { status: "supported" }),
+    /requires a stable evidence reference or an anchored/u,
+  );
+});
+
+test("removing a reference cannot orphan an already supported downstream conclusion", () => {
+  const workspace = new ReasoningWorkspace("session-support-removal");
+  const observation = workspace.addNode({
+    kind: "observation",
+    content: "Observed result",
+    evidenceRefs: ["tool:result"],
+  });
+  const conclusion = workspace.addNode({ kind: "conclusion", content: "Supported result" });
+  workspace.link(observation.id, conclusion.id, "supports");
+  workspace.updateNode(conclusion.id, { status: "supported" });
+
+  assert.throws(
+    () => workspace.updateNode(observation.id, { evidenceRefs: [] }),
+    /would remove support/u,
+  );
+  assert.deepEqual(workspace.toJSON().nodes.find((node) => node.id === observation.id)?.evidenceRefs, [
+    "tool:result",
+  ]);
 });

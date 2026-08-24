@@ -320,7 +320,10 @@ observed:
   policy, and STG/LTG promotion: only after real interruption or compaction tasks
   show that the ordinary transcript and AG are insufficient. The explicit Lab
   tool, same-session atomic persistence, process-restart resume, and one-shot
-  post-compaction checkpoint injection are implemented.
+  post-compaction checkpoint injection are implemented. Structural provenance is
+  also enforced: evidence requires a stable reference, supported nodes require
+  an anchored support path, support cycles cannot self-justify, and checkpoints
+  expose unsupported hypotheses. Reference truth is not independently verified.
 - Memory-Graph Reasoner edge-following and automatic inference: only after that
   reasoning-workspace need is established; global scoring is a retained Lab
   prototype, not a Lite dependency.

@@ -28,6 +28,7 @@ test("Pi reasoning workspace persists typed scratch state across manager restart
     assert.equal(checkpoint.edges.length, 1);
     assert.match(checkpoint.text, /parser rejects empty records/u);
     assert.match(checkpoint.text, /not verified fact/u);
+    assert.match(checkpoint.text, /hypothesis\/active\/support=linked/u);
 
     const disk = JSON.parse(readFileSync(second.statePath("session-a"), "utf8")) as {
       sessionId: string;

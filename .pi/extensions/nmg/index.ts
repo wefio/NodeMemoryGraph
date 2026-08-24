@@ -781,14 +781,16 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           if (
             params.content === undefined &&
             params.status === undefined &&
-            params.importance === undefined
+            params.importance === undefined &&
+            params.evidenceRefs === undefined
           ) {
-            throw new Error("action=update requires content, status, or importance");
+            throw new Error("action=update requires content, status, importance, or evidenceRefs");
           }
           const node = reasoningWorkspaces.update(sessionId, params.nodeId, {
             content: params.content,
             status: params.status as ReasoningStatus | undefined,
             importance: params.importance,
+            evidenceRefs: params.evidenceRefs,
           });
           const checkpoint = reasoningWorkspaces.checkpoint(sessionId);
           return toolResult(

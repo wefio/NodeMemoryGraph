@@ -37,7 +37,12 @@ export class PiReasoningWorkspaces {
   update(
     sessionId: string,
     nodeId: string,
-    update: { content?: string; status?: ReasoningStatus; importance?: number },
+    update: {
+      content?: string;
+      status?: ReasoningStatus;
+      importance?: number;
+      evidenceRefs?: string[];
+    },
   ): ReasoningNode {
     const workspace = this.#workspace(sessionId, true)!;
     const node = workspace.updateNode(nodeId, update);

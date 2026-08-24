@@ -135,6 +135,10 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
       afterCompaction.message?.content ?? "",
       /auditable scratchpad, not verified fact/u,
     );
+    assert.match(
+      afterCompaction.message?.content ?? "",
+      /hypothesis\/active\/support=unsupported/u,
+    );
 
     const consumed = (await handlers.get("before_agent_start")!(
       { prompt: "continue", systemPrompt: "base" },

@@ -23,6 +23,8 @@ export const REASONING_STATUSES = [
 
 export type ReasoningStatus = (typeof REASONING_STATUSES)[number];
 
+export type ReasoningSupportState = "referenced" | "linked" | "unsupported";
+
 export const REASONING_EDGE_KINDS = [
   "supports",
   "contradicts",
@@ -137,18 +139,29 @@ export class ReasoningWorkspace {
       content,
       status: input.status ?? "active",
       importance: clampImportance(input.importance),
-      evidenceRefs: [...new Set(input.evidenceRefs?.filter(Boolean) ?? [])],
+      evidenceRefs: normalizeEvidenceRefs(input.evidenceRefs ?? []),
       createdAt: now,
       updatedAt: now,
     };
     this.nodes.set(node.id, node);
+    try {
+      this.assertNodeSupport(node);
+    } catch (error) {
+      this.nodes.delete(node.id);
+      throw error;
+    }
     this.updatedAt = now;
     return structuredClone(node);
   }
 
   updateNode(
     id: string,
-    update: { content?: string; status?: ReasoningStatus; importance?: number },
+    update: {
+      content?: string;
+      status?: ReasoningStatus;
+      importance?: number;
+      evidenceRefs?: string[];
+    },
   ): ReasoningNode {
     const current = this.nodes.get(id);
     if (!current) throw new Error(`Unknown reasoning node: ${id}`);
@@ -162,9 +175,30 @@ export class ReasoningWorkspace {
       status: update.status ?? current.status,
       importance:
         update.importance === undefined ? current.importance : clampImportance(update.importance),
+      evidenceRefs:
+        update.evidenceRefs === undefined
+          ? current.evidenceRefs
+          : normalizeEvidenceRefs(update.evidenceRefs),
       updatedAt: now,
     };
     this.nodes.set(id, next);
+    try {
+      this.assertNodeSupport(next);
+      const lostAnchors = [...this.nodes.values()].filter(
+        (node) =>
+          node.status === "supported" &&
+          this.supportState(node.id) === "unsupported" &&
+          this.supportState(node.id, new Map([[id, current]])) !== "unsupported",
+      );
+      if (lostAnchors.length > 0) {
+        throw new Error(
+          `Reasoning update would remove support from: ${lostAnchors.map((node) => node.id).join(", ")}`,
+        );
+      }
+    } catch (error) {
+      this.nodes.set(id, current);
+      throw error;
+    }
     this.updatedAt = now;
     return structuredClone(next);
   }
@@ -205,8 +239,9 @@ export class ReasoningWorkspace {
     const lines = [header];
     const includedNodes: ReasoningNode[] = [];
     for (const node of selected) {
+      const support = this.supportState(node.id);
       const line =
-        `[${node.id}] ${node.kind}/${node.status}/i=${node.importance.toFixed(2)}: ` +
+        `[${node.id}] ${node.kind}/${node.status}/support=${support}/i=${node.importance.toFixed(2)}: ` +
         compactContent(node.content);
       if (lines.join("\n").length + line.length + 1 > maxChars) break;
       lines.push(line);
@@ -234,20 +269,50 @@ export class ReasoningWorkspace {
   }
 
   consolidationCandidates(minImportance = 0.8): ReasoningNode[] {
-    const supportedTargets = new Set(
-      [...this.edges.values()]
-        .filter((edge) => edge.type === "supports" || edge.type === "derived_from")
-        .map((edge) => edge.targetId),
-    );
     return [...this.nodes.values()]
       .filter(
         (node) =>
           (node.kind === "conclusion" || node.kind === "decision") &&
           node.status === "supported" &&
           node.importance >= minImportance &&
-          (node.evidenceRefs.length > 0 || supportedTargets.has(node.id)),
+          this.supportState(node.id) !== "unsupported",
       )
       .map((node) => structuredClone(node));
+  }
+
+  /**
+   * Resolve whether a scratch node is anchored in an external stable reference.
+   * A relation is support only when its source is itself anchored; graph cycles
+   * cannot manufacture evidence by pointing at each other.
+   */
+  supportState(
+    nodeId: string,
+    nodeOverrides: ReadonlyMap<string, ReasoningNode> = new Map(),
+  ): ReasoningSupportState {
+    const node = nodeOverrides.get(nodeId) ?? this.nodes.get(nodeId);
+    if (!node) throw new Error(`Unknown reasoning node: ${nodeId}`);
+    if (node.evidenceRefs.length > 0) return "referenced";
+
+    const anchored = new Set<string>();
+    for (const candidate of this.nodes.values()) {
+      const effective = nodeOverrides.get(candidate.id) ?? candidate;
+      if (effective.evidenceRefs.length > 0) anchored.add(effective.id);
+    }
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const edge of this.edges.values()) {
+        if (
+          (edge.type === "supports" || edge.type === "derived_from") &&
+          anchored.has(edge.sourceId) &&
+          !anchored.has(edge.targetId)
+        ) {
+          anchored.add(edge.targetId);
+          changed = true;
+        }
+      }
+    }
+    return anchored.has(nodeId) ? "linked" : "unsupported";
   }
 
   toJSON(): ReasoningWorkspaceState {
@@ -268,4 +333,19 @@ export class ReasoningWorkspace {
   private edgeKey(edge: Pick<ReasoningEdge, "sourceId" | "targetId" | "type">): string {
     return `${edge.sourceId}\u0000${edge.type}\u0000${edge.targetId}`;
   }
+
+  private assertNodeSupport(node: ReasoningNode): void {
+    if (node.kind === "evidence" && node.evidenceRefs.length === 0) {
+      throw new Error("Reasoning evidence nodes require at least one stable evidence reference");
+    }
+    if (node.status === "supported" && this.supportState(node.id) === "unsupported") {
+      throw new Error(
+        "A supported reasoning node requires a stable evidence reference or an anchored supports/derived_from path",
+      );
+    }
+  }
+}
+
+function normalizeEvidenceRefs(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
