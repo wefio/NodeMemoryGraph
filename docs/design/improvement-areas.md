@@ -2,6 +2,10 @@
 
 **Created:** 2026-07-20
 **Status:** working notes, not a roadmap commitment
+**Authority:** historical gap analysis. Current design belongs in
+[design.md](design.md), implementation status in
+[completion-audit.md](completion-audit.md), and unresolved actions in
+[temporary-todo.md](temporary-todo.md).
 
 This document collects known gaps, risks, and opportunities discovered during
 code review and evaluation. Each item includes the observed symptom, the

@@ -1,5 +1,9 @@
 # NMG design completion audit
 
+**Authority:** current requirement-to-evidence ledger. Normative intent remains
+in [design.md](design.md); document ownership is defined by
+[the documentation index](../README.md).
+
 **Status:** requirement ledger
 **Updated:** 2026-08-24
 **Normative source:** [design.md](design.md)

@@ -1,0 +1,20 @@
+{
+  "skill_name": "doc-maintenance",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "We changed the STG-to-LTG promotion contract and rejected two simpler alternatives. Update the repository documentation without creating duplicate sources of truth.",
+      "expected_output": "Updates the owning normative design, records rationale in a decision note, updates completion evidence only when verified, and removes or adjusts any resolved TODO without duplicating history."
+    },
+    {
+      "id": 2,
+      "prompt": "A small benchmark found that a candidate reranker improved recall but increased token cost. Document the result; do not change the default design policy.",
+      "expected_output": "Places measured evidence in experiments, preserves configuration and caveats, and does not turn the result into a normative or default-policy claim."
+    },
+    {
+      "id": 3,
+      "prompt": "A public startup command changed and an implemented decision was revised. Keep Chinese and English documentation useful without demanding exact paragraph parity.",
+      "expected_output": "Updates both public entry documents and normally both decision-language variants, preserves commands and warnings, and runs the structural documentation check."
+    }
+  ]
+}
