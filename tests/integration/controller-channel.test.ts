@@ -78,7 +78,7 @@ test("active controller binds candidate, three gate artifacts, and rollback", ()
     const gatePaths = ["retrieval.json", "controller.json", "product.json"];
     for (const path of gatePaths) writeFileSync(join(fixture.directory, path), `{\"gate\":\"${path}\"}`);
     const rollbackPath = join(fixture.directory, "rollback.json");
-    writeFileSync(rollbackPath, "previous-controller-state");
+    new ControllerRuntime(rollbackPath).save();
     const reference = (path: string) => ({ path, sha256: fingerprint(join(fixture.directory, path)) });
     const receipt: ControllerActivationReceipt = {
       version: 1,
@@ -113,6 +113,23 @@ test("active controller binds candidate, three gate artifacts, and rollback", ()
           activationReceiptPath: receiptPath,
         }),
       /product artifact fingerprint mismatch/u,
+    );
+
+    writeFileSync(join(fixture.directory, gatePaths[2]!), `{\"gate\":\"${gatePaths[2]}\"}`);
+    receipt.gates.product = reference(gatePaths[2]!);
+    receipt.rollbackTarget = {
+      path: "candidate.json",
+      sha256: receipt.candidateSha256,
+    };
+    writeFileSync(receiptPath, JSON.stringify(receipt));
+    assert.throws(
+      () =>
+        new ControllerPolicyChannel({
+          mode: "active",
+          statePath: fixture.statePath,
+          activationReceiptPath: receiptPath,
+        }),
+      /rollback target must differ/u,
     );
   } finally {
     fixture.close();

@@ -476,8 +476,9 @@ separate controller runtime channel is fail closed:
 - `active` is the production actuation boundary. It requires the same exact
   trained state plus `NMG_CONTROLLER_ACTIVATION_RECEIPT`, a reviewed JSON
   receipt binding the candidate SHA-256, feature-protocol version, retrieval,
-  controller, and product gate artifacts, and a rollback artifact. Missing,
-  changed, or incomplete artifacts make the controller inert.
+  controller, and product gate artifacts, and a distinct loadable prior
+  controller state as its rollback artifact. Missing, changed, incomplete, or
+  unloadable artifacts make the controller inert.
 
 The channel passes only typed numeric decisions to retrieval. Candidate policy,
 receipt contents, and controller protocol are never inserted into the Agent's

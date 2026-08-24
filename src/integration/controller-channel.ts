@@ -141,7 +141,17 @@ export function validateControllerActivationReceipt(
   if (!receipt.gates?.retrieval || !receipt.gates?.controller || !receipt.gates?.product) {
     throw new Error("controller activation receipt must reference all three gate artifacts");
   }
-  validateArtifactReference("rollbackTarget", receipt.rollbackTarget, dirname(absoluteReceiptPath));
+  const rollbackPath = validateArtifactReference(
+    "rollbackTarget",
+    receipt.rollbackTarget,
+    dirname(absoluteReceiptPath),
+  );
+  if (receipt.rollbackTarget.sha256 === candidateSha256) {
+    throw new Error("controller activation rollback target must differ from the selected candidate");
+  }
+  // A rollback promise is meaningful only when the runtime can actually load
+  // the referenced prior state. Zero-step deterministic states remain valid.
+  new ControllerRuntime(rollbackPath);
   return receipt;
 }
 
@@ -149,7 +159,7 @@ function validateArtifactReference(
   name: string,
   reference: ControllerArtifactReference | undefined,
   baseDirectory: string,
-): void {
+): string {
   if (!reference?.path?.trim() || !/^[a-f0-9]{64}$/u.test(reference.sha256)) {
     throw new Error(`controller activation ${name} artifact reference is invalid`);
   }
@@ -157,6 +167,7 @@ function validateArtifactReference(
   if (fingerprint(path) !== reference.sha256) {
     throw new Error(`controller activation ${name} artifact fingerprint mismatch: ${path}`);
   }
+  return path;
 }
 
 function fingerprint(path: string): string | null {

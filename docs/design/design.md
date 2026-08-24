@@ -1490,7 +1490,8 @@ may score and log but cannot actuate; `controlled` may actuate only inside an
 explicitly marked controlled evaluation; and `active` additionally requires a
 reviewed activation receipt. The receipt binds the exact trained-state hash,
 feature-protocol version, retrieval/controller/product gate artifacts, and a
-rollback artifact. Missing or modified artifacts fail closed. QPP1/QPP2
+distinct prior controller state that the current runtime can load for rollback.
+Missing, modified, or unloadable artifacts fail closed. QPP1/QPP2
 `active` and `NMG_CONTROLLER_RERANK=active` therefore expose capabilities, not
 authority by themselves. A zero-step controller is inert, and all active
 outputs remain inside hard minimum/normal/expanded envelopes.
