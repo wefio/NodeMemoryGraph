@@ -52,6 +52,8 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      - name: Build
+        run: npm run build
       - name: Unit tests with coverage
         run: npm run test:coverage
 
