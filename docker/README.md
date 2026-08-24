@@ -39,6 +39,11 @@ docker run --rm --name nmg --gpus all -v nmg-data:/data nmg:bge
 The BGE startup log reports `device=cuda` or `device=cpu`. Docker health checks
 both the embedding endpoint and the NMG daemon.
 
+The image enables `NMG_EMBED_AUTO_SYNC=1`: each accepted `remember` schedules
+an incremental, deduplicated record-index update through the resident daemon.
+Outside this image auto-sync remains opt-in, so configuring an embedding
+provider alone does not silently add network or model work to normal writes.
+
 ## Process and storage boundary
 
 - One container starts one NMG daemon for `/data/nmg.sqlite`.
@@ -51,4 +56,3 @@ This is the reproducible NMG runtime base. It deliberately does not expose an
 Agent Memory Leaderboard Add/Search endpoint yet. That adapter should connect
 to this single daemon through the existing daemon client rather than opening a
 second `NmgService` against the same SQLite database.
-

@@ -6,6 +6,7 @@ import {
   createEmbeddingClientFromEnv,
   type EmbeddingClient,
 } from "../core/embedding-provider.ts";
+import { syncRecordEmbeddings } from "../core/embedding-sync.ts";
 import {
   createLeafSummaryProviderFromEnv,
   drainLeafSummaries,
@@ -128,6 +129,7 @@ export class NmgService {
   readonly #summaryDrains = new Set<NmgStore>();
   #nodeSummaryProvider: NodeSummaryProvider | undefined | null;
   readonly #nodeSummaryDrains = new Set<NmgStore>();
+  readonly #embeddingDrains = new Set<NmgStore>();
   #shutdownRequested = false;
   readonly #maintenanceJobs = new Map<NmgStore, NodeJS.Immediate>();
   readonly #maintenanceSignals = new Map<
@@ -699,6 +701,7 @@ export class NmgService {
         // Node summaries consume the node's leaf-block summaries (coarser
         // tier), so they drain after blocks get their summaries.
         this.#drainNodeSummaries(store);
+        this.#drainRecordEmbeddings(store);
       } catch {
         // Maintenance is opportunistic. Dirty/delta counters remain durable and
         // the next write can retry; a failed batch must not fail remember.
@@ -1187,6 +1190,22 @@ export class NmgService {
       this.#embeddingError ??= error instanceof Error ? error.message : String(error);
       return this.#environment.NMG_EMBED_PROVIDER?.trim() || null;
     }
+  }
+
+  /** Incrementally fills the configured record index after writes. Disabled by
+   * default so embedding traffic remains an explicit deployment choice. */
+  #drainRecordEmbeddings(store: NmgStore): void {
+    if (!isEnabled(this.#environment.NMG_EMBED_AUTO_SYNC) || this.#embeddingDrains.has(store)) {
+      return;
+    }
+    const client = this.#configuredEmbeddingClient();
+    if (!client) return;
+    this.#embeddingDrains.add(store);
+    void syncRecordEmbeddings(store, client)
+      .catch((error) => {
+        this.#embeddingError = error instanceof Error ? error.message : String(error);
+      })
+      .finally(() => this.#embeddingDrains.delete(store));
   }
 
   #configuredSummaryProvider(): LeafSummaryProvider | undefined {
@@ -2025,4 +2044,8 @@ function optionalMarkers(params: Record<string, unknown>, key: string): MemoryMa
     }
     return { kind, attributes: attributes as MemoryMarker["attributes"] };
   });
+}
+
+function isEnabled(value: string | undefined): boolean {
+  return /^(?:1|true|yes|on)$/i.test(value?.trim() ?? "");
 }

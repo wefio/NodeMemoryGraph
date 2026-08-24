@@ -28,24 +28,30 @@ ENV DEBIAN_FRONTEND=noninteractive \
     NMG_EMBED_PROFILE=bge-en \
     BGE_MODEL=/opt/models/bge-small-en-v1.5 \
     BGE_PORT=8000 \
-    HF_HUB_OFFLINE=1 \
-    TRANSFORMERS_OFFLINE=1 \
     VIRTUAL_ENV=/opt/nmg-embed \
     PATH=/opt/nmg-embed/bin:$PATH
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
        ca-certificates \
        python3 \
        python3-pip \
        python3-venv \
        tini \
-    && rm -rf /var/lib/apt/lists/* \
-    && python3 -m venv "$VIRTUAL_ENV" \
-    && pip install --no-cache-dir --index-url "$TORCH_INDEX_URL" torch \
-    && pip install --no-cache-dir sentence-transformers fastapi "uvicorn[standard]" \
-    && BGE_SOURCE_MODEL="$BGE_SOURCE_MODEL" BGE_SOURCE_REVISION="$BGE_REVISION" \
-       python -c 'import os; from sentence_transformers import SentenceTransformer; model = SentenceTransformer(os.environ["BGE_SOURCE_MODEL"], revision=os.environ["BGE_SOURCE_REVISION"]); model.save_pretrained("/opt/models/bge-small-en-v1.5")'
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv "$VIRTUAL_ENV" \
+    && pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir --index-url "$TORCH_INDEX_URL" torch
+
+RUN pip install --no-cache-dir sentence-transformers fastapi "uvicorn[standard]"
+
+RUN BGE_SOURCE_MODEL="$BGE_SOURCE_MODEL" BGE_SOURCE_REVISION="$BGE_REVISION" \
+    python -c 'import os; from sentence_transformers import SentenceTransformer; model = SentenceTransformer(os.environ["BGE_SOURCE_MODEL"], revision=os.environ["BGE_SOURCE_REVISION"]); model.save_pretrained("/opt/models/bge-small-en-v1.5")'
+
+ENV HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    NMG_EMBED_AUTO_SYNC=1
 
 WORKDIR /app
 COPY package.json package-lock.json ./
