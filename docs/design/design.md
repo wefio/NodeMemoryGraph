@@ -558,6 +558,27 @@ Connections are established in three classes:
    merge, and split proposals require accumulated evidence or explicit
    confirmation.
 
+Relation type alone does not grant write authority. The establishment policy is
+defined by whether the edge is mechanically entailed by the transaction that
+creates it:
+
+| Relation family | Immediate source | Otherwise |
+| --- | --- | --- |
+| provenance (`derived_from`) | Core derivation transaction with exact source memory IDs | Reject; a model assertion is not provenance |
+| lifecycle (`supersedes`) | Validated same-domain state transition with an acyclic predecessor chain | Keep both states and request explicit resolution |
+| transform structure (`is_a`, redirects) | Reviewed merge/split transaction and rollback journal | Store a topology proposal, not a consolidated edge |
+| explicit domain attachment (`applies_to`, `part_of`) | Harness/tool supplies stable IDs and attributable evidence for both endpoints | Proposal or STG observation |
+| regulatory (`contradicts`, `exception_to`, `distinct_from`) | Explicit attributable judgement after scope/time compatibility checks | Proposal; never infer from retrieval co-occurrence alone |
+| identity/refinement (`same_as`, `refines`) | Reviewed topology proposal; `same_as` still requires the separate reversible merge actuator to canonicalize identity | Keep nodes separate |
+| causal/dependency/support (`causes`, `depends_on`, `supports`) | Explicit attributable evidence or reviewed proposal | STG observation until independently supported |
+| associative (`related_to`) | Stability consolidation from independent verified outcomes, or an explicit administrative relation | Co-retrieval remains an observation only |
+
+“Immediate” therefore means *entailed by a governed operation*, not “a model
+chose a relation label with high confidence.” Core methods may materialize such
+edges inside the same transaction; model-facing `remember(action="relate")`
+creates a pending proposal. Administrative `linkNodes` remains an explicit trust
+boundary and must not be exposed as unattended model authority.
+
 New semantic candidates first enter STG unless a governed rule can safely
 promote the atomic memory immediately:
 
@@ -1401,6 +1422,17 @@ Stable-ID `getContext` remains available for L4/L5 recovery. The conservative
 states, constraints, contradictions/exceptions, marked records, high-value or
 frequently used records, and evidence with surviving derivations. Automatic
 purge is deliberately not implemented.
+
+Retention protection and resident injection are distinct. A record is protected
+from automatic L4/L5 movement when its type is `constraint`, `preference`, or
+`state`; its evidence role is `contradict` or `exception`; it supports a surviving
+derivation; or it carries a `critical`, `pinned`, `protected`,
+`safety_constraint`, or `user_defined` marker. This protection does not inject
+the record into every prompt. The resident kernel is narrower: only active,
+indexed, tier-0 constraints of importance at least `0.8`, asserted or verified by
+a user/tool/system source, are eligible, and the harness still applies a small
+global limit. Thus a rare safety constraint cannot disappear through heat-based
+retention, while ordinary protected history does not consume permanent context.
 
 Physical privacy erasure is a separate, explicit operation with a stronger
 contract than logical withdrawal. Its implementation must run as one reviewed
@@ -2717,8 +2749,6 @@ The next work should reduce uncertainty rather than add another subsystem:
   session scratchpad as globally active?
 - What measured ambiguity/coverage thresholds justify node creation or
   refinement?
-- Which deterministic relation types are safe to establish immediately, and
-  which always require confirmation?
 - What feedback proves a retrieved memory was useful without reinforcing the
   router's own prior selections?
 - What STG retention, expiry, and demotion policy preserves useful provisional
@@ -2735,8 +2765,6 @@ The next work should reduce uncertainty rather than add another subsystem:
 - When a QPP recommendation is emitted, what bounded policy prevents repeated
   low-value searches while still allowing a genuinely multi-part query to
   continue?
-- Which rare safety/user constraints must remain pinned regardless of access
-  frequency?
 - At what measured node/leaf count does exact contiguous vector scan stop
   meeting the end-to-end latency budget?
 - What privacy/delete interface can remove raw evidence and every dependent
