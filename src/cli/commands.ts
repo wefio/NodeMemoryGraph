@@ -584,6 +584,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   --topic NAME             Chain topic/name (required)
   --owner SESSION          Owning session id (default: none)`,
     buildParams: (values) => {
+      rejectPositionals(values, "chain create");
       const type = requiredOption(values, "type");
       if (type !== "temporal" && type !== "logical") {
         throw new Error("--type must be 'temporal' or 'logical'");
@@ -609,6 +610,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   --position N             Explicit position (default: append)
   --note TEXT              Optional per-member note`,
     buildParams: (values) => {
+      rejectPositionals(values, "chain add");
       const position = firstOption(values, "position");
       return {
         chainId: requiredOption(values, "chain"),
@@ -629,12 +631,15 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
     usageDetail: `Chain remove options:
   --chain ID               Chain id (required)
   --memory ID              Memory id to remove (required)`,
-    buildParams: (values) => ({
-      chainId: requiredOption(values, "chain"),
-      memoryId: requiredOption(values, "memory"),
-      projectDir: firstOption(values, "project-dir"),
-      sessionId: firstOption(values, "session-id"),
-    }),
+    buildParams: (values) => {
+      rejectPositionals(values, "chain remove");
+      return {
+        chainId: requiredOption(values, "chain"),
+        memoryId: requiredOption(values, "memory"),
+        projectDir: firstOption(values, "project-dir"),
+        sessionId: firstOption(values, "session-id"),
+      };
+    },
   },
   {
     method: "chainEdgeAdd",
@@ -646,14 +651,17 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   --chain ID               Chain id (required)
   --from MEMORY            Source memory id (required)
   --to MEMORY              Target memory id (required)`,
-    buildParams: (values) => ({
-      chainId: requiredOption(values, "chain"),
-      sourceMemoryId: requiredOption(values, "from"),
-      targetMemoryId: requiredOption(values, "to"),
-      edgeType: "order" as const,
-      projectDir: firstOption(values, "project-dir"),
-      sessionId: firstOption(values, "session-id"),
-    }),
+    buildParams: (values) => {
+      rejectPositionals(values, "chain edge add");
+      return {
+        chainId: requiredOption(values, "chain"),
+        sourceMemoryId: requiredOption(values, "from"),
+        targetMemoryId: requiredOption(values, "to"),
+        edgeType: "order" as const,
+        projectDir: firstOption(values, "project-dir"),
+        sessionId: firstOption(values, "session-id"),
+      };
+    },
   },
   {
     method: "chainEdgeRemove",
@@ -665,13 +673,16 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   --chain ID               Chain id (required)
   --from MEMORY            Source memory id (required)
   --to MEMORY              Target memory id (required)`,
-    buildParams: (values) => ({
-      chainId: requiredOption(values, "chain"),
-      sourceMemoryId: requiredOption(values, "from"),
-      targetMemoryId: requiredOption(values, "to"),
-      projectDir: firstOption(values, "project-dir"),
-      sessionId: firstOption(values, "session-id"),
-    }),
+    buildParams: (values) => {
+      rejectPositionals(values, "chain edge remove");
+      return {
+        chainId: requiredOption(values, "chain"),
+        sourceMemoryId: requiredOption(values, "from"),
+        targetMemoryId: requiredOption(values, "to"),
+        projectDir: firstOption(values, "project-dir"),
+        sessionId: firstOption(values, "session-id"),
+      };
+    },
   },
   {
     method: "chainGet",
@@ -681,11 +692,14 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
     flags: [],
     usageDetail: `Chain get options:
   --chain ID               Chain id (required)`,
-    buildParams: (values) => ({
-      chainId: requiredOption(values, "chain"),
-      projectDir: firstOption(values, "project-dir"),
-      sessionId: firstOption(values, "session-id"),
-    }),
+    buildParams: (values) => {
+      rejectPositionals(values, "chain get");
+      return {
+        chainId: requiredOption(values, "chain"),
+        projectDir: firstOption(values, "project-dir"),
+        sessionId: firstOption(values, "session-id"),
+      };
+    },
   },
   {
     method: "chainList",
@@ -697,6 +711,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   --type TYPE              Filter by chain type
   --owner SESSION          Filter by owner session`,
     buildParams: (values) => {
+      rejectPositionals(values, "chain list");
       const type = firstOption(values, "type");
       if (type !== undefined && type !== "temporal" && type !== "logical") {
         throw new Error("--type must be 'temporal' or 'logical'");

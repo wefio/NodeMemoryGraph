@@ -37,8 +37,8 @@ is excluded from natural labels.
 The source and installed Skill now require
 `nmg.v7` and fail closed instead of silently dropping attribution, claim-origin,
 or complete memory-chain RPC semantics. The shared daemon was explicitly
-restarted for v6 on 2026-08-20; after the v7 chain boundary lands, an operator
-must again restart any still-running v6 daemon at a safe coordination point.
+restarted on 2026-08-24 and verified compatible with v7; any independent client
+database still served by a v6 process requires the same coordinated restart.
 Existing labels meet the provisional sample-count target but do not
 supply verified useful-evidence targets in either split. New
 collection must therefore emphasize tasks where the Agent receives explicit

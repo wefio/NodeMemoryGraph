@@ -333,13 +333,20 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   if (command === "daemon") return daemonArguments(rest);
   const group = cliCommandGroup(command!);
   if (group.length === 0) throw new Error(`unknown command: ${command}`);
-  const spec =
-    group.find((entry) => entry.words.length === 1) ??
-    group.find((entry) => entry.words[1] === rest[0]);
+  // Prefer the longest matching command prefix. The registry supports nested
+  // administrative verbs such as `chain edge add`; matching only the second
+  // word would silently route `chain edge remove` to the first `chain edge *`
+  // entry.
+  const fullWords = [command!, ...rest];
+  const spec = [...group]
+    .sort((left, right) => right.words.length - left.words.length)
+    .find((entry) => entry.words.every((word, index) => fullWords[index] === word));
   if (!spec) {
-    throw new Error(`${command} requires ${oxfordJoin(group.map((entry) => entry.words[1]!))}`);
+    throw new Error(
+      `${command} requires ${oxfordJoin(group.map((entry) => entry.words.slice(1).join(" ")))}`,
+    );
   }
-  const values = parseOptions(spec.words.length > 1 ? rest.slice(1) : rest);
+  const values = parseOptions(rest.slice(spec.words.length - 1));
   assertSpecOptions(spec, values);
   if (values.flags.has("json") && values.flags.has("compact-json")) {
     throw new Error("--json and --compact-json are mutually exclusive");

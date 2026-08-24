@@ -419,6 +419,78 @@ test("HTTP daemon starts once, serves CLI requests, and stops cleanly", () => {
       directory,
     ]) as { storageState: string };
     assert.equal(restored.storageState, "indexed");
+    const chainPeer = runLauncher([
+      "remember",
+      "Cobalt follows amber in the explicit test sequence.",
+      "--node",
+      "Explicit test sequence",
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { memory: { id: string } };
+    const chain = runLauncher([
+      "chain",
+      "create",
+      "--type",
+      "logical",
+      "--topic",
+      "Daemon chain roundtrip",
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { id: string };
+    runLauncher([
+      "chain",
+      "edge",
+      "add",
+      "--chain",
+      chain.id,
+      "--from",
+      remembered.memory.id,
+      "--to",
+      chainPeer.memory.id,
+      "--json",
+      "--data-dir",
+      directory,
+    ]);
+    const loadedChain = runLauncher([
+      "chain",
+      "get",
+      "--chain",
+      chain.id,
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { edges: unknown[]; topologicalOrder: string[] };
+    assert.equal(loadedChain.edges.length, 1);
+    assert.deepEqual(loadedChain.topologicalOrder, [remembered.memory.id, chainPeer.memory.id]);
+    const removedEdge = runLauncher([
+      "chain",
+      "edge",
+      "remove",
+      "--chain",
+      chain.id,
+      "--from",
+      remembered.memory.id,
+      "--to",
+      chainPeer.memory.id,
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { removed: boolean };
+    assert.equal(removedEdge.removed, true);
+    const removedMember = runLauncher([
+      "chain",
+      "remove",
+      "--chain",
+      chain.id,
+      "--memory",
+      chainPeer.memory.id,
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { removed: boolean };
+    assert.equal(removedMember.removed, true);
     const deleted = runLauncher([
       "memory",
       "delete",
