@@ -2139,6 +2139,15 @@ new status, importance, or evidence; semantic evolution and additional evidence
 must use explicit `update`. This prevents tool retries from inflating the graph
 while keeping changes auditable.
 
+Scratch lifecycle is deliberately session-bound. The same Pi session can resume
+its atomic file after a process restart; a new session never inherits another
+session's workspace automatically. `clear` deletes the owning session
+immediately. Because the scratchpad is not durable semantic memory, Lab startup
+removes workspaces idle for 30 days (including an associated pending compaction
+marker) without archiving or promoting them. Cross-session task transfer, event
+archive, and STG/LTG promotion require a future explicit reviewed operation; TTL
+cleanup must never imply that a conclusion was accepted or forgotten from LTG.
+
 The tool is Lab-only (`NMG_ENABLE_LAB_TOOLS=1`). NMG Lite keeps three durable-memory
 tools plus the independent task-board coordination tool, and the existing numerical MGR prototype remains available
 for independent experiments. The Pi adapter now registers `nmg_reason` only
@@ -2352,7 +2361,7 @@ optional.
 
 Current development evidence (updated 2026-08-24):
 
-- 952 automated tests cover UOp autodiff, the differentiable controller,
+- 953 automated tests cover UOp autodiff, the differentiable controller,
   hierarchical activation, the retained memory-graph reasoner prototype,
   reasoning-workspace persistence and checkpoint injection, P3 lifecycle,
   budget enforcement, disclosure/verified-evidence separation, independent-task deduplication,
@@ -2694,10 +2703,12 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
    transitively anchored support; cycles cannot manufacture evidence; reference
    removal cannot orphan a supported descendant; checkpoints mark unsupported
    hypotheses explicitly. External source truth remains a harness/tool concern.
-4. **Partially complete:** exact add retries are idempotent, explicit `clear`
-   resets only the owning session, and process restart resumes the same session.
-   Stale-node retirement, task-completion archival, and cross-session task resume
-   remain policy decisions; they are not automatic defaults.
+4. **Complete for the bounded Lab lifecycle:** exact add retries are idempotent,
+   explicit `clear` resets only the owning session, process restart resumes that
+   session, and a 30-day idle TTL removes abandoned scratch files. Per-node stale
+   retirement is expressed through explicit status and checkpoint priority.
+   Task-completion archival, cross-session resume, and promotion are deliberately
+   absent rather than implicit defaults.
 5. Keep measuring the explicit workspace on tasks with real interruption or
    compaction risk; do not treat synthetic success as justification for default
    activation.
@@ -2743,10 +2754,6 @@ The next work should reduce uncertainty rather than add another subsystem:
 
 - Can a future deterministic gate identify the narrow tasks that benefit from
   an explicit reasoning workspace without injecting it into ordinary turns?
-- When a task ends, should its workspace be deleted, archived as an event, or
-  reviewed for selective STG/LTG promotion?
-- How should a task resume across a new Pi session without treating every prior
-  session scratchpad as globally active?
 - What measured ambiguity/coverage thresholds justify node creation or
   refinement?
 - What feedback proves a retrieved memory was useful without reinforcing the

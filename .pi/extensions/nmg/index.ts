@@ -63,7 +63,10 @@ import {
   shadowCollectionOrigin,
   shadowEnabled,
 } from "./controller-shadow.ts";
-import { PiReasoningWorkspaces } from "./reasoning-workspace.ts";
+import {
+  DEFAULT_REASONING_WORKSPACE_IDLE_MS,
+  PiReasoningWorkspaces,
+} from "./reasoning-workspace.ts";
 
 /**
  * NMG Pi extension.
@@ -103,6 +106,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const reasoningWorkspaces = labToolsEnabled
     ? new PiReasoningWorkspaces(join(resolveNmgDataDir(), "reasoning"))
     : null;
+  reasoningWorkspaces?.pruneStale(DEFAULT_REASONING_WORKSPACE_IDLE_MS);
   // Most recent event context, used by the board wake loop to test isIdle and
   // to resolve the current session id outside an event handler.
   let latestAgentCtx: ExtensionContext | undefined;

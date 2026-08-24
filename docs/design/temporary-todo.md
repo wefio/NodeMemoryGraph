@@ -316,11 +316,12 @@ observed:
   reviewed and implemented.
 - Full long-horizon reinforcement learning: only after a real sequential
   credit-assignment problem is demonstrated.
-- Automatic reasoning-workspace capture, cross-session continuation, archival
-  policy, and STG/LTG promotion: only after real interruption or compaction tasks
+- Automatic reasoning-workspace capture, cross-session continuation, event
+  archival, and STG/LTG promotion: only after real interruption or compaction tasks
   show that the ordinary transcript and AG are insufficient. The explicit Lab
   tool, same-session atomic persistence, process-restart resume, and one-shot
-  post-compaction checkpoint injection are implemented. Structural provenance is
+  post-compaction checkpoint injection are implemented. Abandoned Lab scratchpads
+  expire after a bounded idle recovery window without promotion. Structural provenance is
   also enforced: evidence requires a stable reference, supported nodes require
   an anchored support path, support cycles cannot self-justify, and checkpoints
   expose unsupported hypotheses. Reference truth is not independently verified.

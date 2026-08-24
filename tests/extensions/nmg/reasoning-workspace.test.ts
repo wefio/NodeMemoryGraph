@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -96,6 +96,31 @@ test("Pi reasoning manager persists an idempotent exact add", () => {
       nodes: unknown[];
     };
     assert.equal(disk.nodes.length, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("stale Lab scratchpads expire without touching a recent session", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-reasoning-expiry-"));
+  try {
+    const manager = new PiReasoningWorkspaces(directory);
+    manager.add("session-old", { kind: "goal", content: "Old interrupted task" });
+    manager.markCompacted("session-old");
+    manager.add("session-new", { kind: "goal", content: "Current task" });
+    const oldState = manager.statePath("session-old");
+    const oldTime = new Date("2026-01-01T00:00:00.000Z");
+    utimesSync(oldState, oldTime, oldTime);
+
+    const removed = manager.pruneStale(
+      7 * 24 * 60 * 60 * 1_000,
+      Date.parse("2026-02-01T00:00:00.000Z"),
+    );
+
+    assert.equal(removed, 1);
+    assert.equal(existsSync(oldState), false);
+    assert.equal(existsSync(manager.statePath("session-new")), true);
+    assert.match(manager.checkpoint("session-new").text, /Current task/u);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

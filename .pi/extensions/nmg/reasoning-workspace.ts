@@ -1,5 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -12,6 +21,8 @@ import {
   type ReasoningStatus,
   type ReasoningWorkspaceState,
 } from "../../../src/lab/reasoning-workspace.ts";
+
+export const DEFAULT_REASONING_WORKSPACE_IDLE_MS = 30 * 24 * 60 * 60 * 1_000;
 
 /**
  * File-backed, session-private owner for the optional Pi reasoning scratchpad.
@@ -100,6 +111,34 @@ export class PiReasoningWorkspaces {
     this.#open.delete(sessionId);
     rmSync(this.#statePath(sessionId), { force: true });
     rmSync(this.#pendingPath(sessionId), { force: true });
+  }
+
+  /**
+   * Delete abandoned Lab scratchpads after an idle recovery window. This never
+   * archives or promotes their contents and never touches a recently written
+   * session. Returns the number of state files removed.
+   */
+  pruneStale(maxIdleMs = DEFAULT_REASONING_WORKSPACE_IDLE_MS, now = Date.now()): number {
+    if (!existsSync(this.directory)) return 0;
+    const boundedIdleMs = Math.max(0, maxIdleMs);
+    let removed = 0;
+    for (const entry of readdirSync(this.directory, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+      const statePath = join(this.directory, entry.name);
+      if (now - statSync(statePath).mtimeMs <= boundedIdleMs) continue;
+      try {
+        const state = JSON.parse(readFileSync(statePath, "utf8")) as Partial<ReasoningWorkspaceState>;
+        if (typeof state.sessionId === "string") this.#open.delete(state.sessionId);
+      } catch {
+        // An old malformed Lab scratchpad is still safe to remove by filename.
+      }
+      rmSync(statePath, { force: true });
+      rmSync(join(this.directory, `${entry.name.slice(0, -".json".length)}.pending`), {
+        force: true,
+      });
+      removed += 1;
+    }
+    return removed;
   }
 
   /** Drop only the in-process cache; the session scratchpad remains resumable. */
