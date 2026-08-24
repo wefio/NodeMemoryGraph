@@ -86,6 +86,13 @@ drift; the current user-level copy is in sync. This automates collection and
 future Agent action but does not convert the current sparse observations into
 natural validation.
 
+The read-only `eval:natural-readiness` command now composes controller coverage,
+the chronological natural dataset, and maintenance evidence into one
+Agent-facing action packet. It distinguishes required collection, an available
+candidate build, and promotion blocked on matched natural evidence; it can write
+a persistent review artifact with `--out`. This removes manual report stitching
+without authorizing automatic runtime changes or closing any evidence item.
+
 A real ordinary Pi audit then exposed one harness gap: the model performed
 `search` and exact `get` but omitted the returned `activeGraphId`, so the new
 disclosure produced only diagnostic attribution and no verified training target.

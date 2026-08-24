@@ -55,6 +55,7 @@
     "eval:natural-maintenance": "node --experimental-strip-types evals/natural-maintenance/audit.ts",
     "eval:controller-dataset": "node --experimental-strip-types evals/controller-shadow/dataset.ts",
     "eval:controller-calibrate": "node --experimental-strip-types evals/controller-shadow/calibrate.ts",
+    "eval:natural-readiness": "node --experimental-strip-types evals/natural-readiness/report.ts",
     "eval:qpp-tau": "node --experimental-strip-types evals/controller-shadow/tau-worker.ts",
     "eval:skillopt:export": "node --experimental-strip-types evals/skillopt/export.ts",
     "eval:skillopt:install": "node --experimental-strip-types evals/skillopt/install-adapter.ts",

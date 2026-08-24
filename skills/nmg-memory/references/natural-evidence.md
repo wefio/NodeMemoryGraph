@@ -66,10 +66,18 @@ Do not fill every boolean merely because the API accepts it. Examples:
 From the NMG checkout, periodically run the read-only summaries:
 
 ```text
+npm run eval:natural-readiness -- --project-dir <REAL_PROJECT>
 npm run eval:controller-shadow
 npm run eval:controller-dataset -- --compact
 npm run eval:natural-maintenance -- --project-dir <REAL_PROJECT>
 ```
+
+Use `eval:natural-readiness` first. It combines the other read-only views into
+one Agent-facing action packet and may be persisted with `--out <FILE>`. Its
+`required`, `available`, and `blocked` actions state what to collect or run next.
+It never activates a controller candidate, changes maintenance policy, or treats
+an empty evidence category as validation. Use the component reports only when
+the packet points to a gap that needs diagnosis.
 
 Use the reports as a readiness contract:
 

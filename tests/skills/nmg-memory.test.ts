@@ -29,6 +29,7 @@ test("NMG Skill natural evidence loop separates observation, calibration, and ac
     /Retrieval, answer reuse, task\s+completion by itself, silence, and lack of correction are not claim evidence/u,
   );
   assert.match(naturalEvidence, /NMG_SHADOW_COLLECTION_ORIGIN/u);
+  assert.match(naturalEvidence, /eval:natural-readiness -- --project-dir <REAL_PROJECT>/u);
   assert.match(naturalEvidence, /eval:controller-dataset -- --compact/u);
   assert.match(naturalEvidence, /writes a rollbackable candidate artifact; it does not activate it/u);
   assert.match(naturalEvidence, /must keep the corresponding production actuator disabled/u);
