@@ -171,6 +171,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       ? renderDisclosure(nmgPrompts.shadow_claim_outcome_nudge, {
           active_graph_id: pendingClaimOutcome.activeGraphId,
           semantic_task_id: pendingClaimOutcome.semanticTaskId,
+          memory_ids: pendingClaimOutcome.memoryIds.join(","),
         })
       : "";
     const nudge = [completionNudge, feedbackNudge, claimOutcomeNudge].filter(Boolean).join("\n");

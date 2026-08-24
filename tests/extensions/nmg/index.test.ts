@@ -579,6 +579,7 @@ test("shadow feedback review selects a disclosed graph instead of a newer header
     assert.deepEqual(claimReminder, {
       activeGraphId: used.activeGraph!.id,
       semanticTaskId: used.activeGraph!.taskId,
+      memoryIds: [saved.memory.id],
     });
     assert.equal(bridge.pendingClaimOutcome("session-a"), null, "claim reminder is one-shot");
     await bridge.claimOutcomeNudgeShown("session-a", claimReminder!);
@@ -602,6 +603,26 @@ test("shadow feedback review selects a disclosed graph instead of a newer header
     assert.equal(events.at(-1)?.graphId, used.activeGraph!.id);
     assert.equal(events.at(-1)?.action, "claim_outcome_nudge_shown");
     assert.equal(events.at(-1)?.reason, "next_user_turn_claim_review");
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("claim-outcome review requires exact get disclosure, not a search preview", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-pi-exact-disclosure-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  try {
+    const bridge = new ControllerShadowBridge(directory, true);
+    store.remember({ statement: "Atlas uses SQLite", nodeName: "Atlas" });
+    const previewOnly = store.searchContext("Atlas database", {
+      sessionId: "session-a",
+      persistTrace: false,
+    });
+    await bridge.retrieval(previewOnly, "session-a", "tool", "search preview text");
+    await bridge.outcome("session-a", []);
+
+    assert.equal(bridge.pendingClaimOutcome("session-a"), null);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });
@@ -644,8 +665,19 @@ test("Pi injects the advisory claim-outcome review only on the next user turn", 
         undefined,
         undefined,
         { sessionManager },
-      )) as { content: Array<{ text: string }> };
+      )) as {
+      content: Array<{ text: string }>;
+      details: { activeGraph?: { id: string }; results: Array<{ memory: { id: string } }> };
+    };
     assert.match(searched.content[0]?.text ?? "", /Atlas stores durable metadata in SQLite/u);
+    const disclosedMemoryId = searched.details.results[0]!.memory.id;
+    await tools.get("nmg_get")!.execute(
+      "get-claim-review",
+      { memoryIds: [disclosedMemoryId] },
+      undefined,
+      undefined,
+      { sessionManager },
+    );
     await handlers.get("agent_end")!(
       {
         messages: [
@@ -664,6 +696,7 @@ test("Pi injects the advisory claim-outcome review only on the next user turn", 
       { sessionManager },
     )) as { message?: { content: string } };
     assert.match(nextTurn.message?.content ?? "", /action=claim_outcome/u);
+    assert.match(nextTurn.message?.content ?? "", new RegExp(disclosedMemoryId));
     assert.match(nextTurn.message?.content ?? "", /successful tool result/u);
     assert.match(nextTurn.message?.content ?? "", /failed tool output are not claim evidence/u);
 

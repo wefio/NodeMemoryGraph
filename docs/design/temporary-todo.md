@@ -22,9 +22,9 @@ plumbing but cannot count as natural product evidence: ordinary Pi writes
 collection origin are excluded. A cross-process lock protects JSONL rotation.
 
 As of the latest 2026-08-24 read-only audit, the bounded shadow log contains
-1,111 events, 345 retrieval graphs, and still only 52 fully labelled natural
-graphs. It contains one disclosure, one `verified_claim_support`, eight
-diagnostic attributions, and 342 outcomes. The joined controller dataset has 52
+1,118 events, 347 retrieval graphs, and still only 52 fully labelled natural
+graphs. It contains two disclosures, one `verified_claim_support`, ten
+diagnostic attributions, and 344 outcomes. The joined controller dataset has 52
 rows across 36 independent tasks (44/8 rows and 28/8 tasks in chronological
 train/validation splits), but all 52 rows lack verified claim attribution. They
 can supervise control labels only, not evidence ranking or budgets. The dataset
@@ -93,6 +93,12 @@ The Pi adapter now recovers an omitted ID from its bounded session-owned search
 trace for `get` and `claim_outcome`; explicit IDs remain the portable contract
 for other harnesses. This repairs provenance continuity but does not infer a
 claim outcome or turn task success into evidence.
+
+The next-turn claim reminder is now also exact-disclosure gated: search headers
+and automatic-recall previews cannot trigger it. When an exact `get` was recorded,
+the reminder carries the owning Active Graph, semantic task, and exact disclosed
+memory IDs. This reduces action ambiguity without treating the reminder itself as
+support or contradiction.
 
 ## 2. Calibrate retrieval and the differentiable controller
 
@@ -243,19 +249,21 @@ The evidence inventory is reproducible without touching the live stores:
 `npm run eval:natural-maintenance -- --project-dir <project>` opens every input
 SQLite database read-only and reports the exact claim, posterior, consolidation,
 proposal, transform, rollback, and maintenance-backlog counts. The latest
-2026-08-24 live audit found 296 LTG memories (253 active), one active project STG
+2026-08-24 live audit found 298 LTG memories (255 active), one active project STG
 memory, four LTG claim outcomes in three semantic tasks with two posteriors, zero
 STG→LTG materializations, one pending `refines` proposal, zero identity
-proposals/transforms/rollbacks, 14 uncompacted index deltas, and 23 pending
+proposals/transforms/rollbacks, 16 uncompacted index deltas, and 24 pending
 accesses. Claim outcomes now retain
 `natural|controlled|legacy` provenance: the current four events are one controlled
 smoke and three migrated legacy events, so the natural count remains zero. The
 first ordinary v5 search/get/write sequence reduced the distributed write backlog
 from 17 nodes to 14. Subsequent smoke writes raised it to 17 deltas across 16
 nodes, and the next ordinary attributable v6 state write drained it again to 13
-deltas across 13 nodes, with a per-node maximum of one. The current audit has 14
+deltas across 13 nodes, with a per-node maximum of one. An earlier audit had 14
 active nodes with writes, a maximum of one pending write per node, and no
-distributed write or access pressure. This repeat validates bounded
+distributed write or access pressure. The latest distribution has 16 active
+nodes with writes, a per-node maximum of one, and no node currently due for
+write/access maintenance. This repeat validates bounded
 sparse-backlog maintenance without claiming consolidation quality. The remaining
 zeros are product-evidence gaps; the audit command and controlled tests do not
 convert them into natural validation.

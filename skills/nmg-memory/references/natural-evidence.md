@@ -45,6 +45,12 @@ During a real task:
 5. Reuse one stable semantic task identity for retries or follow-up turns so one
    conversation cannot create several independent votes.
 
+With shadow collection enabled, Pi may show a one-shot reminder on the next user
+turn. It includes only the exact memory IDs disclosed by `get`, plus the owning
+Active Graph and semantic task. A search preview alone cannot trigger this claim
+review. The reminder is an opportunity to inspect new evidence, not permission to
+infer an outcome.
+
 Do not fill every boolean merely because the API accepts it. Examples:
 
 - An explicit user correction may establish `userCorrection=true` and usually

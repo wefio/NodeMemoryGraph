@@ -287,7 +287,8 @@ shadow_feedback_nudge: >-
 # Shadow-only, one-shot request to inspect the next turn for attributable claim evidence.
 shadow_claim_outcome_nudge: >-
   The previous NMG retrieval activeGraphId={active_graph_id} disclosed saved
-  memory and completed under semanticTaskId={semantic_task_id}. Inspect only the
+  memory IDs {memory_ids} through exact get and completed under
+  semanticTaskId={semantic_task_id}. Inspect only the
   current user message or a successful tool result from this new turn. If it
   independently and unambiguously supports or contradicts one of that graph's
   disclosed saved claims, call nmg_remember action=claim_outcome with the exact

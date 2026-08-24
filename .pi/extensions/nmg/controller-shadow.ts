@@ -13,6 +13,7 @@ interface PendingContext {
   context: MemoryContext;
   retrievedAt: number;
   disclosureRecorded: boolean;
+  disclosedMemoryIds: Set<string>;
   outcomeRecorded: boolean;
   feedbackRecorded: boolean;
   feedbackNudgeShown: boolean;
@@ -29,6 +30,7 @@ export interface PendingShadowFeedback {
 export interface PendingClaimOutcome {
   activeGraphId: string;
   semanticTaskId: string;
+  memoryIds: string[];
 }
 
 /**
@@ -70,10 +72,6 @@ export class ControllerShadowBridge {
       const controllerLatencyMs = performance.now() - startedAt;
       if (!decision) return;
       this.#rememberContext(context.activeGraph.id, context);
-      if (injectedText.trim()) {
-        const pending = this.#contexts.get(context.activeGraph.id);
-        if (pending) pending.disclosureRecorded = true;
-      }
       dependencies.log.retrieval({
         graphId: context.activeGraph.id,
         sessionId,
@@ -281,7 +279,10 @@ export class ControllerShadowBridge {
         requestedMemoryIds,
         disclosedMemoryIds,
       });
-      if (recorded && disclosedMemoryIds.length > 0) pending.disclosureRecorded = true;
+      if (recorded && disclosedMemoryIds.length > 0) {
+        pending.disclosureRecorded = true;
+        for (const memoryId of disclosedMemoryIds) pending.disclosedMemoryIds.add(memoryId);
+      }
     } catch {
       // Best-effort disclosure telemetry; the daemon owns the canonical trace.
     }
@@ -492,6 +493,7 @@ export class ControllerShadowBridge {
     return {
       activeGraphId,
       semanticTaskId: entry.context.activeGraph!.taskId,
+      memoryIds: [...entry.disclosedMemoryIds],
     };
   }
 
@@ -521,6 +523,7 @@ export class ControllerShadowBridge {
       context,
       retrievedAt: performance.now(),
       disclosureRecorded: false,
+      disclosedMemoryIds: new Set(),
       outcomeRecorded: false,
       feedbackRecorded: false,
       feedbackNudgeShown: false,

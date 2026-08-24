@@ -85,7 +85,11 @@ limit：硬上限 = min(调用方原始 limit, expand 后 maxEvidence)，不再 
 ## 待办（下一步）
 
 - 阈值 0.55 在 partial-evidence eval 上标定（可选）；
-- `NMG_SEARCH_RECOMMENDATION` 完整提示词模板化（当前 MEMORY_POLICY 已含追加授权）。
+
+`NMG_SEARCH_RECOMMENDATION` 的提示词模板化已经完成：模板位于
+`src/prompts/nmg-prompts.yaml`，由 Pi adapter 通过 `renderDisclosure` 渲染，
+并有 prompt-source 与 `off|advisory|guardrail` 行为回归测试。其开关仍由
+operator 决定，不与阈值标定混为一项。
 
 ## 范围外
 

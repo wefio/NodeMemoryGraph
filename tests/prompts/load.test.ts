@@ -120,6 +120,7 @@ test("memory policy exposes the independently verified claim-outcome boundary", 
 
 test("claim-outcome reminder is advisory and keeps the exact evidence boundary", () => {
   const text = loadPrompts().shadow_claim_outcome_nudge;
+  assert.match(text, /\{memory_ids\}/u);
   assert.match(text, /current user message or a successful tool result/u);
   assert.match(text, /independently and unambiguously supports or contradicts/u);
   assert.match(text, /claimOutcomeSource=user/u);
