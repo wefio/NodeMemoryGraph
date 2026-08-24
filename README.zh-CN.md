@@ -136,12 +136,16 @@ pi
 Pi adapter 刻意做薄：它通过 JSON-RPC/HTTP 惰性启动本地 daemon，自动回忆和
 四个稳定工具复用同一条连接，且只在本次 adapter 调用启动了 daemon 时才在
 会话关闭时停掉它。已在运行的共享 daemon 不会被碰。
+daemon 是对应 SQLite 数据库唯一的应用层写入者。并发 Agent 轮次可以并行等待
+embedding 或摘要；短小的同步 SQLite 阶段由 daemon 事件循环串行执行。客户端
+不应再对同一文件打开独立可写 store。
 为避免重复注入同一条记忆，adapter 维护一个会话本地内存窗口（最近 12 轮、
 至多 128 条记忆引用）。重复未变的内容折叠成稳定 ID；更深披露、证据变化、
 窗口过期或不同会话才允许重新注入。这个缓存在会话关闭时丢弃，绝不存为 LTG。
 
 Pi 扩展把权威 LTG 放在 `NMG_DATA_DIR` 或 `~/.nmg/nmg.sqlite`，把当前工作
-目录的隔离 STG 放在 `<project>/.nmg/sessions/<session-hash>/stg.sqlite`。
+目录的 STG 放在一个 `<project>/.nmg/stg.sqlite` 中。临时行按 `sessionId`
+隔离；没有会话所有者的 LTG 缓存行由项目内会话共享。
 只有当项目根目录和 Pi 工作目录不同的时候才需要设置 `NMG_PROJECT_DIR`。
 
 默认情况下，模型拿到四个工具和一套类型化写入/使用策略：

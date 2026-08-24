@@ -239,28 +239,24 @@ False negatives cascade: the query never reaches the correct leaf's records.
 
 ---
 
-## 8. No concurrency model
+## 8. Daemon-owned phase concurrency
 
-**Symptom:** `NmgStore` uses a single `DatabaseSync` handle. There is no
-documentation of the expected concurrency model.
+**Status:** resolved in the primary design contract and exercised by the
+single-service concurrency probe.
 
-**Concern:** Node.js SQLite synchronous API is single-threaded per
-connection, which is currently fine. If Pi ever runs multiple concurrent
-agent turns or a background maintenance worker, two operations on the same
-database handle will serialize or, worse, interleave.
+One daemon is the application-level authority for each LTG database and its
+opened project STGs. SQLite phases are synchronous and event-loop serialized;
+external embedding and summary calls may overlap, but no transaction remains
+open across an `await`. Leaf summaries reject stale membership fingerprints,
+while node summaries intentionally tolerate bounded staleness under refresh
+hysteresis. Background maintenance is sliced and retryable from durable
+dirty/delta state.
 
-**Approaches:**
-
-- **Document the current model explicitly:** "NMG expects a single-threaded
-  access pattern. Multi-turn or multi-agent use must serialize through the Pi
-  extension event loop."
-- **Read-only replicas for queries:** open a second read-only connection for
-  search/get operations while mutations use the primary write connection.
-  SQLite WAL supports one writer and many readers concurrently.
-- **Async wrapper:** if the Pi harness ever exposes async extension hooks,
-  wrap the synchronous `DatabaseSync` in a worker thread with a
-  request-response queue. This is a significant architectural change and
-  should be deferred until the need is demonstrated.
+WAL and `busy_timeout` remain resilience mechanisms, not authorization for
+independent multi-process writers. Read-only replicas or a worker-thread database
+queue are deferred until measured event-loop contention violates the latency
+budget. See `design.md` section 4.1.1 for the normative contract and
+`docs/experiments/scale-evaluation-2026-08-09.md` for the 32-session probe.
 
 ---
 

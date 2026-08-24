@@ -97,6 +97,18 @@ export interface NmgServiceOptions {
 }
 
 export class NmgService {
+  /**
+   * Concurrency contract:
+   * - one resident service is the application-level writer for its LTG and
+   *   opened project STGs;
+   * - DatabaseSync phases are short and event-loop serialized;
+   * - external embedding/summary awaits never hold a SQLite transaction;
+   * - summary drains use stale-write protection or bounded-staleness
+   *   hysteresis before their later synchronous write-back.
+   *
+   * Do not wrap invoke() in one global async mutex: that would let a slow model
+   * call block unrelated reads and writes without adding database correctness.
+   */
   readonly databasePath: string;
   readonly #environment: NodeJS.ProcessEnv;
   #store: NmgStore | undefined;

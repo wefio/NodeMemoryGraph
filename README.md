@@ -182,6 +182,10 @@ JSON-RPC/HTTP, reuses one connection for automatic recall and four stable
 tools, and stops the daemon at session shutdown only when that adapter
 invocation started it.
 An already-running shared daemon is left untouched.
+The daemon is the single application-level writer for its SQLite database.
+Concurrent Agent turns may wait on embeddings or summaries in parallel, while
+their short synchronous SQLite phases are serialized by the daemon event loop;
+clients should not open independent writable stores against the same file.
 To avoid repeatedly injecting the same memory, the adapter keeps a
 session-local in-memory window for the last 12 turns (at most 128 memory
 references). Repeated unchanged content is folded to its stable ID; deeper
@@ -190,8 +194,9 @@ reinjection. This cache is discarded at session shutdown and is never stored
 as LTG.
 
 The Pi extension keeps authoritative LTG in `NMG_DATA_DIR` or
-`~/.nmg/nmg.sqlite` and uses `<project>/.nmg/sessions/<session-hash>/stg.sqlite` for the current
-working directory's isolated STG. Set `NMG_PROJECT_DIR` only when the project
+`~/.nmg/nmg.sqlite` and uses one `<project>/.nmg/stg.sqlite` for the current
+working directory's STG. Provisional rows are isolated by `sessionId`; shared
+LTG cache rows have no session owner. Set `NMG_PROJECT_DIR` only when the project
 root differs from Pi's working directory.
 
 By default, the model receives four tools and a typed write/use policy:

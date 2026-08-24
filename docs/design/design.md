@@ -1,7 +1,7 @@
 # NMG design baseline
 
 **Status:** 0.9 / P3 runtime memory model implemented
-**Updated:** 2026-08-13
+**Updated:** 2026-08-24
 
 ## 1. Definition
 
@@ -206,6 +206,39 @@ The lease records the loopback endpoint and a random bearer token. Starting a
 second daemon for the same database is rejected, stale leases are recovered,
 and `Shutdown` performs the normal close path. PID termination is only a
 fallback when the HTTP endpoint cannot be reached.
+
+#### 4.1.1 Runtime ownership and concurrency contract
+
+One resident daemon is the application-level authority for one LTG database and
+for every project STG handle it has opened. Harness adapters and ordinary CLI
+commands must use that daemon rather than opening a second writable `NmgStore`.
+The PID lease prevents two cooperative daemons from owning the same LTG file.
+SQLite WAL and `busy_timeout` provide crash recovery and bounded tolerance for
+administrative or test processes; they do **not** define semantic ordering for
+unsupported multi-process writers.
+
+Inside the daemon, concurrency is phase-based rather than request-global:
+
+- each SQLite phase is synchronous and therefore runs to completion on the
+  Node.js event loop before another SQLite phase begins;
+- external embedding and summary calls may wait concurrently and never hold a
+  SQLite transaction across `await`;
+- a search takes its database view after its query embedding returns; it is not
+  a snapshot begun before the external call;
+- leaf-summary writes carry a membership fingerprint and reject a result when
+  the block changed in flight; node summaries deliberately accept bounded
+  staleness and record the member-count baseline used by refresh hysteresis;
+- maintenance runs in bounded event-loop slices. Its durable dirty/delta state
+  makes an interrupted or failed slice retryable and keeps `remember` success
+  independent from opportunistic maintenance.
+
+This model permits concurrent Agent turns without holding all work behind a
+slow model call, while retaining a single authoritative writer for persistent
+state. Request arrival determines the order of otherwise concurrent write
+phases. It does not promise distributed transactions, linearizable ordering
+across independent OS processes, or parallel execution of synchronous SQLite
+work. Read replicas or a worker-thread database queue remain performance options
+only if measurements show the event-loop writer exceeds its latency budget.
 
 Protocol version `nmg.v6` exposes the typed lifecycle, memory, retrieval,
 maintenance, STG-sync, and Task Board methods declared in `protocol.ts` over
@@ -2639,9 +2672,9 @@ The next work should reduce uncertainty rather than add another subsystem:
 4. Implement the claim outcome posterior from section 5c only after the
    existing use/outcome events can be attributed to independent tasks without
    self-reinforcement.
-5. Harden the plugin boundary: add an installable Pi package manifest, validate
-   the Pi session-entry schema, document the single-writer concurrency model,
-   and expose user-facing delete/export.
+5. **Complete:** harden the plugin boundary with an installable Pi package
+   manifest, validated Pi session-entry schema, an explicit daemon concurrency
+   contract, and user-facing delete/export.
 6. Leave activation and module composition to explicit user/operator policy.
 7. Keep ANN, unattended topology mutation, cloud sync, and automatic reasoning
    workspace activation deferred until their measured prerequisite appears.

@@ -96,6 +96,30 @@ test("JSON-RPC arrays survive the wire without wrapping", async () => {
   });
 });
 
+test("concurrent HTTP turns share one daemon writer without losing writes", async () => {
+  await withServer(async (state) => {
+    const writes = await Promise.all(
+      Array.from({ length: 32 }, (_, index) =>
+        httpCall(state, "remember", {
+          statement: `Concurrent daemon fact ${index}.`,
+          nodeName: "Concurrent daemon writes",
+          memoryType: "fact",
+          evidence: `Concurrent daemon fact ${index}.`,
+        }) as Promise<{ memory: { id: string } }>,
+      ),
+    );
+    assert.equal(new Set(writes.map((result) => result.memory.id)).size, 32);
+
+    const exported = (await httpCall(state, "exportMemories", {})) as {
+      items: Array<{ memory: { statement: string } }>;
+    };
+    const retained = exported.items.filter((entry) =>
+      entry.memory.statement.startsWith("Concurrent daemon fact "),
+    );
+    assert.equal(retained.length, 32, "the daemon serializes all SQLite write phases");
+  });
+});
+
 test("JSON-RPC over HTTP rejects unauthenticated requests", async () => {
   await withServer(async (state) => {
     await assert.rejects(

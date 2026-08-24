@@ -2,16 +2,17 @@
  * STG isolated store (docs/design/stg-isolated-store.md).
  *
  * Three-storage model support without touching NmgStore internals:
- *   - createStgStore: open/create the session-private project STG SQLite (Phase 1)
+ *   - createStgStore: open/create the project-local shared STG SQLite (Phase 1)
  *   - copyLtgSubsetToStg: usage-driven copy of LTG content into the STG,
  *     each copy carrying a cached_from_ltg marker (Phase 2)
  *   - searchStgFirst: STG-first dual-store search with LTG fallback and
  *     dedupe by sourceMemoryId (Phase 3)
  *
- * STG stores are plain NmgStore instances on separate files: deletable,
- * session-private and project-local, never authoritative. LTG remains the sole authority;
- * cached copies are search hints (marker, no re-verification) and are
- * refused by the promotion pipeline (loop guard in promoteMemory).
+ * STG stores are plain NmgStore instances in one file per project: deletable,
+ * row-isolated by session and never authoritative. Sessionless cached copies
+ * are project-shared search hints (marker, no re-verification) and are refused
+ * by the promotion pipeline (loop guard in promoteMemory). LTG remains the sole
+ * authority.
  */
 import { join } from "node:path";
 

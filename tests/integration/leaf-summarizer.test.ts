@@ -154,3 +154,42 @@ test("drainLeafSummaries: systematic provider failure stops without hot-looping"
     rmSync(directory, { force: true, recursive: true });
   }
 });
+
+test("drainLeafSummaries: rejects a summary whose block changed during the model call", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-leaf-drain-stale-"));
+  const store = new NmgStore(join(directory, "test.sqlite"));
+  try {
+    store.remember({ statement: "first member", nodeName: "changing node", sourceActor: "user" });
+    store.rebuildLeafBlocks();
+
+    let release!: (value: string) => void;
+    const response = new Promise<string>((resolve) => {
+      release = resolve;
+    });
+    let started!: () => void;
+    const providerStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const provider: LeafSummaryProvider = {
+      model: "slow-model",
+      summarize: () => {
+        started();
+        return response;
+      },
+    };
+
+    const draining = drainLeafSummaries(store, provider, { maxCalls: 1 });
+    await providerStarted;
+    store.remember({ statement: "second member", nodeName: "changing node", sourceActor: "user" });
+    store.rebuildLeafBlocks();
+    release("summary from the old membership");
+
+    const result = await draining;
+    assert.equal(result.summarized, 0);
+    assert.equal(result.truncated, true);
+    assert.ok(store.pendingLeafSummaries().length > 0, "the changed block remains pending");
+  } finally {
+    store.close();
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
