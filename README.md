@@ -26,9 +26,9 @@ other way:
   board passes memory *IDs*, not content: memory outlives any single agent.
 - **Local and private.** All durable memory lives in one SQLite file you can
   back up by copying. Retrieval works with zero configuration (SQLite FTS5);
-  the optional semantic layer runs a local embedding model, or a free-tier
-  cloud embedder if you prefer — only the text to embed ever leaves the
-  machine, never the store.
+  the optional semantic layer can use a bundled local model, a separately hosted
+  local service, or a free-tier cloud embedder — only the text to embed ever
+  leaves the memory process, never the store.
 - **Free.** No billing surface at all: FTS5 retrieval is built in, the local
   embedding path costs nothing, and there is no account to upgrade.
 - **Real, not conceptual.** A CLI, a JSON-RPC daemon, an MCP server, working
