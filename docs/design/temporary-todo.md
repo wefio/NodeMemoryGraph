@@ -72,6 +72,17 @@ enforces a per-turn construction-process budget (three searches, five total
 search/get calls, exact-evidence progression, and no-gain stopping), preventing
 repeated tool expansion from bypassing the final AG projection budget.
 
+The NMG Skill now carries the natural-evidence loop so ordinary Agents can
+collect the missing data during real work and act when it matures. It documents
+passive shadow capture, exact search→get attribution, partial/unknown label
+semantics, claim evidence, compact readiness audits, candidate calibration,
+matched quality/cost gates, rollback, and the stricter consolidation/identity
+merge boundary. Two Skill eval cases cover natural tool-verified outcomes and
+fail-closed calibration. `skill:nmg:sync` atomically installs the complete Skill
+and `skill:nmg:check` detects source/install drift; the current user-level copy is
+in sync. This automates collection and future Agent action but does not convert
+the current sparse observations into natural validation.
+
 ## 2. Calibrate retrieval and the differentiable controller
 
 - [ ] On semantic-task/time splits, compare the frozen heuristic with a shadow

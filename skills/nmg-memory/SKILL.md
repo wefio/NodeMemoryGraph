@@ -21,6 +21,9 @@ an operation or encountering its named special case.
 - Use the task board, not LTG or Markdown files, for temporary cross-Agent
   coordination. Blackboard entries expire and never become durable memory
   unless an Agent separately calls `nmg remember` with attributable evidence.
+- Let ordinary work produce natural improvement evidence when controller shadow
+  collection is enabled. Record only outcomes that are directly observable; an
+  uncorrected answer, silence, retrieval, or answer reuse remains `unknown`.
 
 ## Normal workflow
 
@@ -146,5 +149,7 @@ loaded evidence, state the remaining uncertainty, or wait for a new user turn.
   [embedding](references/embedding.md)
 - For calibrating QPP from real Agent usage rather than benchmark-only data:
   [QPP calibration](references/qpp-calibration.md)
+- For collecting natural evidence and letting an Agent perform a gated update
+  after the evidence is mature: [natural evidence loop](references/natural-evidence.md)
 - For writing an NMG adapter for a new harness (worked example: DeepSeek Harness):
   [harness adapters](references/harness-adapters.md)

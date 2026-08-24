@@ -336,6 +336,20 @@ recall, and operations guidance is read only after an Agent forgets an operation
 or encounters a special case. The normal path remains
 `status → start if needed → search → selected get → ownership-safe stop`.
 
+Install or refresh the complete Skill (quick card plus references) and verify
+that the installed copy has not drifted:
+
+```bash
+npm run skill:nmg:sync
+npm run skill:nmg:check
+```
+
+The default cross-platform target is `~/.agents/skills/nmg-memory`; pass
+`-- --target <.../nmg-memory>` to either command for another Agent home. The
+natural-evidence reference describes passive real-use collection, fail-closed
+readiness audits, candidate calibration, matched validation, and rollbackable
+Agent-applied updates.
+
 SQLite FTS5 is the zero-configuration Pi retrieval path. Set
 `NMG_EMBED_BASE_URL` and `NMG_EMBED_MODEL` to add the external node/leaf semantic
 signal to the same budgeted Active Graph pipeline. If the endpoint fails or

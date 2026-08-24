@@ -56,5 +56,26 @@
       "Does not use nmg remember or semantic search for temporary coordination",
       "Treats the board as expiring task state projected into each Agent's private AG"
     ]
+  },
+  {
+    "name": "natural_outcome_collection",
+    "prompt": "这次真实任务里 NMG 找到并 get 了旧决定，随后测试工具明确验证该决定仍正确。把这次结果作为以后改进检索的自然证据，但不要把沉默或回答复用当作成功。",
+    "expected": [
+      "Uses the session-owned activeGraphId to preserve search-to-get attribution",
+      "Records only directly observed feedback fields",
+      "Uses the smallest exact successful tool excerpt for claim_outcome",
+      "Keeps silence, lack of correction, retrieval, and answer reuse as unknown"
+    ]
+  },
+  {
+    "name": "gated_natural_calibration",
+    "prompt": "NMG 已经积累了一批真实 Pi 使用数据。检查它是否足够训练控制器；如果足够就让 Agent 更新策略，如果不够就继续采集。不要把 benchmark 或 probe 冒充自然数据。",
+    "expected": [
+      "Runs compact controller and natural-maintenance readiness audits",
+      "Treats controlled and legacy rows as ineligible natural supervision",
+      "Does not calibrate while dataset blockers remain",
+      "Creates a rollbackable candidate only after readiness",
+      "Applies a source or configuration update only after held-out matched quality and cost gates pass"
+    ]
   }
 ]

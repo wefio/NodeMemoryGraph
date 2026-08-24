@@ -95,14 +95,17 @@ weight, but must not be treated as ground truth.
 - Benchmark data remains useful as a regression suite and cold-start prior, not
   as the final estimate of real-use probabilities.
 
-## Optional controller shadow collection
+## Natural controller shadow collection
 
-Set `NMG_CONTROLLER_SHADOW=1` for a Pi session to collect a bounded, local
+Set `NMG_CONTROLLER_SHADOW=1` for ordinary Pi sessions to collect a bounded, local
 matched trace without changing retrieval. NMG stores
 `controller-shadow-events.jsonl` and `controller-shadow-state.json` under
 `NMG_DATA_DIR`. A retrieval is only a candidate event; training occurs only
 after an explicit `nmg_get` fetch from the same session-owned Active Graph.
-Leave the switch off when no controller experiment is being run.
+Do not set `NMG_SHADOW_COLLECTION_ORIGIN=controlled` for ordinary work. Conversely,
+never remove that marker from a headless probe, benchmark, or scripted experiment
+to make it appear natural. See [natural evidence](natural-evidence.md) for the
+full collection and update loop.
 
 For an Active Graph whose outcome is explicitly known, the existing Pi tool
 surface can record labels without creating a separate evaluation tool:
@@ -134,7 +137,7 @@ does not turn sparse telemetry into a policy.
 Once independently reviewed labels exist, build the leakage-safe joined data:
 
 ```text
-npm run eval:controller-dataset
+npm run eval:controller-dataset -- --compact
 ```
 
 The exporter joins retrieval, exact use, outcome, and feedback by Active Graph,
@@ -145,7 +148,7 @@ inventing labels or treating a query fingerprint as semantic-task identity.
 Fit the candidate only after the exporter has no protocol blockers:
 
 ```text
-npm run eval:controller-calibrate
+npm run eval:controller-calibrate -- --compact
 ```
 
 The calibration command prints a bounded readiness summary and writes the full
