@@ -1,6 +1,6 @@
 # NMG design baseline
 
-**Status:** 0.9 / P3 runtime memory model implemented
+**Status:** 0.9 / core runtime structurally complete; adaptive defaults validation-gated
 **Updated:** 2026-08-24
 
 ## 1. Definition
@@ -43,12 +43,36 @@ NMG has two intentionally different surfaces:
 - **NMG Lite** is the default product surface: a zero-configuration Pi plugin
   backed by SQLite, a small model-facing API, and the framework-free
   differentiable computation substrate used by optional controllers.
-- **NMG Lab** contains measured experiments such as graph routing, adaptive
-  tiers, ANN, learned routing, and topology refinement. A Lab feature enters
-  Lite only after an ablation demonstrates a benefit over a simpler baseline.
+- **NMG Lab** contains non-default capabilities such as graph routing, adaptive
+  tiers, ANN, learned routing, and topology refinement. Lab is an opt-in product
+  channel, not a permanent quarantine: a capability can be used while it remains
+  in Lab when an Agent profile, harness, operator, or user explicitly enables its
+  feature gate. It becomes part of the Lite default only after an ablation shows
+  sufficient benefit over a simpler baseline at acceptable quality, latency,
+  token, and maintenance cost.
 
 The repository may contain both surfaces, but experimental complexity must not
-become an installation or prompt dependency for the default plugin.
+become an installation or prompt dependency for the default plugin. Disabled Lab
+capabilities must stay out of the model's active tool schema and ordinary prompt;
+opting in accepts the capability's documented cost and maturity limits without
+claiming that it has passed the Lite promotion gate.
+
+Lab capability lifecycle therefore has two independent transitions:
+
+```text
+implemented Lab capability
+  |-- explicit per-capability opt-in --> enabled Lab capability
+  `-- evidence-backed promotion -----> Lite default capability
+```
+
+The first transition is configuration, not proof of usefulness. The second is a
+product-default decision and must remain reversible. A model may request a Lab
+capability only when its harness has delegated that authority; it must not silently
+enable cost-bearing or topology-mutating behavior. In Pi today, Lab features use
+per-Agent process/profile gates (for example `NMG_ENABLE_LAB_TOOLS=1` for the
+reasoning scratchpad and independent QPP/controller mode variables). A future
+session UI may change active tools dynamically, but no always-visible unlock tool
+is required in Lite.
 
 The autodiff substrate belongs to Lite because product features may depend on
 its numerical graph and it adds no Python, PyTorch, GPU, or model-service
@@ -2740,9 +2764,11 @@ The next work should reduce uncertainty rather than add another subsystem:
    raw recall.
 3. Test whether the model follows one search recommendation when useful,
    ignores it when unnecessary, and stops after an unproductive search.
-4. Implement the claim outcome posterior from section 5c only after the
-   existing use/outcome events can be attributed to independent tasks without
-   self-reinforcement.
+4. **Mechanism complete; evidence collection open:** claim-outcome posteriors,
+   source lineage, semantic-task deduplication, conservative bounds, and
+   reversible STG materialization exist. Accumulate independent natural
+   verified-evidence outcomes before calibrating or enabling unattended
+   consolidation.
 5. **Complete:** harden the plugin boundary with an installable Pi package
    manifest, validated Pi session-entry schema, an explicit daemon concurrency
    contract, and user-facing delete/export.
@@ -2769,9 +2795,9 @@ The next work should reduce uncertainty rather than add another subsystem:
 - How should QPP1 depth and QPP2 retained mass be calibrated from independent
   outcome evidence rather than benchmark labels or the controller's own prior
   selections?
-- When a QPP recommendation is emitted, what bounded policy prevents repeated
-  low-value searches while still allowing a genuinely multi-part query to
-  continue?
+- Does the implemented per-turn construction budget (three searches, five total
+  search/get calls, exact-evidence progression, and no-gain stopping) strike the
+  right precision/cost balance for genuinely multi-part natural queries?
 - At what measured node/leaf count does exact contiguous vector scan stop
   meeting the end-to-end latency budget?
 - What privacy/delete interface can remove raw evidence and every dependent

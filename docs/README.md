@@ -4,7 +4,9 @@ Two kinds of documents live here:
 
 - **`design/`** — design and mechanism records: architecture decisions, data
   models, algorithms, process conventions. Entry point:
-  [design/design.md](design/design.md) (normative model and roadmap).
+  [design/design.md](design/design.md) (normative model and roadmap). The
+  requirement-to-evidence ledger is
+  [design/completion-audit.md](design/completion-audit.md).
 - **`experiments/`** — experiment and evaluation records: benchmark runs,
   audits, probes, regressions. Named `<topic>-<date>.md` whenever they report
   a run. Retrieval-quality series:

@@ -217,6 +217,14 @@ Graph maintenance, QPP, indexing, and experimental reasoning components remain
 core/CLI concerns rather than Pi tools. The adapter never opens SQLite or
 imports those implementations directly.
 
+Lab is an opt-in capability channel, not a dead-end staging area. A Lab feature
+may be enabled for one Agent profile without becoming a Lite default. For example,
+start that Pi Agent with `NMG_ENABLE_LAB_TOOLS=1` to expose the experimental
+`nmg_reason` scratchpad; QPP and controller experiments have their own independent
+mode variables. Disabled Lab capabilities are omitted from the active model tool
+surface. Passing evaluation is required for default promotion, not for explicit
+opt-in use.
+
 For one-off development inside this repository, disable automatic extension
 discovery and load NMG exactly once:
 

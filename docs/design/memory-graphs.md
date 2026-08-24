@@ -586,11 +586,12 @@ Implemented (design.md §13):
   world channel), and convention-based `memory=<id>` pointers readers expand
   via `nmg_get`;
 
-Not yet implemented:
+Implemented but not promoted or naturally calibrated:
 
 - promotion of the implemented Lab AG budget projection into the default Lite
-  policy (the typed runtime boundary now exists and defaults to shadow; no
-  candidate has passed the natural matched-evidence gate for active/default use);
+  policy (the typed runtime boundary exists and defaults to shadow; it may be
+  enabled explicitly while still in Lab, but no candidate has passed the natural
+  matched-evidence gate for active/default use);
 - calibrated SPRT evaluation for tier opening;
 - learned temporal edge direction, contrastive unlearning, and automatic
   compression merge (see
@@ -599,14 +600,12 @@ Not yet implemented:
 
 ## 9. Open questions
 
-1. What STG retention, expiry, and demotion policy preserves useful
-   provisional information without turning STG into a second unbounded
-   archive?
-2. How should an AG allocate token, node, edge, evidence, graph-hop, and
-   tier budgets across a query — fixed defaults first, learned projection
-   only after a measured gain?
-3. Can a consolidated LTG relation be demoted or reopened when later
-   evidence contradicts it, and what hysteresis parameters prevent
-   oscillation?
+1. How should the implemented STG retention, expiry, and demotion priors be
+   calibrated so useful provisional information survives without turning STG
+   into a second unbounded archive?
+2. How should the implemented AG token, node, edge, evidence, graph-hop, and
+   tier allocator be calibrated across natural queries?
+3. What natural contradiction and reversal evidence is sufficient to calibrate
+   the implemented LTG relation demotion/reopen hysteresis?
 4. Is CLS's replay analogy actionable (e.g., scheduled STG re-integration
    passes), or only a justification for the promotion thresholds?
