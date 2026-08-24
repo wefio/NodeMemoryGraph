@@ -30,11 +30,19 @@ test("valid bilingual documentation surface passes", () => {
   assert.deepEqual(report.errors, []);
 });
 
-test("broken local links and missing H1 fail", () => {
+test("internal notes with broken links or no H1 warn without blocking", () => {
   const root = fixture();
   writeFileSync(join(root, "docs", "broken.md"), "[missing](absent.md)\n");
   const report = verifyDocumentation(root);
-  assert.ok(report.errors.some((error) => error.includes("missing H1")));
+  assert.deepEqual(report.errors, []);
+  assert.ok(report.warnings.some((warning) => warning.includes("missing H1")));
+  assert.ok(report.warnings.some((warning) => warning.includes("broken local link")));
+});
+
+test("canonical entry documents fail on a broken local link", () => {
+  const root = fixture();
+  writeFileSync(join(root, "docs", "README.md"), "# Docs\n\n[missing](absent.md)\n");
+  const report = verifyDocumentation(root);
   assert.ok(report.errors.some((error) => error.includes("broken local link")));
 });
 
@@ -69,9 +77,10 @@ test("a missing public bilingual index fails", () => {
   assert.ok(report.errors.some((error) => error.includes("missing public bilingual document")));
 });
 
-test("uncategorized documentation content at docs root fails", () => {
+test("uncategorized documentation content at docs root warns", () => {
   const root = fixture();
   writeFileSync(join(root, "docs", "orphan.md"), "# Orphan\n");
   const report = verifyDocumentation(root);
-  assert.ok(report.errors.some((error) => error.includes("must live in design/")));
+  assert.deepEqual(report.errors, []);
+  assert.ok(report.warnings.some((warning) => warning.includes("must live in design/")));
 });

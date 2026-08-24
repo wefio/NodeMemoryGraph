@@ -71,4 +71,6 @@ Use [the `doc-maintenance` Skill](../skills/doc-maintenance/SKILL.md) whenever a
 change affects behavior, architecture, evaluation evidence, public instructions,
 or the document layout. Run `npm run docs:check` before committing documentation
 changes. The check intentionally enforces only structural errors; translation
-drift and missing decision translations are warnings for human review.
+drift and missing decision translations are warnings for human review. In CI,
+only public/canonical entry breakage and malformed decision records block the
+build; internal and experimental document issues remain advisory.

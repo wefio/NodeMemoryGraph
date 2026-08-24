@@ -37,4 +37,4 @@ NMG 需要双语文档，但不要求机械地逐段一致。
 
 ## 维护流程
 
-行为、架构、评估证据、公开说明或文档布局发生变化时，使用 [`doc-maintenance` Skill](../skills/doc-maintenance/SKILL.md)。提交文档修改前运行 `npm run docs:check`。该检查只阻止明确的结构错误；翻译漂移和缺少决策译文只作为人工复核警告。
+行为、架构、评估证据、公开说明或文档布局发生变化时，使用 [`doc-maintenance` Skill](../skills/doc-maintenance/SKILL.md)。提交文档修改前运行 `npm run docs:check`。CI 只阻止公共/规范入口破损和错误的决策结构；内部或实验文档问题、翻译漂移与缺少决策译文只作为人工复核警告。

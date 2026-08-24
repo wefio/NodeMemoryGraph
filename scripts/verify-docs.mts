@@ -104,6 +104,7 @@ function checkLocalLinks(
   path: string,
   text: string,
   report: DocumentationReport,
+  strict: boolean,
 ): void {
   const clean = withoutCodeFences(text);
   const link = /(?<!!)\[[^\]]*\]\(([^)]+)\)/g;
@@ -126,9 +127,30 @@ function checkLocalLinks(
     }
     const resolved = resolve(dirname(path), target);
     if (!existsSync(resolved)) {
-      report.errors.push(`${relative(root, path)}: broken local link '${match[1]}'`);
+      const message = `${relative(root, path)}: broken local link '${match[1]}'`;
+      (strict ? report.errors : report.warnings).push(message);
     }
   }
+}
+
+function isContractDocument(display: string): boolean {
+  if (new Set(["README.md", "README.zh-CN.md"]).has(display)) return true;
+  if (
+    new Set([
+      "docs/README.md",
+      "docs/README.zh-CN.md",
+      "docs/design/design.md",
+      "docs/design/completion-audit.md",
+      "docs/decisions/README.md",
+      "docs/decisions/README.zh-CN.md",
+    ]).has(display)
+  ) {
+    return true;
+  }
+  if (/^docs\/decisions\/(proposed|implemented|rejected|archived)\/.+\.md$/.test(display)) {
+    return true;
+  }
+  return /^skills\/[^/]+\/SKILL\.md$/.test(display);
 }
 
 export function verifyDocumentation(rootDirectory = process.cwd()): DocumentationReport {
@@ -159,9 +181,12 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
   for (const path of [...candidates].sort()) {
     const text = readFileSync(path, "utf8");
     const display = relative(root, path).replaceAll("\\", "/");
+    const strict = isContractDocument(display);
     report.files += 1;
-    if (!/^#\s+\S/m.test(text)) report.errors.push(`${display}: missing H1`);
-    checkLocalLinks(root, path, text, report);
+    if (!/^#\s+\S/m.test(text)) {
+      (strict ? report.errors : report.warnings).push(`${display}: missing H1`);
+    }
+    checkLocalLinks(root, path, text, report, strict);
 
     const parts = display.split("/");
     if (
@@ -169,7 +194,7 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
       parts.length === 2 &&
       !new Set(["README.md", "README.zh-CN.md", "AGENTS.md"]).has(parts[1])
     ) {
-      report.errors.push(
+      report.warnings.push(
         `${display}: documentation content must live in design/, decisions/, or experiments/`,
       );
     }

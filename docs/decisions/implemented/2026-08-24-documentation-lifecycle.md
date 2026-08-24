@@ -21,8 +21,9 @@ Use a lightweight ownership and lifecycle system:
 - one project Skill named `doc-maintenance` as the operational workflow;
 - paired bilingual public indexes and normally paired decisions, without
   paragraph-level equivalence or translation hashes;
-- a structural verifier that fails on broken local links, missing headings, or
-  malformed decision records, while bilingual drift remains a warning.
+- a structural verifier that fails on broken canonical entry points or malformed
+  decision records, while internal-note issues and bilingual drift remain
+  warnings.
 
 ## Alternatives considered
 
@@ -37,5 +38,6 @@ Use a lightweight ownership and lifecycle system:
 
 Contributors must identify the owning document before adding another file. Public
 entry points remain bilingual, but translation is judged by preserved intent
-rather than identical structure. The verifier catches objective breakage without
-turning evolving translations or historical notes into release blockers.
+rather than identical structure. CI blocks broken public/canonical navigation and
+decision contracts; it reports internal organization and translation drift
+without turning them into release blockers.
