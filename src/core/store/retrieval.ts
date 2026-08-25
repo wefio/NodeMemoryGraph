@@ -73,7 +73,11 @@ import type {
   SearchOptions,
   VectorEmbedder,
 } from "../types.ts";
-import { DEFAULT_APPENDED_MAX_CHARS } from "../types.ts";
+import {
+  DEFAULT_APPENDED_BASE_CHARS,
+  DEFAULT_APPENDED_MAX_CHARS,
+  DEFAULT_APPENDED_MAX_RATIO,
+} from "../types.ts";
 import type { DatabaseSync } from "node:sqlite";
 import {
   MIN_WARM_DISCLOSURE_SIZE,
@@ -712,10 +716,24 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       // below — chain expansion and block-member routing. This is a protocol
       // guarantee, not merely an eval setting: omitted callers receive the
       // same finite ceiling as explicit callers.
-      const appendedMaxChars = Math.max(
+      const absoluteAppendedMaxChars = Math.max(
         0,
         Math.trunc(options.appendedMaxChars ?? DEFAULT_APPENDED_MAX_CHARS),
       );
+      const primaryEvidenceChars = context.results.reduce(
+        (total, result) => total + result.memory.statement.length,
+        0,
+      );
+      const appendedMaxRatio = Math.max(
+        0,
+        Number.isFinite(options.appendedMaxRatio)
+          ? Number(options.appendedMaxRatio)
+          : DEFAULT_APPENDED_MAX_RATIO,
+      );
+      const relativeAppendedMaxChars = Math.trunc(
+        DEFAULT_APPENDED_BASE_CHARS + primaryEvidenceChars * appendedMaxRatio,
+      );
+      const appendedMaxChars = Math.min(absoluteAppendedMaxChars, relativeAppendedMaxChars);
       let appendedChars = 0;
       const fitsAppendedBudget = (chars: number): boolean =>
         appendedChars + chars <= appendedMaxChars;
@@ -730,38 +748,155 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       // single most-similar record. Retrieval ranking is untouched — this is a
       // recall supplement on the evolution side (docs §3.1), never a re-rank.
       if (options.expandChains && context.results.length > 0) {
-        const chainIds = new Set<string>();
+        const rankedMemoryIds = context.results.map((result) => result.memory.id);
+        const placeholders = (count: number): string => Array.from({ length: count }, () => "?").join(",");
+        const directRows = this.db
+          .prepare(
+            `SELECT chain_id, memory_id, position FROM memory_chain_members
+              WHERE memory_id IN (${placeholders(rankedMemoryIds.length)})`,
+          )
+          .all(...rankedMemoryIds) as Row[];
+        const directChainIds = new Set(directRows.map((row) => String(row.chain_id)));
+        const candidateChainIds = new Set(directChainIds);
         const chainOfExisting = new Map<string, Array<{ chainId: string; position: number }>>();
         const hitPositions = new Map<string, number[]>();
-        for (const result of context.results) {
-          const chainRows = this.db
-            .prepare("SELECT chain_id, position FROM memory_chain_members WHERE memory_id = ?")
-            .all(result.memory.id) as Row[];
-          for (const row of chainRows) {
+        const anchorMemoryIds = new Map<string, Set<string>>();
+        for (const row of directRows) {
+          const cid = String(row.chain_id);
+          const memoryId = String(row.memory_id);
+          const pos = Number(row.position);
+          const memberships = chainOfExisting.get(memoryId) ?? [];
+          memberships.push({ chainId: cid, position: pos });
+          chainOfExisting.set(memoryId, memberships);
+          const positions = hitPositions.get(cid) ?? [];
+          positions.push(pos);
+          hitPositions.set(cid, positions);
+          const anchors = anchorMemoryIds.get(cid) ?? new Set<string>();
+          anchors.add(memoryId);
+          anchorMemoryIds.set(cid, anchors);
+        }
+
+        // A bounded recursive disclosure step over the chain-intersection graph:
+        // chains sharing a memory with a direct hit chain are one-hop neighbours.
+        // We intentionally never recurse from those neighbours, so C0 -> C1 is
+        // possible but C0 -> C1 -> C2 is not.
+        const maxChainHops = Math.max(0, Math.min(1, Math.trunc(options.chainExpansionMaxHops ?? 1)));
+        if (maxChainHops > 0 && directChainIds.size > 0) {
+          const directIds = [...directChainIds];
+          const adjacentRows = this.db
+            .prepare(
+              `SELECT DISTINCT adjacent.chain_id, adjacent.memory_id, adjacent.position
+                 FROM memory_chain_members bridge
+                 JOIN memory_chain_members adjacent ON adjacent.memory_id = bridge.memory_id
+                WHERE bridge.chain_id IN (${placeholders(directIds.length)})
+                  AND adjacent.chain_id != bridge.chain_id`,
+            )
+            .all(...directIds) as Row[];
+          for (const row of adjacentRows) {
             const cid = String(row.chain_id);
-            chainIds.add(cid);
-            const memberships = chainOfExisting.get(result.memory.id) ?? [];
-            memberships.push({ chainId: cid, position: Number(row.position) });
-            chainOfExisting.set(result.memory.id, memberships);
-            const pos = Number(row.position);
-            const arr = hitPositions.get(cid) ?? [];
-            arr.push(pos);
-            hitPositions.set(cid, arr);
+            const memoryId = String(row.memory_id);
+            candidateChainIds.add(cid);
+            const positions = hitPositions.get(cid) ?? [];
+            positions.push(Number(row.position));
+            hitPositions.set(cid, positions);
+            const anchors = anchorMemoryIds.get(cid) ?? new Set<string>();
+            anchors.add(memoryId);
+            anchorMemoryIds.set(cid, anchors);
           }
         }
-        if (chainIds.size > 0) {
+
+        if (candidateChainIds.size > 0) {
+          const candidateIds = [...candidateChainIds];
+          const chainRows = this.db
+            .prepare(
+              `SELECT id, chain_type, topic FROM memory_chains
+                WHERE id IN (${placeholders(candidateIds.length)}) AND status = 'active'`,
+            )
+            .all(...candidateIds) as Row[];
+          const chainMeta = new Map<string, { chainType: MemoryChainType; topic: string | null }>();
+          for (const row of chainRows) {
+            chainMeta.set(String(row.id), {
+              chainType: row.chain_type as MemoryChainType,
+              topic: (row.topic as string | null) ?? null,
+            });
+          }
+          const allMemberRows = this.db
+            .prepare(
+              `SELECT cm.chain_id, cm.memory_id, cm.position, m.statement, m.importance
+                 FROM memory_chain_members cm
+                 JOIN memory_records m ON m.id = cm.memory_id
+                WHERE cm.chain_id IN (${placeholders(candidateIds.length)})
+                ORDER BY cm.chain_id, cm.position`,
+            )
+            .all(...candidateIds) as Row[];
+          const membersByChain = new Map<string, Row[]>();
+          const memberIdsByChain = new Map<string, Set<string>>();
+          for (const row of allMemberRows) {
+            const cid = String(row.chain_id);
+            const rows = membersByChain.get(cid) ?? [];
+            rows.push(row);
+            membersByChain.set(cid, rows);
+            const ids = memberIdsByChain.get(cid) ?? new Set<string>();
+            ids.add(String(row.memory_id));
+            memberIdsByChain.set(cid, ids);
+          }
+
+          // Select chains with MMR: direct-hit strength and query/topic overlap
+          // provide relevance; shared member IDs provide redundancy. This keeps
+          // intersecting near-duplicates from consuming all disclosure slots.
+          const maxChains = Math.max(1, Math.min(8, Math.trunc(options.chainExpansionMaxChains ?? 4)));
+          const queryTerms = queryOverlapTerms(query);
+          const remaining = candidateIds.filter((id) => chainMeta.has(id));
+          const selectedChainIds: string[] = [];
+          const jaccard = (left: Set<string>, right: Set<string>): number => {
+            let intersection = 0;
+            for (const id of left) if (right.has(id)) intersection += 1;
+            const union = left.size + right.size - intersection;
+            return union === 0 ? 0 : intersection / union;
+          };
+          while (remaining.length > 0 && selectedChainIds.length < maxChains) {
+            let bestIndex = 0;
+            let bestScore = Number.NEGATIVE_INFINITY;
+            for (let index = 0; index < remaining.length; index += 1) {
+              const cid = remaining[index]!;
+              const meta = chainMeta.get(cid)!;
+              const relevance =
+                (directChainIds.has(cid) ? 1 : 0.65) +
+                0.1 * termOverlapScore(queryTerms, meta.topic ?? "");
+              const redundancy = selectedChainIds.reduce(
+                (highest, selected) =>
+                  Math.max(
+                    highest,
+                    jaccard(memberIdsByChain.get(cid) ?? new Set(), memberIdsByChain.get(selected) ?? new Set()),
+                  ),
+                0,
+              );
+              const score = 0.7 * relevance - 0.3 * redundancy;
+              if (score > bestScore || (score === bestScore && cid < remaining[bestIndex]!)) {
+                bestScore = score;
+                bestIndex = index;
+              }
+            }
+            selectedChainIds.push(remaining.splice(bestIndex, 1)[0]!);
+          }
+          const chainIds = new Set(selectedChainIds);
+
           // Collect the DAG edges of every surfaced chain so the presentation
           // layer can render branching (`A --> B & C`) rather than a linear
           // position sequence. Adjacent in storage is not adjacency in the
           // graph — edges are the structure.
-          const chainEdgesSql = this.db.prepare(
-            `SELECT chain_id, source_memory_id, target_memory_id, edge_type
-             FROM memory_chain_edges WHERE chain_id = ?`,
-          );
-          const edgeRows: Row[] = [];
-          for (const cid of chainIds) {
-            edgeRows.push(...(chainEdgesSql.all(cid) as Row[]));
-          }
+          const maxChainEdges = Math.max(0, Math.min(128, Math.trunc(options.chainExpansionMaxEdges ?? 64)));
+          const edgeRows = selectedChainIds.length === 0
+            ? []
+            : (this.db
+                .prepare(
+                  `SELECT chain_id, source_memory_id, target_memory_id, edge_type
+                     FROM memory_chain_edges
+                    WHERE chain_id IN (${placeholders(selectedChainIds.length)})
+                    ORDER BY chain_id, source_memory_id, target_memory_id
+                    LIMIT ?`,
+                )
+                .all(...selectedChainIds, maxChainEdges) as Row[]);
           context.chainEdges = edgeRows.map((r) => ({
             chainId: String(r.chain_id),
             sourceMemoryId: String(r.source_memory_id),
@@ -772,18 +907,10 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           // the whole chain surfaced (hit + expansion) rather than only the
           // appended part. A memory can belong to several chains — collect all
           // memberships; chainId mirrors the first for single-chain callers.
-          const chainMeta = new Map<string, { chainType: MemoryChainType; topic: string | null }>();
-          for (const cid of chainIds) {
-            const cRow = this.db
-              .prepare("SELECT chain_type, topic FROM memory_chains WHERE id = ?")
-              .get(cid) as Row | undefined;
-            chainMeta.set(cid, {
-              chainType: (cRow?.chain_type as MemoryChainType) ?? "temporal",
-              topic: (cRow?.topic as string | null) ?? null,
-            });
-          }
           for (const result of context.results) {
-            const memberships = chainOfExisting.get(result.memory.id);
+            const memberships = (chainOfExisting.get(result.memory.id) ?? []).filter((membership) =>
+              chainIds.has(membership.chainId),
+            );
             if (memberships && memberships.length > 0) {
               result.chainId = memberships[0].chainId;
               result.chainPosition = memberships[0].position;
@@ -824,6 +951,10 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           );
           const chainQueryTerms = queryOverlapTerms(query);
           const activationTerms = window === undefined ? chainQueryTerms : null;
+          const maxMemoryHops = Math.max(
+            0,
+            Math.min(8, Math.trunc(options.chainExpansionMaxMemoryHops ?? 2)),
+          );
           interface ChainCandidate {
             id: string;
             chainIndex: number;
@@ -834,17 +965,43 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           }
           const gated: ChainCandidate[] = [];
           const windowed: ChainCandidate[] = [];
+          const edgesByChain = new Map<string, Row[]>();
+          for (const row of edgeRows) {
+            const cid = String(row.chain_id);
+            const rows = edgesByChain.get(cid) ?? [];
+            rows.push(row);
+            edgesByChain.set(cid, rows);
+          }
           let chainIndex = 0;
           for (const chainId of chainIds) {
-            const memberRows = this.db
-              .prepare(
-                `SELECT cm.memory_id, cm.position, m.statement, m.importance
-                   FROM memory_chain_members cm
-                   JOIN memory_records m ON m.id = cm.memory_id
-                  WHERE cm.chain_id = ? ORDER BY cm.position`,
-              )
-              .all(chainId) as Row[];
+            const memberRows = membersByChain.get(chainId) ?? [];
             const hitPos = hitPositions.get(chainId) ?? [];
+            const graphDistance = new Map<string, number>();
+            if (chainMeta.get(chainId)?.chainType === "logical" && (edgesByChain.get(chainId)?.length ?? 0) > 0) {
+              const adjacency = new Map<string, Set<string>>();
+              for (const edge of edgesByChain.get(chainId) ?? []) {
+                const source = String(edge.source_memory_id);
+                const target = String(edge.target_memory_id);
+                const sourceNeighbours = adjacency.get(source) ?? new Set<string>();
+                sourceNeighbours.add(target);
+                adjacency.set(source, sourceNeighbours);
+                const targetNeighbours = adjacency.get(target) ?? new Set<string>();
+                targetNeighbours.add(source);
+                adjacency.set(target, targetNeighbours);
+              }
+              const queue = [...(anchorMemoryIds.get(chainId) ?? [])];
+              for (const id of queue) graphDistance.set(id, 0);
+              for (let cursor = 0; cursor < queue.length; cursor += 1) {
+                const current = queue[cursor]!;
+                const distance = graphDistance.get(current)!;
+                if (distance >= maxMemoryHops) continue;
+                for (const neighbour of adjacency.get(current) ?? []) {
+                  if (graphDistance.has(neighbour)) continue;
+                  graphDistance.set(neighbour, distance + 1);
+                  queue.push(neighbour);
+                }
+              }
+            }
             if (window !== undefined && hitPos.length > 0) {
               const lo = Math.min(...hitPos) - window;
               const hi = Math.max(...hitPos) + window;
@@ -853,7 +1010,9 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                 if (p < lo || p > hi) continue;
                 const memberId = String(row.memory_id);
                 if (seen.has(memberId)) continue;
-                const dist = Math.min(...hitPos.map((h) => Math.abs(p - h)));
+                const edgeDist = graphDistance.get(memberId);
+                if (graphDistance.size > 0 && edgeDist === undefined) continue;
+                const dist = edgeDist ?? Math.min(...hitPos.map((h) => Math.abs(p - h)));
                 const activation =
                   1 / (1 + dist) +
                   (termOverlapScore(chainQueryTerms, String(row.statement)) > 0 ? 1 : 0) +
@@ -875,7 +1034,9 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                 // emission time.
                 if (seen.has(memberId)) continue;
                 const p = Number(row.position);
-                const dist = Math.min(...hitPos.map((h) => Math.abs(p - h)));
+                const edgeDist = graphDistance.get(memberId);
+                if (graphDistance.size > 0 && edgeDist === undefined) continue;
+                const dist = edgeDist ?? Math.min(...hitPos.map((h) => Math.abs(p - h)));
                 const activation =
                   1 / (1 + dist) +
                   (termOverlapScore(activationTerms, String(row.statement)) > 0 ? 1 : 0) +
@@ -917,7 +1078,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             )) {
               if (reserveAppendedBudget(candidate.chars)) admitted.add(candidate.id);
             }
-            const chainList = [...chainIds];
+            const chainList = selectedChainIds;
             for (const candidate of [...windowed].sort(
               (a, b) => a.chainIndex - b.chainIndex || a.pos - b.pos,
             )) {
@@ -955,7 +1116,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             for (const candidate of priorityOrder) {
               if (reserveAppendedBudget(candidate.chars)) kept.add(candidate.id);
             }
-            const chainList = [...chainIds];
+            const chainList = selectedChainIds;
             for (const c of [...gated].sort(
               (a, b) => a.chainIndex - b.chainIndex || a.pos - b.pos,
             )) {

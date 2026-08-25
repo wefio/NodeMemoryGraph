@@ -98,6 +98,28 @@ test("CLI exact get preserves Active Graph disclosure attribution", () => {
   );
 });
 
+test("CLI search exposes bounded chain disclosure without leaking storage details", () => {
+  const search = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "search")!;
+  assert.deepEqual(
+    search.buildParams({
+      flags: new Set(["no-chain-expansion"]),
+      options: new Map([
+        ["chain-max-chains", ["3"]],
+        ["chain-hops", ["1"]],
+        ["chain-memory-hops", ["2"]],
+      ]),
+      positionals: ["project", "history"],
+    }),
+    {
+      query: "project history",
+      expandChains: false,
+      chainExpansionMaxChains: 3,
+      chainExpansionMaxHops: 1,
+      chainExpansionMaxMemoryHops: 2,
+    },
+  );
+});
+
 test("CLI exposes complete memory-chain member and edge operations", () => {
   const byName = (name: string) => NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === name)!;
   const scoped = new Map([

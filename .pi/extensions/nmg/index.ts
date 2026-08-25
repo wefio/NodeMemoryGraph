@@ -1334,6 +1334,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         }),
       ),
       graphHops: Type.Optional(Type.Number({ minimum: 0, maximum: 3 })),
+      expandChains: Type.Optional(Type.Boolean()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const sessionId = ctx.sessionManager.getSessionId();

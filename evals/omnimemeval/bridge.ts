@@ -141,6 +141,10 @@ export interface OmniMemEvalBridgeOptions {
    *  skipped, never truncated. Omitted uses the core's finite default; the
    *  benchmark also records the resolved value so runs remain comparable. */
   appendedMaxChars?: number;
+  chainExpansionMaxChains?: number;
+  chainExpansionMaxHops?: number;
+  chainExpansionMaxMemoryHops?: number;
+  appendedMaxRatio?: number;
 }
 
 /**
@@ -167,6 +171,10 @@ export class OmniMemEvalBridge {
   readonly #judge?: JudgeClient;
   readonly #chainInjection: "temporal" | "logical" | "both" | "none";
   readonly #appendedMaxChars?: number;
+  readonly #chainExpansionMaxChains?: number;
+  readonly #chainExpansionMaxHops?: number;
+  readonly #chainExpansionMaxMemoryHops?: number;
+  readonly #appendedMaxRatio?: number;
 
   constructor(root: string, options: OmniMemEvalBridgeOptions = {}) {
     this.#root = resolve(root);
@@ -191,6 +199,10 @@ export class OmniMemEvalBridge {
     this.#judge = createJudgeClientFromEnv();
     this.#chainInjection = options.chainInjection ?? "none";
     this.#appendedMaxChars = positiveNumber(options.appendedMaxChars);
+    this.#chainExpansionMaxChains = positiveNumber(options.chainExpansionMaxChains);
+    this.#chainExpansionMaxHops = finiteNumber(options.chainExpansionMaxHops);
+    this.#chainExpansionMaxMemoryHops = finiteNumber(options.chainExpansionMaxMemoryHops);
+    this.#appendedMaxRatio = finiteNumber(options.appendedMaxRatio);
     mkdirSync(this.#root, { recursive: true });
   }
 
@@ -434,6 +446,10 @@ export class OmniMemEvalBridge {
         expandChains: true,
         leafBlockRouting: this.#leafBlockRouting,
         appendedMaxChars: this.#appendedMaxChars,
+        chainExpansionMaxChains: this.#chainExpansionMaxChains,
+        chainExpansionMaxHops: this.#chainExpansionMaxHops,
+        chainExpansionMaxMemoryHops: this.#chainExpansionMaxMemoryHops,
+        appendedMaxRatio: this.#appendedMaxRatio,
         activeGraphBudget: {
           maxNodes: limit,
           maxEvidence: limit,

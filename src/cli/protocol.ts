@@ -261,6 +261,14 @@ export interface NmgSearchParams {
   maxTier?: MemoryTier;
   limit?: number;
   graphHops?: number;
+  expandChains?: boolean;
+  chainExpansionMaxMembers?: number;
+  chainExpansionMaxChains?: number;
+  chainExpansionMaxHops?: number;
+  chainExpansionMaxMemoryHops?: number;
+  chainExpansionMaxEdges?: number;
+  appendedMaxChars?: number;
+  appendedMaxRatio?: number;
   retrievalMode?: "legacy" | "fts5" | "hashing" | "qwen3" | "hybrid";
   vectorGranularity?: "hierarchy" | "records" | "union";
   secondPass?: boolean;

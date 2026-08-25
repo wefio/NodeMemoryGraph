@@ -79,6 +79,19 @@
   - **TrustMem**：agent 可写操作（write/revise/delete）会污染记忆/引入幻觉 → 推演产物落库有实证风险
   - **MemOps**：黑盒评分混淆失败原因（missing facts / wrong bindings / stale values）→ 评估须按失败类型归因（BEAM 分析已按维度归因）
 
+### 3.3.1 查询时的有界跨链披露
+
+链的交叉允许补足证据，但不等于无界图遍历。运行时采用以下固定边界：
+
+1. **先去重再扩展**：一次批量读取命中记忆的 memberships；同一 chain、memory、edge 在本次查询中只处理一次，避免 N+1 查询和重复注入。
+2. **链交集只走一跳**：直接含 ranked hit 的链为 C0；与 C0 共享成员的链为 C1。允许 `C0 → C1`，不从 C1 继续发现 C2。`chainExpansionMaxHops=0` 可退回只展开 C0。
+3. **链内证据另算跳数**：具有显式 DAG edge 的逻辑链，从 ranked/shared anchor 按弱邻接距离展开，默认最多 2 个 memory hops；时间链仍按 position、window 与 activation 工作。这与跨链 hop 是两个独立维度。
+4. **MMR 选择链，不改主排名**：候选链的 direct-hit/主题匹配提供 relevance，共享 memory IDs 的 Jaccard 提供 redundancy；默认最多选 4 条、硬上限 8 条。MMR 只决定哪些补充链被打开，主证据排名保持不变。
+5. **信息量双重封顶**：追加证据共享绝对上限，同时受 `1024 + 0.75 × primaryEvidenceChars` 的相对上限约束；有效上限取二者较小值。基础 1024 字符用于避免主证据极短时完全无法补证。
+6. **边与成员都有界**：默认最多公开 64 条 chain edges（硬上限 128）；成员继续受全局 member cap、激活门控和共享字符预算约束。长链完整存储，但只披露局部。
+
+因此，链扩展是受预算约束的渐进披露，不是把相交图整体塞入 Active Graph。
+
 ### 3.4 记忆生命周期 / 遗忘（借用已有概念：Mem0 decay / FOREVER / ForgetBench）
 - **旧记忆不删但别占主导**：Mem0 Memory Decay（近期 1.5x / stale 0.3x，检索时降权）。
 - **遗忘是真实需求**：FOREVER 用艾宾浩斯遗忘曲线启发的重放（而非固定步数启发式）；ForgetBench 评估遗忘时序动态。
@@ -132,7 +145,8 @@
 ## 6. 待定项 / 已解决
 
 **已实现**：
-- ✅ **链长截取**：`SearchOptions.chainExpansionWindow`（命中点窗口 [minHit−window, maxHit+window]，默认整链）——commit d0a1cc0
+- ✅ **链长截取**：`SearchOptions.chainExpansionWindow` 提供显式位置窗口；未指定窗口时使用 activation 门控和全局 member cap，不再默认整链。
+- ✅ **有界跨链披露**：共享节点发现一跳相邻链、批量去重查询、链级 MMR、逻辑 DAG memory-hop、边上限，以及绝对/相对双重字符预算。
 - ✅ **supersede 活/快照引用**：`getMemoryChain` 对已 superseded 成员返回 `successorId`（活引用指针）+ 保留原快照（历史上下文）——commit d0a1cc0
 - ✅ **记忆生命周期/遗忘（§3.4）**：`SearchOptions.recencyDecayHalfLifeDays`（可选，默认关；历史查询 eventTimeTo 跳过；无 event_time 不衰减）——commit fbc45e5
 

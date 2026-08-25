@@ -1233,6 +1233,7 @@ export class NmgService {
       ...options,
       sessionId,
       graphHops: options.graphHops ?? configuredGraphHops(1, this.#environment),
+      expandChains: options.expandChains ?? true,
       progressiveWarmDisclosure: options.progressiveWarmDisclosure ?? true,
     };
     const raws = [query, ...(queries ?? [])];
@@ -1696,6 +1697,14 @@ function parseSearchParams(value: unknown): NmgSearchParams {
     maxTier: optionalInteger(params, "maxTier", 0, 3) as MemoryTier | undefined,
     limit: optionalInteger(params, "limit", 1, 50),
     graphHops: optionalInteger(params, "graphHops", 0, 3),
+    expandChains: optionalBoolean(params, "expandChains"),
+    chainExpansionMaxMembers: optionalInteger(params, "chainExpansionMaxMembers", 0, 100),
+    chainExpansionMaxChains: optionalInteger(params, "chainExpansionMaxChains", 1, 8),
+    chainExpansionMaxHops: optionalInteger(params, "chainExpansionMaxHops", 0, 1),
+    chainExpansionMaxMemoryHops: optionalInteger(params, "chainExpansionMaxMemoryHops", 0, 8),
+    chainExpansionMaxEdges: optionalInteger(params, "chainExpansionMaxEdges", 0, 128),
+    appendedMaxChars: optionalInteger(params, "appendedMaxChars", 0, 1_000_000),
+    appendedMaxRatio: optionalNumber(params, "appendedMaxRatio", 0, 10),
     retrievalMode: optionalEnum(params, "retrievalMode", RETRIEVAL_MODES),
     vectorGranularity: optionalEnum(params, "vectorGranularity", VECTOR_GRANULARITIES),
     secondPass: optionalBoolean(params, "secondPass"),

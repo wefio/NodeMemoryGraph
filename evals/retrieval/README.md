@@ -27,7 +27,10 @@ candidates.
   the block hits.
   The summary text itself is index metadata and never appears as a candidate.
 - **Budgets**: `topK = 20` mapped to the ranked evidence budget; appended chain
-  and summary-routed evidence shares a hard 16,000-character ceiling. Bridge defaults
+  and summary-routed evidence shares the smaller of a hard 16,000-character
+  ceiling and `1024 + 0.75 × primary evidence characters`. Chain disclosure
+  selects at most 4 MMR-diverse chains, follows at most one chain-intersection
+  hop and two logical-DAG memory hops. Bridge defaults
   `secondPass: true`, `tieredDisclosure: true`, `maxTier: 3`, `graphHops: 1`,
   `expandChains: true`, `progressiveWarmDisclosure: false`.
 - **Ingestion**: verbatim message storage (`statement = message.content`),

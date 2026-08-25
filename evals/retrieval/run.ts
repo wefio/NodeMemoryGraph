@@ -63,6 +63,10 @@ const PINNED_RETRIEVAL = {
   // Shared budget for appended (non-ranked) context; the bridge defaults to
   // the same value via its constructor env override.
   appendedMaxChars: Number(process.env.NMG_APPENDED_MAX_CHARS ?? 16_000),
+  appendedMaxRatio: Number(process.env.NMG_APPENDED_MAX_RATIO ?? 0.75),
+  chainExpansionMaxChains: Number(process.env.NMG_CHAIN_MAX_CHAINS ?? 4),
+  chainExpansionMaxHops: Number(process.env.NMG_CHAIN_MAX_HOPS ?? 1),
+  chainExpansionMaxMemoryHops: Number(process.env.NMG_CHAIN_MAX_MEMORY_HOPS ?? 2),
 } as const;
 
 interface CliOptions {
@@ -120,6 +124,10 @@ async function main(): Promise<void> {
       embeddingClient,
       leafBlockRouting: options.summaries,
       appendedMaxChars: PINNED_RETRIEVAL.appendedMaxChars,
+      appendedMaxRatio: PINNED_RETRIEVAL.appendedMaxRatio,
+      chainExpansionMaxChains: PINNED_RETRIEVAL.chainExpansionMaxChains,
+      chainExpansionMaxHops: PINNED_RETRIEVAL.chainExpansionMaxHops,
+      chainExpansionMaxMemoryHops: PINNED_RETRIEVAL.chainExpansionMaxMemoryHops,
     });
     try {
       const scored = await retrieveAndScore(bridge, spec, options.topK);

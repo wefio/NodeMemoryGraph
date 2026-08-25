@@ -68,6 +68,10 @@ export type MemoryActor = (typeof MEMORY_ACTORS)[number];
 export const MAX_EVIDENCE_SOURCE_CHARACTERS = 4_096;
 /** Default hard ceiling shared by every unranked retrieval supplement. */
 export const DEFAULT_APPENDED_MAX_CHARS = 16_000;
+/** Fixed allowance before supplements scale with the primary evidence text. */
+export const DEFAULT_APPENDED_BASE_CHARS = 1_024;
+/** Supplements may add at most this fraction of the primary evidence text. */
+export const DEFAULT_APPENDED_MAX_RATIO = 0.75;
 export const TRUTH_STATUSES = ["asserted", "inferred", "unverified", "verified"] as const;
 export type TruthStatus = (typeof TRUTH_STATUSES)[number];
 /** Logical polarity of a statement, extracted at write time from text. */
@@ -516,11 +520,27 @@ export interface SearchOptions {
    *  supplement should not exceed the primary evidence budget). Window mode
    *  is already self-bounding and ignores this cap. */
   chainExpansionMaxMembers?: number;
+  /** Maximum number of distinct chains expanded after MMR de-duplication.
+   *  Defaults to 4 and is hard-capped at 8. */
+  chainExpansionMaxChains?: number;
+  /** Number of chain-intersection hops. `0` expands only chains containing a
+   *  ranked hit; `1` also expands chains sharing a member with those chains.
+   *  Values above 1 are intentionally rejected by the implementation. */
+  chainExpansionMaxHops?: number;
+  /** For a logical chain with explicit DAG edges, maximum weak-neighbourhood
+   *  distance from a ranked/shared anchor. Defaults to 2. */
+  chainExpansionMaxMemoryHops?: number;
+  /** Maximum chain edges exposed for rendering. Defaults to 64. */
+  chainExpansionMaxEdges?: number;
   /** Shared character budget for the appended (unranked) sections — chain
    *  expansion and leaf-block member routing together. A candidate whose
    *  statement would exceed the remaining budget is skipped (shorter later
    *  candidates may still fit). Omit to use DEFAULT_APPENDED_MAX_CHARS. */
   appendedMaxChars?: number;
+  /** Relative supplement ceiling: base allowance plus this fraction of the
+   *  primary ranked evidence. Defaults to DEFAULT_APPENDED_MAX_RATIO. The
+   *  effective ceiling is the smaller of this and appendedMaxChars. */
+  appendedMaxRatio?: number;
   /** Leaf-block summary routing: blocks carrying an LLM-written semantic
    *  summary (see pendingLeafSummaries/setLeafSummary) are matched against the
    *  query over a dedicated FTS index; members of hit blocks are appended to

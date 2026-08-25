@@ -194,6 +194,158 @@ test("expandChains appends chain members after a hit (recall supplement, no re-r
   });
 });
 
+test("expandChains follows one adjacent chain through a shared memory, but not a second hop", () => {
+  withStore((store) => {
+    const remember = (statement: string) =>
+      store.remember({
+        nodeName: "bounded chain walk",
+        statement,
+        sessionId: "s1",
+        sourceActor: "user",
+      }).memory.id;
+    const anchor = remember("ultraviolet anchor fact");
+    const firstJunction = remember("first shared junction");
+    const adjacentEvidence = remember("adjacent chain evidence");
+    const secondJunction = remember("second shared junction");
+    const secondHopEvidence = remember("second hop evidence must stay folded");
+
+    const direct = store.createMemoryChain({ chainType: "logical", topic: "direct" });
+    const adjacent = store.createMemoryChain({ chainType: "logical", topic: "adjacent" });
+    const secondHop = store.createMemoryChain({ chainType: "logical", topic: "second-hop" });
+    for (const [chainId, members] of [
+      [direct.id, [anchor, firstJunction]],
+      [adjacent.id, [firstJunction, adjacentEvidence, secondJunction]],
+      [secondHop.id, [secondJunction, secondHopEvidence]],
+    ] as const) {
+      members.forEach((memoryId, position) =>
+        store.addMemoryToChain({ chainId, memoryId, position }),
+      );
+    }
+
+    const context = store.searchContext("ultraviolet anchor", {
+      limit: 1,
+      sessionId: "s1",
+      expandChains: true,
+      chainExpansionMaxMembers: 20,
+      chainExpansionMaxChains: 8,
+      chainExpansionMaxHops: 1,
+      appendedMaxChars: 16_000,
+    });
+    const ids = context.results.map((result) => result.memory.id);
+    assert.ok(ids.includes(adjacentEvidence), "one adjacent chain is expanded");
+    assert.ok(!ids.includes(secondHopEvidence), "a chain discovered at hop one is not traversed again");
+    assert.equal(new Set(ids).size, ids.length, "shared memories are emitted once");
+  });
+});
+
+test("chain expansion is bounded relative to primary evidence, not only by the absolute ceiling", () => {
+  withStore((store) => {
+    const anchorStatement = "relative-budget-anchor";
+    const anchor = store.remember({
+      nodeName: "relative budget",
+      statement: anchorStatement,
+      sessionId: "s1",
+      sourceActor: "user",
+    }).memory.id;
+    const oversized = store.remember({
+      nodeName: "relative budget",
+      statement: `relative-budget-anchor ${"x".repeat(2_000)}`,
+      sessionId: "s1",
+      sourceActor: "user",
+    }).memory.id;
+    const chain = store.createMemoryChain({ chainType: "temporal", topic: "relative budget" });
+    store.addMemoryToChain({ chainId: chain.id, memoryId: anchor, position: 0 });
+    store.addMemoryToChain({ chainId: chain.id, memoryId: oversized, position: 1 });
+
+    const context = store.searchContext("relative-budget-anchor", {
+      limit: 1,
+      sessionId: "s1",
+      expandChains: true,
+      chainExpansionMaxMembers: 10,
+      appendedMaxChars: 16_000,
+      appendedMaxRatio: 0.75,
+    });
+    assert.deepEqual(context.results.map((result) => result.memory.id), [anchor]);
+  });
+});
+
+test("chain-level MMR spends a bounded slot on diverse evidence instead of a redundant chain", () => {
+  withStore((store) => {
+    const add = (statement: string) =>
+      store.remember({
+        nodeName: "chain diversity",
+        statement,
+        sessionId: "s1",
+        sourceActor: "user",
+      }).memory.id;
+    const anchor = add("prismatic anchor");
+    const junction = add("shared junction");
+    const secondShared = add("second shared member");
+    const redundantOnly = add("redundant branch evidence");
+    const diverseOnly = add("diverse branch evidence");
+    const direct = store.createMemoryChain({ chainType: "logical", topic: "prismatic direct" });
+    const redundant = store.createMemoryChain({ chainType: "logical", topic: "redundant" });
+    const diverse = store.createMemoryChain({ chainType: "logical", topic: "diverse" });
+    for (const [chainId, members] of [
+      [direct.id, [anchor, junction, secondShared]],
+      [redundant.id, [junction, secondShared, redundantOnly]],
+      [diverse.id, [junction, diverseOnly]],
+    ] as const) {
+      members.forEach((memoryId, position) =>
+        store.addMemoryToChain({ chainId, memoryId, position }),
+      );
+    }
+
+    const context = store.searchContext("prismatic anchor", {
+      limit: 1,
+      sessionId: "s1",
+      expandChains: true,
+      chainExpansionMaxChains: 2,
+      chainExpansionMaxMembers: 20,
+    });
+    const ids = context.results.map((result) => result.memory.id);
+    assert.ok(ids.includes(diverseOnly), "the lower-overlap adjacent chain receives the remaining slot");
+    assert.ok(!ids.includes(redundantOnly), "the near-duplicate chain remains folded");
+  });
+});
+
+test("logical chain expansion obeys explicit edge distance independently of chain-intersection hops", () => {
+  withStore((store) => {
+    const ids = ["graph-hop anchor", "graph-hop neighbour", "graph-hop distant"].map(
+      (statement) =>
+        store.remember({
+          nodeName: "logical hops",
+          statement,
+          sessionId: "s1",
+          sourceActor: "user",
+        }).memory.id,
+    );
+    const chain = store.createMemoryChain({ chainType: "logical", topic: "bounded logical walk" });
+    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: ids[0]!, targetMemoryId: ids[1]! });
+    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: ids[1]!, targetMemoryId: ids[2]! });
+
+    const oneHop = store.searchContext("graph-hop anchor", {
+      limit: 1,
+      sessionId: "s1",
+      expandChains: true,
+      chainExpansionMaxMembers: 20,
+      chainExpansionMaxMemoryHops: 1,
+    });
+    const oneHopIds = oneHop.results.map((result) => result.memory.id);
+    assert.ok(oneHopIds.includes(ids[1]!));
+    assert.ok(!oneHopIds.includes(ids[2]!));
+
+    const twoHops = store.searchContext("graph-hop anchor", {
+      limit: 1,
+      sessionId: "s1",
+      expandChains: true,
+      chainExpansionMaxMembers: 20,
+      chainExpansionMaxMemoryHops: 2,
+    });
+    assert.ok(twoHops.results.some((result) => result.memory.id === ids[2]));
+  });
+});
+
 test("expandChains shares the appended character budget and skips overflow", () => {
   withStore((store) => {
     const statements = ["anchor event", "first follow-up", "second follow-up"];
