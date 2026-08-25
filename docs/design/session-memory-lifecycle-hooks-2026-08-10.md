@@ -153,3 +153,21 @@ session_shutdown ───────  archive + daemon teardown + 运行时 AG
 | strict 同工具延迟 flush | 运行时 FIFO 不写持久层 | ➖ 不再适用 |
 
 **边界已确定**：`tool_result` 提供运行时状态，但不会自动成为记忆；`session_before_compact` 提供 doomed 消息，但 NMG 不因压缩而复制它们。持久化仍以显式 `nmg_remember` 为语义接入点。
+
+## 七、Reasoning scratch 生命周期
+
+可选 Lab scratchpad 与运行时 AG 不同：它是 session-private、原子写入的显式推理工作区。当前实现保证：
+
+- 只有启用 `NMG_ENABLE_LAB_TOOLS=1` 时实例化；
+- checkpoint/retry 幂等，重复调用不会复制推理节点；
+- shutdown 释放当前 session，陈旧且未持有的 scratch 文件按 30 天窗口清理；
+- 推理 claim 必须锚定可归因证据，scratch 内容不会自动提升为 STG/LTG。
+
+## 八、Implementation lineage
+
+- **Introduced — `06d3f8ac`**：接通 PostToolUse capture 与 compact 前 rescue 边界。
+- **Introduced — `14cf0e89`**：把 Pi reasoning workspace 接为显式 Lab scratchpad。
+- **Hardened — `fd086859`、`d05c3cfd`**：限制 scratch 生命周期并令 retry 幂等。
+- **Hardened — `86d80c4e`**：要求 reasoning claim 指向证据，阻止草稿自证为真。
+
+完整历史分类见 [implementation lineage](implementation-lineage.md)。

@@ -10,6 +10,7 @@
 2. `design/` 下的专题设计文档负责深入说明单个机制；它们细化基线，但不能静默替代基线。
 3. **`decisions/`** 记录非平凡选择的原因、考虑过的替代方案和后果。决策文档解释设计，但不是第二份规范。
 4. **[design/completion-audit.md](design/completion-audit.md)** 是需求到证据的当前台账，只记录实现与验证状态，不定义设计意图。
+   **[design/implementation-lineage.md](design/implementation-lineage.md)** 是精选的 commit-to-owner 恢复索引；Git 仍是完整 changelog。
 5. **[design/temporary-todo.md](design/temporary-todo.md)** 只保留未完成事项。完成历史留在 Git；有长期价值的结果应写回对应的设计、决策、操作或审计文档。
 6. **`experiments/`** 保存 benchmark、审计、探针和回归等观测结果。实验可以推动决策，但不能仅因测得结果就成为规范。
 7. **`skills/`** 保存 Agent 工作流。Skill 说明如何维护或使用项目，并链接规范来源，不复制项目事实。
@@ -18,13 +19,13 @@
 
 ## 目录说明
 
-- **`design/`**：架构、数据模型、算法和流程契约。
+- **`design/`**：架构、数据模型、算法和流程契约；[实现沿革索引](design/implementation-lineage.md)只记录能显著降低重新定位或重复犯错成本的 commit。
 - **`decisions/`**：带生命周期的设计与流程决策，见 [decisions/README.zh-CN.md](decisions/README.zh-CN.md)。
 - **`experiments/`**：测量证据。运行报告通常命名为 `<topic>-<date>.md`。相关入口包括
   [节点摘要加速检索调研](experiments/node-summary-accelerated-retrieval-2026-08-19.md)
   和当前 [benchmark 结果汇总](experiments/benchmark-results.md)。
 
-简化判断：NMG _怎样工作或应该怎样工作_ 写入 `design/`；_为什么这样选择_ 写入 `decisions/`；_实际测到了什么_ 写入 `experiments/`。
+简化判断：NMG _怎样工作或应该怎样工作_ 写入 `design/`；_为什么这样选择_ 写入 `decisions/`；_实际测到了什么_ 写入 `experiments/`。实验 commit 只有被明确的设计或决策 owner 接纳后，才会成为规范。
 
 ## 双语规则
 

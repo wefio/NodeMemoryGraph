@@ -162,3 +162,13 @@ nmg_board put taskId="..." kind="handoff" content="..." to="codex"
 - MACP Protocol（broadcast 存 channel / direct 存 NULL）— https://github.com/multiagentcognition/macp
 - Microsoft Multi-Agent Reference Architecture（Agent Registry）— https://microsoft.github.io/multi-agent-reference-architecture/docs/agent-registry/Agent-Registry.html
 - Atomic Task Claiming（SQLite CAS，= 我们 live claim）— https://amux.io/demos/atomic-task-claiming/
+
+## 9. Implementation lineage
+
+- **Introduced — `79a099de`**：建立不进入 LTG/FTS 的临时 Task Board。
+- **Introduced — `5d09c4e1`**：加入 A2A-style discover、direct 和 serial handoff。
+- **Hardened — `9e097253`、`7b2bda5a`、`80506586`**：区分 delivery/ack/claim，以 RAII ownership 和 TTL 收敛生命周期。
+- **Hardened — `3641b3af`、`3f9d62be`**：加入 topic membership、notify-only 静默和 expired claim recovery。
+- **Hardened — `b792f3af`**：direct delivery 不再要求接收方预先订阅，保持定向投递语义。
+
+完整 owner 导航见 [implementation lineage](implementation-lineage.md)。

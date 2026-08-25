@@ -18,6 +18,8 @@ different jobs and must not compete as independent sources of truth.
 4. **[design/completion-audit.md](design/completion-audit.md)** is the current
    requirement-to-evidence ledger. It records implementation and validation
    status, not design intent.
+   **[design/implementation-lineage.md](design/implementation-lineage.md)** is the
+   curated commit-to-owner recovery index; Git remains the exhaustive changelog.
 5. **[design/temporary-todo.md](design/temporary-todo.md)** contains unresolved
    work only. Completed work belongs in Git and, when durable, in the owning
    design, decision, operating, or audit document.
@@ -36,6 +38,8 @@ copying the whole implementation narrative.
 ## Directory guide
 
 - **`design/`** — architecture, data models, algorithms, and process contracts.
+  The [implementation lineage](design/implementation-lineage.md) records only
+  commits that materially reduce rediscovery or regression risk.
 - **`decisions/`** — lifecycle-managed design and process decisions. See
   [decisions/README.md](decisions/README.md).
 - **`experiments/`** — measured evidence. Run reports should normally be named
@@ -49,7 +53,8 @@ copying the whole implementation narrative.
 
 Rule of thumb: _how NMG works or should work_ belongs in `design/`; _why this
 choice was made_ belongs in `decisions/`; _what was measured_ belongs in
-`experiments/`.
+`experiments/`. An experiment commit does not become normative until an explicit
+design or decision owner accepts the result.
 
 ## Bilingual policy
 

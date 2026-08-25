@@ -1,7 +1,7 @@
 # Tiered Disclosure Design（层级渐进披露）
 
 **Status:** deterministic QPP gate implemented; calibrated SPRT remains future work
-**Updated:** 2026-08-01
+**Updated:** 2026-08-25
 **Related:** [edge-activation-design.md](edge-activation-design.md), [fibonacci-progressive-recall.md](fibonacci-progressive-recall.md), docs/design/design.md §7.1, §11
 
 ## 1. Problem
@@ -212,3 +212,12 @@ QPP decision until calibration evidence exists.
 - No per-tier learned quotas (single `maxTierBudget` + Fibonacci scale first).
 - No LLM call in the insufficiency signal (deterministic QPP components only).
 - Tier assignment logic (`huffmanDepths`/`blockTiers`) unchanged.
+
+## 7. Implementation lineage
+
+- **Introduced — `1feb008d`**：leaf-block summary 成为细节索引，不替代原始记录。
+- **Introduced — `ecde4e45`**：增加更粗粒度 node semantic summary。
+- **Hardened — `796439ed`**：维护周期先 drain leaf summary，再有界 drain node summary；provider 失败不阻塞 daemon。
+- **Hardened — `5a0edbf5`、`20de2efc`**：记录并消费 routed-vs-recalled 信号，用于识别 summary routing gap，而不是修改事实排名。
+
+这些提交只实现 summary 的索引、drain 和诊断边界；节点摘要的质量结论仍属于实验。完整 owner 导航见 [implementation lineage](implementation-lineage.md)。

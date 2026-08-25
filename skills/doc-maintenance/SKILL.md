@@ -42,6 +42,23 @@ editing. Use its Chinese counterpart when Chinese wording is part of the task.
    change. Review warnings rather than hiding them. If automation policy must
    change, update the contract first and the verifier second.
 
+## Commit lineage
+
+Git remains the exhaustive changelog. Add commit information to an existing owner
+only when it helps a later Agent rediscover an architectural origin, understand a
+hardening fix, locate validation evidence, or avoid retrying a superseded design.
+
+- Put a compact `Implementation lineage` section in the owning topic document.
+- Group related commits; do not narrate every intermediate patch.
+- Mark entries as **Introduced**, **Hardened**, **Validated**, or **Superseded**.
+- A validation commit proves only what its evidence measured; it does not imply
+  default activation.
+- For supersession, name both the old and replacement commit or decision.
+- Leave formatting, generated artifacts, dependency refreshes, ordinary tests,
+  merges, and easy-to-rediscover implementation details in Git.
+- Use [the curated lineage index](../../docs/design/implementation-lineage.md) to
+  find owners; do not turn it into a duplicate commit database.
+
 ## Boundaries
 
 - Do not copy project facts into this Skill. Link their canonical owner.

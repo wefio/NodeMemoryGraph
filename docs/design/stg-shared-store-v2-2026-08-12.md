@@ -1,19 +1,19 @@
 # STG Shared-Store v2：物理共享 + 逻辑隔离
 
-**Status:** 设计定稿，待实现
+**Status:** 已实现；会话行隔离、匿名读取和 daemon 并发契约已验证
 **Date:** 2026-08-12
 **Supersedes:** [stg-isolated-store.md](stg-isolated-store.md)（v1：session-private per-session 文件）
 **Related:** [memory-graphs.md](memory-graphs.md) §1/§3/§5, docs/design/design.md §1, `src/core/stg.ts`, `src/core/store/schema.ts`, `src/cli/service.ts`
 
 ## 0. TL;DR
 
-v1 用"每会话一个 `stg.sqlite` 文件"实现 STG 会话隔离。实测代价：**1765 个文件、~1.6G 磁盘**（含 1.5G 未 checkpoint 的 WAL + 1765 份完整 schema/FTS 骨架），而 STG 语义内容几乎为空（样本 `memory_records` 全 0 行）。v2 收敛为**每项目一个 `stg.sqlite`**，把会话隔离从"文件系统层级"上移到"**数据行层级**"（`memory_records.session_id`），由 daemon 作为唯一守门人签发/校验 session_id——即业界多租户"共享表 + tenant_id"架构在 SQLite 上的实现，并用 daemon 认证消除 SQLite 无 RLS 的缺口。
+v1 用"每会话一个 `stg.sqlite` 文件"实现 STG 会话隔离。实测代价：**1765 个文件、~1.6G 磁盘**（含 1.5G 未 checkpoint 的 WAL + 1765 份完整 schema/FTS 骨架），而 STG 语义内容几乎为空（样本 `memory_records` 全 0 行）。v2 收敛为**每项目一个 `stg.sqlite`**，把会话隔离从"文件系统层级"上移到"**数据行层级**"（`memory_records.session_id`）。daemon 是唯一数据访问入口并统一应用行过滤；它信任 harness 传入的 session ID，不声称签发或认证该 ID。
 
 ```
 v1:  <project>/.nmg/sessions/<session-hash>/stg.sqlite   (每会话一文件)
 v2:  <project>/.nmg/stg.sqlite                           (每项目一文件)
      ├─ cached_from_ltg 行  → session_id NULL（项目共享，所有会话共用一份 LTG 缓存）
-     ├─ provisional 行      → session_id = 会话（逻辑私有，daemon 认证过滤）
+     ├─ provisional 行      → session_id = 会话（逻辑私有，daemon 统一过滤）
      └─ 会话结束           → DELETE WHERE session_id=?（删行，原子轻量）
      单 WAL → close 时 wal_checkpoint(TRUNCATE) → 无泄漏
 ```
@@ -69,9 +69,9 @@ v2:  <project>/.nmg/stg.sqlite                           (每项目一文件)
 
 "漏 WHERE"风险在多租户 SaaS（多方应用代码写 SQL）才严重。**NMG 的 STG 只有 daemon 一个守门人**：pi 扩展/CLI 客户端只通过 daemon 的 HTTP API 访问 STG，从不直接操作 SQLite 文件。因此：
 
-- session_id 由 **daemon 认证**（不可伪造，满足 memory-graphs.md §3 "non-forgeable runtime_id + session_id must be carried through search"）；
+- session_id 由 harness 会话系统提供并贯穿检索；daemon 信任该值，但把所有读取收敛到统一过滤入口；
 - 行过滤**收敛到 daemon 少数统一入口**（`#getStgStore` / `searchStgFirst` / remember 路径），无散落 SQL → "漏 WHERE"风险近似为零；
-- **daemon 认证即业界 RLS 的等价物**（SQLite 无内核 RLS，用守门人架构替代）。
+- 这是 SQLite 无内核 RLS 时的应用层守门方案，不等价于防恶意伪造的数据库 RLS。
 
 ---
 
@@ -116,7 +116,7 @@ history/trace 已有 `assertTraceOwner(row, sessionId)`：owner 非空且不等�
 
 ### 3.5 安全模型
 
-**信任模型（评审修正，019fefc5 2026-08-12）**：sessionId 来自 pi 的 `sessionManager.getSessionId()`（客户端会话系统），**daemon 只信任客户端传入值，并未签发/认证**。因此 v2 防的是【漏 WHERE 的无意识错误】（唯一入口 + 过滤收敛），**不防恶意/伪造**（本地进程可声称任意 sessionId）。v1 的 `sha256(sessionId)` 路径同样不防伪造——**信任模型无回退**；真正的变化是 **blast radius：v1 漏过滤只污染本会话文件，v2 漏过滤污染整个项目库 + 共享缓存**（风险更集中，因此统一入口更重要）。
+**信任模型（评审修正，2026-08-12）**：sessionId 来自 pi 的 `sessionManager.getSessionId()`（客户端会话系统），**daemon 只信任客户端传入值，并未签发/认证**。因此 v2 防的是【漏 WHERE 的无意识错误】（唯一入口 + 过滤收敛），**不防恶意/伪造**（本地进程可声称任意 sessionId）。v1 的 `sha256(sessionId)` 路径同样不防伪造——**信任模型无回退**；真正的变化是 **blast radius：v1 漏过滤只污染本会话文件，v2 漏过滤污染整个项目库 + 共享缓存**（风险更集中，因此统一入口更重要）。
 
 **统一入口**：session 过滤收敛在 daemon 层（`#getStgStore` 单 store + `#search` 统一构造 `SearchOptions.sessionId` + store 层 `searchWithVector`/`getMemory`/`getContext` 统一 SQL 谓词），**业务代码不暴露裸 WHERE**。客户端（pi/CLI）只走 daemon HTTP API，不能绕过过滤层直接触库。
 
@@ -221,7 +221,16 @@ v1 的 1765 个 `stg.sqlite` 处理（评审修正：provisional 合并**不可�
 
 ## 9. 决定记录
 
-- 采纳业界架构 ③（共享表 + session_id + daemon 认证），放弃 v1 的 per-session 文件。
+- 采纳业界架构 ③（共享表 + session_id + daemon 统一过滤），放弃 v1 的 per-session 文件。
 - "项目内共享、项目间私有"：物理单文件（项目内）+ 行级 session 隔离（会话私有）+ 不同项目文件（项目间隔离）。
 - 不引入独立登记层/索引（黑板内容入长期层属策略纪律，另见黑板去重设计，与本存储改造正交）。
 - Phase 顺序：先止血（WAL checkpoint + 清理空库，不碰架构），后 v2（schema + stg.ts + service + 迁移）。
+
+## 10. Implementation lineage
+
+- **Introduced — `1d8b21df`**：从 per-session 文件迁移到每项目共享 store，并以 `session_id` 做行隔离。
+- **Hardened — `48d64e29`、`25260270`**：修复匿名读取泄漏，并确定无 session 时只允许 `session_id IS NULL`。
+- **Hardened — `6f755217`**：derived STG 检索同样服从 session 可见性。
+- **Hardened — `9a911d00`**：将 daemon 并发模型和 STG 单写者契约对齐。
+
+完整 commit-to-owner 对应见 [implementation lineage](implementation-lineage.md)。

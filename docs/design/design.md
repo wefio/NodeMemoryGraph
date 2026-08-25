@@ -312,6 +312,17 @@ post-turn feedback, and shutdown. It must not parse SQLite rows, update graph
 topology, implement QPP, or construct embedding indexes. Pi is the first
 adapter, not part of the NMG data model.
 
+The package dependency boundary follows that architecture. NMG Core, the daemon,
+and non-interactive CLI paths do not import Pi. The Pi adapter type-checks against
+`@earendil-works/pi-coding-agent` as a development dependency and declares it as
+an optional peer supplied by the harness; installing NMG for CLI-only use must not
+pull the Pi harness into the runtime graph. `@earendil-works/pi-tui` remains a
+runtime dependency only because both the adapter UI and the standalone lazy-loaded
+`nmg inspect` command execute it. Its version line must stay aligned with the Pi
+harness to avoid duplicate or incompatible TUI component instances. If install
+cost later becomes material, the adapter or inspect TUI may become a separate
+package, but Core does not need a package split to preserve this boundary.
+
 The Pi adapter is now a thin HTTP lifecycle/tool adapter. It lazily starts the
 daemon, reuses one connection (via the shared `http-client`) for automatic
 recall and the four stable tools, and

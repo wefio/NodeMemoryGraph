@@ -154,3 +154,14 @@ Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**�
 - 经典 QPP 在 dense/neural IR 上相关性掉 10%+（文献）；NMG 用 BGE dense+hybrid，靠 `intentCoverage`/`reasonHealth` 领域增强补偿——这两项是 vanilla QPP 没有的 typed-memory / provenance 信号，非冗余。但 benchmark 全 `conversation_evidence` ingest → intentCoverage 退化（恒 0.5），需类型化 ingest 才有信号。
 - 只攻"覆盖"半；"捞进来没排对/拼对"的 ranking/composition 半需另打，两者配套才完整。
 - DC 过 gate 前不可启用学化路径（Stage 2）；Stage 1 rolling τ 是生产自适应，非梯度学化。
+
+## Implementation lineage
+
+- **Introduced — `dd41829e`、`d86b658c`、`86c837fc`**：建立 Stage 0 QPP、分量与 guardrail floor。
+- **Introduced — `2bb92098`、`72ec3a33`、`84640037`**：从固定 top-K 收敛到 Fibonacci 渐进展开和折叠。
+- **Introduced — `1ae9e501`**：接通 controller shadow bridge、每轮预算与产品使用反馈。
+- **Hardened — `c369fa0b`、`4074eb19`**：rolling calibration fail closed，并把 controller policy 与 Agent answer 隔离。
+- **Validated — `87d02423`、`fd62ed06`**：定义 matched product evidence 和因果 matched arm；这些证据仍不足以推广默认激活。
+- **Hardened — `9e7168e7`、`4a2f7ff1`**：active channel 必须通过 gate 并持有可用 rollback state。
+
+完整 owner 导航见 [implementation lineage](implementation-lineage.md)。

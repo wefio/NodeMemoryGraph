@@ -209,3 +209,13 @@
 5. **链进 LLM 上下文呈现层**（`2f068cf` 序号+独立链块 / `f5598a8` 多链 memberships / `f4977cf` 链块 topic）：召回序号行 + 独立链块，链不污染记忆行，一条记忆可渲染进多个链块，同类型多链以 topic 区分。
 
 每步遵守：检索不全局重排、链只存静态依赖、自动推断只建议不写。
+
+## 8. Implementation lineage
+
+- **Introduced — `155d88c9`**：建立独立的 temporal/logical chain 与成员结构。
+- **Hardened — `d0a1cc03`、`fbc45e51`**：加入窗口、successor 活引用和可选 recency decay。
+- **Hardened — `e093eb6c`、`cb4a858a`、`a126382a`**：补齐多跳 path、写时防环和 branching DAG pointer edges。
+- **Validated — `2f068cfc`、`f5598a8c`、`f4977cf2`**：验证链的独立上下文呈现、多链 membership 和 topic 区分。
+- **Hardened — `6db50df8`**：完成 daemon/CLI/application boundary；从此链不再只是 store 内部原型。
+
+完整 owner 导航见 [implementation lineage](implementation-lineage.md)。

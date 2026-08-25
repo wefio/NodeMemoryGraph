@@ -7,6 +7,7 @@ in [design.md](design.md); document ownership is defined by
 **Status:** requirement ledger
 **Updated:** 2026-08-25
 **Normative source:** [design.md](design.md)
+**Implementation recovery:** [implementation-lineage.md](implementation-lineage.md)
 
 This ledger answers two different questions without conflating them:
 
@@ -37,7 +38,7 @@ model request alone.
 
 | Domain | Required contract | Implementation evidence | Current state | Remaining proof or work |
 | --- | --- | --- | --- | --- |
-| Product boundary | Local-first memory component; Pi is the primary harness; no sandbox/cloud/runtime ownership | package manifest, `extensions/nmg.ts`, `src/index.ts` | **Verified core** | Package release/versioning is product work, not architecture work. |
+| Product boundary | Local-first memory component; Pi is the primary optional adapter; Core/daemon do not require the Pi harness; no sandbox/cloud/runtime ownership | package manifest optional peer boundary, `extensions/nmg.ts`, `src/index.ts`, dependency-boundary test | **Verified core** | Package release/versioning and a future physical multi-package split are product work, not architecture work. |
 | Stable model surface | Compact search, exact get, governed remember, separate temporary board | Pi tool registrations and prompt YAML | **Verified core** | Monitor schema drift in real Pi releases. |
 | History and provenance | Retain useful source evidence; semantic memory remains mutable/rebuildable; rejected writes are auditable without retaining rejected content | store write/schema modules, evidence selection, write policy | **Verified core** | Physical erasure is a separate deferred privacy claim. |
 | Semantic records | Typed facts, preferences, constraints, states, events and experience with stable IDs, actors, truth status, evidence roles and markers | `src/core/types.ts`, store writes and row parsing | **Verified core** | Natural extraction quality remains model/harness dependent. |
@@ -48,9 +49,9 @@ model request alone.
 | STG/LTG residence | Session-private provisional STG; shared durable LTG; governed promotion, demotion, expiry and audit | `src/core/stg.ts`, store lifecycle and Pi turn-end maintenance | **Calibration gate** | Mechanics are verified; natural consolidation precision and retention thresholds are not. |
 | Active Graph | Per-session budgeted projection, never a third authoritative graph; record selected nodes/edges/evidence and measured budget use | Active Graph store module, Pi search/get propagation | **Verified core** | Allocator and stopping priors need natural calibration. |
 | Progressive disclosure | Resident directory/kernel, compact automatic recall, explicit search headers, exact get, bounded deeper expansion | integration search/projection, Pi recall flow | **Verified core** | Daily-use validation remains observational. |
-| Retrieval | FTS/exact fallback, optional record embeddings, hybrid ranking, node/leaf hierarchy and query filters | integration search, embedding providers/sync, hierarchy | **Verified core** | Provider quality is configuration; exact-scan/ANN crossover is measurement work. |
+| Retrieval | FTS/exact fallback, optional record embeddings, hybrid ranking, node/leaf hierarchy and query filters | integration search, embedding providers/sync, bounded leaf-then-node summary drain, hierarchy | **Verified core** | Provider and summary quality are configuration/evaluation concerns; exact-scan/ANN crossover is measurement work. |
 | QPP and search recommendation | Independently switchable allocation, local folding and recommendation; preserve folded evidence in AG | QPP core, Pi modes, controller shadow | **Opt-in Lab** | Calibrate sufficiency and cost from independent outcomes before Lite promotion. |
-| Differentiable controller | Framework-free autodiff substrate; learned heads cannot bypass hard safety/budget gates | `src/lab/autodiff.ts`, controller protocol/runtime/gate | **Opt-in Lab** | A candidate improved a small dev set but failed cost and LoCoMo gates; natural matched evidence is required. |
+| Differentiable controller | Framework-free autodiff substrate; learned heads cannot bypass hard safety/budget gates | `src/lab/autodiff.ts`, controller protocol/runtime/gate, matched telemetry and causal comparison | **Opt-in Lab** | Matched evidence remains calibration evidence, not Lite promotion; natural quality, cost and rollback gates are required. |
 | Feedback and posterior | Separate disclosure, diagnostic overlap and verified evidence; prevent self-reinforcing labels | feedback core, claim outcomes, Pi shadow channel | **Verified core** | The natural dataset lacks verified evidence attribution, so learning/calibration stays blocked. |
 | Edge activation/stability | Query-local activation differs from durable stability; retrieval alone cannot consolidate an edge | edge activation, Active Graph telemetry, consolidation/demotion | **Calibration gate** | Calibrate independent-task definition, decay and hysteresis on natural reversals. |
 | Retention | Indexed L0-L3, dormant/unindexed L4, quarantine L5; protect critical evidence independently of prompt residency | hierarchy and maintenance modules, CLI retention operations | **Verified core** | Automatic physical purge remains **explicitly deferred**. |
@@ -86,3 +87,8 @@ NMG is product-proven only when the active blockers pass on independent natural
 use. New mechanisms should be added only when an observed failure cannot be
 resolved by an existing owner; otherwise they increase maintenance cost without
 closing a requirement.
+
+Commit hashes are recorded only when they materially shorten recovery or prevent
+repeating a superseded design. The curated owner map and notation live in
+[implementation-lineage.md](implementation-lineage.md); Git remains the exhaustive
+changelog.

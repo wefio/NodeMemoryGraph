@@ -1,7 +1,7 @@
 # NMG Daemon 生命周期加固设计（Idle 超时 / 自动重拉 / 数量上限）
 
 **Status:** implemented（2026-08-02 实机验证通过，见 §8）
-**Updated:** 2026-08-02
+**Updated:** 2026-08-25
 **Related:** [stg-isolated-store.md](stg-isolated-store.md), [memory-graphs.md](memory-graphs.md), [external-source-design.md](external-source-design.md), [design.md](design.md)
 
 ## 0. 背景：2026-08-02 内存耗尽事故
@@ -207,3 +207,13 @@ stderr 会被 `RpcClient` 子进程捕获并透传到评测主进程，可观测
 - **评测侧显式清理**（`evaluate()` finally 里 `shutdownOwnedDaemon`、启动前全量扫 stale daemon）：本设计是 daemon 侧兜底，评测侧修复仍推荐单独做（互不替代）；
 - **daemon 复用**（matched 3 arms 共享同一 seed db/daemon）：减少 spawn 次数的结构性优化，独立改动；
 - **硬阻断上限**：留 `NMG_DAEMON_LIMIT_BLOCK` 作为可选后续项。
+
+## 10. Implementation lineage
+
+- **Introduced — `39516537`**：建立 resident CLI daemon 生命周期。
+- **Superseded — `9444a3c1` → `692fe85c`**：gRPC transport 被跨平台 HTTP JSON-RPC 取代；协议语义继续由 `src/cli/protocol.ts` 管理。
+- **Hardened — `80167da9`、`a5787cd6`、`30e273e8`**：owned shutdown、idle 退出和重连路径收敛。
+- **Hardened — `11e2101f`**：stale protocol fail-closed，避免旧 daemon 静默接受新客户端。
+- **Hardened — `9a911d00`、`ac2d1114`**：对齐 SQLite 单写者/STG 并发契约，并按最长前缀稳定路由嵌套 CLI 命令。
+
+完整历史分类见 [implementation lineage](implementation-lineage.md)。
