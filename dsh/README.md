@@ -89,6 +89,41 @@ dsh plugin --profile web add "link:C:/.../dsh-nmg"   # adds bundle to the web pr
 # then restart the web host so the recomposed profile (id: nmg, name: @nmg/dsh-nmg) loads
 ```
 
+> **Verify the bundle resolves before relying on it.** `dsh plugin add` records the
+> package in `dependencies` and, when it declares `dsh.bundle`, also appends it to
+> `dsh.profile.bundles`. Only the **two together** make the plugin load. A package
+> that is listed in `dependencies` but whose `node_modules/<name>` link is dangling
+> or not materialized will still crash the host at boot:
+>
+> ```text
+> dsh: cannot resolve profile bundle "<name>" from the dsh installation or <profileDir>; run 'dsh plugin --profile <name> install' if its dependency is not installed
+> ```
+>
+> This bites after a repo relocate or a cache-miss/pnpm rewrite that re-emits
+> `package.json` without re-materializing the link. A junction/symlink "looking"
+> present is *not* proof — a dangling link points at a path that no longer exists and
+> fails `existsSync` on the package.json. Check with the **same resolver the boot
+> uses** (`resolveBundleDir` → `packageDirFromAnchor`, profile anchor first):
+>
+> ```js
+> // node --input-type=module -e '...'
+> const { createRequire } = await import('node:module');
+> const { join } = await import('node:path');
+> const { existsSync } = await import('node:fs');
+> const anchor = 'C:\\Users\\LEGION\\.dsh\\profiles\\web\\package.json';
+> const name = '@nmg/dsh-nmg';
+> for (const sp of createRequire(anchor).resolve.paths(name) ?? []) {
+>   const dir = join(sp, name);
+>   if (existsSync(join(dir, 'package.json'))) { console.log('resolves:', dir); break; }
+> }
+> ```
+>
+> If it prints nothing, the link is missing/dangling — run `dsh plugin --profile web
+> install` (or `pnpm install` in the profile dir) to materialize it, then re-check.
+> For a true end-to-end compose check, `dsh --profile web --dump-config` prints the
+> whole composed tree, but it rewrites the profile's `cordis.yml`, so it is not usable
+> under the default `workspace-write` sandbox.
+
 Retire the legacy preset when the package is confirmed working (they register the
 same tool names and would otherwise double-register): run `agentPresets.remove('nmg')`
 and clear `agent-presets.default` from `~/.dsh/settings.yaml`, then restart once more.
