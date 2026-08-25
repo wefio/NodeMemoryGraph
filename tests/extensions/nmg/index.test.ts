@@ -81,12 +81,12 @@ test("Pi adapter exposes stable memory tools plus the unified Lab capability ent
   try {
     assert.deepEqual(
       [...extensionHarness().tools.keys()],
-      ["nmg_lab", "nmg_remember", "nmg_get", "nmg_search"],
+      ["nmg_lab", "nmg_remember", "nmg_get", "nmg_search", "nmg_board"],
     );
-    process.env.NMG_ENABLE_COORDINATION = "1";
+    process.env.NMG_ENABLE_COORDINATION = "off";
     assert.deepEqual(
       [...extensionHarness().tools.keys()],
-      ["nmg_lab", "nmg_remember", "nmg_get", "nmg_search", "nmg_board"],
+      ["nmg_lab", "nmg_remember", "nmg_get", "nmg_search"],
     );
   } finally {
     if (previous === undefined) delete process.env.NMG_ENABLE_LAB_TOOLS;
@@ -108,7 +108,7 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
     const { handlers, tools } = extensionHarness();
     assert.deepEqual(
       [...tools.keys()],
-      ["nmg_reason", "nmg_lab", "nmg_remember", "nmg_get", "nmg_search"],
+      ["nmg_reason", "nmg_lab", "nmg_remember", "nmg_get", "nmg_search", "nmg_board"],
     );
     const sessionManager = {
       getSessionId: () => "reasoning-session",

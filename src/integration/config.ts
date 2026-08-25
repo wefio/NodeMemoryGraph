@@ -1,12 +1,11 @@
 export type QppActuationMode = "off" | "shadow" | "active";
 export type SearchRecommendationMode = "off" | "advisory" | "guardrail";
 
-/**
- * Temporary cross-Agent coordination is an optional adapter capability. Core
- * daemon and CLI board operations remain available regardless of this switch.
- */
+/** Cross-Agent coordination is available by default. Explicit false-like values
+ * disable the adapter tool and wake loop without disabling daemon/CLI storage. */
 export function coordinationEnabled(environment: NodeJS.ProcessEnv = process.env): boolean {
-  return environment.NMG_ENABLE_COORDINATION === "1";
+  const configured = environment.NMG_ENABLE_COORDINATION?.trim().toLowerCase();
+  return configured === undefined || !new Set(["0", "false", "off", "no"]).has(configured);
 }
 
 export interface MaintenancePolicyConfig {

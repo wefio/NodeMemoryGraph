@@ -21,11 +21,12 @@ MCP server 提供（`.mcp.json` 里的 `nmg` 条目），本目录只补事件�
 
 ## 唤醒开关
 
-唤醒默认关闭。把 `<数据目录>/board-wake.json` 里的 `enabled` 设为 `true`
-开启（与 Pi 扩展 `/nmg wake on` 写的是同一个文件，一处开关两边生效）：
+唤醒默认开启，让新 Agent 不需要先手动配置就能发现共享工作。把
+`<数据目录>/board-wake.json` 里的 `enabled` 设为 `false` 可关闭（与 Pi
+扩展 `/nmg wake off` 写的是同一个文件，一处开关两边生效）：
 
 ```json
-{ "enabled": true, "budget": 8, "cooldownMs": 600000 }
+{ "enabled": false, "budget": 8, "cooldownMs": 600000 }
 ```
 
 `budget` 是每日通知上限（0 = 不限），`cooldownMs` 是两次通知的最小间隔

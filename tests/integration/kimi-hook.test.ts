@@ -96,7 +96,7 @@ test("kimi hook nudges on completion keywords, git commit, and stays silent othe
   assert.equal(runHook({ hook_event_name: "SessionStart" }), "");
 });
 
-test("kimi hook reports a stable discoverable agent identity without enabling wake", async () => {
+test("kimi hook reports a stable discoverable agent identity independently of wake polling", async () => {
   assert.deepEqual(
     kimiAgentIdentity(
       { session_id: "kimi-session" },

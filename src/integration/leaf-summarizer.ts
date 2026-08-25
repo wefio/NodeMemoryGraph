@@ -17,6 +17,8 @@
 
 import type { NmgStore } from "../core/store.ts";
 import type { LeafSummaryProvider } from "../core/types.ts";
+import { OpenAiCompletionClient, type OpenAiCompletionOptions } from "./openai-completion.ts";
+import { drainSummaryTasks, type SummaryDrainResult } from "./summary-drain.ts";
 
 /** Bump when the prompt changes; recorded in benchmark manifests. */
 export const LEAF_SUMMARY_PROMPT_VERSION = "leaf-summary-v1";
@@ -34,83 +36,29 @@ Rules:
   each on its own line prefixed with "Q:".
 - At most 180 words, plain text only.`;
 
-export interface OpenAiLeafSummaryOptions {
-  baseUrl: string;
-  apiKey?: string;
-  model: string;
-  timeoutMs?: number;
-  /** Hard output budget (max_tokens); the 180-word cap needs ~250 tokens. */
-  maxTokens?: number;
-  /** Injectable fetch for tests. */
-  fetch?: typeof fetch;
-}
+export type OpenAiLeafSummaryOptions = OpenAiCompletionOptions;
 
 export class OpenAiLeafSummaryProvider implements LeafSummaryProvider {
   readonly model: string;
   readonly baseUrl: string;
-  readonly #apiKey?: string;
-  readonly #timeoutMs: number;
-  readonly #maxTokens: number;
-  readonly #fetch: typeof fetch;
+  readonly #client: OpenAiCompletionClient;
 
   constructor(options: OpenAiLeafSummaryOptions) {
-    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.model = options.model;
-    this.#apiKey = options.apiKey;
-    this.#timeoutMs = options.timeoutMs ?? 30_000;
-    this.#maxTokens = options.maxTokens ?? 600;
-    this.#fetch = options.fetch ?? globalThis.fetch;
+    this.#client = new OpenAiCompletionClient(options);
+    this.baseUrl = this.#client.baseUrl;
+    this.model = this.#client.model;
   }
 
   async summarize(input: { nodeName: string; statements: readonly string[] }): Promise<string> {
-    const body: Record<string, unknown> = {
-      model: this.model,
-      messages: [
-        { role: "system", content: LEAF_SUMMARY_SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: [
-            `Cluster: ${input.nodeName}`,
-            "",
-            "Memories:",
-            ...input.statements.map((statement) => `- ${statement}`),
-          ].join("\n"),
-        },
-      ],
-      stream: false,
-      max_tokens: this.#maxTokens,
-    };
-    const deepSeekRequest = /deepseek/i.test(this.baseUrl) || /deepseek/i.test(this.model);
-    if (deepSeekRequest) {
-      // Same rationale as the judge client: disable server-side thinking so
-      // content is never left empty by reasoning-only responses.
-      body.temperature = 0;
-      body.thinking = { type: "disabled" };
-    } else {
-      body.temperature = 0;
-    }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
-    try {
-      const response = await this.#fetch(`${this.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(this.#apiKey ? { Authorization: `Bearer ${this.#apiKey}` } : {}),
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error(`summary endpoint HTTP ${response.status}`);
-      const payload = (await response.json()) as {
-        choices?: Array<{ message?: { content?: string | null } }>;
-      };
-      const content = payload.choices?.[0]?.message?.content?.trim();
-      if (!content) throw new Error("summary endpoint returned empty content");
-      return content;
-    } finally {
-      clearTimeout(timer);
-    }
+    return this.#client.complete(
+      LEAF_SUMMARY_SYSTEM_PROMPT,
+      [
+        `Cluster: ${input.nodeName}`,
+        "",
+        "Memories:",
+        ...input.statements.map((statement) => `- ${statement}`),
+      ].join("\n"),
+    );
   }
 }
 
@@ -149,13 +97,7 @@ export function createLeafSummaryProviderFromEnv(
   });
 }
 
-export interface LeafSummaryDrainResult {
-  summarized: number;
-  /** Stale-write rejections (membership changed mid-flight) + LLM failures. */
-  failed: number;
-  /** True when pendingLeafSummaries still has work after this drain. */
-  truncated: boolean;
-}
+export type LeafSummaryDrainResult = SummaryDrainResult;
 
 /** Summarize every pending block, bounded per call. LLM calls run with
  *  bounded concurrency; the small setLeafSummary writes stay serial. A round
@@ -166,55 +108,12 @@ export async function drainLeafSummaries(
   provider: LeafSummaryProvider,
   options: { batch?: number; concurrency?: number; maxCalls?: number } = {},
 ): Promise<LeafSummaryDrainResult> {
-  const batch = Math.max(1, Math.min(options.batch ?? 32, 256));
-  const concurrency = Math.max(1, Math.min(options.concurrency ?? 8, 32));
-  const maxCalls = Math.max(1, options.maxCalls ?? Number.POSITIVE_INFINITY);
-  let summarized = 0;
-  let failed = 0;
-  let calls = 0;
-  let truncated = false;
-  for (;;) {
-    const remainingBudget = maxCalls - calls;
-    if (remainingBudget <= 0) {
-      truncated = true;
-      break;
-    }
-    const tasks = store.pendingLeafSummaries({
-      limit: Math.min(batch, remainingBudget),
-    });
-    if (tasks.length === 0) break;
-    calls += tasks.length;
-    let roundSummarized = 0;
-    for (let offset = 0; offset < tasks.length; offset += concurrency) {
-      const slice = tasks.slice(offset, offset + concurrency);
-      const summaries = await Promise.all(
-        slice.map((task) =>
-          provider
-            .summarize({ nodeName: task.nodeName, statements: task.statements })
-            .then((text) => text.trim())
-            .catch(() => ""),
-        ),
-      );
-      for (const [index, task] of slice.entries()) {
-        const text = summaries[index]!;
-        if (!text) {
-          failed += 1;
-          continue;
-        }
-        // Stale rejection (false) means the block changed mid-flight; it will
-        // be re-collected with a fresh fingerprint on the next round.
-        if (store.setLeafSummary(task.blockId, text, provider.model, task.membersKey)) {
-          summarized += 1;
-          roundSummarized += 1;
-        }
-      }
-    }
-    // No progress at all (endpoint down, or every write went stale): stop
-    // instead of hot-looping the same pending set.
-    if (roundSummarized === 0) {
-      truncated = true;
-      break;
-    }
-  }
-  return { summarized, failed, truncated };
+  return drainSummaryTasks({
+    ...options,
+    pull: (limit) => store.pendingLeafSummaries({ limit }),
+    summarize: (task) =>
+      provider.summarize({ nodeName: task.nodeName, statements: task.statements }),
+    commit: (task, summary) =>
+      store.setLeafSummary(task.blockId, summary, provider.model, task.membersKey),
+  });
 }

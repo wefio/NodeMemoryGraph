@@ -148,7 +148,7 @@ Pi 扩展把权威 LTG 放在 `NMG_DATA_DIR` 或 `~/.nmg/nmg.sqlite`，把当前
 隔离；没有会话所有者的 LTG 缓存行由项目内会话共享。
 只有当项目根目录和 Pi 工作目录不同的时候才需要设置 `NMG_PROJECT_DIR`。
 
-默认情况下，模型拿到四个工具和一套类型化写入/使用策略：
+默认情况下，模型拿到五个工具和一套类型化写入/使用策略：
 
 - `nmg_remember`：保存带作用域、真值状态、事件时间、稳定状态身份、证据角色
   和来源的类型化长期记忆。
@@ -157,8 +157,12 @@ Pi 扩展把权威 LTG 放在 `NMG_DATA_DIR` 或 `~/.nmg/nmg.sqlite`，把当前
 - `nmg_get`：把选中的 ID 展开为精确记忆陈述和有界来源证据。传入 `nmg_search`
   返回的 `activeGraphId` 会把选中的 ID 记录为实际使用过；另一个会话读不到
   也更新不了那个 AG。
+- `nmg_lab`：发现、租用、调用和关闭可选的会话能力；受控或 active 执行仍需
+  原有评估门和授权回执。
 - `nmg_board`：多个 agent 通过带署名的条目、TTL 过期、增量游标和显式 resolve
-  交换临时的任务范围笔记。板面条目不是 LTG 记忆，也永远不进入语义检索。
+  交换临时的任务范围笔记。它默认可用，让新 Agent 能立即发现共享任务；设置
+  `NMG_ENABLE_COORDINATION=0`（也接受 `false`、`off`、`no`）可关闭模型工具和
+  adapter 唤醒。板面条目不是 LTG 记忆，也永远不进入语义检索。
 
 图维护、QPP、索引和实验性推理组件留在 core/CLI 层，不做成 Pi 工具。adapter
 从不直接打开 SQLite 或 import 那些实现。

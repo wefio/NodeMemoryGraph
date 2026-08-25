@@ -105,9 +105,11 @@ named special case.
 
 ## Shared task blackboard
 
-This is optional. CLI board operations are always available; model-facing board
-tools and automatic wake polling require `NMG_ENABLE_COORDINATION=1`. Do not
-enable coordination for a single-Agent task merely because the storage exists.
+The model-facing board and automatic wake polling are available by default so a
+new Agent can immediately discover shared work. Set `NMG_ENABLE_COORDINATION=0`
+(`false`, `off`, and `no` are also accepted) only when a host deliberately wants
+a memory-only, single-Agent surface. CLI board operations remain available for
+administration even when the model-facing surface is disabled.
 
 Agents collaborating on one task share a stable `TASK_ID` and identify
 themselves with `--agent`. Publish only concise coordination state:

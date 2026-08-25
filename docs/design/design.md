@@ -154,10 +154,12 @@ nmg_lab(action, capability?, ...)
   -> discover and explicitly lease optional session capabilities
 ```
 
-Cross-Agent coordination is an independent optional capability. Setting
-`NMG_ENABLE_COORDINATION=1` exposes `nmg_board` and adapter wake polling; daemon
-RPC and CLI board operations remain available when the model-facing tool is off.
-This keeps ordinary single-Agent memory use from paying a coordination tax.
+Cross-Agent coordination is an independent capability, but its discovery surface
+is enabled by default: adapters expose `nmg_board` and wake polling unless
+`NMG_ENABLE_COORDINATION` is explicitly set to `0`, `false`, `off`, or `no`.
+This lets a newly attached Agent discover and join shared work without every peer
+first performing a manual enable step. Daemon RPC and CLI board operations remain
+available when the model-facing surface is disabled.
 
 Automatic extraction may use the same write path. Privacy deletion, reindexing,
 graph editing, feedback inspection, and maintenance belong in CLI/UI/background
@@ -339,13 +341,15 @@ cannot meet its budget in TypeScript.
 
 Implementation reuse follows semantic ownership rather than textual similarity.
 Scope canonicalization and embedding-index lifecycle are single Core rules;
-adapters must not reimplement them. Host-specific tool-schema encodings,
-message-delivery calls, and process lifecycle hooks may remain thin local
-adapters because Pi, MCP, Kimi, and DSH expose different host contracts. Generated
+adapters must not reimplement them. Pi, MCP and DSH consume one host-neutral list
+of common remember/board actions, while retaining native TypeBox, Zod, or JSON
+schema encodings and host-only actions. Leaf and node summarizers share the
+OpenAI-compatible completion client and bounded drain runner, while retaining
+their distinct prompts, pending-task rules, and stale-write semantics.
+Host-specific message delivery and process lifecycle hooks remain thin local
+adapters because Pi, MCP, Kimi, and DSH expose different event loops. Generated
 bundles are not a second implementation, and real-process daemon tests remain
 separate from fast in-process fixtures because they verify different boundaries.
-Shared summarizer transport/drain code is a future extraction seam, not a reason
-to merge leaf and node prompts or stale-write semantics.
 
 Other Agents can use the packaged `nmg-memory` Skill. Its entry document is a
 small first-use card; detailed write, recall, and daemon operations live in
@@ -752,8 +756,9 @@ Agent B private AG ─┘                       │
 
 **Implementation status:** the shared Task Board is implemented in SQLite and
 exposed by daemon RPC and CLI (`nmg board put/read/resolve`). Adapters expose the
-`nmg_board` tool and wake polling only with `NMG_ENABLE_COORDINATION=1`. It records
-`agentId` and source session, supports task
+`nmg_board` tool and wake polling by default; false-like
+`NMG_ENABLE_COORDINATION` values explicitly suppress that model-facing surface.
+It records `agentId` and source session, supports task
 isolation, cursor reads, TTL deletion, and explicit resolution. Pi reads are
 added to the caller's bounded `SessionRuntimeAg`. Membership/ACLs and remote
 multi-device transport are not implemented; local callers sharing the daemon

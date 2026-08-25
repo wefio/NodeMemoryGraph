@@ -26,6 +26,7 @@ import {
   stagingDirFor,
 } from "../../../src/cli/archive-staging.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
+import { PI_BOARD_ACTIONS, PI_REMEMBER_ACTIONS } from "../../../src/integration/tool-contract.ts";
 import { resolveSkillOptPolicyChannels } from "../../../src/lab/skillopt-policy.ts";
 import type {
   ActiveGraphBudget,
@@ -895,16 +896,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     parameters: Type.Object({
       action: Type.Optional(
         Type.Union(
-          [
-            Type.Literal("save"),
-            Type.Literal("supersede"),
-            Type.Literal("relate"),
-            Type.Literal("forget"),
-            Type.Literal("resolve"),
-            Type.Literal("reopen"),
-            Type.Literal("feedback"),
-            Type.Literal("claim_outcome"),
-          ],
+          PI_REMEMBER_ACTIONS.map((action) => Type.Literal(action)),
           { description: nmgPrompts.remember_action_parameter_description },
         ),
       ),
@@ -1469,187 +1461,177 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     },
   });
 
-  if (coordinationToolsEnabled) pi.registerTool({
-    name: "nmg_board",
-    label: "NMG Task Board",
-    description: nmgPrompts.board_description,
-    parameters: Type.Object({
-      action: Type.Union(
-        [
-          Type.Literal("put"),
-          Type.Literal("read"),
-          Type.Literal("resolve"),
-          Type.Literal("acknowledge"),
-          Type.Literal("claim"),
-          Type.Literal("release"),
-          Type.Literal("unsubscribe"),
-          Type.Literal("subscribe"),
-          Type.Literal("discover"),
-          Type.Literal("rename"),
-        ],
-        { description: nmgPrompts.board_action_parameter_description },
-      ),
-      taskId: Type.Optional(
-        Type.String({ description: nmgPrompts.board_task_id_parameter_description }),
-      ),
-      content: Type.Optional(
-        Type.String({ description: nmgPrompts.board_content_parameter_description }),
-      ),
-      kind: Type.Optional(
-        Type.Union([
-          Type.Literal("blocker"),
-          Type.Literal("decision"),
-          Type.Literal("goal"),
-          Type.Literal("handoff"),
-          Type.Literal("note"),
-          Type.Literal("question"),
-          Type.Literal("result"),
-        ]),
-      ),
-      entryId: Type.Optional(Type.String()),
-      resolution: Type.Optional(Type.String()),
-      reason: Type.Optional(Type.String()),
-      leaseSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 86_400 })),
-      afterCursor: Type.Optional(Type.Number({ minimum: 0 })),
-      limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
-      includeResolved: Type.Optional(Type.Boolean()),
-      ttlSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 2_592_000 })),
-      // A2A find→direct: put with to=<stable agent_name> wakes only that
-      // agent's LLM (others read-but-stay-silent). discover lists online
-      // agents so the caller can pick a to= target.
-      to: Type.Optional(
-        Type.String({
-          description:
-            "定向投递：stable agent_name 只唤醒该 agent；其他订阅者 read 可见但静默（需先 discover 选人）",
-        }),
-      ),
-      need: Type.Optional(Type.String({ description: "discover 的找人需求描述（可选）" })),
-      capabilities: Type.Optional(
-        Type.String({ description: "discover 按能力过滤（可选，如 'stg,audit'）" }),
-      ),
-      agentName: Type.Optional(
-        Type.String({ description: "rename 的新显示名（id 不变，reload 后保持）" }),
-      ),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const sessionId = ctx.sessionManager.getSessionId();
-      // Identity chain: explicit NMG_AGENT_ID wins, then the session id (stable
-      // across a session), then the pid as a last resort. A pid alone would
-      // change every launch and fragment cross-session attribution.
-      const identity = loadOrCreateAgentIdentity(sessionId);
-      const agentId = identity.id;
-      const agentName = identity.agentName;
-      // taskId is optional: without one, entries land on the shared world
-      // channel (the lobby), which every Agent reads by default — no channel
-      // name needs to be agreed on in advance. Explicit taskIds open named
-      // channels that are surfaced in the world channel's lobby.
-      const taskId = params.taskId?.trim() || WORLD_BOARD_ID;
-      // Runtime rename: change this agent's display name (id unchanged — it is
-      // the stable routing key). Persisted in the per-agent identity file so
-      // it survives reload; mirrored to the registry so discover shows it.
-      if (params.action === "rename") {
-        const newName = String(params.agentName ?? "").trim();
-        if (!newName) {
-          return toolResult(
-            { action: "rename", agentName, id: agentId },
-            `当前 agent 名：${agentName}（id=${agentId}）。用法：nmg_board rename <新名>`,
-          );
-        }
-        const anchor = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
-        const identityFile = join(resolveNmgDataDir(), "agents", anchor, "identity.json");
-        const renamedIdentity = { id: agentId, agentName: newName };
-        cachedIdentities.set(anchor, renamedIdentity);
-        try {
-          mkdirSync(join(resolveNmgDataDir(), "agents", anchor), { recursive: true });
-          writeFileSync(identityFile, JSON.stringify(renamedIdentity, null, 2), "utf8");
-        } catch {
-          // read-only dir — rename is in-memory only for this process
-        }
-        const result = (await invoke("taskBoard", {
-          action: "rename",
-          id: agentId,
-          agentName: newName,
-        })) as { action: "rename"; agentName: string; id: string };
-        return toolResult(
-          result,
-          `已改名：${result.agentName}（id=${result.id}）——reload 后保持；定向 to= 可用新名或 id。`,
-        );
-      }
-      // Unsubscribe/subscribe are session-scoped (whether THIS session keeps
-      // getting wake notices for a channel), handled apart from entry reads.
-      // Topic-based membership: subscribe joins a channel (named channels only
-      // notify their members), unsubscribe leaves it. The world channel is the
-      // default member channel; unsubscribe there mutes the world channel.
-      if (params.action === "unsubscribe" || params.action === "subscribe") {
-        const result = (await invoke("taskBoard", {
-          action: params.action,
-          taskId,
-          sessionId,
-          agentId,
-        })) as { action: "unsubscribe" | "subscribe"; taskId: string };
-        return toolResult(
-          result,
-          params.action === "unsubscribe"
-            ? `已退出频道 ${result.taskId}：不再接收该频道新条目的唤醒通知（用 nmg_board subscribe 重新加入）。`
-            : `已加入频道 ${result.taskId}：接收该频道新条目的唤醒通知（未订阅的频道不会打扰你）。`,
-        );
-      }
-      const result = (await invoke("taskBoard", {
-        ...params,
-        taskId,
-        agentId,
-        sourceSessionId: sessionId,
-      })) as TaskBoardToolResult;
-      const entries = result.entries ?? (result.entry ? [result.entry] : []);
-      if (result.action === "read") {
-        for (const entry of entries) {
-          runtimeAg.note(
-            sessionId,
-            `board:${taskId}:${entry.id}`,
-            `[task-board ${taskId} #${entry.sequence} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
-          );
-        }
-        if (entries.length > 0) runtimeAg.activateProjection(sessionId);
-        // Reading is a delivery: write a receipt for every open, non-own-echo
-        // entry returned, so the wake loop does not re-push entries this
-        // session has already seen (flow constraint — 'already read' never
-        // re-wakes, per cross-agent feedback on world #9). Same echo boundary
-        // as the loop: the poster's own entries are never pushed anyway.
-        // await allSettled so receipts are durable before the read returns;
-        // a transient failure just risks one extra push (at-least-once).
-        const receipts = entries
-          .filter((entry) => {
-            if (entry.status !== "open") return false;
-            return !(
-              entry.sourceSessionId === sessionId ||
-              (entry.sourceSessionId == null && entry.agentId === agentId)
+  if (coordinationToolsEnabled)
+    pi.registerTool({
+      name: "nmg_board",
+      label: "NMG Task Board",
+      description: nmgPrompts.board_description,
+      parameters: Type.Object({
+        action: Type.Union(
+          PI_BOARD_ACTIONS.map((action) => Type.Literal(action)),
+          { description: nmgPrompts.board_action_parameter_description },
+        ),
+        taskId: Type.Optional(
+          Type.String({ description: nmgPrompts.board_task_id_parameter_description }),
+        ),
+        content: Type.Optional(
+          Type.String({ description: nmgPrompts.board_content_parameter_description }),
+        ),
+        kind: Type.Optional(
+          Type.Union([
+            Type.Literal("blocker"),
+            Type.Literal("decision"),
+            Type.Literal("goal"),
+            Type.Literal("handoff"),
+            Type.Literal("note"),
+            Type.Literal("question"),
+            Type.Literal("result"),
+          ]),
+        ),
+        entryId: Type.Optional(Type.String()),
+        resolution: Type.Optional(Type.String()),
+        reason: Type.Optional(Type.String()),
+        leaseSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 86_400 })),
+        afterCursor: Type.Optional(Type.Number({ minimum: 0 })),
+        limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
+        includeResolved: Type.Optional(Type.Boolean()),
+        ttlSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 2_592_000 })),
+        // A2A find→direct: put with to=<stable agent_name> wakes only that
+        // agent's LLM (others read-but-stay-silent). discover lists online
+        // agents so the caller can pick a to= target.
+        to: Type.Optional(
+          Type.String({
+            description:
+              "定向投递：stable agent_name 只唤醒该 agent；其他订阅者 read 可见但静默（需先 discover 选人）",
+          }),
+        ),
+        need: Type.Optional(Type.String({ description: "discover 的找人需求描述（可选）" })),
+        capabilities: Type.Optional(
+          Type.String({ description: "discover 按能力过滤（可选，如 'stg,audit'）" }),
+        ),
+        agentName: Type.Optional(
+          Type.String({ description: "rename 的新显示名（id 不变，reload 后保持）" }),
+        ),
+      }),
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        const sessionId = ctx.sessionManager.getSessionId();
+        // Identity chain: explicit NMG_AGENT_ID wins, then the session id (stable
+        // across a session), then the pid as a last resort. A pid alone would
+        // change every launch and fragment cross-session attribution.
+        const identity = loadOrCreateAgentIdentity(sessionId);
+        const agentId = identity.id;
+        const agentName = identity.agentName;
+        // taskId is optional: without one, entries land on the shared world
+        // channel (the lobby), which every Agent reads by default — no channel
+        // name needs to be agreed on in advance. Explicit taskIds open named
+        // channels that are surfaced in the world channel's lobby.
+        const taskId = params.taskId?.trim() || WORLD_BOARD_ID;
+        // Runtime rename: change this agent's display name (id unchanged — it is
+        // the stable routing key). Persisted in the per-agent identity file so
+        // it survives reload; mirrored to the registry so discover shows it.
+        if (params.action === "rename") {
+          const newName = String(params.agentName ?? "").trim();
+          if (!newName) {
+            return toolResult(
+              { action: "rename", agentName, id: agentId },
+              `当前 agent 名：${agentName}（id=${agentId}）。用法：nmg_board rename <新名>`,
             );
-          })
-          .map((entry) =>
-            invoke("taskBoard", {
-              action: "recordDelivery",
-              entryId: entry.id,
-              sessionId,
-              agentId,
-              source: "read",
-            }),
+          }
+          const anchor = process.env.NMG_AGENT_ID?.trim() || sessionId || `pi:${process.pid}`;
+          const identityFile = join(resolveNmgDataDir(), "agents", anchor, "identity.json");
+          const renamedIdentity = { id: agentId, agentName: newName };
+          cachedIdentities.set(anchor, renamedIdentity);
+          try {
+            mkdirSync(join(resolveNmgDataDir(), "agents", anchor), { recursive: true });
+            writeFileSync(identityFile, JSON.stringify(renamedIdentity, null, 2), "utf8");
+          } catch {
+            // read-only dir — rename is in-memory only for this process
+          }
+          const result = (await invoke("taskBoard", {
+            action: "rename",
+            id: agentId,
+            agentName: newName,
+          })) as { action: "rename"; agentName: string; id: string };
+          return toolResult(
+            result,
+            `已改名：${result.agentName}（id=${result.id}）——reload 后保持；定向 to= 可用新名或 id。`,
           );
-        await Promise.allSettled(receipts);
-      }
-      // Reading the world channel surfaces the lobby: the directory of active
-      // named channels, so an Agent that knows no channel name can discover
-      // and join one.
-      let directory: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> = [];
-      if (result.action === "read" && taskId === WORLD_BOARD_ID) {
-        const lobby = (await invoke("taskBoard", { action: "list", agentId })) as {
-          action: "list";
-          boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }>;
-        };
-        directory = lobby.boards ?? [];
-      }
-      return toolResult(result, formatTaskBoardResult(result, taskId, directory));
-    },
-  });
+        }
+        // Unsubscribe/subscribe are session-scoped (whether THIS session keeps
+        // getting wake notices for a channel), handled apart from entry reads.
+        // Topic-based membership: subscribe joins a channel (named channels only
+        // notify their members), unsubscribe leaves it. The world channel is the
+        // default member channel; unsubscribe there mutes the world channel.
+        if (params.action === "unsubscribe" || params.action === "subscribe") {
+          const result = (await invoke("taskBoard", {
+            action: params.action,
+            taskId,
+            sessionId,
+            agentId,
+          })) as { action: "unsubscribe" | "subscribe"; taskId: string };
+          return toolResult(
+            result,
+            params.action === "unsubscribe"
+              ? `已退出频道 ${result.taskId}：不再接收该频道新条目的唤醒通知（用 nmg_board subscribe 重新加入）。`
+              : `已加入频道 ${result.taskId}：接收该频道新条目的唤醒通知（未订阅的频道不会打扰你）。`,
+          );
+        }
+        const result = (await invoke("taskBoard", {
+          ...params,
+          taskId,
+          agentId,
+          sourceSessionId: sessionId,
+        })) as TaskBoardToolResult;
+        const entries = result.entries ?? (result.entry ? [result.entry] : []);
+        if (result.action === "read") {
+          for (const entry of entries) {
+            runtimeAg.note(
+              sessionId,
+              `board:${taskId}:${entry.id}`,
+              `[task-board ${taskId} #${entry.sequence} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
+            );
+          }
+          if (entries.length > 0) runtimeAg.activateProjection(sessionId);
+          // Reading is a delivery: write a receipt for every open, non-own-echo
+          // entry returned, so the wake loop does not re-push entries this
+          // session has already seen (flow constraint — 'already read' never
+          // re-wakes, per cross-agent feedback on world #9). Same echo boundary
+          // as the loop: the poster's own entries are never pushed anyway.
+          // await allSettled so receipts are durable before the read returns;
+          // a transient failure just risks one extra push (at-least-once).
+          const receipts = entries
+            .filter((entry) => {
+              if (entry.status !== "open") return false;
+              return !(
+                entry.sourceSessionId === sessionId ||
+                (entry.sourceSessionId == null && entry.agentId === agentId)
+              );
+            })
+            .map((entry) =>
+              invoke("taskBoard", {
+                action: "recordDelivery",
+                entryId: entry.id,
+                sessionId,
+                agentId,
+                source: "read",
+              }),
+            );
+          await Promise.allSettled(receipts);
+        }
+        // Reading the world channel surfaces the lobby: the directory of active
+        // named channels, so an Agent that knows no channel name can discover
+        // and join one.
+        let directory: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> = [];
+        if (result.action === "read" && taskId === WORLD_BOARD_ID) {
+          const lobby = (await invoke("taskBoard", { action: "list", agentId })) as {
+            action: "list";
+            boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }>;
+          };
+          directory = lobby.boards ?? [];
+        }
+        return toolResult(result, formatTaskBoardResult(result, taskId, directory));
+      },
+    });
 
   // ---- Board wake loop (config file + /nmg-wake command) ------------
   // Notification for an idle Agent: poll the subscribed spaces (the world
@@ -1660,7 +1642,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   // claim+notify design: claims decide who works, notifications decide who
   // knows. Enabled and tuned via ~/.nmg/board-wake.json (edited by hand or
   // toggled with /nmg-wake, which persists to the same file); dedup state is
-  // kept in board-wake-state.json. Defaults are conservative: off.
+  // kept in board-wake-state.json. Coordination is available by default and
+  // this second-layer switch can explicitly silence automatic wake delivery.
   const wakeConfigPath = join(resolveNmgDataDir(), "board-wake.json");
   const wakeStatePath = join(resolveNmgDataDir(), "board-wake-state.json");
   interface BoardWakeConfig {
@@ -1681,7 +1664,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     try {
       const raw = JSON.parse(readFileSync(wakeConfigPath, "utf8")) as Partial<BoardWakeConfig>;
       return {
-        enabled: raw.enabled === true,
+        enabled: raw.enabled !== false,
         // 0 = unlimited: budget 0 disables the daily cap, cooldownMs 0 removes the cooldown.
         budget: raw.budget === 0 ? 0 : Math.max(1, Number(raw.budget) || 8),
         cooldownMs: raw.cooldownMs === 0 ? 0 : Math.max(30_000, Number(raw.cooldownMs) || 600_000),
@@ -1690,7 +1673,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       };
     } catch {
       return {
-        enabled: false,
+        enabled: true,
         budget: 8,
         cooldownMs: 600_000,
         intervalMs: 60_000,

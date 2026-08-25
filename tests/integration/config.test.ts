@@ -18,10 +18,14 @@ import {
   configuredStgSyncPolicy,
 } from "../../src/integration/config.ts";
 
-test("coordination is an explicit adapter capability", () => {
-  assert.equal(coordinationEnabled({}), false);
+test("coordination is enabled by default and has an explicit off switch", () => {
+  assert.equal(coordinationEnabled({}), true);
   assert.equal(coordinationEnabled({ NMG_ENABLE_COORDINATION: "1" }), true);
-  assert.equal(coordinationEnabled({ NMG_ENABLE_COORDINATION: "true" }), false);
+  assert.equal(coordinationEnabled({ NMG_ENABLE_COORDINATION: "true" }), true);
+  assert.equal(coordinationEnabled({ NMG_ENABLE_COORDINATION: "on" }), true);
+  for (const value of ["0", "false", "OFF", "No"]) {
+    assert.equal(coordinationEnabled({ NMG_ENABLE_COORDINATION: value }), false);
+  }
 });
 
 test("maintenance policy owns defaults and validates environment overrides", () => {

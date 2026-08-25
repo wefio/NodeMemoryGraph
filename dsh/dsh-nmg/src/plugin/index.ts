@@ -18,6 +18,8 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { connect } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
+import { coordinationEnabled as configuredCoordinationEnabled } from '../../../../src/integration/config.ts'
+import { COMMON_BOARD_ACTIONS, COMMON_REMEMBER_ACTIONS } from '../../../../src/integration/tool-contract.ts'
 
 export const inject = ['tools', 'subprocess', 'sandboxPolicy', 'systemPrompt', 'timer']
 
@@ -43,7 +45,7 @@ export function apply(ctx: Context): () => void {
   const subprocess = ctx.subprocess
   const sandboxPolicy = ctx.sandboxPolicy
   const systemPrompt = ctx.systemPrompt
-  const coordinationEnabled = process.env.NMG_ENABLE_COORDINATION === '1'
+  const coordinationEnabled = configuredCoordinationEnabled()
 
   const workspaceRoot =
     (process.env.NMG_PROJECT_DIR && process.env.NMG_PROJECT_DIR.trim()) ||
@@ -269,6 +271,21 @@ export function apply(ctx: Context): () => void {
       return { ok: false, error: 'NMG call aborted' }
     }
     return nmgJson(cliArgs, signal)
+  }
+
+  async function invokeRpcOnly(method, params, signal) {
+    try {
+      let raw = await daemonCall(method, params, signal)
+      if (raw == null) {
+        await ensureDaemon(signal)
+        raw = await daemonCall(method, params, signal)
+      }
+      return raw == null
+        ? { ok: false, error: 'NMG daemon is unavailable for ' + method }
+        : { ok: true, data: raw }
+    } catch {
+      return { ok: false, error: 'NMG call aborted' }
+    }
   }
 
   // ── automatic recall (DSH-native: systemPrompt.context) ───────────────────
@@ -1067,10 +1084,25 @@ export function apply(ctx: Context): () => void {
 
   const rememberTool = {
     name: 'nmg_remember',
-    description: 'Save a durable typed memory (fact/preference/constraint/state/event/strategy). Requires a stable nodeName and self-contained statement. Never save secrets, chatter, unverified model claims, or transient failures.',
+    description: 'Save or update durable memory through the shared NMG lifecycle contract. Never save secrets, chatter, unverified model claims, or transient failures.',
     parameters: {
       type: 'object',
       properties: {
+        action: { type: 'string', enum: [...COMMON_REMEMBER_ACTIONS], description: 'Memory action (default save).' },
+        memoryId: { type: 'string', description: 'Existing memory for forget/resolve/reopen/claim_outcome.' },
+        newMemoryId: { type: 'string', description: 'Newer memory for supersede/relate.' },
+        supersededMemoryId: { type: 'string', description: 'Older memory replaced by newMemoryId.' },
+        relatedMemoryId: { type: 'string', description: 'Existing memory related to newMemoryId.' },
+        relatedMemoryIds: { type: 'array', items: { type: 'string' }, description: 'Evidence anchors for resolve/reopen.' },
+        relationJudgement: { type: 'string', enum: ['conflict', 'distinct', 'refines', 'related', 'same_entity'] },
+        relationConfidence: { type: 'number', description: 'Relation confidence 0..1.' },
+        resolutionReason: { type: 'string', description: 'Reason for supersede/resolve/reopen.' },
+        semanticTaskId: { type: 'string', description: 'Independent task identity for claim_outcome.' },
+        activeGraphId: { type: 'string', description: 'Active graph that produced the evaluated claim.' },
+        claimOutcome: { type: 'string', enum: ['supported', 'contradicted'] },
+        claimSourceLineage: { type: 'string', description: 'Stable attributable source lineage.' },
+        claimIndexes: { type: 'array', items: { type: 'integer' } },
+        claimWeight: { type: 'number', description: 'Claim reliability in (0,1].' },
         statement: { type: 'string', description: 'Self-contained semantic statement.' },
         nodeName: { type: 'string', description: 'Stable node grouping related memories.' },
         memoryType: { type: 'string', enum: ['fact', 'state', 'event', 'preference', 'constraint', 'strategy'], description: 'Memory type.' },
@@ -1085,10 +1117,49 @@ export function apply(ctx: Context): () => void {
         writeReason: { type: 'string', description: 'Durable-write justification.' },
         scope: { type: 'object', additionalProperties: true, description: 'Applicability scope, e.g. {"project":"nmg"}.' },
       },
-      required: ['statement', 'nodeName'],
+      required: [],
     },
     output: textOutput,
     async execute(args, exec) {
+      const action = args.action || 'save'
+      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
+      if (action === 'claim_outcome') {
+        if (!args.memoryId || !args.claimOutcome || !args.semanticTaskId || !args.claimSourceLineage) {
+          return 'nmg_remember claim_outcome requires memoryId, claimOutcome, semanticTaskId, and claimSourceLineage.'
+        }
+        const result = await invokeRpcOnly('recordClaimOutcomes', {
+          semanticTaskId: args.semanticTaskId,
+          activeGraphId: args.activeGraphId,
+          sessionId,
+          collectionOrigin: 'natural',
+          projectDir: workspaceRoot,
+          votes: [{
+            memoryId: args.memoryId,
+            claimIndexes: args.claimIndexes,
+            outcome: args.claimOutcome,
+            source: 'task',
+            sourceLineage: args.claimSourceLineage,
+            weight: args.claimWeight,
+          }],
+        }, exec.signal)
+        return result.ok ? JSON.stringify(result.data) : result.error
+      }
+      if (action !== 'save') {
+        const params: Record<string, any> = { action, projectDir: workspaceRoot, sessionId }
+        if (args.memoryId) params.memoryId = args.memoryId
+        if (args.newMemoryId) params.newMemoryId = args.newMemoryId
+        if (args.supersededMemoryId) params.supersededMemoryId = args.supersededMemoryId
+        if (args.relatedMemoryId) params.relatedMemoryId = args.relatedMemoryId
+        if (args.relatedMemoryIds) params.relatedMemoryIds = args.relatedMemoryIds
+        if (args.relationJudgement) params.relationJudgement = args.relationJudgement
+        if (args.relationConfidence != null) params.confidence = args.relationConfidence
+        if (args.resolutionReason) params.reason = args.resolutionReason
+        const result = await invokeRpcOnly('resolveRemember', params, exec.signal)
+        return result.ok ? JSON.stringify(result.data) : result.error
+      }
+      if (!args.statement || !args.nodeName) {
+        return 'nmg_remember save requires statement and nodeName.'
+      }
       const params: Record<string, any> = { statement: args.statement, nodeName: args.nodeName, projectDir: workspaceRoot }
       if (args.memoryType) params.memoryType = args.memoryType
       if (args.stateKey) params.stateKey = args.stateKey
@@ -1128,13 +1199,14 @@ export function apply(ctx: Context): () => void {
     parameters: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['put', 'read', 'resolve', 'claim', 'release', 'discover'], description: 'Board action.' },
+        action: { type: 'string', enum: [...COMMON_BOARD_ACTIONS], description: 'Board action.' },
         taskId: { type: 'string', description: 'Task channel; omit for the shared world channel.' },
         content: { type: 'string', description: 'Entry text (put).' },
         kind: { type: 'string', enum: ['goal', 'note', 'question', 'result', 'handoff', 'decision', 'blocker'], description: 'Entry kind (put).' },
         agentId: { type: 'string', description: 'Writer/reader identity (default "dsh").' },
         entryId: { type: 'string', description: 'Entry to resolve/claim/release.' },
         resolution: { type: 'string', description: 'Resolution note (resolve).' },
+        reason: { type: 'string', description: 'Reason for acknowledge/subscribe/unsubscribe.' },
         afterCursor: { type: 'integer', description: 'Read only entries after this sequence (read).' },
         limit: { type: 'integer', description: 'Max entries (read).' },
         includeResolved: { type: 'boolean', description: 'Include resolved entries (read).' },
@@ -1150,15 +1222,34 @@ export function apply(ctx: Context): () => void {
       const agent = args.agentId || WAKE_AGENT_ID
        const sourceSessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
       const taskId = args.taskId || WAKE_WORLD_TASK
-      if ((args.action === 'resolve' || args.action === 'claim' || args.action === 'release') && (!args.taskId || !args.entryId)) {
+      if (['resolve', 'acknowledge', 'claim', 'release'].includes(args.action) && (!args.taskId || !args.entryId)) {
         return 'nmg_board ' + args.action + ' requires taskId and entryId.'
       }
-      if (!['put', 'read', 'resolve', 'claim', 'release', 'discover'].includes(args.action)) {
+      if (!COMMON_BOARD_ACTIONS.includes(args.action)) {
         return 'Unsupported board action: ' + args.action
       }
       const params: Record<string, any> = { action: args.action, agentId: agent }
       const argv = ['board', args.action]
-      if (args.action === 'discover') {
+      if (args.action === 'subscribe' || args.action === 'unsubscribe') {
+        const result = await invokeRpcOnly('taskBoard', {
+          action: args.action,
+          taskId,
+          sessionId: sourceSessionId,
+          agentId: agent,
+          reason: args.reason,
+        }, exec.signal)
+        return result.ok ? JSON.stringify(result.data) : result.error
+      } else if (args.action === 'acknowledge') {
+        const result = await invokeRpcOnly('taskBoard', {
+          action: args.action,
+          taskId,
+          entryId: args.entryId,
+          agentId: agent,
+          sourceSessionId,
+          reason: args.reason,
+        }, exec.signal)
+        return result.ok ? JSON.stringify(result.data) : result.error
+      } else if (args.action === 'discover') {
         params.taskId = 'default'
         if (args.capabilities) params.capabilities = args.capabilities
         argv.push('--agent', agent)

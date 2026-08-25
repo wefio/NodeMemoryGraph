@@ -10,6 +10,7 @@ import {
 import { resolveNmgDataDir } from "../../../src/cli/data-path.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import { coordinationEnabled } from "../../../src/integration/config.ts";
+import { COMMON_BOARD_ACTIONS, COMMON_REMEMBER_ACTIONS } from "../../../src/integration/tool-contract.ts";
 import { WORLD_BOARD_ID, type MemoryContext, type PerfSnapshot } from "../../../src/core/types.ts";
 
 const nmgPrompts = loadPrompts();
@@ -103,7 +104,7 @@ server.registerTool(
     description: nmgPrompts.mcp_remember_description,
     inputSchema: {
       action: z
-        .enum(["save", "supersede", "relate", "forget", "resolve", "reopen", "claim_outcome"])
+        .enum(COMMON_REMEMBER_ACTIONS)
         .default("save")
         .describe(nmgPrompts.mcp_remember_action_parameter_description),
       memoryId: z.string().optional().describe(nmgPrompts.remember_memory_id_parameter_description),
@@ -409,17 +410,7 @@ if (coordinationEnabled()) server.registerTool(
     description: nmgPrompts.board_description,
     inputSchema: {
       action: z
-        .enum([
-          "put",
-          "read",
-          "resolve",
-          "acknowledge",
-          "claim",
-          "release",
-          "subscribe",
-          "unsubscribe",
-          "discover",
-        ])
+        .enum(COMMON_BOARD_ACTIONS)
         .describe(nmgPrompts.board_action_parameter_description),
       taskId: z.string().optional().describe(nmgPrompts.board_task_id_parameter_description),
       content: z.string().optional().describe(nmgPrompts.board_content_parameter_description),

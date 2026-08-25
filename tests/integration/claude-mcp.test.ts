@@ -20,7 +20,7 @@ function textOf(result: Awaited<ReturnType<Client["callTool"]>>): string {
     .join("\n");
 }
 
-test("MCP adapter keeps coordination off the default tool surface", async () => {
+test("MCP adapter permits coordination to be explicitly disabled", async () => {
   const dataDir = mkdtempSync(resolve(tmpdir(), "nmg-claude-mcp-default-"));
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -51,7 +51,6 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
       NMG_AGENT_ID: "claude-reviewer",
       NMG_AGENT_CAPABILITIES: "review,typescript",
       NMG_SESSION_ID: "claude-session",
-      NMG_ENABLE_COORDINATION: "1",
     },
     stderr: "pipe",
   });

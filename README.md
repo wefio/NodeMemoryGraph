@@ -203,7 +203,7 @@ LTG cache rows have no session owner. Set `NMG_PROJECT_DIR` only when the projec
 root differs from Pi's working directory.
 
 By default, the model receives three durable-memory tools, one Lab capability
-entry point, and a typed write/use policy:
+entry point, the shared Task Board, and a typed write/use policy:
 
 - `nmg_remember`: save a typed long-term memory with scope, truth status,
   event time, stable state identity, evidence role, and provenance.
@@ -217,11 +217,15 @@ entry point, and a typed write/use policy:
   the existing daemon connection. Reasoning workspace, read-only graph reasoning,
   and controller shadow are Agent-selectable; controlled/active actuation remains
   receipt- and gate-protected.
+- `nmg_board`: publish, discover, claim, acknowledge, and resolve temporary
+  cross-Agent work. It is available by default so a newly attached Agent can
+  immediately discover peers and shared tasks.
 
-Set `NMG_ENABLE_COORDINATION=1` to additionally expose `nmg_board` and enable
-adapter wake polling. The daemon RPC and `nmg board ...` CLI remain available
-without this model-facing tool. Board entries are temporary, attributed,
-task-scoped coordination data; they never enter LTG or semantic retrieval.
+Set `NMG_ENABLE_COORDINATION=0` (also `false`, `off`, or `no`) to hide the
+model-facing `nmg_board` tool and disable adapter wake polling. The daemon RPC
+and `nmg board ...` CLI remain available for administration. Board entries are
+temporary, attributed, task-scoped coordination data; they never enter LTG or
+semantic retrieval.
 
 Graph maintenance, QPP, and indexing remain core/CLI concerns. The adapter never opens SQLite or
 imports those implementations directly.

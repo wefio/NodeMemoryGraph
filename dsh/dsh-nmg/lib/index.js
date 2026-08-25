@@ -2,6 +2,45 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { connect } from "node:net";
+//#region ../../src/integration/config.ts
+/** Cross-Agent coordination is available by default. Explicit false-like values
+* disable the adapter tool and wake loop without disabling daemon/CLI storage. */
+function coordinationEnabled(environment = process.env) {
+	const configured = environment.NMG_ENABLE_COORDINATION?.trim().toLowerCase();
+	return configured === void 0 || !(/* @__PURE__ */ new Set([
+		"0",
+		"false",
+		"off",
+		"no"
+	])).has(configured);
+}
+//#endregion
+//#region ../../src/integration/tool-contract.ts
+/** Host-neutral action contracts. Adapters keep their native schema library and
+* host-only fields, but must not silently omit these shared lifecycle actions. */
+const COMMON_REMEMBER_ACTIONS = [
+	"save",
+	"supersede",
+	"relate",
+	"forget",
+	"resolve",
+	"reopen",
+	"claim_outcome"
+];
+[...COMMON_REMEMBER_ACTIONS.slice(0, -1)];
+const COMMON_BOARD_ACTIONS = [
+	"put",
+	"read",
+	"resolve",
+	"acknowledge",
+	"claim",
+	"release",
+	"unsubscribe",
+	"subscribe",
+	"discover"
+];
+[...COMMON_BOARD_ACTIONS];
+//#endregion
 //#region src/plugin/index.ts
 const inject = [
 	"tools",
@@ -31,7 +70,7 @@ function apply(ctx) {
 	const subprocess = ctx.subprocess;
 	const sandboxPolicy = ctx.sandboxPolicy;
 	const systemPrompt = ctx.systemPrompt;
-	const coordinationEnabled = process.env.NMG_ENABLE_COORDINATION === "1";
+	const coordinationEnabled$1 = coordinationEnabled();
 	const workspaceRoot = process.env.NMG_PROJECT_DIR && process.env.NMG_PROJECT_DIR.trim() || sandboxPolicy && typeof sandboxPolicy.workspaceRoot === "string" && sandboxPolicy.workspaceRoot || "C:\\Documents\\GitHub\\NodeMemoryGraph";
 	const binPath = workspaceRoot.replace(/[\\/]+$/, "") + "\\bin\\nmg.mjs";
 	let nodePromise;
@@ -259,6 +298,27 @@ function apply(ctx) {
 			};
 		}
 		return nmgJson(cliArgs, signal);
+	}
+	async function invokeRpcOnly(method, params, signal) {
+		try {
+			let raw = await daemonCall(method, params, signal);
+			if (raw == null) {
+				await ensureDaemon(signal);
+				raw = await daemonCall(method, params, signal);
+			}
+			return raw == null ? {
+				ok: false,
+				error: "NMG daemon is unavailable for " + method
+			} : {
+				ok: true,
+				data: raw
+			};
+		} catch {
+			return {
+				ok: false,
+				error: "NMG call aborted"
+			};
+		}
 	}
 	const recallWindows = /* @__PURE__ */ new Map();
 	const sessionTokenTotals = /* @__PURE__ */ new Map();
@@ -900,10 +960,78 @@ function apply(ctx) {
 	};
 	const rememberTool = {
 		name: "nmg_remember",
-		description: "Save a durable typed memory (fact/preference/constraint/state/event/strategy). Requires a stable nodeName and self-contained statement. Never save secrets, chatter, unverified model claims, or transient failures.",
+		description: "Save or update durable memory through the shared NMG lifecycle contract. Never save secrets, chatter, unverified model claims, or transient failures.",
 		parameters: {
 			type: "object",
 			properties: {
+				action: {
+					type: "string",
+					enum: [...COMMON_REMEMBER_ACTIONS],
+					description: "Memory action (default save)."
+				},
+				memoryId: {
+					type: "string",
+					description: "Existing memory for forget/resolve/reopen/claim_outcome."
+				},
+				newMemoryId: {
+					type: "string",
+					description: "Newer memory for supersede/relate."
+				},
+				supersededMemoryId: {
+					type: "string",
+					description: "Older memory replaced by newMemoryId."
+				},
+				relatedMemoryId: {
+					type: "string",
+					description: "Existing memory related to newMemoryId."
+				},
+				relatedMemoryIds: {
+					type: "array",
+					items: { type: "string" },
+					description: "Evidence anchors for resolve/reopen."
+				},
+				relationJudgement: {
+					type: "string",
+					enum: [
+						"conflict",
+						"distinct",
+						"refines",
+						"related",
+						"same_entity"
+					]
+				},
+				relationConfidence: {
+					type: "number",
+					description: "Relation confidence 0..1."
+				},
+				resolutionReason: {
+					type: "string",
+					description: "Reason for supersede/resolve/reopen."
+				},
+				semanticTaskId: {
+					type: "string",
+					description: "Independent task identity for claim_outcome."
+				},
+				activeGraphId: {
+					type: "string",
+					description: "Active graph that produced the evaluated claim."
+				},
+				claimOutcome: {
+					type: "string",
+					enum: ["supported", "contradicted"]
+				},
+				claimSourceLineage: {
+					type: "string",
+					description: "Stable attributable source lineage."
+				},
+				claimIndexes: {
+					type: "array",
+					items: { type: "integer" }
+				},
+				claimWeight: {
+					type: "number",
+					description: "Claim reliability in (0,1]."
+				},
 				statement: {
 					type: "string",
 					description: "Self-contained semantic statement."
@@ -979,10 +1107,49 @@ function apply(ctx) {
 					description: "Applicability scope, e.g. {\"project\":\"nmg\"}."
 				}
 			},
-			required: ["statement", "nodeName"]
+			required: []
 		},
 		output: textOutput,
 		async execute(args, exec) {
+			const action = args.action || "save";
+			const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId;
+			if (action === "claim_outcome") {
+				if (!args.memoryId || !args.claimOutcome || !args.semanticTaskId || !args.claimSourceLineage) return "nmg_remember claim_outcome requires memoryId, claimOutcome, semanticTaskId, and claimSourceLineage.";
+				const result = await invokeRpcOnly("recordClaimOutcomes", {
+					semanticTaskId: args.semanticTaskId,
+					activeGraphId: args.activeGraphId,
+					sessionId,
+					collectionOrigin: "natural",
+					projectDir: workspaceRoot,
+					votes: [{
+						memoryId: args.memoryId,
+						claimIndexes: args.claimIndexes,
+						outcome: args.claimOutcome,
+						source: "task",
+						sourceLineage: args.claimSourceLineage,
+						weight: args.claimWeight
+					}]
+				}, exec.signal);
+				return result.ok ? JSON.stringify(result.data) : result.error;
+			}
+			if (action !== "save") {
+				const params = {
+					action,
+					projectDir: workspaceRoot,
+					sessionId
+				};
+				if (args.memoryId) params.memoryId = args.memoryId;
+				if (args.newMemoryId) params.newMemoryId = args.newMemoryId;
+				if (args.supersededMemoryId) params.supersededMemoryId = args.supersededMemoryId;
+				if (args.relatedMemoryId) params.relatedMemoryId = args.relatedMemoryId;
+				if (args.relatedMemoryIds) params.relatedMemoryIds = args.relatedMemoryIds;
+				if (args.relationJudgement) params.relationJudgement = args.relationJudgement;
+				if (args.relationConfidence != null) params.confidence = args.relationConfidence;
+				if (args.resolutionReason) params.reason = args.resolutionReason;
+				const result = await invokeRpcOnly("resolveRemember", params, exec.signal);
+				return result.ok ? JSON.stringify(result.data) : result.error;
+			}
+			if (!args.statement || !args.nodeName) return "nmg_remember save requires statement and nodeName.";
 			const params = {
 				statement: args.statement,
 				nodeName: args.nodeName,
@@ -1032,14 +1199,7 @@ function apply(ctx) {
 			properties: {
 				action: {
 					type: "string",
-					enum: [
-						"put",
-						"read",
-						"resolve",
-						"claim",
-						"release",
-						"discover"
-					],
+					enum: [...COMMON_BOARD_ACTIONS],
 					description: "Board action."
 				},
 				taskId: {
@@ -1074,6 +1234,10 @@ function apply(ctx) {
 				resolution: {
 					type: "string",
 					description: "Resolution note (resolve)."
+				},
+				reason: {
+					type: "string",
+					description: "Reason for acknowledge/subscribe/unsubscribe."
 				},
 				afterCursor: {
 					type: "integer",
@@ -1111,21 +1275,38 @@ function apply(ctx) {
 			const agent = args.agentId || WAKE_AGENT_ID;
 			const sourceSessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId;
 			const taskId = args.taskId || WAKE_WORLD_TASK;
-			if ((args.action === "resolve" || args.action === "claim" || args.action === "release") && (!args.taskId || !args.entryId)) return "nmg_board " + args.action + " requires taskId and entryId.";
-			if (![
-				"put",
-				"read",
+			if ([
 				"resolve",
+				"acknowledge",
 				"claim",
-				"release",
-				"discover"
-			].includes(args.action)) return "Unsupported board action: " + args.action;
+				"release"
+			].includes(args.action) && (!args.taskId || !args.entryId)) return "nmg_board " + args.action + " requires taskId and entryId.";
+			if (!COMMON_BOARD_ACTIONS.includes(args.action)) return "Unsupported board action: " + args.action;
 			const params = {
 				action: args.action,
 				agentId: agent
 			};
 			const argv = ["board", args.action];
-			if (args.action === "discover") {
+			if (args.action === "subscribe" || args.action === "unsubscribe") {
+				const result = await invokeRpcOnly("taskBoard", {
+					action: args.action,
+					taskId,
+					sessionId: sourceSessionId,
+					agentId: agent,
+					reason: args.reason
+				}, exec.signal);
+				return result.ok ? JSON.stringify(result.data) : result.error;
+			} else if (args.action === "acknowledge") {
+				const result = await invokeRpcOnly("taskBoard", {
+					action: args.action,
+					taskId,
+					entryId: args.entryId,
+					agentId: agent,
+					sourceSessionId,
+					reason: args.reason
+				}, exec.signal);
+				return result.ok ? JSON.stringify(result.data) : result.error;
+			} else if (args.action === "discover") {
 				params.taskId = "default";
 				if (args.capabilities) params.capabilities = args.capabilities;
 				argv.push("--agent", agent);
@@ -1280,7 +1461,7 @@ function apply(ctx) {
 		order: 90,
 		text: (assembleContext) => recallTextFor(assembleContext && assembleContext.agent)
 	});
-	const boardWakeContextDisposer = coordinationEnabled ? systemPrompt.context({
+	const boardWakeContextDisposer = coordinationEnabled$1 ? systemPrompt.context({
 		name: "nmg:board-wake",
 		order: 85,
 		text: (assembleContext) => wakeTextFor(assembleContext && assembleContext.agent)
@@ -1359,18 +1540,18 @@ function apply(ctx) {
 		wakeRouteDisposer = typeof dispose === "function" ? dispose : void 0;
 		wakeRouteRegistered = true;
 	}
-	if (coordinationEnabled) tryRegisterWakeRoute((() => {
+	if (coordinationEnabled$1) tryRegisterWakeRoute((() => {
 		try {
 			return ctx.reflect.get("webServer", false);
 		} catch {
 			return;
 		}
 	})());
-	const wakeServiceDisposer = coordinationEnabled ? ctx.on("internal/service", (name, value) => {
+	const wakeServiceDisposer = coordinationEnabled$1 ? ctx.on("internal/service", (name, value) => {
 		if (name === "webServer") tryRegisterWakeRoute(value);
 	}) : void 0;
-	const wakeTimerDisposer = coordinationEnabled ? ctx.interval(boardWakeOnce, WAKE_INTERVAL_MS) : void 0;
-	const initialWakeDisposer = coordinationEnabled ? ctx.timeout(boardWakeOnce, 0) : void 0;
+	const wakeTimerDisposer = coordinationEnabled$1 ? ctx.interval(boardWakeOnce, WAKE_INTERVAL_MS) : void 0;
+	const initialWakeDisposer = coordinationEnabled$1 ? ctx.timeout(boardWakeOnce, 0) : void 0;
 	const disposers = [
 		tools.register(searchTool),
 		tools.register(getTool),
@@ -1381,7 +1562,7 @@ function apply(ctx) {
 		ctx.on("agent/inbox/inserted", onInboxInserted),
 		ctx.on("agent/disposed", onAgentDisposed)
 	];
-	if (coordinationEnabled) disposers.push(tools.register(boardTool), boardWakeContextDisposer, wakeServiceDisposer, wakeTimerDisposer, initialWakeDisposer);
+	if (coordinationEnabled$1) disposers.push(tools.register(boardTool), boardWakeContextDisposer, wakeServiceDisposer, wakeTimerDisposer, initialWakeDisposer);
 	if (routeDisposer) disposers.push(routeDisposer);
 	if (wakeRouteDisposer) disposers.push(wakeRouteDisposer);
 	return () => {

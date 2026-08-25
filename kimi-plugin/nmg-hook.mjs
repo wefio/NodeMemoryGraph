@@ -25,8 +25,8 @@
  * session). deliveryCheck filters already-notified ones, and a
  * recordDelivery receipt is written for the picked entry so it never
  * re-notifies. Budget and
- * cooldown come from the shared <dataDir>/board-wake.json (enabled defaults
- * to off); dedup state is per-host in kimi-board-wake-state.json.
+ * cooldown come from the shared <dataDir>/board-wake.json (enabled by default);
+ * dedup state is per-host in kimi-board-wake-state.json.
  *
  * The hook is deliberately passive: it never starts a daemon. It only polls
  * when a live HTTP lease exists (<dataDir>/nmg.sqlite.server.json with an
@@ -53,7 +53,9 @@ const COMPLETION_PATTERN =
   /(?:完成了|收工|搞定|结束|提交了|committed|done|finished|wrapped\s+up)/iu;
 
 const WORLD_BOARD_ID = "default";
-const COORDINATION_ENABLED = process.env.NMG_ENABLE_COORDINATION === "1";
+const COORDINATION_ENABLED = !new Set(["0", "false", "off", "no"]).has(
+  (process.env.NMG_ENABLE_COORDINATION ?? "").trim().toLowerCase(),
+);
 const BROADCAST_PREFIX = "[NMG board 协作广播]";
 // Wake routing: only kinds that ask for a response/action may push. The
 // notify-only kinds (goal/note/decision/result) are silent by convention —
@@ -207,8 +209,8 @@ export async function reportAgentPresence(payload, options = {}) {
  */
 async function pollBoardWake(payload) {
   const dataDir = process.env.NMG_DATA_DIR?.trim() || join(homedir(), ".nmg");
-  const config = readJson(join(dataDir, "board-wake.json"));
-  if (config?.enabled !== true) return "";
+  const config = readJson(join(dataDir, "board-wake.json")) ?? {};
+  if (config.enabled === false) return "";
 
   const statePath = join(dataDir, "kimi-board-wake-state.json");
   const state = readJson(statePath) ?? { budgetDate: "", budgetUsed: 0, lastWakeAt: 0 };
