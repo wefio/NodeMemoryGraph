@@ -26,13 +26,13 @@ export async function runInspectTui(databasePath: string): Promise<void> {
   if (!process.stdout.isTTY) {
     throw new Error("nmg inspect requires an interactive terminal (TTY)");
   }
-  const { TUI, ProcessTerminal, Text, SelectList, matchesKey } =
+  const { TuiMainScreen, ProcessTerminal, Text, SelectList, matchesKey } =
     await import("@earendil-works/pi-tui");
   const data = await import("./inspect-data.ts");
 
   const db = data.openInspectDb(databasePath);
   const terminal = new ProcessTerminal();
-  const tui = new TUI(terminal);
+  const tui = new TuiMainScreen(terminal);
 
   type Tab = "memories" | "traces";
   let tab: Tab = "memories";
