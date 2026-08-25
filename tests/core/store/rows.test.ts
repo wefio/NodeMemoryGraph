@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { MemoryMarker, MemoryScope, SearchOptions } from "../../../src/core/types.ts";
 import type { StoreRow } from "../../../src/core/store/search-ranking.ts";
+import { sameScope, serializeScope } from "../../../src/core/scope.ts";
 import {
   canonicalNodeIdentity,
   clamp,
@@ -31,7 +32,6 @@ import {
   requireText,
   serializeClaims,
   serializeMarkers,
-  serializeScope,
   stableLeafBlockId,
 } from "../../../src/core/store/rows.ts";
 
@@ -466,6 +466,8 @@ test("matchesScope: requested undefined matches everything, else all keys equal"
 test("serializeScope: keys sorted for deterministic on-disk form", () => {
   assert.equal(serializeScope({ project: "nmg", area: "core" }), '{"area":"core","project":"nmg"}');
   assert.equal(serializeScope({}), "{}");
+  assert.equal(sameScope({ project: "nmg", area: "core" }, { area: "core", project: "nmg" }), true);
+  assert.equal(sameScope({ project: "nmg" }, { project: "other" }), false);
 });
 
 test("effectiveFilterDimensions: reports every applied filter dimension", () => {

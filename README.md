@@ -181,8 +181,8 @@ By default, the extension stores shared LTG and Task Board data in
 `.nmg/` data is reserved for isolated STG sessions and controlled/headless runs.
 
 The Pi adapter is deliberately thin. It lazily starts the local daemon over
-JSON-RPC/HTTP, reuses one connection for automatic recall and four stable
-tools, and stops the daemon at session shutdown only when that adapter
+JSON-RPC/HTTP, reuses one connection for automatic recall and the default tool
+surface, and stops the daemon at session shutdown only when that adapter
 invocation started it.
 An already-running shared daemon is left untouched.
 The daemon is the single application-level writer for its SQLite database.
@@ -202,7 +202,8 @@ working directory's STG. Provisional rows are isolated by `sessionId`; shared
 LTG cache rows have no session owner. Set `NMG_PROJECT_DIR` only when the project
 root differs from Pi's working directory.
 
-By default, the model receives four tools and a typed write/use policy:
+By default, the model receives three durable-memory tools, one Lab capability
+entry point, and a typed write/use policy:
 
 - `nmg_remember`: save a typed long-term memory with scope, truth status,
   event time, stable state identity, evidence role, and provenance.
@@ -212,13 +213,15 @@ By default, the model receives four tools and a typed write/use policy:
 - `nmg_get`: expand selected IDs into exact memory statements and bounded source
   evidence. Passing the `activeGraphId` returned by `nmg_search` records those
   selected IDs as actually used; another session cannot read or update that AG.
-- `nmg_board`: exchange temporary, task-scoped notes between agents through
-  attributed entries, TTL expiry, incremental cursors, and explicit resolution.
-  Board entries are not LTG memories and never enter semantic retrieval.
 - `nmg_lab`: list, lease, invoke, and disable optional session capabilities on
   the existing daemon connection. Reasoning workspace, read-only graph reasoning,
   and controller shadow are Agent-selectable; controlled/active actuation remains
   receipt- and gate-protected.
+
+Set `NMG_ENABLE_COORDINATION=1` to additionally expose `nmg_board` and enable
+adapter wake polling. The daemon RPC and `nmg board ...` CLI remain available
+without this model-facing tool. Board entries are temporary, attributed,
+task-scoped coordination data; they never enter LTG or semantic retrieval.
 
 Graph maintenance, QPP, and indexing remain core/CLI concerns. The adapter never opens SQLite or
 imports those implementations directly.
@@ -465,7 +468,7 @@ defaults to a 90-second prompt timeout plus 12 tool calls. Override these with
 test-runner safety limits, not NMG retrieval limits.
 The controller defaults to `deepseek/deepseek-v4-flash` with thinking disabled,
 uses `--no-extensions`, and explicitly loads only the NMG extension and its
-four stable tools. This prevents unrelated global permission extensions from
+default stable tool surface. This prevents unrelated global permission extensions from
 blocking non-interactive RPC tool calls. Set `NMG_PI_MODEL` to override the
 test model when needed.
 

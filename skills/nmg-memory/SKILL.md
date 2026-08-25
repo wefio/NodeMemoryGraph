@@ -18,9 +18,10 @@ an operation or encountering its named special case.
 - Accept no useful memory as a valid outcome.
 - Save only attributable durable information. Keep secrets, transient content,
   unconfirmed Assistant proposals, and unsupported guesses out of memory.
-- Use the task board, not LTG or Markdown files, for temporary cross-Agent
-  coordination. Blackboard entries expire and never become durable memory
-  unless an Agent separately calls `nmg remember` with attributable evidence.
+- When temporary cross-Agent coordination is enabled, use the task board rather
+  than LTG or Markdown files. Blackboard entries expire and never become durable
+  memory unless an Agent separately calls `nmg remember` with attributable
+  evidence. Ordinary single-Agent memory use does not require the board.
 - Let ordinary work produce natural improvement evidence when controller shadow
   collection is enabled. Record only outcomes that are directly observable; an
   uncorrected answer, silence, retrieval, or answer reuse remains `unknown`.
@@ -103,6 +104,10 @@ three-command contract in working memory and open the references only for a
 named special case.
 
 ## Shared task blackboard
+
+This is optional. CLI board operations are always available; model-facing board
+tools and automatic wake polling require `NMG_ENABLE_COORDINATION=1`. Do not
+enable coordination for a single-Agent task merely because the storage exists.
 
 Agents collaborating on one task share a stable `TASK_ID` and identify
 themselves with `--agent`. Publish only concise coordination state:

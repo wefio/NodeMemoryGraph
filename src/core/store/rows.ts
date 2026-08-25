@@ -473,9 +473,3 @@ export function effectiveFilterDimensions(options: SearchOptions): string[] {
   if (options.graphHops !== undefined && options.graphHops > 0) dimensions.push("graphHops");
   return dimensions;
 }
-
-export function serializeScope(scope: MemoryScope): string {
-  return JSON.stringify(
-    Object.fromEntries(Object.entries(scope).sort(([left], [right]) => left.localeCompare(right))),
-  );
-}

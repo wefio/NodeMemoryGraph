@@ -75,8 +75,15 @@ function extensionHarness() {
 
 test("Pi adapter exposes stable memory tools plus the unified Lab capability entry", () => {
   const previous = process.env.NMG_ENABLE_LAB_TOOLS;
+  const previousCoordination = process.env.NMG_ENABLE_COORDINATION;
   delete process.env.NMG_ENABLE_LAB_TOOLS;
+  delete process.env.NMG_ENABLE_COORDINATION;
   try {
+    assert.deepEqual(
+      [...extensionHarness().tools.keys()],
+      ["nmg_lab", "nmg_remember", "nmg_get", "nmg_search"],
+    );
+    process.env.NMG_ENABLE_COORDINATION = "1";
     assert.deepEqual(
       [...extensionHarness().tools.keys()],
       ["nmg_lab", "nmg_remember", "nmg_get", "nmg_search", "nmg_board"],
@@ -84,6 +91,8 @@ test("Pi adapter exposes stable memory tools plus the unified Lab capability ent
   } finally {
     if (previous === undefined) delete process.env.NMG_ENABLE_LAB_TOOLS;
     else process.env.NMG_ENABLE_LAB_TOOLS = previous;
+    if (previousCoordination === undefined) delete process.env.NMG_ENABLE_COORDINATION;
+    else process.env.NMG_ENABLE_COORDINATION = previousCoordination;
   }
 });
 
@@ -91,13 +100,15 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-reasoning-tool-"));
   const previousData = process.env.NMG_DATA_DIR;
   const previousLab = process.env.NMG_ENABLE_LAB_TOOLS;
+  const previousCoordination = process.env.NMG_ENABLE_COORDINATION;
   process.env.NMG_DATA_DIR = directory;
   process.env.NMG_ENABLE_LAB_TOOLS = "1";
+  delete process.env.NMG_ENABLE_COORDINATION;
   try {
     const { handlers, tools } = extensionHarness();
     assert.deepEqual(
       [...tools.keys()],
-      ["nmg_reason", "nmg_lab", "nmg_remember", "nmg_get", "nmg_search", "nmg_board"],
+      ["nmg_reason", "nmg_lab", "nmg_remember", "nmg_get", "nmg_search"],
     );
     const sessionManager = {
       getSessionId: () => "reasoning-session",
@@ -151,6 +162,8 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
     else process.env.NMG_DATA_DIR = previousData;
     if (previousLab === undefined) delete process.env.NMG_ENABLE_LAB_TOOLS;
     else process.env.NMG_ENABLE_LAB_TOOLS = previousLab;
+    if (previousCoordination === undefined) delete process.env.NMG_ENABLE_COORDINATION;
+    else process.env.NMG_ENABLE_COORDINATION = previousCoordination;
     rmSync(directory, { recursive: true, force: true });
   }
 });
@@ -838,45 +851,59 @@ test("Pi evidence resolution versions references and explains degraded provenanc
 });
 
 test("tool descriptions come from the prompt source of truth", () => {
-  const { tools } = extensionHarness();
-  const prompts = loadPrompts();
-  assert.equal(tools.get("nmg_search")?.description, prompts.search_description);
-  assert.equal(tools.get("nmg_get")?.description, prompts.get_description);
-  assert.equal(tools.get("nmg_remember")?.description, prompts.remember_description);
-  assert.equal(tools.get("nmg_board")?.description, prompts.board_description);
+  const previous = process.env.NMG_ENABLE_COORDINATION;
+  process.env.NMG_ENABLE_COORDINATION = "1";
+  try {
+    const { tools } = extensionHarness();
+    const prompts = loadPrompts();
+    assert.equal(tools.get("nmg_search")?.description, prompts.search_description);
+    assert.equal(tools.get("nmg_get")?.description, prompts.get_description);
+    assert.equal(tools.get("nmg_remember")?.description, prompts.remember_description);
+    assert.equal(tools.get("nmg_board")?.description, prompts.board_description);
+  } finally {
+    if (previous === undefined) delete process.env.NMG_ENABLE_COORDINATION;
+    else process.env.NMG_ENABLE_COORDINATION = previous;
+  }
 });
 
 test("tool parameter descriptions come from the prompt source of truth", () => {
-  const { tools } = extensionHarness();
-  const prompts = loadPrompts();
-  assert.equal(
-    tools.get("nmg_remember")?.parameters?.properties?.stateKey?.description,
-    prompts.state_key_parameter_description,
-  );
-  assert.equal(
-    tools.get("nmg_get")?.parameters?.properties?.activeGraphId?.description,
-    prompts.active_graph_id_parameter_description,
-  );
-  assert.equal(
-    tools.get("nmg_search")?.parameters?.properties?.query?.description,
-    prompts.search_query_parameter_description,
-  );
-  assert.equal(
-    tools.get("nmg_remember")?.parameters?.properties?.evidence?.description,
-    prompts.evidence_parameter_description,
-  );
-  assert.equal(
-    tools.get("nmg_remember")?.parameters?.properties?.sourceActor?.description,
-    prompts.source_actor_parameter_description,
-  );
-  assert.equal(
-    tools.get("nmg_remember")?.parameters?.properties?.memoryId?.description,
-    prompts.remember_memory_id_parameter_description,
-  );
-  assert.equal(
-    tools.get("nmg_board")?.parameters?.properties?.taskId?.description,
-    prompts.board_task_id_parameter_description,
-  );
+  const previous = process.env.NMG_ENABLE_COORDINATION;
+  process.env.NMG_ENABLE_COORDINATION = "1";
+  try {
+    const { tools } = extensionHarness();
+    const prompts = loadPrompts();
+    assert.equal(
+      tools.get("nmg_remember")?.parameters?.properties?.stateKey?.description,
+      prompts.state_key_parameter_description,
+    );
+    assert.equal(
+      tools.get("nmg_get")?.parameters?.properties?.activeGraphId?.description,
+      prompts.active_graph_id_parameter_description,
+    );
+    assert.equal(
+      tools.get("nmg_search")?.parameters?.properties?.query?.description,
+      prompts.search_query_parameter_description,
+    );
+    assert.equal(
+      tools.get("nmg_remember")?.parameters?.properties?.evidence?.description,
+      prompts.evidence_parameter_description,
+    );
+    assert.equal(
+      tools.get("nmg_remember")?.parameters?.properties?.sourceActor?.description,
+      prompts.source_actor_parameter_description,
+    );
+    assert.equal(
+      tools.get("nmg_remember")?.parameters?.properties?.memoryId?.description,
+      prompts.remember_memory_id_parameter_description,
+    );
+    assert.equal(
+      tools.get("nmg_board")?.parameters?.properties?.taskId?.description,
+      prompts.board_task_id_parameter_description,
+    );
+  } finally {
+    if (previous === undefined) delete process.env.NMG_ENABLE_COORDINATION;
+    else process.env.NMG_ENABLE_COORDINATION = previous;
+  }
 });
 
 test("NMG prompt keeps a stable policy prefix; dynamic recall goes to the trailing message", () => {
@@ -909,8 +936,10 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
   const previous = process.env.NMG_DATA_DIR;
   const previousProject = process.env.NMG_PROJECT_DIR;
   const previousAgent = process.env.NMG_AGENT_ID;
+  const previousCoordination = process.env.NMG_ENABLE_COORDINATION;
   process.env.NMG_DATA_DIR = directory;
   process.env.NMG_PROJECT_DIR = directory;
+  process.env.NMG_ENABLE_COORDINATION = "1";
   const sessionManager = {
     getSessionId: () => "http-test-session",
     getSessionFile: () => "session.jsonl",
@@ -1397,6 +1426,8 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     else process.env.NMG_PROJECT_DIR = previousProject;
     if (previousAgent === undefined) delete process.env.NMG_AGENT_ID;
     else process.env.NMG_AGENT_ID = previousAgent;
+    if (previousCoordination === undefined) delete process.env.NMG_ENABLE_COORDINATION;
+    else process.env.NMG_ENABLE_COORDINATION = previousCoordination;
     // Windows can hold the SQLite handle a moment after the daemon exits;
     // retry, and tolerate a final failure (temp dirs are reclaimed by the OS).
     for (let attempt = 0; attempt < 60; attempt += 1) {

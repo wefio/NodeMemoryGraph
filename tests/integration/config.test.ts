@@ -7,6 +7,7 @@ import {
   DEFAULT_STG_SYNC_POLICY,
   configuredControllerRerankMode,
   configuredControllerRuntimeMode,
+  coordinationEnabled,
   configuredGraphHops,
   configuredMaintenancePolicy,
   configuredQpp1Mode,
@@ -16,6 +17,12 @@ import {
   configuredStgConsolidationPolicy,
   configuredStgSyncPolicy,
 } from "../../src/integration/config.ts";
+
+test("coordination is an explicit adapter capability", () => {
+  assert.equal(coordinationEnabled({}), false);
+  assert.equal(coordinationEnabled({ NMG_ENABLE_COORDINATION: "1" }), true);
+  assert.equal(coordinationEnabled({ NMG_ENABLE_COORDINATION: "true" }), false);
+});
 
 test("maintenance policy owns defaults and validates environment overrides", () => {
   assert.deepEqual(configuredMaintenancePolicy({}), DEFAULT_MAINTENANCE_POLICY);

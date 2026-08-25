@@ -9,6 +9,7 @@ import {
 } from "../../../src/cli/daemon-client.ts";
 import { resolveNmgDataDir } from "../../../src/cli/data-path.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
+import { coordinationEnabled } from "../../../src/integration/config.ts";
 import { WORLD_BOARD_ID, type MemoryContext, type PerfSnapshot } from "../../../src/core/types.ts";
 
 const nmgPrompts = loadPrompts();
@@ -402,7 +403,7 @@ async function heartbeatBoardAgent(): Promise<void> {
   lastBoardHeartbeatAt = Date.now();
 }
 
-server.registerTool(
+if (coordinationEnabled()) server.registerTool(
   "nmg_board",
   {
     description: nmgPrompts.board_description,
@@ -510,7 +511,7 @@ server.registerTool(
 // ── Lifecycle ──
 
 const connection = await connectDaemon(dbPath());
-await registerBoardAgent();
+if (coordinationEnabled()) await registerBoardAgent();
 const transport = new StdioServerTransport();
 await server.connect(transport);
 const done = async () => {

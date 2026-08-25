@@ -43,6 +43,7 @@ export function apply(ctx: Context): () => void {
   const subprocess = ctx.subprocess
   const sandboxPolicy = ctx.sandboxPolicy
   const systemPrompt = ctx.systemPrompt
+  const coordinationEnabled = process.env.NMG_ENABLE_COORDINATION === '1'
 
   const workspaceRoot =
     (process.env.NMG_PROJECT_DIR && process.env.NMG_PROJECT_DIR.trim()) ||
@@ -348,7 +349,7 @@ export function apply(ctx: Context): () => void {
     }
   }
 
-  async function autoRecall(query, signal) {
+  async function autoRecall(query, sessionId, signal) {
     const limit = clampInt(process.env.NMG_AUTO_RECALL_LIMIT, 1, 50, 13)
     const tier = clampInt(process.env.NMG_AUTO_RECALL_TIER, 0, 3, 1)
     const budget = recallBudget(signal)
@@ -360,6 +361,7 @@ export function apply(ctx: Context): () => void {
         graphHops: 1,
         tieredDisclosure: true,
         projectDir: workspaceRoot,
+        sessionId,
       }, budget)
       if (context) return projectCompact(context)
     } catch {
@@ -372,6 +374,7 @@ export function apply(ctx: Context): () => void {
       '--graph-hops', '1',
       '--tiered-disclosure',
       '--project-dir', workspaceRoot,
+      '--session-id', sessionId,
       '--compact-json',
     ]
     const result = await nmgJson(argv, budget)
@@ -402,7 +405,7 @@ export function apply(ctx: Context): () => void {
           // recent memory until a new successful recall overwrites it. Flickering
           // to "暂无召回" on every fresh round that happens to find nothing is the
           // bug we avoid by leaving the previous snapshot in place.
-          const recall = await autoRecall(query, undefined)
+          const recall = await autoRecall(query, sessionId, undefined)
           if (!recall || !Array.isArray(recall.candidates) || recall.candidates.length === 0) {
             return
           }
@@ -1215,7 +1218,7 @@ export function apply(ctx: Context): () => void {
 
   const daemonTool = {
     name: 'nmg_daemon',
-    description: 'Read-only NMG daemon health check. The adapter uses one-shot CLI calls and never owns a daemon, so start/stop is intentionally out of scope.',
+    description: 'Read-only NMG daemon health check. The adapter may ensure a daemon is running for requests, but it does not expose lifecycle ownership or stop it on plugin disposal.',
     parameters: {
       type: 'object',
       properties: {
@@ -1300,11 +1303,13 @@ export function apply(ctx: Context): () => void {
 
   // Board wake surfaces as a second native context contribution, ordered before
   // recall (85 < 90) so pending work reads ahead of memory.
-  const boardWakeContextDisposer = systemPrompt.context({
-    name: 'nmg:board-wake',
-    order: 85,
-    text: (assembleContext) => wakeTextFor(assembleContext && assembleContext.agent),
-  })
+  const boardWakeContextDisposer = coordinationEnabled
+    ? systemPrompt.context({
+        name: 'nmg:board-wake',
+        order: 85,
+        text: (assembleContext) => wakeTextFor(assembleContext && assembleContext.agent),
+      })
+    : undefined
 
   // ── webServer route: persistent host→browser channel ───────────────────────
   // Persistent (host-composition) packages have no harness.handle/host.call RPC
@@ -1369,10 +1374,14 @@ export function apply(ctx: Context): () => void {
     wakeRouteDisposer = typeof dispose === 'function' ? dispose : undefined
     wakeRouteRegistered = true
   }
-  tryRegisterWakeRoute((() => { try { return ctx.reflect.get('webServer', false) } catch { return undefined } })())
-  ctx.on('internal/service', (name, value) => {
-    if (name === 'webServer') tryRegisterWakeRoute(value)
-  })
+  if (coordinationEnabled) {
+    tryRegisterWakeRoute((() => { try { return ctx.reflect.get('webServer', false) } catch { return undefined } })())
+  }
+  const wakeServiceDisposer = coordinationEnabled
+    ? ctx.on('internal/service', (name, value) => {
+        if (name === 'webServer') tryRegisterWakeRoute(value)
+      })
+    : undefined
 
   // ── wake timer + startup ───────────────────────────────────────────────────
   // Single host-side timer polls the daemon for board entries every
@@ -1384,23 +1393,31 @@ export function apply(ctx: Context): () => void {
   // globals: they return disposers, are auto-released with the fiber on
   // dispose/update, and require the `timer` service in `inject`. Note
   // ctx.setInterval / ctx.setTimeout are deprecated in favor of these.
-  const wakeTimerDisposer = ctx.interval(boardWakeOnce, WAKE_INTERVAL_MS)
+  const wakeTimerDisposer = coordinationEnabled
+    ? ctx.interval(boardWakeOnce, WAKE_INTERVAL_MS)
+    : undefined
   // First poll on next tick (let the event loop settle).
-  ctx.timeout(boardWakeOnce, 0)
+  const initialWakeDisposer = coordinationEnabled ? ctx.timeout(boardWakeOnce, 0) : undefined
 
   const disposers = [
     tools.register(searchTool),
     tools.register(getTool),
     tools.register(rememberTool),
-    tools.register(boardTool),
     tools.register(labTool),
     tools.register(daemonTool),
     contextDisposer,
-    boardWakeContextDisposer,
-    wakeTimerDisposer,
     ctx.on('agent/inbox/inserted', onInboxInserted),
     ctx.on('agent/disposed', onAgentDisposed),
   ]
+  if (coordinationEnabled) {
+    disposers.push(
+      tools.register(boardTool),
+      boardWakeContextDisposer,
+      wakeServiceDisposer,
+      wakeTimerDisposer,
+      initialWakeDisposer,
+    )
+  }
   if (routeDisposer) disposers.push(routeDisposer)
   if (wakeRouteDisposer) disposers.push(wakeRouteDisposer)
 

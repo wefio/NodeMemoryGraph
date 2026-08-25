@@ -42,6 +42,7 @@ import { migrate } from "./schema.ts";
 import { parseNumberArray } from "./row-parse.ts";
 import { encodeVector, storedVector } from "./vector-codec.ts";
 import { updateRelationStrength } from "../edge-activation.ts";
+import { serializeScope } from "../scope.ts";
 import {
   ftsExpression,
   ftsIndexedText,
@@ -57,7 +58,6 @@ import {
   mapNode,
   mapRelation,
   mapSearchResult,
-  serializeScope,
 } from "./rows.ts";
 
 export class NmgStoreBase {

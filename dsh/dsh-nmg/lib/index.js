@@ -31,6 +31,7 @@ function apply(ctx) {
 	const subprocess = ctx.subprocess;
 	const sandboxPolicy = ctx.sandboxPolicy;
 	const systemPrompt = ctx.systemPrompt;
+	const coordinationEnabled = process.env.NMG_ENABLE_COORDINATION === "1";
 	const workspaceRoot = process.env.NMG_PROJECT_DIR && process.env.NMG_PROJECT_DIR.trim() || sandboxPolicy && typeof sandboxPolicy.workspaceRoot === "string" && sandboxPolicy.workspaceRoot || "C:\\Documents\\GitHub\\NodeMemoryGraph";
 	const binPath = workspaceRoot.replace(/[\\/]+$/, "") + "\\bin\\nmg.mjs";
 	let nodePromise;
@@ -307,7 +308,7 @@ function apply(ctx) {
 			return signal;
 		}
 	}
-	async function autoRecall(query, signal) {
+	async function autoRecall(query, sessionId, signal) {
 		const limit = clampInt(process.env.NMG_AUTO_RECALL_LIMIT, 1, 50, 13);
 		const tier = clampInt(process.env.NMG_AUTO_RECALL_TIER, 0, 3, 1);
 		const budget = recallBudget(signal);
@@ -318,7 +319,8 @@ function apply(ctx) {
 				maxTier: tier,
 				graphHops: 1,
 				tieredDisclosure: true,
-				projectDir: workspaceRoot
+				projectDir: workspaceRoot,
+				sessionId
 			}, budget);
 			if (context) return projectCompact(context);
 		} catch {
@@ -336,6 +338,8 @@ function apply(ctx) {
 			"--tiered-disclosure",
 			"--project-dir",
 			workspaceRoot,
+			"--session-id",
+			sessionId,
 			"--compact-json"
 		], budget);
 		return result.ok ? result.data : null;
@@ -352,7 +356,7 @@ function apply(ctx) {
 			const generation = window.generation;
 			const run = (async () => {
 				try {
-					const recall = await autoRecall(query, void 0);
+					const recall = await autoRecall(query, sessionId, void 0);
 					if (!recall || !Array.isArray(recall.candidates) || recall.candidates.length === 0) return;
 					const fresh = filterRecallCandidates(window, generation, recall.candidates);
 					if (fresh.length === 0) return;
@@ -1176,7 +1180,7 @@ function apply(ctx) {
 	};
 	const daemonTool = {
 		name: "nmg_daemon",
-		description: "Read-only NMG daemon health check. The adapter uses one-shot CLI calls and never owns a daemon, so start/stop is intentionally out of scope.",
+		description: "Read-only NMG daemon health check. The adapter may ensure a daemon is running for requests, but it does not expose lifecycle ownership or stop it on plugin disposal.",
 		parameters: {
 			type: "object",
 			properties: { action: {
@@ -1202,16 +1206,85 @@ function apply(ctx) {
 			return JSON.stringify(data);
 		}
 	};
+	const labTool = {
+		name: "nmg_lab",
+		description: "Discover and temporarily enable optional NMG capabilities for this session. Reasoning workspace, graph reasoner, and controller shadow are self-service; controlled/active controller modes remain gated.",
+		parameters: {
+			type: "object",
+			properties: {
+				action: {
+					type: "string",
+					enum: [
+						"list",
+						"status",
+						"enable",
+						"disable",
+						"invoke"
+					]
+				},
+				capability: {
+					type: "string",
+					enum: [
+						"reasoning_workspace",
+						"memory_graph_reasoner",
+						"controller_shadow",
+						"controller_controlled",
+						"controller_active"
+					]
+				},
+				reason: { type: "string" },
+				ttlSeconds: { type: "integer" },
+				operation: { type: "string" },
+				input: {
+					type: "object",
+					additionalProperties: true
+				}
+			},
+			required: ["action"]
+		},
+		output: textOutput,
+		async execute(args, exec) {
+			const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId;
+			if (args.action !== "list" && !args.capability) return args.action + " requires capability.";
+			if (args.action === "enable" && !args.reason) return "enable requires reason.";
+			if (args.action === "invoke" && !args.operation) return "invoke requires operation.";
+			const params = {
+				action: args.action,
+				capability: args.capability,
+				sessionId,
+				requester: args.action === "enable" ? "agent:dsh" : void 0,
+				reason: args.reason,
+				ttlSeconds: args.ttlSeconds,
+				operation: args.operation,
+				input: args.input
+			};
+			const argv = ["lab", args.action];
+			if (args.capability) argv.push(args.capability);
+			if (args.action !== "list") argv.push("--session-id", sessionId);
+			if (args.action === "enable") {
+				argv.push("--requester", "agent:dsh", "--reason", args.reason);
+				if (args.ttlSeconds != null) argv.push("--ttl-seconds", String(args.ttlSeconds));
+			}
+			if (args.action === "invoke") {
+				argv.push("--operation", args.operation);
+				if (args.input != null) argv.push("--input-json", JSON.stringify(args.input));
+			}
+			argv.push("--json");
+			const r = await invoke("lab", params, argv, exec.signal, null);
+			if (!r.ok) return r.error;
+			return JSON.stringify(r.data, null, 2);
+		}
+	};
 	const contextDisposer = systemPrompt.context({
 		name: "nmg:recall",
 		order: 90,
 		text: (assembleContext) => recallTextFor(assembleContext && assembleContext.agent)
 	});
-	const boardWakeContextDisposer = systemPrompt.context({
+	const boardWakeContextDisposer = coordinationEnabled ? systemPrompt.context({
 		name: "nmg:board-wake",
 		order: 85,
 		text: (assembleContext) => wakeTextFor(assembleContext && assembleContext.agent)
-	});
+	}) : void 0;
 	const ROUTE_PATH = "/nmg/recall";
 	let routeRegistered = false;
 	let routeDisposer = void 0;
@@ -1286,30 +1359,29 @@ function apply(ctx) {
 		wakeRouteDisposer = typeof dispose === "function" ? dispose : void 0;
 		wakeRouteRegistered = true;
 	}
-	tryRegisterWakeRoute((() => {
+	if (coordinationEnabled) tryRegisterWakeRoute((() => {
 		try {
 			return ctx.reflect.get("webServer", false);
 		} catch {
 			return;
 		}
 	})());
-	ctx.on("internal/service", (name, value) => {
+	const wakeServiceDisposer = coordinationEnabled ? ctx.on("internal/service", (name, value) => {
 		if (name === "webServer") tryRegisterWakeRoute(value);
-	});
-	const wakeTimerDisposer = ctx.interval(boardWakeOnce, WAKE_INTERVAL_MS);
-	ctx.timeout(boardWakeOnce, 0);
+	}) : void 0;
+	const wakeTimerDisposer = coordinationEnabled ? ctx.interval(boardWakeOnce, WAKE_INTERVAL_MS) : void 0;
+	const initialWakeDisposer = coordinationEnabled ? ctx.timeout(boardWakeOnce, 0) : void 0;
 	const disposers = [
 		tools.register(searchTool),
 		tools.register(getTool),
 		tools.register(rememberTool),
-		tools.register(boardTool),
+		tools.register(labTool),
 		tools.register(daemonTool),
 		contextDisposer,
-		boardWakeContextDisposer,
-		wakeTimerDisposer,
 		ctx.on("agent/inbox/inserted", onInboxInserted),
 		ctx.on("agent/disposed", onAgentDisposed)
 	];
+	if (coordinationEnabled) disposers.push(tools.register(boardTool), boardWakeContextDisposer, wakeServiceDisposer, wakeTimerDisposer, initialWakeDisposer);
 	if (routeDisposer) disposers.push(routeDisposer);
 	if (wakeRouteDisposer) disposers.push(wakeRouteDisposer);
 	return () => {

@@ -22,6 +22,7 @@ import {
 } from "./graph-policy.ts";
 import { nowMs, PerfTimer, SECTION } from "../perf.ts";
 import { normalizeClaims } from "../claims.ts";
+import { serializeScope } from "../scope.ts";
 import {
   clamp,
   defaultResidence,
@@ -31,7 +32,6 @@ import {
   requireText,
   serializeClaims,
   serializeMarkers,
-  serializeScope,
 } from "./rows.ts";
 import type { StoreRow as Row } from "./search-ranking.ts";
 import { normalizeStatement, searchTerms, statementSimilarity } from "./search-ranking.ts";

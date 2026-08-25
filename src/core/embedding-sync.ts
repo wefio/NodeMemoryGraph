@@ -13,6 +13,63 @@ export interface RecordEmbeddingSyncResult {
   health: EmbeddingIndexHealth;
 }
 
+interface EmbeddingSyncDocument {
+  id: string;
+  text: string;
+}
+
+interface EmbeddingSyncTarget {
+  target: "records" | "leaves";
+  label: string;
+  read(cursor: string, limit: number, indexId: string): EmbeddingSyncDocument[];
+  write(indexId: string, documents: EmbeddingSyncDocument[], vectors: number[][]): void;
+}
+
+async function syncEmbeddingTarget(
+  store: NmgStore,
+  client: RecordEmbeddingClient,
+  batchSize: number,
+  target: EmbeddingSyncTarget,
+): Promise<RecordEmbeddingSyncResult> {
+  const limit = Math.max(1, Math.min(Math.trunc(batchSize), 2_048));
+  let indexed = 0;
+  store.beginEmbeddingIndex({
+    indexId: client.indexId,
+    model: client.model ?? client.indexId,
+    profile: client.profile ?? "external",
+    targets: [target.target],
+  });
+  try {
+    let cursor = "";
+    while (true) {
+      const documents = target.read(cursor, limit, client.indexId);
+      if (documents.length === 0) break;
+      const vectors = await client.embedDocuments(documents.map((document) => document.text));
+      if (vectors.length !== documents.length) {
+        throw new Error(
+          `embedding provider returned ${vectors.length} vectors for ` +
+            `${documents.length} ${target.label}`,
+        );
+      }
+      vectors.forEach((vector, index) => {
+        if (!vector?.length) {
+          throw new Error(`embedding provider returned an empty vector at index ${index}`);
+        }
+      });
+      target.write(client.indexId, documents, vectors);
+      indexed += documents.length;
+      cursor = documents.at(-1)!.id;
+    }
+    store.completeEmbeddingIndex(client.indexId);
+    const health = store.embeddingIndexHealth(client.indexId);
+    if (!health) throw new Error(`embedding index ${client.indexId} has no health record`);
+    return { indexed, health };
+  } catch (error) {
+    store.failEmbeddingIndex(client.indexId, error);
+    throw error;
+  }
+}
+
 /**
  * Incrementally embeds only records missing from the selected external index.
  *
@@ -24,47 +81,20 @@ export async function syncRecordEmbeddings(
   client: RecordEmbeddingClient,
   batchSize = 64,
 ): Promise<RecordEmbeddingSyncResult> {
-  const limit = Math.max(1, Math.min(Math.trunc(batchSize), 2_048));
-  let indexed = 0;
-  store.beginEmbeddingIndex({
-    indexId: client.indexId,
-    model: client.model ?? client.indexId,
-    profile: client.profile ?? "external",
-    targets: ["records"],
-  });
-  try {
-    let cursor = "";
-    while (true) {
-      const documents = store.embeddingDocuments(cursor, limit, client.indexId);
-      if (documents.length === 0) break;
-      const vectors = await client.embedDocuments(documents.map((document) => document.text));
-      if (vectors.length !== documents.length) {
-        throw new Error(
-          `embedding provider returned ${vectors.length} vectors for ` +
-            `${documents.length} records`,
-        );
-      }
+  return syncEmbeddingTarget(store, client, batchSize, {
+    target: "records",
+    label: "records",
+    read: (cursor, limit, indexId) =>
+      store.embeddingDocuments(cursor, limit, indexId).map((document) => ({
+        id: document.memoryId,
+        text: document.text,
+      })),
+    write: (indexId, documents, vectors) =>
       store.upsertExternalEmbeddings(
-        client.indexId,
-        documents.map((document, index) => {
-          const vector = vectors[index];
-          if (!vector?.length) {
-            throw new Error(`embedding provider returned an empty vector at index ${index}`);
-          }
-          return { memoryId: document.memoryId, vector };
-        }),
-      );
-      indexed += documents.length;
-      cursor = documents.at(-1)!.memoryId;
-    }
-    store.completeEmbeddingIndex(client.indexId);
-    const health = store.embeddingIndexHealth(client.indexId);
-    if (!health) throw new Error(`embedding index ${client.indexId} has no health record`);
-    return { indexed, health };
-  } catch (error) {
-    store.failEmbeddingIndex(client.indexId, error);
-    throw error;
-  }
+        indexId,
+        documents.map((document, index) => ({ memoryId: document.id, vector: vectors[index]! })),
+      ),
+  });
 }
 
 /**
@@ -78,45 +108,18 @@ export async function syncLeafEmbeddings(
   client: RecordEmbeddingClient,
   batchSize = 64,
 ): Promise<RecordEmbeddingSyncResult> {
-  const limit = Math.max(1, Math.min(Math.trunc(batchSize), 2_048));
-  let indexed = 0;
-  store.beginEmbeddingIndex({
-    indexId: client.indexId,
-    model: client.model ?? client.indexId,
-    profile: client.profile ?? "external",
-    targets: ["leaves"],
-  });
-  try {
-    let cursor = "";
-    while (true) {
-      const documents = store.leafEmbeddingDocuments(cursor, limit, client.indexId);
-      if (documents.length === 0) break;
-      const vectors = await client.embedDocuments(documents.map((document) => document.text));
-      if (vectors.length !== documents.length) {
-        throw new Error(
-          `embedding provider returned ${vectors.length} vectors for ` +
-            `${documents.length} leaf blocks`,
-        );
-      }
+  return syncEmbeddingTarget(store, client, batchSize, {
+    target: "leaves",
+    label: "leaf blocks",
+    read: (cursor, limit, indexId) =>
+      store.leafEmbeddingDocuments(cursor, limit, indexId).map((document) => ({
+        id: document.blockId,
+        text: document.text,
+      })),
+    write: (indexId, documents, vectors) =>
       store.upsertExternalLeafEmbeddings(
-        client.indexId,
-        documents.map((document, index) => {
-          const vector = vectors[index];
-          if (!vector?.length) {
-            throw new Error(`embedding provider returned an empty vector at index ${index}`);
-          }
-          return { blockId: document.blockId, vector };
-        }),
-      );
-      indexed += documents.length;
-      cursor = documents.at(-1)!.blockId;
-    }
-    store.completeEmbeddingIndex(client.indexId);
-    const health = store.embeddingIndexHealth(client.indexId);
-    if (!health) throw new Error(`embedding index ${client.indexId} has no health record`);
-    return { indexed, health };
-  } catch (error) {
-    store.failEmbeddingIndex(client.indexId, error);
-    throw error;
-  }
+        indexId,
+        documents.map((document, index) => ({ blockId: document.id, vector: vectors[index]! })),
+      ),
+  });
 }

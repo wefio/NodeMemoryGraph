@@ -137,8 +137,8 @@ semantic embedding provider may be enabled by configuration, but local Qwen,
 vLLM, CUDA, USearch, general-purpose ML frameworks, and Cloudflare are not
 default dependencies.
 
-The target model-facing surface is four tools, with the fourth deliberately
-outside durable memory:
+The target default model-facing surface is three durable-memory tools plus one
+Lab capability entry point:
 
 ```text
 nmg_search(query, filters, budget)
@@ -150,9 +150,14 @@ nmg_get(ids)
 nmg_remember(statement, type?, scope?)
   -> explicit/hot-path durable write through the same governed write policy
 
-nmg_board(action, taskId, ...)
-  -> temporary cross-agent task coordination with TTL, cursors, and attribution
+nmg_lab(action, capability?, ...)
+  -> discover and explicitly lease optional session capabilities
 ```
+
+Cross-Agent coordination is an independent optional capability. Setting
+`NMG_ENABLE_COORDINATION=1` exposes `nmg_board` and adapter wake polling; daemon
+RPC and CLI board operations remain available when the model-facing tool is off.
+This keeps ordinary single-Agent memory use from paying a coordination tax.
 
 Automatic extraction may use the same write path. Privacy deletion, reindexing,
 graph editing, feedback inspection, and maintenance belong in CLI/UI/background
@@ -162,7 +167,7 @@ it records adapter-owned evaluation metadata and never mutates memory truth or
 ranking. This action is currently a Pi shadow-controller integration, not an
 NMG Core/RPC method.
 
-The default Pi package exposes only these four tools. Graph editing,
+The default Pi package exposes only this surface. Graph editing,
 rebalancing, consolidation, QPP, and experimental reasoning remain background,
 CLI, benchmark, or administrative concerns. Explicit retrieval feedback is an
 action on the existing remember boundary, not another tool or an automatic
@@ -326,11 +331,21 @@ package, but Core does not need a package split to preserve this boundary.
 
 The Pi adapter is now a thin HTTP lifecycle/tool adapter. It lazily starts the
 daemon, reuses one connection (via the shared `http-client`) for automatic
-recall and the four stable tools, and
+recall and the default stable tool surface, and
 stops the daemon only when that adapter invocation owns it. It does not open
 SQLite, maintain indexes, or import graph/QPP implementations. No Rust/Python
 implementation is planned unless profiling later identifies a component that
 cannot meet its budget in TypeScript.
+
+Implementation reuse follows semantic ownership rather than textual similarity.
+Scope canonicalization and embedding-index lifecycle are single Core rules;
+adapters must not reimplement them. Host-specific tool-schema encodings,
+message-delivery calls, and process lifecycle hooks may remain thin local
+adapters because Pi, MCP, Kimi, and DSH expose different host contracts. Generated
+bundles are not a second implementation, and real-process daemon tests remain
+separate from fast in-process fixtures because they verify different boundaries.
+Shared summarizer transport/drain code is a future extraction seam, not a reason
+to merge leaf and node prompts or stale-write semantics.
 
 Other Agents can use the packaged `nmg-memory` Skill. Its entry document is a
 small first-use card; detailed write, recall, and daemon operations live in
@@ -722,7 +737,7 @@ projection may contain:
 - bounded harness-local tool observations that remain virtual and session-owned.
 
 AG can act as one Agent's **private working blackboard**, but cannot itself
-communicate across Agents. Cross-Agent coordination uses the independent
+communicate across Agents. When coordination is required, Agents use the independent
 task-scoped **Task Board** in the daemon. Its attributed, expiring entries are
 read through a task-local cursor and projected into each caller's private AG.
 They are never inserted into memory records, FTS, embeddings, QPP, or LTG search.
@@ -736,8 +751,9 @@ Agent B private AG ─┘                       │
 ```
 
 **Implementation status:** the shared Task Board is implemented in SQLite and
-exposed by daemon RPC, CLI (`nmg board put/read/resolve`), and one trailing Pi
-tool (`nmg_board`). It records `agentId` and source session, supports task
+exposed by daemon RPC and CLI (`nmg board put/read/resolve`). Adapters expose the
+`nmg_board` tool and wake polling only with `NMG_ENABLE_COORDINATION=1`. It records
+`agentId` and source session, supports task
 isolation, cursor reads, TTL deletion, and explicit resolution. Pi reads are
 added to the caller's bounded `SessionRuntimeAg`. Membership/ACLs and remote
 multi-device transport are not implemented; local callers sharing the daemon
@@ -1588,6 +1604,14 @@ Inbox/Delta + global FTS/exact + fine-grained record semantics
   -> compact headers and selected exact evidence
 ```
 
+The implementation keeps these stages inspectable rather than treating
+`searchContext` as one ranking formula: AG hard-budget selection, main-candidate
+ranking, active-graph projection selection, and duplicate marking are pure
+functions. Storage reads and optional graph/semantic expansion remain orchestration
+steps. Autodiff remains a supported controller mechanism because it is a small,
+already implemented DAG-native computation layer; it is not a mandatory runtime
+dependency for ordinary retrieval.
+
 Search modes are ordered by purpose:
 
 - semantic/vector search for meaning;
@@ -2279,7 +2303,8 @@ insufficient.
 Implemented and verified in the current prototype:
 
 - a normal Pi package manifest, stable extension entry, three durable-memory
-  tools plus the independent `nmg_board` coordination tool, and optional Lab tools;
+  tools plus the Lab capability entry point, and an opt-in `nmg_board`
+  coordination tool;
 - progressive `nmg_search` headers followed by exact `nmg_get` evidence loading;
 - a persistent Inbox/Delta path that survives restart, participates in hierarchy
   retrieval before compaction, and is acknowledged only after external leaf
@@ -2299,7 +2324,8 @@ Implemented and verified in the current prototype:
 - a Lab-only, file-backed session reasoning workspace with bounded compaction
   checkpoints and explicit hypothesis/evidence status;
 - a task-scoped shared coordination board with attributed entries, TTL, cursor
-  reads, explicit resolution, CLI/RPC/Pi/MCP/Kimi-hook access, a system-layer
+  reads, explicit resolution, always-available CLI/RPC access, opt-in adapter
+  access, a system-layer
   online-agent registry, capability discovery and stable-name directed delivery,
   and no LTG/FTS indexing;
 - a bounded `searchContext` result that approximates an early Active Graph by

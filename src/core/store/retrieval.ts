@@ -22,6 +22,7 @@ import {
   expandActiveGraphBudget,
   fibonacciEvidenceBudgets,
   queryAssociationEdges,
+  selectWithinActiveGraphBudget,
   stableTaskId,
 } from "./active-graph.ts";
 import { computeQppComponents, qppCandidates, shouldTriggerSecondPass } from "../qpp.ts";
@@ -30,7 +31,7 @@ import {
   STRONG_HIT_INITIAL_TARGET,
   STRONG_HIT_TOP_GAP,
 } from "../qpp.ts";
-import { propagateEdgeActivation } from "../edge-activation.ts";
+import { propagateEdgeActivation, type EdgePropagationResult } from "../edge-activation.ts";
 import {
   contextUsefulness,
   ftsExpression,
@@ -81,6 +82,63 @@ import {
 } from "./graph-policy.ts";
 
 const MAX_SEARCH_CANDIDATES = 500;
+
+function rankMainCandidates(
+  query: string,
+  direct: readonly MemorySearchResult[],
+  related: readonly MemorySearchResult[],
+  edgeProjection: EdgePropagationResult,
+): MemorySearchResult[] {
+  return [...direct, ...related]
+    .filter(
+      (result, index, all) =>
+        all.findIndex((candidate) => candidate.memory.id === result.memory.id) === index,
+    )
+    .sort((left, right) => contextUsefulness(query, right) - contextUsefulness(query, left))
+    .map((result) => {
+      if (result.path) return result;
+      const path = edgeProjection.paths.get(result.node.id);
+      return path && path.length > 0 ? { ...result, path } : result;
+    });
+}
+
+function buildActiveGraphSelections(
+  query: string,
+  results: readonly MemorySearchResult[],
+  directMemoryIds: ReadonlySet<string>,
+  attachmentIds: ReadonlySet<string>,
+): ActiveGraphSelection[] {
+  return results.map((result, index) => ({
+    memoryId: result.memory.id,
+    nodeId: result.node.id,
+    source: directMemoryIds.has(result.memory.id)
+      ? "direct"
+      : attachmentIds.has(result.memory.id)
+        ? "open_attachment"
+        : "graph_expansion",
+    reason: recallReason(result),
+    rank: index + 1,
+    tier: result.memory.tier,
+    estimatedTokens: estimateResultTokens(result),
+    scores: {
+      lexical: result.lexicalScore,
+      vector: result.vectorScore,
+      route: result.routeScore,
+      combined: result.combinedScore,
+      usefulness: contextUsefulness(query, result),
+    },
+  }));
+}
+
+function markDuplicateResults(results: MemorySearchResult[]): void {
+  const seen = new Map<string, string>();
+  for (const result of results) {
+    const normalized = normalizeStatement(result.memory.statement);
+    const kept = seen.get(normalized);
+    if (kept !== undefined) result.duplicateOf = kept;
+    else seen.set(normalized, result.memory.id);
+  }
+}
 
 export function withRetrieval<TBase extends Constructor>(Base: TBase) {
   return class extends Base {
@@ -294,21 +352,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           combinedScore: hybridScore(result.lexicalScore, result.vectorScore, edgeScore),
         };
       });
-      const rankedMain = [...direct, ...related]
-        .filter(
-          (result, index, all) =>
-            all.findIndex((candidate) => candidate.memory.id === result.memory.id) === index,
-        )
-        .sort((left, right) => contextUsefulness(query, right) - contextUsefulness(query, left))
-        .map((result) => {
-          // Attach the multi-hop path to any result whose node was reached via
-          // graph activation (docs §7.1). Related results already carry it;
-          // direct hits that are also graph neighbours get it here. Seeds have
-          // an empty path, non-neighbours none — both stay path-less.
-          if (result.path) return result;
-          const path = edgeProjection.paths.get(result.node.id);
-          return path && path.length > 0 ? { ...result, path } : result;
-        });
+      const rankedMain = rankMainCandidates(query, direct, related, edgeProjection);
       const anchorMemoryIds = [
         ...new Set(direct.slice(0, limit).map((result) => result.memory.id)),
       ];
@@ -379,66 +423,13 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         bud: ActiveGraphBudget,
         lim: number,
         pool: readonly MemorySearchResult[] = candidates,
-      ): {
-        results: MemorySearchResult[];
-        selectedNodes: Set<string>;
-        estimatedTokens: number;
-        exhausted: Set<ActiveGraphBudgetUsage["exhausted"][number]>;
-      } => {
-        const nodes = new Set<string>();
-        const res: MemorySearchResult[] = [];
-        let tokens = 0;
-        let deepEvidence = 0;
-        const ex = new Set<ActiveGraphBudgetUsage["exhausted"][number]>();
-        for (const candidate of pool) {
-          if (res.length >= lim) {
-            ex.add("evidence");
-            break;
-          }
-          if (!nodes.has(candidate.node.id) && nodes.size >= bud.maxNodes) {
-            ex.add("nodes");
-            continue;
-          }
-          if (candidate.memory.tier >= 2 && deepEvidence >= bud.maxTierBudget) {
-            ex.add("deepEvidence");
-            continue;
-          }
-          const candidateTokens = estimateResultTokens(candidate);
-          if (res.length > 0 && tokens + candidateTokens > bud.maxTokens) {
-            ex.add("tokens");
-            continue;
-          }
-          res.push(candidate);
-          nodes.add(candidate.node.id);
-          tokens += candidateTokens;
-          if (candidate.memory.tier >= 2) deepEvidence += 1;
-        }
-        return { results: res, selectedNodes: nodes, estimatedTokens: tokens, exhausted: ex };
-      };
+      ) => selectWithinActiveGraphBudget(pool, bud, lim);
       const deferredWarmSelection = foldWarm
         ? selectWithinBudget(budget, limit, deferredWarm).results
         : [];
+      const directMemoryIds = new Set(direct.map((item) => item.memory.id));
       const buildSelections = (res: readonly MemorySearchResult[]): ActiveGraphSelection[] =>
-        res.map((result, index) => ({
-          memoryId: result.memory.id,
-          nodeId: result.node.id,
-          source: direct.some((item) => item.memory.id === result.memory.id)
-            ? "direct"
-            : attachmentIds.has(result.memory.id)
-              ? "open_attachment"
-              : "graph_expansion",
-          reason: recallReason(result),
-          rank: index + 1,
-          tier: result.memory.tier,
-          estimatedTokens: estimateResultTokens(result),
-          scores: {
-            lexical: result.lexicalScore,
-            vector: result.vectorScore,
-            route: result.routeScore,
-            combined: result.combinedScore,
-            usefulness: contextUsefulness(query, result),
-          },
-        }));
+        buildActiveGraphSelections(query, res, directMemoryIds, attachmentIds);
       let selection = selectWithinBudget(budget, limit);
       let activeBudget = budget;
       let selections = buildSelections(selection.results);
@@ -706,18 +697,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       // Retrieval-time duplicate marking: a later result whose normalized
       // statement matches an earlier (higher-ranked) one points at the kept
       // record via duplicateOf. Callers may drop these for rendering.
-      {
-        const seen = new Map<string, string>();
-        for (const result of context.results) {
-          const norm = normalizeStatement(result.memory.statement);
-          const kept = seen.get(norm);
-          if (kept !== undefined) {
-            result.duplicateOf = kept;
-          } else {
-            seen.set(norm, result.memory.id);
-          }
-        }
-      }
+      markDuplicateResults(context.results);
       // Shared character budget for the two appended (unranked) sections
       // below — chain expansion and block-member routing. Unset = unlimited
       // (legacy); the eval protocol pins it so worst-case inflation is a

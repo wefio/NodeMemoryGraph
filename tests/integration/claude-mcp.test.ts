@@ -20,6 +20,26 @@ function textOf(result: Awaited<ReturnType<Client["callTool"]>>): string {
     .join("\n");
 }
 
+test("MCP adapter keeps coordination off the default tool surface", async () => {
+  const dataDir = mkdtempSync(resolve(tmpdir(), "nmg-claude-mcp-default-"));
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: ["--experimental-strip-types", serverPath],
+    env: { ...process.env, NMG_DATA_DIR: dataDir, NMG_ENABLE_COORDINATION: "0" },
+    stderr: "pipe",
+  });
+  const client = new Client({ name: "nmg-mcp-default-test", version: "1.0.0" });
+  try {
+    await client.connect(transport);
+    const tools = await client.listTools();
+    assert.equal(tools.tools.some((tool) => tool.name === "nmg_board"), false);
+    assert.equal(tools.tools.some((tool) => tool.name === "nmg_search"), true);
+  } finally {
+    await client.close().catch(() => undefined);
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
 test("MCP adapter registers, discovers, and directs to a stable agent", async () => {
   const dataDir = mkdtempSync(resolve(tmpdir(), "nmg-claude-mcp-"));
   const transport = new StdioClientTransport({
@@ -31,6 +51,7 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
       NMG_AGENT_ID: "claude-reviewer",
       NMG_AGENT_CAPABILITIES: "review,typescript",
       NMG_SESSION_ID: "claude-session",
+      NMG_ENABLE_COORDINATION: "1",
     },
     stderr: "pipe",
   });

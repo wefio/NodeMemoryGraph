@@ -53,6 +53,7 @@ const COMPLETION_PATTERN =
   /(?:完成了|收工|搞定|结束|提交了|committed|done|finished|wrapped\s+up)/iu;
 
 const WORLD_BOARD_ID = "default";
+const COORDINATION_ENABLED = process.env.NMG_ENABLE_COORDINATION === "1";
 const BROADCAST_PREFIX = "[NMG board 协作广播]";
 // Wake routing: only kinds that ask for a response/action may push. The
 // notify-only kinds (goal/note/decision/result) are silent by convention —
@@ -304,7 +305,7 @@ async function runFromStdin() {
       // Plain stdout text is attached to the context; exit 0 = allow.
       output.push(NUDGE);
     }
-    if (isPromptSubmit(payload)) {
+    if (COORDINATION_ENABLED && isPromptSubmit(payload)) {
       await reportAgentPresence(payload).catch(() => false);
       const notice = await pollBoardWake(payload).catch(() => "");
       if (notice) output.push(notice);

@@ -72,9 +72,14 @@ const EXTRACTED: ExtractedGroup[] = [
       "parseMarkers",
       "matchesScope",
       "effectiveFilterDimensions",
-      "serializeScope",
     ],
     kept: ["NmgStore"],
+  },
+  {
+    sourceFile: "src/core/store/rows.ts",
+    moduleFile: "src/core/scope.ts",
+    symbols: ["serializeScope"],
+    kept: ["mapNode"],
   },
 ];
 

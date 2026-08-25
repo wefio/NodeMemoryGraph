@@ -35,6 +35,7 @@ import type {
 } from "../../../src/core/types.ts";
 import { WORLD_BOARD_ID } from "../../../src/core/types.ts";
 import {
+  coordinationEnabled,
   configuredControllerRerankMode,
   configuredQpp1Mode,
   configuredQpp2Mode,
@@ -96,6 +97,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     shadowEnabled() || qpp1Mode !== "off" || qpp2Mode !== "off" || controllerRerankMode !== "off",
   );
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
+  const coordinationToolsEnabled = coordinationEnabled();
   // Most recent event context, used by the board wake loop to test isIdle and
   // to resolve the current session id outside an event handler.
   let latestAgentCtx: ExtensionContext | undefined;
@@ -1467,7 +1469,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerTool({
+  if (coordinationToolsEnabled) pi.registerTool({
     name: "nmg_board",
     label: "NMG Task Board",
     description: nmgPrompts.board_description,
@@ -1907,7 +1909,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         setTimeout(wakeLoop, readWakeConfig().intervalMs).unref();
       });
   };
-  setTimeout(wakeLoop, readWakeConfig().intervalMs).unref();
+  if (coordinationToolsEnabled) setTimeout(wakeLoop, readWakeConfig().intervalMs).unref();
 }
 
 const EVIDENCE_SOURCE_WINDOW = 64;

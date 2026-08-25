@@ -19,6 +19,7 @@ import { join } from "node:path";
 import type { MemoryContext, MemoryMarker, MemoryScope, SearchOptions } from "./types.ts";
 import { NmgStore } from "./store.ts";
 import type { VectorEmbedder } from "./types.ts";
+import { serializeScope } from "./scope.ts";
 
 /** Marker attached to every LTG copy cached in an STG store. */
 export function cachedFromLtgMarker(sourceMemoryId: string, cachedAt: string): MemoryMarker {
@@ -264,7 +265,7 @@ function reconcileStateVersions(results: MemoryContext["results"]): MemoryContex
   const winnerByState = new Map<string, MemoryContext["results"][number]>();
   for (const result of results) {
     if (result.memory.memoryType !== "state" || !result.memory.stateKey) continue;
-    const key = `${result.memory.stateKey}\0${canonicalScope(result.memory.scope)}`;
+    const key = `${result.memory.stateKey}\0${serializeScope(result.memory.scope)}`;
     const current = winnerByState.get(key);
     if (!current || compareStateRecency(result, current) > 0) winnerByState.set(key, result);
   }
@@ -287,12 +288,6 @@ function compareStateRecency(
   const timeDifference = timestamp(left) - timestamp(right);
   if (timeDifference !== 0) return timeDifference;
   return Number(left.memory.residence === "ltg") - Number(right.memory.residence === "ltg");
-}
-
-function canonicalScope(scope: MemoryScope): string {
-  return JSON.stringify(
-    Object.fromEntries(Object.entries(scope).sort(([left], [right]) => left.localeCompare(right))),
-  );
 }
 
 function mergeActiveGraphs(

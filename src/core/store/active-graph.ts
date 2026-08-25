@@ -113,6 +113,50 @@ export function estimateResultTokens(result: MemorySearchResult): number {
   return Math.max(1, Math.ceil(characters / 4));
 }
 
+export interface ActiveGraphBudgetSelection {
+  results: MemorySearchResult[];
+  selectedNodes: Set<string>;
+  estimatedTokens: number;
+  exhausted: Set<ActiveGraphBudgetUsage["exhausted"][number]>;
+}
+
+/** Apply the hard AG envelope to an already ranked candidate list. */
+export function selectWithinActiveGraphBudget(
+  candidates: readonly MemorySearchResult[],
+  budget: ActiveGraphBudget,
+  limit: number,
+): ActiveGraphBudgetSelection {
+  const selectedNodes = new Set<string>();
+  const results: MemorySearchResult[] = [];
+  const exhausted = new Set<ActiveGraphBudgetUsage["exhausted"][number]>();
+  let estimatedTokens = 0;
+  let deepEvidence = 0;
+  for (const candidate of candidates) {
+    if (results.length >= limit) {
+      exhausted.add("evidence");
+      break;
+    }
+    if (!selectedNodes.has(candidate.node.id) && selectedNodes.size >= budget.maxNodes) {
+      exhausted.add("nodes");
+      continue;
+    }
+    if (candidate.memory.tier >= 2 && deepEvidence >= budget.maxTierBudget) {
+      exhausted.add("deepEvidence");
+      continue;
+    }
+    const candidateTokens = estimateResultTokens(candidate);
+    if (results.length > 0 && estimatedTokens + candidateTokens > budget.maxTokens) {
+      exhausted.add("tokens");
+      continue;
+    }
+    results.push(candidate);
+    selectedNodes.add(candidate.node.id);
+    estimatedTokens += candidateTokens;
+    if (candidate.memory.tier >= 2) deepEvidence += 1;
+  }
+  return { results, selectedNodes, estimatedTokens, exhausted };
+}
+
 export function queryAssociationEdges(
   nodeIds: string[],
   persistentEdges: ActiveGraph["edges"],

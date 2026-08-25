@@ -58,6 +58,7 @@ import {
   type MemoryNode as ReasonerMemoryNode,
 } from "../lab/memory-graph-reasoner.ts";
 import { scopesOverlap, validityIntervalsOverlap } from "../core/semantic-domain.ts";
+import { sameScope } from "../core/scope.ts";
 import { searchMemoryContext } from "../integration/search.ts";
 import { ControllerPolicyChannel } from "../integration/controller-channel.ts";
 import {
@@ -1574,12 +1575,6 @@ function optionalEvidenceSource(
     sourceMessageId: requiredString(source, "sourceMessageId"),
     sourceRef: optionalString(source, "sourceRef"),
   };
-}
-
-function sameScope(left: MemoryScope, right: MemoryScope): boolean {
-  return (
-    JSON.stringify(Object.entries(left).sort()) === JSON.stringify(Object.entries(right).sort())
-  );
 }
 
 function parseExportMemoriesParams(value: unknown): NmgExportMemoriesParams {
