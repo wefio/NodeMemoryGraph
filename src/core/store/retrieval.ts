@@ -880,6 +880,18 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             selectedChainIds.push(remaining.splice(bestIndex, 1)[0]!);
           }
           const chainIds = new Set(selectedChainIds);
+          const selectedMembershipsByMemory = new Map<
+            string,
+            Array<{ chainId: string; position: number }>
+          >();
+          for (const chainId of selectedChainIds) {
+            for (const row of membersByChain.get(chainId) ?? []) {
+              const memoryId = String(row.memory_id);
+              const memberships = selectedMembershipsByMemory.get(memoryId) ?? [];
+              memberships.push({ chainId, position: Number(row.position) });
+              selectedMembershipsByMemory.set(memoryId, memberships);
+            }
+          }
 
           // Collect the DAG edges of every surfaced chain so the presentation
           // layer can render branching (`A --> B & C`) rather than a linear
@@ -963,6 +975,23 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             dist: number;
             chars: number;
           }
+          const dedupeChainCandidates = (candidates: ChainCandidate[]): ChainCandidate[] => {
+            const byMemory = new Map<string, ChainCandidate>();
+            for (const candidate of candidates) {
+              const kept = byMemory.get(candidate.id);
+              if (
+                !kept ||
+                candidate.activation > kept.activation ||
+                (candidate.activation === kept.activation && candidate.dist < kept.dist) ||
+                (candidate.activation === kept.activation &&
+                  candidate.dist === kept.dist &&
+                  candidate.chainIndex < kept.chainIndex)
+              ) {
+                byMemory.set(candidate.id, candidate);
+              }
+            }
+            return [...byMemory.values()];
+          };
           const gated: ChainCandidate[] = [];
           const windowed: ChainCandidate[] = [];
           const edgesByChain = new Map<string, Row[]>();
@@ -1067,9 +1096,11 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             }
             chainIndex += 1;
           }
-          if (windowed.length > 0) {
+          const uniqueWindowed = dedupeChainCandidates(windowed);
+          const uniqueGated = dedupeChainCandidates(gated);
+          if (uniqueWindowed.length > 0) {
             const admitted = new Set<string>();
-            for (const candidate of [...windowed].sort(
+            for (const candidate of [...uniqueWindowed].sort(
               (a, b) =>
                 b.activation - a.activation ||
                 a.dist - b.dist ||
@@ -1079,7 +1110,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
               if (reserveAppendedBudget(candidate.chars)) admitted.add(candidate.id);
             }
             const chainList = selectedChainIds;
-            for (const candidate of [...windowed].sort(
+            for (const candidate of [...uniqueWindowed].sort(
               (a, b) => a.chainIndex - b.chainIndex || a.pos - b.pos,
             )) {
               if (!admitted.has(candidate.id) || seen.has(candidate.id)) continue;
@@ -1089,13 +1120,13 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
               chainPos.set(candidate.id, candidate.pos);
             }
           }
-          if (activationTerms !== null && gated.length > 0) {
+          if (activationTerms !== null && uniqueGated.length > 0) {
             // Over the cap: keep the highest-activation members (ties break
             // toward the hit, then chain order), but emit in chain order so
             // chronology survives for ordering questions.
             const survivors =
-              gated.length > maxChainMembers
-                ? [...gated]
+              uniqueGated.length > maxChainMembers
+                ? [...uniqueGated]
                     .sort(
                       (a, b) =>
                         b.activation - a.activation ||
@@ -1104,7 +1135,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                         a.pos - b.pos,
                     )
                     .slice(0, maxChainMembers)
-                : gated;
+                : uniqueGated;
             const priorityOrder = [...survivors].sort(
               (a, b) =>
                 b.activation - a.activation ||
@@ -1117,7 +1148,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
               if (reserveAppendedBudget(candidate.chars)) kept.add(candidate.id);
             }
             const chainList = selectedChainIds;
-            for (const c of [...gated].sort(
+            for (const c of [...uniqueGated].sort(
               (a, b) => a.chainIndex - b.chainIndex || a.pos - b.pos,
             )) {
               if (!kept.has(c.id) || seen.has(c.id)) continue;
@@ -1132,21 +1163,21 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             for (const result of extra.results) {
               const cid = chainOf.get(result.memory.id);
               const pos = chainPos.get(result.memory.id);
+              const memberships = selectedMembershipsByMemory.get(result.memory.id) ?? [];
               context.results.push({
                 ...result,
                 chainId: cid,
                 chainPosition: pos,
                 chainType: cid ? chainMeta.get(cid)!.chainType : undefined,
-                chainMemberships: cid
-                  ? [
-                      {
-                        chainId: cid,
-                        position: pos ?? 0,
-                        chainType: chainMeta.get(cid)!.chainType,
-                        topic: chainMeta.get(cid)!.topic ?? undefined,
-                      },
-                    ]
-                  : undefined,
+                chainMemberships:
+                  memberships.length > 0
+                    ? memberships.map((membership) => ({
+                        chainId: membership.chainId,
+                        position: membership.position,
+                        chainType: chainMeta.get(membership.chainId)!.chainType,
+                        topic: chainMeta.get(membership.chainId)!.topic ?? undefined,
+                      }))
+                    : undefined,
               });
             }
           }

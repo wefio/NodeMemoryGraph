@@ -309,6 +309,50 @@ test("chain-level MMR spends a bounded slot on diverse evidence instead of a red
   });
 });
 
+test("shared evidence across selected chains consumes one budget slot and retains every membership", () => {
+  withStore((store) => {
+    const add = (statement: string) =>
+      store.remember({
+        nodeName: "cross-chain dedupe",
+        statement,
+        sessionId: "s1",
+        sourceActor: "user",
+      }).memory.id;
+    const leftAnchor = add("dualtoken left anchor");
+    const rightAnchor = add("dualtoken right anchor");
+    const sharedStatement = "shared-evidence";
+    const uniqueStatement = "unique-evidence-is-longer";
+    const shared = add(sharedStatement);
+    const unique = add(uniqueStatement);
+    const left = store.createMemoryChain({ chainType: "temporal", topic: "left" });
+    const right = store.createMemoryChain({ chainType: "temporal", topic: "right" });
+    store.addMemoryToChain({ chainId: left.id, memoryId: leftAnchor, position: 0 });
+    store.addMemoryToChain({ chainId: left.id, memoryId: shared, position: 1 });
+    store.addMemoryToChain({ chainId: right.id, memoryId: rightAnchor, position: 0 });
+    store.addMemoryToChain({ chainId: right.id, memoryId: shared, position: 1 });
+    store.addMemoryToChain({ chainId: right.id, memoryId: unique, position: 2 });
+
+    const context = store.searchContext("dualtoken", {
+      limit: 2,
+      sessionId: "s1",
+      expandChains: true,
+      chainExpansionMaxMembers: 10,
+      appendedMaxChars: sharedStatement.length + uniqueStatement.length,
+    });
+    const sharedResults = context.results.filter((result) => result.memory.id === shared);
+    assert.equal(sharedResults.length, 1, "the shared memory is emitted once");
+    assert.deepEqual(
+      sharedResults[0]!.chainMemberships?.map((membership) => membership.chainId).sort(),
+      [left.id, right.id].sort(),
+      "the one result retains both chain memberships",
+    );
+    assert.ok(
+      context.results.some((result) => result.memory.id === unique),
+      "the shared memory consumes the character budget only once",
+    );
+  });
+});
+
 test("logical chain expansion obeys explicit edge distance independently of chain-intersection hops", () => {
   withStore((store) => {
     const ids = ["graph-hop anchor", "graph-hop neighbour", "graph-hop distant"].map(
