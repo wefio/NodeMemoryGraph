@@ -38,7 +38,9 @@ function fixture(): string {
     "tests/guardrails/merge/guardrail.yaml": [
       "id: merge-v1",
       "status: active",
+      "reason: Protect the merge contract during migration.",
       "review_after: 2026-10-01",
+      "exit_criteria: Promote the stable behavior to a contract test.",
       "",
     ].join("\n"),
   };
@@ -64,6 +66,8 @@ test("selects owners, tests, commands, and active guardrails for a scoped path",
       id: "merge-v1",
       status: "active",
       reviewAfter: "2026-10-01",
+      reason: "Protect the merge contract during migration.",
+      exitCriteria: "Promote the stable behavior to a contract test.",
       path: "tests/guardrails/merge/guardrail.yaml",
     },
   ]);
@@ -98,6 +102,18 @@ test("validates every declared route for CI without selecting a scope", () => {
     "missing: missing owner docs/design/missing.md",
     "missing: missing npm script missing-script",
   ]);
+});
+
+test("active guardrails require a reason, review date, and exit criteria", () => {
+  const root = fixture();
+  writeFileSync(
+    join(root, "tests", "guardrails", "merge", "guardrail.yaml"),
+    "id: merge-v1\nstatus: active\n",
+  );
+  const warnings = validateAgentContext(root);
+  assert.ok(warnings.includes("guardrail merge-v1: missing reason"));
+  assert.ok(warnings.includes("guardrail merge-v1: missing review_after"));
+  assert.ok(warnings.includes("guardrail merge-v1: missing exit_criteria"));
 });
 
 test("markdown output remains a concise navigation surface", () => {

@@ -45,7 +45,7 @@
     "lint:fix": "eslint --fix src/ .pi/extensions/ claude-plugins/",
     "format": "prettier --write \"src/**/*.ts\" \".pi/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \".pi/**/*.ts\"",
-    "test:coverage": "c8 node --experimental-strip-types --test \"tests/**/*.test.ts\"",
+    "test:coverage": "c8 node --experimental-strip-types --test --test-concurrency=2 \"tests/cli/**/*.test.ts\" \"tests/core/**/*.test.ts\" \"tests/docker/**/*.test.ts\" \"tests/docs/**/*.test.ts\" \"tests/extensions/**/*.test.ts\" \"tests/guardrails/**/*.test.ts\" \"tests/integration/**/*.test.ts\" \"tests/prompts/**/*.test.ts\" \"tests/scripts/**/*.test.ts\" \"tests/skills/**/*.test.ts\" \"tests/support/**/*.test.ts\" \"tests/tools/**/*.test.ts\"",
     "eval:agents": "node --experimental-strip-types evals/run.ts",
     "hotspot:modules": "node --experimental-strip-types scripts/hotspot-files.ts",
     "perf:hotspots": "node --experimental-strip-types scripts/perf-hotspots.ts",
@@ -110,10 +110,13 @@
     "agent:context:check": "node --experimental-strip-types tools/repo-context.ts --check",
     "bench:autodiff": "node --experimental-strip-types tools/autodiff-benchmark.ts",
     "test": "node --experimental-strip-types --test --test-concurrency=4 \"tests/**/*.test.ts\"",
+    "test:product": "node --experimental-strip-types --test --test-concurrency=4 \"tests/cli/**/*.test.ts\" \"tests/core/**/*.test.ts\" \"tests/docker/**/*.test.ts\" \"tests/docs/**/*.test.ts\" \"tests/extensions/**/*.test.ts\" \"tests/guardrails/**/*.test.ts\" \"tests/integration/**/*.test.ts\" \"tests/prompts/**/*.test.ts\" \"tests/scripts/**/*.test.ts\" \"tests/skills/**/*.test.ts\" \"tests/support/**/*.test.ts\" \"tests/tools/**/*.test.ts\"",
+    "test:research": "node --experimental-strip-types --test --test-concurrency=4 \"tests/benchmarks/**/*.test.ts\" \"tests/evals/**/*.test.ts\" \"tests/official/**/*.test.ts\"",
     "test:chaos": "npm run build && node --experimental-strip-types --test \"tests/chaos/*.test.ts\"",
     "test:cg": "node --experimental-strip-types --test tests/core/autodiff.test.ts tests/core/differentiable-controller.test.ts tests/core/hierarchical-activation.test.ts tests/core/memory-graph-reasoner.test.ts tests/core/fork-merge.test.ts tests/core/robustness.test.ts"
   },
   "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
     "@earendil-works/pi-coding-agent": "^0.84.1",
     "@eslint/js": "^10.0.1",
     "@mizchi/server-faults": "^1.0.0",

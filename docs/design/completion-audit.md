@@ -5,7 +5,7 @@ in [design.md](design.md); document ownership is defined by
 [the documentation index](../README.md).
 
 **Status:** requirement ledger
-**Updated:** 2026-08-24
+**Updated:** 2026-08-25
 **Normative source:** [design.md](design.md)
 
 This ledger answers two different questions without conflating them:
@@ -61,6 +61,7 @@ model request alone.
 | Daemon and concurrency | One application authority/single LTG writer; synchronous SQLite phases serialize; no transaction spans an await | CLI daemon/service/client and concurrency tests | **Verified core** | Multi-process distributed writers are out of current scope. |
 | Observability | Trace routing, scores, budgets, disclosures, outcomes, maintenance and rollback without treating diagnostics as truth | trace tables, shadow JSONL, reports/audits | **Verified core** | Natural labels must accumulate through use. |
 | Benchmarks | Official-format adapters, matched arms, cacheable embeddings and fail-closed scoring | evaluation adapters and benchmark scripts | **Verified core** | Larger/repeated capability runs are evaluation work, not missing design. |
+| Agent development and quality | Dynamic repository context, owned documentation, product/research/chaos test tracks, temporary guardrail lifecycle, and composable resource cleanup | root bootstrap, repo-development Skill, context tool, CI workflow, Cordis-backed test wrapper | **Verified core** | Research characterization remains non-blocking and cannot redefine product contracts. |
 | Cloud and sandbox | Pluggable future integration only; no default dependency | explicit product boundary | **Out of scope** | Pi sandbox plugins own execution isolation; cloud waits for multi-device scope. |
 
 ## Actual active blockers

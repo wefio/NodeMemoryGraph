@@ -44,7 +44,7 @@ jobs:
         run: npm audit --production --audit-level=high
 
   tests:
-    name: Unit tests and coverage
+    name: Product tests and coverage
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -56,8 +56,23 @@ jobs:
       - run: npm ci
       - name: Build
         run: npm run build
-      - name: Unit tests with coverage
+      - name: Product tests with coverage
         run: npm run test:coverage
+
+  research-tests:
+    name: Research characterization (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Research and benchmark adapter tests
+        run: npm run test:research
 
   node-compat:
     name: Node 22 compatibility

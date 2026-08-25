@@ -21,6 +21,8 @@ export interface GuardrailSummary {
   id: string;
   status: string;
   reviewAfter?: string;
+  reason?: string;
+  exitCriteria?: string;
   path: string;
 }
 
@@ -84,23 +86,38 @@ function git(root: string): AgentContextReport["git"] {
   return { available: true, branch: branch.stdout.trim() || undefined, dirtyFiles };
 }
 
-function guardrails(root: string): GuardrailSummary[] {
+function guardrails(root: string): { active: GuardrailSummary[]; warnings: string[] } {
   const directory = join(root, "tests", "guardrails");
-  if (!existsSync(directory)) return [];
+  if (!existsSync(directory)) return { active: [], warnings: [] };
   const result: GuardrailSummary[] = [];
+  const warnings: string[] = [];
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const manifest = join(directory, entry.name, "guardrail.yaml");
     if (!existsSync(manifest)) continue;
     const parsed = parseYaml(readFileSync(manifest, "utf8")) as Record<string, unknown>;
-    result.push({
-      id: typeof parsed.id === "string" ? parsed.id : entry.name,
-      status: typeof parsed.status === "string" ? parsed.status : "unknown",
-      reviewAfter: typeof parsed.review_after === "string" ? parsed.review_after : undefined,
+    const id = textValue(parsed.id) ?? entry.name;
+    const status = textValue(parsed.status) ?? "unknown";
+    const summary = {
+      id,
+      status,
+      reviewAfter: textValue(parsed.review_after),
+      reason: textValue(parsed.reason),
+      exitCriteria: textValue(parsed.exit_criteria),
       path: normalizePath(relative(root, manifest)),
-    });
+    } satisfies GuardrailSummary;
+    result.push(summary);
+    if (status === "active") {
+      if (!summary.reason) warnings.push(`guardrail ${id}: missing reason`);
+      if (!summary.reviewAfter) warnings.push(`guardrail ${id}: missing review_after`);
+      if (!summary.exitCriteria) warnings.push(`guardrail ${id}: missing exit_criteria`);
+    }
   }
-  return result.filter((item) => item.status === "active");
+  return { active: result.filter((item) => item.status === "active"), warnings };
+}
+
+function textValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function validateRoutes(
@@ -140,6 +157,7 @@ export function collectAgentContext(root: string, scopes: string[] = []): AgentC
       )
     : [];
   const scripts = packageJson.scripts ?? {};
+  const guardrailState = guardrails(resolvedRoot);
   const report: AgentContextReport = {
     project: packageJson.name ?? "unknown",
     version: packageJson.version ?? "unknown",
@@ -149,13 +167,13 @@ export function collectAgentContext(root: string, scopes: string[] = []): AgentC
     engines: packageJson.engines ?? {},
     routes: selected,
     availableRoutes: config.routes.map((route) => route.id),
-    guardrails: guardrails(resolvedRoot),
+    guardrails: guardrailState.active,
     canonical: {
       design: "docs/design/design.md",
       completion: "docs/design/completion-audit.md",
       todo: "docs/design/temporary-todo.md",
     },
-    warnings: validateRoutes(resolvedRoot, selected, scripts),
+    warnings: [...validateRoutes(resolvedRoot, selected, scripts), ...guardrailState.warnings],
   };
   if (normalizedScopes.length && !selected.length) {
     report.warnings.push(`no route matched: ${normalizedScopes.join(", ")}`);
@@ -168,7 +186,10 @@ export function validateAgentContext(root: string): string[] {
   const packageJson = JSON.parse(readFileSync(join(resolvedRoot, "package.json"), "utf8")) as {
     scripts?: Record<string, string>;
   };
-  return validateRoutes(resolvedRoot, readConfig(resolvedRoot).routes, packageJson.scripts ?? {});
+  return [
+    ...validateRoutes(resolvedRoot, readConfig(resolvedRoot).routes, packageJson.scripts ?? {}),
+    ...guardrails(resolvedRoot).warnings,
+  ];
 }
 
 export function formatAgentContext(report: AgentContextReport): string {

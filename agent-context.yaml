@@ -72,6 +72,7 @@ routes:
     owners:
       - docs/design/ci-cd-and-quality.md
       - docs/README.md
+      - skills/repo-development/SKILL.md
     tests: [tests/**]
     verify: [check, test]
 

@@ -14,6 +14,7 @@ import {
 } from "../../src/core/stg.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder } from "../../src/core/vector.ts";
+import { removeTempDirectory } from "../helpers/temp-directory.ts";
 
 /**
  * Design-driven tests for docs/design/stg-isolated-store.md (Phase 1 + 2).
@@ -30,7 +31,7 @@ function withStore(run: (store: NmgStore) => void): void {
     run(store);
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 }
 
@@ -66,7 +67,7 @@ test("Phase1: STG store is a separate file that can be deleted without touching 
     );
     reopened.close();
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -128,7 +129,7 @@ test("outcome-qualified STG memory can be copied into LTG without a cache loop",
   } finally {
     ltg.close();
     stg.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -188,7 +189,7 @@ test("STG/LTG projection keeps only the newest same-scope state version", () => 
   } finally {
     ltg.close();
     stg.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -219,7 +220,7 @@ test("Phase2: access-driven copy selects the accessed project memory", () => {
   } finally {
     ltg.close();
     stg.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -259,7 +260,7 @@ test("Phase1: stgStorePath derives a single project-local shared file", () => {
     rmSync(path, { force: true });
     assert.ok(!existsSync(path), "STG file deletable");
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -325,7 +326,7 @@ test("Phase2: copyLtgSubsetToStg copies usage-ranked project LTG with markers", 
   } finally {
     ltg.close();
     stg.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
 
@@ -381,6 +382,6 @@ test("Phase3: searchStgFirst returns STG hits directly and falls back to LTG", (
   } finally {
     ltg.close();
     stg.close();
-    rmSync(directory, { recursive: true, force: true });
+    removeTempDirectory(directory);
   }
 });
