@@ -14,6 +14,7 @@
     "src/**/*.ts",
     ".pi/extensions/**/*.ts",
     "claude-plugins/**/*.ts",
-    "tools/autodiff-benchmark.ts"
+    "tools/autodiff-benchmark.ts",
+    "tools/repo-context.ts"
   ]
 }

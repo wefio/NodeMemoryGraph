@@ -179,3 +179,21 @@ jobs:
 | Dependabot (GitHub 内置) | 依赖更新 | 免费，开 |
 
 就这些。不需要额外的东西。
+
+---
+
+## 6. Agent 原生仓库上下文
+
+根 `AGENTS.md` 只保存稳定的启动协议，不复制持续变化的模块、状态和命令。
+Agent 修改仓库前运行：
+
+```powershell
+npm run agent:context -- --scope <目标路径>
+```
+
+独立的 `tools/repo-context.ts` 从 Git、`package.json`、`agent-context.yaml`、
+文档 owner 和临时 guardrail manifest 生成当前任务视图。它是只读开发工具，
+不访问 NMG 数据库，不启动 daemon，也不调用 LLM 或 embedding。
+
+`agent-context.yaml` 只维护难以自动推导的稳定所有权关系。实现状态继续由源码、
+`completion-audit.md` 和 `temporary-todo.md` 各自负责，避免产生第二事实源。

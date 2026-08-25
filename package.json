@@ -106,6 +106,8 @@
     "skill:nmg:sync": "node --experimental-strip-types scripts/sync-nmg-skill.ts",
     "skill:nmg:check": "node --experimental-strip-types scripts/sync-nmg-skill.ts --check",
     "docs:check": "node --experimental-strip-types scripts/verify-docs.mts",
+    "agent:context": "node --experimental-strip-types tools/repo-context.ts",
+    "agent:context:check": "node --experimental-strip-types tools/repo-context.ts --check",
     "bench:autodiff": "node --experimental-strip-types tools/autodiff-benchmark.ts",
     "test": "node --experimental-strip-types --test --test-concurrency=4 \"tests/**/*.test.ts\"",
     "test:chaos": "npm run build && node --experimental-strip-types --test \"tests/chaos/*.test.ts\"",

@@ -38,6 +38,8 @@ jobs:
         run: npm run format:check
       - name: Documentation contracts
         run: npm run docs:check
+      - name: Agent context routes
+        run: npm run agent:context:check
       - name: Dependency audit
         run: npm audit --production --audit-level=high
 
