@@ -12,6 +12,7 @@ export interface NmgPrompts {
   get_description: string;
   remember_description: string;
   board_description: string;
+  lab_description: string;
   reason_description: string;
   reason_action_parameter_description: string;
   reason_node_id_parameter_description: string;

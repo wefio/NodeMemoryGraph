@@ -16,6 +16,7 @@ import type {
   NmgDeleteMemoryParams,
   NmgExportMemoriesParams,
   NmgGetParams,
+  NmgLabParams,
   NmgMergeNodesParams,
   NmgPerfParams,
   NmgRecordClaimOutcomesParams,
@@ -62,6 +63,100 @@ export const COMMON_OPTIONS = ["data-dir", "db"] as const;
 export const COMMON_FLAGS = ["json"] as const;
 
 export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
+  {
+    method: "lab",
+    words: ["lab", "list"],
+    usageLine: "nmg lab list [--json]",
+    options: [],
+    flags: [],
+    buildParams: (values): NmgLabParams => {
+      rejectPositionals(values, "lab list");
+      return { action: "list" };
+    },
+  },
+  {
+    method: "lab",
+    words: ["lab", "status"],
+    usageLine: "nmg lab status CAPABILITY --session-id ID [--json]",
+    options: ["session-id"],
+    flags: [],
+    buildParams: (values): NmgLabParams => ({
+      action: "status",
+      capability: singlePositional(values, "lab status") as NmgLabParams extends {
+        capability: infer C;
+      }
+        ? C
+        : never,
+      sessionId: requiredOption(values, "session-id"),
+    }),
+  },
+  {
+    method: "lab",
+    words: ["lab", "enable"],
+    usageLine:
+      "nmg lab enable CAPABILITY --session-id ID --requester ID --reason TEXT [--ttl-seconds N] [--json]",
+    options: ["session-id", "requester", "reason", "ttl-seconds"],
+    flags: [],
+    buildParams: (values): NmgLabParams => ({
+      action: "enable",
+      capability: singlePositional(values, "lab enable") as NmgLabParams extends {
+        capability: infer C;
+      }
+        ? C
+        : never,
+      scope: "session",
+      sessionId: requiredOption(values, "session-id"),
+      requester: requiredOption(values, "requester"),
+      reason: requiredOption(values, "reason"),
+      ttlSeconds: numericOption(values, "ttl-seconds"),
+    }),
+  },
+  {
+    method: "lab",
+    words: ["lab", "disable"],
+    usageLine: "nmg lab disable CAPABILITY --session-id ID [--json]",
+    options: ["session-id"],
+    flags: [],
+    buildParams: (values): NmgLabParams => ({
+      action: "disable",
+      capability: singlePositional(values, "lab disable") as NmgLabParams extends {
+        capability: infer C;
+      }
+        ? C
+        : never,
+      sessionId: requiredOption(values, "session-id"),
+    }),
+  },
+  {
+    method: "lab",
+    words: ["lab", "invoke"],
+    usageLine:
+      "nmg lab invoke CAPABILITY --session-id ID --operation NAME [--input-json JSON] [--json]",
+    options: ["session-id", "operation", "input-json"],
+    flags: [],
+    buildParams: (values): NmgLabParams => {
+      const rawInput = firstOption(values, "input-json");
+      let input: unknown;
+      if (rawInput !== undefined) {
+        try {
+          input = JSON.parse(rawInput);
+        } catch {
+          throw new Error("--input-json must be valid JSON");
+        }
+      }
+      return {
+        action: "invoke",
+        capability: singlePositional(values, "lab invoke") as NmgLabParams extends {
+          capability: infer C;
+        }
+          ? C
+          : never,
+        sessionId: requiredOption(values, "session-id"),
+        operation: requiredOption(values, "operation"),
+        input,
+      };
+    },
+  },
   {
     method: "status",
     words: ["status"],

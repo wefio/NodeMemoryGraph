@@ -31,6 +31,12 @@ import type {
   TaskBoardKind,
   TruthStatus,
 } from "../core/types.ts";
+import type {
+  LabActivation,
+  LabCapability,
+  LabCapabilityDescriptor,
+  LabScope,
+} from "../integration/lab-capabilities.ts";
 
 // Bump only when a live daemon from the previous revision cannot faithfully
 // implement the current client contract. v5 replaced the ambiguous
@@ -39,8 +45,10 @@ import type {
 // agent_end. v6 preserves natural/controlled provenance on claim outcomes;
 // a v5 daemon would silently discard the optional field and contaminate audits.
 // v7 completes the chain contract (DAG edges, member removal, and structured
-// reads); a v6 daemon only implements the earlier partial chain surface.
-export const NMG_PROTOCOL_VERSION = "nmg.v7" as const;
+// reads); a v6 daemon only implements the earlier partial chain surface. v8
+// adds daemon-owned Lab capability leases and invocation; a v7 daemon cannot
+// honor those agent-visible operations.
+export const NMG_PROTOCOL_VERSION = "nmg.v8" as const;
 
 export const NMG_CAPABILITIES = [
   "hello",
@@ -69,6 +77,7 @@ export const NMG_CAPABILITIES = [
   "diagnostic-answer-attribution",
   "claim-outcome-origin-provenance",
   "memory-chains",
+  "lab-capabilities",
 ] as const;
 
 export const NMG_METHODS = [
@@ -99,6 +108,7 @@ export const NMG_METHODS = [
   "chainEdgeRemove",
   "chainGet",
   "chainList",
+  "lab",
   "shutdown",
   "status",
 ] as const;
@@ -584,6 +594,32 @@ export type NmgTopologyProposalParams =
   | { action: "review"; proposalId: string; decision: "accept" | "reject" }
   | { action: "actuate"; proposalId: string };
 
+export type NmgLabParams =
+  | { action: "list" }
+  | { action: "status"; capability: LabCapability; sessionId: string }
+  | {
+      action: "enable";
+      capability: LabCapability;
+      scope?: LabScope;
+      sessionId: string;
+      requester: string;
+      reason: string;
+      ttlSeconds?: number;
+    }
+  | { action: "disable"; capability: LabCapability; sessionId: string }
+  | {
+      action: "invoke";
+      capability: LabCapability;
+      sessionId: string;
+      operation: string;
+      input?: unknown;
+    };
+
+export type NmgLabResult =
+  | { action: "list"; capabilities: LabCapabilityDescriptor[] }
+  | { action: "status" | "enable" | "disable"; activation: LabActivation | null }
+  | { action: "invoke"; capability: LabCapability; operation: string; output: unknown };
+
 export type NmgMethodResult = {
   hello: NmgHelloResult;
   status: NmgStatusResult;
@@ -634,6 +670,7 @@ export type NmgMethodResult = {
     topologicalOrder: string[];
   } | null;
   chainList: MemoryChain[];
+  lab: NmgLabResult;
   recordActiveGraphAttribution: { activeGraphId: string; attributedMemoryIds: string[] };
   retentionCandidates: { candidates: RetentionCandidate[] };
   setStorageState: { memoryId: string; storageState: MemoryStorageState };

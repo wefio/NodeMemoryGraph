@@ -2,8 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   statSync,
@@ -14,23 +14,13 @@ import { join } from "node:path";
 import {
   ReasoningWorkspace,
   type AddReasoningNodeInput,
-  type ReasoningCheckpoint,
-  type ReasoningEdge,
   type ReasoningEdgeKind,
-  type ReasoningNode,
   type ReasoningStatus,
   type ReasoningWorkspaceState,
-} from "../../../src/lab/reasoning-workspace.ts";
+} from "../lab/reasoning-workspace.ts";
 
-export const DEFAULT_REASONING_WORKSPACE_IDLE_MS = 30 * 24 * 60 * 60 * 1_000;
-
-/**
- * File-backed, session-private owner for the optional Pi reasoning scratchpad.
- * Writes are atomic and never touch the semantic memory daemon. A separate
- * marker survives extension restarts when Pi compacts a session before the next
- * turn can consume its checkpoint.
- */
-export class PiReasoningWorkspaces {
+/** Daemon-owned file persistence for session-private reasoning workspaces. */
+export class ReasoningWorkspaces {
   readonly directory: string;
   readonly #open = new Map<string, ReasoningWorkspace>();
 
@@ -38,11 +28,8 @@ export class PiReasoningWorkspaces {
     this.directory = directory;
   }
 
-  add(sessionId: string, input: AddReasoningNodeInput): ReasoningNode {
-    const workspace = this.#workspace(sessionId, true)!;
-    const node = workspace.addNode(input);
-    this.#save(workspace);
-    return node;
+  add(sessionId: string, input: AddReasoningNodeInput) {
+    return this.#mutate(sessionId, (workspace) => workspace.addNode(input));
   }
 
   update(
@@ -54,33 +41,18 @@ export class PiReasoningWorkspaces {
       importance?: number;
       evidenceRefs?: string[];
     },
-  ): ReasoningNode {
-    const workspace = this.#workspace(sessionId, true)!;
-    const node = workspace.updateNode(nodeId, update);
-    this.#save(workspace);
-    return node;
+  ) {
+    return this.#mutate(sessionId, (workspace) => workspace.updateNode(nodeId, update));
   }
 
-  link(
-    sessionId: string,
-    sourceId: string,
-    targetId: string,
-    type: ReasoningEdgeKind,
-  ): ReasoningEdge {
-    const workspace = this.#workspace(sessionId, true)!;
-    const edge = workspace.link(sourceId, targetId, type);
-    this.#save(workspace);
-    return edge;
+  link(sessionId: string, sourceId: string, targetId: string, type: ReasoningEdgeKind) {
+    return this.#mutate(sessionId, (workspace) => workspace.link(sourceId, targetId, type));
   }
 
-  checkpoint(
-    sessionId: string,
-    options: { maxNodes?: number; maxChars?: number } = {},
-  ): ReasoningCheckpoint {
+  checkpoint(sessionId: string, options: { maxNodes?: number; maxChars?: number } = {}) {
     return this.#workspace(sessionId, true)!.checkpoint(options);
   }
 
-  /** Mark an existing workspace for one bounded injection after Pi compaction. */
   markCompacted(sessionId: string): boolean {
     const workspace = this.#workspace(sessionId, false);
     if (!workspace || workspace.toJSON().nodes.length === 0) return false;
@@ -89,67 +61,63 @@ export class PiReasoningWorkspaces {
     return true;
   }
 
-  /** Consume the durable compaction marker exactly once. */
   consumeCompactionCheckpoint(
     sessionId: string,
     options: { maxNodes?: number; maxChars?: number } = {},
-  ): ReasoningCheckpoint | null {
-    const pendingPath = this.#pendingPath(sessionId);
-    if (!existsSync(pendingPath)) return null;
-    const recordedSessionId = readFileSync(pendingPath, "utf8");
-    if (recordedSessionId !== sessionId) {
+  ) {
+    const pending = this.#pendingPath(sessionId);
+    if (!existsSync(pending)) return null;
+    if (readFileSync(pending, "utf8") !== sessionId)
       throw new Error("Reasoning checkpoint marker belongs to a different session");
-    }
     const workspace = this.#workspace(sessionId, false);
     if (!workspace) return null;
     const checkpoint = workspace.checkpoint(options);
-    rmSync(pendingPath, { force: true });
+    rmSync(pending, { force: true });
     return checkpoint;
   }
 
-  clear(sessionId: string): void {
+  clear(sessionId: string): boolean {
+    const existed = existsSync(this.#statePath(sessionId)) || this.#open.has(sessionId);
     this.#open.delete(sessionId);
     rmSync(this.#statePath(sessionId), { force: true });
     rmSync(this.#pendingPath(sessionId), { force: true });
+    return existed;
   }
 
-  /**
-   * Delete abandoned Lab scratchpads after an idle recovery window. This never
-   * archives or promotes their contents and never touches a recently written
-   * session. Returns the number of state files removed.
-   */
-  pruneStale(maxIdleMs = DEFAULT_REASONING_WORKSPACE_IDLE_MS, now = Date.now()): number {
+  release(sessionId: string): void {
+    this.#open.delete(sessionId);
+  }
+  statePath(sessionId: string): string {
+    return this.#statePath(sessionId);
+  }
+
+  pruneStale(maxIdleMs = 30 * 24 * 60 * 60 * 1_000, now = Date.now()): number {
     if (!existsSync(this.directory)) return 0;
-    const boundedIdleMs = Math.max(0, maxIdleMs);
     let removed = 0;
     for (const entry of readdirSync(this.directory, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
       const statePath = join(this.directory, entry.name);
-      if (now - statSync(statePath).mtimeMs <= boundedIdleMs) continue;
+      if (now - statSync(statePath).mtimeMs <= Math.max(0, maxIdleMs)) continue;
       try {
         const state = JSON.parse(
           readFileSync(statePath, "utf8"),
         ) as Partial<ReasoningWorkspaceState>;
         if (typeof state.sessionId === "string") this.#open.delete(state.sessionId);
       } catch {
-        // An old malformed Lab scratchpad is still safe to remove by filename.
+        /* malformed stale Lab state is still safe to remove */
       }
       rmSync(statePath, { force: true });
-      rmSync(join(this.directory, `${entry.name.slice(0, -".json".length)}.pending`), {
-        force: true,
-      });
+      rmSync(join(this.directory, `${entry.name.slice(0, -5)}.pending`), { force: true });
       removed += 1;
     }
     return removed;
   }
 
-  /** Drop only the in-process cache; the session scratchpad remains resumable. */
-  release(sessionId: string): void {
-    this.#open.delete(sessionId);
-  }
-
-  statePath(sessionId: string): string {
-    return this.#statePath(sessionId);
+  #mutate<T>(sessionId: string, operation: (workspace: ReasoningWorkspace) => T): T {
+    const workspace = this.#workspace(sessionId, true)!;
+    const result = operation(workspace);
+    this.#save(workspace);
+    return result;
   }
 
   #workspace(sessionId: string, create: boolean): ReasoningWorkspace | null {
@@ -159,11 +127,11 @@ export class PiReasoningWorkspaces {
     const path = this.#statePath(sessionId);
     let workspace: ReasoningWorkspace;
     if (existsSync(path)) {
-      const state = JSON.parse(readFileSync(path, "utf8")) as ReasoningWorkspaceState;
-      workspace = ReasoningWorkspace.fromJSON(state);
-      if (workspace.sessionId !== sessionId) {
+      workspace = ReasoningWorkspace.fromJSON(
+        JSON.parse(readFileSync(path, "utf8")) as ReasoningWorkspaceState,
+      );
+      if (workspace.sessionId !== sessionId)
         throw new Error("Reasoning workspace file belongs to a different session");
-      }
     } else {
       if (!create) return null;
       workspace = new ReasoningWorkspace(sessionId);
@@ -193,7 +161,6 @@ export class PiReasoningWorkspaces {
   #statePath(sessionId: string): string {
     return join(this.directory, `${sessionFileKey(sessionId)}.json`);
   }
-
   #pendingPath(sessionId: string): string {
     return join(this.directory, `${sessionFileKey(sessionId)}.pending`);
   }

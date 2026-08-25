@@ -20,9 +20,102 @@ test("status and hello do not create or open the database", async () => {
     const status = await service.invoke("status");
     assert.equal(hello.protocol, NMG_PROTOCOL_VERSION);
     assert.ok(hello.capabilities.includes("search"));
+    assert.ok(hello.capabilities.includes("lab-capabilities"));
     assert.equal(status.storage.exists, false);
     assert.equal(status.storage.loaded, false);
     assert.equal(existsSync(databasePath), false);
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("Lab RPC is session scoped and reasoning workspaces are daemon owned", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-lab-"));
+  const service = new NmgService({
+    databasePath: join(directory, "nmg.sqlite"),
+    dataDirectory: directory,
+    environment: {},
+  });
+  try {
+    const listed = await service.invoke("lab", { action: "list" });
+    assert.equal(listed.action, "list");
+    if (listed.action !== "list") throw new Error("expected Lab list result");
+    assert.ok(listed.capabilities.some((item) => item.id === "reasoning_workspace"));
+
+    const enabled = await service.invoke("lab", {
+      action: "enable",
+      capability: "reasoning_workspace",
+      scope: "session",
+      sessionId: "session-a",
+      requester: "agent:test",
+      reason: "keep an auditable investigation scratchpad",
+    });
+    assert.equal(enabled.action, "enable");
+
+    const added = await service.invoke("lab", {
+      action: "invoke",
+      capability: "reasoning_workspace",
+      sessionId: "session-a",
+      operation: "add",
+      input: { kind: "hypothesis", content: "The parser owns the regression." },
+    });
+    assert.equal(added.action, "invoke");
+
+    const checkpoint = await service.invoke("lab", {
+      action: "invoke",
+      capability: "reasoning_workspace",
+      sessionId: "session-a",
+      operation: "checkpoint",
+      input: { maxNodes: 8, maxChars: 2_000 },
+    });
+    assert.equal(checkpoint.action, "invoke");
+    if (checkpoint.action !== "invoke") throw new Error("expected Lab invoke result");
+    assert.match(JSON.stringify(checkpoint.output), /parser owns the regression/);
+
+    await assert.rejects(
+      service.invoke("lab", {
+        action: "invoke",
+        capability: "reasoning_workspace",
+        sessionId: "session-b",
+        operation: "checkpoint",
+      }),
+      /not enabled for session/,
+    );
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("Lab RPC exposes read-only memory graph reasoning after explicit activation", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-mgr-"));
+  const service = new NmgService({ dataDirectory: directory, environment: {} });
+  try {
+    await service.invoke("lab", {
+      action: "enable",
+      capability: "memory_graph_reasoner",
+      sessionId: "session-mgr",
+      requester: "agent:test",
+      reason: "compare competing memory paths",
+    });
+    const result = await service.invoke("lab", {
+      action: "invoke",
+      capability: "memory_graph_reasoner",
+      sessionId: "session-mgr",
+      operation: "traverse",
+      input: {
+        queryVector: [1, 0],
+        graph: [
+          { id: "relevant", vector: [1, 0] },
+          { id: "noise", vector: [0, 1] },
+        ],
+        maxSteps: 1,
+      },
+    });
+    assert.equal(result.action, "invoke");
+    if (result.action !== "invoke") throw new Error("expected Lab invoke result");
+    assert.equal((result.output as { path: Array<{ nodeId: string }> }).path[0]?.nodeId, "relevant");
   } finally {
     service.close();
     removeTempDirectory(directory);

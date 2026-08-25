@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { PiReasoningWorkspaces } from "../../../.pi/extensions/nmg/reasoning-workspace.ts";
+import { ReasoningWorkspaces } from "../../../src/integration/reasoning-workspaces.ts";
 
-test("Pi reasoning workspace persists typed scratch state across manager restart", () => {
+test("daemon reasoning workspace persists typed scratch state across manager restart", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-reasoning-"));
   try {
-    const first = new PiReasoningWorkspaces(directory);
+    const first = new ReasoningWorkspaces(directory);
     const observation = first.add("session-a", {
       kind: "observation",
       content: "The parser rejects empty records.",
@@ -22,7 +22,7 @@ test("Pi reasoning workspace persists typed scratch state across manager restart
     first.link("session-a", observation.id, hypothesis.id, "supports");
     first.release("session-a");
 
-    const second = new PiReasoningWorkspaces(directory);
+    const second = new ReasoningWorkspaces(directory);
     const checkpoint = second.checkpoint("session-a");
     assert.equal(checkpoint.nodes.length, 2);
     assert.equal(checkpoint.edges.length, 1);
@@ -44,7 +44,7 @@ test("Pi reasoning workspace persists typed scratch state across manager restart
 test("compaction checkpoint survives restart and is consumed exactly once", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-reasoning-compact-"));
   try {
-    const first = new PiReasoningWorkspaces(directory);
+    const first = new ReasoningWorkspaces(directory);
     first.add("session-b", {
       kind: "decision",
       content: "Keep the reversible parser path.",
@@ -54,7 +54,7 @@ test("compaction checkpoint survives restart and is consumed exactly once", () =
     assert.equal(first.markCompacted("session-b"), true);
     first.release("session-b");
 
-    const second = new PiReasoningWorkspaces(directory);
+    const second = new ReasoningWorkspaces(directory);
     const injected = second.consumeCompactionCheckpoint("session-b");
     assert.match(injected?.text ?? "", /Keep the reversible parser path/u);
     assert.equal(second.consumeCompactionCheckpoint("session-b"), null);
@@ -67,7 +67,7 @@ test("compaction checkpoint survives restart and is consumed exactly once", () =
 test("clear removes only the selected session scratchpad", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-reasoning-clear-"));
   try {
-    const manager = new PiReasoningWorkspaces(directory);
+    const manager = new ReasoningWorkspaces(directory);
     manager.add("session-a", { kind: "goal", content: "Goal A" });
     manager.add("session-b", { kind: "goal", content: "Goal B" });
     manager.markCompacted("session-a");
@@ -80,10 +80,10 @@ test("clear removes only the selected session scratchpad", () => {
   }
 });
 
-test("Pi reasoning manager persists an idempotent exact add", () => {
+test("daemon reasoning manager persists an idempotent exact add", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-reasoning-idempotent-"));
   try {
-    const manager = new PiReasoningWorkspaces(directory);
+    const manager = new ReasoningWorkspaces(directory);
     const first = manager.add("session-a", { kind: "next_action", content: "Run the tests" });
     const replay = manager.add("session-a", {
       kind: "next_action",
@@ -104,7 +104,7 @@ test("Pi reasoning manager persists an idempotent exact add", () => {
 test("stale Lab scratchpads expire without touching a recent session", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-pi-reasoning-expiry-"));
   try {
-    const manager = new PiReasoningWorkspaces(directory);
+    const manager = new ReasoningWorkspaces(directory);
     manager.add("session-old", { kind: "goal", content: "Old interrupted task" });
     manager.markCompacted("session-old");
     manager.add("session-new", { kind: "goal", content: "Current task" });

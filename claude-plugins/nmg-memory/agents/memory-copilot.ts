@@ -141,6 +141,36 @@ server.registerTool(
   },
 );
 
+server.registerTool(
+  "nmg_lab",
+  {
+    description: nmgPrompts.lab_description,
+    inputSchema: {
+      action: z.enum(["list", "status", "enable", "disable", "invoke"]),
+      capability: z.enum([
+        "reasoning_workspace", "memory_graph_reasoner", "controller_shadow",
+        "controller_controlled", "controller_active",
+      ]).optional(),
+      reason: z.string().optional(),
+      ttlSeconds: z.number().int().min(60).max(86_400).optional(),
+      operation: z.string().optional(),
+      input: z.unknown().optional(),
+    },
+  },
+  async (params) => {
+    if (params.action !== "list" && !params.capability) throw new Error(`${params.action} requires capability`);
+    if (params.action === "enable" && !params.reason) throw new Error("enable requires reason");
+    if (params.action === "invoke" && !params.operation) throw new Error("invoke requires operation");
+    const result = await invokeDaemon(connection, "lab", {
+      ...params,
+      sessionId: BOARD_SESSION_ID,
+      scope: params.action === "enable" ? "session" : undefined,
+      requester: params.action === "enable" ? `agent:mcp:${BOARD_AGENT_ID}` : undefined,
+    });
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
 // ── nmg_board ──
 
 interface BoardEntry {

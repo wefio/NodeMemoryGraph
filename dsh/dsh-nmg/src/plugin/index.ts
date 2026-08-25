@@ -1,7 +1,7 @@
 // NMG adapter for DeepSeek Harness — community-standard dual-face host package.
 //
-// Host half: registers five model tools (nmg_search / nmg_get / nmg_remember /
-// nmg_board / nmg_daemon) into the host `tools` registry and implements
+// Host half: registers model tools (nmg_search / nmg_get / nmg_remember /
+// nmg_board / nmg_lab / nmg_daemon) into the host `tools` registry and implements
 // AUTOMATIC RECALL on `agent/pre-step`. Inside this package the half runs in the
 // real node process (full fetch / fs / process), so it talks to the running NMG
 // daemon over HTTP JSON-RPC first (single-digit-ms fast path) and falls back to
@@ -1237,6 +1237,55 @@ export function apply(ctx: Context): () => void {
     },
   }
 
+  const labTool = {
+    name: 'nmg_lab',
+    description: 'Discover and temporarily enable optional NMG capabilities for this session. Reasoning workspace, graph reasoner, and controller shadow are self-service; controlled/active controller modes remain gated.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['list', 'status', 'enable', 'disable', 'invoke'] },
+        capability: { type: 'string', enum: ['reasoning_workspace', 'memory_graph_reasoner', 'controller_shadow', 'controller_controlled', 'controller_active'] },
+        reason: { type: 'string' },
+        ttlSeconds: { type: 'integer' },
+        operation: { type: 'string' },
+        input: { type: 'object', additionalProperties: true },
+      },
+      required: ['action'],
+    },
+    output: textOutput,
+    async execute(args, exec) {
+      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
+      if (args.action !== 'list' && !args.capability) return args.action + ' requires capability.'
+      if (args.action === 'enable' && !args.reason) return 'enable requires reason.'
+      if (args.action === 'invoke' && !args.operation) return 'invoke requires operation.'
+      const params: Record<string, any> = {
+        action: args.action,
+        capability: args.capability,
+        sessionId,
+        requester: args.action === 'enable' ? 'agent:dsh' : undefined,
+        reason: args.reason,
+        ttlSeconds: args.ttlSeconds,
+        operation: args.operation,
+        input: args.input,
+      }
+      const argv = ['lab', args.action]
+      if (args.capability) argv.push(args.capability)
+      if (args.action !== 'list') argv.push('--session-id', sessionId)
+      if (args.action === 'enable') {
+        argv.push('--requester', 'agent:dsh', '--reason', args.reason)
+        if (args.ttlSeconds != null) argv.push('--ttl-seconds', String(args.ttlSeconds))
+      }
+      if (args.action === 'invoke') {
+        argv.push('--operation', args.operation)
+        if (args.input != null) argv.push('--input-json', JSON.stringify(args.input))
+      }
+      argv.push('--json')
+      const r = await invoke('lab', params, argv, exec.signal, null)
+      if (!r.ok) return r.error
+      return JSON.stringify(r.data, null, 2)
+    },
+  }
+
   // DSH-native automatic recall: a named systemPrompt.context contribution. The
   // agent loop materializes its resolved text as a user-role snapshot appended to
   // the turn's messages (no manual message fabrication). The recall search is
@@ -1344,6 +1393,7 @@ export function apply(ctx: Context): () => void {
     tools.register(getTool),
     tools.register(rememberTool),
     tools.register(boardTool),
+    tools.register(labTool),
     tools.register(daemonTool),
     contextDisposer,
     boardWakeContextDisposer,

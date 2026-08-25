@@ -31,3 +31,10 @@ test("daemon protocol guard rejects v4 after the attribution RPC contract change
     },
   );
 });
+
+test("daemon protocol guard rejects v7 because it cannot serve Lab capabilities", () => {
+  assert.throws(
+    () => assertDaemonProtocol({ protocol: "nmg.v7" } as never),
+    /restart/u,
+  );
+});

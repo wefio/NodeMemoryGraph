@@ -54,19 +54,12 @@ import {
   REASONING_EDGE_KINDS,
   REASONING_NODE_KINDS,
   REASONING_STATUSES,
-  type ReasoningEdgeKind,
-  type ReasoningNodeKind,
-  type ReasoningStatus,
 } from "../../../src/lab/reasoning-workspace.ts";
 import {
   ControllerShadowBridge,
   shadowCollectionOrigin,
   shadowEnabled,
 } from "./controller-shadow.ts";
-import {
-  DEFAULT_REASONING_WORKSPACE_IDLE_MS,
-  PiReasoningWorkspaces,
-} from "./reasoning-workspace.ts";
 
 /**
  * NMG Pi extension.
@@ -103,10 +96,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     shadowEnabled() || qpp1Mode !== "off" || qpp2Mode !== "off" || controllerRerankMode !== "off",
   );
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
-  const reasoningWorkspaces = labToolsEnabled
-    ? new PiReasoningWorkspaces(join(resolveNmgDataDir(), "reasoning"))
-    : null;
-  reasoningWorkspaces?.pruneStale(DEFAULT_REASONING_WORKSPACE_IDLE_MS);
   // Most recent event context, used by the board wake loop to test isIdle and
   // to resolve the current session id outside an event handler.
   let latestAgentCtx: ExtensionContext | undefined;
@@ -180,13 +169,23 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       : "";
     const nudge = [completionNudge, feedbackNudge, claimOutcomeNudge].filter(Boolean).join("\n");
     let reasoningCheckpoint = "";
-    if (reasoningWorkspaces) {
+    if (labToolsEnabled) {
       try {
-        reasoningCheckpoint =
-          reasoningWorkspaces.consumeCompactionCheckpoint(sessionId, {
-            maxNodes: 24,
-            maxChars: 6_000,
-          })?.text ?? "";
+        const status = (await invokeDaemon(await connection(), "lab", {
+          action: "status",
+          capability: "reasoning_workspace",
+          sessionId,
+        })) as { activation?: unknown };
+        if (status.activation) {
+          const consumed = (await invokeDaemon(await connection(), "lab", {
+            action: "invoke",
+            capability: "reasoning_workspace",
+            sessionId,
+            operation: "consume_checkpoint",
+            input: { maxNodes: 24, maxChars: 6_000 },
+          })) as { output?: { text?: string } | null };
+          reasoningCheckpoint = consumed.output?.text ?? "";
+        }
       } catch (error) {
         reasoningCheckpoint = `Reasoning workspace unavailable: ${message(error)}`;
       }
@@ -651,7 +650,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     runtimeAg.clear(sessionId);
     agentAttributionFlow.clear(sessionId);
     controllerShadow.clear(sessionId);
-    reasoningWorkspaces?.release(sessionId);
     if (!connectionPromise) return;
     const active = await connectionPromise.catch(() => undefined);
     if (!active) {
@@ -697,13 +695,31 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     const sessionId = ctx.sessionManager.getSessionId();
     injectionWindow.clear(sessionId);
     runtimeAg.activateProjection(sessionId);
-    reasoningWorkspaces?.markCompacted(sessionId);
+    if (labToolsEnabled) {
+      try {
+        const status = (await invokeDaemon(await connection(), "lab", {
+          action: "status",
+          capability: "reasoning_workspace",
+          sessionId,
+        })) as { activation?: unknown };
+        if (status.activation) {
+          await invokeDaemon(await connection(), "lab", {
+            action: "invoke",
+            capability: "reasoning_workspace",
+            sessionId,
+            operation: "mark_compacted",
+          });
+        }
+      } catch {
+        // Optional Lab state must never block Pi compaction.
+      }
+    }
     // Pi owns conversational compaction. The runtime AG remains in memory and
     // is injected again on the next turn; compaction alone never promotes
     // temporary state into durable NMG storage.
   });
 
-  if (reasoningWorkspaces) {
+  if (labToolsEnabled) {
     pi.registerTool({
       name: "nmg_reason",
       label: "NMG Reasoning Scratchpad",
@@ -764,69 +780,111 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       }),
       async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
         const sessionId = ctx.sessionManager.getSessionId();
-        if (params.action === "add") {
-          if (!params.kind || !params.content)
-            throw new Error("action=add requires kind and content");
-          const node = reasoningWorkspaces.add(sessionId, {
-            kind: params.kind as ReasoningNodeKind,
-            content: params.content,
-            status: params.status as ReasoningStatus | undefined,
-            importance: params.importance,
-            evidenceRefs: params.evidenceRefs,
-          });
-          const checkpoint = reasoningWorkspaces.checkpoint(sessionId);
-          return toolResult(
-            { node, checkpoint },
-            `Reasoning node added: ${node.id}\n${checkpoint.text}`,
-          );
-        }
-        if (params.action === "update") {
-          if (!params.nodeId) throw new Error("action=update requires nodeId");
-          if (
-            params.content === undefined &&
-            params.status === undefined &&
-            params.importance === undefined &&
-            params.evidenceRefs === undefined
-          ) {
-            throw new Error("action=update requires content, status, importance, or evidenceRefs");
-          }
-          const node = reasoningWorkspaces.update(sessionId, params.nodeId, {
-            content: params.content,
-            status: params.status as ReasoningStatus | undefined,
-            importance: params.importance,
-            evidenceRefs: params.evidenceRefs,
-          });
-          const checkpoint = reasoningWorkspaces.checkpoint(sessionId);
-          return toolResult(
-            { node, checkpoint },
-            `Reasoning node updated: ${node.id}\n${checkpoint.text}`,
-          );
-        }
-        if (params.action === "link") {
-          if (!params.sourceId || !params.targetId || !params.relation) {
-            throw new Error("action=link requires sourceId, targetId, and relation");
-          }
-          const edge = reasoningWorkspaces.link(
+        const status = (await invokeDaemon(await connection(), "lab", {
+          action: "status",
+          capability: "reasoning_workspace",
+          sessionId,
+        })) as { activation?: unknown };
+        if (!status.activation) {
+          await invokeDaemon(await connection(), "lab", {
+            action: "enable",
+            capability: "reasoning_workspace",
+            scope: "session",
             sessionId,
-            params.sourceId,
-            params.targetId,
-            params.relation as ReasoningEdgeKind,
-          );
-          const checkpoint = reasoningWorkspaces.checkpoint(sessionId);
-          return toolResult(
-            { edge, checkpoint },
-            `Reasoning edge added: ${edge.sourceId} -[${edge.type}]-> ${edge.targetId}\n${checkpoint.text}`,
-          );
+            requester: "agent:pi",
+            reason: "nmg_reason requested a session scratchpad",
+          });
         }
-        if (params.action === "clear") {
-          reasoningWorkspaces.clear(sessionId);
-          return toolResult({ cleared: true, sessionId }, "Reasoning scratchpad cleared.");
-        }
-        const checkpoint = reasoningWorkspaces.checkpoint(sessionId);
-        return toolResult({ checkpoint }, checkpoint.text);
+        const input =
+          params.action === "link"
+            ? { sourceId: params.sourceId, targetId: params.targetId, type: params.relation }
+            : params.action === "update"
+              ? {
+                  nodeId: params.nodeId,
+                  content: params.content,
+                  status: params.status,
+                  importance: params.importance,
+                  evidenceRefs: params.evidenceRefs,
+                }
+              : params.action === "add"
+                ? {
+                    kind: params.kind,
+                    content: params.content,
+                    status: params.status,
+                    importance: params.importance,
+                    evidenceRefs: params.evidenceRefs,
+                  }
+                : {};
+        const invoked = await invokeDaemon(await connection(), "lab", {
+          action: "invoke",
+          capability: "reasoning_workspace",
+          sessionId,
+          operation: params.action === "checkpoint" ? "checkpoint" : params.action,
+          input,
+        });
+        if (params.action === "clear") return toolResult(invoked, "Reasoning scratchpad cleared.");
+        const checkpoint =
+          params.action === "checkpoint"
+            ? invoked
+            : await invokeDaemon(await connection(), "lab", {
+                action: "invoke",
+                capability: "reasoning_workspace",
+                sessionId,
+                operation: "checkpoint",
+              });
+        return toolResult({ invoked, checkpoint }, JSON.stringify(checkpoint, null, 2));
       },
     });
   }
+
+  pi.registerTool({
+    name: "nmg_lab",
+    label: "NMG Lab capabilities",
+    description: nmgPrompts.lab_description,
+    parameters: Type.Object({
+      action: Type.Union([
+        Type.Literal("list"),
+        Type.Literal("status"),
+        Type.Literal("enable"),
+        Type.Literal("disable"),
+        Type.Literal("invoke"),
+      ]),
+      capability: Type.Optional(
+        Type.Union([
+          Type.Literal("reasoning_workspace"),
+          Type.Literal("memory_graph_reasoner"),
+          Type.Literal("controller_shadow"),
+          Type.Literal("controller_controlled"),
+          Type.Literal("controller_active"),
+        ]),
+      ),
+      reason: Type.Optional(Type.String()),
+      ttlSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 86400 })),
+      operation: Type.Optional(Type.String()),
+      input: Type.Optional(Type.Unknown()),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const sessionId = ctx.sessionManager.getSessionId();
+      if (params.action !== "list" && !params.capability) {
+        throw new Error(`${params.action} requires capability`);
+      }
+      if (params.action === "enable" && !params.reason) throw new Error("enable requires reason");
+      if (params.action === "invoke" && !params.operation)
+        throw new Error("invoke requires operation");
+      const result = await invokeDaemon(await connection(), "lab", {
+        action: params.action,
+        capability: params.capability,
+        sessionId,
+        scope: params.action === "enable" ? "session" : undefined,
+        requester: params.action === "enable" ? "agent:pi" : undefined,
+        reason: params.reason,
+        ttlSeconds: params.ttlSeconds,
+        operation: params.operation,
+        input: params.input,
+      });
+      return toolResult(result, JSON.stringify(result, null, 2));
+    },
+  });
 
   pi.registerTool({
     name: "nmg_remember",

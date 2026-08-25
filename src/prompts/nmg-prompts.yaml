@@ -56,6 +56,14 @@ board_description: >-
   writer attribution (NMG_AGENT_ID). Use put/read/resolve; full conventions
   (memory pointers, boundaries) are disclosed in each tool result.
 
+lab_description: >-
+  Discover and temporarily enable optional NMG capabilities for the current
+  session. Use list before first use, enable only when the current task benefits,
+  invoke a documented operation, and disable when finished. Reasoning workspace,
+  graph reasoner, and controller shadow are self-service; controlled or active
+  controller modes remain harness/operator gated. Lab output is provisional and
+  never becomes durable memory unless separately submitted through nmg_remember.
+
 reason_description: >-
   Maintain a session-private, auditable reasoning scratchpad containing typed
   goals, observations, hypotheses, evidence, conclusions, decisions, open

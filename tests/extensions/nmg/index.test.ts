@@ -73,13 +73,13 @@ function extensionHarness() {
   return { handlers, tools, messageRenderers, commands };
 }
 
-test("Pi adapter exposes only the stable tool surface", () => {
+test("Pi adapter exposes stable memory tools plus the unified Lab capability entry", () => {
   const previous = process.env.NMG_ENABLE_LAB_TOOLS;
   delete process.env.NMG_ENABLE_LAB_TOOLS;
   try {
     assert.deepEqual(
       [...extensionHarness().tools.keys()],
-      ["nmg_remember", "nmg_get", "nmg_search", "nmg_board"],
+      ["nmg_lab", "nmg_remember", "nmg_get", "nmg_search", "nmg_board"],
     );
   } finally {
     if (previous === undefined) delete process.env.NMG_ENABLE_LAB_TOOLS;
@@ -97,7 +97,7 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
     const { handlers, tools } = extensionHarness();
     assert.deepEqual(
       [...tools.keys()],
-      ["nmg_reason", "nmg_remember", "nmg_get", "nmg_search", "nmg_board"],
+      ["nmg_reason", "nmg_lab", "nmg_remember", "nmg_get", "nmg_search", "nmg_board"],
     );
     const sessionManager = {
       getSessionId: () => "reasoning-session",
@@ -114,8 +114,8 @@ test("Lab reasoning tool persists scratch state and injects it only after compac
       undefined,
       undefined,
       { sessionManager },
-    )) as { details: { node: { id: string } }; content: Array<{ text: string }> };
-    assert.match(added.details.node.id, /^reason_/u);
+    )) as { details: { invoked: { output: { id: string } } }; content: Array<{ text: string }> };
+    assert.match(added.details.invoked.output.id, /^reason_/u);
     assert.match(added.content[0]!.text, /not verified fact/u);
     assert.equal(existsSync(join(directory, "nmg.sqlite")), false);
 

@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local-first long-term memory for the Pi agent harness",
+  "description": "Local-first long-term memory and optional Lab capabilities for agent harnesses",
   "keywords": [
     "pi-package"
   ],
@@ -23,7 +23,6 @@
     "extensions/nmg.ts",
     ".pi/extensions/nmg/index.ts",
     ".pi/extensions/nmg/controller-shadow.ts",
-    ".pi/extensions/nmg/reasoning-workspace.ts",
     "skills/",
     "src/cli/",
     "src/core/",
@@ -33,6 +32,7 @@
     "src/lab/controller-protocol.ts",
     "src/lab/controller-runtime.ts",
     "src/lab/differentiable-controller.ts",
+    "src/lab/memory-graph-reasoner.ts",
     "src/lab/shadow-evaluation.ts",
     "src/lab/skillopt-policy.ts",
     "src/lab/reasoning-workspace.ts"

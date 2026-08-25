@@ -52,8 +52,20 @@ import {
   type SearchOptions,
 } from "../core/types.ts";
 import { assessMemoryWrite } from "../core/write-policy.ts";
+import {
+  MemoryGraphReasoner,
+  type LogicExpr,
+  type MemoryNode as ReasonerMemoryNode,
+} from "../lab/memory-graph-reasoner.ts";
 import { scopesOverlap, validityIntervalsOverlap } from "../core/semantic-domain.ts";
 import { searchMemoryContext } from "../integration/search.ts";
+import { ControllerPolicyChannel } from "../integration/controller-channel.ts";
+import {
+  LAB_CAPABILITIES,
+  LabActivationAuthority,
+  type LabCapability,
+} from "../integration/lab-capabilities.ts";
+import { ReasoningWorkspaces } from "../integration/reasoning-workspaces.ts";
 import {
   configuredMaintenancePolicy,
   configuredStgConsolidationPolicy,
@@ -74,6 +86,7 @@ import {
   type NmgGetParams,
   type NmgRecordActiveGraphAttributionParams,
   type NmgHelloResult,
+  type NmgLabParams,
   type NmgDeleteMemoryParams,
   type NmgExportMemoriesParams,
   type NmgMethod,
@@ -116,7 +129,11 @@ export class NmgService {
    * call block unrelated reads and writes without adding database correctness.
    */
   readonly databasePath: string;
+  readonly #dataDirectory: string;
   readonly #environment: NodeJS.ProcessEnv;
+  readonly #labAuthority = new LabActivationAuthority();
+  readonly #reasoningWorkspaces: ReasoningWorkspaces;
+  #labShadowController: ControllerPolicyChannel | undefined;
   #store: NmgStore | undefined;
   readonly #stgStores = new Map<string, NmgStore>();
   readonly #activeGraphParts = new Map<
@@ -143,7 +160,9 @@ export class NmgService {
       ? resolve(options.dataDirectory)
       : resolveNmgDataDir(environment);
     this.databasePath = resolve(options.databasePath ?? join(dataDirectory, "nmg.sqlite"));
+    this.#dataDirectory = dataDirectory;
     this.#environment = environment;
+    this.#reasoningWorkspaces = new ReasoningWorkspaces(join(dataDirectory, "lab", "reasoning"));
   }
 
   get shutdownRequested(): boolean {
@@ -429,6 +448,8 @@ export class NmgService {
         return this.#chainGet(parseChainGetParams(params)) as NmgMethodResult[M];
       case "chainList":
         return this.#chainList(parseChainListParams(params)) as NmgMethodResult[M];
+      case "lab":
+        return this.#lab(parseLabParams(params)) as NmgMethodResult[M];
       case "shutdown":
         this.#shutdownRequested = true;
         return { shuttingDown: true } as NmgMethodResult[M];
@@ -481,6 +502,196 @@ export class NmgService {
         reason: this.#embeddingError,
       },
     };
+  }
+
+  #lab(params: NmgLabParams): NmgMethodResult["lab"] {
+    if (params.action === "list") {
+      return { action: "list", capabilities: this.#labAuthority.list() };
+    }
+    if (params.action === "status") {
+      return {
+        action: "status",
+        activation: this.#labAuthority.status(params.capability, params.sessionId),
+      };
+    }
+    if (params.action === "enable") {
+      return {
+        action: "enable",
+        activation: this.#labAuthority.enable({
+          capability: params.capability,
+          scope: params.scope ?? "session",
+          sessionId: params.sessionId,
+          requester: params.requester,
+          reason: params.reason,
+          ttlSeconds: params.ttlSeconds,
+        }),
+      };
+    }
+    if (params.action === "disable") {
+      return {
+        action: "disable",
+        activation: this.#labAuthority.disable(params.capability, params.sessionId),
+      };
+    }
+
+    this.#labAuthority.requireEnabled(params.capability, params.sessionId);
+    const output = this.#invokeLabCapability(
+      params.capability,
+      params.sessionId,
+      params.operation,
+      params.input,
+    );
+    return { action: "invoke", capability: params.capability, operation: params.operation, output };
+  }
+
+  #invokeLabCapability(
+    capability: LabCapability,
+    sessionId: string,
+    operation: string,
+    input: unknown,
+  ): unknown {
+    if (capability === "memory_graph_reasoner") {
+      return this.#invokeMemoryGraphReasoner(operation, input);
+    }
+    if (capability === "controller_shadow") {
+      if (operation !== "observe")
+        throw new NmgProtocolError(
+          "INVALID_PARAMS",
+          `unknown controller shadow operation: ${operation}`,
+        );
+      const context = input as MemoryContext;
+      if (!context || typeof context !== "object" || !context.activeGraph) {
+        throw new NmgProtocolError(
+          "INVALID_PARAMS",
+          "controller shadow observe requires a MemoryContext with activeGraph",
+        );
+      }
+      this.#labShadowController ??= new ControllerPolicyChannel({
+        mode: "shadow",
+        statePath: join(this.#dataDirectory, "controller-shadow-state.json"),
+      });
+      return {
+        descriptor: this.#labShadowController.descriptor,
+        decision: this.#labShadowController.shadow(context),
+      };
+    }
+    if (capability !== "reasoning_workspace") {
+      throw new NmgProtocolError(
+        "LAB_OPERATION_UNAVAILABLE",
+        `${capability} does not expose operation ${operation} through this daemon yet`,
+      );
+    }
+    const values = objectParams(input);
+    if (operation === "add") {
+      return this.#reasoningWorkspaces.add(sessionId, {
+        kind: requiredEnum(values, "kind", [
+          "goal",
+          "observation",
+          "hypothesis",
+          "evidence",
+          "conclusion",
+          "decision",
+          "open_question",
+          "next_action",
+        ] as const),
+        content: requiredString(values, "content"),
+        status: optionalEnum(values, "status", [
+          "active",
+          "supported",
+          "rejected",
+          "resolved",
+          "superseded",
+        ] as const),
+        importance: optionalNumber(values, "importance", 0, 1),
+        evidenceRefs: optionalStringArray(values, "evidenceRefs"),
+      });
+    }
+    if (operation === "update") {
+      return this.#reasoningWorkspaces.update(sessionId, requiredString(values, "nodeId"), {
+        content: optionalString(values, "content"),
+        status: optionalEnum(values, "status", [
+          "active",
+          "supported",
+          "rejected",
+          "resolved",
+          "superseded",
+        ] as const),
+        importance: optionalNumber(values, "importance", 0, 1),
+        evidenceRefs: optionalStringArray(values, "evidenceRefs"),
+      });
+    }
+    if (operation === "link") {
+      return this.#reasoningWorkspaces.link(
+        sessionId,
+        requiredString(values, "sourceId"),
+        requiredString(values, "targetId"),
+        requiredEnum(values, "type", [
+          "supports",
+          "contradicts",
+          "derived_from",
+          "tests",
+          "rejects",
+          "depends_on",
+          "next_step",
+        ] as const),
+      );
+    }
+    if (operation === "checkpoint") {
+      return this.#reasoningWorkspaces.checkpoint(sessionId, {
+        maxNodes: optionalInteger(values, "maxNodes", 1, 1_000),
+        maxChars: optionalInteger(values, "maxChars", 256, 100_000),
+      });
+    }
+    if (operation === "mark_compacted") {
+      return { marked: this.#reasoningWorkspaces.markCompacted(sessionId) };
+    }
+    if (operation === "consume_checkpoint") {
+      return this.#reasoningWorkspaces.consumeCompactionCheckpoint(sessionId, {
+        maxNodes: optionalInteger(values, "maxNodes", 1, 1_000),
+        maxChars: optionalInteger(values, "maxChars", 256, 100_000),
+      });
+    }
+    if (operation === "clear") return { cleared: this.#reasoningWorkspaces.clear(sessionId) };
+    throw new NmgProtocolError(
+      "INVALID_PARAMS",
+      `unknown reasoning workspace operation: ${operation}`,
+    );
+  }
+
+  #invokeMemoryGraphReasoner(operation: string, input: unknown): unknown {
+    const values = objectParams(input);
+    const queryVector = requiredNumberArray(values, "queryVector");
+    const graph = parseReasonerGraph(values.graph, queryVector.length);
+    const reasoner = new MemoryGraphReasoner(queryVector.length);
+    if (operation === "traverse") {
+      return labJson(
+        reasoner.traverse(queryVector, graph, optionalInteger(values, "maxSteps", 1, 100) ?? 8),
+      );
+    }
+    if (operation === "logic_search") {
+      return labJson(
+        reasoner.logicSearch(
+          parseLogicExpression(values.expression, queryVector.length),
+          graph,
+          optionalInteger(values, "topK", 1, 100) ?? 10,
+        ),
+      );
+    }
+    if (operation === "what_if") {
+      const hypothetical = parseReasonerNode(values.hypotheticalNode, queryVector.length);
+      const result = reasoner.whatIf(
+        queryVector,
+        graph,
+        hypothetical,
+        optionalInteger(values, "maxSteps", 1, 100) ?? 8,
+        optionalNumber(values, "impactThreshold", 0, 1) ?? 0.05,
+      );
+      return { ...labJson(result), summary: reasoner.impactSummary(result, hypothetical.id) };
+    }
+    throw new NmgProtocolError(
+      "INVALID_PARAMS",
+      `unknown memory graph reasoner operation: ${operation}`,
+    );
   }
 
   #chainCreate(params: NmgChainCreateParams): MemoryChain {
@@ -1468,6 +1679,39 @@ function parseGetParams(value: unknown): NmgGetParams {
   };
 }
 
+function parseLabParams(value: unknown): NmgLabParams {
+  const params = objectParams(value);
+  const action = requiredEnum(params, "action", [
+    "list",
+    "status",
+    "enable",
+    "disable",
+    "invoke",
+  ] as const);
+  if (action === "list") return { action };
+  const capability = requiredEnum(params, "capability", LAB_CAPABILITIES);
+  const sessionId = requiredString(params, "sessionId");
+  if (action === "status" || action === "disable") return { action, capability, sessionId };
+  if (action === "enable") {
+    return {
+      action,
+      capability,
+      sessionId,
+      scope: optionalEnum(params, "scope", ["session", "project", "global"] as const),
+      requester: requiredString(params, "requester"),
+      reason: requiredString(params, "reason"),
+      ttlSeconds: optionalInteger(params, "ttlSeconds", 60, 86_400),
+    };
+  }
+  return {
+    action,
+    capability,
+    sessionId,
+    operation: requiredString(params, "operation"),
+    input: params.input,
+  };
+}
+
 function parseChainCreateParams(value: unknown): NmgChainCreateParams {
   const params = objectParams(value);
   const chainType = params.chainType;
@@ -1840,6 +2084,79 @@ function objectParams(value: unknown): Record<string, unknown> {
     throw new NmgProtocolError("INVALID_PARAMS", "params must be an object");
   }
   return value as Record<string, unknown>;
+}
+
+function requiredNumberArray(params: Record<string, unknown>, key: string): Float32Array {
+  const value = params[key];
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.some((item) => typeof item !== "number" || !Number.isFinite(item))
+  ) {
+    throw new NmgProtocolError("INVALID_PARAMS", `${key} must be a non-empty finite number array`);
+  }
+  return Float32Array.from(value as number[]);
+}
+
+function parseReasonerNode(value: unknown, dimensions: number): ReasonerMemoryNode {
+  const params = objectParams(value);
+  const vector = requiredNumberArray(params, "vector");
+  if (vector.length !== dimensions)
+    throw new NmgProtocolError(
+      "INVALID_PARAMS",
+      "reasoner node vector dimensions must match queryVector",
+    );
+  return {
+    id: requiredString(params, "id"),
+    vector,
+    requires: optionalStringArray(params, "requires"),
+  };
+}
+
+function parseReasonerGraph(value: unknown, dimensions: number): Map<string, ReasonerMemoryNode> {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 10_000) {
+    throw new NmgProtocolError("INVALID_PARAMS", "graph must contain between 1 and 10000 nodes");
+  }
+  const graph = new Map<string, ReasonerMemoryNode>();
+  for (const raw of value) {
+    const node = parseReasonerNode(raw, dimensions);
+    if (graph.has(node.id))
+      throw new NmgProtocolError("INVALID_PARAMS", `duplicate reasoner node: ${node.id}`);
+    graph.set(node.id, node);
+  }
+  return graph;
+}
+
+function parseLogicExpression(value: unknown, dimensions: number): LogicExpr {
+  const params = objectParams(value);
+  const kind = requiredEnum(params, "kind", ["atom", "and", "or", "not"] as const);
+  if (kind === "atom") {
+    const queryVector = requiredNumberArray(params, "queryVector");
+    if (queryVector.length !== dimensions)
+      throw new NmgProtocolError("INVALID_PARAMS", "logic atom dimensions must match queryVector");
+    return { kind, queryVector };
+  }
+  if (kind === "not") return { kind, child: parseLogicExpression(params.child, dimensions) };
+  if (
+    !Array.isArray(params.children) ||
+    params.children.length < 1 ||
+    params.children.length > 32
+  ) {
+    throw new NmgProtocolError(
+      "INVALID_PARAMS",
+      "logic children must contain between 1 and 32 expressions",
+    );
+  }
+  return {
+    kind,
+    children: params.children.map((child) => parseLogicExpression(child, dimensions)),
+  };
+}
+
+function labJson<T>(value: T): T {
+  return JSON.parse(
+    JSON.stringify(value, (_key, item) => (item instanceof Float32Array ? [...item] : item)),
+  ) as T;
 }
 
 function requiredString(params: Record<string, unknown>, key: string): string {

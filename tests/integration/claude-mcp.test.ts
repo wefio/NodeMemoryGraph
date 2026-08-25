@@ -40,7 +40,9 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     await client.connect(transport);
     const tools = await client.listTools();
     const board = tools.tools.find((tool) => tool.name === "nmg_board");
+    const lab = tools.tools.find((tool) => tool.name === "nmg_lab");
     assert.ok(board);
+    assert.ok(lab);
     assert.match(JSON.stringify(board.inputSchema), /discover/u);
     assert.match(JSON.stringify(board.inputSchema), /capabilities/u);
     assert.match(JSON.stringify(board.inputSchema), /"to"/u);
@@ -65,6 +67,27 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
       arguments: { action: "read" },
     });
     assert.match(textOf(read), /Review the adapter boundary/u);
+
+    const capabilities = await client.callTool({ name: "nmg_lab", arguments: { action: "list" } });
+    assert.match(textOf(capabilities), /reasoning_workspace/u);
+    await client.callTool({
+      name: "nmg_lab",
+      arguments: {
+        action: "enable",
+        capability: "reasoning_workspace",
+        reason: "preserve a cross-tool investigation",
+      },
+    });
+    const added = await client.callTool({
+      name: "nmg_lab",
+      arguments: {
+        action: "invoke",
+        capability: "reasoning_workspace",
+        operation: "add",
+        input: { kind: "hypothesis", content: "The MCP adapter owns this scratch node." },
+      },
+    });
+    assert.match(textOf(added), /MCP adapter owns this scratch node/u);
   } finally {
     await client.close().catch(() => undefined);
     const daemon = await connectDaemon(resolve(dataDir, "nmg.sqlite")).catch(() => null);
