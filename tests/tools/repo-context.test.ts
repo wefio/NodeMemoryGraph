@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
@@ -17,7 +19,12 @@ function fixture(): string {
       name: "fixture",
       version: "1.2.3",
       engines: { node: ">=22" },
-      scripts: { check: "tsc --noEmit", test: "node --test" },
+      scripts: {
+        check: "tsc --noEmit",
+        "test:product": "node --test tests/product",
+        "test:research": "node --test tests/research",
+        "docs:check": "node docs-check.mjs",
+      },
     }),
     "agent-context.yaml": [
       "version: 1",
@@ -26,12 +33,23 @@ function fixture(): string {
       "    paths: [src/store/**]",
       "    owners: [docs/design/store.md]",
       "    tests: [tests/store/**]",
-      "    verify: [check, test]",
+      "    verify:",
+      "      blocking: [check, test:product]",
+      "      advisory: [test:research]",
+      "  - id: docs",
+      "    paths: [docs/**]",
+      "    owners: [docs/design/store.md]",
+      "    tests: []",
+      "    verify:",
+      "      blocking: [docs:check]",
+      "      advisory: []",
       "  - id: missing",
       "    paths: [src/missing/**]",
       "    owners: [docs/design/missing.md]",
       "    tests: []",
-      "    verify: [missing-script]",
+      "    verify:",
+      "      blocking: [missing-script]",
+      "      advisory: []",
       "",
     ].join("\n"),
     "docs/design/store.md": "# Store\n",
@@ -61,6 +79,10 @@ test("selects owners, tests, commands, and active guardrails for a scoped path",
     ["store"],
   );
   assert.deepEqual(report.routes[0].owners, ["docs/design/store.md"]);
+  assert.deepEqual(report.routes[0].verify, {
+    blocking: ["check", "test:product"],
+    advisory: ["test:research"],
+  });
   assert.deepEqual(report.guardrails, [
     {
       id: "merge-v1",
@@ -120,7 +142,41 @@ test("markdown output remains a concise navigation surface", () => {
   const report = collectAgentContext(fixture(), ["src/store/rows.ts"]);
   const text = formatAgentContext(report);
   assert.match(text, /## Route: store/);
-  assert.match(text, /npm run check, npm run test/);
+  assert.match(text, /Blocking: npm run check, npm run test:product/);
+  assert.match(text, /Advisory: npm run test:research/);
   assert.match(text, /## Active guardrails/);
   assert.doesNotMatch(text, /Route: missing/);
+});
+
+test("--changed routes every dirty path through the same context report", () => {
+  const root = fixture();
+  const runGit = (args: string[]) => {
+    const result = spawnSync("git", args, {
+      cwd: root,
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  runGit(["init", "--quiet"]);
+  runGit(["config", "user.email", "agent@example.invalid"]);
+  runGit(["config", "user.name", "Agent Test"]);
+  mkdirSync(join(root, "src", "store"), { recursive: true });
+  writeFileSync(join(root, "src", "store", "rows.ts"), "export const row = 1;\n", {
+    flag: "w",
+  });
+  writeFileSync(join(root, "docs", "guide.md"), "# Guide\n", { flag: "w" });
+
+  const script = fileURLToPath(new URL("../../tools/repo-context.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--changed", "--json"],
+    { encoding: "utf8", windowsHide: true },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout) as { routes: Array<{ id: string }> };
+  assert.deepEqual(
+    report.routes.map((route) => route.id),
+    ["store", "docs"],
+  );
 });

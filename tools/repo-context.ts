@@ -4,12 +4,17 @@ import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
-interface RouteConfig {
+export interface VerificationConfig {
+  blocking: string[];
+  advisory: string[];
+}
+
+export interface RouteConfig {
   id: string;
   paths: string[];
   owners: string[];
   tests: string[];
-  verify: string[];
+  verify: VerificationConfig;
 }
 
 interface AgentContextConfig {
@@ -68,6 +73,15 @@ function readConfig(root: string): AgentContextConfig {
   if (parsed.version !== 1 || !Array.isArray(parsed.routes)) {
     throw new Error("agent-context.yaml must declare version: 1 and a routes array");
   }
+  for (const route of parsed.routes) {
+    if (
+      !route.verify ||
+      !Array.isArray(route.verify.blocking) ||
+      !Array.isArray(route.verify.advisory)
+    ) {
+      throw new Error(`${route.id}: verify must declare blocking and advisory script arrays`);
+    }
+  }
   return parsed as AgentContextConfig;
 }
 
@@ -75,14 +89,18 @@ function git(root: string): AgentContextReport["git"] {
   const run = (args: string[]) =>
     spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
   const branch = run(["branch", "--show-current"]);
-  const status = run(["status", "--short", "--untracked-files=all"]);
+  const status = run(["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
   if (branch.status !== 0 || status.status !== 0) {
     return { available: false, dirtyFiles: [] };
   }
-  const dirtyFiles = status.stdout
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => normalizePath(line.slice(3).trim()));
+  const entries = status.stdout.split("\0").filter(Boolean);
+  const dirtyFiles: string[] = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    const statusCode = entry.slice(0, 2);
+    dirtyFiles.push(normalizePath(entry.slice(3)));
+    if (statusCode.includes("R") || statusCode.includes("C")) index += 1;
+  }
   return { available: true, branch: branch.stdout.trim() || undefined, dirtyFiles };
 }
 
@@ -130,14 +148,18 @@ function validateRoutes(
     for (const owner of route.owners) {
       if (!existsSync(join(root, owner))) warnings.push(`${route.id}: missing owner ${owner}`);
     }
-    for (const command of route.verify) {
+    for (const command of [...route.verify.blocking, ...route.verify.advisory]) {
       if (!(command in scripts)) warnings.push(`${route.id}: missing npm script ${command}`);
     }
   }
   return warnings;
 }
 
-export function collectAgentContext(root: string, scopes: string[] = []): AgentContextReport {
+export function collectAgentContext(
+  root: string,
+  scopes: string[] = [],
+  options: { changed?: boolean } = {},
+): AgentContextReport {
   const resolvedRoot = resolve(root);
   const packageJson = JSON.parse(readFileSync(join(resolvedRoot, "package.json"), "utf8")) as {
     name?: string;
@@ -146,11 +168,17 @@ export function collectAgentContext(root: string, scopes: string[] = []): AgentC
     engines?: Record<string, string>;
   };
   const config = readConfig(resolvedRoot);
-  const normalizedScopes = scopes.map((scope) => {
-    const path = resolve(resolvedRoot, scope);
-    const local = relative(resolvedRoot, path);
-    return normalizePath(local.startsWith("..") ? scope : local);
-  });
+  const gitState = git(resolvedRoot);
+  const requestedScopes = options.changed ? [...scopes, ...gitState.dirtyFiles] : scopes;
+  const normalizedScopes = [
+    ...new Set(
+      requestedScopes.map((scope) => {
+        const path = resolve(resolvedRoot, scope);
+        const local = relative(resolvedRoot, path);
+        return normalizePath(local.startsWith("..") ? scope : local);
+      }),
+    ),
+  ];
   const selected = normalizedScopes.length
     ? config.routes.filter((route) =>
         normalizedScopes.some((scope) => route.paths.some((pattern) => matches(pattern, scope))),
@@ -163,7 +191,7 @@ export function collectAgentContext(root: string, scopes: string[] = []): AgentC
     version: packageJson.version ?? "unknown",
     root: normalizePath(resolvedRoot),
     scopes: normalizedScopes,
-    git: git(resolvedRoot),
+    git: gitState,
     engines: packageJson.engines ?? {},
     routes: selected,
     availableRoutes: config.routes.map((route) => route.id),
@@ -177,6 +205,9 @@ export function collectAgentContext(root: string, scopes: string[] = []): AgentC
   };
   if (normalizedScopes.length && !selected.length) {
     report.warnings.push(`no route matched: ${normalizedScopes.join(", ")}`);
+  }
+  if (options.changed && !gitState.available) {
+    report.warnings.push("--changed requires an available Git worktree");
   }
   return report;
 }
@@ -215,7 +246,12 @@ export function formatAgentContext(report: AgentContextReport): string {
     lines.push("", `## Route: ${route.id}`);
     lines.push(`- Owners: ${route.owners.join(", ") || "none"}`);
     lines.push(`- Tests: ${route.tests.join(", ") || "none"}`);
-    lines.push(`- Verify: ${route.verify.map((name) => `npm run ${name}`).join(", ") || "none"}`);
+    lines.push(
+      `- Blocking: ${route.verify.blocking.map((name) => `npm run ${name}`).join(", ") || "none"}`,
+    );
+    lines.push(
+      `- Advisory: ${route.verify.advisory.map((name) => `npm run ${name}`).join(", ") || "none"}`,
+    );
   }
   if (report.guardrails.length) {
     lines.push("", "## Active guardrails");
@@ -237,15 +273,18 @@ function parseArgs(args: string[]): {
   scopes: string[];
   json: boolean;
   check: boolean;
+  changed: boolean;
 } {
   let root = process.cwd();
   let json = false;
   let check = false;
+  let changed = false;
   const scopes: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--json") json = true;
     else if (argument === "--check") check = true;
+    else if (argument === "--changed") changed = true;
     else if (argument === "--root") root = args[++index] ?? root;
     else if (argument === "--scope") {
       const scope = args[++index];
@@ -253,7 +292,7 @@ function parseArgs(args: string[]): {
       scopes.push(scope);
     } else throw new Error(`unknown argument: ${argument}`);
   }
-  return { root, scopes, json, check };
+  return { root, scopes, json, check, changed };
 }
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
@@ -266,7 +305,9 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
       process.stdout.write("agent-context routes are valid\n");
       process.exit(0);
     }
-    const report = collectAgentContext(options.root, options.scopes);
+    const report = collectAgentContext(options.root, options.scopes, {
+      changed: options.changed,
+    });
     process.stdout.write(
       options.json ? `${JSON.stringify(report, null, 2)}\n` : formatAgentContext(report),
     );

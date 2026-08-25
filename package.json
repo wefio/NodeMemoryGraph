@@ -108,6 +108,7 @@
     "docs:check": "node --experimental-strip-types scripts/verify-docs.mts",
     "agent:context": "node --experimental-strip-types tools/repo-context.ts",
     "agent:context:check": "node --experimental-strip-types tools/repo-context.ts --check",
+    "agent:verify": "node --experimental-strip-types tools/agent-verify.ts",
     "bench:autodiff": "node --experimental-strip-types tools/autodiff-benchmark.ts",
     "test": "node --experimental-strip-types --test --test-concurrency=4 \"tests/**/*.test.ts\"",
     "test:product": "node --experimental-strip-types --test --test-concurrency=4 \"tests/cli/**/*.test.ts\" \"tests/core/**/*.test.ts\" \"tests/docker/**/*.test.ts\" \"tests/docs/**/*.test.ts\" \"tests/extensions/**/*.test.ts\" \"tests/guardrails/**/*.test.ts\" \"tests/integration/**/*.test.ts\" \"tests/prompts/**/*.test.ts\" \"tests/scripts/**/*.test.ts\" \"tests/skills/**/*.test.ts\" \"tests/support/**/*.test.ts\" \"tests/tools/**/*.test.ts\"",

@@ -8,7 +8,9 @@ routes:
       - docs/design/store-cluster-split.md
       - docs/design/sqlite-assessment.md
     tests: [tests/core/store/**]
-    verify: [check, test]
+    verify:
+      blocking: [check, test:product]
+      advisory: []
 
   - id: core-memory
     paths: [src/core/**]
@@ -16,7 +18,9 @@ routes:
       - docs/design/design.md
       - docs/design/memory-graphs.md
     tests: [tests/core/**]
-    verify: [check, test]
+    verify:
+      blocking: [check, test:product]
+      advisory: []
 
   - id: daemon-cli
     paths: [src/cli/**, bin/**, proto/**]
@@ -24,7 +28,9 @@ routes:
       - docs/design/design.md
       - docs/design/daemon-lifecycle-design.md
     tests: [tests/cli/**, tests/chaos/**]
-    verify: [build, test]
+    verify:
+      blocking: [build, test:product]
+      advisory: [test:chaos]
 
   - id: pi-adapter
     paths: [extensions/**, .pi/extensions/**]
@@ -33,7 +39,9 @@ routes:
       - docs/design/session-memory-lifecycle-hooks-2026-08-10.md
       - docs/design/tiered-disclosure-design.md
     tests: [tests/extensions/**, tests/integration/**]
-    verify: [check, test]
+    verify:
+      blocking: [check, test:product]
+      advisory: []
 
   - id: dsh-adapter
     paths: [dsh/**]
@@ -41,7 +49,9 @@ routes:
       - dsh/README.md
       - skills/nmg-memory/references/harness-adapters.md
     tests: []
-    verify: [check]
+    verify:
+      blocking: [check]
+      advisory: []
 
   - id: claude-adapter
     paths: [claude-plugins/**]
@@ -49,7 +59,9 @@ routes:
       - README.md
       - skills/nmg-memory/references/harness-adapters.md
     tests: [tests/integration/claude-mcp.test.ts]
-    verify: [check, test]
+    verify:
+      blocking: [check, test:product]
+      advisory: []
 
   - id: documentation
     paths: [docs/**, skills/**, README.md, README.zh-CN.md]
@@ -57,7 +69,9 @@ routes:
       - docs/README.md
       - skills/doc-maintenance/SKILL.md
     tests: [tests/docs/**, tests/skills/**]
-    verify: [docs:check]
+    verify:
+      blocking: [docs:check]
+      advisory: []
 
   - id: evaluation
     paths: [evals/**, tests/evals/**, tests/benchmarks/**, tests/official/**]
@@ -65,7 +79,9 @@ routes:
       - docs/experiments/benchmark-results.md
       - docs/design/completion-audit.md
     tests: [tests/evals/**, tests/benchmarks/**, tests/official/**]
-    verify: [check]
+    verify:
+      blocking: [check]
+      advisory: [test:research]
 
   - id: ci-and-tests
     paths: [tests/**, .github/**, scripts/verify-docs.mts, package.json]
@@ -74,7 +90,19 @@ routes:
       - docs/README.md
       - skills/repo-development/SKILL.md
     tests: [tests/**]
-    verify: [check, test]
+    verify:
+      blocking: [check, test:product, agent:context:check]
+      advisory: []
+
+  - id: packaging
+    paths: [package.json, package-lock.json, tsconfig.build.json, bin/**]
+    owners:
+      - docs/design/ci-cd-and-quality.md
+      - docs/design/design.md
+    tests: [tests/extensions/pi-dependency-boundary.test.ts]
+    verify:
+      blocking: [build, package:check]
+      advisory: []
 
   - id: repository-tooling
     paths: [tools/**, scripts/**, AGENTS.md, agent-context.yaml, tsconfig.json]
@@ -82,4 +110,6 @@ routes:
       - docs/design/ci-cd-and-quality.md
       - docs/README.md
     tests: [tests/tools/**, tests/scripts/**, tests/docs/**]
-    verify: [check, test]
+    verify:
+      blocking: [check, test:product, agent:context:check]
+      advisory: []

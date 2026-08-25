@@ -32,8 +32,12 @@ or remove it when its exit criteria are met.
 1. Make the smallest coherent change; keep optional infrastructure behind a narrow adapter.
 2. Update the owning design when behavior or process changes. Follow
    [`doc-maintenance`](../doc-maintenance/SKILL.md).
-3. Run the targeted test, then the checks selected by the context report. Product changes normally run
-   `npm run check`, `npm run test:product`, and `npm run build`.
+3. Run the targeted test, then `npm run agent:verify -- --scope <target-path>`.
+   This executes the exact blocking checks selected by `agent-context.yaml`,
+   deduplicates checks shared by several routes, and reports advisory tracks
+   without running them. Use `--changed` only when the whole dirty worktree is
+   owned by the task; use `--include-advisory` only when the research or chaos
+   cost is intentional.
 4. Use `npm run test:research` only for research adapters; use `npm run test:chaos` for explicit lifecycle
    fault testing. Neither substitutes for product tests.
 5. For CI, packaging, or generated-output changes, validate from a clean checkout or equivalent clean tree.
