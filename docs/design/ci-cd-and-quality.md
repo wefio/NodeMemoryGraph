@@ -36,6 +36,8 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 | `npm run test:research` | `tests/benchmarks`、`tests/evals`、`tests/official`  | 非阻塞研究表征   |
 | `npm run test:chaos`    | Windows 故障注入与进程/文件锁生命周期                | 独立阻塞轨道     |
 | `npm test`              | 所有 `tests/**/*.test.ts`                            | 本地完整兼容入口 |
+| `npm run verify:static` | build/package/type/lint/format/docs/context           | 本地与 CI 共用   |
+| `npm run verify:product-ci` | build + product coverage                         | 本地与 CI 共用   |
 
 `eval:*`、`benchmark:*`、真实 LLM/embedding 与官方大数据集运行不进入 keyless CI。研究测试可以验证 adapter 和计分契约，但不得访问外部密钥或把实验常量提升为产品默认值。
 
@@ -43,7 +45,9 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 ## 3. CI 契约
 
-`.github/workflows/ci.yml` 使用以下 job：
+`.github/workflows/ci.yml` 使用以下 job。各 job 不复制底层命令清单，而是调用
+`verify:static`、`verify:product-ci`、`verify:research`、`verify:node-compat` 和
+`verify:chaos` 这些命名 package contract，使本地可复现入口和远程 CI 保持同源：
 
 - `static`：build、package、type、lint、format、文档、Agent context 与生产依赖审计；
 - `tests`：Node 24 产品测试和覆盖率；
@@ -83,15 +87,17 @@ npm run agent:context -- --scope <目标路径>
 
 ## 6. AI 开发验证流水线
 
-修改完成后运行：
+修改完成后直接运行：
 
 ```powershell
-npm run agent:verify -- --scope <目标路径>
+npm run agent:verify
 ```
 
-同一任务拥有整个工作树时可使用 `--changed`。执行器聚合所有命中 route，按首次出现顺序去重，并运行全部 blocking 命令；一个 blocking 失败不会阻止其余检查收集证据，最终统一返回失败。advisory 命令默认只显示、不执行；显式传入 `--include-advisory` 后才运行，且其失败不改变 blocking 结果。`--dry-run` 只输出计划，`--json` 提供机器可读报告。
+零参数入口自动读取 Git 变更并选择 route；Git 不可用时失败关闭，不允许空跑后误报成功。共享脏工作树使用 `--scope <本任务路径>` 精确覆盖自动范围。执行器聚合所有命中 route，按首次出现顺序去重，并运行全部 blocking 命令；一个命令退出失败、启动异常、超时或被信号终止，都被归因到该命令且不会阻止后续检查收集证据，最终统一返回失败。默认单命令上限为 30 分钟，可用 `--timeout-ms` 调整。
 
-该流水线负责机械路由、执行和证据汇总，不负责判断架构是否合理，不自动格式化、修改代码、提交 Git，也不自动调用 LLM、embedding、benchmark 或官方数据集。真实外部评估仍须用户或 Agent 明确选择。
+advisory 命令默认只显示、不执行；显式传入 `--include-advisory` 后才运行，且其失败不改变 blocking 结果。`--dry-run` 只生成计划，`--json` 提供机器可读报告，`--require-clean` 为打包/CI 等任务增加干净工作树门槛。每次成功形成报告后会自动覆盖 `.nmg/verification/latest.json`；该文件包含 run ID、起止时间、运行时、Git HEAD、scope、route 和逐命令结果，位于已忽略的 `.nmg/` 下，不形成无限增长的日志历史。
+
+该流水线的自动化边界是机械路由、执行、失败归因和最近证据覆盖。它不负责判断架构是否合理，不自动格式化、修改代码、提交 Git，也不自动调用 LLM、embedding、benchmark 或官方数据集。真实外部评估仍须用户或 Agent 明确选择。GitHub CI 在 push/PR 自动执行命名验证契约；不安装强制本地 Git hook，避免修改未完成时制造隐式副作用。
 
 ## 7. 修改验证
 

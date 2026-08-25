@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -136,6 +136,43 @@ test("active guardrails require a reason, review date, and exit criteria", () =>
   assert.ok(warnings.includes("guardrail merge-v1: missing reason"));
   assert.ok(warnings.includes("guardrail merge-v1: missing review_after"));
   assert.ok(warnings.includes("guardrail merge-v1: missing exit_criteria"));
+});
+
+test("route schema rejects duplicate ids and commands with conflicting classifications", () => {
+  const root = fixture();
+  writeFileSync(
+    join(root, "agent-context.yaml"),
+    [
+      "version: 1",
+      "routes:",
+      "  - id: duplicate",
+      "    paths: [src/**]",
+      "    owners: []",
+      "    tests: []",
+      "    verify:",
+      "      blocking: [check]",
+      "      advisory: [check]",
+      "  - id: duplicate",
+      "    paths: [docs/**]",
+      "    owners: []",
+      "    tests: []",
+      "    verify:",
+      "      blocking: [docs:check]",
+      "      advisory: []",
+      "",
+    ].join("\n"),
+  );
+  assert.throws(() => validateAgentContext(root), /duplicate route id: duplicate/);
+
+  const text = readFileSync(join(root, "agent-context.yaml"), "utf8").replace(
+    "  - id: duplicate\n    paths: [docs/**]",
+    "  - id: documentation\n    paths: [docs/**]",
+  );
+  writeFileSync(join(root, "agent-context.yaml"), text);
+  assert.throws(
+    () => validateAgentContext(root),
+    /duplicate: npm script check cannot be both blocking and advisory/,
+  );
 });
 
 test("markdown output remains a concise navigation surface", () => {

@@ -26,20 +26,8 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
-      - name: Build
-        run: npm run build
-      - name: Package integrity
-        run: npm run package:check
-      - name: Type check
-        run: npm run check
-      - name: Lint
-        run: npm run lint
-      - name: Format check
-        run: npm run format:check
-      - name: Documentation contracts
-        run: npm run docs:check
-      - name: Agent context routes
-        run: npm run agent:context:check
+      - name: Shared static verification contract
+        run: npm run verify:static
       - name: Dependency audit
         run: npm audit --production --audit-level=high
 
@@ -54,10 +42,8 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
-      - name: Build
-        run: npm run build
-      - name: Product tests with coverage
-        run: npm run test:coverage
+      - name: Shared product verification contract
+        run: npm run verify:product-ci
 
   research-tests:
     name: Research characterization (non-blocking)
@@ -71,8 +57,8 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
-      - name: Research and benchmark adapter tests
-        run: npm run test:research
+      - name: Shared research verification contract
+        run: npm run verify:research
 
   node-compat:
     name: Node 22 compatibility
@@ -85,10 +71,8 @@ jobs:
           node-version: "22.19.0"
           cache: npm
       - run: npm ci
-      - name: Build and type check
-        run: npm run build && npm run check
-      - name: Package integrity
-        run: npm run package:check
+      - name: Shared minimum-Node verification contract
+        run: npm run verify:node-compat
 
   chaos:
     name: Windows chaos tests
@@ -103,12 +87,10 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
-      - name: Build
-        run: npm run build
       - name: Chaos tests (Windows)
         env:
           NMG_DAEMON_READY_TIMEOUT_MS: "60000"
-        run: npm run test:chaos
+        run: npm run verify:chaos
 
   all-checks-passed:
     name: All checks passed

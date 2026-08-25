@@ -38,6 +38,7 @@ export interface AgentContextReport {
   scopes: string[];
   git: {
     branch?: string;
+    head?: string;
     dirtyFiles: string[];
     available: boolean;
   };
@@ -73,22 +74,49 @@ function readConfig(root: string): AgentContextConfig {
   if (parsed.version !== 1 || !Array.isArray(parsed.routes)) {
     throw new Error("agent-context.yaml must declare version: 1 and a routes array");
   }
+  const ids = new Set<string>();
   for (const route of parsed.routes) {
+    if (!route || typeof route !== "object" || !textValue(route.id)) {
+      throw new Error("each route must declare a non-empty id");
+    }
+    if (ids.has(route.id)) throw new Error(`duplicate route id: ${route.id}`);
+    ids.add(route.id);
+  }
+  for (const route of parsed.routes) {
+    for (const field of ["paths", "owners", "tests"] as const) {
+      if (!isStringArray(route[field])) {
+        throw new Error(`${route.id}: ${field} must be a string array`);
+      }
+    }
     if (
       !route.verify ||
-      !Array.isArray(route.verify.blocking) ||
-      !Array.isArray(route.verify.advisory)
+      !isStringArray(route.verify.blocking) ||
+      !isStringArray(route.verify.advisory)
     ) {
       throw new Error(`${route.id}: verify must declare blocking and advisory script arrays`);
     }
+    const overlap = route.verify.blocking.find((command) => route.verify.advisory.includes(command));
+    if (overlap) {
+      throw new Error(
+        `${route.id}: npm script ${overlap} cannot be both blocking and advisory`,
+      );
+    }
   }
   return parsed as AgentContextConfig;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.every((entry) => typeof entry === "string" && entry.trim().length > 0)
+  );
 }
 
 function git(root: string): AgentContextReport["git"] {
   const run = (args: string[]) =>
     spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
   const branch = run(["branch", "--show-current"]);
+  const head = run(["rev-parse", "HEAD"]);
   const status = run(["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
   if (branch.status !== 0 || status.status !== 0) {
     return { available: false, dirtyFiles: [] };
@@ -101,7 +129,12 @@ function git(root: string): AgentContextReport["git"] {
     dirtyFiles.push(normalizePath(entry.slice(3)));
     if (statusCode.includes("R") || statusCode.includes("C")) index += 1;
   }
-  return { available: true, branch: branch.stdout.trim() || undefined, dirtyFiles };
+  return {
+    available: true,
+    branch: branch.stdout.trim() || undefined,
+    head: head.status === 0 ? head.stdout.trim() || undefined : undefined,
+    dirtyFiles,
+  };
 }
 
 function guardrails(root: string): { active: GuardrailSummary[]; warnings: string[] } {

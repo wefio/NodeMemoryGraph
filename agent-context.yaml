@@ -9,7 +9,7 @@ routes:
       - docs/design/sqlite-assessment.md
     tests: [tests/core/store/**]
     verify:
-      blocking: [check, test:product]
+      blocking: [check, test:product, build]
       advisory: []
 
   - id: core-memory
@@ -19,7 +19,7 @@ routes:
       - docs/design/memory-graphs.md
     tests: [tests/core/**]
     verify:
-      blocking: [check, test:product]
+      blocking: [check, test:product, build]
       advisory: []
 
   - id: daemon-cli
@@ -40,7 +40,7 @@ routes:
       - docs/design/tiered-disclosure-design.md
     tests: [tests/extensions/**, tests/integration/**]
     verify:
-      blocking: [check, test:product]
+      blocking: [check, test:product, build]
       advisory: []
 
   - id: dsh-adapter
@@ -60,7 +60,7 @@ routes:
       - skills/nmg-memory/references/harness-adapters.md
     tests: [tests/integration/claude-mcp.test.ts]
     verify:
-      blocking: [check, test:product]
+      blocking: [check, test:product, build]
       advisory: []
 
   - id: documentation
@@ -91,8 +91,8 @@ routes:
       - skills/repo-development/SKILL.md
     tests: [tests/**]
     verify:
-      blocking: [check, test:product, agent:context:check]
-      advisory: []
+      blocking: [verify:static, test:product]
+      advisory: [verify:research, verify:chaos]
 
   - id: packaging
     paths: [package.json, package-lock.json, tsconfig.build.json, bin/**]
@@ -111,5 +111,5 @@ routes:
       - docs/README.md
     tests: [tests/tools/**, tests/scripts/**, tests/docs/**]
     verify:
-      blocking: [check, test:product, agent:context:check]
+      blocking: [check, test:product, build, agent:context:check]
       advisory: []

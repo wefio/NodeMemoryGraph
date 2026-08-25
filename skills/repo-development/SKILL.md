@@ -32,15 +32,17 @@ or remove it when its exit criteria are met.
 1. Make the smallest coherent change; keep optional infrastructure behind a narrow adapter.
 2. Update the owning design when behavior or process changes. Follow
    [`doc-maintenance`](../doc-maintenance/SKILL.md).
-3. Run the targeted test, then `npm run agent:verify -- --scope <target-path>`.
-   This executes the exact blocking checks selected by `agent-context.yaml`,
-   deduplicates checks shared by several routes, and reports advisory tracks
-   without running them. Use `--changed` only when the whole dirty worktree is
-   owned by the task; use `--include-advisory` only when the research or chaos
-   cost is intentional.
+3. Run the targeted test, then `npm run agent:verify`. With no arguments it
+   automatically detects Git changes, selects routes, executes the exact blocking
+   checks, and overwrites `.nmg/verification/latest.json` with structured evidence.
+   In a shared dirty worktree, pass `-- --scope <owned-path>` so unrelated changes
+   stay outside the plan. Use `--include-advisory` only when research or chaos cost
+   is intentional.
 4. Use `npm run test:research` only for research adapters; use `npm run test:chaos` for explicit lifecycle
    fault testing. Neither substitutes for product tests.
-5. For CI, packaging, or generated-output changes, validate from a clean checkout or equivalent clean tree.
+5. For CI, packaging, or generated-output changes, validate from a clean checkout
+   or use `--require-clean` in an equivalent clean tree. CI automatically runs the
+   named `verify:*` package contracts on push and pull request.
 6. Commit one coherent change with only owned files. Leave unrelated user or Agent work untouched.
 
 Never invoke live LLM, embedding, or full benchmark workloads unless the task explicitly calls for them.
