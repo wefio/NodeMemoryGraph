@@ -4,7 +4,7 @@
 
 ## 定位
 
-检索置信度不是新发明——它是 IR 里的 **post-retrieval QPP**（Query Performance Prediction）预测器；τ 触发是 **QPP-thresholded adaptive retrieval**。既然未实现，直接叫 **QPP**（代码标识 `qpp`，公式符号 `C`），不再造 `recallConfidence` 这个名。下文对齐已有研究，定三阶段演进。
+检索置信度不是新发明——它是 IR 里的 **post-retrieval QPP**（Query Performance Prediction）预测器；τ 触发是 **QPP-thresholded adaptive retrieval**。实现统一采用 **QPP**（代码标识 `qpp`，公式符号 `C`），不再造 `recallConfidence` 这个名。下文对齐已有研究，定三阶段演进。
 
 ## 要做什么
 
@@ -142,7 +142,7 @@ Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**�
 | LLM sufficiency discriminator（轻量 LLM 读摘要判充分性）| 无 | 明确不追——与"纯检索、免 LLM、免 API"哲学冲突；弱 reader 不该把稀缺 LLM 调用花在判充分性上（与"模型不积极用工具、要自动"的诉求反了）|
 | intra-list consistency / 二重 qpp（在结果里二次检索看一致性）| `graph_expansion` 已是一次"二重"（在 direct 上扩关联节点），但当前 qpp 把 expansion 标 `isDirect=false` 排除在 score 信号外——丢了"多跳题靠 expansion 拼证据"信号 | 有增量，见下 |
 
-**可做增量（shadow 分量，未实现）**：`expansionDependence = expansions / totalCount`。但不能单独用——多跳题靠 expansion 是**正常**的（高 dependence ≠ 召回差）。真正信号是交互项 `(1 − Top1) × expansionDependence`：direct 强 → dependence 正常；direct 弱 + dependence 高 → 拼起来的链不稳固 → qpp 拉低 → 触发补强 direct。
+**已实现为 shadow 分量**：`expansionDependence = expansions / totalCount`，并记录交互项 `(1 − Top1) × expansionDependence`。它们不参与当前硬 QPP 分数：多跳题靠 expansion 是**正常**的（高 dependence ≠ 召回差）。该交互项只表达 direct 弱且局部证据高度依赖扩展，供自然 outcome 校准后判断是否值得补强 direct。
 
 **风险**：第 5 个分量，`reasonHealth` 实测已近常数低区分度——再加交互项可能在 benchmark 同样退化；"expansion 多 = 多跳题正常"的歧义，标定时若误判会把多跳题都触发浪费预算。**先 shadow 记 trace，用隐式反馈的 (qpp, useful) 对验边际贡献，再决定升入 C 或留 shadow**——审计先于标定。
 

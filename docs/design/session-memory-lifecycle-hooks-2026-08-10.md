@@ -23,7 +23,7 @@ NMG 的使命 = 给 coding agent 持久、可检索的记忆。三个动作：
 | 信息源 | 价值 | 钩子 | 唯一性 |
 |---|---|---|---|
 | 用户**显式**「记住 X」 | 最高 | `nmg_remember` 工具 | 无钩子 |
-| 用户**隐式**偏好/决定 | 高 | （缺口，见「五.2 未实现」） | 无自动路径 |
+| 用户**隐式**事实/偏好/约束/决定 | 高 | 当前 Agent 按 memory policy 主动调用 `nmg_remember` | 不另启后台抽取模型 |
 | **工具执行结果** | 会话工作状态 | `tool_result` | 唯一：只有它同时有 input + content + isError + 按工具 details；默认只进运行时 AG |
 | **轮/会话结局** | 高 | `agent_settled`（语义） | 唯一；但无 messages payload，需 `agent_end` 缓存 |
 | **会话归档** | 中 | `session_shutdown` | 唯一：daemon 死前必须归档 |
@@ -49,7 +49,7 @@ NMG 的使命 = 给 coding agent 持久、可检索的记忆。三个动作：
 | Agent | `before_agent_start` | prompt, systemPrompt(+Options)；可注入 | ✅ recall + nudge |
 | Agent | `agent_start` | run 开始 | ❌ |
 | Agent | `agent_end` | **messages: AgentMessage[]** | ✅ shadow outcome |
-| Agent | `agent_settled` | 完全落定（无 retry/compact/续跑）；**无 payload** | ❌（未实现，见五.1） |
+| Agent | `agent_settled` | 完全落定（无 retry/compact/续跑）；**无 payload** | ➖ 明确不用于自动写入 |
 | Turn/消息 | `turn_start` / `turn_end` | turnIndex / message + toolResults | ❌ |
 | Turn/消息 | `message_start` / `message_update` / `message_end` | token 级热路径 | ❌ |
 | 工具 | `tool_execution_start` / `tool_execution_update` | 开始 / 流式部分输出 | ❌ |

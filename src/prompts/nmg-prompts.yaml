@@ -381,8 +381,12 @@ memory_policy: >-
   noise. When an exact current-session user message or successful tool result independently
   supports or contradicts a disclosed saved claim, record nmg_remember action=claim_outcome
   with that exact excerpt; otherwise omit it. Retrieval, answer reuse, task completion,
-  silence, or lack of correction are not claim evidence. Save only attributable, durable information; do not save secrets, transient
-  content, unconfirmed assistant proposals, or unsupported guesses.
+  silence, or lack of correction are not claim evidence. Without waiting for an explicit "remember"
+  request, save newly confirmed durable user facts, preferences, constraints, decisions, and reusable
+  experience when they are likely to matter in a later session. Reuse an existing state key and scope for
+  updates; search first when duplication is plausible. Ask instead of saving when attribution, scope, or
+  durability is materially ambiguous. Save only attributable, durable information; do not save secrets,
+  transient content, unconfirmed assistant proposals, unsupported guesses, or information already stored.
 
 claim_outcome_parameter_description: >-
   Explicit result for selected saved claims: supported or contradicted. This is

@@ -24,6 +24,10 @@ import type {
   MaintenanceBatchResult,
   MemoryNode,
   MemoryNodeKind,
+  MemoryMaintenanceAction,
+  MemoryMaintenanceDefect,
+  MemoryMaintenancePolicyArtifact,
+  MemoryMaintenanceProposal,
   MemoryRecord,
   MemoryResidence,
   MemoryResolution,
@@ -2391,6 +2395,123 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         .run(...ids);
       return Number(result.changes);
     }
+
+    createMemoryMaintenanceProposal(input: {
+      defectType: MemoryMaintenanceDefect;
+      action: MemoryMaintenanceAction;
+      targetMemoryIds: string[];
+      evidenceMemoryIds?: string[];
+      evidenceTraceIds?: string[];
+      proposedStatement?: string;
+      proposedScope?: import("../types.ts").MemoryScope;
+      policy: MemoryMaintenancePolicyArtifact;
+      longHorizonScore: number;
+      evaluationKind: "held_out" | "matched_replay";
+      evaluationRef: string;
+    }): MemoryMaintenanceProposal {
+      const targets = [
+        ...new Set(input.targetMemoryIds.map((id) => requireText(id, "targetMemoryId"))),
+      ];
+      if (targets.length === 0) throw new Error("maintenance proposal requires targetMemoryIds");
+      if (input.defectType === "retrieval" && input.action !== "observe") {
+        throw new Error(
+          "retrieval defects are selection-policy evidence and may only use action=observe",
+        );
+      }
+      if (input.action === "rewrite" && !input.proposedStatement?.trim()) {
+        throw new Error("rewrite proposals require proposedStatement");
+      }
+      if (input.action === "rescope" && !input.proposedScope) {
+        throw new Error("rescope proposals require proposedScope");
+      }
+      const score = clamp(input.longHorizonScore, 0, 1);
+      const threshold = clamp(input.policy.minimumLongHorizonScore, 0, 1);
+      if (score < threshold) {
+        throw new Error(`long-horizon score ${score} is below policy threshold ${threshold}`);
+      }
+      const evidenceMemoryIds = [...new Set(input.evidenceMemoryIds ?? [])];
+      const evidenceTraceIds = [...new Set(input.evidenceTraceIds ?? [])];
+      for (const id of [...targets, ...evidenceMemoryIds]) this.requireActiveMemory(id);
+      for (const id of evidenceTraceIds) {
+        if (!this.db.prepare("SELECT 1 FROM retrieval_traces WHERE id = ?").get(id)) {
+          throw new Error(`retrieval trace ${id} does not exist`);
+        }
+      }
+      const id = randomUUID();
+      const now = new Date().toISOString();
+      this.db
+        .prepare(
+          `INSERT INTO memory_maintenance_proposals(
+             id, defect_type, action, target_memory_ids_json, evidence_memory_ids_json,
+             evidence_trace_ids_json, proposed_statement, proposed_scope_json,
+             policy_id, policy_revision, policy_source_hash, minimum_long_horizon_score,
+             long_horizon_score, evaluation_kind, evaluation_ref, status, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+        )
+        .run(
+          id,
+          input.defectType,
+          input.action,
+          JSON.stringify(targets),
+          JSON.stringify(evidenceMemoryIds),
+          JSON.stringify(evidenceTraceIds),
+          input.proposedStatement?.trim() || null,
+          input.proposedScope ? JSON.stringify(input.proposedScope) : null,
+          requireText(input.policy.id, "policy.id"),
+          requireText(input.policy.revision, "policy.revision"),
+          requireText(input.policy.sourceHash, "policy.sourceHash"),
+          threshold,
+          score,
+          input.evaluationKind,
+          requireText(input.evaluationRef, "evaluationRef"),
+          now,
+        );
+      return this.memoryMaintenanceProposal(id)!;
+    }
+
+    memoryMaintenanceProposals(
+      status: MemoryMaintenanceProposal["status"] = "pending",
+    ): MemoryMaintenanceProposal[] {
+      return (
+        this.db
+          .prepare(
+            "SELECT * FROM memory_maintenance_proposals WHERE status = ? ORDER BY created_at, id",
+          )
+          .all(status) as Row[]
+      ).map(mapMemoryMaintenanceProposal);
+    }
+
+    reviewMemoryMaintenanceProposal(
+      proposalId: string,
+      decision: "accept" | "reject",
+      reason: string,
+    ): MemoryMaintenanceProposal {
+      const proposal = this.memoryMaintenanceProposal(proposalId);
+      if (!proposal) throw new Error(`memory maintenance proposal ${proposalId} does not exist`);
+      if (proposal.status !== "pending") {
+        throw new Error(`memory maintenance proposal ${proposalId} is already ${proposal.status}`);
+      }
+      const now = new Date().toISOString();
+      this.db
+        .prepare(
+          `UPDATE memory_maintenance_proposals
+           SET status = ?, review_reason = ?, reviewed_at = ? WHERE id = ?`,
+        )
+        .run(
+          decision === "accept" ? "accepted" : "rejected",
+          requireText(reason, "reason"),
+          now,
+          proposalId,
+        );
+      return this.memoryMaintenanceProposal(proposalId)!;
+    }
+
+    private memoryMaintenanceProposal(proposalId: string): MemoryMaintenanceProposal | null {
+      const row = this.db
+        .prepare("SELECT * FROM memory_maintenance_proposals WHERE id = ?")
+        .get(proposalId) as Row | undefined;
+      return row ? mapMemoryMaintenanceProposal(row) : null;
+    }
   };
 }
 
@@ -2420,4 +2541,30 @@ function detailStringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
     : [];
+}
+
+function mapMemoryMaintenanceProposal(row: Row): MemoryMaintenanceProposal {
+  return {
+    id: String(row.id),
+    defectType: String(row.defect_type) as MemoryMaintenanceDefect,
+    action: String(row.action) as MemoryMaintenanceAction,
+    targetMemoryIds: parseStringArray(row.target_memory_ids_json),
+    evidenceMemoryIds: parseStringArray(row.evidence_memory_ids_json),
+    evidenceTraceIds: parseStringArray(row.evidence_trace_ids_json),
+    proposedStatement: row.proposed_statement ? String(row.proposed_statement) : null,
+    proposedScope: row.proposed_scope_json ? parseScope(row.proposed_scope_json) : null,
+    policy: {
+      id: String(row.policy_id),
+      revision: String(row.policy_revision),
+      sourceHash: String(row.policy_source_hash),
+      minimumLongHorizonScore: Number(row.minimum_long_horizon_score),
+    },
+    longHorizonScore: Number(row.long_horizon_score),
+    evaluationKind: String(row.evaluation_kind) as MemoryMaintenanceProposal["evaluationKind"],
+    evaluationRef: String(row.evaluation_ref),
+    status: String(row.status) as MemoryMaintenanceProposal["status"],
+    reviewReason: row.review_reason ? String(row.review_reason) : null,
+    reviewedAt: row.reviewed_at ? String(row.reviewed_at) : null,
+    createdAt: String(row.created_at),
+  };
 }

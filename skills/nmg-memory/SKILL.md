@@ -170,6 +170,8 @@ loaded evidence, state the remaining uncertainty, or wait for a new user turn.
   [embedding](references/embedding.md)
 - For calibrating QPP from real Agent usage rather than benchmark-only data:
   [QPP calibration](references/qpp-calibration.md)
+- For implemented but non-default QPP, controller, STG, topology, Lab, and ANN
+  switches: [optional capabilities](references/optional-capabilities.md)
 - For collecting natural evidence and letting an Agent perform a gated update
   after the evidence is mature: [natural evidence loop](references/natural-evidence.md)
 - For writing an NMG adapter for a new harness (worked example: DeepSeek Harness):

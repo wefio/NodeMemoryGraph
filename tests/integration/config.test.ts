@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   DEFAULT_MAINTENANCE_POLICY,
   DEFAULT_STG_CONSOLIDATION_POLICY,
+  DEFAULT_STG_SYNC_POLICY,
   configuredControllerRerankMode,
   configuredControllerRuntimeMode,
   configuredMaintenancePolicy,
@@ -12,6 +13,7 @@ import {
   configuredQpp2RetainedMass,
   configuredSearchRecommendationMode,
   configuredStgConsolidationPolicy,
+  configuredStgSyncPolicy,
 } from "../../src/integration/config.ts";
 
 test("maintenance policy owns defaults and validates environment overrides", () => {
@@ -52,8 +54,14 @@ test("QPP controls resolve from the supplied daemon environment", () => {
   assert.equal(configuredControllerRerankMode({}), "off");
   assert.equal(configuredControllerRerankMode({ NMG_CONTROLLER_RERANK: "active" }), "active");
   assert.equal(configuredControllerRuntimeMode({}), "shadow");
-  assert.equal(configuredControllerRuntimeMode({ NMG_CONTROLLER_RUNTIME_MODE: "active" }), "active");
-  assert.equal(configuredControllerRuntimeMode({ NMG_CONTROLLER_RUNTIME_MODE: "invalid" }), "shadow");
+  assert.equal(
+    configuredControllerRuntimeMode({ NMG_CONTROLLER_RUNTIME_MODE: "active" }),
+    "active",
+  );
+  assert.equal(
+    configuredControllerRuntimeMode({ NMG_CONTROLLER_RUNTIME_MODE: "invalid" }),
+    "shadow",
+  );
   assert.equal(configuredQpp2RetainedMass({ NMG_QPP2_RETAINED_MASS: "1.5" }), 1);
   assert.equal(configuredQpp2RetainedMass({ NMG_QPP2_RETAINED_MASS: "bad" }), 0.98);
   assert.equal(
@@ -80,5 +88,17 @@ test("STG retention hysteresis cannot be stricter than its promotion gate", () =
       minimumRetainedPosteriorMean: 0.6,
       minimumRetainedConservativeLowerBound: 0.2,
     },
+  );
+});
+
+test("STG automatic sync is opt-in, bounded, and cooldown-controlled", () => {
+  assert.deepEqual(configuredStgSyncPolicy({}), DEFAULT_STG_SYNC_POLICY);
+  assert.deepEqual(
+    configuredStgSyncPolicy({
+      NMG_STG_AUTO_SYNC: "1",
+      NMG_STG_AUTO_SYNC_LIMIT: "999",
+      NMG_STG_AUTO_SYNC_INTERVAL_SECONDS: "30",
+    }),
+    { enabled: true, limit: 200, minimumIntervalMs: 30_000 },
   );
 });

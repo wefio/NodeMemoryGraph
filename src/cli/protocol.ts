@@ -10,6 +10,10 @@ import type {
   MemoryChainType,
   MemoryContext,
   MemoryMarker,
+  MemoryMaintenanceAction,
+  MemoryMaintenanceDefect,
+  MemoryMaintenancePolicyArtifact,
+  MemoryMaintenanceProposal,
   MemoryExportBundle,
   MemoryNodeKind,
   MemoryRecord,
@@ -66,6 +70,7 @@ export const NMG_CAPABILITIES = [
   "rollback-node-transform",
   "split-node",
   "topology-proposals",
+  "memory-maintenance-proposals",
   "sync-stg",
   "task-board",
   "directed-task-board-inbox",
@@ -98,6 +103,7 @@ export const NMG_METHODS = [
   "rollbackNodeTransform",
   "splitNode",
   "topologyProposal",
+  "memoryMaintenanceProposal",
   "syncStg",
   "stgPurgeSession",
   "taskBoard",
@@ -594,6 +600,29 @@ export type NmgTopologyProposalParams =
   | { action: "review"; proposalId: string; decision: "accept" | "reject" }
   | { action: "actuate"; proposalId: string };
 
+export type NmgMemoryMaintenanceProposalParams =
+  | { action: "list"; status?: MemoryMaintenanceProposal["status"] }
+  | {
+      action: "propose";
+      defectType: MemoryMaintenanceDefect;
+      maintenanceAction: MemoryMaintenanceAction;
+      targetMemoryIds: string[];
+      evidenceMemoryIds?: string[];
+      evidenceTraceIds?: string[];
+      proposedStatement?: string;
+      proposedScope?: MemoryScope;
+      policy: MemoryMaintenancePolicyArtifact;
+      longHorizonScore: number;
+      evaluationKind: "held_out" | "matched_replay";
+      evaluationRef: string;
+    }
+  | {
+      action: "review";
+      proposalId: string;
+      decision: "accept" | "reject";
+      reason: string;
+    };
+
 export type NmgLabParams =
   | { action: "list" }
   | { action: "status"; capability: LabCapability; sessionId: string }
@@ -686,6 +715,9 @@ export type NmgMethodResult = {
     | { action: "assess"; assessment: TopologyAutomationAssessment }
     | { action: "review"; proposal: TopologyProposal }
     | { action: "actuate"; transform: NodeTransform };
+  memoryMaintenanceProposal:
+    | { action: "list"; proposals: MemoryMaintenanceProposal[] }
+    | { action: "propose" | "review"; proposal: MemoryMaintenanceProposal };
   syncStg: { copied: number; projectDir: string };
   stgPurgeSession: { purged: number; projectDir: string };
   taskBoard:

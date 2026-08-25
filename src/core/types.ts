@@ -1107,6 +1107,10 @@ export interface QppComponents {
   directCount: number;
   /** total candidate count (direct + graph_expansion). */
   totalCount: number;
+  /** Share of visible candidates supplied by graph expansion. Shadow-only. */
+  expansionDependence: number;
+  /** (1 - top1) * expansionDependence; weak direct evidence plus heavy expansion. */
+  expansionRisk: number;
 }
 
 export type QppTriggerReason =
@@ -1319,6 +1323,41 @@ export interface TopologyAutomationAssessment {
     minimumEstimatedGain: number;
     minimumEvidenceMemories: number;
   };
+}
+
+export type MemoryMaintenanceDefect = "content" | "retrieval" | "scope";
+export type MemoryMaintenanceAction =
+  "merge" | "observe" | "rescope" | "rewrite" | "split" | "supersede";
+
+/** Reviewed policy identity attached to every maintenance proposal. */
+export interface MemoryMaintenancePolicyArtifact {
+  id: string;
+  revision: string;
+  sourceHash: string;
+  minimumLongHorizonScore: number;
+}
+
+/**
+ * Auditable recommendation only. Acceptance does not mutate memory; an Agent
+ * or user must apply an existing journalled maintenance operation explicitly.
+ */
+export interface MemoryMaintenanceProposal {
+  id: string;
+  defectType: MemoryMaintenanceDefect;
+  action: MemoryMaintenanceAction;
+  targetMemoryIds: string[];
+  evidenceMemoryIds: string[];
+  evidenceTraceIds: string[];
+  proposedStatement: string | null;
+  proposedScope: MemoryScope | null;
+  policy: MemoryMaintenancePolicyArtifact;
+  longHorizonScore: number;
+  evaluationKind: "held_out" | "matched_replay";
+  evaluationRef: string;
+  status: "accepted" | "pending" | "rejected";
+  reviewReason: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
 }
 
 export interface RebalanceResult {

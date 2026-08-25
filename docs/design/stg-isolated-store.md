@@ -124,7 +124,7 @@ query
 | Phase | Scope | Evidence gate |
 | --- | --- | --- |
 | 1 | **Implemented:** separate project-local SQLite store | daemon/CLI/Pi isolation tests pass |
-| 2 | **Implemented:** `cached_from_ltg` marker + usage-ranked `stg sync` | real copy/idempotency tests pass; automatic sync policy remains open |
+| 2 | **Implemented, opt-in:** `cached_from_ltg` marker + usage-ranked explicit or search-triggered sync | copy/idempotency and bounded cooldown tests pass; natural cost/benefit remains uncalibrated |
 | 3 | **Implemented:** STG-first dual-store search with QPP fallback + authoritative dedupe | service and adapter tests pass; benchmark gate pending |
 
 The daemon keys stores by `projectDir + sessionId` and opens them lazily. Pi
@@ -137,6 +137,6 @@ search, automatic recall, and get. CLI exposes `--project-dir` plus optional
 
 - No re-verification of cached LTG content (marker suffices; agent decides).
 - No background sync daemon — copy runs as a maintenance action (same
-  discipline as retention/prune).
+  discipline as retention/prune) or as an opt-in, scope-bound read-through cache.
 - LTG schema unchanged.
 - No new memory types (cache is a marker, not a type).

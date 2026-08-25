@@ -80,6 +80,18 @@ test("stateKey guidance explains reuse, separation, scope, and supersession cons
   assert.match(text, /incorrectly retire/u);
 });
 
+test("memory policy makes model-mediated durable capture proactive but attributable", () => {
+  const text = loadPrompts().memory_policy;
+  assert.match(text, /Without waiting for an explicit "remember" request/u);
+  assert.match(text, /facts, preferences, constraints, decisions/u);
+  assert.match(
+    text,
+    /Ask instead of saving when attribution, scope, or durability is materially ambiguous/u,
+  );
+  assert.match(text, /do not save secrets/u);
+  assert.match(text, /information already stored/u);
+});
+
 test("tool descriptions are neutral: they state capability, not when to call", () => {
   const prompts = loadPrompts();
   for (const key of [

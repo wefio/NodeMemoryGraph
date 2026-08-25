@@ -105,12 +105,14 @@ observed:
   archival, and STG/LTG promotion: only after real interruption or compaction
   tasks show that the transcript, private AG, and explicit Lab workspace are
   insufficient.
-- Memory-Graph Reasoner edge-following and automatic inference: only after the
-  reasoning-workspace need is established; global scoring remains an opt-in Lab
-  prototype rather than a Lite dependency.
-- A SkillOpt `memory_maintenance_policy` and three-way content/scope/retrieval
-  defect attribution: only after recall-policy readiness and promotion have
-  enough natural labels.
+- Memory-Graph Reasoner automatic inference: explicit edge-following is now
+  implemented, but automatic inference waits for a demonstrated reasoning need;
+  MGR remains a read-only opt-in Lab capability rather than a Lite dependency.
+- Automatic SkillOpt optimization and extraction for `memory_maintenance_policy`:
+  the hash-bound proposal store, three-way content/scope/retrieval attribution,
+  long-horizon gate and explicit review channel are implemented. Learning and
+  automatic proposal generation wait for enough natural labels; review never
+  actuates a mutation.
 - Full physical privacy erasure, learned-aggregate reset, adapter erasure hooks,
   and erasure receipts: before any privacy-erasure product claim, after threat
   model and user-consent review. Current delete/forget is logical withdrawal.

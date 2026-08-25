@@ -121,11 +121,7 @@ test("CLI exposes complete memory-chain member and edge operations", () => {
   assert.deepEqual(
     byName("chain edge add").buildParams({
       flags: new Set(),
-      options: new Map([
-        ...scoped,
-        ["from", ["memory-1"]],
-        ["to", ["memory-2"]],
-      ]),
+      options: new Map([...scoped, ["from", ["memory-1"]], ["to", ["memory-2"]]]),
       positionals: [],
     }),
     {
@@ -140,11 +136,7 @@ test("CLI exposes complete memory-chain member and edge operations", () => {
   assert.deepEqual(
     byName("chain edge remove").buildParams({
       flags: new Set(),
-      options: new Map([
-        ...scoped,
-        ["from", ["memory-1"]],
-        ["to", ["memory-2"]],
-      ]),
+      options: new Map([...scoped, ["from", ["memory-1"]], ["to", ["memory-2"]]]),
       positionals: [],
     }),
     {
@@ -262,6 +254,49 @@ test("CLI exposes topology proposal administration without raw database access",
       positionals: ["proposal-1"],
     }),
     { action: "actuate", proposalId: "proposal-1" },
+  );
+});
+
+test("CLI exposes review-only memory maintenance proposals", () => {
+  const byName = (name: string) => NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === name)!;
+  assert.deepEqual(
+    byName("maintenance propose").buildParams({
+      flags: new Set(),
+      options: new Map([
+        ["defect", ["scope"]],
+        ["maintenance-action", ["rescope"]],
+        ["target-memory", ["memory-1", "memory-2"]],
+        ["evidence-memory", ["memory-3"]],
+        ["scope", ["project=atlas"]],
+        ["policy-id", ["policy"]],
+        ["policy-revision", ["1"]],
+        ["policy-hash", ["sha256:policy"]],
+        ["policy-min-score", ["0.7"]],
+        ["score", ["0.82"]],
+        ["evaluation-kind", ["held_out"]],
+        ["evaluation-ref", ["eval:1"]],
+      ]),
+      positionals: [],
+    }),
+    {
+      action: "propose",
+      defectType: "scope",
+      maintenanceAction: "rescope",
+      targetMemoryIds: ["memory-1", "memory-2"],
+      evidenceMemoryIds: ["memory-3"],
+      evidenceTraceIds: undefined,
+      proposedStatement: undefined,
+      proposedScope: { project: "atlas" },
+      policy: {
+        id: "policy",
+        revision: "1",
+        sourceHash: "sha256:policy",
+        minimumLongHorizonScore: 0.7,
+      },
+      longHorizonScore: 0.82,
+      evaluationKind: "held_out",
+      evaluationRef: "eval:1",
+    },
   );
 });
 

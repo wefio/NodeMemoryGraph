@@ -129,6 +129,8 @@ export function computeQppComponents(
     direct.length === 0
       ? 0
       : direct.filter((candidate) => candidate.reason !== "hybrid_match").length / direct.length;
+  const expansionDependence =
+    candidates.length === 0 ? 0 : (candidates.length - direct.length) / candidates.length;
   return {
     top1,
     variance,
@@ -138,6 +140,10 @@ export function computeQppComponents(
     reasonHealth,
     directCount: direct.length,
     totalCount: candidates.length,
+    expansionDependence,
+    // This remains diagnostic: normal multi-hop retrieval may legitimately rely
+    // on expansion, so it must not affect the hard QPP score before calibration.
+    expansionRisk: (1 - top1) * expansionDependence,
   };
 }
 

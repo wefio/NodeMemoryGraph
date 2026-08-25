@@ -1388,13 +1388,13 @@ Reuse the key only when the new value makes the old one no longer current; two
 values that can remain true together (for example a personal best and a target)
 are separate properties and require separate keys.
 
-> **预留接口（未实现，用户明确不需要）** — `RememberInput.judgeDuplicates`
-> (`DuplicateJudge`, `src/core/types.ts`) 允许 NMG 自身接入独立模型，在
-> `remember` 内联裁决 near-duplicate 的 merge/supersede，而非依赖调用方
-> Agent 的二阶段判断。当前为零实现（daemon RPC 与扩展均不传该字段，仓库内
-> 无 judge-provider）；裁决仍走上文“Agent 二阶段 supersede”路径。如需接通：
-> `NMG_JUDGE_*` 配置 + daemon 侧 judge-provider + judge 不可用时降级回算法
-> 候选。决策记录：LTG memory `54599c45`。
+> `RememberInput.judgeDuplicates` (`DuplicateJudge`, `src/core/types.ts`) is an
+> implemented Core injection point: exact, normalised, and near candidates are
+> computed deterministically, then an embedding- or model-backed caller may
+> return a validated merge/supersede decision. The daemon and adapters
+> deliberately do not serialize callbacks across the RPC boundary; their
+> governed path remains the explicit two-stage Agent resolution described above.
+> Judge absence therefore degrades to candidates, never to an implicit model call.
 
 ## 10. Incremental storage and index maintenance
 
@@ -1885,12 +1885,13 @@ fingerprinted, repeated benchmark demonstrates a quality/cost advantage.
 
 ## 12bis. Memory-Graph Reasoner — retained numerical Lab prototype
 
-`MemoryGraphReasoner` is retained unchanged as a numerical experiment. It is
-not part of NMG Lite and is not the session reasoning scratchpad described
-below. The current implementation repeatedly scores all unvisited nodes; it
-does not yet constrain the next step to outgoing semantic edges. Consequently,
-its path must not be described as knowledge-graph traversal or used as evidence
-that NMG can perform logical inference.
+`MemoryGraphReasoner` is retained as a numerical experiment. It is not part of
+NMG Lite and is not the session reasoning scratchpad described below. The runtime
+supports both the legacy global candidate experiment and explicit directed
+topology. When any input node declares `outgoing`, the first step is a global
+query seed and every later step is restricted to the preceding node's outgoing
+neighbors; training rejects paths that violate those edges. This proves edge
+adherence, not factual correctness or automatic logical inference.
 
 ### Concept
 
@@ -1935,13 +1936,13 @@ from the traversal path.
 | --------------- | ------------------------- | ------------------------------ |
 | Node role       | passive data, scored      | active operator, transforms    |
 | Scoring         | 7-way similarity blend    | single gate + local relevance  |
-| Graph structure | fixed candidate hierarchy | global unvisited candidate set |
+| Graph structure | fixed candidate hierarchy | global seed, then optional directed neighbors |
 | Parameters      | 9 global                  | 2/node + 1 global              |
 | Best for        | batch ranking over pool   | multi-step path reasoning      |
 
-They remain separate Lab experiments. MGR currently refines a query through a
-sequence of selected node operators; graph-constrained traversal is future
-work that requires its own correctness benchmark.
+They remain separate Lab experiments. MGR refines a query through a sequence of
+selected node operators and can constrain that sequence to explicit directed
+edges. Utility and inference correctness still require their own benchmark.
 
 ### API
 
@@ -1965,10 +1966,10 @@ const clone = MemoryGraphReasoner.fromJSON(json);
 
 ### Experimental status
 
-MGR can produce deterministic traversal and what-if summaries for experiments,
-but it is not currently integrated into Pi and is not a verified
-LLM-offloaded reasoning engine. Correctness and graph-edge adherence must be
-demonstrated before such an integration is considered.
+MGR is exposed as the session-scoped `memory_graph_reasoner` Lab capability on
+the daemon, CLI, Pi, MCP, and DSH adapters. It produces deterministic traversal,
+fuzzy-set search, and what-if summaries, including explicit edge-constrained
+paths. It remains read-only and is not a verified LLM-offloaded inference engine.
 
 ```text
 LLM context                    MGR (external)
@@ -2571,8 +2572,8 @@ because `recall_action` JSON appeared in user answers; the candidate was rejecte
 and canonical YAML was unchanged. See
 `skillopt-policy-optimization.md` for the protocol and current readiness.
 
-A second, separate candidate artifact is the proposed
-`memory_maintenance_policy`. It would translate already observed controller and
+A second, separate candidate artifact is
+`memory_maintenance_policy`. It translates already observed controller and
 feedback signals into reviewed maintenance proposals, not mutate memory during
 inference. Its attribution must distinguish:
 
@@ -2583,9 +2584,17 @@ inference. Its attribution must distinguish:
 Only the first two categories may propose content/scope maintenance. Retrieval
 defects remain selection-policy evidence. Candidate maintenance policies require
 their own long-horizon outcome definition, held-out gate, and matched Pi+NMG
-promotion test. Any accepted policy remains a reviewed YAML edit; individual
+promotion test. Every proposal binds a reviewed policy ID, revision and source
+hash to its minimum accepted long-horizon score and held-out or matched-replay
+evaluation reference. Any accepted policy remains a reviewed YAML edit; individual
 rewrite, supersede, split, or merge proposals must retain evidence and use the
 existing journal where supported.
+
+Proposal review is deliberately separate from actuation. Accepting a maintenance
+proposal records a human/Agent decision but never edits memory. The reviewer must
+then invoke the existing explicit rewrite/supersede/split/merge operation, retaining
+that operation's own validation and rollback boundary. This prevents an offline
+policy from acquiring an implicit write capability.
 
 **Implementation status:** explicit feedback collection, natural/controlled
 provenance, journaled node-merge rollback, the recall-policy SkillOpt adapter,
@@ -2594,10 +2603,12 @@ implemented. The dedicated controller runtime policy channel is implemented and
 defaults to shadow-only operation; controlled evaluation requires controlled
 provenance, while production actuation requires a hash-bound three-gate approval
 receipt and rollback artifact. Promotion of any candidate into active/default
-operation still requires real matched evidence. The maintenance-policy artifact, three-way attribution,
-long-horizon score, and proposal-to-store channel are not implemented. STG/LTG
-context composition is implemented, but it is not a reversible persistent STG
-merge.
+operation still requires real matched evidence. The maintenance-policy identity,
+three-way attribution, long-horizon gate, durable proposal store and explicit review
+channel are implemented through Core, daemon RPC and CLI. Automatic proposal
+generation, SkillOpt optimization and actuation remain disabled until natural labels
+pass their promotion gates. STG/LTG context composition is implemented, but it is
+not a reversible persistent STG merge.
 
 The current Pi regression, seven-category invariant suite, controlled topology
 ablation, and strict seven-question LongMemEval matched sample prove integration

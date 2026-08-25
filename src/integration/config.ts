@@ -22,6 +22,38 @@ export interface StgConsolidationPolicyConfig {
   minimumRetainedConservativeLowerBound: number;
 }
 
+export interface StgSyncPolicyConfig {
+  enabled: boolean;
+  limit: number;
+  minimumIntervalMs: number;
+}
+
+export const DEFAULT_STG_SYNC_POLICY: StgSyncPolicyConfig = {
+  enabled: false,
+  limit: 20,
+  minimumIntervalMs: 5 * 60 * 1_000,
+};
+
+export function configuredStgSyncPolicy(
+  environment: NodeJS.ProcessEnv = process.env,
+): StgSyncPolicyConfig {
+  return {
+    enabled: environment.NMG_STG_AUTO_SYNC === "1",
+    limit: Math.min(
+      200,
+      positiveInteger(environment.NMG_STG_AUTO_SYNC_LIMIT, DEFAULT_STG_SYNC_POLICY.limit),
+    ),
+    minimumIntervalMs:
+      Math.min(
+        86_400,
+        positiveInteger(
+          environment.NMG_STG_AUTO_SYNC_INTERVAL_SECONDS,
+          DEFAULT_STG_SYNC_POLICY.minimumIntervalMs / 1_000,
+        ),
+      ) * 1_000,
+  };
+}
+
 export const DEFAULT_STG_CONSOLIDATION_POLICY: StgConsolidationPolicyConfig = {
   // Shadow by default until natural-use precision has been measured.
   enabled: false,

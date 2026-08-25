@@ -82,6 +82,35 @@ test("MGR traverse does not revisit nodes", () => {
   assert.equal(ids.length, unique.size, "path should not contain duplicate nodes");
 });
 
+test("MGR traverse follows directed outgoing edges when the graph declares topology", () => {
+  const mgr = new MemoryGraphReasoner(2);
+  const graph = new Map<string, MemoryNode>([
+    ["start", { id: "start", vector: Float32Array.from([1, 0]), outgoing: ["next"] }],
+    ["next", { id: "next", vector: Float32Array.from([0.8, 0.2]), outgoing: [] }],
+    ["disconnected", { id: "disconnected", vector: Float32Array.from([0.99, 0.01]), outgoing: [] }],
+  ]);
+
+  const result = mgr.traverse(Float32Array.from([1, 0]), graph, 3);
+  assert.deepEqual(
+    result.path.map((step) => step.nodeId),
+    ["start", "next"],
+  );
+});
+
+test("MGR trainPath rejects a transition that is not an outgoing edge", () => {
+  const mgr = new MemoryGraphReasoner(2);
+  const graph = new Map<string, MemoryNode>([
+    ["a", { id: "a", vector: Float32Array.from([1, 0]), outgoing: ["b"] }],
+    ["b", { id: "b", vector: Float32Array.from([0, 1]), outgoing: [] }],
+    ["c", { id: "c", vector: Float32Array.from([0.5, 0.5]), outgoing: [] }],
+  ]);
+
+  assert.throws(
+    () => mgr.trainPath({ queryVector: Float32Array.from([1, 0]), pathNodeIds: ["a", "c"], graph }),
+    /not an outgoing edge/,
+  );
+});
+
 // ── training ──
 
 test("MGR trainPath reduces loss", () => {
@@ -101,9 +130,7 @@ test("MGR trainPath reduces loss", () => {
 
 test("MGR trainPath requires at least one node", () => {
   const mgr = new MemoryGraphReasoner(d);
-  assert.throws(() =>
-    mgr.trainPath({ queryVector: rvec(d), pathNodeIds: [], graph: new Map() }),
-  );
+  assert.throws(() => mgr.trainPath({ queryVector: rvec(d), pathNodeIds: [], graph: new Map() }));
 });
 
 test("MGR trainPath rejects missing nodes", () => {
@@ -176,7 +203,10 @@ test("MGR precondition gates out nodes when facts are inactive", () => {
   // gated-node should have low gate since fact-A is random
   const gatedStep = result.path.find((s) => s.nodeId === "gated-node");
   if (gatedStep) {
-    assert.ok(gatedStep.gate < 0.5, `gated node gate ${gatedStep.gate} should be low when fact inactive`);
+    assert.ok(
+      gatedStep.gate < 0.5,
+      `gated node gate ${gatedStep.gate} should be low when fact inactive`,
+    );
   }
   // At minimum, the result should complete without errors
   assert.ok(result.path.length >= 1);

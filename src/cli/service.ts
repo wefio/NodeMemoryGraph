@@ -69,6 +69,7 @@ import { ReasoningWorkspaces } from "../integration/reasoning-workspaces.ts";
 import {
   configuredMaintenancePolicy,
   configuredStgConsolidationPolicy,
+  configuredStgSyncPolicy,
 } from "../integration/config.ts";
 import { applyAdvancedFilters, parseAdvancedQuery } from "../core/store/advanced-query.ts";
 import {
@@ -92,6 +93,7 @@ import {
   type NmgMethod,
   type NmgMethodResult,
   type NmgMergeNodesParams,
+  type NmgMemoryMaintenanceProposalParams,
   type NmgRememberParams,
   type NmgRecordClaimOutcomesParams,
   type NmgResolveRememberParams,
@@ -147,6 +149,7 @@ export class NmgService {
   #nodeSummaryProvider: NodeSummaryProvider | undefined | null;
   readonly #nodeSummaryDrains = new Set<NmgStore>();
   readonly #embeddingDrains = new Set<NmgStore>();
+  readonly #stgSyncTimes = new WeakMap<NmgStore, Map<string, number>>();
   #shutdownRequested = false;
   readonly #maintenanceJobs = new Map<NmgStore, NodeJS.Immediate>();
   readonly #maintenanceSignals = new Map<
@@ -256,6 +259,33 @@ export class NmgService {
         return {
           action: "actuate",
           transform: this.#getStore().actuateAutomaticMergeProposal(parsed.proposalId),
+        } as NmgMethodResult[M];
+      }
+      case "memoryMaintenanceProposal": {
+        const parsed = parseMemoryMaintenanceProposalParams(params);
+        if (parsed.action === "list") {
+          return {
+            action: "list",
+            proposals: this.#getStore().memoryMaintenanceProposals(parsed.status),
+          } as NmgMethodResult[M];
+        }
+        if (parsed.action === "review") {
+          return {
+            action: "review",
+            proposal: this.#getStore().reviewMemoryMaintenanceProposal(
+              parsed.proposalId,
+              parsed.decision,
+              parsed.reason,
+            ),
+          } as NmgMethodResult[M];
+        }
+        const { action: _action, maintenanceAction, ...proposal } = parsed;
+        return {
+          action: "propose",
+          proposal: this.#getStore().createMemoryMaintenanceProposal({
+            ...proposal,
+            action: maintenanceAction,
+          }),
         } as NmgMethodResult[M];
       }
       case "syncStg": {
@@ -1199,6 +1229,7 @@ export class NmgService {
       return ctx;
     };
     const searchAcross = async (store: NmgStore, raw: string) => {
+      this.#syncStgWorkingSet(store, options.scope);
       const local = await runOne(store, raw);
       if (local.results.length > 0 && local.activeGraph?.qpp?.trigger === false) return local;
       const shared = await runOne(this.#getStore(), raw);
@@ -1250,6 +1281,26 @@ export class NmgService {
     }
     if (searchOptions.limit) primary.results = primary.results.slice(0, searchOptions.limit);
     return primary;
+  }
+
+  #syncStgWorkingSet(store: NmgStore, scope: MemoryScope | undefined): void {
+    const policy = configuredStgSyncPolicy(this.#environment);
+    if (!policy.enabled || !scope || Object.keys(scope).length === 0) return;
+    const scopeKey = JSON.stringify(
+      Object.entries(scope).sort(([left], [right]) => left.localeCompare(right)),
+    );
+    const syncTimes = this.#stgSyncTimes.get(store) ?? new Map<string, number>();
+    const now = Date.now();
+    if (now - (syncTimes.get(scopeKey) ?? 0) < policy.minimumIntervalMs) return;
+    // Mark the attempt before copying so repeated searches do not hot-loop on a
+    // malformed or empty scope. This cache is advisory and resets with daemon restart.
+    syncTimes.set(scopeKey, now);
+    this.#stgSyncTimes.set(store, syncTimes);
+    try {
+      copyLtgSubsetToStg(this.#getStore(), store, { scope, limit: policy.limit });
+    } catch {
+      // Read-through caching is optional. LTG fallback remains authoritative.
+    }
   }
 
   #get(params: NmgGetParams): NmgMethodResult["get"] {
@@ -2078,6 +2129,52 @@ function parseTopologyProposalParams(value: unknown): NmgTopologyProposalParams 
   return { action, proposalId };
 }
 
+function parseMemoryMaintenanceProposalParams(value: unknown): NmgMemoryMaintenanceProposalParams {
+  const params = objectParams(value);
+  const action = requiredEnum(params, "action", ["list", "propose", "review"] as const);
+  if (action === "list") {
+    return {
+      action,
+      status: optionalEnum(params, "status", ["accepted", "pending", "rejected"] as const),
+    };
+  }
+  if (action === "review") {
+    return {
+      action,
+      proposalId: requiredString(params, "proposalId"),
+      decision: requiredEnum(params, "decision", ["accept", "reject"] as const),
+      reason: requiredString(params, "reason"),
+    };
+  }
+  const policy = objectParams(params.policy);
+  return {
+    action,
+    defectType: requiredEnum(params, "defectType", ["content", "retrieval", "scope"] as const),
+    maintenanceAction: requiredEnum(params, "maintenanceAction", [
+      "merge",
+      "observe",
+      "rescope",
+      "rewrite",
+      "split",
+      "supersede",
+    ] as const),
+    targetMemoryIds: requiredStringArray(params, "targetMemoryIds", 1, 10_000),
+    evidenceMemoryIds: optionalStringArray(params, "evidenceMemoryIds"),
+    evidenceTraceIds: optionalStringArray(params, "evidenceTraceIds"),
+    proposedStatement: optionalString(params, "proposedStatement"),
+    proposedScope: optionalScope(params, "proposedScope"),
+    policy: {
+      id: requiredString(policy, "id"),
+      revision: requiredString(policy, "revision"),
+      sourceHash: requiredString(policy, "sourceHash"),
+      minimumLongHorizonScore: requiredNumber(policy, "minimumLongHorizonScore", 0, 1),
+    },
+    longHorizonScore: requiredNumber(params, "longHorizonScore", 0, 1),
+    evaluationKind: requiredEnum(params, "evaluationKind", ["held_out", "matched_replay"] as const),
+    evaluationRef: requiredString(params, "evaluationRef"),
+  };
+}
+
 function objectParams(value: unknown): Record<string, unknown> {
   if (value === undefined) return {};
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -2110,6 +2207,7 @@ function parseReasonerNode(value: unknown, dimensions: number): ReasonerMemoryNo
     id: requiredString(params, "id"),
     vector,
     requires: optionalStringArray(params, "requires"),
+    outgoing: optionalStringArray(params, "outgoing"),
   };
 }
 
@@ -2123,6 +2221,16 @@ function parseReasonerGraph(value: unknown, dimensions: number): Map<string, Rea
     if (graph.has(node.id))
       throw new NmgProtocolError("INVALID_PARAMS", `duplicate reasoner node: ${node.id}`);
     graph.set(node.id, node);
+  }
+  for (const node of graph.values()) {
+    for (const targetId of node.outgoing ?? []) {
+      if (!graph.has(targetId)) {
+        throw new NmgProtocolError(
+          "INVALID_PARAMS",
+          `reasoner node ${node.id} references missing outgoing node: ${targetId}`,
+        );
+      }
+    }
   }
   return graph;
 }
@@ -2231,6 +2339,17 @@ function optionalNumber(
       `${key} must be a number from ${minimum} to ${maximum}`,
     );
   }
+  return value;
+}
+
+function requiredNumber(
+  params: Record<string, unknown>,
+  key: string,
+  minimum: number,
+  maximum: number,
+): number {
+  const value = optionalNumber(params, key, minimum, maximum);
+  if (value === undefined) throw new NmgProtocolError("INVALID_PARAMS", `${key} is required`);
   return value;
 }
 

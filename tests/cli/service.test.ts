@@ -30,6 +30,48 @@ test("status and hello do not create or open the database", async () => {
   }
 });
 
+test("memory maintenance RPC persists review-only proposals", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-maintenance-proposal-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    const remembered = await service.invoke("remember", {
+      statement: "Atlas currently runs in region eu-west",
+      nodeName: "Atlas deployment",
+      sourceActor: "user",
+    });
+    const proposed = await service.invoke("memoryMaintenanceProposal", {
+      action: "propose",
+      defectType: "retrieval",
+      maintenanceAction: "observe",
+      targetMemoryIds: [remembered.memory.id],
+      policy: {
+        id: "policy",
+        revision: "1",
+        sourceHash: "sha256:policy",
+        minimumLongHorizonScore: 0.5,
+      },
+      longHorizonScore: 0.75,
+      evaluationKind: "matched_replay",
+      evaluationRef: "replay:atlas",
+    });
+    assert.equal(proposed.action, "propose");
+    if (proposed.action !== "propose") throw new Error("expected proposal result");
+
+    const reviewed = await service.invoke("memoryMaintenanceProposal", {
+      action: "review",
+      proposalId: proposed.proposal.id,
+      decision: "reject",
+      reason: "selection policy will be calibrated separately",
+    });
+    assert.equal(reviewed.action, "review");
+    if (reviewed.action !== "review") throw new Error("expected review result");
+    assert.equal(reviewed.proposal.status, "rejected");
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
 test("Lab RPC is session scoped and reasoning workspaces are daemon owned", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-lab-"));
   const service = new NmgService({
@@ -115,7 +157,10 @@ test("Lab RPC exposes read-only memory graph reasoning after explicit activation
     });
     assert.equal(result.action, "invoke");
     if (result.action !== "invoke") throw new Error("expected Lab invoke result");
-    assert.equal((result.output as { path: Array<{ nodeId: string }> }).path[0]?.nodeId, "relevant");
+    assert.equal(
+      (result.output as { path: Array<{ nodeId: string }> }).path[0]?.nodeId,
+      "relevant",
+    );
   } finally {
     service.close();
     removeTempDirectory(directory);
@@ -975,6 +1020,55 @@ test("resident service syncs a scoped LTG working set into project STG idempoten
     });
     assert.equal(first.copied, 1);
     assert.equal(second.copied, 0);
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("resident service can automatically cache a scoped LTG working set on project search", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-stg-auto-sync-"));
+  const projectDir = join(directory, "project");
+  const service = new NmgService({
+    databasePath: join(directory, "ltg.sqlite"),
+    environment: {
+      NMG_STG_AUTO_SYNC: "1",
+      NMG_STG_AUTO_SYNC_LIMIT: "10",
+      NMG_STG_AUTO_SYNC_INTERVAL_SECONDS: "60",
+    },
+  });
+  try {
+    const remembered = await service.invoke("remember", {
+      statement: "Project atlas uses SQLite for durable state.",
+      nodeName: "Atlas storage",
+      scope: { project: "atlas" },
+    });
+    await service.invoke("search", {
+      query: "atlas durable state",
+      projectDir,
+      sessionId: "session-alpha",
+      scope: { project: "atlas" },
+    });
+
+    const stg = new NmgStore(stgStorePath(projectDir));
+    try {
+      const cached = stg.search("atlas durable state", {
+        scope: { project: "atlas" },
+        maxTier: 3,
+        limit: 10,
+      });
+      assert.ok(
+        cached.some((entry) =>
+          entry.memory.markers.some(
+            (marker) =>
+              marker.kind === "cached_from_ltg" &&
+              marker.attributes?.sourceMemoryId === remembered.memory.id,
+          ),
+        ),
+      );
+    } finally {
+      stg.close();
+    }
   } finally {
     service.close();
     removeTempDirectory(directory);

@@ -18,6 +18,7 @@ import type {
   NmgGetParams,
   NmgLabParams,
   NmgMergeNodesParams,
+  NmgMemoryMaintenanceProposalParams,
   NmgPerfParams,
   NmgRecordClaimOutcomesParams,
   NmgRememberParams,
@@ -460,6 +461,89 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
       minimumObservations: numericOption(values, "minimum-observations"),
       minimumEstimatedGain: numericOption(values, "minimum-estimated-gain"),
       minimumEvidenceMemories: numericOption(values, "minimum-evidence-memories"),
+    }),
+  },
+  {
+    method: "memoryMaintenanceProposal",
+    words: ["maintenance", "proposals"],
+    usageLine: "nmg maintenance proposals [--status pending|accepted|rejected] [--json]",
+    options: ["status"],
+    flags: [],
+    buildParams: (values): NmgMemoryMaintenanceProposalParams => {
+      rejectPositionals(values, "maintenance proposals");
+      return {
+        action: "list",
+        status: firstOption(values, "status") as "accepted" | "pending" | "rejected" | undefined,
+      };
+    },
+  },
+  {
+    method: "memoryMaintenanceProposal",
+    words: ["maintenance", "propose"],
+    usageLine:
+      "nmg maintenance propose --defect TYPE --maintenance-action ACTION --target-memory ID --policy-id ID --policy-revision REV --policy-hash HASH --policy-min-score N --score N --evaluation-kind KIND --evaluation-ref REF [options] [--json]",
+    options: [
+      "defect",
+      "maintenance-action",
+      "target-memory",
+      "evidence-memory",
+      "evidence-trace",
+      "proposed-statement",
+      "scope",
+      "policy-id",
+      "policy-revision",
+      "policy-hash",
+      "policy-min-score",
+      "score",
+      "evaluation-kind",
+      "evaluation-ref",
+    ],
+    flags: [],
+    usageDetail: `Maintenance proposals are review-only and never mutate memory automatically.
+  --defect TYPE             content, scope, or retrieval
+  --maintenance-action A    observe, rewrite, rescope, supersede, split, or merge
+  --target-memory ID        Target memory; repeat for multiple targets
+  --evidence-memory ID      Supporting memory; repeat as needed
+  --evidence-trace ID       Supporting retrieval trace; repeat as needed
+  --scope KEY=VALUE         Proposed scope for rescope; repeat as needed
+  Retrieval defects may only use observe: selection failures must not rewrite content.`,
+    buildParams: (values): NmgMemoryMaintenanceProposalParams => {
+      rejectPositionals(values, "maintenance propose");
+      const targetMemoryIds = values.options.get("target-memory") ?? [];
+      if (targetMemoryIds.length === 0) throw new Error("--target-memory is required");
+      return {
+        action: "propose",
+        defectType: requiredOption(values, "defect") as "content" | "retrieval" | "scope",
+        maintenanceAction: requiredOption(values, "maintenance-action") as
+          "merge" | "observe" | "rescope" | "rewrite" | "split" | "supersede",
+        targetMemoryIds,
+        evidenceMemoryIds: values.options.get("evidence-memory"),
+        evidenceTraceIds: values.options.get("evidence-trace"),
+        proposedStatement: firstOption(values, "proposed-statement"),
+        proposedScope: scopeOptions(values),
+        policy: {
+          id: requiredOption(values, "policy-id"),
+          revision: requiredOption(values, "policy-revision"),
+          sourceHash: requiredOption(values, "policy-hash"),
+          minimumLongHorizonScore: requiredNumericOption(values, "policy-min-score"),
+        },
+        longHorizonScore: requiredNumericOption(values, "score"),
+        evaluationKind: requiredOption(values, "evaluation-kind") as "held_out" | "matched_replay",
+        evaluationRef: requiredOption(values, "evaluation-ref"),
+      };
+    },
+  },
+  {
+    method: "memoryMaintenanceProposal",
+    words: ["maintenance", "review"],
+    usageLine: "nmg maintenance review PROPOSAL_ID --decision accept|reject --reason TEXT [--json]",
+    options: ["decision", "reason"],
+    flags: [],
+    buildParams: (values): NmgMemoryMaintenanceProposalParams => ({
+      action: "review",
+      proposalId: singlePositional(values, "maintenance review"),
+      decision: requiredOption(values, "decision") as "accept" | "reject",
+      reason: requiredOption(values, "reason"),
     }),
   },
   {
@@ -1112,6 +1196,12 @@ function numericOption(values: OptionValues, name: string): number | undefined {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) throw new Error(`--${name} must be a number`);
   return parsed;
+}
+
+function requiredNumericOption(values: OptionValues, name: string): number {
+  const value = numericOption(values, name);
+  if (value === undefined) throw new Error(`--${name} is required`);
+  return value;
 }
 
 function scopeOptions(values: OptionValues): Record<string, string> | undefined {

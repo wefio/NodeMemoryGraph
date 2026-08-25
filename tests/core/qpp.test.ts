@@ -44,10 +44,7 @@ function candidate(opts: CandidateOpts = {}): QppCandidate {
 }
 
 function approx(actual: number, expected: number, eps = 1e-6): void {
-  assert.ok(
-    Math.abs(actual - expected) <= eps,
-    `expected ${expected}, got ${actual}`,
-  );
+  assert.ok(Math.abs(actual - expected) <= eps, `expected ${expected}, got ${actual}`);
 }
 
 test("Fibonacci recall tiers use cumulative visible counts and include the hard cap", () => {
@@ -57,11 +54,26 @@ test("Fibonacci recall tiers use cumulative visible counts and include the hard 
 });
 
 test("queryIntentFamilies detects the three intent families (en + zh)", () => {
-  assert.deepEqual(queryIntentFamilies("recommend a hotel").map((f) => f.name), ["recommend"]);
-  assert.deepEqual(queryIntentFamilies("how many users").map((f) => f.name), ["list_count"]);
-  assert.deepEqual(queryIntentFamilies("what did the assistant say").map((f) => f.name), ["assistant"]);
-  assert.deepEqual(queryIntentFamilies("推荐一家酒店").map((f) => f.name), ["recommend"]);
-  assert.deepEqual(queryIntentFamilies("what is the weather").map((f) => f.name), []);
+  assert.deepEqual(
+    queryIntentFamilies("recommend a hotel").map((f) => f.name),
+    ["recommend"],
+  );
+  assert.deepEqual(
+    queryIntentFamilies("how many users").map((f) => f.name),
+    ["list_count"],
+  );
+  assert.deepEqual(
+    queryIntentFamilies("what did the assistant say").map((f) => f.name),
+    ["assistant"],
+  );
+  assert.deepEqual(
+    queryIntentFamilies("推荐一家酒店").map((f) => f.name),
+    ["recommend"],
+  );
+  assert.deepEqual(
+    queryIntentFamilies("what is the weather").map((f) => f.name),
+    [],
+  );
 });
 
 test("computeQppComponents returns zeros and neutral intentCoverage for empty candidates", () => {
@@ -81,15 +93,16 @@ test("computeQppComponents intentCoverage is 0 when an intent family matches but
 });
 
 test("computeQppComponents intentCoverage is 1 when the expected type is present", () => {
-  const components = computeQppComponents("recommend a hotel", [candidate({ memoryType: "preference" })]);
+  const components = computeQppComponents("recommend a hotel", [
+    candidate({ memoryType: "preference" }),
+  ]);
   approx(components.intentCoverage, 1);
 });
 
 test("computeQppComponents covers multiple matched families independently", () => {
-  const components = computeQppComponents(
-    "you said recommend",
-    [candidate({ memoryType: "conversation_evidence" })],
-  );
+  const components = computeQppComponents("you said recommend", [
+    candidate({ memoryType: "conversation_evidence" }),
+  ]);
   // assistant covered, recommend not -> 1 of 2.
   approx(components.intentCoverage, 0.5);
 });
@@ -143,6 +156,25 @@ test("score-based signals ignore graph_expansion candidates", () => {
   ]);
   approx(components.top1, 0.5);
   assert.equal(components.directCount, 1);
+  approx(components.expansionDependence, 0.5);
+  approx(components.expansionRisk, 0.25);
+});
+
+test("expansion shadow signals distinguish expansion dependence from direct confidence", () => {
+  const directOnly = computeQppComponents("weather", [
+    candidate({ strength: 0.2, isDirect: true }),
+  ]);
+  approx(directOnly.expansionDependence, 0);
+  approx(directOnly.expansionRisk, 0);
+
+  const expansionHeavy = computeQppComponents("weather", [
+    candidate({ strength: 0.2, isDirect: true }),
+    candidate({ strength: 0.9, isDirect: false }),
+    candidate({ strength: 0.8, isDirect: false }),
+    candidate({ strength: 0.7, isDirect: false }),
+  ]);
+  approx(expansionHeavy.expansionDependence, 0.75);
+  approx(expansionHeavy.expansionRisk, 0.6);
 });
 
 test("composeQpp is the NQC-anchored sum C = Top1 + wNqc*NQC", () => {
@@ -248,9 +280,13 @@ test("searchContext records a shadow QPP decision on the trace (no behaviour cha
     assert.equal(trace.qpp!.threshold, DEFAULT_QPP_THRESHOLD);
     assert.equal(trace.qpp!.components.totalCount, context.activeGraph.selections.length);
     assert.ok(
-      ["ok", "below_threshold", "guardrail_empty", "guardrail_all_fallback", "guardrail_low_top1"].includes(
-        trace.qpp!.reason,
-      ),
+      [
+        "ok",
+        "below_threshold",
+        "guardrail_empty",
+        "guardrail_all_fallback",
+        "guardrail_low_top1",
+      ].includes(trace.qpp!.reason),
     );
     if (context.results.some((result) => result.memory.memoryType === "preference")) {
       approx(trace.qpp!.components.intentCoverage, 1);
@@ -284,7 +320,11 @@ test("searchContextWithSecondPass: secondPass off returns the normal result", ()
   const directory = mkdtempSync(join(tmpdir(), "nmg-qpp-2p-off-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
   try {
-    store.remember({ statement: "user prefers a window seat", nodeName: "Seat", memoryType: "preference" });
+    store.remember({
+      statement: "user prefers a window seat",
+      nodeName: "Seat",
+      memoryType: "preference",
+    });
     const normal = store.searchContext("window seat");
     const adaptive = store.searchContextWithSecondPass("window seat", { secondPass: false });
     assert.equal(adaptive.activeGraph!.budget.maxEvidence, normal.activeGraph!.budget.maxEvidence);
@@ -299,10 +339,17 @@ test("searchContextWithSecondPass: sufficient Top-1 stops at the first tier", ()
   const directory = mkdtempSync(join(tmpdir(), "nmg-qpp-2p-notrig-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
   try {
-    store.remember({ statement: "user prefers a window seat", nodeName: "Seat", memoryType: "preference" });
+    store.remember({
+      statement: "user prefers a window seat",
+      nodeName: "Seat",
+      memoryType: "preference",
+    });
     // strong lexical match -> top1 high -> qpp ok -> no trigger; the walk
     // starts at the configured default (13) instead of a single record.
-    const result = store.searchContextWithSecondPass("window seat", { secondPass: true, limit: 20 });
+    const result = store.searchContextWithSecondPass("window seat", {
+      secondPass: true,
+      limit: 20,
+    });
     assert.equal(result.activeGraph!.qpp?.trigger, false);
     assert.equal(result.activeGraph!.budget.maxEvidence, 13);
     assert.deepEqual(
@@ -320,9 +367,16 @@ test("searchContextWithSecondPass: an exhausted candidate pool stops progressive
   const directory = mkdtempSync(join(tmpdir(), "nmg-qpp-2p-trig-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
   try {
-    store.remember({ statement: "user prefers a window seat", nodeName: "Seat", memoryType: "preference" });
+    store.remember({
+      statement: "user prefers a window seat",
+      nodeName: "Seat",
+      memoryType: "preference",
+    });
     // no real match -> qpp triggers (guardrail_low_top1 or guardrail_empty) -> expanded pass runs.
-    const result = store.searchContextWithSecondPass("zzz-no-such-thing", { secondPass: true, limit: 20 });
+    const result = store.searchContextWithSecondPass("zzz-no-such-thing", {
+      secondPass: true,
+      limit: 20,
+    });
     assert.equal(result.activeGraph!.qpp?.trigger, true);
     assert.equal(result.activeGraph!.budget.maxEvidence, 13);
     assert.equal(result.activeGraph!.qpp?.expansion?.stoppedBecause, "candidate_pool_exhausted");
@@ -447,7 +501,9 @@ test("searchContextWithSecondPass: limit is a hard cap on Fibonacci tiers", () =
 });
 
 test("computeQppComponents topGap: 0 for single candidate, large for a real cliff", () => {
-  const single = computeQppComponents("x", [{ strength: 0.8, reason: "lexical_match", memoryType: "fact", isDirect: true }]);
+  const single = computeQppComponents("x", [
+    { strength: 0.8, reason: "lexical_match", memoryType: "fact", isDirect: true },
+  ]);
   assert.equal(single.topGap, 0);
   const cliff = computeQppComponents("x", [
     { strength: 0.8, reason: "lexical_match", memoryType: "fact", isDirect: true },
@@ -458,7 +514,10 @@ test("computeQppComponents topGap: 0 for single candidate, large for a real clif
     { strength: 0.8, reason: "lexical_match", memoryType: "fact", isDirect: true },
     { strength: 0.79, reason: "lexical_match", memoryType: "fact", isDirect: true },
   ]);
-  assert.ok(flat.topGap < STRONG_HIT_TOP_GAP, `flat gap ${flat.topGap} should stay below the strong-hit threshold`);
+  assert.ok(
+    flat.topGap < STRONG_HIT_TOP_GAP,
+    `flat gap ${flat.topGap} should stay below the strong-hit threshold`,
+  );
 });
 
 test("searchContextWithSecondPass: strong top-gap early-stops to 3 records", () => {
@@ -467,8 +526,16 @@ test("searchContextWithSecondPass: strong top-gap early-stops to 3 records", () 
   try {
     // Inject two embedded records: one very close to the query vector, one far
     // -> a real score cliff in the ranked list (semantic pool is fully visible).
-    const hit = store.remember({ statement: "window seat on the left side of the train", nodeName: "Seat", memoryType: "preference" });
-    const miss = store.remember({ statement: "the cat sat on the mat", nodeName: "Cat", memoryType: "fact" });
+    const hit = store.remember({
+      statement: "window seat on the left side of the train",
+      nodeName: "Seat",
+      memoryType: "preference",
+    });
+    const miss = store.remember({
+      statement: "the cat sat on the mat",
+      nodeName: "Cat",
+      memoryType: "fact",
+    });
     store.upsertExternalEmbeddings("test-model", [
       { memoryId: hit.memory.id, vector: [0.9, 0.1, 0, 0] },
       { memoryId: miss.memory.id, vector: [0.1, 0.9, 0, 0] },

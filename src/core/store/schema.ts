@@ -400,6 +400,32 @@ export function migrate(db: DatabaseSync): void {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS memory_maintenance_proposals (
+      id TEXT PRIMARY KEY,
+      defect_type TEXT NOT NULL CHECK (defect_type IN ('content', 'retrieval', 'scope')),
+      action TEXT NOT NULL CHECK (
+        action IN ('merge', 'observe', 'rescope', 'rewrite', 'split', 'supersede')
+      ),
+      target_memory_ids_json TEXT NOT NULL,
+      evidence_memory_ids_json TEXT NOT NULL DEFAULT '[]',
+      evidence_trace_ids_json TEXT NOT NULL DEFAULT '[]',
+      proposed_statement TEXT,
+      proposed_scope_json TEXT,
+      policy_id TEXT NOT NULL,
+      policy_revision TEXT NOT NULL,
+      policy_source_hash TEXT NOT NULL,
+      minimum_long_horizon_score REAL NOT NULL CHECK (
+        minimum_long_horizon_score >= 0 AND minimum_long_horizon_score <= 1
+      ),
+      long_horizon_score REAL NOT NULL CHECK (long_horizon_score >= 0 AND long_horizon_score <= 1),
+      evaluation_kind TEXT NOT NULL CHECK (evaluation_kind IN ('held_out', 'matched_replay')),
+      evaluation_ref TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('accepted', 'pending', 'rejected')),
+      review_reason TEXT,
+      reviewed_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS router_weights (
       node_id TEXT PRIMARY KEY REFERENCES memory_nodes(id),
       model TEXT NOT NULL,
@@ -471,6 +497,8 @@ export function migrate(db: DatabaseSync): void {
       ON memory_index_delta(node_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_topology_proposals_key_created
       ON topology_proposals(proposal_key, created_at);
+    CREATE INDEX IF NOT EXISTS idx_memory_maintenance_proposals_status_created
+      ON memory_maintenance_proposals(status, created_at);
     CREATE INDEX IF NOT EXISTS idx_edge_task_observations_pair
       ON edge_task_observations(left_node_id, right_node_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_task_board_task_status_sequence

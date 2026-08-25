@@ -17,6 +17,94 @@ function withStore(run: (store: NmgStore) => void): void {
   }
 }
 
+test("maintenance proposals enforce attribution, evaluation, and explicit review", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "The deployment region is probably Europe",
+      nodeName: "deployment region",
+      sourceActor: "user",
+    });
+    const proposal = store.createMemoryMaintenanceProposal({
+      defectType: "scope",
+      action: "rescope",
+      targetMemoryIds: [saved.memory.id],
+      evidenceMemoryIds: [saved.memory.id],
+      proposedScope: { project: "atlas" },
+      policy: {
+        id: "maintenance-policy",
+        revision: "1",
+        sourceHash: "sha256:test-policy",
+        minimumLongHorizonScore: 0.7,
+      },
+      longHorizonScore: 0.82,
+      evaluationKind: "held_out",
+      evaluationRef: "eval:scope-2026-08",
+    });
+
+    assert.equal(proposal.status, "pending");
+    assert.deepEqual(proposal.proposedScope, { project: "atlas" });
+    assert.equal(store.memoryMaintenanceProposals().length, 1);
+
+    const reviewed = store.reviewMemoryMaintenanceProposal(
+      proposal.id,
+      "accept",
+      "held-out regression improved without cross-scope leakage",
+    );
+    assert.equal(reviewed.status, "accepted");
+    assert.match(reviewed.reviewReason!, /held-out/);
+    assert.equal(store.memoryMaintenanceProposals().length, 0);
+    assert.equal(store.memoryMaintenanceProposals("accepted").length, 1);
+
+    // Review records intent only: applying rescope remains an explicit,
+    // journalled operation owned by an Agent or user.
+    assert.deepEqual(store.getContext([saved.memory.id]).results[0]!.memory.scope, {});
+  });
+});
+
+test("maintenance proposals do not turn retrieval defects into content mutations", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "The user prefers concise explanations",
+      nodeName: "response preferences",
+      memoryType: "preference",
+      sourceActor: "user",
+    });
+    const policy = {
+      id: "maintenance-policy",
+      revision: "1",
+      sourceHash: "sha256:test-policy",
+      minimumLongHorizonScore: 0.5,
+    };
+    assert.throws(
+      () =>
+        store.createMemoryMaintenanceProposal({
+          defectType: "retrieval",
+          action: "rewrite",
+          targetMemoryIds: [saved.memory.id],
+          proposedStatement: "rewrite must not happen",
+          policy,
+          longHorizonScore: 0.9,
+          evaluationKind: "matched_replay",
+          evaluationRef: "replay:1",
+        }),
+      /may only use action=observe/,
+    );
+    assert.throws(
+      () =>
+        store.createMemoryMaintenanceProposal({
+          defectType: "content",
+          action: "observe",
+          targetMemoryIds: [saved.memory.id],
+          policy,
+          longHorizonScore: 0.4,
+          evaluationKind: "matched_replay",
+          evaluationRef: "replay:2",
+        }),
+      /below policy threshold/,
+    );
+  });
+});
+
 // ── deleteMemory cascaded deletion ──
 
 test("deleteMemory: marks record as deleted and returns pre-deletion snapshot", () => {

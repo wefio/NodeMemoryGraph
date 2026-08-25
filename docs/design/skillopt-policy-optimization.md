@@ -122,14 +122,20 @@ verbatim as the Agent's global memory policy.
 
 ## Proposed maintenance-policy extension
 
-**Status: designed, not implemented.** A future `memory_maintenance_policy` may
-use the same offline optimization and two-stage promotion protocol to propose
-content rewrites, scope corrections, supersession, splits, or merges. It must
-separate content, scope, and retrieval defects; retrieval defects must not mutate
-memory. Existing explicit feedback, collection provenance, and journaled node
-merge rollback are reusable infrastructure, not evidence that this maintenance
-decision layer already exists. The normative boundary is recorded in
-`design.md` under “Offline text-space policy optimization”.
+**Status: review channel implemented; optimizer deferred.** A
+`memory_maintenance_policy` candidate may use the same offline optimization and
+two-stage promotion protocol to propose content rewrites, scope corrections,
+supersession, splits, or merges. Core persists hash-bound policy identity,
+long-horizon score, held-out or matched-replay reference, evidence and review
+status. It separates content, scope, and retrieval defects; retrieval defects are
+accepted only as `observe` proposals and cannot mutate memory. Review acceptance
+also does not actuate a mutation.
+
+Automatic proposal extraction and SkillOpt training remain deferred until natural
+labels are sufficient. Existing explicit feedback, collection provenance and
+journaled transforms support that future optimizer but do not authorize it. The
+normative boundary is recorded in `design.md` under “Offline text-space policy
+optimization”; the operational commands are in the optional capability manual.
 
 ## Commands
 

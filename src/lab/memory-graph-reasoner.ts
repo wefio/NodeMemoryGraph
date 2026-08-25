@@ -27,6 +27,12 @@ export interface MemoryNode {
   vector: Float32Array; // L2-normalized [d]
   /** Fact node IDs that must be active for this node's gate to open. */
   requires?: string[];
+  /**
+   * Directed semantic neighbors. When any graph node declares this field,
+   * traversal is topology-constrained after the globally selected start node.
+   * An empty list is a terminal node; omission preserves legacy global traversal.
+   */
+  outgoing?: string[];
 }
 
 export interface TraversalStep {
@@ -272,6 +278,8 @@ export class MemoryGraphReasoner {
     let q = queryOriginal;
     let currentQuery = Float32Array.from(queryVector);
     let pathScore = 0;
+    const edgeConstrained = Array.from(graph.values()).some((node) => node.outgoing !== undefined);
+    const visited = new Set<string>();
 
     // Step 0: find best starting node by evaluating all nodes
     let candidates = Array.from(graph.values());
@@ -358,7 +366,12 @@ export class MemoryGraphReasoner {
 
       q = winningQ;
       currentQuery = bestNextQ;
-      candidates = candidates.filter((n) => n.id !== bestNode.id);
+      visited.add(bestNode.id);
+      candidates = edgeConstrained
+        ? (bestNode.outgoing ?? [])
+            .map((nodeId) => graph.get(nodeId))
+            .filter((node): node is MemoryNode => node !== undefined && !visited.has(node.id))
+        : candidates.filter((node) => !visited.has(node.id));
     }
 
     return { path, finalQuery: currentQuery, pathScore };
@@ -475,9 +488,20 @@ export class MemoryGraphReasoner {
     let q = queryOriginal;
     let totalScore: Tensor | null = null;
 
-    for (const nodeId of sample.pathNodeIds) {
+    const edgeConstrained = Array.from(sample.graph.values()).some(
+      (node) => node.outgoing !== undefined,
+    );
+    for (let index = 0; index < sample.pathNodeIds.length; index++) {
+      const nodeId = sample.pathNodeIds[index]!;
       const node = sample.graph.get(nodeId);
       if (!node) throw new Error(`node not in graph: ${nodeId}`);
+      if (edgeConstrained && index > 0) {
+        const previousId = sample.pathNodeIds[index - 1]!;
+        const previous = sample.graph.get(previousId)!;
+        if (!(previous.outgoing ?? []).includes(nodeId)) {
+          throw new Error(`path transition ${previousId} -> ${nodeId} is not an outgoing edge`);
+        }
+      }
       const { nextQuery, score } = this.#reasonStep(q, queryOriginal, node.vector, nodeId);
       totalScore = totalScore ? totalScore.add(score) : score;
       q = nextQuery;
