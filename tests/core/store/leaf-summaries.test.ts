@@ -129,6 +129,25 @@ test("searchContext leafBlockRouting: opt-in appends block members verbatim", ()
   });
 });
 
+test("leafBlockRouting respects the shared appended character budget", () => {
+  withStore((store) => {
+    writeThree(store);
+    store.rebuildLeafBlocks();
+    const task = store.pendingLeafSummaries()[0]!;
+    store.setLeafSummary(task.blockId, "zebra index terms", "test-model", task.membersKey);
+
+    const firstStatement = task.statements[0]!;
+    const context = store.searchContext("zebra", {
+      leafBlockRouting: true,
+      appendedMaxChars: firstStatement.length,
+    });
+    assert.deepEqual(
+      context.results.map((result) => result.memory.statement),
+      [firstStatement],
+    );
+  });
+});
+
 test("leafEmbeddingDocuments prefers the semantic summary when present", () => {
   withStore((store) => {
     writeThree(store);

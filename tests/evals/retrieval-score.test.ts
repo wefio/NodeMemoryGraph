@@ -101,6 +101,24 @@ test("aggregate computes recall@k, MRR and legacy rates", () => {
   assert.equal(metrics.latencyMs.mean, 10);
 });
 
+test("aggregate separates windowed any/all@k from full-window rates", () => {
+  // Gold hit at rank 3 with maxK=2: counted in the full-window rates, not @2.
+  const metrics = aggregate(
+    [
+      scoreQuestion(
+        { category: "a", golds: ["g1"], candidates: [["x"], ["y"], ["g1"]] },
+        "gold-in-candidate",
+      ),
+    ],
+    [1, 2],
+  );
+  assert.equal(metrics.anyEvidenceRate, 1);
+  assert.equal(metrics.allEvidenceRate, 1);
+  assert.equal(metrics.anyEvidenceAtK, 0);
+  assert.equal(metrics.allEvidenceAtK, 0);
+  assert.equal(metrics.recallAt["2"], 0);
+});
+
 test("aggregateByCategory buckets per category with an overall entry", () => {
   const questions = [
     scoreQuestion({ category: "a", golds: ["g1"], candidates: [["g1"]] }, "gold-in-candidate"),

@@ -59,11 +59,11 @@ server.registerTool(
     },
   },
   async (params) => {
-    const r = (await invokeDaemon(
-      connection,
-      "search",
-      AGENT_PERF ? { ...params, perf: true } : params,
-    )) as MemoryContext;
+    const r = (await invokeDaemon(connection, "search", {
+      ...params,
+      sessionId: BOARD_SESSION_ID,
+      ...(AGENT_PERF ? { perf: true } : {}),
+    })) as MemoryContext;
     return { content: [{ type: "text", text: searchH(r) }] };
   },
 );
@@ -77,10 +77,17 @@ server.registerTool(
     inputSchema: {
       memoryIds: z.array(z.string()).min(1).max(50).describe("Memory IDs from nmg_search"),
       graphHops: z.number().int().min(0).max(3).optional(),
+      activeGraphId: z
+        .string()
+        .optional()
+        .describe(nmgPrompts.mcp_active_graph_id_parameter_description),
     },
   },
   async (params) => {
-    const r = (await invokeDaemon(connection, "get", params)) as MemoryContext & {
+    const r = (await invokeDaemon(connection, "get", {
+      ...params,
+      sessionId: BOARD_SESSION_ID,
+    })) as MemoryContext & {
       missingMemoryIds?: string[];
     };
     return { content: [{ type: "text", text: memText(r) }] };
@@ -92,10 +99,55 @@ server.registerTool(
 server.registerTool(
   "nmg_remember",
   {
-    description: nmgPrompts.remember_description,
+    description: nmgPrompts.mcp_remember_description,
     inputSchema: {
-      statement: z.string().describe("Self-contained semantic statement"),
-      nodeName: z.string().describe("Stable semantic node grouping related memories"),
+      action: z
+        .enum(["save", "supersede", "relate", "forget", "resolve", "reopen", "claim_outcome"])
+        .default("save")
+        .describe(nmgPrompts.mcp_remember_action_parameter_description),
+      memoryId: z.string().optional().describe(nmgPrompts.remember_memory_id_parameter_description),
+      newMemoryId: z
+        .string()
+        .optional()
+        .describe(nmgPrompts.remember_new_memory_id_parameter_description),
+      supersededMemoryId: z
+        .string()
+        .optional()
+        .describe(nmgPrompts.remember_superseded_memory_id_parameter_description),
+      relatedMemoryId: z
+        .string()
+        .optional()
+        .describe(nmgPrompts.remember_related_memory_id_parameter_description),
+      relationJudgement: z
+        .enum(["conflict", "distinct", "refines", "related", "same_entity"])
+        .optional()
+        .describe(nmgPrompts.remember_relation_judgement_parameter_description),
+      relationConfidence: z.number().min(0).max(1).optional(),
+      resolutionReason: z.string().optional(),
+      relatedMemoryIds: z.array(z.string()).optional(),
+      activeGraphId: z
+        .string()
+        .optional()
+        .describe(nmgPrompts.mcp_active_graph_id_parameter_description),
+      semanticTaskId: z
+        .string()
+        .optional()
+        .describe(nmgPrompts.semantic_task_id_parameter_description),
+      claimOutcome: z
+        .enum(["supported", "contradicted"])
+        .optional()
+        .describe(nmgPrompts.claim_outcome_parameter_description),
+      claimSourceLineage: z
+        .string()
+        .optional()
+        .describe(nmgPrompts.claim_source_lineage_parameter_description),
+      claimIndexes: z
+        .array(z.number().int().min(0))
+        .optional()
+        .describe(nmgPrompts.claim_indexes_parameter_description),
+      claimWeight: z.number().gt(0).max(1).optional(),
+      statement: z.string().optional().describe("Self-contained semantic statement"),
+      nodeName: z.string().optional().describe(nmgPrompts.node_name_parameter_description),
       memoryType: z.enum(MEMORY_TYPES).optional(),
       stateKey: z.string().optional(),
       eventTime: z.string().optional(),
@@ -118,9 +170,126 @@ server.registerTool(
     },
   },
   async (params) => {
-    const { boardSource, ...memory } = params;
+    if (params.action === "claim_outcome") {
+      if (
+        !params.memoryId ||
+        !params.claimOutcome ||
+        !params.semanticTaskId?.trim() ||
+        !params.claimSourceLineage?.trim()
+      ) {
+        throw new Error(
+          "action=claim_outcome requires memoryId, claimOutcome, semanticTaskId, and claimSourceLineage",
+        );
+      }
+      const result = await invokeDaemon(connection, "recordClaimOutcomes", {
+        semanticTaskId: params.semanticTaskId,
+        activeGraphId: params.activeGraphId,
+        sessionId: BOARD_SESSION_ID,
+        collectionOrigin: "natural",
+        votes: [
+          {
+            memoryId: params.memoryId,
+            claimIndexes: params.claimIndexes,
+            outcome: params.claimOutcome,
+            source: "task",
+            sourceLineage: params.claimSourceLineage,
+            weight: params.claimWeight,
+          },
+        ],
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Task-attributed claim outcome recorded. ${JSON.stringify(result)}`,
+          },
+        ],
+      };
+    }
+    if (params.action === "forget") {
+      if (!params.memoryId) throw new Error("action=forget requires memoryId");
+      const result = await invokeDaemon(connection, "resolveRemember", {
+        action: "forget",
+        memoryId: params.memoryId,
+        sessionId: BOARD_SESSION_ID,
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Memory withdrawn from normal retrieval. ${JSON.stringify(result)}`,
+          },
+        ],
+      };
+    }
+    if (params.action === "resolve" || params.action === "reopen") {
+      if (!params.memoryId) throw new Error(`action=${params.action} requires memoryId`);
+      const result = await invokeDaemon(connection, "resolveRemember", {
+        action: params.action,
+        memoryId: params.memoryId,
+        relatedMemoryIds: params.relatedMemoryIds,
+        reason: params.resolutionReason,
+        sessionId: BOARD_SESSION_ID,
+      });
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+    if (params.action === "supersede") {
+      if (!params.newMemoryId || !params.supersededMemoryId) {
+        throw new Error("action=supersede requires newMemoryId and supersededMemoryId");
+      }
+      const result = await invokeDaemon(connection, "resolveRemember", {
+        action: "supersede",
+        newMemoryId: params.newMemoryId,
+        supersededMemoryId: params.supersededMemoryId,
+        reason: params.resolutionReason,
+        sessionId: BOARD_SESSION_ID,
+      });
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+    if (params.action === "relate") {
+      if (!params.newMemoryId || !params.relatedMemoryId || !params.relationJudgement) {
+        throw new Error(
+          "action=relate requires newMemoryId, relatedMemoryId, and relationJudgement",
+        );
+      }
+      const result = await invokeDaemon(connection, "resolveRemember", {
+        action: "relate",
+        newMemoryId: params.newMemoryId,
+        relatedMemoryId: params.relatedMemoryId,
+        relationJudgement: params.relationJudgement,
+        confidence: params.relationConfidence,
+        sessionId: BOARD_SESSION_ID,
+      });
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+    if (!params.statement?.trim() || !params.nodeName?.trim()) {
+      throw new Error("action=save requires statement and nodeName");
+    }
+    const boardSource = params.boardSource;
+    const memory: Record<string, unknown> = { ...params };
+    for (const key of [
+      "action",
+      "boardSource",
+      "memoryId",
+      "newMemoryId",
+      "supersededMemoryId",
+      "relatedMemoryId",
+      "relationJudgement",
+      "relationConfidence",
+      "resolutionReason",
+      "relatedMemoryIds",
+      "activeGraphId",
+      "semanticTaskId",
+      "claimOutcome",
+      "claimSourceLineage",
+      "claimIndexes",
+      "claimWeight",
+    ]) {
+      delete memory[key];
+    }
     const r = (await invokeDaemon(connection, "remember", {
       ...memory,
+      sessionId: BOARD_SESSION_ID,
       ...(boardSource
         ? {
             markers: [
@@ -147,10 +316,15 @@ server.registerTool(
     description: nmgPrompts.lab_description,
     inputSchema: {
       action: z.enum(["list", "status", "enable", "disable", "invoke"]),
-      capability: z.enum([
-        "reasoning_workspace", "memory_graph_reasoner", "controller_shadow",
-        "controller_controlled", "controller_active",
-      ]).optional(),
+      capability: z
+        .enum([
+          "reasoning_workspace",
+          "memory_graph_reasoner",
+          "controller_shadow",
+          "controller_controlled",
+          "controller_active",
+        ])
+        .optional(),
       reason: z.string().optional(),
       ttlSeconds: z.number().int().min(60).max(86_400).optional(),
       operation: z.string().optional(),
@@ -158,9 +332,11 @@ server.registerTool(
     },
   },
   async (params) => {
-    if (params.action !== "list" && !params.capability) throw new Error(`${params.action} requires capability`);
+    if (params.action !== "list" && !params.capability)
+      throw new Error(`${params.action} requires capability`);
     if (params.action === "enable" && !params.reason) throw new Error("enable requires reason");
-    if (params.action === "invoke" && !params.operation) throw new Error("invoke requires operation");
+    if (params.action === "invoke" && !params.operation)
+      throw new Error("invoke requires operation");
     const result = await invokeDaemon(connection, "lab", {
       ...params,
       sessionId: BOARD_SESSION_ID,
@@ -368,6 +544,7 @@ function searchH(r: MemoryContext): string {
   const perfLine = perfFeedback(r.timings, r.filterUsage);
   if (perfLine) lines.push(perfLine);
   return [
+    ...(r.activeGraph?.id ? [`activeGraphId=${r.activeGraph.id}`] : []),
     renderDisclosure(nmgPrompts.mcp_search_disclosure, {
       count: String(r.results.length),
       next_step: nextStep,

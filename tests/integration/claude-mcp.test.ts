@@ -41,11 +41,43 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     const tools = await client.listTools();
     const board = tools.tools.find((tool) => tool.name === "nmg_board");
     const lab = tools.tools.find((tool) => tool.name === "nmg_lab");
+    const search = tools.tools.find((tool) => tool.name === "nmg_search");
+    const get = tools.tools.find((tool) => tool.name === "nmg_get");
+    const remember = tools.tools.find((tool) => tool.name === "nmg_remember");
     assert.ok(board);
     assert.ok(lab);
+    assert.ok(search);
+    assert.ok(get);
+    assert.ok(remember);
     assert.match(JSON.stringify(board.inputSchema), /discover/u);
     assert.match(JSON.stringify(board.inputSchema), /capabilities/u);
     assert.match(JSON.stringify(board.inputSchema), /"to"/u);
+    assert.match(JSON.stringify(get.inputSchema), /activeGraphId/u);
+    assert.match(JSON.stringify(remember.inputSchema), /claim_outcome/u);
+
+    const saved = await client.callTool({
+      name: "nmg_remember",
+      arguments: {
+        action: "save",
+        statement: "The MCP adapter test uses a stable Active Graph session.",
+        nodeName: "MCP adapter test",
+        memoryType: "fact",
+      },
+    });
+    const memoryId = /Saved ([0-9a-f-]+)/u.exec(textOf(saved))?.[1];
+    assert.ok(memoryId);
+    const recalled = await client.callTool({
+      name: "nmg_search",
+      arguments: { query: "stable Active Graph session", limit: 4 },
+    });
+    const activeGraphId = /activeGraphId=([^\s]+)/u.exec(textOf(recalled))?.[1];
+    assert.ok(activeGraphId);
+    assert.match(textOf(recalled), new RegExp(memoryId, "u"));
+    const exact = await client.callTool({
+      name: "nmg_get",
+      arguments: { memoryIds: [memoryId], activeGraphId },
+    });
+    assert.match(textOf(exact), /stable Active Graph session/u);
 
     const roster = await client.callTool({
       name: "nmg_board",
@@ -88,6 +120,12 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
       },
     });
     assert.match(textOf(added), /MCP adapter owns this scratch node/u);
+
+    const forgotten = await client.callTool({
+      name: "nmg_remember",
+      arguments: { action: "forget", memoryId },
+    });
+    assert.match(textOf(forgotten), /withdrawn from normal retrieval/u);
   } finally {
     await client.close().catch(() => undefined);
     const daemon = await connectDaemon(resolve(dataDir, "nmg.sqlite")).catch(() => null);

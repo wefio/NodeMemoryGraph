@@ -148,8 +148,11 @@ export function configuredMaintenancePolicy(
   };
 }
 
-export function configuredGraphHops(fallback: number): number {
-  const configured = Number.parseInt(process.env.NMG_GRAPH_HOPS ?? "", 10);
+export function configuredGraphHops(
+  fallback: number,
+  environment: NodeJS.ProcessEnv = process.env,
+): number {
+  const configured = Number.parseInt(environment.NMG_GRAPH_HOPS ?? "", 10);
   return Number.isInteger(configured) ? Math.max(0, Math.min(configured, 3)) : fallback;
 }
 

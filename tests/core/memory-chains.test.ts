@@ -194,6 +194,41 @@ test("expandChains appends chain members after a hit (recall supplement, no re-r
   });
 });
 
+test("expandChains shares the appended character budget and skips overflow", () => {
+  withStore((store) => {
+    const statements = ["anchor event", "first follow-up", "second follow-up"];
+    const ids = statements.map(
+      (statement) =>
+        store.remember({
+          nodeName: "budgeted chain",
+          statement,
+          sessionId: "s1",
+          sourceActor: "user",
+        }).memory.id,
+    );
+    const chain = store.createMemoryChain({
+      chainType: "temporal",
+      topic: "budgeted events",
+      ownerSessionId: "s1",
+    });
+    ids.forEach((memoryId, position) =>
+      store.addMemoryToChain({ chainId: chain.id, memoryId, position }),
+    );
+
+    const context = store.searchContext("anchor event", {
+      limit: 1,
+      sessionId: "s1",
+      expandChains: true,
+      chainExpansionMaxMembers: 10,
+      appendedMaxChars: statements[1]!.length,
+    });
+    assert.deepEqual(
+      context.results.map((result) => result.memory.statement),
+      statements.slice(0, 2),
+    );
+  });
+});
+
 test("expandChains does nothing for a hit outside any chain", () => {
   withStore((store) => {
     store.remember({

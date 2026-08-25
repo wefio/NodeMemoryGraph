@@ -49,6 +49,14 @@ remember_description: >-
   Assistant inference as a user statement. A stateKey names one
   replaceable property within a stable scope; it is not a topic or grouping tag.
 
+mcp_remember_description: >-
+  Save a durable record or apply an explicit memory lifecycle action. Supports
+  save, supersede, relate, forget, resolve, reopen, and task-attributed
+  claim_outcome. The MCP adapter cannot verify user/tool message evidence and
+  does not expose Pi-local retrieval feedback, so claim_outcome accepts only a
+  task source with an explicit source lineage. NMG validates scope, identity,
+  provenance, and applies the transaction.
+
 board_description: >-
   Coordinate through a temporary blackboard shared by NMG clients. Without a
   taskId, entries land on the shared world channel; reading it lists active
@@ -195,6 +203,15 @@ remember_action_parameter_description: >-
   labelling a specific older retrieval; omit it only to label the latest retrieval
   in the current Pi session. Silence or lack of correction is not positive feedback.
 
+mcp_remember_action_parameter_description: >-
+  Omit or use save for a new memory. Use supersede only when the selected older
+  value has the same scope, relate to create a reversible semantic proposal,
+  forget only for an explicit withdrawal, and resolve or reopen for an open
+  memory lifecycle change. Use claim_outcome only for an independently
+  attributable completed task, with semanticTaskId and claimSourceLineage. The
+  MCP adapter does not accept Pi-local retrieval feedback or user/tool claim
+  evidence because it cannot verify those current-session message sources.
+
 remember_memory_id_parameter_description: >-
   For action=forget, resolve, or reopen, the exact target memory ID.
   This creates an auditable logical deletion, not physical privacy erasure.
@@ -250,6 +267,11 @@ active_graph_id_parameter_description: >-
   Optional activeGraphId returned by nmg_search. For action=feedback, omit it to
   target the latest retrieval owned by the current Pi session; pass it to label a
   specific older retrieval. For nmg_get, pass it when available to attribute use.
+
+mcp_active_graph_id_parameter_description: >-
+  Optional activeGraphId returned by nmg_search. Pass it to nmg_get when
+  available so exact disclosure is attributed to this MCP session, or to
+  claim_outcome when the selected claim came from that retrieval.
 
 feedback_note_parameter_description: >-
   Optional concise reason for an explicit retrieval/task label. Do not include

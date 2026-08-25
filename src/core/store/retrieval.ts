@@ -718,6 +718,19 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           }
         }
       }
+      // Shared character budget for the two appended (unranked) sections
+      // below — chain expansion and block-member routing. Unset = unlimited
+      // (legacy); the eval protocol pins it so worst-case inflation is a
+      // protocol constant.
+      const appendedMaxChars = options.appendedMaxChars;
+      let appendedChars = 0;
+      const fitsAppendedBudget = (chars: number): boolean =>
+        appendedMaxChars === undefined || appendedChars + chars <= appendedMaxChars;
+      const reserveAppendedBudget = (chars: number): boolean => {
+        if (!fitsAppendedBudget(chars)) return false;
+        appendedChars += chars;
+        return true;
+      };
       // Post-retrieval chain expansion: if any ranked result is a member of a
       // memory chain, append the chain's other members (in chain order) so
       // evolution/aggregation queries get the whole timeline, not just the
@@ -823,6 +836,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             pos: number;
             activation: number;
             dist: number;
+            chars: number;
           }
           const gated: ChainCandidate[] = [];
           let chainIndex = 0;
@@ -843,7 +857,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                 const p = Number(row.position);
                 if (p < lo || p > hi) continue;
                 const memberId = String(row.memory_id);
-                if (!seen.has(memberId)) {
+                if (!seen.has(memberId) && reserveAppendedBudget(String(row.statement).length)) {
                   seen.add(memberId);
                   toFetch.push(memberId);
                   chainOf.set(memberId, chainId);
@@ -870,6 +884,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                     pos: p,
                     activation,
                     dist,
+                    chars: String(row.statement).length,
                   });
                 }
               }
@@ -878,7 +893,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
               // hits) — preserve the legacy whole-chain behavior.
               for (const row of memberRows) {
                 const memberId = String(row.memory_id);
-                if (!seen.has(memberId)) {
+                if (!seen.has(memberId) && reserveAppendedBudget(String(row.statement).length)) {
                   seen.add(memberId);
                   toFetch.push(memberId);
                   chainOf.set(memberId, chainId);
@@ -909,7 +924,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             for (const c of [...gated].sort(
               (a, b) => a.chainIndex - b.chainIndex || a.pos - b.pos,
             )) {
-              if (!kept.has(c.id) || seen.has(c.id)) continue;
+              if (!kept.has(c.id) || seen.has(c.id) || !reserveAppendedBudget(c.chars)) continue;
               seen.add(c.id);
               toFetch.push(c.id);
               chainOf.set(c.id, chainList[c.chainIndex]!);
@@ -1031,6 +1046,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                 memoryId: String(row.memory_id),
                 ordinal: Number(row.ordinal),
                 score: termScore(String(row.statement)),
+                chars: String(row.statement).length,
               }))
               .filter((member) => !seen.has(member.memoryId));
             const chosen = new Set(
@@ -1047,6 +1063,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             for (const member of ranked) {
               if (toFetch.length >= maxMembers) break;
               if (!chosen.has(member.memoryId)) continue;
+              if (!reserveAppendedBudget(member.chars)) continue;
               seen.add(member.memoryId);
               toFetch.push(member.memoryId);
               blockOf.set(member.memoryId, blockId);
@@ -1080,7 +1097,10 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                 WHERE chain_id = ? AND position IN (?, ?)`,
             );
             const positionQuery = this.db.prepare(
-              "SELECT position FROM memory_chain_members WHERE chain_id = ? AND memory_id = ?",
+              `SELECT cm.position, m.statement
+                 FROM memory_chain_members cm
+                 JOIN memory_records m ON m.id = cm.memory_id
+                WHERE cm.chain_id = ? AND cm.memory_id = ?`,
             );
             const chainTypeQuery = this.db.prepare(
               "SELECT chain_type FROM memory_chains WHERE id = ?",
@@ -1088,6 +1108,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             const pull = (neighbor: string, chainId: string): void => {
               if (seen.has(neighbor) || toFetch.length >= maxMembers) return;
               const posRow = positionQuery.get(chainId, neighbor) as Row | undefined;
+              if (!posRow || !reserveAppendedBudget(String(posRow.statement).length)) return;
               const typeRow = chainTypeQuery.get(chainId) as Row | undefined;
               seen.add(neighbor);
               toFetch.push(neighbor);

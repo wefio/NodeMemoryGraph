@@ -7,6 +7,7 @@ import {
   DEFAULT_STG_SYNC_POLICY,
   configuredControllerRerankMode,
   configuredControllerRuntimeMode,
+  configuredGraphHops,
   configuredMaintenancePolicy,
   configuredQpp1Mode,
   configuredQpp2Mode,
@@ -68,6 +69,13 @@ test("QPP controls resolve from the supplied daemon environment", () => {
     configuredSearchRecommendationMode({ NMG_SEARCH_RECOMMENDATION: "guardrail" }),
     "guardrail",
   );
+});
+
+test("graph hop defaults resolve from the supplied daemon environment", () => {
+  assert.equal(configuredGraphHops(1, {}), 1);
+  assert.equal(configuredGraphHops(1, { NMG_GRAPH_HOPS: "0" }), 0);
+  assert.equal(configuredGraphHops(1, { NMG_GRAPH_HOPS: "9" }), 3);
+  assert.equal(configuredGraphHops(2, { NMG_GRAPH_HOPS: "invalid" }), 2);
 });
 
 test("STG retention hysteresis cannot be stricter than its promotion gate", () => {

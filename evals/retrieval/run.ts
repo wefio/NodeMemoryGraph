@@ -342,6 +342,8 @@ function metricRow(label: string, metrics: AggregateMetrics): string {
     label,
     String(metrics.questionsWithGolds),
     ...RECALL_KS.map((k) => percent(metrics.recallAt[String(k)] ?? 0)),
+    percent(metrics.anyEvidenceAtK),
+    percent(metrics.allEvidenceAtK),
     percent(metrics.anyEvidenceRate),
     percent(metrics.allEvidenceRate),
     metrics.mrrQuestion.toFixed(3),
@@ -352,9 +354,11 @@ function metricRow(label: string, metrics: AggregateMetrics): string {
   return `| ${cells.join(" | ")} |`;
 }
 
+// any/all@20 are restricted to rank ≤ 20 (the ranked window); any/all@full
+// count the entire returned context, appended (unranked) candidates included.
 const TABLE_HEADER =
-  "| slice | questions | R@1 | R@5 | R@10 | R@20 | any@20 | all@20 | MRR(Q) | legacy evid | ctx chars | p50 ms |\n" +
-  "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |";
+  "| slice | questions | R@1 | R@5 | R@10 | R@20 | any@20 | all@20 | any@full | all@full | MRR(Q) | legacy evid | ctx chars | p50 ms |\n" +
+  "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |";
 
 function printTable(name: string, metrics: Record<string, AggregateMetrics>): void {
   console.log(TABLE_HEADER);

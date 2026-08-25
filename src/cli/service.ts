@@ -67,6 +67,7 @@ import {
 } from "../integration/lab-capabilities.ts";
 import { ReasoningWorkspaces } from "../integration/reasoning-workspaces.ts";
 import {
+  configuredGraphHops,
   configuredMaintenancePolicy,
   configuredStgConsolidationPolicy,
   configuredStgSyncPolicy,
@@ -279,12 +280,20 @@ export class NmgService {
             ),
           } as NmgMethodResult[M];
         }
-        const { action: _action, maintenanceAction, ...proposal } = parsed;
         return {
           action: "propose",
           proposal: this.#getStore().createMemoryMaintenanceProposal({
-            ...proposal,
-            action: maintenanceAction,
+            defectType: parsed.defectType,
+            action: parsed.maintenanceAction,
+            targetMemoryIds: parsed.targetMemoryIds,
+            evidenceMemoryIds: parsed.evidenceMemoryIds,
+            evidenceTraceIds: parsed.evidenceTraceIds,
+            proposedStatement: parsed.proposedStatement,
+            proposedScope: parsed.proposedScope,
+            policy: parsed.policy,
+            longHorizonScore: parsed.longHorizonScore,
+            evaluationKind: parsed.evaluationKind,
+            evaluationRef: parsed.evaluationRef,
           }),
         } as NmgMethodResult[M];
       }
@@ -1218,6 +1227,7 @@ export class NmgService {
     const searchOptions: SearchOptions = {
       ...options,
       sessionId,
+      graphHops: options.graphHops ?? configuredGraphHops(1, this.#environment),
       progressiveWarmDisclosure: options.progressiveWarmDisclosure ?? true,
     };
     const raws = [query, ...(queries ?? [])];

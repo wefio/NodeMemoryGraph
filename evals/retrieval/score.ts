@@ -92,6 +92,11 @@ export interface AggregateMetrics {
   anyEvidenceRate: number;
   /** Fraction of questions with every gold hit within the full window. */
   allEvidenceRate: number;
+  /** Same as anyEvidenceRate but restricted to rank ≤ max(ks) — the honest
+   *  "@20" reading; the full-window rates above count appended (unranked)
+   *  candidates too. */
+  anyEvidenceAtK: number;
+  allEvidenceAtK: number;
   /** Mean 1/rank over golds (miss = 0). */
   mrrGold: number;
   /** Mean 1/rank of each question's first-hit gold (no hit = 0). */
@@ -114,6 +119,9 @@ export function aggregate(
   let questionReciprocalSum = 0;
   let anyHit = 0;
   let allHit = 0;
+  let anyHitK = 0;
+  let allHitK = 0;
+  const maxK = Math.max(...ks);
   let legacyAny = 0;
   let legacyAll = 0;
   let legacyHits = 0;
@@ -128,11 +136,14 @@ export function aggregate(
     golds += question.goldRanks.length;
     let firstRank: number | null = null;
     let every = true;
+    let everyK = true;
     for (const rank of question.goldRanks) {
       if (rank === null) {
         every = false;
+        everyK = false;
         continue;
       }
+      if (rank > maxK) everyK = false;
       for (const k of ks) {
         if (rank <= k) hitCountAt.set(k, hitCountAt.get(k)! + 1);
       }
@@ -141,9 +152,11 @@ export function aggregate(
     }
     if (firstRank !== null) {
       anyHit += 1;
+      if (firstRank <= maxK) anyHitK += 1;
       questionReciprocalSum += 1 / firstRank;
     }
     if (every) allHit += 1;
+    if (everyK) allHitK += 1;
     const legacyEvery = question.legacyHits.length > 0 && question.legacyHits.every(Boolean);
     if (question.legacyHits.some(Boolean)) legacyAny += 1;
     if (legacyEvery) legacyAll += 1;
@@ -164,6 +177,8 @@ export function aggregate(
     recallAt,
     anyEvidenceRate: ratio(anyHit, questionsWithGolds),
     allEvidenceRate: ratio(allHit, questionsWithGolds),
+    anyEvidenceAtK: ratio(anyHitK, questionsWithGolds),
+    allEvidenceAtK: ratio(allHitK, questionsWithGolds),
     mrrGold: ratio(rankSumReciprocal, golds),
     mrrQuestion: ratio(questionReciprocalSum, questionsWithGolds),
     legacy: {

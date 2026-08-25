@@ -72,6 +72,29 @@ test("memory maintenance RPC persists review-only proposals", async () => {
   }
 });
 
+test("service applies NMG_GRAPH_HOPS as a default while explicit search params win", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-graph-hops-"));
+  const service = new NmgService({
+    databasePath: join(directory, "nmg.sqlite"),
+    environment: { NMG_GRAPH_HOPS: "0" },
+  });
+  try {
+    await service.invoke("remember", {
+      statement: "Atlas uses SQLite",
+      nodeName: "Atlas storage",
+      sourceActor: "user",
+    });
+    const configured = await service.invoke("search", { query: "Atlas SQLite" });
+    assert.equal(configured.activeGraph?.budget.maxGraphHops, 0);
+
+    const explicit = await service.invoke("search", { query: "Atlas SQLite", graphHops: 2 });
+    assert.equal(explicit.activeGraph?.budget.maxGraphHops, 2);
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
 test("Lab RPC is session scoped and reasoning workspaces are daemon owned", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-lab-"));
   const service = new NmgService({

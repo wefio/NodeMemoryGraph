@@ -514,6 +514,13 @@ export interface SearchOptions {
    *  supplement should not exceed the primary evidence budget). Window mode
    *  is already self-bounding and ignores this cap. */
   chainExpansionMaxMembers?: number;
+  /** Shared character budget for the appended (unranked) sections — chain
+   *  expansion and leaf-block member routing together. A candidate whose
+   *  statement would exceed the remaining budget is skipped (shorter later
+   *  candidates may still fit). Unset = unlimited (legacy behavior); the
+   *  eval protocol pins it so worst-case context inflation is a protocol
+   *  constant rather than a data-dependent accident. */
+  appendedMaxChars?: number;
   /** Leaf-block summary routing: blocks carrying an LLM-written semantic
    *  summary (see pendingLeafSummaries/setLeafSummary) are matched against the
    *  query over a dedicated FTS index; members of hit blocks are appended to

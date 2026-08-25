@@ -11,6 +11,7 @@ export interface NmgPrompts {
   search_description: string;
   get_description: string;
   remember_description: string;
+  mcp_remember_description: string;
   board_description: string;
   lab_description: string;
   reason_description: string;
@@ -28,6 +29,7 @@ export interface NmgPrompts {
   board_task_id_parameter_description: string;
   board_content_parameter_description: string;
   remember_action_parameter_description: string;
+  mcp_remember_action_parameter_description: string;
   remember_memory_id_parameter_description: string;
   remember_new_memory_id_parameter_description: string;
   remember_superseded_memory_id_parameter_description: string;
@@ -40,6 +42,7 @@ export interface NmgPrompts {
   evidence_parameter_description: string;
   source_actor_parameter_description: string;
   active_graph_id_parameter_description: string;
+  mcp_active_graph_id_parameter_description: string;
   feedback_note_parameter_description: string;
   feedback_label_parameter_description: string;
   semantic_task_id_parameter_description: string;
