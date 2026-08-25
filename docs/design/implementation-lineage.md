@@ -44,7 +44,7 @@ risk.
 | Temporal/logical memory chains | **Introduced** `155d88c9`; **Hardened** `d0a1cc03`, `fbc45e51`, `a126382a`, `cb4a858a`, `6db50df8`; **Validated** `2f068cfc`, `f5598a8c`, `f4977cf2` | [Temporal/logical chains](temporal-logical-chains-design-2026-08-13.md) |
 | Leaf/node summaries and summary routing | **Introduced** `1feb008d`, `ecde4e45`; **Hardened** `796439ed`, `5a0edbf5`, `20de2efc` | [Tiered disclosure](tiered-disclosure-design.md), node-summary experiment series |
 | Natural evidence and activation gates | **Introduced** `cc0fa383`, `c815dfd1`; **Hardened** `f49db9d1`, `9fa0872c`, `a14f7828`; **Validated** `fd62ed06`, `571e4bbf` | [Retrieval confidence controller](retrieval-confidence-controller.md), [completion audit](completion-audit.md) |
-| Documentation, CI and Agent development workflow | **Introduced** `00d4a285`, `40c8e22e`, `75d9da39`; **Hardened** `8319e7e0`, `8b4ac943`, `11ab3b56` | [Documentation index](../README.md), [CI and quality](ci-cd-and-quality.md) |
+| Documentation, CI and Agent development workflow | **Introduced** `00d4a285`, `40c8e22e`, `75d9da39`; **Hardened** `8319e7e0`, `8b4ac943`, `11ab3b56`, `8061679` | [Documentation index](../README.md), [CI and quality](ci-cd-and-quality.md) |
 
 The Pi dependency boundary is intentionally represented by the package manifest
 and its contract test rather than a new subsystem: the harness API is an optional
