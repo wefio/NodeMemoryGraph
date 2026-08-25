@@ -24,8 +24,11 @@ export interface QuestionInput {
   /** Gold evidence texts (messages or whole-session blobs). Empty strings are ignored. */
   golds: readonly string[];
   /** Ranked candidates, best first; each candidate is a list of alternative
-   *  texts (statement, evidence excerpt) — a hit on any part counts. */
+   *  texts (statement, evidence excerpt) — a hit on any part counts. Appended
+   *  recall supplements may follow the ranked prefix. */
   candidates: ReadonlyArray<readonly string[]>;
+  /** Length of the ranked prefix. Omit when every candidate is ranked. */
+  rankedCandidateCount?: number;
   /** Rendered context for the legacy audit-comparable coverage metrics. */
   contextText?: string;
   durationMs?: number;
@@ -33,8 +36,10 @@ export interface QuestionInput {
 
 export interface ScoredQuestion {
   category: string;
-  /** Per-gold first-hit rank (1-based), null when never hit. */
+  /** Per-gold first-hit position in the complete rendered window (1-based). */
   goldRanks: Array<number | null>;
+  /** Per-gold first-hit rank inside the ranked prefix only. */
+  rankedGoldRanks: Array<number | null>;
   /** Per-gold hit in the rendered context (legacy audit-compatible coverage). */
   legacyHits: boolean[];
   contextChars: number;
@@ -54,9 +59,13 @@ export function scoreQuestion(input: QuestionInput, direction: MatchDirection): 
     parts.map(normalizeText).filter((part) => part.length > 0),
   );
   const context = input.contextText === undefined ? null : normalizeText(input.contextText);
+  const rankedCandidateCount = Math.max(
+    0,
+    Math.min(input.rankedCandidateCount ?? candidates.length, candidates.length),
+  );
 
-  const goldRanks = golds.map((gold) => {
-    for (let index = 0; index < candidates.length; index += 1) {
+  const firstHitRanks = (candidateCount: number): Array<number | null> => golds.map((gold) => {
+    for (let index = 0; index < candidateCount; index += 1) {
       const parts = candidates[index]!;
       const hit = parts.some((part) =>
         direction === "gold-in-candidate" ? part.includes(gold) : gold.includes(part),
@@ -65,6 +74,8 @@ export function scoreQuestion(input: QuestionInput, direction: MatchDirection): 
     }
     return null;
   });
+  const goldRanks = firstHitRanks(candidates.length);
+  const rankedGoldRanks = firstHitRanks(rankedCandidateCount);
 
   const legacyHits = golds.map((gold, index) => {
     if (context !== null && direction === "gold-in-candidate") {
@@ -76,6 +87,7 @@ export function scoreQuestion(input: QuestionInput, direction: MatchDirection): 
   return {
     category: input.category,
     goldRanks,
+    rankedGoldRanks,
     legacyHits,
     contextChars: input.contextText?.length ?? 0,
     ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
@@ -137,9 +149,10 @@ export function aggregate(
     let firstRank: number | null = null;
     let every = true;
     let everyK = true;
-    for (const rank of question.goldRanks) {
+    for (const [index, fullRank] of question.goldRanks.entries()) {
+      const rank = question.rankedGoldRanks[index] ?? null;
+      if (fullRank === null) every = false;
       if (rank === null) {
-        every = false;
         everyK = false;
         continue;
       }
@@ -150,8 +163,8 @@ export function aggregate(
       rankSumReciprocal += 1 / rank;
       if (firstRank === null || rank < firstRank) firstRank = rank;
     }
+    if (question.goldRanks.some((rank) => rank !== null)) anyHit += 1;
     if (firstRank !== null) {
-      anyHit += 1;
       if (firstRank <= maxK) anyHitK += 1;
       questionReciprocalSum += 1 / firstRank;
     }

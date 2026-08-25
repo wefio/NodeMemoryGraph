@@ -73,6 +73,7 @@ import type {
   SearchOptions,
   VectorEmbedder,
 } from "../types.ts";
+import { DEFAULT_APPENDED_MAX_CHARS } from "../types.ts";
 import type { DatabaseSync } from "node:sqlite";
 import {
   MIN_WARM_DISCLOSURE_SIZE,
@@ -601,19 +602,28 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       const budgetLedger = activeGraphBudgetLedger(activeBudget, usage);
       const taskId = options.taskId?.trim() || stableTaskId(query);
       // Summary-routing signal (diagnostic for IR + learnable router): which
-      // nodes the coarse node-summary FTS index matched (routed) and whether
+      // nodes the coarse node-summary lexical/vector indexes matched and whether
       // they also reached the base retrieval result set (recalled). routed ∧
       // !recalled is the IR gap — the summary index saw it, base retrieval
       // missed it, and the later node-routed expansion rescued it. Computed
       // once here (before traceInput) and reused by the node-routed block
       // expansion below so the FTS route runs a single time per query.
-      const nodeRouteSignal: NodeRouteSignalItem[] = options.leafBlockRouting
-        ? this.routeNodesByFts(query, 2).map((hit) => ({
-            nodeId: hit.nodeId,
-            routed: true,
-            recalled: results.some((result) => result.node.id === hit.nodeId),
-          }))
-        : [];
+      const nodeRouteIds: string[] = [];
+      if (options.leafBlockRouting) {
+        for (const hit of this.routeNodesByFts(query, 2)) {
+          if (!nodeRouteIds.includes(hit.nodeId)) nodeRouteIds.push(hit.nodeId);
+        }
+        if (semantic) {
+          for (const route of this.routeNodesByVector(semantic.queryVector, semantic.model, 2)) {
+            if (!nodeRouteIds.includes(route.node.id)) nodeRouteIds.push(route.node.id);
+          }
+        }
+      }
+      const nodeRouteSignal: NodeRouteSignalItem[] = nodeRouteIds.map((nodeId) => ({
+        nodeId,
+        routed: true,
+        recalled: results.some((result) => result.node.id === nodeId),
+      }));
       const traceInput: RetrievalTraceInput = {
         sessionId: options.sessionId?.trim() || null,
         query,
@@ -699,13 +709,16 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       // record via duplicateOf. Callers may drop these for rendering.
       markDuplicateResults(context.results);
       // Shared character budget for the two appended (unranked) sections
-      // below — chain expansion and block-member routing. Unset = unlimited
-      // (legacy); the eval protocol pins it so worst-case inflation is a
-      // protocol constant.
-      const appendedMaxChars = options.appendedMaxChars;
+      // below — chain expansion and block-member routing. This is a protocol
+      // guarantee, not merely an eval setting: omitted callers receive the
+      // same finite ceiling as explicit callers.
+      const appendedMaxChars = Math.max(
+        0,
+        Math.trunc(options.appendedMaxChars ?? DEFAULT_APPENDED_MAX_CHARS),
+      );
       let appendedChars = 0;
       const fitsAppendedBudget = (chars: number): boolean =>
-        appendedMaxChars === undefined || appendedChars + chars <= appendedMaxChars;
+        appendedChars + chars <= appendedMaxChars;
       const reserveAppendedBudget = (chars: number): boolean => {
         if (!fitsAppendedBudget(chars)) return false;
         appendedChars += chars;
@@ -809,7 +822,8 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             0,
             Math.trunc(options.chainExpansionMaxMembers ?? context.results.length),
           );
-          const activationTerms = window === undefined ? queryOverlapTerms(query) : null;
+          const chainQueryTerms = queryOverlapTerms(query);
+          const activationTerms = window === undefined ? chainQueryTerms : null;
           interface ChainCandidate {
             id: string;
             chainIndex: number;
@@ -819,6 +833,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             chars: number;
           }
           const gated: ChainCandidate[] = [];
+          const windowed: ChainCandidate[] = [];
           let chainIndex = 0;
           for (const chainId of chainIds) {
             const memberRows = this.db
@@ -837,12 +852,20 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                 const p = Number(row.position);
                 if (p < lo || p > hi) continue;
                 const memberId = String(row.memory_id);
-                if (!seen.has(memberId) && reserveAppendedBudget(String(row.statement).length)) {
-                  seen.add(memberId);
-                  toFetch.push(memberId);
-                  chainOf.set(memberId, chainId);
-                  chainPos.set(memberId, p);
-                }
+                if (seen.has(memberId)) continue;
+                const dist = Math.min(...hitPos.map((h) => Math.abs(p - h)));
+                const activation =
+                  1 / (1 + dist) +
+                  (termOverlapScore(chainQueryTerms, String(row.statement)) > 0 ? 1 : 0) +
+                  0.5 * (Number(row.importance) || 0);
+                windowed.push({
+                  id: memberId,
+                  chainIndex,
+                  pos: p,
+                  activation,
+                  dist,
+                  chars: String(row.statement).length,
+                });
               }
             } else if (activationTerms !== null && hitPos.length > 0) {
               for (const row of memberRows) {
@@ -883,6 +906,28 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             }
             chainIndex += 1;
           }
+          if (windowed.length > 0) {
+            const admitted = new Set<string>();
+            for (const candidate of [...windowed].sort(
+              (a, b) =>
+                b.activation - a.activation ||
+                a.dist - b.dist ||
+                a.chainIndex - b.chainIndex ||
+                a.pos - b.pos,
+            )) {
+              if (reserveAppendedBudget(candidate.chars)) admitted.add(candidate.id);
+            }
+            const chainList = [...chainIds];
+            for (const candidate of [...windowed].sort(
+              (a, b) => a.chainIndex - b.chainIndex || a.pos - b.pos,
+            )) {
+              if (!admitted.has(candidate.id) || seen.has(candidate.id)) continue;
+              seen.add(candidate.id);
+              toFetch.push(candidate.id);
+              chainOf.set(candidate.id, chainList[candidate.chainIndex]!);
+              chainPos.set(candidate.id, candidate.pos);
+            }
+          }
           if (activationTerms !== null && gated.length > 0) {
             // Over the cap: keep the highest-activation members (ties break
             // toward the hit, then chain order), but emit in chain order so
@@ -899,12 +944,22 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                     )
                     .slice(0, maxChainMembers)
                 : gated;
-            const kept = new Set(survivors.map((c) => c.id));
+            const priorityOrder = [...survivors].sort(
+              (a, b) =>
+                b.activation - a.activation ||
+                a.dist - b.dist ||
+                a.chainIndex - b.chainIndex ||
+                a.pos - b.pos,
+            );
+            const kept = new Set<string>();
+            for (const candidate of priorityOrder) {
+              if (reserveAppendedBudget(candidate.chars)) kept.add(candidate.id);
+            }
             const chainList = [...chainIds];
             for (const c of [...gated].sort(
               (a, b) => a.chainIndex - b.chainIndex || a.pos - b.pos,
             )) {
-              if (!kept.has(c.id) || seen.has(c.id) || !reserveAppendedBudget(c.chars)) continue;
+              if (!kept.has(c.id) || seen.has(c.id)) continue;
               seen.add(c.id);
               toFetch.push(c.id);
               chainOf.set(c.id, chainList[c.chainIndex]!);
@@ -966,8 +1021,8 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         // the node summary is the index that matched.
         const nodeRouted = new Set<string>();
         // nodeRouteSignal was computed earlier (before traceInput) to record
-        // the routed-vs-recalled signal; reuse it so the node-summary FTS
-        // route runs exactly once per query.
+        // the routed-vs-recalled signal; reuse it so coarse summary routing
+        // runs exactly once per query.
         const nodeHits = nodeRouteSignal.map((signal) => ({
           nodeId: signal.nodeId,
           score: 0,
@@ -1040,10 +1095,15 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
               if (chosen.size >= perBlock) break;
               chosen.add(member.memoryId);
             }
+            const budgeted = new Set<string>();
+            for (const member of [...ranked]
+              .filter((candidate) => chosen.has(candidate.memoryId))
+              .sort((a, b) => b.score - a.score || a.ordinal - b.ordinal)) {
+              if (reserveAppendedBudget(member.chars)) budgeted.add(member.memoryId);
+            }
             for (const member of ranked) {
               if (toFetch.length >= maxMembers) break;
-              if (!chosen.has(member.memoryId)) continue;
-              if (!reserveAppendedBudget(member.chars)) continue;
+              if (!budgeted.has(member.memoryId)) continue;
               seen.add(member.memoryId);
               toFetch.push(member.memoryId);
               blockOf.set(member.memoryId, blockId);

@@ -229,6 +229,44 @@ test("expandChains shares the appended character budget and skips overflow", () 
   });
 });
 
+test("expandChains admits higher-activation evidence before chronological rendering", () => {
+  withStore((store) => {
+    const statements = [
+      "needle anchor",
+      `low relevance ${"x".repeat(8_000)}`,
+      `needle high relevance ${"y".repeat(800)}`,
+    ];
+    const ids = statements.map(
+      (statement) =>
+        store.remember({
+          nodeName: "priority budget chain",
+          statement,
+          sessionId: "s1",
+          sourceActor: "user",
+        }).memory.id,
+    );
+    const chain = store.createMemoryChain({
+      chainType: "temporal",
+      topic: "priority budget",
+      ownerSessionId: "s1",
+    });
+    ids.forEach((memoryId, position) =>
+      store.addMemoryToChain({ chainId: chain.id, memoryId, position }),
+    );
+
+    const context = store.searchContext("needle anchor", {
+      limit: 1,
+      sessionId: "s1",
+      expandChains: true,
+      chainExpansionMaxMembers: 10,
+      appendedMaxChars: statements[1]!.length,
+    });
+    const returned = context.results.map((result) => result.memory.id);
+    assert.ok(returned.includes(ids[2]!), "higher-activation candidate consumes the shared budget first");
+    assert.ok(!returned.includes(ids[1]!), "lower-activation long candidate cannot crowd it out");
+  });
+});
+
 test("expandChains does nothing for a hit outside any chain", () => {
   withStore((store) => {
     store.remember({

@@ -60,6 +60,9 @@ const PINNED_RETRIEVAL = {
   tieredDisclosure: true,
   progressiveWarmDisclosure: false,
   expandChains: true,
+  // Shared budget for appended (non-ranked) context; the bridge defaults to
+  // the same value via its constructor env override.
+  appendedMaxChars: Number(process.env.NMG_APPENDED_MAX_CHARS ?? 16_000),
 } as const;
 
 interface CliOptions {
@@ -116,6 +119,7 @@ async function main(): Promise<void> {
     const bridge = new OmniMemEvalBridge(storeRoot, {
       embeddingClient,
       leafBlockRouting: options.summaries,
+      appendedMaxChars: PINNED_RETRIEVAL.appendedMaxChars,
     });
     try {
       const scored = await retrieveAndScore(bridge, spec, options.topK);
@@ -160,6 +164,7 @@ async function retrieveAndScore(
           category: question.category,
           golds: question.golds,
           candidates,
+          rankedCandidateCount: result.memories.filter((memory) => memory.ranked === true).length,
           contextText: result.text,
           durationMs,
         },

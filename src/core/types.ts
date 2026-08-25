@@ -66,6 +66,8 @@ export type MemoryType = (typeof MEMORY_TYPES)[number];
 export const MEMORY_ACTORS = ["assistant", "system", "tool", "user"] as const;
 export type MemoryActor = (typeof MEMORY_ACTORS)[number];
 export const MAX_EVIDENCE_SOURCE_CHARACTERS = 4_096;
+/** Default hard ceiling shared by every unranked retrieval supplement. */
+export const DEFAULT_APPENDED_MAX_CHARS = 16_000;
 export const TRUTH_STATUSES = ["asserted", "inferred", "unverified", "verified"] as const;
 export type TruthStatus = (typeof TRUTH_STATUSES)[number];
 /** Logical polarity of a statement, extracted at write time from text. */
@@ -517,9 +519,7 @@ export interface SearchOptions {
   /** Shared character budget for the appended (unranked) sections — chain
    *  expansion and leaf-block member routing together. A candidate whose
    *  statement would exceed the remaining budget is skipped (shorter later
-   *  candidates may still fit). Unset = unlimited (legacy behavior); the
-   *  eval protocol pins it so worst-case context inflation is a protocol
-   *  constant rather than a data-dependent accident. */
+   *  candidates may still fit). Omit to use DEFAULT_APPENDED_MAX_CHARS. */
   appendedMaxChars?: number;
   /** Leaf-block summary routing: blocks carrying an LLM-written semantic
    *  summary (see pendingLeafSummaries/setLeafSummary) are matched against the
@@ -630,13 +630,20 @@ export interface NodeSummaryTask {
   statements: readonly string[];
 }
 
+export interface SummaryProviderInput {
+  nodeName: string;
+  statements: readonly string[];
+}
+
 /** External LLM that writes retrieval-index summaries for leaf blocks.
  *  Same provider pattern as the embedding/judge clients: NMG ships no model,
  *  the caller configures an endpoint. The summary is index metadata — it is
  *  matched against queries but never returned as evidence. */
 export interface LeafSummaryProvider {
   readonly model: string;
-  summarize(input: { nodeName: string; statements: readonly string[] }): Promise<string>;
+  summarize(input: SummaryProviderInput): Promise<string>;
+  /** Optional transport batch. Each output corresponds to the input at the same index. */
+  summarizeMany?(inputs: readonly SummaryProviderInput[]): Promise<readonly string[]>;
 }
 
 /** External LLM that writes retrieval-index node summaries. Same provider
@@ -646,7 +653,8 @@ export interface LeafSummaryProvider {
  *  hysteresis, so bounded staleness is acceptable by design. */
 export interface NodeSummaryProvider {
   readonly model: string;
-  summarize(input: { nodeName: string; statements: readonly string[] }): Promise<string>;
+  summarize(input: SummaryProviderInput): Promise<string>;
+  summarizeMany?(inputs: readonly SummaryProviderInput[]): Promise<readonly string[]>;
 }
 
 export interface LeafEmbeddingDocument {

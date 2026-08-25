@@ -6,7 +6,11 @@ import {
   createEmbeddingClientFromEnv,
   type EmbeddingClient,
 } from "../core/embedding-provider.ts";
-import { syncRecordEmbeddings } from "../core/embedding-sync.ts";
+import {
+  syncLeafEmbeddings,
+  syncNodeEmbeddings,
+  syncRecordEmbeddings,
+} from "../core/embedding-sync.ts";
 import {
   createLeafSummaryProviderFromEnv,
   drainLeafSummaries,
@@ -947,7 +951,7 @@ export class NmgService {
         // Node summaries consume the node's leaf-block summaries (coarser
         // tier), so they drain after blocks get their summaries.
         this.#drainNodeSummaries(store);
-        this.#drainRecordEmbeddings(store);
+        this.#drainEmbeddings(store);
       } catch {
         // Maintenance is opportunistic. Dirty/delta counters remain durable and
         // the next write can retry; a failed batch must not fail remember.
@@ -1457,9 +1461,11 @@ export class NmgService {
     }
   }
 
-  /** Incrementally fills the configured record index after writes. Disabled by
-   * default so embedding traffic remains an explicit deployment choice. */
-  #drainRecordEmbeddings(store: NmgStore): void {
+  /** Incrementally fills record, leaf-summary and node-summary indexes after
+   * writes. Disabled by default so embedding traffic remains an explicit
+   * deployment choice. Summary vectors may become pending after this pass;
+   * their timestamps make the next bounded pass refresh them safely. */
+  #drainEmbeddings(store: NmgStore): void {
     if (!isEnabled(this.#environment.NMG_EMBED_AUTO_SYNC) || this.#embeddingDrains.has(store)) {
       return;
     }
@@ -1467,6 +1473,8 @@ export class NmgService {
     if (!client) return;
     this.#embeddingDrains.add(store);
     void syncRecordEmbeddings(store, client)
+      .then(() => syncLeafEmbeddings(store, client))
+      .then(() => syncNodeEmbeddings(store, client))
       .catch((error) => {
         this.#embeddingError = error instanceof Error ? error.message : String(error);
       })

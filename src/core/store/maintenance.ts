@@ -2212,7 +2212,19 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
       const exists = this.db.prepare("SELECT id FROM memory_nodes WHERE id = ?").get(nodeId) as
         Row | undefined;
       if (!exists) return false;
-      const now = new Date().toISOString();
+      // Embedding freshness is timestamp-based. Ensure a summary written in the
+      // same millisecond as its previous embedding is still observably newer.
+      const latestEmbedding = this.db
+        .prepare("SELECT MAX(updated_at) AS updated_at FROM node_embeddings WHERE node_id = ?")
+        .get(nodeId) as Row | undefined;
+      const latestEmbeddingMs = latestEmbedding?.updated_at
+        ? Date.parse(String(latestEmbedding.updated_at))
+        : Number.NaN;
+      const now = new Date(
+        Number.isFinite(latestEmbeddingMs)
+          ? Math.max(Date.now(), latestEmbeddingMs + 1)
+          : Date.now(),
+      ).toISOString();
       this.db.exec("BEGIN IMMEDIATE");
       try {
         this.db

@@ -27,6 +27,31 @@ export class OpenAiCompletionClient {
   }
 
   async complete(systemPrompt: string, userPrompt: string): Promise<string> {
+    return this.#request(systemPrompt, userPrompt, this.#maxTokens);
+  }
+
+  async completeBatch(systemPrompt: string, userPrompts: readonly string[]): Promise<string[]> {
+    if (userPrompts.length === 0) return [];
+    const content = await this.#request(
+      `${systemPrompt}\n\nReturn exactly one JSON object: {"summaries":["...", ...]}. ` +
+        "Keep the summaries in input order and return no prose or Markdown fences.",
+      JSON.stringify(userPrompts.map((prompt, index) => ({ id: index, content: prompt }))),
+      Math.min(8_192, this.#maxTokens * userPrompts.length),
+    );
+    const first = content.indexOf("{");
+    const last = content.lastIndexOf("}");
+    if (first < 0 || last <= first) throw new Error("summary batch returned invalid JSON");
+    const parsed = JSON.parse(content.slice(first, last + 1)) as { summaries?: unknown };
+    if (!Array.isArray(parsed.summaries) || parsed.summaries.length !== userPrompts.length) {
+      throw new Error("summary batch returned the wrong number of summaries");
+    }
+    if (parsed.summaries.some((summary) => typeof summary !== "string" || !summary.trim())) {
+      throw new Error("summary batch returned an empty or non-text summary");
+    }
+    return parsed.summaries as string[];
+  }
+
+  async #request(systemPrompt: string, userPrompt: string, maxTokens: number): Promise<string> {
     const body: Record<string, unknown> = {
       model: this.model,
       messages: [
@@ -34,7 +59,7 @@ export class OpenAiCompletionClient {
         { role: "user", content: userPrompt },
       ],
       stream: false,
-      max_tokens: this.#maxTokens,
+      max_tokens: maxTokens,
       temperature: 0,
     };
     if (/deepseek/i.test(this.baseUrl) || /deepseek/i.test(this.model)) {

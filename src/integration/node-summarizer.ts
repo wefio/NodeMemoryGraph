@@ -22,7 +22,7 @@
  */
 
 import type { NmgStore } from "../core/store.ts";
-import type { NodeSummaryProvider } from "../core/types.ts";
+import type { NodeSummaryProvider, SummaryProviderInput } from "../core/types.ts";
 import { OpenAiCompletionClient, type OpenAiCompletionOptions } from "./openai-completion.ts";
 import { drainSummaryTasks, type SummaryDrainResult } from "./summary-drain.ts";
 
@@ -47,6 +47,15 @@ Rules:
 
 export type OpenAiNodeSummaryOptions = OpenAiCompletionOptions;
 
+function nodeSummaryPrompt(input: SummaryProviderInput): string {
+  return [
+    `Cluster: ${input.nodeName}`,
+    "",
+    "Block summaries:",
+    ...input.statements.map((statement) => `- ${statement}`),
+  ].join("\n");
+}
+
 export class OpenAiNodeSummaryProvider implements NodeSummaryProvider {
   readonly model: string;
   readonly baseUrl: string;
@@ -58,16 +67,12 @@ export class OpenAiNodeSummaryProvider implements NodeSummaryProvider {
     this.model = this.#client.model;
   }
 
-  async summarize(input: { nodeName: string; statements: readonly string[] }): Promise<string> {
-    return this.#client.complete(
-      NODE_SUMMARY_SYSTEM_PROMPT,
-      [
-        `Cluster: ${input.nodeName}`,
-        "",
-        "Block summaries:",
-        ...input.statements.map((statement) => `- ${statement}`),
-      ].join("\n"),
-    );
+  async summarize(input: SummaryProviderInput): Promise<string> {
+    return this.#client.complete(NODE_SUMMARY_SYSTEM_PROMPT, nodeSummaryPrompt(input));
+  }
+
+  async summarizeMany(inputs: readonly SummaryProviderInput[]): Promise<readonly string[]> {
+    return this.#client.completeBatch(NODE_SUMMARY_SYSTEM_PROMPT, inputs.map(nodeSummaryPrompt));
   }
 }
 
@@ -132,6 +137,12 @@ export async function drainNodeSummaries(
     pull: (limit) => store.pendingNodeSummaries({ limit, ...pendingOptions }),
     summarize: (task) =>
       provider.summarize({ nodeName: task.nodeName, statements: task.statements }),
+    summarizeMany: provider.summarizeMany
+      ? (tasks) =>
+          provider.summarizeMany!(
+            tasks.map((task) => ({ nodeName: task.nodeName, statements: task.statements })),
+          )
+      : undefined,
     commit: (task, summary) =>
       store.setNodeSummary(task.nodeId, summary, provider.model, task.memberCount),
   });

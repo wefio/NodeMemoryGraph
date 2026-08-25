@@ -1207,12 +1207,12 @@ export class NmgStoreBase {
   ): NodeEmbeddingDocument[] {
     const rows = this.db
       .prepare(
-        `SELECT n.id, n.canonical_name, n.kind, n.summary
+        `SELECT n.id, n.canonical_name, n.kind, n.summary, n.semantic_summary
        FROM memory_nodes n
        WHERE n.id > ? AND n.status = 'active'
          AND (? IS NULL OR NOT EXISTS (
            SELECT 1 FROM node_embeddings e WHERE e.node_id = n.id AND e.model = ?
-             AND e.updated_at >= n.updated_at
+             AND e.updated_at >= COALESCE(n.semantic_summary_at, n.updated_at)
          ))
        ORDER BY n.id LIMIT ?`,
       )
@@ -1224,7 +1224,7 @@ export class NmgStoreBase {
       ) as Row[];
     return rows.map((row) => ({
       nodeId: String(row.id),
-      text: `${row.canonical_name} ${row.kind} ${row.summary}`,
+      text: `${row.canonical_name} ${row.kind} ${row.semantic_summary ?? row.summary}`,
     }));
   }
   upsertExternalNodeEmbeddings(model: string, embeddings: ExternalNodeEmbedding[]): number {

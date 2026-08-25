@@ -19,7 +19,7 @@ interface EmbeddingSyncDocument {
 }
 
 interface EmbeddingSyncTarget {
-  target: "records" | "leaves";
+  target: "records" | "leaves" | "nodes";
   label: string;
   read(cursor: string, limit: number, indexId: string): EmbeddingSyncDocument[];
   write(indexId: string, documents: EmbeddingSyncDocument[], vectors: number[][]): void;
@@ -120,6 +120,28 @@ export async function syncLeafEmbeddings(
       store.upsertExternalLeafEmbeddings(
         indexId,
         documents.map((document, index) => ({ blockId: document.id, vector: vectors[index]! })),
+      ),
+  });
+}
+
+/** Incrementally embeds node-level semantic summaries for coarse routing. */
+export async function syncNodeEmbeddings(
+  store: NmgStore,
+  client: RecordEmbeddingClient,
+  batchSize = 64,
+): Promise<RecordEmbeddingSyncResult> {
+  return syncEmbeddingTarget(store, client, batchSize, {
+    target: "nodes",
+    label: "memory nodes",
+    read: (cursor, limit, indexId) =>
+      store.nodeEmbeddingDocuments(cursor, limit, indexId).map((document) => ({
+        id: document.nodeId,
+        text: document.text,
+      })),
+    write: (indexId, documents, vectors) =>
+      store.upsertExternalNodeEmbeddings(
+        indexId,
+        documents.map((document, index) => ({ nodeId: document.id, vector: vectors[index]! })),
       ),
   });
 }

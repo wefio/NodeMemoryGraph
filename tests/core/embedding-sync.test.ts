@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { syncLeafEmbeddings, syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
+import {
+  syncLeafEmbeddings,
+  syncNodeEmbeddings,
+  syncRecordEmbeddings,
+} from "../../src/core/embedding-sync.ts";
 import { NmgStore } from "../../src/core/store.ts";
 
 test("record embedding sync indexes only missing records and marks the index ready", async () => {
@@ -94,6 +98,39 @@ test("leaf embedding sync shares the lifecycle but writes leaf targets", async (
     const second = await syncLeafEmbeddings(store, client, 1);
     assert.equal(second.indexed, 0);
     assert.equal(calls.length, 1);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("node embedding sync prefers semantic summaries and refreshes stale vectors", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-node-embedding-sync-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  const calls: string[][] = [];
+  const client = {
+    indexId: "nodes@test",
+    async embedDocuments(inputs: string[]) {
+      calls.push(inputs);
+      return inputs.map(() => [1, 0]);
+    },
+  };
+  try {
+    const remembered = store.remember({ statement: "opaque source text", nodeName: "target" });
+    const first = await syncNodeEmbeddings(store, client, 8);
+    assert.equal(first.indexed, 1);
+    assert.ok(calls[0]![0]!.includes("opaque source text") === false);
+
+    store.setNodeSummary(
+      remembered.node.id,
+      "semantic bridge about zephyr travel",
+      "summary-model",
+      1,
+    );
+    const second = await syncNodeEmbeddings(store, client, 8);
+    assert.equal(second.indexed, 1, "semantic-summary timestamp makes the prior node vector stale");
+    assert.ok(calls[1]![0]!.includes("semantic bridge about zephyr travel"));
+    assert.deepEqual(second.health.targets, ["nodes"]);
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });

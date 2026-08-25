@@ -16,7 +16,7 @@
  */
 
 import type { NmgStore } from "../core/store.ts";
-import type { LeafSummaryProvider } from "../core/types.ts";
+import type { LeafSummaryProvider, SummaryProviderInput } from "../core/types.ts";
 import { OpenAiCompletionClient, type OpenAiCompletionOptions } from "./openai-completion.ts";
 import { drainSummaryTasks, type SummaryDrainResult } from "./summary-drain.ts";
 
@@ -38,6 +38,15 @@ Rules:
 
 export type OpenAiLeafSummaryOptions = OpenAiCompletionOptions;
 
+function leafSummaryPrompt(input: SummaryProviderInput): string {
+  return [
+    `Cluster: ${input.nodeName}`,
+    "",
+    "Memories:",
+    ...input.statements.map((statement) => `- ${statement}`),
+  ].join("\n");
+}
+
 export class OpenAiLeafSummaryProvider implements LeafSummaryProvider {
   readonly model: string;
   readonly baseUrl: string;
@@ -49,16 +58,12 @@ export class OpenAiLeafSummaryProvider implements LeafSummaryProvider {
     this.model = this.#client.model;
   }
 
-  async summarize(input: { nodeName: string; statements: readonly string[] }): Promise<string> {
-    return this.#client.complete(
-      LEAF_SUMMARY_SYSTEM_PROMPT,
-      [
-        `Cluster: ${input.nodeName}`,
-        "",
-        "Memories:",
-        ...input.statements.map((statement) => `- ${statement}`),
-      ].join("\n"),
-    );
+  async summarize(input: SummaryProviderInput): Promise<string> {
+    return this.#client.complete(LEAF_SUMMARY_SYSTEM_PROMPT, leafSummaryPrompt(input));
+  }
+
+  async summarizeMany(inputs: readonly SummaryProviderInput[]): Promise<readonly string[]> {
+    return this.#client.completeBatch(LEAF_SUMMARY_SYSTEM_PROMPT, inputs.map(leafSummaryPrompt));
   }
 }
 
@@ -113,6 +118,12 @@ export async function drainLeafSummaries(
     pull: (limit) => store.pendingLeafSummaries({ limit }),
     summarize: (task) =>
       provider.summarize({ nodeName: task.nodeName, statements: task.statements }),
+    summarizeMany: provider.summarizeMany
+      ? (tasks) =>
+          provider.summarizeMany!(
+            tasks.map((task) => ({ nodeName: task.nodeName, statements: task.statements })),
+          )
+      : undefined,
     commit: (task, summary) =>
       store.setLeafSummary(task.blockId, summary, provider.model, task.membersKey),
   });

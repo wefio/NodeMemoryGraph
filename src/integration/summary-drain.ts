@@ -4,6 +4,8 @@ export interface SummaryDrainOptions<TTask> {
   maxCalls?: number;
   pull(limit: number): TTask[];
   summarize(task: TTask): Promise<string>;
+  /** Optional request-level batching. Durable commits remain one task at a time. */
+  summarizeMany?(tasks: readonly TTask[]): Promise<readonly string[]>;
   /** False means the task changed before commit. It remains pending but is not
    * counted as a provider failure. */
   commit(task: TTask, summary: string): boolean;
@@ -38,14 +40,23 @@ export async function drainSummaryTasks<TTask>(
     let roundSummarized = 0;
     for (let offset = 0; offset < tasks.length; offset += concurrency) {
       const slice = tasks.slice(offset, offset + concurrency);
-      const summaries = await Promise.all(
-        slice.map((task) =>
-          options
-            .summarize(task)
-            .then((text) => text.trim())
-            .catch(() => ""),
-        ),
-      );
+      const summaries = options.summarizeMany
+        ? await options
+            .summarizeMany(slice)
+            .then((texts) =>
+              slice.map((_, index) =>
+                typeof texts[index] === "string" ? texts[index]!.trim() : "",
+              ),
+            )
+            .catch(() => slice.map(() => ""))
+        : await Promise.all(
+            slice.map((task) =>
+              options
+                .summarize(task)
+                .then((text) => text.trim())
+                .catch(() => ""),
+            ),
+          );
       for (const [index, task] of slice.entries()) {
         const summary = summaries[index]!;
         if (!summary) {

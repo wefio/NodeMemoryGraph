@@ -27,6 +27,7 @@ test("scoreQuestion ranks gold hits (gold-in-candidate)", () => {
     "gold-in-candidate",
   );
   assert.deepEqual(scored.goldRanks, [2, null]);
+  assert.deepEqual(scored.rankedGoldRanks, [2, null]);
   assert.deepEqual(scored.legacyHits, [true, false]);
 });
 
@@ -117,6 +118,26 @@ test("aggregate separates windowed any/all@k from full-window rates", () => {
   assert.equal(metrics.anyEvidenceAtK, 0);
   assert.equal(metrics.allEvidenceAtK, 0);
   assert.equal(metrics.recallAt["2"], 0);
+});
+
+test("appended evidence never contaminates ranked recall even inside array position k", () => {
+  const scored = scoreQuestion(
+    {
+      category: "a",
+      golds: ["gold"],
+      candidates: [["ranked miss"], ["gold appended member"]],
+      rankedCandidateCount: 1,
+    },
+    "gold-in-candidate",
+  );
+  assert.deepEqual(scored.goldRanks, [2]);
+  assert.deepEqual(scored.rankedGoldRanks, [null]);
+  const metrics = aggregate([scored], [20]);
+  assert.equal(metrics.recallAt["20"], 0);
+  assert.equal(metrics.anyEvidenceAtK, 0);
+  assert.equal(metrics.allEvidenceAtK, 0);
+  assert.equal(metrics.anyEvidenceRate, 1);
+  assert.equal(metrics.allEvidenceRate, 1);
 });
 
 test("aggregateByCategory buckets per category with an overall entry", () => {

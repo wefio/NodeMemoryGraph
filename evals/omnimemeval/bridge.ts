@@ -6,7 +6,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
 import { createJudgeClientFromEnv, type JudgeClient } from "./judge-provider.ts";
-import { syncLeafEmbeddings, syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
+import {
+  syncLeafEmbeddings,
+  syncNodeEmbeddings,
+  syncRecordEmbeddings,
+} from "../../src/core/embedding-sync.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { loadPrompts, renderDisclosure } from "../../src/prompts/load.ts";
 import type { HistoryRole, MemoryActor, MemoryMarker, PerfSnapshot, DuplicateCandidate } from "../../src/core/types.ts";
@@ -37,6 +41,9 @@ export type OmniRetrievedMemory = {
   markers: MemoryMarker[];
   eventTime: string | null;
   score: number;
+  /** True only for the Active Graph's ranked evidence prefix. Chain/block
+   *  recall supplements are false even when they appear before top_k. */
+  ranked?: boolean;
   sourceRef: string | null;
   /** Post-retrieval chain expansion: which chain this member belongs to, its
    *  position within the chain, and whether it is temporal or logical. The
@@ -129,6 +136,11 @@ export interface OmniMemEvalBridgeOptions {
    *  (default) leaves BEAM chain-free. Synthetic, explicit benchmark
    *  construction — not runtime auto-inference. */
   chainInjection?: "temporal" | "logical" | "both" | "none";
+  /** Shared character budget for all appended (non-ranked) context sections:
+   *  chain expansion and block-routed members. Over-budget members are
+   *  skipped, never truncated. Omitted uses the core's finite default; the
+   *  benchmark also records the resolved value so runs remain comparable. */
+  appendedMaxChars?: number;
 }
 
 /**
@@ -154,6 +166,7 @@ export class OmniMemEvalBridge {
   readonly #leafBlockRouting: boolean;
   readonly #judge?: JudgeClient;
   readonly #chainInjection: "temporal" | "logical" | "both" | "none";
+  readonly #appendedMaxChars?: number;
 
   constructor(root: string, options: OmniMemEvalBridgeOptions = {}) {
     this.#root = resolve(root);
@@ -177,6 +190,7 @@ export class OmniMemEvalBridge {
     this.#leafBlockRouting = options.leafBlockRouting ?? false;
     this.#judge = createJudgeClientFromEnv();
     this.#chainInjection = options.chainInjection ?? "none";
+    this.#appendedMaxChars = positiveNumber(options.appendedMaxChars);
     mkdirSync(this.#root, { recursive: true });
   }
 
@@ -419,6 +433,7 @@ export class OmniMemEvalBridge {
         strongHitInitialTarget: this.#strongHitInitialTarget,
         expandChains: true,
         leafBlockRouting: this.#leafBlockRouting,
+        appendedMaxChars: this.#appendedMaxChars,
         activeGraphBudget: {
           maxNodes: limit,
           maxEvidence: limit,
@@ -428,6 +443,7 @@ export class OmniMemEvalBridge {
       },
       semantic,
     );
+    const rankedMemoryIds = new Set(context.activeGraph.memoryIds);
     const memories = context.results.map((result) => ({
       memoryId: result.memory.id,
       nodeId: result.node.id,
@@ -435,6 +451,7 @@ export class OmniMemEvalBridge {
       markers: result.memory.markers,
       eventTime: result.memory.eventTime,
       score: result.combinedScore,
+      ranked: rankedMemoryIds.has(result.memory.id),
       sourceRef: result.evidence.sourceRef,
       chainId: result.chainId,
       chainPosition: result.chainPosition,
@@ -515,8 +532,14 @@ export class OmniMemEvalBridge {
       (health?.status === "ready" &&
         health.targets.includes("leaves") &&
         health.pending.leaves === 0);
+    const nodesDone =
+      !this.#leafBlockRouting ||
+      (health?.status === "ready" &&
+        health.targets.includes("nodes") &&
+        health.pending.nodes === 0);
     if (!recordsDone) await syncRecordEmbeddings(store, client, this.#embeddingBatchSize);
     if (!leavesDone) await syncLeafEmbeddings(store, client, this.#embeddingBatchSize);
+    if (!nodesDone) await syncNodeEmbeddings(store, client, this.#embeddingBatchSize);
   }
 
   #store(userId: string): NmgStore {
@@ -926,6 +949,7 @@ async function run(): Promise<void> {
       ? Number(process.env.NMG_QPP_STRONG_HIT_INITIAL_TARGET)
       : undefined,
     chainInjection: process.env.NMG_CHAIN_INJECTION === "logical" ? "logical" : "none",
+    appendedMaxChars: Number(process.env.NMG_APPENDED_MAX_CHARS ?? 16_000),
   });
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 

@@ -23,9 +23,11 @@ candidates.
   over the block summary FTS index, pulling the block's verbatim members into
   the context (`leafBlockRouting`). A coarser node-summary tier (one summary
   per node, built from its block summaries, hysteresis-refreshed, ≥2
-  summarized blocks to qualify) adds node-FTS routing behind the block hits.
+  summarized blocks to qualify) adds node FTS and node-vector routing behind
+  the block hits.
   The summary text itself is index metadata and never appears as a candidate.
-- **Budgets**: `topK = 20` mapped to the evidence budget; bridge defaults
+- **Budgets**: `topK = 20` mapped to the ranked evidence budget; appended chain
+  and summary-routed evidence shares a hard 16,000-character ceiling. Bridge defaults
   `secondPass: true`, `tieredDisclosure: true`, `maxTier: 3`, `graphHops: 1`,
   `expandChains: true`, `progressiveWarmDisclosure: false`.
 - **Ingestion**: verbatim message storage (`statement = message.content`),
@@ -56,10 +58,14 @@ verbatim `evidenceExcerpt` — and a hit on either part counts.
 
 ## Metrics
 
-Per gold evidence: first-hit rank (miss = none).
+Per gold evidence the report records both its first rank in the ranked retrieval
+prefix and its first position in the complete rendered window. Chain and block
+members appended after ranking never acquire a ranked position.
 
 - `R@k` (k = 1, 5, 10, 20): fraction of gold evidences hit within rank k.
-- `any@20` / `all@20`: question-level any/all golds hit.
+- `any@20` / `all@20`: question-level any/all golds hit inside the ranked prefix.
+- `any@full` / `all@full`: question-level any/all golds found anywhere in the
+  rendered window, including unranked chain/block supplements.
 - `MRR(Q)`: mean reciprocal rank of each question's first-hit gold.
 - `legacy evid`: evidence recall over the rendered context, with the same
   definition as the legacy audits, for cross-checking against historical
@@ -137,7 +143,8 @@ Formal run results are recorded as dated documents under `docs/`, not here:
   27.0% → 27.4%, LoCoMo unaffected (degenerate 1-block nodes).
 - [Retrieval-quality cross-block chain pull 2026-08-24](../../docs/experiments/retrieval-quality-chains-2026-08-24.md)
   — ±1-hop chain neighbors (edges + positional) pulled into the block-member
-  budget; BEAM 27.4% → 27.7%, any@20 65.1% → 80.0%, ctx 51.1k → 159.4k chars.
+  budget; BEAM 27.4% → 27.7%, historical `any@full` (then mislabeled
+  `any@20`) 65.1% → 80.0%, ctx 51.1k → 159.4k chars.
 - [Retrieval-quality activation-gated chain expansion 2026-08-25](../../docs/experiments/retrieval-quality-chain-activation-2026-08-25.md)
   — whole-chain `expandChains` replaced by activation gating (proximity +
   query overlap + importance, hard cap); BEAM ctx 159.4k → 93.9k chars at

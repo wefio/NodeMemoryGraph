@@ -193,6 +193,45 @@ test("leafBlockRouting: node-summary hit expands node blocks even without leaf s
   });
 });
 
+test("leafBlockRouting: node-summary vector route rescues a zero-lexical-overlap node", () => {
+  withStore((store) => {
+    const target = store.remember({
+      statement: "user booked transport to Kyoto",
+      nodeName: "travel archive",
+      sourceActor: "user",
+    });
+    store.remember({
+      statement: "quarterly nebula report",
+      nodeName: "decoy",
+      sourceActor: "user",
+    });
+    store.rebuildLeafBlocks();
+    store.setNodeSummary(
+      target.node.id,
+      "journey planning and destination arrangements",
+      "summary-model",
+      1,
+    );
+    store.upsertExternalNodeEmbeddings("vectors@test", [
+      { nodeId: target.node.id, vector: [1, 0] },
+    ]);
+
+    const context = store.searchContext(
+      "nebula",
+      { limit: 1, leafBlockRouting: true, leafBlockRoutingMaxMembers: 8 },
+      { model: "vectors@test", queryVector: [1, 0] },
+    );
+    assert.ok(
+      context.results.some((result) => result.memory.id === target.memory.id),
+      "coarse vector route expands the target node despite no query-term overlap",
+    );
+    const trace = store.retrievalTrace(context.activeGraph!.id)!;
+    const signal = (trace.nodeRouteSignal ?? []).find((item) => item.nodeId === target.node.id);
+    assert.equal(signal?.routed, true);
+    assert.equal(signal?.recalled, false);
+  });
+});
+
 test("summary routing signal: routed+recalled detail persists and aggregates", () => {
   withStore((store) => {
     writeThree(store);

@@ -220,4 +220,15 @@ QPP decision until calibration evidence exists.
 - **Hardened — `796439ed`**：维护周期先 drain leaf summary，再有界 drain node summary；provider 失败不阻塞 daemon。
 - **Hardened — `5a0edbf5`、`20de2efc`**：记录并消费 routed-vs-recalled 信号，用于识别 summary routing gap，而不是修改事实排名。
 
+Current engineering contract (2026-08-25):
+
+- chain and summary-routed supplements share a hard 16,000-character budget;
+  candidates are admitted by activation/relevance before chronological output;
+- leaf/node summarizers may batch one bounded drain slice into one provider
+  request, preserving a stable domain prompt while serializing durable commits;
+- node semantic summaries participate in vector routing as well as FTS, and
+  semantic-summary refresh invalidates the prior node vector;
+- benchmark `@20` metrics cover only ranked candidates; appended evidence is
+  reported separately as `@full`, so disclosure mechanisms cannot inflate rank.
+
 这些提交只实现 summary 的索引、drain 和诊断边界；节点摘要的质量结论仍属于实验。完整 owner 导航见 [implementation lineage](implementation-lineage.md)。

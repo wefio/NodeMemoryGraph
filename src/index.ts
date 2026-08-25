@@ -4,7 +4,11 @@ export { OpenAIEmbeddingClient } from "./core/openai-embedding.ts";
 export { GeminiEmbeddingClient } from "./core/embedding-providers/gemini.ts";
 export { configuredProvider, createEmbeddingClientFromEnv } from "./core/embedding-provider.ts";
 export type { EmbeddingClient, EmbeddingProvider } from "./core/embedding-provider.ts";
-export { syncLeafEmbeddings, syncRecordEmbeddings } from "./core/embedding-sync.ts";
+export {
+  syncLeafEmbeddings,
+  syncNodeEmbeddings,
+  syncRecordEmbeddings,
+} from "./core/embedding-sync.ts";
 export type { RecordEmbeddingClient, RecordEmbeddingSyncResult } from "./core/embedding-sync.ts";
 export {
   configuredGraphHops,
