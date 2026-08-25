@@ -65,14 +65,15 @@ implemented Lab capability
   `-- evidence-backed promotion -----> Lite default capability
 ```
 
-The first transition is configuration, not proof of usefulness. The second is a
-product-default decision and must remain reversible. A model may request a Lab
-capability only when its harness has delegated that authority; it must not silently
-enable cost-bearing or topology-mutating behavior. In Pi today, Lab features use
-per-Agent process/profile gates (for example `NMG_ENABLE_LAB_TOOLS=1` for the
-reasoning scratchpad and independent QPP/controller mode variables). A future
-session UI may change active tools dynamically, but no always-visible unlock tool
-is required in Lite.
+The first transition is an explicit bounded lease, not proof of usefulness. The
+second is a product-default decision and must remain reversible. The daemon's
+capability directory states which features an Agent may lease for its own session.
+Low-risk scratch, read-only reasoning, and shadow observation are self-service;
+cost-bearing or mutating controller modes still require delegated harness/operator
+authority and cannot be unlocked by a model request. `nmg_lab` is therefore one
+small always-available discovery/control entry, while the capability-specific
+schemas and state stay unloaded until enabled. Pi's optional `nmg_reason` remains
+only a typed convenience wrapper over this shared boundary.
 
 The autodiff substrate belongs to Lite because product features may depend on
 its numerical graph and it adds no Python, PyTorch, GPU, or model-service
@@ -2191,14 +2192,14 @@ supports | contradicts | derived_from | tests
 rejects | depends_on | next_step
 ```
 
-Pi integration follows a narrow lifecycle:
+Harness integration follows one daemon-owned lifecycle:
 
 ```text
 model or tool result
-  -> nmg_reason add/update/link
-  -> local .nmg/reasoning/<session>.json
+  -> existing NMG client: lab enable/invoke
+  -> daemon-owned <NMG_DATA_DIR>/lab/reasoning/<session-hash>.json
   -> bounded ReasoningCheckpoint
-  -> before_agent_start injection after normal Pi compaction
+  -> optional harness injection after its normal compaction
 ```
 
 NMG does not replace Pi's compactor. `session_compact` only checkpoints the
@@ -2228,23 +2229,32 @@ new status, importance, or evidence; semantic evolution and additional evidence
 must use explicit `update`. This prevents tool retries from inflating the graph
 while keeping changes auditable.
 
-Scratch lifecycle is deliberately session-bound. The same Pi session can resume
+Scratch lifecycle is deliberately session-bound. The same Agent session can resume
 its atomic file after a process restart; a new session never inherits another
 session's workspace automatically. `clear` deletes the owning session
-immediately. Because the scratchpad is not durable semantic memory, Lab startup
-removes workspaces idle for 30 days (including an associated pending compaction
+immediately. Because the scratchpad is not durable semantic memory, maintenance
+may remove workspaces idle for 30 days (including an associated pending compaction
 marker) without archiving or promoting them. Cross-session task transfer, event
 archive, and STG/LTG promotion require a future explicit reviewed operation; TTL
 cleanup must never imply that a conclusion was accepted or forgotten from LTG.
 
-The tool is Lab-only (`NMG_ENABLE_LAB_TOOLS=1`). NMG Lite keeps three durable-memory
-tools plus the independent task-board coordination tool, and the existing numerical MGR prototype remains available
-for independent experiments. The Pi adapter now registers `nmg_reason` only
-under that flag. Its typed mutations are written atomically to the session file;
-`session_before_compact` records a durable one-shot marker, and the next
-`before_agent_start` consumes one bounded checkpoint. Extension shutdown releases
-only the in-process cache, so the same Pi session can resume after a process
-restart. No reasoning-tool path calls the semantic-memory daemon.
+`nmg_lab` is a stable capability-discovery entry on the existing NMG client in
+Pi, MCP, DSH, and the CLI; it is not a second process or client library. An Agent
+may obtain a bounded session lease for `reasoning_workspace`,
+`memory_graph_reasoner`, or `controller_shadow`, invoke only the operations listed
+by `lab list`, and disable the lease when finished. Leases expire automatically.
+`controller_controlled` and `controller_active` accept no Agent self-authorization:
+the existing candidate, evaluation, receipt, rollback, and product gates remain
+mandatory. Project/global self-service is intentionally unsupported.
+
+The daemon owns Lab state and performs atomic reasoning-workspace writes. Pi may
+still expose the convenience `nmg_reason` schema under
+`NMG_ENABLE_LAB_TOOLS=1`, but that tool now delegates to the same daemon `lab`
+RPC. `session_before_compact` records a one-shot marker only when the session
+capability is active, and the next `before_agent_start` consumes one bounded
+checkpoint. MCP, DSH, or another harness can use the same state without importing
+Pi code. Lab output never enters STG/LTG unless separately submitted through the
+governed remember boundary.
 
 An automatic input-capture and checkpoint-injection variant was implemented and
 rejected in July 2026. In a matched DeepSeek V4 Flash development run (three

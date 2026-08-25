@@ -75,6 +75,27 @@ an operation or encountering its named special case.
 6. On exit, run `nmg daemon stop --json` only if this invocation started it.
    Never stop a daemon that was already running.
 
+## Optional Lab capabilities
+
+Use Lab only when an ordinary search/get/remember/board workflow is insufficient.
+It reuses the existing daemon and client; do not start another process.
+
+```text
+nmg lab list --json
+nmg lab enable reasoning_workspace --session-id <SESSION> \
+  --requester agent:<NAME> --reason "preserve a multi-step investigation" --json
+nmg lab invoke reasoning_workspace --session-id <SESSION> \
+  --operation add --input-json '{"kind":"hypothesis","content":"..."}' --json
+nmg lab disable reasoning_workspace --session-id <SESSION> --json
+```
+
+An Agent may self-enable only capabilities whose directory entry says
+`agentMayEnable=true`. Never attempt to bypass a denial for
+`controller_controlled` or `controller_active`; those modes require independent
+harness/operator authorization and the existing activation gates. Lab results are
+scratch or experimental output, not durable truth. Save a supported conclusion
+only through a separate governed `remember` call.
+
 For Codex, execute these commands through the shell tool. If the active
 `AGENTS.md` requires an RTK command prefix, use `rtk nmg ...`; otherwise use
 `nmg ...` directly. Do not reread this Skill on every turn: keep the stable

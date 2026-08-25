@@ -215,18 +215,20 @@ By default, the model receives four tools and a typed write/use policy:
 - `nmg_board`: exchange temporary, task-scoped notes between agents through
   attributed entries, TTL expiry, incremental cursors, and explicit resolution.
   Board entries are not LTG memories and never enter semantic retrieval.
+- `nmg_lab`: list, lease, invoke, and disable optional session capabilities on
+  the existing daemon connection. Reasoning workspace, read-only graph reasoning,
+  and controller shadow are Agent-selectable; controlled/active actuation remains
+  receipt- and gate-protected.
 
-Graph maintenance, QPP, indexing, and experimental reasoning components remain
-core/CLI concerns rather than Pi tools. The adapter never opens SQLite or
+Graph maintenance, QPP, and indexing remain core/CLI concerns. The adapter never opens SQLite or
 imports those implementations directly.
 
-Lab is an opt-in capability channel, not a dead-end staging area. A Lab feature
-may be enabled for one Agent profile without becoming a Lite default. For example,
-start that Pi Agent with `NMG_ENABLE_LAB_TOOLS=1` to expose the experimental
-`nmg_reason` scratchpad; QPP and controller experiments have their own independent
-mode variables. Disabled Lab capabilities are omitted from the active model tool
-surface. Passing evaluation is required for default promotion, not for explicit
-opt-in use.
+Lab is an opt-in capability channel, not a dead-end staging area or separate
+client. Pi, MCP, DSH and CLI adapters all call the same daemon `lab` RPC. Agents
+may explicitly lease low-risk capabilities for the current session; leases expire,
+and output is provisional until governed memory write. `NMG_ENABLE_LAB_TOOLS=1`
+adds Pi's typed `nmg_reason` convenience tool, which delegates to that same RPC.
+Passing evaluation is required for default promotion, not explicit opt-in use.
 
 For one-off development inside this repository, disable automatic extension
 discovery and load NMG exactly once:

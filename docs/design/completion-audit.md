@@ -28,11 +28,12 @@ not evidence that a policy improves real Agent work.
 | **Explicitly deferred** | Boundary is designed, but implementation waits for a stated prerequisite. |
 | **Out of scope** | Another component owns it; NMG must only define an integration boundary. |
 
-Lab is not a one-way holding area. An operator, user, harness, or Agent profile can
-enable an individual Lab capability behind its feature gate. Passing an evaluation
-is required to make it a Lite default, not to use it explicitly. Runtime model
-self-enablement requires delegated harness authority; it is never inferred from a
-model request alone.
+Lab is not a one-way holding area. The daemon publishes a capability directory and
+session-scoped expiring leases through the existing client RPC. An Agent may
+self-enable explicitly designated low-risk capabilities; controlled and active
+actuation still require harness/operator authority and their existing receipts and
+gates. Passing an evaluation is required to make a capability a Lite default, not
+to use it explicitly for one suitable task.
 
 ## Requirement matrix
 
@@ -56,8 +57,8 @@ model request alone.
 | Edge activation/stability | Query-local activation differs from durable stability; retrieval alone cannot consolidate an edge | edge activation, Active Graph telemetry, consolidation/demotion | **Calibration gate** | Calibrate independent-task definition, decay and hysteresis on natural reversals. |
 | Retention | Indexed L0-L3, dormant/unindexed L4, quarantine L5; protect critical evidence independently of prompt residency | hierarchy and maintenance modules, CLI retention operations | **Verified core** | Automatic physical purge remains **explicitly deferred**. |
 | Delete/export/privacy | Logical withdrawal, dependency cleanup and user-memory export | CLI/RPC service and deletion tests | **Verified core** | Raw-history/aggregate physical erasure and receipts are **explicitly deferred** until threat-model/consent work. |
-| Session reasoning scratchpad | Private, atomic, bounded, restart-resumable, explicit checkpoint tool; never silently promoted | Lab reasoning workspace and Pi adapter | **Opt-in Lab** | Automatic capture was rejected; cross-session transfer/promotion waits for demonstrated need. |
-| Memory-Graph Reasoner | Numerical graph/set reasoning prototype is independent from durable truth | Lab MGR/autodiff modules | **Opt-in Lab** | Edge-following inference and utility proof remain optional experiments. |
+| Session reasoning scratchpad | Private, atomic, bounded, restart-resumable, explicit checkpoint tool; never silently promoted | Daemon Lab authority/workspace plus CLI, Pi, MCP and DSH adapters | **Opt-in Lab** | Automatic capture was rejected; cross-session transfer/promotion waits for demonstrated need. |
+| Memory-Graph Reasoner | Numerical graph/set reasoning is a read-only session capability independent from durable truth | Daemon Lab RPC, MGR/autodiff modules and adapter-neutral invocation | **Opt-in Lab** | Utility proof and ergonomic vector sourcing remain optional experiments; training stays internal. |
 | Temporary coordination | Task Board is TTL/cursor/attribution based and does not enter LTG/FTS | board store, daemon, CLI/Pi/MCP adapters | **Verified core** | ACLs and multi-device transport are **explicitly deferred**. |
 | Daemon and concurrency | One application authority/single LTG writer; synchronous SQLite phases serialize; no transaction spans an await | CLI daemon/service/client and concurrency tests | **Verified core** | Multi-process distributed writers are out of current scope. |
 | Observability | Trace routing, scores, budgets, disclosures, outcomes, maintenance and rollback without treating diagnostics as truth | trace tables, shadow JSONL, reports/audits | **Verified core** | Natural labels must accumulate through use. |
