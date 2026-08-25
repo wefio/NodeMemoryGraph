@@ -177,10 +177,15 @@ async function ensureIngested(spec: DatasetSpec, skipIngest: boolean): Promise<s
   const manifest = existsSync(manifestPath)
     ? (JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, unknown>)
     : null;
+  // Chain injection changes store contents (eval-only logical chains), so it
+  // is part of the reuse key: switching the env re-ingests instead of
+  // silently comparing against a differently-built store.
+  const chainInjection = process.env.NMG_CHAIN_INJECTION === "logical" ? "logical" : "none";
   const reusable =
     manifest !== null &&
     manifest.sha256 === spec.sha256 &&
     manifest.sampleNote === spec.sampleNote &&
+    (manifest.chainInjection ?? "none") === chainInjection &&
     existsSync(storeRoot);
 
   if (reusable) {
@@ -196,7 +201,7 @@ async function ensureIngested(spec: DatasetSpec, skipIngest: boolean): Promise<s
   console.log(`ingesting ${spec.conversations.length} conversations into ${storeRoot} …`);
   rmSync(storeRoot, { recursive: true, force: true });
   mkdirSync(storeRoot, { recursive: true });
-  return ingestNow(spec, storeRoot, manifestPath);
+  return ingestNow(spec, storeRoot, manifestPath, chainInjection);
 }
 
 /** Ingestion runs in its own bridge instance so it can be async without
@@ -205,8 +210,9 @@ async function ingestNow(
   spec: DatasetSpec,
   storeRoot: string,
   manifestPath: string,
+  chainInjection: "logical" | "none",
 ): Promise<string> {
-  const bridge = new OmniMemEvalBridge(storeRoot);
+  const bridge = new OmniMemEvalBridge(storeRoot, { chainInjection });
   try {
     let requestId = 0;
     for (const [index, conversation] of spec.conversations.entries()) {
@@ -230,6 +236,7 @@ async function ingestNow(
       {
         sha256: spec.sha256,
         sampleNote: spec.sampleNote,
+        chainInjection,
         conversations: spec.conversations.length,
         questions: spec.questions.length,
         createdAt: new Date().toISOString(),
@@ -289,6 +296,7 @@ function buildManifest(
       recallKs: [...RECALL_KS],
       ...PINNED_RETRIEVAL,
       leafBlockRouting: options.summaries,
+      chainInjection: process.env.NMG_CHAIN_INJECTION === "logical" ? "logical" : "none",
       ...(options.summaries
         ? {
             leafSummaries: {

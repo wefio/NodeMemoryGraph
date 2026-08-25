@@ -253,6 +253,35 @@ export function normalize(value: string): string {
 }
 
 /**
+ * Query-term extraction for overlap scoring: whitespace-split terms (≥3
+ * chars), CJK bigram shingles when the query is a single CJK run (no word
+ * boundaries), or the lone term as-is — bigramming a single Latin word would
+ * substring-match half the lexicon.
+ */
+export function queryOverlapTerms(query: string): string[] {
+  const queryText = normalize(query);
+  if (queryText.includes(" ")) {
+    return queryText.split(" ").filter((term) => term.length >= 3);
+  }
+  if (/[\u4e00-\u9fff]/u.test(queryText)) {
+    return Array.from({ length: Math.max(0, queryText.length - 1) }, (_, i) =>
+      queryText.slice(i, i + 2),
+    );
+  }
+  return [queryText];
+}
+
+/** Overlap score of a statement against pre-extracted query terms: sum of
+ *  matched term lengths, 0 when nothing matches. */
+export function termOverlapScore(terms: readonly string[], statement: string): number {
+  const haystack = normalize(statement);
+  return terms.reduce(
+    (score, term) => score + (term && haystack.includes(term) ? term.length : 0),
+    0,
+  );
+}
+
+/**
  * Statement-level normalization for duplicate detection: NFKC, lowercased,
  * punctuation stripped, whitespace collapsed. Two statements that normalize
  * equal are the same fact written again regardless of surface formatting

@@ -502,8 +502,18 @@ export interface SearchOptions {
   expandChains?: boolean;
   /** When expandChains is on, cap chain-member expansion to a window around
    *  the ranked hit(s): members with position in [minHit−window, maxHit+window]
-   *  are appended. Omit for the whole chain. */
+   *  are appended. Omit for activation-gated expansion (default): a member is
+   *  kept when its activation — 1/(1+distance to the nearest hit), plus 1 when
+   *  the member shares query terms, plus half its static importance — reaches
+   *  0.5. Proximity dominates on purpose: the chain exists to rescue evidence
+   *  the query signal missed, so gating on relevance alone would filter out
+   *  exactly the members expansion is for. */
   chainExpansionWindow?: number;
+  /** Hard cap on members appended by expandChains across all surfaced chains
+   *  in activation-gated mode (default: the ranked-result count — a recall
+   *  supplement should not exceed the primary evidence budget). Window mode
+   *  is already self-bounding and ignores this cap. */
+  chainExpansionMaxMembers?: number;
   /** Leaf-block summary routing: blocks carrying an LLM-written semantic
    *  summary (see pendingLeafSummaries/setLeafSummary) are matched against the
    *  query over a dedicated FTS index; members of hit blocks are appended to

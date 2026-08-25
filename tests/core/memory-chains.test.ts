@@ -170,9 +170,17 @@ test("expandChains appends chain members after a hit (recall supplement, no re-r
     assert.equal(off.results.length, 1);
     assert.ok(off.results.every((r) => r.chainId === undefined));
 
-    // With expansion, the whole chain surfaces (hit + appended members), the
+    // With expansion, the chain surfaces (hit + appended members — all pass
+    // the activation gate here: every statement shares query terms), the
     // unrelated memory does not, and every chain member carries its chainId.
-    const on = store.searchContext("预算收支", { limit: 1, sessionId: "s1", expandChains: true });
+    // Cap is explicit because the default cap scales with the ranked count
+    // (limit=1 would otherwise admit a single appended member).
+    const on = store.searchContext("预算收支", {
+      limit: 1,
+      sessionId: "s1",
+      expandChains: true,
+      chainExpansionMaxMembers: 10,
+    });
     const onIds = on.results.map((r) => r.memory.id);
     for (const id of chainMemberIds) {
       assert.ok(onIds.includes(id), `chain member ${id} present in expanded results`);
@@ -237,13 +245,115 @@ test("chainExpansionWindow caps expansion to a window around the hit", () => {
     assert.ok(!stmts.includes("预算阶段0"));
     assert.ok(!stmts.includes("预算阶段4"));
 
-    // Without a window the whole chain is appended.
+    // Without a window, activation gating applies: every member shares the
+    // "阶段" bigram with the query, so all pass the gate.
     const full = store.searchContext("阶段2", {
       limit: 1,
       sessionId: "s1",
       expandChains: true,
+      chainExpansionMaxMembers: 10,
     });
     assert.equal(full.results.length, 5);
+  });
+});
+
+test("activation gate: proximity decays, importance escapes, cap keeps highest activation", () => {
+  withStore((store) => {
+    // Default importance 0.5 adds 0.25 static activation, so with θ=0.5 the
+    // proximity term alone admits distance ≤ 3 from the hit.
+    const stmts = [
+      { statement: "起点" }, // pos0 — the ranked hit
+      { statement: "内容填充一" }, // pos1: 0.50+0.25 → in
+      { statement: "内容填充二" }, // pos2: 0.33+0.25 → in
+      { statement: "内容填充三" }, // pos3: 0.25+0.25 → in (boundary)
+      { statement: "内容填充四" }, // pos4: 0.20+0.25 → out
+      { statement: "内容填充五", importance: 0.9 }, // pos5: 0.17+0.45 → in
+    ];
+    const mids: string[] = [];
+    for (const s of stmts) {
+      const r = store.remember({
+        nodeName: "预算",
+        nodeKind: "topic",
+        nodeSummary: "预算",
+        statement: s.statement,
+        importance: s.importance,
+        sessionId: "s1",
+        sourceActor: "user",
+      });
+      mids.push(r.memory.id);
+    }
+    const chain = store.createMemoryChain({
+      chainType: "temporal",
+      topic: "门控",
+      ownerSessionId: "s1",
+    });
+    mids.forEach((m, i) => store.addMemoryToChain({ chainId: chain.id, memoryId: m, position: i }));
+
+    const res = store.searchContext("起点", {
+      limit: 1,
+      sessionId: "s1",
+      expandChains: true,
+      chainExpansionMaxMembers: 10,
+    });
+    const got = res.results.map((r) => r.memory.statement);
+    for (const expected of ["起点", "内容填充一", "内容填充二", "内容填充三", "内容填充五"]) {
+      assert.ok(got.includes(expected), `${expected} admitted by the gate`);
+    }
+    assert.ok(!got.includes("内容填充四"), "distance-4 member with default importance dropped");
+
+    // The cap keeps the highest-activation members, not the nearest in
+    // emission order: cap=1 admits only the distance-1 neighbor (0.75),
+    // ahead of the high-importance distance-5 member (0.62).
+    const capped = store.searchContext("起点", {
+      limit: 1,
+      sessionId: "s1",
+      expandChains: true,
+      chainExpansionMaxMembers: 1,
+    });
+    const appended = capped.results.filter((r) => r.memory.statement !== "起点");
+    assert.equal(appended.length, 1);
+    assert.equal(appended[0]!.memory.statement, "内容填充一");
+  });
+});
+
+test("activation gate: a query-term match escapes position decay at any distance", () => {
+  withStore((store) => {
+    const mids: string[] = [];
+    const filler = "随".repeat(60); // length-penalized so FTS ranks it below the hit
+    for (const stmt of [
+      "anchor beacon anchor beacon 锚点", // pos0 — both terms, term-dense hit
+      "填充甲",
+      "填充乙",
+      "填充丙",
+      "填充丁",
+      `beacon ${filler}`, // pos5 — one query term, far from the hit
+    ]) {
+      const r = store.remember({
+        nodeName: "预算",
+        nodeKind: "topic",
+        nodeSummary: "预算",
+        statement: stmt,
+        sessionId: "s1",
+        sourceActor: "user",
+      });
+      mids.push(r.memory.id);
+    }
+    const chain = store.createMemoryChain({
+      chainType: "temporal",
+      topic: "相关性逃逸",
+      ownerSessionId: "s1",
+    });
+    mids.forEach((m, i) => store.addMemoryToChain({ chainId: chain.id, memoryId: m, position: i }));
+
+    const res = store.searchContext("anchor beacon", {
+      limit: 1,
+      sessionId: "s1",
+      expandChains: true,
+      chainExpansionMaxMembers: 10,
+    });
+    const got = res.results.map((r) => r.memory.statement);
+    assert.ok(got.some((s) => s.startsWith("beacon ")), "term-matching distant member admitted");
+    assert.ok(!got.includes("填充丁"), "distance-4 filler dropped");
   });
 });
 

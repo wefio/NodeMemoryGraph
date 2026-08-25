@@ -39,8 +39,10 @@ import {
   mergeSemanticCandidates,
   normalize,
   normalizeStatement,
+  queryOverlapTerms,
   recallHitTerms,
   recallReason,
+  termOverlapScore,
   type StoreRow as Row,
 } from "./search-ranking.ts";
 import { clamp, effectiveFilterDimensions, mapSearchResult, matchesScope } from "./rows.ts";
@@ -795,29 +797,123 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           // chainExpansionWindow: cap expansion to a window around the ranked
           // hit(s) — members with position in [minHit−window, maxHit+window]
           // are appended, so a long evolution chain does not blow the budget.
+          // Without a window, expansion is activation-gated: a member is kept
+          // when its activation reaches 0.5, where
+          //   activation = 1/(1 + distance to nearest hit)      (proximity)
+          //              + 1 if the member shares query terms    (relevance)
+          //              + 0.5 × static importance               (prior)
+          // Position proximity dominates because the chain's whole purpose is
+          // rescuing evidence the query signal missed; gating on relevance
+          // alone would filter out exactly those members. With the default
+          // importance of 0.5 this behaves like a soft ±3 radius that query-
+          // matching or high-importance members escape at any distance
+          // (spreading activation, cf. HippoRAG's PPR — not a tuned window).
           const window = options.chainExpansionWindow;
+          // Hard cap on appended members across all chains (activation mode
+          // only; a window is already self-bounding): a recall supplement
+          // should not exceed the primary evidence budget.
+          const maxChainMembers = Math.max(
+            0,
+            Math.trunc(options.chainExpansionMaxMembers ?? context.results.length),
+          );
+          const activationTerms = window === undefined ? queryOverlapTerms(query) : null;
+          interface ChainCandidate {
+            id: string;
+            chainIndex: number;
+            pos: number;
+            activation: number;
+            dist: number;
+          }
+          const gated: ChainCandidate[] = [];
+          let chainIndex = 0;
           for (const chainId of chainIds) {
             const memberRows = this.db
               .prepare(
-                "SELECT memory_id, position FROM memory_chain_members WHERE chain_id = ? ORDER BY position",
+                `SELECT cm.memory_id, cm.position, m.statement, m.importance
+                   FROM memory_chain_members cm
+                   JOIN memory_records m ON m.id = cm.memory_id
+                  WHERE cm.chain_id = ? ORDER BY cm.position`,
               )
               .all(chainId) as Row[];
             const hitPos = hitPositions.get(chainId) ?? [];
-            const selected =
-              window !== undefined && hitPos.length > 0
-                ? memberRows.filter((r) => {
-                    const p = Number(r.position);
-                    return p >= Math.min(...hitPos) - window && p <= Math.max(...hitPos) + window;
-                  })
-                : memberRows;
-            for (const row of selected) {
-              const memberId = String(row.memory_id);
-              if (!seen.has(memberId)) {
-                seen.add(memberId);
-                toFetch.push(memberId);
-                chainOf.set(memberId, chainId);
-                chainPos.set(memberId, Number(row.position));
+            if (window !== undefined && hitPos.length > 0) {
+              const lo = Math.min(...hitPos) - window;
+              const hi = Math.max(...hitPos) + window;
+              for (const row of memberRows) {
+                const p = Number(row.position);
+                if (p < lo || p > hi) continue;
+                const memberId = String(row.memory_id);
+                if (!seen.has(memberId)) {
+                  seen.add(memberId);
+                  toFetch.push(memberId);
+                  chainOf.set(memberId, chainId);
+                  chainPos.set(memberId, p);
+                }
               }
+            } else if (activationTerms !== null && hitPos.length > 0) {
+              for (const row of memberRows) {
+                const memberId = String(row.memory_id);
+                // Hits and already-surfaced members are not candidates —
+                // they would only consume cap slots and be skipped at
+                // emission time.
+                if (seen.has(memberId)) continue;
+                const p = Number(row.position);
+                const dist = Math.min(...hitPos.map((h) => Math.abs(p - h)));
+                const activation =
+                  1 / (1 + dist) +
+                  (termOverlapScore(activationTerms, String(row.statement)) > 0 ? 1 : 0) +
+                  0.5 * (Number(row.importance) || 0);
+                if (activation >= 0.5) {
+                  gated.push({
+                    id: memberId,
+                    chainIndex,
+                    pos: p,
+                    activation,
+                    dist,
+                  });
+                }
+              }
+            } else {
+              // No hit positions recorded (defensive; chainIds derive from
+              // hits) — preserve the legacy whole-chain behavior.
+              for (const row of memberRows) {
+                const memberId = String(row.memory_id);
+                if (!seen.has(memberId)) {
+                  seen.add(memberId);
+                  toFetch.push(memberId);
+                  chainOf.set(memberId, chainId);
+                  chainPos.set(memberId, Number(row.position));
+                }
+              }
+            }
+            chainIndex += 1;
+          }
+          if (activationTerms !== null && gated.length > 0) {
+            // Over the cap: keep the highest-activation members (ties break
+            // toward the hit, then chain order), but emit in chain order so
+            // chronology survives for ordering questions.
+            const survivors =
+              gated.length > maxChainMembers
+                ? [...gated]
+                    .sort(
+                      (a, b) =>
+                        b.activation - a.activation ||
+                        a.dist - b.dist ||
+                        a.chainIndex - b.chainIndex ||
+                        a.pos - b.pos,
+                    )
+                    .slice(0, maxChainMembers)
+                : gated;
+            const kept = new Set(survivors.map((c) => c.id));
+            const chainList = [...chainIds];
+            for (const c of [...gated].sort(
+              (a, b) => a.chainIndex - b.chainIndex || a.pos - b.pos,
+            )) {
+              if (!kept.has(c.id) || seen.has(c.id)) continue;
+              seen.add(c.id);
+              toFetch.push(c.id);
+              chainOf.set(c.id, chainList[c.chainIndex]!);
+              chainPos.set(c.id, c.pos);
             }
           }
           if (toFetch.length > 0) {
@@ -916,24 +1012,8 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           // go first (score desc), ordinal order fills the per-block share;
           // the appended set is emitted in ordinal order so chronology
           // survives (event-ordering queries read order, not rank).
-          const queryText = normalize(query);
-          const terms = queryText.includes(" ")
-            ? queryText.split(" ").filter((term) => term.length >= 3)
-            : /[\u4e00-\u9fff]/u.test(queryText)
-              ? // CJK has no word boundaries: score by bigram shingles.
-                Array.from({ length: Math.max(0, queryText.length - 1) }, (_, i) =>
-                  queryText.slice(i, i + 2),
-                )
-              : // A single Latin word stays one term — bigramming it would
-                // substring-match half the lexicon.
-                [queryText];
-          const termScore = (statement: string): number => {
-            const haystack = normalize(statement);
-            return terms.reduce(
-              (score, term) => score + (term && haystack.includes(term) ? term.length : 0),
-              0,
-            );
-          };
+          const terms = queryOverlapTerms(query);
+          const termScore = (statement: string): number => termOverlapScore(terms, statement);
           const perBlock = Math.max(2, Math.ceil(maxMembers / expansions.length));
           const toFetch: string[] = [];
           const blockOf = new Map<string, string>();
@@ -973,9 +1053,85 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             }
             if (toFetch.length >= maxMembers) break;
           }
+          // Cross-block chain pull: ordering questions need the sequence that
+          // continues past the hit block, but per-block expansion only surfaces
+          // one block's members at a time. From each selected member, walk its
+          // chains one step — explicit edge endpoints (DAG chains) and
+          // position-adjacent members (member-only chains, e.g. eval chain
+          // injection) — and append neighbors the per-block share cut away or
+          // that live in other blocks, filling whatever budget the block
+          // members left. Appended after ranking, same recall-supplement
+          // contract as chain expansion (docs §3.1).
+          const chainOf = new Map<
+            string,
+            { chainId: string; position: number; chainType: MemoryChainType }
+          >();
+          if (toFetch.length > 0 && toFetch.length < maxMembers) {
+            const edgeQuery = this.db.prepare(
+              `SELECT chain_id, source_memory_id, target_memory_id
+                 FROM memory_chain_edges
+                WHERE source_memory_id = ? OR target_memory_id = ?`,
+            );
+            const membershipQuery = this.db.prepare(
+              "SELECT chain_id, position FROM memory_chain_members WHERE memory_id = ?",
+            );
+            const adjacentQuery = this.db.prepare(
+              `SELECT memory_id, position FROM memory_chain_members
+                WHERE chain_id = ? AND position IN (?, ?)`,
+            );
+            const positionQuery = this.db.prepare(
+              "SELECT position FROM memory_chain_members WHERE chain_id = ? AND memory_id = ?",
+            );
+            const chainTypeQuery = this.db.prepare(
+              "SELECT chain_type FROM memory_chains WHERE id = ?",
+            );
+            const pull = (neighbor: string, chainId: string): void => {
+              if (seen.has(neighbor) || toFetch.length >= maxMembers) return;
+              const posRow = positionQuery.get(chainId, neighbor) as Row | undefined;
+              const typeRow = chainTypeQuery.get(chainId) as Row | undefined;
+              seen.add(neighbor);
+              toFetch.push(neighbor);
+              chainOf.set(neighbor, {
+                chainId,
+                position: posRow ? Number(posRow.position) : 0,
+                chainType: (typeRow?.chain_type as MemoryChainType) ?? "temporal",
+              });
+            };
+            for (const memberId of [...toFetch]) {
+              if (toFetch.length >= maxMembers) break;
+              for (const edge of edgeQuery.all(memberId, memberId) as Row[]) {
+                const neighbor =
+                  String(edge.source_memory_id) === memberId
+                    ? String(edge.target_memory_id)
+                    : String(edge.source_memory_id);
+                pull(neighbor, String(edge.chain_id));
+              }
+              for (const link of membershipQuery.all(memberId) as Row[]) {
+                const position = Number(link.position);
+                for (const adjacent of adjacentQuery.all(
+                  String(link.chain_id),
+                  position - 1,
+                  position + 1,
+                ) as Row[]) {
+                  pull(String(adjacent.memory_id), String(link.chain_id));
+                }
+              }
+            }
+          }
           if (toFetch.length > 0) {
             for (const result of this.getContext(toFetch, 0, options.sessionId).results) {
-              context.results.push({ ...result, leafBlockId: blockOf.get(result.memory.id) });
+              const chain = chainOf.get(result.memory.id);
+              context.results.push({
+                ...result,
+                leafBlockId: blockOf.get(result.memory.id),
+                ...(chain
+                  ? {
+                      chainId: chain.chainId,
+                      chainPosition: chain.position,
+                      chainType: chain.chainType,
+                    }
+                  : {}),
+              });
             }
           }
         }

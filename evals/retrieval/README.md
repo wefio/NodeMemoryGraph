@@ -21,8 +21,10 @@ candidates.
   gets an LLM-written semantic summary (`NMG_SUMMARY_*` env, falling back to
   `NMG_JUDGE_*`; prompt version pinned in the manifest) and queries are routed
   over the block summary FTS index, pulling the block's verbatim members into
-  the context (`leafBlockRouting`). The summary text itself is index metadata
-  and never appears as a candidate.
+  the context (`leafBlockRouting`). A coarser node-summary tier (one summary
+  per node, built from its block summaries, hysteresis-refreshed, ≥2
+  summarized blocks to qualify) adds node-FTS routing behind the block hits.
+  The summary text itself is index metadata and never appears as a candidate.
 - **Budgets**: `topK = 20` mapped to the evidence budget; bridge defaults
   `secondPass: true`, `tieredDisclosure: true`, `maxTier: 3`, `graphHops: 1`,
   `expandChains: true`, `progressiveWarmDisclosure: false`.
@@ -130,3 +132,13 @@ Formal run results are recorded as dated documents under `docs/`, not here:
 - [Retrieval-quality summaries arm 2026-08-18](../../docs/experiments/retrieval-quality-summaries-2026-08-18.md)
   — leaf-block summary arm (`--summaries`) and stacked arm
   (`--hybrid --summaries`); LoCoMo R@20 24.1% → 48.6%, BEAM 16.9% → 27.0%.
+- [Retrieval-quality node-summary tier 2026-08-24](../../docs/experiments/retrieval-quality-node-summaries-2026-08-24.md)
+  — node summaries (from block summaries, hysteresis refresh); BEAM stacked
+  27.0% → 27.4%, LoCoMo unaffected (degenerate 1-block nodes).
+- [Retrieval-quality cross-block chain pull 2026-08-24](../../docs/experiments/retrieval-quality-chains-2026-08-24.md)
+  — ±1-hop chain neighbors (edges + positional) pulled into the block-member
+  budget; BEAM 27.4% → 27.7%, any@20 65.1% → 80.0%, ctx 51.1k → 159.4k chars.
+- [Retrieval-quality activation-gated chain expansion 2026-08-25](../../docs/experiments/retrieval-quality-chain-activation-2026-08-25.md)
+  — whole-chain `expandChains` replaced by activation gating (proximity +
+  query overlap + importance, hard cap); BEAM ctx 159.4k → 93.9k chars at
+  ~40% of the coverage gain; event_ordering back to the no-chain level.

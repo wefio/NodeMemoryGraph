@@ -513,7 +513,7 @@ test("id render mode renders a branching DAG chain as a Mermaid flowchart with f
     store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a, targetMemoryId: b });
     store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a, targetMemoryId: c });
     store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: c, targetMemoryId: d });
-    const ctx = store.searchContext("脚本误操作", { sessionId: "s1", limit: 8, expandChains: true });
+    const ctx = store.searchContext("脚本误操作", { sessionId: "s1", limit: 8, expandChains: true, chainExpansionMaxMembers: 10 });
     const memories = ctx.results.map((r) => ({
       memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
       markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
@@ -554,7 +554,7 @@ test("a memory in multiple chains renders in every chain block", () => {
     store.addMemoryToChain({ chainId: B.id, memoryId: m.memory.id, position: 0 });
     store.addMemoryToChain({ chainId: B.id, memoryId: dep.memory.id, position: 1 });
 
-    const ctx = store.searchContext("2024年预算", { sessionId: "s1", limit: 8, expandChains: true });
+    const ctx = store.searchContext("2024年预算", { sessionId: "s1", limit: 8, expandChains: true, chainExpansionMaxMembers: 10 });
     const hit = ctx.results.find((r) => r.memory.statement.includes("2024年度"));
     assert.ok(hit && hit.chainMemberships && hit.chainMemberships.length === 2, "both memberships collected");
     const memories = ctx.results.map((r) => ({

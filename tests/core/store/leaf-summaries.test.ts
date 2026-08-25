@@ -142,3 +142,81 @@ test("leafEmbeddingDocuments prefers the semantic summary when present", () => {
     assert.ok(semantic[0]!.text.includes("zebra semantic text"));
   });
 });
+
+test("leafBlockRouting: chain edges pull cross-block neighbors into the append", () => {
+  withStore((store) => {
+    // Block A (hit via its summary) and block B (never matched directly).
+    const a1 = store.remember({
+      statement: "alpha: user visited Kyoto on 2026-03-01",
+      nodeName: "alpha trips",
+      sourceActor: "user",
+    }).memory.id;
+    const a2 = store.remember({
+      statement: "alpha: user visited Osaka on 2026-03-05",
+      nodeName: "alpha trips",
+      sourceActor: "user",
+    }).memory.id;
+    const b1 = store.remember({
+      statement: "beta: user flew home on 2026-03-09",
+      nodeName: "beta logistics",
+      sourceActor: "user",
+    }).memory.id;
+    store.rebuildLeafBlocks();
+    const taskA = store.pendingLeafSummaries().find((t) => t.nodeName === "alpha trips")!;
+    store.setLeafSummary(taskA.blockId, "zebra index terms for alpha", "test-model", taskA.membersKey);
+
+    // Without a chain, the append covers block A only.
+    const plain = store.searchContext("zebra", { leafBlockRouting: true });
+    assert.deepEqual(
+      plain.results.map((r) => r.memory.id).sort(),
+      [a1, a2].sort(),
+    );
+
+    // A temporal chain a1 → b1 makes the cross-block continuation surface:
+    // b1 lives in another block and is appended with chain markings.
+    const chain = store.createMemoryChain({ chainType: "temporal", topic: "march trip" });
+    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a1, targetMemoryId: b1 });
+    const pulled = store.searchContext("zebra", { leafBlockRouting: true });
+    assert.equal(pulled.results.length, 3);
+    const beta = pulled.results.find((r) => r.memory.id === b1)!;
+    assert.equal(beta.chainId, chain.id);
+    assert.equal(beta.chainType, "temporal");
+    assert.equal(beta.leafBlockId, undefined);
+    // Block members keep their block marking; the chain-pulled neighbor is
+    // marked with its chain instead (order inside the append is getContext's).
+    for (const id of [a1, a2]) {
+      assert.equal(pulled.results.find((r) => r.memory.id === id)!.leafBlockId, taskA.blockId);
+    }
+  });
+});
+
+test("leafBlockRouting: member-only chains pull position-adjacent neighbors", () => {
+  withStore((store) => {
+    // Eval chain injection builds member-only chains (no explicit edges):
+    // position adjacency must stand in for the missing edge structure.
+    const a1 = store.remember({
+      statement: "alpha: user visited Kyoto on 2026-03-01",
+      nodeName: "alpha trips",
+      sourceActor: "user",
+    }).memory.id;
+    const b1 = store.remember({
+      statement: "beta: user flew home on 2026-03-09",
+      nodeName: "beta logistics",
+      sourceActor: "user",
+    }).memory.id;
+    store.rebuildLeafBlocks();
+    const taskA = store.pendingLeafSummaries().find((t) => t.nodeName === "alpha trips")!;
+    store.setLeafSummary(taskA.blockId, "zebra index terms for alpha", "test-model", taskA.membersKey);
+
+    const chain = store.createMemoryChain({ chainType: "logical", topic: "march trip" });
+    store.addMemoryToChain({ chainId: chain.id, memoryId: a1, position: 0 });
+    store.addMemoryToChain({ chainId: chain.id, memoryId: b1, position: 1 });
+
+    const pulled = store.searchContext("zebra", { leafBlockRouting: true });
+    const beta = pulled.results.find((r) => r.memory.id === b1);
+    assert.ok(beta, "position-adjacent member of a member-only chain is pulled");
+    assert.equal(beta.chainId, chain.id);
+    assert.equal(beta.chainType, "logical");
+    assert.equal(beta.chainPosition, 1);
+  });
+});
