@@ -44,13 +44,12 @@ import {
   configuredSearchRecommendationMode,
   type SearchRecommendationMode,
 } from "../../../src/integration/config.ts";
-import { searchPreview } from "../../../src/integration/search-projection.ts";
 import {
-  DEFAULT_LOGICAL_CHAIN_MAX_CHARS,
-  logicalChainCount,
-  logicalChainNames,
-  projectLogicalChains,
-} from "../../../src/integration/chain-projection.ts";
+  renderEvidenceSurface,
+  renderRememberSurface,
+  renderSearchSurface,
+  renderTaskBoardSurface,
+} from "../../../src/integration/agent-surface.ts";
 import {
   selectEvidence,
   type AgentHistoryMessage,
@@ -2543,76 +2542,22 @@ function isTaskContinuation(prompt: string): boolean {
 }
 
 export function formatSearchHeaders(context: MemoryContext): string {
-  if (context.results.length === 0) return "No matching NMG memory found.";
   const nextStep = formatProgressiveDisclosure(context) || nmgPrompts.get_hint;
-  const chainCount = logicalChainCount(context);
-  return [
-    renderDisclosure(nmgPrompts.search_disclosure, {
+  return renderSearchSurface(context, {
+    preamble: renderDisclosure(nmgPrompts.search_disclosure, {
       count: String(context.results.length),
       next_step: nextStep,
       forget_hint: hasForgetMarker(context) ? nmgPrompts.forget_hint : "",
     }),
-    nmgPrompts.headers_title,
-    nmgPrompts.headers_fields,
-    ...context.results.map((result) => {
-      const { memory, node, recallReason: reason, hitTerms } = result;
-      const forget = (memory.markers ?? []).some((marker) => marker.kind === "forget");
-      const logicalChains = logicalChainNames(result);
-      return (
-        `- ${(memory.markers ?? []).some((marker) => marker.kind === "external_source") ? "[external] " : ""}` +
-        `${memory.resolution === "open" || memory.resolution === "reopened" ? "[open] " : ""}` +
-        `memory=${memory.id}; node=${node.canonicalName}; type=${memory.memoryType}; ` +
-        `${recallMatchLabel(reason, hitTerms)}` +
-        `${recallTimeLabel(memory)}` +
-        `${logicalChains.length > 0 ? `chains=${logicalChains.join(",")}; ` : ""}` +
-        // Revoked records show their metadata but not their statement:
-        // the model sees the revocation exists without content to cite.
-        `preview=${forget ? nmgPrompts.forget_redacted : searchPreview(memory)}`
-      );
-    }),
-    chainCount > 0
-      ? `logical_chains=${chainCount}; use nmg_get for compact chain structure with exact evidence.`
-      : "",
-    formatActiveGraph(context),
-  ]
-    .filter(Boolean)
-    .join("\n");
+    candidateHeading: [nmgPrompts.headers_title, nmgPrompts.headers_fields],
+    includeTier: false,
+  });
 }
 
 function hasForgetMarker(context: MemoryContext): boolean {
   return (context.results ?? []).some((result) =>
     (result.memory.markers ?? []).some((marker) => marker.kind === "forget"),
   );
-}
-
-/** What the query actually matched, not why the record surfaced:
- *  literal query terms for lexical hits, otherwise the mechanism
- *  (semantic / graph route / hybrid) when no term is available. */
-function recallMatchLabel(
-  reason: MemorySearchResult["recallReason"],
-  hitTerms: MemorySearchResult["hitTerms"],
-): string {
-  if (hitTerms && hitTerms.length > 0) return `matches=${hitTerms.join(",")}; `;
-  const label =
-    reason === "learned_route"
-      ? "graph"
-      : reason === "vector_match"
-        ? "semantic"
-        : (reason ?? "hybrid");
-  return `matches=${label}; `;
-}
-
-/** Temporal anchors the agent can act on: the event's own time when
- *  recorded, and an expiry when the record stops being current. Dates only,
- *  omitted when absent. */
-function recallTimeLabel(memory: MemorySearchResult["memory"]): string {
-  const day = (iso: string | null): string | null => (iso ? iso.slice(0, 10) : null);
-  const parts: string[] = [];
-  const event = day(memory.eventTime);
-  if (event) parts.push(`time=${event}`);
-  const expires = day(memory.expiresAt ?? memory.validUntil);
-  if (expires) parts.push(`expires=${expires}`);
-  return parts.length > 0 ? `${parts.join("; ")}; ` : "";
 }
 
 function formatProgressiveDisclosure(context: MemoryContext): string {
@@ -2622,7 +2567,7 @@ function formatProgressiveDisclosure(context: MemoryContext): string {
 }
 
 function formatActiveGraph(context: MemoryContext): string {
-  return context.activeGraph ? `AG activeGraphId=${context.activeGraph.id}` : "";
+  return context.activeGraph ? `activeGraphId=${context.activeGraph.id}` : "";
 }
 
 interface MemoryContextFormatOptions {
@@ -2635,42 +2580,14 @@ export function formatMemoryContext(
   context: MemoryContext,
   options: MemoryContextFormatOptions = {},
 ): string {
-  const chains = projectLogicalChains(
-    context,
-    options.logicalChainMaxChars ?? DEFAULT_LOGICAL_CHAIN_MAX_CHARS,
-  );
-  const records = context.results
-    .map(({ memory, node, evidence }) => {
-      const source =
-        evidence.content.trim() !== memory.statement.trim()
-          ? `\n  SOURCE=${excerpt(evidence.content, 320)}`
-          : "";
-      const external = (memory.markers ?? []).find((marker) => marker.kind === "external_source");
-      const externalLabel = external ? `[external, ${memory.truthStatus}] ` : "";
-      const resolutionLabel =
-        memory.resolution === "open" || memory.resolution === "reopened" ? "[open] " : "";
-      const externalSource = external?.attributes?.source
-        ? `\n  EXTERNAL_SOURCE=${String(external.attributes.source)}; retrievedAt=${String(external.attributes.retrievedAt ?? "unknown")}`
-        : "";
-      const chainLabel = chains.labels.get(memory.id);
-      return (
-        `- ${chainLabel ? `[${chainLabel}] ` : ""}${externalLabel}${resolutionLabel}${memory.statement}\n  memory=${memory.id}; node=${node.canonicalName}; ` +
-        `type=${memory.memoryType}; truth=${memory.truthStatus}; scope=${JSON.stringify(memory.scope)}` +
-        externalSource +
-        source
-      );
-    })
-    .join("\n");
-  return [
-    renderDisclosure(nmgPrompts.get_disclosure, {
+  return renderEvidenceSurface(context, {
+    preamble: renderDisclosure(nmgPrompts.get_disclosure, {
       count: String(context.results.length),
       next_step: formatProgressiveDisclosure(context) || "",
     }),
-    records,
-    chains.text,
-  ]
-    .filter(Boolean)
-    .join("\n");
+    nextStep: formatProgressiveDisclosure(context),
+    logicalChainMaxChars: options.logicalChainMaxChars,
+  });
 }
 
 function toolResult(details: unknown, text: string) {
@@ -2900,99 +2817,11 @@ function formatTaskBoardResult(
   taskId: string,
   directory: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> = [],
 ): string {
-  // discover: online agent roster (A2A find→direct). Rendered instead of
-  // entries so the caller can pick a to= target for a directed put.
-  if (result.action === "discover") {
-    const agents = result.agents ?? [];
-    const lines: string[] = ["在线 agent 名录（discover，按最近心跳）："];
-    if (agents.length === 0) {
-      lines.push("- 暂无在线 agent（各 hook/扩展需注册身份并心跳，NMG_AGENT_ID 或 agent 名）");
-    } else {
-      for (const agent of agents) {
-        const desc = agent.description ? ` — ${agent.description}` : "";
-        const caps = agent.capabilities ? ` [${agent.capabilities}]` : "";
-        lines.push(
-          `- ${agent.agentName}${desc}${caps} (id=${agent.id.slice(0, 8)}·last ${agent.lastSeenAt.slice(0, 19)})`,
-        );
-      }
-    }
-    lines.push(
-      "用 nmg_board put ... to=<agent_name> 定向投递（只唤醒该 agent）；不指定 to 则广播给订阅者。",
-    );
-    return lines.join("\n");
-  }
-  const entries = result.entries ?? (result.entry ? [result.entry] : []);
-  const lines: string[] = [];
-  if (directory.length > 0) {
-    lines.push("Active named channels (world channel lobby):");
-    for (const board of directory) {
-      lines.push(
-        `- ${board.taskId} (${board.entryCount} open · updated ${board.lastUpdatedAt.slice(0, 10)})`,
-      );
-    }
-    lines.push("");
-  }
-  if (entries.length === 0) {
-    lines.push(`Task board ${taskId} has no matching entries.`);
-  } else {
-    lines.push(
-      ...entries.map((entry) => {
-        const claim = entry.claimedBy ? ` [claimed by ${entry.claimedBy}]` : "";
-        const ack =
-          entry.ackedBy && entry.ackedBy.length > 0
-            ? ` (✅ acked by ${entry.ackedBy.join(", ")})`
-            : "";
-        return `- #${entry.sequence} ${entry.id} [${entry.kind}/${entry.status}]${claim}${ack} ${entry.agentId}: ${excerpt(entry.content, 500)}`;
-      }),
-    );
-    if (result.action === "read") lines.push(`nextCursor=${String(result.nextCursor ?? 0)}`);
-  }
-  lines.push("Temporary coordination only; use nmg_remember separately for durable knowledge.");
-  // Disclosed only on use (progressive disclosure): the full conventions are
-  // kept out of the always-resident tool description to save tokens.
-  lines.push(
-    "Board conventions (on use): entries may carry memory=<id> references to LTG records — readers expand them with nmg_get; open entries can be claimed by one Agent (lease-based, expired claims return to the pool) and released; resolve a request once it is answered — a resolved entry is closed and must not be replied to (reopen only with new substance); keep entries concise and temporary; taskId is the only channel boundary (no DMs, mentions, groups, or pinning).",
-  );
-  return lines.join("\n");
+  return renderTaskBoardSurface(result, { taskId, directory });
 }
 
 function formatRememberResult(value: unknown): string {
-  const result = value as {
-    memory?: { id?: string; statement?: string };
-    duplicates?: Array<{ memoryId: string; statement: string; similarity?: number }>;
-    supersedeCandidates?: Array<{
-      memoryId: string;
-      statement: string;
-      supersedeSignal?: number;
-    }>;
-  };
-  const memoryId = result.memory?.id;
-  const lines = [`Memory saved${memoryId ? ` as ${memoryId}` : ""}.`];
-  const supersede = (result.supersedeCandidates ?? []).slice(0, 3);
-  if (supersede.length > 0 && memoryId) {
-    lines.push(
-      "NMG found possible older values. Similarity is only a candidate signal; decide semantically.",
-    );
-    for (const candidate of supersede) {
-      lines.push(`- ${candidate.memoryId}: ${excerpt(candidate.statement, 180)}`);
-    }
-    lines.push(
-      "If exactly one candidate is genuinely replaced in the same scope, call nmg_remember again with action=supersede, newMemoryId, supersededMemoryId, and a short reason. Otherwise do nothing.",
-    );
-  }
-  const duplicates = (result.duplicates ?? []).filter(
-    (candidate) => candidate.memoryId !== memoryId,
-  );
-  if (duplicates.length > 0) {
-    lines.push("Possible semantic neighbours were retained as distinct nodes:");
-    for (const candidate of duplicates.slice(0, 3)) {
-      lines.push(`- ${candidate.memoryId}: ${excerpt(candidate.statement, 180)}`);
-    }
-    lines.push(
-      "Only if a relationship is useful, call nmg_remember again with action=relate, newMemoryId, relatedMemoryId, and relationJudgement. Similarity alone is not identity; otherwise do nothing.",
-    );
-  }
-  return lines.join("\n");
+  return renderRememberSurface(value as Parameters<typeof renderRememberSurface>[0]);
 }
 
 function excerpt(value: string, maxLength: number): string {

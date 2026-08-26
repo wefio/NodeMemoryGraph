@@ -41,6 +41,306 @@ const COMMON_BOARD_ACTIONS = [
 ];
 [...COMMON_BOARD_ACTIONS];
 //#endregion
+//#region ../../src/integration/chain-projection.ts
+const DEFAULT_LOGICAL_CHAIN_MAX_CHARS = 2048;
+function logicalChainNames(result) {
+	return [...new Set((result.chainMemberships ?? []).filter((membership) => membership.chainType === "logical").map((membership) => membership.topic ?? membership.chainId.slice(0, 8)))];
+}
+function logicalChainCount(context) {
+	return new Set(context.results.flatMap((result) => (result.chainMemberships ?? []).filter((membership) => membership.chainType === "logical").map((membership) => membership.chainId))).size;
+}
+function memoryLabel(index) {
+	let value = index + 1;
+	let label = "";
+	while (value > 0) {
+		value -= 1;
+		label = String.fromCharCode(65 + value % 26) + label;
+		value = Math.floor(value / 26);
+	}
+	return label;
+}
+function compactEdgeLines(edges, labels) {
+	const unique = [...new Map(edges.map((edge) => [`${edge.sourceMemoryId}\0${edge.targetMemoryId}`, edge])).values()];
+	const grouped = (incoming) => {
+		const groups = /* @__PURE__ */ new Map();
+		for (const edge of unique) {
+			const key = incoming ? edge.targetMemoryId : edge.sourceMemoryId;
+			const member = incoming ? edge.sourceMemoryId : edge.targetMemoryId;
+			const members = groups.get(key) ?? /* @__PURE__ */ new Set();
+			members.add(member);
+			groups.set(key, members);
+		}
+		return [...groups.entries()].map(([key, members]) => {
+			const keyLabel = labels.get(key);
+			const memberLabels = [...members].map((id) => labels.get(id)).join(" & ");
+			return incoming ? `${memberLabels} --> ${keyLabel}` : `${keyLabel} --> ${memberLabels}`;
+		});
+	};
+	const outgoing = grouped(false);
+	const incoming = grouped(true);
+	const cost = (lines) => lines.reduce((sum, line) => sum + line.length + 1, 0);
+	return cost(incoming) < cost(outgoing) ? incoming : outgoing;
+}
+/**
+* Host-neutral, budgeted projection of logical chain structure.
+*
+* Evidence statements remain outside this projection. Adapters render each
+* statement once, prefix it with the returned local label, then append `text`
+* (or consume `chains` as structured data).
+*/
+function projectLogicalChains(context, maxChars = DEFAULT_LOGICAL_CHAIN_MAX_CHARS) {
+	if (maxChars <= 0) return {
+		labels: /* @__PURE__ */ new Map(),
+		chains: [],
+		foldedChainCount: 0,
+		text: ""
+	};
+	const available = new Set(context.results.map((result) => result.memory.id));
+	const labels = new Map(context.results.map((result, index) => [result.memory.id, memoryLabel(index)]));
+	const groupedChains = /* @__PURE__ */ new Map();
+	for (const result of context.results) for (const membership of result.chainMemberships ?? []) {
+		if (membership.chainType !== "logical") continue;
+		const chain = groupedChains.get(membership.chainId) ?? {
+			topic: membership.topic,
+			members: []
+		};
+		chain.members.push({
+			memoryId: result.memory.id,
+			position: membership.position
+		});
+		if (!chain.topic && membership.topic) chain.topic = membership.topic;
+		groupedChains.set(membership.chainId, chain);
+	}
+	const blocks = [];
+	for (const [chainId, chain] of groupedChains) {
+		const members = [...chain.members].sort((left, right) => left.position - right.position || left.memoryId.localeCompare(right.memoryId));
+		const edges = (context.chainEdges ?? []).filter((edge) => edge.chainId === chainId && available.has(edge.sourceMemoryId) && available.has(edge.targetMemoryId));
+		const lines = edges.length > 0 ? compactEdgeLines(edges, labels) : members.length > 1 ? [members.map((member) => labels.get(member.memoryId)).join(" --> ")] : [];
+		if (lines.length === 0) continue;
+		const topic = (chain.topic ?? chainId).replace(/[\r\n]+/gu, " ").trim();
+		const projected = {
+			chainId,
+			topic,
+			memoryIds: members.map((member) => member.memoryId),
+			lines
+		};
+		blocks.push({
+			chain: projected,
+			text: `[logical chain: ${topic}]\nflowchart LR\n${lines.map((line) => `  ${line}`).join("\n")}`
+		});
+	}
+	if (blocks.length === 0) return {
+		labels: /* @__PURE__ */ new Map(),
+		chains: [],
+		foldedChainCount: 0,
+		text: ""
+	};
+	const open = "<nmg_logical_chains>";
+	const close = "</nmg_logical_chains>";
+	const folded = "[additional logical chains folded by structure budget]";
+	const accepted = [];
+	for (const block of blocks) if ([
+		open,
+		...accepted.map((item) => item.text),
+		block.text,
+		close
+	].join("\n").length <= maxChars) accepted.push(block);
+	if (accepted.length === 0) return {
+		labels: /* @__PURE__ */ new Map(),
+		chains: [],
+		foldedChainCount: blocks.length,
+		text: ""
+	};
+	const foldedChainCount = blocks.length - accepted.length;
+	let text = [
+		open,
+		...accepted.map((item) => item.text),
+		close
+	].join("\n");
+	if (foldedChainCount > 0) {
+		const withFolded = [
+			open,
+			...accepted.map((item) => item.text),
+			folded,
+			close
+		].join("\n");
+		if (withFolded.length <= maxChars) text = withFolded;
+	}
+	const usedMemoryIds = new Set(accepted.flatMap((item) => item.chain.memoryIds));
+	return {
+		labels: new Map([...labels].filter(([memoryId]) => usedMemoryIds.has(memoryId))),
+		chains: accepted.map((item) => item.chain),
+		foldedChainCount,
+		text
+	};
+}
+function searchPreview(memory) {
+	if ((memory.markers ?? []).some((marker) => marker.kind === "forget")) return "[forget] (content withdrawn)";
+	const normalized = memory.statement.replace(/\s+/gu, " ").trim();
+	return normalized.length <= 320 ? normalized : `${normalized.slice(0, 319)}…`;
+}
+/** Agent-facing search projection. Exact records and evidence remain behind `nmg get`. */
+function compactSearchContext(context) {
+	return {
+		candidates: context.results.map((result) => ({
+			id: result.memory.id,
+			node: result.node.canonicalName,
+			type: result.memory.memoryType,
+			resolution: result.memory.resolution,
+			tier: result.memory.tier,
+			preview: searchPreview(result.memory),
+			matches: result.hitTerms && result.hitTerms.length > 0 ? result.hitTerms : [result.recallReason ?? "hybrid"],
+			eventTime: result.memory.eventTime,
+			expiresAt: result.memory.expiresAt ?? result.memory.validUntil,
+			score: result.combinedScore,
+			chains: logicalChainNames(result)
+		})),
+		logicalChainCount: logicalChainCount(context),
+		activeGraphId: context.activeGraph?.id ?? null,
+		tokens: context.activeGraph?.usage.estimatedTokens ?? null,
+		deferredMemoryIds: context.progressiveDisclosure?.deferredMemoryIds ?? [],
+		qpp: context.activeGraph?.qpp ? {
+			trigger: context.activeGraph.qpp.trigger,
+			reason: context.activeGraph.qpp.reason,
+			score: context.activeGraph.qpp.qpp,
+			threshold: context.activeGraph.qpp.threshold
+		} : null,
+		retrieval: context.retrieval,
+		totalMs: context.timings?.totalMs
+	};
+}
+//#endregion
+//#region ../../src/integration/agent-surface.ts
+function excerpt(value, maxLength) {
+	const normalized = value.replace(/\s+/gu, " ").trim();
+	return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}…`;
+}
+function hasMarker(context, kind) {
+	return context.results.some(({ memory }) => (memory.markers ?? []).some((marker) => marker.kind === kind));
+}
+function matchLabel(result) {
+	if (result.hitTerms && result.hitTerms.length > 0) return result.hitTerms.join(",");
+	return result.recallReason === "learned_route" ? "graph" : result.recallReason === "vector_match" ? "semantic" : result.recallReason ?? "hybrid";
+}
+function temporalLabels(result) {
+	const day = (value) => value ? value.slice(0, 10) : null;
+	const labels = [];
+	const event = day(result.memory.eventTime);
+	if (event) labels.push(`time=${event}`);
+	const expires = day(result.memory.expiresAt ?? result.memory.validUntil);
+	if (expires) labels.push(`expires=${expires}`);
+	return labels;
+}
+/**
+* Host-neutral default rendering for the progressive search surface. Adapters
+* may supply host prompt copy, but candidate fields, redaction, chain labels,
+* and next-step placement stay identical across hosts.
+*/
+function renderSearchSurface(context, options = {}) {
+	if (context.results.length === 0) return options.emptyText ?? "No matching NMG memory found.";
+	const lines = context.results.map((result) => {
+		const { memory, node } = result;
+		const flags = [(memory.markers ?? []).some((marker) => marker.kind === "external_source") ? "[external]" : "", memory.resolution === "open" || memory.resolution === "reopened" ? "[open]" : ""].filter(Boolean);
+		const fields = [
+			`memory=${memory.id}`,
+			`node=${node.canonicalName}`,
+			`type=${memory.memoryType}`,
+			...options.includeTier === false ? [] : [`tier=L${memory.tier}`],
+			`matches=${matchLabel(result)}`,
+			...temporalLabels(result),
+			...logicalChainNames(result).length > 0 ? [`chains=${logicalChainNames(result).join(",")}`] : [],
+			`preview=${searchPreview(memory)}`
+		];
+		return `- ${flags.length > 0 ? `${flags.join(" ")} ` : ""}${fields.join("; ")}`;
+	});
+	const chainCount = logicalChainCount(context);
+	return [
+		options.preamble,
+		...options.candidateHeading ?? [],
+		...lines,
+		chainCount > 0 ? `logical_chains=${chainCount}; use nmg_get for compact chain structure with exact evidence.` : "",
+		context.activeGraph?.id ? `activeGraphId=${context.activeGraph.id}` : "",
+		options.performanceLine,
+		options.nextStep,
+		hasMarker(context, "forget") ? options.forgetHint : ""
+	].filter(Boolean).join("\n");
+}
+/** Exact-evidence surface. Statements are emitted once; logical structure has
+* an independent budget and refers to stable local labels. */
+function renderEvidenceSurface(context, options = {}) {
+	const chains = projectLogicalChains(context, options.logicalChainMaxChars ?? 2048);
+	const sourceMaxChars = options.sourceMaxChars ?? 320;
+	const records = context.results.map(({ memory, node, evidence }) => {
+		const external = (memory.markers ?? []).find((marker) => marker.kind === "external_source");
+		const flags = [
+			chains.labels.get(memory.id) ? `[${chains.labels.get(memory.id)}]` : "",
+			external ? `[external, ${memory.truthStatus}]` : "",
+			memory.resolution === "open" || memory.resolution === "reopened" ? "[open]" : ""
+		].filter(Boolean);
+		const details = [
+			`memory=${memory.id}`,
+			`node=${node.canonicalName}`,
+			`type=${memory.memoryType}`,
+			`truth=${memory.truthStatus}`,
+			`scope=${JSON.stringify(memory.scope)}`
+		];
+		const externalSource = external?.attributes?.source ? `\n  EXTERNAL_SOURCE=${String(external.attributes.source)}; retrievedAt=${String(external.attributes.retrievedAt ?? "unknown")}` : "";
+		const source = evidence.content.trim() !== memory.statement.trim() ? `\n  SOURCE=${excerpt(evidence.content, sourceMaxChars)}` : "";
+		return `- ${flags.length > 0 ? `${flags.join(" ")} ` : ""}${memory.statement}\n  ${details.join("; ")}${externalSource}${source}`;
+	});
+	const missing = options.missingMemoryIds?.length ? `MISSING: ${options.missingMemoryIds.join(", ")}` : "";
+	return [
+		options.preamble,
+		...records,
+		missing,
+		chains.text,
+		options.nextStep
+	].filter(Boolean).join("\n") || options.emptyText || "No active memory found.";
+}
+/** Default follow-up guidance after a durable save. The model remains the
+* semantic judge; NMG only exposes bounded candidates. */
+function renderRememberSurface(result) {
+	const memoryId = result.memory?.id;
+	const lines = [`Saved${memoryId ? ` ${memoryId}` : " memory"}.`];
+	const supersede = (result.supersedeCandidates ?? []).slice(0, 3);
+	if (supersede.length > 0 && memoryId) lines.push("NMG found possible older values. Similarity is only a candidate signal; decide semantically.", ...supersede.map((candidate) => `- ${candidate.memoryId}: ${excerpt(candidate.statement, 180)}`), "If exactly one candidate is genuinely replaced in the same scope, call nmg_remember again with action=supersede, newMemoryId, supersededMemoryId, and a short reason. Otherwise do nothing.");
+	const duplicates = (result.duplicates ?? []).filter((candidate) => candidate.memoryId !== memoryId);
+	if (duplicates.length > 0) lines.push("Possible semantic neighbours were retained as distinct nodes:", ...duplicates.slice(0, 3).map((candidate) => `- ${candidate.memoryId}: ${excerpt(candidate.statement, 180)}`), "Only if a relationship is useful, call nmg_remember again with action=relate, newMemoryId, relatedMemoryId, and relationJudgement. Similarity alone is not identity; otherwise do nothing.");
+	return lines.join("\n");
+}
+const TASK_BOARD_CONVENTIONS = "Board conventions (on use): entries may carry memory=<id> references to LTG records — readers expand them with nmg_get; open entries can be claimed by one Agent (lease-based, expired claims return to the pool) and released; resolve a request once it is answered — a resolved entry is closed and must not be replied to (reopen only with new substance); keep entries concise and temporary; taskId is the only channel boundary (no DMs, mentions, groups, or pinning).";
+/** Host-neutral board rendering. Host-only actions such as Pi rename remain in
+* the adapter and can bypass this renderer. */
+function renderTaskBoardSurface(result, options) {
+	if (result.action === "discover") {
+		const agents = result.agents ?? [];
+		return agents.length === 0 ? "No online NMG agents match the requested capability." : [
+			"Online NMG agents:",
+			...agents.map((agent) => `- ${agent.agentName}${agent.description ? ` — ${agent.description}` : ""}${agent.capabilities ? ` capabilities=${agent.capabilities}` : ""} (id=${agent.id ?? agent.agentName}; lastSeen=${agent.lastSeenAt})`),
+			"Use nmg_board action=put with to=<agent name> for directed delivery."
+		].join("\n");
+	}
+	const entries = result.entries ?? (result.entry ? [result.entry] : []);
+	const lines = [];
+	for (const board of options.directory ?? []) {
+		if (lines.length === 0) lines.push("Active named channels (world channel lobby):");
+		lines.push(`- ${board.taskId} (${board.entryCount} open · updated ${board.lastUpdatedAt.slice(0, 10)})`);
+	}
+	if (lines.length > 0) lines.push("");
+	if (entries.length === 0) lines.push(options.emptyText ?? `Task board ${options.taskId} has no matching entries.`);
+	else {
+		for (const entry of entries) {
+			const claim = entry.claimedBy ? ` [claimed by ${entry.claimedBy}]` : "";
+			const ack = entry.ackedBy?.length ? ` (✅ acked by ${entry.ackedBy.join(", ")})` : "";
+			lines.push(`- #${String(entry.sequence ?? "?")} ${String(entry.id ?? "?")} [${String(entry.kind ?? "entry")}/${String(entry.status ?? "open")}]${claim}${ack} ${String(entry.agentId ?? "unknown")}: ${excerpt(String(entry.content ?? ""), 500)}`);
+		}
+		if (result.action === "read") lines.push(`nextCursor=${String(result.nextCursor ?? 0)}`);
+	}
+	lines.push("Temporary coordination only; use nmg_remember separately for durable knowledge.");
+	if (options.includeConventions !== false) lines.push(TASK_BOARD_CONVENTIONS);
+	return lines.join("\n");
+}
+//#endregion
 //#region src/plugin/index.ts
 const inject = [
 	"tools",
@@ -256,24 +556,6 @@ function apply(ctx) {
 		for (const key of Object.keys(scope || {})) out[key] = String(scope[key]);
 		return out;
 	}
-	function searchPreviewOf(memory) {
-		const normalized = String(memory && memory.statement || "").replace(/\s+/g, " ").trim();
-		return normalized.length <= 320 ? normalized : normalized.slice(0, 319) + "…";
-	}
-	function projectCompact(context) {
-		return {
-			candidates: (Array.isArray(context.results) ? context.results : []).map((r) => ({
-				id: r.memory.id,
-				node: r.node && r.node.canonicalName || "",
-				type: r.memory.memoryType,
-				tier: r.memory.tier,
-				preview: searchPreviewOf(r.memory)
-			})),
-			activeGraphId: context.activeGraph ? context.activeGraph.id : null,
-			deferredMemoryIds: context.progressiveDisclosure && context.progressiveDisclosure.deferredMemoryIds || [],
-			tokens: context.activeGraph && context.activeGraph.usage && context.activeGraph.usage.estimatedTokens || null
-		};
-	}
 	function projectDaemonStatus(raw) {
 		const endpoint = resolveDaemon();
 		return {
@@ -382,7 +664,7 @@ function apply(ctx) {
 				projectDir: workspaceRoot,
 				sessionId
 			}, budget);
-			if (context) return projectCompact(context);
+			if (context) return compactSearchContext(context);
 		} catch {
 			return null;
 		}
@@ -891,18 +1173,14 @@ function apply(ctx) {
 			if (args.sourceActor) argv.push("--source-actor", args.sourceActor);
 			if (args.includeHistorical) argv.push("--include-historical");
 			for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1]);
-			argv.push("--project-dir", workspaceRoot, "--compact-json");
-			const r = await invoke("search", params, argv, exec.signal, projectCompact);
+			argv.push("--project-dir", workspaceRoot, "--json");
+			const r = await invoke("search", params, argv, exec.signal, null);
 			if (!r.ok) return r.error;
 			const data = r.data;
-			const candidates = Array.isArray(data.candidates) ? data.candidates : [];
-			const lines = candidates.length ? candidates.map((c) => "mid=" + c.id + "	node=" + c.node + "	type=" + c.type + "	L" + c.tier + "	" + truncate(c.preview, 160)) : ["No NMG match."];
-			if (data.activeGraphId) lines.push("activeGraphId=" + data.activeGraphId);
-			if (Array.isArray(data.deferredMemoryIds) && data.deferredMemoryIds.length) lines.push("deferred: " + data.deferredMemoryIds.join(","));
-			if (data.tokens != null) lines.push("recall tokens ~" + data.tokens);
-			else if (candidates.length) lines.push("recall tokens ~" + estimateTokens(lines.join("\n")));
-			lines.push("Select exact records with nmg_get (mids + activeGraphId).");
-			return lines.join("\n");
+			const deferred = data.progressiveDisclosure && data.progressiveDisclosure.deferredMemoryIds;
+			const text = renderSearchSurface(data, { nextStep: Array.isArray(deferred) && deferred.length ? "More ranked records are folded. Expand selected memory IDs first; deferred IDs: " + deferred.join(",") : "Select exact records with nmg_get (memory IDs + activeGraphId)." });
+			const tokens = data.activeGraph && data.activeGraph.usage && data.activeGraph.usage.estimatedTokens;
+			return text + "\nrecall tokens ~" + (tokens != null ? tokens : estimateTokens(text));
 		}
 	};
 	const getTool = {
@@ -943,19 +1221,10 @@ function apply(ctx) {
 			argv.push("--project-dir", workspaceRoot, "--json");
 			const r = await invoke("get", params, argv, exec.signal, null);
 			if (!r.ok) return r.error;
-			const data = r.data;
-			const results = Array.isArray(data.results) ? data.results : [];
-			const lines = [];
-			for (const item of results) {
-				const m = item.memory || {};
-				const n = item.node || {};
-				lines.push("- " + m.statement);
-				lines.push("  mid=" + m.id + " node=" + (n.canonicalName || "") + " type=" + m.memoryType + " truth=" + m.truthStatus);
-				const ev = item.evidence && item.evidence.content;
-				if (ev && String(ev).trim() !== String(m.statement || "").trim()) lines.push("  SRC: " + truncate(ev, 280));
-			}
-			if (Array.isArray(data.missingMemoryIds) && data.missingMemoryIds.length) lines.push("MISSING: " + data.missingMemoryIds.join(", "));
-			return lines.length ? lines.join("\n") : "No active memory found.";
+			return renderEvidenceSurface(r.data, {
+				missingMemoryIds: Array.isArray(r.data.missingMemoryIds) ? r.data.missingMemoryIds : void 0,
+				sourceMaxChars: 280
+			});
 		}
 	};
 	const rememberTool = {
@@ -1186,9 +1455,7 @@ function apply(ctx) {
 			argv.push("--project-dir", workspaceRoot, "--json");
 			const r = await invoke("remember", params, argv, exec.signal, null);
 			if (!r.ok) return r.error;
-			const m = r.data.memory || {};
-			const n = r.data.node || {};
-			return "Saved " + m.id + " under \"" + (n.canonicalName || "") + "\" (type=" + (m.memoryType || "?") + ").";
+			return renderRememberSurface(r.data);
 		}
 	};
 	const boardTool = {
@@ -1346,17 +1613,7 @@ function apply(ctx) {
 			const r = await invoke("taskBoard", params, argv, exec.signal, null);
 			if (!r.ok) return r.error;
 			if (args.entryId && (args.action === "claim" || args.action === "resolve")) removeWakeEntry(args.entryId);
-			const data = r.data;
-			if (data.action === "discover") {
-				const agents = Array.isArray(data.agents) ? data.agents : [];
-				if (!agents.length) return "No online NMG agents match.";
-				return "Online NMG agents [v2]:\n" + agents.map((a) => "- " + a.agentName + (a.capabilities ? " capabilities=" + a.capabilities : "") + " lastSeen=" + a.lastSeenAt).join("\n");
-			}
-			const entries = Array.isArray(data.entries) ? data.entries : data.entry ? [data.entry] : [];
-			if (entries.length === 0 && data.action === "read") return "No matching board entries.";
-			const lines = entries.map((e) => "- #" + e.sequence + " " + e.id + " [" + e.kind + "/" + e.status + "] " + e.agentId + ": " + truncate(e.content, 400));
-			if (data.action === "read" && data.nextCursor != null && data.nextCursor !== 0) lines.push("nextCursor=" + data.nextCursor);
-			return lines.length ? lines.join("\n") : "No matching board entries.";
+			return renderTaskBoardSurface(r.data, { taskId });
 		}
 	};
 	const daemonTool = {

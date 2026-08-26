@@ -10,12 +10,16 @@ import {
 import { resolveNmgDataDir } from "../../../src/cli/data-path.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import { coordinationEnabled } from "../../../src/integration/config.ts";
-import { COMMON_BOARD_ACTIONS, COMMON_REMEMBER_ACTIONS } from "../../../src/integration/tool-contract.ts";
 import {
-  logicalChainCount,
-  logicalChainNames,
-  projectLogicalChains,
-} from "../../../src/integration/chain-projection.ts";
+  COMMON_BOARD_ACTIONS,
+  COMMON_REMEMBER_ACTIONS,
+} from "../../../src/integration/tool-contract.ts";
+import {
+  renderEvidenceSurface,
+  renderRememberSurface,
+  renderSearchSurface,
+  renderTaskBoardSurface,
+} from "../../../src/integration/agent-surface.ts";
 import { WORLD_BOARD_ID, type MemoryContext, type PerfSnapshot } from "../../../src/core/types.ts";
 
 const nmgPrompts = loadPrompts();
@@ -307,12 +311,9 @@ server.registerTool(
             ],
           }
         : {}),
-    })) as {
-      memory: { id: string };
-      node: { canonicalName: string };
-    };
+    })) as Parameters<typeof renderRememberSurface>[0];
     return {
-      content: [{ type: "text", text: `Saved ${r.memory.id} under "${r.node.canonicalName}".` }],
+      content: [{ type: "text", text: renderRememberSurface(r) }],
     };
   },
 );
@@ -409,100 +410,120 @@ async function heartbeatBoardAgent(): Promise<void> {
   lastBoardHeartbeatAt = Date.now();
 }
 
-if (coordinationEnabled()) server.registerTool(
-  "nmg_board",
-  {
-    description: nmgPrompts.board_description,
-    inputSchema: {
-      action: z
-        .enum(COMMON_BOARD_ACTIONS)
-        .describe(nmgPrompts.board_action_parameter_description),
-      taskId: z.string().optional().describe(nmgPrompts.board_task_id_parameter_description),
-      content: z.string().optional().describe(nmgPrompts.board_content_parameter_description),
-      kind: z
-        .enum(["blocker", "decision", "goal", "handoff", "note", "question", "result"])
-        .optional(),
-      entryId: z.string().optional(),
-      resolution: z.string().optional(),
-      reason: z.string().optional(),
-      leaseSeconds: z.number().int().min(60).max(86_400).optional(),
-      afterCursor: z.number().int().min(0).optional(),
-      limit: z.number().int().min(1).max(200).optional(),
-      includeResolved: z.boolean().optional(),
-      ttlSeconds: z.number().int().min(60).max(2_592_000).optional(),
-      to: z.string().optional().describe("Stable agent name returned by discover for directed put"),
-      capabilities: z.string().optional().describe("Capability substring used by discover"),
+if (coordinationEnabled())
+  server.registerTool(
+    "nmg_board",
+    {
+      description: nmgPrompts.board_description,
+      inputSchema: {
+        action: z
+          .enum(COMMON_BOARD_ACTIONS)
+          .describe(nmgPrompts.board_action_parameter_description),
+        taskId: z.string().optional().describe(nmgPrompts.board_task_id_parameter_description),
+        content: z.string().optional().describe(nmgPrompts.board_content_parameter_description),
+        kind: z
+          .enum(["blocker", "decision", "goal", "handoff", "note", "question", "result"])
+          .optional(),
+        entryId: z.string().optional(),
+        resolution: z.string().optional(),
+        reason: z.string().optional(),
+        leaseSeconds: z.number().int().min(60).max(86_400).optional(),
+        afterCursor: z.number().int().min(0).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        includeResolved: z.boolean().optional(),
+        ttlSeconds: z.number().int().min(60).max(2_592_000).optional(),
+        to: z
+          .string()
+          .optional()
+          .describe("Stable agent name returned by discover for directed put"),
+        capabilities: z.string().optional().describe("Capability substring used by discover"),
+      },
     },
-  },
-  async (params) => {
-    await heartbeatBoardAgent();
-    // taskId is optional: without one, entries land on the shared world
-    // channel (the lobby), which every agent reads by default.
-    const taskId = params.taskId?.trim() || WORLD_BOARD_ID;
-    if (params.action === "discover") {
+    async (params) => {
+      await heartbeatBoardAgent();
+      // taskId is optional: without one, entries land on the shared world
+      // channel (the lobby), which every agent reads by default.
+      const taskId = params.taskId?.trim() || WORLD_BOARD_ID;
+      if (params.action === "discover") {
+        const result = (await invokeDaemon(connection, "taskBoard", {
+          action: "discover",
+          taskId,
+          agentId: BOARD_AGENT_ID,
+          capabilities: params.capabilities,
+        })) as BoardToolResult;
+        return {
+          content: [
+            {
+              type: "text",
+              text: renderTaskBoardSurface(
+                {
+                  ...result,
+                  agents: (result.agents ?? []).map((agent) => ({
+                    ...agent,
+                    id: agent.agentName,
+                  })),
+                },
+                { taskId },
+              ),
+            },
+          ],
+        };
+      }
+      if (params.action === "subscribe" || params.action === "unsubscribe") {
+        const result = (await invokeDaemon(connection, "taskBoard", {
+          action: params.action,
+          taskId,
+          sessionId: BOARD_SESSION_ID,
+          agentId: BOARD_AGENT_ID,
+        })) as { taskId: string };
+        const text =
+          params.action === "unsubscribe"
+            ? `已退出频道 ${result.taskId}：不再接收该频道新条目的唤醒通知（用 nmg_board subscribe 重新加入）。`
+            : `已加入频道 ${result.taskId}：接收该频道新条目的唤醒通知（未订阅的频道不会打扰你）。`;
+        return { content: [{ type: "text", text }] };
+      }
       const result = (await invokeDaemon(connection, "taskBoard", {
-        action: "discover",
+        ...params,
         taskId,
         agentId: BOARD_AGENT_ID,
-        capabilities: params.capabilities,
+        sourceSessionId: BOARD_SESSION_ID,
       })) as BoardToolResult;
-      return { content: [{ type: "text", text: formatAgentRoster(result.agents ?? []) }] };
-    }
-    if (params.action === "subscribe" || params.action === "unsubscribe") {
-      const result = (await invokeDaemon(connection, "taskBoard", {
-        action: params.action,
-        taskId,
-        sessionId: BOARD_SESSION_ID,
-        agentId: BOARD_AGENT_ID,
-      })) as { taskId: string };
-      const text =
-        params.action === "unsubscribe"
-          ? `已退出频道 ${result.taskId}：不再接收该频道新条目的唤醒通知（用 nmg_board subscribe 重新加入）。`
-          : `已加入频道 ${result.taskId}：接收该频道新条目的唤醒通知（未订阅的频道不会打扰你）。`;
-      return { content: [{ type: "text", text }] };
-    }
-    const result = (await invokeDaemon(connection, "taskBoard", {
-      ...params,
-      taskId,
-      agentId: BOARD_AGENT_ID,
-      sourceSessionId: BOARD_SESSION_ID,
-    })) as BoardToolResult;
-    const entries = result.entries ?? (result.entry ? [result.entry] : []);
-    if (result.action === "read") {
-      // Reading is a delivery: receipt every open, non-own-echo entry so the
-      // wake path never re-pushes what this session already saw.
-      const receipts = entries
-        .filter((entry) => {
-          if (entry.status !== "open") return false;
-          return !(
-            entry.sourceSessionId === BOARD_SESSION_ID ||
-            (entry.sourceSessionId == null && entry.agentId === BOARD_AGENT_ID)
+      const entries = result.entries ?? (result.entry ? [result.entry] : []);
+      if (result.action === "read") {
+        // Reading is a delivery: receipt every open, non-own-echo entry so the
+        // wake path never re-pushes what this session already saw.
+        const receipts = entries
+          .filter((entry) => {
+            if (entry.status !== "open") return false;
+            return !(
+              entry.sourceSessionId === BOARD_SESSION_ID ||
+              (entry.sourceSessionId == null && entry.agentId === BOARD_AGENT_ID)
+            );
+          })
+          .map((entry) =>
+            invokeDaemon(connection, "taskBoard", {
+              action: "recordDelivery",
+              entryId: entry.id,
+              sessionId: BOARD_SESSION_ID,
+              agentId: BOARD_AGENT_ID,
+              source: "read",
+            }),
           );
-        })
-        .map((entry) =>
-          invokeDaemon(connection, "taskBoard", {
-            action: "recordDelivery",
-            entryId: entry.id,
-            sessionId: BOARD_SESSION_ID,
-            agentId: BOARD_AGENT_ID,
-            source: "read",
-          }),
-        );
-      await Promise.allSettled(receipts);
-    }
-    // The world channel read surfaces the lobby: the directory of active
-    // named channels, so an agent that knows no channel name can find one.
-    let directory: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> = [];
-    if (result.action === "read" && taskId === WORLD_BOARD_ID) {
-      const lobby = (await invokeDaemon(connection, "taskBoard", {
-        action: "list",
-        agentId: BOARD_AGENT_ID,
-      })) as { boards?: typeof directory };
-      directory = lobby.boards ?? [];
-    }
-    return { content: [{ type: "text", text: formatBoard(result, taskId, directory) }] };
-  },
-);
+        await Promise.allSettled(receipts);
+      }
+      // The world channel read surfaces the lobby: the directory of active
+      // named channels, so an agent that knows no channel name can find one.
+      let directory: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }> = [];
+      if (result.action === "read" && taskId === WORLD_BOARD_ID) {
+        const lobby = (await invokeDaemon(connection, "taskBoard", {
+          action: "list",
+          agentId: BOARD_AGENT_ID,
+        })) as { boards?: typeof directory };
+        directory = lobby.boards ?? [];
+      }
+      return { content: [{ type: "text", text: formatBoard(result, taskId, directory) }] };
+    },
+  );
 
 // ── Lifecycle ──
 
@@ -520,17 +541,6 @@ process.on("SIGTERM", done);
 // ── Compact formatters ──
 
 function searchH(r: MemoryContext): string {
-  const lines = r.results.length
-    ? r.results.map((result) => {
-        const { memory: m, node: n } = result;
-        const chains = logicalChainNames(result);
-        return `mid=${m.id}\tnode=${n.canonicalName}\ttype=${m.memoryType}\tL${m.tier}\t${chains.length > 0 ? `chains=${chains.join(",")}\t` : ""}${
-          (m.markers ?? []).some((marker) => marker.kind === "forget")
-            ? nmgPrompts.forget_redacted
-            : t115(m.statement)
-        }`;
-      })
-    : ["No NMG match."];
   const deferred = r.progressiveDisclosure?.deferredMemoryIds;
   const nextStep =
     deferred && deferred.length > 0
@@ -539,21 +549,15 @@ function searchH(r: MemoryContext): string {
   const forget = r.results.some(({ memory: m }) =>
     (m.markers ?? []).some((marker) => marker.kind === "forget"),
   );
-  const perfLine = perfFeedback(r.timings, r.filterUsage);
-  if (perfLine) lines.push(perfLine);
-  const chainCount = logicalChainCount(r);
-  if (chainCount > 0) {
-    lines.push(`logical_chains=${chainCount}; use nmg_get for compact chain structure.`);
-  }
-  return [
-    ...(r.activeGraph?.id ? [`activeGraphId=${r.activeGraph.id}`] : []),
-    renderDisclosure(nmgPrompts.mcp_search_disclosure, {
+  return renderSearchSurface(r, {
+    emptyText: "No NMG match.",
+    preamble: renderDisclosure(nmgPrompts.mcp_search_disclosure, {
       count: String(r.results.length),
       next_step: nextStep,
       forget_hint: forget ? nmgPrompts.forget_hint : "",
     }),
-    ...lines,
-  ].join("\n");
+    performanceLine: perfFeedback(r.timings, r.filterUsage),
+  });
 }
 
 /** Compact per-phase timing feedback line for agent self-maintenance. */
@@ -576,75 +580,13 @@ function perfFeedback(timings: PerfSnapshot | undefined, filters?: unknown): str
 }
 
 function memText(r: MemoryContext & { missingMemoryIds?: string[] }): string {
-  const chains = projectLogicalChains(r);
-  const l = r.results.map(({ memory: m, node: n, evidence: e }) => {
-    const label = chains.labels.get(m.id);
-    return `- ${label ? `[${label}] ` : ""}${m.statement}\n  mid=${m.id} n=${n.canonicalName} t=${m.memoryType} truth=${m.truthStatus}${e.content.trim() !== m.statement.trim() ? `\nSRC: ${t280(e.content)}` : ""}`;
-  });
-  if (r.missingMemoryIds?.length) l.push(`MISSING: ${r.missingMemoryIds.join(", ")}`);
-  if (chains.text) l.push(chains.text);
-  return l.join("\n");
+  return renderEvidenceSurface(r, { missingMemoryIds: r.missingMemoryIds, sourceMaxChars: 280 });
 }
-
-const t115 = (v: string) => {
-  const n = v.replace(/\s+/g, " ").trim();
-  return n.length <= 115 ? n : `${n.slice(0, 114)}…`;
-};
-const t280 = (v: string) => {
-  const n = v.replace(/\s+/g, " ").trim();
-  return n.length <= 280 ? n : `${n.slice(0, 279)}…`;
-};
-const t500 = (v: string) => {
-  const n = v.replace(/\s+/g, " ").trim();
-  return n.length <= 500 ? n : `${n.slice(0, 499)}…`;
-};
 
 function formatBoard(
   result: BoardToolResult,
   taskId: string,
   directory: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }>,
 ): string {
-  const entries = result.entries ?? (result.entry ? [result.entry] : []);
-  const lines: string[] = [];
-  if (directory.length > 0) {
-    lines.push("Active named channels (world channel lobby):");
-    for (const board of directory) {
-      lines.push(
-        `- ${board.taskId} (${board.entryCount} open · updated ${board.lastUpdatedAt.slice(0, 10)})`,
-      );
-    }
-    lines.push("");
-  }
-  if (entries.length === 0) {
-    lines.push(`Task board ${taskId} has no matching entries.`);
-  } else {
-    for (const entry of entries) {
-      const claim = entry.claimedBy ? ` [claimed by ${entry.claimedBy}]` : "";
-      const ack =
-        entry.ackedBy && entry.ackedBy.length > 0
-          ? ` (✅ acked by ${entry.ackedBy.join(", ")})`
-          : "";
-      lines.push(
-        `- #${entry.sequence} ${entry.id} [${entry.kind}/${entry.status}]${claim}${ack} ${entry.agentId}: ${t500(entry.content)}`,
-      );
-    }
-    if (result.action === "read") lines.push(`nextCursor=${String(result.nextCursor ?? 0)}`);
-  }
-  lines.push("Temporary coordination only; use nmg_remember separately for durable knowledge.");
-  lines.push(
-    "Board conventions (on use): entries may carry memory=<id> references to LTG records — readers expand them with nmg_get; open entries can be claimed by one Agent (lease-based, expired claims return to the pool) and released; resolve a request once it is answered — a resolved entry is closed and must not be replied to (reopen only with new substance); keep entries concise and temporary; taskId is the only channel boundary (no DMs, mentions, groups, or pinning).",
-  );
-  return lines.join("\n");
-}
-
-function formatAgentRoster(agents: NonNullable<BoardToolResult["agents"]>): string {
-  if (agents.length === 0) return "No online NMG agents match the requested capability.";
-  return [
-    "Online NMG agents:",
-    ...agents.map(
-      (agent) =>
-        `- ${agent.agentName}${agent.capabilities ? ` capabilities=${agent.capabilities}` : ""} lastSeen=${agent.lastSeenAt}`,
-    ),
-    "Use nmg_board action=put with to=<agent name> for directed delivery.",
-  ].join("\n");
+  return renderTaskBoardSurface(result, { taskId, directory });
 }

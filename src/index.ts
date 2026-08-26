@@ -18,6 +18,21 @@ export {
   configuredSearchRecommendationMode,
 } from "./integration/config.ts";
 export type { QppActuationMode, SearchRecommendationMode } from "./integration/config.ts";
+export {
+  renderEvidenceSurface,
+  renderRememberSurface,
+  renderSearchSurface,
+  renderTaskBoardSurface,
+  TASK_BOARD_CONVENTIONS,
+} from "./integration/agent-surface.ts";
+export type {
+  EvidenceSurfaceOptions,
+  SearchSurfaceOptions,
+  TaskBoardDirectoryEntry,
+  TaskBoardSurfaceEntry,
+  TaskBoardSurfaceOptions,
+  TaskBoardSurfaceResult,
+} from "./integration/agent-surface.ts";
 export { retainEvidence } from "./integration/evidence.ts";
 export type { AgentHistoryMessage, AgentHistorySnapshot } from "./integration/evidence.ts";
 export { searchMemoryContext } from "./integration/search.ts";

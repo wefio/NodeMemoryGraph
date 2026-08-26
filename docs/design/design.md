@@ -301,14 +301,15 @@ client/server process boundary:
 Agent-specific adapter
   |- native message -> AgentHistorySnapshot
   |- native lifecycle -> recall/write/feedback calls
-  |- native tool schema and result formatting
+  |- native tool schema and host-only actions
   `- prompt/context injection
                 |
                 v
 Agent-independent integration modules
   |- config: environment and feature-mode parsing
   |- evidence: selective source-message retention
-  `- search: lexical/hybrid retrieval with explicit degradation
+  |- search: lexical/hybrid retrieval with explicit degradation
+  `- Agent Surface: shared DTO projection, budgets, redaction and default rendering
                 |
                 v
 NMG core + SQLite
@@ -319,6 +320,17 @@ text, an optional source reference, and lifecycle hooks for pre-turn recall,
 post-turn feedback, and shutdown. It must not parse SQLite rows, update graph
 topology, implement QPP, or construct embedding indexes. Pi is the first
 adapter, not part of the NMG data model.
+
+Agent-facing result semantics have one integration-layer owner. The shared
+`Agent Surface` projects and renders compact search headers, exact evidence,
+bounded remember follow-up candidates, Task Board entries, and logical-chain
+structure. It owns stable field names, withdrawal redaction, evidence/structure
+budgets, chain labels, and default next-step placement. An adapter may wrap that
+text in a native content block, add a host lifecycle notice, or disable an
+optional field such as tier in an automatic-recall header; it must not recreate
+the candidate DTO, evidence layout, board conventions, or semantic follow-up
+rules. Structured daemon results remain canonical and the Agent Surface is a
+replaceable presentation boundary, never another store or protocol version.
 
 The package dependency boundary follows that architecture. NMG Core, the daemon,
 and non-interactive CLI paths do not import Pi. The Pi adapter type-checks against
@@ -343,7 +355,9 @@ Implementation reuse follows semantic ownership rather than textual similarity.
 Scope canonicalization and embedding-index lifecycle are single Core rules;
 adapters must not reimplement them. Pi, MCP and DSH consume one host-neutral list
 of common remember/board actions, while retaining native TypeBox, Zod, or JSON
-schema encodings and host-only actions. Leaf and node summarizers share the
+schema encodings and host-only actions. The same adapters consume the shared
+Agent Surface for search/get/remember/board projection; only host registration,
+lifecycle, transport fallback, and host-only actions remain local. Leaf and node summarizers share the
 OpenAI-compatible completion client and bounded drain runner, while retaining
 their distinct prompts, pending-task rules, and stale-write semantics.
 Host-specific message delivery and process lifecycle hooks remain thin local

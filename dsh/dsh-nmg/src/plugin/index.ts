@@ -20,6 +20,13 @@ import { connect } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
 import { coordinationEnabled as configuredCoordinationEnabled } from '../../../../src/integration/config.ts'
 import { COMMON_BOARD_ACTIONS, COMMON_REMEMBER_ACTIONS } from '../../../../src/integration/tool-contract.ts'
+import { compactSearchContext } from '../../../../src/integration/search-projection.ts'
+import {
+  renderEvidenceSurface,
+  renderRememberSurface,
+  renderSearchSurface,
+  renderTaskBoardSurface,
+} from '../../../../src/integration/agent-surface.ts'
 
 export const inject = ['tools', 'subprocess', 'sandboxPolicy', 'systemPrompt', 'timer']
 
@@ -229,29 +236,6 @@ export function apply(ctx: Context): () => void {
     return out
   }
 
-  function searchPreviewOf(memory) {
-    const normalized = String((memory && memory.statement) || '').replace(/\s+/g, ' ').trim()
-    return normalized.length <= 320 ? normalized : normalized.slice(0, 319) + '…'
-  }
-
-  function projectCompact(context) {
-    return {
-      candidates: (Array.isArray(context.results) ? context.results : []).map((r) => ({
-        id: r.memory.id,
-        node: (r.node && r.node.canonicalName) || '',
-        type: r.memory.memoryType,
-        tier: r.memory.tier,
-        preview: searchPreviewOf(r.memory),
-      })),
-      activeGraphId: context.activeGraph ? context.activeGraph.id : null,
-      deferredMemoryIds:
-        (context.progressiveDisclosure && context.progressiveDisclosure.deferredMemoryIds) || [],
-      tokens:
-        (context.activeGraph && context.activeGraph.usage && context.activeGraph.usage.estimatedTokens) ||
-        null,
-    }
-  }
-
   function projectDaemonStatus(raw) {
     const endpoint = resolveDaemon()
     return {
@@ -380,7 +364,7 @@ export function apply(ctx: Context): () => void {
         projectDir: workspaceRoot,
         sessionId,
       }, budget)
-      if (context) return projectCompact(context)
+      if (context) return compactSearchContext(context)
     } catch {
       return null
     }
@@ -1024,20 +1008,17 @@ export function apply(ctx: Context): () => void {
       if (args.sourceActor) argv.push('--source-actor', args.sourceActor)
       if (args.includeHistorical) argv.push('--include-historical')
       for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1])
-      argv.push('--project-dir', workspaceRoot, '--compact-json')
-      const r = await invoke('search', params, argv, exec.signal, projectCompact)
+      argv.push('--project-dir', workspaceRoot, '--json')
+      const r = await invoke('search', params, argv, exec.signal, null)
       if (!r.ok) return r.error
       const data = r.data
-      const candidates = Array.isArray(data.candidates) ? data.candidates : []
-      const lines = candidates.length
-        ? candidates.map((c) => 'mid=' + c.id + '\tnode=' + c.node + '\ttype=' + c.type + '\tL' + c.tier + '\t' + truncate(c.preview, 160))
-        : ['No NMG match.']
-      if (data.activeGraphId) lines.push('activeGraphId=' + data.activeGraphId)
-      if (Array.isArray(data.deferredMemoryIds) && data.deferredMemoryIds.length) lines.push('deferred: ' + data.deferredMemoryIds.join(','))
-      if (data.tokens != null) lines.push('recall tokens ~' + data.tokens)
-      else if (candidates.length) lines.push('recall tokens ~' + estimateTokens(lines.join('\n')))
-      lines.push('Select exact records with nmg_get (mids + activeGraphId).')
-      return lines.join('\n')
+      const deferred = data.progressiveDisclosure && data.progressiveDisclosure.deferredMemoryIds
+      const nextStep = Array.isArray(deferred) && deferred.length
+        ? 'More ranked records are folded. Expand selected memory IDs first; deferred IDs: ' + deferred.join(',')
+        : 'Select exact records with nmg_get (memory IDs + activeGraphId).'
+      const text = renderSearchSurface(data, { nextStep })
+      const tokens = data.activeGraph && data.activeGraph.usage && data.activeGraph.usage.estimatedTokens
+      return text + '\nrecall tokens ~' + (tokens != null ? tokens : estimateTokens(text))
     },
   }
 
@@ -1066,19 +1047,10 @@ export function apply(ctx: Context): () => void {
       argv.push('--project-dir', workspaceRoot, '--json')
       const r = await invoke('get', params, argv, exec.signal, null)
       if (!r.ok) return r.error
-      const data = r.data
-      const results = Array.isArray(data.results) ? data.results : []
-      const lines = []
-      for (const item of results) {
-        const m = item.memory || {}
-        const n = item.node || {}
-        lines.push('- ' + m.statement)
-        lines.push('  mid=' + m.id + ' node=' + (n.canonicalName || '') + ' type=' + m.memoryType + ' truth=' + m.truthStatus)
-        const ev = item.evidence && item.evidence.content
-        if (ev && String(ev).trim() !== String(m.statement || '').trim()) lines.push('  SRC: ' + truncate(ev, 280))
-      }
-      if (Array.isArray(data.missingMemoryIds) && data.missingMemoryIds.length) lines.push('MISSING: ' + data.missingMemoryIds.join(', '))
-      return lines.length ? lines.join('\n') : 'No active memory found.'
+      return renderEvidenceSurface(r.data, {
+        missingMemoryIds: Array.isArray(r.data.missingMemoryIds) ? r.data.missingMemoryIds : undefined,
+        sourceMaxChars: 280,
+      })
     },
   }
 
@@ -1187,9 +1159,7 @@ export function apply(ctx: Context): () => void {
       argv.push('--project-dir', workspaceRoot, '--json')
       const r = await invoke('remember', params, argv, exec.signal, null)
       if (!r.ok) return r.error
-      const m = r.data.memory || {}
-      const n = r.data.node || {}
-      return 'Saved ' + m.id + ' under "' + (n.canonicalName || '') + '" (type=' + (m.memoryType || '?') + ').'
+      return renderRememberSurface(r.data)
     },
   }
 
@@ -1293,17 +1263,7 @@ export function apply(ctx: Context): () => void {
       if (args.entryId && (args.action === 'claim' || args.action === 'resolve')) {
         removeWakeEntry(args.entryId)
       }
-      const data = r.data
-      if (data.action === 'discover') {
-        const agents = Array.isArray(data.agents) ? data.agents : []
-        if (!agents.length) return 'No online NMG agents match.'
-        return 'Online NMG agents [v2]:\n' + agents.map((a) => '- ' + a.agentName + (a.capabilities ? ' capabilities=' + a.capabilities : '') + ' lastSeen=' + a.lastSeenAt).join('\n')
-      }
-      const entries = Array.isArray(data.entries) ? data.entries : (data.entry ? [data.entry] : [])
-      if (entries.length === 0 && data.action === 'read') return 'No matching board entries.'
-      const lines = entries.map((e) => '- #' + e.sequence + ' ' + e.id + ' [' + e.kind + '/' + e.status + '] ' + e.agentId + ': ' + truncate(e.content, 400))
-      if (data.action === 'read' && data.nextCursor != null && data.nextCursor !== 0) lines.push('nextCursor=' + data.nextCursor)
-      return lines.length ? lines.join('\n') : 'No matching board entries.'
+      return renderTaskBoardSurface(r.data, { taskId })
     },
   }
 

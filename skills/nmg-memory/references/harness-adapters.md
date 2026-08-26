@@ -24,14 +24,31 @@ Expose exactly this surface, with compact output:
 | `nmg_board(action, taskId?, ...)` | RPC `taskBoard` · fallback `nmg board <action> --json` |
 | `nmg_daemon(status)` (optional) | RPC `status` · fallback `nmg daemon status --json` |
 
+Do not hand-build those four tools' result strings in the adapter. Import the
+pure functions from `src/integration/agent-surface.ts`:
+
+- `renderSearchSurface` for compact candidates and the `activeGraphId`;
+- `renderEvidenceSurface` for exact records and bounded logical structure;
+- `renderRememberSurface` for bounded semantic follow-up candidates;
+- `renderTaskBoardSurface` for temporary coordination and its on-use rules.
+
+`compactSearchContext` remains the structured compact DTO for shell/automatic
+recall paths. Native TypeBox, Zod, or JSON Schema definitions stay in the host;
+shared action enums come from `tool-contract.ts`. Host code may add lifecycle
+notices or host-only actions, but it must not fork field names, withdrawal
+redaction, chain rendering, or remember/board semantics. A new tool therefore
+needs one shared surface implementation and contract test, then only thin host
+registration wrappers.
+
 Rules every adapter must preserve:
 
 - `search` returns compact headers + `activeGraphId`; exact statements and evidence
   stay behind `get`.
 - `get` forwards the `activeGraphId` so actual use is recorded, not mere exposure.
 - Search headers expose logical-chain names per candidate and the represented
-  chain count. Exact `get` consumes the shared `src/integration/chain-projection`
-  contract: render each evidence statement once, prefix records with its returned
+  chain count. Exact `get` consumes the shared Agent Surface, which delegates to
+  `src/integration/chain-projection`
+  to render each evidence statement once, prefix records with its returned
   response-local label, and append the bounded label-only DAG. Do not implement
   host-specific edge grouping or reuse these labels as stable IDs.
 - A shell-only adapter may use `search --compact-json` for chain names/count and

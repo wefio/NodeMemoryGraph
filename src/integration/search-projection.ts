@@ -34,6 +34,7 @@ export function compactSearchContext(context: MemoryContext) {
     })),
     logicalChainCount: logicalChainCount(context),
     activeGraphId: context.activeGraph?.id ?? null,
+    tokens: context.activeGraph?.usage.estimatedTokens ?? null,
     deferredMemoryIds: context.progressiveDisclosure?.deferredMemoryIds ?? [],
     qpp: context.activeGraph?.qpp
       ? {
