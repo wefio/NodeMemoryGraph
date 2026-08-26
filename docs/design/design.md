@@ -1221,6 +1221,19 @@ reranking the original hits. The caller can then request exact evidence using th
 normal Active Graph budget. Chain expansion therefore improves ordered context;
 it does not prove relevance, causality, correctness, or answer sufficiency.
 
+Chains are part of the normal Pi disclosure path, not benchmark-only metadata.
+Compact search headers advertise how many logical chains are represented, label
+which candidates share a chain, and direct the Agent to `nmg_get`. Exact get
+hydrates every selected record's active
+chain memberships and returns only those chain edges whose two endpoints are in
+the selected evidence set. The Pi projection then emits each full statement once,
+assigns it a short stable label for that response, and renders logical structure
+with label-only Mermaid-style edges. Fan-in and fan-out are grouped (`A & C --> B`
+or `A --> B & C`) using the shorter exact representation. Structural disclosure
+has an independent 2048-character budget and may be omitted without truncating
+or removing exact evidence. Temporal ordering remains in record timestamps and
+is not repeated as a second timeline block.
+
 The stable daemon/CLI administration boundary supports chain create/list/get,
 member add/remove, edge add/remove, structured edge reads, and deterministic
 topological order. These operations are intentionally absent from the default Pi
@@ -2324,7 +2337,8 @@ Implemented and verified in the current prototype:
   redirects;
 - static temporal/logical memory chains over reusable record IDs, with bounded
   post-retrieval expansion, live successor pointers, acyclic order edges,
-  complete daemon/CLI administration, and session-owned STG isolation;
+  complete daemon/CLI administration, session-owned STG isolation, exact-get
+  hydration, and compact Pi logical-DAG projection without statement duplication;
 - resident/automatic/cue execution layers;
 - a Lab-only, file-backed session reasoning workspace with bounded compaction
   checkpoints and explicit hypothesis/evidence status;

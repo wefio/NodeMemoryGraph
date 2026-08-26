@@ -89,6 +89,7 @@
 4. **MMR 选择链，不改主排名**：候选链的 direct-hit/主题匹配提供 relevance，共享 memory IDs 的 Jaccard 提供 redundancy；默认最多选 4 条、硬上限 8 条。MMR 只决定哪些补充链被打开，主证据排名保持不变。
 5. **信息量双重封顶**：追加证据共享绝对上限，同时受 `1024 + 0.75 × primaryEvidenceChars` 的相对上限约束；有效上限取二者较小值。基础 1024 字符用于避免主证据极短时完全无法补证。
 6. **边与成员都有界**：默认最多公开 64 条 chain edges（硬上限 128）；成员继续受全局 member cap、激活门控和共享字符预算约束。长链完整存储，但只披露局部。
+7. **实际使用投影独立限额**：Pi 的搜索头提示逻辑链可用并标记同链候选，`nmg_get` 才加载精确证据和所选证据之间的边。每条正文只出现一次，图只引用本次响应内的短标签；fan-in/fan-out 取更短的等价写法。结构默认最多 2048 字符，超限可折叠结构但不能挤掉精确证据。时间链继续使用记录时间字段，不重复生成时间线。
 
 因此，链扩展是受预算约束的渐进披露，不是把相交图整体塞入 Active Graph。
 
@@ -147,6 +148,7 @@
 **已实现**：
 - ✅ **链长截取**：`SearchOptions.chainExpansionWindow` 提供显式位置窗口；未指定窗口时使用 activation 门控和全局 member cap，不再默认整链。
 - ✅ **有界跨链披露**：共享节点发现一跳相邻链、批量去重查询、链级 MMR、逻辑 DAG memory-hop、边上限，以及绝对/相对双重字符预算。
+- ✅ **Pi 实际投影**：搜索头提示链可用；精确 `get` 在 Core 和 STG/LTG 合并后保留 memberships/edges；Pi 用一次正文 + 短标签逻辑图展示，并对结构使用独立预算。
 - ✅ **supersede 活/快照引用**：`getMemoryChain` 对已 superseded 成员返回 `successorId`（活引用指针）+ 保留原快照（历史上下文）——commit d0a1cc0
 - ✅ **记忆生命周期/遗忘（§3.4）**：`SearchOptions.recencyDecayHalfLifeDays`（可选，默认关；历史查询 eventTimeTo 跳过；无 event_time 不衰减）——commit fbc45e5
 

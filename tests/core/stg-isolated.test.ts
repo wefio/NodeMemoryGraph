@@ -193,6 +193,51 @@ test("STG/LTG projection keeps only the newest same-scope state version", () => 
   }
 });
 
+test("STG/LTG projection preserves exact logical edges from both stores", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-stg-chain-projection-"));
+  const ltg = new NmgStore(join(directory, "ltg.sqlite"), new HashingVectorEmbedder());
+  const stg = createStgStore(directory, new HashingVectorEmbedder(), "session-chain");
+  try {
+    const sharedIds = ["durable source", "durable conclusion"].map(
+      (statement) => ltg.remember({ statement, nodeName: "durable chain" }).memory.id,
+    );
+    const localIds = ["session source", "session conclusion"].map(
+      (statement) =>
+        stg.remember({
+          statement,
+          nodeName: "session chain",
+          residence: "stg",
+          sessionId: "session-chain",
+        }).memory.id,
+    );
+    const sharedChain = ltg.createMemoryChain({ chainType: "logical", topic: "durable" });
+    const localChain = stg.createMemoryChain({ chainType: "logical", topic: "session" });
+    ltg.addMemoryChainEdge({
+      chainId: sharedChain.id,
+      sourceMemoryId: sharedIds[0]!,
+      targetMemoryId: sharedIds[1]!,
+    });
+    stg.addMemoryChainEdge({
+      chainId: localChain.id,
+      sourceMemoryId: localIds[0]!,
+      targetMemoryId: localIds[1]!,
+    });
+
+    const merged = mergeStgLtgContexts(
+      stg.getContext(localIds, 0, "session-chain"),
+      ltg.getContext(sharedIds),
+    );
+    assert.deepEqual(
+      new Set(merged.chainEdges?.map((edge) => edge.chainId)),
+      new Set([localChain.id, sharedChain.id]),
+    );
+  } finally {
+    ltg.close();
+    stg.close();
+    removeTempDirectory(directory);
+  }
+});
+
 test("Phase2: access-driven copy selects the accessed project memory", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-stg-usage-"));
   const ltg = new NmgStore(join(directory, "nmg.sqlite"), new HashingVectorEmbedder());

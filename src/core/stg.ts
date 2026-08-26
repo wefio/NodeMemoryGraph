@@ -236,8 +236,23 @@ export function mergeStgLtgContexts(local: MemoryContext, shared: MemoryContext)
   );
   const results = reconcileStateVersions([...dedupedLocal, ...shared.results]);
   const activeGraph = mergeActiveGraphs(local.activeGraph, shared.activeGraph, results);
+  const visibleMemoryIds = new Set(results.map((result) => result.memory.id));
+  const chainEdges = [
+    ...new Map(
+      [...(local.chainEdges ?? []), ...(shared.chainEdges ?? [])]
+        .filter(
+          (edge) =>
+            visibleMemoryIds.has(edge.sourceMemoryId) && visibleMemoryIds.has(edge.targetMemoryId),
+        )
+        .map((edge) => [
+          `${edge.chainId}\0${edge.sourceMemoryId}\0${edge.targetMemoryId}\0${edge.edgeType}`,
+          edge,
+        ]),
+    ).values(),
+  ];
   return {
     results,
+    ...(chainEdges.length > 0 ? { chainEdges } : {}),
     relations: [
       ...new Map(
         [...(local.relations ?? []), ...shared.relations].map((relation) => [

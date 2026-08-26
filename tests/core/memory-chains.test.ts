@@ -353,6 +353,46 @@ test("shared evidence across selected chains consumes one budget slot and retain
   });
 });
 
+test("exact get preserves logical chain memberships and edges for harness projection", () => {
+  withStore((store) => {
+    const ids = ["exact chain source", "exact chain merge", "exact chain peer"].map(
+      (statement) =>
+        store.remember({
+          nodeName: "exact chain projection",
+          statement,
+          sessionId: "s1",
+          sourceActor: "user",
+        }).memory.id,
+    );
+    const chain = store.createMemoryChain({ chainType: "logical", topic: "exact merge" });
+    store.addMemoryChainEdge({
+      chainId: chain.id,
+      sourceMemoryId: ids[0]!,
+      targetMemoryId: ids[1]!,
+    });
+    store.addMemoryChainEdge({
+      chainId: chain.id,
+      sourceMemoryId: ids[2]!,
+      targetMemoryId: ids[1]!,
+    });
+
+    const context = store.getContext(ids, 0, "s1");
+    assert.ok(
+      context.results.every((result) =>
+        result.chainMemberships?.some((membership) => membership.chainId === chain.id),
+      ),
+      "exact evidence carries chain membership metadata",
+    );
+    assert.deepEqual(
+      context.chainEdges?.map((edge) => [edge.sourceMemoryId, edge.targetMemoryId]),
+      [
+        [ids[0], ids[1]],
+        [ids[2], ids[1]],
+      ],
+    );
+  });
+});
+
 test("logical chain expansion obeys explicit edge distance independently of chain-intersection hops", () => {
   withStore((store) => {
     const ids = ["graph-hop anchor", "graph-hop neighbour", "graph-hop distant"].map(

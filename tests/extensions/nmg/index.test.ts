@@ -1798,6 +1798,55 @@ test("formatters keep search headers compact and exact evidence separate", () =>
   assert.match(formatMemoryContext(context), /More ranked records are folded/);
 });
 
+test("exact evidence projects logical chains without repeating statements", () => {
+  const chainId = "logical-merge";
+  const result = (id: string, statement: string, position: number) => ({
+    memory: {
+      id,
+      statement,
+      memoryType: "fact",
+      tier: 1,
+      truthStatus: "asserted",
+      scope: { project: "atlas" },
+    },
+    node: { canonicalName: `Atlas ${id}` },
+    evidence: { content: statement },
+    chainMemberships: [{ chainId, position, chainType: "logical", topic: "Atlas merge evidence" }],
+  });
+  const context = {
+    results: [
+      result("memory-a", "Atlas input A is available.", 0),
+      result("memory-b", "Atlas combines both inputs.", 2),
+      result("memory-c", "Atlas input C is available.", 1),
+    ],
+    relations: [],
+    chainEdges: [
+      { chainId, sourceMemoryId: "memory-a", targetMemoryId: "memory-b", edgeType: "order" },
+      { chainId, sourceMemoryId: "memory-c", targetMemoryId: "memory-b", edgeType: "order" },
+    ],
+  } as never;
+
+  const headers = formatSearchHeaders(context);
+  const rendered = formatMemoryContext(context);
+  assert.match(headers, /logical_chains=1/);
+  assert.match(headers, /chains=Atlas merge evidence/);
+  assert.match(headers, /nmg_get/);
+  assert.match(rendered, /<nmg_logical_chains>/);
+  assert.match(rendered, /\[logical chain: Atlas merge evidence\]/);
+  assert.match(rendered, /A & C --> B/);
+  assert.doesNotMatch(rendered, /A --> B\n.*C --> B/s);
+  for (const statement of [
+    "Atlas input A is available.",
+    "Atlas combines both inputs.",
+    "Atlas input C is available.",
+  ]) {
+    assert.equal(rendered.split(statement).length - 1, 1, `${statement} is emitted once`);
+  }
+  const evidenceOnly = formatMemoryContext(context, { logicalChainMaxChars: 0 });
+  assert.doesNotMatch(evidenceOnly, /<nmg_logical_chains>/);
+  assert.match(evidenceOnly, /Atlas combines both inputs\./);
+});
+
 test("search headers close with the nmg_get hint when nothing is deferred", () => {
   const context = {
     results: [

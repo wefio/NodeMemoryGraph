@@ -749,7 +749,8 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       // recall supplement on the evolution side (docs §3.1), never a re-rank.
       if (options.expandChains && context.results.length > 0) {
         const rankedMemoryIds = context.results.map((result) => result.memory.id);
-        const placeholders = (count: number): string => Array.from({ length: count }, () => "?").join(",");
+        const placeholders = (count: number): string =>
+          Array.from({ length: count }, () => "?").join(",");
         const directRows = this.db
           .prepare(
             `SELECT chain_id, memory_id, position FROM memory_chain_members
@@ -780,7 +781,10 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         // chains sharing a memory with a direct hit chain are one-hop neighbours.
         // We intentionally never recurse from those neighbours, so C0 -> C1 is
         // possible but C0 -> C1 -> C2 is not.
-        const maxChainHops = Math.max(0, Math.min(1, Math.trunc(options.chainExpansionMaxHops ?? 1)));
+        const maxChainHops = Math.max(
+          0,
+          Math.min(1, Math.trunc(options.chainExpansionMaxHops ?? 1)),
+        );
         if (maxChainHops > 0 && directChainIds.size > 0) {
           const directIds = [...directChainIds];
           const adjacentRows = this.db
@@ -844,7 +848,10 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           // Select chains with MMR: direct-hit strength and query/topic overlap
           // provide relevance; shared member IDs provide redundancy. This keeps
           // intersecting near-duplicates from consuming all disclosure slots.
-          const maxChains = Math.max(1, Math.min(8, Math.trunc(options.chainExpansionMaxChains ?? 4)));
+          const maxChains = Math.max(
+            1,
+            Math.min(8, Math.trunc(options.chainExpansionMaxChains ?? 4)),
+          );
           const queryTerms = queryOverlapTerms(query);
           const remaining = candidateIds.filter((id) => chainMeta.has(id));
           const selectedChainIds: string[] = [];
@@ -867,7 +874,10 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                 (highest, selected) =>
                   Math.max(
                     highest,
-                    jaccard(memberIdsByChain.get(cid) ?? new Set(), memberIdsByChain.get(selected) ?? new Set()),
+                    jaccard(
+                      memberIdsByChain.get(cid) ?? new Set(),
+                      memberIdsByChain.get(selected) ?? new Set(),
+                    ),
                   ),
                 0,
               );
@@ -897,18 +907,22 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           // layer can render branching (`A --> B & C`) rather than a linear
           // position sequence. Adjacent in storage is not adjacency in the
           // graph — edges are the structure.
-          const maxChainEdges = Math.max(0, Math.min(128, Math.trunc(options.chainExpansionMaxEdges ?? 64)));
-          const edgeRows = selectedChainIds.length === 0
-            ? []
-            : (this.db
-                .prepare(
-                  `SELECT chain_id, source_memory_id, target_memory_id, edge_type
+          const maxChainEdges = Math.max(
+            0,
+            Math.min(128, Math.trunc(options.chainExpansionMaxEdges ?? 64)),
+          );
+          const edgeRows =
+            selectedChainIds.length === 0
+              ? []
+              : (this.db
+                  .prepare(
+                    `SELECT chain_id, source_memory_id, target_memory_id, edge_type
                      FROM memory_chain_edges
                     WHERE chain_id IN (${placeholders(selectedChainIds.length)})
                     ORDER BY chain_id, source_memory_id, target_memory_id
                     LIMIT ?`,
-                )
-                .all(...selectedChainIds, maxChainEdges) as Row[]);
+                  )
+                  .all(...selectedChainIds, maxChainEdges) as Row[]);
           context.chainEdges = edgeRows.map((r) => ({
             chainId: String(r.chain_id),
             sourceMemoryId: String(r.source_memory_id),
@@ -1006,7 +1020,10 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             const memberRows = membersByChain.get(chainId) ?? [];
             const hitPos = hitPositions.get(chainId) ?? [];
             const graphDistance = new Map<string, number>();
-            if (chainMeta.get(chainId)?.chainType === "logical" && (edgesByChain.get(chainId)?.length ?? 0) > 0) {
+            if (
+              chainMeta.get(chainId)?.chainType === "logical" &&
+              (edgesByChain.get(chainId)?.length ?? 0) > 0
+            ) {
               const adjacency = new Map<string, Set<string>>();
               for (const edge of edgesByChain.get(chainId) ?? []) {
                 const source = String(edge.source_memory_id);
@@ -1432,6 +1449,72 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           sessionId ?? null,
         );
       });
+      const resultIds = [...new Set(results.map((result) => result.memory.id))];
+      const membershipsByMemory = new Map<
+        string,
+        Array<{
+          chainId: string;
+          position: number;
+          chainType: MemoryChainType;
+          topic?: string;
+        }>
+      >();
+      const selectedChainIds = new Set<string>();
+      if (resultIds.length > 0) {
+        const bind = Array.from({ length: resultIds.length }, () => "?").join(",");
+        const membershipRows = this.db
+          .prepare(
+            `SELECT cm.chain_id, cm.memory_id, cm.position, c.chain_type, c.topic
+               FROM memory_chain_members cm
+               JOIN memory_chains c ON c.id = cm.chain_id
+              WHERE cm.memory_id IN (${bind})
+                AND c.status = 'active'
+              ORDER BY cm.memory_id, cm.chain_id, cm.position`,
+          )
+          .all(...resultIds) as Row[];
+        for (const row of membershipRows) {
+          const memoryId = String(row.memory_id);
+          const chainId = String(row.chain_id);
+          selectedChainIds.add(chainId);
+          const memberships = membershipsByMemory.get(memoryId) ?? [];
+          memberships.push({
+            chainId,
+            position: Number(row.position),
+            chainType: row.chain_type as MemoryChainType,
+            ...((row.topic as string | null) ? { topic: String(row.topic) } : {}),
+          });
+          membershipsByMemory.set(memoryId, memberships);
+        }
+        for (const result of results) {
+          const memberships = membershipsByMemory.get(result.memory.id);
+          if (!memberships || memberships.length === 0) continue;
+          result.chainId = memberships[0]!.chainId;
+          result.chainPosition = memberships[0]!.position;
+          result.chainType = memberships[0]!.chainType;
+          result.chainMemberships = memberships;
+        }
+      }
+      const chainEdges =
+        selectedChainIds.size === 0
+          ? []
+          : (
+              this.db
+                .prepare(
+                  `SELECT chain_id, source_memory_id, target_memory_id, edge_type
+                 FROM memory_chain_edges
+                WHERE chain_id IN (${Array.from({ length: selectedChainIds.size }, () => "?").join(",")})
+                  AND source_memory_id IN (${Array.from({ length: resultIds.length }, () => "?").join(",")})
+                  AND target_memory_id IN (${Array.from({ length: resultIds.length }, () => "?").join(",")})
+                ORDER BY rowid
+                LIMIT 64`,
+                )
+                .all(...selectedChainIds, ...resultIds, ...resultIds) as Row[]
+            ).map((row) => ({
+              chainId: String(row.chain_id),
+              sourceMemoryId: String(row.source_memory_id),
+              targetMemoryId: String(row.target_memory_id),
+              edgeType: String(row.edge_type) as MemoryChainEdgeType,
+            }));
       const selectedNodeIds = [...new Set(results.map((result) => result.node.id))];
       const discoveredRelations = this.getRelations(selectedNodeIds, graphHops);
       const readableNodeIds = new Set(selectedNodeIds);
@@ -1445,6 +1528,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       }
       return {
         results,
+        ...(chainEdges.length > 0 ? { chainEdges } : {}),
         relations: discoveredRelations.filter(
           (relation) =>
             readableNodeIds.has(relation.sourceNodeId) &&
