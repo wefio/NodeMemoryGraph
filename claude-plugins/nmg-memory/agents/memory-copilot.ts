@@ -11,6 +11,11 @@ import { resolveNmgDataDir } from "../../../src/cli/data-path.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import { coordinationEnabled } from "../../../src/integration/config.ts";
 import { COMMON_BOARD_ACTIONS, COMMON_REMEMBER_ACTIONS } from "../../../src/integration/tool-contract.ts";
+import {
+  logicalChainCount,
+  logicalChainNames,
+  projectLogicalChains,
+} from "../../../src/integration/chain-projection.ts";
 import { WORLD_BOARD_ID, type MemoryContext, type PerfSnapshot } from "../../../src/core/types.ts";
 
 const nmgPrompts = loadPrompts();
@@ -516,14 +521,15 @@ process.on("SIGTERM", done);
 
 function searchH(r: MemoryContext): string {
   const lines = r.results.length
-    ? r.results.map(
-        ({ memory: m, node: n }) =>
-          `mid=${m.id}\tnode=${n.canonicalName}\ttype=${m.memoryType}\tL${m.tier}\t${
-            (m.markers ?? []).some((marker) => marker.kind === "forget")
-              ? nmgPrompts.forget_redacted
-              : t115(m.statement)
-          }`,
-      )
+    ? r.results.map((result) => {
+        const { memory: m, node: n } = result;
+        const chains = logicalChainNames(result);
+        return `mid=${m.id}\tnode=${n.canonicalName}\ttype=${m.memoryType}\tL${m.tier}\t${chains.length > 0 ? `chains=${chains.join(",")}\t` : ""}${
+          (m.markers ?? []).some((marker) => marker.kind === "forget")
+            ? nmgPrompts.forget_redacted
+            : t115(m.statement)
+        }`;
+      })
     : ["No NMG match."];
   const deferred = r.progressiveDisclosure?.deferredMemoryIds;
   const nextStep =
@@ -535,6 +541,10 @@ function searchH(r: MemoryContext): string {
   );
   const perfLine = perfFeedback(r.timings, r.filterUsage);
   if (perfLine) lines.push(perfLine);
+  const chainCount = logicalChainCount(r);
+  if (chainCount > 0) {
+    lines.push(`logical_chains=${chainCount}; use nmg_get for compact chain structure.`);
+  }
   return [
     ...(r.activeGraph?.id ? [`activeGraphId=${r.activeGraph.id}`] : []),
     renderDisclosure(nmgPrompts.mcp_search_disclosure, {
@@ -566,10 +576,13 @@ function perfFeedback(timings: PerfSnapshot | undefined, filters?: unknown): str
 }
 
 function memText(r: MemoryContext & { missingMemoryIds?: string[] }): string {
+  const chains = projectLogicalChains(r);
   const l = r.results.map(({ memory: m, node: n, evidence: e }) => {
-    return `- ${m.statement}\n  mid=${m.id} n=${n.canonicalName} t=${m.memoryType} truth=${m.truthStatus}${e.content.trim() !== m.statement.trim() ? `\nSRC: ${t280(e.content)}` : ""}`;
+    const label = chains.labels.get(m.id);
+    return `- ${label ? `[${label}] ` : ""}${m.statement}\n  mid=${m.id} n=${n.canonicalName} t=${m.memoryType} truth=${m.truthStatus}${e.content.trim() !== m.statement.trim() ? `\nSRC: ${t280(e.content)}` : ""}`;
   });
   if (r.missingMemoryIds?.length) l.push(`MISSING: ${r.missingMemoryIds.join(", ")}`);
+  if (chains.text) l.push(chains.text);
   return l.join("\n");
 }
 

@@ -1221,18 +1221,25 @@ reranking the original hits. The caller can then request exact evidence using th
 normal Active Graph budget. Chain expansion therefore improves ordered context;
 it does not prove relevance, causality, correctness, or answer sufficiency.
 
-Chains are part of the normal Pi disclosure path, not benchmark-only metadata.
-Compact search headers advertise how many logical chains are represented, label
-which candidates share a chain, and direct the Agent to `nmg_get`. Exact get
-hydrates every selected record's active
+Chains are part of the normal Agent disclosure path, not Pi-only or
+benchmark-only metadata. A host-neutral integration projector under
+`src/integration` owns chain names, response-local labels, edge compaction, and
+the independent structure budget. Adapter search headers advertise how many
+logical chains are represented, label which candidates share a chain, and
+direct the Agent to exact `get`. Exact get hydrates every selected record's active
 chain memberships and returns only those chain edges whose two endpoints are in
-the selected evidence set. The Pi projection then emits each full statement once,
-assigns it a short stable label for that response, and renders logical structure
-with label-only Mermaid-style edges. Fan-in and fan-out are grouped (`A & C --> B`
+the selected evidence set. Pi and Claude consume the shared projection: each
+emits every full statement once, assigns it a short stable label for that
+response, and renders logical structure with label-only Mermaid-style edges.
+The CLI compact-search projection exposes chain membership and total chain count;
+its exact JSON response carries the canonical memberships and edges so a shell-
+only Agent can render the same structure without a Pi dependency. Fan-in and
+fan-out are grouped (`A & C --> B`
 or `A --> B & C`) using the shorter exact representation. Structural disclosure
 has an independent 2048-character budget and may be omitted without truncating
-or removing exact evidence. Temporal ordering remains in record timestamps and
-is not repeated as a second timeline block.
+or removing exact evidence. OmniMemEval keeps an evaluation-format compatibility
+renderer and does not define this product contract. Temporal ordering remains in
+record timestamps and is not repeated as a second timeline block.
 
 The stable daemon/CLI administration boundary supports chain create/list/get,
 member add/remove, edge add/remove, structured edge reads, and deterministic
@@ -2338,7 +2345,8 @@ Implemented and verified in the current prototype:
 - static temporal/logical memory chains over reusable record IDs, with bounded
   post-retrieval expansion, live successor pointers, acyclic order edges,
   complete daemon/CLI administration, session-owned STG isolation, exact-get
-  hydration, and compact Pi logical-DAG projection without statement duplication;
+  hydration, and shared agent-facing logical-DAG projection consumed by Pi,
+  Claude MCP, and CLI search metadata without statement duplication;
 - resident/automatic/cue execution layers;
 - a Lab-only, file-backed session reasoning workspace with bounded compaction
   checkpoints and explicit hypothesis/evidence status;

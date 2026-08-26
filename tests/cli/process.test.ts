@@ -25,6 +25,53 @@ test("search compact JSON exposes bounded headers without exact evidence", () =>
       "--data-dir",
       directory,
     ]) as { memory: { id: string } };
+    const supporting = runLauncher([
+      "remember",
+      "Supporting chain evidence for the compact projection.",
+      "--node",
+      "Compact projection support",
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { memory: { id: string } };
+    const chain = runLauncher([
+      "chain",
+      "create",
+      "--type",
+      "logical",
+      "--topic",
+      "Compact projection chain",
+      "--json",
+      "--data-dir",
+      directory,
+    ]) as { id: string };
+    for (const memoryId of [remembered.memory.id, supporting.memory.id]) {
+      runLauncher([
+        "chain",
+        "add",
+        "--chain",
+        chain.id,
+        "--memory",
+        memoryId,
+        "--json",
+        "--data-dir",
+        directory,
+      ]);
+    }
+    runLauncher([
+      "chain",
+      "edge",
+      "add",
+      "--chain",
+      chain.id,
+      "--from",
+      remembered.memory.id,
+      "--to",
+      supporting.memory.id,
+      "--json",
+      "--data-dir",
+      directory,
+    ]);
     const compact = runLauncher([
       "search",
       "Durable detail",
@@ -32,13 +79,16 @@ test("search compact JSON exposes bounded headers without exact evidence", () =>
       "--data-dir",
       directory,
     ]) as {
-      candidates: Array<{ id: string; preview: string }>;
+      candidates: Array<{ id: string; preview: string; chains: string[] }>;
+      logicalChainCount: number;
       activeGraphId: string | null;
       results?: unknown;
       activeGraph?: unknown;
     };
 
     assert.equal(compact.candidates[0]?.id, remembered.memory.id);
+    assert.equal(compact.logicalChainCount, 1);
+    assert.deepEqual(compact.candidates[0]?.chains, ["Compact projection chain"]);
     assert.ok(compact.candidates[0]!.preview.length > 160);
     assert.equal(compact.candidates[0]!.preview.length, 320);
     assert.match(compact.candidates[0]!.preview, /…$/u);

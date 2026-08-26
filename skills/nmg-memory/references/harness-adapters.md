@@ -29,6 +29,14 @@ Rules every adapter must preserve:
 - `search` returns compact headers + `activeGraphId`; exact statements and evidence
   stay behind `get`.
 - `get` forwards the `activeGraphId` so actual use is recorded, not mere exposure.
+- Search headers expose logical-chain names per candidate and the represented
+  chain count. Exact `get` consumes the shared `src/integration/chain-projection`
+  contract: render each evidence statement once, prefix records with its returned
+  response-local label, and append the bounded label-only DAG. Do not implement
+  host-specific edge grouping or reuse these labels as stable IDs.
+- A shell-only adapter may use `search --compact-json` for chain names/count and
+  `get --json` for canonical `chainMemberships`/`chainEdges`. Benchmark renderers
+  may retain official output formats but must not redefine the product contract.
 - the board is temporary cross-agent coordination, never durable memory.
 - the adapter never owns or stops a shared daemon — the one-shot CLI reuses it.
 

@@ -1,4 +1,5 @@
 import type { MemoryContext, MemorySearchResult } from "../core/types.ts";
+import { logicalChainCount, logicalChainNames } from "./chain-projection.ts";
 
 export const SEARCH_PREVIEW_CHARS = 320;
 
@@ -29,7 +30,9 @@ export function compactSearchContext(context: MemoryContext) {
       eventTime: result.memory.eventTime,
       expiresAt: result.memory.expiresAt ?? result.memory.validUntil,
       score: result.combinedScore,
+      chains: logicalChainNames(result),
     })),
+    logicalChainCount: logicalChainCount(context),
     activeGraphId: context.activeGraph?.id ?? null,
     deferredMemoryIds: context.progressiveDisclosure?.deferredMemoryIds ?? [],
     qpp: context.activeGraph?.qpp

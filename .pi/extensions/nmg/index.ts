@@ -46,6 +46,12 @@ import {
 } from "../../../src/integration/config.ts";
 import { searchPreview } from "../../../src/integration/search-projection.ts";
 import {
+  DEFAULT_LOGICAL_CHAIN_MAX_CHARS,
+  logicalChainCount,
+  logicalChainNames,
+  projectLogicalChains,
+} from "../../../src/integration/chain-projection.ts";
+import {
   selectEvidence,
   type AgentHistoryMessage,
   type SelectedEvidence,
@@ -2539,13 +2545,7 @@ function isTaskContinuation(prompt: string): boolean {
 export function formatSearchHeaders(context: MemoryContext): string {
   if (context.results.length === 0) return "No matching NMG memory found.";
   const nextStep = formatProgressiveDisclosure(context) || nmgPrompts.get_hint;
-  const logicalChainCount = new Set(
-    context.results.flatMap((result) =>
-      (result.chainMemberships ?? [])
-        .filter((membership) => membership.chainType === "logical")
-        .map((membership) => membership.chainId),
-    ),
-  ).size;
+  const chainCount = logicalChainCount(context);
   return [
     renderDisclosure(nmgPrompts.search_disclosure, {
       count: String(context.results.length),
@@ -2554,15 +2554,10 @@ export function formatSearchHeaders(context: MemoryContext): string {
     }),
     nmgPrompts.headers_title,
     nmgPrompts.headers_fields,
-    ...context.results.map(({ memory, node, recallReason: reason, hitTerms, chainMemberships }) => {
+    ...context.results.map((result) => {
+      const { memory, node, recallReason: reason, hitTerms } = result;
       const forget = (memory.markers ?? []).some((marker) => marker.kind === "forget");
-      const logicalChains = [
-        ...new Set(
-          (chainMemberships ?? [])
-            .filter((membership) => membership.chainType === "logical")
-            .map((membership) => membership.topic ?? membership.chainId.slice(0, 8)),
-        ),
-      ];
+      const logicalChains = logicalChainNames(result);
       return (
         `- ${(memory.markers ?? []).some((marker) => marker.kind === "external_source") ? "[external] " : ""}` +
         `${memory.resolution === "open" || memory.resolution === "reopened" ? "[open] " : ""}` +
@@ -2575,8 +2570,8 @@ export function formatSearchHeaders(context: MemoryContext): string {
         `preview=${forget ? nmgPrompts.forget_redacted : searchPreview(memory)}`
       );
     }),
-    logicalChainCount > 0
-      ? `logical_chains=${logicalChainCount}; use nmg_get for compact chain structure with exact evidence.`
+    chainCount > 0
+      ? `logical_chains=${chainCount}; use nmg_get for compact chain structure with exact evidence.`
       : "",
     formatActiveGraph(context),
   ]
@@ -2636,125 +2631,14 @@ interface MemoryContextFormatOptions {
   logicalChainMaxChars?: number;
 }
 
-interface LogicalChainProjection {
-  labels: Map<string, string>;
-  text: string;
-}
-
-function memoryLabel(index: number): string {
-  let value = index + 1;
-  let label = "";
-  while (value > 0) {
-    value -= 1;
-    label = String.fromCharCode(65 + (value % 26)) + label;
-    value = Math.floor(value / 26);
-  }
-  return label;
-}
-
-function compactEdgeLines(
-  edges: Array<{ sourceMemoryId: string; targetMemoryId: string }>,
-  labels: Map<string, string>,
-): string[] {
-  const unique = [
-    ...new Map(
-      edges.map((edge) => [`${edge.sourceMemoryId}\0${edge.targetMemoryId}`, edge]),
-    ).values(),
-  ];
-  const grouped = (incoming: boolean): string[] => {
-    const groups = new Map<string, Set<string>>();
-    for (const edge of unique) {
-      const key = incoming ? edge.targetMemoryId : edge.sourceMemoryId;
-      const member = incoming ? edge.sourceMemoryId : edge.targetMemoryId;
-      const members = groups.get(key) ?? new Set<string>();
-      members.add(member);
-      groups.set(key, members);
-    }
-    return [...groups.entries()].map(([key, members]) => {
-      const keyLabel = labels.get(key)!;
-      const memberLabels = [...members].map((id) => labels.get(id)!).join(" & ");
-      return incoming ? `${memberLabels} --> ${keyLabel}` : `${keyLabel} --> ${memberLabels}`;
-    });
-  };
-  const outgoing = grouped(false);
-  const incoming = grouped(true);
-  const cost = (lines: string[]): number => lines.reduce((sum, line) => sum + line.length + 1, 0);
-  return cost(incoming) < cost(outgoing) ? incoming : outgoing;
-}
-
-function projectLogicalChains(context: MemoryContext, maxChars = 2_048): LogicalChainProjection {
-  const available = new Set(context.results.map((result) => result.memory.id));
-  const labels = new Map(
-    context.results.map((result, index) => [result.memory.id, memoryLabel(index)]),
-  );
-  const chains = new Map<
-    string,
-    { topic?: string; members: Array<{ memoryId: string; position: number }> }
-  >();
-  for (const result of context.results) {
-    for (const membership of result.chainMemberships ?? []) {
-      if (membership.chainType !== "logical") continue;
-      const chain = chains.get(membership.chainId) ?? { topic: membership.topic, members: [] };
-      chain.members.push({ memoryId: result.memory.id, position: membership.position });
-      if (!chain.topic && membership.topic) chain.topic = membership.topic;
-      chains.set(membership.chainId, chain);
-    }
-  }
-  const blocks: Array<{ text: string; memoryIds: string[] }> = [];
-  for (const [chainId, chain] of chains) {
-    const members = [...chain.members].sort(
-      (left, right) =>
-        left.position - right.position || left.memoryId.localeCompare(right.memoryId),
-    );
-    const edges = (context.chainEdges ?? []).filter(
-      (edge) =>
-        edge.chainId === chainId &&
-        available.has(edge.sourceMemoryId) &&
-        available.has(edge.targetMemoryId),
-    );
-    const lines =
-      edges.length > 0
-        ? compactEdgeLines(edges, labels)
-        : members.length > 1
-          ? [members.map((member) => labels.get(member.memoryId)!).join(" --> ")]
-          : [];
-    if (lines.length === 0) continue;
-    const topic = (chain.topic ?? chainId).replace(/[\r\n]+/gu, " ").trim();
-    blocks.push({
-      text: `[logical chain: ${topic}]\nflowchart LR\n${lines.map((line) => `  ${line}`).join("\n")}`,
-      memoryIds: members.map((member) => member.memoryId),
-    });
-  }
-  if (blocks.length === 0 || maxChars <= 0) return { labels: new Map(), text: "" };
-
-  const open = "<nmg_logical_chains>";
-  const close = "</nmg_logical_chains>";
-  const folded = "[additional logical chains folded by structure budget]";
-  const accepted: Array<{ text: string; memoryIds: string[] }> = [];
-  let skipped = false;
-  for (const block of blocks) {
-    const candidate = [open, ...accepted.map((item) => item.text), block.text, close].join("\n");
-    if (candidate.length <= maxChars) accepted.push(block);
-    else skipped = true;
-  }
-  if (accepted.length === 0) return { labels: new Map(), text: "" };
-  let body = [open, ...accepted.map((item) => item.text), close].join("\n");
-  if (skipped) {
-    const withFolded = [open, ...accepted.map((item) => item.text), folded, close].join("\n");
-    if (withFolded.length <= maxChars) body = withFolded;
-  }
-  const usedMemoryIds = new Set(accepted.flatMap((item) => item.memoryIds));
-  return {
-    labels: new Map([...labels].filter(([memoryId]) => usedMemoryIds.has(memoryId))),
-    text: body,
-  };
-}
-
 export function formatMemoryContext(
   context: MemoryContext,
   options: MemoryContextFormatOptions = {},
 ): string {
-  const chains = projectLogicalChains(context, options.logicalChainMaxChars ?? 2_048);
+  const chains = projectLogicalChains(
+    context,
+    options.logicalChainMaxChars ?? DEFAULT_LOGICAL_CHAIN_MAX_CHARS,
+  );
   const records = context.results
     .map(({ memory, node, evidence }) => {
       const source =
