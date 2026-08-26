@@ -235,9 +235,11 @@ test("search recommendation distinguishes advisory from hard guardrails", () => 
   } as unknown as MemoryContext;
   assert.equal(formatSearchRecommendation(context, "off"), "");
   assert.equal(formatSearchRecommendation(context, "guardrail"), "");
-  assert.match(formatSearchRecommendation(context, "advisory"), /below_threshold/u);
+  assert.match(formatSearchRecommendation(context, "advisory"), /may be incomplete/u);
+  assert.doesNotMatch(formatSearchRecommendation(context, "advisory"), /below_threshold|0\.42/u);
   context.activeGraph!.qpp!.reason = "guardrail_empty";
-  assert.match(formatSearchRecommendation(context, "guardrail"), /guardrail_empty/u);
+  assert.match(formatSearchRecommendation(context, "guardrail"), /may be incomplete/u);
+  assert.doesNotMatch(formatSearchRecommendation(context, "guardrail"), /guardrail_empty/u);
 });
 
 test("TUI registers the nmg-context renderer and the /nmg menu command", () => {
@@ -708,13 +710,11 @@ test("Pi injects the advisory claim-outcome review only on the next user turn", 
     };
     assert.match(searched.content[0]?.text ?? "", /Atlas stores durable metadata in SQLite/u);
     const disclosedMemoryId = searched.details.results[0]!.memory.id;
-    await tools.get("nmg_get")!.execute(
-      "get-claim-review",
-      { memoryIds: [disclosedMemoryId] },
-      undefined,
-      undefined,
-      { sessionManager },
-    );
+    await tools
+      .get("nmg_get")!
+      .execute("get-claim-review", { memoryIds: [disclosedMemoryId] }, undefined, undefined, {
+        sessionManager,
+      });
     await handlers.get("agent_end")!(
       {
         messages: [
@@ -1263,10 +1263,11 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     assert.doesNotMatch(recalled.systemPrompt, /NMG SEARCH HEADERS/);
     const recallContent = recalled.message?.content ?? "";
     assert.match(recallContent, /Atlas must use SQLite/);
-    assert.match(recallContent, /NMG SEARCH HEADERS/);
+    assert.match(recallContent, /NMG MEMORY CANDIDATES/);
     assert.match(recallContent, /fields: memory=id/);
-    assert.match(recallContent, /matches=storage/);
+    assert.match(recallContent, /fields separated by "; "/);
     assert.doesNotMatch(recallContent, /tier=L\d/);
+    assert.doesNotMatch(recallContent, /matches=/);
     assert.doesNotMatch(recallContent, /deepestTier/);
     assert.doesNotMatch(recallContent, /SOURCE=/);
     const recalledAgain = (await handlers.get("before_agent_start")!(
@@ -1340,13 +1341,9 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
     assert.match(searched.content[0].text, new RegExp(activeGraphId));
     await tools
       .get("nmg_get")!
-      .execute(
-        "get",
-        { memoryIds: [remember.details.memory.id] },
-        undefined,
-        undefined,
-        { sessionManager },
-      );
+      .execute("get", { memoryIds: [remember.details.memory.id] }, undefined, undefined, {
+        sessionManager,
+      });
 
     await tools.get("nmg_remember")!.execute(
       "remember-deep",
@@ -1938,7 +1935,7 @@ test("revoked records show metadata but withhold the statement", () => {
     ],
   } as never;
   const headers = formatSearchHeaders(context);
-  // Metadata stays visible (id, node, type, matches); the statement is
+  // Metadata stays visible (id, node, type); the statement is
   // withheld so the model cannot cite the revoked content.
   assert.match(headers, /memory=memory-revoked/);
   assert.match(headers, /node=Event preferences/);
@@ -1946,8 +1943,11 @@ test("revoked records show metadata but withhold the statement", () => {
   assert.match(headers, /\(content withdrawn\)/);
   assert.doesNotMatch(headers, /modern electronic music festivals/);
   assert.match(headers, /revocation boundary/);
-  // An explicit nmg_get still returns the exact record.
-  assert.match(formatMemoryContext(context), /I enjoy modern electronic music festivals/);
+  // Exact lookup preserves the revocation boundary instead of re-disclosing
+  // content that the user asked the Agent to forget.
+  const evidence = formatMemoryContext(context);
+  assert.match(evidence, /\[forget\] \(content withdrawn\)/);
+  assert.doesNotMatch(evidence, /modern electronic music festivals/);
 });
 
 test("session injection window folds duplicates but permits deeper disclosure", () => {

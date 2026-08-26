@@ -300,9 +300,9 @@ search_progression_required: >-
   web. Do not keep paraphrasing the same historical search.
 
 search_recommendation: >-
-  Automatic recall may be incomplete ({reason}; confidence={qpp}). If prior
-  experience could change the answer, make one deliberate nmg_search call and
-  then inspect only useful IDs with nmg_get.
+  Automatic recall may be incomplete. If prior experience could change the
+  answer, make one deliberate nmg_search call and then inspect only useful IDs
+  with nmg_get.
 
 # ---- 完成提醒（弱提示——commit/任务完成后注入，不强制） ------------------
 completion_nudge: >-
@@ -337,16 +337,10 @@ shadow_claim_outcome_nudge: >-
 
 search_disclosure: |
   NMG memory search results: {count} candidate record(s).
-  Each line is one memory record, optionally prefixed by [event date] and [marker] tags.
-  Records are ranked by retrieval score; order is not a guarantee of relevance.
-  {next_step}
-  {forget_hint}
-
-# MCP (Claude Code plugin) variant: the renderer emits compact tab-separated
-# headers (mid/node/type/L/preview), so the format line describes that layout.
-mcp_search_disclosure: |
-  NMG memory search results: {count} candidate header(s).
-  Each line: mid=memory id; node=cluster; type=memory type; L{tier}; statement preview.
+  NMG MEMORY CANDIDATES
+  format: one candidate per line; fields separated by "; ".
+  fields: memory=id; node=semantic cluster; type=memory type; time=event date; expires=expiry date; chains=logical chain names; preview=statement excerpt
+  Optional [external] and [open] markers describe provenance and unresolved state.
   Records are ranked by retrieval score; order is not a guarantee of relevance.
   {next_step}
   {forget_hint}
@@ -357,6 +351,7 @@ get_disclosure: |
   - SOURCE=: original evidence content when it differs from the statement
   - id/node/type/truth/scope identify the record
   {next_step}
+  {forget_hint}
 
 deferred_hint: >-
   More ranked records are folded. If these are insufficient, call nmg_get
@@ -370,18 +365,7 @@ forget_hint: >-
   A line beginning with [forget] is a revocation boundary; treat it as
   revoked.
 
-# Rendered in place of a revoked record's statement in search results
-# (auto-recommendation). Metadata (id, type, time) stays visible on the
-# line; only the statement content is withheld.
-forget_redacted: "[forget] (content withdrawn)"
-
 # ---- 其他 -----------------------------------------------------------------
-
-headers_fields: |-
-  fields: memory=id; node=memory cluster; type=memory type; matches=query terms hit, else semantic/graph/hybrid; time=event date; expires=expiry date; preview=statement excerpt
-
-# Section titles injected by the Pi extension (LLM-visible format labels).
-headers_title: "NMG SEARCH HEADERS"
 in_context_title: "NMG ALREADY IN CURRENT CONTEXT"
 
 memory_policy: >-

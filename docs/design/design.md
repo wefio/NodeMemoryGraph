@@ -326,11 +326,13 @@ Agent-facing result semantics have one integration-layer owner. The shared
 bounded remember follow-up candidates, Task Board entries, and logical-chain
 structure. It owns stable field names, withdrawal redaction, evidence/structure
 budgets, chain labels, and default next-step placement. An adapter may wrap that
-text in a native content block, add a host lifecycle notice, or disable an
-optional field such as tier in an automatic-recall header; it must not recreate
-the candidate DTO, evidence layout, board conventions, or semantic follow-up
-rules. Structured daemon results remain canonical and the Agent Surface is a
-replaceable presentation boundary, never another store or protocol version.
+text in a native content block or add a host lifecycle notice; it must not
+recreate the candidate DTO, evidence layout, board conventions, or semantic
+follow-up rules. Storage tiers, ranking scores, QPP internals, timings, and token
+estimates remain in Core traces or diagnostic output and never enter the
+Agent-facing candidate DTO. Structured daemon results remain canonical and the
+Agent Surface is a replaceable presentation boundary, never another store or
+protocol version.
 
 The package dependency boundary follows that architecture. NMG Core, the daemon,
 and non-interactive CLI paths do not import Pi. The Pi adapter type-checks against

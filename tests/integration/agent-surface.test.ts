@@ -20,6 +20,7 @@ function context(): MemoryContext {
         tier: 1,
         truthStatus: "asserted",
         scope: { project: "atlas" },
+        eventTime: "2026-08-20T12:00:00.000Z",
       },
       node: { canonicalName: "Atlas" },
       evidence: { content: `Exact source detail for ${id}.` },
@@ -41,15 +42,20 @@ function context(): MemoryContext {
 
 test("shared agent surface keeps search compact and evidence exact", () => {
   const memory = context();
-  const search = renderSearchSurface(memory, { nextStep: "Call nmg_get." });
+  const search = renderSearchSurface(memory, {
+    preamble: 'NMG MEMORY CANDIDATES\nformat: one candidate per line; fields separated by "; ".',
+  });
   const evidence = renderEvidenceSurface(memory);
 
   assert.match(search, /memory=memory-a/u);
-  assert.match(search, /matches=semantic/u);
   assert.match(search, /chains=Atlas flow/u);
   assert.match(search, /activeGraphId=ag-atlas/u);
+  assert.match(search, /fields separated by "; "/u);
+  assert.doesNotMatch(search, /tier=L\d/u);
+  assert.doesNotMatch(search, /matches=/u);
   assert.doesNotMatch(search, /Exact source detail/u);
   assert.match(evidence, /Exact source detail/u);
+  assert.match(evidence, /time=2026-08-20/u);
   assert.match(evidence, /<nmg_logical_chains>/u);
   assert.equal(evidence.split("Atlas receives input.").length - 1, 1);
 });

@@ -17,9 +17,9 @@ actual evidence use from a merely displayed candidate.
 
 ## Warm-memory continuation
 
-The CLI and Pi adapter rank the complete L1 candidate pool once. Pools of up
+The CLI and Pi adapter rank the complete warm candidate pool once. Pools of up
 to four records are exposed in full; pools of five or more initially expose
-only their hotter half. When a search result reports `L1 continuation`,
+only their hotter half. When a search result reports folded records,
 inspect the visible headers first. If they are insufficient, call `nmg_get`
 once with the reported deferred memory IDs. Do not repeat `nmg_search`: the
 deferred IDs are the budgeted second window of the same stable ranking, and
@@ -29,11 +29,12 @@ diagnostics that intentionally expose the entire ranked L1 pool immediately.
 
 ## Progressive second pass
 
-To make the storage tier itself progressive, add `--tiered-disclosure`. This
-opens L0 first and only searches L1–L3 while deterministic QPP still reports
-insufficient evidence. It composes with, but is distinct from, `--second-pass`:
-the former opens storage tiers; the latter widens the evidence prefix inside
-the opened candidate pool.
+To make physical storage progressively searchable, add `--tiered-disclosure`.
+NMG opens internal tiers only while deterministic QPP still reports insufficient
+evidence. It composes with, but is distinct from, `--second-pass`: the former
+widens the physical search scope; the latter widens the evidence prefix inside
+the opened candidate pool. Physical tier names remain an NMG diagnostic detail,
+not evidence for the answering model.
 
 When the first recall quality is doubtful but the query is right, re-select
 within the same candidate pool instead of changing the query:

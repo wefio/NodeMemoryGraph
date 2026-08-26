@@ -13,38 +13,43 @@ export function searchPreview(memory: MemorySearchResult["memory"]): string {
     : `${normalized.slice(0, SEARCH_PREVIEW_CHARS - 1)}…`;
 }
 
+export interface CompactSearchCandidate {
+  id: string;
+  node: string;
+  type: string;
+  open: boolean;
+  external: boolean;
+  forgotten: boolean;
+  preview: string;
+  eventTime: string | null;
+  expiresAt: string | null;
+  chains: string[];
+}
+
+export interface CompactSearchContext {
+  candidates: CompactSearchCandidate[];
+  logicalChainCount: number;
+  activeGraphId: string | null;
+  deferredMemoryIds: string[];
+}
+
 /** Agent-facing search projection. Exact records and evidence remain behind `nmg get`. */
-export function compactSearchContext(context: MemoryContext) {
+export function compactSearchContext(context: MemoryContext): CompactSearchContext {
   return {
     candidates: context.results.map((result) => ({
       id: result.memory.id,
       node: result.node.canonicalName,
       type: result.memory.memoryType,
-      resolution: result.memory.resolution,
-      tier: result.memory.tier,
+      open: result.memory.resolution === "open" || result.memory.resolution === "reopened",
+      external: (result.memory.markers ?? []).some((marker) => marker.kind === "external_source"),
+      forgotten: (result.memory.markers ?? []).some((marker) => marker.kind === "forget"),
       preview: searchPreview(result.memory),
-      matches:
-        result.hitTerms && result.hitTerms.length > 0
-          ? result.hitTerms
-          : [result.recallReason ?? "hybrid"],
       eventTime: result.memory.eventTime,
       expiresAt: result.memory.expiresAt ?? result.memory.validUntil,
-      score: result.combinedScore,
       chains: logicalChainNames(result),
     })),
     logicalChainCount: logicalChainCount(context),
     activeGraphId: context.activeGraph?.id ?? null,
-    tokens: context.activeGraph?.usage.estimatedTokens ?? null,
     deferredMemoryIds: context.progressiveDisclosure?.deferredMemoryIds ?? [],
-    qpp: context.activeGraph?.qpp
-      ? {
-          trigger: context.activeGraph.qpp.trigger,
-          reason: context.activeGraph.qpp.reason,
-          score: context.activeGraph.qpp.qpp,
-          threshold: context.activeGraph.qpp.threshold,
-        }
-      : null,
-    retrieval: context.retrieval,
-    totalMs: context.timings?.totalMs,
   };
 }

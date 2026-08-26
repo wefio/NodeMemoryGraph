@@ -41,19 +41,17 @@ bash evals/omnimemeval/run-pmv2-quick.sh 60 --llm-workers=16
 1. **原文 + 标记**（旧版）：`[forget] I enjoy modern electronic music festivals` + 长 hint
    （"do not use or reconstruct..."）。
 2. **脱敏**（用户提议）：自动推荐只给 `memory=id` + `[forget] (content withdrawn)`——要内容必须主动 `nmg_get`（意图门槛）。
-3. **元数据 + 脱敏**（定案，`cfb982f`）：**保留检索元数据**（id/node/type/matches/time），**不给 statement**：
+3. **元数据 + 脱敏**（定案，`cfb982f`）：**保留 Agent 可用的语义元数据**（id/node/type/time），**不给 statement**。当前各适配器共用同一个投影，不再暴露存储层级、匹配机制或分数：
 
 ```
-Pi 扩展:  memory=m-9; node=Event preferences; type=preference; matches=semantic;
-          preview=[forget] (content withdrawn)
-MCP:      mid=m-9  node=Event preferences  type=preference  L1  [forget] (content withdrawn)
-评测桥:    [forget] (content withdrawn) memory=m-9; time=2025-09-01
+memory=m-9; node=Event preferences; type=preference; time=2025-09-01;
+preview=[forget] (content withdrawn)
 ```
 
 - `forget_hint`（简化为）：`A line beginning with [forget] is a revocation boundary; treat it as revoked.`
   （内容已不在 prompt 里，无需长解释"不要重建"）
-- **nmg_get 不变**：主动查询仍返回完整原文 + `[forget]` 标记（"拿查询工具查才能看到"）。
-- 模板单一来源：`src/prompts/nmg-prompts.yaml` 的 `forget_redacted` / `forget_hint`。
+- **当前共享边界**：`nmg_get` 也只返回撤销元数据与 `[forget] (content withdrawn)`；原文可以留在审计存储中，但不再回到模型上下文。
+- 模板单一来源：`src/prompts/nmg-prompts.yaml` 的 `search_disclosure` / `forget_hint`。
 
 ### 语义理由（为什么是元数据+脱敏，而不是原文）
 
@@ -87,7 +85,7 @@ MCP:      mid=m-9  node=Event preferences  type=preference  L1  [forget] (conten
 
 - 评测入口：`evals/omnimemeval/run-pmv2-quick.sh`（一键 60 问）
 - embedding server：`evals/omnimemeval/bge-server.py`（uv 启动，OpenAI 兼容）
-- 提示词单一来源：`src/prompts/nmg-prompts.yaml`（`forget_redacted` / `forget_hint`）
+- 提示词单一来源：`src/prompts/nmg-prompts.yaml`（`search_disclosure` / `forget_hint`）
 - 渲染实现：`.pi/extensions/nmg/index.ts`、`claude-plugins/nmg-memory/agents/memory-copilot.ts`、
   `evals/omnimemeval/bridge.ts`
 - 结果目录：`.benchmarks/official/OmniMemEval/results/pmv2/nmg-pmv2_20260805_165251/`（脱敏验证 run）

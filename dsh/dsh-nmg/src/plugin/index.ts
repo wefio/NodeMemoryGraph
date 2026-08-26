@@ -22,11 +22,15 @@ import { coordinationEnabled as configuredCoordinationEnabled } from '../../../.
 import { COMMON_BOARD_ACTIONS, COMMON_REMEMBER_ACTIONS } from '../../../../src/integration/tool-contract.ts'
 import { compactSearchContext } from '../../../../src/integration/search-projection.ts'
 import {
+  renderCompactSearchSurface,
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
   renderTaskBoardSurface,
 } from '../../../../src/integration/agent-surface.ts'
+import { loadPrompts, renderDisclosure } from '../../../../src/prompts/load.ts'
+
+const nmgPrompts = loadPrompts()
 
 export const inject = ['tools', 'subprocess', 'sandboxPolicy', 'systemPrompt', 'timer']
 
@@ -330,16 +334,28 @@ export function apply(ctx: Context): () => void {
     return joined.length > 500 ? joined.slice(0, 500) : joined
   }
 
-  function formatRecall(candidates, activeGraphId, tokens, sessionTotal) {
-    const lines = candidates.map(
-      (c) => 'mid=' + c.id + '\tnode=' + c.node + '\ttype=' + c.type + '\tL' + c.tier + '\t' + truncate(c.preview, 160),
+  function formatRecall(recall, candidates) {
+    const chainCount = new Set(candidates.flatMap((candidate) => candidate.chains || [])).size
+    const deferred = Array.isArray(recall.deferredMemoryIds) ? recall.deferredMemoryIds : []
+    const nextStep = deferred.length
+      ? nmgPrompts.deferred_hint + ' Memory IDs: ' + deferred.join(',')
+      : nmgPrompts.get_hint
+    const forget = candidates.some((candidate) => candidate.forgotten)
+    return renderCompactSearchSurface(
+      {
+        candidates,
+        logicalChainCount: chainCount,
+        activeGraphId: recall.activeGraphId || null,
+        deferredMemoryIds: deferred,
+      },
+      {
+        preamble: renderDisclosure(nmgPrompts.search_disclosure, {
+          count: String(candidates.length),
+          next_step: nextStep,
+          forget_hint: forget ? nmgPrompts.forget_hint : '',
+        }),
+      },
     )
-    if (activeGraphId) lines.push('activeGraphId=' + activeGraphId)
-    if (tokens != null) {
-      lines.push('recall tokens ~' + tokens + (sessionTotal != null ? ' · session ~' + sessionTotal : ''))
-    }
-    lines.push('Load exact records with nmg_get (mids + activeGraphId).')
-    return 'NMG memory (automatic recall):\n' + lines.join('\n')
   }
 
   function recallBudget(signal) {
@@ -418,7 +434,7 @@ export function apply(ctx: Context): () => void {
               : estimateTokens(fresh.map((c) => c.preview).join(' '))
           const sessionTotal = (sessionTokenTotals.get(sessionId) || 0) + thisTokens
           sessionTokenTotals.set(sessionId, sessionTotal)
-          const text = formatRecall(fresh, recall.activeGraphId, thisTokens, sessionTotal)
+          const text = formatRecall(recall, fresh)
           const entry = {
             generation,
             text,
@@ -975,7 +991,7 @@ export function apply(ctx: Context): () => void {
   // ── tools ──────────────────────────────────────────────────────────────────
   const searchTool = {
     name: 'nmg_search',
-    description: 'Search NMG durable memory and return compact headers (mid/node/type/tier/preview) plus an activeGraphId. Load exact statements with nmg_get. Treat results as candidates, not proof of completeness.',
+    description: nmgPrompts.search_description,
     parameters: {
       type: 'object',
       properties: {
@@ -1016,15 +1032,22 @@ export function apply(ctx: Context): () => void {
       const nextStep = Array.isArray(deferred) && deferred.length
         ? 'More ranked records are folded. Expand selected memory IDs first; deferred IDs: ' + deferred.join(',')
         : 'Select exact records with nmg_get (memory IDs + activeGraphId).'
-      const text = renderSearchSurface(data, { nextStep })
-      const tokens = data.activeGraph && data.activeGraph.usage && data.activeGraph.usage.estimatedTokens
-      return text + '\nrecall tokens ~' + (tokens != null ? tokens : estimateTokens(text))
+      const forget = data.results.some((result) =>
+        (result.memory.markers || []).some((marker) => marker.kind === 'forget'),
+      )
+      return renderSearchSurface(data, {
+        preamble: renderDisclosure(nmgPrompts.search_disclosure, {
+          count: String(data.results.length),
+          next_step: nextStep,
+          forget_hint: forget ? nmgPrompts.forget_hint : '',
+        }),
+      })
     },
   }
 
   const getTool = {
     name: 'nmg_get',
-    description: 'Expand selected memory IDs into exact statements and bounded source evidence. Pass the activeGraphId returned by nmg_search to record actual use.',
+    description: nmgPrompts.get_description,
     parameters: {
       type: 'object',
       properties: {
@@ -1047,9 +1070,16 @@ export function apply(ctx: Context): () => void {
       argv.push('--project-dir', workspaceRoot, '--json')
       const r = await invoke('get', params, argv, exec.signal, null)
       if (!r.ok) return r.error
+      const forget = r.data.results.some((result) =>
+        (result.memory.markers || []).some((marker) => marker.kind === 'forget'),
+      )
       return renderEvidenceSurface(r.data, {
+        preamble: renderDisclosure(nmgPrompts.get_disclosure, {
+          count: String(r.data.results.length),
+          next_step: '',
+          forget_hint: forget ? nmgPrompts.forget_hint : '',
+        }),
         missingMemoryIds: Array.isArray(r.data.missingMemoryIds) ? r.data.missingMemoryIds : undefined,
-        sourceMaxChars: 280,
       })
     },
   }

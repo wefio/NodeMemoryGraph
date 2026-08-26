@@ -93,6 +93,12 @@ test("search compact JSON exposes bounded headers without exact evidence", () =>
     assert.equal(compact.candidates[0]!.preview.length, 320);
     assert.match(compact.candidates[0]!.preview, /…$/u);
     assert.ok(compact.activeGraphId);
+    assert.equal((compact.candidates[0] as Record<string, unknown>).tier, undefined);
+    assert.equal((compact.candidates[0] as Record<string, unknown>).score, undefined);
+    assert.equal((compact as Record<string, unknown>).tokens, undefined);
+    assert.equal((compact as Record<string, unknown>).qpp, undefined);
+    assert.equal((compact as Record<string, unknown>).retrieval, undefined);
+    assert.equal((compact as Record<string, unknown>).totalMs, undefined);
     assert.equal(compact.results, undefined);
     assert.equal(compact.activeGraph, undefined);
   } finally {
@@ -570,13 +576,7 @@ test("HTTP daemon starts once, serves CLI requests, and stops cleanly", () => {
       directory,
     ]);
 
-    const restarted = runLauncher([
-      "daemon",
-      "restart",
-      "--json",
-      "--data-dir",
-      directory,
-    ]) as {
+    const restarted = runLauncher(["daemon", "restart", "--json", "--data-dir", directory]) as {
       started: boolean;
       restarted: boolean;
       restartedFrom: number;

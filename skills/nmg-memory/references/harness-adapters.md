@@ -33,7 +33,9 @@ pure functions from `src/integration/agent-surface.ts`:
 - `renderTaskBoardSurface` for temporary coordination and its on-use rules.
 
 `compactSearchContext` remains the structured compact DTO for shell/automatic
-recall paths. Native TypeBox, Zod, or JSON Schema definitions stay in the host;
+recall paths. It contains semantic candidate headers and operational continuation
+handles, never storage tiers, scores, QPP internals, timings, or token estimates.
+Native TypeBox, Zod, or JSON Schema definitions stay in the host;
 shared action enums come from `tool-contract.ts`. Host code may add lifecycle
 notices or host-only actions, but it must not fork field names, withdrawal
 redaction, chain rendering, or remember/board semantics. A new tool therefore
@@ -70,7 +72,7 @@ each new user turn and inject the **Active-Graph header projection** (compact
 headers + `activeGraphId`) as a context message — not bare text. Exact evidence
 stays behind `get(activeGraphId)`, which records actual use on the AG trace; plain
 injection must never be counted as use. Keep it cheap: one search per new user turn
-(`limit` ≈ 13, `max-tier` 1, `graph-hops` 1, tiered disclosure), fold repeated ids
+(`limit` ≈ 13, internal `max-tier` 1, `graph-hops` 1, tiered disclosure), fold repeated ids
 with a per-session window, and never let a failed recall block the turn.
 
 DeepSeek Harness: hook `agent/pre-step` (waterfall; return

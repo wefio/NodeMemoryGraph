@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
+
+import { parse } from "yaml";
 
 import { loadPrompts, renderDisclosure } from "../../src/prompts/load.ts";
 
@@ -50,26 +54,34 @@ const SECTIONS = [
   "search_recommendation",
   "shadow_claim_outcome_nudge",
   "search_disclosure",
-  "mcp_search_disclosure",
   "get_disclosure",
   "deferred_hint",
   "get_hint",
   "forget_hint",
-  "forget_redacted",
-  "headers_fields",
-  "headers_title",
   "in_context_title",
   "memory_policy",
 ] as const;
 
 test("loadPrompts reads every prompt section from the yaml source", () => {
   const prompts = loadPrompts();
+  const source = parse(
+    readFileSync(resolve(import.meta.dirname, "../../src/prompts/nmg-prompts.yaml"), "utf8"),
+  );
+  assert.deepEqual(prompts, source, "generated runtime prompts must match the YAML source");
   for (const key of SECTIONS) {
     assert.ok(
       typeof prompts[key] === "string" && prompts[key].length > 0,
       `${key} must be a non-empty string`,
     );
   }
+});
+
+test("search disclosure owns the progressive candidate header and delimiter contract", () => {
+  const text = loadPrompts().search_disclosure;
+  assert.match(text, /NMG MEMORY CANDIDATES/u);
+  assert.match(text, /fields separated by "; "/u);
+  assert.match(text, /fields: memory=id/u);
+  assert.doesNotMatch(text, /tier=L|score=|qpp=|latency=|tokens?=/iu);
 });
 
 test("stateKey guidance explains reuse, separation, scope, and supersession consequence", () => {

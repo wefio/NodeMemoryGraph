@@ -1,11 +1,8 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { parse } from "yaml";
+import { GENERATED_NMG_PROMPTS } from "./nmg-prompts.generated.ts";
 
 /**
- * Prompt source of truth (see nmg-prompts.yaml). Loaded once per process;
- * editing the yaml takes effect on the next process start (restart the daemon
- * or rerun the eval bridge) without touching code.
+ * Prompt source of truth (see nmg-prompts.yaml). The generated TypeScript copy
+ * keeps runtime adapters free of YAML parser and filesystem dependencies.
  */
 export interface NmgPrompts {
   search_description: string;
@@ -58,25 +55,16 @@ export interface NmgPrompts {
   shadow_feedback_nudge: string;
   shadow_claim_outcome_nudge: string;
   search_disclosure: string;
-  mcp_search_disclosure: string;
   get_disclosure: string;
   deferred_hint: string;
   get_hint: string;
   forget_hint: string;
-  forget_redacted: string;
-  headers_fields: string;
-  headers_title: string;
   in_context_title: string;
   memory_policy: string;
 }
 
-let cached: NmgPrompts | undefined;
-
 export function loadPrompts(): NmgPrompts {
-  cached ??= parse(
-    readFileSync(join(import.meta.dirname, "nmg-prompts.yaml"), "utf8"),
-  ) as NmgPrompts;
-  return cached;
+  return GENERATED_NMG_PROMPTS as NmgPrompts;
 }
 
 /**

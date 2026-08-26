@@ -452,7 +452,6 @@ export class OmniMemEvalBridge {
         maxTier: 3,
         graphHops: 1,
         vectorGranularity: semantic ? "records" : undefined,
-        sourceActor: prefersAssistantEvidence(query) ? undefined : "user",
         secondPass: this.#secondPass,
         progressiveWarmDisclosure: false,
         tieredDisclosure: true,
@@ -492,10 +491,6 @@ export class OmniMemEvalBridge {
       chainMemberships: result.chainMemberships,
       evidenceExcerpt: result.evidence.content.slice(0, 500),
     }));
-    // Contradiction annotations are NMG's own retrieval product: when a
-    // retrieved memory contradicts another memory (claims metadata), the
-    // note is rendered into the context regardless of the caller.
-    const notes = store.contradictionNotes(memories.map((m) => m.memoryId));
     const hasForget = context.results.some(({ memory }) =>
       memory.markers.some((marker) => marker.kind === "forget"),
     );
@@ -523,12 +518,8 @@ export class OmniMemEvalBridge {
                 // OmniMemEval has no separate nmg_get round; the bridge therefore
                 // exposes the same exact-evidence surface in this response.
                 next_step: "",
+                forget_hint: hasForget ? nmgPrompts.forget_hint : "",
               }),
-              includeEventTime: needsTemporalContext(query),
-              redactForgotten: true,
-              annotations: notes,
-              sourceMaxChars: 500,
-              forgetHint: hasForget ? nmgPrompts.forget_hint : "",
             }),
       memories,
     };
@@ -584,18 +575,6 @@ export class OmniMemEvalBridge {
   #databasePath(key: string): string {
     return resolve(this.#root, `${key}.sqlite`);
   }
-}
-
-function prefersAssistantEvidence(query: string): boolean {
-  return /\b(?:assistant|previous\s+(?:chat|conversation)|earlier\s+(?:you|we)|you\s+(?:said|suggested|recommended|provided|mentioned|told|wrote|created|made|gave|listed|outlined|explained)|we\s+(?:discussed|talked|decided)|(?:(?:can|could)\s+you|you\s+could)\s+remind\s+me|your\s+(?:answer|response|recommendation|list|example))\b/iu.test(
-    query,
-  );
-}
-
-function needsTemporalContext(query: string): boolean {
-  return /\b(?:when|date|days?|weeks?|months?|years?|before|after|first|last|recent|recently|ago|long|yesterday|today|tomorrow|since|until|during|between|january|february|march|april|may|june|july|august|september|october|november|december)\b|(?:19|20)\d{2}/iu.test(
-    query,
-  );
 }
 
 function explicitForgetTarget(content: string): string | null {

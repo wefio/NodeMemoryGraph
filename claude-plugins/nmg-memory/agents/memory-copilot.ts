@@ -20,19 +20,13 @@ import {
   renderSearchSurface,
   renderTaskBoardSurface,
 } from "../../../src/integration/agent-surface.ts";
-import { WORLD_BOARD_ID, type MemoryContext, type PerfSnapshot } from "../../../src/core/types.ts";
+import { WORLD_BOARD_ID, type MemoryContext } from "../../../src/core/types.ts";
 
 const nmgPrompts = loadPrompts();
 
 function dbPath(): string {
   return join(resolveNmgDataDir(), "nmg.sqlite");
 }
-
-// Per-call performance feedback, off by default. When enabled, nmg_search
-// returns a compact per-phase timing line the agent can act on (e.g. detect
-// a slow lexical scan and suggest retention/merge). Shared daemons keep
-// their own env; this switch applies only to this MCP server's requests.
-const AGENT_PERF = process.env.NMG_AGENT_PERF === "1";
 
 const MEMORY_TYPES = ["constraint", "event", "fact", "preference", "state", "strategy"] as const;
 const ACTORS = ["assistant", "system", "tool", "user"] as const;
@@ -73,7 +67,6 @@ server.registerTool(
     const r = (await invokeDaemon(connection, "search", {
       ...params,
       sessionId: BOARD_SESSION_ID,
-      ...(AGENT_PERF ? { perf: true } : {}),
     })) as MemoryContext;
     return { content: [{ type: "text", text: searchH(r) }] };
   },
@@ -551,36 +544,26 @@ function searchH(r: MemoryContext): string {
   );
   return renderSearchSurface(r, {
     emptyText: "No NMG match.",
-    preamble: renderDisclosure(nmgPrompts.mcp_search_disclosure, {
+    preamble: renderDisclosure(nmgPrompts.search_disclosure, {
       count: String(r.results.length),
       next_step: nextStep,
       forget_hint: forget ? nmgPrompts.forget_hint : "",
     }),
-    performanceLine: perfFeedback(r.timings, r.filterUsage),
   });
 }
 
-/** Compact per-phase timing feedback line for agent self-maintenance. */
-function perfFeedback(timings: PerfSnapshot | undefined, filters?: unknown): string | null {
-  if (!timings) return null;
-  const sections = Object.entries(timings.timings)
-    .sort((left, right) => right[1] - left[1])
-    .map(([section, ms]) => `${section}=${ms.toFixed(1)}ms`)
-    .join(" ");
-  let advice = "";
-  // Slow + unfiltered → the agent can narrow scope instead of widening the
-  // query. This is the index-decision signal surfacing at the boundary.
-  if (
-    timings.totalMs > 50 &&
-    (!filters || (filters as { dimensions?: string[] }).dimensions?.length === 0)
-  ) {
-    advice = " (slow: consider --scope to narrow)";
-  }
-  return `[perf ${sections} total=${timings.totalMs.toFixed(1)}ms${advice}]`;
-}
-
 function memText(r: MemoryContext & { missingMemoryIds?: string[] }): string {
-  return renderEvidenceSurface(r, { missingMemoryIds: r.missingMemoryIds, sourceMaxChars: 280 });
+  const forget = r.results.some(({ memory }) =>
+    (memory.markers ?? []).some((marker) => marker.kind === "forget"),
+  );
+  return renderEvidenceSurface(r, {
+    preamble: renderDisclosure(nmgPrompts.get_disclosure, {
+      count: String(r.results.length),
+      next_step: "",
+      forget_hint: forget ? nmgPrompts.forget_hint : "",
+    }),
+    missingMemoryIds: r.missingMemoryIds,
+  });
 }
 
 function formatBoard(

@@ -2517,10 +2517,7 @@ export function formatSearchRecommendation(
   const qpp = context.activeGraph?.qpp;
   if (mode === "off" || !qpp?.trigger) return "";
   if (mode === "guardrail" && !qpp.reason.startsWith("guardrail_")) return "";
-  return renderDisclosure(nmgPrompts.search_recommendation, {
-    reason: qpp.reason,
-    qpp: qpp.qpp.toFixed(3),
-  });
+  return nmgPrompts.search_recommendation;
 }
 
 function normalizeTaskPrompt(prompt: string): string {
@@ -2549,8 +2546,6 @@ export function formatSearchHeaders(context: MemoryContext): string {
       next_step: nextStep,
       forget_hint: hasForgetMarker(context) ? nmgPrompts.forget_hint : "",
     }),
-    candidateHeading: [nmgPrompts.headers_title, nmgPrompts.headers_fields],
-    includeTier: false,
   });
 }
 
@@ -2584,8 +2579,8 @@ export function formatMemoryContext(
     preamble: renderDisclosure(nmgPrompts.get_disclosure, {
       count: String(context.results.length),
       next_step: formatProgressiveDisclosure(context) || "",
+      forget_hint: hasForgetMarker(context) ? nmgPrompts.forget_hint : "",
     }),
-    nextStep: formatProgressiveDisclosure(context),
     logicalChainMaxChars: options.logicalChainMaxChars,
   });
 }

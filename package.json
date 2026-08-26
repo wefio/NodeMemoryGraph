@@ -38,8 +38,10 @@
     "src/lab/reasoning-workspace.ts"
   ],
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node -e \"require('node:fs').cpSync('src/cli/graph/assets','dist/cli/graph/assets',{recursive:true})\"",
-    "check": "tsc --noEmit",
+    "prompts:generate": "node --experimental-strip-types scripts/generate-prompts.ts",
+    "prompts:check": "node --experimental-strip-types scripts/generate-prompts.ts --check",
+    "build": "npm run prompts:generate && node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node -e \"require('node:fs').cpSync('src/cli/graph/assets','dist/cli/graph/assets',{recursive:true})\"",
+    "check": "npm run prompts:check && tsc --noEmit",
     "cli": "node --experimental-strip-types src/cli/main.ts",
     "lint": "eslint src/ .pi/extensions/ claude-plugins/",
     "lint:fix": "eslint --fix src/ .pi/extensions/ claude-plugins/",

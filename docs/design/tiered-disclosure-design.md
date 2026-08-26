@@ -170,8 +170,9 @@ admission: tier 0 always passes; tier ≥1 passes only if
 
 `nmg_search(..., maxTier: 0..3)` (already accepted as `maxTier` in
 SearchOptions) becomes meaningful: `0` = hot memory only; unset = default
-progression. Add `tiersOpened` to the result header so the agent can decide
-whether to `nmg_get` deeper.
+progression. Tier state remains internal to retrieval and traces. The Agent
+surface exposes only whether ranked evidence remains folded and how to load it;
+it does not expose L0/L1 placement or `tiersOpened`.
 
 ## 4. Evaluation
 
@@ -200,7 +201,7 @@ baseline (benchmark discipline §"Always run the matched no-memory baseline").
 | 0 | **Implemented:** `maxTierBudget`, `tiersOpened`, `deepEvidence`, and ledger fields | unit tests cover the hard envelope |
 | 1 | **Implemented, opt-in:** `nmg_search --tiered-disclosure` opens L0→L3 with deterministic QPP | targeted shallow-stop/deep-open tests pass; scale/recall benchmark pending |
 | 2 | **Implemented:** Pi automatic recall enables sequential opening | adapter integration tests pass; matched LongMemEval run pending |
-| 3 | **Implemented:** search headers expose opened/deep tiers; `nmg_get` remains the exact unlock | agent utility evaluation pending |
+| 3 | **Implemented:** search headers expose only bounded candidates and continuation availability; `nmg_get` remains the exact unlock | agent utility evaluation pending |
 
 The runtime intentionally does not claim SPRT: QPP scores are not calibrated
 likelihoods yet. It follows §2.2's required fallback and uses the deterministic

@@ -1,33 +1,21 @@
 import type { MemoryContext, RememberResult } from "../core/types.ts";
+import { DEFAULT_LOGICAL_CHAIN_MAX_CHARS, projectLogicalChains } from "./chain-projection.ts";
 import {
-  DEFAULT_LOGICAL_CHAIN_MAX_CHARS,
-  logicalChainCount,
-  logicalChainNames,
-  projectLogicalChains,
-} from "./chain-projection.ts";
-import { searchPreview } from "./search-projection.ts";
+  compactSearchContext,
+  type CompactSearchCandidate,
+  type CompactSearchContext,
+} from "./search-projection.ts";
 
 export interface SearchSurfaceOptions {
   preamble?: string;
-  candidateHeading?: string[];
   emptyText?: string;
-  nextStep?: string;
-  forgetHint?: string;
-  performanceLine?: string | null;
-  includeTier?: boolean;
 }
 
 export interface EvidenceSurfaceOptions {
   preamble?: string;
   emptyText?: string;
-  nextStep?: string;
   missingMemoryIds?: string[];
   logicalChainMaxChars?: number;
-  sourceMaxChars?: number;
-  includeEventTime?: boolean;
-  redactForgotten?: boolean;
-  annotations?: ReadonlyMap<string, string>;
-  forgetHint?: string;
 }
 
 export interface TaskBoardDirectoryEntry {
@@ -75,28 +63,13 @@ function excerpt(value: string, maxLength: number): string {
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}…`;
 }
 
-function hasMarker(context: MemoryContext, kind: string): boolean {
-  return context.results.some(({ memory }) =>
-    (memory.markers ?? []).some((marker) => marker.kind === kind),
-  );
-}
-
-function matchLabel(result: MemoryContext["results"][number]): string {
-  if (result.hitTerms && result.hitTerms.length > 0) return result.hitTerms.join(",");
-  return result.recallReason === "learned_route"
-    ? "graph"
-    : result.recallReason === "vector_match"
-      ? "semantic"
-      : (result.recallReason ?? "hybrid");
-}
-
-function temporalLabels(result: MemoryContext["results"][number]): string[] {
+function temporalLabels(candidate: CompactSearchCandidate): string[] {
   const day = (value: string | null | undefined): string | null =>
     value ? value.slice(0, 10) : null;
   const labels: string[] = [];
-  const event = day(result.memory.eventTime);
+  const event = day(candidate.eventTime);
   if (event) labels.push(`time=${event}`);
-  const expires = day(result.memory.expiresAt ?? result.memory.validUntil);
+  const expires = day(candidate.expiresAt);
   if (expires) labels.push(`expires=${expires}`);
   return labels;
 }
@@ -110,41 +83,37 @@ export function renderSearchSurface(
   context: MemoryContext,
   options: SearchSurfaceOptions = {},
 ): string {
-  if (context.results.length === 0) return options.emptyText ?? "No matching NMG memory found.";
-  const lines = context.results.map((result) => {
-    const { memory, node } = result;
-    const flags = [
-      (memory.markers ?? []).some((marker) => marker.kind === "external_source")
-        ? "[external]"
-        : "",
-      memory.resolution === "open" || memory.resolution === "reopened" ? "[open]" : "",
-    ].filter(Boolean);
+  return renderCompactSearchSurface(compactSearchContext(context), options);
+}
+
+/** Render only the already-filtered Agent-facing candidate DTO. Storage tiers,
+ * scores, QPP internals, timings and token estimates never cross this boundary. */
+export function renderCompactSearchSurface(
+  context: CompactSearchContext,
+  options: SearchSurfaceOptions = {},
+): string {
+  if (context.candidates.length === 0) return options.emptyText ?? "No matching NMG memory found.";
+  const lines = context.candidates.map((candidate) => {
+    const flags = [candidate.external ? "[external]" : "", candidate.open ? "[open]" : ""].filter(
+      Boolean,
+    );
     const fields = [
-      `memory=${memory.id}`,
-      `node=${node.canonicalName}`,
-      `type=${memory.memoryType}`,
-      ...(options.includeTier === false ? [] : [`tier=L${memory.tier}`]),
-      `matches=${matchLabel(result)}`,
-      ...temporalLabels(result),
-      ...(logicalChainNames(result).length > 0
-        ? [`chains=${logicalChainNames(result).join(",")}`]
-        : []),
-      `preview=${searchPreview(memory)}`,
+      `memory=${candidate.id}`,
+      `node=${candidate.node}`,
+      `type=${candidate.type}`,
+      ...temporalLabels(candidate),
+      ...(candidate.chains.length > 0 ? [`chains=${candidate.chains.join(",")}`] : []),
+      `preview=${candidate.preview}`,
     ];
     return `- ${flags.length > 0 ? `${flags.join(" ")} ` : ""}${fields.join("; ")}`;
   });
-  const chainCount = logicalChainCount(context);
   return [
     options.preamble,
-    ...(options.candidateHeading ?? []),
     ...lines,
-    chainCount > 0
-      ? `logical_chains=${chainCount}; use nmg_get for compact chain structure with exact evidence.`
+    context.logicalChainCount > 0
+      ? `logical_chains=${context.logicalChainCount}; use nmg_get for compact chain structure with exact evidence.`
       : "",
-    context.activeGraph?.id ? `activeGraphId=${context.activeGraph.id}` : "",
-    options.performanceLine,
-    options.nextStep,
-    hasMarker(context, "forget") ? options.forgetHint : "",
+    context.activeGraphId ? `activeGraphId=${context.activeGraphId}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -160,7 +129,6 @@ export function renderEvidenceSurface(
     context,
     options.logicalChainMaxChars ?? DEFAULT_LOGICAL_CHAIN_MAX_CHARS,
   );
-  const sourceMaxChars = options.sourceMaxChars ?? 320;
   const records = context.results.map(({ memory, node, evidence }) => {
     const external = (memory.markers ?? []).find((marker) => marker.kind === "external_source");
     const forgotten = (memory.markers ?? []).some((marker) => marker.kind === "forget");
@@ -175,33 +143,22 @@ export function renderEvidenceSurface(
       `type=${memory.memoryType}`,
       `truth=${memory.truthStatus}`,
       `scope=${JSON.stringify(memory.scope)}`,
-      ...(options.includeEventTime && memory.eventTime ? [`time=${memory.eventTime}`] : []),
+      ...(memory.eventTime ? [`time=${memory.eventTime}`] : []),
     ];
     const externalSource = external?.attributes?.source
       ? `\n  EXTERNAL_SOURCE=${String(external.attributes.source)}; retrievedAt=${String(external.attributes.retrievedAt ?? "unknown")}`
       : "";
     const source =
-      !(forgotten && options.redactForgotten) && evidence.content.trim() !== memory.statement.trim()
-        ? `\n  SOURCE=${excerpt(evidence.content, sourceMaxChars)}`
+      !forgotten && evidence.content.trim() !== memory.statement.trim()
+        ? `\n  SOURCE=${excerpt(evidence.content, 320)}`
         : "";
-    const statement =
-      forgotten && options.redactForgotten ? "[forget] (content withdrawn)" : memory.statement;
-    const annotation = options.annotations?.get(memory.id);
-    return `- ${flags.length > 0 ? `${flags.join(" ")} ` : ""}${statement}\n  ${details.join("; ")}${externalSource}${source}${annotation ? `\n  ${annotation}` : ""}`;
+    const statement = forgotten ? "[forget] (content withdrawn)" : memory.statement;
+    return `- ${flags.length > 0 ? `${flags.join(" ")} ` : ""}${statement}\n  ${details.join("; ")}${externalSource}${source}`;
   });
   const missing = options.missingMemoryIds?.length
     ? `MISSING: ${options.missingMemoryIds.join(", ")}`
     : "";
-  const body = [
-    options.preamble,
-    ...records,
-    missing,
-    chains.text,
-    options.nextStep,
-    options.forgetHint,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const body = [options.preamble, ...records, missing, chains.text].filter(Boolean).join("\n");
   return body || options.emptyText || "No active memory found.";
 }
 
