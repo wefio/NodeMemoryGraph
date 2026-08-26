@@ -40,6 +40,11 @@ redaction, chain rendering, or remember/board semantics. A new tool therefore
 needs one shared surface implementation and contract test, then only thin host
 registration wrappers.
 
+Benchmark adapters use the same boundary. They may preserve an official
+request/response envelope and structured audit fields, but model-visible memory
+text must come from the shared Agent Surface rather than an eval-specific
+ranking/rendering mode.
+
 Rules every adapter must preserve:
 
 - `search` returns compact headers + `activeGraphId`; exact statements and evidence

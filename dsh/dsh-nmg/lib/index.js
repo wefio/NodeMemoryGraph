@@ -272,6 +272,7 @@ function renderEvidenceSurface(context, options = {}) {
 	const sourceMaxChars = options.sourceMaxChars ?? 320;
 	const records = context.results.map(({ memory, node, evidence }) => {
 		const external = (memory.markers ?? []).find((marker) => marker.kind === "external_source");
+		const forgotten = (memory.markers ?? []).some((marker) => marker.kind === "forget");
 		const flags = [
 			chains.labels.get(memory.id) ? `[${chains.labels.get(memory.id)}]` : "",
 			external ? `[external, ${memory.truthStatus}]` : "",
@@ -282,11 +283,14 @@ function renderEvidenceSurface(context, options = {}) {
 			`node=${node.canonicalName}`,
 			`type=${memory.memoryType}`,
 			`truth=${memory.truthStatus}`,
-			`scope=${JSON.stringify(memory.scope)}`
+			`scope=${JSON.stringify(memory.scope)}`,
+			...options.includeEventTime && memory.eventTime ? [`time=${memory.eventTime}`] : []
 		];
 		const externalSource = external?.attributes?.source ? `\n  EXTERNAL_SOURCE=${String(external.attributes.source)}; retrievedAt=${String(external.attributes.retrievedAt ?? "unknown")}` : "";
-		const source = evidence.content.trim() !== memory.statement.trim() ? `\n  SOURCE=${excerpt(evidence.content, sourceMaxChars)}` : "";
-		return `- ${flags.length > 0 ? `${flags.join(" ")} ` : ""}${memory.statement}\n  ${details.join("; ")}${externalSource}${source}`;
+		const source = !(forgotten && options.redactForgotten) && evidence.content.trim() !== memory.statement.trim() ? `\n  SOURCE=${excerpt(evidence.content, sourceMaxChars)}` : "";
+		const statement = forgotten && options.redactForgotten ? "[forget] (content withdrawn)" : memory.statement;
+		const annotation = options.annotations?.get(memory.id);
+		return `- ${flags.length > 0 ? `${flags.join(" ")} ` : ""}${statement}\n  ${details.join("; ")}${externalSource}${source}${annotation ? `\n  ${annotation}` : ""}`;
 	});
 	const missing = options.missingMemoryIds?.length ? `MISSING: ${options.missingMemoryIds.join(", ")}` : "";
 	return [
@@ -294,7 +298,8 @@ function renderEvidenceSurface(context, options = {}) {
 		...records,
 		missing,
 		chains.text,
-		options.nextStep
+		options.nextStep,
+		options.forgetHint
 	].filter(Boolean).join("\n") || options.emptyText || "No active memory found.";
 }
 /** Default follow-up guidance after a durable save. The model remains the

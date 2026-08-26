@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { OmniMemEvalBridge, projectMemoryContext } from "../../evals/omnimemeval/bridge.ts";
+import { OmniMemEvalBridge } from "../../evals/omnimemeval/bridge.ts";
 import { NmgStore } from "../../src/core/store.ts";
 
 test("OmniMemEval bridge ingests and retrieves isolated user memories", async () => {
@@ -49,8 +49,8 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
       topK: 4,
     })) as { text: string };
 
-    assert.match(alice.text, /NMG memory search results: 1 candidate record/);
-    assert.match(alice.text, /order is not a guarantee of relevance/);
+    assert.match(alice.text, /NMG evidence for 1 selected record/);
+    assert.match(alice.text, /id\/node\/type\/truth\/scope identify the record/);
     assert.doesNotMatch(alice.text, /retrieval guidance/);
     assert.match(alice.text, /Kepler/);
     assert.ok(alice.timings);
@@ -66,7 +66,7 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
       query: "When did I name my telescope?",
       topK: 4,
     })) as { text: string };
-    assert.match(temporalRecall.text, /\[2026-07-20\] My telescope is named Kepler/);
+    assert.match(temporalRecall.text, /time=2026-07-20/);
 
     const datedRecall = (await bridge.handle({
       id: 5,
@@ -75,7 +75,7 @@ test("OmniMemEval bridge ingests and retrieves isolated user memories", async ()
       query: "What telescope did I have in July 2026?",
       topK: 4,
     })) as { text: string };
-    assert.match(datedRecall.text, /\[2026-07-20\] My telescope is named Kepler/);
+    assert.match(datedRecall.text, /time=2026-07-20/);
 
     const assistantRecall = (await bridge.handle({
       id: 6,
@@ -353,7 +353,7 @@ test("OmniMemEval replaces an explicitly forgotten memory with a tagged revocati
     };
     // Revoked records show metadata but withhold the statement: the model
     // sees the revocation exists (id/time) without content to cite.
-    assert.match(forgotten.text, /\(content withdrawn\) memory=/);
+    assert.match(forgotten.text, /\[forget\] \(content withdrawn\)/);
     assert.doesNotMatch(forgotten.text, /I feel isolated working from home/i);
     assert.doesNotMatch(forgotten.text, /collaborative whiteboard sessions/i);
     assert.doesNotMatch(forgotten.text, /Please forget/i);
@@ -431,7 +431,7 @@ test("semantic retrieval exposes a tagged revocation boundary", async () => {
       text: string;
       memories: Array<{ statement: string; markers: Array<{ kind: string }> }>;
     };
-    assert.match(result.text, /\(content withdrawn\) memory=/);
+    assert.match(result.text, /\[forget\] \(content withdrawn\)/);
     assert.doesNotMatch(result.text, /feel isolated working from home/i);
     assert.doesNotMatch(result.text, /collaborative whiteboard sessions/i);
     assert.doesNotMatch(result.text, /Please forget/i);
@@ -440,175 +440,12 @@ test("semantic retrieval exposes a tagged revocation boundary", async () => {
         memory.statement.startsWith("[forget]") === false &&
         memory.markers.some((marker) => marker.kind === "forget"),
     );
-    // The Fibonacci walk may stop at one or two revocations; the structured
-    // marker is projected to [forget] exactly once (projectMemoryContext
-    // dedupes control markers) — the assertion is about the tagged boundary.
+    // The Fibonacci walk may stop at one or two revocations; every surfaced
+    // revocation crosses the shared Agent Surface as a tagged boundary.
     assert.ok(revocations.length >= 1, "at least one tagged revocation surfaced");
-    // projectMemoryContext renders tagged lines ("<A:short-id> [forget] …" in
-    // the default idtime mode) and dedupes control markers, so exactly one
-    // tagged [forget] line appears.
-    assert.equal(result.text.match(/^<[A-Z]+:[0-9a-f]{8}> \[forget\]/gm)?.length, 1);
+    assert.ok((result.text.match(/\[forget\] \(content withdrawn\)/g)?.length ?? 0) >= 1);
   } finally {
     bridge.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-;
-
-;
-
-;
-
-;
-
-test("idtime render mode keeps [time] on temporal member lines and drops the timeline block", () => {
-  const root = mkdtempSync(join(tmpdir(), "chainrender-idtime-"));
-  try {
-    const store = new NmgStore(join(root, "nmg.sqlite"));
-    const times = ["2024-03-15", "2024-03-16", "2024-03-17"];
-    const cm: string[] = [];
-    for (let i = 0; i < times.length; i += 1) {
-      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: `事件${i + 1}`, eventTime: times[i], sessionId: "s1", sourceActor: "user" });
-      cm.push(m.memory.id);
-    }
-    const tc = store.createMemoryChain({ chainType: "temporal", topic: "事故时间线", ownerSessionId: "s1" });
-    cm.forEach((m, i) => store.addMemoryToChain({ chainId: tc.id, memoryId: m, position: i }));
-    const ctx = store.searchContext("事件", { sessionId: "s1", limit: 8, expandChains: true });
-    const memories = ctx.results.map((r) => ({
-      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
-      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
-      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
-      chainMemberships: r.chainMemberships,
-    }));
-    const { lines } = projectMemoryContext(memories, true, new Map(), "idtime");
-    const text = lines.join("\n");
-    // Lines keep [time] even for temporal members.
-    assert.ok(text.includes("[2024-03-15]"), "temporal member lines keep [time] in idtime mode");
-    // No Mermaid timeline block — chronology lives on the line.
-    assert.ok(!text.includes("timeline"), "no timeline block in idtime mode");
-    assert.match(lines[0]!, /^<[A-Z]+:[0-9a-f]{8}> /, "lines are <letter:short-id>-tagged");
-    store.close();
-  } finally {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows handle-lock noise */ }
-  }
-});
-
-;
-
-;
-
-test("id render mode renders a branching DAG chain as a Mermaid flowchart with forks", () => {
-  const root = mkdtempSync(join(tmpdir(), "chainrender-dag-"));
-  try {
-    const store = new NmgStore(join(root, "nmg.sqlite"));
-    const ids: string[] = [];
-    for (const s of ["根因：脚本误操作", "后果A：写入阻塞", "后果B：数据丢失", "后续：回滚恢复"]) {
-      const m = store.remember({ nodeName: "事故", nodeKind: "topic", nodeSummary: "事故", statement: s, sessionId: "s1", sourceActor: "user" });
-      ids.push(m.memory.id);
-    }
-    const [a, b, c, d] = ids;
-    const chain = store.createMemoryChain({ chainType: "logical", topic: "分叉事故", ownerSessionId: "s1" });
-    // a --> b, a --> c (branch), c --> d
-    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a, targetMemoryId: b });
-    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: a, targetMemoryId: c });
-    store.addMemoryChainEdge({ chainId: chain.id, sourceMemoryId: c, targetMemoryId: d });
-    const ctx = store.searchContext("脚本误操作", { sessionId: "s1", limit: 8, expandChains: true, chainExpansionMaxMembers: 10 });
-    const memories = ctx.results.map((r) => ({
-      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement,
-      markers: r.memory.markers, eventTime: r.memory.eventTime, score: r.combinedScore,
-      sourceRef: r.evidence.sourceRef, chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType,
-      chainMemberships: r.chainMemberships,
-    }));
-    const chainEdges = new Map<string, Array<{ sourceMemoryId: string; targetMemoryId: string }>>();
-    for (const e of ctx.chainEdges ?? []) {
-      const list = chainEdges.get(e.chainId) ?? [];
-      list.push({ sourceMemoryId: e.sourceMemoryId, targetMemoryId: e.targetMemoryId });
-      chainEdges.set(e.chainId, list);
-    }
-    const { lines } = projectMemoryContext(memories, true, new Map(), "idtime", chainEdges);
-    const text = lines.join("\n");
-    assert.match(text, /flowchart LR/, "branching chain renders as a flowchart");
-    assert.ok(text.includes(" & "), "fork is rendered with Mermaid & syntax");
-    const fork = [...text.matchAll(/^\s+([0-9a-f]{8}) --> ([0-9a-f]{8}) & ([0-9a-f]{8})$/gm)];
-    assert.equal(fork.length, 1, "one fork row: source --> t1 & t2");
-    store.close();
-  } finally {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows handle-lock noise */ }
-  }
-});
-
-;
-
-test("a memory in multiple chains renders in every chain block", () => {
-  const root = mkdtempSync(join(tmpdir(), "multichain-"));
-  try {
-    const store = new NmgStore(join(root, "nmg.sqlite"));
-    const m = store.remember({ nodeName: "预算", nodeKind: "topic", nodeSummary: "预算", statement: "2024年度预算8000万", sessionId: "s1", sourceActor: "user", eventTime: "2024-01-01" });
-    const A = store.createMemoryChain({ chainType: "temporal", topic: "预算年度演进", ownerSessionId: "s1" });
-    const B = store.createMemoryChain({ chainType: "logical", topic: "预算依赖链", ownerSessionId: "s1" });
-    const m2023 = store.remember({ nodeName: "预算", nodeKind: "topic", nodeSummary: "预算", statement: "2023年度预算6500万", sessionId: "s1", sourceActor: "user", eventTime: "2023-01-01" });
-    store.addMemoryToChain({ chainId: A.id, memoryId: m2023.memory.id, position: 0 });
-    store.addMemoryToChain({ chainId: A.id, memoryId: m.memory.id, position: 1 });
-    const dep = store.remember({ nodeName: "选型", nodeKind: "topic", nodeSummary: "选型", statement: "技术选型依赖预算规模", sessionId: "s1", sourceActor: "user" });
-    store.addMemoryToChain({ chainId: B.id, memoryId: m.memory.id, position: 0 });
-    store.addMemoryToChain({ chainId: B.id, memoryId: dep.memory.id, position: 1 });
-
-    const ctx = store.searchContext("2024年预算", { sessionId: "s1", limit: 8, expandChains: true, chainExpansionMaxMembers: 10 });
-    const hit = ctx.results.find((r) => r.memory.statement.includes("2024年度"));
-    assert.ok(hit && hit.chainMemberships && hit.chainMemberships.length === 2, "both memberships collected");
-    const memories = ctx.results.map((r) => ({
-      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement, markers: r.memory.markers,
-      eventTime: r.memory.eventTime, score: r.combinedScore, sourceRef: r.evidence.sourceRef,
-      chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType, chainMemberships: r.chainMemberships,
-    }));
-    const { lines } = projectMemoryContext(memories, true, new Map(), "idtime");
-    const text = lines.join("\n");
-    // idtime: temporal chains render no block; the shared member surfaces in
-    // the logical chain's flowchart and on its own tagged line.
-    assert.doesNotMatch(text, /\[temporal chain/, "temporal chain renders no block in idtime");
-    assert.match(text, /\[logical chain: 预算依赖链\]/);
-    assert.match(text, /flowchart LR/);
-    const sharedLine = memories.find((mm) => mm.memoryId === hit!.memory.id)!;
-    assert.ok(
-      lines.some((l) => l.includes("[2024-01-01]") && /<[A-Z]+:[0-9a-f]{8}>/.test(l)),
-      "shared member keeps a tagged [time] line",
-    );
-    store.close();
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("multiple chains of the same type render with distinguishable topics", () => {
-  const root = mkdtempSync(join(tmpdir(), "mtopic-"));
-  try {
-    const store = new NmgStore(join(root, "nmg.sqlite"));
-    const mk = (name: string, stmt: string, et: string) =>
-      store.remember({ nodeName: name, nodeKind: "topic", nodeSummary: name, statement: stmt, sessionId: "s1", sourceActor: "user", eventTime: et });
-    const b1 = mk("预算", "2023预算6500万", "2023-01-01");
-    const b2 = mk("预算", "2024预算8000万", "2024-01-01");
-    const A = store.createMemoryChain({ chainType: "logical", topic: "预算年度演进", ownerSessionId: "s1" });
-    store.addMemoryToChain({ chainId: A.id, memoryId: b1.memory.id, position: 0 });
-    store.addMemoryToChain({ chainId: A.id, memoryId: b2.memory.id, position: 1 });
-    const e1 = mk("事故", "故障凌晨发生", "2024-03-01");
-    const e2 = mk("事故", "故障次日恢复", "2024-03-02");
-    const C = store.createMemoryChain({ chainType: "logical", topic: "事故时间线", ownerSessionId: "s1" });
-    store.addMemoryToChain({ chainId: C.id, memoryId: e1.memory.id, position: 0 });
-    store.addMemoryToChain({ chainId: C.id, memoryId: e2.memory.id, position: 1 });
-
-    const ctx = store.searchContext("2024年 故障时间", { sessionId: "s1", limit: 8, expandChains: true });
-    const memories = ctx.results.map((r) => ({
-      memoryId: r.memory.id, nodeId: r.node.id, statement: r.memory.statement, markers: r.memory.markers,
-      eventTime: r.memory.eventTime, score: r.combinedScore, sourceRef: r.evidence.sourceRef,
-      chainId: r.chainId, chainPosition: r.chainPosition, chainType: r.chainType, chainMemberships: r.chainMemberships,
-    }));
-    const { lines } = projectMemoryContext(memories, true, new Map(), "idtime");
-    const text = lines.join("\n");
-    assert.match(text, /\[logical chain: 预算年度演进\]/);
-    assert.match(text, /\[logical chain: 事故时间线\]/);
-    store.close();
-  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -620,9 +457,7 @@ test("chainInjection=logical links same-session memories into a logical chain", 
     embeddingClient: {
       indexId: "chaininj@v1",
       async embedDocuments(inputs) {
-        return inputs.map((input) =>
-          /服务器|监控|磁盘/i.test(input) ? [1, 0] : [0, 1],
-        );
+        return inputs.map((input) => (/服务器|监控|磁盘/i.test(input) ? [1, 0] : [0, 1]));
       },
       async embedQueries() {
         return [[1, 0]];
@@ -635,7 +470,11 @@ test("chainInjection=logical links same-session memories into a logical chain", 
       op: "add",
       userId: "alice",
       messages: [
-        { role: "user", content: "我在2024年3月买了台服务器", chat_time: "2024-03-01T00:00:00+00:00" },
+        {
+          role: "user",
+          content: "我在2024年3月买了台服务器",
+          chat_time: "2024-03-01T00:00:00+00:00",
+        },
         { role: "user", content: "6月部署了监控", chat_time: "2024-06-01T00:00:00+00:00" },
         { role: "user", content: "9月升级了磁盘", chat_time: "2024-09-01T00:00:00+00:00" },
       ],
@@ -653,7 +492,8 @@ test("chainInjection=logical links same-session memories into a logical chain", 
     const logical = result.memories.find((m) =>
       m.chainMemberships?.some((c) => c.chainType === "logical"),
     );
-    assert.ok(logical, "logical chain surfaced via expandChains");    assert.match(result.text, /\[logical chain/);
+    assert.ok(logical, "logical chain surfaced via expandChains");
+    assert.match(result.text, /\[logical chain/);
     assert.match(result.text, /flowchart LR/);
     assert.doesNotMatch(result.text, /timeline/, "idtime renders no timeline block");
   } finally {

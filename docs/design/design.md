@@ -355,10 +355,12 @@ Implementation reuse follows semantic ownership rather than textual similarity.
 Scope canonicalization and embedding-index lifecycle are single Core rules;
 adapters must not reimplement them. Pi, MCP and DSH consume one host-neutral list
 of common remember/board actions, while retaining native TypeBox, Zod, or JSON
-schema encodings and host-only actions. The same adapters consume the shared
-Agent Surface for search/get/remember/board projection; only host registration,
-lifecycle, transport fallback, and host-only actions remain local. Leaf and node summarizers share the
-OpenAI-compatible completion client and bounded drain runner, while retaining
+schema encodings and host-only actions. The same adapters and the benchmark
+bridge consume the shared Agent Surface for search/get/remember/board or direct
+exact-evidence projection; only host registration, lifecycle, transport fallback,
+host-only actions, and official benchmark envelopes or audit fields remain local.
+Leaf and node summarizers share the OpenAI-compatible completion client and
+bounded drain runner, while retaining
 their distinct prompts, pending-task rules, and stale-write semantics.
 Host-specific message delivery and process lifecycle hooks remain thin local
 adapters because Pi, MCP, Kimi, and DSH expose different event loops. Generated

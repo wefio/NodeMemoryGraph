@@ -62,3 +62,12 @@ test("Pi, MCP, and DSH render through the shared agent surface", () => {
     assert.match(source, /renderTaskBoardSurface/u);
   }
 });
+
+test("the benchmark bridge evaluates the shared exact-evidence surface", () => {
+  const source = readFileSync(
+    resolve(import.meta.dirname, "../../evals/omnimemeval/bridge.ts"),
+    "utf8",
+  );
+  assert.match(source, /renderEvidenceSurface/u);
+  assert.doesNotMatch(source, /projectMemoryContext/u);
+});

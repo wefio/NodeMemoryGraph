@@ -184,10 +184,11 @@ The Pi adapter is deliberately thin. It lazily starts the local daemon over
 JSON-RPC/HTTP, reuses one connection for automatic recall and the default tool
 surface, and stops the daemon at session shutdown only when that adapter
 invocation started it.
-Pi, Claude MCP, and DSH share one Agent Surface for compact search, exact
-evidence, remember follow-up, Task Board output, redaction, and logical-chain
-projection. Their adapters retain only native tool schemas, lifecycle hooks,
-transport fallback, and genuinely host-only actions.
+Pi, Claude MCP, DSH, and the benchmark bridge share one Agent Surface for
+compact search, exact evidence, remember follow-up, Task Board output,
+redaction, and logical-chain projection. Adapters retain only native tool
+schemas, lifecycle hooks, transport fallback, genuinely host-only actions, and
+official benchmark envelopes or audit fields.
 An already-running shared daemon is left untouched.
 The daemon is the single application-level writer for its SQLite database.
 Concurrent Agent turns may wait on embeddings or summaries in parallel, while

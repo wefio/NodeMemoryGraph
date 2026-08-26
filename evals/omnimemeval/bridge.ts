@@ -12,12 +12,18 @@ import {
   syncRecordEmbeddings,
 } from "../../src/core/embedding-sync.ts";
 import { NmgStore } from "../../src/core/store.ts";
+import { renderEvidenceSurface } from "../../src/integration/agent-surface.ts";
 import { loadPrompts, renderDisclosure } from "../../src/prompts/load.ts";
-import type { HistoryRole, MemoryActor, MemoryMarker, PerfSnapshot, DuplicateCandidate } from "../../src/core/types.ts";
+import type {
+  HistoryRole,
+  MemoryActor,
+  MemoryMarker,
+  PerfSnapshot,
+  DuplicateCandidate,
+} from "../../src/core/types.ts";
 import { CachedOmniEmbeddingClient } from "./embedding-cache.ts";
 
 const nmgPrompts = loadPrompts();
-const PROJECTED_CONTROL_MARKERS = new Set(["forget"]);
 
 /** Shared embedding cache for all evals. Embeddings are content-hashed
  *  (index_id, input_kind, text_hash), so the same text under the same model
@@ -47,8 +53,7 @@ export type OmniRetrievedMemory = {
   sourceRef: string | null;
   /** Post-retrieval chain expansion: which chain this member belongs to, its
    *  position within the chain, and whether it is temporal or logical. The
-   *  presentation layer renders these as numbered lines + a chain block so
-   *  the model sees order (causal / chronological), not an isolated list. */
+   *  shared Agent Surface projects this metadata into bounded structure. */
   chainId?: string;
   chainPosition?: number;
   chainType?: string;
@@ -319,7 +324,11 @@ export class OmniMemEvalBridge {
       });
       if (remembered.memory) {
         memories.push(remembered.memory.statement);
-        dialogMemories.push({ memoryId: remembered.memory.id, eventTime: message.chat_time, order: index });
+        dialogMemories.push({
+          memoryId: remembered.memory.id,
+          eventTime: message.chat_time,
+          order: index,
+        });
       }
       // Simulate the NMG plugin's write path: when the new statement shares
       // tokens with same-scope memories, ask the external LLM judge whether
@@ -340,7 +349,9 @@ export class OmniMemEvalBridge {
         // are exactly the supersession scenarios ("from X to Y", negated update)
         // that need the LLM to confirm the stale predecessor.
         const cands = remembered.supersedeCandidates
-          .filter((c) => !c.eventTime || !Number.isFinite(newTime) || Date.parse(c.eventTime) < newTime)
+          .filter(
+            (c) => !c.eventTime || !Number.isFinite(newTime) || Date.parse(c.eventTime) < newTime,
+          )
           .filter((c) => c.priority === "transition" || c.priority === "polarity")
           .slice(0, 3);
         if (cands.length) {
@@ -397,10 +408,16 @@ export class OmniMemEvalBridge {
       //   const chain = store.createMemoryChain({ chainType: "temporal", topic, ownerSessionId: sessionId });
       //   sorted.forEach((m, i) => store.addMemoryToChain({ chainId: chain.id, memoryId: m.memoryId, position: i }));
       // }
-      const chain = store.createMemoryChain({ chainType: "logical", topic, ownerSessionId: sessionId });
+      const chain = store.createMemoryChain({
+        chainType: "logical",
+        topic,
+        ownerSessionId: sessionId,
+      });
       [...dialogMemories]
         .sort((a, b) => a.order - b.order)
-        .forEach((m, i) => store.addMemoryToChain({ chainId: chain.id, memoryId: m.memoryId, position: i }));
+        .forEach((m, i) =>
+          store.addMemoryToChain({ chainId: chain.id, memoryId: m.memoryId, position: i }),
+        );
     }
     return { added, memories };
   }
@@ -475,31 +492,13 @@ export class OmniMemEvalBridge {
       chainMemberships: result.chainMemberships,
       evidenceExcerpt: result.evidence.content.slice(0, 500),
     }));
-    const includeTime = needsTemporalContext(query);
     // Contradiction annotations are NMG's own retrieval product: when a
     // retrieved memory contradicts another memory (claims metadata), the
     // note is rendered into the context regardless of the caller.
     const notes = store.contradictionNotes(memories.map((m) => m.memoryId));
-    // Render-mode lock: only idtime is active (BEAM 6-mode same-param A/B,
-    // 2026-08-16: <A:short-id> [time] lines, no timeline block — highest of
-    // the six variants). The env override and the other five modes are kept
-    // below in commented form purely as the experiment record.
-    // const renderMode: MemoryRenderMode =
-    //   process.env.NMG_RENDER_MODE === "id" ||
-    //   process.env.NMG_RENDER_MODE === "idbare" ||
-    //   process.env.NMG_RENDER_MODE === "idtime" ||
-    //   process.env.NMG_RENDER_MODE === "alpha" ||
-    //   process.env.NMG_RENDER_MODE === "none"
-    //     ? process.env.NMG_RENDER_MODE
-    //     : "idtime";
-    const renderMode: MemoryRenderMode = "idtime";
-    const chainEdges = new Map<string, Array<{ sourceMemoryId: string; targetMemoryId: string }>>();
-    for (const e of context.chainEdges ?? []) {
-      const list = chainEdges.get(e.chainId) ?? [];
-      list.push({ sourceMemoryId: e.sourceMemoryId, targetMemoryId: e.targetMemoryId });
-      chainEdges.set(e.chainId, list);
-    }
-    const projection = projectMemoryContext(memories, includeTime, notes, renderMode, chainEdges);
+    const hasForget = context.results.some(({ memory }) =>
+      memory.markers.some((marker) => marker.kind === "forget"),
+    );
     appendFileSync(
       this.#perfLogPath,
       `${JSON.stringify({
@@ -516,18 +515,21 @@ export class OmniMemEvalBridge {
       retrievalMode: semantic ? "records" : "lexical",
       timings: context.timings,
       text:
-        projection.lines.length === 0
+        context.results.length === 0
           ? ""
-          : [
-              renderDisclosure(nmgPrompts.search_disclosure, {
-                count: String(projection.lines.length),
-                // The OmniMemEval protocol has no nmg_get step; the next-step hint
-                // is intentionally empty so the answer follows the data directly.
+          : renderEvidenceSurface(context, {
+              preamble: renderDisclosure(nmgPrompts.get_disclosure, {
+                count: String(context.results.length),
+                // OmniMemEval has no separate nmg_get round; the bridge therefore
+                // exposes the same exact-evidence surface in this response.
                 next_step: "",
-                forget_hint: projection.hasForget ? nmgPrompts.forget_hint : "",
               }),
-              ...projection.lines,
-            ].join("\n"),
+              includeEventTime: needsTemporalContext(query),
+              redactForgotten: true,
+              annotations: notes,
+              sourceMaxChars: 500,
+              forgetHint: hasForget ? nmgPrompts.forget_hint : "",
+            }),
       memories,
     };
   }
@@ -582,243 +584,6 @@ export class OmniMemEvalBridge {
   #databasePath(key: string): string {
     return resolve(this.#root, `${key}.sqlite`);
   }
-}
-
-export type MemoryRenderMode = "none" | "numeric" | "alpha" | "id" | "idbare" | "idtime";
-
-const UUID_SEGMENT_ENDS = [8, 13, 18, 23, 36];
-
-/** Shortest per-id prefix that is unique within the given id set. Extends by
- *  UUID segment (8-4-4-4-12) until no other id in the set shares the prefix,
- *  so rendered identifiers are short, stable and collision-free locally. */
-function shortestUniquePrefixes(ids: readonly string[]): Map<string, string> {
-  const result = new Map<string, string>();
-  for (const id of ids) {
-    let prefix = "";
-    for (const end of UUID_SEGMENT_ENDS) {
-      prefix = id.slice(0, end);
-      if (!ids.some((other) => other !== id && other.startsWith(prefix))) break;
-    }
-    result.set(id, prefix);
-  }
-  return result;
-}
-
-/** Spreadsheet-style column label (A, B, …, Z, AA, AB, …) for a 0-based
- *  row index — the letter part of the `<A:short-id>` line tag. */
-function columnLetter(index: number): string {
-  let n = index + 1;
-  let s = "";
-  while (n > 0) {
-    const rem = (n - 1) % 26;
-    s = String.fromCharCode(65 + rem) + s;
-    n = Math.floor((n - 1) / 26);
-  }
-  return s;
-}
-
-export function projectMemoryContext(
-  memories: readonly OmniRetrievedMemory[],
-  includeTime: boolean,
-  notes: ReadonlyMap<string, string>,
-  renderMode: MemoryRenderMode = "idtime",
-  chainEdges: ReadonlyMap<string, Array<{ sourceMemoryId: string; targetMemoryId: string }>> = new Map(),
-): { lines: string[]; hasForget: boolean } {
-  // idtime always carries short-id prefixes (other modes commented out).
-  // const idPrefixes =
-  //   renderMode === "id" || renderMode === "idbare" || renderMode === "idtime"
-  //     ? shortestUniquePrefixes(memories.map((m) => m.memoryId))
-  //     : new Map<string, string>();
-  const idPrefixes = shortestUniquePrefixes(memories.map((m) => m.memoryId));
-  const projectedKinds = new Set<string>();
-  const lines: string[] = [];
-  const indexByMemory = new Map<string, number>();
-  for (const memory of memories) {
-    const controlKinds = [
-      ...new Set(
-        memory.markers
-          .map((marker) => marker.kind.trim().toLowerCase())
-          .filter((kind) => PROJECTED_CONTROL_MARKERS.has(kind)),
-      ),
-    ];
-    const visibleKinds = controlKinds.filter((kind) => !projectedKinds.has(kind));
-    if (controlKinds.length > 0 && visibleKinds.length === 0) continue;
-    visibleKinds.forEach((kind) => projectedKinds.add(kind));
-
-    // Revoked records surface their metadata (id, time) but not their
-    // statement: the model sees the revocation without content to cite.
-    const forget = visibleKinds.includes("forget");
-    // Temporal-chain members carry their chronology in the chain's dedicated
-    // Mermaid timeline block (time : short-id), so their line drops the [time]
-    // tag to avoid duplicating the time dimension — except in "idtime" mode,
-    // which keeps [time] on every line and skips the timeline block entirely.
-    // idtime keeps [time] on every line, temporal-chain members included; the
-    // timeline block is dropped, so chronology lives entirely on the line.
-    // const isTemporalMember =
-    //   renderMode !== "idtime" &&
-    //   renderMode !== "idbare" &&
-    //   (memory.chainMemberships?.some((m) => m.chainType === "temporal") ?? false);
-    const base =
-      includeTime && memory.eventTime
-        ? `[${memory.eventTime}] ${memory.statement}`
-        : memory.statement;
-    const rendered = forget
-      ? `${nmgPrompts.forget_redacted} memory=${memory.memoryId}${memory.eventTime ? `; time=${memory.eventTime}` : ""}`
-      : visibleKinds.length > 0
-        ? `[${visibleKinds.join(",")}] ${base}`
-        : base;
-    const note = notes.get(memory.memoryId);
-    // Render modes: "numeric" prefixes each line with 1., 2., … so the chain
-    // block can reference members by index; "id" prefixes with [<short-uuid>
-    // — a stable real memory identifier wrapped in <> so it cannot be mistaken
-    // for content; "none" renders bare lines and drops the chain block.
-    // Render-mode lock: idtime only. The other five branches (none / alpha /
-    // idbare / id / numeric) are commented out — they are the experiment record
-    // from the 2026-08-16 A/B, superseded by idtime.
-    // let numbered: string;
-    // if (renderMode === "none") {
-    //   numbered = rendered;
-    // } else if (renderMode === "alpha") {
-    //   numbered = `${String.fromCharCode(65 + lines.length)}. ${rendered}`;
-    // } else if (renderMode === "idbare") {
-    //   const short = idPrefixes.get(memory.memoryId);
-    //   numbered = short === undefined ? rendered : `<${short}> ${rendered}`;
-    // } else if (renderMode === "id" || renderMode === "idtime") {
-    //   const short = idPrefixes.get(memory.memoryId);
-    //   numbered = short === undefined ? rendered : `<${columnLetter(lines.length)}:${short}> ${rendered}`;
-    // } else {
-    //   numbered = `${lines.length + 1}. ${rendered}`;
-    // }
-    const short = idPrefixes.get(memory.memoryId);
-    const numbered = short === undefined ? rendered : `<${columnLetter(lines.length)}:${short}> ${rendered}`;
-    indexByMemory.set(memory.memoryId, lines.length);
-    lines.push(note ? `${numbered}\n${note}` : numbered);
-  }
-  // Independent chain block: members grouped per chain, ordered by their
-  // chain position (causal order for logical chains, chronological for
-  // temporal chains), referenced by line number. The chains stay separate
-  // from the numbered lines so the memory list stays clean.
-  const chains = new Map<
-    string,
-    { chainType: string; topic?: string; members: Array<{ id: string; position: number }> }
-  >();
-  for (const memory of memories) {
-    // A memory can belong to several chains: render it in every chain block.
-    const memberships =
-      memory.chainMemberships ??
-      (memory.chainId
-        ? [{ chainId: memory.chainId, position: memory.chainPosition ?? 0, chainType: memory.chainType }]
-        : []);
-    for (const membership of memberships) {
-      const chain = chains.get(membership.chainId) ?? {
-        chainType: membership.chainType ?? "memory",
-        topic: membership.topic,
-        members: [],
-      };
-      if (!chain.topic && membership.topic) chain.topic = membership.topic;
-      chain.members.push({ id: memory.memoryId, position: membership.position });
-      chains.set(membership.chainId, chain);
-    }
-  }
-  if (chains.size > 0) {
-    lines.push("");
-    for (const [chainId, chain] of chains) {
-      chain.members.sort((a, b) => a.position - b.position);
-      const label = chain.topic ? `${chain.chainType} chain: ${chain.topic}` : `${chain.chainType} chain`;
-      // Render-mode lock: idtime — temporal chains render no block at all
-      // (chronology lives on the line as [time]); logical chains keep their
-      // Mermaid flowchart. The pre-idtime else branch (numbered "#N → #M"
-      // chain lines for numeric/alpha) is commented out below as record.
-      if (chain.chainType === "temporal") continue;
-        // Mermaid-flavoured chain block. Explicit DAG edges (memory_chain_edges)
-        // render the chain as a branching flowchart (`A --> B & C`); a purely
-        // linear temporal chain renders as a timeline (time : member). When a
-        // chain has no explicit edges (legacy position-only membership) we fall
-        // back to adjacency between adjacent positions.
-        const edges = chainEdges.get(chainId);
-        if (edges && edges.length > 0) {
-          const adj = new Map<string, string[]>();
-          const inDeg = new Map<string, number>();
-          for (const e of edges) {
-            const list = adj.get(e.sourceMemoryId) ?? [];
-            list.push(e.targetMemoryId);
-            adj.set(e.sourceMemoryId, list);
-            inDeg.set(e.targetMemoryId, (inDeg.get(e.targetMemoryId) ?? 0) + 1);
-          }
-          const isLinear =
-            [...adj.values()].every((ts) => ts.length <= 1) &&
-            [...inDeg.values()].every((d) => d <= 1) &&
-            edges.length === chain.members.length - 1;
-          if (chain.chainType === "temporal" && isLinear) {
-            // Walk the single path from the unique source for a chronological
-            // timeline; append any disconnected members by insertion order.
-            const posByMemory = new Map(chain.members.map((m) => [m.id, m.position]));
-            let cur = [...adj.keys()].find((s) => !inDeg.has(s));
-            const order: string[] = [];
-            while (cur !== undefined && !order.includes(cur)) {
-              order.push(cur);
-              cur = adj.get(cur)?.[0];
-            }
-            const walked = new Set(order);
-            for (const m of chain.members) if (!walked.has(m.id)) order.push(m.id);
-            lines.push(`[${label}]`);
-            lines.push("timeline");
-            for (const id of order) {
-              const p = idPrefixes.get(id);
-              if (p === undefined) continue;
-              const mem = memories.find((m) => m.memoryId === id);
-              const time = mem?.eventTime ?? String((posByMemory.get(id) ?? 0) + 1);
-              lines.push(`  ${time} : ${p}`);
-            }
-          } else {
-            lines.push(`[${label}]`);
-            lines.push("flowchart LR");
-            for (const [s, ts] of adj) {
-              const sp = idPrefixes.get(s);
-              if (sp === undefined) continue;
-              const targets = ts
-                .map((t) => idPrefixes.get(t))
-                .filter((x): x is string => x !== undefined);
-              if (targets.length === 0) continue;
-              lines.push(`  ${sp} --> ${targets.join(" & ")}`);
-            }
-          }
-        } else {
-          // Fallback: no explicit edges — use position order (legacy chains).
-          if (chain.chainType === "temporal") {
-            lines.push(`[${label}]`);
-            lines.push("timeline");
-            for (const member of chain.members) {
-              const p = idPrefixes.get(member.id);
-              if (p === undefined) continue;
-              const mem = memories.find((m) => m.memoryId === member.id);
-              const time = mem?.eventTime ?? String(member.position + 1);
-              lines.push(`  ${time} : ${p}`);
-            }
-          } else {
-            const fallback: string[] = [];
-            for (let i = 0; i + 1 < chain.members.length; i += 1) {
-              const a = idPrefixes.get(chain.members[i].id);
-              const b = idPrefixes.get(chain.members[i + 1].id);
-              if (a !== undefined && b !== undefined) fallback.push(`  ${a} --> ${b}`);
-            }
-            if (fallback.length > 0) {
-              lines.push(`[${label}]`);
-              lines.push("flowchart LR");
-              lines.push(...fallback);
-            }
-          }
-        }
-      // } // pre-idtime numeric/alpha chain lines — commented out as record:
-      // const seq = chain.members
-      //   .map((member) => indexByMemory.get(member.id))
-      //   .filter((i): i is number => i !== undefined)
-      //   .map((i) => (renderMode === "alpha" ? `#${String.fromCharCode(65 + i)}` : `#${i + 1}`))
-      //   .join(" → ");
-      // if (seq) lines.push(`[${label}] ${seq}`);
-    }
-  }
-  return { lines, hasForget: projectedKinds.has("forget") };
 }
 
 function prefersAssistantEvidence(query: string): boolean {
