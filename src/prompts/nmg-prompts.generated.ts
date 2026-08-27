@@ -79,7 +79,7 @@ export const GENERATED_NMG_PROMPTS = {
   search_query_parameter_description:
     "Natural-language retrieval clause; may include key:value filters, -term exclusions, and quoted phrases.",
   search_queries_parameter_description:
-    "Additional retrieval clauses unioned with the primary query; the primary query retains rank priority.",
+    "Optional Agent-generated retrieval clauses, such as query decomposition, alternate wording, or a hypothetical-answer (HyDE) clause. NMG does not generate these clauses; it searches them, removes duplicate records, and appends unique results after the primary query's ranking.",
   search_progression_required:
     "NMG paused another search because two searches were already completed without loading selected evidence. Use nmg_get on relevant returned memory IDs, or use a current-source tool when the missing fact concerns live code, files, or the web. Do not keep paraphrasing the same historical search.",
   search_recommendation:

@@ -29,6 +29,9 @@ deleted evidence.
 The probe embeds whole LongMemEval sessions, whereas the NMG benchmark retrieves
 memory records through its graph and tiers. Its absolute recall is therefore not
 an NMG score; only paired differences between the four arms are meaningful.
+RRF and reverse retrieval are useful candidate-generation and fusion strategies,
+not benchmark-specific answer logic. Product adoption still requires a shared,
+bounded implementation and matched evidence on the normal Agent surface.
 Production integration uses the existing Fibonacci/QPP window rather than a
 mandatory Top-20. The caller's `top_k` is the normal budget, and the window starts
 at Top-1. Structured control markers such as `forget` are projected into LLM
@@ -124,6 +127,9 @@ default so long unverified assistant replies do not crowd out the user's
 history. Queries that explicitly ask about the assistant or a previous chat
 use both actors, preserving LongMemEval's assistant-memory category. This uses
 the generic `SearchOptions.sourceActor` boundary rather than SQL access.
+This actor-aware selection is the adapter's declared retrieval profile, not an
+OmniMemEval answer or judge prompt. Official benchmark prompts remain upstream
+owned and are run unchanged for comparable answer-stage results.
 
 The current adapter uses a persistent NDJSON subprocess rather than an HTTP
 service. Install it into the pinned ignored checkout with:

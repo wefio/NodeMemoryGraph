@@ -67,4 +67,5 @@ can inject noise). Run artifacts: `results/lme/nmg-hyde-pool/`.
 - `evals/omnimemeval/hyde-context.mjs` — generates the fused search-results
   artifact (bridge-identical rendering) that feeds answer + judge
 - `src/core/store/advanced-query.ts` + `nmg_search queries[]` — the engine
-  surface an agent needs to express the HyDE second clause (fused union)
+  generic multi-query surface used to submit a caller-generated HyDE clause;
+  HyDE generation itself remains outside NMG

@@ -163,6 +163,14 @@ test("disclosures keep placeholders for runtime substitution", () => {
   assert.match(prompts.get_disclosure, /\{count\}/);
 });
 
+test("multi-query guidance leaves query generation to the Agent", () => {
+  const text = loadPrompts().search_queries_parameter_description;
+  assert.match(text, /Agent-generated/u);
+  assert.match(text, /query decomposition/u);
+  assert.match(text, /HyDE/u);
+  assert.match(text, /NMG does not generate/u);
+});
+
 test("renderDisclosure substitutes placeholders and drops emptied lines", () => {
   const template = "NMG results: {count}\n{next_step}\n{forget_hint}\n- data";
   // Callers pass every known placeholder; absent values are passed as empty strings

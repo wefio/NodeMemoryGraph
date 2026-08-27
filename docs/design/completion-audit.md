@@ -5,7 +5,7 @@ in [design.md](design.md); document ownership is defined by
 [the documentation index](../README.md).
 
 **Status:** requirement ledger
-**Updated:** 2026-08-25
+**Updated:** 2026-08-27
 **Normative source:** [design.md](design.md)
 **Implementation recovery:** [implementation-lineage.md](implementation-lineage.md)
 
@@ -50,7 +50,7 @@ to use it explicitly for one suitable task.
 | STG/LTG residence | Session-private provisional STG; shared durable LTG; governed promotion, demotion, expiry and audit | `src/core/stg.ts`, explicit and opt-in scope-bound working-set sync, store lifecycle and Pi turn-end maintenance | **Calibration gate** | Mechanics are verified; natural sync cost/benefit, consolidation precision and retention thresholds are not. |
 | Active Graph | Per-session budgeted projection, never a third authoritative graph; record selected nodes/edges/evidence and measured budget use | Active Graph store module, Pi search/get propagation | **Verified core** | Allocator and stopping priors need natural calibration. |
 | Progressive disclosure | Resident directory/kernel, compact automatic recall, explicit search headers, exact get, bounded deeper expansion | integration search plus shared Agent Surface, Pi/DSH recall flow | **Verified core** | Daily-use validation remains observational. |
-| Retrieval | FTS/exact fallback, optional record embeddings, hybrid ranking, node/leaf hierarchy and query filters | integration search, embedding providers/sync, bounded leaf-then-node summary drain, hierarchy | **Verified core** | Provider and summary quality are configuration/evaluation concerns; exact-scan/ANN crossover is measurement work. |
+| Retrieval | FTS/exact fallback, optional record embeddings, hybrid ranking, node/leaf hierarchy, query filters and caller-generated multi-query clauses | integration search, embedding providers/sync, bounded leaf-then-node summary drain, hierarchy, primary-first stable-ID query union | **Verified core** | Provider and summary quality are configuration/evaluation concerns; RRF and reverse retrieval remain candidate strategies, while HyDE generation belongs to the caller. |
 | QPP and search recommendation | Independently switchable allocation, local folding and recommendation; preserve folded evidence in AG | QPP core, Pi modes, controller shadow | **Opt-in Lab** | Calibrate sufficiency and cost from independent outcomes before Lite promotion. |
 | Differentiable controller | Framework-free autodiff substrate; learned heads cannot bypass hard safety/budget gates | `src/lab/autodiff.ts`, controller protocol/runtime/gate, matched telemetry and causal comparison | **Opt-in Lab** | Matched evidence remains calibration evidence, not Lite promotion; natural quality, cost and rollback gates are required. |
 | Feedback and posterior | Separate disclosure, diagnostic overlap and verified evidence; prevent self-reinforcing labels | feedback core, claim outcomes, Pi shadow channel | **Verified core** | The natural dataset lacks verified evidence attribution, so learning/calibration stays blocked. |
@@ -63,7 +63,7 @@ to use it explicitly for one suitable task.
 | Temporary coordination | Task Board is TTL/cursor/attribution based and does not enter LTG/FTS | board store, daemon, CLI/Pi/MCP adapters | **Verified core** | ACLs and multi-device transport are **explicitly deferred**. |
 | Daemon and concurrency | One application authority/single LTG writer; synchronous SQLite phases serialize; no transaction spans an await | CLI daemon/service/client and concurrency tests | **Verified core** | Multi-process distributed writers are out of current scope. |
 | Observability | Trace routing, scores, budgets, disclosures, outcomes, maintenance and rollback without treating diagnostics as truth | trace tables, shadow JSONL, reports/audits | **Verified core** | Natural labels must accumulate through use. |
-| Benchmarks | Official-format adapters, matched arms, cacheable embeddings and fail-closed scoring | evaluation adapters and benchmark scripts; official envelopes remain local while model-visible memory uses the shared Agent Surface | **Verified core** | Larger/repeated capability runs are evaluation work, not missing design. |
+| Benchmarks | Official-format adapters, matched arms, cacheable embeddings and fail-closed scoring | evaluation adapters and benchmark scripts; official answer/judge prompts and envelopes remain benchmark-owned while model-visible memory uses the shared Agent Surface | **Verified core** | Retrieval profiles must be declared separately from official prompts; larger/repeated capability runs are evaluation work, not missing design. |
 | Agent development and quality | Dynamic repository context, owned documentation, product/research/chaos test tracks, temporary guardrail lifecycle, and composable resource cleanup | root bootstrap, repo-development Skill, context tool, CI workflow, Cordis-backed test wrapper | **Verified core** | Research characterization remains non-blocking and cannot redefine product contracts. |
 | Cloud and sandbox | Pluggable future integration only; no default dependency | explicit product boundary | **Out of scope** | Pi sandbox plugins own execution isolation; cloud waits for multi-device scope. |
 

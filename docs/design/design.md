@@ -1669,7 +1669,27 @@ entire store by default. Exact literal search is the first precision feature to
 add because it covers most code-agent identifiers without regex escaping or
 catastrophic-backtracking risk.
 
-### 11.1 QPP actuation and progressive disclosure
+### 11.1 Query formation and route fusion boundary
+
+NMG accepts a primary query plus optional caller-generated `queries[]`. The
+caller may produce these clauses through query decomposition, alternate
+wording, domain knowledge, or a hypothetical answer (HyDE). HyDE is therefore
+not an NMG subsystem: the Agent or another LLM-facing harness method generates
+the hypothetical text, while NMG only searches the supplied clauses.
+
+The retrieval boundary owns stable-ID deduplication, primary-query priority,
+and the shared record/token budget. The verified Lite path currently appends
+unique secondary-query results after the primary ranking. Weighted reciprocal
+rank fusion is available as a deterministic Lab primitive, and reverse
+retrieval remains an offline candidate-generation probe. Neither changes the
+Lite default until a shared bounded implementation and matched product tests
+show a benefit outside one benchmark distribution.
+
+Benchmark-owned answer and judge prompts remain upstream protocol. They may be
+used unchanged for comparability, but they do not define NMG query generation,
+ranking, or product prompt policy.
+
+### 11.2 QPP actuation and progressive disclosure
 
 QPP is an optional control plane over the same Active Graph retrieval path, not
 a separate store or retrieval engine. Its three actions are independently

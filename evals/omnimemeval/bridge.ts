@@ -452,6 +452,11 @@ export class OmniMemEvalBridge {
         maxTier: 3,
         graphHops: 1,
         vectorGranularity: semantic ? "records" : undefined,
+        // Declared evaluation profile: ordinary personal-memory questions use
+        // user evidence, while explicit references to a previous Assistant
+        // answer permit Assistant records. This is retrieval routing, not part
+        // of OmniMemEval's answer or judge prompts.
+        sourceActor: prefersAssistantEvidence(query) ? undefined : "user",
         secondPass: this.#secondPass,
         progressiveWarmDisclosure: false,
         tieredDisclosure: true,
@@ -575,6 +580,12 @@ export class OmniMemEvalBridge {
   #databasePath(key: string): string {
     return resolve(this.#root, `${key}.sqlite`);
   }
+}
+
+function prefersAssistantEvidence(query: string): boolean {
+  return /\b(?:assistant|previous\s+(?:chat|conversation)|earlier\s+(?:you|we)|you\s+(?:said|suggested|recommended|provided|mentioned|told|wrote|created|made|gave|listed|outlined|explained)|we\s+(?:discussed|talked|decided)|(?:(?:can|could)\s+you|you\s+could)\s+remind\s+me|your\s+(?:answer|response|recommendation|list|example))\b/iu.test(
+    query,
+  );
 }
 
 function explicitForgetTarget(content: string): string | null {
