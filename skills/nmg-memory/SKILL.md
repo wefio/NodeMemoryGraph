@@ -112,12 +112,26 @@ a memory-only, single-Agent surface. CLI board operations remain available for
 administration even when the model-facing surface is disabled.
 
 Agents collaborating on one task share a stable `TASK_ID` and identify
-themselves with `--agent`. Publish only concise coordination state:
+themselves with `--agent`.
+
+For repository development, an open `goal` entry may serve as an **in-flight
+work registry**. Create it once immediately before the first substantive write:
 
 ```text
-nmg board put TASK_ID "parser tests pass; inspect serializer next" \
-  --agent scout-a --kind handoff --ttl-seconds 86400 --json
+nmg board put repo-development \
+  "goal=<outcome>; approach=<intended method>; scope=<owned paths>" \
+  --agent scout-a --kind goal --ttl-seconds 86400 --json
 ```
+
+The entry answers only what is being attempted, how, and where. Do not post
+per-step progress, completed-item lists, tool traces, or repeated entries for
+the same coherent task. Writer attribution identifies the initial worker; it
+does not need to claim its own new entry. A replacement Agent claims the still
+open entry, inspects Git and verification evidence for actual progress, then
+continues. Resolve the entry when the task finishes or is abandoned.
+
+Use additional entries only for coordination that genuinely needs a separate
+goal, blocker, question, result, handoff, or decision. Publish concise state:
 
 Read incrementally and retain the returned task-local cursor:
 
@@ -129,7 +143,7 @@ Resolve completed or obsolete entries explicitly:
 
 ```text
 nmg board resolve TASK_ID ENTRY_ID --agent scout-b \
-  --resolution "serializer review completed" --json
+  --resolution "work completed or deliberately abandoned" --json
 ```
 
 The board is a task-scoped coordination store. It is not semantic search, STG,

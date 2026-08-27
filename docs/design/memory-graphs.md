@@ -285,6 +285,17 @@ Board content becomes durable semantic memory only through a separate,
 attributable `remember` operation. Current local sharing trusts callers that
 know the task ID; ACLs and multi-device transport remain future infrastructure.
 
+**In-flight work registry.** An open attributed `goal` entry may represent one
+coherent unit of work currently being attempted. It records only the goal, the
+intended approach, and the owned scope. The initial writer does not need to
+claim its own entry; a replacement Agent may claim it after interruption and
+derive actual progress from Git and verification evidence. The entry is
+resolved when the work completes or is deliberately abandoned. It is not a
+progress log: phases, files, tool calls, completed-item lists, and periodic
+checkpoints must not create additional entries by default. This keeps takeover
+discoverable without imposing continuous bookkeeping. _Status:_ operating
+convention over the implemented board lifecycle.
+
 **Channel model — world channel + named channels.** `taskId` is a channel, not
 a visibility hierarchy. There is one _world channel_ (the default when no
 `taskId` is given) and independently _named channels_; any Agent can read or

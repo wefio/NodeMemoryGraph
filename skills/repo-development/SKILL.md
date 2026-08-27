@@ -19,6 +19,23 @@ Keep the workflow small, evidence-based, and friendly to concurrent Agents.
 3. Read the returned owning design and the exact code you will modify. Experiments are evidence,
    not normative design.
 4. State a testable outcome. For defects and lifecycle work, write the failing behavior test first.
+5. Immediately before the first substantive file write, register one open in-flight
+   goal on the `repo-development` Task Board channel. Its content contains only
+   `goal`, `approach`, and `scope`; use one entry for the coherent task, not one
+   per file or step. Follow the daemon ownership rules in
+   [`nmg-memory`](../nmg-memory/SKILL.md), and retain the returned entry ID:
+
+   ```text
+   nmg board put repo-development \
+     "goal=<outcome>; approach=<intended method>; scope=<owned paths>" \
+     --agent <stable-agent-id> --kind goal --ttl-seconds 86400 --json
+   ```
+
+   Do not publish progress updates. Writer attribution marks the initial worker;
+   another Agent may claim the same open entry if it must take over. If the board
+   is unavailable because this task is repairing NMG lifecycle or board code,
+   report that limitation and continue rather than making the repository
+   unrepairable.
 
 ## Classify tests
 
@@ -49,5 +66,8 @@ or remove it when its exit criteria are met.
    or use `--require-clean` in an equivalent clean tree. CI automatically runs the
    named `verify:*` package contracts on push and pull request.
 6. Commit one coherent change with only owned files. Leave unrelated user or Agent work untouched.
+7. Resolve the in-flight goal after the task is completed or deliberately
+   abandoned. The board records that work is active, not a step-by-step history;
+   Git and verification evidence remain the source of actual implementation state.
 
 Never invoke live LLM, embedding, or full benchmark workloads unless the task explicitly calls for them.
