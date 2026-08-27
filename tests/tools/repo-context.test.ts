@@ -53,6 +53,7 @@ function fixture(): string {
       "",
     ].join("\n"),
     "docs/design/store.md": "# Store\n",
+    "src/store/rows.ts": "export const row = 1;\n",
     "tests/guardrails/merge/guardrail.yaml": [
       "id: merge-v1",
       "status: active",
@@ -182,7 +183,94 @@ test("markdown output remains a concise navigation surface", () => {
   assert.match(text, /Blocking: npm run check, npm run test:product/);
   assert.match(text, /Advisory: npm run test:research/);
   assert.match(text, /## Active guardrails/);
+  assert.match(text, /## Reconciliation/);
+  assert.match(text, /Status: unknown/);
   assert.doesNotMatch(text, /Route: missing/);
+});
+
+function writeVerificationEvidence(
+  root: string,
+  report: ReturnType<typeof collectAgentContext>,
+  status: "passed" | "failed" = "passed",
+): void {
+  const directory = join(root, ".nmg", "verification");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, "latest.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      runId: "verification-fixture",
+      finishedAt: "2026-08-27T00:00:00.000Z",
+      report,
+      result: {
+        ok: status === "passed",
+        results: ["check", "test:product"].map((command) => ({
+          command,
+          classification: "blocking",
+          status,
+        })),
+      },
+    }),
+  );
+}
+
+test("reconciliation stays unknown until matching verification evidence exists", () => {
+  const report = collectAgentContext(fixture(), ["src/store/rows.ts"]);
+  assert.equal(report.reconciliation.status, "unknown");
+  assert.equal(
+    report.reconciliation.conditions.find((condition) => condition.type === "verification")?.status,
+    "unknown",
+  );
+});
+
+test("reconciliation converges only for the same desired and observed revisions", () => {
+  const root = fixture();
+  const before = collectAgentContext(root, ["src/store/rows.ts"]);
+  writeVerificationEvidence(root, before);
+
+  const verified = collectAgentContext(root, ["src/store/rows.ts"]);
+  assert.equal(verified.reconciliation.status, "converged");
+  assert.equal(verified.reconciliation.latestVerification?.runId, "verification-fixture");
+
+  writeFileSync(join(root, "src", "store", "rows.ts"), "export const row = 2;\n");
+  const changed = collectAgentContext(root, ["src/store/rows.ts"]);
+  assert.equal(changed.reconciliation.status, "drifted");
+  assert.ok(changed.reconciliation.drifts.some((drift) => drift.kind === "observed-state"));
+});
+
+test("matching failed blocking evidence is reported as verification drift", () => {
+  const root = fixture();
+  const before = collectAgentContext(root, ["src/store/rows.ts"]);
+  writeVerificationEvidence(root, before, "failed");
+
+  const report = collectAgentContext(root, ["src/store/rows.ts"]);
+  assert.equal(report.reconciliation.status, "drifted");
+  assert.ok(report.reconciliation.drifts.some((drift) => drift.kind === "verification"));
+});
+
+test("a commit-only HEAD change does not invalidate verified scoped content", () => {
+  const root = fixture();
+  const runGit = (args: string[]) => {
+    const result = spawnSync("git", args, {
+      cwd: root,
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  runGit(["init", "--quiet"]);
+  runGit(["config", "user.email", "agent@example.invalid"]);
+  runGit(["config", "user.name", "Agent Test"]);
+  runGit(["add", "."]);
+  runGit(["commit", "--quiet", "-m", "fixture"]);
+
+  const before = collectAgentContext(root, ["src/store/rows.ts"]);
+  writeVerificationEvidence(root, before);
+  runGit(["commit", "--quiet", "--allow-empty", "-m", "metadata only"]);
+
+  const after = collectAgentContext(root, ["src/store/rows.ts"]);
+  assert.notEqual(after.git.head, before.git.head);
+  assert.equal(after.reconciliation.status, "converged");
 });
 
 test("--changed routes every dirty path through the same context report", () => {

@@ -10,6 +10,9 @@ Keep the workflow small, evidence-based, and friendly to concurrent Agents.
 ## Before editing
 
 1. Run `npm run agent:context -- --scope <target-path>`.
+   Treat `unknown` reconciliation as missing applicable evidence, and `drifted`
+   as a request to inspect the reported declaration, snapshot, or verification
+   mismatch. Neither status is an architectural verdict.
 2. Inspect `git status --short`; preserve unrelated changes and commit only your files.
 3. Read the returned owning design and the exact code you will modify. Experiments are evidence,
    not normative design.

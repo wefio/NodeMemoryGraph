@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
@@ -51,7 +52,39 @@ export interface AgentContextReport {
     completion: string;
     todo: string;
   };
+  state: RepositoryStateRevision;
+  reconciliation: RepositoryReconciliation;
   warnings: string[];
+}
+
+export interface RepositoryStateRevision {
+  desiredRevision: string;
+  observedRevision: string;
+}
+
+export type ReconciliationStatus = "converged" | "drifted" | "unknown";
+
+export interface ReconciliationCondition {
+  type: "routing" | "verification";
+  status: "true" | "false" | "unknown";
+  message: string;
+}
+
+export interface ReconciliationDrift {
+  kind: "routing" | "desired-state" | "observed-state" | "verification";
+  severity: "blocking" | "advisory";
+  message: string;
+}
+
+export interface RepositoryReconciliation {
+  status: ReconciliationStatus;
+  conditions: ReconciliationCondition[];
+  drifts: ReconciliationDrift[];
+  latestVerification?: {
+    path: string;
+    runId?: string;
+    finishedAt?: string;
+  };
 }
 
 function normalizePath(path: string): string {
@@ -188,6 +221,196 @@ function validateRoutes(
   return warnings;
 }
 
+function digest(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function desiredRevision(routes: RouteConfig[], scripts: Record<string, string>): string {
+  const commands = new Set(
+    routes.flatMap((route) => [...route.verify.blocking, ...route.verify.advisory]),
+  );
+  return digest(
+    JSON.stringify({
+      routes,
+      scripts: [...commands]
+        .sort()
+        .map((command) => [command, scripts[command] ?? null]),
+    }),
+  );
+}
+
+function updatePathDigest(hash: ReturnType<typeof createHash>, root: string, scope: string): void {
+  const path = resolve(root, scope);
+  const local = relative(root, path);
+  if (local.startsWith("..")) {
+    hash.update(`external:${scope}\0`);
+    return;
+  }
+  if (!existsSync(path)) {
+    hash.update(`missing:${scope}\0`);
+    return;
+  }
+  const stat = lstatSync(path);
+  if (stat.isSymbolicLink()) {
+    hash.update(`link:${scope}:${readlinkSync(path)}\0`);
+    return;
+  }
+  if (stat.isDirectory()) {
+    hash.update(`directory:${scope}\0`);
+    for (const entry of readdirSync(path, { withFileTypes: true })
+      .filter((entry) => ![".git", ".nmg", "node_modules"].includes(entry.name))
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      updatePathDigest(hash, root, join(scope, entry.name));
+    }
+    return;
+  }
+  hash.update(`file:${scope}\0`);
+  hash.update(readFileSync(path));
+  hash.update("\0");
+}
+
+function observedRevision(root: string, scopes: string[]): string {
+  const hash = createHash("sha256");
+  for (const scope of [...scopes].sort()) updatePathDigest(hash, root, scope);
+  return hash.digest("hex");
+}
+
+interface VerificationEvidence {
+  runId?: string;
+  finishedAt?: string;
+  report?: {
+    state?: RepositoryStateRevision;
+  };
+  result?: {
+    results?: Array<{
+      command?: string;
+      classification?: string;
+      status?: string;
+    }>;
+  };
+}
+
+function reconcile(
+  root: string,
+  routes: RouteConfig[],
+  scopes: string[],
+  warnings: string[],
+  state: RepositoryStateRevision,
+): RepositoryReconciliation {
+  const conditions: ReconciliationCondition[] = [];
+  const drifts: ReconciliationDrift[] = warnings.map((warning) => ({
+    kind: "routing",
+    severity: "blocking",
+    message: warning,
+  }));
+  conditions.push({
+    type: "routing",
+    status: warnings.length ? "false" : routes.length || !scopes.length ? "true" : "unknown",
+    message: warnings.length ? "Route declarations do not match the observed repository." : "Route declarations are valid for the selected scope.",
+  });
+
+  const evidencePath = join(root, ".nmg", "verification", "latest.json");
+  if (!existsSync(evidencePath)) {
+    conditions.push({
+      type: "verification",
+      status: "unknown",
+      message: "No verification evidence has been recorded for this repository state.",
+    });
+    return { status: drifts.length ? "drifted" : "unknown", conditions, drifts };
+  }
+
+  let evidence: VerificationEvidence;
+  try {
+    evidence = JSON.parse(readFileSync(evidencePath, "utf8")) as VerificationEvidence;
+  } catch {
+    drifts.push({
+      kind: "verification",
+      severity: "blocking",
+      message: "Latest verification evidence is unreadable.",
+    });
+    conditions.push({
+      type: "verification",
+      status: "false",
+      message: "Latest verification evidence is unreadable.",
+    });
+    return { status: "drifted", conditions, drifts, latestVerification: { path: ".nmg/verification/latest.json" } };
+  }
+
+  const latestVerification = {
+    path: ".nmg/verification/latest.json",
+    runId: evidence.runId,
+    finishedAt: evidence.finishedAt,
+  };
+  const verifiedState = evidence.report?.state;
+  if (!verifiedState) {
+    conditions.push({
+      type: "verification",
+      status: "unknown",
+      message: "Latest verification evidence predates repository-state reconciliation.",
+    });
+    return {
+      status: drifts.length ? "drifted" : "unknown",
+      conditions,
+      drifts,
+      latestVerification,
+    };
+  }
+  if (verifiedState.desiredRevision !== state.desiredRevision) {
+    drifts.push({
+      kind: "desired-state",
+      severity: "blocking",
+      message: "Route or verification declarations changed after the latest verification run.",
+    });
+  }
+  if (verifiedState.observedRevision !== state.observedRevision) {
+    drifts.push({
+      kind: "observed-state",
+      severity: "blocking",
+      message: "The selected repository content changed after the latest verification run.",
+    });
+  }
+  if (drifts.length) {
+    conditions.push({
+      type: "verification",
+      status: "false",
+      message: "Latest verification evidence does not describe the current repository state.",
+    });
+    return { status: "drifted", conditions, drifts, latestVerification };
+  }
+
+  const results = evidence.result?.results ?? [];
+  const required = [...new Set(routes.flatMap((route) => route.verify.blocking))];
+  const missingOrFailed = required.filter(
+    (command) =>
+      !results.some(
+        (result) =>
+          result.command === command &&
+          result.classification === "blocking" &&
+          result.status === "passed",
+      ),
+  );
+  if (missingOrFailed.length) {
+    drifts.push({
+      kind: "verification",
+      severity: "blocking",
+      message: `Blocking verification is not satisfied: ${missingOrFailed.join(", ")}.`,
+    });
+    conditions.push({
+      type: "verification",
+      status: "false",
+      message: "Matching evidence is missing one or more passing blocking checks.",
+    });
+    return { status: "drifted", conditions, drifts, latestVerification };
+  }
+
+  conditions.push({
+    type: "verification",
+    status: "true",
+    message: "Latest evidence matches this repository state and satisfies all blocking checks.",
+  });
+  return { status: "converged", conditions, drifts, latestVerification };
+}
+
 export function collectAgentContext(
   root: string,
   scopes: string[] = [],
@@ -219,6 +442,17 @@ export function collectAgentContext(
     : [];
   const scripts = packageJson.scripts ?? {};
   const guardrailState = guardrails(resolvedRoot);
+  const warnings = [...validateRoutes(resolvedRoot, selected, scripts), ...guardrailState.warnings];
+  if (normalizedScopes.length && !selected.length) {
+    warnings.push(`no route matched: ${normalizedScopes.join(", ")}`);
+  }
+  if (options.changed && !gitState.available) {
+    warnings.push("--changed requires an available Git worktree");
+  }
+  const state = {
+    desiredRevision: desiredRevision(selected, scripts),
+    observedRevision: observedRevision(resolvedRoot, normalizedScopes),
+  };
   const report: AgentContextReport = {
     project: packageJson.name ?? "unknown",
     version: packageJson.version ?? "unknown",
@@ -234,14 +468,10 @@ export function collectAgentContext(
       completion: "docs/design/completion-audit.md",
       todo: "docs/design/temporary-todo.md",
     },
-    warnings: [...validateRoutes(resolvedRoot, selected, scripts), ...guardrailState.warnings],
+    state,
+    reconciliation: reconcile(resolvedRoot, selected, normalizedScopes, warnings, state),
+    warnings,
   };
-  if (normalizedScopes.length && !selected.length) {
-    report.warnings.push(`no route matched: ${normalizedScopes.join(", ")}`);
-  }
-  if (options.changed && !gitState.available) {
-    report.warnings.push("--changed requires an available Git worktree");
-  }
   return report;
 }
 
@@ -270,6 +500,19 @@ export function formatAgentContext(report: AgentContextReport): string {
   lines.push(`- Design: ${report.canonical.design}`);
   lines.push(`- Completion: ${report.canonical.completion}`);
   lines.push(`- TODO: ${report.canonical.todo}`);
+  lines.push("", "## Reconciliation");
+  lines.push(`- Status: ${report.reconciliation.status}`);
+  lines.push(`- Desired revision: ${report.state.desiredRevision.slice(0, 12)}`);
+  lines.push(`- Observed revision: ${report.state.observedRevision.slice(0, 12)}`);
+  for (const condition of report.reconciliation.conditions) {
+    lines.push(`- ${condition.type}: ${condition.status} — ${condition.message}`);
+  }
+  if (report.reconciliation.latestVerification) {
+    const evidence = report.reconciliation.latestVerification;
+    lines.push(
+      `- Evidence: ${evidence.path}${evidence.runId ? ` (${evidence.runId})` : ""}`,
+    );
+  }
   if (!report.routes.length) {
     lines.push("", "## Available routes");
     for (const id of report.availableRoutes) lines.push(`- ${id}`);
