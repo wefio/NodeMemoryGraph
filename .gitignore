@@ -11,6 +11,7 @@ coverage/
 .playwright-cli/
 graph.html
 output/
+design/
 evals/topology/results/
 evals/scale/.tmp/
 evals/hierarchy-scale/.tmp/
