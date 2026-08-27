@@ -9,7 +9,9 @@ Keep the workflow small, evidence-based, and friendly to concurrent Agents.
 
 ## Before editing
 
-1. Run `npm run agent:context -- --scope <target-path>`.
+1. Run `npm run agent:context -- <target-path>`. Positional paths route the
+   explicit scope without consulting Git. Use `--changed` only when dirty Git
+   paths should be added automatically; that mode requires working Git inspection.
    Treat `unknown` reconciliation as missing applicable evidence, and `drifted`
    as a request to inspect the reported declaration, snapshot, or verification
    mismatch. Neither status is an architectural verdict.
@@ -38,7 +40,7 @@ or remove it when its exit criteria are met.
 3. Run the targeted test, then `npm run agent:verify`. With no arguments it
    automatically detects Git changes, selects routes, executes the exact blocking
    checks, and overwrites `.nmg/verification/latest.json` with structured evidence.
-   In a shared dirty worktree, pass `-- --scope <owned-path>` so unrelated changes
+   In a shared dirty worktree, pass `-- <owned-path>` so unrelated changes
    stay outside the plan. Use `--include-advisory` only when research or chaos cost
    is intentional.
 4. Use `npm run test:research` only for research adapters; use `npm run test:chaos` for explicit lifecycle

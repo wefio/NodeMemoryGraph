@@ -199,6 +199,7 @@ function parseArgs(args: string[]) {
   let requireClean = false;
   let timeoutMs = 30 * 60 * 1_000;
   let output: string | undefined;
+  let help = false;
   const scopes: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
@@ -207,6 +208,7 @@ function parseArgs(args: string[]) {
     else if (argument === "--include-advisory") includeAdvisory = true;
     else if (argument === "--json") json = true;
     else if (argument === "--require-clean") requireClean = true;
+    else if (argument === "--help" || argument === "-h") help = true;
     else if (argument === "--timeout-ms") {
       timeoutMs = Number(args[++index]);
       if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
@@ -221,7 +223,8 @@ function parseArgs(args: string[]) {
       const scope = args[++index];
       if (!scope) throw new Error("--scope requires a path");
       scopes.push(scope);
-    } else throw new Error(`unknown argument: ${argument}`);
+    } else if (argument.startsWith("-")) throw new Error(`unknown argument: ${argument}`);
+    else scopes.push(argument);
   }
   if (!changed && !scopes.length) changed = true;
   const resolvedRoot = resolve(root);
@@ -235,8 +238,22 @@ function parseArgs(args: string[]) {
     timeoutMs,
     output: output ? resolve(resolvedRoot, output) : join(resolvedRoot, ".nmg", "verification", "latest.json"),
     scopes,
+    help,
   };
 }
+
+const usage = `Usage: npm run agent:verify -- [paths...] [options]
+
+Paths select matching verification routes directly and do not require Git.
+With no paths, verification defaults to dirty Git paths.
+  --changed              derive scopes from dirty Git paths; requires Git inspection
+  --scope <path>         legacy spelling for a path; positional paths are preferred
+  --include-advisory     run advisory checks in addition to blocking checks
+  --dry-run              print and persist the plan without running checks
+  --require-clean        reject a dirty Git worktree
+  --root <path>          verify another repository root
+  --json                 emit structured JSON
+`;
 
 function persistEvidence(path: string, evidence: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -264,12 +281,18 @@ const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
 if (invokedPath === fileURLToPath(import.meta.url)) {
   try {
     const options = parseArgs(process.argv.slice(2));
+    if (options.help) {
+      process.stdout.write(usage);
+      process.exit(0);
+    }
     const startedAt = new Date().toISOString();
     const report = collectAgentContext(options.root, options.scopes, {
       changed: options.changed,
     });
     if (options.changed && !report.git.available) {
-      throw new Error("--changed requires an available Git worktree");
+      throw new Error(
+        `--changed requires an available Git worktree${report.git.error ? `: ${report.git.error}` : ""}`,
+      );
     }
     if (options.requireClean && report.git.dirtyFiles.length) {
       throw new Error(`--require-clean found ${report.git.dirtyFiles.length} dirty files`);

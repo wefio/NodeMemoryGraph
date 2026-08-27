@@ -255,6 +255,36 @@ test("CLI fails closed when --changed cannot inspect a Git worktree", () => {
   );
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /--changed requires an available Git worktree/);
+  assert.match(result.stderr, /not a git repository|git inspection failed/i);
+});
+
+test("CLI accepts a positional scope without enabling changed-file discovery", () => {
+  const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-positional-"));
+  mkdirSync(join(root, "docs"), { recursive: true });
+  mkdirSync(join(root, "src"), { recursive: true });
+  writeFileSync(join(root, "docs", "owner.md"), "# Owner\n");
+  writeFileSync(join(root, "src", "file.ts"), "export const value = 1;\n");
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({ name: "fixture", version: "1.0.0", scripts: { pass: 'node -e ""' } }),
+  );
+  writeFileSync(
+    join(root, "agent-context.yaml"),
+    "version: 1\nroutes:\n  - id: fixture\n    paths: [src/**]\n    owners: [docs/owner.md]\n    tests: []\n    verify:\n      blocking: [pass]\n      advisory: []\n",
+  );
+
+  const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "src/file.ts", "--dry-run", "--json"],
+    { encoding: "utf8", windowsHide: true },
+  );
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout) as {
+    report: { scopes: string[]; routes: Array<{ id: string }> };
+  };
+  assert.deepEqual(payload.report.scopes, ["src/file.ts"]);
+  assert.deepEqual(payload.report.routes.map((route) => route.id), ["fixture"]);
 });
 
 test("CLI automatically routes dirty Git files when called without scope arguments", () => {

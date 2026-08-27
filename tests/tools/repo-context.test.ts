@@ -305,3 +305,43 @@ test("--changed routes every dirty path through the same context report", () => 
     ["store", "docs"],
   );
 });
+
+test("CLI accepts positional scopes so npm cannot consume the path option", () => {
+  const root = fixture();
+  const script = fileURLToPath(new URL("../../tools/repo-context.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "src/store/rows.ts", "--json"],
+    { encoding: "utf8", windowsHide: true },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout) as {
+    scopes: string[];
+    routes: Array<{ id: string }>;
+  };
+  assert.deepEqual(report.scopes, ["src/store/rows.ts"]);
+  assert.deepEqual(report.routes.map((route) => route.id), ["store"]);
+});
+
+test("manual scope survives unavailable Git and reports the inspection failure", () => {
+  const root = fixture();
+  const script = fileURLToPath(new URL("../../tools/repo-context.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "src/store/rows.ts", "--json"],
+    {
+      encoding: "utf8",
+      windowsHide: true,
+      env: { ...process.env, PATH: "" },
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout) as {
+    git: { available: boolean; error?: string };
+    routes: Array<{ id: string }>;
+    warnings: string[];
+  };
+  assert.equal(report.git.available, false);
+  assert.match(report.git.error ?? "", /ENOENT|not found/i);
+  assert.deepEqual(report.routes.map((route) => route.id), ["store"]);
+});

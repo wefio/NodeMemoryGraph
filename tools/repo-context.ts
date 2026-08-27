@@ -42,6 +42,7 @@ export interface AgentContextReport {
     head?: string;
     dirtyFiles: string[];
     available: boolean;
+    error?: string;
   };
   engines: Record<string, string>;
   routes: RouteConfig[];
@@ -152,7 +153,16 @@ function git(root: string): AgentContextReport["git"] {
   const head = run(["rev-parse", "HEAD"]);
   const status = run(["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
   if (branch.status !== 0 || status.status !== 0) {
-    return { available: false, dirtyFiles: [] };
+    const failed = branch.status !== 0 ? branch : status;
+    const operation = branch.status !== 0 ? "git branch --show-current" : "git status";
+    const code = (failed.error as NodeJS.ErrnoException | undefined)?.code;
+    const detail =
+      failed.error?.message ?? failed.stderr?.trim() ?? `${operation} exited with code ${failed.status}`;
+    return {
+      available: false,
+      dirtyFiles: [],
+      error: `${operation} failed${code ? ` (${code})` : ""}: ${detail.replaceAll(/\s+/g, " ")}`,
+    };
   }
   const entries = status.stdout.split("\0").filter(Boolean);
   const dirtyFiles: string[] = [];
@@ -447,7 +457,9 @@ export function collectAgentContext(
     warnings.push(`no route matched: ${normalizedScopes.join(", ")}`);
   }
   if (options.changed && !gitState.available) {
-    warnings.push("--changed requires an available Git worktree");
+    warnings.push(
+      `--changed requires an available Git worktree${gitState.error ? `: ${gitState.error}` : ""}`,
+    );
   }
   const state = {
     desiredRevision: desiredRevision(selected, scripts),
@@ -492,7 +504,11 @@ export function formatAgentContext(report: AgentContextReport): string {
     "",
     `- Root: ${report.root}`,
     `- Scope: ${report.scopes.length ? report.scopes.join(", ") : "not selected"}`,
-    `- Git: ${report.git.available ? (report.git.branch ?? "detached") : "unavailable"}`,
+    `- Git: ${
+      report.git.available
+        ? (report.git.branch ?? "detached")
+        : `unavailable${report.git.error ? ` (${report.git.error})` : ""}`
+    }`,
     `- Dirty files: ${report.git.dirtyFiles.length}`,
   ];
   for (const file of report.git.dirtyFiles) lines.push(`  - ${file}`);
@@ -516,7 +532,7 @@ export function formatAgentContext(report: AgentContextReport): string {
   if (!report.routes.length) {
     lines.push("", "## Available routes");
     for (const id of report.availableRoutes) lines.push(`- ${id}`);
-    lines.push("", "Run again with `--scope <target-path>` for task-specific owners and checks.");
+    lines.push("", "Run again with `<target-path>` for task-specific owners and checks.");
   }
   for (const route of report.routes) {
     lines.push("", `## Route: ${route.id}`);
@@ -550,31 +566,49 @@ function parseArgs(args: string[]): {
   json: boolean;
   check: boolean;
   changed: boolean;
+  help: boolean;
 } {
   let root = process.cwd();
   let json = false;
   let check = false;
   let changed = false;
+  let help = false;
   const scopes: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--json") json = true;
     else if (argument === "--check") check = true;
     else if (argument === "--changed") changed = true;
+    else if (argument === "--help" || argument === "-h") help = true;
     else if (argument === "--root") root = args[++index] ?? root;
     else if (argument === "--scope") {
       const scope = args[++index];
       if (!scope) throw new Error("--scope requires a path");
       scopes.push(scope);
-    } else throw new Error(`unknown argument: ${argument}`);
+    } else if (argument.startsWith("-")) throw new Error(`unknown argument: ${argument}`);
+    else scopes.push(argument);
   }
-  return { root, scopes, json, check, changed };
+  return { root, scopes, json, check, changed, help };
 }
+
+const usage = `Usage: npm run agent:context -- [paths...] [options]
+
+Paths select matching repository routes directly and do not require Git.
+  --changed       also derive scopes from dirty Git paths; requires Git inspection
+  --scope <path>  legacy spelling for a path; positional paths are preferred
+  --root <path>   inspect another repository root
+  --json          emit structured JSON
+  --check         validate all route declarations
+`;
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
 if (invokedPath === fileURLToPath(import.meta.url)) {
   try {
     const options = parseArgs(process.argv.slice(2));
+    if (options.help) {
+      process.stdout.write(usage);
+      process.exit(0);
+    }
     if (options.check) {
       const warnings = validateAgentContext(options.root);
       if (warnings.length) throw new Error(warnings.join("\n"));
