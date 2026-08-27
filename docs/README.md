@@ -28,6 +28,8 @@ different jobs and must not compete as independent sources of truth.
    merely because it was measured.
 7. **`skills/`** contains Agent workflows. Skills tell an Agent how to maintain
    or use the project; they link to canonical facts instead of duplicating them.
+8. **`guides/`** contains non-normative learning paths and maps. Guides exercise
+   public contracts and route readers to owners; they do not redefine design.
 
 When two files disagree, resolve the disagreement in the owning document rather
 than adding another summary. Git remains the implementation history. When a
@@ -37,6 +39,9 @@ copying the whole implementation narrative.
 
 ## Directory guide
 
+- **Start here:** [concept map](guides/concept-map.md) for terminology and owner
+  routes, then the executable [first-recall tutorial](guides/first-recall.md).
+- **`guides/`** — non-normative navigation and tested walkthroughs.
 - **`design/`** — architecture, data models, algorithms, and process contracts.
   The [implementation lineage](design/implementation-lineage.md) records only
   commits that materially reduce rediscovery or regression risk.

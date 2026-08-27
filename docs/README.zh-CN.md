@@ -14,11 +14,14 @@
 5. **[design/temporary-todo.md](design/temporary-todo.md)** 只保留未完成事项。完成历史留在 Git；有长期价值的结果应写回对应的设计、决策、操作或审计文档。
 6. **`experiments/`** 保存 benchmark、审计、探针和回归等观测结果。实验可以推动决策，但不能仅因测得结果就成为规范。
 7. **`skills/`** 保存 Agent 工作流。Skill 说明如何维护或使用项目，并链接规范来源，不复制项目事实。
+8. **`guides/`** 保存非规范的学习路径与导航图。Guide 运行公共契约并把读者路由到 owner，不重新定义设计。
 
 文档冲突时，应修正拥有该信息的文档，而不是新增一份摘要。Git 继续承担实现历史。若某项细节有意只保留在 Git 中、但以后很难重新定位，应在相关审计或决策文档中留下 commit 或 decision 链接，而不是复制整段实现流水账。
 
 ## 目录说明
 
+- **从这里开始：**先用[概念地图](guides/concept-map.zh-CN.md)理解术语和 owner，再运行[第一次回忆教程](guides/first-recall.zh-CN.md)。
+- **`guides/`**：非规范导航与经过测试的演练。
 - **`design/`**：架构、数据模型、算法和流程契约；[实现沿革索引](design/implementation-lineage.md)只记录能显著降低重新定位或重复犯错成本的 commit。
 - **`decisions/`**：带生命周期的设计与流程决策，见 [decisions/README.zh-CN.md](decisions/README.zh-CN.md)。
 - **`experiments/`**：测量证据。运行报告通常命名为 `<topic>-<date>.md`。相关入口包括
