@@ -270,6 +270,7 @@ export function createRunPlan(
 
   const environment = { ...process.env };
   environment.NMG_ROOT = repoRoot;
+  environment.NMG_NODE ??= process.execPath;
   environment.PYTHONUTF8 = "1";
   environment.PYTHONIOENCODING = "utf-8";
   const venvFolder = process.platform === "win32" ? "Scripts" : "bin";

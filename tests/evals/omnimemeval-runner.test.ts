@@ -68,6 +68,7 @@ test("one config supplies common and suite-specific official arguments", () => {
   ]);
   assert.ok(plan.args.includes("--workers"));
   assert.equal(plan.environment.NMG_ROOT, repoRoot);
+  assert.equal(plan.environment.NMG_NODE, process.execPath);
 });
 
 test("configured arguments cannot replace runner-owned identity", () => {
