@@ -876,6 +876,11 @@ test("tool parameter descriptions come from the prompt source of truth", () => {
       tools.get("nmg_remember")?.parameters?.properties?.stateKey?.description,
       prompts.state_key_parameter_description,
     );
+    assert.match(prompts.recall_triggers_parameter_description, /query phrases|查询短语/iu);
+    assert.equal(
+      tools.get("nmg_remember")?.parameters?.properties?.recallTriggers?.description,
+      prompts.recall_triggers_parameter_description,
+    );
     assert.equal(
       tools.get("nmg_get")?.parameters?.properties?.activeGraphId?.description,
       prompts.active_graph_id_parameter_description,

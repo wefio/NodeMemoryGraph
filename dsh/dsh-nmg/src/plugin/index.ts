@@ -1108,6 +1108,7 @@ export function apply(ctx: Context): () => void {
         statement: { type: 'string', description: 'Self-contained semantic statement.' },
         nodeName: { type: 'string', description: 'Stable node grouping related memories.' },
         memoryType: { type: 'string', enum: ['fact', 'state', 'event', 'preference', 'constraint', 'strategy'], description: 'Memory type.' },
+        recallTriggers: { type: 'array', maxItems: 16, items: { type: 'string', minLength: 1, maxLength: 80 }, description: nmgPrompts.recall_triggers_parameter_description },
         stateKey: { type: 'string', description: 'Replaceable property identity; a new value in the same scope supersedes the old.' },
         sourceActor: { type: 'string', enum: ['user', 'assistant', 'system', 'tool'], description: 'Evidence actor (default user).' },
         truthStatus: { type: 'string', enum: ['asserted', 'inferred', 'unverified', 'verified'], description: 'Truth status.' },
@@ -1164,6 +1165,7 @@ export function apply(ctx: Context): () => void {
       }
       const params: Record<string, any> = { statement: args.statement, nodeName: args.nodeName, projectDir: workspaceRoot }
       if (args.memoryType) params.memoryType = args.memoryType
+      if (args.recallTriggers) params.recallTriggers = args.recallTriggers
       if (args.stateKey) params.stateKey = args.stateKey
       if (args.sourceActor) params.sourceActor = args.sourceActor
       if (args.truthStatus) params.truthStatus = args.truthStatus
@@ -1176,6 +1178,7 @@ export function apply(ctx: Context): () => void {
       if (args.scope) params.scope = coerceScope(args.scope)
       const argv = ['remember', args.statement, '--node', args.nodeName]
       if (args.memoryType) argv.push('--type', args.memoryType)
+      for (const trigger of args.recallTriggers || []) argv.push('--recall-trigger', trigger)
       if (args.stateKey) argv.push('--state-key', args.stateKey)
       if (args.sourceActor) argv.push('--actor', args.sourceActor)
       if (args.truthStatus) argv.push('--truth', args.truthStatus)

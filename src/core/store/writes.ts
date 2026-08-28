@@ -61,6 +61,7 @@ import type {
   RecordFeedbackInput,
 } from "../types.ts";
 import { assertTemporalValidity } from "../semantic-domain.ts";
+import { recallTriggerMarkers } from "../recall-triggers.ts";
 
 export function withWrites<TBase extends Constructor>(Base: TBase) {
   return class extends Base {
@@ -191,6 +192,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       extractMethod?: MemoryRecord["extractMethod"];
       claims?: MemoryRecord["claims"];
       markers?: MemoryMarker[];
+      recallTriggers?: string[];
       tier?: MemoryTier;
       importance?: number;
       scope?: MemoryScope;
@@ -256,7 +258,10 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         predicateKey: claimRollup ? claimRollup.predicateKey : (input.predicateKey ?? null),
         extractMethod: claimRollup ? claimRollup.extractMethod : (input.extractMethod ?? null),
         claims: claimRollup ? claimRollup.claims : null,
-        markers: normalizeMarkers(input.markers),
+        markers: normalizeMarkers([
+          ...(input.markers ?? []),
+          ...recallTriggerMarkers(input.recallTriggers),
+        ]),
         scope: input.scope ?? {},
         validFrom,
         validUntil: input.validUntil ?? null,
@@ -491,6 +496,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           extractMethod: input.extractMethod,
           claims: input.claims,
           markers: input.markers,
+          recallTriggers: input.recallTriggers,
           tier: input.tier,
           importance: input.importance,
           scope: input.scope,
@@ -655,7 +661,9 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         for (const { memoryId, hints } of input.retrieveHints) {
           if (!hints.length) continue;
           const row = this.db
-            .prepare("SELECT markers_json FROM memory_records WHERE id = ?")
+            .prepare(
+              "SELECT markers_json, statement, node_id, evidence_id FROM memory_records WHERE id = ?",
+            )
             .get(memoryId) as Row | undefined;
           if (!row) continue; // soft signal — unknown target
           const raw = row.markers_json;
@@ -668,16 +676,24 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
             }
           })();
           let changed = false;
-          for (const hint of hints) {
-            if (!markers.some((m) => m.kind === "retrieveHint" && m.attributes?.value === hint)) {
-              markers.push({ kind: "retrieveHint", attributes: { value: hint } });
+          for (const marker of recallTriggerMarkers(hints)) {
+            if (
+              !markers.some((candidate) => JSON.stringify(candidate) === JSON.stringify(marker))
+            ) {
+              markers.push(marker);
               changed = true;
             }
           }
           if (changed) {
             this.db
               .prepare("UPDATE memory_records SET markers_json = ? WHERE id = ?")
-              .run(JSON.stringify(markers), memoryId);
+              .run(serializeMarkers(markers), memoryId);
+            this.upsertFts(
+              memoryId,
+              String(row.statement),
+              String(row.node_id),
+              String(row.evidence_id),
+            );
           }
         }
       }

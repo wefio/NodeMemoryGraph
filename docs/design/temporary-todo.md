@@ -83,6 +83,29 @@ audit parity, not natural precision or false-merge safety.
 reversal, true identity, false identity, scope conflicts, same-name entities, and
 rollback with acceptable precision and recovery cost.
 
+## 4. Remove the per-client OmniMemEval bridge process
+
+- [ ] Move the official-adapter transport to one runner-owned NMG daemon while
+  keeping corpus mapping, judge metadata, forget semantics, and benchmark
+  rendering in the adapter rather than adding benchmark RPCs to Core.
+- [ ] Define and test benchmark namespace cleanup over the generic scope/store
+  lifecycle before deleting the NDJSON bridge compatibility path.
+
+**Available mechanism:** the daemon already exposes generic JSON-RPC over HTTP;
+the Python `NmgClient` owns the official benchmark API; Core already supports
+scope, session and actor isolation. The shared embedding cache now joins
+concurrent same-process misses and persists vectors in SQLite.
+
+**Current blocker:** `bridge.ts` still owns substantial benchmark-specific
+ingestion, rendering, per-user store lifecycle, evaluation-chain and audit
+behaviour. Replacing only its transport would duplicate those policies in
+Python or leak benchmark operations into the product daemon.
+
+**Done when:** a parity test shows identical add/search/delete behaviour through
+one shared daemon, each benchmark worker closes without stopping that daemon,
+and the bridge subprocess can be removed without changing official inputs,
+outputs, scoring, or product RPC semantics.
+
 ## Explicitly deferred — not missing current work
 
 These options return to the active checklist only after their prerequisite is

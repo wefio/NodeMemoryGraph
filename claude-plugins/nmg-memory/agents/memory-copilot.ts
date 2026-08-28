@@ -153,6 +153,11 @@ server.registerTool(
       statement: z.string().optional().describe("Self-contained semantic statement"),
       nodeName: z.string().optional().describe(nmgPrompts.node_name_parameter_description),
       memoryType: z.enum(MEMORY_TYPES).optional(),
+      recallTriggers: z
+        .array(z.string().min(1).max(80))
+        .max(16)
+        .optional()
+        .describe(nmgPrompts.recall_triggers_parameter_description),
       stateKey: z.string().optional(),
       eventTime: z.string().optional(),
       sourceActor: z.enum(ACTORS).optional(),

@@ -43,6 +43,7 @@ import { parseNumberArray } from "./row-parse.ts";
 import { encodeVector, storedVector } from "./vector-codec.ts";
 import { updateRelationStrength } from "../edge-activation.ts";
 import { serializeScope } from "../scope.ts";
+import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import {
   ftsExpression,
   ftsIndexedText,
@@ -1641,6 +1642,10 @@ export class NmgStoreBase {
   upsertFts(memoryId: string, statement: string, nodeId: string, evidenceId: string): void {
     const node = this.requireNode(nodeId);
     const evidence = this.requireHistory(evidenceId);
+    const row = this.db
+      .prepare("SELECT markers_json FROM memory_records WHERE id = ?")
+      .get(memoryId) as Row | undefined;
+    const triggers = recallTriggersFromStoredMarkers(row?.markers_json).join(" ");
     this.db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
     this.db
       .prepare(
@@ -1650,7 +1655,7 @@ export class NmgStoreBase {
         memoryId,
         ftsIndexedText(statement),
         ftsIndexedText(node.canonicalName),
-        ftsIndexedText(evidence.content),
+        ftsIndexedText(`${evidence.content} ${triggers}`.trim()),
       );
     this.db
       .prepare("INSERT OR IGNORE INTO memory_fts_registry(memory_id) VALUES (?)")

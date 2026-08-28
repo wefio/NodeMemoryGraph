@@ -93,7 +93,7 @@ test("recordFeedback: attributedMemoryIds bumps access_count", () => {
   });
 });
 
-test("recordFeedback: retrieveHints stored as retrieveHint markers", () => {
+test("recordFeedback: retrieveHints become searchable canonical recall triggers", () => {
   withStore((store) => {
     const mem = store.remember({
       statement: "Martin prefers spicy food.",
@@ -101,10 +101,13 @@ test("recordFeedback: retrieveHints stored as retrieveHint markers", () => {
       scope: { user: "a" },
     });
     store.recordFeedback({
-      retrieveHints: [{ memoryId: mem.memory.id, hints: ["辣", "spicy"] }],
+      retrieveHints: [{ memoryId: mem.memory.id, hints: ["辣味偏好", "spicy"] }],
     });
     const markers = store.getMemory(mem.memory.id)?.markers ?? [];
-    const hints = markers.filter((m) => m.kind === "retrieveHint").map((m) => m.attributes?.value);
-    assert.deepEqual(hints, ["辣", "spicy"], "retrieveHints stored as retrieveHint markers");
+    const hints = markers
+      .filter((m) => m.kind === "recall_trigger")
+      .map((m) => m.attributes?.value);
+    assert.deepEqual(hints, ["辣味偏好", "spicy"]);
+    assert.equal(store.search("辣味偏好", { retrievalMode: "fts5" })[0]?.memory.id, mem.memory.id);
   });
 });

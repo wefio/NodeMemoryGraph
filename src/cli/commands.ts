@@ -201,6 +201,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
       "resolution",
       "opened-at",
       "related-memory",
+      "recall-trigger",
     ],
     flags: [],
     usageDetail: `Remember options:
@@ -216,6 +217,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   --resolution VALUE         open, resolved, or reopened
   --opened-at ISO            When the open structure was created
   --related-memory ID        Repeatable evidence anchor; required for open/reopened
+  --recall-trigger PHRASE    Repeatable exact alias or query phrase for later recall
   --write-reason TEXT        Durable-write justification
   --write-source SOURCE      Submission channel; defaults to user for the CLI
   --external-source REF      External provenance: web:URL or file:PATH
@@ -1018,6 +1020,7 @@ function rememberParams(values: OptionValues): NmgRememberParams {
     resolution: firstOption(values, "resolution"),
     openedAt: firstOption(values, "opened-at"),
     relatedMemoryIds: values.options.get("related-memory"),
+    recallTriggers: values.options.get("recall-trigger"),
     markers: externalMarker,
     projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
   }) as unknown as NmgRememberParams;

@@ -1,3 +1,4 @@
+import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import type { MemoryNode, MemorySearchResult, MemoryType, RecallCue } from "../types.ts";
 
 export type StoreRow = Record<string, string | number | Uint8Array | null>;
@@ -60,7 +61,10 @@ export function queryIntentFamilies(query: string): QueryIntentFamily[] {
 }
 
 export function lexicalScore(query: string, row: StoreRow): number {
-  const haystack = normalize(`${row.m_statement} ${row.n_canonical_name} ${row.n_summary}`);
+  const triggers = recallTriggersFromStoredMarkers(row.m_markers_json).join(" ");
+  const haystack = normalize(
+    `${row.m_statement} ${row.n_canonical_name} ${row.n_summary} ${triggers}`,
+  );
   if (haystack.includes(query)) return 10 + query.length;
   const terms = searchTerms(query);
   return terms.reduce((score, term) => score + (haystack.includes(term) ? term.length : 0), 0);

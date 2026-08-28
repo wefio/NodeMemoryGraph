@@ -958,6 +958,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       nodeName: Type.Optional(
         Type.String({ description: nmgPrompts.node_name_parameter_description }),
       ),
+      recallTriggers: Type.Optional(
+        Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
+          maxItems: 16,
+          description: nmgPrompts.recall_triggers_parameter_description,
+        }),
+      ),
       newMemoryId: Type.Optional(
         Type.String({ description: nmgPrompts.remember_new_memory_id_parameter_description }),
       ),

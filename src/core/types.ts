@@ -328,6 +328,8 @@ export interface RememberInput {
   extractMethod?: ExtractMethod;
   claims?: MemoryClaim[];
   markers?: MemoryMarker[];
+  /** Short aliases or likely query phrases used only for recall routing. */
+  recallTriggers?: string[];
   evidence?: string;
   /** Exact, bounded source excerpt selected from a harness-owned message. */
   evidenceSource?: {

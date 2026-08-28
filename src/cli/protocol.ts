@@ -184,6 +184,8 @@ export interface NmgRememberParams {
   sessionId?: string;
   sourceRef?: string;
   markers?: MemoryMarker[];
+  /** Short aliases or likely query phrases used only for recall routing. */
+  recallTriggers?: string[];
   projectDir?: string;
 }
 

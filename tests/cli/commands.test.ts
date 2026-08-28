@@ -187,6 +187,26 @@ test("CLI remember attributes the submission channel to the user by default", ()
   );
 });
 
+test("CLI remember accepts repeatable recall triggers", () => {
+  const command = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "remember")!;
+  assert.deepEqual(
+    command.buildParams({
+      flags: new Set(),
+      options: new Map([
+        ["node", ["Atlas storage"]],
+        ["recall-trigger", ["where data lives", "storage backend"]],
+      ]),
+      positionals: ["Atlas", "uses", "SQLite."],
+    }),
+    {
+      statement: "Atlas uses SQLite.",
+      nodeName: "Atlas storage",
+      recallTriggers: ["where data lives", "storage backend"],
+      writeSource: "user",
+    },
+  );
+});
+
 test("CLI exposes explicit attributable claim outcomes", () => {
   const command = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "claim outcome")!;
   assert.deepEqual(

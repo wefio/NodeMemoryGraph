@@ -14,6 +14,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import { ftsIndexedText } from "./search-ranking.ts";
+import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import { encodeVector, parseVector } from "./vector-codec.ts";
 
 type Row = Record<string, string | number | Uint8Array | null>;
@@ -551,7 +552,7 @@ export function migrate(db: DatabaseSync): void {
 }
 
 const FTS_TEXT_FORMAT_KEY = "fts_text_format";
-const FTS_TEXT_FORMAT = "unicode61-han-bigram-v1";
+const FTS_TEXT_FORMAT = "unicode61-han-bigram-recall-trigger-v2";
 
 /** One-time, versioned rebuild; normal store opens perform one metadata lookup. */
 function ensureFtsTextFormat(db: DatabaseSync): void {
@@ -562,7 +563,7 @@ function ensureFtsTextFormat(db: DatabaseSync): void {
 
   const rows = db
     .prepare(
-      `SELECT m.id, m.statement, n.canonical_name, h.content
+      `SELECT m.id, m.statement, m.markers_json, n.canonical_name, h.content
        FROM memory_records m
        JOIN memory_nodes n ON n.id = m.node_id
        JOIN history_records h ON h.id = m.evidence_id
@@ -580,7 +581,9 @@ function ensureFtsTextFormat(db: DatabaseSync): void {
         String(row.id),
         ftsIndexedText(String(row.statement)),
         ftsIndexedText(String(row.canonical_name)),
-        ftsIndexedText(String(row.content)),
+        ftsIndexedText(
+          `${String(row.content)} ${recallTriggersFromStoredMarkers(row.markers_json).join(" ")}`.trim(),
+        ),
       );
     }
     db.prepare(

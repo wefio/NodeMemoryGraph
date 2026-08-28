@@ -34,6 +34,7 @@ export interface NmgPrompts {
   remember_relation_judgement_parameter_description: string;
   remember_board_source_parameter_description: string;
   node_name_parameter_description: string;
+  recall_triggers_parameter_description: string;
   state_key_parameter_description: string;
   external_source_parameter_description: string;
   evidence_parameter_description: string;

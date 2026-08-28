@@ -8,12 +8,20 @@ nmg remember "<statement>" \
   --type fact \
   --actor user \
   --evidence "<short exact source excerpt>" \
+  --recall-trigger "<short alias or likely future query phrase>" \
   --write-reason "<why it remains useful>" \
   --json
 ```
 
 Choose `preference`, `constraint`, or `strategy` instead of `fact` when that is
 how the Agent should use the memory.
+
+`--recall-trigger` is optional and repeatable. Use it only when a short, exact
+alias or likely question would find the same fact more reliably than its
+canonical wording. It is routing metadata, not another fact: do not put new
+claims, broad topic tags, secrets, or the full statement in it. The Pi, MCP, and
+DSH `nmg_remember` tools expose the same field as `recallTriggers` (maximum 16,
+maximum 80 characters each).
 
 ## Changeable state
 

@@ -48,6 +48,8 @@ remember_description: >-
   not secrets, transient content, or unsupported guesses. Never label an
   Assistant inference as a user statement. A stateKey names one
   replaceable property within a stable scope; it is not a topic or grouping tag.
+  recallTriggers may name a few short aliases or likely query phrases that should
+  retrieve this record when its factual statement uses different wording.
 
 mcp_remember_description: >-
   Save a durable record or apply an explicit memory lifecycle action. Supports
@@ -235,6 +237,12 @@ remember_relation_judgement_parameter_description: >-
 node_name_parameter_description: >-
   Stable semantic cluster name. Related memories may share a node even when
   they describe different properties.
+
+recall_triggers_parameter_description: >-
+  Optional short aliases or likely query phrases that should recall this record
+  when the saved statement uses different wording. Use only distinctive wording
+  a future user or Agent may actually search for; do not copy the whole statement,
+  add broad topic tags, or encode new facts here. At most 16 entries.
 
 state_key_parameter_description: >-
   Stable key for exactly one replaceable property within one canonical scope.

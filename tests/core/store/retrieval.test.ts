@@ -127,6 +127,27 @@ test("FTS5 retrieves a Chinese memory from a shorter overlapping phrase", () => 
   });
 });
 
+test("FTS5 recalls a memory by an explicit recall trigger without exposing a duplicate", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement: "The user's preferred explanation style is concise and visual.",
+      nodeName: "Explanation preference",
+      memoryType: "preference",
+      recallTriggers: ["讲解风格", "how to explain things to me"],
+    });
+
+    const context = store.searchContext("讲解风格", {
+      limit: 8,
+      retrievalMode: "fts5",
+    });
+
+    assert.deepEqual(
+      context.results.filter((result) => result.memory.id === saved.memory.id).map((result) => result.memory.id),
+      [saved.memory.id],
+    );
+  });
+});
+
 test("store open migrates a legacy raw Chinese FTS row exactly once", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-fts-migration-"));
   const path = join(directory, "nmg.sqlite");

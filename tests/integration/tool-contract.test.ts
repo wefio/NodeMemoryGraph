@@ -48,6 +48,17 @@ test("Pi, MCP, and DSH schemas consume the shared action contract", () => {
   }
 });
 
+test("Pi, MCP, and DSH expose recall triggers through remember", () => {
+  for (const relativePath of [
+    "../../.pi/extensions/nmg/index.ts",
+    "../../claude-plugins/nmg-memory/agents/memory-copilot.ts",
+    "../../dsh/dsh-nmg/src/plugin/index.ts",
+  ]) {
+    const source = readFileSync(resolve(import.meta.dirname, relativePath), "utf8");
+    assert.match(source, /recallTriggers/u, `${relativePath} must forward recallTriggers`);
+  }
+});
+
 test("Pi, MCP, and DSH render through the shared agent surface", () => {
   const sources = [
     "../../.pi/extensions/nmg/index.ts",

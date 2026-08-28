@@ -63,6 +63,7 @@ import {
 } from "../lab/memory-graph-reasoner.ts";
 import { scopesOverlap, validityIntervalsOverlap } from "../core/semantic-domain.ts";
 import { sameScope } from "../core/scope.ts";
+import { normalizeRecallTriggers } from "../core/recall-triggers.ts";
 import { searchMemoryContext } from "../integration/search.ts";
 import { ControllerPolicyChannel } from "../integration/controller-channel.ts";
 import {
@@ -1559,6 +1560,7 @@ function parseRememberParams(value: unknown): NmgRememberParams {
     sessionId: optionalString(params, "sessionId"),
     sourceRef: optionalString(params, "sourceRef"),
     markers: optionalMarkers(params, "markers"),
+    recallTriggers: optionalRecallTriggers(params),
     unsafe: optionalBoolean(params, "unsafe"),
     projectDir: optionalString(params, "projectDir"),
   };
@@ -2315,6 +2317,19 @@ function optionalStringArray(params: Record<string, unknown>, key: string): stri
     throw new NmgProtocolError("INVALID_PARAMS", `${key} must be an array of non-empty strings`);
   }
   return value.map((entry) => String(entry).trim());
+}
+
+function optionalRecallTriggers(params: Record<string, unknown>): string[] | undefined {
+  const values = optionalStringArray(params, "recallTriggers");
+  if (!values) return undefined;
+  try {
+    return normalizeRecallTriggers(values);
+  } catch (error) {
+    throw new NmgProtocolError(
+      "INVALID_PARAMS",
+      error instanceof Error ? error.message : "invalid recallTriggers",
+    );
+  }
 }
 
 function requiredStringArray(

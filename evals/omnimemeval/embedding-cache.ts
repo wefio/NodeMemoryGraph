@@ -21,10 +21,17 @@ interface EmbeddingClient {
   embedDocuments(inputs: string[]): Promise<number[][]>;
 }
 
+interface PendingEmbedding {
+  promise: Promise<number[]>;
+  resolve(vector: number[]): void;
+  reject(error: unknown): void;
+}
+
 export class CachedOmniEmbeddingClient implements EmbeddingClient {
   readonly indexId: string;
   readonly #delegate: EmbeddingClient;
   readonly #db: DatabaseSync;
+  readonly #inFlight = new Map<string, Promise<number[]>>();
   #closed = false;
 
   constructor(databasePath: string, delegate: EmbeddingClient) {
@@ -93,25 +100,70 @@ export class CachedOmniEmbeddingClient implements EmbeddingClient {
     }
 
     const missing = [...missingByHash.entries()];
-    if (missing.length > 0) {
-      const fetched = await fetchMissing(missing.map(([, input]) => input));
-      if (fetched.length !== missing.length) {
-        throw new Error(`embedding provider returned ${fetched.length} vectors for ${missing.length} inputs`);
+    const pendingByHash = new Map<string, Promise<number[]>>();
+    const claimed: Array<{ hash: string; input: string; key: string; pending: PendingEmbedding }> =
+      [];
+    for (const [hash, input] of missing) {
+      const key = `${kind}:${hash}`;
+      const inFlight = this.#inFlight.get(key);
+      if (inFlight) {
+        pendingByHash.set(hash, inFlight);
+        continue;
       }
-      const insert = this.#db.prepare(
-        `INSERT OR IGNORE INTO embedding_cache
-         (index_id, input_kind, text_hash, vector_blob, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
-      );
-      const createdAt = new Date().toISOString();
-      for (const [index, [hash]] of missing.entries()) {
-        const vector = fetched[index]!;
-        insert.run(this.indexId, kind, hash, encodeVector(vector), createdAt);
-        vectors.set(hash, vector);
+      const pending = createPendingEmbedding();
+      this.#inFlight.set(key, pending.promise);
+      pendingByHash.set(hash, pending.promise);
+      claimed.push({ hash, input, key, pending });
+    }
+
+    // Attach rejection handlers before provider I/O. Concurrent callers can
+    // join a miss without duplicating embedding work, and failures release the
+    // key so a later call can retry.
+    const pendingResults = Promise.all(
+      [...pendingByHash].map(async ([hash, promise]) => [hash, await promise] as const),
+    );
+    if (claimed.length > 0) {
+      try {
+        const fetched = await fetchMissing(claimed.map(({ input }) => input));
+        if (fetched.length !== claimed.length) {
+          throw new Error(
+            `embedding provider returned ${fetched.length} vectors for ${claimed.length} inputs`,
+          );
+        }
+        const insert = this.#db.prepare(
+          `INSERT OR IGNORE INTO embedding_cache
+           (index_id, input_kind, text_hash, vector_blob, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        );
+        const readStored = this.#db.prepare(
+          "SELECT vector_blob FROM embedding_cache WHERE index_id = ? AND input_kind = ? AND text_hash = ?",
+        );
+        const createdAt = new Date().toISOString();
+        for (const [index, item] of claimed.entries()) {
+          const fetchedVector = fetched[index]!;
+          insert.run(this.indexId, kind, item.hash, encodeVector(fetchedVector), createdAt);
+          const stored = readStored.get(this.indexId, kind, item.hash) as CacheRow | undefined;
+          item.pending.resolve(stored ? parseVector(stored.vector_blob) : fetchedVector);
+        }
+      } catch (error) {
+        for (const { pending } of claimed) pending.reject(error);
+      } finally {
+        for (const { key } of claimed) this.#inFlight.delete(key);
       }
     }
+    for (const [hash, vector] of await pendingResults) vectors.set(hash, vector);
     return inputs.map((input) => vectors.get(textHash(input))!);
   }
+}
+
+function createPendingEmbedding(): PendingEmbedding {
+  let resolve!: (vector: number[]) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<number[]>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 function textHash(input: string): string {

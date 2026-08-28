@@ -34,6 +34,7 @@ const SECTIONS = [
   "remember_superseded_memory_id_parameter_description",
   "remember_related_memory_id_parameter_description",
   "remember_relation_judgement_parameter_description",
+  "recall_triggers_parameter_description",
   "node_name_parameter_description",
   "state_key_parameter_description",
   "external_source_parameter_description",

@@ -1404,7 +1404,33 @@ and deterministic storage. The two sides have different responsibilities:
 
 | LLM / Agent                                                                                                                                                                                                   | NMG core                                                                                                                                                                  |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Extract a self-contained statement; assign type, actor, time, scope, and importance; decide whether a returned candidate is the same meaning, a genuinely replaced old value, a related concept, or distinct. | Enforce admission policy, stable IDs, exact deduplication, scope/state invariants, provenance, transactions, index deltas, version history, and reversible graph changes. |
+| Extract a self-contained statement; assign type, actor, time, scope, and importance; optionally provide a few short phrases by which the same fact is likely to be recalled; decide whether a returned candidate is the same meaning, a genuinely replaced old value, a related concept, or distinct. | Enforce admission policy, stable IDs, exact deduplication, scope/state invariants, provenance, transactions, trigger limits, index deltas, version history, and reversible graph changes. |
+
+`recallTriggers` are optional retrieval metadata on the same governed write, not
+additional facts, tags, or a second memory object. The Agent may supply up to 16
+short, distinct aliases or likely query phrases when the canonical statement
+uses wording that a future query may not repeat. NMG normalises and indexes the
+phrases with the record, but never discloses marker syntax to the answering
+Agent and never lets a trigger change truth, scope, provenance, importance, or
+node membership. The canonical statement and evidence remain the content that
+is returned after recall. This deliberately borrows the useful part of a Skill
+header/body split: a small routing header may find a precise body, but it does
+not become another instruction system.
+
+```text
+remember(statement, evidence, recallTriggers=[short alias, likely query phrase])
+  -> validate and store one semantic record
+  -> index statement + evidence + recall triggers
+search(query)
+  -> trigger text may nominate the record
+  -> disclose only the canonical statement/evidence
+```
+
+Triggers should encode how the existing fact may be asked for, not broad topic
+words, guesses about future facts, or copies of the whole statement. A missing
+trigger is normal: semantic embeddings and FTS still operate on the canonical
+record. A legacy `retrieveHint` marker remains readable during migration, while
+new writes use the canonical `recall_trigger` marker.
 
 The common path remains one call. NMG writes the governed atom and returns only
 a bounded set of ambiguous near-duplicate or supersession candidates. When a
@@ -1626,7 +1652,13 @@ from both storage tiers and the STG/LTG lifecycle:
    prompt as a history query.
 3. **Agent-directed recall layer:** compact headers/cues that let the model call
    `nmg_search`, inspect costs, and expand the AG with exact details through
-   `nmg_get`.
+    `nmg_get`.
+
+Automatic recall and Agent-directed recall share the same indexed records.
+Explicit recall triggers may improve candidate nomination in either layer, but
+they do not bypass the memory gate, Active Graph budgets, QPP folding, scope or
+truth filters, or the requirement to load exact evidence before relying on a
+detail.
 
 The third layer is additionally bounded as a tool process, not just as returned
 information. Repeated candidate sets count as no progress, an exact `get` only

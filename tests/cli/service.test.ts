@@ -1481,6 +1481,37 @@ test("external source markers persist and default trust to unverified", async ()
   }
 });
 
+test("remember accepts bounded recall triggers and uses them in automatic recall", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-recall-trigger-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    const remembered = await service.invoke("remember", {
+      statement: "The user prefers diagrams before equations.",
+      nodeName: "Explanation preference",
+      memoryType: "preference",
+      recallTriggers: ["讲解顺序", "teaching sequence"],
+    });
+    const recalled = await service.invoke("search", {
+      query: "讲解顺序",
+      retrievalMode: "fts5",
+      limit: 8,
+    });
+    assert.equal(recalled.results[0]?.memory.id, remembered.memory.id);
+
+    await assert.rejects(
+      service.invoke("remember", {
+        statement: "Invalid trigger input.",
+        nodeName: "Invalid",
+        recallTriggers: [""],
+      }),
+      { code: "INVALID_PARAMS" },
+    );
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
 test("CLI writes pass through the governed memory admission policy", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-write-policy-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
