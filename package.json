@@ -81,6 +81,7 @@
     "eval:personamem": "node --experimental-strip-types evals/benchmarks/run.ts personamem",
     "eval:beam": "node --experimental-strip-types evals/benchmarks/run.ts beam",
     "benchmark:setup": "node --experimental-strip-types evals/official/bootstrap.ts",
+    "benchmark:omni": "node --experimental-strip-types evals/omnimemeval/run.ts",
     "benchmark:install:omni-adapter": "node --experimental-strip-types evals/omnimemeval/install-adapter.ts",
     "benchmark:report:omni-perf": "node --experimental-strip-types evals/omnimemeval/report-perf.ts",
     "benchmark:prepare:no-memory": "node --experimental-strip-types evals/omnimemeval/prepare-no-memory.ts",

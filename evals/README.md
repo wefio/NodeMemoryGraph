@@ -126,45 +126,48 @@ logs under `docs/` (indexed here so new work can find prior evidence):
 - `docs/design/llm-sufficiency-recall-design.md` — LLM-sufficiency recall design.
 - `docs/experiments/lme-recall-headers-2026-08-04.md` — recall-header refinement verified as format-only (94.15/87.95/82.67 unchanged; answer acc 82.3%).
 
-## Reproducible LongMemEval runs
+## Unified OmniMemEval runs
 
-LongMemEval experiments go through one flow so recipes stop drifting between
-runs (env encoding, embedding-cache locking, worker flags, NMG_ROOT timing,
-baseline comparison):
+LongMemEval, LoCoMo, BEAM, PersonaMem v2 and HaluMem use the same NMG entry
+point. The entry point owns preflight checks, environment encoding, NMG-safe
+worker defaults, exact step forwarding and resume validation; the pinned
+OmniMemEval scripts continue to own each dataset's parsing, prompts, scoring,
+checkpoint implementation and report schema.
 
-```bash
-# Full run (ingest + search + answer + judge + metrics)
-./evals/omnimemeval/run-lme.sh --env-file .env.nmg-bgefix --version fixed20_rerun
+```powershell
+# Complete pipeline. The version is generated when omitted.
+npm run benchmark:omni -- longmemeval --env .env.nmg-bgefix
 
-# Reuse existing user stores (same corpus already ingested): start at search
-./evals/omnimemeval/run-lme.sh --env-file .env.nmg-bgefix --version fixed20_rerun --skip-ingest
+# The same common flags work for every suite.
+npm run benchmark:omni -- locomo --env .env.nmg-opencode `
+  --version locomo-canary --llm-workers 32 --top-k 20
 
-# Analyze an existing run (metrics + manifest)
-./evals/omnimemeval/run-lme.sh --analyze results/lme/nmg-lme500_fixed20_rerun
+# Dataset-only flags go after `--`; they cannot silently become global policy.
+npm run benchmark:omni -- beam --env .env.nmg-opencode `
+  --version beam-canary -- --scale 100k --judge-batch-size 4
+
+# Resume from search only when the exact old result directory is named.
+npm run benchmark:omni -- longmemeval --env .env.nmg-bgefix `
+  --version fixed20-rerun --from-step 2 `
+  --resume-dir .benchmarks/official/OmniMemEval/results/lme/nmg-fixed20-rerun
+
+# Validate the resolved official command without running it.
+npm run benchmark:omni -- personamem-v2 --env .env.nmg-opencode --dry-run
 ```
 
-The script pins `NMG_ROOT`/`PYTHONUTF8`/`PYTHONIOENCODING`, kills stray
-bridge/lme processes, checks embedding-cache coverage, and defaults
-`--workers 1` (parallel bridge workers race on the cache schema lock). After
-the run it emits `experiment_manifest.json` into the result dir:
+The common defaults are `workers=1`, `llm-workers=16`, `top-k=20` and
+`num-runs=1`. Explicit CLI values win. `workers=1` protects NMG's single-writer
+bridge; answer and judge calls still use the shared LLM concurrency pool.
+The runner never kills Pi, NMG daemons, embedding servers, or unrelated Python
+processes. External services remain the caller's responsibility.
 
-- `code.commit` + dirty files — the exact NMG revision, i.e. the rollback
-  point for any change made in the experiment.
-- `prompt_templates.*` — hashes of the retrieval guidance (bridge.ts), the
-  LME answer/judge prompts (utils/prompts.py) and the NMG policy extension
-  (`.pi/extensions/nmg/index.ts`), so "prompt didn't change but the score
-  moved" is checkable against template hashes.
-- `runtime.env` + `runtime.llm_defaults` — answer/judge model, base URL,
-  embedding model/profile, QPP toggles, temperature.
-- `dataset.sha256` — exact LongMemEval corpus.
-- `results.*` — any-evidence recall, evidence recall (overall), all-evidence
-  recall, answer accuracy, per-category breakdowns, and up to five failing
-  samples for bad-case review.
-
-Publishing discipline: keep the env file (`OmniMemEval/.env.nmg-*`) and the
-result directory together, note the responsible person and canary scope in
-`experiment_manifest.json.experiment` if shared, and treat `code.commit` as
-the rollback version.
+`--from-step > 1` is fail-closed: both `--version` and `--resume-dir` are
+required, the directory must belong to the selected suite, its recorded NMG
+version must match, and the preceding checkpoint artifact must be non-empty.
+This prevents an old result label from accidentally continuing against a new
+or empty store. `--replay <result-dir>` delegates to OmniMemEval's official
+interactive replay flow. Dataset-specific audits remain separate commands;
+they do not change execution or official scoring.
 
 Storage: user stores (`omnimemeval-nmg/*.sqlite`) are keyed by
 `sha256(userId)` and the userId embeds the version label, so every run creates

@@ -144,6 +144,19 @@ Then use `--lib nmg` in OmniMemEval's user-memory commands. OmniMemEval declares
 its own Python 3.12 environment; NMG's smaller Python 3.11 official-scorer
 environment is deliberately not reused.
 
+For normal NMG runs, do not invoke those commands separately. Use the one
+cross-suite entry point, which pins `--lib nmg`, common defaults, UTF-8 and
+resume validation before delegating to the selected official script:
+
+```powershell
+npm run benchmark:omni -- <longmemeval|locomo|beam|personamem-v2|halumem> `
+  --env .env.nmg-opencode --version <run-id>
+```
+
+Dataset-specific flags follow a second `--`. See
+`.pi/skills/omnimemeval-eval/SKILL.md` when starting, resuming, or specializing
+a run.
+
 The installer also registers NMG with OmniMemEval's generic text-search
 dispatcher, LoCoMo's benchmark-local search dispatcher, and the conversation-ID
 helper. OmniMemEval currently keeps these allowlists separately from its

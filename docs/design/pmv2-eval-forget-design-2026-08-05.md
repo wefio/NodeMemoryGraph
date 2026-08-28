@@ -10,11 +10,12 @@
 ### 一键脚本
 
 ```bash
-# 60 问（用户 0..59），16 并发 LLM，~1-2 分钟计算
-bash evals/omnimemeval/run-pmv2-quick.sh 60 --llm-workers=16
+# 当前统一入口（不再通过临时改写 CSV 制造 60 问子集）
+npm run benchmark:omni -- personamem-v2 --env .env.nmg-opencode --llm-workers 16
 ```
 
-脚本位于 `evals/omnimemeval/run-pmv2-quick.sh`，固化处理了以下评测基础设施坑：
+早期原型 `run-pmv2-quick.sh` 曾通过临时截断 CSV 固化以下基础设施坑；
+它已被统一 runner 淘汰，以下内容只保留为历史问题记录：
 
 | 坑 | 现象 | 修复 |
 |---|---|---|
@@ -83,7 +84,7 @@ preview=[forget] (content withdrawn)
 
 ## 三、相关文件
 
-- 评测入口：`evals/omnimemeval/run-pmv2-quick.sh`（一键 60 问）
+- 评测入口：`npm run benchmark:omni -- personamem-v2 ...`
 - embedding server：`evals/omnimemeval/bge-server.py`（uv 启动，OpenAI 兼容）
 - 提示词单一来源：`src/prompts/nmg-prompts.yaml`（`search_disclosure` / `forget_hint`）
 - 渲染实现：`.pi/extensions/nmg/index.ts`、`claude-plugins/nmg-memory/agents/memory-copilot.ts`、
