@@ -8,100 +8,80 @@ import {
   SUITES,
   createRunPlan,
   parseRunOptions,
+  type BenchmarkConfig,
   type BenchmarkSuite,
 } from "../../evals/omnimemeval/run.ts";
 
-function fixtureRepo(suite: BenchmarkSuite): string {
+function fixtureRepo(suite: BenchmarkSuite, config?: Partial<BenchmarkConfig>): string {
   const root = mkdtempSync(join(tmpdir(), "nmg-omni-runner-"));
   const scripts = join(root, ".benchmarks", "official", "OmniMemEval", "scripts");
   mkdirSync(scripts, { recursive: true });
   writeFileSync(join(scripts, SUITES[suite].runner), "#!/usr/bin/env bash\n", "utf8");
   writeFileSync(join(root, "benchmark.env"), "LLM_API_KEY=test\n", "utf8");
+  const suites = Object.fromEntries(Object.keys(SUITES).map((name) => [name, []]));
+  writeFileSync(
+    join(root, "benchmark.json"),
+    JSON.stringify({
+      envFile: "benchmark.env",
+      commonArgs: ["--workers", "1", "--llm-workers", "16", "--top-k", "20"],
+      suites,
+      ...config,
+    }),
+    "utf8",
+  );
   return root;
 }
 
-test("all user-memory suites share one common default contract", () => {
-  for (const suite of Object.keys(SUITES) as BenchmarkSuite[]) {
-    const options = parseRunOptions([suite, "--env", "benchmark.env"]);
-    assert.equal(options.workers, 1, suite);
-    assert.equal(options.llmWorkers, 16, suite);
-    assert.equal(options.topK, 20, suite);
-    assert.equal(options.numRuns, 1, suite);
-    assert.equal(options.fromStep, 1, suite);
-  }
+test("CLI exposes only suite, config, resume, and dry-run", () => {
+  assert.deepEqual(parseRunOptions(["beam", "--config", "canary.json", "--dry-run"]), {
+    suite: "beam",
+    configPath: "canary.json",
+    dryRun: true,
+  });
+  assert.throws(
+    () => parseRunOptions(["beam", "--llm-workers", "32"]),
+    /Unsupported command option/,
+  );
 });
 
-test("the unified plan delegates to the pinned official runner", () => {
-  const repoRoot = fixtureRepo("beam");
-  const options = parseRunOptions([
-    "beam",
-    "--env",
-    "benchmark.env",
-    "--version",
-    "beam-canary",
-    "--workers",
-    "2",
-    "--llm-workers",
-    "32",
-    "--to-step",
-    "2",
-    "--",
+test("one config supplies common and suite-specific official arguments", () => {
+  const suites = Object.fromEntries(Object.keys(SUITES).map((name) => [name, []])) as Record<
+    BenchmarkSuite,
+    string[]
+  >;
+  suites.beam = ["--scale", "100k", "--judge-batch-size", "4"];
+  const repoRoot = fixtureRepo("beam", { suites });
+  const plan = createRunPlan(
+    parseRunOptions(["beam", "--config", "benchmark.json"]),
+    { repoRoot, now: new Date("2026-08-28T01:02:03.456Z") },
+  );
+
+  assert.equal(plan.version, "beam_20260828T010203Z");
+  assert.deepEqual(plan.args.slice(-7), [
+    "16",
+    "--top-k",
+    "20",
     "--scale",
     "100k",
+    "--judge-batch-size",
+    "4",
   ]);
-  const plan = createRunPlan(options, { repoRoot });
-
-  assert.match(plan.runner, /run_beam_eval\.sh$/);
-  assert.deepEqual(plan.args.slice(0, 5), [
-    "./scripts/run_beam_eval.sh",
-    "--lib",
-    "nmg",
-    "--env",
-    join(repoRoot, "benchmark.env").replaceAll("\\", "/"),
-  ]);
-  assert.ok(plan.args.includes("beam-canary"));
-  assert.ok(plan.args.includes("32"));
-  assert.deepEqual(plan.args.slice(-2), ["--scale", "100k"]);
+  assert.ok(plan.args.includes("--workers"));
   assert.equal(plan.environment.NMG_ROOT, repoRoot);
-  assert.equal(plan.environment.PYTHONUTF8, "1");
 });
 
-test("suite-only options cannot silently become common policy", () => {
-  assert.throws(
-    () => parseRunOptions(["locomo", "--env", "benchmark.env", "--scale", "100k"]),
-    /not a common option/,
-  );
+test("configured arguments cannot replace runner-owned identity", () => {
+  const repoRoot = fixtureRepo("locomo", { commonArgs: ["--env", "other.env"] });
   assert.throws(
     () =>
-      parseRunOptions([
-        "locomo",
-        "--env",
-        "benchmark.env",
-        "--",
-        "--scale",
-        "100k",
-      ]),
-    /not a supported locomo option/,
+      createRunPlan(parseRunOptions(["locomo", "--config", "benchmark.json"]), {
+        repoRoot,
+      }),
+    /cannot set runner-owned option --env/,
   );
 });
 
-test("resume is fail-closed without an exact result directory", () => {
-  assert.throws(
-    () =>
-      parseRunOptions([
-        "longmemeval",
-        "--env",
-        "benchmark.env",
-        "--version",
-        "old-run",
-        "--from-step",
-        "2",
-      ]),
-    /requires both --version and --resume-dir/,
-  );
-});
-
-test("resume validates suite, version, and prerequisite artifacts", () => {
+test("resume infers suite and version from the exact result directory", () => {
   const repoRoot = fixtureRepo("longmemeval");
   const resultDir = join(
     repoRoot,
@@ -115,40 +95,51 @@ test("resume validates suite, version, and prerequisite artifacts", () => {
   mkdirSync(resultDir, { recursive: true });
   writeFileSync(
     join(resultDir, "experiment_config.sh"),
-    'LIB="nmg"\nVERSION="old-run"\n',
+    [
+      'ENV_FILE_BASENAME="benchmark.env"',
+      'LIB="nmg"',
+      'VERSION="old-run"',
+      "WORKERS=1",
+      "LLM_WORKERS=16",
+      "TOPK=20",
+    ].join("\n"),
     "utf8",
   );
-  writeFileSync(join(resultDir, "success_records.txt"), "0\n", "utf8");
 
-  const good = parseRunOptions([
-    "longmemeval",
-    "--env",
-    "benchmark.env",
-    "--version",
-    "old-run",
-    "--from-step",
-    "2",
-    "--resume-dir",
-    resultDir,
-  ]);
-  assert.doesNotThrow(() => createRunPlan(good, { repoRoot }));
-
-  const wrongVersion = { ...good, version: "different-run" };
-  assert.throws(() => createRunPlan(wrongVersion, { repoRoot }), /Resume version mismatch/);
-
-  const afterSearch = { ...good, fromStep: 3 };
-  assert.throws(
-    () => createRunPlan(afterSearch, { repoRoot }),
-    /nmg_lme_search_results\.json is missing or empty/,
+  const plan = createRunPlan(
+    parseRunOptions(["--resume", resultDir, "--config", "benchmark.json"]),
+    { repoRoot },
   );
+  assert.equal(plan.suite, "longmemeval");
+  assert.equal(plan.version, "old-run");
+  assert.ok(!plan.args.includes("--from-step"));
 });
 
-test("generated versions are stable for an injected clock", () => {
-  const repoRoot = fixtureRepo("personamem-v2");
-  const options = parseRunOptions(["personamem-v2", "--env", "benchmark.env"]);
-  const plan = createRunPlan(options, {
-    repoRoot,
-    now: new Date("2026-08-27T01:02:03.456Z"),
+test("resume rejects config drift instead of silently changing the run", () => {
+  const repoRoot = fixtureRepo("longmemeval", {
+    commonArgs: ["--workers", "2", "--llm-workers", "16", "--top-k", "20"],
   });
-  assert.equal(plan.version, "personamem-v2_20260827T010203Z");
+  const resultDir = join(
+    repoRoot,
+    ".benchmarks",
+    "official",
+    "OmniMemEval",
+    "results",
+    "lme",
+    "nmg-old-run",
+  );
+  mkdirSync(resultDir, { recursive: true });
+  writeFileSync(
+    join(resultDir, "experiment_config.sh"),
+    'ENV_FILE_BASENAME="benchmark.env"\nLIB="nmg"\nVERSION="old-run"\nWORKERS=1\n',
+    "utf8",
+  );
+  assert.throws(
+    () =>
+      createRunPlan(
+        parseRunOptions(["--resume", resultDir, "--config", "benchmark.json"]),
+        { repoRoot },
+      ),
+    /Resume config drift: --workers was 1, now 2/,
+  );
 });

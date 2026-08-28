@@ -11,8 +11,12 @@
 
 ```bash
 # 当前统一入口（不再通过临时改写 CSV 制造 60 问子集）
-npm run benchmark:omni -- personamem-v2 --env .env.nmg-opencode --llm-workers 16
+npm run benchmark:omni -- personamem-v2
 ```
+
+环境文件、并发和其他稳定参数统一来自
+`evals/omnimemeval/benchmark.config.json`。需要一次性实验时复制配置并用
+`--config` 选择，不再在每次命令中重复拼参数。
 
 早期原型 `run-pmv2-quick.sh` 曾通过临时截断 CSV 固化以下基础设施坑；
 它已被统一 runner 淘汰，以下内容只保留为历史问题记录：

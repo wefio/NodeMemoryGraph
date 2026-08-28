@@ -1,0 +1,20 @@
+{
+  "envFile": ".env.nmg-opencode",
+  "commonArgs": [
+    "--workers",
+    "1",
+    "--llm-workers",
+    "16",
+    "--top-k",
+    "20",
+    "--num-runs",
+    "1"
+  ],
+  "suites": {
+    "longmemeval": [],
+    "locomo": [],
+    "beam": ["--scale", "100k", "--judge-batch-size", "4"],
+    "personamem-v2": [],
+    "halumem": ["--variant", "medium"]
+  }
+}

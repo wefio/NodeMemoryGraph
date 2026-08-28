@@ -129,45 +129,41 @@ logs under `docs/` (indexed here so new work can find prior evidence):
 ## Unified OmniMemEval runs
 
 LongMemEval, LoCoMo, BEAM, PersonaMem v2 and HaluMem use the same NMG entry
-point. The entry point owns preflight checks, environment encoding, NMG-safe
-worker defaults, exact step forwarding and resume validation; the pinned
+point. Stable run parameters live in
+`evals/omnimemeval/benchmark.config.json`, rather than being rebuilt on every
+command line. The entry point owns environment encoding, generated run identity
+and resume validation; the pinned
 OmniMemEval scripts continue to own each dataset's parsing, prompts, scoring,
 checkpoint implementation and report schema.
 
 ```powershell
-# Complete pipeline. The version is generated when omitted.
-npm run benchmark:omni -- longmemeval --env .env.nmg-bgefix
+# Complete pipeline using the checked-in configuration.
+npm run benchmark:omni -- longmemeval
 
-# The same common flags work for every suite.
-npm run benchmark:omni -- locomo --env .env.nmg-opencode `
-  --version locomo-canary --llm-workers 32 --top-k 20
+# Use a copied config for a bounded or one-off experiment.
+npm run benchmark:omni -- beam --config evals/omnimemeval/canary.config.json
 
-# Dataset-only flags go after `--`; they cannot silently become global policy.
-npm run benchmark:omni -- beam --env .env.nmg-opencode `
-  --version beam-canary -- --scale 100k --judge-batch-size 4
-
-# Resume from search only when the exact old result directory is named.
-npm run benchmark:omni -- longmemeval --env .env.nmg-bgefix `
-  --version fixed20-rerun --from-step 2 `
-  --resume-dir .benchmarks/official/OmniMemEval/results/lme/nmg-fixed20-rerun
+# Resume only from an exact old result directory.
+npm run benchmark:omni -- --resume `
+  .benchmarks/official/OmniMemEval/results/lme/nmg-fixed20-rerun
 
 # Validate the resolved official command without running it.
-npm run benchmark:omni -- personamem-v2 --env .env.nmg-opencode --dry-run
+npm run benchmark:omni -- personamem-v2 --dry-run
 ```
 
-The common defaults are `workers=1`, `llm-workers=16`, `top-k=20` and
-`num-runs=1`. Explicit CLI values win. `workers=1` protects NMG's single-writer
-bridge; answer and judge calls still use the shared LLM concurrency pool.
+The checked-in config currently records `workers=1`, `llm-workers=16`,
+`top-k=20`, and `num-runs=1`; suite-only official arguments are stored beside
+the suite name. Change that file deliberately or select a copied config rather
+than growing another CLI parameter surface. `workers=1` protects NMG's
+single-writer bridge; answer and judge calls still use the shared LLM pool.
 The runner never kills Pi, NMG daemons, embedding servers, or unrelated Python
 processes. External services remain the caller's responsibility.
 
-`--from-step > 1` is fail-closed: both `--version` and `--resume-dir` are
-required, the directory must belong to the selected suite, its recorded NMG
-version must match, and the preceding checkpoint artifact must be non-empty.
-This prevents an old result label from accidentally continuing against a new
-or empty store. `--replay <result-dir>` delegates to OmniMemEval's official
-interactive replay flow. Dataset-specific audits remain separate commands;
-they do not change execution or official scoring.
+Resume is fail-closed: the directory must be inside the selected official
+result tree, record `LIB=nmg` and a version, and agree with the active config.
+The suite and version are inferred instead of repeated by the caller. Unsafe
+lifecycle flags are not replayed. Dataset-specific audits remain separate
+commands; they do not change execution or official scoring.
 
 Storage: user stores (`omnimemeval-nmg/*.sqlite`) are keyed by
 `sha256(userId)` and the userId embeds the version label, so every run creates

@@ -145,15 +145,17 @@ its own Python 3.12 environment; NMG's smaller Python 3.11 official-scorer
 environment is deliberately not reused.
 
 For normal NMG runs, do not invoke those commands separately. Use the one
-cross-suite entry point, which pins `--lib nmg`, common defaults, UTF-8 and
-resume validation before delegating to the selected official script:
+cross-suite entry point. It reads stable parameters from
+`evals/omnimemeval/benchmark.config.json`, pins `--lib nmg`, establishes UTF-8,
+generates the run identity, and validates resume before delegating:
 
 ```powershell
-npm run benchmark:omni -- <longmemeval|locomo|beam|personamem-v2|halumem> `
-  --env .env.nmg-opencode --version <run-id>
+npm run benchmark:omni -- <longmemeval|locomo|beam|personamem-v2|halumem>
 ```
 
-Dataset-specific flags follow a second `--`. See
+Common and dataset-specific official flags belong in the config. A copied
+config can be selected with `--config`; an exact result directory can be
+continued with `--resume`. See
 `.pi/skills/omnimemeval-eval/SKILL.md` when starting, resuming, or specializing
 a run.
 
