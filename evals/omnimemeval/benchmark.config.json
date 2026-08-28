@@ -1,8 +1,8 @@
 {
-  "envFile": ".env.nmg-opencode",
+  "envFile": ".env.nmg",
   "commonArgs": [
     "--workers",
-    "1",
+    "16",
     "--llm-workers",
     "16",
     "--top-k",

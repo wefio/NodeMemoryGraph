@@ -32,7 +32,7 @@ Edit the checked-in config when the experiment policy changes:
 ```json
 {
   "envFile": ".env.nmg-opencode",
-  "commonArgs": ["--workers", "1", "--llm-workers", "16", "--top-k", "20"],
+  "commonArgs": ["--workers", "16", "--llm-workers", "16", "--top-k", "20"],
   "suites": {
     "longmemeval": [],
     "beam": ["--scale", "100k"]

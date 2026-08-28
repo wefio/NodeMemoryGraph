@@ -151,11 +151,12 @@ npm run benchmark:omni -- --resume `
 npm run benchmark:omni -- personamem-v2 --dry-run
 ```
 
-The checked-in config currently records `workers=1`, `llm-workers=16`,
+The checked-in config currently records `workers=16`, `llm-workers=16`,
 `top-k=20`, and `num-runs=1`; suite-only official arguments are stored beside
 the suite name. Change that file deliberately or select a copied config rather
-than growing another CLI parameter surface. `workers=1` protects NMG's
-single-writer bridge; answer and judge calls still use the shared LLM pool.
+than growing another CLI parameter surface. OmniMemEval isolates benchmark user
+stores, so ingestion/search and answer/judge each use one bounded 16-worker
+pool rather than spawning an unbounded process per item.
 The runner never kills Pi, NMG daemons, embedding servers, or unrelated Python
 processes. External services remain the caller's responsibility.
 
