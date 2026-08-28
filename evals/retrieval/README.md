@@ -98,26 +98,31 @@ reproduces metrics bit-for-bit (only wall-clock latency varies).
 
 ## Environment
 
-Canonical runner: `evals/retrieval/bench.sh <arm> <dataset[,dataset...]>`
-(arms: `lexical` / `hybrid` / `summaries` / `stacked`). It sources `.env`,
-sets the LLM endpoint, health-checks the embedding server, sets the LME heap,
-and tees a dated log to `evals/results/retrieval/logs/`. Prefer it over
-hand-assembled `npm run eval:retrieval` invocations so runs stay comparable.
+Canonical runner: `npm run eval:retrieval -- [options]`. The TypeScript runner
+loads `.env` and, for `--hybrid`, the optional `.env.nmg-bgefix`, then checks a
+local embedding service before running. The package script also sets the LME
+heap limit. There is no Shell launcher in the benchmark call path.
 
 Two external services, both configured by env (no models ship with NMG):
 
-- **Embeddings (hybrid/stacked arms)**: BGE-small-en-v1.5 served by
-  `evals/omnimemeval/bge-server.py` on `127.0.0.1:8000`. GPU setup (one time,
+- **Embeddings (hybrid/stacked arms)**: BGE-small-en-v1.5 served by the sole
+  service entrypoint `evals/omnimemeval/bge_server.py` on `127.0.0.1:8000`.
+  GPU setup (one time,
   PyTorch CUDA wheel ~3GB, venv lives in gitignored `.benchmarks/bge-venv`):
   ```bash
   uv venv .benchmarks/bge-venv
   uv pip install --python .benchmarks/bge-venv/Scripts/python.exe torch --index-url https://download.pytorch.org/whl/cu126
   uv pip install --python .benchmarks/bge-venv/Scripts/python.exe sentence-transformers fastapi "uvicorn[standard]"
-  evals/retrieval/bench.sh server   # foreground; run as its own task
+  .benchmarks/bge-venv/Scripts/python.exe evals/omnimemeval/bge_server.py --device cuda
   ```
-  `uv run --with` resolves PyPI's CPU-only torch on Windows and
-  `uv run --torch-backend` is unsupported (uv 0.12) — hence the explicit
-  venv. The server auto-selects CUDA and reports it on `/health`.
+  `uv run --with` can resolve PyPI's CPU-only torch on Windows, so it is not a
+  supported launch path. Invoke the prepared interpreter directly. With no
+  `--device`, the service selects CUDA when visible and CPU otherwise;
+  `--device cuda` and `--device cpu` force the choice. Explicit CUDA fails
+  instead of silently falling back. `/health` reports the actual Python,
+  PyTorch, device and dynamic-batcher state. Concurrent requests enter a
+  bounded queue and are merged up to `BGE_MAX_BATCH_TEXTS` (default 256) after
+  `BGE_BATCH_WAIT_MS` (default 5 ms); `BGE_MAX_QUEUE_REQUESTS` bounds admission.
 - **LLM (summaries arm / write-time judge)**: default is the OpenCode **Go**
   subscription endpoint `https://opencode.ai/zen/go/v1` with
   `deepseek-v4-flash` (`OPENCODE_API_KEY` in `.env`; included in the Go

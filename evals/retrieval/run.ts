@@ -22,6 +22,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { loadEnvFile } from "node:process";
 
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
 import { NmgStore } from "../../src/core/store.ts";
@@ -51,6 +52,10 @@ const STORES_ROOT = resolve(".benchmarks/retrieval-stores");
 const RESULTS_ROOT = resolve("evals/results/retrieval");
 const RECALL_KS = [1, 5, 10, 20] as const;
 const DEFAULT_TOP_K = 20;
+
+for (const envFile of [resolve(".env")]) {
+  if (existsSync(envFile)) loadEnvFile(envFile);
+}
 
 /** Pinned retrieval configuration (bridge defaults), recorded in the manifest. */
 const PINNED_RETRIEVAL = {
@@ -88,6 +93,12 @@ interface BridgeSearchResult {
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
+  if (options.hybrid) {
+    const embeddingEnv = resolve(".env.nmg-bgefix");
+    if (existsSync(embeddingEnv)) loadEnvFile(embeddingEnv);
+    await assertEmbeddingServiceHealthy();
+  }
+  if (options.summaries) configureSummaryEnvironment();
   const runId = new Date().toISOString().replace(/[:.]/gu, "-");
   const outDir = resolve(options.out ?? resolve(RESULTS_ROOT, runId));
   mkdirSync(outDir, { recursive: true });
@@ -142,6 +153,42 @@ async function main(): Promise<void> {
   writeFileSync(resolve(outDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
   writeFileSync(resolve(outDir, "table.md"), renderMarkdown(report), "utf8");
   console.log(`\nreport written to ${outDir}`);
+}
+
+function configureSummaryEnvironment(): void {
+  process.env.NMG_SUMMARY_BASE_URL ??= "https://opencode.ai/zen/go/v1";
+  process.env.NMG_SUMMARY_MODEL ??= "deepseek-v4-flash";
+  process.env.NMG_SUMMARY_API_KEY ??= process.env.OPENCODE_API_KEY ?? "";
+  process.env.NMG_JUDGE_BASE_URL ??= process.env.NMG_SUMMARY_BASE_URL;
+  process.env.NMG_JUDGE_MODEL ??= process.env.NMG_SUMMARY_MODEL;
+  process.env.NMG_JUDGE_API_KEY ??= process.env.NMG_SUMMARY_API_KEY;
+}
+
+async function assertEmbeddingServiceHealthy(): Promise<void> {
+  const baseUrl = process.env.NMG_EMBED_BASE_URL;
+  if (!baseUrl) return;
+  const configuredHealthUrl = process.env.NMG_EMBED_HEALTH_URL;
+  const base = new URL(baseUrl);
+  const local = base.hostname === "127.0.0.1" || base.hostname === "localhost";
+  if (!configuredHealthUrl && !local) return;
+  const healthUrl = configuredHealthUrl ?? new URL("/health", base.origin).toString();
+  let response: Response;
+  try {
+    response = await fetch(healthUrl, { signal: AbortSignal.timeout(5_000) });
+  } catch (error) {
+    throw new Error(
+      `embedding service is unavailable at ${healthUrl}; start evals/omnimemeval/bge_server.py first`,
+      { cause: error },
+    );
+  }
+  if (!response.ok) {
+    throw new Error(`embedding health check failed (${response.status}) at ${healthUrl}`);
+  }
+  const health = (await response.json()) as { device?: string; model?: string; torch?: string };
+  console.log(
+    `embedding service ready: device=${health.device ?? "unknown"} ` +
+      `model=${health.model ?? "unknown"} torch=${health.torch ?? "unknown"}`,
+  );
 }
 
 async function retrieveAndScore(

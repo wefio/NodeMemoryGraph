@@ -12,6 +12,18 @@ the command line.
 
 ## Run
 
+For an embedding-backed run, start the single local service in a separate
+terminal with the already prepared interpreter, then verify that `/health`
+reports `"device":"cuda"`:
+
+```powershell
+.benchmarks/bge-venv/Scripts/python.exe evals/omnimemeval/bge_server.py --device cuda
+```
+
+Do not use `uv run --with` for this service on Windows: it can resolve a second,
+CPU-only PyTorch environment. Omit `--device` only when automatic GPU-or-CPU
+selection is intentional; use `--device cpu` for an explicit CPU run.
+
 ```powershell
 # Inspect without model or embedding work.
 npm run benchmark:omni -- longmemeval --dry-run

@@ -24,6 +24,7 @@ test("external target stays free of the bundled embedding environment", () => {
 
 test("bundled embedding startup is explicitly gated", () => {
   assert.match(entrypoint, /NMG_EMBED_LOCAL_SERVER:-0/);
-  assert.match(entrypoint, /python \/app\/evals\/omnimemeval\/bge-server\.py/);
+  assert.match(entrypoint, /python \/app\/evals\/omnimemeval\/bge_server\.py/);
+  assert.match(dockerfile, /COPY evals\/omnimemeval\/embedding_batcher\.py/);
   assert.match(entrypoint, /wait "\$nmg_pid"/);
 });

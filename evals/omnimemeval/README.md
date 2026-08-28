@@ -683,10 +683,11 @@ A matched LoCoMo K=20 retrieval ablation used the locally cached
 benchmark server in `bge_server.py`. Vectors remained in each user's SQLite
 database; no vector database or vLLM server was introduced.
 
-With the model already present in the Hugging Face cache, the local server is:
+With the model and CUDA-enabled dependencies installed in the benchmark venv,
+the local server is:
 
 ```bash
-uv run --offline evals/omnimemeval/bge_server.py
+.benchmarks/bge-venv/Scripts/python.exe evals/omnimemeval/bge_server.py --device cuda
 ```
 
 Set `NMG_EMBED_BASE_URL=http://127.0.0.1:8000/v1`,

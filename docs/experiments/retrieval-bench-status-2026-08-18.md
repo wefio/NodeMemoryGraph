@@ -29,9 +29,11 @@ prompt version `leaf-summary-v1` in `src/integration/leaf-summarizer.ts`.
 
 ## How to run anything
 
-```bash
-evals/retrieval/bench.sh server            # BGE embedding server (GPU), own task
-evals/retrieval/bench.sh <arm> <datasets>  # lexical|hybrid|summaries|stacked
+Current invocation (the historical Shell wrapper has been removed):
+
+```powershell
+.benchmarks/bge-venv/Scripts/python.exe evals/omnimemeval/bge_server.py --device cuda
+npm run eval:retrieval -- --dataset <datasets> --hybrid
 ```
 
 Stores persist in `.benchmarks/retrieval-stores/<dataset>/` and are reused;
@@ -49,7 +51,7 @@ summaries persist too (membersKey fingerprint), so re-runs cost no LLM calls.
   `OPENCODE_API_KEY`). Fallback: DeepSeek official (`DEEPSEEK_API_KEY` in
   `.env`):
   `NMG_SUMMARY_BASE_URL=https://api.deepseek.com NMG_SUMMARY_MODEL=deepseek-chat ...`
-  (bench.sh honors pre-set `NMG_SUMMARY_*` overrides).
+  (the TypeScript runner honors pre-set `NMG_SUMMARY_*` overrides).
 - Go gateway ignores `thinking: {type:"disabled"}` (responses still carry a
   `reasoning` field) — expect higher per-call latency/cost than the official
   endpoint. Not yet worked around.

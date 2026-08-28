@@ -20,7 +20,7 @@ trap shutdown EXIT INT TERM
 mkdir -p "$(dirname "$NMG_DB_PATH")"
 
 if [[ "${NMG_EMBED_LOCAL_SERVER:-0}" == "1" ]]; then
-  python /app/evals/omnimemeval/bge-server.py &
+  python /app/evals/omnimemeval/bge_server.py &
   bge_pid=$!
 
   for _ in $(seq 1 120); do

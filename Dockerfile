@@ -87,7 +87,8 @@ RUN pip install --no-cache-dir sentence-transformers fastapi "uvicorn[standard]"
 RUN BGE_SOURCE_MODEL="$BGE_SOURCE_MODEL" BGE_SOURCE_REVISION="$BGE_REVISION" \
     python -c 'import os; from sentence_transformers import SentenceTransformer; model = SentenceTransformer(os.environ["BGE_SOURCE_MODEL"], revision=os.environ["BGE_SOURCE_REVISION"]); model.save_pretrained("/opt/models/bge-small-en-v1.5")'
 
-COPY evals/omnimemeval/bge-server.py ./evals/omnimemeval/bge-server.py
+COPY evals/omnimemeval/bge_server.py ./evals/omnimemeval/bge_server.py
+COPY evals/omnimemeval/embedding_batcher.py ./evals/omnimemeval/embedding_batcher.py
 
 ENV HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1

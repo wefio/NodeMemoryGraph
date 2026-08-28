@@ -73,7 +73,7 @@
     "eval:halumem:promotion-audit": "node --experimental-strip-types evals/halumem/promotion-audit.ts",
     "eval:halumem:score": "node --experimental-strip-types evals/halumem/score.ts",
     "eval:quality": "node --experimental-strip-types evals/memory-quality/run.ts",
-    "eval:retrieval": "node --experimental-strip-types evals/retrieval/run.ts",
+    "eval:retrieval": "node --max-old-space-size=8192 --experimental-strip-types evals/retrieval/run.ts",
     "eval:longmem": "node --experimental-strip-types evals/longmemeval/run.ts",
     "eval:gate": "node --experimental-strip-types evals/gate/run.ts",
     "eval:disclosure": "node --experimental-strip-types evals/disclosure/run.ts",
