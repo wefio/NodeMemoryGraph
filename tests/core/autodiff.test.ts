@@ -18,6 +18,25 @@ test("UOp autodiff evaluates lazily and differentiates matrix multiplication", (
   assert.deepEqual([...input.grad], [4, 6]);
 });
 
+test("matrix multiplication preserves rectangular tails and gradients", () => {
+  const left = Tensor.matrix([1, 2, 3, 4, 5, 6], 2, 3, true);
+  const right = Tensor.matrix(
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    3,
+    5,
+    true,
+  );
+  const product = left.matmul(right);
+
+  assert.deepEqual([...product.data], [46, 52, 58, 64, 70, 100, 115, 130, 145, 160]);
+  product.sum().backward();
+  assert.deepEqual([...left.grad], [15, 40, 65, 15, 40, 65]);
+  assert.deepEqual(
+    [...right.grad],
+    [5, 5, 5, 5, 5, 7, 7, 7, 7, 7, 9, 9, 9, 9, 9],
+  );
+});
+
 test("softmax cross entropy produces the expected graph gradient", () => {
   const logits = Tensor.vector([1, 2, 3], true);
   const probabilities = logits.softmax();
