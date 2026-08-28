@@ -109,23 +109,101 @@ nmg lab list --json
 nmg lab enable <CAPABILITY> --session-id <SESSION> \
   --requester agent:<NAME> --reason "<why ordinary NMG is insufficient>" --json
 nmg lab status <CAPABILITY> --session-id <SESSION> --json
+nmg lab invoke <CAPABILITY> --session-id <SESSION> \
+  --operation <OP> --input-json '<JSON>' --json
 nmg lab disable <CAPABILITY> --session-id <SESSION> --json
 ```
 
-Agent-self-service capabilities are:
+`nmg lab list` is the authoritative contract source: it returns each capability's
+`id`, `summary`, `agentMayEnable`, `supportedScopes`, and `operations`. Always
+read it before calling `invoke`; do not guess an operation name.
 
-- `reasoning_workspace`: explicit session scratchpad/checkpoints;
-- `memory_graph_reasoner`: read-only differentiable traversal, fuzzy logic, and
-  what-if analysis;
-- `controller_shadow`: controller observations without actuation.
+### Enablement rules
 
-MGR graph nodes accept `outgoing: string[]`. When any node declares it, the first
-node is selected globally and every later step must follow the preceding node's
-directed outgoing edges. An empty list terminates that path.
+- Agent-self-service capabilities (`agentMayEnable=true`) are:
+  - `reasoning_workspace`: session-private scratch graph and checkpoints;
+  - `memory_graph_reasoner`: read-only differentiable traversal, fuzzy logic,
+    and what-if analysis;
+  - `controller_shadow`: controller observations without actuation.
+- `controller_controlled` and `controller_active` have `agentMayEnable=false` and
+  **cannot** be self-authorized by an Agent; they require independent
+  harness/operator authorization and the existing activation gates. Never try
+  to bypass a denial.
+- Leases are session-scoped (`--session-id`) and expire after the enable TTL.
+  Lab output is scratch/experimental and is **not** durable truth until
+  separately admitted through a governed `remember` call.
 
-`controller_controlled` and `controller_active` cannot be self-authorized by an
-Agent. Lab leases are session-scoped and expire; Lab output is not durable truth
-until separately admitted through governed `remember`.
+### `reasoning_workspace` operations
+
+Session-private auditable scratch graph for multi-step reasoning and compaction
+recovery. Every node carries one `kind`. Confirmed `kind` values:
+`goal`, `observation`, `hypothesis`, `evidence`, `conclusion`, `decision`,
+`open_question`, `next_action`.
+
+| Operation | Required input keys | Returns | Status |
+| --- | --- | --- | --- |
+| `add` | `id`, `kind`, `content` | node `{id, kind, content, status, importance, evidenceRefs, createdAt, updatedAt}` | verified live |
+| `link` | `sourceId`, `targetId`, `type` | `{sourceId, targetId, type, createdAt}` | verified live |
+| `checkpoint` | `label` (optional) | snapshot `{sessionId, nodes, edges, omittedNodes, text}` | verified live |
+| `update` | node id + fields | node | not re-verified |
+| `mark_compacted` | session | compaction marker | not re-verified |
+| `consume_checkpoint` | session | checkpoint consumption | not re-verified |
+| `clear` | session | cleared workspace | not re-verified |
+
+`link` uses `sourceId`/`targetId`/`type` — not `from`/`to`/`relation`.
+`checkpoint` output includes a ready-to-inject `text` projection; treat it as an
+auditable scratchpad, not verified fact.
+
+```text
+nmg lab invoke reasoning_workspace --session-id <SESSION> \
+  --operation add --input-json '{"id":"n1","kind":"hypothesis","content":"..."}' --json
+nmg lab invoke reasoning_workspace --session-id <SESSION> \
+  --operation link --input-json '{"sourceId":"<id>","targetId":"<id>","type":"supports"}' --json
+nmg lab invoke reasoning_workspace --session-id <SESSION> \
+  --operation checkpoint --input-json '{"label":"step-1"}' --json
+```
+
+### `memory_graph_reasoner` operations
+
+Read-only differentiable reasoning over **supplied** memory vectors. It does not
+query the LTG store; you pass the graph in every call. A graph node is
+`{id, vector, requires?, outgoing?}` where `vector` is an **L2-normalized number
+array** (not a query string). The daemon converts a JSON array of nodes into the
+internal `Map<id, node>`.
+
+| Operation | Required input keys | Returns | Status |
+| --- | --- | --- | --- |
+| `traverse` | `queryVector`, `graph`, `maxSteps` | `{path:[{nodeId,score,queryBefore,queryAfter,gate}], finalQuery, pathScore}` | verified live |
+| `logic_search` | `expr`, `graph`, `topK` | `[{nodeId, membership, atomScores}]` (ranked by `membership`) | from source (`logicSearch`) |
+| `what_if` | `queryVector`, `graph`, `hypotheticalNode`, `maxSteps` (+`impactThreshold`) | `{baseline, withNode, impacted:[{nodeId, scoreBefore, scoreAfter, delta, pathChange}]}` | from source (`whatIf`) |
+
+- `queryVector` must be a non-empty finite number array (sends `queryVector is
+  required` otherwise); it is the traversal anchor.
+- `graph` is a JSON array of node objects (`graph must contain between 1 and
+  10000 nodes`).
+- `traverse` greedily advances from the globally best start node; each step's
+  `queryAfter` becomes the next step's `queryBefore`.
+- When any node declares `outgoing: string[]`, traversal is topology-constrained
+  after the global start: every later step must follow the preceding node's
+  directed outgoing edges. An empty list terminates that path. Omit `outgoing`
+  for global (legacy) traversal.
+- `logic_search` takes a fuzzy `expr`: `{kind:"atom", queryVector}` or
+  `{kind:"and"|"or", children:[...]}` / `{kind:"not", child}` (composable
+  `nand`/`xor` helpers exist). Each result carries `membership` (combined
+  membership in (0,1)) and `atomScores` (per-atom memberships for explanation).
+- `what_if` injects a `hypotheticalNode` and compares traversal before/after
+  (`impacted` lists nodes whose score changed beyond `impactThreshold`, default
+  `0.05`).
+
+```text
+nmg lab invoke memory_graph_reasoner --session-id <SESSION> \
+  --operation traverse --input-json '{"queryVector":[0.8,0.2],"maxSteps":3,"graph":[{"id":"a","vector":[1,0],"outgoing":["b"]},{"id":"b","vector":[0,1]}]}' --json
+```
+
+### `controller_shadow`
+
+Single `observe` operation: records controller decisions without changing product
+retrieval. Read-only diagnostics; does not actuate.
 
 ## ANN index
 

@@ -103,6 +103,12 @@ For Codex, execute these commands through the shell tool. If the active
 three-command contract in working memory and open the references only for a
 named special case.
 
+The exact per-operation input contract for every Lab capability (required keys,
+valid `kind` values, node/graph shape, and return structure) lives in
+[`references/optional-capabilities.md`](references/optional-capabilities.md)
+under **Session Lab capabilities**. Read `nmg lab list` and that section before
+calling `invoke` instead of guessing operation names or parameters.
+
 ## Shared task blackboard
 
 The model-facing board and automatic wake polling are available by default so a
