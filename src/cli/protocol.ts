@@ -98,51 +98,63 @@ export const NMG_CAPABILITIES = [
 
 export type NmgCapability = (typeof NMG_CAPABILITIES)[number];
 
-export const NMG_METHODS = [
-  "get",
-  "recordActiveGraphAttribution",
-  "hello",
-  "perfAggregates",
-  "pruneRetrievalTraces",
-  "remember",
-  "resolveRemember",
-  "recordClaimOutcomes",
-  "search",
-  "retentionCandidates",
-  "setStorageState",
-  "deleteMemory",
-  "exportMemories",
-  "mergeNodes",
-  "rollbackNodeTransform",
-  "splitNode",
-  "topologyProposal",
-  "memoryMaintenanceProposal",
-  "syncStg",
-  "stgPurgeSession",
-  "taskBoard",
-  "chainCreate",
-  "chainAdd",
-  "chainRemove",
-  "chainEdgeAdd",
-  "chainEdgeRemove",
-  "chainGet",
-  "chainList",
-  "lab",
-  "sessionActiveGraph",
-  "shutdown",
-  "status",
-] as const;
-
-export type NmgMethod = (typeof NMG_METHODS)[number];
+interface NmgRpcDescriptor {
+  /** Additive same-epoch methods are callable only when hello advertises this. */
+  optionalCapability?: NmgCapability;
+}
 
 /**
- * Methods introduced additively within a compatibility epoch. Clients gate
- * these calls locally instead of treating an older same-epoch daemon as
- * globally incompatible. Baseline methods deliberately do not appear here.
+ * Runtime source of truth for RPC existence and additive capability gates.
+ * Parsers, handlers, transactions, and host exposure remain explicit because
+ * their semantics cannot be inferred safely from a wire descriptor.
  */
-export const NMG_OPTIONAL_METHOD_CAPABILITIES = {
-  sessionActiveGraph: "session-active-graph",
-} as const satisfies Partial<Record<NmgMethod, NmgCapability>>;
+export const NMG_RPC_DESCRIPTORS = {
+  get: {},
+  recordActiveGraphAttribution: {},
+  hello: {},
+  perfAggregates: {},
+  pruneRetrievalTraces: {},
+  remember: {},
+  resolveRemember: {},
+  recordClaimOutcomes: {},
+  search: {},
+  retentionCandidates: {},
+  setStorageState: {},
+  deleteMemory: {},
+  exportMemories: {},
+  mergeNodes: {},
+  rollbackNodeTransform: {},
+  splitNode: {},
+  topologyProposal: {},
+  memoryMaintenanceProposal: {},
+  syncStg: {},
+  stgPurgeSession: {},
+  taskBoard: {},
+  chainCreate: {},
+  chainAdd: {},
+  chainRemove: {},
+  chainEdgeAdd: {},
+  chainEdgeRemove: {},
+  chainGet: {},
+  chainList: {},
+  lab: {},
+  sessionActiveGraph: { optionalCapability: "session-active-graph" },
+  shutdown: {},
+  status: {},
+} as const satisfies Record<string, NmgRpcDescriptor>;
+
+export type NmgMethod = keyof typeof NMG_RPC_DESCRIPTORS;
+
+export const NMG_METHODS = Object.freeze(Object.keys(NMG_RPC_DESCRIPTORS) as NmgMethod[]);
+
+/** Derived gate table; never maintain a second method list by hand. */
+export const NMG_OPTIONAL_METHOD_CAPABILITIES = Object.freeze(
+  Object.fromEntries(
+    Object.entries(NMG_RPC_DESCRIPTORS).flatMap(([method, descriptor]) =>
+      "optionalCapability" in descriptor ? [[method, descriptor.optionalCapability] as const] : [],
+    ),
+  ) as Partial<Record<NmgMethod, NmgCapability>>,
+);
 
 export interface NmgHelloResult {
   /** Wire value is open; assertDaemonProtocol narrows it to this client epoch. */
@@ -150,6 +162,8 @@ export interface NmgHelloResult {
   service: "node-memory-graph";
   version: string;
   capabilities: readonly string[];
+  /** Runtime discovery surface; optional so earlier same-epoch daemons remain compatible. */
+  methods?: readonly string[];
 }
 
 export interface NmgStatusResult extends NmgHelloResult {

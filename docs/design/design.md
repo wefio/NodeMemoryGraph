@@ -293,6 +293,15 @@ error only when the caller invokes a missing capability. Clients fail closed
 only when a live daemon uses a different compatibility epoch and then require an
 explicit `nmg daemon restart` at a safe coordination point; they never replace a
 shared daemon automatically.
+`NMG_RPC_DESCRIPTORS` is the runtime declaration source for method existence and
+same-epoch optional capability gates. It derives the server whitelist, the
+TypeScript method union, the client gate table, and the optional `hello.methods`
+discovery list; bidirectional contract tests
+reject a descriptor without a service handler or a handler without a descriptor.
+This automation intentionally stops at the wire declaration. Parsers,
+cross-field invariants, transactions, side effects, CLI syntax, host exposure,
+and epoch-bump decisions remain explicit because structural generation cannot
+establish their semantics or safety.
 `nmg.v5` was deliberately incompatible with v4 because the ambiguous
 `recordActiveGraphUse` RPC was replaced by diagnostic-only
 `recordActiveGraphAttribution`; silently connecting to v4 would lose attribution

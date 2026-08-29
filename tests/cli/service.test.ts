@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
+import { NMG_METHODS, NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { stgStorePath } from "../../src/core/stg.ts";
@@ -21,6 +21,7 @@ test("status and hello do not create or open the database", async () => {
     assert.equal(hello.protocol, NMG_PROTOCOL_VERSION);
     assert.ok(hello.capabilities.includes("search"));
     assert.ok(hello.capabilities.includes("lab-capabilities"));
+    assert.deepEqual(hello.methods, NMG_METHODS);
     assert.equal(status.storage.exists, false);
     assert.equal(status.storage.loaded, false);
     assert.equal(existsSync(databasePath), false);

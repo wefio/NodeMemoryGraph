@@ -85,6 +85,7 @@ import {
 import { applyAdvancedFilters, parseAdvancedQuery } from "../core/store/advanced-query.ts";
 import {
   NMG_CAPABILITIES,
+  NMG_METHODS,
   MEMORY_RELATION_JUDGEMENTS,
   NMG_PROTOCOL_VERSION,
   NmgProtocolError,
@@ -527,6 +528,7 @@ export class NmgService {
       service: "node-memory-graph",
       version: SERVICE_VERSION,
       capabilities: NMG_CAPABILITIES,
+      methods: NMG_METHODS,
     };
   }
 

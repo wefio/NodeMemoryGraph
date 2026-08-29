@@ -82,7 +82,9 @@ function importsSpecifier(relative: string, target: string): boolean {
 }
 
 function moduleKey(path: string): string {
-  return resolve(path).replace(/\.[cm]?tsx?$/, "").toLocaleLowerCase();
+  return resolve(path)
+    .replace(/\.[cm]?tsx?$/, "")
+    .toLocaleLowerCase();
 }
 
 test("http client module is thin and free of the core dependency tree", () => {
@@ -93,9 +95,7 @@ test("http client module is thin and free of the core dependency tree", () => {
     !importsSpecifier(CLIENT_FILE, "./service.ts"),
     `${CLIENT_FILE} must not import ./service.ts (would pull store.ts into the Pi process)`,
   );
-  const coreSpecifiers = relativeSpecifiers(CLIENT_FILE).filter((spec) =>
-    spec.includes("/core/"),
-  );
+  const coreSpecifiers = relativeSpecifiers(CLIENT_FILE).filter((spec) => spec.includes("/core/"));
   assert.deepEqual(
     coreSpecifiers,
     [],
@@ -164,10 +164,21 @@ test("http server implements every method the service supports", () => {
 
   // The server's known-method guard is driven by NMG_METHODS (protocol.ts) —
   // the same list the NmgMethod type derives from.
-  const missing = [...serviceMethods].filter((m) => !(NMG_METHODS as readonly string[]).includes(m));
+  const missing = [...serviceMethods].filter(
+    (m) => !(NMG_METHODS as readonly string[]).includes(m),
+  );
   assert.deepEqual(
     missing,
     [],
     `${SERVER_FILE} must serve every service method; missing: ${missing.join(", ")}`,
+  );
+
+  const unimplemented = (NMG_METHODS as readonly string[]).filter(
+    (method) => !serviceMethods.has(method),
+  );
+  assert.deepEqual(
+    unimplemented,
+    [],
+    `protocol registry must not advertise methods without service handlers: ${unimplemented.join(", ")}`,
   );
 });

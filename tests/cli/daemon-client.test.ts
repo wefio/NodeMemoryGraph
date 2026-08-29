@@ -8,7 +8,12 @@ import {
   NmgDaemonCapabilityError,
   NmgDaemonCompatibilityError,
 } from "../../src/cli/daemon-client.ts";
-import { NMG_CAPABILITIES, NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
+import {
+  NMG_CAPABILITIES,
+  NMG_OPTIONAL_METHOD_CAPABILITIES,
+  NMG_PROTOCOL_VERSION,
+  NMG_RPC_DESCRIPTORS,
+} from "../../src/cli/protocol.ts";
 
 test("daemon protocol guard accepts the current compatibility epoch", () => {
   assert.doesNotThrow(() => assertDaemonProtocol({ protocol: NMG_PROTOCOL_VERSION }));
@@ -69,4 +74,15 @@ test("optional method guard fails only when the invoked capability is unavailabl
     daemonSupportsCapability({ capabilities: new Set(["future-parameter"]) }, "future-parameter"),
     true,
   );
+});
+
+test("RPC descriptors derive every optional method capability from advertised capabilities", () => {
+  for (const [method, descriptor] of Object.entries(NMG_RPC_DESCRIPTORS)) {
+    if (!("optionalCapability" in descriptor)) continue;
+    assert.ok(NMG_CAPABILITIES.includes(descriptor.optionalCapability));
+    assert.equal(
+      NMG_OPTIONAL_METHOD_CAPABILITIES[method as keyof typeof NMG_OPTIONAL_METHOD_CAPABILITIES],
+      descriptor.optionalCapability,
+    );
+  }
 });
