@@ -22,3 +22,8 @@
 ```
 
 决策记录通常应提供互相链接的英文版和 `.zh-CN.md` 版。缺少译文只产生警告，不作为硬错误。
+
+## 开放提案
+
+- [会话级 Active Graph 运行时](proposed/2026-08-29-session-active-graph-runtime.zh-CN.md)
+- [外部 Repository Control Plane](proposed/2026-08-29-repository-control-plane.zh-CN.md)
