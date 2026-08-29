@@ -4,14 +4,13 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Context } from "@deepseek-ai/cordis";
-
 import { httpHandler } from "../../src/cli/http-server.ts";
 import type { ServerState } from "../../src/cli/lifecycle.ts";
 import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
+import { createTestRuntime, type TestEffectScope } from "./cordis-adapter.ts";
 
 export interface TestWorkspace {
   path: string;
@@ -26,21 +25,17 @@ export interface TestDaemon {
   state: ServerState;
 }
 
-export type TestPlugin = (context: Context, runtime: TestRuntime) => void | Promise<void>;
-
-type DisposableFiber = { dispose(): Promise<void> };
+export type TestPlugin = (context: TestEffectScope, runtime: TestRuntime) => void | Promise<void>;
 
 /** Test-only composition root. Product code never depends on Cordis. */
 export class TestRuntime {
-  readonly #root = new Context();
-  readonly #fibers: DisposableFiber[] = [];
+  readonly #lifecycle = createTestRuntime();
   readonly #resources = new Map<symbol, unknown>();
   #disposed = false;
 
   async use(plugin: TestPlugin): Promise<void> {
     if (this.#disposed) throw new Error("TestRuntime is already disposed");
-    const fiber = await this.#root.plugin((context) => plugin(context, this));
-    this.#fibers.push(fiber);
+    await this.#lifecycle.use((context) => plugin(context, this));
   }
 
   provide<T>(key: symbol, value: T): void {
@@ -68,10 +63,8 @@ export class TestRuntime {
   async dispose(): Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
-    for (const fiber of this.#fibers.reverse()) await fiber.dispose();
-    this.#fibers.length = 0;
+    await this.#lifecycle.dispose();
     this.#resources.clear();
-    await this.#root.fiber.dispose();
   }
 }
 

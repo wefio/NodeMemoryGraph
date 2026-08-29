@@ -10,7 +10,11 @@
 
 ## 决策
 
-精确锁定开发依赖 `@deepseek-ai/cordis@4.0.1`，且仅在 `tests/support/test-runtime.ts` 中使用。窄 `TestRuntime` wrapper 组合 workspace、database 与进程内 daemon 插件，并按逆序释放 Cordis fiber。产品模块、发布包和 adapter 不导入 Cordis。
+精确锁定开发依赖 `@deepseek-ai/cordis@4.0.1`，且仅在
+`tests/support/cordis-adapter.ts` 中使用。其唯一运行时导出 `createTestRuntime()` 负责 Cordis
+fiber 和幂等的逆序释放，不导入 NMG Core。`tests/support/test-runtime.ts` 在该生命周期边界之上
+单独组合 workspace、database 与进程内 daemon fixture。产品模块、发布包和 adapter 不导入
+Cordis。
 
 ## 考虑过的替代方案
 
@@ -20,4 +24,4 @@
 
 ## 后果
 
-生命周期测试获得显式依赖与确定性清理，生产架构不变。wrapper 是替换接缝，将来移除 Cordis 不需要修改 NMG Core。精确版本避免测试基础设施在未评审时跟随候选版本变化。
+生命周期测试获得显式依赖与确定性清理，生产架构不变。生命周期 adapter 是替换接缝，将来移除 Cordis 不需要修改 NMG fixture 或 NMG Core。精确版本避免测试基础设施在未评审时跟随候选版本变化。

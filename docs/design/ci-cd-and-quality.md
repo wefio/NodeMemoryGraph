@@ -1,7 +1,7 @@
 # 代码质量与 CI/CD
 
 **Created:** 2026-07-20  
-**Updated:** 2026-08-27
+**Updated:** 2026-08-29
 **Authority:** 仓库测试、CI 与 Agent 开发流程契约
 
 NMG 的测试负责阻止可复现错误，不负责冻结尚未验证的设计。产品契约、研究测量与故障注入使用不同执行轨道，避免 benchmark 便利逻辑反向定义产品行为。
@@ -60,7 +60,10 @@ CI 或打包规则变更除本地目标测试外，应在 clean checkout（或�
 
 ## 4. 可组合测试运行时
 
-需要文件系统、SQLite 和 daemon 的集成测试使用 `tests/support/test-runtime.ts`：
+Cordis 本身只出现在 `tests/support/cordis-adapter.ts`。该文件只导出
+`createTestRuntime()`，返回可组合 effect 与幂等 `dispose()` 的最小生命周期对象；它不导入 NMG
+Core、CLI 或 daemon。需要文件系统、SQLite 和 daemon 的集成测试再由
+`tests/support/test-runtime.ts` 组合 NMG 专用资源：
 
 ```text
 TestRuntime
@@ -71,7 +74,7 @@ TestRuntime
 
 测试通过 `withTestRuntime(...)` 或显式 `dispose()` 获取 RAII 式回收。插件依赖必须显式：database 要求 workspace，daemon 要求 database；缺少依赖时失败，不偷偷创建隐含全局状态。daemon 在进程内使用真实 HTTP JSON-RPC handler，因此能验证协议，同时不会遗留后台进程。
 
-该层精确锁定 `@deepseek-ai/cordis@4.0.1` 作为 **devDependency**，只借用插件 effect/fiber 生命周期。NMG Core、daemon、Pi adapter 和发布包均不依赖 Cordis；不引入其 loader、HMR 或配置系统。测试运行时通过窄 wrapper 隔离，未来若替换框架只修改 test support。
+该层精确锁定 `@deepseek-ai/cordis@4.0.1` 作为 **devDependency**，只借用插件 effect/fiber 生命周期。NMG Core、daemon、Pi adapter 和发布包均不依赖 Cordis；不引入其 loader、HMR 或配置系统。Cordis adapter 与 NMG fixture composition 分离，未来若替换框架只需修改生命周期 adapter。
 
 ## 5. Agent 原生仓库上下文
 

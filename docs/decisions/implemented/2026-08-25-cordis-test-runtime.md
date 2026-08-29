@@ -10,7 +10,12 @@ Integration tests repeatedly assemble temporary workspaces, SQLite stores, and H
 
 ## Decision
 
-Use the exact development dependency `@deepseek-ai/cordis@4.0.1` only inside `tests/support/test-runtime.ts`. A narrow `TestRuntime` wrapper composes workspace, database, and in-process daemon plugins and disposes their Cordis fibers in reverse order. Product modules, published packages, and adapters do not import Cordis.
+Use the exact development dependency `@deepseek-ai/cordis@4.0.1` only inside
+`tests/support/cordis-adapter.ts`. Its sole runtime export, `createTestRuntime()`,
+owns Cordis fibers and idempotent reverse-order disposal without importing NMG
+Core. `tests/support/test-runtime.ts` separately composes workspace, database, and
+in-process daemon fixtures over that lifecycle boundary. Product modules,
+published packages, and adapters do not import Cordis.
 
 ## Alternatives considered
 
@@ -20,4 +25,4 @@ Use the exact development dependency `@deepseek-ai/cordis@4.0.1` only inside `te
 
 ## Consequences
 
-Lifecycle tests get explicit dependencies and deterministic cleanup while the production architecture stays unchanged. The wrapper is the replacement seam: Cordis can be removed later without changing NMG Core. The exact version prevents unreviewed release-candidate behavior changes in test infrastructure.
+Lifecycle tests get explicit dependencies and deterministic cleanup while the production architecture stays unchanged. The lifecycle adapter is the replacement seam: Cordis can be removed later without changing NMG fixtures or NMG Core. The exact version prevents unreviewed release-candidate behavior changes in test infrastructure.
