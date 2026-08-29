@@ -6,7 +6,7 @@ Implementation note: isolated STG is wired through the core, daemon, CLI, and
 Pi adapter. One physical STG database is stored per `projectDir`; records and
 derived retrieval paths are isolated by `sessionId` rows. Pi propagates its
 native session identity through automatic recall and the memory tools.
-**Updated:** 2026-08-13
+**Updated:** 2026-08-29
 **Related:** [design.md](design.md) §1/§5/§6/§7.1, [tiered-disclosure-design.md](tiered-disclosure-design.md), [edge-activation-design.md](edge-activation-design.md)
 
 This document is the standalone reference for NMG's three-graph model:
@@ -22,13 +22,14 @@ state.
 | ------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
 | **STG** | private to one Agent session   | new, provisional, task-local, or not-yet-consolidated semantic information                                                      | session; expiry is a policy decision |
 | **LTG** | the only shared graph          | durable atomic memories and consolidated semantic structure                                                                     | persistent                           |
-| **AG**  | private, per-Agent/per-session | budget-constrained runtime projection from that session's STG and the shared LTG, with optional temporary cross-graph relations | one query/task; released after       |
+| **AG**  | private to one Agent session   | mutable, budget-constrained runtime graph over STG/LTG references, task frames, tool observations, activation and temporary reasoning | session; memory-resident only        |
 
 AG is **not** a third authoritative or shared memory graph. It is the private
-virtual memory space presented to one model session. Agents never write a
-shared AG or STG. Durable collaboration occurs through admitted LTG memories;
-temporary coordination occurs through a separate Task Board whose entries are
-projected into each caller's private AG.
+working graph owned by one model session and must remain in memory. Agents never
+write a shared AG or STG. Durable collaboration occurs through admitted LTG
+memories; temporary coordination occurs through a separate Task Board whose
+entries are projected into each caller's private AG. Immutable
+`ProjectionRevision` snapshots record each concrete model-visible surface.
 
 ```text
 HistoryRecord
@@ -49,14 +50,19 @@ Semantic memory store
        - consolidated strategy | derived concept | typed relation
        - stable semantic addresses and bounded leaf/block hierarchies
 
-STG + LTG + current query/task state
+STG + LTG + current query/task belief + tool observations
        |
-       | budgeted selection and temporary relation construction
+       | budgeted selection, update, activation and temporary reasoning
        v
-Active Graph (virtual, ephemeral)
-  - selected nodes, relations, and bounded local record/evidence content
-  - temporary cross-STG/LTG edges and query-local reasoning nodes
-  - per-projection token/node/edge/depth/latency budget ledger
+Session Active Graph (mutable, memory-resident, non-authoritative)
+  - bounded task frames, selected references and local evidence content
+  - temporary tool state, activation edges and reasoning artifacts
+  - total token/node/edge/depth/reasoning/task/latency budget ledger
+       |
+       | freeze visible subset
+       v
+ProjectionRevision
+  - immutable selection/disclosure/feedback boundary
 
 Task Board (shared coordination, not a memory graph)
   - task-scoped attributed goals, blockers, results, handoffs, and decisions
@@ -215,27 +221,33 @@ The two dimensions are orthogonal (design.md §10).
   imply merging node identity (see edge-activation-design.md §4.4 for the
   merge-as-compression view).
 
-## 5. AG: the query-scoped projection
+## 5. AG: session runtime graph and projection revisions
 
 ```text
-AG_t = Project_B(STG, LTG, q_t, task_t)
+candidates_t = Project(STG, LTG, q_t, TaskBelief_t)
+AG_(t+1) = Update_B(AG_t, candidates_t, observations_t, TaskBelief_t)
+Projection_t = Freeze(VisibleSubset(AG_(t+1)))
 ```
 
-`B` is a hard multidimensional budget over injected tokens, nodes, edges,
-records/evidence excerpts, local tier/depth, graph expansion, and latency.
-The projection may contain:
+`B` is one hard multidimensional budget over injected tokens, nodes, edges,
+records/evidence excerpts, temporary observations, task frames, reasoning
+steps, local tier/depth, graph expansion, and latency. AG may contain:
 
 - resident critical LTG constraints;
 - newly active STG observations and task state;
 - retrieved LTG nodes and bounded local content;
 - selected persistent relations;
 - temporary STG-to-LTG, LTG-to-LTG, or query-local relations used only for
-  the current task.
+  the current task;
+- bounded tool observations, unresolved working state, activation metadata,
+  and hypothetical reasoning artifacts;
+- one active task frame and a small bounded cooling set.
 
-AG construction is **query planning, not graph copying**: identify candidate
-nodes first, then allocate local-content and relation budgets according to
-expected usefulness. The model can request progressive expansion, but the
-harness enforces the total budget and provenance boundary.
+AG update is **working-memory management, not graph copying**: identify
+candidates, update the appropriate task frame, allocate the total runtime
+budget, then freeze one immutable model-visible revision. The model can request
+progressive expansion, but the harness enforces both the total budget and the
+projection provenance boundary.
 
 The harness also enforces a separate per-turn construction-process budget. Pi
 currently allows at most three searches and five total search/get calls, requires
@@ -244,27 +256,28 @@ searches introduce no new candidate IDs. Thus a small final AG cannot be reached
 through an unbounded tool loop. These counters are session-local, reset on a new
 user turn, and remain hard limits outside learned/QPP budget allocation.
 
-AG contains references and query-local annotations, not authoritative
-copies. When AG is released, temporary nodes and edges disappear; only
-explicitly recorded usage outcomes, stability observations, and accepted
-writes survive.
+AG contains references and runtime annotations, not authoritative copies. It
+may mutate across turns and compaction, but session release destroys it. Only
+projection traces, explicitly recorded outcomes, stability observations, and
+accepted writes survive.
 
-The Pi adapter may keep a small **session injection window** beside these
-query-scoped projections. It records only the stable memory ID, a content
-hash, the greatest disclosure depth already rendered, and the turn number.
+The target AG owns a bounded **disclosure ledger**. It records only the stable
+memory ID, a content hash, the greatest disclosure depth already rendered, and
+the turn number.
 Within 12 turns, unchanged content already disclosed deeply enough is folded
 to an `already_in_context` reference. A deeper request, changed evidence,
 expiry from the window, or another session renders it again. The window is
-bounded to 128 references, lives only in adapter memory, and is cleared at
-session shutdown. It is context-cache metadata, not a third graph and not an
-authoritative usage outcome.
+bounded to 128 references and cleared at session shutdown. It is context-cache
+metadata inside AG, not an authoritative usage outcome. The current Pi-local
+injection window remains implementation evidence until migrated.
 
-Every persisted AG trace carries its owning harness `sessionId`. Trace reads,
+Every persisted projection trace carries its owning harness `sessionId`. Trace reads,
 disclosure, diagnostic attribution, and verified feedback must present the same identity;
 cross-session access is rejected before any learning or stability signal is
-updated. Pi exposes the owned `activeGraphId` in `nmg_search` headers and sends
-it back with an explicit `nmg_get`, making exact evidence expansion observable
-disclosure. Automatic recall and answer overlap remain diagnostic exposure,
+updated. The target protocol distinguishes session `agId` from immutable
+`projectionId`; current Pi `activeGraphId` behavior is the migration source.
+Sending the projection identity with an explicit `nmg_get` makes exact evidence
+expansion observable disclosure. Automatic recall and answer overlap remain diagnostic exposure,
 not proof that the model used a memory. Only verified user/tool/benchmark
 outcomes may train. Pi's `session_before_compact` event
 clears the injection window so evidence removed by compaction can be rendered
@@ -405,20 +418,23 @@ explicit attributable `remember`. It is not, and must not become, a shared
 authoritative graph — that would break per-Agent memory ownership and the
 immutable-content red line.
 
-### AG lifecycle: memory-resident, trace-persistent
+### AG lifecycle: mutable in memory, revision trace persistent
 
-AG itself is **pure memory, released with the session**. What persists is
-not a copy of AG but its **observation trace**: which nodes/edges/records were
-selected, rendered, expanded, fetched via `nmg_get`, diagnostically matched to
-an answer, and independently verified or rejected. These stages are separate;
-API-answer overlap is not proof of causal use.
+AG itself is **pure memory, mutable within and released with the session**. What
+persists is not a copy of AG but immutable **projection observation traces**:
+which nodes/edges/records were selected, rendered, expanded, fetched via
+`nmg_get`, diagnostically matched to an answer, and independently verified or
+rejected. These stages are separate; API-answer overlap is not proof of causal use.
 
 The trace is not bookkeeping — it is the input to persistence decisions.
 Active content is a _candidate signal_ for persistence, not persistence
 itself:
 
 ```text
-STG + LTG ──project──▶ AG (memory-resident, released with session)
+STG + LTG ──update──▶ session AG (mutable, memory-resident)
+                            │ freeze visible subset
+                            ▼
+                    ProjectionRevision
                             │ render / expand / nmg_get / verify
                             ▼
                     observation trace (persistent)
@@ -498,11 +514,11 @@ Consumers (each reads the same persisted field):
 future pushdown would actually save (see the index-decision sketch in
 docs/design/improvement-areas.md).
 
-### AG lifecycle and the tiered disclosure design
+### Projection lifecycle and the tiered disclosure design
 
 The tiered gate ([tiered-disclosure-design.md](tiered-disclosure-design.md))
-is the time dimension of AG construction: AG opens tiers sequentially and
-exposes `tiersOpened` to the model; `nmg_get` is the explicit deep unlock.
+is the time dimension of projection construction: AG opens tiers sequentially
+and exposes `tiersOpened` to the model; `nmg_get` is the explicit deep unlock.
 The activation rules ([edge-activation-design.md](edge-activation-design.md))
 are the within-AG mechanics: node activation is state, edge activation is a
 derived function of it, and budgets apply after (not before) the bounded
@@ -575,8 +591,9 @@ Implemented (design.md §13):
 - explicit STG/LTG residence on memories and nodes;
 - governed immediate atomic LTG writes;
 - ID-preserving promotion/demotion, STG expiry, append-only history;
-- a first-class AG returned by `searchContext`, with persistent and
-  query-local projection traits;
+- a first-class query-scoped `ActiveGraph` returned by `searchContext`, with
+  persistent and query-local projection traits; this is the current
+  implementation that the target design renames to `ProjectionRevision`;
 - Pi propagation of AG IDs from `nmg_search` to `nmg_get`;
 - automatic turn-end maintenance in the Pi harness: STG expiry, due-node
   batch rebalance;
@@ -609,14 +626,25 @@ Implemented but not promoted or naturally calibrated:
   [edge-activation-design.md](edge-activation-design.md));
 - Task Board ACLs and multi-device transport (still future infrastructure).
 
+Designed but not implemented:
+
+- one mutable session-owned AG shared by semantic retrieval, tool observations,
+  task frames, HA activation, and bounded MGR artifacts;
+- distinct `agId`, `taskFrameId`, `projectionId`, and `boardChannelId` identities;
+- migration of Pi `SessionRuntimeAg`, the injection window, and daemon
+  continuation maps into the shared runtime and immutable revision contract.
+
 ## 9. Open questions
 
 1. How should the implemented STG retention, expiry, and demotion priors be
    calibrated so useful provisional information survives without turning STG
    into a second unbounded archive?
-2. How should the implemented AG token, node, edge, evidence, graph-hop, and
-   tier allocator be calibrated across natural queries?
+2. How should the session AG allocate one total token, node, edge, evidence,
+   task-frame, reasoning, graph-hop, and tier budget across natural work?
 3. What natural contradiction and reversal evidence is sufficient to calibrate
    the implemented LTG relation demotion/reopen hysteresis?
 4. Is CLS's replay analogy actionable (e.g., scheduled STG re-integration
    passes), or only a justification for the promotion thresholds?
+5. Which deterministic task-switch baseline is sufficient before HA learns
+   task-frame activation, and how many cooling frames have positive marginal
+   value?

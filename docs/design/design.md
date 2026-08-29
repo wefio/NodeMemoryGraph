@@ -1,7 +1,7 @@
 # NMG design baseline
 
-**Status:** 0.9 / core runtime structurally complete; adaptive defaults validation-gated
-**Updated:** 2026-08-24
+**Status:** 0.10 / core persistence stable; session Active Graph redesign proposed
+**Updated:** 2026-08-29
 
 ## 1. Definition
 
@@ -16,15 +16,21 @@ NMG separates physical memory residence from runtime exposure:
   provisional, task-local, or not-yet-consolidated semantic information;
 - the **Long-Term Graph (LTG)** is the only shared graph and holds durable atomic
   memories and consolidated semantic structure;
-- the **Active Graph (AG)** is a private, per-Agent/per-session,
-  budget-constrained runtime projection selected from that session's STG and
-  the shared LTG, with optional temporary cross-graph relations.
+- the **Active Graph (AG)** is a private, session-owned, mutable and strictly
+  memory-resident runtime graph. It maintains the bounded working set selected
+  from that session's STG and the shared LTG together with temporary tool state,
+  task frames, activation metadata, and reasoning artifacts;
+- a **ProjectionRevision** is an immutable, budgeted model-visible snapshot
+  frozen from AG for one retrieval/disclosure/feedback boundary.
 
-AG is not a third authoritative or shared memory graph. It is the private
-virtual memory space presented to one model session. Agents never write a
-shared AG or STG: durable collaboration occurs through admitted LTG memories;
-temporary coordination occurs through the separate Task Board and is projected
-into each caller's private AG.
+AG is not a third authoritative or shared memory graph. Its only mandatory
+physical property is that the graph itself remains in memory and disappears
+with its owning session; durable truth and provenance remain in STG/LTG. Agents
+never write a shared AG or STG: durable collaboration occurs through admitted
+LTG memories; temporary coordination occurs through the separate Task Board
+and is projected into each caller's private AG. The rationale and migration
+contract are recorded in the proposed
+[session Active Graph decision](../decisions/proposed/2026-08-29-session-active-graph-runtime.md).
 
 > **Standalone reference:** the STG/LTG/AG model, its theoretical lineage
 > (Atkinson–Shiffrin 1968, Complementary Learning Systems 1995, ACT-R/SOAR,
@@ -196,15 +202,17 @@ nmg daemon status
 nmg daemon stop
 ```
 
-`activeGraphId` is not decorative continuation metadata. Agent-independent
+The current `activeGraphId` is not decorative continuation metadata. Agent-independent
 clients must return it on exact `get` so the owning retrieval trace records
 which candidates were **disclosed**. Search, injection, and exact loading are
 observable exposure states, not evidence that an API model relied on a record.
 Keeping them separate prevents candidate exposure from becoming
 self-reinforcing positive feedback.
 
-This is the portable observation boundary. `get(activeGraphId=...)` records
-disclosure through the stable RPC. An adapter may additionally record
+This remains the portable observation invariant during migration. The target
+protocol renames this immutable exposure identity to `projectionId` and adds a
+separate session `agId`; `get(projectionId=...)` records disclosure through the
+stable RPC. An adapter may additionally record
 answer-to-memory overlap, but that is provider-dependent diagnostic telemetry,
 not proof of causal use and not a training label. Only auditable user
 confirmation, tool-verified outcomes, and official benchmark evidence may mark
@@ -214,14 +222,14 @@ depend on native answer, correction, token, and tool lifecycle events, so they
 remain harness-adapter telemetry. Silence or candidate exposure is never
 converted into a positive label.
 
-For Pi ergonomics, `nmg_remember(action="feedback")` may omit `activeGraphId`
+For current Pi ergonomics, `nmg_remember(action="feedback")` may omit `activeGraphId`
 only to target the latest retrieval owned by that same Pi session. A supplied ID
 is still session-checked and remains necessary when reviewing an older graph.
 This avoids fragile UUID transcription without allowing cross-session labels.
 
 One-shot commands remain useful for people and diagnostics. Harnesses normally
 connect to the resident HTTP JSON-RPC service so the bounded in-memory working set,
-session/STG state, Active Graph continuations, node directory, and hot caches
+session/STG state, projection continuations, node directory, and hot caches
 survive across calls. The daemon speaks JSON-RPC 2.0 over HTTP on an
 OS-assigned `127.0.0.1` port, using Node's built-in `http` and `fetch` and
 requiring no third-party transport dependencies. SQLite opens lazily on first
@@ -395,14 +403,19 @@ Semantic memory store
        - consolidated strategy | derived concept | typed relation
        - stable semantic addresses and bounded leaf/block hierarchies
 
-STG + LTG + current query/task state
+STG + LTG + query + session task belief + tool observations
        |
-       | budgeted selection and temporary relation construction
+       | select/update under one hard runtime budget
        v
-Active Graph (virtual, ephemeral)
-  - selected nodes, relations, and bounded local record/evidence content
-  - temporary cross-STG/LTG edges and query-local reasoning nodes
-  - per-projection token/node/edge/depth/latency budget ledger
+Session Active Graph (mutable, memory-resident, non-authoritative)
+  - task frames and selected STG/LTG references
+  - temporary tool observations and unresolved working state
+  - typed semantic / activation / reasoning edge layers
+  - disclosure ledger and total node/edge/evidence/token/depth/latency budget
+       |
+       | Freeze(VisibleSubset)
+       v
+ProjectionRevision (immutable exposure and feedback boundary)
 ```
 
 A `MemoryRecord` is a retrievable semantic statement with provenance and an STG
@@ -738,25 +751,38 @@ local expansion DAG even when the persistent semantic graph contains cycles.
 > the tiered disclosure gate is designed in [tiered-disclosure-design.md](tiered-disclosure-design.md).
 > This section keeps the normative activation/stability model.
 
-### 7.1 Active Graph construction
+### 7.1 Session AG update and projection revisions
 
-For query `q_t` and current task state `task_t`, NMG constructs:
+For query `q_t`, current task belief `TaskBelief_t`, and bounded runtime
+observations `O_t`, NMG targets:
 
 ```text
-AG_t = Project_B(STG, LTG, q_t, task_t)
+candidates_t = Project(STG, LTG, q_t, TaskBelief_t)
+AG_(t+1) = Update_B(AG_t, candidates_t, O_t, TaskBelief_t)
+Projection_t = Freeze(VisibleSubset(AG_(t+1)))
 ```
 
-`B` is a hard multidimensional budget over injected tokens, nodes, edges,
-records/evidence excerpts, local tier/depth, graph expansion, and latency. The
-projection may contain:
+`AG_t` is mutable but session-owned and memory-resident. `Projection_t` is
+immutable and records exactly what the model could see. `B` is one hard
+multidimensional budget over injected tokens, nodes, edges, records/evidence
+excerpts, temporary observations, task frames, reasoning steps, local
+tier/depth, graph expansion, and latency. AG may contain:
 
 - resident critical LTG constraints;
 - newly active STG observations and task state;
 - retrieved LTG nodes and bounded local content;
 - selected persistent relations;
 - temporary STG-to-LTG, LTG-to-LTG, or query-local relations used only for the
-  current task.
-- bounded harness-local tool observations that remain virtual and session-owned.
+  current task;
+- bounded harness-local tool observations that remain virtual and session-owned;
+- one active task frame and a small bounded cooling set, allowing task return
+  without retaining an unbounded transcript.
+
+Identity is explicit rather than overloaded: `agId` owns the session runtime,
+`taskFrameId` partitions semantic work inside AG, `projectionId` names one
+immutable exposure/feedback boundary, and `boardChannelId` names a Task Board
+coordination channel. Current `activeGraphId` and query-hash `taskId` behavior is
+implementation evidence to migrate, not a compatibility constraint.
 
 AG can act as one Agent's **private working blackboard**, but cannot itself
 communicate across Agents. When coordination is required, Agents use the independent
@@ -778,14 +804,17 @@ exposed by daemon RPC and CLI (`nmg board put/read/resolve`). Adapters expose th
 `NMG_ENABLE_COORDINATION` values explicitly suppress that model-facing surface.
 It records `agentId` and source session, supports task
 isolation, cursor reads, TTL deletion, and explicit resolution. Pi reads are
-added to the caller's bounded `SessionRuntimeAg`. Membership/ACLs and remote
+currently added to the caller's bounded `SessionRuntimeAg`; the session-AG
+target replaces that adapter-owned FIFO with shared runtime ingestion.
+Membership/ACLs and remote
 multi-device transport are not implemented; local callers sharing the daemon
 must agree on a task ID and should set stable `NMG_AGENT_ID` values.
 
-AG construction is query planning, not graph copying. It should first identify
-candidate nodes, then allocate local-content and relation budgets according to
-expected usefulness. The model can request progressive expansion, but the
-harness enforces the total budget and provenance boundary.
+AG update is working-memory management, not graph copying. It identifies
+candidate nodes, updates task-local runtime state, allocates one total budget,
+and then freezes only the visible subset. The model can request progressive
+expansion, but the harness enforces both the total AG budget and the immutable
+projection/provenance boundary.
 
 The projection budget and the **construction-process budget** are separate.
 Bounding the final AG does not prevent an Agent from repeatedly issuing searches
@@ -797,7 +826,7 @@ ephemeral guard. These are deterministic harness limits outside QPP and the
 differentiable controller; learned allocation may choose a smaller AG but cannot
 relax them.
 
-### 7.2 Node and edge activation
+### 7.2 HA activation, MGR reasoning, and typed edge layers
 
 Node activation manages current working memory. A target scoring family is:
 
@@ -816,7 +845,7 @@ Edge activation records the current cognitive/retrieval path:
 A_e(t) = f(A_source, A_target, relation_type, q_t, task_t, path_cost)
 ```
 
-Activation is fast-changing and query-local. A highly active node or edge is
+Activation is fast-changing and session/task-local. A highly active node or edge is
 not thereby true, durable, or stable. Conversely, a stable LTG constraint may
 remain inactive in an unrelated task. AG should separately record which nodes
 and edges were selected, which exact evidence was disclosed, which records only
@@ -824,6 +853,29 @@ overlapped the answer, and which evidence was independently verified,
 contradicted, or rejected. Only the final class can supervise persistence and
 controller learning; selection, disclosure, and API-answer overlap remain
 observations rather than utility claims.
+
+Hierarchical Activation (HA) manages admission, cooling, reactivation,
+redundancy-aware retention, and budget allocation across the session AG. Its
+fast `h1` state belongs to the in-memory AG and must be isolated by session and
+branch. Slower learned parameters, if validated, belong to versioned
+controller/Lab state rather than the AG itself.
+
+The Memory-Graph Reasoner (MGR) may consume a bounded HA-selected subgraph and
+emit temporary hypotheses, operator paths, or what-if relations. MGR output is
+not a memory write: every derived artifact carries source references, starts as
+`hypothetical`, consumes the same AG budget, and expires with its task frame
+unless separately verified and admitted through `remember`.
+
+AG maintains three typed edge layers:
+
+1. semantic edges referenced from STG/LTG;
+2. activation/attention edges produced by HA;
+3. reasoning/operator edges produced by MGR.
+
+These layers may inform one another during a bounded runtime iteration, but
+activation or hypothetical reasoning must never silently increase semantic
+confidence or LTG edge stability. The projection ledger preserves the layer and
+origin of every exposed edge.
 
 ### 7.3 Edge stability and structural consolidation
 
@@ -1975,13 +2027,13 @@ enables zero-copy constant construction. Controller auto-batches inputs into
 
 ### 12.3 Architecture
 
-The persistent semantic graphs, the Active Graph, and the differentiable
-computation graph are distinct objects:
+The persistent semantic graphs, the session Active Graph, immutable projection
+revisions, and differentiable computation graphs are distinct objects:
 
 ```text
 persistent STG + LTG in SQLite
-  → construct bounded Active Graph
-  → HierarchicalActivation.propagate(query, candidates, neighborhood, graphState)
+  → retrieve candidates for a session/task frame
+  → HierarchicalActivation.propagate(query, candidates, neighborhood, AG state)
      ├─ g₁: query → candidates cross-attention (learnable temperature)
      ├─ g₂: g₁ → neighborhood cross-attention
      ├─ g₃: L2Normalize(g₁+g₂+h₁+h₂+h₃)  spatial fusion
@@ -1989,13 +2041,17 @@ persistent STG + LTG in SQLite
      ├─ h₂: mean of medium-term stable vectors   (from graphState)
      ├─ h₃: mean of long-term stable vectors     (from graphState)
      └─ 7-weight blended scoring → nodeScores
-  → DifferentiableController(node/edge/control/budget scores)
-  → discrete Top-K selection → Active Graph expansion
+  → update the memory-resident session AG under hard budgets
+  → optional MGR traversal over a bounded selected subgraph
+  → HA rescore + DifferentiableController(node/edge/control/budget scores)
+  → freeze a discrete ProjectionRevision for model exposure
 ```
 
-The computation graph is ephemeral — created per propagate/train call and
-discarded. SQLite, the semantic graph, provenance, consolidation, and discrete
-Top-K selection remain ordinary deterministic system components.
+The autodiff computation graph is ephemeral — created per propagate/train call
+and discarded. The session AG is also non-persistent, but can survive multiple
+turns and compaction within its owning session. SQLite, semantic provenance,
+consolidation, immutable projection revisions, and hard budget enforcement
+remain ordinary deterministic system components.
 
 Variable semantic granularity remains an experimental question. Hierarchy-only,
 record-vector, and independently ranked union retrieval are retained as
@@ -2004,8 +2060,9 @@ fingerprinted, repeated benchmark demonstrates a quality/cost advantage.
 
 ## 12bis. Memory-Graph Reasoner — retained numerical Lab prototype
 
-`MemoryGraphReasoner` is retained as a numerical experiment. It is not part of
-NMG Lite and is not the session reasoning scratchpad described below. The runtime
+`MemoryGraphReasoner` is retained as a gated numerical engine. It is not part of
+NMG Lite and is not the session reasoning scratchpad described below. The target
+session AG gives it a bounded runtime input/output role, but the current runtime
 supports both the legacy global candidate experiment and explicit directed
 topology. When any input node declares `outgoing`, the first step is a global
 query seed and every later step is restricted to the preceding node's outgoing
@@ -2059,9 +2116,11 @@ from the traversal path.
 | Parameters      | 9 global                  | 2/node + 1 global              |
 | Best for        | batch ranking over pool   | multi-step path reasoning      |
 
-They remain separate Lab experiments. MGR refines a query through a sequence of
-selected node operators and can constrain that sequence to explicit directed
-edges. Utility and inference correctness still require their own benchmark.
+They remain separately gated engines but share the proposed session AG runtime:
+HA selects and maintains the active working set; MGR optionally transforms a
+bounded selected subgraph into temporary reasoning artifacts. Utility and
+inference correctness still require their own evidence, and the current runtime
+has not yet wired this combined path.
 
 ### API
 
@@ -2395,6 +2454,12 @@ insufficient.
 
 ## 13. Current implementation versus target
 
+The session Active Graph decision deliberately makes the current query-scoped
+graph and Pi runtime FIFO migration inputs rather than the final architecture.
+The following list records what exists today; it must not be read as evidence
+that the mutable session AG, task frames, projection identity split, or HA/MGR
+runtime loop has been implemented.
+
 Implemented and verified in the current prototype:
 
 - a normal Pi package manifest, stable extension entry, three durable-memory
@@ -2430,12 +2495,12 @@ Implemented and verified in the current prototype:
 - explicit STG/LTG residence on memories and nodes, governed immediate atomic
   LTG writes, ID-preserving promotion/demotion, STG expiry, and append-only
   lifecycle audit events;
-- a first-class Active Graph returned by `searchContext`, with persistent and
+- a first-class query-scoped `ActiveGraph` returned by `searchContext`, with persistent and
   temporary edges plus a shared node/edge/evidence/token/hop/tier/latency budget
   and a per-dimension measured usage ledger;
 - durable per-memory selection explanations, score components, estimated token
   cost, and relation expansion paths, all recoverable from one retrieval trace;
-- Pi propagation of Active Graph IDs from `nmg_search` to `nmg_get`, so exact
+- Pi propagation of current Active Graph/trace IDs from `nmg_search` to `nmg_get`, so exact
   expansion acts as the current operational signal that a recalled memory was
   actually selected for use;
 - query/task-deduplicated edge observations, separate selection/use/
@@ -2900,29 +2965,39 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 1. **Complete:** add explicit STG/LTG lifecycle state, provenance-preserving promotion,
    expiry, and demotion; keep immediate atomic LTG promotion for governed facts,
    preferences, constraints, and replaceable states.
-2. **Complete:** introduce a first-class `ActiveGraph` runtime object with selected nodes,
-   relations, local evidence, temporary cross-graph edges, and a unified budget
-   ledger.
-3. **Complete with conservative attribution:** record scored node and edge
+2. **Superseded target, reusable mechanism complete:** the current query-scoped
+   `ActiveGraph` provides selected nodes, relations, local evidence, temporary
+   cross-graph edges, and a unified budget ledger. Reuse these mechanics while
+   replacing its trace-shaped identity with a mutable session AG plus immutable
+   `ProjectionRevision`.
+3. **Open breaking runtime work:** implement session/branch ownership, bounded
+   task frames, tool-observation ingestion, disclosure ledger, typed
+   semantic/activation/reasoning layers, deterministic cleanup, and the
+   `agId`/`taskFrameId`/`projectionId`/`boardChannelId` identity split.
+4. **Open integration work:** bind HA fast state to session AG and let explicitly
+   enabled MGR consume only bounded selected subgraphs. Keep both optional and
+   subordinate to deterministic hard budgets and governed persistence.
+5. **Complete with conservative attribution:** record scored node and edge
    activation from retrieval traces and agent-directed exact-memory use, with
    durable selection reasons, expansion paths, and budget accounting; retrieval
    frequency alone does not establish usefulness.
-4. **Complete:** estimate edge stability from independent tasks, evidence coverage, verified
+6. **Complete:** estimate edge stability from independent tasks, evidence coverage, verified
    usefulness, contradiction, and time decay while preventing self-reinforcing
    retrieval loops.
-5. **Complete for pairwise local subgraphs:** add auditable, reversible
+7. **Complete for pairwise local subgraphs:** add auditable, reversible
    local-subgraph consolidation into LTG with minimum
    evidence, hysteresis, cooldown, and explicit evaluation gates. Pi runs this
    conservative maintenance policy automatically after completed turns.
-6. **Autodiff and bounded actuation complete as Lite infrastructure; promotion separately gated:**
+8. **Autodiff and bounded actuation complete as Lite infrastructure; promotion separately gated:**
    implement a tinygrad-inspired UOp engine and a serializable multi-head
    controller for node, edge, STOP/EXPAND, and budget decisions. The numerical
    substrate ships with Lite; trained rerank/allocation/fold actuation is wired
    behind explicit modes, while default activation remains gated on a fixed
    feature contract and matched evidence-recall/cost evaluation.
-7. **Mechanism complete, utility evaluation open:** independently selectable QPP1
+9. **Mechanism complete, utility evaluation open:** independently selectable QPP1
    allocation, QPP2 progressive folding, and search recommendation are wired
-   through the Pi adapter. QPP2 preserves folded candidates in the Active Graph.
+   through the Pi adapter. QPP2 preserves folded candidates in the current
+   query-scoped projection; the target stores them in the projection revision.
    Calibration and matched answer-quality/cost evaluation are not complete;
    activation and composition remain user/operator policy.
 
@@ -3019,8 +3094,10 @@ The next work should reduce uncertainty rather than add another subsystem:
 
 > NMG is an adaptive semantic coding system for agent memory. It encodes
 > immutable historical evidence into mutable, variably granular semantic nodes
-> and relations across a short-term graph and a long-term graph; constructs a
-> budgeted Active Graph as the model's query-scoped virtual memory space;
+> and relations across a short-term graph and a long-term graph; maintains a
+> session-owned, mutable, memory-resident Active Graph as the bounded working
+> space; freezes immutable projection revisions as model-visible evidence;
+> optionally uses HA to manage activation and MGR to perform temporary reasoning;
 > consolidates stable evidence-backed structure while allowing governed atomic
 > memories to persist immediately; and preserves exact history as a lossless
 > fallback against semantic retrieval error.

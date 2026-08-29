@@ -2,7 +2,7 @@
 
 **Purpose:** unresolved work only.
 **Authority:** working queue, not design specification or implementation history.
-**Updated:** 2026-08-24
+**Updated:** 2026-08-29
 
 Durable behavior belongs in the owning design or operating document; current
 implementation evidence belongs in
@@ -11,7 +11,42 @@ Use [`doc-maintenance`](../../skills/doc-maintenance/SKILL.md) when moving a
 result to its durable owner. Remove an item as soon as it is implemented or
 deliberately closed.
 
-## 1. Collect trustworthy verified-evidence supervision
+## 1. Implement the session Active Graph runtime
+
+- [ ] Introduce a memory-resident, session/branch-owned AG registry with one
+  total hard budget and deterministic cleanup.
+- [ ] Separate `agId`, `taskFrameId`, `projectionId`, and `boardChannelId`;
+  migrate query-hash task lineage and preserve immutable disclosure/feedback
+  revisions without retaining the mutable AG.
+- [ ] Represent semantic references, tool observations, activation edges, and
+  hypothetical reasoning artifacts as typed AG layers with provenance and TTL.
+- [ ] Replace Pi `SessionRuntimeAg` and the independent injection window with
+  thin host event ingestion and the shared AG disclosure ledger; route other
+  adapters through the same projection contract.
+- [ ] Bind HA fast state to session/branch and use it for admission, cooling,
+  task return, redundancy-aware retention, and budget proposals without
+  changing semantic confidence.
+- [ ] Let explicitly enabled MGR consume only a bounded HA-selected subgraph and
+  return attributable hypothetical artifacts; never auto-write them to STG/LTG.
+- [ ] Add behavior tests for task continuation, A→B, A→B→A, shared constraints,
+  false switches, compaction, projection replay, concurrent branches, budget
+  exhaustion, and session cleanup.
+
+**Available mechanism:** current query-scoped AG budgets and ledgers,
+retrieval/disclosure traces, Pi runtime tool capture, HA, MGR, controller hard
+gates, and session lifecycle hooks provide reusable implementation pieces.
+
+**Current blocker:** those pieces have different identities and owners. The
+current query-scoped `ActiveGraph` is a trace-shaped projection, Pi owns a flat
+runtime FIFO, HA fast state is not a shared session-AG contract, and MGR runs as
+an isolated Lab invocation.
+
+**Done when:** every supported adapter receives model context through immutable
+projection revisions frozen from one bounded session AG; no duplicate working
+memory remains in Pi; task and branch isolation plus cleanup are proven; HA and
+MGR can be enabled independently without bypassing provenance or hard budgets.
+
+## 2. Collect trustworthy verified-evidence supervision
 
 - [ ] Accumulate materially independent Pi+NMG tasks with retrieval, exact
   `get` disclosure, expansion depth, user/tool-verified evidence,
@@ -35,7 +70,7 @@ completion, silence, or lack of correction must not be relabelled as evidence.
 positive, negative, partial, and no-memory outcomes to support the matched gates
 below without relying on controlled or API-only diagnostics.
 
-## 2. Calibrate retrieval and the differentiable controller
+## 3. Calibrate retrieval and the differentiable controller
 
 - [ ] Compare the frozen heuristic with a frozen shadow candidate on semantic
   task and time splits; persist feature version, data window, effective
@@ -63,7 +98,7 @@ constants remain cold-start priors rather than calibrated probabilities.
 shows useful causal actions and passes answer/evidence quality plus token,
 tool-round, depth, latency, and rollback gates.
 
-## 3. Validate unattended memory maintenance
+## 4. Validate unattended memory maintenance
 
 - [ ] Measure STG-to-LTG consolidation precision and reversibility on natural
   outcomes before enabling unattended promotion by default.
@@ -83,7 +118,7 @@ audit parity, not natural precision or false-merge safety.
 reversal, true identity, false identity, scope conflicts, same-name entities, and
 rollback with acceptable precision and recovery cost.
 
-## 4. Remove the per-client OmniMemEval bridge process
+## 5. Remove the per-client OmniMemEval bridge process
 
 - [ ] Move the official-adapter transport to one runner-owned NMG daemon while
   keeping corpus mapping, judge metadata, forget semantics, and benchmark
@@ -124,13 +159,13 @@ observed:
   reviewed and implemented.
 - Full long-horizon reinforcement learning: only after a real sequential
   credit-assignment problem is demonstrated.
-- Automatic reasoning-workspace capture, cross-session continuation, event
-  archival, and STG/LTG promotion: only after real interruption or compaction
-  tasks show that the transcript, private AG, and explicit Lab workspace are
-  insufficient.
-- Memory-Graph Reasoner automatic inference: explicit edge-following is now
-  implemented, but automatic inference waits for a demonstrated reasoning need;
-  MGR remains a read-only opt-in Lab capability rather than a Lite dependency.
+- Cross-session AG continuation, automatic reasoning-workspace capture, event
+  archival, and implicit STG/LTG promotion remain deferred. The new AG is
+  session-owned and memory-resident; only its immutable observation traces may
+  persist.
+- MGR default/automatic inference remains deferred. Wiring the opt-in engine to
+  bounded AG input is implementation work, but enabling it automatically still
+  requires demonstrated reasoning value.
 - Automatic SkillOpt optimization and extraction for `memory_maintenance_policy`:
   the hash-bound proposal store, three-way content/scope/retrieval attribution,
   long-horizon gate and explicit review channel are implemented. Learning and

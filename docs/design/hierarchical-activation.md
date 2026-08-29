@@ -1,6 +1,6 @@
 # Hierarchical Activation Propagation — NMG 图侧设计
 
-> **启用状态：实验性、默认关闭。** 常规节点向量路由使用确定性的余弦相似度。
+> **启用状态：已实现实验引擎、默认关闭；session AG 接线未实现。** 常规节点向量路由使用确定性的余弦相似度。
 > 只有显式向 `routeNodesByVector` 传入
 > `activationMode = "hierarchical-activation"` 才会运行 HA。只有当持久化训练状态可用，
 > 且严格匹配 benchmark 证明收益后，HA 才能进入 active 排序路径。
@@ -10,7 +10,7 @@
 当前 NMG 的激活传播是平面的：
 
 ```
-query → candidate nodes → activation scores → graph expansion → AG projection
+query/observations → candidate nodes → activation scores → session AG update → projection revision
 ```
 
 所有候选节点在同一层级被评分，缺乏结构化的多尺度信息聚合。
@@ -18,7 +18,7 @@ query → candidate nodes → activation scores → graph expansion → AG proje
 这个设计引入**层次化全局节点（Hierarchical Global Nodes）**，将激活传播升级为：
 
 ```
-query → g₁(候选池上下文) → g₂(邻域上下文) → g₃(全图上下文) → AG projection
+query → g₁(候选池上下文) → g₂(邻域上下文) → g₃(全图上下文) → session AG update
               ↑                  ↑                  ↑
           短期记忆            中期记忆            长期记忆
 ```
@@ -41,11 +41,11 @@ query → g₁(候选池上下文) → g₂(邻域上下文) → g₃(全图上�
 
 | 节点 | 时间尺度 | 对应 NMG 概念 | 更新频率 |
 |------|----------|-------------|----------|
-| **h₁** | 短期 | 当前 session 上下文 | 每次检索 |
-| **h₂** | 中期 | 当前 task 的 STG | 每次 task 结束 |
+| **h₁** | 短期 | 当前 session AG 快状态 | 每次 AG 更新 |
+| **h₂** | 中期 | 当前 task frame / STG | task frame 切换或结束 |
 | **h₃** | 长期 | LTG 稳定节点 | consolidation 时 |
 
-**关键设计原则：h₁/h₂/h₃ 是 NMG 图状态的可微投影，不是独立的编码器记忆。** 它们从 NMG 的 STG/LTG/AG 中读取，不自己维护隐式状态——避免两个记忆系统互相遮蔽。
+**关键设计原则：h₁/h₂/h₃ 是 NMG 图状态的可微投影，不是独立的编码器记忆。** `h₁` 的快速运行态属于会话 AG，并按 session/branch 隔离；`h₂` 从 task frame/STG 投影，`h₃` 从 LTG 投影。可训练慢参数属于版本化 controller/Lab state，而不是 AG。HA 不得拥有第二套不可见语义记忆。
 
 ### 2.3 与编码器的职责边界
 
@@ -61,9 +61,13 @@ query → g₁(候选池上下文) → g₂(邻域上下文) → g₃(全图上�
 │  活在图侧，与 Controller 联合训练      │
 └──────────────┬────────────────┘
                │ activation scores
-┌─ AG Projection ─┐
-│  节点选择 + 边扩展 │
-└──────────────────┘
+┌─ Session AG ──────────────────┐
+│  admission / cooling / revive │
+│  total budget + task frames   │
+└──────────────┬────────────────┘
+               │ freeze
+               ▼
+       ProjectionRevision
 ```
 
 ## 3. 接口设计
@@ -244,19 +248,30 @@ loss.backward();  // 梯度流过所有 Tensor 参数
 
 总计约 `d² + 4d + 8` 个参数，对 d=128 约 17K 参数——和现有的 DifferentiableController 同级。
 
-### 4.3 与 DifferentiableController 的关系
+### 4.3 与 DifferentiableController、MGR 的关系
 
 ```
-HierarchicalActivation   ← 新增：多尺度激活
-        ↓  nodeScores
-DifferentiableController  ← 现有：路径决策（expand/stop）+ 预算管理
-        ↓  route + budget
-AG Projection             ← 现有：最终节点选择
+HierarchicalActivation   ← 多尺度激活与工作集评分
+        ↓ nodeScores
+Session AG update        ← 总预算、task frame、临时观察
+        ↓ selected bounded subgraph
+MGR (optional)           ← 临时遍历 / what-if / hypothetical artifacts
+        ↓ rescore features
+DifferentiableController ← expand/stop/预算建议，不能绕过硬上限
+        ↓ freeze
+ProjectionRevision       ← 不可变模型可见面
 ```
 
-两者职责明确：
-- HierarchicalActivation：**哪些节点应该被激活**（评分）
-- DifferentiableController：**激活后往哪走**（路径 + 预算）
+职责明确：
+- HierarchicalActivation：**哪些节点应该进入、留在或返回工作集**；
+- Session AG：**拥有内存态工作状态与硬预算**；
+- MGR：**在选定子图上生成临时推演**；
+- DifferentiableController：**建议激活后往哪走和分配多少预算**；
+- ProjectionRevision：**冻结模型真正能看到的内容**。
+
+HA 产生的 activation edges 与 MGR 产生的 reasoning edges 必须和
+STG/LTG semantic edges 分层存储。激活或推演不能自行增加事实置信度、
+LTG 边稳定度或长期写入资格。
 
 可以联合训练：
 
@@ -347,14 +362,15 @@ query → g₁ → g₂ (neighborhood) → combined scores
 
 加入邻域扩展。验证邻域信息是否有边际收益。
 
-### Phase C：g₁ + g₂ + h₁
+### Phase C：session/branch 隔离的 g₁ + g₂ + h₁
 
 ```
 query → g₁ → g₂ → scores
                 ↘ h₁（短期记忆投影）
 ```
 
-加入短期时序。验证跨轮一致性是否提升。
+加入属于内存态 session AG 的短期时序。验证跨轮一致性、任务切换和
+A→B→A 返回是否提升，并验证不同 session/branch 不互相污染。
 
 ### Phase D：完整 g₁/g₂/g₃ + h₁/h₂/h₃
 
@@ -366,7 +382,8 @@ query → g₁ → g₂ → scores
 |----------|------|
 | `src/core/router.ts` | 用 g₁ 加权替代或增强纯 cosineSimilarity |
 | `src/lab/differentiable-controller.ts` | 接收 hierarchical scores 而非纯特征向量 |
-| `.pi/extensions/nmg/index.ts` | gate 逻辑中传入 graphState snapshot |
+| session AG runtime（待实现） | 拥有按 session/branch 隔离的 h₁ 快状态、task frame 和总预算 |
+| `.pi/extensions/nmg/index.ts` | 只转发宿主事件；不再拥有独立工作记忆策略 |
 | `src/lab/autodiff.ts` | 不变（只用现有的 matmul/softmax/sigmoid/add） |
 
 ## 9. 为什么不在编码器里做

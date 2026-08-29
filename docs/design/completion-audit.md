@@ -5,7 +5,7 @@ in [design.md](design.md); document ownership is defined by
 [the documentation index](../README.md).
 
 **Status:** requirement ledger
-**Updated:** 2026-08-27
+**Updated:** 2026-08-29
 **Normative source:** [design.md](design.md)
 **Implementation recovery:** [implementation-lineage.md](implementation-lineage.md)
 
@@ -24,6 +24,7 @@ not evidence that a policy improves real Agent work.
 | --- | --- |
 | **Verified core** | Contract is designed, wired into the stable boundary, and covered by deterministic tests. |
 | **Opt-in Lab** | Implemented and explicitly activatable, but omitted from the Lite default tool/prompt path. |
+| **Designed target** | Normative target and ownership are accepted, but the current implementation still follows a superseded runtime shape. |
 | **Calibration gate** | Mechanism exists; thresholds or default activation require independent natural evidence. |
 | **Explicitly deferred** | Boundary is designed, but implementation waits for a stated prerequisite. |
 | **Out of scope** | Another component owns it; NMG must only define an integration boundary. |
@@ -48,18 +49,19 @@ to use it explicitly for one suitable task.
 | Temporal/logical chains | Optional ordered/DAG references reuse exact memory IDs; temporal order needs explicit time, logical order needs attributable supervision; chain expansion cannot imply truth or causality | chain store/retrieval, exact-get hydration, STG/LTG edge merge, shared integration projection consumed by Pi/Claude plus CLI chain metadata, daemon protocol and chain tests | **Verified core** | Domain-specific automatic chain construction is a harness policy, not a Core default. |
 | Node merge/split | Preserve redirects, transforms, provenance and rollback; automatic identity merge remains conservative | graph transforms, proposal review, maintenance actuator | **Calibration gate** | Collect true/false identity pairs, scope conflicts and rollback outcomes before default auto-merge. |
 | STG/LTG residence | Session-private provisional STG; shared durable LTG; governed promotion, demotion, expiry and audit | `src/core/stg.ts`, explicit and opt-in scope-bound working-set sync, store lifecycle and Pi turn-end maintenance | **Calibration gate** | Mechanics are verified; natural sync cost/benefit, consolidation precision and retention thresholds are not. |
-| Active Graph | Per-session budgeted projection, never a third authoritative graph; record selected nodes/edges/evidence and measured budget use | Active Graph store module, Pi search/get propagation | **Verified core** | Allocator and stopping priors need natural calibration. |
+| Active Graph | Mutable, session-owned and memory-resident working graph; task frames, semantic/tool/reasoning content share a total hard budget; immutable projection revisions freeze model exposure | Current query-scoped Active Graph, Pi `SessionRuntimeAg`, injection window, trace/disclosure and Lab engines provide migration inputs | **Designed target** | Implement the shared session runtime, identity split, task lifecycle, projection registry and adapter migration; current mechanisms remain usable but do not yet satisfy the target. |
 | Progressive disclosure | Resident directory/kernel, compact automatic recall, explicit search headers, exact get, bounded deeper expansion | integration search plus shared Agent Surface, Pi/DSH recall flow | **Verified core** | Daily-use validation remains observational. |
 | Retrieval | FTS/exact fallback, optional record embeddings, hybrid ranking, node/leaf hierarchy, query filters and caller-generated multi-query clauses | integration search, embedding providers/sync, bounded leaf-then-node summary drain, hierarchy, primary-first stable-ID query union | **Verified core** | Provider and summary quality are configuration/evaluation concerns; RRF and reverse retrieval remain candidate strategies, while HyDE generation belongs to the caller. |
 | QPP and search recommendation | Independently switchable allocation, local folding and recommendation; preserve folded evidence in AG | QPP core, Pi modes, controller shadow | **Opt-in Lab** | Calibrate sufficiency and cost from independent outcomes before Lite promotion. |
-| Differentiable controller | Framework-free autodiff substrate; learned heads cannot bypass hard safety/budget gates | `src/lab/autodiff.ts`, controller protocol/runtime/gate, matched telemetry and causal comparison | **Opt-in Lab** | Matched evidence remains calibration evidence, not Lite promotion; natural quality, cost and rollback gates are required. |
+| Differentiable controller | Framework-free autodiff substrate; learned heads cannot bypass hard safety/budget gates | `src/lab/autodiff.ts`, controller protocol/runtime/gate, matched telemetry and causal comparison | **Opt-in Lab** | After session AG exists, controller proposals may allocate projection budgets but remain subordinate to hard AG limits; natural quality, cost and rollback gates are required. |
+| Hierarchical Activation | Optional multi-scale admission/cooling/reactivation scorer; fast state belongs to session/branch AG while slow parameters remain separately versioned | HA implementation, Router activation mode and deterministic cosine fallback | **Designed target** | Existing explicit candidate reranking works; session-AG fast-state ownership, task-frame activation, typed activation edges and natural utility evidence are missing. |
 | Feedback and posterior | Separate disclosure, diagnostic overlap and verified evidence; prevent self-reinforcing labels | feedback core, claim outcomes, Pi shadow channel | **Verified core** | The natural dataset lacks verified evidence attribution, so learning/calibration stays blocked. |
 | Memory maintenance policy | Attribute content, scope and retrieval defects separately; require hash-bound policy identity and long-horizon evaluation; store reviewable proposals without implicit actuation | maintenance proposal table/store, daemon RPC, CLI and deterministic tests | **Calibration gate** | Automatic extraction and SkillOpt optimization wait for natural labels; accepted proposals still require an explicit journalled mutation. |
 | Edge activation/stability | Query-local activation differs from durable stability; retrieval alone cannot consolidate an edge | edge activation, Active Graph telemetry, consolidation/demotion | **Calibration gate** | Calibrate independent-task definition, decay and hysteresis on natural reversals. |
 | Retention | Indexed L0-L3, dormant/unindexed L4, quarantine L5; protect critical evidence independently of prompt residency | hierarchy and maintenance modules, CLI retention operations | **Verified core** | Automatic physical purge remains **explicitly deferred**. |
 | Delete/export/privacy | Logical withdrawal, dependency cleanup and user-memory export | CLI/RPC service and deletion tests | **Verified core** | Raw-history/aggregate physical erasure and receipts are **explicitly deferred** until threat-model/consent work. |
 | Session reasoning scratchpad | Private, atomic, bounded, restart-resumable, explicit checkpoint tool; never silently promoted | Daemon Lab authority/workspace plus CLI, Pi, MCP and DSH adapters | **Opt-in Lab** | Automatic capture was rejected; cross-session transfer/promotion waits for demonstrated need. |
-| Memory-Graph Reasoner | Numerical graph/set reasoning is a read-only session capability independent from durable truth | Daemon Lab RPC, optional directed-edge traversal, MGR/autodiff modules and adapter-neutral invocation | **Opt-in Lab** | Utility proof and ergonomic vector sourcing remain optional experiments; training stays internal. |
+| Memory-Graph Reasoner | Optional bounded traversal/what-if engine over an HA-selected session-AG subgraph; output stays hypothetical and separate from durable truth | Daemon Lab RPC, optional directed-edge traversal, MGR/autodiff modules and adapter-neutral invocation | **Designed target** | Existing opt-in engine works per call; session-AG input, derivation/TTL artifacts, typed reasoning edges and HA rescore loop are not wired. Utility proof remains separate from wiring correctness. |
 | Temporary coordination | Task Board is TTL/cursor/attribution based and does not enter LTG/FTS | board store, daemon, CLI/Pi/MCP adapters | **Verified core** | ACLs and multi-device transport are **explicitly deferred**. |
 | Daemon and concurrency | One application authority/single LTG writer; synchronous SQLite phases serialize; no transaction spans an await | CLI daemon/service/client and concurrency tests | **Verified core** | Multi-process distributed writers are out of current scope. |
 | Observability | Trace routing, scores, budgets, disclosures, outcomes, maintenance and rollback without treating diagnostics as truth | trace tables, shadow JSONL, reports/audits | **Verified core** | Natural labels must accumulate through use. |
@@ -69,17 +71,20 @@ to use it explicitly for one suitable task.
 
 ## Actual active blockers
 
-Only three blockers currently prevent evidence-backed default activation of the
-adaptive policies:
+Four active work families remain; the first is implementation work and the
+other three prevent evidence-backed default activation of adaptive policies:
 
-1. Natural Pi tasks rarely contain independently verified claim/evidence outcomes.
-2. Retrieval/controller gains have not yet passed matched quality **and** token,
+1. The session Active Graph target is not implemented; current query projections,
+   Pi runtime state and continuation identities remain separate.
+2. Natural Pi tasks rarely contain independently verified claim/evidence outcomes.
+3. Retrieval/controller gains have not yet passed matched quality **and** token,
    tool-round, latency, and rollback gates.
-3. Unattended STG consolidation and identity merge lack natural false-positive,
+4. Unattended STG consolidation and identity merge lack natural false-positive,
    contradiction, and reversal coverage.
 
-These are validation blockers, not missing storage, graph, routing, or lifecycle
-designs. Their executable checklist lives in [temporary-todo.md](temporary-todo.md).
+The AG item is a deliberate breaking runtime redesign; the remaining items are
+validation blockers rather than missing storage mechanisms. Their executable
+checklist lives in [temporary-todo.md](temporary-todo.md).
 
 ## Completion rule
 
