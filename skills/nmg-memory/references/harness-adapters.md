@@ -1,6 +1,7 @@
 # Harness adapters
 
-NMG ships a thin adapter per harness (Pi, Claude Code MCP, DeepSeek Harness).
+NMG ships a thin adapter per harness (Pi, Claude Code MCP, DeepSeek Harness,
+plus the installable WorkBuddy hook in `workbuddy-plugin/`).
 This reference is the recipe for writing one. Read it when you need to expose NMG
 to a new tool-capable harness, or when an existing adapter misbehaves.
 
@@ -74,6 +75,13 @@ stays behind `get(activeGraphId)`, which records actual use on the AG trace; pla
 injection must never be counted as use. Keep it cheap: one search per new user turn
 (`limit` ≈ 13, internal `max-tier` 1, `graph-hops` 1, tiered disclosure), fold repeated ids
 with a per-session window, and never let a failed recall block the turn.
+
+That projection handle is valid only when the hook and tools share the same
+host session identity. A detached hook such as WorkBuddy's command hook does not
+share the MCP server's session. It therefore injects compact **recall hints**
+without `activeGraphId`, uses a unique ephemeral hook session, and immediately
+releases that session AG. The Agent must call tool-side `nmg_search` before
+`nmg_get`; never weaken session ownership merely to reuse a hook-created handle.
 
 DeepSeek Harness: hook `agent/pre-step` (waterfall; return
 `{ kind: 'enter', messages: [...decision.messages, cue] }`), and only act on the

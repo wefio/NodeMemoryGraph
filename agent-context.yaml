@@ -63,6 +63,16 @@ routes:
       blocking: [check, test:product, build]
       advisory: []
 
+  - id: workbuddy-adapter
+    paths: [workbuddy-plugin/**]
+    owners:
+      - workbuddy-plugin/README.md
+      - skills/nmg-memory/references/harness-adapters.md
+    tests: [tests/integration/workbuddy-hook.test.ts]
+    verify:
+      blocking: [check, test:product, build, package:check]
+      advisory: []
+
   - id: documentation
     paths: [docs/**, skills/**, README.md, README.zh-CN.md]
     owners:
