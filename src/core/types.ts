@@ -945,6 +945,18 @@ export interface ActiveGraphEdge {
 }
 
 export interface ActiveGraph {
+  /** Stable identity of the session-owned mutable runtime graph. */
+  agId?: string;
+  /** Immutable identity of this particular runtime projection revision. */
+  projectionId?: string;
+  /** Monotonic revision within agId. */
+  projectionSequence?: number;
+  /** Previous immutable projection in the same task frame, when present. */
+  parentProjectionId?: string | null;
+  /** Session-local task frame that selected this projection. */
+  taskFrameId?: string;
+  /** Persisted retrieval traces that supplied evidence to this projection. */
+  traceIds?: string[];
   id: string;
   sessionId: string | null;
   query: string;

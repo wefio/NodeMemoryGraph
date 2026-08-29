@@ -1,4 +1,5 @@
 import type { MemoryContext, RememberResult } from "../core/types.ts";
+import type { SessionActiveGraphSnapshot } from "../core/session-active-graph.ts";
 import { DEFAULT_LOGICAL_CHAIN_MAX_CHARS, projectLogicalChains } from "./chain-projection.ts";
 import {
   compactSearchContext,
@@ -56,6 +57,26 @@ export interface TaskBoardSurfaceOptions {
   directory?: TaskBoardDirectoryEntry[];
   emptyText?: string;
   includeConventions?: boolean;
+}
+
+/** Model-facing projection of temporary AG state. Durable semantic memories are
+ * omitted because search/get already render them with provenance. */
+export function renderSessionActiveGraphSurface(
+  snapshot: SessionActiveGraphSnapshot | null,
+  maxCharacters = 8_000,
+): string {
+  if (!snapshot?.temporaryProjectionActive) return "";
+  const temporary = snapshot.items.filter((item) => item.temporary);
+  if (temporary.length === 0) return "";
+  const lines = ["Session working state (temporary; not durable memory):"];
+  let used = lines[0]!.length;
+  for (const item of temporary) {
+    const line = `- ${excerpt(item.statement, 500)}`;
+    if (used + line.length + 1 > Math.max(128, maxCharacters)) break;
+    lines.push(line);
+    used += line.length + 1;
+  }
+  return lines.length > 1 ? lines.join("\n") : "";
 }
 
 function excerpt(value: string, maxLength: number): string {

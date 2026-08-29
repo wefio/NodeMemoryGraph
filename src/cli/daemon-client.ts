@@ -5,7 +5,13 @@ import { join, resolve } from "node:path";
 import { resolveNmgDataDir } from "./data-path.ts";
 import { httpCall } from "./http-client.ts";
 import { isProcessAlive, readServerState, serverStatePath, type ServerState } from "./lifecycle.ts";
-import { NMG_PROTOCOL_VERSION, type NmgHelloResult, type NmgMethod } from "./protocol.ts";
+import {
+  NMG_OPTIONAL_METHOD_CAPABILITIES,
+  NMG_PROTOCOL_VERSION,
+  type NmgCapability,
+  type NmgHelloResult,
+  type NmgMethod,
+} from "./protocol.ts";
 
 const DEFAULT_DAEMON_LIMIT = 32;
 const DAEMON_COUNT_MEMO_MS = 1_000;
@@ -15,6 +21,8 @@ const SERVER_STATE_SUFFIX = ".server.json";
 export interface DaemonConnection {
   state: ServerState;
   startedByCaller: boolean;
+  /** Capabilities advertised by this exact daemon connection. */
+  capabilities: ReadonlySet<string>;
   /** 数据库路径，供连接失败重连时重新拉起同库 daemon。 */
   databasePath: string;
 }
@@ -26,7 +34,12 @@ export async function connectDaemon(databasePath: string): Promise<DaemonConnect
     try {
       const hello = (await httpCall(existing, "hello")) as NmgHelloResult;
       assertDaemonProtocol(hello);
-      return { startedByCaller: false, state: existing, databasePath };
+      return {
+        startedByCaller: false,
+        state: existing,
+        databasePath,
+        capabilities: new Set(hello.capabilities),
+      };
     } catch (error) {
       if (error instanceof NmgDaemonCompatibilityError) throw error;
       // The OS may have reused a stale descriptor's PID for an unrelated
@@ -46,8 +59,14 @@ export async function connectDaemon(databasePath: string): Promise<DaemonConnect
   child.unref();
 
   const state = await waitForState(statePath);
-  assertDaemonProtocol((await httpCall(state, "hello")) as NmgHelloResult);
-  return { startedByCaller: true, state, databasePath };
+  const hello = (await httpCall(state, "hello")) as NmgHelloResult;
+  assertDaemonProtocol(hello);
+  return {
+    startedByCaller: true,
+    state,
+    databasePath,
+    capabilities: new Set(hello.capabilities),
+  };
 }
 
 export class NmgDaemonCompatibilityError extends Error {
@@ -64,6 +83,32 @@ export function assertDaemonProtocol(hello: Pick<NmgHelloResult, "protocol">): v
   if (hello.protocol !== NMG_PROTOCOL_VERSION) {
     throw new NmgDaemonCompatibilityError(hello.protocol);
   }
+}
+
+export class NmgDaemonCapabilityError extends Error {
+  constructor(method: NmgMethod, capability: NmgCapability) {
+    super(
+      `NMG daemon does not advertise capability ${capability} required by ${method}; ` +
+        "upgrade or enable that feature before calling it",
+    );
+    this.name = "NmgDaemonCapabilityError";
+  }
+}
+
+export function assertDaemonCapability(capabilities: ReadonlySet<string>, method: NmgMethod): void {
+  const required =
+    NMG_OPTIONAL_METHOD_CAPABILITIES[method as keyof typeof NMG_OPTIONAL_METHOD_CAPABILITIES];
+  if (required && !capabilities.has(required)) {
+    throw new NmgDaemonCapabilityError(method, required);
+  }
+}
+
+/** Use for optional parameters or behavior that share an existing RPC method. */
+export function daemonSupportsCapability(
+  connection: Pick<DaemonConnection, "capabilities">,
+  capability: string,
+): boolean {
+  return connection.capabilities.has(capability);
 }
 
 export async function shutdownOwnedDaemon(connection: DaemonConnection): Promise<void> {
@@ -98,6 +143,7 @@ export async function invokeDaemon(
   method: NmgMethod,
   params: Record<string, unknown> = {},
 ): Promise<unknown> {
+  assertDaemonCapability(connection.capabilities, method);
   try {
     return await httpCall(connection.state, method, params);
   } catch (error) {
@@ -109,6 +155,8 @@ export async function invokeDaemon(
     const reconnected = await connectDaemon(connection.databasePath);
     connection.state = reconnected.state;
     connection.startedByCaller = reconnected.startedByCaller;
+    connection.capabilities = reconnected.capabilities;
+    assertDaemonCapability(connection.capabilities, method);
     return await httpCall(connection.state, method, params);
   }
 }

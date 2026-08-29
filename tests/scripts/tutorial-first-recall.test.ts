@@ -22,7 +22,11 @@ test("first-recall tutorial runs the isolated remember-search-get loop", () => {
 
   const result = spawnSync(
     process.execPath,
-    ["--experimental-strip-types", resolve(root, "scripts/tutorial-first-recall.ts"), "--non-interactive"],
+    [
+      "--experimental-strip-types",
+      resolve(root, "scripts/tutorial-first-recall.ts"),
+      "--non-interactive",
+    ],
     {
       cwd: root,
       encoding: "utf8",
@@ -39,6 +43,7 @@ test("first-recall tutorial runs the isolated remember-search-get loop", () => {
   assert.match(result.stdout, /Step 2\/4: remember one durable preference/);
   assert.match(result.stdout, /Step 3\/4: search compact headers/);
   assert.match(result.stdout, /Step 4\/4: load exact evidence through the Active Graph/);
+  assert.match(result.stdout, /one resident daemon/);
   assert.match(result.stdout, /Active Graph: [0-9a-f-]{36}/);
   assert.match(result.stdout, /Exact evidence: The user prefers concise technical answers\./);
 

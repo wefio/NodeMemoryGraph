@@ -6,8 +6,49 @@ import {
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
+  renderSessionActiveGraphSurface,
   renderTaskBoardSurface,
 } from "../../src/integration/agent-surface.ts";
+
+test("session Active Graph surface renders only projected temporary items", () => {
+  const rendered = renderSessionActiveGraphSurface({
+    agId: "ag-a",
+    sessionId: "session-a",
+    activeTaskFrameId: "task-a",
+    projectionSequence: 1,
+    latestProjectionId: "projection-a",
+    temporaryProjectionActive: true,
+    items: [
+      {
+        id: "memory:a",
+        kind: "semantic_memory",
+        statement: "memory:a",
+        sourceId: "a",
+        nodeId: "node-a",
+        taskFrameId: "task-a",
+        createdAt: "2026-08-29T00:00:00.000Z",
+        lastActivatedAt: "2026-08-29T00:00:00.000Z",
+        activation: 1,
+        temporary: false,
+      },
+      {
+        id: "tool:a",
+        kind: "tool_observation",
+        statement: "Tests passed.",
+        sourceId: "bash",
+        nodeId: "tool:bash",
+        taskFrameId: "task-a",
+        createdAt: "2026-08-29T00:00:00.000Z",
+        lastActivatedAt: "2026-08-29T00:00:00.000Z",
+        activation: 0.8,
+        temporary: true,
+      },
+    ],
+    edges: [],
+  });
+  assert.match(rendered, /Tests passed/u);
+  assert.doesNotMatch(rendered, /memory:a/u);
+});
 
 function context(): MemoryContext {
   const chainId = "chain-atlas";

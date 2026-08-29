@@ -261,21 +261,23 @@ may mutate across turns and compaction, but session release destroys it. Only
 projection traces, explicitly recorded outcomes, stability observations, and
 accepted writes survive.
 
-The target AG owns a bounded **disclosure ledger**. It records only the stable
+The AG target owns a bounded **disclosure ledger**. It records only the stable
 memory ID, a content hash, the greatest disclosure depth already rendered, and
 the turn number.
 Within 12 turns, unchanged content already disclosed deeply enough is folded
 to an `already_in_context` reference. A deeper request, changed evidence,
 expiry from the window, or another session renders it again. The window is
 bounded to 128 references and cleared at session shutdown. It is context-cache
-metadata inside AG, not an authoritative usage outcome. The current Pi-local
-injection window remains implementation evidence until migrated.
+metadata inside AG, not an authoritative usage outcome. Tool and Task Board
+observations have moved to the daemon-owned AG; the Pi-local injection window
+still implements this disclosure cache until the ledger is migrated.
 
 Every persisted projection trace carries its owning harness `sessionId`. Trace reads,
 disclosure, diagnostic attribution, and verified feedback must present the same identity;
 cross-session access is rejected before any learning or stability signal is
-updated. The target protocol distinguishes session `agId` from immutable
-`projectionId`; current Pi `activeGraphId` behavior is the migration source.
+updated. Protocol v9 distinguishes session `agId` from immutable
+`projectionId`; the public `activeGraphId` argument now names that projection,
+which resolves internally to one or more persisted retrieval traces.
 Sending the projection identity with an explicit `nmg_get` makes exact evidence
 expansion observable disclosure. Automatic recall and answer overlap remain diagnostic exposure,
 not proof that the model used a memory. Only verified user/tool/benchmark

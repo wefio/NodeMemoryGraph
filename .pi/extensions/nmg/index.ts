@@ -48,6 +48,7 @@ import {
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
+  renderSessionActiveGraphSurface,
   renderTaskBoardSurface,
 } from "../../../src/integration/agent-surface.ts";
 import {
@@ -91,7 +92,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   const injectionWindow = new SessionInjectionWindow();
   const taskWindow = new SessionTaskWindow();
   const recallFlow = new SessionRecallFlow();
-  const runtimeAg = new SessionRuntimeAg();
   const agentAttributionFlow = new AgentAttributionFlow(32);
   const qpp1Mode = configuredQpp1Mode();
   const qpp2Mode = configuredQpp2Mode();
@@ -127,6 +127,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       | "remember"
       | "resolveRemember"
       | "search"
+      | "sessionActiveGraph"
       | "taskBoard"
       | "recordActiveGraphAttribution"
       | "recordClaimOutcomes",
@@ -143,7 +144,18 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     const sessionId = ctx.sessionManager.getSessionId();
     if (isSuccessfulCommit(event)) commitNudgePending = true;
     if (!isMemorableToolResult(event)) return;
-    runtimeAg.note(sessionId, event.toolName, summarizeToolResult(event).statement);
+    const observation = summarizeToolResult(event);
+    try {
+      await invoke("sessionActiveGraph", {
+        action: "observe",
+        sessionId,
+        sourceId: event.toolName,
+        nodeId: observation.nodeName,
+        statement: observation.statement,
+      });
+    } catch {
+      // Temporary working state must never break the host tool lifecycle.
+    }
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
@@ -198,9 +210,20 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         reasoningCheckpoint = `Reasoning workspace unavailable: ${message(error)}`;
       }
     }
-    const runtimeContext = [runtimeAg.format(sessionId), reasoningCheckpoint]
-      .filter(Boolean)
-      .join("\n");
+    let runtimeAgContext = "";
+    try {
+      const result = (await invoke("sessionActiveGraph", {
+        action: "snapshot",
+        sessionId,
+      })) as {
+        snapshot?:
+          import("../../../src/core/session-active-graph.ts").SessionActiveGraphSnapshot | null;
+      };
+      runtimeAgContext = renderSessionActiveGraphSurface(result.snapshot ?? null);
+    } catch {
+      // Search and ordinary Pi operation continue without optional working state.
+    }
+    const runtimeContext = [runtimeAgContext, reasoningCheckpoint].filter(Boolean).join("\n");
     const recallRequest = taskWindow.prepare(sessionId, event.prompt);
     const dynamicContext = composeNmgContextMessage("", "", nudge, runtimeContext);
     if (!recallRequest) {
@@ -655,7 +678,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     injectionWindow.clear(sessionId);
     taskWindow.clear(sessionId);
     recallFlow.clear(sessionId);
-    runtimeAg.clear(sessionId);
     agentAttributionFlow.clear(sessionId);
     controllerShadow.clear(sessionId);
     if (!connectionPromise) return;
@@ -663,6 +685,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     if (!active) {
       connectionPromise = undefined;
       return;
+    }
+    try {
+      await invokeDaemon(active, "sessionActiveGraph", { action: "release", sessionId });
+    } catch {
+      // Process teardown below is the final cleanup fallback.
     }
     // Archive before teardown (daemon is still alive here); archiveOrStage has
     // a hard timeout and never throws, so daemon shutdown always runs.
@@ -702,7 +729,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   pi.on("session_before_compact", async (_event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
     injectionWindow.clear(sessionId);
-    runtimeAg.activateProjection(sessionId);
+    try {
+      await invoke("sessionActiveGraph", { action: "activate", sessionId });
+    } catch {
+      // Compaction remains owned by Pi when the optional AG projection is unavailable.
+    }
     if (labToolsEnabled) {
       try {
         const status = (await invokeDaemon(await connection(), "lab", {
@@ -1595,14 +1626,23 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         })) as TaskBoardToolResult;
         const entries = result.entries ?? (result.entry ? [result.entry] : []);
         if (result.action === "read") {
-          for (const entry of entries) {
-            runtimeAg.note(
-              sessionId,
-              `board:${taskId}:${entry.id}`,
-              `[task-board ${taskId} #${entry.sequence} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
+          await Promise.allSettled(
+            entries.map((entry) =>
+              invoke("sessionActiveGraph", {
+                action: "observe",
+                sessionId,
+                kind: "board_projection",
+                sourceId: `board:${taskId}:${entry.id}`,
+                nodeId: `board:${taskId}`,
+                statement: `[task-board ${taskId} #${entry.sequence} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
+              }),
+            ),
+          );
+          if (entries.length > 0) {
+            await invoke("sessionActiveGraph", { action: "activate", sessionId }).catch(
+              () => undefined,
             );
           }
-          if (entries.length > 0) runtimeAg.activateProjection(sessionId);
           // Reading is a delivery: write a receipt for every open, non-own-echo
           // entry returned, so the wake loop does not re-push entries this
           // session has already seen (flow constraint — 'already read' never
@@ -2910,56 +2950,3 @@ export function summarizeToolResult(event: {
  * Session-local projection of recent tool state. It deliberately has no daemon
  * or SQLite path: explicit nmg_remember remains the durable-memory gate.
  */
-export class SessionRuntimeAg {
-  readonly #recent = new Map<string, Array<{ key: string; statement: string }>>();
-  readonly #projected = new Set<string>();
-  readonly maxPerSession: number;
-  readonly maxCharacters: number;
-
-  constructor(maxPerSession = 32, maxCharacters = 8000) {
-    this.maxPerSession = Math.max(1, maxPerSession);
-    this.maxCharacters = Math.max(1, maxCharacters);
-  }
-
-  /** Returns true when this (tool, statement) pair is new for the session. */
-  note(sessionId: string, toolName: string, statement: string): boolean {
-    const key = `${toolName}\u0000${toolTraceHash(statement)}`;
-    let entries = this.#recent.get(sessionId);
-    if (!entries) {
-      entries = [];
-      this.#recent.set(sessionId, entries);
-    }
-    if (entries.some((entry) => entry.key === key)) return false;
-    entries.push({ key, statement });
-    while (
-      entries.length > this.maxPerSession ||
-      entries.reduce((sum, entry) => sum + entry.statement.length, 0) > this.maxCharacters
-    ) {
-      entries.shift();
-    }
-    return true;
-  }
-
-  format(sessionId: string): string {
-    if (!this.#projected.has(sessionId)) return "";
-    const entries = this.#recent.get(sessionId) ?? [];
-    if (entries.length === 0) return "";
-    return [
-      "Session-local tool state (temporary; not durable memory):",
-      ...entries.map((entry) => `- ${entry.statement}`),
-    ].join("\n");
-  }
-
-  activateProjection(sessionId: string): void {
-    this.#projected.add(sessionId);
-  }
-
-  clear(sessionId: string): void {
-    this.#recent.delete(sessionId);
-    this.#projected.delete(sessionId);
-  }
-}
-
-function toolTraceHash(statement: string): string {
-  return createHash("sha256").update(statement).digest("base64url");
-}

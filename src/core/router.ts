@@ -8,6 +8,7 @@ import {
 } from "./hierarchical-activation.ts";
 
 export interface HierarchicalRouteOptions {
+  sessionId?: string;
   queryVector: Float32Array;
   candidates: NodeActivationInput[];
   neighborhood?: NodeActivationInput[];
@@ -31,6 +32,7 @@ export class Router {
   readonly #embedder: VectorEmbedder;
   #ha: HierarchicalActivation | null = null;
   #haDimensions = 0;
+  readonly #sessionHa = new Map<string, HierarchicalActivation>();
 
   constructor(embedder: VectorEmbedder, haState?: HierarchicalActivationState | null) {
     this.#embedder = embedder;
@@ -49,7 +51,19 @@ export class Router {
   }
 
   /** Lazily initialize HA on first use with the actual vector dimensions. */
-  ensureHA(dimensions: number): HierarchicalActivation {
+  ensureHA(dimensions: number, sessionId?: string | null): HierarchicalActivation {
+    const sessionKey = sessionId?.trim();
+    if (sessionKey) {
+      const current = this.#sessionHa.get(sessionKey);
+      if (current?.dimensions === dimensions) return current;
+      const learned = this.#ha?.toJSON();
+      const runtime = new HierarchicalActivation(
+        dimensions,
+        learned ? { ...learned, h1State: null } : undefined,
+      );
+      this.#sessionHa.set(sessionKey, runtime);
+      return runtime;
+    }
     if (!this.#ha || this.#haDimensions !== dimensions) {
       this.#ha = new HierarchicalActivation(dimensions);
       this.#haDimensions = dimensions;
@@ -78,8 +92,7 @@ export class Router {
   // ── hierarchical batch scoring ──
 
   routeHierarchical(options: HierarchicalRouteOptions): HierarchicalRouteResult {
-    const ha = this.#ha;
-    if (!ha) throw new Error("hierarchical activation is not available — call ensureHA first");
+    const ha = this.ensureHA(options.queryVector.length, options.sessionId);
     const out = ha.propagate(
       options.queryVector,
       options.candidates,
@@ -101,8 +114,7 @@ export class Router {
     usedNodeIds: Set<string>,
     learningRate?: number,
   ): number {
-    const ha = this.#ha;
-    if (!ha) throw new Error("hierarchical activation is not available — call ensureHA first");
+    const ha = this.ensureHA(options.queryVector.length, options.sessionId);
     const result = ha.train(
       {
         queryVector: options.queryVector,
@@ -114,6 +126,10 @@ export class Router {
       learningRate,
     );
     return result.loss;
+  }
+
+  clearSession(sessionId: string): boolean {
+    return this.#sessionHa.delete(sessionId.trim());
   }
 
   // ── persistence ──

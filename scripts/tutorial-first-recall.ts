@@ -4,11 +4,21 @@ import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 
 import { runCli } from "../src/cli/main.ts";
+import { httpCall } from "../src/cli/http-client.ts";
+import { serveHttp } from "../src/cli/http-server.ts";
+import {
+  acquireServerLease,
+  readServerState,
+  serverStatePath,
+  type ServerState,
+} from "../src/cli/lifecycle.ts";
+import { NmgService } from "../src/cli/service.ts";
 import type { CompactSearchContext } from "../src/integration/search-projection.ts";
 
 const nonInteractive = process.argv.includes("--non-interactive") || !process.stdin.isTTY;
 const dataDirectory = mkdtempSync(join(tmpdir(), "nmg-first-recall-"));
 const statement = "The user prefers concise technical answers.";
+const databasePath = join(dataDirectory, "nmg.sqlite");
 
 interface RememberResult {
   memory: { id: string; statement: string };
@@ -40,10 +50,33 @@ function showCommand(args: string[]): void {
   console.log(`$ nmg ${args.join(" ")}`);
 }
 
+async function startTutorialDaemon(): Promise<() => Promise<void>> {
+  const service = new NmgService({ dataDirectory, databasePath });
+  const lease = acquireServerLease(databasePath);
+  const serving = serveHttp(service, lease, { idleTimeoutMs: 0 }).finally(() => service.close());
+  let state: ServerState | null = null;
+  for (let attempt = 0; attempt < 100 && !state?.port; attempt += 1) {
+    state = readServerState(serverStatePath(databasePath));
+    if (!state?.port) await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+  }
+  if (!state?.port) {
+    lease.release();
+    service.close();
+    throw new Error("tutorial daemon did not become ready");
+  }
+  return async () => {
+    try {
+      await httpCall(state!, "shutdown");
+    } finally {
+      await serving;
+    }
+  };
+}
+
 async function main(): Promise<void> {
   console.log("NMG first-recall tutorial");
   console.log(`Temporary store: ${dataDirectory}`);
-  console.log("This walkthrough uses a private temporary SQLite store and no daemon.\n");
+  console.log("This walkthrough uses a private temporary SQLite store and one resident daemon.\n");
 
   console.log("Step 1/4: inspect an empty isolated store");
   const statusArgs = ["status", "--json"];
@@ -91,24 +124,24 @@ async function main(): Promise<void> {
   await pause();
 
   console.log("Step 4/4: load exact evidence through the Active Graph");
-  const getArgs = [
-    "get",
-    candidate.id,
-    "--active-graph-id",
-    searched.activeGraphId,
-    "--json",
-  ];
+  const getArgs = ["get", candidate.id, "--active-graph-id", searched.activeGraphId, "--json"];
   showCommand(getArgs);
   const exact = await invoke<GetResult>(getArgs);
   const exactStatement = exact.results[0]?.memory.statement;
-  if (exactStatement !== statement) throw new Error("exact evidence did not match the saved statement");
+  if (exactStatement !== statement)
+    throw new Error("exact evidence did not match the saved statement");
   console.log(`Exact evidence: ${exactStatement}`);
-  console.log("\nThe header guided recall; get disclosed the lossless record and attributed that disclosure.");
+  console.log(
+    "\nThe header guided recall; get disclosed the lossless record and attributed that disclosure.",
+  );
 }
 
+let stopDaemon: (() => Promise<void>) | undefined;
 try {
+  stopDaemon = await startTutorialDaemon();
   await main();
 } finally {
+  await stopDaemon?.();
   rmSync(dataDirectory, { recursive: true, force: true });
   console.log("Tutorial complete; temporary data removed.");
 }

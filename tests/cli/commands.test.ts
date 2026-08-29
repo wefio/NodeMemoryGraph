@@ -32,6 +32,7 @@ test("every RPC method is exposed via the CLI or is intentionally RPC-only", () 
   const rpcOnly: readonly NmgMethod[] = [
     "hello",
     "recordActiveGraphAttribution",
+    "sessionActiveGraph",
     "shutdown",
     "stgPurgeSession",
   ];

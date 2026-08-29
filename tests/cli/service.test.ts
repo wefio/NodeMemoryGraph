@@ -164,16 +164,39 @@ test("Lab RPC exposes read-only memory graph reasoning after explicit activation
       requester: "agent:test",
       reason: "compare competing memory paths",
     });
+    await service.invoke("remember", {
+      statement: "Relevant memory path.",
+      nodeName: "relevant",
+      sessionId: "session-mgr",
+    });
+    await service.invoke("remember", {
+      statement: "Noise memory path.",
+      nodeName: "noise",
+      sessionId: "session-mgr",
+    });
+    const searched = await service.invoke("search", {
+      query: "memory path",
+      sessionId: "session-mgr",
+      limit: 10,
+    });
+    assert.ok(searched.activeGraph);
+    const relevantNodeId = searched.results.find((entry) => entry.node.canonicalName === "relevant")
+      ?.node.id;
+    const noiseNodeId = searched.results.find((entry) => entry.node.canonicalName === "noise")?.node
+      .id;
+    assert.ok(relevantNodeId);
+    assert.ok(noiseNodeId);
     const result = await service.invoke("lab", {
       action: "invoke",
       capability: "memory_graph_reasoner",
       sessionId: "session-mgr",
       operation: "traverse",
       input: {
+        projectionId: searched.activeGraph!.id,
         queryVector: [1, 0],
         graph: [
-          { id: "relevant", vector: [1, 0] },
-          { id: "noise", vector: [0, 1] },
+          { id: relevantNodeId, vector: [1, 0] },
+          { id: noiseNodeId, vector: [0, 1] },
         ],
         maxSteps: 1,
       },
@@ -182,8 +205,46 @@ test("Lab RPC exposes read-only memory graph reasoning after explicit activation
     if (result.action !== "invoke") throw new Error("expected Lab invoke result");
     assert.equal(
       (result.output as { path: Array<{ nodeId: string }> }).path[0]?.nodeId,
-      "relevant",
+      relevantNodeId,
     );
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("daemon owns temporary session Active Graph observations and releases them", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-session-ag-"));
+  const service = new NmgService({ dataDirectory: directory, environment: {} });
+  try {
+    const observed = await service.invoke("sessionActiveGraph", {
+      action: "observe",
+      sessionId: "session-ag",
+      sourceId: "bash",
+      statement: "Tests passed.",
+    });
+    assert.equal(observed.action, "observe");
+    assert.equal(observed.added, true);
+
+    const hidden = await service.invoke("sessionActiveGraph", {
+      action: "snapshot",
+      sessionId: "session-ag",
+    });
+    assert.equal(hidden.action, "snapshot");
+    assert.deepEqual(hidden.snapshot?.items, []);
+
+    const activated = await service.invoke("sessionActiveGraph", {
+      action: "activate",
+      sessionId: "session-ag",
+    });
+    assert.equal(activated.action, "activate");
+    assert.equal(activated.snapshot?.items[0]?.statement, "Tests passed.");
+
+    const released = await service.invoke("sessionActiveGraph", {
+      action: "release",
+      sessionId: "session-ag",
+    });
+    assert.deepEqual(released, { action: "release", released: true });
   } finally {
     service.close();
     removeTempDirectory(directory);
@@ -1009,7 +1070,9 @@ test("resident service records nmg_get disclosure only for the owning session", 
     });
     const reader = new NmgStore(join(directory, "ltg.sqlite"));
     try {
-      const trace = reader.retrievalTrace(activeGraphId, "session-alpha");
+      const traceId = searched.activeGraph!.traceIds?.[0];
+      assert.ok(traceId);
+      const trace = reader.retrievalTrace(traceId, "session-alpha");
       assert.deepEqual(trace?.disclosedMemoryIds, [remembered.memory.id]);
       assert.deepEqual(trace?.usefulMemoryIds, [], "disclosure is not answer attribution");
     } finally {
@@ -1700,7 +1763,10 @@ test("recordActiveGraphAttribution persists API answer overlap as diagnostic att
     const searched = (await service.invoke("search", {
       query: "Atlas durable metadata",
       sessionId: "session-a",
-    })) as { results: Array<{ memory: { id: string } }>; activeGraph?: { id: string } };
+    })) as {
+      results: Array<{ memory: { id: string } }>;
+      activeGraph?: { id: string; traceIds?: string[] };
+    };
     assert.ok(searched.activeGraph, "search produced an active graph");
     const recorded = await service.invoke("recordActiveGraphAttribution", {
       activeGraphId: searched.activeGraph.id,
@@ -1710,7 +1776,9 @@ test("recordActiveGraphAttribution persists API answer overlap as diagnostic att
     assert.equal(recorded.activeGraphId, searched.activeGraph.id);
     const store = new NmgStore(join(directory, "nmg.sqlite"));
     try {
-      const trace = store.retrievalTrace(searched.activeGraph!.id, "session-a");
+      const traceId = searched.activeGraph!.traceIds?.[0];
+      assert.ok(traceId);
+      const trace = store.retrievalTrace(traceId, "session-a");
       assert.ok(trace, "trace exists");
       assert.deepEqual(trace.attributedMemoryIds, [saved.memory.id]);
       assert.deepEqual(trace.usefulMemoryIds, []);

@@ -1,6 +1,6 @@
 # NMG design baseline
 
-**Status:** 0.10 / core persistence stable; session Active Graph redesign proposed
+**Status:** 0.11 / core persistence stable; session Active Graph runtime core implemented
 **Updated:** 2026-08-29
 
 ## 1. Definition
@@ -280,13 +280,19 @@ across independent OS processes, or parallel execution of synchronous SQLite
 work. Read replicas or a worker-thread database queue remain performance options
 only if measurements show the event-loop writer exceeds its latency budget.
 
-Protocol version `nmg.v7` exposes the typed lifecycle, memory, retrieval,
-maintenance, STG-sync, memory-chain, and Task Board methods declared in `protocol.ts` over
-JSON-RPC 2.0. HTTP is the only resident protocol;
+Protocol compatibility epoch `nmg.v9` exposes the typed lifecycle, memory,
+retrieval, maintenance, STG-sync, memory-chain, Task Board, Lab, and
+session-Active-Graph methods declared in `protocol.ts` over JSON-RPC 2.0. HTTP is
+the only resident protocol;
 NMG does not maintain a parallel NDJSON or platform-specific socket API.
-The lease records the protocol version. Clients fail closed when a live daemon
-uses an incompatible protocol and require an explicit `nmg daemon restart` at a
-safe coordination point; they never replace a shared daemon automatically.
+The lease records the compatibility epoch. Additive RPCs, optional fields, and
+optional behavior do not advance that epoch. The daemon advertises them in
+`hello.capabilities`; clients preserve unknown capability names for forward
+compatibility, gate optional calls locally, and report a feature-unavailable
+error only when the caller invokes a missing capability. Clients fail closed
+only when a live daemon uses a different compatibility epoch and then require an
+explicit `nmg daemon restart` at a safe coordination point; they never replace a
+shared daemon automatically.
 `nmg.v5` was deliberately incompatible with v4 because the ambiguous
 `recordActiveGraphUse` RPC was replaced by diagnostic-only
 `recordActiveGraphAttribution`; silently connecting to v4 would lose attribution
@@ -299,6 +305,13 @@ closed until an explicitly coordinated restart.
 edge mutation, structured edge reads, topological order, and STG session routing.
 A v6 daemon exposes only the earlier partial chain API, so v7 clients do not
 silently downgrade.
+`nmg.v8` adds daemon-owned Lab capability leases and invocation. `nmg.v9` moves
+session Active Graph ownership into the daemon and changes returned Active Graph
+ids from persisted retrieval-trace ids to immutable runtime projection ids. A v8
+daemon cannot preserve that ownership or feedback identity, so the epoch change
+is intentionally incompatible. Further additive features remain within v9 and
+negotiate by capability unless they alter established semantics, ownership,
+security, or durable interpretation.
 
 ### 4.2 Modular harness adapters
 
@@ -798,14 +811,26 @@ Agent B private AG ─┘                       │
                                            └─ explicit remember only ─▶ STG/LTG
 ```
 
-**Implementation status:** the shared Task Board is implemented in SQLite and
+**Implementation status:** the daemon now owns a bounded, memory-resident
+session AG registry. Every service search freezes a distinct `projectionId`
+while retaining a stable session `agId`, a monotonic projection sequence,
+`taskFrameId`, parent revision, and the persisted retrieval `traceIds` that
+supplied it. `get`, diagnostic attribution, and claim outcomes resolve the
+projection back to its owning traces and reject cross-session use. Pi tool and
+Task Board observations enter this shared runtime through `sessionActiveGraph`;
+compaction activates their temporary model projection and session shutdown
+releases it. The old Pi `SessionRuntimeAg` no longer exists. The Pi disclosure
+window is still adapter-local, and automatic task-frame switching/cooling is
+not yet implemented.
+
+The shared Task Board is implemented in SQLite and
 exposed by daemon RPC and CLI (`nmg board put/read/resolve`). Adapters expose the
 `nmg_board` tool and wake polling by default; false-like
 `NMG_ENABLE_COORDINATION` values explicitly suppress that model-facing surface.
 It records `agentId` and source session, supports task
 isolation, cursor reads, TTL deletion, and explicit resolution. Pi reads are
-currently added to the caller's bounded `SessionRuntimeAg`; the session-AG
-target replaces that adapter-owned FIFO with shared runtime ingestion.
+added to the caller's shared daemon-owned session AG as temporary
+`board_projection` items.
 Membership/ACLs and remote
 multi-device transport are not implemented; local callers sharing the daemon
 must agree on a task ID and should set stable `NMG_AGENT_ID` values.
@@ -858,13 +883,20 @@ Hierarchical Activation (HA) manages admission, cooling, reactivation,
 redundancy-aware retention, and budget allocation across the session AG. Its
 fast `h1` state belongs to the in-memory AG and must be isolated by session and
 branch. Slower learned parameters, if validated, belong to versioned
-controller/Lab state rather than the AG itself.
+controller/Lab state rather than the AG itself. Router runtime instances now
+isolate `h1` by session and discard that fast state on session release; the
+learned base parameters remain separate. Task-frame cooling and HA-driven
+admission are still open.
 
 The Memory-Graph Reasoner (MGR) may consume a bounded HA-selected subgraph and
 emit temporary hypotheses, operator paths, or what-if relations. MGR output is
 not a memory write: every derived artifact carries source references, starts as
 `hypothetical`, consumes the same AG budget, and expires with its task frame
-unless separately verified and admitted through `remember`.
+unless separately verified and admitted through `remember`. The opt-in Lab RPC
+now requires a session-owned `projectionId`, rejects nodes outside that
+projection, caps nodes, edges, steps and results by its AG budget, and marks
+outputs non-persistent/hypothetical. Materializing those outputs as TTL-bound AG
+items and HA rescoring them remain open.
 
 AG maintains three typed edge layers:
 

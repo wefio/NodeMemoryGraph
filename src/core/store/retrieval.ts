@@ -158,6 +158,9 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       queryVector: readonly number[],
       model: string,
       limit?: number,
+      candidateNodeIds?: string[],
+      activationMode?: "cosine" | "hierarchical-activation",
+      sessionId?: string,
     ) => NodeRoute[];
     declare routeLeafBlocksByVector: (
       queryVector: readonly number[],

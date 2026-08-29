@@ -23,7 +23,6 @@ import nmgExtension, {
   selectPiEvidenceSource,
   SessionInjectionWindow,
   SessionRecallFlow,
-  SessionRuntimeAg,
   SessionTaskWindow,
   SKILLOPT_POLICY_CHANNELS,
   summarizeToolResult,
@@ -1339,7 +1338,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
         sessionManager,
       })) as {
       content: Array<{ text: string }>;
-      details: { activeGraph: { id: string } };
+      details: { activeGraph: { id: string; traceIds: string[] } };
     };
     assert.match(searched.content[0].text, /already_in_context=true/);
     const activeGraphId = searched.details.activeGraph.id;
@@ -1409,7 +1408,10 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       false,
     );
     try {
-      const trace = store.retrievalTrace(activeGraphId, "http-test-session");
+      const trace = store.retrievalTrace(
+        searched.details.activeGraph.traceIds[0],
+        "http-test-session",
+      );
       assert.deepEqual(trace?.disclosedMemoryIds, [remember.details.memory.id]);
       assert.deepEqual(trace?.usefulMemoryIds, []);
     } finally {
@@ -1526,7 +1528,7 @@ test("agent_end derives and persists answer-overlap attribution on the trace", a
       })) as {
       details: {
         results: Array<{ memory: { id: string } }>;
-        activeGraph?: { id: string };
+        activeGraph?: { id: string; traceIds: string[] };
       };
     };
     assert.ok(searched.details.activeGraph, "search built an active graph");
@@ -1543,7 +1545,10 @@ test("agent_end derives and persists answer-overlap attribution on the trace", a
     );
     const store = new NmgStore(join(directory, "nmg.sqlite"));
     try {
-      const trace = store.retrievalTrace(searched.details.activeGraph!.id, "agent-end-session");
+      const trace = store.retrievalTrace(
+        searched.details.activeGraph!.traceIds[0],
+        "agent-end-session",
+      );
       assert.ok(trace, "trace exists");
       assert.ok(
         trace.attributedMemoryIds.includes(searched.details.results[0].memory.id),
@@ -2256,36 +2261,17 @@ test("tool trace statement carries the path and tool node", () => {
   assert.match(bash.statement, /\[error\]/);
 });
 
-test("runtime AG dedupes, bounds, isolates, and clears session tool state", () => {
-  const runtime = new SessionRuntimeAg(2, 80);
-  assert.equal(runtime.note("session-a", "bash", "Tool bash: first failure"), true);
-  assert.equal(runtime.note("session-a", "bash", "Tool bash: first failure"), false);
-  assert.equal(runtime.note("session-a", "edit", "Edited src/a.ts."), true);
-  assert.equal(runtime.format("session-a"), "");
-  runtime.activateProjection("session-a");
-  assert.match(runtime.format("session-a"), /first failure/);
-  assert.match(runtime.format("session-a"), /Edited src\/a\.ts/);
-
-  runtime.note("session-a", "bash", "Tool bash: latest test passed");
-  assert.doesNotMatch(runtime.format("session-a"), /first failure/);
-  assert.match(runtime.format("session-a"), /latest test passed/);
-  assert.equal(runtime.format("session-b"), "");
-
-  runtime.clear("session-a");
-  assert.equal(runtime.format("session-a"), "");
-});
-
 test("runtime AG is presented as temporary state after durable recall", () => {
   const output = composeNmgContextMessage(
     "durable recall",
     "",
     "",
-    "Session-local tool state (temporary; not durable memory):\n- tests passed",
+    "Session working state (temporary; not durable memory):\n- tests passed",
   );
   assert.match(output, /<nmg_automatic_recall>\ndurable recall/);
   assert.match(output, /<nmg_runtime_ag>/);
   assert.match(output, /temporary; not durable memory/);
-  assert.ok(output.indexOf("durable recall") < output.indexOf("Session-local tool state"));
+  assert.ok(output.indexOf("durable recall") < output.indexOf("Session working state"));
 });
 
 test("/nmg with no arguments opens the interactive select menu", async () => {

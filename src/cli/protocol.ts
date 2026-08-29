@@ -36,14 +36,22 @@ import type {
   TruthStatus,
 } from "../core/types.ts";
 import type {
+  SessionActiveGraphItem,
+  SessionActiveGraphItemKind,
+  SessionActiveGraphSnapshot,
+} from "../core/session-active-graph.ts";
+import type {
   LabActivation,
   LabCapability,
   LabCapabilityDescriptor,
   LabScope,
 } from "../integration/lab-capabilities.ts";
 
-// Bump only when a live daemon from the previous revision cannot faithfully
-// implement the current client contract. v5 replaced the ambiguous
+// This is a compatibility epoch, not a feature revision. Additive RPCs,
+// optional fields, and capabilities remain within the same epoch and are
+// negotiated through hello.capabilities. Bump only when a live daemon from
+// the previous epoch cannot faithfully implement the current client contract.
+// v5 replaced the ambiguous
 // recordActiveGraphUse RPC with diagnostic-only recordActiveGraphAttribution;
 // a v4 daemon would otherwise accept the connection and reject that method at
 // agent_end. v6 preserves natural/controlled provenance on claim outcomes;
@@ -51,8 +59,10 @@ import type {
 // v7 completes the chain contract (DAG edges, member removal, and structured
 // reads); a v6 daemon only implements the earlier partial chain surface. v8
 // adds daemon-owned Lab capability leases and invocation; a v7 daemon cannot
-// honor those agent-visible operations.
-export const NMG_PROTOCOL_VERSION = "nmg.v8" as const;
+// honor those agent-visible operations. v9 moves the session Active Graph into
+// the daemon and makes returned Active Graph ids immutable projection ids; a v8
+// daemon would silently keep Pi's working state in a separate local cache.
+export const NMG_PROTOCOL_VERSION = "nmg.v9" as const;
 
 export const NMG_CAPABILITIES = [
   "hello",
@@ -83,7 +93,10 @@ export const NMG_CAPABILITIES = [
   "claim-outcome-origin-provenance",
   "memory-chains",
   "lab-capabilities",
+  "session-active-graph",
 ] as const;
+
+export type NmgCapability = (typeof NMG_CAPABILITIES)[number];
 
 export const NMG_METHODS = [
   "get",
@@ -115,14 +128,25 @@ export const NMG_METHODS = [
   "chainGet",
   "chainList",
   "lab",
+  "sessionActiveGraph",
   "shutdown",
   "status",
 ] as const;
 
 export type NmgMethod = (typeof NMG_METHODS)[number];
 
+/**
+ * Methods introduced additively within a compatibility epoch. Clients gate
+ * these calls locally instead of treating an older same-epoch daemon as
+ * globally incompatible. Baseline methods deliberately do not appear here.
+ */
+export const NMG_OPTIONAL_METHOD_CAPABILITIES = {
+  sessionActiveGraph: "session-active-graph",
+} as const satisfies Partial<Record<NmgMethod, NmgCapability>>;
+
 export interface NmgHelloResult {
-  protocol: typeof NMG_PROTOCOL_VERSION;
+  /** Wire value is open; assertDaemonProtocol narrows it to this client epoch. */
+  protocol: string;
   service: "node-memory-graph";
   version: string;
   capabilities: readonly string[];
@@ -296,6 +320,24 @@ export interface NmgGetParams {
   projectDir?: string;
   sessionId?: string;
 }
+
+export type NmgSessionActiveGraphParams =
+  | {
+      action: "observe";
+      sessionId: string;
+      statement: string;
+      sourceId?: string;
+      nodeId?: string;
+      taskFrameId?: string;
+      kind?: Exclude<SessionActiveGraphItemKind, "semantic_memory">;
+      activation?: number;
+    }
+  | { action: "snapshot" | "activate" | "release"; sessionId: string };
+
+export type NmgSessionActiveGraphResult =
+  | { action: "observe"; added: boolean; item: SessionActiveGraphItem }
+  | { action: "snapshot" | "activate"; snapshot: SessionActiveGraphSnapshot | null }
+  | { action: "release"; released: boolean };
 
 export interface NmgChainCreateParams {
   chainType: MemoryChainType;
@@ -710,6 +752,7 @@ export type NmgMethodResult = {
   } | null;
   chainList: MemoryChain[];
   lab: NmgLabResult;
+  sessionActiveGraph: NmgSessionActiveGraphResult;
   recordActiveGraphAttribution: { activeGraphId: string; attributedMemoryIds: string[] };
   retentionCandidates: { candidates: RetentionCandidate[] };
   setStorageState: { memoryId: string; storageState: MemoryStorageState };

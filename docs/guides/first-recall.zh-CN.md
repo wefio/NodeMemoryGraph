@@ -8,7 +8,7 @@
 remember -> 紧凑搜索目录 -> 精确 get
 ```
 
-它会创建私有临时 SQLite 数据库，不启动 daemon，不调用 LLM 或 embedding provider，并在退出时删除临时库。它不会读写用户正常的 `~/.nmg` 记忆。
+它会创建私有临时 SQLite 数据库和一个进程内常驻 daemon，不调用 LLM 或 embedding provider，并在退出时关闭 daemon、删除临时库。必须共享常驻进程，是因为会话 Active Graph 在 search 与精确披露之间有意只保存在内存中。它不会读写用户正常的 `~/.nmg` 记忆。
 
 ## 运行
 

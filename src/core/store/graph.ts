@@ -797,6 +797,7 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
       limit = 5,
       candidateNodeIds: string[] = [],
       activationMode: "cosine" | "hierarchical-activation" = "cosine",
+      sessionId?: string,
     ): NodeRoute[] {
       if (!model.trim()) throw new Error("embedding model is required");
       if (queryVector.length === 0) throw new Error("query vector is required");
@@ -823,7 +824,7 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
           if (vec) candidateList.push({ id, vector: vec });
         }
         if (candidateList.length > 0) {
-          const ha = this.router.ensureHA(queryVector.length);
+          const ha = this.router.ensureHA(queryVector.length, sessionId);
           const out = ha.propagate(
             new Float32Array(queryVector),
             candidateList.map((c) => ({ nodeId: c.id, vector: c.vector })),
@@ -844,6 +845,10 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         .score(queryVector, new Set(byId.keys()))
         .map(({ id, score }) => ({ node: mapNode(byId.get(id)!), score }))
         .slice(0, Math.max(1, Math.min(limit, 50)));
+    }
+
+    clearSessionActivation(sessionId: string): boolean {
+      return this.router.clearSession(sessionId);
     }
 
     trainRouter(

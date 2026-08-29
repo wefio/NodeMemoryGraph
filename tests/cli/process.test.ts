@@ -866,7 +866,7 @@ test("invokeDaemon reconnects after the daemon dies mid-session", () => {
         `process.kill(before, "SIGKILL");`,
         `for (let i = 0; i < 50 && isProcessAlive(before); i += 1) await new Promise((r) => setTimeout(r, 20));`,
         `const result = await invokeDaemon(conn, "search", { query: "reconnect probe" });`,
-        `console.log(JSON.stringify({ before, after: conn.state.pid, reconnected: before !== conn.state.pid, found: (result.results ?? []).length > 0 }));`,
+        `console.log(JSON.stringify({ before, after: conn.state.pid, reconnected: before !== conn.state.pid, found: (result.results ?? []).length > 0, sessionActiveGraph: conn.capabilities.has("session-active-graph") }));`,
         `await shutdownOwnedDaemon(conn);`,
       ].join("\n"),
     );
@@ -880,9 +880,11 @@ test("invokeDaemon reconnects after the daemon dies mid-session", () => {
       after: number;
       reconnected: boolean;
       found: boolean;
+      sessionActiveGraph: boolean;
     };
     assert.equal(parsed.reconnected, true, "a fresh daemon process was spawned after death");
     assert.equal(parsed.found, true, "sqlite memory survived daemon death");
+    assert.equal(parsed.sessionActiveGraph, true, "reconnect refreshes negotiated capabilities");
   } finally {
     removeTempDirectory(directory);
   }

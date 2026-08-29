@@ -1,11 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assertDaemonProtocol, NmgDaemonCompatibilityError } from "../../src/cli/daemon-client.ts";
-import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
+import {
+  assertDaemonCapability,
+  assertDaemonProtocol,
+  daemonSupportsCapability,
+  NmgDaemonCapabilityError,
+  NmgDaemonCompatibilityError,
+} from "../../src/cli/daemon-client.ts";
+import { NMG_CAPABILITIES, NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 
-test("daemon protocol guard accepts the current protocol", () => {
+test("daemon protocol guard accepts the current compatibility epoch", () => {
   assert.doesNotThrow(() => assertDaemonProtocol({ protocol: NMG_PROTOCOL_VERSION }));
+});
+
+test("same-epoch capability additions do not affect protocol compatibility", () => {
+  assert.doesNotThrow(() =>
+    assertDaemonProtocol({ protocol: NMG_PROTOCOL_VERSION, capabilities: ["future-feature"] }),
+  );
 });
 
 test("daemon protocol guard fails closed with restart guidance", () => {
@@ -33,8 +45,28 @@ test("daemon protocol guard rejects v4 after the attribution RPC contract change
 });
 
 test("daemon protocol guard rejects v7 because it cannot serve Lab capabilities", () => {
+  assert.throws(() => assertDaemonProtocol({ protocol: "nmg.v7" }), /restart/u);
+});
+
+test("optional method guard fails only when the invoked capability is unavailable", () => {
+  const baseline = new Set<string>(
+    NMG_CAPABILITIES.filter((value) => value !== "session-active-graph"),
+  );
+  assert.doesNotThrow(() => assertDaemonCapability(baseline, "search"));
   assert.throws(
-    () => assertDaemonProtocol({ protocol: "nmg.v7" } as never),
-    /restart/u,
+    () => assertDaemonCapability(baseline, "sessionActiveGraph"),
+    (error: unknown) => {
+      assert.ok(error instanceof NmgDaemonCapabilityError);
+      assert.match(error.message, /session-active-graph/u);
+      assert.doesNotMatch(error.message, /restart/u);
+      return true;
+    },
+  );
+  assert.doesNotThrow(() =>
+    assertDaemonCapability(new Set(NMG_CAPABILITIES), "sessionActiveGraph"),
+  );
+  assert.equal(
+    daemonSupportsCapability({ capabilities: new Set(["future-parameter"]) }, "future-parameter"),
+    true,
   );
 });

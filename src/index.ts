@@ -22,6 +22,7 @@ export {
   renderEvidenceSurface,
   renderRememberSurface,
   renderSearchSurface,
+  renderSessionActiveGraphSurface,
   renderTaskBoardSurface,
   TASK_BOARD_CONVENTIONS,
 } from "./integration/agent-surface.ts";
@@ -46,6 +47,13 @@ export {
 export type { LeafSummaryDrainResult } from "./integration/leaf-summarizer.ts";
 export { UsearchAnnIndex } from "./core/ann.ts";
 export { decideMemoryLoad } from "./core/gate.ts";
+export { SessionActiveGraphRuntime } from "./core/session-active-graph.ts";
+export type {
+  SessionActiveGraphItem,
+  SessionActiveGraphItemKind,
+  SessionActiveGraphProjection,
+  SessionActiveGraphSnapshot,
+} from "./core/session-active-graph.ts";
 export { normalizeClaims } from "./core/claims.ts";
 export type {
   ActivationSignal,

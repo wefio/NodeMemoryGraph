@@ -22,6 +22,10 @@ import {
 import type { LeafSummaryProvider, NodeSummaryProvider } from "../core/types.ts";
 import { NmgStore } from "../core/store.ts";
 import {
+  SessionActiveGraphRuntime,
+  type ActiveGraphProjectionPart,
+} from "../core/session-active-graph.ts";
+import {
   consolidateStgMemoryToLtg,
   copyLtgSubsetToStg,
   createStgStore,
@@ -107,6 +111,7 @@ import {
   type NmgRollbackNodeTransformParams,
   type NmgRetentionCandidatesParams,
   type NmgSearchParams,
+  type NmgSessionActiveGraphParams,
   type NmgSetStorageStateParams,
   type NmgSplitNodeParams,
   type NmgStatusResult,
@@ -118,6 +123,7 @@ import {
 import { resolveNmgDataDir } from "./data-path.ts";
 
 const SERVICE_VERSION = "0.1.0";
+type ActiveGraphStorePart = { store: NmgStore; traceId: string; memoryIds: Set<string> };
 export interface NmgServiceOptions {
   dataDirectory?: string;
   databasePath?: string;
@@ -145,10 +151,7 @@ export class NmgService {
   #labShadowController: ControllerPolicyChannel | undefined;
   #store: NmgStore | undefined;
   readonly #stgStores = new Map<string, NmgStore>();
-  readonly #activeGraphParts = new Map<
-    string,
-    Array<{ store: NmgStore; traceId: string; memoryIds: Set<string> }>
-  >();
+  readonly #sessionActiveGraphs = new SessionActiveGraphRuntime<NmgStore>();
   #embeddingClient: EmbeddingClient | undefined | null;
   #embeddingError: string | null = null;
   #summaryProvider: LeafSummaryProvider | undefined | null;
@@ -495,6 +498,10 @@ export class NmgService {
         return this.#chainList(parseChainListParams(params)) as NmgMethodResult[M];
       case "lab":
         return this.#lab(parseLabParams(params)) as NmgMethodResult[M];
+      case "sessionActiveGraph":
+        return this.#sessionActiveGraph(
+          parseSessionActiveGraphParams(params),
+        ) as NmgMethodResult[M];
       case "shutdown":
         this.#shutdownRequested = true;
         return { shuttingDown: true } as NmgMethodResult[M];
@@ -511,7 +518,7 @@ export class NmgService {
     this.#store = undefined;
     for (const store of this.#stgStores.values()) store.close();
     this.#stgStores.clear();
-    this.#activeGraphParts.clear();
+    this.#sessionActiveGraphs.clear();
   }
 
   #hello(): NmgHelloResult {
@@ -596,7 +603,7 @@ export class NmgService {
     input: unknown,
   ): unknown {
     if (capability === "memory_graph_reasoner") {
-      return this.#invokeMemoryGraphReasoner(operation, input);
+      return this.#invokeMemoryGraphReasoner(sessionId, operation, input);
     }
     if (capability === "controller_shadow") {
       if (operation !== "observe")
@@ -703,24 +710,76 @@ export class NmgService {
     );
   }
 
-  #invokeMemoryGraphReasoner(operation: string, input: unknown): unknown {
+  #invokeMemoryGraphReasoner(sessionId: string, operation: string, input: unknown): unknown {
     const values = objectParams(input);
-    const queryVector = requiredNumberArray(values, "queryVector");
-    const graph = parseReasonerGraph(values.graph, queryVector.length);
-    const reasoner = new MemoryGraphReasoner(queryVector.length);
-    if (operation === "traverse") {
-      return labJson(
-        reasoner.traverse(queryVector, graph, optionalInteger(values, "maxSteps", 1, 100) ?? 8),
+    const projectionId = requiredString(values, "projectionId");
+    const projection = this.#sessionActiveGraphs.projection(projectionId, sessionId);
+    if (!projection) {
+      const owner = this.#sessionActiveGraphs.projectionOwner(projectionId);
+      throw new NmgProtocolError(
+        "NOT_FOUND",
+        owner
+          ? `Active Graph projection ${projectionId} belongs to another session`
+          : `Active Graph projection ${projectionId} does not exist`,
       );
     }
-    if (operation === "logic_search") {
-      return labJson(
-        reasoner.logicSearch(
-          parseLogicExpression(values.expression, queryVector.length),
-          graph,
-          optionalInteger(values, "topK", 1, 100) ?? 10,
-        ),
+    const queryVector = requiredNumberArray(values, "queryVector");
+    const graph = parseReasonerGraph(values.graph, queryVector.length);
+    const allowedNodeIds = new Set(projection.graph.nodeIds);
+    for (const nodeId of graph.keys()) {
+      if (!allowedNodeIds.has(nodeId)) {
+        throw new NmgProtocolError(
+          "INVALID_PARAMS",
+          `reasoner node ${nodeId} is outside Active Graph projection ${projectionId}`,
+        );
+      }
+    }
+    if (graph.size > projection.graph.budget.maxNodes) {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        `reasoner graph exceeds Active Graph node budget ${projection.graph.budget.maxNodes}`,
       );
+    }
+    const edgeCount = [...graph.values()].reduce(
+      (sum, node) => sum + (node.outgoing?.length ?? 0),
+      0,
+    );
+    if (edgeCount > projection.graph.budget.maxEdges) {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        `reasoner graph exceeds Active Graph edge budget ${projection.graph.budget.maxEdges}`,
+      );
+    }
+    const reasoner = new MemoryGraphReasoner(queryVector.length);
+    const envelope = { projectionId, agId: projection.agId, persisted: false } as const;
+    if (operation === "traverse") {
+      return {
+        ...envelope,
+        hypothetical: false,
+        ...labJson(
+          reasoner.traverse(
+            queryVector,
+            graph,
+            boundedReasonerSteps(values, projection.graph.budget.maxGraphHops),
+          ),
+        ),
+      };
+    }
+    if (operation === "logic_search") {
+      return {
+        ...envelope,
+        hypothetical: false,
+        ...labJson(
+          reasoner.logicSearch(
+            parseLogicExpression(values.expression, queryVector.length),
+            graph,
+            Math.min(
+              optionalInteger(values, "topK", 1, 100) ?? 10,
+              projection.graph.budget.maxNodes,
+            ),
+          ),
+        ),
+      };
     }
     if (operation === "what_if") {
       const hypothetical = parseReasonerNode(values.hypotheticalNode, queryVector.length);
@@ -728,15 +787,39 @@ export class NmgService {
         queryVector,
         graph,
         hypothetical,
-        optionalInteger(values, "maxSteps", 1, 100) ?? 8,
+        boundedReasonerSteps(values, projection.graph.budget.maxGraphHops),
         optionalNumber(values, "impactThreshold", 0, 1) ?? 0.05,
       );
-      return { ...labJson(result), summary: reasoner.impactSummary(result, hypothetical.id) };
+      return {
+        ...envelope,
+        hypothetical: true,
+        ...labJson(result),
+        summary: reasoner.impactSummary(result, hypothetical.id),
+      };
     }
     throw new NmgProtocolError(
       "INVALID_PARAMS",
       `unknown memory graph reasoner operation: ${operation}`,
     );
+  }
+
+  #sessionActiveGraph(params: NmgSessionActiveGraphParams): NmgMethodResult["sessionActiveGraph"] {
+    if (params.action === "observe") {
+      return { action: "observe", ...this.#sessionActiveGraphs.observe(params) };
+    }
+    if (params.action === "snapshot") {
+      return { action: "snapshot", snapshot: this.#sessionActiveGraphs.snapshot(params.sessionId) };
+    }
+    if (params.action === "activate") {
+      return {
+        action: "activate",
+        snapshot: this.#sessionActiveGraphs.activateTemporaryProjection(params.sessionId),
+      };
+    }
+    const released = this.#sessionActiveGraphs.release(params.sessionId);
+    this.#store?.clearSessionActivation(params.sessionId);
+    for (const store of this.#stgStores.values()) store.clearSessionActivation(params.sessionId);
+    return { action: "release", released };
   }
 
   #chainCreate(params: NmgChainCreateParams): MemoryChain {
@@ -1084,7 +1167,7 @@ export class NmgService {
   ): NmgMethodResult["recordClaimOutcomes"] {
     const { projectDir, ...input } = params;
     const parts = params.activeGraphId
-      ? this.#activeGraphParts.get(params.activeGraphId)
+      ? this.#projectionParts(params.activeGraphId, params.sessionId)
       : undefined;
     if (parts?.length) {
       const events: NmgMethodResult["recordClaimOutcomes"]["events"] = [];
@@ -1248,48 +1331,54 @@ export class NmgService {
     const searchAcross = async (store: NmgStore, raw: string) => {
       this.#syncStgWorkingSet(store, options.scope);
       const local = await runOne(store, raw);
-      if (local.results.length > 0 && local.activeGraph?.qpp?.trigger === false) return local;
-      const shared = await runOne(this.#getStore(), raw);
-      if (local.results.length === 0) return shared;
-      const merged = mergeStgLtgContexts(local, shared);
-      if (merged.activeGraph) {
-        this.#activeGraphParts.set(
-          merged.activeGraph.id,
-          [
-            local.activeGraph
-              ? {
-                  store,
-                  traceId: local.activeGraph.id,
-                  memoryIds: new Set(local.activeGraph.memoryIds),
-                }
-              : undefined,
-            shared.activeGraph
-              ? {
-                  store: this.#getStore(),
-                  traceId: shared.activeGraph.id,
-                  memoryIds: new Set(shared.activeGraph.memoryIds),
-                }
-              : undefined,
-          ].filter(
-            (part): part is { store: NmgStore; traceId: string; memoryIds: Set<string> } =>
-              part !== undefined,
-          ),
-        );
+      if (local.results.length > 0 && local.activeGraph?.qpp?.trigger === false) {
+        return this.#registerSearchProjection(local, activeGraphPartsFor(store, local));
       }
-      return merged;
+      const sharedStore = this.#getStore();
+      const shared = await runOne(sharedStore, raw);
+      if (local.results.length === 0) {
+        return this.#registerSearchProjection(shared, activeGraphPartsFor(sharedStore, shared));
+      }
+      const merged = mergeStgLtgContexts(local, shared);
+      return this.#registerSearchProjection(
+        merged,
+        [
+          local.activeGraph
+            ? {
+                store,
+                traceId: local.activeGraph.id,
+                memoryIds: new Set(local.activeGraph.memoryIds),
+              }
+            : undefined,
+          shared.activeGraph
+            ? {
+                store: this.#getStore(),
+                traceId: shared.activeGraph.id,
+                memoryIds: new Set(shared.activeGraph.memoryIds),
+              }
+            : undefined,
+        ].filter(isActiveGraphStorePart),
+      );
     };
 
     if (raws.length === 1) {
-      if (!projectDir) return runOne(this.#getStore(), raws[0]!);
+      if (!projectDir) {
+        const store = this.#getStore();
+        const context = await runOne(store, raws[0]!);
+        return this.#registerSearchProjection(context, activeGraphPartsFor(store, context));
+      }
       return searchAcross(this.#getStgStore(projectDir, sessionId), raws[0]!);
     }
 
     // Multi-query fusion: primary keeps rank, extra clauses append unique
     // hits (their own order), then the hard limit is applied once.
-    const primary = await runOne(this.#getStore(), raws[0]!);
+    const sharedStore = this.#getStore();
+    const primary = await runOne(sharedStore, raws[0]!);
+    const parts = activeGraphPartsFor(sharedStore, primary);
     const seen = new Set(primary.results.map((result) => result.memory.id));
     for (let i = 1; i < raws.length; i += 1) {
       const extra = await runOne(this.#getStore(), raws[i]!);
+      parts.push(...activeGraphPartsFor(sharedStore, extra));
       for (const result of extra.results) {
         if (seen.has(result.memory.id)) continue;
         seen.add(result.memory.id);
@@ -1297,7 +1386,7 @@ export class NmgService {
       }
     }
     if (searchOptions.limit) primary.results = primary.results.slice(0, searchOptions.limit);
-    return primary;
+    return this.#registerSearchProjection(primary, parts);
   }
 
   #syncStgWorkingSet(store: NmgStore, scope: MemoryScope | undefined): void {
@@ -1333,7 +1422,7 @@ export class NmgService {
     const found = new Set(context.results.map((result) => result.memory.id));
     if (params.activeGraphId) {
       const activeGraphId = params.activeGraphId;
-      const parts = this.#activeGraphParts.get(activeGraphId);
+      const parts = this.#projectionParts(activeGraphId, params.sessionId);
       if (parts) {
         for (const part of parts) {
           const disclosedMemoryIds = [...found].filter((id) => part.memoryIds.has(id));
@@ -1350,6 +1439,13 @@ export class NmgService {
           ...context,
           missingMemoryIds: params.memoryIds.filter((id) => !found.has(id)),
         };
+      }
+      const projectionOwner = this.#sessionActiveGraphs.projectionOwner(activeGraphId);
+      if (projectionOwner && projectionOwner !== (params.sessionId?.trim() || "__anonymous__")) {
+        throw new NmgProtocolError(
+          "NOT_FOUND",
+          `active graph ${activeGraphId} belongs to another session`,
+        );
       }
       const stores = [localStore, sharedStore].filter(
         (store): store is NmgStore => store !== undefined,
@@ -1377,6 +1473,34 @@ export class NmgService {
     };
   }
 
+  #registerSearchProjection(context: MemoryContext, parts: ActiveGraphStorePart[]): MemoryContext {
+    if (!context.activeGraph) return context;
+    const graph = {
+      ...context.activeGraph,
+      memoryIds: context.results.map((result) => result.memory.id),
+      nodeIds: [...new Set(context.results.map((result) => result.node.id))],
+    };
+    const projection = this.#sessionActiveGraphs.registerProjection(
+      graph,
+      parts.map((part): ActiveGraphProjectionPart<NmgStore> => ({
+        traceId: part.traceId,
+        memoryIds: part.memoryIds,
+        value: part.store,
+      })),
+    );
+    return { ...context, activeGraph: projection.graph };
+  }
+
+  #projectionParts(activeGraphId: string, sessionId?: string): ActiveGraphStorePart[] | undefined {
+    const projection = this.#sessionActiveGraphs.projection(activeGraphId, sessionId);
+    if (!projection) return undefined;
+    return projection.parts.map((part) => ({
+      store: part.value,
+      traceId: part.traceId,
+      memoryIds: new Set(part.memoryIds),
+    }));
+  }
+
   #recordActiveGraphAttribution(
     params: NmgRecordActiveGraphAttributionParams,
   ): NmgMethodResult["recordActiveGraphAttribution"] {
@@ -1392,6 +1516,31 @@ export class NmgService {
     // the first match: in a merged STG+LTG retrieval the same activeGraphId
     // can carry a trace in both stores, and the LTG (authoritative) side must
     // not lose its diagnostic trace.
+    const projectionParts = this.#projectionParts(params.activeGraphId, params.sessionId);
+    if (projectionParts?.length) {
+      const attributed = new Set(params.attributedMemoryIds);
+      for (const part of projectionParts) {
+        part.store.recordActiveGraphAttribution(
+          part.traceId,
+          {
+            method: "answer_overlap",
+            attributedMemoryIds: [...attributed].filter((id) => part.memoryIds.has(id)),
+          },
+          params.sessionId,
+        );
+      }
+      return {
+        activeGraphId: params.activeGraphId,
+        attributedMemoryIds: params.attributedMemoryIds,
+      };
+    }
+    const projectionOwner = this.#sessionActiveGraphs.projectionOwner(params.activeGraphId);
+    if (projectionOwner && projectionOwner !== (params.sessionId?.trim() || "__anonymous__")) {
+      throw new NmgProtocolError(
+        "NOT_FOUND",
+        `active graph ${params.activeGraphId} belongs to another session`,
+      );
+    }
     const stores = localStore ? [localStore, sharedStore] : [sharedStore];
     const owned = stores.filter(
       (store) => store.traceOwnership(params.activeGraphId, params.sessionId) === "owned",
@@ -1784,6 +1933,32 @@ function parseLabParams(value: unknown): NmgLabParams {
     sessionId,
     operation: requiredString(params, "operation"),
     input: params.input,
+  };
+}
+
+function parseSessionActiveGraphParams(value: unknown): NmgSessionActiveGraphParams {
+  const params = objectParams(value);
+  const action = requiredEnum(params, "action", [
+    "observe",
+    "snapshot",
+    "activate",
+    "release",
+  ] as const);
+  const sessionId = requiredString(params, "sessionId");
+  if (action !== "observe") return { action, sessionId };
+  return {
+    action,
+    sessionId,
+    statement: requiredString(params, "statement"),
+    sourceId: optionalString(params, "sourceId"),
+    nodeId: optionalString(params, "nodeId"),
+    taskFrameId: optionalString(params, "taskFrameId"),
+    kind: optionalEnum(params, "kind", [
+      "tool_observation",
+      "board_projection",
+      "reasoning_artifact",
+    ] as const),
+    activation: optionalNumber(params, "activation", 0, 1),
   };
 }
 
@@ -2289,6 +2464,31 @@ function labJson<T>(value: T): T {
   return JSON.parse(
     JSON.stringify(value, (_key, item) => (item instanceof Float32Array ? [...item] : item)),
   ) as T;
+}
+
+function boundedReasonerSteps(values: Record<string, unknown>, graphHopBudget: number): number {
+  return Math.min(
+    optionalInteger(values, "maxSteps", 1, 100) ?? 8,
+    Math.max(1, graphHopBudget + 1),
+  );
+}
+
+function activeGraphPartsFor(store: NmgStore, context: MemoryContext): ActiveGraphStorePart[] {
+  return context.activeGraph
+    ? [
+        {
+          store,
+          traceId: context.activeGraph.id,
+          memoryIds: new Set(context.activeGraph.memoryIds),
+        },
+      ]
+    : [];
+}
+
+function isActiveGraphStorePart(
+  value: ActiveGraphStorePart | undefined,
+): value is ActiveGraphStorePart {
+  return value !== undefined;
 }
 
 function requiredString(params: Record<string, unknown>, key: string): string {

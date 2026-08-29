@@ -5,6 +5,14 @@
 **Status:** proposed
 **Date:** 2026-08-29
 
+**Partial implementation (2026-08-29):** protocol v9 and
+`SessionActiveGraphRuntime` now provide daemon-owned session state, immutable
+projection identities, projection-to-trace provenance, Pi tool/Task Board
+ingestion, deterministic release, session-isolated HA fast state, and
+projection-bounded MGR invocation. The decision remains proposed until automatic
+task/branch lifecycle, combined budget accounting, the shared disclosure ledger,
+and TTL reasoning artifacts satisfy the remaining acceptance criteria.
+
 ## Problem
 
 NMG currently uses "Active Graph" for a query-scoped retrieval result while the

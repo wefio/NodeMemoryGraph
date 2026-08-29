@@ -8,9 +8,11 @@ This executable walkthrough teaches NMG's smallest complete memory loop:
 remember -> compact search headers -> exact get
 ```
 
-It creates a private temporary SQLite store, does not start a daemon, does not
-call an LLM or embedding provider, and removes the store on exit. It never reads
-or writes the user's normal `~/.nmg` memory.
+It creates a private temporary SQLite store and one in-process resident daemon,
+does not call an LLM or embedding provider, and shuts down the daemon and removes
+the store on exit. The resident process is required because the session Active
+Graph is intentionally memory-only across search and exact disclosure. The
+tutorial never reads or writes the user's normal `~/.nmg` memory.
 
 ## Run it
 

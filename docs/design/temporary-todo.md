@@ -13,21 +13,26 @@ deliberately closed.
 
 ## 1. Implement the session Active Graph runtime
 
-- [ ] Introduce a memory-resident, session/branch-owned AG registry with one
-  total hard budget and deterministic cleanup.
-- [ ] Separate `agId`, `taskFrameId`, `projectionId`, and `boardChannelId`;
-  migrate query-hash task lineage and preserve immutable disclosure/feedback
-  revisions without retaining the mutable AG.
+- [x] Introduce a bounded memory-resident, session-owned AG registry with
+  deterministic cleanup and immutable projection revisions.
+- [x] Separate `agId`, `taskFrameId`, `projectionId`, retrieval `traceIds`, and
+  `boardChannelId`; route disclosure, attribution and claim outcomes through the
+  projection-to-trace registry.
+- [ ] Add branch ownership, automatic semantic task-frame switching/cooling,
+  task return, and one combined semantic/tool/reasoning budget.
 - [ ] Represent semantic references, tool observations, activation edges, and
   hypothetical reasoning artifacts as typed AG layers with provenance and TTL.
-- [ ] Replace Pi `SessionRuntimeAg` and the independent injection window with
-  thin host event ingestion and the shared AG disclosure ledger; route other
-  adapters through the same projection contract.
-- [ ] Bind HA fast state to session/branch and use it for admission, cooling,
+- [x] Replace Pi `SessionRuntimeAg` with thin tool/Task Board event ingestion to
+  the daemon-owned AG; all daemon search consumers receive projection revisions.
+- [ ] Move the Pi injection window into a host-neutral AG disclosure ledger.
+- [x] Isolate HA fast state by session and clear it on session release.
+- [ ] Use HA for admission, cooling,
   task return, redundancy-aware retention, and budget proposals without
   changing semantic confidence.
-- [ ] Let explicitly enabled MGR consume only a bounded HA-selected subgraph and
-  return attributable hypothetical artifacts; never auto-write them to STG/LTG.
+- [x] Require explicitly enabled MGR to consume a session-owned bounded AG
+  projection and label its result non-persistent/hypothetical.
+- [ ] Materialize MGR derivations as provenance-carrying TTL AG artifacts and
+  add the optional HA rescore loop; never auto-write them to STG/LTG.
 - [ ] Add behavior tests for task continuation, A→B, A→B→A, shared constraints,
   false switches, compaction, projection replay, concurrent branches, budget
   exhaustion, and session cleanup.
@@ -36,10 +41,9 @@ deliberately closed.
 retrieval/disclosure traces, Pi runtime tool capture, HA, MGR, controller hard
 gates, and session lifecycle hooks provide reusable implementation pieces.
 
-**Current blocker:** those pieces have different identities and owners. The
-current query-scoped `ActiveGraph` is a trace-shaped projection, Pi owns a flat
-runtime FIFO, HA fast state is not a shared session-AG contract, and MGR runs as
-an isolated Lab invocation.
+**Current blocker:** the core owner and identities are unified, but task/branch
+lifecycle, combined budget accounting, disclosure-ledger migration and runtime
+reasoning artifacts are not yet complete.
 
 **Done when:** every supported adapter receives model context through immutable
 projection revisions frozen from one bounded session AG; no duplicate working
