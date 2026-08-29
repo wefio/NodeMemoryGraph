@@ -145,41 +145,6 @@ one shared daemon, each benchmark worker closes without stopping that daemon,
 and the bridge subprocess can be removed without changing official inputs,
 outputs, scoring, or product RPC semantics.
 
-## 6. Build the external Repository Control Plane
-
-- [ ] Define versioned YAML/JSON Contract fixtures and a canonical IR with stable
-  IDs, source locations, diagnostics, extension namespaces and content digests.
-- [ ] Extract reusable route/observation logic from `agent:context` behind a
-  read-only Repository Observer; preserve the existing CLI behavior.
-- [ ] Implement a run-to-completion reconciler CLI that emits a bounded WorkOrder
-  and defaults to plan-only operation.
-- [ ] Turn `agent:verify` output into an immutable receipt bound to contract
-  digest, observed revision, commit, scope and verifier identity.
-- [ ] Add independent scope, check-strength and architecture-boundary verification
-  so an implementing Agent cannot self-certify completion.
-- [ ] Add a forge provider for Draft PR/check state and idempotent re-observation;
-  keep the Task Board as a pointer/notification surface rather than authoritative
-  work state.
-- [ ] Define narrow harness, repository, verifier, policy, receipt and optional
-  memory provider contracts; prove at least two harnesses share one WorkOrder.
-- [ ] Prove the full closed loop with NMG disabled, then add an optional NMG
-  adapter for recall, reusable experience and Task Board coordination.
-- [ ] Evaluate whether continuous watcher/queue/catalog behavior is justified by
-  real continuous contracts before adding a resident control-plane service.
-
-**Available mechanism:** `agent:context`, `agent:verify`, route ownership,
-blocking/advisory checks, Draft PR/CI, Task Board, stable NMG client boundaries and
-structured latest verification evidence already cover parts of the loop.
-
-**Current blocker:** these parts do not share a Contract IR, WorkOrder, independent
-receipt identity or idempotent reconciler. The current repository automation is a
-lightweight workflow, not the designed control plane.
-
-**Done when:** all acceptance criteria in
-[ci-cd-and-quality.md §7.9](ci-cd-and-quality.md#79-完整闭环验收) hold and the
-completion audit can cite implementation plus behavior evidence instead of this
-plan.
-
 ## Explicitly deferred — not missing current work
 
 These options return to the active checklist only after their prerequisite is

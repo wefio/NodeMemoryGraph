@@ -44,16 +44,6 @@ session lifecycle, tools, and UI. NMG owns durable memory, provenance, retrieval
 and memory-maintenance policy. NMG is not an agent harness, a sandbox, or a cloud
 platform.
 
-Repository development orchestration is also outside the NMG daemon. A future
-Repository Control Plane may live in this repository and use NMG through an
-optional client adapter, but the dependency direction is strictly
-`Repository Control Plane -> NMG client -> NMG daemon`. Git contracts, repository
-observations, verification receipts, pull-request state, and merge readiness
-remain control-plane or forge concerns; they do not become STG/LTG truth and the
-NMG daemon never schedules or reconciles repository work. The designed boundary
-is specified in [ci-cd-and-quality.md](ci-cd-and-quality.md#7-repository-control-plane-designed-target)
-and the proposed [Repository Control Plane decision](../decisions/proposed/2026-08-29-repository-control-plane.md).
-
 NMG has two intentionally different surfaces:
 
 - **NMG Lite** is the default product surface: a zero-configuration Pi plugin
