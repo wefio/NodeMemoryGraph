@@ -1,193 +1,29 @@
-import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { collectAgentContext, type AgentContextReport } from "./repo-context.ts";
+import {
+  buildRouteVerificationPlan,
+  executeVerificationPlan,
+  npmCommandRunner,
+  type VerificationCommandResult,
+  type VerificationRunResult,
+} from "../src/rcp/verification.ts";
+export {
+  executeVerificationPlan,
+  type VerificationClassification,
+  type VerificationCommandResult,
+  type VerificationFailureKind,
+  type VerificationPlan,
+  type VerificationPlanItem,
+  type VerificationRunResult,
+  type VerificationStatus,
+} from "../src/rcp/verification.ts";
 
-export type VerificationClassification = "blocking" | "advisory";
-export type VerificationStatus = "passed" | "failed" | "skipped";
-export type VerificationFailureKind = "exit" | "spawn" | "timeout" | "signal" | "runner";
-
-export interface VerificationPlanItem {
-  command: string;
-  classification: VerificationClassification;
-  routes: string[];
-}
-
-export interface VerificationPlan {
-  blocking: VerificationPlanItem[];
-  advisory: VerificationPlanItem[];
-}
-
-export interface VerificationCommandResult extends VerificationPlanItem {
-  status: VerificationStatus;
-  exitCode?: number;
-  durationMs: number;
-  reason?: string;
-  output?: string;
-  errorKind?: VerificationFailureKind;
-  signal?: NodeJS.Signals;
-}
-
-export interface VerificationRunResult {
-  ok: boolean;
-  results: VerificationCommandResult[];
-}
-
-type CommandRunner = (
-  command: string,
-  classification: VerificationClassification,
-  routes: string[],
-) => Promise<VerificationCommandResult>;
-
-function collectPlanItems(
-  report: AgentContextReport,
-  classification: VerificationClassification,
-): VerificationPlanItem[] {
-  const commands = new Map<string, string[]>();
-  for (const route of report.routes) {
-    for (const command of route.verify[classification]) {
-      const routes = commands.get(command) ?? [];
-      routes.push(route.id);
-      commands.set(command, routes);
-    }
-  }
-  return [...commands].map(([command, routes]) => ({
-    command,
-    classification,
-    routes,
-  }));
-}
-
-export function buildVerificationPlan(report: AgentContextReport): VerificationPlan {
-  return {
-    blocking: collectPlanItems(report, "blocking"),
-    advisory: collectPlanItems(report, "advisory"),
-  };
-}
-
-export async function executeVerificationPlan(
-  plan: VerificationPlan,
-  options: {
-    includeAdvisory?: boolean;
-    dryRun?: boolean;
-    run: CommandRunner;
-  },
-): Promise<VerificationRunResult> {
-  const results: VerificationCommandResult[] = [];
-  const execute = async (item: VerificationPlanItem) => {
-    if (options.dryRun) {
-      results.push({ ...item, status: "skipped", durationMs: 0, reason: "dry run" });
-      return;
-    }
-    try {
-      const result = await options.run(item.command, item.classification, item.routes);
-      results.push({ ...result, ...item });
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      results.push({
-        ...item,
-        status: "failed",
-        durationMs: 0,
-        errorKind: "runner",
-        reason,
-        output: outputTail(reason),
-      });
-    }
-  };
-
-  for (const item of plan.blocking) await execute(item);
-  if (options.includeAdvisory) {
-    for (const item of plan.advisory) await execute(item);
-  } else {
-    for (const item of plan.advisory) {
-      results.push({
-        ...item,
-        status: "skipped",
-        durationMs: 0,
-        reason: "advisory checks require --include-advisory",
-      });
-    }
-  }
-
-  return {
-    ok: results.every(
-      (result) => result.classification === "advisory" || result.status !== "failed",
-    ),
-    results,
-  };
-}
-
-function outputTail(value: string, limit = 8_000): string | undefined {
-  const text = value.trim();
-  if (!text) return undefined;
-  return text.length <= limit ? text : `[truncated]\n${text.slice(-limit)}`;
-}
-
-function npmRunner(root: string, quiet: boolean, timeoutMs: number): CommandRunner {
-  return async (command, classification, routes) => {
-    const started = performance.now();
-    const npmEntry = process.env.npm_execpath;
-    const executable = npmEntry
-      ? process.execPath
-      : process.platform === "win32"
-        ? (process.env.ComSpec ?? "cmd.exe")
-        : "npm";
-    const args = npmEntry
-      ? [npmEntry, "run", command]
-      : process.platform === "win32"
-        ? ["/d", "/s", "/c", `npm run ${command}`]
-        : ["run", command];
-    const result = spawnSync(executable, args, {
-      cwd: root,
-      encoding: "utf8",
-      windowsHide: true,
-      stdio: "pipe",
-      maxBuffer: 16 * 1024 * 1024,
-      timeout: timeoutMs,
-    });
-    const stdout = result.stdout ?? "";
-    const stderr = result.stderr ?? "";
-    if (!quiet) {
-      if (stdout) process.stdout.write(stdout);
-      if (stderr) process.stderr.write(stderr);
-    }
-    const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
-    const errorKind: VerificationFailureKind | undefined =
-      errorCode === "ETIMEDOUT"
-        ? "timeout"
-        : result.error
-          ? "spawn"
-          : result.signal
-            ? "signal"
-            : result.status !== 0
-              ? "exit"
-              : undefined;
-    const exitCode = result.status ?? undefined;
-    const reason =
-      errorKind === "timeout"
-        ? `command exceeded ${timeoutMs}ms timeout`
-        : result.error?.message ??
-          (result.signal
-            ? `command terminated by ${result.signal}`
-            : errorKind === "exit"
-              ? `command exited with code ${exitCode ?? "unknown"}`
-              : undefined);
-    return {
-      command,
-      classification,
-      routes,
-      status: errorKind ? "failed" : "passed",
-      exitCode,
-      durationMs: Math.round(performance.now() - started),
-      errorKind,
-      signal: result.signal ?? undefined,
-      reason,
-      output: errorKind ? outputTail(`${stdout}${stderr}${result.error?.message ?? ""}`) : undefined,
-    };
-  };
+export function buildVerificationPlan(report: AgentContextReport) {
+  return buildRouteVerificationPlan(report.routes);
 }
 
 function parseArgs(args: string[]) {
@@ -303,7 +139,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     const result = await executeVerificationPlan(buildVerificationPlan(report), {
       includeAdvisory: options.includeAdvisory,
       dryRun: options.dryRun,
-      run: npmRunner(options.root, options.json, options.timeoutMs),
+      run: npmCommandRunner(options.root, options.json, options.timeoutMs),
     });
     const finishedAt = new Date().toISOString();
     const evidence = {

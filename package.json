@@ -14,10 +14,12 @@
     ]
   },
   "bin": {
-    "nmg": "./bin/nmg.mjs"
+    "nmg": "./bin/nmg.mjs",
+    "nmg-rcp": "./bin/nmg-rcp.mjs"
   },
   "files": [
     "bin/nmg.mjs",
+    "bin/nmg-rcp.mjs",
     "dist/",
     "proto/",
     "scripts/tutorial-first-recall.ts",
@@ -30,6 +32,7 @@
     "src/core/",
     "src/integration/",
     "src/prompts/",
+    "src/rcp/",
     "src/lab/autodiff.ts",
     "src/lab/controller-protocol.ts",
     "src/lab/controller-runtime.ts",
@@ -45,12 +48,13 @@
     "build": "npm run prompts:generate && node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node -e \"require('node:fs').cpSync('src/cli/graph/assets','dist/cli/graph/assets',{recursive:true})\"",
     "check": "npm run prompts:check && tsc --noEmit",
     "cli": "node --experimental-strip-types src/cli/main.ts",
+    "rcp": "node --experimental-strip-types src/rcp/cli/main.ts",
     "tutorial:first-recall": "node --experimental-strip-types scripts/tutorial-first-recall.ts",
     "lint": "eslint src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/",
     "lint:fix": "eslint --fix src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/",
     "format": "prettier --write \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\"",
-    "test:coverage": "c8 node --experimental-strip-types --test --test-concurrency=2 \"tests/cli/**/*.test.ts\" \"tests/core/**/*.test.ts\" \"tests/docker/**/*.test.ts\" \"tests/docs/**/*.test.ts\" \"tests/extensions/**/*.test.ts\" \"tests/guardrails/**/*.test.ts\" \"tests/integration/**/*.test.ts\" \"tests/prompts/**/*.test.ts\" \"tests/scripts/**/*.test.ts\" \"tests/skills/**/*.test.ts\" \"tests/support/**/*.test.ts\" \"tests/tools/**/*.test.ts\"",
+    "test:coverage": "c8 node --experimental-strip-types --test --test-concurrency=2 \"tests/cli/**/*.test.ts\" \"tests/core/**/*.test.ts\" \"tests/docker/**/*.test.ts\" \"tests/docs/**/*.test.ts\" \"tests/extensions/**/*.test.ts\" \"tests/guardrails/**/*.test.ts\" \"tests/integration/**/*.test.ts\" \"tests/prompts/**/*.test.ts\" \"tests/rcp/**/*.test.ts\" \"tests/scripts/**/*.test.ts\" \"tests/skills/**/*.test.ts\" \"tests/support/**/*.test.ts\" \"tests/tools/**/*.test.ts\"",
     "eval:agents": "node --experimental-strip-types evals/run.ts",
     "hotspot:modules": "node --experimental-strip-types scripts/hotspot-files.ts",
     "perf:hotspots": "node --experimental-strip-types scripts/perf-hotspots.ts",
@@ -122,7 +126,7 @@
     "verify:chaos": "npm run test:chaos",
     "bench:autodiff": "node --experimental-strip-types tools/autodiff-benchmark.ts",
     "test": "node --experimental-strip-types --test --test-concurrency=4 \"tests/**/*.test.ts\"",
-    "test:product": "node --experimental-strip-types --test --test-concurrency=4 \"tests/cli/**/*.test.ts\" \"tests/core/**/*.test.ts\" \"tests/docker/**/*.test.ts\" \"tests/docs/**/*.test.ts\" \"tests/extensions/**/*.test.ts\" \"tests/guardrails/**/*.test.ts\" \"tests/integration/**/*.test.ts\" \"tests/prompts/**/*.test.ts\" \"tests/scripts/**/*.test.ts\" \"tests/skills/**/*.test.ts\" \"tests/support/**/*.test.ts\" \"tests/tools/**/*.test.ts\"",
+    "test:product": "node --experimental-strip-types --test --test-concurrency=4 \"tests/cli/**/*.test.ts\" \"tests/core/**/*.test.ts\" \"tests/docker/**/*.test.ts\" \"tests/docs/**/*.test.ts\" \"tests/extensions/**/*.test.ts\" \"tests/guardrails/**/*.test.ts\" \"tests/integration/**/*.test.ts\" \"tests/prompts/**/*.test.ts\" \"tests/rcp/**/*.test.ts\" \"tests/scripts/**/*.test.ts\" \"tests/skills/**/*.test.ts\" \"tests/support/**/*.test.ts\" \"tests/tools/**/*.test.ts\"",
     "test:research": "node --experimental-strip-types --test --test-concurrency=4 \"tests/benchmarks/**/*.test.ts\" \"tests/evals/**/*.test.ts\" \"tests/official/**/*.test.ts\"",
     "test:chaos": "npm run build && node --experimental-strip-types --test \"tests/chaos/*.test.ts\"",
     "test:cg": "node --experimental-strip-types --test tests/core/autodiff.test.ts tests/core/differentiable-controller.test.ts tests/core/hierarchical-activation.test.ts tests/core/memory-graph-reasoner.test.ts tests/core/fork-merge.test.ts tests/core/robustness.test.ts"

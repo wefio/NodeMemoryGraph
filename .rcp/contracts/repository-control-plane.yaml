@@ -1,0 +1,57 @@
+apiVersion: repository.nmg.dev/v1alpha1
+kind: AgentChange
+metadata:
+  id: repository-control-plane-implementation
+spec:
+  intent: Complete the external run-to-completion Repository Control Plane without moving repository authority into NMG
+  scope:
+    include:
+      - .gitignore
+      - .rcp/contracts/**
+      - agent-context.yaml
+      - bin/nmg-rcp.mjs
+      - docs/decisions/proposed/2026-08-29-repository-control-plane.md
+      - docs/decisions/proposed/2026-08-29-repository-control-plane.zh-CN.md
+      - docs/design/ci-cd-and-quality.md
+      - docs/design/completion-audit.md
+      - docs/design/temporary-todo.md
+      - package.json
+      - src/rcp/**
+      - tests/rcp/**
+      - tools/agent-verify.ts
+      - tools/repo-context.ts
+      - tools/verify-package.ts
+      - tsconfig.build.json
+    exclude:
+      - docs/experiments/**
+      - evals/**
+  preserve:
+    - NMG daemon and Core do not depend on or own the Repository Control Plane
+    - experiments remain non-normative and non-blocking
+    - unrelated working-tree changes remain untouched
+  invariants:
+    - plan is the default and mutation requires explicit apply authority plus a harness boundary
+    - implementing harness output cannot self-certify verification or weaken checks during execution
+    - desired state, observed state, receipts, forge state and memory have separate owners
+    - failed attempts remain append-only and do not prevent a corrected retry
+  verification:
+    routes:
+      - ci-and-tests
+      - packaging
+      - repository-control-plane
+      - repository-tooling
+    checks:
+      - agent:context:check
+      - build
+      - check
+      - docs:check
+      - package:check
+      - test:product
+    forgeChecks:
+      - All checks passed
+  authority:
+    mode: apply
+  extensions:
+    repository.nmg.dev/delivery:
+      kind: run-to-completion
+      continuousWatcher: deferred-until-needed

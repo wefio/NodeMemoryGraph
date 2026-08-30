@@ -36,3 +36,8 @@ links and make the pair point both ways:
 
 Decision notes should normally have an English and `.zh-CN.md` version that link
 to one another. Missing translations are reported as warnings, not hard errors.
+
+## Open proposals
+
+- [Session-owned Active Graph runtime](proposed/2026-08-29-session-active-graph-runtime.md)
+- [External Repository Control Plane](proposed/2026-08-29-repository-control-plane.md)

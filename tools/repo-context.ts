@@ -1,9 +1,13 @@
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+
+import {
+  digestRepositoryPaths,
+  observeGitWorktree,
+} from "../src/rcp/repository.ts";
 
 export interface VerificationConfig {
   blocking: string[];
@@ -147,36 +151,13 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 function git(root: string): AgentContextReport["git"] {
-  const run = (args: string[]) =>
-    spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
-  const branch = run(["branch", "--show-current"]);
-  const head = run(["rev-parse", "HEAD"]);
-  const status = run(["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
-  if (branch.status !== 0 || status.status !== 0) {
-    const failed = branch.status !== 0 ? branch : status;
-    const operation = branch.status !== 0 ? "git branch --show-current" : "git status";
-    const code = (failed.error as NodeJS.ErrnoException | undefined)?.code;
-    const detail =
-      failed.error?.message ?? failed.stderr?.trim() ?? `${operation} exited with code ${failed.status}`;
-    return {
-      available: false,
-      dirtyFiles: [],
-      error: `${operation} failed${code ? ` (${code})` : ""}: ${detail.replaceAll(/\s+/g, " ")}`,
-    };
-  }
-  const entries = status.stdout.split("\0").filter(Boolean);
-  const dirtyFiles: string[] = [];
-  for (let index = 0; index < entries.length; index += 1) {
-    const entry = entries[index];
-    const statusCode = entry.slice(0, 2);
-    dirtyFiles.push(normalizePath(entry.slice(3)));
-    if (statusCode.includes("R") || statusCode.includes("C")) index += 1;
-  }
+  const observation = observeGitWorktree(root);
   return {
-    available: true,
-    branch: branch.stdout.trim() || undefined,
-    head: head.status === 0 ? head.stdout.trim() || undefined : undefined,
-    dirtyFiles,
+    available: observation.available,
+    branch: observation.branch,
+    head: observation.commit,
+    dirtyFiles: observation.dirtyFiles,
+    error: observation.error,
   };
 }
 
@@ -249,40 +230,8 @@ function desiredRevision(routes: RouteConfig[], scripts: Record<string, string>)
   );
 }
 
-function updatePathDigest(hash: ReturnType<typeof createHash>, root: string, scope: string): void {
-  const path = resolve(root, scope);
-  const local = relative(root, path);
-  if (local.startsWith("..")) {
-    hash.update(`external:${scope}\0`);
-    return;
-  }
-  if (!existsSync(path)) {
-    hash.update(`missing:${scope}\0`);
-    return;
-  }
-  const stat = lstatSync(path);
-  if (stat.isSymbolicLink()) {
-    hash.update(`link:${scope}:${readlinkSync(path)}\0`);
-    return;
-  }
-  if (stat.isDirectory()) {
-    hash.update(`directory:${scope}\0`);
-    for (const entry of readdirSync(path, { withFileTypes: true })
-      .filter((entry) => ![".git", ".nmg", "node_modules"].includes(entry.name))
-      .sort((left, right) => left.name.localeCompare(right.name))) {
-      updatePathDigest(hash, root, join(scope, entry.name));
-    }
-    return;
-  }
-  hash.update(`file:${scope}\0`);
-  hash.update(readFileSync(path));
-  hash.update("\0");
-}
-
 function observedRevision(root: string, scopes: string[]): string {
-  const hash = createHash("sha256");
-  for (const scope of [...scopes].sort()) updatePathDigest(hash, root, scope);
-  return hash.digest("hex");
+  return digestRepositoryPaths(root, scopes);
 }
 
 interface VerificationEvidence {
