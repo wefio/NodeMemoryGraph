@@ -128,7 +128,7 @@ routes:
     paths: [src/rcp/**, tests/rcp/**, bin/nmg-rcp.mjs]
     owners:
       - docs/design/ci-cd-and-quality.md
-      - docs/decisions/proposed/2026-08-29-repository-control-plane.md
+      - docs/decisions/implemented/2026-08-29-repository-control-plane.md
     tests: [tests/rcp/**]
     verify:
       blocking: [check, test:product, build, package:check]

@@ -26,4 +26,7 @@
 ## 开放提案
 
 - [会话级 Active Graph 运行时](proposed/2026-08-29-session-active-graph-runtime.zh-CN.md)
-- [外部 Repository Control Plane](proposed/2026-08-29-repository-control-plane.zh-CN.md)
+
+## 已实现决策
+
+- [外部 Repository Control Plane](implemented/2026-08-29-repository-control-plane.zh-CN.md)

@@ -40,4 +40,7 @@ to one another. Missing translations are reported as warnings, not hard errors.
 ## Open proposals
 
 - [Session-owned Active Graph runtime](proposed/2026-08-29-session-active-graph-runtime.md)
-- [External Repository Control Plane](proposed/2026-08-29-repository-control-plane.md)
+
+## Implemented decisions
+
+- [External Repository Control Plane](implemented/2026-08-29-repository-control-plane.md)
