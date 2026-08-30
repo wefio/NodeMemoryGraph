@@ -10,8 +10,8 @@ spec:
       - .rcp/contracts/**
       - agent-context.yaml
       - bin/nmg-rcp.mjs
-      - docs/decisions/proposed/2026-08-29-repository-control-plane.md
-      - docs/decisions/proposed/2026-08-29-repository-control-plane.zh-CN.md
+      - docs/decisions/implemented/2026-08-29-repository-control-plane.md
+      - docs/decisions/implemented/2026-08-29-repository-control-plane.zh-CN.md
       - docs/design/ci-cd-and-quality.md
       - docs/design/completion-audit.md
       - docs/design/temporary-todo.md

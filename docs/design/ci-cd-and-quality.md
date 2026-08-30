@@ -114,12 +114,13 @@ advisory 命令默认只显示、不执行；显式传入 `--include-advisory` �
 
 该流水线的自动化边界是机械路由、声明/观测协调、执行、失败归因和最近证据覆盖。它不负责判断架构是否合理，不自动格式化、修改代码、提交 Git，也不自动调用 LLM、embedding、benchmark 或官方数据集。真实外部评估仍须用户或 Agent 明确选择。GitHub CI 在 push/PR 自动执行命名验证契约；不安装强制本地 Git hook，避免修改未完成时制造隐式副作用。
 
-## 7. Repository Control Plane designed target
+## 7. Repository Control Plane
 
-本节是**已设计、未实现**的目标边界。当前 `agent:context`、`agent:verify`、Task
-Board、GitHub PR 和 CI 是可复用原语，不等于完整控制面已经存在。规划 rationale
-和替代方案见 proposed
-[Repository Control Plane decision](../decisions/proposed/2026-08-29-repository-control-plane.zh-CN.md)。
+本节同时规定已实现的 run-to-completion 核心与仍延后的目标边界。`src/rcp/`、
+`nmg-rcp`、Contract compiler、observer、WorkOrder、独立 npm verifier、本地 receipt、
+forge adapter 和 optional NMG provider 已合并；持续 watcher/queue/catalog、多租户和
+portable attestation 尚未实现。Rationale 与替代方案见 implemented
+[Repository Control Plane decision](../decisions/implemented/2026-08-29-repository-control-plane.zh-CN.md)。
 
 ### 7.1 产品边界与依赖方向
 
@@ -266,7 +267,12 @@ Verifier 在 Agent 变更之后独立运行，检查至少分为结构、行为�
 }
 ```
 
-Receipt store 可有索引数据库，但规范 receipt 必须绑定 immutable input/output identity。
+默认 `FileReceiptSink` 把 receipt 写入被 Git 忽略的 `.rcp/receipts/`。它服务本地幂等、
+恢复和操作者审计，不随 PR 传播，也不能单独充当第三方可验证证明；
+`npm run agent:verify` 只写最近一次 `.nmg/verification/latest.json`，不会生成 RCP
+receipt。只有 `nmg-rcp reconcile --apply` 经过 `ReceiptSink` 才产生 receipt。
+Receipt store 可有索引数据库或外部 artifact/attestation provider，但规范 receipt 必须
+绑定 immutable input/output identity。外部 provider 在出现跨机器复核需求前保持延后。
 GitHub required checks 只接受受信 verifier 的结果；PR 描述和评论用于解释，不作为唯一
 机器状态。一次 receipt 可被 NMG 作为来源引用，但不会自动成为 LTG；只有经归因、可复用
 且由独立 `remember` 接入的经验才进入记忆。
@@ -291,8 +297,9 @@ schema hashing、diagnostics 和 capability-negotiation 库。
 1. **Contract compiler MVP**：schema、IR、digest、diagnostics、fixtures；只读 plan。
 2. **Observer + reconciler CLI**：复用 `agent:context` 路由，生成 Desired/Observed diff 和
    WorkOrder；一次运行后退出。
-3. **Independent verifier + receipt**：复用 `agent:verify`，receipt 绑定 commit、scope、
-   contract 与 verifier；CI 可验证 receipt。
+3. **Independent verifier + receipt**：复用 `agent:verify` 的验证原语，由 `nmg-rcp`
+   的 receipt sink 绑定 commit、scope、contract 与 verifier；当前 CI 验证同名检查，
+   但本地 receipt 本身不作为远程 artifact 发布。
 4. **Draft PR closed loop**：forge adapter、状态 conditions、重观察、重试/幂等；Task Board
    只发布指针。
 5. **Provider boundary**：支持多个 harness；NMG adapter 设为 optional 并验证无 NMG 降级。
@@ -303,9 +310,10 @@ schema hashing、diagnostics 和 capability-negotiation 库。
 通用 DSL、分布式队列或控制面数据库。是否拆成独立产品/仓库由 provider 数量、独立发布
 需求和运行隔离证据决定，而不是概念规模决定。
 
-### 7.9 完整闭环验收
+### 7.9 闭环状态与后续加固
 
-只有以下条件同时成立，RCP 才能从 designed target 升为 implemented：
+Run-to-completion 核心已通过真实 Contract-bound PR、远程 CI 和本地 receipt 闭环实现。
+`implemented` 只表示以下本地控制面能力成立，不表示已经具备持续控制器或第三方证明：
 
 - 同一 Contract 在无 NMG 情况下可编译、plan、执行受限 Agent 工作、验证并生成 receipt；
 - desired、observed、receipt 和 PR 状态分别可追踪且不存在竞争写入者；
@@ -314,8 +322,13 @@ schema hashing、diagnostics 和 capability-negotiation 库。
 - plan/apply/continuous 权限明确，破坏性动作默认不自动执行；
 - Pi、Codex 或 DSH 至少两个 harness 通过同一 WorkOrder contract；
 - NMG adapter 断开时闭环仍可工作，接入时只增加记忆/协调价值；
-- Draft PR、CI required check 与 receipt 绑定同一 commit 和 contract digest；
-- completion audit 只根据实现和验证证据升级，不根据本规划或 PR 文本升级。
+- Draft PR、CI required check 与本地 receipt 可由同一次操作者运行绑定到同一 commit 和
+  contract digest；外部复核者目前只能复核 Git/PR/CI，不能取得被忽略的本地 receipt；
+- completion audit 只根据实现和验证证据升级，不根据规划或 PR 文本升级。
+
+后续加固包括：读取时验证 receipt、把 route/verifier identity 纳入复用边界、证明被验证
+workspace 与 commit 一致、提供只读 receipt index，以及在确有外部证明需求时发布
+CI artifact 或受信 attestation。它们不得被当前 `implemented` 状态暗示为已经完成。
 
 ### 7.10 理论来源
 
@@ -331,7 +344,8 @@ reconciled state、[Kubernetes controllers](https://kubernetes.io/docs/concepts/
 
 ### 7.11 Run-to-completion CLI
 
-候选实现提供独立的 `nmg-rcp` 入口；它不由 NMG daemon 托管。最小流程为：
+已实现的 run-to-completion 核心提供独立的 `nmg-rcp` 入口；它不由 NMG daemon 托管。
+最小流程为：
 
 ```text
 nmg-rcp compile .rcp/contracts/change.yaml

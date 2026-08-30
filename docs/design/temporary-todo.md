@@ -145,42 +145,28 @@ one shared daemon, each benchmark worker closes without stopping that daemon,
 and the bridge subprocess can be removed without changing official inputs,
 outputs, scoring, or product RPC semantics.
 
-## 6. Build the external Repository Control Plane
+## 6. Harden the RCP evidence boundary
 
-- [x] Define versioned YAML/JSON Contract fixtures and a canonical IR with stable
-  IDs, source locations, diagnostics, extension namespaces and content digests.
-- [x] Extract reusable route/observation logic from `agent:context` behind a
-  read-only Repository Observer; preserve the existing CLI behavior.
-- [x] Implement a run-to-completion reconciler CLI that emits a bounded WorkOrder
-  and defaults to plan-only operation.
-- [x] Turn `agent:verify` output into an immutable receipt bound to contract
-  digest, observed revision, commit, scope and verifier identity.
-- [x] Add independent scope, check-strength and architecture-boundary verification
-  so an implementing Agent cannot self-certify completion.
-- [ ] Add a forge provider for Draft PR/check state and idempotent re-observation;
-  keep the Task Board as a pointer/notification surface rather than authoritative
-  work state.
-- [x] Define narrow harness, repository, verifier, policy, receipt and optional
-  memory provider contracts; prove at least two harnesses share one WorkOrder.
-- [ ] Prove the full closed loop with NMG disabled, then add an optional NMG
-  adapter for recall, reusable experience and Task Board coordination.
-- [x] Evaluate whether continuous watcher/queue/catalog behavior is justified by
-  real continuous contracts before adding a resident control-plane service.
+- [ ] Validate receipt integrity when looking up a reusable result instead of trusting
+  parsed `decision: verified` fields alone.
+- [ ] Bind receipt reuse to the active route and verifier definition, not only the
+  Contract digest, scoped observed revision, and operation key.
+- [ ] Prove that verified workspace bytes match the recorded commit/forge head and
+  fail closed when Git observation is unavailable.
+- [ ] Add a read-only receipt list/scan surface before treating the local append-only
+  store as an auditable history rather than an idempotency cache.
+- [ ] Define an executable terminal predicate, attempt/time budgets, cancellation,
+  and cycle detection before adding any iterative reconciler. The current CLI
+  deliberately stops after one `reconcileOnce` attempt.
 
-**Available mechanism:** the feature branch contains the Contract compiler,
-observer, WorkOrder planner, plan/apply CLI, independent npm verifier, check-definition
-stability guard, append-only retryable receipts, GitHub Draft PR binding, two harness
-providers, optional NMG provider, and deterministic product tests.
+**Available mechanism:** deterministic RCP product tests cover one-shot planning,
+apply, scope enforcement, named verification, retryable receipts, forge binding and
+optional/no-NMG operation. These tests do not establish semantic refactor
+equivalence or portable attestation.
 
-**Current blocker:** candidate implementation is not merged and has not yet driven a
-real Contract-bound Draft PR through remote CI to a matching receipt. No real
-continuous contract justifies a resident watcher/queue/catalog, so that phase remains
-conditional rather than silently missing.
-
-**Done when:** all acceptance criteria in
-[ci-cd-and-quality.md §7.9](ci-cd-and-quality.md#79-完整闭环验收) hold and the
-completion audit can cite implementation plus behavior evidence instead of this
-plan.
+**Done when:** stale or tampered receipts cannot be reused, verified bytes are bound
+to the claimed commit and verifier identity, local receipt history is inspectable,
+and any future iterative mode has explicit convergence and resource boundaries.
 
 ## Explicitly deferred — not missing current work
 
@@ -192,6 +178,11 @@ observed:
 - Rust/Python rewrites: only after a measured TypeScript bottleneck or an
   unavoidable native dependency.
 - vLLM as a runtime dependency: rejected for the local-first default.
+- RCP continuous watcher/queue/catalog: only after a real continuous Contract
+  demonstrates that run-to-completion operation is insufficient.
+- Portable RCP receipt attestation: only when receipts must be independently
+  verified across machines or organizations; local receipts remain sufficient for
+  current operator audit and idempotency.
 - Strict Huffman storage: only if tier/block access misses measured scale or
   latency targets.
 - Automatic multi-edge motif consolidation: only after ordinary node and edge

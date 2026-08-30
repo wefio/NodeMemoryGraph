@@ -2,14 +2,15 @@
 
 [中文](2026-08-29-repository-control-plane.zh-CN.md)
 
-**Status:** proposed  
+**Status:** implemented  
 **Date:** 2026-08-29
 
-**Implementation status:** implementation candidate on the feature branch, not
-accepted or merged. Contract compilation, observation, WorkOrders, independent
-verification, append-only receipts, provider boundaries, and Draft PR binding have
-deterministic tests. A real Draft PR/CI/receipt run and completion audit are still
-required before this decision or implementation may be called complete.
+**Implementation status:** the single-attempt run-to-completion control plane was merged through
+PR #3 and hardened through PR #4. Contract compilation, observation, WorkOrders,
+independent verification, append-only local receipts, provider boundaries, Draft
+PR binding, and optional/no-NMG operation have deterministic product tests and a
+real Contract-bound PR/CI/local-receipt run. Continuous reconciliation and portable
+third-party attestations remain deferred.
 
 ## Problem
 
@@ -27,13 +28,14 @@ make the memory service control Git, CI, PRs, and Agent execution; prevent the
 development loop from working when NMG is unavailable; and create competing
 sources of truth between Git, receipts, and LTG.
 
-## Proposal
+## Decision
 
 Introduce a Repository Control Plane (RCP) as an external, Agent-neutral control
 plane. It compiles versioned repository Contracts into a canonical IR, observes
 the repository, evaluates policy, emits bounded WorkOrders, delegates work to an
-Agent harness, independently verifies the result, records an immutable receipt,
-and reconciles until a terminal condition or explicit blocker is reached.
+Agent harness, independently verifies the result, and records an immutable receipt.
+Each explicit invocation performs one bounded reconciliation attempt ending in a
+verified, failed, or blocked result. Iterative convergence is not implemented.
 
 The dependency direction is one way:
 
@@ -101,7 +103,7 @@ Delivery proceeds in six independently verifiable slices:
 
 The normative data contracts, lifecycle, security defaults, phased plan, and
 full completion criteria are owned by
-[ci-cd-and-quality.md §7](../../design/ci-cd-and-quality.md#7-repository-control-plane-designed-target).
+[ci-cd-and-quality.md §7](../../design/ci-cd-and-quality.md#7-repository-control-plane).
 
 ## Alternatives considered
 
@@ -121,21 +123,26 @@ full completion criteria are owned by
    TTL coordination and semantic memory cannot replace versioned desired state,
    repository observation, forge state, or immutable verification receipts.
 
-## Acceptance criteria
+## Consequences
 
-- NMG design states the one-way external dependency and assigns repository state,
-  receipt, PR, and memory truth to distinct owners.
-- The canonical process design specifies Contract IR, observer, policy, planner,
-  WorkOrder, reconciler, verifier, receipt, providers, authority modes, and phased
-  delivery without claiming they are implemented.
-- A future implementation can complete the Contract-to-receipt loop with NMG
-  disabled and gains only optional memory/coordination value when NMG is enabled.
-- Agents cannot self-certify completion; verified state requires an independent
-  receipt bound to the same Contract digest and commit as the PR/check.
-- Repeated reconciliation is idempotent, interruption is recoverable from Git and
-  receipts, and destructive operations remain opt-in.
-- Completion status changes only when code and behavior evidence satisfy the full
-  criteria in the canonical design.
+- RCP remains outside the NMG daemon and can complete its run-to-completion path
+  with NMG disabled; memory and Task Board integration are optional value only.
+- The implemented CLI binds a Contract, scoped observation, WorkOrder, named
+  checks, forge state, and one append-only receipt. It does not make preservation
+  prose executable or prove semantic equivalence by itself.
+- The default `FileReceiptSink` writes `.rcp/receipts/`, which is intentionally
+  ignored by Git. Those receipts support local idempotency and operator audit, but
+  are not portable third-party attestations and are not produced by
+  `npm run agent:verify` alone.
+- GitHub CI remains the repository's remote verification authority. A future
+  artifact/attestation provider may publish receipt evidence when an independently
+  reproducible external proof is required.
+- Only single-attempt run-to-completion reconciliation is implemented. Watchers, queues,
+  continuous convergence, general catalogs, and multi-tenant operation still
+  require demonstrated demand and separate safety design.
+- Receipt reuse, verifier identity depth, clean-worktree/commit binding, and
+  read-only receipt indexing remain explicit hardening work rather than stronger
+  claims hidden behind the implemented status.
 
 ## Risks
 

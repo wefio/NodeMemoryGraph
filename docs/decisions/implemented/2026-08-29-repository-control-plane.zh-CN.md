@@ -2,12 +2,13 @@
 
 [English](2026-08-29-repository-control-plane.md)
 
-**Status:** proposed  
+**Status:** implemented  
 **Date:** 2026-08-29
 
-**实现状态：** feature 分支中已有候选实现，尚未接受或合并。Contract 编译、仓库观察、
-WorkOrder、独立验证、append-only receipt、provider 边界和 Draft PR 绑定已有确定性测试；
-在真实 Draft PR/CI/receipt 闭环及 completion audit 完成前，仍不得称为完整实现。
+**实现状态：** 单次 run-to-completion 控制面已通过 PR #3 合并，并由 PR #4 完成质量加固。
+Contract 编译、仓库观察、WorkOrder、独立验证、本地 append-only receipt、provider 边界、
+Draft PR 绑定及 optional/no-NMG 路径已有确定性产品测试和真实 Contract-bound
+PR/CI/本地 receipt 闭环。持续协调与可供第三方独立复核的 portable attestation 仍延后。
 
 ## 问题
 
@@ -20,11 +21,12 @@ WorkOrder、独立验证、append-only receipt、provider 边界和 Draft PR 绑
 记忆；这样会让记忆服务控制 Git、CI、PR 和 Agent 执行，使开发闭环依赖 NMG 可用性，
 并在 Git、receipt 与 LTG 之间制造竞争真相源。
 
-## 提案
+## 决策
 
 引入外部、Agent-neutral 的 Repository Control Plane（RCP）。它把版本化 Repository
 Contract 编译成规范 IR，观察仓库，评估策略，产生受限 WorkOrder，把工作委托给 Agent
-harness，独立验证结果，记录不可变 receipt，并协调到 terminal condition 或显式 blocker。
+harness，独立验证结果并记录不可变 receipt。每次显式调用只执行一次有界协调尝试，
+终态为 verified、failed 或 blocked；当前没有实现迭代收敛。
 
 依赖方向严格单向：
 
@@ -82,7 +84,7 @@ RCP 只通过窄 provider 扩展 repository/forge、harness、verifier、policy�
 6. 只有出现真实持续 contract 和独立发布需求后，才加入 watcher、queue、catalog 与拆分。
 
 规范数据契约、生命周期、安全默认值、阶段计划和完整验收由
-[ci-cd-and-quality.md §7](../../design/ci-cd-and-quality.md#7-repository-control-plane-designed-target)
+[ci-cd-and-quality.md §7](../../design/ci-cd-and-quality.md#7-repository-control-plane)
 拥有。
 
 ## 考虑过的替代方案
@@ -98,15 +100,20 @@ RCP 只通过窄 provider 扩展 repository/forge、harness、verifier、policy�
 5. **把 Task Board 或 NMG LTG 当 work system of record。** 拒绝；TTL 协作和语义记忆
    不能替代版本化 desired state、仓库观测、forge 状态和不可变验证 receipt。
 
-## 验收标准
+## 后果
 
-- NMG 设计写明外部单向依赖，并把仓库状态、receipt、PR 与记忆真相分配给不同所有者。
-- 规范流程设计定义 Contract IR、observer、policy、planner、WorkOrder、reconciler、
-  verifier、receipt、provider、权限模式和阶段交付，且不声称已经实现。
-- 未来实现能在 NMG 禁用时完成 Contract-to-receipt 闭环，启用 NMG 时只增加记忆与协调价值。
-- Agent 不能自证完成；verified 状态需要独立 receipt 绑定同一 Contract digest 和 PR commit。
-- 重复 reconcile 幂等，中断后可从 Git 与 receipt 恢复，破坏性操作保持 opt-in。
-- 只有实现和行为证据满足规范设计中的完整条件时，完成状态才会升级。
+- RCP 保持在 NMG daemon 外部，并可在 NMG 禁用时完成 run-to-completion 路径；记忆与
+  Task Board 接入只提供可选增益。
+- 已实现 CLI 把 Contract、scope 观测、WorkOrder、命名检查、forge 状态与一份
+  append-only receipt 绑定起来；它不会自动执行 preservation 文本，也不自行证明语义等价。
+- 默认 `FileReceiptSink` 写入被 Git 忽略的 `.rcp/receipts/`。这些 receipt 用于本地幂等和
+  操作者审计，不是可移植的第三方 attestation，也不会由 `npm run agent:verify` 单独产生。
+- GitHub CI 仍是仓库远程验证权威。只有出现独立外部证明需求时，才增加 artifact/
+  attestation provider 发布 receipt 证据。
+- 当前只实现单次 run-to-completion；watcher、queue、持续收敛、通用 catalog 与多租户仍需
+  真实需求和独立安全设计。
+- Receipt 复用、verifier identity 深度、干净 worktree/commit 绑定和只读 receipt 索引
+  仍是明确加固项，不能被 `implemented` 状态掩盖。
 
 ## 风险
 
