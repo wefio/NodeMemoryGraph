@@ -98,7 +98,7 @@ npm run agent:context -- --scope <目标路径>
 
 协调状态只有三种：`unknown` 表示尚无可适用证据或旧证据不含状态指纹；`converged` 表示同一声明、同一观测快照的 blocking checks 全部通过；`drifted` 表示 route 无法机械解析、声明或内容在验证后改变、证据损坏，或 blocking check 未通过/未执行。改变同一个脏文件的内容也会改变 observed revision，不能仅凭相同 HEAD 和文件名复用旧收据。
 
-这是由 `agent:context`、`agent:verify` 和 CI 事件驱动的已实现轻量协调，不是后台 daemon，也不建立服务 catalog 或第二套仓库状态。`drifted` 只说明声明、观测和证据没有收敛，不等于架构错误；依赖方向、公共协议、持久化边界和默认能力等架构影响仍由 owner 文档、decision 与 Agent review 判断。静态测试可以机械保护已确定的 architecture fitness functions，但自动化不承载产品或架构智能。
+这是由 `agent:context`、`agent:verify` 和 CI 事件驱动的轻量协调，不是后台 daemon，也不建立服务 catalog 或第二套仓库状态。`drifted` 只说明声明、观测和证据没有收敛，不等于架构错误；依赖方向、公共协议、持久化边界和默认能力等架构影响仍由 owner 文档、decision 与 Agent review 判断。静态测试可以机械保护已确定的 architecture fitness functions，但控制面不承载产品或架构智能。
 
 ## 6. AI 开发验证流水线
 
