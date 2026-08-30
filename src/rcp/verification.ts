@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 
 import type { RouteDeclaration, VerificationCheckResult } from "./types.ts";
 
@@ -119,17 +119,7 @@ export function runNpmScriptCheck(
   streamOutput = false,
 ): VerificationCheckResult {
   const started = performance.now();
-  const npmEntry = process.env.npm_execpath;
-  const executable = npmEntry
-    ? process.execPath
-    : process.platform === "win32"
-      ? (process.env.ComSpec ?? "cmd.exe")
-      : "npm";
-  const args = npmEntry
-    ? [npmEntry, "run", name]
-    : process.platform === "win32"
-      ? ["/d", "/s", "/c", `npm run ${name}`]
-      : ["run", name];
+  const { executable, args } = npmInvocation(name);
   const result = spawnSync(executable, args, {
     cwd: root,
     encoding: "utf8",
@@ -140,21 +130,9 @@ export function runNpmScriptCheck(
   });
   const stdout = result.stdout ?? "";
   const stderr = result.stderr ?? "";
-  if (streamOutput) {
-    if (stdout) process.stdout.write(stdout);
-    if (stderr) process.stderr.write(stderr);
-  }
-  const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  if (streamOutput) streamCapturedOutput(stdout, stderr);
   const failed = Boolean(result.error || result.signal || result.status !== 0);
-  const reason =
-    errorCode === "ETIMEDOUT"
-      ? `command exceeded ${timeoutMs}ms timeout`
-      : (result.error?.message ??
-        (result.signal
-          ? `command terminated by ${result.signal}`
-          : failed
-            ? `command exited with code ${result.status ?? "unknown"}`
-            : undefined));
+  const reason = verificationFailureReason(result, timeoutMs, failed);
   return {
     name,
     status: failed ? "failed" : "passed",
@@ -163,6 +141,35 @@ export function runNpmScriptCheck(
     reason,
     evidence: failed ? outputTail(`${stdout}${stderr}${result.error?.message ?? ""}`) : undefined,
   };
+}
+
+function npmInvocation(name: string): { executable: string; args: string[] } {
+  const npmEntry = process.env.npm_execpath;
+  if (npmEntry) return { executable: process.execPath, args: [npmEntry, "run", name] };
+  if (process.platform === "win32") {
+    return {
+      executable: process.env.ComSpec ?? "cmd.exe",
+      args: ["/d", "/s", "/c", `npm run ${name}`],
+    };
+  }
+  return { executable: "npm", args: ["run", name] };
+}
+
+function streamCapturedOutput(stdout: string, stderr: string): void {
+  if (stdout) process.stdout.write(stdout);
+  if (stderr) process.stderr.write(stderr);
+}
+
+function verificationFailureReason(
+  result: SpawnSyncReturns<string>,
+  timeoutMs: number,
+  failed: boolean,
+): string | undefined {
+  const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  if (errorCode === "ETIMEDOUT") return `command exceeded ${timeoutMs}ms timeout`;
+  if (result.error) return result.error.message;
+  if (result.signal) return `command terminated by ${result.signal}`;
+  return failed ? `command exited with code ${result.status ?? "unknown"}` : undefined;
 }
 
 export function outputTail(value: string, limit = 8_000): string | undefined {

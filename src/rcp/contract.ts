@@ -35,6 +35,23 @@ export interface ContractSource {
   path: string;
 }
 
+type ContractError = (code: string, message: string, field?: string) => void;
+type NormalizedContract = Omit<RepositoryContractIr, "source" | "contractDigest">;
+
+interface ContractIdentity {
+  id: string | undefined;
+  intent: string | undefined;
+}
+
+interface ContractSpecFields {
+  scope: NormalizedContract["scope"];
+  preserve: string[];
+  invariants: string[];
+  verification: NormalizedContract["verification"];
+  authority: NormalizedContract["authority"];
+  extensions: Record<string, unknown>;
+}
+
 export function compileContractFile(path: string): CompileContractResult {
   const resolved = resolve(path);
   return compileContract({ text: readFileSync(resolved, "utf8"), path: resolved });
@@ -42,25 +59,57 @@ export function compileContractFile(path: string): CompileContractResult {
 
 export function compileContract(source: ContractSource): CompileContractResult {
   const diagnostics: ContractDiagnostic[] = [];
-  const location = (field?: string): SourceLocation => ({
-    path: source.path,
-    ...(field ? locateField(source.text, field) : {}),
-  });
-  const error = (code: string, message: string, field?: string) => {
-    diagnostics.push({ severity: "error", code, message, field, source: location(field) });
-  };
+  const error = createContractError(source, diagnostics);
+  const raw = parseContractDocument(source.text, error);
+  if (!raw) return { ok: false, diagnostics };
 
+  const normalized = compileContractDocument(raw, error, diagnostics);
+  if (!normalized) return { ok: false, diagnostics };
+
+  const contract: RepositoryContractIr = {
+    ...normalized,
+    source: { path: source.path },
+    contractDigest: digestCanonical(normalized),
+  };
+  return { ok: true, diagnostics, contract };
+}
+
+function createContractError(
+  source: ContractSource,
+  diagnostics: ContractDiagnostic[],
+): ContractError {
+  return (code, message, field) => {
+    const location: SourceLocation = {
+      path: source.path,
+      ...(field ? locateField(source.text, field) : {}),
+    };
+    diagnostics.push({ severity: "error", code, message, field, source: location });
+  };
+}
+
+function parseContractDocument(
+  text: string,
+  error: ContractError,
+): Record<string, unknown> | undefined {
   let raw: unknown;
   try {
-    raw = parseYaml(source.text);
+    raw = parseYaml(text);
   } catch (cause) {
     error("contract.parse", cause instanceof Error ? cause.message : String(cause));
-    return { ok: false, diagnostics };
+    return undefined;
   }
   if (!isRecord(raw)) {
     error("contract.shape", "contract root must be an object");
-    return { ok: false, diagnostics };
+    return undefined;
   }
+  return raw;
+}
+
+function compileContractDocument(
+  raw: Record<string, unknown>,
+  error: ContractError,
+  diagnostics: ContractDiagnostic[],
+): NormalizedContract | undefined {
   rejectUnknown(raw, TOP_LEVEL_FIELDS, "", error);
   if (raw.apiVersion !== RCP_CONTRACT_API_VERSION) {
     error("contract.api-version", `apiVersion must be ${RCP_CONTRACT_API_VERSION}`, "apiVersion");
@@ -71,10 +120,34 @@ export function compileContract(source: ContractSource): CompileContractResult {
 
   const metadata = recordField(raw, "metadata", error);
   const spec = recordField(raw, "spec", error);
-  if (!metadata || !spec) return { ok: false, diagnostics };
+  if (!metadata || !spec) return undefined;
   rejectUnknown(metadata, METADATA_FIELDS, "metadata", error);
   rejectUnknown(spec, SPEC_FIELDS, "spec", error);
 
+  const identity = compileContractIdentity(metadata, spec, error);
+  const fields = compileContractSpec(spec, error);
+  if (!fields) return undefined;
+  if (
+    diagnostics.some((diagnostic) => diagnostic.severity === "error") ||
+    !identity.id ||
+    !identity.intent
+  ) {
+    return undefined;
+  }
+  return {
+    apiVersion: RCP_CONTRACT_API_VERSION,
+    kind: RCP_CONTRACT_KIND,
+    id: identity.id,
+    intent: identity.intent,
+    ...fields,
+  };
+}
+
+function compileContractIdentity(
+  metadata: Record<string, unknown>,
+  spec: Record<string, unknown>,
+  error: ContractError,
+): ContractIdentity {
   const id = requiredText(metadata.id, "metadata.id", error);
   if (id && !/^[a-z0-9][a-z0-9._-]{2,127}$/i.test(id)) {
     error(
@@ -83,12 +156,18 @@ export function compileContract(source: ContractSource): CompileContractResult {
       "metadata.id",
     );
   }
-  const intent = requiredText(spec.intent, "spec.intent", error);
+  return { id, intent: requiredText(spec.intent, "spec.intent", error) };
+}
+
+function compileContractSpec(
+  spec: Record<string, unknown>,
+  error: ContractError,
+): ContractSpecFields | undefined {
   const scope = recordField(spec, "scope", error);
   const verification = recordField(spec, "verification", error);
   const authority = optionalRecordField(spec.authority, "spec.authority", error) ?? {};
   const extensions = optionalRecordField(spec.extensions, "spec.extensions", error) ?? {};
-  if (!scope || !verification) return { ok: false, diagnostics };
+  if (!scope || !verification) return undefined;
   rejectUnknown(scope, SCOPE_FIELDS, "spec.scope", error);
   rejectUnknown(verification, VERIFICATION_FIELDS, "spec.verification", error);
   rejectUnknown(authority, AUTHORITY_FIELDS, "spec.authority", error);
@@ -112,15 +191,7 @@ export function compileContract(source: ContractSource): CompileContractResult {
   ] as const) {
     for (const pattern of patterns) validateRepositoryPattern(pattern, field, error);
   }
-  if (diagnostics.some((diagnostic) => diagnostic.severity === "error") || !id || !intent) {
-    return { ok: false, diagnostics };
-  }
-
-  const normalized = {
-    apiVersion: RCP_CONTRACT_API_VERSION,
-    kind: RCP_CONTRACT_KIND,
-    id,
-    intent,
+  return {
     scope: { include: uniqueSorted(include), exclude: uniqueSorted(exclude) },
     preserve: uniqueSorted(preserve),
     invariants: uniqueSorted(invariants),
@@ -132,12 +203,6 @@ export function compileContract(source: ContractSource): CompileContractResult {
     authority: { mode },
     extensions,
   };
-  const contract: RepositoryContractIr = {
-    ...normalized,
-    source: { path: source.path },
-    contractDigest: digestCanonical(normalized),
-  };
-  return { ok: true, diagnostics, contract };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
