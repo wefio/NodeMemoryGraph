@@ -101,6 +101,26 @@ export async function runRcpCli(args: string[]): Promise<number> {
       emit(options.json, observation, `${observation.url} ${observation.state}`);
       return 0;
     }
+    if (options.command === "forge-bind") {
+      if (options.pullRequestNumber === undefined)
+        throw new Error("forge-bind requires --pr <number>");
+      const provider = new GitHubForgeProvider();
+      if (!provider.bindPullRequest)
+        throw new Error("forge provider cannot update Contract bindings");
+      const observation = await provider.bindPullRequest({
+        root: options.root,
+        number: options.pullRequestNumber,
+        contractId: compiled.contract.id,
+        contractDigest: compiled.contract.contractDigest,
+        body: options.body,
+      });
+      emit(
+        options.json,
+        observation,
+        `${observation.url} ${observation.contractDigest ?? "unbound"}`,
+      );
+      return 0;
+    }
     const repository = new LocalRepositoryProvider();
     const routes = readRouteDeclarations(options.root);
     if (options.command === "plan") {
@@ -337,6 +357,7 @@ Commands:
   receipt-verify <path>    validate an immutable receipt
   forge-status --pr <n>    observe a GitHub pull request
   forge-create <contract>  create a Contract-bound Draft pull request
+  forge-bind <contract>    update an existing pull request Contract binding
 
 Options:
   --root <path>            repository root

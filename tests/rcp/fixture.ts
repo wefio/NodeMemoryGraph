@@ -11,8 +11,8 @@ export function repositoryFixture(): string {
       version: "1.0.0",
       type: "module",
       scripts: {
-        check: "node -e \"process.exit(0)\"",
-        failing: "node -e \"process.exit(3)\"",
+        check: 'node -e "process.exit(0)"',
+        failing: 'node -e "process.exit(3)"',
       },
     }),
     "agent-context.yaml": [
@@ -66,6 +66,7 @@ export function contractText(overrides = ""): string {
     "  verification:",
     "    routes: [source]",
     "    checks: [check]",
+    "    forgeChecks: [product]",
     "  authority:",
     "    mode: apply",
     overrides,

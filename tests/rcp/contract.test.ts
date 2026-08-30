@@ -12,7 +12,7 @@ test("YAML and JSON compile to the same canonical Contract digest", () => {
     apiVersion: "repository.nmg.dev/v1alpha1",
     spec: {
       authority: { mode: "apply" },
-      verification: { checks: ["check"], routes: ["source"] },
+      verification: { checks: ["check"], forgeChecks: ["product"], routes: ["source"] },
       invariants: ["do not modify outside scope"],
       preserve: ["public API"],
       scope: { exclude: ["src/generated/**"], include: ["src/**"] },

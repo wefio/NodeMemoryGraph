@@ -338,6 +338,7 @@ nmg-rcp compile .rcp/contracts/change.yaml
 nmg-rcp plan .rcp/contracts/change.yaml
 nmg-rcp reconcile .rcp/contracts/change.yaml --apply --workspace-ready --nmg disabled
 nmg-rcp forge-create .rcp/contracts/change.yaml --base main --head feature/change
+nmg-rcp forge-bind .rcp/contracts/change.yaml --pr 42
 nmg-rcp reconcile .rcp/contracts/change.yaml --apply --workspace-ready \
   --pr 42 --operation-key pr-ci --nmg disabled
 ```
@@ -345,6 +346,8 @@ nmg-rcp reconcile .rcp/contracts/change.yaml --apply --workspace-ready \
 `reconcile` 默认只 plan；`--apply` 还必须显式选择当前 workspace 或外部 harness。
 本地验证 receipt 与 PR/CI receipt 使用不同 `operation-key`，但都绑定同一 Contract
 digest。带 `--pr` 的收敛还要求 PR body 中的机器标记、head commit 与成功 CI 状态一致。
+远程收敛只检查 Contract 的 `spec.verification.forgeChecks` 明确列出的检查；其他
+第三方或 advisory 状态仍记录进 receipt，但不能在未声明时取得控制面否决权。
 失败 receipt 只追加、不覆盖，并允许在外部状态修复后重试；只有已验证 receipt 才用于
 幂等复用。`.rcp/receipts/` 不参与仓库 observed revision，避免控制面输出改变自身输入。
 

@@ -184,8 +184,17 @@ export async function reconcileOnce(
     ) {
       forgeFailures.push("pull request body is not bound to the verified Contract identity");
     }
-    if (!forge.checks.length || forge.checks.some((check) => !forgeCheckPassed(check))) {
-      forgeFailures.push("pull request checks are missing, pending, or unsuccessful");
+    const requiredChecks = request.contract.verification.forgeChecks;
+    if (!requiredChecks.length) {
+      forgeFailures.push("Contract declares no required forge checks");
+    }
+    for (const name of requiredChecks) {
+      const check = forge.checks.find((candidate) => candidate.name === name);
+      if (!check) {
+        forgeFailures.push(`required pull request check is missing: ${name}`);
+      } else if (!forgeCheckPassed(check)) {
+        forgeFailures.push(`required pull request check is pending or unsuccessful: ${name}`);
+      }
     }
   }
   diagnostics.push(...forgeFailures);
@@ -249,6 +258,7 @@ export async function reconcileOnce(
           headCommit: forge.headCommit,
           contractId: forge.contractId,
           contractDigest: forge.contractDigest,
+          requiredChecks: request.contract.verification.forgeChecks,
           checks: forge.checks,
         }
       : undefined,

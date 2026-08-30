@@ -26,7 +26,7 @@ const SPEC_FIELDS = new Set([
   "extensions",
 ]);
 const SCOPE_FIELDS = new Set(["include", "exclude"]);
-const VERIFICATION_FIELDS = new Set(["routes", "checks"]);
+const VERIFICATION_FIELDS = new Set(["routes", "checks", "forgeChecks"]);
 const AUTHORITY_FIELDS = new Set(["mode"]);
 const AUTHORITY_MODES = new Set<AuthorityMode>(["plan", "apply", "continuous"]);
 
@@ -101,6 +101,7 @@ export function compileContract(source: ContractSource): CompileContractResult {
   const checks = stringArray(verification.checks, "spec.verification.checks", error, {
     required: true,
   });
+  const forgeChecks = stringArray(verification.forgeChecks, "spec.verification.forgeChecks", error);
   const mode = (authority.mode ?? "plan") as AuthorityMode;
   if (!AUTHORITY_MODES.has(mode)) {
     error("contract.authority", "spec.authority.mode must be plan, apply or continuous", "mode");
@@ -123,7 +124,11 @@ export function compileContract(source: ContractSource): CompileContractResult {
     scope: { include: uniqueSorted(include), exclude: uniqueSorted(exclude) },
     preserve: uniqueSorted(preserve),
     invariants: uniqueSorted(invariants),
-    verification: { routes: uniqueSorted(routes), checks: uniqueSorted(checks) },
+    verification: {
+      routes: uniqueSorted(routes),
+      checks: uniqueSorted(checks),
+      forgeChecks: uniqueSorted(forgeChecks),
+    },
     authority: { mode },
     extensions,
   };

@@ -27,7 +27,10 @@ function setup() {
   return { root, contract: compiled.contract, routes: readRouteDeclarations(root) };
 }
 
-function providers(root: string, harness: HarnessProvider = new ExternalWorkspaceHarnessProvider()) {
+function providers(
+  root: string,
+  harness: HarnessProvider = new ExternalWorkspaceHarnessProvider(),
+) {
   return {
     repository: new LocalRepositoryProvider(),
     policy: new DefaultPolicyProvider(),
@@ -45,7 +48,10 @@ test("plan mode emits a WorkOrder without executing or recording", async () => {
   );
   assert.equal(result.status, "planned");
   assert.equal(result.receipt, undefined);
-  assert.equal(result.conditions.find((condition) => condition.type === "Executed")?.status, "unknown");
+  assert.equal(
+    result.conditions.find((condition) => condition.type === "Executed")?.status,
+    "unknown",
+  );
 });
 
 test("apply independently verifies, records an immutable receipt, and reuses identity", async () => {
@@ -62,7 +68,10 @@ test("apply independently verifies, records an immutable receipt, and reuses ide
   assert.equal(first.status, "verified", JSON.stringify(first, null, 2));
   assert.ok(first.receiptPath);
   assert.equal(validateReceipt(first.receipt!).valid, true);
-  assert.equal(JSON.parse(readFileSync(first.receiptPath!, "utf8")).receiptId, first.receipt?.receiptId);
+  assert.equal(
+    JSON.parse(readFileSync(first.receiptPath!, "utf8")).receiptId,
+    first.receipt?.receiptId,
+  );
 
   const second = await reconcileOnce(
     { ...value, requestedMode: "apply", invocationId: "apply-2" },
@@ -103,7 +112,7 @@ test("an implementing harness cannot weaken its verifier during execution", asyn
       const packageJson = JSON.parse(readFileSync(path, "utf8")) as {
         scripts: Record<string, string>;
       };
-      packageJson.scripts.check = 'node -e "console.log(\'weakened\')"';
+      packageJson.scripts.check = "node -e \"console.log('weakened')\"";
       writeFileSync(path, JSON.stringify(packageJson));
       return {
         provider: new ExternalWorkspaceHarnessProvider("check-weakener").descriptor,
@@ -117,7 +126,11 @@ test("an implementing harness cannot weaken its verifier during execution", asyn
     providers(value.root, harness),
   );
   assert.equal(result.status, "failed");
-  assert.ok(result.receipt?.diagnostics.includes("verification definitions changed during harness execution"));
+  assert.ok(
+    result.receipt?.diagnostics.includes(
+      "verification definitions changed during harness execution",
+    ),
+  );
 });
 
 test("optional NMG failure degrades without changing authority or verified decision", async () => {
@@ -191,7 +204,10 @@ test("forge verification binds Contract, commit and successful CI checks", async
     contractId: value.contract.id,
     contractDigest: value.contract.contractDigest,
     headCommit: observed.git.commit!,
-    checks: [{ name: "product", status: "COMPLETED", conclusion: "SUCCESS" }],
+    checks: [
+      { name: "product", status: "COMPLETED", conclusion: "SUCCESS" },
+      { name: "CodeFactor", status: "COMPLETED", conclusion: "FAILURE" },
+    ],
   });
   const result = await reconcileOnce(
     { ...value, requestedMode: "apply", pullRequestNumber: 42, operationKey: "pr-ci" },
@@ -199,6 +215,7 @@ test("forge verification binds Contract, commit and successful CI checks", async
   );
   assert.equal(result.status, "verified", JSON.stringify(result.receipt?.diagnostics));
   assert.equal(result.receipt?.forge?.contractDigest, value.contract.contractDigest);
+  assert.deepEqual(result.receipt?.forge?.requiredChecks, ["product"]);
 });
 
 test("forge verification fails closed for an unbound or pending PR", async () => {
@@ -212,7 +229,7 @@ test("forge verification fails closed for an unbound or pending PR", async () =>
   );
   assert.equal(result.status, "failed");
   assert.ok(result.receipt?.diagnostics.some((entry) => entry.includes("Contract identity")));
-  assert.ok(result.receipt?.diagnostics.some((entry) => entry.includes("pending")));
+  assert.ok(result.receipt?.diagnostics.some((entry) => /missing|pending/.test(entry)));
 });
 
 function fixedClock() {

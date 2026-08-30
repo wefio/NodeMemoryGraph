@@ -16,7 +16,9 @@ test("CLI compiles and plans a Contract without mutating the repository", () => 
   writeFileSync(contract, contractText());
   const compile = run(root, ["compile", contract, "--json"]);
   assert.equal(compile.status, 0, compile.stderr);
-  const compiled = JSON.parse(compile.stdout) as { contract: { id: string; contractDigest: string } };
+  const compiled = JSON.parse(compile.stdout) as {
+    contract: { id: string; contractDigest: string };
+  };
   assert.equal(compiled.contract.id, "fixture-change");
   assert.match(compiled.contract.contractDigest, /^sha256:/);
 
@@ -77,9 +79,7 @@ test("GitHub provider normalizes forge state through an injected runner", async 
       baseRefName: "main",
       headRefOid: "abc123",
       body: forgeBindingBody("change-42", "sha256:abc123"),
-      statusCheckRollup: [
-        { name: "product", status: "COMPLETED", conclusion: "SUCCESS" },
-      ],
+      statusCheckRollup: [{ name: "product", status: "COMPLETED", conclusion: "SUCCESS" }],
     });
   });
   const observation = await provider.observePullRequest({ root: ".", number: 42 });
@@ -96,9 +96,10 @@ test("GitHub provider creates a Draft PR with a machine-readable Contract bindin
   const provider = new GitHubForgeProvider((_root, args) => {
     calls.push(args);
     if (args[1] === "create") return "https://example.invalid/pull/43\n";
-    const body = args[2] === "https://example.invalid/pull/43"
-      ? forgeBindingBody("change-43", "sha256:def456", "implementation")
-      : "";
+    const body =
+      args[2] === "https://example.invalid/pull/43"
+        ? forgeBindingBody("change-43", "sha256:def456", "implementation")
+        : "";
     return JSON.stringify({
       number: 43,
       url: "https://example.invalid/pull/43",
@@ -125,6 +126,40 @@ test("GitHub provider creates a Draft PR with a machine-readable Contract bindin
   const submittedBody = calls[0]?.[calls[0].indexOf("--body") + 1] ?? "";
   assert.match(submittedBody, /contract-id: change-43/);
   assert.match(submittedBody, /contract-digest: sha256:def456/);
+});
+
+test("GitHub provider updates a binding without duplicating the machine block", async () => {
+  const calls: string[][] = [];
+  let body = forgeBindingBody("old-change", "sha256:abc111", "implementation");
+  const provider = new GitHubForgeProvider((_root, args) => {
+    calls.push(args);
+    if (args[1] === "edit") {
+      body = args[args.indexOf("--body") + 1] ?? "";
+      return "";
+    }
+    return JSON.stringify({
+      number: 44,
+      url: "https://example.invalid/pull/44",
+      state: "OPEN",
+      isDraft: true,
+      headRefName: "feature",
+      baseRefName: "main",
+      headRefOid: "abc789",
+      body,
+      statusCheckRollup: [],
+    });
+  });
+  const observation = await provider.bindPullRequest!({
+    root: ".",
+    number: 44,
+    contractId: "new-change",
+    contractDigest: "sha256:abc999",
+  });
+  assert.equal(observation.contractId, "new-change");
+  assert.equal(observation.contractDigest, "sha256:abc999");
+  assert.equal(body.match(/nmg-rcp-binding/g)?.length, 1);
+  assert.match(body, /^implementation/m);
+  assert.equal(calls.filter((args) => args[1] === "view").length, 2);
 });
 
 function run(root: string, args: string[]) {

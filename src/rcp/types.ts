@@ -32,6 +32,7 @@ export interface RepositoryContractIr {
   verification: {
     routes: string[];
     checks: string[];
+    forgeChecks: string[];
   };
   authority: {
     mode: AuthorityMode;
@@ -178,6 +179,7 @@ export interface RepositoryReceipt {
   checks: VerificationCheckResult[];
   forge?: Omit<ForgeObservation, "provider" | "checks"> & {
     provider: string;
+    requiredChecks: string[];
     checks: ForgeObservation["checks"];
   };
   decision: "verified" | "failed" | "blocked";

@@ -75,6 +75,13 @@ export interface ForgeProvider {
     contractDigest: string;
     body?: string;
   }): Promise<ForgeObservation>;
+  bindPullRequest?(input: {
+    root: string;
+    number: number;
+    contractId: string;
+    contractDigest: string;
+    body?: string;
+  }): Promise<ForgeObservation>;
 }
 
 export class DefaultPolicyProvider implements PolicyProvider {
@@ -319,8 +326,12 @@ export class GitHubForgeProvider implements ForgeProvider {
   readonly descriptor: ProviderDescriptor = {
     id: "github-cli-forge",
     version: "1",
-    capabilities: ["pull-request-observation", "draft-pull-request-creation"],
-    operations: ["observePullRequest", "createDraftPullRequest"],
+    capabilities: [
+      "pull-request-observation",
+      "draft-pull-request-creation",
+      "contract-binding-update",
+    ],
+    operations: ["observePullRequest", "createDraftPullRequest", "bindPullRequest"],
     authority: ["plan", "apply", "continuous"],
   };
   readonly runner: (root: string, args: string[]) => string;
@@ -367,6 +378,38 @@ export class GitHubForgeProvider implements ForgeProvider {
       "pr",
       "view",
       url,
+      "--json",
+      "number,url,state,isDraft,headRefName,baseRefName,headRefOid,body,statusCheckRollup",
+    ]);
+    return forgeObservation(this.descriptor, JSON.parse(result) as GhPullRequest);
+  }
+
+  async bindPullRequest(input: {
+    root: string;
+    number: number;
+    contractId: string;
+    contractDigest: string;
+    body?: string;
+  }): Promise<ForgeObservation> {
+    const current = JSON.parse(
+      this.runner(input.root, [
+        "pr",
+        "view",
+        String(input.number),
+        "--json",
+        "number,url,state,isDraft,headRefName,baseRefName,headRefOid,body,statusCheckRollup",
+      ]),
+    ) as GhPullRequest;
+    const body = forgeBindingBody(
+      input.contractId,
+      input.contractDigest,
+      input.body ?? current.body ?? "",
+    );
+    this.runner(input.root, ["pr", "edit", String(input.number), "--body", body]);
+    const result = this.runner(input.root, [
+      "pr",
+      "view",
+      String(input.number),
       "--json",
       "number,url,state,isDraft,headRefName,baseRefName,headRefOid,body,statusCheckRollup",
     ]);
@@ -420,7 +463,8 @@ export function forgeBindingBody(contractId: string, contractDigest: string, bod
     `contract-digest: ${contractDigest}`,
     "-->",
   ].join("\n");
-  return body.trim() ? `${body.trim()}\n\n${binding}\n` : `${binding}\n`;
+  const prose = body.replace(/<!--\s*nmg-rcp-binding\s+[\s\S]*?-->\s*/gi, "").trim();
+  return prose ? `${prose}\n\n${binding}\n` : `${binding}\n`;
 }
 
 function parseForgeBinding(body: string): { contractId?: string; contractDigest?: string } {

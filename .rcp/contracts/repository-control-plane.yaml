@@ -47,6 +47,8 @@ spec:
       - docs:check
       - package:check
       - test:product
+    forgeChecks:
+      - All checks passed
   authority:
     mode: apply
   extensions:
