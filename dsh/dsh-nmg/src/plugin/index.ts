@@ -560,7 +560,7 @@ export function apply(ctx: Context): () => void {
   const wakeBatch = new Map() // sessionId -> entry[] (deduped, newest first)
   let wakeAgentRegistered = false
   let wakeConfig = null // <dataDir>/board-wake.json (enabled/intervalMs/budget/cooldownMs)
-  let lastAgents = new Map() // 已注册的活跃 agent 实例（key=String(agent.id)），供定时器按会话唤醒用
+  const lastAgents = new Map() // 已注册的活跃 agent 实例（key=String(agent.id)），供定时器按会话唤醒用
 
   function wakeEntryKey(entry) {
     return entry && entry.id ? String(entry.id) : ''
