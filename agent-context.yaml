@@ -123,3 +123,13 @@ routes:
     verify:
       blocking: [check, test:product, build, agent:context:check]
       advisory: []
+
+  - id: repository-control-plane
+    paths: [src/rcp/**, tests/rcp/**, bin/nmg-rcp.mjs]
+    owners:
+      - docs/design/ci-cd-and-quality.md
+      - docs/decisions/proposed/2026-08-29-repository-control-plane.md
+    tests: [tests/rcp/**]
+    verify:
+      blocking: [check, test:product, build, package:check]
+      advisory: []
