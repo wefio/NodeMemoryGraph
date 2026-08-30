@@ -329,6 +329,28 @@ reconciled state、[Kubernetes controllers](https://kubernetes.io/docs/concepts/
 [SLSA provenance](https://github.com/slsa-framework/slsa/blob/main/spec/build-provenance.md)
 的输入、builder、invocation 和 artifact identity。它们是设计依据，不是首版依赖。
 
+### 7.11 Run-to-completion CLI
+
+候选实现提供独立的 `nmg-rcp` 入口；它不由 NMG daemon 托管。最小流程为：
+
+```text
+nmg-rcp compile .rcp/contracts/change.yaml
+nmg-rcp plan .rcp/contracts/change.yaml
+nmg-rcp reconcile .rcp/contracts/change.yaml --apply --workspace-ready --nmg disabled
+nmg-rcp forge-create .rcp/contracts/change.yaml --base main --head feature/change
+nmg-rcp reconcile .rcp/contracts/change.yaml --apply --workspace-ready \
+  --pr 42 --operation-key pr-ci --nmg disabled
+```
+
+`reconcile` 默认只 plan；`--apply` 还必须显式选择当前 workspace 或外部 harness。
+本地验证 receipt 与 PR/CI receipt 使用不同 `operation-key`，但都绑定同一 Contract
+digest。带 `--pr` 的收敛还要求 PR body 中的机器标记、head commit 与成功 CI 状态一致。
+失败 receipt 只追加、不覆盖，并允许在外部状态修复后重试；只有已验证 receipt 才用于
+幂等复用。`.rcp/receipts/` 不参与仓库 observed revision，避免控制面输出改变自身输入。
+
+当前只实现 run-to-completion 路径。`continuous` 是 Contract 可声明的权限上限，不表示
+已经存在 watcher；在出现真实持续 contract 前，常驻 queue/catalog/watcher 仍明确延后。
+
 ## 8. 修改验证
 
 普通产品改动至少运行目标测试、`npm run check`、`npm run test:product` 与 `npm run build`。文档按 [文档 CI 契约](../README.md#ci-contract)运行 `npm run docs:check`。仓库工具还运行 `npm run agent:context:check`；包边界运行 `npm run package:check`。

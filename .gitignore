@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 .nmg/
+.rcp/receipts/
 .workbuddy/
 .qoder/
 .claude/settings.local.json

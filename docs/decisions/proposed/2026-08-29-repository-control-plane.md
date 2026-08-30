@@ -5,9 +5,11 @@
 **Status:** proposed  
 **Date:** 2026-08-29
 
-**Implementation status:** design only. Existing `agent:context`, `agent:verify`,
-CI, Draft PRs, and the Task Board are reusable mechanisms, not evidence that the
-control plane described here has been implemented.
+**Implementation status:** implementation candidate on the feature branch, not
+accepted or merged. Contract compilation, observation, WorkOrders, independent
+verification, append-only receipts, provider boundaries, and Draft PR binding have
+deterministic tests. A real Draft PR/CI/receipt run and completion audit are still
+required before this decision or implementation may be called complete.
 
 ## Problem
 

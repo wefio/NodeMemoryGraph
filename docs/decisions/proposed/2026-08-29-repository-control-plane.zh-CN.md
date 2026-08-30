@@ -5,8 +5,9 @@
 **Status:** proposed  
 **Date:** 2026-08-29
 
-**实现状态：** 仅设计。现有 `agent:context`、`agent:verify`、CI、Draft PR 与
-Task Board 是可复用原语，不代表本文描述的控制面已经实现。
+**实现状态：** feature 分支中已有候选实现，尚未接受或合并。Contract 编译、仓库观察、
+WorkOrder、独立验证、append-only receipt、provider 边界和 Draft PR 绑定已有确定性测试；
+在真实 Draft PR/CI/receipt 闭环及 completion audit 完成前，仍不得称为完整实现。
 
 ## 问题
 
