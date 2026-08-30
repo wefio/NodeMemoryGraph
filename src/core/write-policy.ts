@@ -47,13 +47,22 @@ export function assessMemoryWrite(input: {
   memoryType?: MemoryType;
   bypass?: boolean;
 }): MemoryWriteAssessment {
-  const text = `${input.statement}\n${input.evidence ?? ""}`;
-  if (SECRET_PATTERNS.some((pattern) => pattern.test(text))) {
+  const statementText = `${input.statement}`;
+  const evidenceText = `${input.evidence ?? ""}`;
+  const fullText = evidenceText ? `${statementText}\n${evidenceText}` : statementText;
+  // Secret detection scans the full text (statement + evidence): credentials
+  // can hide inside a quoted source excerpt, so evidence must never exempt
+  // them.
+  if (SECRET_PATTERNS.some((pattern) => pattern.test(fullText))) {
     return { allowed: false, reason: "secret" };
   }
-  // Explicit user refusal is as non-bypassable as a secret: an unsafe flag
-  // must never override the user's own "do not retain" instruction.
-  if (DO_NOT_RETAIN_PATTERNS.some((pattern) => pattern.test(text))) {
+  // The intent filters (explicit "do not retain" refusal, transient wording)
+  // judge what the model is persisting — the statement — not the verbatim
+  // quoted evidence. A user quote may legitimately contain transient wording
+  // or a negative imperative; that is the source's wording, not a persist
+  // instruction. Evidence is exempt from these two, exactly like secrets are
+  // exempt from nothing.
+  if (DO_NOT_RETAIN_PATTERNS.some((pattern) => pattern.test(statementText))) {
     return { allowed: false, reason: "non_persistent_instruction" };
   }
   // Transient-word matches are the wording-false-positive zone; the explicit
@@ -61,7 +70,7 @@ export function assessMemoryWrite(input: {
   if (
     !input.bypass &&
     input.memoryType !== "event" &&
-    TRANSIENT_PATTERNS.some((pattern) => pattern.test(text))
+    TRANSIENT_PATTERNS.some((pattern) => pattern.test(statementText))
   ) {
     return { allowed: false, reason: "non_persistent_instruction" };
   }
