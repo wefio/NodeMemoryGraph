@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { relative, resolve } from "node:path";
 
 import { operationIdentity, planWorkOrder } from "./planner.ts";
 import type {
@@ -10,7 +11,12 @@ import type {
   VerifierProvider,
 } from "./providers.ts";
 import { receiptId } from "./receipt.ts";
-import { changedPaths, isPathAllowed, type RepositoryProvider } from "./repository.ts";
+import {
+  changedPaths,
+  isPathAllowed,
+  normalizeRepositoryPath,
+  type RepositoryProvider,
+} from "./repository.ts";
 import type {
   ReconciliationCondition,
   ReconciliationResult,
@@ -149,12 +155,18 @@ export async function reconcileOnce(
     root: request.root,
     contract: request.contract,
   });
-  const actual = [
-    ...new Set([
-      ...changedPaths(before, after),
-      ...after.git.dirtyFiles.filter((path) => !before.git.dirtyFiles.includes(path)),
-    ]),
-  ].sort((left, right) => left.localeCompare(right));
+  // An external-workspace harness reports work that already exists when apply
+  // starts, so before/after content comparison alone would certify an empty
+  // change. In that mode every current dirty path is part of the submitted
+  // workspace and must pass the Contract scope gate. Process harnesses retain
+  // delta attribution because the control plane observes them before execution.
+  const contractInputPath = repositoryContractPath(request.root, request.contract.source.path);
+  const submittedWorkspace = harness.provider.capabilities.includes("report-existing-workspace")
+    ? after.git.dirtyFiles.filter((path) => path !== contractInputPath)
+    : after.git.dirtyFiles.filter((path) => !before.git.dirtyFiles.includes(path));
+  const actual = [...new Set([...changedPaths(before, after), ...submittedWorkspace])].sort(
+    (left, right) => left.localeCompare(right),
+  );
   const scopeMatched = actual.every((path) => isPathAllowed(path, request.contract.scope));
   const verification = await providers.verifier.verify({
     root: request.root,
@@ -288,6 +300,11 @@ export async function reconcileOnce(
     receiptPath: stored.path,
     memoryDiagnostics,
   };
+}
+
+function repositoryContractPath(root: string, sourcePath: string): string | undefined {
+  const local = normalizeRepositoryPath(relative(resolve(root), resolve(sourcePath)));
+  return local === ".." || local.startsWith("../") ? undefined : local;
 }
 
 function errorMessage(value: unknown): string {

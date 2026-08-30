@@ -81,6 +81,29 @@ test("apply independently verifies, records an immutable receipt, and reuses ide
   assert.equal(second.receipt?.receiptId, first.receipt?.receiptId);
 });
 
+test("external workspace scope verification includes changes present before apply starts", async () => {
+  const value = setup();
+  writeFileSync(join(value.root, "src", "value.ts"), "export const value = 2;\n");
+  const result = await reconcileOnce(
+    { ...value, requestedMode: "apply", invocationId: "existing-workspace" },
+    providers(value.root),
+  );
+  assert.equal(result.status, "verified", JSON.stringify(result.receipt?.diagnostics));
+  assert.deepEqual(result.receipt?.scope.actual, ["src/value.ts"]);
+});
+
+test("external workspace fails closed for pre-existing out-of-scope changes", async () => {
+  const value = setup();
+  writeFileSync(join(value.root, "outside.txt"), "already dirty\n");
+  const result = await reconcileOnce(
+    { ...value, requestedMode: "apply", invocationId: "existing-outside" },
+    providers(value.root),
+  );
+  assert.equal(result.status, "failed");
+  assert.equal(result.receipt?.scope.matched, false);
+  assert.ok(result.receipt?.scope.actual.includes("outside.txt"));
+});
+
 test("out-of-scope workspace mutation fails independent scope verification", async () => {
   const value = setup();
   const harness: HarnessProvider = {

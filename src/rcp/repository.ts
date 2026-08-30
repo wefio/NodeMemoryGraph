@@ -62,7 +62,11 @@ export function observeRepository(
   const files: ObservedFile[] = [];
   collectFiles(resolvedRoot, resolvedRoot, contract, files, diagnostics);
   files.sort((left, right) => left.path.localeCompare(right.path));
-  const git = observeGitWorktree(resolvedRoot);
+  const observedGit = observeGitWorktree(resolvedRoot);
+  const git = {
+    ...observedGit,
+    dirtyFiles: observedGit.dirtyFiles.filter((path) => !isSkippedRepositoryPath(path)),
+  };
   if (!git.available && git.error) diagnostics.push(git.error);
   const observedRevision = digestObservation(contract, files);
   return {
@@ -106,7 +110,7 @@ function collectFiles(
     if (entry.isDirectory() && SKIP_DIRECTORIES.has(entry.name)) continue;
     const absolute = join(directory, entry.name);
     const local = normalizeRepositoryPath(relative(root, absolute));
-    if (SKIP_PATH_PREFIXES.some((prefix) => local === prefix || local.startsWith(`${prefix}/`))) {
+    if (isSkippedRepositoryPath(local)) {
       continue;
     }
     const stat = lstatSync(absolute);
@@ -125,6 +129,10 @@ function collectFiles(
       diagnostics.push(`${local}: ${cause instanceof Error ? cause.message : String(cause)}`);
     }
   }
+}
+
+function isSkippedRepositoryPath(path: string): boolean {
+  return SKIP_PATH_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 }
 
 export function observeGitWorktree(root: string): ObservedRepository["git"] {
