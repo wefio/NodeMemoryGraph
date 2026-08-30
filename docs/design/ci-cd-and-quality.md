@@ -163,7 +163,7 @@ daemon 不解析 contract、不启动 Agent、不判断 CI、不拥有 PR，也�
 | --- | --- | --- |
 | 期望仓库状态 | Git 中经版本控制的 Contract | catalog、编译缓存、NMG 记忆 |
 | 当前仓库状态 | 指定 commit/worktree 的 Repository Observer 输出 | Agent 描述、PR 文本 |
-| 验证事实 | 绑定 contract digest、commit 和 verifier identity 的 immutable receipt | 日志摘要、Task Board result |
+| 验证事实 | 绑定 contract digest、observed content revision、verifier identity，并在 clean/forge 场景绑定 commit 的 immutable receipt | 日志摘要、Task Board result |
 | PR/合并状态 | Git forge | 本地缓存、NMG |
 | Agent 工作记忆与经验 | 各 harness 与 NMG 的 AG/STG/LTG 边界 | RCP receipt 摘要 |
 
@@ -225,10 +225,12 @@ Repository -> observe ---------+-> diff -> policy -> route/plan
                                                     `-> reconcile again
 ```
 
-Reconciler 必须幂等、可恢复且不相信“动作已经成功”。它以
-`contractDigest + observedRevision + operationKey` 去重；执行后重新观察，而不是依据
-工具返回值直接宣告收敛。默认只生成 plan；写文件、推送、开 PR、合并、删除或权限变化
-均需 contract 授权和对应 provider。破坏性 drift 不自动修复。
+Reconciler 必须幂等、可恢复且不相信“动作已经成功”。复用 identity 绑定 Contract、
+observed revision、operation key、route/check 声明和 verifier definition；执行后重新观察，
+而不是依据工具返回值直接宣告收敛。Harness 执行前写本地 in-flight attempt，只有 receipt
+成功落盘后才清除。若进程在两者之间中断，普通重试失败关闭，操作者必须显式选择 recovery，
+只验证现有 workspace 而不重放 mutation。默认只生成 plan；写文件、推送、开 PR、合并、
+删除或权限变化均需 contract 授权和对应 provider。破坏性 drift 不自动修复。
 
 RCP 区分两类资源：
 
@@ -257,18 +259,27 @@ Verifier 在 Agent 变更之后独立运行，检查至少分为结构、行为�
   "receiptSchema": "repository.receipt/v1alpha1",
   "contractId": "rcp-001",
   "contractDigest": "sha256:...",
-  "observedRevision": "sha256:...",
+  "observedRevisionBefore": "sha256:...",
+  "observedRevisionAfter": "sha256:...",
   "commit": "git-sha",
   "invocationId": "...",
   "verifier": { "id": "verify:product-ci", "digest": "sha256:..." },
+  "workOrder": {
+    "id": "wo-...",
+    "routeDigest": "sha256:...",
+    "routes": ["repository-control-plane"],
+    "verificationChecks": ["check"],
+    "budget": { "maxAttempts": 1, "timeoutMs": 1800000 }
+  },
   "scope": { "declared": ["src/**"], "actual": ["src/**"], "matched": true },
   "checks": [{ "name": "...", "status": "passed", "evidence": "..." }],
   "decision": "verified"
 }
 ```
 
-默认 `FileReceiptSink` 把 receipt 写入被 Git 忽略的 `.rcp/receipts/`。它服务本地幂等、
-恢复和操作者审计，不随 PR 传播，也不能单独充当第三方可验证证明；
+默认 `FileReceiptSink` 把 receipt 写入被 Git 忽略的 `.rcp/receipts/`，并在同目录的
+`inflight/` 下维护异常中断恢复标记。标记不是 receipt 或证明，正常终态会被清除。Receipt
+服务本地幂等、恢复和操作者审计，不随 PR 传播，也不能单独充当第三方可验证证明；
 `npm run agent:verify` 只写最近一次 `.nmg/verification/latest.json`，不会生成 RCP
 receipt。只有 `nmg-rcp reconcile --apply` 经过 `ReceiptSink` 才产生 receipt。
 Receipt store 可有索引数据库或外部 artifact/attestation provider，但规范 receipt 必须
@@ -316,9 +327,12 @@ Run-to-completion 核心已通过真实 Contract-bound PR、远程 CI 和本地 
 `implemented` 只表示以下本地控制面能力成立，不表示已经具备持续控制器或第三方证明：
 
 - 同一 Contract 在无 NMG 情况下可编译、plan、执行受限 Agent 工作、验证并生成 receipt；
+- WorkOrder 把单次 attempt 和 timeout 预算传给 harness，process harness 只能采用相同或
+  更严格的时限；
 - desired、observed、receipt 和 PR 状态分别可追踪且不存在竞争写入者；
 - Agent 无法通过自报完成、改弱检查或越权路径使 verifier 判定收敛；
-- 重复 reconcile 不重复执行同一 mutation，进程中断后可从仓库与 receipt 恢复；
+- 重复 reconcile 不重复执行同一 mutation；异常中断由本地 attempt journal 检出，只有
+  显式 recovery 才会跳过 harness 并验证当前 workspace；
 - plan/apply/continuous 权限明确，破坏性动作默认不自动执行；
 - Pi、Codex 或 DSH 至少两个 harness 通过同一 WorkOrder contract；
 - NMG adapter 断开时闭环仍可工作，接入时只增加记忆/协调价值；
@@ -326,9 +340,9 @@ Run-to-completion 核心已通过真实 Contract-bound PR、远程 CI 和本地 
   contract digest；外部复核者目前只能复核 Git/PR/CI，不能取得被忽略的本地 receipt；
 - completion audit 只根据实现和验证证据升级，不根据规划或 PR 文本升级。
 
-后续加固包括：读取时验证 receipt、把 route/verifier identity 纳入复用边界、证明被验证
-workspace 与 commit 一致、提供只读 receipt index，以及在确有外部证明需求时发布
-CI artifact 或受信 attestation。它们不得被当前 `implemented` 状态暗示为已经完成。
+Receipt 读取校验、route/verifier 复用绑定、Git/forge provenance、只读 receipt scan、
+harness 超时和中断恢复均由产品测试覆盖。当前边界之外只保留有前提的扩展：出现持续
+Contract 后再设计迭代收敛；出现跨机器独立复核需求后再增加 artifact/attestation provider。
 
 ### 7.10 理论来源
 
@@ -351,6 +365,7 @@ reconciled state、[Kubernetes controllers](https://kubernetes.io/docs/concepts/
 nmg-rcp compile .rcp/contracts/change.yaml
 nmg-rcp plan .rcp/contracts/change.yaml
 nmg-rcp reconcile .rcp/contracts/change.yaml --apply --workspace-ready --nmg disabled
+nmg-rcp reconcile .rcp/contracts/change.yaml --apply --workspace-ready --recover-attempt
 nmg-rcp forge-create .rcp/contracts/change.yaml --base main --head feature/change
 nmg-rcp forge-bind .rcp/contracts/change.yaml --pr 42
 nmg-rcp reconcile .rcp/contracts/change.yaml --apply --workspace-ready \
@@ -362,8 +377,10 @@ nmg-rcp reconcile .rcp/contracts/change.yaml --apply --workspace-ready \
 digest。带 `--pr` 的收敛还要求 PR body 中的机器标记、head commit 与成功 CI 状态一致。
 远程收敛只检查 Contract 的 `spec.verification.forgeChecks` 明确列出的检查；其他
 第三方或 advisory 状态仍记录进 receipt，但不能在未声明时取得控制面否决权。
-失败 receipt 只追加、不覆盖，并允许在外部状态修复后重试；只有已验证 receipt 才用于
-幂等复用。`.rcp/receipts/` 不参与仓库 observed revision，避免控制面输出改变自身输入。
+失败 receipt 只追加、不覆盖，并允许在外部状态修复后重试；只有通过完整性校验且绑定
+当前 route/check/verifier 的已验证 receipt 才用于幂等复用。`--recover-attempt` 只处理已
+存在的中断标记，并禁止再次运行外部 harness。`.rcp/receipts/` 不参与仓库 observed
+revision，避免控制面输出改变自身输入。
 
 当前只实现 run-to-completion 路径。`continuous` 是 Contract 可声明的权限上限，不表示
 已经存在 watcher；在出现真实持续 contract 前，常驻 queue/catalog/watcher 仍明确延后。

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { relative, resolve } from "node:path";
 
-import { operationIdentity, planWorkOrder } from "./planner.ts";
+import { attemptKey as workOrderAttemptKey, operationIdentity, planWorkOrder } from "./planner.ts";
 import type {
   ForgeProvider,
   HarnessProvider,
@@ -22,6 +22,7 @@ import type {
   HarnessResult,
   ObservedRepository,
   ReconciliationCondition,
+  ReconciliationAttempt,
   ReconciliationResult,
   RepositoryContractIr,
   RepositoryReceipt,
@@ -49,6 +50,8 @@ export interface ReconcileRequest {
   pullRequestNumber?: number;
   now?: () => Date;
   invocationId?: string;
+  recoverIncomplete?: boolean;
+  executionTimeoutMs?: number;
 }
 
 interface PreparedReconciliation {
@@ -59,7 +62,21 @@ interface PreparedReconciliation {
   workOrder: WorkOrder;
   memoryDiagnostics: string[];
   identity: string;
+  verifierDigestBefore: string;
+  attemptKey: string;
+  incompleteAttempt?: ReconciliationAttempt;
 }
+
+interface PreparationContext {
+  now: () => Date;
+  invocationId: string;
+  conditions: ReconciliationCondition[];
+  before: ObservedRepository;
+  workOrder: WorkOrder;
+  memoryDiagnostics: string[];
+}
+
+type Guarded<T> = { ok: true; value: T } | { ok: false; reason: string };
 
 export async function reconcileOnce(
   request: ReconcileRequest,
@@ -93,8 +110,17 @@ async function prepareReconciliation(
     observation: before,
     routes: request.routes,
     operationKey: request.operationKey,
+    executionTimeoutMs: request.executionTimeoutMs,
   });
   const memoryDiagnostics = await recallMemory(providers.memory, request.contract, workOrder);
+  const context: PreparationContext = {
+    now,
+    invocationId,
+    conditions,
+    before,
+    workOrder,
+    memoryDiagnostics,
+  };
   const requestedMode = request.requestedMode ?? "plan";
   const authorization = providers.policy.evaluate({
     contract: request.contract,
@@ -107,14 +133,7 @@ async function prepareReconciliation(
     reason: authorization.reason,
   });
   if (!authorization.allowed) {
-    return {
-      status: "blocked",
-      contract: request.contract,
-      observation: before,
-      workOrder,
-      conditions,
-      memoryDiagnostics,
-    };
+    return terminalPreparation(request, context, "blocked");
   }
   if (requestedMode === "plan") {
     conditions.push({
@@ -122,41 +141,174 @@ async function prepareReconciliation(
       status: "unknown",
       reason: "plan mode performs no mutation",
     });
-    return {
-      status: "planned",
-      contract: request.contract,
-      observation: before,
-      workOrder,
-      conditions,
-      memoryDiagnostics,
-    };
+    return terminalPreparation(request, context, "planned");
   }
 
-  const identity = operationIdentity(workOrder);
-  const existing = await providers.receipts.find(identity);
-  if (existing) {
-    conditions.push(
-      { type: "Executed", status: "true", reason: "existing operation receipt reused" },
-      {
-        type: "Verified",
-        status: existing.receipt.decision === "verified" ? "true" : "false",
-        reason: `existing receipt decision: ${existing.receipt.decision}`,
-      },
-      { type: "Recorded", status: "true", reason: "append-only receipt already exists" },
+  return prepareApplyReconciliation(request, providers, context);
+}
+
+async function prepareApplyReconciliation(
+  request: ReconcileRequest,
+  providers: ControlPlaneProviders,
+  context: PreparationContext,
+): Promise<PreparedReconciliation | ReconciliationResult> {
+  const { before, workOrder } = context;
+  if (!before.git.available) {
+    return blockedPreparation(
+      request,
+      context,
+      "Executed",
+      "Git observation is required before apply",
     );
-    return {
-      status: "reused",
-      contract: request.contract,
-      observation: before,
-      workOrder,
-      conditions,
-      receipt: existing.receipt,
-      receiptPath: existing.path,
-      memoryDiagnostics,
-    };
   }
 
-  return { now, invocationId, conditions, before, workOrder, memoryDiagnostics, identity };
+  const verifierDigest = await guardProviderCall(
+    () =>
+      providers.verifier.definitionDigest({
+        root: request.root,
+        contract: request.contract,
+        workOrder,
+      }),
+    "verifier definition unavailable",
+  );
+  if (!verifierDigest.ok) {
+    return blockedPreparation(request, context, "Verified", verifierDigest.reason);
+  }
+  const verifierDigestBefore = verifierDigest.value;
+  const identity = operationIdentity(workOrder, verifierDigestBefore);
+  const attemptKey = workOrderAttemptKey(workOrder);
+  const receiptLookup = await guardProviderCall(
+    () => providers.receipts.find(identity),
+    "invalid receipt evidence",
+  );
+  if (!receiptLookup.ok) {
+    return blockedPreparation(request, context, "Recorded", receiptLookup.reason);
+  }
+  if (receiptLookup.value) {
+    return reuseReceipt(request, providers.receipts, context, attemptKey, receiptLookup.value);
+  }
+
+  const attemptLookup = await guardProviderCall(
+    () => providers.receipts.findIncomplete(attemptKey),
+    "invalid in-flight attempt evidence",
+  );
+  if (!attemptLookup.ok) {
+    return blockedPreparation(request, context, "Recorded", attemptLookup.reason);
+  }
+  const incompleteAttempt = attemptLookup.value;
+  const attemptBlocker = incompleteAttemptBlocker(
+    request,
+    workOrder,
+    attemptKey,
+    incompleteAttempt,
+  );
+  if (attemptBlocker) {
+    return blockedPreparation(request, context, attemptBlocker.type, attemptBlocker.reason);
+  }
+
+  return {
+    ...context,
+    identity,
+    verifierDigestBefore,
+    attemptKey,
+    incompleteAttempt: incompleteAttempt ?? undefined,
+  };
+}
+
+function terminalPreparation(
+  request: ReconcileRequest,
+  context: PreparationContext,
+  status: "planned" | "blocked",
+): ReconciliationResult {
+  return {
+    status,
+    contract: request.contract,
+    observation: context.before,
+    workOrder: context.workOrder,
+    conditions: context.conditions,
+    memoryDiagnostics: context.memoryDiagnostics,
+  };
+}
+
+function blockedPreparation(
+  request: ReconcileRequest,
+  context: PreparationContext,
+  type: ReconciliationCondition["type"],
+  reason: string,
+): ReconciliationResult {
+  context.conditions.push({ type, status: "false", reason });
+  return terminalPreparation(request, context, "blocked");
+}
+
+async function guardProviderCall<T>(
+  operation: () => Promise<T>,
+  failure: string,
+): Promise<Guarded<T>> {
+  try {
+    return { ok: true, value: await operation() };
+  } catch (cause) {
+    return { ok: false, reason: `${failure}: ${errorMessage(cause)}` };
+  }
+}
+
+async function reuseReceipt(
+  request: ReconcileRequest,
+  receipts: ReceiptSink,
+  context: PreparationContext,
+  attemptKey: string,
+  existing: NonNullable<Awaited<ReturnType<ReceiptSink["find"]>>>,
+): Promise<ReconciliationResult> {
+  try {
+    await receipts.completeAttempt(attemptKey);
+  } catch (cause) {
+    context.memoryDiagnostics.push(`in-flight attempt cleanup degraded: ${errorMessage(cause)}`);
+  }
+  context.conditions.push(
+    { type: "Executed", status: "true", reason: "existing operation receipt reused" },
+    {
+      type: "Verified",
+      status: existing.receipt.decision === "verified" ? "true" : "false",
+      reason: `existing receipt decision: ${existing.receipt.decision}`,
+    },
+    { type: "Recorded", status: "true", reason: "append-only receipt already exists" },
+  );
+  return {
+    ...terminalPreparation(request, context, "blocked"),
+    status: "reused",
+    receipt: existing.receipt,
+    receiptPath: existing.path,
+  };
+}
+
+function incompleteAttemptBlocker(
+  request: ReconcileRequest,
+  workOrder: WorkOrder,
+  attemptKey: string,
+  attempt: ReconciliationAttempt | null,
+): { type: ReconciliationCondition["type"]; reason: string } | undefined {
+  if (!attempt) {
+    return request.recoverIncomplete
+      ? { type: "Executed", reason: "no incomplete attempt is available to recover" }
+      : undefined;
+  }
+  const matchesRequest =
+    attempt.attemptKey === attemptKey &&
+    attempt.contractId === request.contract.id &&
+    attempt.contractDigest === request.contract.contractDigest &&
+    attempt.operationKey === workOrder.operationKey;
+  if (!matchesRequest) {
+    return {
+      type: "Recorded",
+      reason: "in-flight attempt does not match the active Contract and operation",
+    };
+  }
+  return request.recoverIncomplete
+    ? undefined
+    : {
+        type: "Executed",
+        reason:
+          "incomplete attempt exists; use explicit recovery to verify without replaying mutation",
+      };
 }
 
 async function applyReconciliation(
@@ -164,34 +316,78 @@ async function applyReconciliation(
   providers: ControlPlaneProviders,
   prepared: PreparedReconciliation,
 ): Promise<ReconciliationResult> {
-  const { now, invocationId, conditions, before, workOrder, memoryDiagnostics, identity } =
-    prepared;
-  const verifierDigestBefore = await providers.verifier.definitionDigest({
-    root: request.root,
-    contract: request.contract,
+  const {
+    now,
+    invocationId,
+    conditions,
+    before,
     workOrder,
-  });
-  const startedAt = now().toISOString();
-  const harness = await providers.harness.execute(workOrder);
+    memoryDiagnostics,
+    identity,
+    verifierDigestBefore,
+    attemptKey,
+    incompleteAttempt,
+  } = prepared;
+  const startedAt = incompleteAttempt?.startedAt ?? now().toISOString();
+  if (!incompleteAttempt) {
+    const attempt: ReconciliationAttempt = {
+      attemptSchema: "repository.attempt/v1alpha1",
+      attemptKey,
+      operationIdentity: identity,
+      contractId: request.contract.id,
+      contractDigest: request.contract.contractDigest,
+      operationKey: workOrder.operationKey,
+      observedRevision: before.observedRevision,
+      workOrderId: workOrder.id,
+      verifierDigest: verifierDigestBefore,
+      invocationId,
+      startedAt,
+    };
+    try {
+      await providers.receipts.beginAttempt(attempt);
+    } catch (cause) {
+      conditions.push({
+        type: "Executed",
+        status: "false",
+        reason: `cannot record in-flight attempt: ${errorMessage(cause)}`,
+      });
+      return {
+        status: "blocked",
+        contract: request.contract,
+        observation: before,
+        workOrder,
+        conditions,
+        memoryDiagnostics,
+      };
+    }
+  }
+  const harness: HarnessResult = incompleteAttempt
+    ? {
+        provider: providers.harness.descriptor,
+        status: "completed",
+        summary: "recovering incomplete attempt by verifying the existing workspace without replay",
+        artifacts: [],
+      }
+    : await executeHarness(providers.harness, workOrder);
   conditions.push({
     type: "Executed",
     status: harness.status === "completed" ? "true" : "false",
     reason: harness.summary,
   });
-  const after = await providers.repository.observe({
-    root: request.root,
-    contract: request.contract,
-  });
-  const actual = submittedPaths(request.root, request.contract, before, after, harness);
+  const after = await observeAfter(request, providers.repository, before);
+  const actual = submittedPaths(request.root, request.contract, before, after);
   const scopeMatched = actual.every((path) => isPathAllowed(path, request.contract.scope));
-  const verification = await providers.verifier.verify({
-    root: request.root,
-    contract: request.contract,
+  const verification = await verifyAfter(
+    request,
+    providers.verifier,
     workOrder,
-  });
+    verifierDigestBefore,
+  );
   const verifierStable = verifierDigestBefore === verification.verifierDigest;
-  const forge = await observeForge(request, providers.forge);
-  const forgeFailures = validateForge(forge, request.contract, after.git.commit);
+  const forgeResult = await observeForge(request, providers.forge);
+  const forge = forgeResult.observation;
+  const forgeFailures = [...forgeResult.failures, ...validateForge(forge, request.contract, after)];
+  const provenanceMatched = after.git.available && forgeResult.failures.length === 0;
   const diagnostics = reconciliationDiagnostics({
     before,
     after,
@@ -199,6 +395,7 @@ async function applyReconciliation(
     scopeMatched,
     verifierStable,
     forgeFailures,
+    provenanceMatched,
   });
   const forgeMatched = forgeFailures.length === 0;
   const decision = receiptDecision(
@@ -206,7 +403,7 @@ async function applyReconciliation(
     verification,
     verifierStable,
     scopeMatched,
-    forgeMatched,
+    forgeMatched && provenanceMatched,
   );
   conditions.push({
     type: "Verified",
@@ -231,8 +428,32 @@ async function applyReconciliation(
     forge,
     decision,
     diagnostics,
+    workOrder,
   });
-  const stored = await providers.receipts.append(receipt);
+  let stored: Awaited<ReturnType<ReceiptSink["append"]>>;
+  try {
+    stored = await providers.receipts.append(receipt);
+  } catch (cause) {
+    conditions.push({
+      type: "Recorded",
+      status: "false",
+      reason: `receipt storage failed: ${errorMessage(cause)}`,
+    });
+    return {
+      status: "failed",
+      contract: request.contract,
+      observation: after,
+      workOrder,
+      conditions,
+      receipt,
+      memoryDiagnostics,
+    };
+  }
+  try {
+    await providers.receipts.completeAttempt(attemptKey);
+  } catch (cause) {
+    memoryDiagnostics.push(`in-flight attempt cleanup degraded: ${errorMessage(cause)}`);
+  }
   conditions.push({ type: "Recorded", status: "true", reason: "append-only receipt recorded" });
   memoryDiagnostics.push(...(await notifyMemory(providers.memory, receipt)));
   return {
@@ -247,6 +468,68 @@ async function applyReconciliation(
   };
 }
 
+async function executeHarness(
+  provider: HarnessProvider,
+  workOrder: WorkOrder,
+): Promise<HarnessResult> {
+  try {
+    return await provider.execute(workOrder);
+  } catch (cause) {
+    return {
+      provider: provider.descriptor,
+      status: "failed",
+      summary: `harness provider failed: ${errorMessage(cause)}`,
+      diagnostics: [errorMessage(cause)],
+      artifacts: [],
+    };
+  }
+}
+
+async function observeAfter(
+  request: ReconcileRequest,
+  repository: RepositoryProvider,
+  before: ObservedRepository,
+): Promise<ObservedRepository> {
+  try {
+    return await repository.observe({ root: request.root, contract: request.contract });
+  } catch (cause) {
+    const failure = `post-execution repository observation failed: ${errorMessage(cause)}`;
+    return {
+      ...before,
+      git: { available: false, dirtyFiles: [], error: failure },
+      diagnostics: [...before.diagnostics, failure],
+    };
+  }
+}
+
+async function verifyAfter(
+  request: ReconcileRequest,
+  verifier: VerifierProvider,
+  workOrder: WorkOrder,
+  verifierDigestBefore: string,
+): Promise<VerificationEvidence> {
+  try {
+    return await verifier.verify({
+      root: request.root,
+      contract: request.contract,
+      workOrder,
+    });
+  } catch (cause) {
+    const reason = `verifier provider failed: ${errorMessage(cause)}`;
+    return {
+      provider: verifier.descriptor,
+      verifierDigest: verifierDigestBefore,
+      ok: false,
+      checks: workOrder.verificationChecks.map((name) => ({
+        name,
+        status: "failed",
+        durationMs: 0,
+        reason,
+      })),
+    };
+  }
+}
+
 function reconciliationDiagnostics(input: {
   before: ObservedRepository;
   after: ObservedRepository;
@@ -254,6 +537,7 @@ function reconciliationDiagnostics(input: {
   scopeMatched: boolean;
   verifierStable: boolean;
   forgeFailures: string[];
+  provenanceMatched: boolean;
 }): string[] {
   const diagnostics = [
     ...input.before.diagnostics,
@@ -264,6 +548,9 @@ function reconciliationDiagnostics(input: {
     diagnostics.push("one or more changed files fall outside declared scope");
   if (!input.verifierStable) {
     diagnostics.push("verification definitions changed during harness execution");
+  }
+  if (!input.provenanceMatched) {
+    diagnostics.push("repository or forge provenance could not be verified");
   }
   diagnostics.push(...input.forgeFailures);
   return diagnostics;
@@ -301,17 +588,15 @@ function submittedPaths(
   contract: RepositoryContractIr,
   before: ObservedRepository,
   after: ObservedRepository,
-  harness: HarnessResult,
 ): string[] {
   // An external-workspace harness reports work that already exists when apply
   // starts, so before/after content comparison alone would certify an empty
   // change. In that mode every current dirty path is part of the submitted
-  // workspace and must pass the Contract scope gate. Process harnesses retain
-  // delta attribution because the control plane observes them before execution.
+  // workspace and must pass the Contract scope gate. Every harness verifies the
+  // complete dirty workspace because a pre-existing out-of-scope change cannot
+  // be attributed away from the bytes being certified.
   const contractInputPath = repositoryContractPath(root, contract.source.path);
-  const submittedWorkspace = harness.provider.capabilities.includes("report-existing-workspace")
-    ? after.git.dirtyFiles.filter((path) => path !== contractInputPath)
-    : after.git.dirtyFiles.filter((path) => !before.git.dirtyFiles.includes(path));
+  const submittedWorkspace = after.git.dirtyFiles.filter((path) => path !== contractInputPath);
   return [...new Set([...changedPaths(before, after), ...submittedWorkspace])].sort((left, right) =>
     left.localeCompare(right),
   );
@@ -320,19 +605,33 @@ function submittedPaths(
 async function observeForge(
   request: ReconcileRequest,
   forge: ForgeProvider | undefined,
-): Promise<ForgeObservation | undefined> {
-  if (!forge || request.pullRequestNumber === undefined) return undefined;
-  return forge.observePullRequest({ root: request.root, number: request.pullRequestNumber });
+): Promise<{ observation?: ForgeObservation; failures: string[] }> {
+  if (!forge || request.pullRequestNumber === undefined) return { failures: [] };
+  try {
+    return {
+      observation: await forge.observePullRequest({
+        root: request.root,
+        number: request.pullRequestNumber,
+      }),
+      failures: [],
+    };
+  } catch (cause) {
+    return { failures: [`forge observation failed: ${errorMessage(cause)}`] };
+  }
 }
 
 function validateForge(
   forge: ForgeObservation | undefined,
   contract: RepositoryContractIr,
-  commit: string | undefined,
+  observation: ObservedRepository,
 ): string[] {
   if (!forge) return [];
   const failures: string[] = [];
-  if (commit && forge.headCommit !== commit) {
+  if (!observation.git.available || !observation.git.commit) {
+    failures.push("Git commit is unavailable for pull request verification");
+  } else if (observation.git.dirtyFiles.length) {
+    failures.push("uncommitted workspace bytes cannot be bound to the pull request head");
+  } else if (forge.headCommit !== observation.git.commit) {
     failures.push("pull request head does not match the locally verified commit");
   }
   if (forge.contractId !== contract.id || forge.contractDigest !== contract.contractDigest) {
@@ -384,6 +683,7 @@ interface BuildReceiptInput {
   forge: ForgeObservation | undefined;
   decision: RepositoryReceipt["decision"];
   diagnostics: string[];
+  workOrder: WorkOrder;
 }
 
 function buildReceipt(input: BuildReceiptInput): RepositoryReceipt {
@@ -394,7 +694,10 @@ function buildReceipt(input: BuildReceiptInput): RepositoryReceipt {
     contractDigest: input.contract.contractDigest,
     observedRevisionBefore: input.before.observedRevision,
     observedRevisionAfter: input.after.observedRevision,
-    commit: input.after.git.commit,
+    commit:
+      input.after.git.available && input.after.git.dirtyFiles.length === 0
+        ? input.after.git.commit
+        : undefined,
     invocationId: input.invocationId,
     startedAt: input.startedAt,
     finishedAt: input.finishedAt,
@@ -408,6 +711,13 @@ function buildReceipt(input: BuildReceiptInput): RepositoryReceipt {
       id: input.verification.provider.id,
       version: input.verification.provider.version,
       digest: input.verification.verifierDigest,
+    },
+    workOrder: {
+      id: input.workOrder.id,
+      routeDigest: input.workOrder.routeDigest,
+      routes: input.workOrder.routes,
+      verificationChecks: input.workOrder.verificationChecks,
+      budget: input.workOrder.budget,
     },
     scope: {
       declared: input.contract.scope.include,

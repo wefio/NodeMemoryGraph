@@ -5,7 +5,7 @@
 **Status:** implemented  
 **Date:** 2026-08-29
 
-**实现状态：** 单次 run-to-completion 控制面已通过 PR #3 合并，并由 PR #4 完成质量加固。
+**实现状态：** 单次 run-to-completion 控制面已通过 PR #3 合并，随后完成证据与恢复边界加固。
 Contract 编译、仓库观察、WorkOrder、独立验证、本地 append-only receipt、provider 边界、
 Draft PR 绑定及 optional/no-NMG 路径已有确定性产品测试和真实 Contract-bound
 PR/CI/本地 receipt 闭环。持续协调与可供第三方独立复核的 portable attestation 仍延后。
@@ -112,8 +112,10 @@ RCP 只通过窄 provider 扩展 repository/forge、harness、verifier、policy�
   attestation provider 发布 receipt 证据。
 - 当前只实现单次 run-to-completion；watcher、queue、持续收敛、通用 catalog 与多租户仍需
   真实需求和独立安全设计。
-- Receipt 复用、verifier identity 深度、干净 worktree/commit 绑定和只读 receipt 索引
-  仍是明确加固项，不能被 `implemented` 状态掩盖。
+- 可复用 receipt 会校验完整性，并绑定当前 route、checks 与 verifier definition。Apply 在
+  缺少 Git provenance 时失败关闭，process harness 有明确时限，in-flight journal 防止
+  中断后的 mutation 被普通重试重复执行。Journal 只是本地协调状态，不是验证证据；
+  receipt 成功落盘后即清除。
 
 ## 风险
 

@@ -104,8 +104,13 @@ export interface WorkOrder {
   invariants: string[];
   verificationChecks: string[];
   routes: string[];
+  routeDigest: string;
   authority: AuthorityMode;
   operationKey: string;
+  budget: {
+    maxAttempts: 1;
+    timeoutMs: number;
+  };
   expectedArtifacts: string[];
 }
 
@@ -170,6 +175,13 @@ export interface RepositoryReceipt {
     version: string;
     digest: string;
   };
+  workOrder: {
+    id: string;
+    routeDigest: string;
+    routes: string[];
+    verificationChecks: string[];
+    budget: WorkOrder["budget"];
+  };
   scope: {
     declared: string[];
     excluded: string[];
@@ -201,4 +213,18 @@ export interface ReconciliationResult {
   receipt?: RepositoryReceipt;
   receiptPath?: string;
   memoryDiagnostics: string[];
+}
+
+export interface ReconciliationAttempt {
+  attemptSchema: "repository.attempt/v1alpha1";
+  attemptKey: string;
+  operationIdentity: string;
+  contractId: string;
+  contractDigest: string;
+  operationKey: string;
+  observedRevision: string;
+  workOrderId: string;
+  verifierDigest: string;
+  invocationId: string;
+  startedAt: string;
 }

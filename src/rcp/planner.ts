@@ -51,6 +51,7 @@ export function planWorkOrder(input: {
   observation: ObservedRepository;
   routes: RouteDeclaration[];
   operationKey?: string;
+  executionTimeoutMs?: number;
 }): WorkOrder {
   const selected = selectRoutes(input.contract, input.routes);
   const checks = unique([
@@ -59,11 +60,17 @@ export function planWorkOrder(input: {
   ]);
   const owners = unique(selected.flatMap((route) => route.owners));
   const routeIds = selected.map((route) => route.id);
+  const routeDigest = digestCanonical(selected);
   const operationKey = input.operationKey ?? "implement";
+  const timeoutMs = executionTimeout(input.executionTimeoutMs);
+  const budget: WorkOrder["budget"] = { maxAttempts: 1, timeoutMs };
   const identity = digestCanonical({
     contractDigest: input.contract.contractDigest,
     observedRevision: input.observation.observedRevision,
     operationKey,
+    routeDigest,
+    verificationChecks: checks,
+    budget,
   });
   return {
     schema: "repository.work-order/v1alpha1",
@@ -80,16 +87,37 @@ export function planWorkOrder(input: {
     invariants: input.contract.invariants,
     verificationChecks: checks,
     routes: routeIds,
+    routeDigest,
     authority: input.contract.authority.mode,
     operationKey,
+    budget,
     expectedArtifacts: ["patch", "verification-receipt"],
   };
 }
 
-export function operationIdentity(workOrder: WorkOrder): string {
+function executionTimeout(value: number | undefined): number {
+  const timeoutMs = value ?? 30 * 60 * 1_000;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("execution timeout must be a positive integer");
+  }
+  return timeoutMs;
+}
+
+export function operationIdentity(workOrder: WorkOrder, verifierDigest: string): string {
   return digestCanonical({
+    workOrderId: workOrder.id,
     contractDigest: workOrder.contractDigest,
     observedRevision: workOrder.observedRevision,
+    operationKey: workOrder.operationKey,
+    routeDigest: workOrder.routeDigest,
+    verificationChecks: workOrder.verificationChecks,
+    verifierDigest,
+  });
+}
+
+export function attemptKey(workOrder: WorkOrder): string {
+  return digestCanonical({
+    contractDigest: workOrder.contractDigest,
     operationKey: workOrder.operationKey,
   });
 }

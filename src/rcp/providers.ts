@@ -6,16 +6,20 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import { canonicalJson, digestCanonical } from "./canonical.ts";
+import { validateReceipt } from "./receipt.ts";
+import { digestRepositoryPaths } from "./repository.ts";
 import type {
   ForgeObservation,
   HarnessResult,
   ProviderDescriptor,
   RepositoryContractIr,
+  ReconciliationAttempt,
   RepositoryReceipt,
   VerificationCheckResult,
   VerificationEvidence,
@@ -55,6 +59,17 @@ export interface ReceiptSink {
   readonly descriptor: ProviderDescriptor;
   find(operationIdentity: string): Promise<{ receipt: RepositoryReceipt; path?: string } | null>;
   append(receipt: RepositoryReceipt): Promise<{ path?: string }>;
+  scan(): Promise<ReceiptScanEntry[]>;
+  findIncomplete(attemptKey: string): Promise<ReconciliationAttempt | null>;
+  beginAttempt(attempt: ReconciliationAttempt): Promise<{ path?: string }>;
+  completeAttempt(attemptKey: string): Promise<void>;
+}
+
+export interface ReceiptScanEntry {
+  path: string;
+  valid: boolean;
+  errors: string[];
+  receipt?: RepositoryReceipt;
 }
 
 export interface MemoryProvider {
@@ -135,35 +150,53 @@ export class ProcessHarnessProvider implements HarnessProvider {
   readonly descriptor: ProviderDescriptor;
   readonly executable: string;
   readonly args: string[];
+  readonly timeoutMs: number;
+  readonly cwd?: string;
 
-  constructor(executable: string, args: string[] = [], id = "process-harness", version = "1") {
+  constructor(
+    executable: string,
+    args: string[] = [],
+    id = "process-harness",
+    version = "1",
+    timeoutMs = 30 * 60 * 1_000,
+    cwd?: string,
+  ) {
     this.executable = executable;
     this.args = args;
+    this.timeoutMs = timeoutMs;
+    this.cwd = cwd;
     this.descriptor = {
       id,
       version,
-      capabilities: ["consume-work-order", "process-execution"],
+      capabilities: ["consume-work-order", "bounded-process-execution"],
       operations: ["execute"],
       authority: ["apply"],
     };
   }
 
   async execute(workOrder: WorkOrder): Promise<HarnessResult> {
+    const timeoutMs = Math.min(this.timeoutMs, workOrder.budget.timeoutMs);
     const result = spawnSync(this.executable, this.args, {
       encoding: "utf8",
       input: `${JSON.stringify(workOrder)}\n`,
       windowsHide: true,
       maxBuffer: 16 * 1024 * 1024,
+      timeout: timeoutMs,
+      killSignal: "SIGTERM",
+      cwd: this.cwd,
     });
     const failed = result.error || result.signal || result.status !== 0;
+    const timedOut = (result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT";
     return {
       provider: this.descriptor,
       status: failed ? "failed" : "completed",
       summary: failed
-        ? (result.error?.message ??
-          (result.signal
-            ? `harness terminated by ${result.signal}`
-            : `harness exited with ${result.status}`))
+        ? timedOut
+          ? `harness timed out after ${timeoutMs}ms`
+          : (result.error?.message ??
+            (result.signal
+              ? `harness terminated by ${result.signal}`
+              : `harness exited with ${result.status}`))
         : result.stdout.trim() || `harness completed ${workOrder.id}`,
       diagnostics: result.stderr.trim() ? [result.stderr.trim()] : [],
       artifacts: failed ? [] : ["workspace"],
@@ -192,7 +225,12 @@ export class LocalNpmVerifierProvider implements VerifierProvider {
     workOrder: WorkOrder;
   }): Promise<string> {
     const scripts = readPackageScripts(request.root);
-    return verifierDefinitionDigest(this.descriptor, request.workOrder.verificationChecks, scripts);
+    return verifierDefinitionDigest(
+      request.root,
+      this.descriptor,
+      request.workOrder.verificationChecks,
+      scripts,
+    );
   }
 
   async verify(request: {
@@ -202,6 +240,7 @@ export class LocalNpmVerifierProvider implements VerifierProvider {
   }): Promise<VerificationEvidence> {
     const scripts = readPackageScripts(request.root);
     const verifierDigest = verifierDefinitionDigest(
+      request.root,
       this.descriptor,
       request.workOrder.verificationChecks,
       scripts,
@@ -234,7 +273,7 @@ export class FileReceiptSink implements ReceiptSink {
     id: "file-receipt-sink",
     version: "1",
     capabilities: ["append-only-receipts", "operation-identity-lookup"],
-    operations: ["find", "append"],
+    operations: ["find", "append", "scan", "findIncomplete", "beginAttempt", "completeAttempt"],
     authority: ["plan", "apply", "continuous"],
   };
 
@@ -255,7 +294,11 @@ export class FileReceiptSink implements ReceiptSink {
       .reverse();
     for (const name of matches) {
       const path = join(resolve(this.directory), name);
-      const receipt = JSON.parse(readFileSync(path, "utf8")) as RepositoryReceipt;
+      const inspected = this.inspect(path);
+      if (!inspected.valid || !inspected.receipt) {
+        throw new Error(`invalid receipt ${path}: ${inspected.errors.join("; ")}`);
+      }
+      const receipt = inspected.receipt;
       if (receipt.operationIdentity === operationIdentity && receipt.decision === "verified") {
         return { receipt, path };
       }
@@ -264,6 +307,10 @@ export class FileReceiptSink implements ReceiptSink {
   }
 
   async append(receipt: RepositoryReceipt): Promise<{ path?: string }> {
+    const validation = validateReceipt(receipt);
+    if (!validation.valid) {
+      throw new Error(`refusing to append invalid receipt: ${validation.errors.join("; ")}`);
+    }
     const path = this.path(receipt.operationIdentity, receipt.receiptId);
     mkdirSync(dirname(path), { recursive: true });
     if (existsSync(path)) {
@@ -277,6 +324,50 @@ export class FileReceiptSink implements ReceiptSink {
     return { path };
   }
 
+  async scan(): Promise<ReceiptScanEntry[]> {
+    if (!existsSync(this.directory)) return [];
+    return readdirSync(this.directory)
+      .filter((name) => name.endsWith(".json"))
+      .sort()
+      .map((name) => this.inspect(join(resolve(this.directory), name)));
+  }
+
+  async findIncomplete(attemptKey: string): Promise<ReconciliationAttempt | null> {
+    const path = this.attemptPath(attemptKey);
+    if (!existsSync(path)) return null;
+    const value = JSON.parse(readFileSync(path, "utf8")) as ReconciliationAttempt;
+    if (
+      value.attemptSchema !== "repository.attempt/v1alpha1" ||
+      value.attemptKey !== attemptKey ||
+      !value.operationIdentity ||
+      !value.workOrderId ||
+      !value.verifierDigest
+    ) {
+      throw new Error(`invalid in-flight attempt journal: ${path}`);
+    }
+    return value;
+  }
+
+  async beginAttempt(attempt: ReconciliationAttempt): Promise<{ path?: string }> {
+    const path = this.attemptPath(attempt.attemptKey);
+    mkdirSync(dirname(path), { recursive: true });
+    if (existsSync(path)) {
+      const existing = JSON.parse(readFileSync(path, "utf8")) as ReconciliationAttempt;
+      if (canonicalJson(existing) === canonicalJson(attempt)) return { path };
+      throw new Error(`in-flight attempt already exists: ${attempt.attemptKey}`);
+    }
+    const temporary = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporary, `${JSON.stringify(attempt, null, 2)}\n`, "utf8");
+    renameSync(temporary, path);
+    return { path };
+  }
+
+  async completeAttempt(attemptKey: string): Promise<void> {
+    const path = this.attemptPath(attemptKey);
+    if (!existsSync(path)) return;
+    unlinkSync(path);
+  }
+
   private operationDigest(operationIdentity: string): string {
     return createHash("sha256").update(operationIdentity).digest("hex");
   }
@@ -285,6 +376,28 @@ export class FileReceiptSink implements ReceiptSink {
     const operation = this.operationDigest(operationIdentity);
     const receipt = createHash("sha256").update(receiptId).digest("hex");
     return join(resolve(this.directory), `${operation}-${receipt}.json`);
+  }
+
+  private attemptPath(attemptKey: string): string {
+    const key = createHash("sha256").update(attemptKey).digest("hex");
+    return join(resolve(this.directory), "inflight", `${key}.json`);
+  }
+
+  private inspect(path: string): ReceiptScanEntry {
+    try {
+      const receipt = JSON.parse(readFileSync(path, "utf8")) as RepositoryReceipt;
+      const validation = validateReceipt(receipt);
+      const expectedName = basename(this.path(receipt.operationIdentity, receipt.receiptId));
+      const errors = [...validation.errors];
+      if (basename(path) !== expectedName) errors.push("receipt filename does not match identity");
+      return { path, valid: errors.length === 0, errors, receipt };
+    } catch (cause) {
+      return {
+        path,
+        valid: false,
+        errors: [cause instanceof Error ? cause.message : String(cause)],
+      };
+    }
   }
 }
 
@@ -497,10 +610,23 @@ function readPackageScripts(root: string): Record<string, string> {
 }
 
 function verifierDefinitionDigest(
+  root: string,
   provider: ProviderDescriptor,
   checks: string[],
   scripts: Record<string, string>,
 ): string {
   const definitions = checks.map((name) => [name, scripts[name] ?? null]);
-  return digestCanonical({ provider, definitions });
+  const repositoryInputs = digestRepositoryPaths(root, [
+    "package.json",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+  ]);
+  return digestCanonical({
+    provider,
+    definitions,
+    repositoryInputs,
+    runtime: { node: process.version, platform: process.platform, arch: process.arch },
+  });
 }
