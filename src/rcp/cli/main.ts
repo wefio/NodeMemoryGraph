@@ -27,10 +27,12 @@ interface CliOptions {
   json: boolean;
   apply: boolean;
   workspaceReady: boolean;
+  recoverAttempt: boolean;
   receiptDirectory: string;
   pullRequestNumber?: number;
   harnessCommand?: string;
   harnessArgs: string[];
+  harnessTimeoutMs: number;
   nmgMode: "disabled" | "optional" | "required";
   receiptPath?: string;
   operationKey?: string;
@@ -60,11 +62,27 @@ async function executeCommand(options: CliOptions): Promise<number> {
       return 0;
     case "receipt-verify":
       return verifyReceipt(options);
+    case "receipt-list":
+      return inspectReceiptStore(options, false);
+    case "receipt-scan":
+      return inspectReceiptStore(options, true);
     case "forge-status":
       return observeForgeStatus(options);
     default:
       return executeContractCommand(options);
   }
+}
+
+async function inspectReceiptStore(options: CliOptions, failOnInvalid: boolean): Promise<number> {
+  const entries = await new FileReceiptSink(options.receiptDirectory).scan();
+  const valid = entries.every((entry) => entry.valid);
+  const result = { valid, entries };
+  emit(
+    options.json,
+    result,
+    `${entries.length} receipt(s), ${entries.filter((entry) => !entry.valid).length} invalid`,
+  );
+  return failOnInvalid && !valid ? 1 : 0;
 }
 
 function verifyReceipt(options: CliOptions): number {
@@ -158,6 +176,7 @@ async function planContract(options: CliOptions, contract: RepositoryContractIr)
     contract,
     observation,
     routes: readRouteDeclarations(options.root),
+    executionTimeoutMs: options.harnessTimeoutMs,
   });
   emit(options.json, { contract, observation, workOrder }, formatPlan(workOrder));
   return 0;
@@ -170,8 +189,21 @@ async function reconcileContract(
   if (options.apply && !options.workspaceReady && !options.harnessCommand) {
     throw new Error("apply requires --workspace-ready or --harness-command <executable>");
   }
+  if (
+    options.recoverAttempt &&
+    (!options.apply || !options.workspaceReady || options.harnessCommand)
+  ) {
+    throw new Error("recovery requires --apply --workspace-ready and cannot use --harness-command");
+  }
   const harness = options.harnessCommand
-    ? new ProcessHarnessProvider(options.harnessCommand, options.harnessArgs)
+    ? new ProcessHarnessProvider(
+        options.harnessCommand,
+        options.harnessArgs,
+        "process-harness",
+        "1",
+        options.harnessTimeoutMs,
+        options.root,
+      )
     : new ExternalWorkspaceHarnessProvider();
   const result = await reconcileOnce(
     {
@@ -181,6 +213,8 @@ async function reconcileContract(
       requestedMode: options.apply ? "apply" : "plan",
       pullRequestNumber: options.pullRequestNumber,
       operationKey: options.operationKey,
+      recoverIncomplete: options.recoverAttempt,
+      executionTimeoutMs: options.harnessTimeoutMs,
     },
     {
       repository: new LocalRepositoryProvider(),
@@ -212,7 +246,9 @@ function defaultCliOptionState(command: string): CliOptionState {
     json: false,
     apply: false,
     workspaceReady: false,
+    recoverAttempt: false,
     harnessArgs: [],
+    harnessTimeoutMs: 30 * 60 * 1_000,
     nmgMode: "disabled",
     baseRef: "main",
   };
@@ -222,6 +258,7 @@ const flagOptionHandlers: Record<string, (state: CliOptionState) => void> = {
   "--json": (state) => (state.json = true),
   "--apply": (state) => (state.apply = true),
   "--workspace-ready": (state) => (state.workspaceReady = true),
+  "--recover-attempt": (state) => (state.recoverAttempt = true),
 };
 
 const valueOptionHandlers: Record<
@@ -252,11 +289,21 @@ function consumeArgument(args: string[], index: number, state: CliOptionState): 
     return index + 1;
   }
   if (argument === "--pr") return consumePullRequestNumber(args, index, state);
+  if (argument === "--harness-timeout-ms") return consumeHarnessTimeout(args, index, state);
   if (argument === "--nmg") return consumeNmgMode(args, index, state);
   if (argument.startsWith("-")) throw new Error(`unknown option: ${argument}`);
   if (state.command === "receipt-verify") state.receiptPath ??= argument;
   else state.contractPath ??= argument;
   return index;
+}
+
+function consumeHarnessTimeout(args: string[], index: number, state: CliOptionState): number {
+  const value = Number(args[index + 1]);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error("--harness-timeout-ms requires a positive integer");
+  }
+  state.harnessTimeoutMs = value;
+  return index + 1;
 }
 
 function consumePullRequestNumber(args: string[], index: number, state: CliOptionState): number {
@@ -401,6 +448,8 @@ Commands:
   plan <contract>          observe the repository and emit a bounded WorkOrder
   reconcile <contract>     plan by default; use --apply to verify an executed change
   receipt-verify <path>    validate an immutable receipt
+  receipt-list             list local receipt entries and validation state
+  receipt-scan             validate the complete local receipt store
   forge-status --pr <n>    observe a GitHub pull request
   forge-create <contract>  create a Contract-bound Draft pull request
   forge-bind <contract>    update an existing pull request Contract binding
@@ -410,8 +459,10 @@ Options:
   --json                   machine-readable output
   --apply                  execute the apply/verify/receipt phase
   --workspace-ready        treat the current workspace as the Agent result
+  --recover-attempt        verify an interrupted attempt without replaying its harness
   --harness-command <exe>  execute an external harness that consumes WorkOrder JSON
   --harness-arg <value>    repeatable external harness argument
+  --harness-timeout-ms <n> terminate an external harness after this many milliseconds
   --receipt-dir <path>     append-only receipt directory (default .rcp/receipts)
   --pr <number>            bind verification to a GitHub pull-request head
   --operation-key <key>    distinguish independent idempotent reconciliation phases

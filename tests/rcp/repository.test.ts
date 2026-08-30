@@ -5,11 +5,7 @@ import test from "node:test";
 
 import { compileContract } from "../../src/rcp/contract.ts";
 import { planWorkOrder, readRouteDeclarations } from "../../src/rcp/planner.ts";
-import {
-  changedPaths,
-  globMatches,
-  observeRepository,
-} from "../../src/rcp/repository.ts";
+import { changedPaths, globMatches, observeRepository } from "../../src/rcp/repository.ts";
 import { contractText, repositoryFixture } from "./fixture.ts";
 
 function contract() {
@@ -23,7 +19,10 @@ test("glob matching and observation stay within declared scope", () => {
   assert.equal(globMatches("src/*.ts", "src/nested/value.ts"), false);
   const root = repositoryFixture();
   const observation = observeRepository(root, contract());
-  assert.deepEqual(observation.files.map((file) => file.path), ["src/value.ts"]);
+  assert.deepEqual(
+    observation.files.map((file) => file.path),
+    ["src/value.ts"],
+  );
   assert.equal(observation.git.available, true);
   assert.equal(observation.git.dirtyFiles.length, 0);
 });
@@ -49,7 +48,10 @@ test("receipt output never changes a broad repository observation", () => {
   writeFileSync(join(root, ".rcp", "receipts", "result.json"), "{}\n");
   const after = observeRepository(root, compiled.contract);
   assert.equal(after.observedRevision, before.observedRevision);
-  assert.equal(after.files.some((file) => file.path.startsWith(".rcp/receipts/")), false);
+  assert.equal(
+    after.files.some((file) => file.path.startsWith(".rcp/receipts/")),
+    false,
+  );
 });
 
 test("planner maps Contract scope to repository routes and a bounded WorkOrder", () => {
@@ -66,4 +68,5 @@ test("planner maps Contract scope to repository routes and a bounded WorkOrder",
   assert.deepEqual(order.owners, ["docs/design.md"]);
   assert.deepEqual(order.verificationChecks, ["check"]);
   assert.deepEqual(order.allowedPaths, ["src/**"]);
+  assert.deepEqual(order.budget, { maxAttempts: 1, timeoutMs: 30 * 60 * 1_000 });
 });

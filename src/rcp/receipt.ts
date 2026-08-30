@@ -16,12 +16,31 @@ export function validateReceipt(receipt: RepositoryReceipt): ReceiptValidation {
     errors.push("missing observed revision binding");
   }
   if (!receipt.verifier.id || !receipt.verifier.digest) errors.push("missing verifier identity");
+  if (!receipt.workOrder?.id || !receipt.workOrder.routeDigest) {
+    errors.push("missing work order identity");
+  }
+  if (
+    !Array.isArray(receipt.workOrder?.routes) ||
+    !Array.isArray(receipt.workOrder?.verificationChecks)
+  ) {
+    errors.push("missing work order route/check binding");
+  }
+  if (
+    receipt.workOrder?.budget?.maxAttempts !== 1 ||
+    !Number.isSafeInteger(receipt.workOrder?.budget?.timeoutMs) ||
+    receipt.workOrder.budget.timeoutMs <= 0
+  ) {
+    errors.push("missing or invalid work order budget");
+  }
   if (!receipt.scope.matched) errors.push("actual scope does not match declared scope");
   if (receipt.decision === "verified") {
     if (receipt.harness.status !== "completed")
       errors.push("verified receipt has incomplete harness");
     if (!receipt.checks.length || receipt.checks.some((check) => check.status !== "passed")) {
       errors.push("verified receipt requires every check to pass");
+    }
+    if (receipt.forge && (!receipt.commit || receipt.forge.headCommit !== receipt.commit)) {
+      errors.push("verified forge receipt is not bound to its commit");
     }
   }
   const expectedId = receiptId({ ...receipt, receiptId: "" });

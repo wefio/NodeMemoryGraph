@@ -6,7 +6,7 @@
 **Date:** 2026-08-29
 
 **Implementation status:** the single-attempt run-to-completion control plane was merged through
-PR #3 and hardened through PR #4. Contract compilation, observation, WorkOrders,
+PR #3 and subsequently hardened at its evidence and recovery boundaries. Contract compilation, observation, WorkOrders,
 independent verification, append-only local receipts, provider boundaries, Draft
 PR binding, and optional/no-NMG operation have deterministic product tests and a
 real Contract-bound PR/CI/local-receipt run. Continuous reconciliation and portable
@@ -140,9 +140,11 @@ full completion criteria are owned by
 - Only single-attempt run-to-completion reconciliation is implemented. Watchers, queues,
   continuous convergence, general catalogs, and multi-tenant operation still
   require demonstrated demand and separate safety design.
-- Receipt reuse, verifier identity depth, clean-worktree/commit binding, and
-  read-only receipt indexing remain explicit hardening work rather than stronger
-  claims hidden behind the implemented status.
+- Reusable receipts are validated and bound to the active route, checks, and
+  verifier definition. Apply fails closed without Git provenance, process harnesses
+  are bounded, and an in-flight journal prevents interrupted mutations from being
+  replayed without explicit recovery. The journal is local coordination state, not
+  verification evidence, and is removed after a receipt is recorded.
 
 ## Risks
 

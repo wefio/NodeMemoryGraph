@@ -145,29 +145,6 @@ one shared daemon, each benchmark worker closes without stopping that daemon,
 and the bridge subprocess can be removed without changing official inputs,
 outputs, scoring, or product RPC semantics.
 
-## 6. Harden the RCP evidence boundary
-
-- [ ] Validate receipt integrity when looking up a reusable result instead of trusting
-  parsed `decision: verified` fields alone.
-- [ ] Bind receipt reuse to the active route and verifier definition, not only the
-  Contract digest, scoped observed revision, and operation key.
-- [ ] Prove that verified workspace bytes match the recorded commit/forge head and
-  fail closed when Git observation is unavailable.
-- [ ] Add a read-only receipt list/scan surface before treating the local append-only
-  store as an auditable history rather than an idempotency cache.
-- [ ] Define an executable terminal predicate, attempt/time budgets, cancellation,
-  and cycle detection before adding any iterative reconciler. The current CLI
-  deliberately stops after one `reconcileOnce` attempt.
-
-**Available mechanism:** deterministic RCP product tests cover one-shot planning,
-apply, scope enforcement, named verification, retryable receipts, forge binding and
-optional/no-NMG operation. These tests do not establish semantic refactor
-equivalence or portable attestation.
-
-**Done when:** stale or tampered receipts cannot be reused, verified bytes are bound
-to the claimed commit and verifier identity, local receipt history is inspectable,
-and any future iterative mode has explicit convergence and resource boundaries.
-
 ## Explicitly deferred — not missing current work
 
 These options return to the active checklist only after their prerequisite is

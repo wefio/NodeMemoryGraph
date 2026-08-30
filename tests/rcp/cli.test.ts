@@ -22,13 +22,14 @@ test("CLI compiles and plans a Contract without mutating the repository", () => 
   assert.equal(compiled.contract.id, "fixture-change");
   assert.match(compiled.contract.contractDigest, /^sha256:/);
 
-  const plan = run(root, ["plan", contract, "--json"]);
+  const plan = run(root, ["plan", contract, "--harness-timeout-ms", "1234", "--json"]);
   assert.equal(plan.status, 0, plan.stderr);
   const planned = JSON.parse(plan.stdout) as {
-    workOrder: { schema: string; verificationChecks: string[] };
+    workOrder: { schema: string; verificationChecks: string[]; budget: { timeoutMs: number } };
   };
   assert.equal(planned.workOrder.schema, "repository.work-order/v1alpha1");
   assert.deepEqual(planned.workOrder.verificationChecks, ["check"]);
+  assert.equal(planned.workOrder.budget.timeoutMs, 1234);
 });
 
 test("CLI apply is fail-closed without an explicit harness boundary", () => {
@@ -38,6 +39,22 @@ test("CLI apply is fail-closed without an explicit harness boundary", () => {
   const result = run(root, ["reconcile", contract, "--apply"]);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /--workspace-ready or --harness-command/);
+});
+
+test("CLI recovery is explicit and cannot execute a harness command", () => {
+  const root = repositoryFixture();
+  const contract = join(root, "change.yaml");
+  writeFileSync(contract, contractText());
+  const result = run(root, [
+    "reconcile",
+    contract,
+    "--apply",
+    "--recover-attempt",
+    "--harness-command",
+    process.execPath,
+  ]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /recovery.*workspace-ready/i);
 });
 
 test("CLI reconcile records and validates a receipt with NMG disabled", () => {
@@ -65,6 +82,12 @@ test("CLI reconcile records and validates a receipt with NMG disabled", () => {
   const validation = run(root, ["receipt-verify", reconciled.receiptPath, "--json"]);
   assert.equal(validation.status, 0, validation.stderr);
   assert.equal((JSON.parse(validation.stdout) as { valid: boolean }).valid, true);
+
+  const scan = run(root, ["receipt-scan", "--json"]);
+  assert.equal(scan.status, 0, scan.stderr);
+  const scanned = JSON.parse(scan.stdout) as { valid: boolean; entries: unknown[] };
+  assert.equal(scanned.valid, true);
+  assert.equal(scanned.entries.length, 1);
 });
 
 test("GitHub provider normalizes forge state through an injected runner", async () => {
