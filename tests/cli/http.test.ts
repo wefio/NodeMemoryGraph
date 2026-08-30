@@ -8,12 +8,15 @@ import test from "node:test";
 import { httpCall } from "../../src/cli/http-client.ts";
 import { httpHandler } from "../../src/cli/http-server.ts";
 import type { ServerState } from "../../src/cli/lifecycle.ts";
-import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
+import { NMG_PROTOCOL_VERSION, NMG_RPC_CATALOG_FINGERPRINT } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
 
 type EphemeralServer = { state: ServerState };
 
-function startServer(service: NmgService, token: string): Promise<EphemeralServer & { server: Server }> {
+function startServer(
+  service: NmgService,
+  token: string,
+): Promise<EphemeralServer & { server: Server }> {
   return new Promise((resolve, reject) => {
     const server = createServer(httpHandler(service, token));
     server.once("error", reject);
@@ -34,28 +37,31 @@ function startServer(service: NmgService, token: string): Promise<EphemeralServe
   });
 }
 
-function withServer(
-  fn: (state: EphemeralServer["state"]) => Promise<void>,
-): Promise<void> {
+function withServer(fn: (state: EphemeralServer["state"]) => Promise<void>): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "nmg-http-"));
   const token = "test-token";
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite") });
-  return startServer(service, token)
-    .then(async ({ server, state }) => {
-      try {
-        await fn(state);
-      } finally {
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-        service.close();
-        rmSync(directory, { recursive: true, force: true });
-      }
-    });
+  return startServer(service, token).then(async ({ server, state }) => {
+    try {
+      await fn(state);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      service.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 }
 
 test("JSON-RPC over HTTP round-trips hello, remember, search, and get", async () => {
   await withServer(async (state) => {
-    const hello = (await httpCall(state, "hello")) as { protocol: string };
+    const hello = (await httpCall(state, "hello")) as {
+      protocol: string;
+      methods: string[];
+      catalogFingerprint: string;
+    };
     assert.equal(hello.protocol, NMG_PROTOCOL_VERSION);
+    assert.ok(hello.methods.includes("search"));
+    assert.equal(hello.catalogFingerprint, NMG_RPC_CATALOG_FINGERPRINT);
 
     const remembered = (await httpCall(state, "remember", {
       statement: "Atlas must use SQLite for offline operation.",
@@ -99,13 +105,15 @@ test("JSON-RPC arrays survive the wire without wrapping", async () => {
 test("concurrent HTTP turns share one daemon writer without losing writes", async () => {
   await withServer(async (state) => {
     const writes = await Promise.all(
-      Array.from({ length: 32 }, (_, index) =>
-        httpCall(state, "remember", {
-          statement: `Concurrent daemon fact ${index}.`,
-          nodeName: "Concurrent daemon writes",
-          memoryType: "fact",
-          evidence: `Concurrent daemon fact ${index}.`,
-        }) as Promise<{ memory: { id: string } }>,
+      Array.from(
+        { length: 32 },
+        (_, index) =>
+          httpCall(state, "remember", {
+            statement: `Concurrent daemon fact ${index}.`,
+            nodeName: "Concurrent daemon writes",
+            memoryType: "fact",
+            evidence: `Concurrent daemon fact ${index}.`,
+          }) as Promise<{ memory: { id: string } }>,
       ),
     );
     assert.equal(new Set(writes.map((result) => result.memory.id)).size, 32);
@@ -122,10 +130,7 @@ test("concurrent HTTP turns share one daemon writer without losing writes", asyn
 
 test("JSON-RPC over HTTP rejects unauthenticated requests", async () => {
   await withServer(async (state) => {
-    await assert.rejects(
-      httpCall({ ...state, token: "wrong-token" }, "hello"),
-      /unauthenticated/,
-    );
+    await assert.rejects(httpCall({ ...state, token: "wrong-token" }, "hello"), /unauthenticated/);
   });
 });
 

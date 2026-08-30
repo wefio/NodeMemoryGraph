@@ -23,6 +23,10 @@ export interface DaemonConnection {
   startedByCaller: boolean;
   /** Capabilities advertised by this exact daemon connection. */
   capabilities: ReadonlySet<string>;
+  /** Methods advertised by this daemon. Absent only for an earlier same-epoch daemon. */
+  methods?: ReadonlySet<string>;
+  /** Discovery/cache identity only; a mismatch never implies incompatibility. */
+  catalogFingerprint?: string;
   /** 数据库路径，供连接失败重连时重新拉起同库 daemon。 */
   databasePath: string;
 }
@@ -32,13 +36,14 @@ export async function connectDaemon(databasePath: string): Promise<DaemonConnect
   const existing = readyState(statePath);
   if (existing) {
     try {
-      const hello = (await httpCall(existing, "hello")) as NmgHelloResult;
-      assertDaemonProtocol(hello);
+      const hello = parseDaemonHello(await httpCall(existing, "hello"));
       return {
         startedByCaller: false,
         state: existing,
         databasePath,
         capabilities: new Set(hello.capabilities),
+        methods: hello.methods ? new Set(hello.methods) : undefined,
+        catalogFingerprint: hello.catalogFingerprint,
       };
     } catch (error) {
       if (error instanceof NmgDaemonCompatibilityError) throw error;
@@ -59,13 +64,14 @@ export async function connectDaemon(databasePath: string): Promise<DaemonConnect
   child.unref();
 
   const state = await waitForState(statePath);
-  const hello = (await httpCall(state, "hello")) as NmgHelloResult;
-  assertDaemonProtocol(hello);
+  const hello = parseDaemonHello(await httpCall(state, "hello"));
   return {
     startedByCaller: true,
     state,
     databasePath,
     capabilities: new Set(hello.capabilities),
+    methods: hello.methods ? new Set(hello.methods) : undefined,
+    catalogFingerprint: hello.catalogFingerprint,
   };
 }
 
@@ -79,10 +85,40 @@ export class NmgDaemonCompatibilityError extends Error {
   }
 }
 
+export class NmgDaemonHandshakeError extends Error {
+  constructor(message: string) {
+    super(`invalid NMG daemon hello: ${message}`);
+    this.name = "NmgDaemonHandshakeError";
+  }
+}
+
 export function assertDaemonProtocol(hello: Pick<NmgHelloResult, "protocol">): void {
   if (hello.protocol !== NMG_PROTOCOL_VERSION) {
     throw new NmgDaemonCompatibilityError(hello.protocol);
   }
+}
+
+export function parseDaemonHello(value: unknown): NmgHelloResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new NmgDaemonHandshakeError("result must be an object");
+  }
+  const hello = value as Record<string, unknown>;
+  assertDaemonProtocol({ protocol: typeof hello.protocol === "string" ? hello.protocol : "" });
+  if (hello.service !== "node-memory-graph")
+    throw new NmgDaemonHandshakeError("service identity is not node-memory-graph");
+  if (typeof hello.version !== "string")
+    throw new NmgDaemonHandshakeError("version must be a string");
+  if (!stringArray(hello.capabilities))
+    throw new NmgDaemonHandshakeError("capabilities must be a string array");
+  if (hello.methods !== undefined && !stringArray(hello.methods))
+    throw new NmgDaemonHandshakeError("methods must be a string array when present");
+  if (
+    hello.catalogFingerprint !== undefined &&
+    (typeof hello.catalogFingerprint !== "string" ||
+      !/^sha256:[0-9a-f]{64}$/u.test(hello.catalogFingerprint))
+  )
+    throw new NmgDaemonHandshakeError("catalogFingerprint must be a sha256 digest when present");
+  return hello as unknown as NmgHelloResult;
 }
 
 export class NmgDaemonCapabilityError extends Error {
@@ -95,7 +131,19 @@ export class NmgDaemonCapabilityError extends Error {
   }
 }
 
-export function assertDaemonCapability(capabilities: ReadonlySet<string>, method: NmgMethod): void {
+export class NmgDaemonMethodError extends Error {
+  constructor(method: NmgMethod) {
+    super(`NMG daemon does not advertise method ${method}; upgrade or enable it before calling`);
+    this.name = "NmgDaemonMethodError";
+  }
+}
+
+export function assertDaemonCapability(
+  capabilities: ReadonlySet<string>,
+  method: NmgMethod,
+  methods?: ReadonlySet<string>,
+): void {
+  if (methods && !methods.has(method)) throw new NmgDaemonMethodError(method);
   const required =
     NMG_OPTIONAL_METHOD_CAPABILITIES[method as keyof typeof NMG_OPTIONAL_METHOD_CAPABILITIES];
   if (required && !capabilities.has(required)) {
@@ -143,7 +191,7 @@ export async function invokeDaemon(
   method: NmgMethod,
   params: Record<string, unknown> = {},
 ): Promise<unknown> {
-  assertDaemonCapability(connection.capabilities, method);
+  assertDaemonCapability(connection.capabilities, method, connection.methods);
   try {
     return await httpCall(connection.state, method, params);
   } catch (error) {
@@ -156,9 +204,15 @@ export async function invokeDaemon(
     connection.state = reconnected.state;
     connection.startedByCaller = reconnected.startedByCaller;
     connection.capabilities = reconnected.capabilities;
-    assertDaemonCapability(connection.capabilities, method);
+    connection.methods = reconnected.methods;
+    connection.catalogFingerprint = reconnected.catalogFingerprint;
+    assertDaemonCapability(connection.capabilities, method, connection.methods);
     return await httpCall(connection.state, method, params);
   }
+}
+
+function stringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
 /**

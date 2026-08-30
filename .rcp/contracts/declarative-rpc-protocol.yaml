@@ -1,0 +1,54 @@
+apiVersion: repository.nmg.dev/v1alpha1
+kind: AgentChange
+metadata:
+  id: declarative-rpc-protocol
+spec:
+  intent: Complete the additive daemon RPC discovery contract without turning the catalog into a full IDL or changing host-owned tool exposure
+  scope:
+    include:
+      - .rcp/contracts/declarative-rpc-protocol.yaml
+      - docs/decisions/**
+      - docs/design/completion-audit.md
+      - docs/design/design.md
+      - docs/design/temporary-todo.md
+      - src/cli/daemon-client.ts
+      - src/cli/protocol.ts
+      - src/cli/service.ts
+      - tests/cli/daemon-client.test.ts
+      - tests/cli/http-boundary.test.ts
+      - tests/cli/http.test.ts
+    exclude:
+      - docs/experiments/**
+      - evals/**
+  preserve:
+    - protocol epoch changes only when the previous daemon cannot faithfully implement the current client contract
+    - parsers handlers permissions side effects and host tool exposure remain explicit owners
+    - Pi MCP DSH CLI WorkBuddy and benchmark behavior remains unchanged unless a capability is explicitly optional
+    - catalog fingerprints are discovery and cache identities rather than compatibility verdicts
+    - unrelated working-tree changes remain untouched
+  invariants:
+    - one frozen runtime catalog defines method existence and optional capability metadata
+    - daemon hello publishes the catalog methods and deterministic fingerprint
+    - clients validate hello structure and refresh negotiated discovery state after reconnect
+    - an optional RPC call requires both advertised method existence and its declared capability
+    - runtime registration and hot reload remain unavailable until a bounded trusted use case is specified
+    - registry and explicit service handlers cannot drift silently
+  verification:
+    routes:
+      - daemon-cli
+      - documentation
+      - ci-and-tests
+    checks:
+      - agent:context:check
+      - build
+      - check
+      - docs:check
+      - test:product
+    forgeChecks:
+      - All checks passed
+  authority:
+    mode: apply
+  extensions:
+    repository.nmg.dev/delivery:
+      kind: run-to-completion
+      hotReload: explicitly-deferred

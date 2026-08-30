@@ -308,6 +308,16 @@ same-epoch optional capability gates. It derives the server whitelist, the
 TypeScript method union, the client gate table, and the optional `hello.methods`
 discovery list; bidirectional contract tests
 reject a descriptor without a service handler or a handler without a descriptor.
+The descriptor catalog is frozen for the lifetime of the daemon and has a
+deterministic `sha256` fingerprint published as `hello.catalogFingerprint`.
+Clients validate the complete hello shape, retain the advertised method set and
+catalog fingerprint, and refresh both after reconnect. The fingerprint is only a
+discovery/cache identity: a different fingerprint inside the same compatibility
+epoch is not an incompatibility verdict. Optional calls are admitted only when
+both the advertised method set (when present) and the descriptor's capability
+gate permit them. Runtime method registration and catalog hot reload are not
+implemented; adding them would first require a bounded trusted registration,
+handler-ownership, and in-flight-request policy.
 This automation intentionally stops at the wire declaration. Parsers,
 cross-field invariants, transactions, side effects, CLI syntax, host exposure,
 and epoch-bump decisions remain explicit because structural generation cannot

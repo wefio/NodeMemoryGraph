@@ -86,6 +86,7 @@ import { applyAdvancedFilters, parseAdvancedQuery } from "../core/store/advanced
 import {
   NMG_CAPABILITIES,
   NMG_METHODS,
+  NMG_RPC_CATALOG_FINGERPRINT,
   MEMORY_RELATION_JUDGEMENTS,
   NMG_PROTOCOL_VERSION,
   NmgProtocolError,
@@ -529,6 +530,7 @@ export class NmgService {
       version: SERVICE_VERSION,
       capabilities: NMG_CAPABILITIES,
       methods: NMG_METHODS,
+      catalogFingerprint: NMG_RPC_CATALOG_FINGERPRINT,
     };
   }
 
