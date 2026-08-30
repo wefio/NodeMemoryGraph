@@ -8,7 +8,6 @@ import {
   buildRouteVerificationPlan,
   executeVerificationPlan,
   npmCommandRunner,
-  type VerificationCommandResult,
   type VerificationRunResult,
 } from "../src/rcp/verification.ts";
 export {
@@ -53,8 +52,7 @@ function parseArgs(args: string[]) {
     } else if (argument === "--output") {
       output = args[++index];
       if (!output) throw new Error("--output requires a path");
-    }
-    else if (argument === "--root") root = args[++index] ?? root;
+    } else if (argument === "--root") root = args[++index] ?? root;
     else if (argument === "--scope") {
       const scope = args[++index];
       if (!scope) throw new Error("--scope requires a path");
@@ -72,7 +70,9 @@ function parseArgs(args: string[]) {
     json,
     requireClean,
     timeoutMs,
-    output: output ? resolve(resolvedRoot, output) : join(resolvedRoot, ".nmg", "verification", "latest.json"),
+    output: output
+      ? resolve(resolvedRoot, output)
+      : join(resolvedRoot, ".nmg", "verification", "latest.json"),
     scopes,
     help,
   };

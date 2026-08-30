@@ -18,7 +18,7 @@ import { validateReceipt } from "../receipt.ts";
 import { reconcileOnce } from "../reconcile.ts";
 import { LocalRepositoryProvider } from "../repository.ts";
 import type { NmgMemoryClient } from "../providers.ts";
-import type { RepositoryReceipt } from "../types.ts";
+import type { RepositoryContractIr, RepositoryReceipt } from "../types.ts";
 
 interface CliOptions {
   command: string;
@@ -40,204 +40,250 @@ interface CliOptions {
   body?: string;
 }
 
+interface CliOptionState extends Omit<CliOptions, "receiptDirectory"> {
+  receiptDirectory?: string;
+}
+
 export async function runRcpCli(args: string[]): Promise<number> {
   try {
-    const options = parseArgs(args);
-    if (options.command === "help") {
-      process.stdout.write(usage);
-      return 0;
-    }
-    if (options.command === "receipt-verify") {
-      if (!options.receiptPath) throw new Error("receipt-verify requires a receipt path");
-      const receipt = JSON.parse(readFileSync(options.receiptPath, "utf8")) as RepositoryReceipt;
-      const validation = validateReceipt(receipt);
-      emit(
-        options.json,
-        validation,
-        validation.valid ? "receipt valid" : validation.errors.join("\n"),
-      );
-      return validation.valid ? 0 : 1;
-    }
-    if (options.command === "forge-status") {
-      if (options.pullRequestNumber === undefined)
-        throw new Error("forge-status requires --pr <number>");
-      const observation = await new GitHubForgeProvider().observePullRequest({
-        root: options.root,
-        number: options.pullRequestNumber,
-      });
-      emit(options.json, observation, `${observation.url} ${observation.state}`);
-      return 0;
-    }
-    if (!options.contractPath) throw new Error(`${options.command} requires a contract path`);
-    const compiled = compileContractFile(resolve(options.root, options.contractPath));
-    if (!compiled.ok || !compiled.contract) {
-      emit(options.json, compiled, formatDiagnostics(compiled.diagnostics));
-      return 1;
-    }
-    if (options.command === "compile") {
-      emit(options.json, compiled, `${compiled.contract.id} ${compiled.contract.contractDigest}`);
-      return 0;
-    }
-    if (options.command === "forge-create") {
-      const git = await new LocalRepositoryProvider().observe({
-        root: options.root,
-        contract: compiled.contract,
-      });
-      const head = options.headRef ?? git.git.branch;
-      if (!head)
-        throw new Error("forge-create requires --head <branch> when Git has no current branch");
-      const provider = new GitHubForgeProvider();
-      if (!provider.createDraftPullRequest)
-        throw new Error("forge provider cannot create Draft PRs");
-      const observation = await provider.createDraftPullRequest({
-        root: options.root,
-        base: options.baseRef,
-        head,
-        title: options.title ?? compiled.contract.intent,
-        contractId: compiled.contract.id,
-        contractDigest: compiled.contract.contractDigest,
-        body: options.body,
-      });
-      emit(options.json, observation, `${observation.url} ${observation.state}`);
-      return 0;
-    }
-    if (options.command === "forge-bind") {
-      if (options.pullRequestNumber === undefined)
-        throw new Error("forge-bind requires --pr <number>");
-      const provider = new GitHubForgeProvider();
-      if (!provider.bindPullRequest)
-        throw new Error("forge provider cannot update Contract bindings");
-      const observation = await provider.bindPullRequest({
-        root: options.root,
-        number: options.pullRequestNumber,
-        contractId: compiled.contract.id,
-        contractDigest: compiled.contract.contractDigest,
-        body: options.body,
-      });
-      emit(
-        options.json,
-        observation,
-        `${observation.url} ${observation.contractDigest ?? "unbound"}`,
-      );
-      return 0;
-    }
-    const repository = new LocalRepositoryProvider();
-    const routes = readRouteDeclarations(options.root);
-    if (options.command === "plan") {
-      const observation = await repository.observe({
-        root: options.root,
-        contract: compiled.contract,
-      });
-      const workOrder = planWorkOrder({ contract: compiled.contract, observation, routes });
-      emit(
-        options.json,
-        { contract: compiled.contract, observation, workOrder },
-        formatPlan(workOrder),
-      );
-      return 0;
-    }
-    if (options.command !== "reconcile") throw new Error(`unknown command: ${options.command}`);
-    if (options.apply && !options.workspaceReady && !options.harnessCommand) {
-      throw new Error("apply requires --workspace-ready or --harness-command <executable>");
-    }
-    const harness = options.harnessCommand
-      ? new ProcessHarnessProvider(options.harnessCommand, options.harnessArgs)
-      : new ExternalWorkspaceHarnessProvider();
-    const memory = memoryProvider(options.nmgMode, options.root);
-    const result = await reconcileOnce(
-      {
-        root: options.root,
-        contract: compiled.contract,
-        routes,
-        requestedMode: options.apply ? "apply" : "plan",
-        pullRequestNumber: options.pullRequestNumber,
-        operationKey: options.operationKey,
-      },
-      {
-        repository,
-        policy: new DefaultPolicyProvider(),
-        harness,
-        verifier: new LocalNpmVerifierProvider(),
-        receipts: new FileReceiptSink(options.receiptDirectory),
-        memory,
-        forge: options.pullRequestNumber === undefined ? undefined : new GitHubForgeProvider(),
-      },
-    );
-    emit(options.json, result, formatResult(result));
-    if (result.status === "blocked") return 2;
-    return result.status === "failed" ? 1 : 0;
+    return await executeCommand(parseArgs(args));
   } catch (cause) {
     process.stderr.write(`${cause instanceof Error ? cause.message : String(cause)}\n`);
     return 1;
   }
 }
 
-function parseArgs(args: string[]): CliOptions {
-  const command = args[0] ?? "help";
-  let root = process.cwd();
-  let contractPath: string | undefined;
-  let json = false;
-  let apply = false;
-  let workspaceReady = false;
-  let receiptDirectory: string | undefined;
-  let pullRequestNumber: number | undefined;
-  let harnessCommand: string | undefined;
-  const harnessArgs: string[] = [];
-  let nmgMode: CliOptions["nmgMode"] = "disabled";
-  let receiptPath: string | undefined;
-  let operationKey: string | undefined;
-  let baseRef = "main";
-  let headRef: string | undefined;
-  let title: string | undefined;
-  let body: string | undefined;
-  for (let index = 1; index < args.length; index += 1) {
-    const argument = args[index]!;
-    if (argument === "--root") root = args[++index] ?? root;
-    else if (argument === "--json") json = true;
-    else if (argument === "--apply") apply = true;
-    else if (argument === "--workspace-ready") workspaceReady = true;
-    else if (argument === "--receipt-dir") receiptDirectory = args[++index];
-    else if (argument === "--operation-key") operationKey = args[++index];
-    else if (argument === "--base") baseRef = args[++index] ?? baseRef;
-    else if (argument === "--head") headRef = args[++index];
-    else if (argument === "--title") title = args[++index];
-    else if (argument === "--body") body = args[++index];
-    else if (argument === "--pr") {
-      pullRequestNumber = Number(args[++index]);
-      if (!Number.isSafeInteger(pullRequestNumber) || pullRequestNumber <= 0) {
-        throw new Error("--pr requires a positive integer");
-      }
-    } else if (argument === "--harness-command") harnessCommand = args[++index];
-    else if (argument === "--harness-arg") harnessArgs.push(args[++index] ?? "");
-    else if (argument === "--nmg") {
-      const value = args[++index];
-      if (value !== "disabled" && value !== "optional" && value !== "required") {
-        throw new Error("--nmg must be disabled, optional or required");
-      }
-      nmgMode = value;
-    } else if (argument.startsWith("-")) throw new Error(`unknown option: ${argument}`);
-    else if (command === "receipt-verify") receiptPath ??= argument;
-    else contractPath ??= argument;
+async function executeCommand(options: CliOptions): Promise<number> {
+  switch (options.command) {
+    case "help":
+      process.stdout.write(usage);
+      return 0;
+    case "receipt-verify":
+      return verifyReceipt(options);
+    case "forge-status":
+      return observeForgeStatus(options);
+    default:
+      return executeContractCommand(options);
   }
-  const resolvedRoot = resolve(root);
+}
+
+function verifyReceipt(options: CliOptions): number {
+  if (!options.receiptPath) throw new Error("receipt-verify requires a receipt path");
+  const receipt = JSON.parse(readFileSync(options.receiptPath, "utf8")) as RepositoryReceipt;
+  const validation = validateReceipt(receipt);
+  emit(options.json, validation, validation.valid ? "receipt valid" : validation.errors.join("\n"));
+  return validation.valid ? 0 : 1;
+}
+
+async function observeForgeStatus(options: CliOptions): Promise<number> {
+  if (options.pullRequestNumber === undefined)
+    throw new Error("forge-status requires --pr <number>");
+  const observation = await new GitHubForgeProvider().observePullRequest({
+    root: options.root,
+    number: options.pullRequestNumber,
+  });
+  emit(options.json, observation, `${observation.url} ${observation.state}`);
+  return 0;
+}
+
+async function executeContractCommand(options: CliOptions): Promise<number> {
+  if (!options.contractPath) throw new Error(`${options.command} requires a contract path`);
+  const compiled = compileContractFile(resolve(options.root, options.contractPath));
+  if (!compiled.ok || !compiled.contract) {
+    emit(options.json, compiled, formatDiagnostics(compiled.diagnostics));
+    return 1;
+  }
+  switch (options.command) {
+    case "compile":
+      emit(options.json, compiled, `${compiled.contract.id} ${compiled.contract.contractDigest}`);
+      return 0;
+    case "forge-create":
+      return createDraftPullRequest(options, compiled.contract);
+    case "forge-bind":
+      return bindPullRequest(options, compiled.contract);
+    case "plan":
+      return planContract(options, compiled.contract);
+    case "reconcile":
+      return reconcileContract(options, compiled.contract);
+    default:
+      throw new Error(`unknown command: ${options.command}`);
+  }
+}
+
+async function createDraftPullRequest(
+  options: CliOptions,
+  contract: RepositoryContractIr,
+): Promise<number> {
+  const git = await new LocalRepositoryProvider().observe({ root: options.root, contract });
+  const head = options.headRef ?? git.git.branch;
+  if (!head)
+    throw new Error("forge-create requires --head <branch> when Git has no current branch");
+  const provider = new GitHubForgeProvider();
+  if (!provider.createDraftPullRequest) throw new Error("forge provider cannot create Draft PRs");
+  const observation = await provider.createDraftPullRequest({
+    root: options.root,
+    base: options.baseRef,
+    head,
+    title: options.title ?? contract.intent,
+    contractId: contract.id,
+    contractDigest: contract.contractDigest,
+    body: options.body,
+  });
+  emit(options.json, observation, `${observation.url} ${observation.state}`);
+  return 0;
+}
+
+async function bindPullRequest(
+  options: CliOptions,
+  contract: RepositoryContractIr,
+): Promise<number> {
+  if (options.pullRequestNumber === undefined) throw new Error("forge-bind requires --pr <number>");
+  const provider = new GitHubForgeProvider();
+  if (!provider.bindPullRequest) throw new Error("forge provider cannot update Contract bindings");
+  const observation = await provider.bindPullRequest({
+    root: options.root,
+    number: options.pullRequestNumber,
+    contractId: contract.id,
+    contractDigest: contract.contractDigest,
+    body: options.body,
+  });
+  emit(options.json, observation, `${observation.url} ${observation.contractDigest ?? "unbound"}`);
+  return 0;
+}
+
+async function planContract(options: CliOptions, contract: RepositoryContractIr): Promise<number> {
+  const repository = new LocalRepositoryProvider();
+  const observation = await repository.observe({ root: options.root, contract });
+  const workOrder = planWorkOrder({
+    contract,
+    observation,
+    routes: readRouteDeclarations(options.root),
+  });
+  emit(options.json, { contract, observation, workOrder }, formatPlan(workOrder));
+  return 0;
+}
+
+async function reconcileContract(
+  options: CliOptions,
+  contract: RepositoryContractIr,
+): Promise<number> {
+  if (options.apply && !options.workspaceReady && !options.harnessCommand) {
+    throw new Error("apply requires --workspace-ready or --harness-command <executable>");
+  }
+  const harness = options.harnessCommand
+    ? new ProcessHarnessProvider(options.harnessCommand, options.harnessArgs)
+    : new ExternalWorkspaceHarnessProvider();
+  const result = await reconcileOnce(
+    {
+      root: options.root,
+      contract,
+      routes: readRouteDeclarations(options.root),
+      requestedMode: options.apply ? "apply" : "plan",
+      pullRequestNumber: options.pullRequestNumber,
+      operationKey: options.operationKey,
+    },
+    {
+      repository: new LocalRepositoryProvider(),
+      policy: new DefaultPolicyProvider(),
+      harness,
+      verifier: new LocalNpmVerifierProvider(),
+      receipts: new FileReceiptSink(options.receiptDirectory),
+      memory: memoryProvider(options.nmgMode, options.root),
+      forge: options.pullRequestNumber === undefined ? undefined : new GitHubForgeProvider(),
+    },
+  );
+  emit(options.json, result, formatResult(result));
+  if (result.status === "blocked") return 2;
+  return result.status === "failed" ? 1 : 0;
+}
+
+function parseArgs(args: string[]): CliOptions {
+  const state = defaultCliOptionState(args[0] ?? "help");
+  for (let index = 1; index < args.length; index += 1) {
+    index = consumeArgument(args, index, state);
+  }
+  return resolveCliOptions(state);
+}
+
+function defaultCliOptionState(command: string): CliOptionState {
   return {
     command,
-    contractPath,
-    root: resolvedRoot,
-    json,
-    apply,
-    workspaceReady,
-    receiptDirectory: resolve(resolvedRoot, receiptDirectory ?? ".rcp/receipts"),
-    pullRequestNumber,
-    harnessCommand,
-    harnessArgs,
-    nmgMode,
-    receiptPath: receiptPath ? resolve(resolvedRoot, receiptPath) : undefined,
-    operationKey,
-    baseRef,
-    headRef,
-    title,
-    body,
+    root: process.cwd(),
+    json: false,
+    apply: false,
+    workspaceReady: false,
+    harnessArgs: [],
+    nmgMode: "disabled",
+    baseRef: "main",
+  };
+}
+
+const flagOptionHandlers: Record<string, (state: CliOptionState) => void> = {
+  "--json": (state) => (state.json = true),
+  "--apply": (state) => (state.apply = true),
+  "--workspace-ready": (state) => (state.workspaceReady = true),
+};
+
+const valueOptionHandlers: Record<
+  string,
+  (state: CliOptionState, value: string | undefined) => void
+> = {
+  "--root": (state, value) => (state.root = value ?? state.root),
+  "--receipt-dir": (state, value) => (state.receiptDirectory = value),
+  "--operation-key": (state, value) => (state.operationKey = value),
+  "--base": (state, value) => (state.baseRef = value ?? state.baseRef),
+  "--head": (state, value) => (state.headRef = value),
+  "--title": (state, value) => (state.title = value),
+  "--body": (state, value) => (state.body = value),
+  "--harness-command": (state, value) => (state.harnessCommand = value),
+  "--harness-arg": (state, value) => state.harnessArgs.push(value ?? ""),
+};
+
+function consumeArgument(args: string[], index: number, state: CliOptionState): number {
+  const argument = args[index]!;
+  const flagHandler = flagOptionHandlers[argument];
+  if (flagHandler) {
+    flagHandler(state);
+    return index;
+  }
+  const valueHandler = valueOptionHandlers[argument];
+  if (valueHandler) {
+    valueHandler(state, args[index + 1]);
+    return index + 1;
+  }
+  if (argument === "--pr") return consumePullRequestNumber(args, index, state);
+  if (argument === "--nmg") return consumeNmgMode(args, index, state);
+  if (argument.startsWith("-")) throw new Error(`unknown option: ${argument}`);
+  if (state.command === "receipt-verify") state.receiptPath ??= argument;
+  else state.contractPath ??= argument;
+  return index;
+}
+
+function consumePullRequestNumber(args: string[], index: number, state: CliOptionState): number {
+  const value = Number(args[index + 1]);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error("--pr requires a positive integer");
+  }
+  state.pullRequestNumber = value;
+  return index + 1;
+}
+
+function consumeNmgMode(args: string[], index: number, state: CliOptionState): number {
+  const value = args[index + 1];
+  if (value !== "disabled" && value !== "optional" && value !== "required") {
+    throw new Error("--nmg must be disabled, optional or required");
+  }
+  state.nmgMode = value;
+  return index + 1;
+}
+
+function resolveCliOptions(state: CliOptionState): CliOptions {
+  const root = resolve(state.root);
+  return {
+    ...state,
+    root,
+    receiptDirectory: resolve(root, state.receiptDirectory ?? ".rcp/receipts"),
+    receiptPath: state.receiptPath ? resolve(root, state.receiptPath) : undefined,
   };
 }
 

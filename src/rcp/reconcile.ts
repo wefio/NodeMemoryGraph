@@ -18,11 +18,16 @@ import {
   type RepositoryProvider,
 } from "./repository.ts";
 import type {
+  ForgeObservation,
+  HarnessResult,
+  ObservedRepository,
   ReconciliationCondition,
   ReconciliationResult,
   RepositoryContractIr,
   RepositoryReceipt,
   RouteDeclaration,
+  VerificationEvidence,
+  WorkOrder,
 } from "./types.ts";
 
 export interface ControlPlaneProviders {
@@ -46,10 +51,29 @@ export interface ReconcileRequest {
   invocationId?: string;
 }
 
+interface PreparedReconciliation {
+  now: () => Date;
+  invocationId: string;
+  conditions: ReconciliationCondition[];
+  before: ObservedRepository;
+  workOrder: WorkOrder;
+  memoryDiagnostics: string[];
+  identity: string;
+}
+
 export async function reconcileOnce(
   request: ReconcileRequest,
   providers: ControlPlaneProviders,
 ): Promise<ReconciliationResult> {
+  const prepared = await prepareReconciliation(request, providers);
+  if ("status" in prepared) return prepared;
+  return applyReconciliation(request, providers, prepared);
+}
+
+async function prepareReconciliation(
+  request: ReconcileRequest,
+  providers: ControlPlaneProviders,
+): Promise<PreparedReconciliation | ReconciliationResult> {
   const now = request.now ?? (() => new Date());
   const invocationId = request.invocationId ?? randomUUID();
   const conditions: ReconciliationCondition[] = [
@@ -70,14 +94,7 @@ export async function reconcileOnce(
     routes: request.routes,
     operationKey: request.operationKey,
   });
-  const memoryDiagnostics: string[] = [];
-  if (providers.memory?.recall) {
-    try {
-      await providers.memory.recall({ contract: request.contract, workOrder });
-    } catch (cause) {
-      memoryDiagnostics.push(`memory recall degraded: ${errorMessage(cause)}`);
-    }
-  }
+  const memoryDiagnostics = await recallMemory(providers.memory, request.contract, workOrder);
   const requestedMode = request.requestedMode ?? "plan";
   const authorization = providers.policy.evaluate({
     contract: request.contract,
@@ -139,6 +156,16 @@ export async function reconcileOnce(
     };
   }
 
+  return { now, invocationId, conditions, before, workOrder, memoryDiagnostics, identity };
+}
+
+async function applyReconciliation(
+  request: ReconcileRequest,
+  providers: ControlPlaneProviders,
+  prepared: PreparedReconciliation,
+): Promise<ReconciliationResult> {
+  const { now, invocationId, conditions, before, workOrder, memoryDiagnostics, identity } =
+    prepared;
   const verifierDigestBefore = await providers.verifier.definitionDigest({
     root: request.root,
     contract: request.contract,
@@ -155,18 +182,7 @@ export async function reconcileOnce(
     root: request.root,
     contract: request.contract,
   });
-  // An external-workspace harness reports work that already exists when apply
-  // starts, so before/after content comparison alone would certify an empty
-  // change. In that mode every current dirty path is part of the submitted
-  // workspace and must pass the Contract scope gate. Process harnesses retain
-  // delta attribution because the control plane observes them before execution.
-  const contractInputPath = repositoryContractPath(request.root, request.contract.source.path);
-  const submittedWorkspace = harness.provider.capabilities.includes("report-existing-workspace")
-    ? after.git.dirtyFiles.filter((path) => path !== contractInputPath)
-    : after.git.dirtyFiles.filter((path) => !before.git.dirtyFiles.includes(path));
-  const actual = [...new Set([...changedPaths(before, after), ...submittedWorkspace])].sort(
-    (left, right) => left.localeCompare(right),
-  );
+  const actual = submittedPaths(request.root, request.contract, before, after, harness);
   const scopeMatched = actual.every((path) => isPathAllowed(path, request.contract.scope));
   const verification = await providers.verifier.verify({
     root: request.root,
@@ -174,53 +190,24 @@ export async function reconcileOnce(
     workOrder,
   });
   const verifierStable = verifierDigestBefore === verification.verifierDigest;
-  let forge;
-  if (providers.forge && request.pullRequestNumber !== undefined) {
-    forge = await providers.forge.observePullRequest({
-      root: request.root,
-      number: request.pullRequestNumber,
-    });
-  }
-  const diagnostics = [...before.diagnostics, ...after.diagnostics, ...(harness.diagnostics ?? [])];
-  if (!scopeMatched) diagnostics.push("one or more changed files fall outside declared scope");
-  if (!verifierStable)
-    diagnostics.push("verification definitions changed during harness execution");
-  const forgeFailures: string[] = [];
-  if (forge) {
-    if (after.git.commit && forge.headCommit !== after.git.commit) {
-      forgeFailures.push("pull request head does not match the locally verified commit");
-    }
-    if (
-      forge.contractId !== request.contract.id ||
-      forge.contractDigest !== request.contract.contractDigest
-    ) {
-      forgeFailures.push("pull request body is not bound to the verified Contract identity");
-    }
-    const requiredChecks = request.contract.verification.forgeChecks;
-    if (!requiredChecks.length) {
-      forgeFailures.push("Contract declares no required forge checks");
-    }
-    for (const name of requiredChecks) {
-      const check = forge.checks.find((candidate) => candidate.name === name);
-      if (!check) {
-        forgeFailures.push(`required pull request check is missing: ${name}`);
-      } else if (!forgeCheckPassed(check)) {
-        forgeFailures.push(`required pull request check is pending or unsuccessful: ${name}`);
-      }
-    }
-  }
-  diagnostics.push(...forgeFailures);
+  const forge = await observeForge(request, providers.forge);
+  const forgeFailures = validateForge(forge, request.contract, after.git.commit);
+  const diagnostics = reconciliationDiagnostics({
+    before,
+    after,
+    harness,
+    scopeMatched,
+    verifierStable,
+    forgeFailures,
+  });
   const forgeMatched = forgeFailures.length === 0;
-  const decision: RepositoryReceipt["decision"] =
-    harness.status === "blocked"
-      ? "blocked"
-      : harness.status === "completed" &&
-          verification.ok &&
-          verifierStable &&
-          scopeMatched &&
-          forgeMatched
-        ? "verified"
-        : "failed";
+  const decision = receiptDecision(
+    harness,
+    verification,
+    verifierStable,
+    scopeMatched,
+    forgeMatched,
+  );
   conditions.push({
     type: "Verified",
     status: decision === "verified" ? "true" : "false",
@@ -229,67 +216,25 @@ export async function reconcileOnce(
         ? "independent checks, scope and forge identity are satisfied"
         : `verification decision: ${decision}`,
   });
-  const partialReceipt: Omit<RepositoryReceipt, "receiptId"> = {
-    receiptSchema: "repository.receipt/v1alpha1",
-    operationIdentity: identity,
-    contractId: request.contract.id,
-    contractDigest: request.contract.contractDigest,
-    observedRevisionBefore: before.observedRevision,
-    observedRevisionAfter: after.observedRevision,
-    commit: after.git.commit,
+  const receipt = buildReceipt({
+    identity,
+    contract: request.contract,
+    before,
+    after,
     invocationId,
     startedAt,
     finishedAt: now().toISOString(),
-    harness: {
-      id: harness.provider.id,
-      version: harness.provider.version,
-      status: harness.status,
-      summary: harness.summary,
-    },
-    verifier: {
-      id: verification.provider.id,
-      version: verification.provider.version,
-      digest: verification.verifierDigest,
-    },
-    scope: {
-      declared: request.contract.scope.include,
-      excluded: request.contract.scope.exclude,
-      actual,
-      matched: scopeMatched,
-    },
-    checks: verification.checks,
-    forge: forge
-      ? {
-          provider: forge.provider.id,
-          number: forge.number,
-          url: forge.url,
-          state: forge.state,
-          isDraft: forge.isDraft,
-          headRef: forge.headRef,
-          baseRef: forge.baseRef,
-          headCommit: forge.headCommit,
-          contractId: forge.contractId,
-          contractDigest: forge.contractDigest,
-          requiredChecks: request.contract.verification.forgeChecks,
-          checks: forge.checks,
-        }
-      : undefined,
+    harness,
+    verification,
+    actual,
+    scopeMatched,
+    forge,
     decision,
     diagnostics,
-  };
-  const receipt: RepositoryReceipt = {
-    ...partialReceipt,
-    receiptId: receiptId(partialReceipt),
-  };
+  });
   const stored = await providers.receipts.append(receipt);
   conditions.push({ type: "Recorded", status: "true", reason: "append-only receipt recorded" });
-  if (providers.memory?.notify) {
-    try {
-      await providers.memory.notify({ receipt });
-    } catch (cause) {
-      memoryDiagnostics.push(`memory notification degraded: ${errorMessage(cause)}`);
-    }
-  }
+  memoryDiagnostics.push(...(await notifyMemory(providers.memory, receipt)));
   return {
     status: decision,
     contract: request.contract,
@@ -300,6 +245,197 @@ export async function reconcileOnce(
     receiptPath: stored.path,
     memoryDiagnostics,
   };
+}
+
+function reconciliationDiagnostics(input: {
+  before: ObservedRepository;
+  after: ObservedRepository;
+  harness: HarnessResult;
+  scopeMatched: boolean;
+  verifierStable: boolean;
+  forgeFailures: string[];
+}): string[] {
+  const diagnostics = [
+    ...input.before.diagnostics,
+    ...input.after.diagnostics,
+    ...(input.harness.diagnostics ?? []),
+  ];
+  if (!input.scopeMatched)
+    diagnostics.push("one or more changed files fall outside declared scope");
+  if (!input.verifierStable) {
+    diagnostics.push("verification definitions changed during harness execution");
+  }
+  diagnostics.push(...input.forgeFailures);
+  return diagnostics;
+}
+
+async function recallMemory(
+  memory: MemoryProvider | undefined,
+  contract: RepositoryContractIr,
+  workOrder: WorkOrder,
+): Promise<string[]> {
+  if (!memory?.recall) return [];
+  try {
+    await memory.recall({ contract, workOrder });
+    return [];
+  } catch (cause) {
+    return [`memory recall degraded: ${errorMessage(cause)}`];
+  }
+}
+
+async function notifyMemory(
+  memory: MemoryProvider | undefined,
+  receipt: RepositoryReceipt,
+): Promise<string[]> {
+  if (!memory?.notify) return [];
+  try {
+    await memory.notify({ receipt });
+    return [];
+  } catch (cause) {
+    return [`memory notification degraded: ${errorMessage(cause)}`];
+  }
+}
+
+function submittedPaths(
+  root: string,
+  contract: RepositoryContractIr,
+  before: ObservedRepository,
+  after: ObservedRepository,
+  harness: HarnessResult,
+): string[] {
+  // An external-workspace harness reports work that already exists when apply
+  // starts, so before/after content comparison alone would certify an empty
+  // change. In that mode every current dirty path is part of the submitted
+  // workspace and must pass the Contract scope gate. Process harnesses retain
+  // delta attribution because the control plane observes them before execution.
+  const contractInputPath = repositoryContractPath(root, contract.source.path);
+  const submittedWorkspace = harness.provider.capabilities.includes("report-existing-workspace")
+    ? after.git.dirtyFiles.filter((path) => path !== contractInputPath)
+    : after.git.dirtyFiles.filter((path) => !before.git.dirtyFiles.includes(path));
+  return [...new Set([...changedPaths(before, after), ...submittedWorkspace])].sort((left, right) =>
+    left.localeCompare(right),
+  );
+}
+
+async function observeForge(
+  request: ReconcileRequest,
+  forge: ForgeProvider | undefined,
+): Promise<ForgeObservation | undefined> {
+  if (!forge || request.pullRequestNumber === undefined) return undefined;
+  return forge.observePullRequest({ root: request.root, number: request.pullRequestNumber });
+}
+
+function validateForge(
+  forge: ForgeObservation | undefined,
+  contract: RepositoryContractIr,
+  commit: string | undefined,
+): string[] {
+  if (!forge) return [];
+  const failures: string[] = [];
+  if (commit && forge.headCommit !== commit) {
+    failures.push("pull request head does not match the locally verified commit");
+  }
+  if (forge.contractId !== contract.id || forge.contractDigest !== contract.contractDigest) {
+    failures.push("pull request body is not bound to the verified Contract identity");
+  }
+  if (!contract.verification.forgeChecks.length) {
+    failures.push("Contract declares no required forge checks");
+  }
+  for (const name of contract.verification.forgeChecks) {
+    const check = forge.checks.find((candidate) => candidate.name === name);
+    if (!check) {
+      failures.push(`required pull request check is missing: ${name}`);
+    } else if (!forgeCheckPassed(check)) {
+      failures.push(`required pull request check is pending or unsuccessful: ${name}`);
+    }
+  }
+  return failures;
+}
+
+function receiptDecision(
+  harness: HarnessResult,
+  verification: VerificationEvidence,
+  verifierStable: boolean,
+  scopeMatched: boolean,
+  forgeMatched: boolean,
+): RepositoryReceipt["decision"] {
+  if (harness.status === "blocked") return "blocked";
+  return harness.status === "completed" &&
+    verification.ok &&
+    verifierStable &&
+    scopeMatched &&
+    forgeMatched
+    ? "verified"
+    : "failed";
+}
+
+interface BuildReceiptInput {
+  identity: string;
+  contract: RepositoryContractIr;
+  before: ObservedRepository;
+  after: ObservedRepository;
+  invocationId: string;
+  startedAt: string;
+  finishedAt: string;
+  harness: HarnessResult;
+  verification: VerificationEvidence;
+  actual: string[];
+  scopeMatched: boolean;
+  forge: ForgeObservation | undefined;
+  decision: RepositoryReceipt["decision"];
+  diagnostics: string[];
+}
+
+function buildReceipt(input: BuildReceiptInput): RepositoryReceipt {
+  const partial: Omit<RepositoryReceipt, "receiptId"> = {
+    receiptSchema: "repository.receipt/v1alpha1",
+    operationIdentity: input.identity,
+    contractId: input.contract.id,
+    contractDigest: input.contract.contractDigest,
+    observedRevisionBefore: input.before.observedRevision,
+    observedRevisionAfter: input.after.observedRevision,
+    commit: input.after.git.commit,
+    invocationId: input.invocationId,
+    startedAt: input.startedAt,
+    finishedAt: input.finishedAt,
+    harness: {
+      id: input.harness.provider.id,
+      version: input.harness.provider.version,
+      status: input.harness.status,
+      summary: input.harness.summary,
+    },
+    verifier: {
+      id: input.verification.provider.id,
+      version: input.verification.provider.version,
+      digest: input.verification.verifierDigest,
+    },
+    scope: {
+      declared: input.contract.scope.include,
+      excluded: input.contract.scope.exclude,
+      actual: input.actual,
+      matched: input.scopeMatched,
+    },
+    checks: input.verification.checks,
+    forge: input.forge
+      ? {
+          provider: input.forge.provider.id,
+          number: input.forge.number,
+          url: input.forge.url,
+          state: input.forge.state,
+          isDraft: input.forge.isDraft,
+          headRef: input.forge.headRef,
+          baseRef: input.forge.baseRef,
+          headCommit: input.forge.headCommit,
+          contractId: input.forge.contractId,
+          contractDigest: input.forge.contractDigest,
+          requiredChecks: input.contract.verification.forgeChecks,
+          checks: input.forge.checks,
+        }
+      : undefined,
+    decision: input.decision,
+    diagnostics: input.diagnostics,
+  };
+  return { ...partial, receiptId: receiptId(partial) };
 }
 
 function repositoryContractPath(root: string, sourcePath: string): string | undefined {
