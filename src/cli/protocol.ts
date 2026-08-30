@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type {
   ActiveGraphBudget,
   ClaimOutcomeEvent,
@@ -98,7 +100,7 @@ export const NMG_CAPABILITIES = [
 
 export type NmgCapability = (typeof NMG_CAPABILITIES)[number];
 
-interface NmgRpcDescriptor {
+export interface NmgRpcDescriptor {
   /** Additive same-epoch methods are callable only when hello advertises this. */
   optionalCapability?: NmgCapability;
 }
@@ -108,7 +110,7 @@ interface NmgRpcDescriptor {
  * Parsers, handlers, transactions, and host exposure remain explicit because
  * their semantics cannot be inferred safely from a wire descriptor.
  */
-export const NMG_RPC_DESCRIPTORS = {
+const RPC_DESCRIPTOR_SOURCE = {
   get: {},
   recordActiveGraphAttribution: {},
   hello: {},
@@ -143,9 +145,31 @@ export const NMG_RPC_DESCRIPTORS = {
   status: {},
 } as const satisfies Record<string, NmgRpcDescriptor>;
 
+for (const descriptor of Object.values(RPC_DESCRIPTOR_SOURCE)) Object.freeze(descriptor);
+
+/** Process-lifetime catalog. Runtime registration and hot reload are intentionally unsupported. */
+export const NMG_RPC_DESCRIPTORS = Object.freeze(RPC_DESCRIPTOR_SOURCE);
+
 export type NmgMethod = keyof typeof NMG_RPC_DESCRIPTORS;
 
 export const NMG_METHODS = Object.freeze(Object.keys(NMG_RPC_DESCRIPTORS) as NmgMethod[]);
+
+/** Stable discovery/cache identity. A mismatch is not an epoch compatibility verdict. */
+export function fingerprintRpcCatalog(
+  descriptors: Readonly<Record<string, Readonly<NmgRpcDescriptor>>>,
+): string {
+  const normalized = Object.entries(descriptors)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([method, descriptor]) => ({
+      method,
+      ...(descriptor.optionalCapability
+        ? { optionalCapability: descriptor.optionalCapability }
+        : {}),
+    }));
+  return `sha256:${createHash("sha256").update(JSON.stringify(normalized)).digest("hex")}`;
+}
+
+export const NMG_RPC_CATALOG_FINGERPRINT = fingerprintRpcCatalog(NMG_RPC_DESCRIPTORS);
 
 /** Derived gate table; never maintain a second method list by hand. */
 export const NMG_OPTIONAL_METHOD_CAPABILITIES = Object.freeze(
@@ -164,6 +188,8 @@ export interface NmgHelloResult {
   capabilities: readonly string[];
   /** Runtime discovery surface; optional so earlier same-epoch daemons remain compatible. */
   methods?: readonly string[];
+  /** Optional same-epoch catalog identity used only for cache invalidation and diagnostics. */
+  catalogFingerprint?: string;
 }
 
 export interface NmgStatusResult extends NmgHelloResult {

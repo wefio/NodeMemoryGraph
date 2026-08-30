@@ -2,7 +2,7 @@
 
 **Purpose:** unresolved work only.
 **Authority:** working queue, not design specification or implementation history.
-**Updated:** 2026-08-29
+**Updated:** 2026-08-30
 
 Durable behavior belongs in the owning design or operating document; current
 implementation evidence belongs in
@@ -180,6 +180,10 @@ observed:
   model and user-consent review. Current delete/forget is logical withdrawal.
 - GPU/WGSL execution for the tiny autodiff substrate: only after profiling finds
   a workload that violates the CPU/WASM budget.
+- Runtime RPC registration and catalog hot reload: only after a trusted dynamic
+  extension use case defines handler ownership, in-flight request behavior,
+  capability withdrawal, and cache invalidation. The current process-lifetime
+  catalog is frozen and additive discovery uses its deterministic fingerprint.
 
 ## Completion rule
 

@@ -7,12 +7,17 @@ import {
   daemonSupportsCapability,
   NmgDaemonCapabilityError,
   NmgDaemonCompatibilityError,
+  NmgDaemonHandshakeError,
+  NmgDaemonMethodError,
+  parseDaemonHello,
 } from "../../src/cli/daemon-client.ts";
 import {
   NMG_CAPABILITIES,
   NMG_OPTIONAL_METHOD_CAPABILITIES,
   NMG_PROTOCOL_VERSION,
   NMG_RPC_DESCRIPTORS,
+  NMG_RPC_CATALOG_FINGERPRINT,
+  fingerprintRpcCatalog,
 } from "../../src/cli/protocol.ts";
 
 test("daemon protocol guard accepts the current compatibility epoch", () => {
@@ -85,4 +90,57 @@ test("RPC descriptors derive every optional method capability from advertised ca
       descriptor.optionalCapability,
     );
   }
+});
+
+test("RPC catalog is frozen and has a deterministic normalized fingerprint", () => {
+  assert.ok(Object.isFrozen(NMG_RPC_DESCRIPTORS));
+  for (const descriptor of Object.values(NMG_RPC_DESCRIPTORS))
+    assert.ok(Object.isFrozen(descriptor));
+  assert.match(NMG_RPC_CATALOG_FINGERPRINT, /^sha256:[0-9a-f]{64}$/u);
+  assert.equal(
+    fingerprintRpcCatalog({ z: {}, a: { optionalCapability: "session-active-graph" } }),
+    fingerprintRpcCatalog({ a: { optionalCapability: "session-active-graph" }, z: {} }),
+  );
+});
+
+test("hello parser validates discovery shape while preserving unknown capabilities", () => {
+  const parsed = parseDaemonHello({
+    protocol: NMG_PROTOCOL_VERSION,
+    service: "node-memory-graph",
+    version: "0.1.0",
+    capabilities: ["future-feature"],
+    methods: ["hello"],
+    catalogFingerprint: NMG_RPC_CATALOG_FINGERPRINT,
+  });
+  assert.deepEqual(parsed.capabilities, ["future-feature"]);
+  assert.throws(
+    () =>
+      parseDaemonHello({
+        protocol: NMG_PROTOCOL_VERSION,
+        service: "wrong",
+        version: "0.1.0",
+        capabilities: [],
+      }),
+    NmgDaemonHandshakeError,
+  );
+  assert.throws(
+    () =>
+      parseDaemonHello({
+        protocol: NMG_PROTOCOL_VERSION,
+        service: "node-memory-graph",
+        version: "0.1.0",
+        capabilities: "hello",
+      }),
+    NmgDaemonHandshakeError,
+  );
+});
+
+test("advertised method discovery gates calls independently of capability metadata", () => {
+  assert.throws(
+    () => assertDaemonCapability(new Set(NMG_CAPABILITIES), "search", new Set(["hello"])),
+    NmgDaemonMethodError,
+  );
+  assert.doesNotThrow(() =>
+    assertDaemonCapability(new Set(NMG_CAPABILITIES), "search", new Set(["hello", "search"])),
+  );
 });

@@ -5,7 +5,7 @@ in [design.md](design.md); document ownership is defined by
 [the documentation index](../README.md).
 
 **Status:** requirement ledger
-**Updated:** 2026-08-29
+**Updated:** 2026-08-30
 **Normative source:** [design.md](design.md)
 **Implementation recovery:** [implementation-lineage.md](implementation-lineage.md)
 
@@ -63,7 +63,7 @@ to use it explicitly for one suitable task.
 | Session reasoning scratchpad | Private, atomic, bounded, restart-resumable, explicit checkpoint tool; never silently promoted | Daemon Lab authority/workspace plus CLI, Pi, MCP and DSH adapters | **Opt-in Lab** | Automatic capture was rejected; cross-session transfer/promotion waits for demonstrated need. |
 | Memory-Graph Reasoner | Optional bounded traversal/what-if engine over an HA-selected session-AG subgraph; output stays hypothetical and separate from durable truth | Daemon Lab RPC requires a session projection, rejects out-of-projection nodes, inherits AG node/edge/step budgets, and labels output non-persistent/hypothetical | **Opt-in Lab** | TTL artifact materialization, typed reasoning edges and the HA rescore loop are not wired. Utility proof remains separate from wiring correctness. |
 | Temporary coordination | Task Board is TTL/cursor/attribution based and does not enter LTG/FTS | board store, daemon, CLI/Pi/MCP adapters | **Verified core** | ACLs and multi-device transport are **explicitly deferred**. |
-| Daemon and concurrency | One application authority/single LTG writer; synchronous SQLite phases serialize; no transaction spans an await | CLI daemon/service/client and concurrency tests | **Verified core** | Multi-process distributed writers are out of current scope. |
+| Daemon and concurrency | One application authority/single LTG writer; synchronous SQLite phases serialize; no transaction spans an await; one frozen declarative RPC catalog drives method discovery and optional capability gates | CLI daemon/service/client, deterministic catalog fingerprint, validated hello discovery, reconnect refresh, registry/handler drift and concurrency tests | **Verified core** | Multi-process distributed writers are out of current scope; trusted runtime registration and hot reload are explicitly deferred. |
 | Observability | Trace routing, scores, budgets, disclosures, outcomes, maintenance and rollback without treating diagnostics as truth | trace tables, shadow JSONL, reports/audits | **Verified core** | Natural labels must accumulate through use. |
 | Benchmarks | Official-format adapters, matched arms, cacheable embeddings, one OmniMemEval execution entry and fail-closed scoring | config-driven NMG runner delegates all five user-memory suites to their pinned official scripts; official answer/judge prompts and envelopes remain benchmark-owned while model-visible memory uses the shared Agent Surface | **Verified core** | Stable and suite-only options are declared in one config; resume binds its exact result directory and rejects configuration drift; retrieval profiles remain separate from official prompts. Larger/repeated capability runs are evaluation work, not missing design. |
 | Agent development and quality | Dynamic repository context, owned documentation, product/research/chaos test tracks, temporary guardrail lifecycle, and composable resource cleanup | root bootstrap, repo-development Skill, context tool, CI workflow, Cordis-backed test wrapper | **Verified core** | Research characterization remains non-blocking and cannot redefine product contracts. |
