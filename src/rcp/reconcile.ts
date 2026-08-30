@@ -67,6 +67,17 @@ interface PreparedReconciliation {
   incompleteAttempt?: ReconciliationAttempt;
 }
 
+interface PreparationContext {
+  now: () => Date;
+  invocationId: string;
+  conditions: ReconciliationCondition[];
+  before: ObservedRepository;
+  workOrder: WorkOrder;
+  memoryDiagnostics: string[];
+}
+
+type Guarded<T> = { ok: true; value: T } | { ok: false; reason: string };
+
 export async function reconcileOnce(
   request: ReconcileRequest,
   providers: ControlPlaneProviders,
@@ -102,6 +113,14 @@ async function prepareReconciliation(
     executionTimeoutMs: request.executionTimeoutMs,
   });
   const memoryDiagnostics = await recallMemory(providers.memory, request.contract, workOrder);
+  const context: PreparationContext = {
+    now,
+    invocationId,
+    conditions,
+    before,
+    workOrder,
+    memoryDiagnostics,
+  };
   const requestedMode = request.requestedMode ?? "plan";
   const authorization = providers.policy.evaluate({
     contract: request.contract,
@@ -114,14 +133,7 @@ async function prepareReconciliation(
     reason: authorization.reason,
   });
   if (!authorization.allowed) {
-    return {
-      status: "blocked",
-      contract: request.contract,
-      observation: before,
-      workOrder,
-      conditions,
-      memoryDiagnostics,
-    };
+    return terminalPreparation(request, context, "blocked");
   }
   if (requestedMode === "plan") {
     conditions.push({
@@ -129,184 +141,174 @@ async function prepareReconciliation(
       status: "unknown",
       reason: "plan mode performs no mutation",
     });
-    return {
-      status: "planned",
-      contract: request.contract,
-      observation: before,
-      workOrder,
-      conditions,
-      memoryDiagnostics,
-    };
+    return terminalPreparation(request, context, "planned");
   }
 
+  return prepareApplyReconciliation(request, providers, context);
+}
+
+async function prepareApplyReconciliation(
+  request: ReconcileRequest,
+  providers: ControlPlaneProviders,
+  context: PreparationContext,
+): Promise<PreparedReconciliation | ReconciliationResult> {
+  const { before, workOrder } = context;
   if (!before.git.available) {
-    conditions.push({
-      type: "Executed",
-      status: "false",
-      reason: "Git observation is required before apply",
-    });
-    return {
-      status: "blocked",
-      contract: request.contract,
-      observation: before,
-      workOrder,
-      conditions,
-      memoryDiagnostics,
-    };
+    return blockedPreparation(
+      request,
+      context,
+      "Executed",
+      "Git observation is required before apply",
+    );
   }
 
-  let verifierDigestBefore: string;
-  try {
-    verifierDigestBefore = await providers.verifier.definitionDigest({
-      root: request.root,
-      contract: request.contract,
-      workOrder,
-    });
-  } catch (cause) {
-    conditions.push({
-      type: "Verified",
-      status: "false",
-      reason: `verifier definition unavailable: ${errorMessage(cause)}`,
-    });
-    return {
-      status: "blocked",
-      contract: request.contract,
-      observation: before,
-      workOrder,
-      conditions,
-      memoryDiagnostics,
-    };
+  const verifierDigest = await guardProviderCall(
+    () =>
+      providers.verifier.definitionDigest({
+        root: request.root,
+        contract: request.contract,
+        workOrder,
+      }),
+    "verifier definition unavailable",
+  );
+  if (!verifierDigest.ok) {
+    return blockedPreparation(request, context, "Verified", verifierDigest.reason);
   }
+  const verifierDigestBefore = verifierDigest.value;
   const identity = operationIdentity(workOrder, verifierDigestBefore);
   const attemptKey = workOrderAttemptKey(workOrder);
-  let existing: Awaited<ReturnType<ReceiptSink["find"]>>;
-  try {
-    existing = await providers.receipts.find(identity);
-  } catch (cause) {
-    conditions.push({
-      type: "Recorded",
-      status: "false",
-      reason: `invalid receipt evidence: ${errorMessage(cause)}`,
-    });
-    return {
-      status: "blocked",
-      contract: request.contract,
-      observation: before,
-      workOrder,
-      conditions,
-      memoryDiagnostics,
-    };
+  const receiptLookup = await guardProviderCall(
+    () => providers.receipts.find(identity),
+    "invalid receipt evidence",
+  );
+  if (!receiptLookup.ok) {
+    return blockedPreparation(request, context, "Recorded", receiptLookup.reason);
   }
-  if (existing) {
-    try {
-      await providers.receipts.completeAttempt(attemptKey);
-    } catch (cause) {
-      memoryDiagnostics.push(`in-flight attempt cleanup degraded: ${errorMessage(cause)}`);
-    }
-    conditions.push(
-      { type: "Executed", status: "true", reason: "existing operation receipt reused" },
-      {
-        type: "Verified",
-        status: existing.receipt.decision === "verified" ? "true" : "false",
-        reason: `existing receipt decision: ${existing.receipt.decision}`,
-      },
-      { type: "Recorded", status: "true", reason: "append-only receipt already exists" },
-    );
-    return {
-      status: "reused",
-      contract: request.contract,
-      observation: before,
-      workOrder,
-      conditions,
-      receipt: existing.receipt,
-      receiptPath: existing.path,
-      memoryDiagnostics,
-    };
+  if (receiptLookup.value) {
+    return reuseReceipt(request, providers.receipts, context, attemptKey, receiptLookup.value);
   }
 
-  let incompleteAttempt: ReconciliationAttempt | null;
-  try {
-    incompleteAttempt = await providers.receipts.findIncomplete(attemptKey);
-  } catch (cause) {
-    conditions.push({
-      type: "Recorded",
-      status: "false",
-      reason: `invalid in-flight attempt evidence: ${errorMessage(cause)}`,
-    });
-    return {
-      status: "blocked",
-      contract: request.contract,
-      observation: before,
-      workOrder,
-      conditions,
-      memoryDiagnostics,
-    };
+  const attemptLookup = await guardProviderCall(
+    () => providers.receipts.findIncomplete(attemptKey),
+    "invalid in-flight attempt evidence",
+  );
+  if (!attemptLookup.ok) {
+    return blockedPreparation(request, context, "Recorded", attemptLookup.reason);
   }
-  if (incompleteAttempt) {
-    const matchesRequest =
-      incompleteAttempt.attemptKey === attemptKey &&
-      incompleteAttempt.contractId === request.contract.id &&
-      incompleteAttempt.contractDigest === request.contract.contractDigest &&
-      incompleteAttempt.operationKey === workOrder.operationKey;
-    if (!matchesRequest) {
-      conditions.push({
-        type: "Recorded",
-        status: "false",
-        reason: "in-flight attempt does not match the active Contract and operation",
-      });
-      return {
-        status: "blocked",
-        contract: request.contract,
-        observation: before,
-        workOrder,
-        conditions,
-        memoryDiagnostics,
-      };
-    }
-    if (!request.recoverIncomplete) {
-      conditions.push({
-        type: "Executed",
-        status: "false",
-        reason:
-          "incomplete attempt exists; use explicit recovery to verify without replaying mutation",
-      });
-      return {
-        status: "blocked",
-        contract: request.contract,
-        observation: before,
-        workOrder,
-        conditions,
-        memoryDiagnostics,
-      };
-    }
-  } else if (request.recoverIncomplete) {
-    conditions.push({
-      type: "Executed",
-      status: "false",
-      reason: "no incomplete attempt is available to recover",
-    });
-    return {
-      status: "blocked",
-      contract: request.contract,
-      observation: before,
-      workOrder,
-      conditions,
-      memoryDiagnostics,
-    };
+  const incompleteAttempt = attemptLookup.value;
+  const attemptBlocker = incompleteAttemptBlocker(
+    request,
+    workOrder,
+    attemptKey,
+    incompleteAttempt,
+  );
+  if (attemptBlocker) {
+    return blockedPreparation(request, context, attemptBlocker.type, attemptBlocker.reason);
   }
 
   return {
-    now,
-    invocationId,
-    conditions,
-    before,
-    workOrder,
-    memoryDiagnostics,
+    ...context,
     identity,
     verifierDigestBefore,
     attemptKey,
     incompleteAttempt: incompleteAttempt ?? undefined,
   };
+}
+
+function terminalPreparation(
+  request: ReconcileRequest,
+  context: PreparationContext,
+  status: "planned" | "blocked",
+): ReconciliationResult {
+  return {
+    status,
+    contract: request.contract,
+    observation: context.before,
+    workOrder: context.workOrder,
+    conditions: context.conditions,
+    memoryDiagnostics: context.memoryDiagnostics,
+  };
+}
+
+function blockedPreparation(
+  request: ReconcileRequest,
+  context: PreparationContext,
+  type: ReconciliationCondition["type"],
+  reason: string,
+): ReconciliationResult {
+  context.conditions.push({ type, status: "false", reason });
+  return terminalPreparation(request, context, "blocked");
+}
+
+async function guardProviderCall<T>(
+  operation: () => Promise<T>,
+  failure: string,
+): Promise<Guarded<T>> {
+  try {
+    return { ok: true, value: await operation() };
+  } catch (cause) {
+    return { ok: false, reason: `${failure}: ${errorMessage(cause)}` };
+  }
+}
+
+async function reuseReceipt(
+  request: ReconcileRequest,
+  receipts: ReceiptSink,
+  context: PreparationContext,
+  attemptKey: string,
+  existing: NonNullable<Awaited<ReturnType<ReceiptSink["find"]>>>,
+): Promise<ReconciliationResult> {
+  try {
+    await receipts.completeAttempt(attemptKey);
+  } catch (cause) {
+    context.memoryDiagnostics.push(`in-flight attempt cleanup degraded: ${errorMessage(cause)}`);
+  }
+  context.conditions.push(
+    { type: "Executed", status: "true", reason: "existing operation receipt reused" },
+    {
+      type: "Verified",
+      status: existing.receipt.decision === "verified" ? "true" : "false",
+      reason: `existing receipt decision: ${existing.receipt.decision}`,
+    },
+    { type: "Recorded", status: "true", reason: "append-only receipt already exists" },
+  );
+  return {
+    ...terminalPreparation(request, context, "blocked"),
+    status: "reused",
+    receipt: existing.receipt,
+    receiptPath: existing.path,
+  };
+}
+
+function incompleteAttemptBlocker(
+  request: ReconcileRequest,
+  workOrder: WorkOrder,
+  attemptKey: string,
+  attempt: ReconciliationAttempt | null,
+): { type: ReconciliationCondition["type"]; reason: string } | undefined {
+  if (!attempt) {
+    return request.recoverIncomplete
+      ? { type: "Executed", reason: "no incomplete attempt is available to recover" }
+      : undefined;
+  }
+  const matchesRequest =
+    attempt.attemptKey === attemptKey &&
+    attempt.contractId === request.contract.id &&
+    attempt.contractDigest === request.contract.contractDigest &&
+    attempt.operationKey === workOrder.operationKey;
+  if (!matchesRequest) {
+    return {
+      type: "Recorded",
+      reason: "in-flight attempt does not match the active Contract and operation",
+    };
+  }
+  return request.recoverIncomplete
+    ? undefined
+    : {
+        type: "Executed",
+        reason:
+          "incomplete attempt exists; use explicit recovery to verify without replaying mutation",
+      };
 }
 
 async function applyReconciliation(
