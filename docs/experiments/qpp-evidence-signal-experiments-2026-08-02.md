@@ -6,7 +6,7 @@
 > 的问题中"证据-证据"相似度应远大于"证据-噪声"。实测验证（协议对齐
 > `locomo-evidence-mode-signal-2026-08-02.md`：标签仅用于评估、无 LLM 时零模型调用）。
 
-## 实验一：扩展信号审计（`evals/omnimemeval/audit-evidence-mode-signal-v2.py`）
+## 实验一：扩展信号审计（`evals/omnimemeval/research/audits/audit-evidence-mode-signal-v2.py`）
 
 协议：LoCoMo `locomo10.json` 1978 个有证据标签的问题；record 级 BGE-small 向量；
 三路（原始 + Top1 反查 + QPP2 反查）加权 RRF@20；五折按会话分组；标签不进检索/特征。
@@ -41,7 +41,7 @@ top1 z-score、softmax 质量差）+ 假设 B 的 4 个（列表内聚、top1 �
   分布假设在多证据问题上成立）；
 - 该间隔预测 complete@20 的 AUC = **0.657**（接近 NQC，但需要标签才可观测，不能做在线特征）。
 
-## 实验二：LLM 充分性判断（`evals/omnimemeval/probe-llm-sufficiency.py`）
+## 实验二：LLM 充分性判断（`evals/omnimemeval/research/probes/probe-llm-sufficiency.py`）
 
 协议：同检索管线 top-12；平衡抽样 150 题（75 单条 + 75 多条，每会话 ≤8）；
 deepseek-chat（deepseek-v4-flash，temperature 0）判断"检索到的记录是否足以回答问题"，
@@ -86,7 +86,7 @@ deepseek-chat（deepseek-v4-flash，temperature 0）判断"检索到的记录是
 
 - LoCoMo `locomo10.json`（1986 题，按会话分组 ingest，每 turn 一条 record，tier=2，
   `scope.diaId` 标注证据）；本地 BGE-small 语义检索（qwen3 模式，纯向量，L2 归一化）。
-- 新增基础设施：`evals/omnimemeval/audit-elbow.ts`（每题输出分数序列 + 真实命中位置）、
+- 新增基础设施：`evals/omnimemeval/research/audits/audit-elbow.ts`（每题输出分数序列 + 真实命中位置）、
   `evals/results/elbow-data.json`；embedding SQLite 缓存 + store 持久化
   （`evals/results/embedding-cache.sqlite`、`audit-stores/`），重跑约 5 分钟。
 

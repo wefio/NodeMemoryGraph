@@ -134,6 +134,6 @@ HaluMem backend track 从 `search()` 开始，不能证明前两步有效。
 ## 8. 参考
 
 - Kimi 动态加载工具：`https://platform.kimi.com/docs/guide/use-dynamic-tool-loading`（核心固定顶层 + search 按需注入 + 前缀缓存）
-- probe：`evals/omnimemeval/progressive-disclosure-probe.mjs`（大 budget 全序 + warm on/off 对比）
+- probe：`evals/omnimemeval/research/probes/progressive-disclosure-probe.mjs`（大 budget 全序 + warm on/off 对比）
 - 数据：`results/halumem/nmg-supersession_trial19/nmg_hm_search_results.json`
 - 相关：`docs/experiments/qpp-engineering-notes.md`（QPP 触发/预算）、`docs/design/supersession-design.md`

@@ -4,7 +4,7 @@ Turns contradiction detection into a deterministic SQL self-join over the
 extracted metadata. Prints candidate contradictions for manual inspection.
 
 Usage:
-  .benchmarks/omni-venv/Scripts/python.exe evals/omnimemeval/polarity-pairs.py \
+  .benchmarks/omni-venv/Scripts/python.exe evals/omnimemeval/research/polarity/polarity-pairs.py \
       --db .benchmarks/polarity-experiment.sqlite
 """
 

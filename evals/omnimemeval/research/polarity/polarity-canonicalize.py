@@ -20,7 +20,7 @@ on claims_json (atomic claims) instead of record-level columns.
 Usage:
   set -a; source .env; set +a
   HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
-  .benchmarks/omni-venv/Scripts/python.exe evals/omnimemeval/polarity-canonicalize.py \
+  .benchmarks/omni-venv/Scripts/python.exe evals/omnimemeval/research/polarity/polarity-canonicalize.py \
       --db .benchmarks/beam-conv1-nmg.sqlite
 """
 

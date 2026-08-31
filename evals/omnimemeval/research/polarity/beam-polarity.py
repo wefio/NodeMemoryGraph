@@ -8,7 +8,7 @@ basic homepage route with Flask" must collide on one predicate_key.
 
 Usage:
   set -a; source .env; set +a
-  .benchmarks/omni-venv/Scripts/python.exe evals/omnimemeval/beam-polarity.py
+  .benchmarks/omni-venv/Scripts/python.exe evals/omnimemeval/research/polarity/beam-polarity.py
 """
 
 import json

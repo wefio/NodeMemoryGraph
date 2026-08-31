@@ -24,7 +24,7 @@ Run:
 
 ```powershell
 .benchmarks\omni-venv\Scripts\python.exe `
-  evals\omnimemeval\audit-evidence-mode-signal.py `
+  evals\omnimemeval\research\audits\audit-evidence-mode-signal.py `
   --data .benchmarks\official\OmniMemEval\data\locomo\locomo10.json `
   --output evals\results\locomo-evidence-mode-signal.json
 ```
@@ -50,4 +50,3 @@ Retain evidence completeness as a shadow signal. It is strong enough to test a
 stable prompt contract such as `completeness=low|uncertain|high`, but not yet
 strong enough to stop retrieval or authorize an answer. Calibrate it on held-out
 data and measure selective risk before wiring it into the Pi adapter.
-

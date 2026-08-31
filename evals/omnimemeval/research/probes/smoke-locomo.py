@@ -7,7 +7,9 @@ import os
 import subprocess
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+)
 DATA = os.path.join(ROOT, ".benchmarks/official/OmniMemEval/data/locomo/locomo10.json")
 
 sample = json.load(open(DATA, encoding="utf-8"))[0]

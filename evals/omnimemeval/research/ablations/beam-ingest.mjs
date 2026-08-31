@@ -2,7 +2,7 @@
 // polarity-worker experiment. Uses the hashing embedder (offline, no model
 // download); retrieval quality is irrelevant here, only the record store.
 import { readFileSync } from 'node:fs';
-import { NmgStore } from '../../src/index.ts';
+import { NmgStore } from '../../../../src/index.ts';
 
 const DATA = '.benchmarks/official/OmniMemEval/data/beam/chats/100K/1/chat.json';
 const DB = process.argv[2] ?? '.benchmarks/beam-conv1-nmg.sqlite';

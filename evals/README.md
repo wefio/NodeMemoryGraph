@@ -16,6 +16,22 @@ Public benchmark scores do not replace the deterministic core suite. A memory
 system can answer benchmark questions correctly while corrupting provenance,
 exceeding its retrieval budget, or rebuilding an index unnecessarily.
 
+## Layout
+
+- `omnimemeval/` is the maintained public-suite adapter and its single official
+  execution entry point. Its `research/` subtree contains non-default probes,
+  audits, and ablations.
+- `benchmarks/`, `longmemeval/`, `locomo/`, `personamem/`, and `beam/` preserve
+  the separate local matched-agent runners. They test harness-triggered recall;
+  they are not competing public-data pipelines.
+- `controller*`, `topology/`, `retrieval/`, `consolidation/`, `disclosure/`,
+  `reasoning-workspace/`, and scale/performance directories are focused research
+  families. Use their local README or package script instead of treating the
+  directory root as a command surface.
+
+Only stable entry points belong in `package.json`. One-off scripts live beside
+their evidence family and must not silently define benchmark or product policy.
+
 ## Pi Agent integration cases
 
 Run `npm run eval:agents` for fresh-process Pi+NMG write/read cases. The runner

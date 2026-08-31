@@ -10,7 +10,7 @@ Pipeline over a COPY of an NMG benchmark DB:
 
 Usage:
   set -a; source .env; set +a
-  .benchmarks/omni-venv/Scripts/python.exe evals/omnimemeval/polarity-extract.py \
+  .benchmarks/omni-venv/Scripts/python.exe evals/omnimemeval/research/polarity/polarity-extract.py \
       --db .benchmarks/polarity-experiment.sqlite
 """
 

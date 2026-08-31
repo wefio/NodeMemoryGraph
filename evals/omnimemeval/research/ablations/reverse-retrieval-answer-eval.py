@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 
-OMNI = Path(__file__).resolve().parents[2] / ".benchmarks" / "official" / "OmniMemEval"
+OMNI = Path(__file__).resolve().parents[4] / ".benchmarks" / "official" / "OmniMemEval"
 sys.path.insert(0, str(OMNI / "scripts"))
 
 from longmemeval.lme_responses import lme_response  # noqa: E402
