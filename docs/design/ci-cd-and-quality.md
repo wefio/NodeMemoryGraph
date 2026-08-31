@@ -1,10 +1,22 @@
 # 代码质量与 CI/CD
 
 **Created:** 2026-07-20  
-**Updated:** 2026-08-29
+**Updated:** 2026-08-31
 **Authority:** 仓库测试、CI 与 Agent 开发流程契约
 
 NMG 的测试负责阻止可复现错误，不负责冻结尚未验证的设计。产品契约、研究测量与故障注入使用不同执行轨道，避免 benchmark 便利逻辑反向定义产品行为。
+
+## 0. 仓库治理不变量
+
+以下原则约束开发控制面、Agent 工作流与维护自动化；它们不建立新的状态库或审批层：
+
+1. **Repository as environment**：主动把仓库塑造成 Agent 可导航、可理解、可验证的工作环境。稳定入口、owner、route、Skill 和验证命令应让 Agent 从目标路径找到下一步；反复需要口头解释的隐含知识应回到其既有 owner，而不是积累新的旁路说明。
+2. **Proof before trust**：Agent 的完成声明、PR 文本或本地输出都不是修改成立的证据。目标测试、独立 verifier、干净环境 CI，以及适用时的真实外部运行共同提供分层 proof；每项证据只证明它实际测量的边界，benchmark 或单次绿灯不能替代架构审查。
+3. **Explicit state transitions**：工作、PR、decision、guardrail 与 release 使用显式状态和转换条件。自动化可以请求转换，但不能用自然语言的“完成”“ship it”绕过前置检查、授权、失败状态或回滚路径。
+4. **Aggressive entropy detection, conservative destruction**：主动发现已完成临时工作、过期 guardrail、重复测试、无消费者兼容层、陈旧分支和失效抽象。缓存、生成物和有明确期限的临时产物可按契约自动清理；源码、历史证据、公开接口、issue 和 PR 只能先形成可审查候选，再依据 owner、proof 与授权处理。
+5. **One fact, one owner**：每类状态只有一个权威写入者，其他组件只能观察、缓存或引用。GitHub 拥有 PR/CI 状态，Contract 拥有 desired state，observer 拥有当前观测，verifier/receipt 拥有验证事实；NMG 只提供记忆与通知价值，不竞争这些事实源。
+
+治理目标是减少下一位 Agent 的重新发现成本，同时阻止自动化把一次局部便利固化为永久架构。只把可机械验证的边界写成测试；语义合理性、删除授权和架构取舍继续由 owner 与 review 判断。
 
 ## 1. 测试分类
 
