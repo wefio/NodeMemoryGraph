@@ -12,7 +12,7 @@
  *   that session).
  *
  * Normalization mirrors the existing audit scripts
- * (evals/omnimemeval/audit-*.ts/py): lowercase, fold non-alphanumeric runs to
+ * (evals/omnimemeval/research/audits/audit-*.ts/py): lowercase, fold non-alphanumeric runs to
  * one space, trim.
  */
 

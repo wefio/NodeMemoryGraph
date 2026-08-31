@@ -5,7 +5,7 @@ the single NMG retrieval pipeline (the same `store.searchContext` call path
 used by automatic recall, `nmg_search`, the daemon, and the OmniMemEval
 bridge) as a pure retriever, without an answer model or judge.
 
-Existing audit scripts (`evals/omnimemeval/audit-*-retrieval.*`) measure text
+Existing audit scripts (`evals/omnimemeval/research/audits/audit-*-retrieval.*`) measure text
 coverage of the rendered context and lose rank information. This runner keeps
 rank: every gold evidence records its first-hit rank inside the returned
 candidates.

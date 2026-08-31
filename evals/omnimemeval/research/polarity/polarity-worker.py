@@ -16,7 +16,7 @@ Pipeline per record:
 
 Usage:
   set -a; source .env; set +a
-  .benchmarks/omni-venv/Scripts/python.exe evals/omnimemeval/polarity-worker.py \
+  .benchmarks/omni-venv/Scripts/python.exe evals/omnimemeval/research/polarity/polarity-worker.py \
       --db .benchmarks/beam-conv1-nmg.sqlite
 """
 

@@ -168,7 +168,7 @@ let audit = {};
 try {
   audit = JSON.parse(
     execSync(
-      `python "${join(ROOT, "evals/omnimemeval/audit-longmemeval-retrieval.py")}" "${searchResults}" "${judgedPath}"`,
+      `python "${join(ROOT, "evals/omnimemeval/research/audits/audit-longmemeval-retrieval.py")}" "${searchResults}" "${judgedPath}"`,
       { cwd: ROOT },
     ).toString(),
   );

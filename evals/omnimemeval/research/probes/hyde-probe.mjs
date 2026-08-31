@@ -12,9 +12,9 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-import { NmgStore } from "../../src/core/store.ts";
-import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
-import { CachedOmniEmbeddingClient } from "./embedding-cache.ts";
+import { NmgStore } from "../../../../src/core/store.ts";
+import { createEmbeddingClientFromEnv } from "../../../../src/core/embedding-provider.ts";
+import { CachedOmniEmbeddingClient } from "../../embedding-cache.ts";
 
 const DATA = ".benchmarks/official/OmniMemEval/data/longmemeval/longmemeval_s_cleaned.json";
 const VERSION = "lme500_bgefix_header_20260804"; // userId suffix matching existing stores

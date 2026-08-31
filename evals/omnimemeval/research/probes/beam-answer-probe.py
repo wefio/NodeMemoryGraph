@@ -9,7 +9,7 @@ For each contradiction_resolution question of BEAM conv 1:
 
 Usage:
   set -a; source .env; set +a
-  .benchmarks/omni-venv/Scripts/python.exe evals/omnimemeval/beam-answer-probe.py
+  .benchmarks/omni-venv/Scripts/python.exe evals/omnimemeval/research/probes/beam-answer-probe.py
 """
 
 import json

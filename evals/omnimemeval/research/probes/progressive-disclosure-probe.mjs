@@ -6,10 +6,10 @@
 // ("position") and whether warm memories are folded/deferred ("timing").
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { NmgStore } from "../../src/core/store.ts";
-import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
-import { parseAdvancedQuery } from "../../src/core/store/advanced-query.ts";
-import { searchMemoryContext } from "../../src/integration/search.ts";
+import { NmgStore } from "../../../../src/core/store.ts";
+import { createEmbeddingClientFromEnv } from "../../../../src/core/embedding-provider.ts";
+import { parseAdvancedQuery } from "../../../../src/core/store/advanced-query.ts";
+import { searchMemoryContext } from "../../../../src/integration/search.ts";
 
 process.env.NMG_EMBED_BASE_URL = "http://127.0.0.1:8000";
 process.env.NMG_EMBED_MODEL = "BAAI/bge-small-en-v1.5";

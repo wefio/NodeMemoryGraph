@@ -60,11 +60,11 @@ can inject noise). Run artifacts: `results/lme/nmg-hyde-pool/`.
 
 ## Engineering artifacts
 
-- `evals/omnimemeval/hyde-probe.mjs` — small-batch probe (plain vs pool-aware
+- `evals/omnimemeval/research/probes/hyde-probe.mjs` — small-batch probe (plain vs pool-aware
   HyDE on the official failure set: +5 vs +9 rescued of 28)
-- `evals/omnimemeval/hyde-full.mjs` — full-corpus recall probe (resume-friendly,
+- `evals/omnimemeval/research/probes/hyde-full.mjs` — full-corpus recall probe (resume-friendly,
   official-metric aligned)
-- `evals/omnimemeval/hyde-context.mjs` — generates the fused search-results
+- `evals/omnimemeval/research/probes/hyde-context.mjs` — generates the fused search-results
   artifact (bridge-identical rendering) that feeds answer + judge
 - `src/core/store/advanced-query.ts` + `nmg_search queries[]` — the engine
   generic multi-query surface used to submit a caller-generated HyDE clause;

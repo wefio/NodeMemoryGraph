@@ -14,17 +14,31 @@ benchmark data
   -> report
 ```
 
+## Layout
+
+The files in this directory are split by responsibility:
+
+- root files are the maintained benchmark boundary: runner, configuration,
+  adapter bridge/client, embedding cache/service, judge provider, and operational
+  helpers;
+- [`research/`](research/README.md) holds one-off audits, probes, ablations, and
+  polarity experiments. These files are evidence tools, not alternate benchmark
+  runners.
+
+This separation keeps `npm run benchmark:omni -- <suite>` as the single public
+execution path while preserving reproducibility of past investigations.
+
 ## Reverse-retrieval recall probe
 
-`reverse-retrieval-ablation.py` compares equal-size session-level Top-K outputs
-for plain vector retrieval, Top-1 reverse lookup followed by QPP2, QPP2-derived
-reverse lookup followed by QPP2, and their union. It is an offline mechanism
-probe: evidence labels are used only for scoring, and no answer model or judge
-is called. The report also measures cumulative recall at configurable result
-cutoffs (20/25/30/40 by default) and records each gold session's rank. This
-models search-style continuation: a first page may stay compact while folded
-candidates remain available through `expand`, rather than being treated as
-deleted evidence.
+`research/ablations/reverse-retrieval-ablation.py` compares equal-size
+session-level Top-K outputs for plain vector retrieval, Top-1 reverse lookup
+followed by QPP2, QPP2-derived reverse lookup followed by QPP2, and their union.
+It is an offline mechanism probe: evidence labels are used only for scoring, and
+no answer model or judge is called. The report also measures cumulative recall
+at configurable result cutoffs (20/25/30/40 by default) and records each gold
+session's rank. This models search-style continuation: a first page may stay
+compact while folded candidates remain available through `expand`, rather than
+being treated as deleted evidence.
 
 The probe embeds whole LongMemEval sessions, whereas the NMG benchmark retrieves
 memory records through its graph and tiers. Its absolute recall is therefore not
@@ -39,7 +53,7 @@ instructions after retrieval and therefore do not impose a minimum window size.
 
 ```powershell
 .benchmarks\omni-venv\Scripts\python.exe `
-  evals\omnimemeval\reverse-retrieval-ablation.py `
+  evals\omnimemeval\research\ablations\reverse-retrieval-ablation.py `
   --data .benchmarks\official\OmniMemEval\data\longmemeval\longmemeval_s_cleaned.json `
   --output .benchmarks\results\reverse-retrieval-temporal-full.json `
   --category temporal-reasoning
@@ -80,7 +94,7 @@ wins/losses against each other, further showing substantial reader/judge noise;
 the extra five records should remain an on-demand continuation, not mandatory
 context.
 
-The reproducible runner is `reverse-retrieval-answer-eval.py`; it consumes the
+The reproducible runner is `research/ablations/reverse-retrieval-answer-eval.py`; it consumes the
 saved old and weighted-RRF ranking artifacts and writes a result file
 under `.benchmarks/results/`.
 
@@ -104,7 +118,7 @@ quality improvement and does not replace evidence composition. Production must
 leave expansion available to the Agent/QPP instead of injecting the next page
 on every query.
 
-`materialize-pagination-arm.py` converts an offline ranking arm into the
+`research/ablations/materialize-pagination-arm.py` converts an offline ranking arm into the
 official search-artifact format so answer-stage comparisons can reuse the
 upstream response and judge scripts without modifying OmniMemEval.
 
@@ -546,7 +560,7 @@ adding a model-specific threshold to the runtime.
 All answer passes used the official PersonaMem response and metric scripts and
 DeepSeek v4 Flash at temperature zero with 64 concurrent workers. The
 nearest-tag arm remains an answer-stage ablation rather than an end-to-end
-leaderboard result: `personamem-forget-tag-ablation.py` selects the closest
+leaderboard result: `research/ablations/personamem-forget-tag-ablation.py` selects the closest
 explicit revocation from the original persona with BGE. Maximum forget-target
 similarity separates forget from non-forget questions only moderately
 (`AUC=0.796`), so a single similarity threshold is useful as a baseline but is

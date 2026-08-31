@@ -12,13 +12,13 @@
  * Requires evals/omnimemeval/bge_server.py on :8000.
  *
  * Usage:
- *   node --experimental-strip-types evals/omnimemeval/mgr-xor-probe.ts \
+ *   node --experimental-strip-types evals/omnimemeval/research/probes/mgr-xor-probe.ts \
  *     .benchmarks/official/OmniMemEval/data/beam/beam_100k.json
  */
 
 import { readFileSync } from "node:fs";
 
-import { Logic, MemoryGraphReasoner } from "../../src/lab/memory-graph-reasoner.ts";
+import { Logic, MemoryGraphReasoner } from "../../../../src/lab/memory-graph-reasoner.ts";
 
 const EMBED_URL = "http://127.0.0.1:8000/v1/embeddings";
 const EMBED_MODEL = "BAAI/bge-small-en-v1.5";

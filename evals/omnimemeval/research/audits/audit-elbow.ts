@@ -13,11 +13,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { CachedOmniEmbeddingClient } from "./embedding-cache.ts";
-import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
-import { syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
-import { NmgStore } from "../../src/core/store.ts";
-import { loadLocomo } from "../benchmarks/loaders.ts";
+import { CachedOmniEmbeddingClient } from "../../embedding-cache.ts";
+import { createEmbeddingClientFromEnv } from "../../../../src/core/embedding-provider.ts";
+import { syncRecordEmbeddings } from "../../../../src/core/embedding-sync.ts";
+import { NmgStore } from "../../../../src/core/store.ts";
+import { loadLocomo } from "../../../benchmarks/loaders.ts";
 
 const DATA = process.argv[2] ?? ".benchmarks/official/OmniMemEval/data/locomo/locomo10.json";
 const MAX_CASES = Number.parseInt(process.argv[3] ?? "2000", 10);

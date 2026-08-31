@@ -8,16 +8,16 @@
  * so we can see whether low QPP actually predicts wrong / partial-evidence
  * answers before wiring the real second-pass trigger.
  *
- * Usage: node --experimental-strip-types evals/omnimemeval/audit-qpp-signal.ts \
+ * Usage: node --experimental-strip-types evals/omnimemeval/research/audits/audit-qpp-signal.ts \
  *        evals/longmemeval/results/<run-dir>
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { resolve } from "node:path";
 
-import { hybridScore } from "../../src/core/store/search-ranking.ts";
-import { shouldTriggerSecondPass, DEFAULT_QPP_THRESHOLD } from "../../src/core/qpp.ts";
-import type { QppCandidate } from "../../src/core/types.ts";
+import { hybridScore } from "../../../../src/core/store/search-ranking.ts";
+import { shouldTriggerSecondPass, DEFAULT_QPP_THRESHOLD } from "../../../../src/core/qpp.ts";
+import type { QppCandidate } from "../../../../src/core/types.ts";
 
 interface Outcome {
   questionId: string;
