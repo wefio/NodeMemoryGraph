@@ -27,6 +27,8 @@ import type {
   MemorySearchResult,
   MemoryScope,
   MemoryTier,
+  MemoryStatus,
+  NmgStoreOptions,
   PerfSnapshot,
   TaskBoardEntry,
   TaskBoardKind,
@@ -44,10 +46,12 @@ import { encodeVector, storedVector } from "./vector-codec.ts";
 import { updateRelationStrength } from "../edge-activation.ts";
 import { serializeScope } from "../scope.ts";
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
+import { ScopeWriteIndex, type ScopeWriteIndexRow, writeTokens } from "./scope-write-index.ts";
 import {
   ftsExpression,
   ftsIndexedText,
   memoryEmbeddingText,
+  normalizeStatement,
   type StoreRow as Row,
 } from "./search-ranking.ts";
 
@@ -66,12 +70,19 @@ export class NmgStoreBase {
   protected embedder: VectorEmbedder;
   protected router: Router;
   protected vectorCaches = new Map<string, Float32VectorCache>();
+  protected scopeWriteIndexes = new Map<string, ScopeWriteIndex>();
+  protected scopeWriteIndexEnabled: boolean;
 
-  constructor(databasePath: string, embedder: VectorEmbedder = new HashingVectorEmbedder()) {
+  constructor(
+    databasePath: string,
+    embedder: VectorEmbedder = new HashingVectorEmbedder(),
+    options: NmgStoreOptions = {},
+  ) {
     mkdirSync(dirname(databasePath), { recursive: true });
     this.db = new DatabaseSync(databasePath);
     this.embedder = embedder;
     this.router = new Router(embedder);
+    this.scopeWriteIndexEnabled = options.scopeWriteIndex ?? false;
     try {
       this.db.exec(`
         PRAGMA foreign_keys = ON;
@@ -122,6 +133,64 @@ export class NmgStoreBase {
       // ignore — closing anyway
     }
     this.db.close();
+  }
+
+  protected scopeWriteIndex(scopeJson: string): ScopeWriteIndex | null {
+    if (!this.scopeWriteIndexEnabled) return null;
+    let index = this.scopeWriteIndexes.get(scopeJson);
+    if (index) return index;
+    const rows = this.db
+      .prepare(
+        `SELECT id, node_id, statement, event_time, polarity, status, created_at
+           FROM memory_records
+          WHERE scope_json = ? AND status IN ('active', 'disputed')
+            AND storage_state = 'indexed'
+          ORDER BY created_at, rowid`,
+      )
+      .all(scopeJson) as Record<string, unknown>[];
+    index = new ScopeWriteIndex(
+      rows.map((row): ScopeWriteIndexRow => ({
+        id: String(row.id),
+        nodeId: String(row.node_id),
+        statement: String(row.statement),
+        normalizedStatement: normalizeStatement(String(row.statement)),
+        tokens: writeTokens(String(row.statement)),
+        eventTime: row.event_time ? String(row.event_time) : null,
+        polarity: row.polarity ? (String(row.polarity) as ScopeWriteIndexRow["polarity"]) : null,
+        status: String(row.status) as MemoryStatus,
+        createdAt: String(row.created_at),
+      })),
+    );
+    this.scopeWriteIndexes.set(scopeJson, index);
+    return index;
+  }
+
+  protected indexScopeWriteMemory(memory: MemoryRecord): void {
+    const index = this.scopeWriteIndex(serializeScope(memory.scope));
+    index?.add({
+      id: memory.id,
+      nodeId: memory.nodeId,
+      statement: memory.statement,
+      normalizedStatement: normalizeStatement(memory.statement),
+      tokens: writeTokens(memory.statement),
+      eventTime: memory.eventTime,
+      polarity: memory.polarity,
+      status: memory.status,
+      createdAt: memory.createdAt,
+    });
+  }
+
+  protected setScopeWriteMemoryStatus(
+    memoryId: string,
+    scopeJson: string,
+    status: MemoryStatus,
+  ): void {
+    this.scopeWriteIndexes.get(scopeJson)?.setStatus(memoryId, status);
+  }
+
+  protected invalidateScopeWriteIndexes(scopeJson?: string): void {
+    if (scopeJson) this.scopeWriteIndexes.delete(scopeJson);
+    else this.scopeWriteIndexes.clear();
   }
   putTaskBoardEntry(input: {
     taskId: string;

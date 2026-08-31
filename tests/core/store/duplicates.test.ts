@@ -67,6 +67,47 @@ test("remember: normalized variant (case/punctuation) auto-skips", () => {
   });
 });
 
+test("scope write index preserves duplicate and supersession candidates", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-scope-index-"));
+  const store = new NmgStore(join(directory, "test.sqlite"), undefined, {
+    scopeWriteIndex: true,
+  });
+  try {
+    const first = store.remember({
+      statement: "Martin is currently Employed at healthcare",
+      nodeName: "work",
+      scope: { user: "a" },
+    });
+    const duplicate = store.remember({
+      statement: "martin is currently employed at healthcare.",
+      nodeName: "work again",
+      scope: { user: "a" },
+    });
+    assert.equal(duplicate.memory.id, first.memory.id);
+
+    const newer = store.remember({
+      statement: "Martin moved from being Employed to self-employed",
+      nodeName: "work",
+      scope: { user: "a" },
+    });
+    assert.ok(newer.supersedeCandidates?.some((candidate) => candidate.memoryId === first.memory.id));
+    store.applySupersession({
+      newMemoryId: newer.memory.id,
+      supersededMemoryId: first.memory.id,
+    });
+    const after = store.remember({
+      statement: "Martin is currently Employed at healthcare",
+      nodeName: "historical wording reused",
+      scope: { user: "a" },
+      supersedeScan: false,
+    });
+    assert.notEqual(after.memory.id, first.memory.id, "superseded rows must leave the active index");
+  } finally {
+    store.close();
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
 test("remember: different scope is not a duplicate", () => {
   withStore((store) => {
     const first = store.remember({

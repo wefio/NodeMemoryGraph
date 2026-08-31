@@ -116,6 +116,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
     declare protected refreshNodeResidence: (nodeId: string, updatedAt: string) => void;
     declare protected requireNode: (nodeId: string) => MemoryNode;
     declare protected invalidateVectorCaches: (kind: "leaf" | "node") => void;
+    declare protected invalidateScopeWriteIndexes: (scopeJson?: string) => void;
     declare protected nodeIdsForMemories: (memoryIds: readonly string[]) => string[];
     declare protected recordNodeSelections: (
       nodeIds: string[],
@@ -528,6 +529,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         }
         this.cascadeDerivedMemories(memoryId);
         this.db.exec("COMMIT");
+        this.invalidateScopeWriteIndexes(String(row.scope_json));
         return memory;
       } catch (error) {
         this.db.exec("ROLLBACK");
@@ -573,7 +575,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
     ): MemoryStorageState {
       const row = this.db
         .prepare(
-          `SELECT id, node_id, evidence_id, statement, residence, storage_state, resolution
+          `SELECT id, node_id, evidence_id, statement, residence, storage_state, resolution, scope_json
            FROM memory_records WHERE id = ?`,
         )
         .get(memoryId) as Row | undefined;
@@ -624,6 +626,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
           for (const cache of this.vectorCaches.values()) cache.remove(memoryId);
         }
         this.db.exec("COMMIT");
+        this.invalidateScopeWriteIndexes(String(row.scope_json));
         return target;
       } catch (error) {
         this.db.exec("ROLLBACK");
@@ -925,6 +928,7 @@ export function withMaintenance<TBase extends Constructor>(Base: TBase) {
         this.db.exec("ROLLBACK");
         throw error;
       }
+      this.invalidateScopeWriteIndexes();
       return rows.map((row) => String(row.id));
     }
 

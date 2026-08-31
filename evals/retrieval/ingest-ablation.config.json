@@ -1,0 +1,8 @@
+{
+  "records": 1000,
+  "batchSize": 32,
+  "warmups": 1,
+  "runs": 3,
+  "supersedeScan": true,
+  "preappendHistory": true
+}

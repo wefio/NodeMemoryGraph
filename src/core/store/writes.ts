@@ -62,6 +62,7 @@ import type {
 } from "../types.ts";
 import { assertTemporalValidity } from "../semantic-domain.ts";
 import { recallTriggerMarkers } from "../recall-triggers.ts";
+import { type ScopeWriteIndexRow, writeTokens } from "./scope-write-index.ts";
 
 export function withWrites<TBase extends Constructor>(Base: TBase) {
   return class extends Base {
@@ -105,6 +106,16 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
     ) => MemoryWriteEvent;
     declare protected refreshNodeResidence: (nodeId: string, updatedAt: string) => void;
     declare protected evidenceIds: (memoryId: string) => string[];
+    declare protected scopeWriteIndex: (
+      scopeJson: string,
+    ) => import("./scope-write-index.ts").ScopeWriteIndex | null;
+    declare protected indexScopeWriteMemory: (memory: MemoryRecord) => void;
+    declare protected setScopeWriteMemoryStatus: (
+      memoryId: string,
+      scopeJson: string,
+      status: MemoryRecord["status"],
+    ) => void;
+    declare protected invalidateScopeWriteIndexes: (scopeJson?: string) => void;
     declare linkNodes: (input: {
       sourceNodeId: string;
       targetNodeId: string;
@@ -350,6 +361,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         )
         .run(input.nodeId, createdAt);
       this.markIndexDelta(memory.id, input.nodeId, "upsert", createdAt);
+      this.indexScopeWriteMemory(memory);
 
       return memory;
     }
@@ -363,7 +375,27 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       return Object.assign(result, { timings: perf.snapshot() });
     }
 
-    rememberInner(input: RememberInput): RememberResult {
+    /**
+     * Commit an ordered group of memories in one SQLite transaction. Later
+     * inputs observe earlier writes, preserving duplicate and state-update
+     * semantics while amortizing transaction overhead.
+     */
+    rememberMany(inputs: readonly RememberInput[]): RememberResult[] {
+      if (inputs.length === 0) return [];
+      const scopeJsons = new Set(inputs.map((input) => serializeScope(input.scope ?? {})));
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        const results = inputs.map((input) => this.rememberInner(input, false));
+        this.db.exec("COMMIT");
+        return results;
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        for (const scopeJson of scopeJsons) this.invalidateScopeWriteIndexes(scopeJson);
+        throw error;
+      }
+    }
+
+    rememberInner(input: RememberInput, manageTransaction = true): RememberResult {
       const memoryType = input.memoryType ?? "fact";
       if (memoryType === "state" && !input.stateKey?.trim()) {
         throw new Error("state memories require a stable stateKey");
@@ -374,13 +406,21 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       // Mem0 hash-dedup pattern); near-duplicates surface as candidates for
       // the optional LLM judge (Neo4j SAME_AS review-queue pattern).
       const scopeJson = serializeScope(input.scope ?? {});
-      const dupExact = this.db
-        .prepare(
-          `SELECT m.* FROM memory_records m
-           WHERE m.statement = ? AND m.scope_json = ? AND m.status = 'active'
-           ORDER BY m.created_at DESC LIMIT 1`,
-        )
-        .get(input.statement, scopeJson) as Record<string, unknown> | undefined;
+      const scopeIndex = this.scopeWriteIndex(scopeJson);
+      const indexedExact = scopeIndex?.exact(input.statement);
+      const dupExact = indexedExact
+        ? (this.db
+            .prepare("SELECT m.* FROM memory_records m WHERE m.id = ?")
+            .get(indexedExact.id) as Record<string, unknown> | undefined)
+        : scopeIndex
+          ? undefined
+          : (this.db
+              .prepare(
+                `SELECT m.* FROM memory_records m
+                 WHERE m.statement = ? AND m.scope_json = ? AND m.status = 'active'
+                 ORDER BY m.created_at DESC LIMIT 1`,
+              )
+              .get(input.statement, scopeJson) as Record<string, unknown> | undefined);
       const dupCandidates = this.nearDuplicateCandidates(input.statement, scopeJson);
       // The supersede scan is O(scope size) per write and its result is only
       // consumed by an external judge; bulk ingestion without one skips it.
@@ -419,7 +459,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           }
         }
       }
-      this.db.exec("BEGIN IMMEDIATE");
+      if (manageTransaction) this.db.exec("BEGIN IMMEDIATE");
       try {
         const history = input.evidenceHistoryId
           ? this.requireHistory(input.evidenceHistoryId)
@@ -480,6 +520,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
                WHERE id = ?`,
             )
             .run(input.validFrom ?? new Date().toISOString(), supersedesId);
+          this.setScopeWriteMemoryStatus(supersedesId, scopeJson, "superseded");
         }
         const memory = this.addMemory({
           nodeId: node.id,
@@ -528,7 +569,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         if (supersededNodeId && supersededNodeId !== node.id) {
           this.refreshNodeResidence(supersededNodeId, memory.createdAt);
         }
-        this.db.exec("COMMIT");
+        if (manageTransaction) this.db.exec("COMMIT");
         const written = { history, node, memory };
         return {
           ...written,
@@ -536,7 +577,8 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           ...(supersedeCands.length > 0 ? { supersedeCandidates: supersedeCands } : {}),
         };
       } catch (error) {
-        this.db.exec("ROLLBACK");
+        if (manageTransaction) this.db.exec("ROLLBACK");
+        this.invalidateScopeWriteIndexes(scopeJson);
         throw error;
       }
     }
@@ -612,12 +654,18 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
             "UPDATE memory_records SET supersedes_id = ?, evidence_role = 'update' WHERE id = ?",
           )
           .run(input.supersededMemoryId, input.newMemoryId);
+        this.setScopeWriteMemoryStatus(
+          input.supersededMemoryId,
+          String(stale.scope_json),
+          "superseded",
+        );
         if (String(stale.node_id) !== String(newer.node_id)) {
           this.refreshNodeResidence(String(stale.node_id), new Date().toISOString());
         }
         this.db.exec("COMMIT");
       } catch (error) {
         this.db.exec("ROLLBACK");
+        this.invalidateScopeWriteIndexes(String(stale.scope_json));
         throw error;
       }
     }
@@ -655,6 +703,16 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
               "UPDATE memory_records SET status = 'disputed' WHERE id = ? AND status = 'active'",
             )
             .run(supersededMemoryId);
+          const scope = this.db
+            .prepare("SELECT scope_json FROM memory_records WHERE id = ?")
+            .get(supersededMemoryId) as Row | undefined;
+          if (scope) {
+            this.setScopeWriteMemoryStatus(
+              supersededMemoryId,
+              String(scope.scope_json),
+              "disputed",
+            );
+          }
         }
       }
       if (input.retrieveHints?.length) {
@@ -763,17 +821,23 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
 
     private nearDuplicateCandidates(statement: string, scopeJson: string): DuplicateCandidate[] {
       const inputNorm = normalizeStatement(statement);
-      const recent = this.db
-        .prepare(
-          `SELECT m.id, m.node_id, m.statement, m.event_time FROM memory_records m
-           WHERE m.scope_json = ? AND m.status = 'active'
-           ORDER BY m.created_at DESC LIMIT ${NEAR_DUPLICATE_SCAN}`,
-        )
-        .all(scopeJson) as Record<string, unknown>[];
+      const scopeIndex = this.scopeWriteIndex(scopeJson);
+      const recent = scopeIndex
+        ? scopeIndex.recentActive(NEAR_DUPLICATE_SCAN).map(indexRow)
+        : (this.db
+            .prepare(
+              `SELECT m.id, m.node_id, m.statement, m.event_time FROM memory_records m
+               WHERE m.scope_json = ? AND m.status = 'active'
+               ORDER BY m.created_at DESC LIMIT ${NEAR_DUPLICATE_SCAN}`,
+            )
+            .all(scopeJson) as Record<string, unknown>[]);
       const out: DuplicateCandidate[] = [];
       for (const row of recent) {
         if (String(row.statement) === statement) continue;
-        const sim = statementSimilarity(inputNorm, normalizeStatement(String(row.statement)));
+        const sim = statementSimilarity(
+          inputNorm,
+          String(row.normalized_statement ?? normalizeStatement(String(row.statement))),
+        );
         if (sim >= NEAR_DUPLICATE_THRESHOLD) out.push(dupCandidate(row, sim));
       }
       out.sort((a, b) => b.similarity - a.similarity);
@@ -796,11 +860,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       // dialogue: "Employed" vs "employed", "healthcare." vs "healthcare".
       // Normalize tokens to lowercased alphanumerics before comparing.
       const normalizeTok = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, "");
-      const inputTokens = new Set(
-        searchTerms(statement)
-          .map(normalizeTok)
-          .filter((t) => t.length >= 2),
-      );
+      const inputTokens = new Set(writeTokens(statement));
       // A transition phrase ("Moving from being employed to self-employed",
       // "transitioned from A to B") names the OLD value on the "from" side.
       // Use those words as explicit recall keys — similarity (lexical or
@@ -823,13 +883,16 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       );
       const likeClause = likeTerms.map(() => `instr(lower(m.statement), ?) > 0`).join(" OR ");
       const params: string[] = likeTerms;
-      const recent = this.db
-        .prepare(
-          `SELECT m.id, m.node_id, m.statement, m.event_time, m.polarity FROM memory_records m
-           WHERE m.scope_json = ? AND m.status IN ('active', 'disputed') AND (${likeClause})
-           ORDER BY m.created_at DESC`,
-        )
-        .all(scopeJson, ...params) as Record<string, unknown>[];
+      const scopeIndex = this.scopeWriteIndex(scopeJson);
+      const recent = scopeIndex
+        ? scopeIndex.matchingTokens(likeTerms).map(indexRow)
+        : (this.db
+            .prepare(
+              `SELECT m.id, m.node_id, m.statement, m.event_time, m.polarity FROM memory_records m
+               WHERE m.scope_json = ? AND m.status IN ('active', 'disputed') AND (${likeClause})
+               ORDER BY m.created_at DESC`,
+            )
+            .all(scopeJson, ...params) as Record<string, unknown>[]);
       const inputNorm = normalizeStatement(statement);
       // Polarity is caller-supplied metadata (the caller understands the
       // semantics: "no longer employed" is a negative update). A polarity flip
@@ -848,12 +911,17 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       for (const row of recent) {
         const rowText = String(row.statement);
         if (rowText === statement) continue;
-        const sim = statementSimilarity(inputNorm, normalizeStatement(rowText));
+        const sim = statementSimilarity(
+          inputNorm,
+          String(row.normalized_statement ?? normalizeStatement(rowText)),
+        );
         // Near-duplicates (>= threshold) are merge candidates, not supersession ones.
         if (sim >= NEAR_DUPLICATE_THRESHOLD) continue;
-        const shared = searchTerms(rowText)
-          .map(normalizeTok)
-          .filter((t) => inputTokens.has(t)).length;
+        const shared = (
+          Array.isArray(row.write_tokens)
+            ? (row.write_tokens as string[])
+            : searchTerms(rowText).map(normalizeTok)
+        ).filter((t) => inputTokens.has(t)).length;
         const transitionHit = transitionTokens.some((t) => rowText.toLowerCase().includes(t));
         const rowPol = String(row.polarity ?? "");
         const polarityHit =
@@ -1111,6 +1179,18 @@ function transitionFromTokens(statement: string): string[] {
     }
   }
   return [...new Set(out)];
+}
+
+function indexRow(row: ScopeWriteIndexRow): Record<string, unknown> {
+  return {
+    id: row.id,
+    node_id: row.nodeId,
+    statement: row.statement,
+    normalized_statement: row.normalizedStatement,
+    write_tokens: row.tokens,
+    event_time: row.eventTime,
+    polarity: row.polarity,
+  };
 }
 
 function dupCandidate(

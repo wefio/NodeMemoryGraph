@@ -89,6 +89,7 @@
     "benchmark:omni": "node --experimental-strip-types evals/omnimemeval/run.ts",
     "benchmark:install:omni-adapter": "node --experimental-strip-types evals/omnimemeval/install-adapter.ts",
     "benchmark:report:omni-perf": "node --experimental-strip-types evals/omnimemeval/report-perf.ts",
+    "eval:ingest-ablation": "node --experimental-strip-types evals/retrieval/ingest-ablation.ts",
     "benchmark:prepare:no-memory": "node --experimental-strip-types evals/omnimemeval/prepare-no-memory.ts",
     "benchmark:audit:locomo": "node --experimental-strip-types evals/omnimemeval/audit-locomo-retrieval.ts",
     "benchmark:audit:beam": "python evals/omnimemeval/audit-beam-retrieval.py",

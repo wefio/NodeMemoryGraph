@@ -1660,6 +1660,21 @@ summary invalidation, and topology changes. A process-local contiguous
 `Float32` matrix may cache active record, node, or leaf embeddings; it is
 disposable and rebuildable from versioned binary vectors in storage.
 
+The same authority boundary applies to write-time candidate acceleration. An
+optional process-local per-scope index may retain raw and normalised statements,
+pre-tokenised terms, current status and stable memory IDs. It exists only to avoid
+repeating exact, near-duplicate and supersession candidate scans; SQLite is still
+the source of truth. The index is built lazily, updated after successful writes,
+and invalidated when rollback, deletion, retention, expiry or node transformation
+makes an incremental update uncertain.
+
+`rememberMany` is an ordered transaction primitive, not an unordered bulk loader.
+Each item observes earlier writes in the same transaction so duplicate and state
+replacement semantics remain identical to repeated `remember`; one failure rolls
+back the batch. Callers may batch memory writes while retaining a distinct history
+session model. They must not reuse a memory `sessionId` merely to group evidence,
+because that field controls STG ownership and retrieval visibility.
+
 ANN is optional. It must not replace exact vector scanning until exact-vs-ANN
 recall audits show acceptable quality at a scale where exact scanning violates
 the latency budget. Current near-duplicate tests and the LoCoMo record-vector
