@@ -7,6 +7,27 @@ description: Modify, test, and commit this repository safely. Use for any NMG co
 
 Keep the workflow small, evidence-based, and friendly to concurrent Agents.
 
+## Repository governance
+
+- Treat the repository as the Agent's working environment. When a recurring task
+  is hard to route or verify, improve its existing owner, route, or Skill instead
+  of adding a private workaround or another source of truth.
+- Treat an Agent completion claim as a proposal. Targeted tests, independent
+  verification, clean CI, and—when the change crosses an external boundary—a
+  real integration run determine whether the change holds. Each proof is scoped
+  to what it actually measured.
+- Move work, PRs, decisions, guardrails, and releases only through their explicit
+  lifecycle operations. Do not infer a state transition from phrases such as
+  "done" or "ship it" and do not bypass its prerequisites.
+- Detect entropy aggressively: stale temporary work, expired guardrails,
+  duplicate tests, unused compatibility layers, and superseded abstractions.
+  Automatically remove only generated, cached, or explicitly expiring material;
+  propose reviewable candidates before deleting source, history, public
+  interfaces, issues, or pull requests.
+- Keep one authoritative writer for each fact. Observe or reference GitHub,
+  Contracts, repository state, verification receipts, and NMG memory through
+  their owning interfaces rather than mirroring them into a competing store.
+
 ## Before editing
 
 1. Run `npm run agent:context -- <target-path>`. Positional paths route the
