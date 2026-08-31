@@ -385,6 +385,19 @@ revision，避免控制面输出改变自身输入。
 当前只实现 run-to-completion 路径。`continuous` 是 Contract 可声明的权限上限，不表示
 已经存在 watcher；在出现真实持续 contract 前，常驻 queue/catalog/watcher 仍明确延后。
 
+### 7.12 CI 状态观察
+
+`.github/workflows/ci-status.yml` 在规范 `CI` workflow 完成后运行一个只读 GitHub-hosted
+worker。它读取该 run 的 jobs 和失败步骤，向 GitHub Step Summary 输出紧凑摘要，并上传
+`nmg.ci-status.v1` JSON artifact。该 artifact 明确标记为 `observation-only`：它方便 Agent
+和外部 RCP 消费状态，但不授权合并、不生成本地 receipt，也不替代 required checks。
+
+该观察器不评论 PR、不写 label、不运行仓库代码测试、不连接本地 NMG daemon，并仅持有
+`actions: read` 与 `contents: read`。消费者执行 reconcile 前仍必须通过 Forge provider
+重读 GitHub 当前状态；workflow-run payload 和 artifact 都可能过期，不能成为第二套
+source of truth。未来若确有本地自动唤醒需求，可在外部增加轮询或 webhook event bridge，
+但不改变本节的只读状态契约。
+
 ## 8. 修改验证
 
 普通产品改动至少运行目标测试、`npm run check`、`npm run test:product` 与 `npm run build`。文档按 [文档 CI 契约](../README.md#ci-contract)运行 `npm run docs:check`。仓库工具还运行 `npm run agent:context:check`；包边界运行 `npm run package:check`。

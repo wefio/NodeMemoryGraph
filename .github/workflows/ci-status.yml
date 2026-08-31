@@ -1,0 +1,40 @@
+name: CI Status Snapshot
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: ci-status-${{ github.event.workflow_run.id }}
+  cancel-in-progress: true
+
+jobs:
+  observe:
+    name: Publish read-only CI status
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - name: Collect workflow status
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node --experimental-strip-types tools/ci-status-snapshot.ts
+          --event "$GITHUB_EVENT_PATH"
+          --output .nmg-ci/status.json
+          --summary "$GITHUB_STEP_SUMMARY"
+      - name: Upload machine-readable observation
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-status-${{ github.event.workflow_run.id }}
+          path: .nmg-ci/status.json
+          if-no-files-found: error
+          retention-days: 14
