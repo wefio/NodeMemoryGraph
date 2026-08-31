@@ -1675,6 +1675,17 @@ back the batch. Callers may batch memory writes while retaining a distinct histo
 session model. They must not reuse a memory `sessionId` merely to group evidence,
 because that field controls STG ownership and retrieval visibility.
 
+The resident daemon exposes this primitive as the additive, capability-negotiated
+`rememberBatch` RPC (`batch-remember`) without changing the protocol compatibility
+epoch. A request is bounded to 512 items and must target one physical LTG or
+session-owned STG store, which preserves one-transaction rollback and ordered
+deduplication. Interactive Agent writes stay on single `remember`; integrations
+use the batch RPC only at natural bulk boundaries. Pi uses it when replaying the
+crash-safe session-archive staging backlog in chunks of 32, deleting a staged file
+only after its whole chunk commits. It falls back to sequential idempotent writes
+when connected to an older same-epoch daemon that does not advertise the optional
+capability. Session shutdown itself remains a latency-sensitive single write.
+
 ANN is optional. It must not replace exact vector scanning until exact-vs-ANN
 recall audits show acceptable quality at a scale where exact scanning violates
 the latency budget. Current near-duplicate tests and the LoCoMo record-vector

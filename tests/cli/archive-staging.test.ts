@@ -59,21 +59,31 @@ test("pendingArchives drops corrupt files defensively", () => {
   removeTempDirectory(dir);
 });
 
-test("flushArchives deletes each entry only after its flush succeeds", async () => {
+test("flushArchives sends bounded batches and deletes entries only after batch success", async () => {
   const dir = freshDir();
   stageArchive(dir, ENTRY);
   stageArchive(dir, { ...ENTRY, sessionId: "sess_other" });
-  const flushed: string[] = [];
-  const n = await flushArchives(dir, async (entry) => {
-    flushed.push(entry.sessionId);
-  });
-  assert.equal(n, 2);
-  assert.deepEqual(flushed.sort(), ["sess_abc123", "sess_other"]);
+  stageArchive(dir, { ...ENTRY, sessionId: "sess_third" });
+  const batches: string[][] = [];
+  const n = await flushArchives(
+    dir,
+    async (entries) => {
+      batches.push(entries.map((entry) => entry.sessionId));
+    },
+    2,
+  );
+  const flushed = batches.flat();
+  assert.deepEqual(
+    batches.map((batch) => batch.length),
+    [2, 1],
+  );
+  assert.equal(n, 3);
+  assert.deepEqual(flushed.sort(), ["sess_abc123", "sess_other", "sess_third"]);
   assert.equal(pendingArchives(dir).length, 0);
   removeTempDirectory(dir);
 });
 
-test("flushArchives keeps the file when flush fails (resume next startup)", async () => {
+test("flushArchives keeps the whole failed batch for the next startup", async () => {
   const dir = freshDir();
   stageArchive(dir, ENTRY);
   await assert.rejects(
