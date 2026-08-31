@@ -20,6 +20,8 @@ import type {
   MemoryMarker,
   PerfSnapshot,
   DuplicateCandidate,
+  RememberInput,
+  RememberResult,
 } from "../../src/core/types.ts";
 import { CachedOmniEmbeddingClient } from "./embedding-cache.ts";
 
@@ -150,6 +152,11 @@ export interface OmniMemEvalBridgeOptions {
   chainExpansionMaxHops?: number;
   chainExpansionMaxMemoryHops?: number;
   appendedMaxRatio?: number;
+  /** Rebuildable per-scope write index. Enabled by default after the local
+   * ingestion ablation showed lower CPU and RSS with identical persisted output. */
+  scopeWriteIndex?: boolean;
+  /** Ordered remember transaction size. Set to 1 to retain per-message commits. */
+  writeBatchSize?: number;
 }
 
 /**
@@ -180,6 +187,8 @@ export class OmniMemEvalBridge {
   readonly #chainExpansionMaxHops?: number;
   readonly #chainExpansionMaxMemoryHops?: number;
   readonly #appendedMaxRatio?: number;
+  readonly #scopeWriteIndex: boolean;
+  readonly #writeBatchSize: number;
 
   constructor(root: string, options: OmniMemEvalBridgeOptions = {}) {
     this.#root = resolve(root);
@@ -208,6 +217,8 @@ export class OmniMemEvalBridge {
     this.#chainExpansionMaxHops = finiteNumber(options.chainExpansionMaxHops);
     this.#chainExpansionMaxMemoryHops = finiteNumber(options.chainExpansionMaxMemoryHops);
     this.#appendedMaxRatio = finiteNumber(options.appendedMaxRatio);
+    this.#scopeWriteIndex = options.scopeWriteIndex ?? true;
+    this.#writeBatchSize = Math.max(1, Math.min(Math.trunc(options.writeBatchSize ?? 32), 512));
     mkdirSync(this.#root, { recursive: true });
   }
 
@@ -267,61 +278,10 @@ export class OmniMemEvalBridge {
       cands: DuplicateCandidate[];
       newMemoryId: string;
     }> = [];
-    for (const [index, message] of messages.entries()) {
-      if (!message || typeof message.content !== "string" || !message.content.trim()) continue;
-      const role = historyRole(message.role);
-      const sourceRef =
-        `omnimemeval:${userKey(userId)}:${conversation}:${index}:` +
-        createHash("sha256").update(`${role}\0${message.content}`).digest("hex").slice(0, 16);
-      const history = store.appendHistory({
-        content: message.content,
-        role,
-        sessionId,
-        sourceMessageId: String(index),
-        sourceRef,
-      });
-      const forgetTarget = role === "user" ? explicitForgetTarget(message.content) : null;
-      if (forgetTarget) {
-        forgetMatchingMemories(store, forgetTarget);
-        const remembered = store.remember({
-          statement: forgetTarget,
-          markers: [{ kind: "forget", attributes: { effect: "revoke" } }],
-          nodeName: "Revoked memory boundary",
-          nodeSummary: "User-requested memory revocation boundary.",
-          memoryType: "constraint",
-          sourceActor: "user",
-          truthStatus: "asserted",
-          evidenceHistoryId: history.id,
-          // A revocation is critical when its subject is queried, but it is not
-          // a global resident constraint. Keeping it in the searchable tier
-          // prevents an unrelated revocation from crowding out exact evidence.
-          tier: 2,
-          importance: 1,
-          scope: { benchmark: "OmniMemEval", user: userKey(userId) },
-          writeReason: "explicit_user_forget_request",
-          writeSource: "user",
-          supersedeScan: this.#judge !== undefined,
-        });
-        if (remembered.memory) memories.push(remembered.memory.statement);
-        added += 1;
-        continue;
-      }
-      const remembered = store.remember({
-        statement: message.content,
-        nodeName,
-        nodeSummary,
-        memoryType: "conversation_evidence",
-        sourceActor: memoryActor(role),
-        truthStatus: role === "user" ? "asserted" : "unverified",
-        evidenceHistoryId: history.id,
-        eventTime: message.chat_time,
-        tier: 2,
-        importance: role === "user" ? 0.6 : 0.4,
-        scope: { benchmark: "OmniMemEval", user: userKey(userId) },
-        // The supersede scan is only worth its O(scope) cost when a judge
-        // will consume the candidates; judge-less benchmark ingestion skips it.
-        supersedeScan: this.#judge !== undefined,
-      });
+    type PendingWrite = { index: number; message: OmniMessage; input: RememberInput };
+    let pending: PendingWrite[] = [];
+    const acceptRemembered = (entry: PendingWrite, remembered: RememberResult): void => {
+      const { index, message } = entry;
       if (remembered.memory) {
         memories.push(remembered.memory.statement);
         dialogMemories.push({
@@ -359,7 +319,85 @@ export class OmniMemEvalBridge {
         }
       }
       added += 1;
+    };
+    const flushPending = (): void => {
+      if (pending.length === 0) return;
+      const results =
+        this.#writeBatchSize > 1
+          ? store.rememberMany(pending.map((entry) => entry.input))
+          : pending.map((entry) => store.remember(entry.input));
+      for (let index = 0; index < pending.length; index += 1) {
+        acceptRemembered(pending[index]!, results[index]!);
+      }
+      pending = [];
+    };
+
+    for (const [index, message] of messages.entries()) {
+      if (!message || typeof message.content !== "string" || !message.content.trim()) continue;
+      const role = historyRole(message.role);
+      const actor = memoryActor(role);
+      const sourceRef =
+        `omnimemeval:${userKey(userId)}:${conversation}:${index}:` +
+        createHash("sha256").update(`${role}\0${message.content}`).digest("hex").slice(0, 16);
+      const forgetTarget = role === "user" ? explicitForgetTarget(message.content) : null;
+      if (forgetTarget) {
+        flushPending();
+        const history = store.appendHistory({
+          content: message.content,
+          role,
+          sessionId,
+          sourceMessageId: String(index),
+          sourceRef,
+        });
+        forgetMatchingMemories(store, forgetTarget);
+        const remembered = store.remember({
+          statement: forgetTarget,
+          markers: [{ kind: "forget", attributes: { effect: "revoke" } }],
+          nodeName: "Revoked memory boundary",
+          nodeSummary: "User-requested memory revocation boundary.",
+          memoryType: "constraint",
+          sourceActor: "user",
+          truthStatus: "asserted",
+          evidenceHistoryId: history.id,
+          tier: 2,
+          importance: 1,
+          scope: { benchmark: "OmniMemEval", user: userKey(userId) },
+          writeReason: "explicit_user_forget_request",
+          writeSource: "user",
+          supersedeScan: this.#judge !== undefined,
+        });
+        if (remembered.memory) memories.push(remembered.memory.statement);
+        added += 1;
+        continue;
+      }
+      const history = store.appendHistory({
+        content: message.content,
+        role,
+        sessionId,
+        sourceMessageId: String(index),
+        sourceRef,
+      });
+      pending.push({
+        index,
+        message,
+        input: {
+          statement: message.content,
+          nodeName,
+          nodeSummary,
+          memoryType: "conversation_evidence",
+          sourceActor: actor,
+          truthStatus: role === "user" ? "asserted" : "unverified",
+          evidenceHistoryId: history.id,
+          eventTime: message.chat_time,
+          tier: 2,
+          importance: role === "user" ? 0.6 : 0.4,
+          scope: { benchmark: "OmniMemEval", user: userKey(userId) },
+          supersedeScan: this.#judge !== undefined,
+        },
+      });
+      if (pending.length >= this.#writeBatchSize) flushPending();
     }
+    flushPending();
     // Parallel judge pass (bounded concurrency), then serial supersession.
     if (this.#judge && judgeTasks.length) {
       const CONCURRENCY = 8;
@@ -560,7 +598,9 @@ export class OmniMemEvalBridge {
     const key = userKey(userId);
     let store = this.#stores.get(key);
     if (!store) {
-      store = new NmgStore(this.#databasePath(key));
+      store = new NmgStore(this.#databasePath(key), undefined, {
+        scopeWriteIndex: this.#scopeWriteIndex,
+      });
       this.#stores.set(key, store);
       // Keep the open-store cache bounded: every open NmgStore pins a SQLite
       // connection (plus its WAL readers), and long benchmarks can otherwise
@@ -721,6 +761,8 @@ async function run(): Promise<void> {
       : undefined,
     chainInjection: process.env.NMG_CHAIN_INJECTION === "logical" ? "logical" : "none",
     appendedMaxChars: Number(process.env.NMG_APPENDED_MAX_CHARS ?? 16_000),
+    scopeWriteIndex: process.env.NMG_SCOPE_WRITE_INDEX !== "0",
+    writeBatchSize: Number(process.env.NMG_WRITE_BATCH_SIZE ?? 32),
   });
   const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 

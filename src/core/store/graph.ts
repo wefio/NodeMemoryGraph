@@ -80,6 +80,7 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
     declare protected embedder: VectorEmbedder;
     declare protected router: Router;
     declare protected vectorCaches: Map<string, Float32VectorCache>;
+    declare protected invalidateScopeWriteIndexes: (scopeJson?: string) => void;
     declare protected recordPerfAggregates: (timings: PerfSnapshot | undefined) => void;
     declare expireShortTermMemories: (at?: string, limit?: number) => string[];
     declare drainPendingTraceSignals: (options?: { limit?: number }) => number;
@@ -506,6 +507,7 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         }
         this.refreshNodeResidence(target.id, operation.createdAt);
         this.db.exec("COMMIT");
+        this.invalidateScopeWriteIndexes();
         this.refreshEmbeddings(movedMemoryIds);
         return operation;
       } catch (error) {
@@ -578,6 +580,7 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
           .prepare("UPDATE memory_nodes SET status = 'split', updated_at = ? WHERE id = ?")
           .run(operation.createdAt, source.id);
         this.db.exec("COMMIT");
+        this.invalidateScopeWriteIndexes();
         this.refreshEmbeddings(assigned);
         return operation;
       } catch (error) {
@@ -724,6 +727,7 @@ export function withGraph<TBase extends Constructor>(Base: TBase) {
         this.db.exec("ROLLBACK");
         throw error;
       }
+      this.invalidateScopeWriteIndexes();
       this.refreshEmbeddings(snapshot.memoryAssignments.map((item) => item.memoryId));
       return this.getNodeTransform(transformId)!;
     }

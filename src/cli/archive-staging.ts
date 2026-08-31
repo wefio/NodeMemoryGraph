@@ -6,8 +6,8 @@
  * decision is "try the daemon RPC with a hard timeout; on any failure, write
  * the entry to a staging file that the next session_start flushes". Staging
  * files are written atomically (tmp + rename) so a crash mid-write never
- * leaves a partial entry, and flushing deletes each file only after its
- * remember call succeeds — an interrupted flush simply retries next startup.
+ * leaves a partial entry, and flushing deletes one bounded batch only after its
+ * ordered remember transaction succeeds — an interrupted flush retries it.
  */
 
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -74,24 +74,29 @@ export function pendingArchives(stagingDir: string): SessionArchiveEntry[] {
 }
 
 /**
- * Flush staged entries through `flush` (a remember call). Each entry is
- * deleted only after its flush succeeds, so an interrupted flush resumes on
- * the next startup without losing entries. Returns the number flushed.
+ * Flush staged entries through bounded ordered transactions. Files in a batch
+ * are deleted only after the whole flush succeeds, so an interrupted flush
+ * resumes without losing or partially acknowledging that batch.
  */
 export async function flushArchives(
   stagingDir: string,
-  flush: (entry: SessionArchiveEntry) => Promise<void>,
+  flush: (entries: readonly SessionArchiveEntry[]) => Promise<void>,
+  batchSize = 32,
 ): Promise<number> {
   const entries = pendingArchives(stagingDir);
   let flushed = 0;
-  for (const entry of entries) {
-    await flush(entry);
-    try {
-      rmSync(entryPath(stagingDir, entry.sessionId), { force: true });
-    } catch {
-      // Leave the file; next flush retries (flush is idempotent by sessionId).
+  const size = Math.max(1, Math.min(Math.trunc(batchSize), 512));
+  for (let offset = 0; offset < entries.length; offset += size) {
+    const batch = entries.slice(offset, offset + size);
+    await flush(batch);
+    for (const entry of batch) {
+      try {
+        rmSync(entryPath(stagingDir, entry.sessionId), { force: true });
+      } catch {
+        // Leave the file; next flush retries (remember is idempotent by sessionId).
+      }
+      flushed += 1;
     }
-    flushed += 1;
   }
   return flushed;
 }

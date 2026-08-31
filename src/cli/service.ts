@@ -19,7 +19,7 @@ import {
   createNodeSummaryProviderFromEnv,
   drainNodeSummaries,
 } from "../integration/node-summarizer.ts";
-import type { LeafSummaryProvider, NodeSummaryProvider } from "../core/types.ts";
+import type { LeafSummaryProvider, NodeSummaryProvider, RememberInput } from "../core/types.ts";
 import { NmgStore } from "../core/store.ts";
 import {
   SessionActiveGraphRuntime,
@@ -108,6 +108,7 @@ import {
   type NmgMergeNodesParams,
   type NmgMemoryMaintenanceProposalParams,
   type NmgRememberParams,
+  type NmgRememberBatchParams,
   type NmgRecordClaimOutcomesParams,
   type NmgResolveRememberParams,
   type NmgRollbackNodeTransformParams,
@@ -192,6 +193,8 @@ export class NmgService {
         return this.#status() as NmgMethodResult[M];
       case "remember":
         return this.#remember(parseRememberParams(params)) as NmgMethodResult[M];
+      case "rememberBatch":
+        return this.#rememberBatch(parseRememberBatchParams(params)) as NmgMethodResult[M];
       case "resolveRemember":
         return this.#resolveRemember(parseResolveRememberParams(params)) as NmgMethodResult[M];
       case "recordClaimOutcomes":
@@ -939,6 +942,27 @@ export class NmgService {
   }
 
   #remember(params: NmgRememberParams): NmgMethodResult["remember"] {
+    const prepared = this.#prepareRemember(params);
+    const result = prepared.store.remember(prepared.input);
+    this.#signalMaintenance(prepared.store, "write");
+    return result;
+  }
+
+  #rememberBatch(params: NmgRememberBatchParams): NmgMethodResult["rememberBatch"] {
+    const prepared = params.items.map((item) => this.#prepareRemember(item));
+    const store = prepared[0]!.store;
+    if (prepared.some((item) => item.store !== store)) {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        "rememberBatch items must target one physical memory store",
+      );
+    }
+    const results = store.rememberMany(prepared.map((item) => item.input));
+    this.#signalMaintenance(store, "write", false, results.length);
+    return { results };
+  }
+
+  #prepareRemember(params: NmgRememberParams): { store: NmgStore; input: RememberInput } {
     const external = params.markers?.some((marker) => marker.kind === "external_source") ?? false;
     const assessment = assessMemoryWrite({
       statement: params.statement,
@@ -969,7 +993,7 @@ export class NmgService {
     const bypassMarkers: MemoryMarker[] = params.unsafe
       ? [{ kind: "write_bypass", attributes: { policy: "unsafe" } }]
       : [];
-    const result = store.remember({
+    const input: RememberInput = {
       ...memory,
       markers: [...(memory.markers ?? []), ...bypassMarkers],
       // LTG rows are project/session-global: never attach a session_id. STG
@@ -978,9 +1002,8 @@ export class NmgService {
       truthStatus: memory.truthStatus ?? (external ? "unverified" : undefined),
       writeReason: params.writeReason ?? `cli_confirmed_${params.memoryType ?? "fact"}`,
       writeSource: params.writeSource ?? "agent",
-    });
-    this.#signalMaintenance(store, "write");
-    return result;
+    };
+    return { store, input };
   }
 
   #signalMaintenance(store: NmgStore, kind: "write" | "access", force = false, count = 1): void {
@@ -1724,6 +1747,15 @@ function parseRememberParams(value: unknown): NmgRememberParams {
     );
   }
   return parsed;
+}
+
+function parseRememberBatchParams(value: unknown): NmgRememberBatchParams {
+  const params = objectParams(value);
+  const items = params.items;
+  if (!Array.isArray(items) || items.length === 0 || items.length > 512) {
+    throw new NmgProtocolError("INVALID_PARAMS", "rememberBatch items must contain 1..512 writes");
+  }
+  return { items: items.map((item) => parseRememberParams(item)) };
 }
 
 function optionalEvidenceSource(

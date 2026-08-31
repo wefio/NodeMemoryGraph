@@ -31,6 +31,80 @@ test("status and hello do not create or open the database", async () => {
   }
 });
 
+test("rememberBatch preserves ordered replacement semantics in one store", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-remember-batch-"));
+  const databasePath = join(directory, "nmg.sqlite");
+  const service = new NmgService({ databasePath, environment: {} });
+  try {
+    const batch = await service.invoke("rememberBatch", {
+      items: [
+        {
+          statement: "Atlas deployment region is eu-west",
+          nodeName: "Atlas deployment",
+          memoryType: "state",
+          stateKey: "deployment-region",
+          sourceActor: "user",
+          scope: { project: "atlas" },
+        },
+        {
+          statement: "Atlas deployment region is eu-central",
+          nodeName: "Atlas deployment",
+          memoryType: "state",
+          stateKey: "deployment-region",
+          sourceActor: "user",
+          scope: { project: "atlas" },
+        },
+      ],
+    });
+    assert.equal(batch.results.length, 2);
+    assert.equal(batch.results[1]!.memory.supersedesId, batch.results[0]!.memory.id);
+
+    const store = new NmgStore(databasePath);
+    try {
+      assert.equal(store.getMemory(batch.results[0]!.memory.id)?.status, "superseded");
+      assert.equal(store.getMemory(batch.results[1]!.memory.id)?.status, "active");
+    } finally {
+      store.close();
+    }
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("rememberBatch rejects mixed LTG and STG targets before writing", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-remember-batch-target-"));
+  const databasePath = join(directory, "nmg.sqlite");
+  const service = new NmgService({ databasePath, environment: {} });
+  try {
+    await assert.rejects(
+      service.invoke("rememberBatch", {
+        items: [
+          { statement: "Durable Atlas fact", nodeName: "Atlas", sourceActor: "user" },
+          {
+            statement: "Session-only Atlas scratch",
+            nodeName: "Atlas scratch",
+            sourceActor: "user",
+            residence: "stg",
+            projectDir: directory,
+            sessionId: "session-a",
+          },
+        ],
+      }),
+      /one physical memory store/u,
+    );
+    const store = new NmgStore(databasePath);
+    try {
+      assert.equal(store.exportMemories().items.length, 0);
+    } finally {
+      store.close();
+    }
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
 test("memory maintenance RPC persists review-only proposals", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-maintenance-proposal-"));
   const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });

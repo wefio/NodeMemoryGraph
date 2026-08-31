@@ -140,6 +140,52 @@ test("remember: perf=false skips timing instrumentation", () => {
   });
 });
 
+test("rememberMany preserves ordered duplicate and state semantics", () => {
+  withStore((store) => {
+    const results = store.rememberMany([
+      { statement: "user prefers dark mode", nodeName: "preferences", scope: { user: "a" } },
+      { statement: "User prefers dark mode.", nodeName: "preferences", scope: { user: "a" } },
+      {
+        statement: "theme is light",
+        nodeName: "settings",
+        memoryType: "state",
+        stateKey: "theme",
+        scope: { user: "a" },
+      },
+      {
+        statement: "theme is dark",
+        nodeName: "settings",
+        memoryType: "state",
+        stateKey: "theme",
+        scope: { user: "a" },
+      },
+    ]);
+    assert.equal(results.length, 4);
+    assert.equal(results[1]!.memory.id, results[0]!.memory.id);
+    assert.equal(store.getMemory(results[2]!.memory.id)?.status, "superseded");
+    assert.equal(results[3]!.memory.supersedesId, results[2]!.memory.id);
+  });
+});
+
+test("rememberMany rolls back the full batch on failure", () => {
+  withStore((store) => {
+    assert.throws(
+      () =>
+        store.rememberMany([
+          { statement: "first batch fact", nodeName: "batch", scope: { test: "rollback" } },
+          {
+            statement: "invalid state without key",
+            nodeName: "batch",
+            memoryType: "state",
+            scope: { test: "rollback" },
+          },
+        ]),
+      /state memories require a stable stateKey/,
+    );
+    assert.equal(store.search("first batch fact", { scope: { test: "rollback" } }).length, 0);
+  });
+});
+
 test("addMemory: evidence is placed and idempotent evidence link created", () => {
   withStore((store) => {
     const node = store.remember({

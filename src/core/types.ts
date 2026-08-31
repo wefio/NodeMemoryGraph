@@ -403,6 +403,12 @@ export interface RememberResult {
   timings?: PerfSnapshot;
 }
 
+/** Optional process-local accelerators. They never change persisted semantics. */
+export interface NmgStoreOptions {
+  /** Lazily cache same-scope write candidates to avoid repeated tokenization and scans. */
+  scopeWriteIndex?: boolean;
+}
+
 /** A same-scope memory that looks like a duplicate of the incoming statement. */
 export interface DuplicateCandidate {
   memoryId: string;

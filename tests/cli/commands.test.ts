@@ -28,10 +28,12 @@ test("every CLI spec binds a valid RPC method and unique words", () => {
 
 test("every RPC method is exposed via the CLI or is intentionally RPC-only", () => {
   // RPC-only: "hello" is the daemon handshake, "shutdown" is driven by
-  // `nmg daemon stop` over HTTP — neither has a direct CLI command.
+  // `nmg daemon stop` over HTTP, and rememberBatch is a capability-negotiated
+  // host/import boundary. None is an ordinary interactive CLI command.
   const rpcOnly: readonly NmgMethod[] = [
     "hello",
     "recordActiveGraphAttribution",
+    "rememberBatch",
     "sessionActiveGraph",
     "shutdown",
     "stgPurgeSession",

@@ -125,6 +125,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     method:
       | "get"
       | "remember"
+      | "rememberBatch"
       | "resolveRemember"
       | "search"
       | "sessionActiveGraph"
@@ -584,8 +585,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     // Failures keep the staging files for the next startup.
     const sessionId = ctx.sessionManager.getSessionId();
     try {
-      await flushArchives(stagingDirFor(projectDirectory()), async (entry) => {
-        await invoke("remember", {
+      await flushArchives(stagingDirFor(projectDirectory()), async (entries) => {
+        const items = entries.map((entry) => ({
           statement: archiveStatement(entry),
           nodeName: archiveNodeName(entry),
           memoryType: "event",
@@ -600,7 +601,16 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           writeReason: "session_archive_flush",
           projectDir: projectDirectory(),
           sessionId,
-        });
+        }));
+        const active = await connection();
+        const supportsBatch =
+          active.capabilities.has("batch-remember") &&
+          (active.methods === undefined || active.methods.has("rememberBatch"));
+        if (supportsBatch) {
+          await invokeDaemon(active, "rememberBatch", { items });
+        } else {
+          for (const item of items) await invokeDaemon(active, "remember", item);
+        }
       });
     } catch {
       // Daemon unavailable; staging files remain for the next startup.

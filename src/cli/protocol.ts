@@ -70,6 +70,7 @@ export const NMG_CAPABILITIES = [
   "hello",
   "status",
   "remember",
+  "batch-remember",
   "resolve-remember",
   "claim-outcome-posterior",
   "search",
@@ -117,6 +118,7 @@ const RPC_DESCRIPTOR_SOURCE = {
   perfAggregates: {},
   pruneRetrievalTraces: {},
   remember: {},
+  rememberBatch: { optionalCapability: "batch-remember" },
   resolveRemember: {},
   recordClaimOutcomes: {},
   search: {},
@@ -251,6 +253,12 @@ export interface NmgRememberParams {
   /** Short aliases or likely query phrases used only for recall routing. */
   recallTriggers?: string[];
   projectDir?: string;
+}
+
+/** Additive daemon transport for natural bulk boundaries. One batch targets one
+ * physical LTG or session-owned STG store and commits atomically in input order. */
+export interface NmgRememberBatchParams {
+  items: NmgRememberParams[];
 }
 
 export interface NmgSupersedeRememberParams {
@@ -745,6 +753,7 @@ export type NmgMethodResult = {
   hello: NmgHelloResult;
   status: NmgStatusResult;
   remember: RememberResult;
+  rememberBatch: { results: RememberResult[] };
   resolveRemember:
     | {
         action: "supersede";
