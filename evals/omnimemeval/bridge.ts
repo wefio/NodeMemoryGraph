@@ -137,6 +137,9 @@ export interface OmniMemEvalBridgeOptions {
   leafBlockRouting?: boolean;
   /** Override the persistent content-addressed embedding cache location. */
   embeddingCachePath?: string;
+  /** Require every embedding to exist in the shared cache. Provider I/O is
+   * disabled and any miss fails closed with an explicit cache error. */
+  embeddingCacheOnly?: boolean;
   /** Eval-only benchmark construction: after ingest, link same-session
    *  conversation memories into chains. "temporal" orders by eventTime,
    *  "logical" by message order, "both" creates both chains, "none"
@@ -196,6 +199,7 @@ export class OmniMemEvalBridge {
       this.#embeddingCache = new CachedOmniEmbeddingClient(
         resolve(options.embeddingCachePath ?? SHARED_EMBED_CACHE),
         options.embeddingClient,
+        { cacheOnly: options.embeddingCacheOnly },
       );
       this.#embeddingClient = this.#embeddingCache;
     }
@@ -739,6 +743,10 @@ function finiteNumber(value: number | undefined): number | undefined {
   return value !== undefined && Number.isFinite(value) ? value : undefined;
 }
 
+function environmentFlag(value: string | undefined): boolean {
+  return value !== undefined && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
 async function run(): Promise<void> {
   const root =
     process.env.NMG_OMNI_DATA_DIR?.trim() || resolve(process.cwd(), ".nmg", "omnimemeval");
@@ -748,6 +756,7 @@ async function run(): Promise<void> {
     embeddingBatchSize: process.env.NMG_EMBED_BATCH_SIZE
       ? Number(process.env.NMG_EMBED_BATCH_SIZE)
       : undefined,
+    embeddingCacheOnly: environmentFlag(process.env.NMG_EMBED_CACHE_ONLY),
     secondPass: process.env.NMG_QPP_SECOND_PASS !== "0",
     qppInitialEvidenceTarget: process.env.NMG_QPP_INITIAL_EVIDENCE_TARGET
       ? Number(process.env.NMG_QPP_INITIAL_EVIDENCE_TARGET)

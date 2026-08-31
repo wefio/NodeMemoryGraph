@@ -123,3 +123,18 @@ PYTHONUTF8=1 NMG_CHAIN_INJECTION=logical \
 The NMG adapter bridge lives at `evals/omnimemeval/bridge.ts`; per-user stores
 under `.benchmarks/omnimemeval-nmg/`, shared embedding cache at
 `.benchmarks/shared-embedding-cache.sqlite`.
+
+### Embedding availability contract
+
+The shared cache is an acceleration layer, not a provider fallback. An exact
+cache hit can succeed while the configured embedding service is offline, so a
+mixture of successful and `fetch failed` rows does **not** establish that the
+service failed partway through a run. Before the official runner starts, the NMG
+entry point sends one real query embedding request and fails before dataset work
+if the provider is unavailable.
+
+`NMG_EMBED_CACHE_ONLY=1` is the explicit offline exception. It disables provider
+I/O and serves only vectors already present under the exact model and
+preprocessing `indexId`; the first document or query miss fails closed with an
+`embedding cache-only miss` error. Use it only when cache coverage is known to be
+complete. Never interpret partial cache coverage as a valid benchmark result.

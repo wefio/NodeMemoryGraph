@@ -7,7 +7,9 @@ import test from "node:test";
 import {
   SUITES,
   createRunPlan,
+  loadBenchmarkEnvironment,
   parseRunOptions,
+  preflightEmbeddingProvider,
   type BenchmarkConfig,
   type BenchmarkSuite,
 } from "../../evals/omnimemeval/run.ts";
@@ -143,4 +145,77 @@ test("resume rejects config drift instead of silently changing the run", () => {
       ),
     /Resume config drift: --workers was 1, now 2/,
   );
+});
+
+test("benchmark environment loads embedding settings without exposing them in runner args", () => {
+  const repoRoot = fixtureRepo("beam");
+  writeFileSync(
+    join(repoRoot, "benchmark.env"),
+    [
+      "NMG_EMBED_PROVIDER=openai",
+      'NMG_EMBED_BASE_URL="http://127.0.0.1:8000/v1"',
+      "NMG_EMBED_MODEL=BAAI/bge-small-en-v1.5",
+      "NMG_EMBED_CACHE_ONLY=1",
+    ].join("\n"),
+    "utf8",
+  );
+  const plan = createRunPlan(parseRunOptions(["beam", "--config", "benchmark.json"]), {
+    repoRoot,
+  });
+  const environment = loadBenchmarkEnvironment(plan);
+  assert.equal(environment.NMG_EMBED_PROVIDER, "openai");
+  assert.equal(environment.NMG_EMBED_BASE_URL, "http://127.0.0.1:8000/v1");
+  assert.equal(environment.NMG_EMBED_CACHE_ONLY, "1");
+  assert.ok(!plan.args.some((argument) => argument.includes("NMG_EMBED")));
+});
+
+test("embedding preflight probes the configured provider before a benchmark starts", async () => {
+  let calls = 0;
+  const environment = {
+    NMG_EMBED_PROVIDER: "openai",
+    NMG_EMBED_BASE_URL: "http://provider.invalid/v1",
+  };
+  await preflightEmbeddingProvider(environment, () => ({
+    indexId: "test-index",
+    model: "test-model",
+    profile: "plain",
+    embed: async () => [],
+    embedDocuments: async () => [],
+    embedQueries: async (inputs: string[]) => {
+      calls += 1;
+      return inputs.map(() => [1]);
+    },
+  }));
+  assert.equal(calls, 1);
+});
+
+test("embedding preflight fails before execution when the provider is unavailable", async () => {
+  await assert.rejects(
+    preflightEmbeddingProvider(
+      { NMG_EMBED_PROVIDER: "openai" },
+      () => ({
+        indexId: "test-index",
+        model: "test-model",
+        profile: "plain",
+        embed: async () => [],
+        embedDocuments: async () => [],
+        embedQueries: async () => {
+          throw new Error("fetch failed");
+        },
+      }),
+    ),
+    /embedding provider preflight failed.*fetch failed/i,
+  );
+});
+
+test("explicit cache-only mode skips the provider preflight", async () => {
+  let factoryCalls = 0;
+  await preflightEmbeddingProvider(
+    { NMG_EMBED_PROVIDER: "openai", NMG_EMBED_CACHE_ONLY: "1" },
+    () => {
+      factoryCalls += 1;
+      throw new Error("provider must not be constructed in cache-only mode");
+    },
+  );
+  assert.equal(factoryCalls, 0);
 });

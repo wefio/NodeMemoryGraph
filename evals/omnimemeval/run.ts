@@ -3,6 +3,13 @@ import { spawnSync } from "node:child_process";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  configuredProvider,
+  createEmbeddingClientFromEnv,
+  type EmbeddingClient,
+} from "../../src/core/embedding-provider.ts";
+import { loadEnvironmentFile } from "../local-env.ts";
+
 export type BenchmarkSuite =
   | "longmemeval"
   | "locomo"
@@ -48,6 +55,10 @@ export type RunPlan = {
   args: string[];
   environment: NodeJS.ProcessEnv;
 };
+
+export type EmbeddingClientFactory = (
+  environment: NodeJS.ProcessEnv,
+) => EmbeddingClient | undefined;
 
 const RUNNER_OWNED_OPTIONS = new Set(["--env", "--lib", "--version", "--replay"]);
 const RESUME_UNSAFE_OPTIONS = new Set(["--clear", "--no-resume"]);
@@ -149,6 +160,46 @@ function resolveEnvFile(repoRoot: string, omniRoot: string, input: string): stri
 function configValue(config: string, key: string): string | undefined {
   const match = config.match(new RegExp(`^${key}=(?:\"([^\"]*)\"|'([^']*)'|([^\\s#]+))`, "m"));
   return match?.[1] ?? match?.[2] ?? match?.[3];
+}
+
+/** Read the benchmark's shell-style env file without executing it. Official
+ * benchmark env files use ordinary KEY=value assignments. Command substitution
+ * is rejected so availability checks cannot turn configuration into code. */
+export function loadBenchmarkEnvironment(plan: RunPlan): NodeJS.ProcessEnv {
+  return loadEnvironmentFile(plan.envFile, plan.environment);
+}
+
+function enabled(value: string | undefined): boolean {
+  return value !== undefined && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Cache hits can survive a dead provider, so successful cached rows do not
+ * prove that a benchmark is healthy. Probe the configured provider before the
+ * official runner starts; cache-only execution must be an explicit choice. */
+export async function preflightEmbeddingProvider(
+  environment: NodeJS.ProcessEnv,
+  createClient: EmbeddingClientFactory = (current) =>
+    createEmbeddingClientFromEnv(current, { required: false }),
+): Promise<void> {
+  if (enabled(environment.NMG_EMBED_CACHE_ONLY)) return;
+  if (!configuredProvider(environment)) return;
+  const client = createClient(environment);
+  if (!client) throw new Error("embedding provider preflight failed: provider is not configured");
+  try {
+    const vectors = await client.embedQueries(["NMG benchmark embedding readiness probe"]);
+    if (vectors.length !== 1 || vectors[0]!.length === 0) {
+      throw new Error("provider returned no vector");
+    }
+  } catch (error) {
+    throw new Error(
+      `embedding provider preflight failed: ${errorMessage(error)}. Cached vectors are only an acceleration layer; restore the provider and resume, or explicitly enable NMG_EMBED_CACHE_ONLY=1 for a known-complete cache.`,
+      { cause: error },
+    );
+  }
 }
 
 function suiteForResultDir(omniRoot: string, resultDir: string): BenchmarkSuite {
@@ -293,7 +344,8 @@ export function createRunPlan(
   };
 }
 
-export function runPlan(plan: RunPlan): number {
+export async function runPlan(plan: RunPlan): Promise<number> {
+  await preflightEmbeddingProvider(loadBenchmarkEnvironment(plan));
   const result = spawnSync(plan.bash, plan.args, {
     cwd: plan.omniRoot,
     env: plan.environment,
@@ -326,7 +378,7 @@ if (isMainModule()) {
         2,
       ),
     );
-    if (!options.dryRun) process.exitCode = runPlan(plan);
+    if (!options.dryRun) process.exitCode = await runPlan(plan);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

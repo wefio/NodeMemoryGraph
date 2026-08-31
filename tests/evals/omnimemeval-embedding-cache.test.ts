@@ -59,3 +59,63 @@ test("shared embedding cache releases a failed in-flight miss for retry", async 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("cache-only mode serves hits without consulting the embedding provider", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-embedding-cache-offline-hit-"));
+  let queryCalls = 0;
+  const delegate = {
+    indexId: "test-index",
+    async embedQueries(inputs: string[]): Promise<number[][]> {
+      queryCalls += 1;
+      return inputs.map((input) => [input.length, 1]);
+    },
+    async embedDocuments(inputs: string[]): Promise<number[][]> {
+      return inputs.map((input) => [input.length, 1]);
+    },
+  };
+  const path = join(directory, "cache.sqlite");
+  const writer = new CachedOmniEmbeddingClient(path, delegate);
+  try {
+    assert.deepEqual(await writer.embedQueries(["cached query"]), [[12, 1]]);
+  } finally {
+    writer.close();
+  }
+
+  const reader = new CachedOmniEmbeddingClient(path, delegate, { cacheOnly: true });
+  try {
+    assert.deepEqual(await reader.embedQueries(["cached query"]), [[12, 1]]);
+    assert.equal(queryCalls, 1);
+  } finally {
+    reader.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("cache-only mode fails closed on any missing embedding", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-embedding-cache-offline-miss-"));
+  let providerCalls = 0;
+  const delegate = {
+    indexId: "test-index",
+    async embedQueries(inputs: string[]): Promise<number[][]> {
+      providerCalls += 1;
+      return inputs.map(() => [0, 1]);
+    },
+    async embedDocuments(inputs: string[]): Promise<number[][]> {
+      providerCalls += 1;
+      return inputs.map(() => [0, 1]);
+    },
+  };
+  const client = new CachedOmniEmbeddingClient(join(directory, "cache.sqlite"), delegate, {
+    cacheOnly: true,
+  });
+  try {
+    await assert.rejects(
+      client.embedQueries(["not cached"]),
+      /embedding cache-only miss: query requires 1 uncached vector/,
+    );
+    assert.equal(providerCalls, 0);
+  } finally {
+    client.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

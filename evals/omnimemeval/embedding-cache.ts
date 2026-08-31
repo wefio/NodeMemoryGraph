@@ -27,16 +27,28 @@ interface PendingEmbedding {
   reject(error: unknown): void;
 }
 
+export interface CachedOmniEmbeddingClientOptions {
+  /** Serve only vectors already present in the content-addressed cache.
+   * Any miss fails closed without contacting the provider. */
+  cacheOnly?: boolean;
+}
+
 export class CachedOmniEmbeddingClient implements EmbeddingClient {
   readonly indexId: string;
   readonly #delegate: EmbeddingClient;
   readonly #db: DatabaseSync;
   readonly #inFlight = new Map<string, Promise<number[]>>();
+  readonly #cacheOnly: boolean;
   #closed = false;
 
-  constructor(databasePath: string, delegate: EmbeddingClient) {
+  constructor(
+    databasePath: string,
+    delegate: EmbeddingClient,
+    options: CachedOmniEmbeddingClientOptions = {},
+  ) {
     mkdirSync(dirname(databasePath), { recursive: true });
     this.#delegate = delegate;
+    this.#cacheOnly = options.cacheOnly ?? false;
     this.indexId = delegate.indexId;
     this.#db = new DatabaseSync(databasePath);
     // Parallel bridge workers open the same cache file and their CREATE TABLE
@@ -100,6 +112,11 @@ export class CachedOmniEmbeddingClient implements EmbeddingClient {
     }
 
     const missing = [...missingByHash.entries()];
+    if (this.#cacheOnly && missing.length > 0) {
+      throw new Error(
+        `embedding cache-only miss: ${kind} requires ${missing.length} uncached vector${missing.length === 1 ? "" : "s"} for index ${this.indexId}`,
+      );
+    }
     const pendingByHash = new Map<string, Promise<number[]>>();
     const claimed: Array<{ hash: string; input: string; key: string; pending: PendingEmbedding }> =
       [];
