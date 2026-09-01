@@ -270,6 +270,56 @@ function findBash(): string {
   return "bash";
 }
 
+/** Resolve the suite, version, and configured args for a resume run by
+ * reading the result directory's experiment_config.sh. */
+function resolveResumePlan(
+  repoRoot: string,
+  omniRoot: string,
+  resumeDir: string,
+  config: BenchmarkConfig,
+  envFile: string,
+): { suite: BenchmarkSuite; version: string; configuredArgs: string[] } {
+  const resultDir = resolve(repoRoot, resumeDir);
+  const suite = suiteForResultDir(omniRoot, resultDir);
+  const experimentConfigPath = join(resultDir, "experiment_config.sh");
+  if (!existsSync(experimentConfigPath)) {
+    throw new Error(`Resume directory has no experiment_config.sh: ${resultDir}`);
+  }
+  const experimentConfig = readFileSync(experimentConfigPath, "utf8");
+  if (configValue(experimentConfig, "LIB") !== "nmg") {
+    throw new Error("Resume directory was not produced by the NMG adapter");
+  }
+  const version = configValue(experimentConfig, "VERSION") ?? "";
+  if (!version) throw new Error("Resume directory does not record VERSION");
+  const configuredArgs = withoutResumeUnsafeArgs([...config.commonArgs, ...config.suites[suite]]);
+  assertResumeConfigMatches(experimentConfig, configuredArgs, envFile);
+  return { suite, version, configuredArgs };
+}
+
+/** Build the runner environment: NMG roots, concurrency alignment, UTF-8, and
+ * the optional benchmark venv on PATH. */
+function buildRunEnvironment(
+  repoRoot: string,
+  configuredArgs: readonly string[],
+  base: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const environment = { ...base };
+  environment.NMG_ROOT = repoRoot;
+  environment.NMG_NODE ??= process.execPath;
+  // The official runners already expose --llm-workers as their public
+  // concurrency knob. Keep the shared adaptive client limiter aligned with it
+  // so a hidden default cannot cap a deliberately larger worker pool.
+  environment.LLM_CONCURRENCY ??= configuredOptionValue(configuredArgs, "--llm-workers");
+  environment.PYTHONUTF8 = "1";
+  environment.PYTHONIOENCODING = "utf-8";
+  const venvFolder = process.platform === "win32" ? "Scripts" : "bin";
+  const venvPath = join(repoRoot, ".benchmarks", "omni-venv", venvFolder);
+  if (existsSync(venvPath)) {
+    environment.PATH = `${venvPath}${process.platform === "win32" ? ";" : ":"}${environment.PATH ?? ""}`;
+  }
+  return environment;
+}
+
 export function createRunPlan(
   options: RunOptions,
   overrides: { repoRoot?: string; now?: Date } = {},
@@ -285,26 +335,19 @@ export function createRunPlan(
   const config = loadBenchmarkConfig(configPath);
   const envFile = resolveEnvFile(repoRoot, omniRoot, config.envFile);
 
-  let suite = options.suite;
+  let suite: BenchmarkSuite;
   let version: string;
   let configuredArgs: string[];
   if (options.resumeDir) {
-    const resultDir = resolve(repoRoot, options.resumeDir);
-    suite = suiteForResultDir(omniRoot, resultDir);
-    const experimentConfigPath = join(resultDir, "experiment_config.sh");
-    if (!existsSync(experimentConfigPath)) {
-      throw new Error(`Resume directory has no experiment_config.sh: ${resultDir}`);
-    }
-    const experimentConfig = readFileSync(experimentConfigPath, "utf8");
-    if (configValue(experimentConfig, "LIB") !== "nmg") {
-      throw new Error("Resume directory was not produced by the NMG adapter");
-    }
-    version = configValue(experimentConfig, "VERSION") ?? "";
-    if (!version) throw new Error("Resume directory does not record VERSION");
-    configuredArgs = withoutResumeUnsafeArgs([...config.commonArgs, ...config.suites[suite]]);
-    assertResumeConfigMatches(experimentConfig, configuredArgs, envFile);
+    ({ suite, version, configuredArgs } = resolveResumePlan(
+      repoRoot,
+      omniRoot,
+      options.resumeDir,
+      config,
+      envFile,
+    ));
   } else {
-    suite = suite!;
+    suite = options.suite!;
     version = generatedVersion(suite, overrides.now ?? new Date());
     configuredArgs = [...config.commonArgs, ...config.suites[suite]];
   }
@@ -325,21 +368,6 @@ export function createRunPlan(
     ...configuredArgs,
   ];
 
-  const environment = { ...process.env };
-  environment.NMG_ROOT = repoRoot;
-  environment.NMG_NODE ??= process.execPath;
-  // The official runners already expose --llm-workers as their public
-  // concurrency knob. Keep the shared adaptive client limiter aligned with it
-  // so a hidden default cannot cap a deliberately larger worker pool.
-  environment.LLM_CONCURRENCY ??= configuredOptionValue(configuredArgs, "--llm-workers");
-  environment.PYTHONUTF8 = "1";
-  environment.PYTHONIOENCODING = "utf-8";
-  const venvFolder = process.platform === "win32" ? "Scripts" : "bin";
-  const venvPath = join(repoRoot, ".benchmarks", "omni-venv", venvFolder);
-  if (existsSync(venvPath)) {
-    environment.PATH = `${venvPath}${process.platform === "win32" ? ";" : ":"}${environment.PATH ?? ""}`;
-  }
-
   return {
     suite,
     version,
@@ -350,7 +378,7 @@ export function createRunPlan(
     runner,
     bash: findBash(),
     args,
-    environment,
+    environment: buildRunEnvironment(repoRoot, configuredArgs, process.env),
   };
 }
 
