@@ -93,9 +93,11 @@ export const GENERATED_NMG_PROMPTS = {
   shadow_claim_outcome_nudge:
     "The previous NMG retrieval activeGraphId={active_graph_id} disclosed saved memory IDs {memory_ids} through exact get and completed under semanticTaskId={semantic_task_id}. Inspect only the current user message or a successful tool result from this new turn. If it independently and unambiguously supports or contradicts one of that graph's disclosed saved claims, call nmg_remember action=claim_outcome with the exact memoryId, activeGraphId, semanticTaskId, claimOutcomeSource=user or claimOutcomeSource=tool, and an exact evidence excerpt. Otherwise omit the call. Answer overlap, retrieval, task success, silence, lack of correction, and failed tool output are not claim evidence.",
   search_disclosure:
-    'NMG memory search results: {count} candidate record(s).\nNMG MEMORY CANDIDATES\nformat: one candidate per line; fields separated by "; ".\nfields: memory=id; node=semantic cluster; type=memory type; time=event date; expires=expiry date; chains=logical chain names; preview=statement excerpt\nOptional [external] and [open] markers describe provenance and unresolved state.\nRecords are ranked by retrieval score; order is not a guarantee of relevance.\n{next_step}\n{forget_hint}\n',
+    'NMG MEMORY CANDIDATES\nformat: one candidate per line; fields separated by "; ".\nfields: memory=id; node=semantic cluster; type=memory type; time=event date; expires=expiry date; chains=logical chain names; preview=statement excerpt\nOptional [external] and [open] markers describe provenance and unresolved state.\nRecords are ranked by retrieval score; order is not a guarantee of relevance.\n',
+  search_disclosure_metadata: "NMG search metadata: count={count}\n{next_step}\n{forget_hint}\n",
   get_disclosure:
-    "NMG selected evidence:\n- statement: the saved record content\n- SOURCE=: original evidence content when it differs from the statement\n- id/node/type/truth/scope identify the record\n{next_step}\n{forget_hint}\n",
+    "NMG selected evidence:\n- statement: the saved record content\n- SOURCE=: original evidence content when it differs from the statement\n- id/node/type/truth/scope identify the record\n",
+  get_disclosure_metadata: "NMG evidence metadata: count={count}\n{next_step}\n{forget_hint}\n",
   deferred_hint:
     "More ranked records are folded. If these are insufficient, call nmg_get once with the deferred memory IDs; do not repeat nmg_search.",
   get_hint:

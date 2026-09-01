@@ -159,10 +159,13 @@ test("claim-outcome reminder is advisory and keeps the exact evidence boundary",
 
 test("disclosures keep placeholders for runtime substitution", () => {
   const prompts = loadPrompts();
-  assert.match(prompts.search_disclosure, /\{count\}/);
-  assert.match(prompts.search_disclosure, /\{next_step\}/);
+  assert.doesNotMatch(prompts.search_disclosure, /\{count\}|\{next_step\}|\{forget_hint\}/);
+  assert.match(prompts.search_disclosure_metadata, /\{count\}/);
+  assert.match(prompts.search_disclosure_metadata, /\{next_step\}/);
   assert.doesNotMatch(prompts.get_disclosure, /\{count\}/);
   assert.match(prompts.get_disclosure, /NMG selected evidence:/u);
+  assert.match(prompts.get_disclosure_metadata, /\{count\}/);
+  assert.match(prompts.get_disclosure_metadata, /\{next_step\}/);
 });
 
 test("multi-query guidance leaves query generation to the Agent", () => {

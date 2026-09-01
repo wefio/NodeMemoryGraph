@@ -1795,7 +1795,8 @@ test("formatters keep search headers compact and exact evidence separate", () =>
   } as never;
   const headers = formatSearchHeaders(context);
   assert.doesNotMatch(headers, /works offline/);
-  assert.match(headers, /NMG memory search results: 1 candidate record/);
+  assert.match(headers, /NMG MEMORY CANDIDATES/);
+  assert.match(headers, /NMG search metadata: count=1/);
   assert.match(headers, /order is not a guarantee of relevance/);
   assert.match(headers, /More ranked records are folded/);
   assert.match(headers, /memory-2/);

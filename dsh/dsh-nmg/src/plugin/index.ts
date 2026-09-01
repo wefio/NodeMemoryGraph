@@ -1036,7 +1036,8 @@ export function apply(ctx: Context): () => void {
         (result.memory.markers || []).some((marker) => marker.kind === 'forget'),
       )
       return renderSearchSurface(data, {
-        preamble: renderDisclosure(nmgPrompts.search_disclosure, {
+        preamble: renderDisclosure(nmgPrompts.search_disclosure, {}),
+        postamble: renderDisclosure(nmgPrompts.search_disclosure_metadata, {
           count: String(data.results.length),
           next_step: nextStep,
           forget_hint: forget ? nmgPrompts.forget_hint : '',
@@ -1074,7 +1075,8 @@ export function apply(ctx: Context): () => void {
         (result.memory.markers || []).some((marker) => marker.kind === 'forget'),
       )
       return renderEvidenceSurface(r.data, {
-        preamble: renderDisclosure(nmgPrompts.get_disclosure, {
+        preamble: renderDisclosure(nmgPrompts.get_disclosure, {}),
+        postamble: renderDisclosure(nmgPrompts.get_disclosure_metadata, {
           count: String(r.data.results.length),
           next_step: '',
           forget_hint: forget ? nmgPrompts.forget_hint : '',

@@ -56,7 +56,9 @@ export interface NmgPrompts {
   shadow_feedback_nudge: string;
   shadow_claim_outcome_nudge: string;
   search_disclosure: string;
+  search_disclosure_metadata: string;
   get_disclosure: string;
+  get_disclosure_metadata: string;
   deferred_hint: string;
   get_hint: string;
   forget_hint: string;

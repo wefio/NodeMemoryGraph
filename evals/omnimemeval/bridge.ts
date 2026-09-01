@@ -560,7 +560,8 @@ export class OmniMemEvalBridge {
         context.results.length === 0
           ? ""
           : renderEvidenceSurface(context, {
-              preamble: renderDisclosure(nmgPrompts.get_disclosure, {
+              preamble: renderDisclosure(nmgPrompts.get_disclosure, {}),
+              postamble: renderDisclosure(nmgPrompts.get_disclosure_metadata, {
                 count: String(context.results.length),
                 // OmniMemEval has no separate nmg_get round; the bridge therefore
                 // exposes the same exact-evidence surface in this response.

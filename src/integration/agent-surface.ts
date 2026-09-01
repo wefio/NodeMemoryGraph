@@ -9,11 +9,13 @@ import {
 
 export interface SearchSurfaceOptions {
   preamble?: string;
+  postamble?: string;
   emptyText?: string;
 }
 
 export interface EvidenceSurfaceOptions {
   preamble?: string;
+  postamble?: string;
   emptyText?: string;
   missingMemoryIds?: string[];
   logicalChainMaxChars?: number;
@@ -135,6 +137,7 @@ export function renderCompactSearchSurface(
       ? `logical_chains=${context.logicalChainCount}; use nmg_get for compact chain structure with exact evidence.`
       : "",
     context.activeGraphId ? `activeGraphId=${context.activeGraphId}` : "",
+    options.postamble,
   ]
     .filter(Boolean)
     .join("\n");
@@ -179,7 +182,9 @@ export function renderEvidenceSurface(
   const missing = options.missingMemoryIds?.length
     ? `MISSING: ${options.missingMemoryIds.join(", ")}`
     : "";
-  const body = [options.preamble, ...records, missing, chains.text].filter(Boolean).join("\n");
+  const body = [options.preamble, ...records, missing, chains.text, options.postamble]
+    .filter(Boolean)
+    .join("\n");
   return body || options.emptyText || "No active memory found.";
 }
 

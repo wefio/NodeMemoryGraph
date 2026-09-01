@@ -549,7 +549,8 @@ function searchH(r: MemoryContext): string {
   );
   return renderSearchSurface(r, {
     emptyText: "No NMG match.",
-    preamble: renderDisclosure(nmgPrompts.search_disclosure, {
+    preamble: renderDisclosure(nmgPrompts.search_disclosure, {}),
+    postamble: renderDisclosure(nmgPrompts.search_disclosure_metadata, {
       count: String(r.results.length),
       next_step: nextStep,
       forget_hint: forget ? nmgPrompts.forget_hint : "",
@@ -562,7 +563,8 @@ function memText(r: MemoryContext & { missingMemoryIds?: string[] }): string {
     (memory.markers ?? []).some((marker) => marker.kind === "forget"),
   );
   return renderEvidenceSurface(r, {
-    preamble: renderDisclosure(nmgPrompts.get_disclosure, {
+    preamble: renderDisclosure(nmgPrompts.get_disclosure, {}),
+    postamble: renderDisclosure(nmgPrompts.get_disclosure_metadata, {
       count: String(r.results.length),
       next_step: "",
       forget_hint: forget ? nmgPrompts.forget_hint : "",

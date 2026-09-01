@@ -346,12 +346,14 @@ shadow_claim_outcome_nudge: >-
 # ---- 渐进披露（检索结果返回时附带） ---------------------------------------
 
 search_disclosure: |
-  NMG memory search results: {count} candidate record(s).
   NMG MEMORY CANDIDATES
   format: one candidate per line; fields separated by "; ".
   fields: memory=id; node=semantic cluster; type=memory type; time=event date; expires=expiry date; chains=logical chain names; preview=statement excerpt
   Optional [external] and [open] markers describe provenance and unresolved state.
   Records are ranked by retrieval score; order is not a guarantee of relevance.
+
+search_disclosure_metadata: |
+  NMG search metadata: count={count}
   {next_step}
   {forget_hint}
 
@@ -360,6 +362,9 @@ get_disclosure: |
   - statement: the saved record content
   - SOURCE=: original evidence content when it differs from the statement
   - id/node/type/truth/scope identify the record
+
+get_disclosure_metadata: |
+  NMG evidence metadata: count={count}
   {next_step}
   {forget_hint}
 

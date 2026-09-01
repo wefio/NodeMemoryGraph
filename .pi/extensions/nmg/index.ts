@@ -2597,7 +2597,8 @@ function isTaskContinuation(prompt: string): boolean {
 export function formatSearchHeaders(context: MemoryContext): string {
   const nextStep = formatProgressiveDisclosure(context) || nmgPrompts.get_hint;
   return renderSearchSurface(context, {
-    preamble: renderDisclosure(nmgPrompts.search_disclosure, {
+    preamble: renderDisclosure(nmgPrompts.search_disclosure, {}),
+    postamble: renderDisclosure(nmgPrompts.search_disclosure_metadata, {
       count: String(context.results.length),
       next_step: nextStep,
       forget_hint: hasForgetMarker(context) ? nmgPrompts.forget_hint : "",
@@ -2632,7 +2633,8 @@ export function formatMemoryContext(
   options: MemoryContextFormatOptions = {},
 ): string {
   return renderEvidenceSurface(context, {
-    preamble: renderDisclosure(nmgPrompts.get_disclosure, {
+    preamble: renderDisclosure(nmgPrompts.get_disclosure, {}),
+    postamble: renderDisclosure(nmgPrompts.get_disclosure_metadata, {
       count: String(context.results.length),
       next_step: formatProgressiveDisclosure(context) || "",
       forget_hint: hasForgetMarker(context) ? nmgPrompts.forget_hint : "",

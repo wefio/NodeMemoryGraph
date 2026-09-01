@@ -85,8 +85,12 @@ test("shared agent surface keeps search compact and evidence exact", () => {
   const memory = context();
   const search = renderSearchSurface(memory, {
     preamble: 'NMG MEMORY CANDIDATES\nformat: one candidate per line; fields separated by "; ".',
+    postamble: "NMG search metadata: count=2",
   });
-  const evidence = renderEvidenceSurface(memory);
+  const evidence = renderEvidenceSurface(memory, {
+    preamble: "NMG selected evidence:",
+    postamble: "NMG evidence metadata: count=2",
+  });
 
   assert.match(search, /memory=memory-a/u);
   assert.match(search, /chains=Atlas flow/u);
@@ -99,6 +103,10 @@ test("shared agent surface keeps search compact and evidence exact", () => {
   assert.match(evidence, /time=2026-08-20/u);
   assert.match(evidence, /<nmg_logical_chains>/u);
   assert.equal(evidence.split("Atlas receives input.").length - 1, 1);
+  assert.ok(search.indexOf("NMG MEMORY CANDIDATES") < search.indexOf("memory=memory-a"));
+  assert.ok(search.indexOf("memory=memory-b") < search.indexOf("NMG search metadata: count=2"));
+  assert.ok(evidence.indexOf("NMG selected evidence:") < evidence.indexOf("Atlas receives input."));
+  assert.ok(evidence.indexOf("Atlas emits output.") < evidence.indexOf("NMG evidence metadata: count=2"));
 });
 
 test("shared remember surface bounds semantic follow-up candidates", () => {
