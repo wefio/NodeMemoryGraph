@@ -261,6 +261,10 @@ test("Lab RPC exposes read-only memory graph reasoning after explicit activation
       .id;
     assert.ok(relevantNodeId);
     assert.ok(noiseNodeId);
+    const before = await service.invoke("sessionActiveGraph", {
+      action: "snapshot",
+      sessionId: "session-mgr",
+    });
     const result = await service.invoke("lab", {
       action: "invoke",
       capability: "memory_graph_reasoner",
@@ -281,6 +285,33 @@ test("Lab RPC exposes read-only memory graph reasoning after explicit activation
     assert.equal(
       (result.output as { path: Array<{ nodeId: string }> }).path[0]?.nodeId,
       relevantNodeId,
+    );
+    const after = await service.invoke("sessionActiveGraph", {
+      action: "snapshot",
+      sessionId: "session-mgr",
+    });
+    assert.deepEqual(after, before, "read-only MGR must not mutate or admit AG state");
+    await service.invoke("lab", {
+      action: "enable",
+      capability: "memory_graph_reasoner",
+      sessionId: "session-other",
+      requester: "agent:test",
+      reason: "verify projection isolation",
+    });
+    await assert.rejects(
+      service.invoke("lab", {
+        action: "invoke",
+        capability: "memory_graph_reasoner",
+        sessionId: "session-other",
+        operation: "traverse",
+        input: {
+          projectionId: searched.activeGraph!.id,
+          queryVector: [1, 0],
+          graph: [{ id: relevantNodeId, vector: [1, 0] }],
+          maxSteps: 1,
+        },
+      }),
+      /belongs to another session/u,
     );
   } finally {
     service.close();
@@ -320,6 +351,59 @@ test("daemon owns temporary session Active Graph observations and releases them"
       sessionId: "session-ag",
     });
     assert.deepEqual(released, { action: "release", released: true });
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("daemon owns the bounded content disclosure window for every adapter", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-session-disclosure-"));
+  const service = new NmgService({ dataDirectory: directory, environment: {} });
+  try {
+    const remembered = await service.invoke("remember", {
+      statement: "The project uses SQLite.",
+      nodeName: "project database",
+      sessionId: "session-a",
+    });
+    const searched = await service.invoke("search", {
+      query: "project database",
+      sessionId: "session-a",
+      limit: 4,
+    });
+    assert.ok(searched.activeGraph?.id);
+
+    assert.deepEqual(
+      await service.invoke("sessionActiveGraph", {
+        action: "beginDisclosureTurn",
+        sessionId: "session-a",
+      }),
+      { action: "beginDisclosureTurn", turn: 1 },
+    );
+    const first = await service.invoke("sessionActiveGraph", {
+      action: "disclose",
+      sessionId: "session-a",
+      projectionId: searched.activeGraph!.id,
+      disclosure: "header",
+      entries: [{ memoryId: remembered.memory.id, contentHash: "header-v1" }],
+    });
+    assert.deepEqual(first, {
+      action: "disclose",
+      freshMemoryIds: [remembered.memory.id],
+      foldedMemoryIds: [],
+    });
+    const repeated = await service.invoke("sessionActiveGraph", {
+      action: "disclose",
+      sessionId: "session-a",
+      projectionId: searched.activeGraph!.id,
+      disclosure: "header",
+      entries: [{ memoryId: remembered.memory.id, contentHash: "header-v1" }],
+    });
+    assert.deepEqual(repeated, {
+      action: "disclose",
+      freshMemoryIds: [],
+      foldedMemoryIds: [remembered.memory.id],
+    });
   } finally {
     service.close();
     removeTempDirectory(directory);

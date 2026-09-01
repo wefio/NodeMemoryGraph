@@ -2,7 +2,7 @@
 
 **Purpose:** unresolved work only.
 **Authority:** working queue, not design specification or implementation history.
-**Updated:** 2026-08-30
+**Updated:** 2026-09-01
 
 Durable behavior belongs in the owning design or operating document; current
 implementation evidence belongs in
@@ -18,13 +18,19 @@ deliberately closed.
 - [x] Separate `agId`, `taskFrameId`, `projectionId`, retrieval `traceIds`, and
   `boardChannelId`; route disclosure, attribution and claim outcomes through the
   projection-to-trace registry.
-- [ ] Add branch ownership, automatic semantic task-frame switching/cooling,
-  task return, and one combined semantic/tool/reasoning budget.
-- [ ] Represent semantic references, tool observations, activation edges, and
-  hypothetical reasoning artifacts as typed AG layers with provenance and TTL.
+- [x] Add explicit branch ownership, bounded task-frame cooling/task return, and
+  one runtime item/character budget across semantic/tool/reasoning items.
+- [x] Represent semantic references, tool observations, and hypothetical
+  reasoning artifacts as typed AG items with provenance and TTL.
+- [ ] Replace query-derived frame IDs with a validated automatic semantic
+  task-frame classifier, including false-switch behavior.
+- [ ] Unify retrieval's multidimensional token/node/edge ledger with runtime
+  observation/reasoning admission; the current runtime item/character cap is not
+  yet the full design-wide budget `B`.
 - [x] Replace Pi `SessionRuntimeAg` with thin tool/Task Board event ingestion to
   the daemon-owned AG; all daemon search consumers receive projection revisions.
-- [ ] Move the Pi injection window into a host-neutral AG disclosure ledger.
+- [x] Move Pi, DSH, WorkBuddy and MCP disclosure windows into one host-neutral,
+  bounded AG ledger; clear it on compaction and release it with the session.
 - [x] Isolate HA fast state by session and clear it on session release.
 - [ ] Use HA for admission, cooling,
   task return, redundancy-aware retention, and budget proposals without
@@ -41,9 +47,10 @@ deliberately closed.
 retrieval/disclosure traces, Pi runtime tool capture, HA, MGR, controller hard
 gates, and session lifecycle hooks provide reusable implementation pieces.
 
-**Current blocker:** the core owner and identities are unified, but task/branch
-lifecycle, combined budget accounting, disclosure-ledger migration and runtime
-reasoning artifacts are not yet complete.
+**Current blocker:** explicit task/branch state and disclosure ownership are
+unified. Automatic semantic frame classification, the full multidimensional
+budget `B`, typed activation/reasoning edges, and optional MGR artifact admission
+remain incomplete. HA/MGR default actuation also lacks natural utility evidence.
 
 **Done when:** every supported adapter receives model context through immutable
 projection revisions frozen from one bounded session AG; no duplicate working

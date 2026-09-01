@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -26,6 +25,7 @@ import {
   stagingDirFor,
 } from "../../../src/cli/archive-staging.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
+import { memoryDisclosureEntries } from "../../../src/integration/search-projection.ts";
 import { PI_BOARD_ACTIONS, PI_REMEMBER_ACTIONS } from "../../../src/integration/tool-contract.ts";
 import { resolveSkillOptPolicyChannels } from "../../../src/lab/skillopt-policy.ts";
 import type {
@@ -89,7 +89,6 @@ function projectDirectory(): string {
 
 export default function nmgExtension(pi: ExtensionAPI): void {
   let connectionPromise: Promise<DaemonConnection> | undefined;
-  const injectionWindow = new SessionInjectionWindow();
   const taskWindow = new SessionTaskWindow();
   const recallFlow = new SessionRecallFlow();
   const agentAttributionFlow = new AgentAttributionFlow(32);
@@ -135,6 +134,57 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     params: Record<string, unknown>,
   ) => invokeDaemon(await connection(), method, params);
 
+  const formatDisclosedContext = async (
+    sessionId: string,
+    context: MemoryContext,
+    disclosure: DisclosureLevel,
+  ): Promise<string> => {
+    if (context.results.length === 0) {
+      return disclosure === "header" ? "No matching NMG memory found." : "";
+    }
+    try {
+      const decision = (await invoke("sessionActiveGraph", {
+        action: "disclose",
+        sessionId,
+        projectionId: context.activeGraph?.id,
+        disclosure,
+        entries: memoryDisclosureEntries(context, disclosure),
+      })) as { freshMemoryIds: string[]; foldedMemoryIds: string[] };
+      const freshIds = new Set(decision.freshMemoryIds);
+      const foldedIds = new Set(decision.foldedMemoryIds);
+      const fresh = context.results.filter((result) => freshIds.has(result.memory.id));
+      const folded = context.results.filter((result) => foldedIds.has(result.memory.id));
+      const sections: string[] = [];
+      if (fresh.length > 0) {
+        const visible = { ...context, results: fresh } as MemoryContext;
+        sections.push(
+          disclosure === "header" ? formatSearchHeaders(visible) : formatMemoryContext(visible),
+        );
+      }
+      if (folded.length > 0) {
+        sections.push(
+          nmgPrompts.in_context_title +
+            "\n" +
+            folded.map(({ memory }) => `- memory=${memory.id}; already_in_context=true`).join("\n"),
+        );
+      }
+      if (disclosure === "header" && fresh.length === 0) {
+        const activeGraph = formatActiveGraph(context);
+        if (activeGraph) sections.push(activeGraph);
+      }
+      return sections.join("\n");
+    } catch {
+      return disclosure === "header" ? formatSearchHeaders(context) : formatMemoryContext(context);
+    }
+  };
+  const beginDisclosureTurn = async (sessionId: string, enabled: boolean): Promise<void> => {
+    if (!enabled) return;
+    await invoke("sessionActiveGraph", {
+      action: "beginDisclosureTurn",
+      sessionId,
+    }).catch(() => undefined);
+  };
+
   // git commit via the bash tool is the strongest "milestone" signal available
   // to the extension; remember it so the next turn can offer NMG memory. The
   // detection moved from the pre-execution tool_call hook to tool_result so it
@@ -161,8 +211,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
 
   pi.on("before_agent_start", async (event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
-    injectionWindow.beginTurn(sessionId);
-    const isNewUserTurn = recallFlow.beginTurn(sessionId, event.prompt);
+    const isNewUserTurn = recallFlow.beginTurn(
+      sessionId,
+      piUserTurnKey(ctx.sessionManager, event.prompt),
+    );
+    await beginDisclosureTurn(sessionId, isNewUserTurn);
     const completionNudge = popCompletionNudge(event.prompt);
     // Pi re-enters before_agent_start after tool results. A completed graph may
     // already exist at that point, but it must be reviewed on the next user
@@ -263,7 +316,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       if (qpp2Mode === "active") {
         context = await applyLearnedFold(context, controllerShadow, qpp2RetainedMass, false);
       }
-      const recalled = injectionWindow.format(sessionId, context, "header");
+      const recalled = await formatDisclosedContext(sessionId, context, "header");
       await controllerShadow.retrieval(fullContext, sessionId, "automatic", recalled);
       // Automatic recall is still a retrieval trace. Keep it in the per-turn
       // attribution window so agent_end can distinguish surfaced evidence from
@@ -685,7 +738,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
 
   pi.on("session_shutdown", async (event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
-    injectionWindow.clear(sessionId);
     taskWindow.clear(sessionId);
     recallFlow.clear(sessionId);
     agentAttributionFlow.clear(sessionId);
@@ -738,7 +790,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
 
   pi.on("session_before_compact", async (_event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
-    injectionWindow.clear(sessionId);
+    await invoke("sessionActiveGraph", { action: "clearDisclosures", sessionId }).catch(
+      () => undefined,
+    );
     try {
       await invoke("sessionActiveGraph", { action: "activate", sessionId });
     } catch {
@@ -1416,7 +1470,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         result.results.map((entry) => entry.memory.id),
       );
       agentAttributionFlow.note(ctx.sessionManager.getSessionId(), result);
-      const text = injectionWindow.format(ctx.sessionManager.getSessionId(), result, "evidence");
+      const text = await formatDisclosedContext(
+        ctx.sessionManager.getSessionId(),
+        result,
+        "evidence",
+      );
       return toolResult(result, text || "No active memory found.");
     },
   });
@@ -1506,7 +1564,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         sessionId,
         result.results.map((entry) => entry.memory.id),
       );
-      const text = injectionWindow.format(sessionId, result, "header");
+      const text = await formatDisclosedContext(sessionId, result, "header");
       await controllerShadow.retrieval(fullResult, sessionId, "tool", text);
       agentAttributionFlow.note(sessionId, fullResult);
       return toolResult(result, text);
@@ -2049,6 +2107,29 @@ export function selectPiEvidenceSource(
   return resolvePiEvidenceSource(sessionManager, evidence, sourceActor).source;
 }
 
+/** Prefer Pi's stable user-message id over prompt text. A repeated user prompt
+ * is still a new turn, while tool-loop re-entry keeps the same message id. */
+export function piUserTurnKey(
+  sessionManager: { getBranch?: () => unknown[] },
+  prompt: string,
+): string {
+  if (typeof sessionManager.getBranch !== "function") return `prompt:${prompt}`;
+  const branch = sessionManager.getBranch();
+  if (!Array.isArray(branch)) return `prompt:${prompt}`;
+  for (let index = branch.length - 1; index >= 0; index -= 1) {
+    const entry = branch[index] as
+      { type?: unknown; id?: unknown; message?: { role?: unknown } } | undefined;
+    if (
+      entry?.type === "message" &&
+      entry.message?.role === "user" &&
+      typeof entry.id === "string"
+    ) {
+      return `message:${entry.id}`;
+    }
+  }
+  return `prompt:${prompt}`;
+}
+
 export function resolvePiEvidenceSource(
   sessionManager: {
     getSessionId(): string;
@@ -2113,95 +2194,6 @@ function messageText(content: unknown): string {
 }
 
 type DisclosureLevel = "header" | "exact" | "evidence";
-
-interface InjectionEntry {
-  contentHash: string;
-  disclosure: DisclosureLevel;
-  turn: number;
-}
-
-interface SessionInjectionState {
-  turn: number;
-  entries: Map<string, InjectionEntry>;
-}
-
-/** Small, session-local cache of memory content already placed in Pi's context. */
-export class SessionInjectionWindow {
-  readonly #sessions = new Map<string, SessionInjectionState>();
-  readonly maxTurns: number;
-  readonly maxEntries: number;
-
-  constructor(maxTurns = 12, maxEntries = 128) {
-    this.maxTurns = maxTurns;
-    this.maxEntries = maxEntries;
-  }
-
-  beginTurn(sessionId: string): void {
-    const state = this.#state(sessionId);
-    state.turn += 1;
-    for (const [memoryId, entry] of state.entries) {
-      if (state.turn - entry.turn >= this.maxTurns) state.entries.delete(memoryId);
-    }
-  }
-
-  clear(sessionId: string): void {
-    this.#sessions.delete(sessionId);
-  }
-
-  format(sessionId: string, context: MemoryContext, disclosure: DisclosureLevel): string {
-    if (context.results.length === 0) {
-      return disclosure === "header" ? "No matching NMG memory found." : "";
-    }
-    const state = this.#state(sessionId);
-    const fresh = [];
-    const folded = [];
-    for (const result of context.results) {
-      const contentHash = injectionHash(result);
-      const previous = state.entries.get(result.memory.id);
-      const alreadyAvailable =
-        previous?.contentHash === contentHash &&
-        disclosureRank(previous.disclosure) >= disclosureRank(disclosure);
-      if (alreadyAvailable) folded.push(result);
-      else {
-        fresh.push(result);
-        state.entries.delete(result.memory.id);
-        state.entries.set(result.memory.id, { contentHash, disclosure, turn: state.turn });
-      }
-    }
-    while (state.entries.size > this.maxEntries) {
-      state.entries.delete(state.entries.keys().next().value!);
-    }
-
-    const sections = [];
-    if (fresh.length > 0) {
-      const visible = { ...context, results: fresh } as MemoryContext;
-      sections.push(
-        disclosure === "header" ? formatSearchHeaders(visible) : formatMemoryContext(visible),
-      );
-    }
-    if (folded.length > 0) {
-      sections.push(
-        nmgPrompts.in_context_title +
-          "\n" +
-          folded.map(({ memory }) => `- memory=${memory.id}; already_in_context=true`).join("\n"),
-      );
-    }
-    if (disclosure === "header" && fresh.length === 0) {
-      const activeGraph = formatActiveGraph(context);
-      if (activeGraph) sections.push(activeGraph);
-    }
-    return sections.join("\n");
-  }
-
-  #state(sessionId: string): SessionInjectionState {
-    let state = this.#sessions.get(sessionId);
-    if (!state) {
-      state = { turn: 0, entries: new Map() };
-      this.#sessions.set(sessionId, state);
-    }
-    return state;
-  }
-}
 
 interface SessionTaskState {
   anchors: string[];
@@ -2466,15 +2458,6 @@ export class SessionRecallFlow {
       loadedIds: new Set<string>(),
     };
   }
-}
-
-function disclosureRank(level: DisclosureLevel): number {
-  return { header: 0, exact: 1, evidence: 2 }[level];
-}
-
-function injectionHash(result: MemoryContext["results"][number]): string {
-  const content = `${result.memory.statement}\n${result.evidence.content}`;
-  return createHash("sha256").update(content).digest("base64url");
 }
 
 const nmgPrompts = loadPrompts();

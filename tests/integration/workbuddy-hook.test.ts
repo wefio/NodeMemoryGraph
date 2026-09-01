@@ -59,7 +59,7 @@ function jsonRpc(result: unknown): Response {
   });
 }
 
-test("WorkBuddy recall verifies v9, keeps recall independent from coordination, and releases its AG", async () => {
+test("WorkBuddy recall verifies v9 and uses the daemon-owned session disclosure ledger", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-workbuddy-hook-"));
   writeLease(directory);
   const originalFetch = globalThis.fetch;
@@ -79,7 +79,18 @@ test("WorkBuddy recall verifies v9, keeps recall independent from coordination, 
       });
     }
     if (body.method === "search") return jsonRpc(searchContext());
-    if (body.method === "sessionActiveGraph") return jsonRpc({ action: "release", released: true });
+    if (body.method === "sessionActiveGraph") {
+      if (body.params.action === "beginDisclosureTurn") {
+        return jsonRpc({ action: "beginDisclosureTurn", turn: 1 });
+      }
+      if (body.params.action === "disclose") {
+        return jsonRpc({
+          action: "disclose",
+          freshMemoryIds: ["memory-atlas"],
+          foldedMemoryIds: [],
+        });
+      }
+    }
     throw new Error(`unexpected RPC ${body.method}`);
   }) as typeof fetch;
   try {
@@ -94,16 +105,19 @@ test("WorkBuddy recall verifies v9, keeps recall independent from coordination, 
     );
     assert.match(output, /Atlas uses SQLite offline/u);
     assert.match(output, /call nmg_search through/u);
-    assert.doesNotMatch(output, /activeGraphId=/u);
-    assert.doesNotMatch(output, /logical_chains=/u);
+    assert.match(output, /activeGraphId=/u);
+    assert.match(output, /logical_chains=1/u);
     assert.equal(calls.filter((call) => call.method === "hello").length, 1);
     assert.equal(calls.filter((call) => call.method === "taskBoard").length, 0);
     const search = calls.find((call) => call.method === "search")!;
     assert.equal(search.params.projectDir, "C:/workspace/atlas");
-    assert.match(String(search.params.sessionId), /^workbuddy-hook:workbuddy-session:/u);
-    const release = calls.find((call) => call.method === "sessionActiveGraph")!;
-    assert.equal(release.params.action, "release");
-    assert.equal(release.params.sessionId, search.params.sessionId);
+    assert.equal(search.params.sessionId, "workbuddy-hook:workbuddy-session");
+    const agCalls = calls.filter((call) => call.method === "sessionActiveGraph");
+    assert.deepEqual(
+      agCalls.map((call) => call.params.action),
+      ["beginDisclosureTurn", "disclose"],
+    );
+    assert.ok(agCalls.every((call) => call.params.sessionId === search.params.sessionId));
   } finally {
     globalThis.fetch = originalFetch;
     rmSync(directory, { recursive: true, force: true });

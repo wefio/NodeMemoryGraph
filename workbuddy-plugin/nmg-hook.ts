@@ -16,16 +16,18 @@
  * The hook is deliberately passive: it never starts a daemon and only talks to
  * a live HTTP lease (<dataDir>/nmg.sqlite.server.json with an alive pid), so a
  * stopped memory layer never delays a user turn. All failures are silent —
- * exit 0 always. Recall dedup keeps a per-session id window in
- * <dataDir>/workbuddy-recall-state.json.
+ * exit 0 always. Recall dedup is owned by the daemon's session AG disclosure
+ * ledger, not a hook-local state file.
  */
-import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { renderCompactSearchSurface } from "../src/integration/agent-surface.ts";
-import { compactSearchContext } from "../src/integration/search-projection.ts";
+import {
+  compactDisclosureEntries,
+  compactSearchContext,
+} from "../src/integration/search-projection.ts";
 import type { MemoryContext } from "../src/core/types.ts";
 import { assertDaemonProtocol } from "../src/cli/daemon-client.ts";
 import type { NmgHelloResult } from "../src/cli/protocol.ts";
@@ -55,7 +57,6 @@ const RECALL_LIMIT = 13;
 const RECALL_MAX_TIER = 1;
 const RECALL_GRAPH_HOPS = 1;
 const RECALL_QUERY_CHARS = 400;
-const RECALL_DEDUP_WINDOW = 60;
 const RPC_TIMEOUT_MS = 2_000;
 
 const WORLD_BOARD_ID = "default";
@@ -228,48 +229,42 @@ export async function recallHeaders(payload, dir = dataDir()): Promise<string> {
   const query = promptText(payload).trim().slice(0, RECALL_QUERY_CHARS);
   if (!query) return "";
   const { sessionId } = agentIdentity(payload);
-  const recallSessionId = `workbuddy-hook:${sessionId}:${randomUUID()}`;
-  let context: MemoryContext;
-  try {
-    context = (await rpcCall(lease, "search", {
-      query,
-      limit: RECALL_LIMIT,
-      maxTier: RECALL_MAX_TIER,
-      graphHops: RECALL_GRAPH_HOPS,
-      tieredDisclosure: true,
-      sessionId: recallSessionId,
-      projectDir:
-        typeof payload?.cwd === "string" && payload.cwd.trim() ? payload.cwd : process.cwd(),
-    })) as MemoryContext;
-  } finally {
-    await rpcCall(lease, "sessionActiveGraph", {
-      action: "release",
-      sessionId: recallSessionId,
-    }).catch(() => {});
-  }
+  const recallSessionId = `workbuddy-hook:${sessionId}`;
+  await rpcCall(lease, "sessionActiveGraph", {
+    action: "beginDisclosureTurn",
+    sessionId: recallSessionId,
+  }).catch(() => undefined);
+  const context = (await rpcCall(lease, "search", {
+    query,
+    limit: RECALL_LIMIT,
+    maxTier: RECALL_MAX_TIER,
+    graphHops: RECALL_GRAPH_HOPS,
+    tieredDisclosure: true,
+    sessionId: recallSessionId,
+    projectDir:
+      typeof payload?.cwd === "string" && payload.cwd.trim() ? payload.cwd : process.cwd(),
+  })) as MemoryContext;
   const compact = compactSearchContext(context);
   if (compact.candidates.length === 0) return "";
-
-  // Fold repeated ids within a per-session window: only unseen headers ride
-  // this turn; a wholly-seen set injects nothing.
-  const statePath = join(dir, "workbuddy-recall-state.json");
-  const state = readJson(statePath) ?? {};
-  const seen: string[] = Array.isArray(state[sessionId]) ? state[sessionId] : [];
-  const seenSet = new Set(seen);
-  const fresh = compact.candidates.filter((candidate) => !seenSet.has(candidate.id));
+  const rawDisclosure = (await rpcCall(lease, "sessionActiveGraph", {
+    action: "disclose",
+    sessionId: recallSessionId,
+    projectionId: compact.activeGraphId ?? undefined,
+    disclosure: "header",
+    entries: compactDisclosureEntries(compact),
+  }).catch(() => null)) as { freshMemoryIds?: unknown } | null;
+  const disclosure = {
+    freshMemoryIds: Array.isArray(rawDisclosure?.freshMemoryIds)
+      ? rawDisclosure.freshMemoryIds
+      : compact.candidates.map((candidate) => candidate.id),
+  };
+  const freshIds = new Set(disclosure.freshMemoryIds);
+  const fresh = compact.candidates.filter((candidate) => freshIds.has(candidate.id));
   if (fresh.length === 0) return "";
-  const freshIds = fresh.map((candidate) => candidate.id);
-  state[sessionId] = [...freshIds, ...seen].slice(0, RECALL_DEDUP_WINDOW);
-  writeJson(statePath, state);
 
   const projected = {
     ...compact,
     candidates: fresh,
-    activeGraphId: null,
-    deferredMemoryIds: [],
-    // The detached hook has released its projection; chain names remain useful
-    // hints, but continuation counts and get guidance require a tool-side AG.
-    logicalChainCount: 0,
   };
   const surface = renderCompactSearchSurface(projected, { emptyText: "" });
   return [RECALL_PREAMBLE, surface].join("\n");

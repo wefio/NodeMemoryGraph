@@ -38,6 +38,7 @@ import type {
   TruthStatus,
 } from "../core/types.ts";
 import type {
+  SessionDisclosureLevel,
   SessionActiveGraphItem,
   SessionActiveGraphItemKind,
   SessionActiveGraphSnapshot,
@@ -380,12 +381,23 @@ export type NmgSessionActiveGraphParams =
       kind?: Exclude<SessionActiveGraphItemKind, "semantic_memory">;
       activation?: number;
     }
-  | { action: "snapshot" | "activate" | "release"; sessionId: string };
+  | { action: "snapshot" | "activate" | "release" | "clearDisclosures"; sessionId: string }
+  | { action: "beginDisclosureTurn"; sessionId: string }
+  | {
+      action: "disclose";
+      sessionId: string;
+      projectionId?: string;
+      disclosure: SessionDisclosureLevel;
+      entries: Array<{ memoryId: string; contentHash: string }>;
+    };
 
 export type NmgSessionActiveGraphResult =
   | { action: "observe"; added: boolean; item: SessionActiveGraphItem }
   | { action: "snapshot" | "activate"; snapshot: SessionActiveGraphSnapshot | null }
-  | { action: "release"; released: boolean };
+  | { action: "release"; released: boolean }
+  | { action: "clearDisclosures"; cleared: boolean }
+  | { action: "beginDisclosureTurn"; turn: number }
+  | { action: "disclose"; freshMemoryIds: string[]; foldedMemoryIds: string[] };
 
 export interface NmgChainCreateParams {
   chainType: MemoryChainType;

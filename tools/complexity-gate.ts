@@ -18,6 +18,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import ts from "typescript";
 
 const root = resolve(import.meta.dirname, "..");
 const maxComplexity = 15;
@@ -124,7 +125,7 @@ async function complexitiesFor(filePath: string, source: string): Promise<Comple
     const parsed = JSON.parse(output) as Array<{
       messages: Array<{ line: number; ruleId: string; message: string }>;
     }>;
-    return extractComplexityFindings(filePath, parsed);
+    return extractComplexityFindings(filePath, source, parsed);
   } catch {
     // A parse/config failure means we cannot measure this file; ignore it
     // rather than fail the whole gate on an unrelated tooling issue.
@@ -140,6 +141,7 @@ async function complexitiesFor(filePath: string, source: string): Promise<Comple
 
 function extractComplexityFindings(
   filePath: string,
+  source: string,
   reports: Array<{ messages: Array<{ line: number; ruleId: string; message: string }> }>,
 ): ComplexityFinding[] {
   const findings: ComplexityFinding[] = [];
@@ -148,18 +150,61 @@ function extractComplexityFindings(
       if (message.ruleId !== "complexity") continue;
       const count = Number(/complexity of (\d+)/u.exec(message.message)?.[1] ?? 0);
       const nameMatch =
-        /(?:Function|Method|Async arrow function|Async function|Async method|Arrow function)\s+'([^']+)'/u.exec(
+        /(?:Function|Method|Async arrow function|Async function|Async method|Arrow function|Private method)\s+'([^']+)'/u.exec(
           message.message,
         );
       findings.push({
         file: filePath,
         line: message.line,
-        name: nameMatch?.[1] ?? `<line ${message.line}>`,
+        name: nameMatch?.[1] ?? functionIdentityAtLine(filePath, source, message.line),
         complexity: count,
       });
     }
   }
   return findings;
+}
+
+/** Stable identity for anonymous callbacks. Line numbers are not identities:
+ * inserting code above a callback must not make existing complexity debt look
+ * like a newly added function. */
+export function functionIdentityAtLine(filePath: string, source: string, line: number): string {
+  const scriptKind = filePath.endsWith(".js") ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKind,
+  );
+  let best: ts.FunctionLikeDeclaration | undefined;
+  const visit = (node: ts.Node): void => {
+    if (ts.isFunctionLike(node) && containsLine(sourceFile, node, line)) {
+      if (!best || node.getWidth(sourceFile) < best.getWidth(sourceFile)) best = node;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return best ? functionIdentity(best, sourceFile) : `<line ${line}>`;
+}
+
+function containsLine(sourceFile: ts.SourceFile, node: ts.Node, line: number): boolean {
+  const start = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+  const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd()).line + 1;
+  return line >= start && line <= end;
+}
+
+function functionIdentity(node: ts.FunctionLikeDeclaration, sourceFile: ts.SourceFile): string {
+  if (node.name) return node.name.getText(sourceFile);
+  const parent = node.parent;
+  if (ts.isVariableDeclaration(parent)) return parent.name.getText(sourceFile);
+  if (ts.isPropertyAssignment(parent)) return parent.name.getText(sourceFile);
+  if (ts.isCallExpression(parent)) {
+    const label = parent.arguments[0];
+    const suffix = label && ts.isStringLiteralLike(label) ? `:${label.text}` : "";
+    const argumentIndex = parent.arguments.findIndex((argument) => argument === node);
+    return `${parent.expression.getText(sourceFile)}${suffix}#${argumentIndex}`;
+  }
+  return `<anonymous:${node.kind}>`;
 }
 
 /** Complexity per (file, method-name) for a whole tree, keyed for diffing. */

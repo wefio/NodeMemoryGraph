@@ -20,7 +20,7 @@ import { connect } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
 import { coordinationEnabled as configuredCoordinationEnabled } from '../../../../src/integration/config.ts'
 import { COMMON_BOARD_ACTIONS, COMMON_REMEMBER_ACTIONS } from '../../../../src/integration/tool-contract.ts'
-import { compactSearchContext } from '../../../../src/integration/search-projection.ts'
+import { compactDisclosureEntries, compactSearchContext, memoryDisclosureEntries } from '../../../../src/integration/search-projection.ts'
 import {
   renderCompactSearchSurface,
   renderEvidenceSurface,
@@ -295,33 +295,35 @@ export function apply(ctx: Context): () => void {
   // snapshot appears from the next step — and, being runtime context, stays in
   // front of the model for the whole turn rather than only the first step.
 
-  const recallWindows = new Map() // sessionId -> { generation, injected: Map<id, generation> }
+  const recallGenerations = new Map() // sessionId -> generation
   const sessionTokenTotals = new Map() // sessionId -> total estimated recall tokens
   const recallBatch = new Map() // sessionId -> recall[] (newest first, capped at MAX_RECALL_HISTORY)
   const MAX_RECALL_HISTORY = 5 // per-session recall rounds kept for the floating indicator
   const openSearches = new Map() // sessionId -> Promise that resolves once the stash is written
 
   function nextGeneration(sessionId) {
-    let window = recallWindows.get(sessionId)
-    if (!window) {
-      window = { generation: 0, injected: new Map() }
-      recallWindows.set(sessionId, window)
-    }
-    window.generation += 1
-    return window
+    const generation = (recallGenerations.get(sessionId) || 0) + 1
+    recallGenerations.set(sessionId, generation)
+    return generation
   }
 
-  function filterRecallCandidates(window, generation, candidates) {
-    const fresh = []
-    for (const candidate of candidates || []) {
-      const previousGeneration = window.injected.get(candidate.id)
-      if (previousGeneration != null && generation - previousGeneration <= 12) continue
-      fresh.push(candidate)
-    }
-    for (const [id, injectedGeneration] of window.injected) {
-      if (generation - injectedGeneration > 12) window.injected.delete(id)
-    }
-    return fresh
+  async function disclose(sessionId, activeGraphId, disclosure, entries) {
+    const decision = await daemonCall('sessionActiveGraph', {
+      action: 'disclose',
+      sessionId,
+      projectionId: activeGraphId || undefined,
+      disclosure,
+      entries,
+    })
+    return decision && Array.isArray(decision.freshMemoryIds)
+      ? decision
+      : { freshMemoryIds: entries.map((entry) => entry.memoryId), foldedMemoryIds: [] }
+  }
+
+  function foldedDisclosureText(memoryIds) {
+    if (!Array.isArray(memoryIds) || memoryIds.length === 0) return ''
+    return nmgPrompts.in_context_title + '\n' +
+      memoryIds.map((id) => '- memory=' + id + '; already_in_context=true').join('\n')
   }
 
   function extractUserPrompt(message) {
@@ -412,10 +414,13 @@ export function apply(ctx: Context): () => void {
       const sessionId = String(agent.id)
       const query = extractUserPrompt(message)
       if (!query) return
-      const window = nextGeneration(sessionId)
-      const generation = window.generation
+      const generation = nextGeneration(sessionId)
       const run = (async () => {
         try {
+          await daemonCall('sessionActiveGraph', {
+            action: 'beginDisclosureTurn',
+            sessionId,
+          })
           // An empty/no-match search for this new turn must NOT clear the
           // session's last successful recall snapshot — the floating indicator
           // (and the model context out-of-band) should keep showing the most
@@ -426,7 +431,19 @@ export function apply(ctx: Context): () => void {
           if (!recall || !Array.isArray(recall.candidates) || recall.candidates.length === 0) {
             return
           }
-          const fresh = filterRecallCandidates(window, generation, recall.candidates)
+          const disclosure = await disclose(
+            sessionId,
+            recall.activeGraphId,
+            'header',
+            compactDisclosureEntries({
+              candidates: recall.candidates,
+              logicalChainCount: recall.logicalChainCount || 0,
+              activeGraphId: recall.activeGraphId || null,
+              deferredMemoryIds: recall.deferredMemoryIds || [],
+            }),
+          )
+          const freshIds = new Set(disclosure.freshMemoryIds)
+          const fresh = recall.candidates.filter((candidate) => freshIds.has(candidate.id))
           if (fresh.length === 0) return
           const thisTokens =
             recall.tokens != null
@@ -445,7 +462,6 @@ export function apply(ctx: Context): () => void {
           }
           const history = recallBatch.get(sessionId)
           recallBatch.set(sessionId, [entry, ...(history || [])].slice(0, MAX_RECALL_HISTORY))
-          for (const candidate of fresh) window.injected.set(candidate.id, generation)
         } catch {
           // Keep the last successful snapshot on any recall failure.
         }
@@ -509,12 +525,13 @@ export function apply(ctx: Context): () => void {
     try {
       if (payload && payload.agent) {
         const id = String(payload.agent.id)
-        recallWindows.delete(id)
+        recallGenerations.delete(id)
         sessionTokenTotals.delete(id)
         recallBatch.delete(id)
         openSearches.delete(id)
         wakeBatch.delete(id)
         lastAgents.delete(id)
+        void daemonCall('sessionActiveGraph', { action: 'release', sessionId: id })
       }
     } catch {
       // cleanup is best-effort
@@ -1007,7 +1024,8 @@ export function apply(ctx: Context): () => void {
     },
     output: textOutput,
     async execute(args, exec) {
-      const params: Record<string, any> = { query: args.query, projectDir: workspaceRoot }
+      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
+      const params: Record<string, any> = { query: args.query, projectDir: workspaceRoot, sessionId }
       if (args.limit != null) params.limit = args.limit
       if (args.maxTier != null) params.maxTier = args.maxTier
       if (args.graphHops != null) params.graphHops = args.graphHops
@@ -1023,10 +1041,17 @@ export function apply(ctx: Context): () => void {
       if (args.sourceActor) argv.push('--source-actor', args.sourceActor)
       if (args.includeHistorical) argv.push('--include-historical')
       for (const pair of scopeArgs(args.scope)) argv.push(pair[0], pair[1])
-      argv.push('--project-dir', workspaceRoot, '--json')
+      argv.push('--project-dir', workspaceRoot, '--session-id', sessionId, '--json')
       const r = await invoke('search', params, argv, exec.signal, null)
       if (!r.ok) return r.error
-      const data = r.data
+      const disclosure = await disclose(
+        sessionId,
+        r.data.activeGraph && r.data.activeGraph.id,
+        'header',
+        memoryDisclosureEntries(r.data, 'header'),
+      )
+      const freshIds = new Set(disclosure.freshMemoryIds)
+      const data = { ...r.data, results: r.data.results.filter((result) => freshIds.has(result.memory.id)) }
       const deferred = data.progressiveDisclosure && data.progressiveDisclosure.deferredMemoryIds
       const nextStep = Array.isArray(deferred) && deferred.length
         ? 'More ranked records are folded. Expand selected memory IDs first; deferred IDs: ' + deferred.join(',')
@@ -1034,14 +1059,14 @@ export function apply(ctx: Context): () => void {
       const forget = data.results.some((result) =>
         (result.memory.markers || []).some((marker) => marker.kind === 'forget'),
       )
-      return renderSearchSurface(data, {
+      return [renderSearchSurface(data, {
         preamble: renderDisclosure(nmgPrompts.search_disclosure, {}),
         postamble: renderDisclosure(nmgPrompts.search_disclosure_metadata, {
           count: String(data.results.length),
           next_step: nextStep,
           forget_hint: forget ? nmgPrompts.forget_hint : '',
         }),
-      })
+      }), foldedDisclosureText(disclosure.foldedMemoryIds)].filter(Boolean).join('\n')
     },
   }
 
@@ -1061,19 +1086,28 @@ export function apply(ctx: Context): () => void {
     async execute(args, exec) {
       const ids = Array.isArray(args.memoryIds) ? args.memoryIds : []
       if (ids.length === 0) return 'nmg_get requires at least one memory ID.'
-      const params: Record<string, any> = { memoryIds: ids, projectDir: workspaceRoot }
+      const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
+      const params: Record<string, any> = { memoryIds: ids, projectDir: workspaceRoot, sessionId }
       if (args.activeGraphId) params.activeGraphId = args.activeGraphId
       if (args.graphHops != null) params.graphHops = args.graphHops
       const argv = ['get'].concat(ids)
       if (args.activeGraphId) argv.push('--active-graph-id', args.activeGraphId)
       if (args.graphHops != null) argv.push('--graph-hops', String(args.graphHops))
-      argv.push('--project-dir', workspaceRoot, '--json')
+      argv.push('--project-dir', workspaceRoot, '--session-id', sessionId, '--json')
       const r = await invoke('get', params, argv, exec.signal, null)
       if (!r.ok) return r.error
-      const forget = r.data.results.some((result) =>
+      const disclosure = await disclose(
+        sessionId,
+        args.activeGraphId,
+        'evidence',
+        memoryDisclosureEntries(r.data, 'evidence'),
+      )
+      const freshIds = new Set(disclosure.freshMemoryIds)
+      const visible = { ...r.data, results: r.data.results.filter((result) => freshIds.has(result.memory.id)) }
+      const forget = visible.results.some((result) =>
         (result.memory.markers || []).some((marker) => marker.kind === 'forget'),
       )
-      return renderEvidenceSurface(r.data, {
+      return [renderEvidenceSurface(visible, {
         preamble: renderDisclosure(nmgPrompts.get_disclosure, {}),
         postamble: renderDisclosure(nmgPrompts.get_disclosure_metadata, {
           count: String(r.data.results.length),
@@ -1081,7 +1115,7 @@ export function apply(ctx: Context): () => void {
           forget_hint: forget ? nmgPrompts.forget_hint : '',
         }),
         missingMemoryIds: Array.isArray(r.data.missingMemoryIds) ? r.data.missingMemoryIds : undefined,
-      })
+      }), foldedDisclosureText(disclosure.foldedMemoryIds)].filter(Boolean).join('\n')
     },
   }
 
@@ -1511,7 +1545,7 @@ export function apply(ctx: Context): () => void {
     for (const dispose of disposers) {
       if (typeof dispose === 'function') dispose()
     }
-    recallWindows.clear()
+    recallGenerations.clear()
     sessionTokenTotals.clear()
     recallBatch.clear()
     openSearches.clear()

@@ -2,8 +2,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { SessionInjectionWindow } from "../../.pi/extensions/nmg/index.ts";
+import { SessionActiveGraphRuntime } from "../../src/core/session-active-graph.ts";
 import { NmgStore } from "../../src/core/store.ts";
+import { memoryDisclosureEntries } from "../../src/integration/search-projection.ts";
 
 const directory = mkdtempSync(join(tmpdir(), "nmg-disclosure-eval-"));
 const store = new NmgStore(join(directory, "nmg.sqlite"));
@@ -23,6 +24,7 @@ try {
   }
 
   const common = {
+    sessionId: "eval-session",
     maxTier: 1 as const,
     limit: 32,
     activeGraphBudget: { maxTokens: 20_000, maxEvidence: 32, maxLocalTier: 1 as const },
@@ -36,11 +38,28 @@ try {
     progressiveWarmDisclosure: true,
   });
 
-  const window = new SessionInjectionWindow();
-  window.beginTurn("eval-session");
-  const firstInjection = window.format("eval-session", progressive, "header");
-  window.beginTurn("eval-session");
-  const repeatedInjection = window.format("eval-session", progressive, "header");
+  const runtime = new SessionActiveGraphRuntime();
+  const projection = runtime.registerProjection(progressive.activeGraph!, []);
+  runtime.beginDisclosureTurn("eval-session");
+  const entries = memoryDisclosureEntries(progressive, "header");
+  const first = runtime.disclose({
+    sessionId: "eval-session",
+    projectionId: projection.projectionId,
+    disclosure: "header",
+    entries,
+  });
+  runtime.beginDisclosureTurn("eval-session");
+  const repeated = runtime.disclose({
+    sessionId: "eval-session",
+    projectionId: projection.projectionId,
+    disclosure: "header",
+    entries,
+  });
+  const firstInjection = progressive.results
+    .filter((result) => first.freshMemoryIds.includes(result.memory.id))
+    .map((result) => result.memory.statement)
+    .join("\n");
+  const repeatedInjection = repeated.foldedMemoryIds.join("\n");
 
   console.log(
     JSON.stringify(

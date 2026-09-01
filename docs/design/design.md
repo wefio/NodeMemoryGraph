@@ -841,17 +841,19 @@ Agent B private AG ─┘                       │
                                            └─ explicit remember only ─▶ STG/LTG
 ```
 
-**Implementation status:** the daemon now owns a bounded, memory-resident
-session AG registry. Every service search freezes a distinct `projectionId`
-while retaining a stable session `agId`, a monotonic projection sequence,
-`taskFrameId`, parent revision, and the persisted retrieval `traceIds` that
-supplied it. `get`, diagnostic attribution, and claim outcomes resolve the
-projection back to its owning traces and reject cross-session use. Pi tool and
-Task Board observations enter this shared runtime through `sessionActiveGraph`;
-compaction activates their temporary model projection and session shutdown
-releases it. The old Pi `SessionRuntimeAg` no longer exists. The Pi disclosure
-window is still adapter-local, and automatic task-frame switching/cooling is
-not yet implemented.
+**Implementation status:** the daemon owns the bounded, memory-resident session
+AG registry. Every service search freezes a distinct `projectionId` while
+retaining a stable session `agId`, monotonic projection sequence, `taskFrameId`,
+parent revision, and persisted retrieval `traceIds`. `get`, diagnostic
+attribution, and claim outcomes resolve the projection to its owning traces and
+reject cross-session use. Pi tool and Task Board observations enter the shared
+runtime through `sessionActiveGraph`; compaction activates temporary state and
+clears the content-disclosure ledger, while session shutdown releases the AG.
+Pi, DSH, WorkBuddy and MCP use that daemon ledger for bounded content-hash/depth
+folding instead of adapter-local injection caches. Explicit task frames, bounded
+cooling and frame-local parent chains are implemented; reliable **automatic
+semantic** task-frame classification remains open and must not be inferred from
+the current query-derived task identifier.
 
 The shared Task Board is implemented in SQLite and
 exposed by daemon RPC and CLI (`nmg board put/read/resolve`). Adapters expose the
@@ -915,8 +917,10 @@ fast `h1` state belongs to the in-memory AG and must be isolated by session and
 branch. Slower learned parameters, if validated, belong to versioned
 controller/Lab state rather than the AG itself. Router runtime instances now
 isolate `h1` by session and discard that fast state on session release; the
-learned base parameters remain separate. Task-frame cooling and HA-driven
-admission are still open.
+learned base parameters remain separate. Task-frame cooling is implemented
+deterministically. HA-driven admission remains opt-in and intentionally
+unconnected to default retrieval until natural evidence shows it improves
+utility rather than merely changing rank.
 
 The Memory-Graph Reasoner (MGR) may consume a bounded HA-selected subgraph and
 emit temporary hypotheses, operator paths, or what-if relations. MGR output is

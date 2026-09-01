@@ -10,6 +10,7 @@ import {
 import { resolveNmgDataDir } from "../../../src/cli/data-path.ts";
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import { coordinationEnabled } from "../../../src/integration/config.ts";
+import { memoryDisclosureEntries } from "../../../src/integration/search-projection.ts";
 import {
   COMMON_BOARD_ACTIONS,
   COMMON_REMEMBER_ACTIONS,
@@ -64,11 +65,18 @@ server.registerTool(
     },
   },
   async (params) => {
+    await invokeDaemon(connection, "sessionActiveGraph", {
+      action: "beginDisclosureTurn",
+      sessionId: BOARD_SESSION_ID,
+    }).catch(() => undefined);
     const r = (await invokeDaemon(connection, "search", {
       ...params,
       sessionId: BOARD_SESSION_ID,
     })) as MemoryContext;
-    return { content: [{ type: "text", text: searchH(r) }] };
+    const disclosed = await discloseContext(r, "header");
+    return {
+      content: [{ type: "text", text: searchH(disclosed.context, disclosed.foldedMemoryIds) }],
+    };
   },
 );
 
@@ -94,7 +102,10 @@ server.registerTool(
     })) as MemoryContext & {
       missingMemoryIds?: string[];
     };
-    return { content: [{ type: "text", text: memText(r) }] };
+    const disclosed = await discloseContext(r, "evidence", params.activeGraphId);
+    return {
+      content: [{ type: "text", text: memText(disclosed.context, disclosed.foldedMemoryIds) }],
+    };
   },
 );
 
@@ -529,6 +540,10 @@ if (coordinationEnabled()) await registerBoardAgent();
 const transport = new StdioServerTransport();
 await server.connect(transport);
 const done = async () => {
+  await invokeDaemon(connection, "sessionActiveGraph", {
+    action: "release",
+    sessionId: BOARD_SESSION_ID,
+  }).catch(() => undefined);
   await shutdownOwnedDaemon(connection);
   process.exit(0);
 };
@@ -537,7 +552,45 @@ process.on("SIGTERM", done);
 
 // ── Compact formatters ──
 
-function searchH(r: MemoryContext): string {
+async function discloseContext(
+  context: MemoryContext,
+  disclosure: "header" | "evidence",
+  projectionId = context.activeGraph?.id,
+): Promise<{ context: MemoryContext; foldedMemoryIds: string[] }> {
+  const rawDecision = (await invokeDaemon(connection, "sessionActiveGraph", {
+    action: "disclose",
+    sessionId: BOARD_SESSION_ID,
+    projectionId,
+    disclosure,
+    entries: memoryDisclosureEntries(context, disclosure),
+  }).catch(() => null)) as {
+    freshMemoryIds?: unknown;
+    foldedMemoryIds?: unknown;
+  } | null;
+  const freshMemoryIds = Array.isArray(rawDecision?.freshMemoryIds)
+    ? rawDecision.freshMemoryIds
+    : context.results.map((result) => result.memory.id);
+  const foldedMemoryIds = Array.isArray(rawDecision?.foldedMemoryIds)
+    ? rawDecision.foldedMemoryIds
+    : [];
+  const freshIds = new Set(freshMemoryIds);
+  return {
+    context: {
+      ...context,
+      results: context.results.filter((result) => freshIds.has(result.memory.id)),
+    },
+    foldedMemoryIds,
+  };
+}
+
+function foldedDisclosureText(memoryIds: string[]): string {
+  if (memoryIds.length === 0) return "";
+  return `${nmgPrompts.in_context_title}\n${memoryIds
+    .map((id) => `- memory=${id}; already_in_context=true`)
+    .join("\n")}`;
+}
+
+function searchH(r: MemoryContext, foldedMemoryIds: string[] = []): string {
   const deferred = r.progressiveDisclosure?.deferredMemoryIds;
   const nextStep =
     deferred && deferred.length > 0
@@ -546,7 +599,7 @@ function searchH(r: MemoryContext): string {
   const forget = r.results.some(({ memory: m }) =>
     (m.markers ?? []).some((marker) => marker.kind === "forget"),
   );
-  return renderSearchSurface(r, {
+  return [renderSearchSurface(r, {
     emptyText: "No NMG match.",
     preamble: renderDisclosure(nmgPrompts.search_disclosure, {}),
     postamble: renderDisclosure(nmgPrompts.search_disclosure_metadata, {
@@ -554,14 +607,17 @@ function searchH(r: MemoryContext): string {
       next_step: nextStep,
       forget_hint: forget ? nmgPrompts.forget_hint : "",
     }),
-  });
+  }), foldedDisclosureText(foldedMemoryIds)].filter(Boolean).join("\n");
 }
 
-function memText(r: MemoryContext & { missingMemoryIds?: string[] }): string {
+function memText(
+  r: MemoryContext & { missingMemoryIds?: string[] },
+  foldedMemoryIds: string[] = [],
+): string {
   const forget = r.results.some(({ memory }) =>
     (memory.markers ?? []).some((marker) => marker.kind === "forget"),
   );
-  return renderEvidenceSurface(r, {
+  return [renderEvidenceSurface(r, {
     preamble: renderDisclosure(nmgPrompts.get_disclosure, {}),
     postamble: renderDisclosure(nmgPrompts.get_disclosure_metadata, {
       count: String(r.results.length),
@@ -569,7 +625,7 @@ function memText(r: MemoryContext & { missingMemoryIds?: string[] }): string {
       forget_hint: forget ? nmgPrompts.forget_hint : "",
     }),
     missingMemoryIds: r.missingMemoryIds,
-  });
+  }), foldedDisclosureText(foldedMemoryIds)].filter(Boolean).join("\n");
 }
 
 function formatBoard(

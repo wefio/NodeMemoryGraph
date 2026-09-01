@@ -823,6 +823,24 @@ export class NmgService {
         snapshot: this.#sessionActiveGraphs.activateTemporaryProjection(params.sessionId),
       };
     }
+    if (params.action === "beginDisclosureTurn") {
+      return {
+        action: "beginDisclosureTurn",
+        turn: this.#sessionActiveGraphs.beginDisclosureTurn(params.sessionId),
+      };
+    }
+    if (params.action === "disclose") {
+      return {
+        action: "disclose",
+        ...this.#sessionActiveGraphs.disclose(params),
+      };
+    }
+    if (params.action === "clearDisclosures") {
+      return {
+        action: "clearDisclosures",
+        cleared: this.#sessionActiveGraphs.clearDisclosures(params.sessionId),
+      };
+    }
     const released = this.#sessionActiveGraphs.release(params.sessionId);
     this.#store?.clearSessionActivation(params.sessionId);
     for (const store of this.#stgStores.values()) store.clearSessionActivation(params.sessionId);
@@ -1979,9 +1997,38 @@ function parseSessionActiveGraphParams(value: unknown): NmgSessionActiveGraphPar
     "snapshot",
     "activate",
     "release",
+    "beginDisclosureTurn",
+    "disclose",
+    "clearDisclosures",
   ] as const);
   const sessionId = requiredString(params, "sessionId");
-  if (action !== "observe") return { action, sessionId };
+  if (
+    action === "beginDisclosureTurn" ||
+    action === "snapshot" ||
+    action === "activate" ||
+    action === "release" ||
+    action === "clearDisclosures"
+  ) {
+    return { action, sessionId };
+  }
+  if (action === "disclose") {
+    if (!Array.isArray(params.entries)) {
+      throw new NmgProtocolError("INVALID_PARAMS", "entries must be an array");
+    }
+    return {
+      action,
+      sessionId,
+      projectionId: optionalString(params, "projectionId"),
+      disclosure: requiredEnum(params, "disclosure", ["header", "exact", "evidence"] as const),
+      entries: params.entries.map((entry) => {
+        const parsed = objectParams(entry);
+        return {
+          memoryId: requiredString(parsed, "memoryId"),
+          contentHash: requiredString(parsed, "contentHash"),
+        };
+      }),
+    };
+  }
   return {
     action,
     sessionId,

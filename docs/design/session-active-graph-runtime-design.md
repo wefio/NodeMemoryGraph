@@ -1,6 +1,6 @@
 # Session Active Graph runtime
 
-**Status:** 0.11 / core + task/branch lifecycle + unified budget + TTL artifacts + disclosure ledger implemented
+**Status:** 0.12 / core + task/branch lifecycle + bounded runtime items + TTL artifacts + adapter-neutral disclosure ledger implemented
 **Updated:** 2026-09-01
 
 This topic document is the implementation blueprint for the session-owned Active
@@ -43,7 +43,8 @@ Implemented and covered by tests:
   (`kind: "tool_observation" | "board_projection"`), hidden from the model until
   `activateTemporaryProjection`, deduplicated by content hash, and evicted by a
   bounded item/character budget.
-- `reasoning_artifact` kind exists in the item type but has **no TTL layer yet**.
+- `reasoning_artifact` supports bounded TTL and explicit source provenance; expiry
+  removes it from live snapshots without rewriting frozen projections.
 - Bounded sessions/items/characters/projections with deterministic eviction
   (`compareEvictionPriority`: activation, then last-activated time).
 - `release(sessionId)` removes the session and its projection ownership.
@@ -101,10 +102,10 @@ The decision's acceptance criteria and their current status:
 | --- | --- | --- | --- |
 | 4.1 | Task-frame lifecycle: switch + bounded cooling set + return | **Implemented** | `session-active-graph.ts` |
 | 4.2 | Branch ownership: same-frame branches with correct parent chains, no cross-frame contamination | **Implemented** | `session-active-graph.ts` |
-| 4.3 | Unified semantic + tool + reasoning budget ledger | **Implemented** | `session-active-graph.ts` |
-| 4.4 | TTL/provenance for reasoning artifacts (bounded MGR output) | **Implemented** | `session-active-graph.ts` |
-| 4.5 | Host-neutral disclosure ledger (Pi injection window moves into AG) | **Runtime foundation implemented**; adapter wiring (Pi `SessionInjectionWindow`, DSH recall window) is a follow-up | `session-active-graph.ts`, adapters |
-| 4.6 | HA admission/rescoring on the AG (optional, gated) | Open (deferred until natural evidence exists) | HA + runtime wiring |
+| 4.3 | Unified semantic + tool + reasoning budget ledger | **Partial**: runtime item/character bounds exist; the full multidimensional shared account remains open | `session-active-graph.ts` + retrieval budget |
+| 4.4 | TTL/provenance for reasoning artifacts (bounded MGR output) | **Runtime primitive implemented**; automatic MGR admission remains deferred | `session-active-graph.ts` |
+| 4.5 | Host-neutral disclosure ledger (adapter windows move into AG) | **Implemented** for Pi, DSH, WorkBuddy and MCP | runtime + adapter RPC calls |
+| 4.6 | HA admission/rescoring on the AG (optional, gated) | **Intentionally deferred** until natural utility evidence exists; explicit Lab and isolation remain available | HA + runtime wiring |
 
 ### 4.1 Task-frame lifecycle
 
@@ -177,12 +178,19 @@ Design intent (design.md §7.1, decision §Proposal): the Pi injection window mo
 into the AG disclosure ledger so every adapter exposes model context through the
 same immutable projection mechanism.
 
-- The runtime records which projection IDs were disclosed to the model
-  (`disclosedProjectionIds` per session) and what each projection's visible items
-  were — a session-local, memory-resident disclosure record.
-- Adapters (Pi/DSH/Claude) render from `snapshot()`/`projection()` instead of
-  maintaining adapter-local windows; the per-session "already injected" fold
-  window becomes a ledger query rather than a separate adapter cache.
+- The runtime records disclosed projection IDs plus bounded content entries:
+  stable memory ID, hash of the representation visible at that depth, greatest
+  disclosure depth, and model-turn number.
+- Pi, DSH, WorkBuddy and MCP ask the daemon to classify candidates as fresh or
+  already in context, then keep their host-specific rendering. No adapter owns a
+  second disclosure cache.
+- A deeper request or changed visible content is rendered again. Entries expire
+  after 12 turns and the ledger holds at most 128 records. Compaction clears only
+  disclosure state (because the model context was removed). Adapters with a host
+  shutdown lifecycle release the whole AG; the stateless WorkBuddy hook has no
+  shutdown event, so its bounded ledger lives until daemon eviction or restart.
+- RPC failure degrades toward showing requested evidence, never silently folding
+  content whose disclosure cannot be confirmed.
 
 ### 4.6 HA admission (optional, gated)
 
@@ -203,13 +211,13 @@ The decision lists these as the bar for promoting from proposed to implemented:
 - [x] Projection freezes exact exposure; get/attribution/replay supported.
 - [ ] Tool observations and retrieved semantic references share **one total
       budget**.
-- [ ] HA fast state isolated by session/branch; activation cannot raise semantic
+- [x] HA fast state isolated by session/branch; activation cannot raise semantic
       confidence or edge stability by itself.
 - [ ] MGR uses bounded selected AG subgraphs, records derivation provenance,
       emits hypothetical TTL-bound artifacts.
 - [ ] Task-switch tests cover continuation, A→B, A→B→A, shared constraints,
       false switches, compaction, session cleanup.
-- [ ] Current query-scoped AG / Pi runtime AG / continuation-map behavior
+- [x] Adapter-local disclosure/continuation caches
       migrated or removed (no permanent compatibility layers).
 
 ## 6. Implementation lineage
