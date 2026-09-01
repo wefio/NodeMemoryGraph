@@ -16,7 +16,15 @@
 // file index without touching memory.
 
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
@@ -130,7 +138,8 @@ export function defaultExclude(relPath: string): boolean {
     // allow .nmg-search-scope itself but skip other dot-dirs
     return !(parts.length === 1 && parts[0] === ".nmg-search-scope");
   }
-  const binary = /\.(?:png|jpe?g|gif|webp|ico|pdf|zip|gz|tar|exe|dll|so|dylib|woff2?|ttf|eot|class|jar)$/iu;
+  const binary =
+    /\.(?:png|jpe?g|gif|webp|ico|pdf|zip|gz|tar|exe|dll|so|dylib|woff2?|ttf|eot|class|jar)$/iu;
   return binary.test(relPath);
 }
 
@@ -206,7 +215,9 @@ export class FileIndex {
   /** Add a hot-zone path to the scope (dedup, cap, auto-create file). The
    *  Agent is the first crawler: grep/read hits feed this. */
   addScopePath(path: string): void {
-    const clean = String(path ?? "").trim().replace(/[\\/]+$/u, "");
+    const clean = String(path ?? "")
+      .trim()
+      .replace(/[\\/]+$/u, "");
     if (!clean) return;
     const entries = this.readScope();
     if (entries.includes(clean)) return;
@@ -246,9 +257,8 @@ export class FileIndex {
         "ON CONFLICT(path) DO UPDATE SET content = excluded.content, content_hash = excluded.content_hash, indexed_at = excluded.indexed_at",
     );
     for (const [rel, contentHash] of wanted) {
-      const prev = this.db
-        .prepare("SELECT content_hash FROM file_meta WHERE path = ?")
-        .get(rel) as { content_hash: string } | undefined;
+      const prev = this.db.prepare("SELECT content_hash FROM file_meta WHERE path = ?").get(rel) as
+        { content_hash: string } | undefined;
       if (prev && prev.content_hash === contentHash) continue; // unchanged
       const abs = resolve(this.projectRoot, rel);
       let content: string;
@@ -264,9 +274,7 @@ export class FileIndex {
     }
 
     // Remove files that disappeared from the scope (or changed scope).
-    const known = this.db
-      .prepare("SELECT path FROM file_meta")
-      .all() as Array<{ path: string }>;
+    const known = this.db.prepare("SELECT path FROM file_meta").all() as Array<{ path: string }>;
     let removed = 0;
     for (const row of known) {
       if (!wanted.has(row.path)) {
