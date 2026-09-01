@@ -114,7 +114,7 @@ test("task frames: bounded cooling set evicts the oldest frame beyond the cap", 
 });
 
 test("task frames: branch isolation — items projected under one frame stay out of another", () => {
-  let now = Date.parse("2026-08-29T00:00:00.000Z");
+  const now = Date.parse("2026-08-29T00:00:00.000Z");
   const runtime = new SessionActiveGraphRuntime<string>({
     now: () => now,
     maxItemsPerSession: 8,
@@ -149,7 +149,7 @@ test("task frames: branch isolation — items projected under one frame stay out
 });
 
 test("task frames: shared constraints persist across frame switches", () => {
-  let now = Date.parse("2026-08-29T00:00:00.000Z");
+  const now = Date.parse("2026-08-29T00:00:00.000Z");
   const runtime = new SessionActiveGraphRuntime<string>({
     now: () => now,
     maxItemsPerSession: 8,
@@ -178,7 +178,7 @@ test("task frames: shared constraints persist across frame switches", () => {
 });
 
 test("unified budget: total items/characters are capped across all frames, not per frame", () => {
-  let now = Date.parse("2026-08-29T00:00:00.000Z");
+  const now = Date.parse("2026-08-29T00:00:00.000Z");
   const runtime = new SessionActiveGraphRuntime<string>({
     now: () => now,
     maxItemsPerSession: 3,
@@ -233,7 +233,7 @@ test("reasoning artifacts: TTL-bound hypotheses expire from live snapshots", () 
 });
 
 test("disclosure ledger: markDisclosed records surfaced projections per session", () => {
-  let now = Date.parse("2026-08-29T00:00:00.000Z");
+  const now = Date.parse("2026-08-29T00:00:00.000Z");
   const runtime = new SessionActiveGraphRuntime<string>({ now: () => now });
   const projection = runtime.registerProjection(
     graph("t-a", "session-a", "task-alpha", "memory-a"),
