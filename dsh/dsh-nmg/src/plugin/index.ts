@@ -1543,39 +1543,13 @@ function setupScopeObserver(ctx, workspaceRoot) {
     ? ctx.provide('fileIndex', { addScopePath: (path) => service.addScopePath(path) })
     : undefined
   const collectScopePaths = (exec, result) => {
-    // Tool name: the registry hands `exec.name` (dsh-tools ToolExecution); keep
-    // `exec.toolName` as a defensive alias for other host integrations. The DSH
-    // suites register exactly 'grep' (dsh-tool-fs-search) and 'read'
-    // (dsh-tool-fs); glob is a separate tool we intentionally do not observe.
+    // Guard clauses keep the main flow linear (see complexity-reduction
+    // practice: guard clause + composed functions).
     const name = (exec && (exec.name || exec.toolName)) || ''
     if (name !== 'grep' && name !== 'read') return
     const fileIndex = ctx.get('fileIndex')
     if (!fileIndex || typeof fileIndex.addScopePath !== 'function') return
-    // Arguments: `exec.arguments` (dsh-tools) with `exec.input` as an alias.
-    const args = (exec && (exec.arguments || exec.input)) || {}
-    const value = result && result.isError ? undefined : result && result.value
-    const paths = []
-    if (name === 'grep') {
-      // Hit file paths ride in the canonical value's `matches[].path` (workdir-
-      // relative display paths). Non-empty result ⇔ matches.length > 0.
-      const matches = value && Array.isArray(value.matches) ? value.matches : []
-      for (const match of matches) {
-        if (match && typeof match.path === 'string' && match.path) paths.push(match.path)
-      }
-      // The searched path arg (a file or directory the Agent pointed grep at)
-      // is itself a candidate hot zone when the search found something.
-      if (paths.length > 0 && args && typeof args.path === 'string' && args.path) {
-        paths.push(args.path)
-      }
-    } else if (name === 'read') {
-      // A non-empty read ⇔ it returned at least one line. Record both the
-      // requested path arg and the resolved display path (they usually agree).
-      const lines = value && Array.isArray(value.lines) ? value.lines : []
-      if (lines.length > 0) {
-        if (args && typeof args.file_path === 'string' && args.file_path) paths.push(args.file_path)
-        if (value && typeof value.path === 'string' && value.path) paths.push(value.path)
-      }
-    }
+    const paths = extractHitPaths(exec, result, name)
     for (const path of paths) {
       try {
         fileIndex.addScopePath(path)
@@ -1592,4 +1566,42 @@ function setupScopeObserver(ctx, workspaceRoot) {
     }
   })
   return { disposer, provide, service }
+}
+
+/** Extract hot-zone candidate paths from a grep/read tool result. The tool
+ *  name is `grep` (dsh-tool-fs-search) or `read` (dsh-tool-fs); glob is a
+ *  separate tool we intentionally do not observe. */
+function extractHitPaths(exec, result, name) {
+  // Arguments: `exec.arguments` (dsh-tools) with `exec.input` as an alias.
+  const args = (exec && (exec.arguments || exec.input)) || {}
+  const value = result && result.isError ? undefined : result && result.value
+  if (name === 'grep') return grepHitPaths(value, args)
+  if (name === 'read') return readHitPaths(value, args)
+  return []
+}
+
+/** grep hit paths: match files (workdir-relative) + the searched path arg
+ *  when the search found something. */
+function grepHitPaths(value, args) {
+  const paths = []
+  const matches = value && Array.isArray(value.matches) ? value.matches : []
+  for (const match of matches) {
+    if (match && typeof match.path === 'string' && match.path) paths.push(match.path)
+  }
+  if (paths.length > 0 && args && typeof args.path === 'string' && args.path) {
+    paths.push(args.path)
+  }
+  return paths
+}
+
+/** read hit paths: a non-empty read ⇔ at least one line; record the requested
+ *  path arg and the resolved display path (they usually agree). */
+function readHitPaths(value, args) {
+  const paths = []
+  const lines = value && Array.isArray(value.lines) ? value.lines : []
+  if (lines.length > 0) {
+    if (args && typeof args.file_path === 'string' && args.file_path) paths.push(args.file_path)
+    if (value && typeof value.path === 'string' && value.path) paths.push(value.path)
+  }
+  return paths
 }
