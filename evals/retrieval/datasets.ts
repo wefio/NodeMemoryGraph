@@ -325,6 +325,37 @@ interface LocomoSample {
   conversation: Record<string, unknown> & { speaker_a: string; speaker_b: string };
 }
 
+const LOCOMO_MONTHS = new Map(
+  [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ].map((month, index) => [month, index]),
+);
+
+function normalizeLocomoTimestamp(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const match = /^(\d{1,2}):(\d{2}) (am|pm) on (\d{1,2}) ([A-Za-z]+), (\d{4})$/u.exec(value.trim());
+  if (!match) throw new Error(`unsupported LoCoMo session timestamp: ${value}`);
+  const [, hourText, minuteText, meridiem, dayText, monthText, yearText] = match;
+  const month = LOCOMO_MONTHS.get(monthText!);
+  if (month === undefined) throw new Error(`unsupported LoCoMo month: ${monthText}`);
+  const hour12 = Number(hourText);
+  const hour = (hour12 % 12) + (meridiem === "pm" ? 12 : 0);
+  return new Date(
+    Date.UTC(Number(yearText), month, Number(dayText), hour, Number(minuteText)),
+  ).toISOString();
+}
+
 function loadLocomo(path: string, options: LoadOptions): DatasetSpec {
   const samples = JSON.parse(readFileSync(path, "utf8")) as LocomoSample[];
   const { limit, note } = effectiveLimit("locomo", options);
@@ -341,6 +372,7 @@ function loadLocomo(path: string, options: LoadOptions): DatasetSpec {
     for (const sessionKey of sessionKeys) {
       const turns = sample.conversation[sessionKey] as LocomoTurn[];
       const dateTime = sample.conversation[`${sessionKey}_date_time`];
+      const chatTime = normalizeLocomoTimestamp(dateTime);
       conversations.push({
         userId,
         conversationId: sessionKey,
@@ -349,7 +381,7 @@ function loadLocomo(path: string, options: LoadOptions): DatasetSpec {
           // content carries the speaker prefix like OmniMemEval's ingestion.
           role: turn.speaker === sample.conversation.speaker_a ? "user" : "assistant",
           content: `${turn.speaker}: ${turn.text}`,
-          ...(typeof dateTime === "string" ? { chat_time: dateTime } : {}),
+          ...(chatTime ? { chat_time: chatTime } : {}),
         })),
       });
       for (const turn of turns) evidenceText.set(turn.dia_id, turn.text);

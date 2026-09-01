@@ -92,3 +92,26 @@ test("HaluMem loader exposes an explicit gold-memory retrieval arm", () => {
   assert.deepEqual(dataset.questions[0]?.golds, ["Martin Mark's birth date is 1996-08-02"]);
   assert.deepEqual(dataset.questions[1]?.golds, []);
 });
+
+test("LoCoMo loader converts its natural-language session time to an ISO timestamp", () => {
+  const root = fixtureRoot();
+  const base = join(root, "locomo");
+  mkdirSync(base, { recursive: true });
+  writeFileSync(
+    join(base, "locomo10.json"),
+    JSON.stringify([
+      {
+        conversation: {
+          speaker_a: "Alice",
+          speaker_b: "Bob",
+          session_1_date_time: "1:56 pm on 8 May, 2023",
+          session_1: [{ speaker: "Alice", dia_id: "D1:1", text: "I bought a telescope." }],
+        },
+        qa: [{ question: "What did Alice buy?", evidence: ["D1:1"], category: 1 }],
+      },
+    ]),
+  );
+
+  const dataset = loadDataset("locomo", { full: true }, root);
+  assert.equal(dataset.conversations[0]?.messages[0]?.chat_time, "2023-05-08T13:56:00.000Z");
+});

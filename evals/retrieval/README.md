@@ -37,7 +37,9 @@ candidates.
   no LLM supersession judge (deterministic). Stores persist under
   `.benchmarks/retrieval-stores/<dataset>/` and are reused across runs when
   the ingest manifest (dataset sha256 + sample rule) matches; mismatch or
-  `--full`/`--limit` changes trigger a clean re-ingest.
+  `--full`/`--limit` changes trigger a clean re-ingest. Dataset adapters
+  normalize source-specific dates to ISO timestamps; Core keeps its strict
+  temporal-validity contract.
 - **Datasets and pinned samples** (from `.benchmarks/official/OmniMemEval/data/`):
   - LoCoMo (`locomo/locomo10.json`): all 10 users; category-5 adversarial
     questions excluded (same as the legacy audit).
