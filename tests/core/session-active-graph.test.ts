@@ -177,6 +177,61 @@ test("task frames: shared constraints persist across frame switches", () => {
   );
 });
 
+test("unified budget: total items/characters are capped across all frames, not per frame", () => {
+  let now = Date.parse("2026-08-29T00:00:00.000Z");
+  const runtime = new SessionActiveGraphRuntime<string>({
+    now: () => now,
+    maxItemsPerSession: 3,
+    maxCharactersPerSession: 10_000,
+    maxTaskFramesPerSession: 4,
+  });
+  // Frame alpha gets 2 observations; frame beta gets 2 more. With a session
+  // cap of 3 items, the two frames together must hold at most 3 — the unified
+  // budget evicts across frames rather than giving each frame its own 3.
+  runtime.observe({ sessionId: "s", statement: "observe alpha 1", taskFrameId: "alpha" });
+  runtime.observe({ sessionId: "s", statement: "observe alpha 2", taskFrameId: "alpha" });
+  runtime.observe({ sessionId: "s", statement: "observe beta 1", taskFrameId: "beta" });
+  runtime.observe({ sessionId: "s", statement: "observe beta 2", taskFrameId: "beta" });
+  // Temporary observations are hidden until the temporary projection is
+  // active; surface them so the frame item counts are observable.
+  runtime.activateTemporaryProjection("s");
+  const alpha = runtime.taskFrame("s", "alpha");
+  const beta = runtime.taskFrame("s", "beta");
+  assert.ok(alpha && beta, "both frames survive");
+  assert.equal(
+    alpha.items.length + beta.items.length,
+    3,
+    "session-wide item cap holds across frames",
+  );
+});
+
+test("reasoning artifacts: TTL-bound hypotheses expire from live snapshots", () => {
+  let now = Date.parse("2026-08-29T00:00:00.000Z");
+  const runtime = new SessionActiveGraphRuntime<string>({
+    now: () => now,
+    maxTaskFramesPerSession: 3,
+  });
+  runtime.observe({
+    sessionId: "s",
+    statement: "Hypothesis: the schema change is safe.",
+    kind: "reasoning_artifact",
+    taskFrameId: "task-alpha",
+    ttlMs: 5_000,
+    sourceKind: "mgr",
+  });
+  runtime.activateTemporaryProjection("s");
+  const before = runtime.taskFrame("s", "task-alpha");
+  assert.ok(before, "frame exists before expiry");
+  assert.equal(before.items.length, 1, "artifact visible while live");
+  assert.equal(before.items[0]?.sourceKind, "mgr", "provenance recorded");
+
+  // Advance past the TTL; the artifact must disappear from live snapshots.
+  now += 6_000;
+  const after = runtime.taskFrame("s", "task-alpha");
+  assert.ok(after, "frame still exists after expiry");
+  assert.equal(after.items.length, 0, "expired artifact no longer surfaced");
+});
+
 function graph(id: string, sessionId: string, taskId: string, memoryId: string): ActiveGraph {
   return {
     id,

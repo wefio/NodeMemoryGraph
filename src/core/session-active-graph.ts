@@ -16,6 +16,15 @@ export interface SessionActiveGraphItem {
   lastActivatedAt: string;
   activation: number;
   temporary: boolean;
+  /** Optional TTL in ms from `createdAt`. When set and expired, the item is
+   * excluded from snapshots and evicted from the live graph. Used by
+   * `reasoning_artifact` (hypothetical MGR output) so hypotheses expire
+   * instead of lingering as if they were durable. */
+  ttlMs?: number;
+  /** Optional provenance tag for the item's origin (e.g. "mgr" for a
+   * reasoning artifact, "bash" for a tool observation). Never implies durable
+   * truth. */
+  sourceKind?: string;
 }
 
 export interface ActiveGraphProjectionPart<TPart> {
@@ -154,7 +163,7 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     state.projections.set(projectionId, projection);
     state.projectionOrder.push(projectionId);
     this.#projectionOwners.set(projectionId, sessionId);
-    this.#activateProjectionItems(frame, projectedGraph, createdAt);
+    this.#activateProjectionItems(state, frame, projectedGraph, createdAt);
     this.#trimProjections(state);
     this.#touch(state);
     return projection;
@@ -182,6 +191,10 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     taskFrameId?: string;
     kind?: Exclude<SessionActiveGraphItemKind, "semantic_memory">;
     activation?: number;
+    /** TTL in ms from creation; the item stops being surfaced once expired. */
+    ttlMs?: number;
+    /** Provenance tag (e.g. "mgr" for a reasoning artifact). */
+    sourceKind?: string;
   }): { added: boolean; item: SessionActiveGraphItem } {
     const sessionId = normalizedSessionId(input.sessionId);
     const state = this.#state(sessionId, input.taskFrameId);
@@ -211,9 +224,11 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
       lastActivatedAt: now,
       activation: clamp01(input.activation ?? 0.7),
       temporary: true,
+      ttlMs: input.ttlMs,
+      sourceKind: input.sourceKind,
     };
     frame.items.set(id, item);
-    this.#trimItems(frame);
+    this.#trimItems(state);
     this.#touch(state);
     return { added: true, item: { ...item } };
   }
@@ -230,8 +245,10 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     if (!state) return null;
     this.#touch(state);
     const frame = state.frames.get(state.activeTaskFrameId);
+    const nowMs = this.#now();
     const items = frame
       ? [...frame.items.values()]
+          .filter((item) => this.#liveItem(item, nowMs))
           .filter((item) => item.kind === "semantic_memory" || state.temporaryProjectionActive)
           .sort((left, right) => right.activation - left.activation)
           .map((item) => ({ ...item }))
@@ -258,7 +275,9 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     if (!state) return null;
     const frame = state.frames.get(taskFrameId.trim());
     if (!frame) return null;
+    const nowMs = this.#now();
     const items = [...frame.items.values()]
+      .filter((item) => this.#liveItem(item, nowMs))
       .filter((item) => item.kind === "semantic_memory" || state.temporaryProjectionActive)
       .sort((left, right) => right.activation - left.activation)
       .map((item) => ({ ...item }));
@@ -329,7 +348,12 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     return frame;
   }
 
-  #activateProjectionItems(frame: FrameState, graph: ActiveGraph, now: string): void {
+  #activateProjectionItems(
+    state: SessionState<TPart>,
+    frame: FrameState,
+    graph: ActiveGraph,
+    now: string,
+  ): void {
     for (const selection of graph.selections) {
       const id = `memory:${selection.memoryId}`;
       const existing = frame.items.get(id);
@@ -352,17 +376,34 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
       }
     }
     for (const edge of graph.edges) frame.edges.set(edge.id, { ...edge });
-    this.#trimItems(frame);
+    this.#trimItems(state);
   }
 
-  #trimItems(frame: FrameState): void {
-    const ordered = [...frame.items.values()].sort(compareEvictionPriority);
-    let characters = ordered.reduce((sum, item) => sum + item.statement.length, 0);
-    while (ordered.length > this.maxItemsPerSession || characters > this.maxCharactersPerSession) {
+  /** An item is live when it has no TTL or its TTL has not elapsed. Expired
+   * items are excluded from snapshots; the live graph stops surfacing them. */
+  #liveItem(item: SessionActiveGraphItem, nowMs: number): boolean {
+    if (!item.ttlMs || item.ttlMs <= 0) return true;
+    return Date.parse(item.createdAt) + item.ttlMs > nowMs;
+  }
+
+  /** Unified budget: the session's total items/characters across ALL frames
+   * (active + cooled) must stay under the per-session caps. Evicts the
+   * lowest-activation item anywhere, so tool observations, board projections,
+   * and reasoning artifacts share one pool with retrieved semantic memories. */
+  #trimItems(state: SessionState<TPart>): void {
+    const all = [...state.frames.values()].flatMap((frame) =>
+      [...frame.items.values()].map((item) => ({ frame, item })),
+    );
+    const ordered = all.sort((a, b) => compareEvictionPriority(a.item, b.item));
+    let characters = ordered.reduce((sum, entry) => sum + entry.item.statement.length, 0);
+    while (
+      ordered.length > this.maxItemsPerSession ||
+      characters > this.maxCharactersPerSession
+    ) {
       const removed = ordered.shift();
       if (!removed) break;
-      frame.items.delete(removed.id);
-      characters -= removed.statement.length;
+      removed.frame.items.delete(removed.item.id);
+      characters -= removed.item.statement.length;
     }
   }
 
