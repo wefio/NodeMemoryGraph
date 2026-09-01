@@ -46,7 +46,7 @@ risk.
 | Leaf/node summaries and summary routing | **Introduced** `1feb008d`, `ecde4e45`; **Hardened** `796439ed`, `5a0edbf5`, `20de2efc` | [Tiered disclosure](tiered-disclosure-design.md), node-summary experiment series |
 | Natural evidence and activation gates | **Introduced** `cc0fa383`, `c815dfd1`; **Hardened** `f49db9d1`, `9fa0872c`, `a14f7828`; **Validated** `fd62ed06`, `571e4bbf` | [Retrieval confidence controller](retrieval-confidence-controller.md), [completion audit](completion-audit.md) |
 | Documentation, CI and Agent development workflow | **Introduced** `00d4a285`, `40c8e22e`, `75d9da39`; **Hardened** `8319e7e0`, `8b4ac943`, `11ab3b56`, `8061679`, `ea98ea4` | [Documentation index](../README.md), [CI and quality](ci-cd-and-quality.md) |
-| Session Active Graph runtime (daemon-owned working memory) | **Introduced** protocol v9 + `SessionActiveGraphRuntime` core; **Hardened** task-frame/branch lifecycle, unified budget, TTL reasoning artifacts (PR for #31) | [Session AG runtime](session-active-graph-runtime-design.md), [AG runtime decision](../decisions/proposed/2026-08-29-session-active-graph-runtime.md) |
+| Session Active Graph runtime (daemon-owned working memory) | **Introduced** protocol v9 + `SessionActiveGraphRuntime` core; **Hardened** task-frame/branch lifecycle, unified session-wide budget, TTL reasoning artifacts, disclosure ledger | [Session AG runtime](session-active-graph-runtime-design.md), [AG runtime decision](../decisions/proposed/2026-08-29-session-active-graph-runtime.md) |
 
 The Pi dependency boundary is intentionally represented by the package manifest
 and its contract test rather than a new subsystem: the harness API is an optional

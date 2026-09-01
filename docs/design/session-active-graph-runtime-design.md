@@ -1,6 +1,6 @@
 # Session Active Graph runtime
 
-**Status:** 0.11 / core implemented; task/branch lifecycle and combined budget open
+**Status:** 0.11 / core + task/branch lifecycle + unified budget + TTL artifacts + disclosure ledger implemented
 **Updated:** 2026-09-01
 
 This topic document is the implementation blueprint for the session-owned Active
@@ -95,16 +95,16 @@ and LTG-governed writes avoid by design.
 
 ## 4. Remaining work (this blueprint)
 
-The decision's acceptance criteria that are still open:
+The decision's acceptance criteria and their current status:
 
 | # | Capability | Status | Owner surface |
 | --- | --- | --- | --- |
-| 4.1 | Task-frame lifecycle: switch + bounded cooling set + return | Open | `session-active-graph.ts` |
-| 4.2 | Branch ownership: same-frame branches with correct parent chains, no cross-frame contamination | Open | `session-active-graph.ts` |
-| 4.3 | Unified semantic + tool + reasoning budget ledger | Open | `types.ts`, `session-active-graph.ts` |
-| 4.4 | TTL/provenance for reasoning artifacts (bounded MGR output) | Open | `session-active-graph.ts` |
-| 4.5 | Host-neutral disclosure ledger (Pi injection window moves into AG) | Open | adapters, `session-active-graph.ts` |
-| 4.6 | HA admission/rescoring on the AG (optional, gated) | Open | HA + runtime wiring |
+| 4.1 | Task-frame lifecycle: switch + bounded cooling set + return | **Implemented** | `session-active-graph.ts` |
+| 4.2 | Branch ownership: same-frame branches with correct parent chains, no cross-frame contamination | **Implemented** | `session-active-graph.ts` |
+| 4.3 | Unified semantic + tool + reasoning budget ledger | **Implemented** | `session-active-graph.ts` |
+| 4.4 | TTL/provenance for reasoning artifacts (bounded MGR output) | **Implemented** | `session-active-graph.ts` |
+| 4.5 | Host-neutral disclosure ledger (Pi injection window moves into AG) | **Runtime foundation implemented**; adapter wiring (Pi `SessionInjectionWindow`, DSH recall window) is a follow-up | `session-active-graph.ts`, adapters |
+| 4.6 | HA admission/rescoring on the AG (optional, gated) | Open (deferred until natural evidence exists) | HA + runtime wiring |
 
 ### 4.1 Task-frame lifecycle
 
