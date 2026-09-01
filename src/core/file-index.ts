@@ -18,7 +18,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 import { ftsExpression, surfaceIndexedText } from "./store/search-ranking.ts";
 import type { FileHit } from "./types.ts";
@@ -69,7 +69,7 @@ export function resolveScopeEntries(projectRoot: string, entries: string[]): Sco
     const key = rel || entry;
     if (seen.has(key)) continue;
     seen.add(key);
-    let dir = false;
+    let dir: boolean;
     try {
       dir = statSync(abs).isDirectory();
     } catch {
@@ -92,7 +92,7 @@ export function collectFiles(
   const out: string[] = [];
   const absRoot = resolve(root, entry.path);
   const walk = (dir: string): void => {
-    let entries: string[] = [];
+    let entries: string[];
     try {
       entries = readdirSync(dir);
     } catch {
@@ -251,7 +251,7 @@ export class FileIndex {
         .get(rel) as { content_hash: string } | undefined;
       if (prev && prev.content_hash === contentHash) continue; // unchanged
       const abs = resolve(this.projectRoot, rel);
-      let content = "";
+      let content: string;
       try {
         content = readFileSync(abs, "utf8");
       } catch {
