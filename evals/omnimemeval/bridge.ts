@@ -13,6 +13,7 @@ import {
 } from "../../src/core/embedding-sync.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { renderEvidenceSurface } from "../../src/integration/agent-surface.ts";
+import { searchMemoryContext } from "../../src/integration/search.ts";
 import { loadPrompts, renderDisclosure } from "../../src/prompts/load.ts";
 import type {
   HistoryRole,
@@ -480,25 +481,18 @@ export class OmniMemEvalBridge {
     // envelope when the normal budget is insufficient.
     const limit = Math.max(1, Math.min(Math.trunc(topK || 10), 50));
     const store = this.#store(userId);
-    let semantic: { queryVector: readonly number[]; model: string } | undefined;
     if (this.#embeddingClient) {
       await this.#syncSemanticIndex(store);
-      const [queryVector] = await this.#embeddingClient.embedQueries([query]);
-      if (!queryVector) throw new Error("embedding client returned no query vector");
-      semantic = { queryVector, model: this.#embeddingClient.indexId };
     }
-    const context = store.searchContext(
+    const context = await searchMemoryContext(
+      store,
+      this.#embeddingClient,
       query,
       {
         limit,
         maxTier: 3,
         graphHops: 1,
-        vectorGranularity: semantic ? "records" : undefined,
-        // Declared evaluation profile: ordinary personal-memory questions use
-        // user evidence, while explicit references to a previous Assistant
-        // answer permit Assistant records. This is retrieval routing, not part
-        // of OmniMemEval's answer or judge prompts.
-        sourceActor: prefersAssistantEvidence(query) ? undefined : "user",
+        vectorGranularity: this.#embeddingClient ? "records" : undefined,
         secondPass: this.#secondPass,
         progressiveWarmDisclosure: false,
         tieredDisclosure: true,
@@ -520,7 +514,6 @@ export class OmniMemEvalBridge {
           maxTierBudget: limit,
         },
       },
-      semantic,
     );
     const rankedMemoryIds = new Set(context.activeGraph.memoryIds);
     const memories = context.results.map((result) => ({
@@ -547,14 +540,14 @@ export class OmniMemEvalBridge {
         timestamp: new Date().toISOString(),
         userId,
         topK: limit,
-        retrievalMode: semantic ? "records" : "lexical",
+        retrievalMode: context.retrieval?.mode === "hybrid" ? "records" : "lexical",
         resultCount: memories.length,
         timings: context.timings,
       })}\n`,
       "utf8",
     );
     return {
-      retrievalMode: semantic ? "records" : "lexical",
+      retrievalMode: context.retrieval?.mode === "hybrid" ? "records" : "lexical",
       timings: context.timings,
       text:
         context.results.length === 0
@@ -625,12 +618,6 @@ export class OmniMemEvalBridge {
   #databasePath(key: string): string {
     return resolve(this.#root, `${key}.sqlite`);
   }
-}
-
-function prefersAssistantEvidence(query: string): boolean {
-  return /\b(?:assistant|previous\s+(?:chat|conversation)|earlier\s+(?:you|we)|you\s+(?:said|suggested|recommended|provided|mentioned|told|wrote|created|made|gave|listed|outlined|explained)|we\s+(?:discussed|talked|decided)|(?:(?:can|could)\s+you|you\s+could)\s+remind\s+me|your\s+(?:answer|response|recommendation|list|example))\b/iu.test(
-    query,
-  );
 }
 
 function explicitForgetTarget(content: string): string | null {

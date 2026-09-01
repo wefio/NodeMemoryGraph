@@ -4,12 +4,13 @@
  * Runs the production retrieval pipeline (OmniMemEval bridge → store.searchContext,
  * the same call path verified for the benchmark integration) against pinned
  * datasets and reports rank-aware metrics (recall@k, MRR) plus the legacy
- * audit-compatible coverage rates. Default mode is fully offline and
- * deterministic: lexical retrieval, no LLM judge, no embedding endpoint.
+ * audit-compatible coverage rates. It evaluates the configured product
+ * retrieval path (record embeddings plus the bounded surface-anchor channel),
+ * with no answer model or LLM judge.
  *
  * Usage:
  *   npm run eval:retrieval -- [--dataset locomo,longmemeval,beam,personamem,halumem|all]
- *     [--full] [--limit N] [--skip-ingest] [--hybrid] [--summaries] [--topK N] [--out DIR]
+ *     [--full] [--limit N] [--skip-ingest] [--summaries] [--topK N] [--out DIR]
  *
  * --summaries runs the leaf-block semantic-summary pass after ingest (NMG_SUMMARY_*
  * or NMG_JUDGE_* env) and routes queries over the block summary index.
@@ -76,7 +77,6 @@ interface CliOptions {
   full: boolean;
   limit?: number;
   skipIngest: boolean;
-  hybrid: boolean;
   summaries: boolean;
   topK: number;
   out?: string;
@@ -90,20 +90,16 @@ interface BridgeSearchResult {
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
-  if (options.hybrid) {
-    const embeddingEnv = resolve(".env.nmg-bgefix");
-    if (existsSync(embeddingEnv)) loadEnvFile(embeddingEnv);
-    await assertEmbeddingServiceHealthy();
-  }
+  const embeddingEnv = resolve(".env.nmg-bgefix");
+  if (existsSync(embeddingEnv)) loadEnvFile(embeddingEnv);
+  await assertEmbeddingServiceHealthy();
   if (options.summaries) configureSummaryEnvironment();
   const runId = new Date().toISOString().replace(/[:.]/gu, "-");
   const outDir = resolve(options.out ?? resolve(RESULTS_ROOT, runId));
   mkdirSync(outDir, { recursive: true });
 
-  const embeddingClient = options.hybrid ? createEmbeddingClientFromEnv() : undefined;
-  if (options.hybrid && !embeddingClient) {
-    throw new Error("--hybrid requires NMG_EMBED_* environment variables");
-  }
+  const embeddingClient = createEmbeddingClientFromEnv();
+  if (!embeddingClient) throw new Error("retrieval evaluation requires NMG_EMBED_* configuration");
   const summaryProvider = options.summaries ? createLeafSummaryProviderFromEnv() : undefined;
   const nodeSummaryProvider = options.summaries ? createNodeSummaryProviderFromEnv() : undefined;
   if (options.summaries && (!summaryProvider || !nodeSummaryProvider)) {
@@ -351,7 +347,7 @@ function buildManifest(
     git: gitState(),
     node: process.version,
     retrieval: {
-      mode: options.hybrid ? "hybrid" : "lexical",
+      mode: "product",
       ...(indexId ? { indexId } : {}),
       topK: options.topK,
       recallKs: [...RECALL_KS],
@@ -452,7 +448,6 @@ function parseArgs(args: string[]): CliOptions {
     datasets: [...DATASET_NAMES],
     full: false,
     skipIngest: false,
-    hybrid: false,
     summaries: false,
     topK: DEFAULT_TOP_K,
   };
@@ -483,9 +478,6 @@ function parseArgs(args: string[]): CliOptions {
         break;
       case "--skip-ingest":
         options.skipIngest = true;
-        break;
-      case "--hybrid":
-        options.hybrid = true;
         break;
       case "--summaries":
         options.summaries = true;

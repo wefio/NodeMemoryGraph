@@ -79,6 +79,7 @@ test("the benchmark bridge evaluates the shared exact-evidence surface", () => {
     resolve(import.meta.dirname, "../../evals/omnimemeval/bridge.ts"),
     "utf8",
   );
+  assert.match(source, /const context = await searchMemoryContext\(/u);
   assert.match(source, /renderEvidenceSurface/u);
   assert.doesNotMatch(source, /projectMemoryContext/u);
 });

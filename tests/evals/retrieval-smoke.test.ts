@@ -8,7 +8,7 @@ import { OmniMemEvalBridge } from "../../evals/omnimemeval/bridge.ts";
 import { parsePythonLiteral } from "../../evals/retrieval/datasets.ts";
 import { aggregateByCategory, scoreQuestion } from "../../evals/retrieval/score.ts";
 
-test("retrieval pipeline smokes: ingest, search, score end to end (lexical)", async () => {
+test("retrieval pipeline smokes: ingest, shared fallback search, and score end to end", async () => {
   const root = mkdtempSync(join(tmpdir(), "nmg-retrieval-eval-"));
   const bridge = new OmniMemEvalBridge(root);
   try {

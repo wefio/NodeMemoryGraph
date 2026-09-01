@@ -1,9 +1,11 @@
 # Formalized retrieval-quality benchmark
 
 One command, one pinned protocol, one table: `npm run eval:retrieval` measures
-the single NMG retrieval pipeline (the same `store.searchContext` call path
-used by automatic recall, `nmg_search`, the daemon, and the OmniMemEval
-bridge) as a pure retriever, without an answer model or judge.
+the shared NMG product retrieval and Agent Surface used by automatic recall,
+`nmg_search`, Pi-class adapters, the daemon, and the OmniMemEval bridge as a
+pure retriever, without an answer model or judge. Dataset adapters and scoring
+remain benchmark-owned; candidate generation, projection, exact evidence,
+chains, redaction, and display budgets do not.
 
 Existing audit scripts (`evals/omnimemeval/research/audits/audit-*-retrieval.*`) measure text
 coverage of the rendered context and lose rank information. This runner keeps
@@ -12,11 +14,17 @@ candidates.
 
 ## Protocol (pinned)
 
-- **Retrieval path**: in-process `OmniMemEvalBridge` → `store.searchContext`.
-  No second call site, no Python subprocess.
-- **Retrieval mode**: lexical (SQLite FTS5) by default — fully offline and
-  deterministic. `--hybrid` enables the external-embedding arm
-  (`NMG_EMBED_*` env) and records the `indexId` in the manifest.
+- **Retrieval path**: in-process `OmniMemEvalBridge` → shared
+  `searchMemoryContext` → `store.searchContext` → shared exact-evidence Agent
+  Surface. No benchmark-local retrieval or context renderer and no Python
+  subprocess.
+- **Retrieval mode**: the configured product path — record embeddings plus the
+  bounded surface-anchor channel — is required and its `indexId` is recorded in
+  the manifest. Ordinary word-level FTS remains a zero-configuration product
+  fallback, not a benchmark arm. Surface anchors preserve explicit quoted
+  phrases, paths, versions, IDs, error codes, code-like identifiers, and recall
+  triggers through a contentless Unicode-normalized trigram index; plain prose
+  does not become an anchor merely because English words overlap a gold answer.
   `--summaries` adds the leaf-block summary arm: after ingest, each block
   gets an LLM-written semantic summary (`NMG_SUMMARY_*` env, falling back to
   `NMG_JUDGE_*`; prompt version pinned in the manifest) and queries are routed
@@ -110,7 +118,6 @@ npm run eval:retrieval                          # all five datasets, pinned samp
 npm run eval:retrieval -- --dataset locomo      # one dataset
 npm run eval:retrieval -- --dataset personamem,halumem
 npm run eval:retrieval -- --dataset longmemeval --full
-npm run eval:retrieval -- --hybrid              # external-embedding arm
 npm run eval:retrieval -- --summaries           # leaf-block summary arm (LLM endpoint)
 ```
 
@@ -120,13 +127,13 @@ reproduces metrics bit-for-bit (only wall-clock latency varies).
 ## Environment
 
 Canonical runner: `npm run eval:retrieval -- [options]`. The TypeScript runner
-loads `.env` and, for `--hybrid`, the optional `.env.nmg-bgefix`, then checks a
-local embedding service before running. The package script also sets the LME
-heap limit. There is no Shell launcher in the benchmark call path.
+loads `.env` and the optional `.env.nmg-bgefix`, then checks the configured
+embedding service before running. The package script also sets the LME heap
+limit. There is no Shell launcher in the benchmark call path.
 
 Two external services, both configured by env (no models ship with NMG):
 
-- **Embeddings (hybrid/stacked arms)**: BGE-small-en-v1.5 served by the sole
+- **Embeddings (product/summary arms)**: BGE-small-en-v1.5 served by the sole
   service entrypoint `evals/omnimemeval/bge_server.py` on `127.0.0.1:8000`.
   GPU setup (one time,
   PyTorch CUDA wheel ~3GB, venv lives in gitignored `.benchmarks/bge-venv`):

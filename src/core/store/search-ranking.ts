@@ -97,6 +97,49 @@ export function ftsIndexedText(value: string): string {
   return bigrams.length > 0 ? `${value} ${[...new Set(bigrams)].join(" ")}` : value;
 }
 
+/** Text stored in the punctuation-preserving trigram index. This index is a
+ * surface channel, not a semantic ranker: NFKC makes visually equivalent
+ * identifiers comparable while punctuation remains part of the evidence. */
+export function surfaceIndexedText(value: string): string {
+  return normalize(value).replace(/\s+/gu, " ");
+}
+
+/** Extract explicit surface anchors that embeddings commonly blur: quoted
+ * phrases, paths/URLs, versions, error codes and code-like identifiers. Plain
+ * prose intentionally produces no anchors so word overlap cannot become an
+ * English benchmark reward path. */
+export function surfaceAnchors(value: string): string[] {
+  const canonical = value.normalize("NFKC");
+  const anchors = new Set<string>();
+  const add = (candidate: string): void => {
+    const cleaned = candidate
+      .trim()
+      .replace(/^[,;!?()[\]{}]+|[,;!?()[\]{}]+$/gu, "")
+      .trim();
+    if ([...cleaned].length >= 3) anchors.add(normalize(cleaned));
+  };
+
+  for (const match of canonical.matchAll(/`([^`\r\n]+)`|["“”'‘’]([^"“”'‘’\r\n]+)["“”'‘’]/gu)) {
+    add(match[1] ?? match[2] ?? "");
+  }
+  for (const token of canonical.split(/\s+/gu)) {
+    const cleaned = token.replace(/^[,;!?()[\]{}"“”'‘’`]+|[,;!?()[\]{}"“”'‘’`]+$/gu, "");
+    if (!cleaned) continue;
+    const codeLike = /[\\/:._+#@-]/u.test(cleaned);
+    const versioned = /\p{N}/u.test(cleaned);
+    const errorCode = /^[A-Z][A-Z0-9_]{2,}$/u.test(cleaned);
+    const camelCase = /^\p{Lu}[\p{L}\p{N}]*\p{Ll}[\p{L}\p{N}]*\p{Lu}[\p{L}\p{N}]*$/u.test(cleaned);
+    if (codeLike || versioned || errorCode || camelCase) add(cleaned);
+  }
+  return [...anchors];
+}
+
+export function surfaceAnchorExpression(query: string): string {
+  return surfaceAnchors(query)
+    .map((anchor) => `"${anchor.replaceAll('"', '""')}"`)
+    .join(" OR ");
+}
+
 export function lexicalNodeScore(query: string, node: MemoryNode): number {
   if (!query) return 0;
   const haystack = normalize(`${node.canonicalName} ${node.summary}`);

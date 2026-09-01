@@ -1810,7 +1810,8 @@ number of disclosure actions.
 Candidate generation should compose independent signals:
 
 ```text
-Inbox/Delta + global FTS/exact + fine-grained record semantics
+Inbox/Delta + surface anchors + fine-grained record semantics
+  -> word-level FTS only as a zero-configuration/degraded fallback
   -> optional node/leaf semantic routing at measured large scale
   -> optional graph expansion
   -> scope/time/truth filtering
@@ -1827,18 +1828,25 @@ steps. Autodiff remains a supported controller mechanism because it is a small,
 already implemented DAG-native computation layer; it is not a mandatory runtime
 dependency for ordinary retrieval.
 
-Search modes are ordered by purpose:
+Search signals are separated by purpose:
 
 - semantic/vector search for meaning;
-- FTS5 for lexical retrieval;
-- exact literal/phrase and structured filters for paths, versions, IDs, dates,
-  scopes, and error codes;
+- contentless trigram surface-anchor retrieval for explicit quoted phrases,
+  paths, versions, IDs, error codes, code-like identifiers, and configured
+  recall triggers; NFKC normalization preserves equivalent surface forms while
+  punctuation remains searchable;
+- structured filters for dates and scopes;
+- word-level FTS5 as the zero-configuration or degraded fallback, not as a
+  substitute for semantic retrieval and not as an English benchmark policy;
 - regular expression only as an advanced/debug fallback over a bounded candidate
   set or raw session subset.
 
 Arbitrary model-generated regex is not a relevance ranker and must not scan the
-entire store by default. Exact literal search is the first precision feature to
-add because it covers most code-agent identifiers without regex escaping or
+entire store by default. Surface anchors are admitted beside semantic candidates
+before the shared AG budget and projection. Plain prose produces no surface
+anchor solely from word overlap, preventing an English benchmark from redefining
+product ranking. Arbitrary literal scans remain disallowed because the trigram
+index provides the bounded precision path without regex escaping or
 catastrophic-backtracking risk.
 
 ### 11.1 Query formation and route fusion boundary
@@ -3009,10 +3017,11 @@ lifecycle, and policy remain responsibilities of Pi and the selected plugin.
 
 1. Add a Pi package manifest and stable installable extension entry.
 2. Reduce the default model-facing API to search, get, and remember.
-3. Keep SQLite + FTS/exact retrieval as the zero-configuration path.
+3. Keep SQLite surface-anchor retrieval plus word-level FTS as the
+   zero-configuration/degraded path.
 4. **Complete at benchmark and Pi boundaries:** wire optional fine-grained
    record embeddings behind the same SQLite store, synchronize only missing
-   records at add/turn boundaries, and retain FTS/exact as the
+   records at add/turn boundaries, and retain surface anchors plus FTS as the
    zero-configuration and not-yet-ready fallback. Node/leaf-only and the
    current union ranker are explicitly gated off after the LoCoMo ablation.
 5. **Complete:** expose the application boundary through an
