@@ -4,7 +4,7 @@
     "--workers",
     "16",
     "--llm-workers",
-    "16",
+    "32",
     "--top-k",
     "20",
     "--num-runs",
@@ -14,7 +14,7 @@
     "longmemeval": [],
     "locomo": [],
     "beam": ["--scale", "100k", "--judge-batch-size", "4"],
-    "personamem-v2": [],
+    "personamem-v2": ["--prompt-layout", "static-first"],
     "halumem": ["--variant", "medium"]
   }
 }

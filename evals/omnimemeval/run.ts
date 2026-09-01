@@ -235,6 +235,13 @@ function optionConfigKey(option: string): string {
   return key === "TOP_K" ? "TOPK" : key;
 }
 
+function configuredOptionValue(args: readonly string[], option: string): string | undefined {
+  const index = args.lastIndexOf(option);
+  if (index < 0) return undefined;
+  const value = args[index + 1];
+  return value && !value.startsWith("--") ? value : undefined;
+}
+
 function assertResumeConfigMatches(config: string, args: string[], envFile: string): void {
   const recordedEnv = configValue(config, "ENV_FILE_BASENAME");
   if (recordedEnv && recordedEnv !== basename(envFile)) {
@@ -322,6 +329,10 @@ export function createRunPlan(
   const environment = { ...process.env };
   environment.NMG_ROOT = repoRoot;
   environment.NMG_NODE ??= process.execPath;
+  // The official runners already expose --llm-workers as their public
+  // concurrency knob. Keep the shared adaptive client limiter aligned with it
+  // so a hidden default cannot cap a deliberately larger worker pool.
+  environment.LLM_CONCURRENCY ??= configuredOptionValue(configuredArgs, "--llm-workers");
   environment.PYTHONUTF8 = "1";
   environment.PYTHONIOENCODING = "utf-8";
   const venvFolder = process.platform === "win32" ? "Scripts" : "bin";

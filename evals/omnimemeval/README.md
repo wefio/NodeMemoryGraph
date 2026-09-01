@@ -173,6 +173,32 @@ continued with `--resume`. See
 `.pi/skills/omnimemeval-eval/SKILL.md` when starting, resuming, or specializing
 a run.
 
+The default answer pool is 32 workers. The launcher mirrors the configured
+`--llm-workers` value into OmniMemEval's shared adaptive-client limit, so the
+public worker setting is not silently capped by a second default. On the
+official DeepSeek endpoint, LongMemEval and LoCoMo also issue one best-effort,
+one-token prefix warmup before their answer batches. Their stable prompt
+prefixes account for roughly 10.5% and 12.9% of average input tokens. Set
+`ANSWER_PREFIX_WARMUP=0` to disable it. Real answer prompts remain unchanged,
+and reports record DeepSeek's top-level cache-hit and cache-miss token counts
+when the provider returns them.
+
+PersonaMem v2 is the exception where prompt ordering has a large avoidable
+effect. Its upstream prompt places retrieved context before 176 tokens of fixed
+instructions, so the maintained NMG profile explicitly passes
+`--prompt-layout static-first`. The upstream runner still defaults to
+`official`; the alternative moves only those fixed instructions before the
+context and preserves the same text, question, options, and output contract.
+On a uniformly sampled 500-question matched probe with direct DeepSeek,
+temperature zero, thinking disabled, `max_tokens=24`, and 32 workers, the
+official layout achieved 0% reported cache hits, 33.70 requests/s, 1240 ms P95,
+and 28.8% answer accuracy. Static-first achieved 10.11% cache hits, 44.83
+requests/s, 1090 ms P95, and 28.0% accuracy; paired choices agreed on 448/500
+questions (22 official-only correct, 18 static-first-only correct). This is an
+execution-profile optimization, not an official-prompt-order leaderboard row,
+and changing the profile intentionally invalidates resume against an older
+PersonaMem result directory.
+
 The installer also registers NMG with OmniMemEval's generic text-search
 dispatcher, LoCoMo's benchmark-local search dispatcher, and the conversation-ID
 helper. OmniMemEval currently keeps these allowlists separately from its

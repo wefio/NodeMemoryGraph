@@ -95,7 +95,7 @@ export const GENERATED_NMG_PROMPTS = {
   search_disclosure:
     'NMG memory search results: {count} candidate record(s).\nNMG MEMORY CANDIDATES\nformat: one candidate per line; fields separated by "; ".\nfields: memory=id; node=semantic cluster; type=memory type; time=event date; expires=expiry date; chains=logical chain names; preview=statement excerpt\nOptional [external] and [open] markers describe provenance and unresolved state.\nRecords are ranked by retrieval score; order is not a guarantee of relevance.\n{next_step}\n{forget_hint}\n',
   get_disclosure:
-    "NMG evidence for {count} selected record(s):\n- statement: the saved record content\n- SOURCE=: original evidence content when it differs from the statement\n- id/node/type/truth/scope identify the record\n{next_step}\n{forget_hint}\n",
+    "NMG selected evidence:\n- statement: the saved record content\n- SOURCE=: original evidence content when it differs from the statement\n- id/node/type/truth/scope identify the record\n{next_step}\n{forget_hint}\n",
   deferred_hint:
     "More ranked records are folded. If these are insufficient, call nmg_get once with the deferred memory IDs; do not repeat nmg_search.",
   get_hint:

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -71,6 +71,15 @@ test("one config supplies common and suite-specific official arguments", () => {
   assert.ok(plan.args.includes("--workers"));
   assert.equal(plan.environment.NMG_ROOT, repoRoot);
   assert.equal(plan.environment.NMG_NODE, process.execPath);
+  assert.equal(plan.environment.LLM_CONCURRENCY, "16");
+});
+
+test("maintained PersonaMem profile selects the validated static-first layout", () => {
+  const config = JSON.parse(
+    readFileSync(join(process.cwd(), "evals", "omnimemeval", "benchmark.config.json"), "utf8"),
+  ) as BenchmarkConfig;
+
+  assert.deepEqual(config.suites["personamem-v2"], ["--prompt-layout", "static-first"]);
 });
 
 test("configured arguments cannot replace runner-owned identity", () => {

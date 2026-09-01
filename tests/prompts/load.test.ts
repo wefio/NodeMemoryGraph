@@ -161,7 +161,8 @@ test("disclosures keep placeholders for runtime substitution", () => {
   const prompts = loadPrompts();
   assert.match(prompts.search_disclosure, /\{count\}/);
   assert.match(prompts.search_disclosure, /\{next_step\}/);
-  assert.match(prompts.get_disclosure, /\{count\}/);
+  assert.doesNotMatch(prompts.get_disclosure, /\{count\}/);
+  assert.match(prompts.get_disclosure, /NMG selected evidence:/u);
 });
 
 test("multi-query guidance leaves query generation to the Agent", () => {

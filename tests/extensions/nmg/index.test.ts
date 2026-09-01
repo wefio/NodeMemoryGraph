@@ -1801,7 +1801,7 @@ test("formatters keep search headers compact and exact evidence separate", () =>
   assert.match(headers, /memory-2/);
   assert.match(headers, /do not repeat nmg_search/);
   assert.match(formatMemoryContext(context), /works offline/);
-  assert.match(formatMemoryContext(context), /NMG evidence for 1 selected record/);
+  assert.match(formatMemoryContext(context), /NMG selected evidence:/);
   assert.match(formatMemoryContext(context), /More ranked records are folded/);
 });
 
