@@ -1,5 +1,4 @@
 import { existsSync, readFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -158,7 +157,7 @@ function resolveEnvFile(repoRoot: string, omniRoot: string, input: string): stri
 }
 
 function configValue(config: string, key: string): string | undefined {
-  const match = config.match(new RegExp(`^${key}=(?:\"([^\"]*)\"|'([^']*)'|([^\\s#]+))`, "m"));
+  const match = config.match(new RegExp(`^${key}=(?:"([^"]*)"|'([^']*)'|([^\\s#]+))`, "m"));
   return match?.[1] ?? match?.[2] ?? match?.[3];
 }
 
@@ -271,6 +270,56 @@ function findBash(): string {
   return "bash";
 }
 
+/** Resolve the suite, version, and configured args for a resume run by
+ * reading the result directory's experiment_config.sh. */
+function resolveResumePlan(
+  repoRoot: string,
+  omniRoot: string,
+  resumeDir: string,
+  config: BenchmarkConfig,
+  envFile: string,
+): { suite: BenchmarkSuite; version: string; configuredArgs: string[] } {
+  const resultDir = resolve(repoRoot, resumeDir);
+  const suite = suiteForResultDir(omniRoot, resultDir);
+  const experimentConfigPath = join(resultDir, "experiment_config.sh");
+  if (!existsSync(experimentConfigPath)) {
+    throw new Error(`Resume directory has no experiment_config.sh: ${resultDir}`);
+  }
+  const experimentConfig = readFileSync(experimentConfigPath, "utf8");
+  if (configValue(experimentConfig, "LIB") !== "nmg") {
+    throw new Error("Resume directory was not produced by the NMG adapter");
+  }
+  const version = configValue(experimentConfig, "VERSION") ?? "";
+  if (!version) throw new Error("Resume directory does not record VERSION");
+  const configuredArgs = withoutResumeUnsafeArgs([...config.commonArgs, ...config.suites[suite]]);
+  assertResumeConfigMatches(experimentConfig, configuredArgs, envFile);
+  return { suite, version, configuredArgs };
+}
+
+/** Build the runner environment: NMG roots, concurrency alignment, UTF-8, and
+ * the optional benchmark venv on PATH. */
+function buildRunEnvironment(
+  repoRoot: string,
+  configuredArgs: readonly string[],
+  base: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const environment = { ...base };
+  environment.NMG_ROOT = repoRoot;
+  environment.NMG_NODE ??= process.execPath;
+  // The official runners already expose --llm-workers as their public
+  // concurrency knob. Keep the shared adaptive client limiter aligned with it
+  // so a hidden default cannot cap a deliberately larger worker pool.
+  environment.LLM_CONCURRENCY ??= configuredOptionValue(configuredArgs, "--llm-workers");
+  environment.PYTHONUTF8 = "1";
+  environment.PYTHONIOENCODING = "utf-8";
+  const venvFolder = process.platform === "win32" ? "Scripts" : "bin";
+  const venvPath = join(repoRoot, ".benchmarks", "omni-venv", venvFolder);
+  if (existsSync(venvPath)) {
+    environment.PATH = `${venvPath}${process.platform === "win32" ? ";" : ":"}${environment.PATH ?? ""}`;
+  }
+  return environment;
+}
+
 export function createRunPlan(
   options: RunOptions,
   overrides: { repoRoot?: string; now?: Date } = {},
@@ -286,26 +335,19 @@ export function createRunPlan(
   const config = loadBenchmarkConfig(configPath);
   const envFile = resolveEnvFile(repoRoot, omniRoot, config.envFile);
 
-  let suite = options.suite;
+  let suite: BenchmarkSuite;
   let version: string;
   let configuredArgs: string[];
   if (options.resumeDir) {
-    const resultDir = resolve(repoRoot, options.resumeDir);
-    suite = suiteForResultDir(omniRoot, resultDir);
-    const experimentConfigPath = join(resultDir, "experiment_config.sh");
-    if (!existsSync(experimentConfigPath)) {
-      throw new Error(`Resume directory has no experiment_config.sh: ${resultDir}`);
-    }
-    const experimentConfig = readFileSync(experimentConfigPath, "utf8");
-    if (configValue(experimentConfig, "LIB") !== "nmg") {
-      throw new Error("Resume directory was not produced by the NMG adapter");
-    }
-    version = configValue(experimentConfig, "VERSION") ?? "";
-    if (!version) throw new Error("Resume directory does not record VERSION");
-    configuredArgs = withoutResumeUnsafeArgs([...config.commonArgs, ...config.suites[suite]]);
-    assertResumeConfigMatches(experimentConfig, configuredArgs, envFile);
+    ({ suite, version, configuredArgs } = resolveResumePlan(
+      repoRoot,
+      omniRoot,
+      options.resumeDir,
+      config,
+      envFile,
+    ));
   } else {
-    suite = suite!;
+    suite = options.suite!;
     version = generatedVersion(suite, overrides.now ?? new Date());
     configuredArgs = [...config.commonArgs, ...config.suites[suite]];
   }
@@ -326,21 +368,6 @@ export function createRunPlan(
     ...configuredArgs,
   ];
 
-  const environment = { ...process.env };
-  environment.NMG_ROOT = repoRoot;
-  environment.NMG_NODE ??= process.execPath;
-  // The official runners already expose --llm-workers as their public
-  // concurrency knob. Keep the shared adaptive client limiter aligned with it
-  // so a hidden default cannot cap a deliberately larger worker pool.
-  environment.LLM_CONCURRENCY ??= configuredOptionValue(configuredArgs, "--llm-workers");
-  environment.PYTHONUTF8 = "1";
-  environment.PYTHONIOENCODING = "utf-8";
-  const venvFolder = process.platform === "win32" ? "Scripts" : "bin";
-  const venvPath = join(repoRoot, ".benchmarks", "omni-venv", venvFolder);
-  if (existsSync(venvPath)) {
-    environment.PATH = `${venvPath}${process.platform === "win32" ? ";" : ":"}${environment.PATH ?? ""}`;
-  }
-
   return {
     suite,
     version,
@@ -351,19 +378,53 @@ export function createRunPlan(
     runner,
     bash: findBash(),
     args,
-    environment,
+    environment: buildRunEnvironment(repoRoot, configuredArgs, process.env),
   };
 }
 
 export async function runPlan(plan: RunPlan): Promise<number> {
   await preflightEmbeddingProvider(loadBenchmarkEnvironment(plan));
-  const result = spawnSync(plan.bash, plan.args, {
+  const { spawn } = await import("node:child_process");
+  const { ResourceSampler, writeResourceReport } = await import(
+    "./resource-observability.ts"
+  );
+
+  const child = spawn(plan.bash, plan.args, {
     cwd: plan.omniRoot,
     env: plan.environment,
     stdio: "inherit",
   });
-  if (result.error) throw result.error;
-  return result.status ?? 1;
+
+  // Full-run resource observability: sample the spawned process tree at a low
+  // fixed cadence. Purely observational — scheduling and arguments untouched.
+  const sampler = new ResourceSampler({
+    label: `${plan.suite}@${plan.version}`,
+    rootPid: child.pid ?? process.pid,
+    cadenceMs: 5_000,
+  });
+  sampler.start();
+
+  const exitCode = await new Promise<number>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      resolve(code ?? (signal ? 1 : 0));
+    });
+  });
+  await sampler.stop();
+
+  // Write one bounded report beside the run's result directory.
+  try {
+    const resultDir = join(
+      plan.omniRoot,
+      "results",
+      SUITES[plan.suite].resultFolder,
+      plan.version,
+    );
+    writeResourceReport(sampler.report, resultDir);
+  } catch {
+    // A missing/unwritable result dir must not fail the run itself.
+  }
+  return exitCode;
 }
 
 function isMainModule(): boolean {

@@ -204,15 +204,24 @@ export class NmgStoreBase {
   }): TaskBoardEntry {
     const now = new Date().toISOString();
     this.pruneExpiredTaskBoardEntries(now, input.taskId);
-    const id = randomUUID();
+    let id: string;
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const row = this.db
+      // Global monotonic counter (single row, never recycled). The id =
+      // <createdAtMs>_<counter> is time-sortable, insertion-ordered for
+      // same-millisecond entries, and globally unique across all channels.
+      // It is the opaque continuation cursor; clients never parse it.
+      this.db
         .prepare(
-          "SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence FROM task_board_entries WHERE task_id = ?",
+          "INSERT INTO task_board_counters (id, counter) VALUES (1, 1) " +
+            "ON CONFLICT(id) DO UPDATE SET counter = counter + 1",
         )
-        .get(input.taskId) as Row;
-      const sequence = Number(row.next_sequence);
+        .run();
+      const counterRow = this.db
+        .prepare("SELECT counter FROM task_board_counters WHERE id = 1")
+        .get() as Row;
+      const counter = Number(counterRow.counter);
+      id = `${String(Date.parse(now)).padStart(13, "0")}_${String(counter).padStart(6, "0")}`;
       // Reply-gated serial handoff: an un-directed actionable (handoff/
       // question/blocker) is 'outstanding' if no other open un-directed
       // actionable exists in this channel yet, else 'pending' (queued until
@@ -235,12 +244,11 @@ export class NmgStoreBase {
           `INSERT INTO task_board_entries(
              id, task_id, sequence, agent_id, source_session_id, kind, content,
              status, created_at, expires_at, [to], serial_state
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)`,
+           ) VALUES (?, ?, 0, ?, ?, ?, ?, 'open', ?, ?, ?, ?)`,
         )
         .run(
           id,
           input.taskId,
-          sequence,
           input.agentId,
           input.sourceSessionId ?? null,
           input.kind,
@@ -259,23 +267,43 @@ export class NmgStoreBase {
   }
   readTaskBoard(input: {
     taskId: string;
-    afterCursor?: number;
+    afterCursor?: string;
     limit?: number;
     includeResolved?: boolean;
     now?: string;
-  }): { entries: TaskBoardEntry[]; nextCursor: number } {
+  }): { entries: TaskBoardEntry[]; nextCursor: string | null } {
     const now = input.now ?? new Date().toISOString();
     this.pruneExpiredTaskBoardEntries(now, input.taskId);
+    // The cursor is the opaque id of the last entry the caller already saw.
+    // Resolve it to its (created_at, id) ordering position; entries strictly
+    // after that position are the incremental continuation. A cursor that
+    // names no entry (e.g. it expired) starts from the beginning — safe
+    // because expiry prunes exactly the entries such a cursor could have
+    // referenced.
+    let afterCreatedAt = "0000-01-01T00:00:00.000Z";
+    let afterId = "";
+    if (input.afterCursor != null) {
+      const cursorRow = this.db
+        .prepare("SELECT created_at FROM task_board_entries WHERE id = ?")
+        .get(input.afterCursor) as Row | undefined;
+      if (cursorRow) {
+        afterCreatedAt = String(cursorRow.created_at);
+        afterId = input.afterCursor;
+      }
+    }
     const rows = this.db
       .prepare(
         `SELECT * FROM task_board_entries
-         WHERE task_id = ? AND sequence > ?
+         WHERE task_id = ?
+           AND (created_at > ? OR (created_at = ? AND id > ?))
            AND (? = 1 OR status = 'open')
-         ORDER BY sequence ASC LIMIT ?`,
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
       )
       .all(
         input.taskId,
-        Math.max(0, input.afterCursor ?? 0),
+        afterCreatedAt,
+        afterCreatedAt,
+        afterId,
         input.includeResolved ? 1 : 0,
         Math.max(1, Math.min(input.limit ?? 50, 200)),
       ) as Row[];
@@ -284,7 +312,7 @@ export class NmgStoreBase {
     for (const entry of rawEntries) entry.ackedBy = ackMap.get(entry.id) ?? [];
     return {
       entries: rawEntries,
-      nextCursor: rawEntries.at(-1)?.sequence ?? Math.max(0, input.afterCursor ?? 0),
+      nextCursor: rawEntries.at(-1)?.id ?? input.afterCursor ?? null,
     };
   }
   /** Open point-to-point entries addressed to this stable agent identity.
@@ -305,7 +333,7 @@ export class NmgStoreBase {
       .prepare(
         `SELECT * FROM task_board_entries
          WHERE status = 'open' AND expires_at > ? AND [to] IN (${placeholders})
-         ORDER BY created_at ASC, task_id ASC, sequence ASC LIMIT ?`,
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
       )
       .all(now, ...targets, Math.max(1, Math.min(input.limit ?? 50, 200))) as Row[];
     const entries = rows.map(mapTaskBoardEntry);
@@ -367,7 +395,7 @@ export class NmgStoreBase {
     const pending = this.db
       .prepare(
         "SELECT id FROM task_board_entries WHERE task_id = ? AND status = 'open' " +
-          "AND serial_state = 'pending' ORDER BY sequence ASC LIMIT 1",
+          "AND serial_state = 'pending' ORDER BY created_at ASC, id ASC LIMIT 1",
       )
       .get(taskId) as Row | undefined;
     if (pending) {
@@ -2161,7 +2189,6 @@ function mapTaskBoardEntry(row: Row): TaskBoardEntry {
   return {
     id: String(row.id),
     taskId: String(row.task_id),
-    sequence: Number(row.sequence),
     agentId: String(row.agent_id),
     sourceSessionId: row.source_session_id === null ? null : String(row.source_session_id),
     kind: String(row.kind) as TaskBoardKind,

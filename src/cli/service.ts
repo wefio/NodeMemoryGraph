@@ -2248,7 +2248,7 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
     return {
       ...base,
       action,
-      afterCursor: optionalInteger(params, "afterCursor", 0, Number.MAX_SAFE_INTEGER),
+      afterCursor: optionalString(params, "afterCursor"),
       limit: optionalInteger(params, "limit", 1, 200),
       includeResolved: optionalBoolean(params, "includeResolved"),
     };

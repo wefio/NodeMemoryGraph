@@ -1544,7 +1544,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         resolution: Type.Optional(Type.String()),
         reason: Type.Optional(Type.String()),
         leaseSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 86_400 })),
-        afterCursor: Type.Optional(Type.Number({ minimum: 0 })),
+        afterCursor: Type.Optional(
+          Type.String({ description: "不透明游标：上一条已读 entry 的 id（增量读续点）" }),
+        ),
         limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
         includeResolved: Type.Optional(Type.Boolean()),
         ttlSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 2_592_000 })),
@@ -1644,7 +1646,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
                 kind: "board_projection",
                 sourceId: `board:${taskId}:${entry.id}`,
                 nodeId: `board:${taskId}`,
-                statement: `[task-board ${taskId} #${entry.sequence} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
+                statement: `[task-board ${taskId} #${entry.id} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
               }),
             ),
           );
@@ -1763,28 +1765,179 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // best-effort; losing dedup state only means an entry could re-notify
     }
   };
-  const scanBoardWake = async (): Promise<void> => {
-    const config = readWakeConfig();
-    if (!config.enabled) return;
-    const state = loadWakeState();
-    const now = Date.now();
-    if (config.cooldownMs > 0 && now - state.lastWakeAt < config.cooldownMs) return;
+  // Wake budget gate: returns false when the tick should stop (disabled,
+  // cooling, budget exhausted) and mutates `state` for the daily budget reset.
+  const wakeBudgetGate = (config: BoardWakeConfig, state: BoardWakeState, now: number): boolean => {
+    if (!config.enabled) return false;
+    if (config.cooldownMs > 0 && now - state.lastWakeAt < config.cooldownMs) return false;
     const today = new Date(now).toISOString().slice(0, 10);
     if (state.budgetDate !== today) {
       state.budgetDate = today;
       state.budgetUsed = 0;
     }
-    if (config.budget > 0 && state.budgetUsed >= config.budget) return;
-    // A captured ctx goes stale after session replacement/reload; isIdle and
-    // getSessionId on a stale ctx throw, which must never crash the host. Guard
-    // them and skip this tick when the ctx is unusable.
-    let sessionId = "";
+    if (config.budget > 0 && state.budgetUsed >= config.budget) return false;
+    return true;
+  };
+
+  // Live session gate: a captured ctx goes stale after session replacement/
+  // reload; isIdle and getSessionId on a stale ctx throw, which must never
+  // crash the host. Returns the session id, or "" to skip this tick.
+  const liveSessionId = (): string => {
     try {
-      if (latestAgentCtx?.isIdle && !latestAgentCtx.isIdle()) return;
-      sessionId = latestAgentCtx?.sessionManager.getSessionId() ?? "";
+      if (latestAgentCtx?.isIdle && !latestAgentCtx.isIdle()) return "";
+      return latestAgentCtx?.sessionManager.getSessionId() ?? "";
     } catch {
-      return; // stale ctx — skip this tick, retry later
+      return ""; // stale ctx — skip this tick, retry later
     }
+  };
+
+  // Collect wake candidates from the world channel, the directed inbox, and
+  // subscribed named channels. Point-to-point delivery is an inbox, not topic
+  // membership: a target must receive a directed handoff even before it has
+  // discovered or joined the sender's named channel.
+  const collectWakeCandidates = async (
+    agentId: string,
+    agentName: string,
+    sessionId: string,
+  ): Promise<Array<TaskBoardToolEntry & { taskId: string }>> => {
+    const candidates: Array<TaskBoardToolEntry & { taskId: string }> = [];
+    const candidateIds = new Set<string>();
+    const collect = (taskId: string, entries: TaskBoardToolEntry[] | undefined) => {
+      for (const entry of entries ?? []) {
+        if (
+          !candidateIds.has(entry.id) &&
+          isBoardWakeCandidate(entry, { sessionId, agentId, agentName })
+        ) {
+          candidateIds.add(entry.id);
+          candidates.push({ ...entry, taskId });
+        }
+      }
+    };
+    const world = (await invoke("taskBoard", {
+      action: "read",
+      taskId: WORLD_BOARD_ID,
+      agentId,
+    })) as TaskBoardToolResult;
+    collect(WORLD_BOARD_ID, world.entries);
+    const directed = (await invoke("taskBoard", {
+      action: "readDirected",
+      agentId,
+      agentName,
+    })) as { action: "readDirected"; entries: TaskBoardToolEntry[] };
+    for (const entry of directed.entries ?? []) {
+      const taskId = entry.taskId?.trim();
+      if (taskId) collect(taskId, [entry]);
+    }
+    // Named channels: only channels this session explicitly subscribed to are
+    // scanned. Topic-based membership — a non-member never receives wake
+    // notices for a named channel, no matter how active it is. Discovery of
+    // new channels happens by reading the world channel lobby, then joining
+    // with subscribe.
+    const subs = (await invoke("taskBoard", {
+      action: "listSubscriptions",
+      agentId,
+      sessionId,
+    })) as { action: "listSubscriptions"; subscriptions: Array<{ taskId: string }> };
+    for (const board of subs.subscriptions ?? []) {
+      const read = (await invoke("taskBoard", {
+        action: "read",
+        taskId: board.taskId,
+        agentId,
+      })) as TaskBoardToolResult;
+      collect(board.taskId, read.entries);
+    }
+    return candidates;
+  };
+
+  // Delivery protocol: ask the daemon which candidates are already delivered to
+  // this session and which channels are suppressed (do-not-send), then keep
+  // only undelivered, non-suppressed ones.
+  const filterUndelivered = async (
+    candidates: Array<TaskBoardToolEntry & { taskId: string }>,
+    agentId: string,
+    sessionId: string,
+  ): Promise<Array<TaskBoardToolEntry & { taskId: string }>> => {
+    const fresh: Array<TaskBoardToolEntry & { taskId: string }> = [];
+    for (const taskId of new Set(candidates.map((candidate) => candidate.taskId))) {
+      const check = (await invoke("taskBoard", {
+        action: "deliveryCheck",
+        taskId,
+        agentId,
+        sessionId,
+        entryIds: candidates
+          .filter((candidate) => candidate.taskId === taskId)
+          .map((candidate) => candidate.id),
+      })) as { delivered: string[]; acked: string[]; suppressed: boolean };
+      if (check.suppressed) continue; // unsubscribed channel — skip entirely
+      const delivered = new Set(check.delivered);
+      const acked = new Set(check.acked ?? []);
+      for (const candidate of candidates) {
+        if (
+          candidate.taskId === taskId &&
+          !delivered.has(candidate.id) &&
+          !acked.has(candidate.id)
+        ) {
+          fresh.push(candidate);
+        }
+      }
+    }
+    return fresh;
+  };
+
+  // Wake the agent for the top-priority fresh entry, record the delivery
+  // receipt, optionally broadcast to the world channel, and consume the budget.
+  const deliverWake = async (
+    pick: TaskBoardToolEntry & { taskId: string },
+    config: BoardWakeConfig,
+    state: BoardWakeState,
+    now: number,
+    agentId: string,
+    sessionId: string,
+  ): Promise<void> => {
+    const excerpt = pick.content.length > 140 ? `${pick.content.slice(0, 140)}…` : pick.content;
+    const label = kindLabel(pick.kind);
+    pi.sendUserMessage(
+      `[NMG board] 你订阅的频道 ${pick.taskId} 有新${label}：#${pick.id} — ${excerpt}（open，可认领）。需要的话用 nmg_board read 查看详情、claim 认领处理。`,
+    );
+    // Delivery receipt: this session has been reached for this entry, so the
+    // wake loop will not re-notify it (idempotent in the store).
+    await invoke("taskBoard", {
+      action: "recordDelivery",
+      entryId: pick.id,
+      sessionId,
+      agentId,
+      source: "wake",
+    });
+    // Optional world-channel pull broadcast: when enabled and the entry is a
+    // collaboration kind, announce it on the world channel so OTHER agents
+    // notice and can pull it in. Broadcast is broadcast-style (a pull
+    // announcement, never addressed), deduped once per entry via the
+    // deliveries table under the sentinel session so an unanswered entry does
+    // not re-broadcast every tick. The loop's own echo filter (sourceSessionId
+    // === this session) stops the broadcaster from waking on its own post.
+    if (
+      config.worldBroadcast &&
+      BROADCAST_KINDS.has(pick.kind) &&
+      !pick.content.startsWith(BROADCAST_PREFIX)
+    ) {
+      await maybeBroadcastToWorld({
+        invoke: invoke as (method: string, params: unknown) => Promise<unknown>,
+        entry: pick,
+        agentId,
+        sessionId,
+      });
+    }
+    state.budgetUsed += 1;
+    state.lastWakeAt = now;
+    saveWakeState(state);
+  };
+
+  const scanBoardWake = async (): Promise<void> => {
+    const config = readWakeConfig();
+    const state = loadWakeState();
+    const now = Date.now();
+    if (!wakeBudgetGate(config, state, now)) return;
+    const sessionId = liveSessionId();
     if (!sessionId) return;
     const identity = loadOrCreateAgentIdentity(sessionId);
     const agentId = identity.id;
@@ -1805,83 +1958,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // best-effort: a daemon without the registerAgent method just skips it.
     }
     try {
-      const candidates: Array<TaskBoardToolEntry & { taskId: string }> = [];
-      const candidateIds = new Set<string>();
-      const collect = (taskId: string, entries: TaskBoardToolEntry[] | undefined) => {
-        for (const entry of entries ?? []) {
-          if (
-            !candidateIds.has(entry.id) &&
-            isBoardWakeCandidate(entry, { sessionId, agentId, agentName })
-          ) {
-            candidateIds.add(entry.id);
-            candidates.push({ ...entry, taskId });
-          }
-        }
-      };
-      const world = (await invoke("taskBoard", {
-        action: "read",
-        taskId: WORLD_BOARD_ID,
-        agentId,
-      })) as TaskBoardToolResult;
-      collect(WORLD_BOARD_ID, world.entries);
-      // Point-to-point delivery is an inbox, not topic membership. A target
-      // must receive a directed handoff even before it has discovered or joined
-      // the sender's named channel.
-      const directed = (await invoke("taskBoard", {
-        action: "readDirected",
-        agentId,
-        agentName,
-      })) as { action: "readDirected"; entries: TaskBoardToolEntry[] };
-      for (const entry of directed.entries ?? []) {
-        const taskId = entry.taskId?.trim();
-        if (taskId) collect(taskId, [entry]);
-      }
-      // Named channels: only channels this session explicitly subscribed to are
-      // scanned. Topic-based membership — a non-member never receives wake
-      // notices for a named channel, no matter how active it is. Discovery of
-      // new channels happens by reading the world channel lobby, then joining
-      // with subscribe.
-      const subs = (await invoke("taskBoard", {
-        action: "listSubscriptions",
-        agentId,
-        sessionId,
-      })) as { action: "listSubscriptions"; subscriptions: Array<{ taskId: string }> };
-      for (const board of subs.subscriptions ?? []) {
-        const read = (await invoke("taskBoard", {
-          action: "read",
-          taskId: board.taskId,
-          agentId,
-        })) as TaskBoardToolResult;
-        collect(board.taskId, read.entries);
-      }
+      const candidates = await collectWakeCandidates(agentId, agentName, sessionId);
       if (candidates.length === 0) return;
-      // Delivery protocol: ask the daemon which candidates are already delivered
-      // to this session and which channels are suppressed (do-not-send), then
-      // keep only undelivered, non-suppressed ones.
-      const fresh: Array<TaskBoardToolEntry & { taskId: string }> = [];
-      for (const taskId of new Set(candidates.map((candidate) => candidate.taskId))) {
-        const check = (await invoke("taskBoard", {
-          action: "deliveryCheck",
-          taskId,
-          agentId,
-          sessionId,
-          entryIds: candidates
-            .filter((candidate) => candidate.taskId === taskId)
-            .map((candidate) => candidate.id),
-        })) as { delivered: string[]; acked: string[]; suppressed: boolean };
-        if (check.suppressed) continue; // unsubscribed channel — skip entirely
-        const delivered = new Set(check.delivered);
-        const acked = new Set(check.acked ?? []);
-        for (const candidate of candidates) {
-          if (
-            candidate.taskId === taskId &&
-            !delivered.has(candidate.id) &&
-            !acked.has(candidate.id)
-          ) {
-            fresh.push(candidate);
-          }
-        }
-      }
+      const fresh = await filterUndelivered(candidates, agentId, sessionId);
       if (fresh.length === 0) return;
       const rank: Record<string, number> = {
         question: 0,
@@ -1897,43 +1976,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           (rank[left.kind] ?? 9) - (rank[right.kind] ?? 9) ||
           String(left.createdAt ?? "").localeCompare(String(right.createdAt ?? "")),
       );
-      const pick = fresh[0]!;
-      const excerpt = pick.content.length > 140 ? `${pick.content.slice(0, 140)}…` : pick.content;
-      const label = kindLabel(pick.kind);
-      pi.sendUserMessage(
-        `[NMG board] 你订阅的频道 ${pick.taskId} 有新${label}：#${pick.sequence} — ${excerpt}（open，可认领）。需要的话用 nmg_board read 查看详情、claim 认领处理。`,
-      );
-      // Delivery receipt: this session has been reached for this entry, so the
-      // wake loop will not re-notify it (idempotent in the store).
-      await invoke("taskBoard", {
-        action: "recordDelivery",
-        entryId: pick.id,
-        sessionId,
-        agentId,
-        source: "wake",
-      });
-      // Optional world-channel pull broadcast: when enabled and the entry is a
-      // collaboration kind, announce it on the world channel so OTHER agents
-      // notice and can pull it in. Broadcast is broadcast-style (a pull
-      // announcement, never addressed), deduped once per entry via the
-      // deliveries table under the sentinel session so an unanswered entry does
-      // not re-broadcast every tick. The loop's own echo filter (sourceSessionId
-      // === this session) stops the broadcaster from waking on its own post.
-      if (
-        config.worldBroadcast &&
-        BROADCAST_KINDS.has(pick.kind) &&
-        !pick.content.startsWith(BROADCAST_PREFIX)
-      ) {
-        await maybeBroadcastToWorld({
-          invoke: invoke as (method: string, params: unknown) => Promise<unknown>,
-          entry: pick,
-          agentId,
-          sessionId,
-        });
-      }
-      state.budgetUsed += 1;
-      state.lastWakeAt = now;
-      saveWakeState(state);
+      await deliverWake(fresh[0]!, config, state, now, agentId, sessionId);
     } catch {
       // daemon unavailable or transient failure — retry next tick
     }
@@ -2739,7 +2782,7 @@ interface TaskBoardToolResult {
   action: "put" | "read" | "resolve" | "claim" | "release" | "acknowledge" | "discover";
   entry?: TaskBoardToolEntry;
   entries?: TaskBoardToolEntry[];
-  nextCursor?: number;
+  nextCursor?: string | null;
   delivered?: string[];
   acked?: string[];
   /** discover: online agent roster (A2A discovery localised). */
@@ -2843,7 +2886,7 @@ export async function maybeBroadcastToWorld(input: {
   if (worldCheck.delivered.includes(entry.id)) return false;
   const excerpt = entry.content.length > 140 ? `${entry.content.slice(0, 140)}…` : entry.content;
   const label = kindLabel(entry.kind);
-  const broadcast = `[NMG board 协作广播] 频道 ${entry.taskId} 有 #${entry.sequence} 未认领的${label}（open）：${excerpt}。有空的 agent 可用 nmg_board read taskId=${entry.taskId} 查看详情、claim 认领处理。`;
+  const broadcast = `[NMG board 协作广播] 频道 ${entry.taskId} 有 #${entry.id} 未认领的${label}（open）：${excerpt}。有空的 agent 可用 nmg_board read taskId=${entry.taskId} 查看详情、claim 认领处理。`;
   await invoke("taskBoard", {
     action: "put",
     taskId: WORLD_BOARD_ID,

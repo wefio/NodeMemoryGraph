@@ -490,7 +490,9 @@ export interface NmgTaskBoardPutParams extends NmgTaskBoardBase {
 
 export interface NmgTaskBoardReadParams extends NmgTaskBoardBase {
   action: "read";
-  afterCursor?: number;
+  /** Opaque continuation cursor: the id of the last entry already seen.
+   * Clients must treat it as an opaque string, never parse it. */
+  afterCursor?: string;
   limit?: number;
   includeResolved?: boolean;
 }
@@ -824,7 +826,7 @@ export type NmgMethodResult = {
   stgPurgeSession: { purged: number; projectDir: string };
   taskBoard:
     | { action: "put" | "resolve" | "claim" | "release" | "acknowledge"; entry: TaskBoardEntry }
-    | { action: "read"; entries: TaskBoardEntry[]; nextCursor: number }
+    | { action: "read"; entries: TaskBoardEntry[]; nextCursor: string | null }
     | { action: "readDirected"; entries: TaskBoardEntry[] }
     | {
         action: "list";

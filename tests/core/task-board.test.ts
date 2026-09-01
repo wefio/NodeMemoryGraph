@@ -52,7 +52,7 @@ test("task board shares attributed entries within one task and isolates other ta
       ["scout-a", "scout-b"],
     );
     assert.equal(page.entries[0]!.sourceSessionId, "session-a");
-    assert.equal(page.nextCursor, 2);
+    assert.equal(page.nextCursor, second.id);
     assert.equal(store.readTaskBoard({ taskId: "unrelated" }).entries.length, 1);
   });
 });
@@ -81,7 +81,7 @@ test("task board supports cursor reads, cross-agent resolution, and expiry", () 
       expiresAt: "2000-01-01T00:00:00.000Z",
     });
 
-    const page = store.readTaskBoard({ taskId: "task-a", afterCursor: first.sequence });
+    const page = store.readTaskBoard({ taskId: "task-a", afterCursor: first.id });
     assert.deepEqual(
       page.entries.map((entry) => entry.id),
       [second.id],

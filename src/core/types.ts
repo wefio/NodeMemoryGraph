@@ -1047,9 +1047,12 @@ export type TaskBoardStatus = "open" | "resolved";
 
 /** Temporary, task-scoped coordination state. It is never an LTG memory. */
 export interface TaskBoardEntry {
+  /** Opaque time-sortable stable identity. The id is derived from the
+   * authoritative per-channel ordering position (createdAtMs + counter) and
+   * is never parsed by clients; it doubles as the continuation cursor for
+   * incremental reads. */
   id: string;
   taskId: string;
-  sequence: number;
   agentId: string;
   sourceSessionId: string | null;
   kind: TaskBoardKind;

@@ -470,7 +470,12 @@ export function migrate(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS task_board_entries (
       id TEXT PRIMARY KEY,
       task_id TEXT NOT NULL,
-      sequence INTEGER NOT NULL,
+      -- Legacy internal column kept for schema compatibility with existing
+      -- stores. It is no longer generated, read, or exposed: ordering and the
+      -- opaque continuation cursor are derived from (created_at, id), where
+      -- the id embeds a per-channel monotonic counter that never recycles
+      -- (see task_board_counters). New writes store 0 here.
+      sequence INTEGER NOT NULL DEFAULT 0,
       agent_id TEXT NOT NULL,
       source_session_id TEXT,
       kind TEXT NOT NULL CHECK (
@@ -482,8 +487,17 @@ export function migrate(db: DatabaseSync): void {
       expires_at TEXT NOT NULL,
       resolved_at TEXT,
       resolved_by TEXT,
-      resolution TEXT,
-      UNIQUE(task_id, sequence)
+      resolution TEXT
+    );
+
+    -- Global monotonic counter for task-board entry ids. Kept in a separate
+    -- table so deletion (expiry/resolve) never recycles a counter: the id
+    -- embeds the counter, so same-millisecond entries stay in insertion order
+    -- deterministically AND the id is globally unique across all channels
+    -- (the entries table uses id as its PRIMARY KEY).
+    CREATE TABLE IF NOT EXISTS task_board_counters (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      counter INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE INDEX IF NOT EXISTS idx_memory_records_node_tier
@@ -502,8 +516,8 @@ export function migrate(db: DatabaseSync): void {
       ON memory_maintenance_proposals(status, created_at);
     CREATE INDEX IF NOT EXISTS idx_edge_task_observations_pair
       ON edge_task_observations(left_node_id, right_node_id, created_at);
-    CREATE INDEX IF NOT EXISTS idx_task_board_task_status_sequence
-      ON task_board_entries(task_id, status, sequence);
+    CREATE INDEX IF NOT EXISTS idx_task_board_task_status_created
+      ON task_board_entries(task_id, status, created_at, id);
     CREATE INDEX IF NOT EXISTS idx_task_board_expiry
       ON task_board_entries(expires_at);
   `);
