@@ -284,7 +284,10 @@ test("OmniMemEval uses progressive QPP by default and permits a fixed-window bas
     // Progressive default now starts at the configured initial target (13):
     // with a 4-record pool the walk returns the whole pool in one pass.
     assert.equal(adaptiveResult.memories.length, 4);
-    assert.equal(safePrefixResult.memories.length, 2);
+    // The configured value is the first Fibonacci tier, not a hard result cap.
+    // Product FTS fallback still sees an incomplete multi-evidence answer at two
+    // records, so QPP advances once to the three-record tier.
+    assert.equal(safePrefixResult.memories.length, 3);
   } finally {
     normal.close();
     adaptive.close();
