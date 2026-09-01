@@ -47,6 +47,7 @@ risk.
 | Natural evidence and activation gates | **Introduced** `cc0fa383`, `c815dfd1`; **Hardened** `f49db9d1`, `9fa0872c`, `a14f7828`; **Validated** `fd62ed06`, `571e4bbf` | [Retrieval confidence controller](retrieval-confidence-controller.md), [completion audit](completion-audit.md) |
 | Documentation, CI and Agent development workflow | **Introduced** `00d4a285`, `40c8e22e`, `75d9da39`; **Hardened** `8319e7e0`, `8b4ac943`, `11ab3b56`, `8061679`, `ea98ea4` | [Documentation index](../README.md), [CI and quality](ci-cd-and-quality.md) |
 | Session Active Graph runtime (daemon-owned working memory) | **Introduced** protocol v9 + `SessionActiveGraphRuntime` core; **Hardened** task-frame/branch lifecycle, unified session-wide budget, TTL reasoning artifacts, disclosure ledger | [Session AG runtime](session-active-graph-runtime-design.md), [AG runtime decision](../decisions/proposed/2026-08-29-session-active-graph-runtime.md) |
+| File content source for search | **Proposed** (2026-09-01): bounded passive scan of `.nmg-search-scope` hot zones; scope learned from Agent grep/read behaviour; lexical-first FTS index; memory+file fusion | [File content source](file-content-source-design.md) |
 
 The Pi dependency boundary is intentionally represented by the package manifest
 and its contract test rather than a new subsystem: the harness API is an optional

@@ -805,6 +805,20 @@ export function ensureClaimOutcomeColumns(db: DatabaseSync): void {
 
 /** Claim columns for task-board lease-based claiming (added after the fact). */
 export function ensureTaskBoardColumns(db: DatabaseSync): void {
+  // Legacy stores created before the opaque-id migration still carry the
+  // UNIQUE(task_id, sequence) constraint (sqlite_autoindex_..._2) and the
+  // sequence-based index. New writes store sequence=0 (the column is legacy),
+  // so the unique constraint would reject the second entry of any channel.
+  // Rebuild the table without it when detected.
+  const autoindexes = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='task_board_entries' AND name LIKE 'sqlite_autoindex_%'",
+    )
+    .all() as Array<{ name: string }>;
+  const hasLegacySequenceUnique = autoindexes.length > 1;
+  if (hasLegacySequenceUnique) {
+    rebuildTaskBoardEntries(db);
+  }
   const existing = new Set(
     (db.prepare("PRAGMA table_info(task_board_entries)").all() as Row[]).map((row) =>
       String(row.name),
@@ -985,6 +999,52 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_chain_edges_chain ON memory_chain_edges(chain_id);
     CREATE INDEX IF NOT EXISTS idx_chain_edges_source ON memory_chain_edges(source_memory_id);
   `);
+}
+
+/** Rebuild `task_board_entries` without the legacy UNIQUE(task_id, sequence)
+ *  constraint (old stores created before the opaque-id migration). Data is
+ *  preserved; the legacy sequence column is kept with its new DEFAULT 0. */
+function rebuildTaskBoardEntries(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE task_board_entries_new (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL DEFAULT 0,
+      agent_id TEXT NOT NULL,
+      source_session_id TEXT,
+      kind TEXT NOT NULL CHECK (
+        kind IN ('blocker', 'decision', 'goal', 'handoff', 'note', 'question', 'result')
+      ),
+      content TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      resolved_at TEXT,
+      resolved_by TEXT,
+      resolution TEXT,
+      claimed_by TEXT,
+      claimed_at TEXT,
+      claim_expires_at TEXT,
+      [to] TEXT,
+      serial_state TEXT CHECK (serial_state IN ('outstanding', 'pending', 'stale'))
+    );
+    INSERT INTO task_board_entries_new (
+      id, task_id, sequence, agent_id, source_session_id, kind, content, status,
+      created_at, expires_at, resolved_at, resolved_by, resolution, claimed_by,
+      claimed_at, claim_expires_at, [to], serial_state
+    ) SELECT
+      id, task_id, sequence, agent_id, source_session_id, kind, content, status,
+      created_at, expires_at, resolved_at, resolved_by, resolution, claimed_by,
+      claimed_at, claim_expires_at, [to], serial_state
+    FROM task_board_entries;
+    DROP TABLE task_board_entries;
+    ALTER TABLE task_board_entries_new RENAME TO task_board_entries;
+  `);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_task_board_task_status_created " +
+      "ON task_board_entries(task_id, status, created_at, id)",
+  );
+  db.exec("CREATE INDEX IF NOT EXISTS idx_task_board_expiry ON task_board_entries(expires_at)");
 }
 
 export function ensureEmbeddingTable(db: DatabaseSync): void {
