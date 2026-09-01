@@ -9,7 +9,7 @@
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 import type { MatchDirection } from "./score.ts";
 
@@ -34,7 +34,7 @@ export interface EvalQuestion {
 }
 
 export interface DatasetSpec {
-  name: "locomo" | "longmemeval" | "beam";
+  name: DatasetName;
   dataPath: string;
   sha256: string;
   direction: MatchDirection;
@@ -43,6 +43,9 @@ export interface DatasetSpec {
   /** Human-readable sample rule, recorded in the report manifest. */
   sampleNote: string;
 }
+
+export const DATASET_NAMES = ["locomo", "longmemeval", "beam", "personamem", "halumem"] as const;
+export type DatasetName = (typeof DATASET_NAMES)[number];
 
 export interface LoadOptions {
   /** undefined = pinned default sample, "full" = entire dataset. */
@@ -56,6 +59,14 @@ export const PINNED_DEFAULTS = {
   locomo: { limit: undefined as number | undefined, note: "all 10 users" },
   longmemeval: { limit: 100, note: "first 100 questions (use --full for all 500)" },
   beam: { limit: undefined as number | undefined, note: "all 20 conversations" },
+  personamem: {
+    limit: 500,
+    note: "first 500 questions (use --full for all rows)",
+  },
+  halumem: {
+    limit: 2,
+    note: "first 2 users, gold-memory retrieval arm (use --full for all users)",
+  },
 } as const;
 
 export function loadDataset(
@@ -67,17 +78,27 @@ export function loadDataset(
     case "locomo":
       return loadLocomo(resolve(dataRoot, "locomo/locomo10.json"), options);
     case "longmemeval":
-      return loadLongMemEval(
-        resolve(dataRoot, "longmemeval/longmemeval_s_cleaned.json"),
-        options,
-      );
+      return loadLongMemEval(resolve(dataRoot, "longmemeval/longmemeval_s_cleaned.json"), options);
     case "beam":
       return loadBeam(resolve(dataRoot, "beam/beam_100k.json"), options);
+    case "personamem":
+      return loadPersonaMem(
+        resolve(dataRoot, "personamem_v2/benchmark/text/benchmark.csv"),
+        options,
+      );
+    case "halumem":
+      return loadHaluMem(resolve(dataRoot, "halumem/HaluMem-Medium.jsonl"), options);
   }
 }
 
 function sha256(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function combinedSha256(values: string[]): string {
+  const hash = createHash("sha256");
+  for (const value of values) hash.update(value).update("\0");
+  return hash.digest("hex");
 }
 
 function take<T>(items: T[], limit: number | undefined): T[] {
@@ -92,6 +113,203 @@ function effectiveLimit(
   if (options.limit !== undefined)
     return { limit: options.limit, note: `first ${options.limit} (explicit --limit)` };
   return { limit: PINNED_DEFAULTS[name].limit, note: PINNED_DEFAULTS[name].note };
+}
+
+// ── PersonaMem v2 ────────────────────────────────────────────────────────────
+
+interface PersonaChatFile {
+  chat_history?: Array<{ role?: unknown; content?: unknown; chat_time?: unknown }>;
+}
+
+function loadPersonaMem(path: string, options: LoadOptions): DatasetSpec {
+  const rows = parseCsvRecords(readFileSync(path, "utf8"));
+  const { limit, note } = effectiveLimit("personamem", options);
+  const selected = take(rows, limit);
+  const personaRoot = resolve(dirname(path), "../..");
+  const conversations: EvalConversation[] = [];
+  const loadedPersonas = new Set<string>();
+  const inputHashes = [sha256(path)];
+
+  for (const row of selected) {
+    const personaId = row.persona_id?.trim();
+    const link = row.chat_history_32k_link?.trim();
+    if (!personaId || !link || loadedPersonas.has(personaId)) continue;
+    const chatPath = resolve(personaRoot, link);
+    const chatSource = readFileSync(chatPath, "utf8");
+    inputHashes.push(sha256(chatPath));
+    const chat = JSON.parse(chatSource) as PersonaChatFile;
+    const messages = (chat.chat_history ?? [])
+      .filter((message) => message.role !== "system")
+      .flatMap((message): EvalMessage[] => {
+        if (typeof message.content !== "string" || !message.content.trim()) return [];
+        return [
+          {
+            role: typeof message.role === "string" ? message.role : "user",
+            content: message.content,
+            ...(typeof message.chat_time === "string" ? { chat_time: message.chat_time } : {}),
+          },
+        ];
+      });
+    conversations.push({
+      userId: `personamem:${personaId}`,
+      conversationId: `personamem:${personaId}:32k`,
+      messages,
+    });
+    loadedPersonas.add(personaId);
+  }
+
+  const questions = selected.flatMap((row, index): EvalQuestion[] => {
+    const personaId = row.persona_id?.trim();
+    const query = row.user_query?.trim();
+    if (!personaId || !query) return [];
+    return [
+      {
+        id: `personamem:${personaId}:${index}`,
+        userId: `personamem:${personaId}`,
+        query,
+        category: row.pref_type?.trim() || "unknown",
+        golds: parsePersonaSnippet(row.related_conversation_snippet),
+      },
+    ];
+  });
+
+  return {
+    name: "personamem",
+    dataPath: path,
+    sha256: combinedSha256(inputHashes),
+    direction: "gold-in-candidate",
+    conversations,
+    questions,
+    sampleNote: note,
+  };
+}
+
+function parsePersonaSnippet(value: string | undefined): string[] {
+  if (!value?.trim()) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry): string[] => {
+      if (!entry || typeof entry !== "object") return [];
+      const content = (entry as { content?: unknown }).content;
+      return typeof content === "string" && content.trim() ? [content] : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
+/** Minimal RFC 4180 reader used to avoid adding a Python/CSV runtime boundary. */
+export function parseCsvRecords(source: string): Array<Record<string, string>> {
+  const records: string[][] = [];
+  let record: string[] = [];
+  let field = "";
+  let quoted = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index]!;
+    if (quoted) {
+      if (char === '"' && source[index + 1] === '"') {
+        field += '"';
+        index += 1;
+      } else if (char === '"') quoted = false;
+      else field += char;
+      continue;
+    }
+    if (char === '"') quoted = true;
+    else if (char === ",") {
+      record.push(field);
+      field = "";
+    } else if (char === "\n") {
+      record.push(field.replace(/\r$/u, ""));
+      records.push(record);
+      record = [];
+      field = "";
+    } else field += char;
+  }
+  if (field.length || record.length) {
+    record.push(field.replace(/\r$/u, ""));
+    records.push(record);
+  }
+  const headers = records.shift() ?? [];
+  return records
+    .filter((values) => values.some((value) => value.length > 0))
+    .map((values) =>
+      Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""])),
+    );
+}
+
+// ── HaluMem ──────────────────────────────────────────────────────────────────
+
+interface HaluMemoryPoint {
+  memory_content?: unknown;
+  memory_type?: unknown;
+}
+
+interface HaluSession {
+  session_id?: unknown;
+  memory_points?: HaluMemoryPoint[];
+  questions?: Array<{
+    question?: unknown;
+    question_type?: unknown;
+    evidence?: HaluMemoryPoint[];
+  }>;
+}
+
+interface HaluUser {
+  uuid?: unknown;
+  sessions?: HaluSession[];
+}
+
+function loadHaluMem(path: string, options: LoadOptions): DatasetSpec {
+  const users = readFileSync(path, "utf8")
+    .split(/\r?\n/u)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as HaluUser);
+  const { limit, note } = effectiveLimit("halumem", options);
+  const selected = take(users, limit);
+  const conversations: EvalConversation[] = [];
+  const questions: EvalQuestion[] = [];
+  for (const [userIndex, user] of selected.entries()) {
+    const uuid = typeof user.uuid === "string" ? user.uuid : `user-${userIndex}`;
+    for (const [sessionIndex, session] of (user.sessions ?? []).entries()) {
+      const sessionId =
+        typeof session.session_id === "string" ? session.session_id : `session-${sessionIndex}`;
+      const messages = (session.memory_points ?? []).flatMap((point): EvalMessage[] => {
+        const content = point.memory_content;
+        return typeof content === "string" && content.trim() ? [{ role: "user", content }] : [];
+      });
+      if (messages.length) {
+        conversations.push({
+          userId: `halumem:${uuid}`,
+          conversationId: `halumem:${uuid}:${sessionId}`,
+          messages,
+        });
+      }
+      for (const [questionIndex, question] of (session.questions ?? []).entries()) {
+        if (typeof question.question !== "string" || !question.question.trim()) continue;
+        questions.push({
+          id: `halumem:${uuid}:${sessionId}:${questionIndex}`,
+          userId: `halumem:${uuid}`,
+          query: question.question,
+          category: typeof question.question_type === "string" ? question.question_type : "unknown",
+          golds: (question.evidence ?? []).flatMap((point): string[] =>
+            typeof point.memory_content === "string" && point.memory_content.trim()
+              ? [point.memory_content]
+              : [],
+          ),
+        });
+      }
+    }
+  }
+  return {
+    name: "halumem",
+    dataPath: path,
+    sha256: sha256(path),
+    direction: "gold-in-candidate",
+    conversations,
+    questions,
+    sampleNote: `${note}; gold-memory retrieval arm (memory points, not raw-dialogue extraction)`,
+  };
 }
 
 // ── LoCoMo ─────────────────────────────────────────────────────────────────
@@ -277,7 +495,9 @@ function loadBeam(path: string, options: LoadOptions): DatasetSpec {
       for (const entry of entries) {
         const golds = uniqueInts(entry?.source_chat_ids)
           .map((id) => messagesById.get(id)?.content)
-          .filter((content): content is string => typeof content === "string" && content.length > 0);
+          .filter(
+            (content): content is string => typeof content === "string" && content.length > 0,
+          );
         questions.push({
           id: `beam_${conversationId}_${questionIndex}`,
           userId,

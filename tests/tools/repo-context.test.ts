@@ -24,10 +24,18 @@ function fixture(): string {
         "test:product": "node --test tests/product",
         "test:research": "node --test tests/research",
         "docs:check": "node docs-check.mjs",
+        "eval:retrieval": "node evals/retrieval/run.ts",
       },
     }),
     "agent-context.yaml": [
       "version: 1",
+      "capabilities:",
+      "  - id: retrieval-evaluation",
+      "    aliases: [evidence-recall]",
+      "    summary: Evaluate rank-aware memory evidence retrieval.",
+      "    paths: [evals/retrieval]",
+      "    entrypoints: [npm run eval:retrieval]",
+      "    supports: [locomo, longmemeval, beam, personamem, halumem]",
       "routes:",
       "  - id: store",
       "    paths: [src/store/**]",
@@ -50,10 +58,18 @@ function fixture(): string {
       "    verify:",
       "      blocking: [missing-script]",
       "      advisory: []",
+      "  - id: evaluation",
+      "    paths: [evals/**]",
+      "    owners: [docs/design/store.md]",
+      "    tests: []",
+      "    verify:",
+      "      blocking: [check]",
+      "      advisory: []",
       "",
     ].join("\n"),
     "docs/design/store.md": "# Store\n",
     "src/store/rows.ts": "export const row = 1;\n",
+    "evals/retrieval/run.ts": "export const run = true;\n",
     "tests/guardrails/merge/guardrail.yaml": [
       "id: merge-v1",
       "status: active",
@@ -188,6 +204,96 @@ test("markdown output remains a concise navigation surface", () => {
   assert.doesNotMatch(text, /Route: missing/);
 });
 
+test("lists declared repository capabilities without pretending they are routes", () => {
+  const text = formatAgentContext(collectAgentContext(fixture()));
+  assert.match(text, /## Available capabilities/);
+  assert.match(text, /capability:retrieval-evaluation/);
+  assert.match(text, /npm run eval:retrieval/);
+  assert.match(text, /personamem, halumem/);
+});
+
+test("selects a capability by stable id or alias and routes through its owned paths", () => {
+  const root = fixture();
+  const byId = collectAgentContext(root, [], { capabilities: ["retrieval-evaluation"] });
+  assert.deepEqual(
+    byId.capabilities.map((capability) => capability.id),
+    ["retrieval-evaluation"],
+  );
+  assert.deepEqual(byId.scopes, ["evals/retrieval"]);
+
+  const byAlias = collectAgentContext(root, [], { capabilities: ["evidence-recall"] });
+  assert.deepEqual(
+    byAlias.capabilities.map((capability) => capability.id),
+    ["retrieval-evaluation"],
+  );
+});
+
+test("CLI accepts capability:id as a positional discovery target", () => {
+  const root = fixture();
+  const script = fileURLToPath(new URL("../../tools/repo-context.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      script,
+      "--root",
+      root,
+      "capability:retrieval-evaluation",
+      "--json",
+    ],
+    { encoding: "utf8", windowsHide: true },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout) as {
+    capabilities: Array<{ id: string }>;
+    routes: Array<{ id: string }>;
+  };
+  assert.deepEqual(
+    report.capabilities.map((capability) => capability.id),
+    ["retrieval-evaluation"],
+  );
+  assert.deepEqual(
+    report.routes.map((route) => route.id),
+    ["evaluation"],
+  );
+});
+
+test("capability declarations reject duplicate aliases", () => {
+  const root = fixture();
+  const path = join(root, "agent-context.yaml");
+  const text = readFileSync(path, "utf8").replace(
+    "routes:",
+    [
+      "  - id: another-capability",
+      "    aliases: [evidence-recall]",
+      "    summary: Conflicts with the first capability.",
+      "    paths: [src/store]",
+      "    entrypoints: [npm run missing-capability-script]",
+      "    supports: []",
+      "routes:",
+    ].join("\n"),
+  );
+  writeFileSync(path, text);
+  assert.throws(() => validateAgentContext(root), /duplicate capability name: evidence-recall/);
+});
+
+test("capability validation reports a missing npm entrypoint", () => {
+  const root = fixture();
+  const path = join(root, "agent-context.yaml");
+  writeFileSync(
+    path,
+    readFileSync(path, "utf8").replace(
+      "entrypoints: [npm run eval:retrieval]",
+      "entrypoints: [npm run missing-capability-script]",
+    ),
+  );
+  assert.ok(
+    validateAgentContext(root).includes(
+      "retrieval-evaluation: missing npm script missing-capability-script",
+    ),
+  );
+});
+
 function writeVerificationEvidence(
   root: string,
   report: ReturnType<typeof collectAgentContext>,
@@ -302,7 +408,7 @@ test("--changed routes every dirty path through the same context report", () => 
   const report = JSON.parse(result.stdout) as { routes: Array<{ id: string }> };
   assert.deepEqual(
     report.routes.map((route) => route.id),
-    ["store", "docs"],
+    ["store", "docs", "evaluation"],
   );
 });
 
@@ -320,7 +426,10 @@ test("CLI accepts positional scopes so npm cannot consume the path option", () =
     routes: Array<{ id: string }>;
   };
   assert.deepEqual(report.scopes, ["src/store/rows.ts"]);
-  assert.deepEqual(report.routes.map((route) => route.id), ["store"]);
+  assert.deepEqual(
+    report.routes.map((route) => route.id),
+    ["store"],
+  );
 });
 
 test("manual scope survives unavailable Git and reports the inspection failure", () => {
@@ -343,5 +452,8 @@ test("manual scope survives unavailable Git and reports the inspection failure",
   };
   assert.equal(report.git.available, false);
   assert.match(report.git.error ?? "", /ENOENT|not found/i);
-  assert.deepEqual(report.routes.map((route) => route.id), ["store"]);
+  assert.deepEqual(
+    report.routes.map((route) => route.id),
+    ["store"],
+  );
 });

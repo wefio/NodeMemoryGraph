@@ -1,5 +1,41 @@
 version: 1
 
+capabilities:
+  - id: memory-runtime
+    aliases: [memory-daemon, durable-memory]
+    summary: Run the local-first NMG daemon and its durable memory, session AG, and Task Board surfaces.
+    paths: [src/cli, src/core, src/integration]
+    entrypoints: [nmg daemon start, nmg search, nmg remember]
+    supports: [remember, search, get, session-active-graph, task-board]
+
+  - id: harness-adapters
+    aliases: [agent-integration]
+    summary: Connect the shared Agent Surface to Pi, Claude MCP, WorkBuddy, or DSH without moving product policy into an adapter.
+    paths: [extensions, claude-plugins, workbuddy-plugin, dsh]
+    entrypoints: [npm install node-memory-graph]
+    supports: [pi, claude-mcp, workbuddy, dsh]
+
+  - id: retrieval-evaluation
+    aliases: [evidence-recall, retrieval-benchmark]
+    summary: Run deterministic rank-aware evidence retrieval evaluation without an answer model or judge.
+    paths: [evals/retrieval, tests/evals]
+    entrypoints: [npm run eval:retrieval]
+    supports: [locomo, longmemeval, beam, personamem, halumem]
+
+  - id: official-memory-benchmarks
+    aliases: [omnimemeval]
+    summary: Run the pinned official OmniMemEval answer and judge pipelines through the NMG adapter.
+    paths: [evals/omnimemeval, evals/official]
+    entrypoints: [npm run benchmark:omni]
+    supports: [locomo, longmemeval, beam, personamem-v2, halumem]
+
+  - id: repository-control-plane
+    aliases: [rcp, repository-reconciliation]
+    summary: Reconcile declared repository changes through scoped execution, verification, receipts, and forge state.
+    paths: [src/rcp, bin/nmg-rcp.mjs]
+    entrypoints: [nmg-rcp reconcile]
+    supports: [contract-compile, plan, reconcile, verify, local-receipts, forge-observation]
+
 routes:
   - id: core-store
     paths: [src/core/store/**]

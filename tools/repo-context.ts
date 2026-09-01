@@ -4,10 +4,7 @@ import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
-import {
-  digestRepositoryPaths,
-  observeGitWorktree,
-} from "../src/rcp/repository.ts";
+import { digestRepositoryPaths, observeGitWorktree } from "../src/rcp/repository.ts";
 
 export interface VerificationConfig {
   blocking: string[];
@@ -22,8 +19,18 @@ export interface RouteConfig {
   verify: VerificationConfig;
 }
 
+export interface CapabilityConfig {
+  id: string;
+  aliases: string[];
+  summary: string;
+  paths: string[];
+  entrypoints: string[];
+  supports: string[];
+}
+
 interface AgentContextConfig {
   version: number;
+  capabilities: CapabilityConfig[];
   routes: RouteConfig[];
 }
 
@@ -51,6 +58,8 @@ export interface AgentContextReport {
   engines: Record<string, string>;
   routes: RouteConfig[];
   availableRoutes: string[];
+  capabilities: CapabilityConfig[];
+  availableCapabilities: CapabilityConfig[];
   guardrails: GuardrailSummary[];
   canonical: {
     design: string;
@@ -112,6 +121,31 @@ function readConfig(root: string): AgentContextConfig {
   if (parsed.version !== 1 || !Array.isArray(parsed.routes)) {
     throw new Error("agent-context.yaml must declare version: 1 and a routes array");
   }
+  parsed.capabilities ??= [];
+  if (!Array.isArray(parsed.capabilities)) {
+    throw new Error("agent-context.yaml capabilities must be an array");
+  }
+  const capabilityNames = new Set<string>();
+  for (const capability of parsed.capabilities) {
+    if (!capability || typeof capability !== "object" || !textValue(capability.id)) {
+      throw new Error("each capability must declare a non-empty id");
+    }
+    for (const field of ["aliases", "paths", "entrypoints", "supports"] as const) {
+      if (!isStringArray(capability[field])) {
+        throw new Error(`${capability.id}: ${field} must be a string array`);
+      }
+    }
+    if (!capability.paths.length || !capability.entrypoints.length) {
+      throw new Error(`${capability.id}: paths and entrypoints must not be empty`);
+    }
+    if (!textValue(capability.summary)) {
+      throw new Error(`${capability.id}: summary must be non-empty`);
+    }
+    for (const name of [capability.id, ...capability.aliases]) {
+      if (capabilityNames.has(name)) throw new Error(`duplicate capability name: ${name}`);
+      capabilityNames.add(name);
+    }
+  }
   const ids = new Set<string>();
   for (const route of parsed.routes) {
     if (!route || typeof route !== "object" || !textValue(route.id)) {
@@ -133,11 +167,11 @@ function readConfig(root: string): AgentContextConfig {
     ) {
       throw new Error(`${route.id}: verify must declare blocking and advisory script arrays`);
     }
-    const overlap = route.verify.blocking.find((command) => route.verify.advisory.includes(command));
+    const overlap = route.verify.blocking.find((command) =>
+      route.verify.advisory.includes(command),
+    );
     if (overlap) {
-      throw new Error(
-        `${route.id}: npm script ${overlap} cannot be both blocking and advisory`,
-      );
+      throw new Error(`${route.id}: npm script ${overlap} cannot be both blocking and advisory`);
     }
   }
   return parsed as AgentContextConfig;
@@ -148,6 +182,34 @@ function isStringArray(value: unknown): value is string[] {
     Array.isArray(value) &&
     value.every((entry) => typeof entry === "string" && entry.trim().length > 0)
   );
+}
+
+function validateCapabilities(
+  root: string,
+  capabilities: CapabilityConfig[],
+  routes: RouteConfig[],
+  scripts: Record<string, string>,
+): string[] {
+  const warnings: string[] = [];
+  for (const capability of capabilities) {
+    if (!capability.paths.some((path) => existsSync(join(root, path)))) {
+      warnings.push(`${capability.id}: no declared path exists`);
+    }
+    if (
+      !capability.paths.some((path) =>
+        routes.some((route) => route.paths.some((pattern) => matches(pattern, path))),
+      )
+    ) {
+      warnings.push(`${capability.id}: no route owns its declared paths`);
+    }
+    for (const entrypoint of capability.entrypoints) {
+      const match = /^npm run ([^\s]+)(?:\s|$)/u.exec(entrypoint);
+      if (match && !(match[1]! in scripts)) {
+        warnings.push(`${capability.id}: missing npm script ${match[1]}`);
+      }
+    }
+  }
+  return warnings;
 }
 
 function git(root: string): AgentContextReport["git"] {
@@ -216,16 +278,19 @@ function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function desiredRevision(routes: RouteConfig[], scripts: Record<string, string>): string {
+function desiredRevision(
+  routes: RouteConfig[],
+  capabilities: CapabilityConfig[],
+  scripts: Record<string, string>,
+): string {
   const commands = new Set(
     routes.flatMap((route) => [...route.verify.blocking, ...route.verify.advisory]),
   );
   return digest(
     JSON.stringify({
       routes,
-      scripts: [...commands]
-        .sort()
-        .map((command) => [command, scripts[command] ?? null]),
+      capabilities,
+      scripts: [...commands].sort().map((command) => [command, scripts[command] ?? null]),
     }),
   );
 }
@@ -265,7 +330,9 @@ function reconcile(
   conditions.push({
     type: "routing",
     status: warnings.length ? "false" : routes.length || !scopes.length ? "true" : "unknown",
-    message: warnings.length ? "Route declarations do not match the observed repository." : "Route declarations are valid for the selected scope.",
+    message: warnings.length
+      ? "Route declarations do not match the observed repository."
+      : "Route declarations are valid for the selected scope.",
   });
 
   const evidencePath = join(root, ".nmg", "verification", "latest.json");
@@ -292,7 +359,12 @@ function reconcile(
       status: "false",
       message: "Latest verification evidence is unreadable.",
     });
-    return { status: "drifted", conditions, drifts, latestVerification: { path: ".nmg/verification/latest.json" } };
+    return {
+      status: "drifted",
+      conditions,
+      drifts,
+      latestVerification: { path: ".nmg/verification/latest.json" },
+    };
   }
 
   const latestVerification = {
@@ -373,7 +445,7 @@ function reconcile(
 export function collectAgentContext(
   root: string,
   scopes: string[] = [],
-  options: { changed?: boolean } = {},
+  options: { changed?: boolean; capabilities?: string[] } = {},
 ): AgentContextReport {
   const resolvedRoot = resolve(root);
   const packageJson = JSON.parse(readFileSync(join(resolvedRoot, "package.json"), "utf8")) as {
@@ -384,7 +456,21 @@ export function collectAgentContext(
   };
   const config = readConfig(resolvedRoot);
   const gitState = git(resolvedRoot);
-  const requestedScopes = options.changed ? [...scopes, ...gitState.dirtyFiles] : scopes;
+  const requestedCapabilities = options.capabilities ?? [];
+  const selectedCapabilities = [
+    ...new Map(
+      requestedCapabilities.flatMap((name): Array<[string, CapabilityConfig]> => {
+        const match = config.capabilities.find(
+          (capability) => capability.id === name || capability.aliases.includes(name),
+        );
+        return match ? [[match.id, match]] : [];
+      }),
+    ).values(),
+  ];
+  const capabilityScopes = selectedCapabilities.flatMap((capability) => capability.paths);
+  const requestedScopes = options.changed
+    ? [...scopes, ...capabilityScopes, ...gitState.dirtyFiles]
+    : [...scopes, ...capabilityScopes];
   const normalizedScopes = [
     ...new Set(
       requestedScopes.map((scope) => {
@@ -401,7 +487,20 @@ export function collectAgentContext(
     : [];
   const scripts = packageJson.scripts ?? {};
   const guardrailState = guardrails(resolvedRoot);
-  const warnings = [...validateRoutes(resolvedRoot, selected, scripts), ...guardrailState.warnings];
+  const warnings = [
+    ...validateRoutes(resolvedRoot, selected, scripts),
+    ...validateCapabilities(resolvedRoot, selectedCapabilities, config.routes, scripts),
+    ...guardrailState.warnings,
+  ];
+  for (const name of requestedCapabilities) {
+    if (
+      !selectedCapabilities.some(
+        (capability) => capability.id === name || capability.aliases.includes(name),
+      )
+    ) {
+      warnings.push(`unknown capability: ${name}`);
+    }
+  }
   if (normalizedScopes.length && !selected.length) {
     warnings.push(`no route matched: ${normalizedScopes.join(", ")}`);
   }
@@ -411,7 +510,7 @@ export function collectAgentContext(
     );
   }
   const state = {
-    desiredRevision: desiredRevision(selected, scripts),
+    desiredRevision: desiredRevision(selected, selectedCapabilities, scripts),
     observedRevision: observedRevision(resolvedRoot, normalizedScopes),
   };
   const report: AgentContextReport = {
@@ -423,6 +522,8 @@ export function collectAgentContext(
     engines: packageJson.engines ?? {},
     routes: selected,
     availableRoutes: config.routes.map((route) => route.id),
+    capabilities: selectedCapabilities,
+    availableCapabilities: config.capabilities,
     guardrails: guardrailState.active,
     canonical: {
       design: "docs/design/design.md",
@@ -441,8 +542,15 @@ export function validateAgentContext(root: string): string[] {
   const packageJson = JSON.parse(readFileSync(join(resolvedRoot, "package.json"), "utf8")) as {
     scripts?: Record<string, string>;
   };
+  const config = readConfig(resolvedRoot);
   return [
-    ...validateRoutes(resolvedRoot, readConfig(resolvedRoot).routes, packageJson.scripts ?? {}),
+    ...validateRoutes(resolvedRoot, config.routes, packageJson.scripts ?? {}),
+    ...validateCapabilities(
+      resolvedRoot,
+      config.capabilities,
+      config.routes,
+      packageJson.scripts ?? {},
+    ),
     ...guardrails(resolvedRoot).warnings,
   ];
 }
@@ -474,14 +582,26 @@ export function formatAgentContext(report: AgentContextReport): string {
   }
   if (report.reconciliation.latestVerification) {
     const evidence = report.reconciliation.latestVerification;
-    lines.push(
-      `- Evidence: ${evidence.path}${evidence.runId ? ` (${evidence.runId})` : ""}`,
-    );
+    lines.push(`- Evidence: ${evidence.path}${evidence.runId ? ` (${evidence.runId})` : ""}`);
   }
   if (!report.routes.length) {
     lines.push("", "## Available routes");
     for (const id of report.availableRoutes) lines.push(`- ${id}`);
     lines.push("", "Run again with `<target-path>` for task-specific owners and checks.");
+  }
+  if (!report.capabilities.length && report.availableCapabilities.length) {
+    lines.push("", "## Available capabilities");
+    for (const capability of report.availableCapabilities) {
+      lines.push(`- capability:${capability.id} — ${capability.summary}`);
+      lines.push(`  - Entrypoints: ${capability.entrypoints.join(", ") || "none"}`);
+      lines.push(`  - Supports: ${capability.supports.join(", ") || "not enumerated"}`);
+    }
+  }
+  for (const capability of report.capabilities) {
+    lines.push("", `## Capability: ${capability.id}`);
+    lines.push(`- Summary: ${capability.summary}`);
+    lines.push(`- Entrypoints: ${capability.entrypoints.join(", ") || "none"}`);
+    lines.push(`- Supports: ${capability.supports.join(", ") || "not enumerated"}`);
   }
   for (const route of report.routes) {
     lines.push("", `## Route: ${route.id}`);
@@ -515,6 +635,7 @@ function parseArgs(args: string[]): {
   json: boolean;
   check: boolean;
   changed: boolean;
+  capabilities: string[];
   help: boolean;
 } {
   let root = process.cwd();
@@ -523,6 +644,7 @@ function parseArgs(args: string[]): {
   let changed = false;
   let help = false;
   const scopes: string[] = [];
+  const capabilities: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--json") json = true;
@@ -535,14 +657,19 @@ function parseArgs(args: string[]): {
       if (!scope) throw new Error("--scope requires a path");
       scopes.push(scope);
     } else if (argument.startsWith("-")) throw new Error(`unknown argument: ${argument}`);
-    else scopes.push(argument);
+    else if (argument.startsWith("capability:")) {
+      const capability = argument.slice("capability:".length);
+      if (!capability) throw new Error("capability: requires an id or alias");
+      capabilities.push(capability);
+    } else scopes.push(argument);
   }
-  return { root, scopes, json, check, changed, help };
+  return { root, scopes, json, check, changed, capabilities, help };
 }
 
 const usage = `Usage: npm run agent:context -- [paths...] [options]
 
 Paths select matching repository routes directly and do not require Git.
+Use capability:<id-or-alias> to discover an existing repository capability.
   --changed       also derive scopes from dirty Git paths; requires Git inspection
   --scope <path>  legacy spelling for a path; positional paths are preferred
   --root <path>   inspect another repository root
@@ -566,6 +693,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     }
     const report = collectAgentContext(options.root, options.scopes, {
       changed: options.changed,
+      capabilities: options.capabilities,
     });
     process.stdout.write(
       options.json ? `${JSON.stringify(report, null, 2)}\n` : formatAgentContext(report),

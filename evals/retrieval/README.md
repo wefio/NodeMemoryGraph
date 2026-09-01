@@ -45,6 +45,14 @@ candidates.
     questions (`--full` for all 500).
   - BEAM (`beam/beam_100k.json`, 20-conversation JSONL): all 20
     conversations; `probing_questions` Python literals are parsed natively.
+  - PersonaMem v2 (`personamem_v2/benchmark/text/benchmark.csv`): first 500
+    questions (`--full` for all rows). Each selected persona's official 32K
+    chat is ingested once; system instructions are excluded.
+  - HaluMem Medium (`halumem/HaluMem-Medium.jsonl`): first 2 users (`--full`
+    for all users). This is explicitly a **gold-memory retrieval arm**: official
+    `memory_points` are the indexed records and question evidence names those
+    same records. It measures routing/ranking over an extracted memory set, not
+    extraction quality or paraphrase matching against raw dialogue.
 
 ## Gold matching
 
@@ -58,6 +66,16 @@ verbatim `evidenceExcerpt` — and a hit on either part counts.
 - **LongMemEval** (`candidate-in-gold`): gold = the whole `answer_session_ids`
   session blob; hit when a candidate part appears inside the gold blob, i.e.
   the candidate is backed by a gold session.
+- **PersonaMem v2** (`gold-in-candidate`): gold = each message in the official
+  `related_conversation_snippet`; hit when that source message appears inside a
+  candidate part.
+- **HaluMem** (`gold-in-candidate`): gold = each official evidence
+  `memory_content`; questions with no evidence (for example Memory Boundary)
+  remain in reports but are excluded from gold-based rates.
+
+Namesakes is intentionally not adapted here: it is an entity-resolution corpus
+without the query-to-source-evidence contract required by this rank-aware
+retrieval scorer. Its topology evaluation remains under `evals/topology/`.
 
 ## Metrics
 
@@ -75,8 +93,8 @@ members appended after ranking never acquire a ranked position.
   numbers.
 - Cost: mean rendered-context characters; search latency p50/p95.
 
-Metrics are stratified: LoCoMo by category, LongMemEval by question_type,
-BEAM by capability.
+Metrics are stratified: LoCoMo by category, LongMemEval and HaluMem by
+question type, BEAM by capability, and PersonaMem by preference type.
 
 ## Output and reproducibility
 
@@ -86,8 +104,9 @@ Reports land in `evals/results/retrieval/<run-id>/` (gitignored):
 and NMG versions, retrieval mode and every budget knob.
 
 ```powershell
-npm run eval:retrieval                          # all three datasets, pinned samples
+npm run eval:retrieval                          # all five datasets, pinned samples
 npm run eval:retrieval -- --dataset locomo      # one dataset
+npm run eval:retrieval -- --dataset personamem,halumem
 npm run eval:retrieval -- --dataset longmemeval --full
 npm run eval:retrieval -- --hybrid              # external-embedding arm
 npm run eval:retrieval -- --summaries           # leaf-block summary arm (LLM endpoint)
@@ -139,7 +158,7 @@ Two external services, both configured by env (no models ship with NMG):
 Formal run results are recorded as dated documents under `docs/`, not here:
 
 - [Retrieval-quality baseline 2026-08-16](../../docs/experiments/retrieval-quality-baseline-2026-08-16.md)
-  — first pinned run, lexical arm, all three datasets.
+  — first pinned run, lexical arm, the original three-dataset protocol.
 - [Retrieval-quality hybrid arm 2026-08-16](../../docs/experiments/retrieval-quality-hybrid-2026-08-16.md)
   — hybrid (external-embedding) arm on all three datasets + LME full-500
   runs for both arms; includes the supersede-scan O(N²) fix measurements.

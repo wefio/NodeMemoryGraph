@@ -8,7 +8,7 @@
  * deterministic: lexical retrieval, no LLM judge, no embedding endpoint.
  *
  * Usage:
- *   npm run eval:retrieval -- [--dataset locomo,longmemeval,beam|all]
+ *   npm run eval:retrieval -- [--dataset locomo,longmemeval,beam,personamem,halumem|all]
  *     [--full] [--limit N] [--skip-ingest] [--hybrid] [--summaries] [--topK N] [--out DIR]
  *
  * --summaries runs the leaf-block semantic-summary pass after ingest (NMG_SUMMARY_*
@@ -36,11 +36,8 @@ import {
   drainNodeSummaries,
   NODE_SUMMARY_PROMPT_VERSION,
 } from "../../src/integration/node-summarizer.ts";
-import {
-  OmniMemEvalBridge,
-  type OmniRetrievedMemory,
-} from "../omnimemeval/bridge.ts";
-import { loadDataset, type DatasetSpec } from "./datasets.ts";
+import { OmniMemEvalBridge, type OmniRetrievedMemory } from "../omnimemeval/bridge.ts";
+import { DATASET_NAMES, loadDataset, PINNED_DEFAULTS, type DatasetSpec } from "./datasets.ts";
 import {
   aggregateByCategory,
   scoreQuestion,
@@ -143,7 +140,11 @@ async function main(): Promise<void> {
     try {
       const scored = await retrieveAndScore(bridge, spec, options.topK);
       const metrics = aggregateByCategory(scored, RECALL_KS);
-      datasetReports[name] = { metrics, questions: scored, ...(summariesGenerated !== undefined ? { summariesGenerated } : {}) };
+      datasetReports[name] = {
+        metrics,
+        questions: scored,
+        ...(summariesGenerated !== undefined ? { summariesGenerated } : {}),
+      };
       printTable(name, metrics);
     } finally {
       bridge.close();
@@ -201,7 +202,7 @@ async function retrieveAndScore(
   for (const [index, question] of spec.questions.entries()) {
     const startedAt = performance.now();
     const result = (await bridge.handle({
-      id: requestId += 1,
+      id: (requestId += 1),
       op: "search",
       userId: question.userId,
       query: question.query,
@@ -277,7 +278,7 @@ async function ingestNow(
     let requestId = 0;
     for (const [index, conversation] of spec.conversations.entries()) {
       await bridge.handle({
-        id: requestId += 1,
+        id: (requestId += 1),
         op: "add",
         userId: conversation.userId,
         conversationId: conversation.conversationId,
@@ -369,15 +370,19 @@ function buildManifest(
     sampling: {
       full: options.full,
       limit: options.limit ?? null,
-      pinnedDefaults: "locomo=all 10 users, longmemeval=first 100 questions, beam=all 20 conversations",
+      pinnedDefaults: Object.fromEntries(
+        DATASET_NAMES.map((name) => [name, PINNED_DEFAULTS[name].note]),
+      ),
     },
   };
 }
 
 function nmgVersion(): string {
   try {
-    return (JSON.parse(readFileSync(resolve("package.json"), "utf8")) as { version?: string })
-      .version ?? "unknown";
+    return (
+      (JSON.parse(readFileSync(resolve("package.json"), "utf8")) as { version?: string }).version ??
+      "unknown"
+    );
   } catch {
     return "unknown";
   }
@@ -444,7 +449,7 @@ function renderMarkdown(report: Record<string, unknown>): string {
 
 function parseArgs(args: string[]): CliOptions {
   const options: CliOptions = {
-    datasets: ["locomo", "longmemeval", "beam"],
+    datasets: [...DATASET_NAMES],
     full: false,
     skipIngest: false,
     hybrid: false,
@@ -459,10 +464,10 @@ function parseArgs(args: string[]): CliOptions {
         if (value !== "all") {
           options.datasets = value.split(",").map((name) => {
             const trimmed = name.trim();
-            if (trimmed !== "locomo" && trimmed !== "longmemeval" && trimmed !== "beam") {
+            if (!DATASET_NAMES.includes(trimmed as DatasetSpec["name"])) {
               throw new Error(`unknown dataset: ${trimmed}`);
             }
-            return trimmed;
+            return trimmed as DatasetSpec["name"];
           });
         }
         break;

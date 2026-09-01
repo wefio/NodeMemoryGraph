@@ -98,7 +98,9 @@ npm run agent:context -- --scope <目标路径>
 
 `tools/repo-context.ts` 从 Git、`package.json`、`agent-context.yaml`、owner 文档和临时 guardrail manifest 生成当前任务视图。它是只读开发工具，不访问 NMG 数据库，不启动 daemon，也不调用 LLM 或 embedding。`--changed` 可以把当前工作树的全部改动作为 scope；共享脏工作树中应优先传入本任务拥有的精确 `--scope`，避免把其他 Agent 的改动误纳入计划。
 
-`skills/repo-development/SKILL.md` 定义修改、测试和提交工作流；`agent-context.yaml` 只维护无法可靠自动推导的模块所有权与验证分类。每条 route 显式区分 `blocking` 与 `advisory`，且命令必须精确对应 `package.json` script；不允许用含义过宽的 `test` 代替 `test:product`、`test:research` 或 `test:chaos`。实现状态继续由源码、`completion-audit.md` 和 `temporary-todo.md` 分别拥有，避免第二事实源。
+`skills/repo-development/SKILL.md` 定义修改、测试和提交工作流；`agent-context.yaml` 维护无法可靠自动推导的模块所有权、验证分类，以及一个轻量的仓库能力目录。每条 route 显式区分 `blocking` 与 `advisory`，且命令必须精确对应 `package.json` script；不允许用含义过宽的 `test` 代替 `test:product`、`test:research` 或 `test:chaos`。实现状态继续由源码、`completion-audit.md` 和 `temporary-todo.md` 分别拥有，避免第二事实源。
+
+能力目录回答“仓库已经有哪个稳定入口可以完成这类工作”，每项只声明稳定 ID/别名、简短职责、代码路径、入口命令和支持对象。Agent 可运行无参数 `npm run agent:context` 查看目录，或用位置参数 `capability:<id-or-alias>` 把能力映射回既有 route、owner 和 verification。目录不复制设计、完成状态、实验结果或运行中服务状态；`package.json` 仍拥有 npm 命令，源码和完成审计仍拥有实现事实，配置校验只防止声明路径、route 和 npm 入口漂移。
 
 ### 5.1 声明状态协调
 
@@ -110,7 +112,7 @@ npm run agent:context -- --scope <目标路径>
 
 协调状态只有三种：`unknown` 表示尚无可适用证据或旧证据不含状态指纹；`converged` 表示同一声明、同一观测快照的 blocking checks 全部通过；`drifted` 表示 route 无法机械解析、声明或内容在验证后改变、证据损坏，或 blocking check 未通过/未执行。改变同一个脏文件的内容也会改变 observed revision，不能仅凭相同 HEAD 和文件名复用旧收据。
 
-这是由 `agent:context`、`agent:verify` 和 CI 事件驱动的轻量协调，不是后台 daemon，也不建立服务 catalog 或第二套仓库状态。`drifted` 只说明声明、观测和证据没有收敛，不等于架构错误；依赖方向、公共协议、持久化边界和默认能力等架构影响仍由 owner 文档、decision 与 Agent review 判断。静态测试可以机械保护已确定的 architecture fitness functions，但控制面不承载产品或架构智能。
+这是由 `agent:context`、`agent:verify` 和 CI 事件驱动的轻量协调，不是后台 daemon。静态能力目录是 Agent 导航索引，不是动态 service catalog、健康检查或第二套仓库状态。`drifted` 只说明声明、观测和证据没有收敛，不等于架构错误；依赖方向、公共协议、持久化边界和默认能力等架构影响仍由 owner 文档、decision 与 Agent review 判断。静态测试可以机械保护已确定的 architecture fitness functions，但控制面不承载产品或架构智能。
 
 ## 6. AI 开发验证流水线
 
