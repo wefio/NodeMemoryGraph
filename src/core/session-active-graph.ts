@@ -54,6 +54,10 @@ export interface SessionActiveGraphSnapshot {
   temporaryProjectionActive: boolean;
   items: SessionActiveGraphItem[];
   edges: ActiveGraphEdge[];
+  /** Projection ids disclosed to the model (host-neutral disclosure ledger).
+   * An adapter marks a projection as disclosed instead of keeping its own
+   * injection window; the ledger is session-local and memory-resident. */
+  disclosedProjectionIds: string[];
 }
 
 export interface SessionActiveGraphRuntimeOptions {
@@ -88,6 +92,9 @@ interface SessionState<TPart> {
   projections: Map<string, SessionActiveGraphProjection<TPart>>;
   projectionOrder: string[];
   frames: Map<string, FrameState>;
+  /** Host-neutral disclosure ledger: projection ids that have been surfaced to
+   * the model. Session-local, memory-resident, cleared with the session. */
+  disclosedProjectionIds: Set<string>;
   touchedAt: number;
 }
 
@@ -183,6 +190,21 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     return this.#projectionOwners.get(projectionId) ?? null;
   }
 
+  /** Record that a projection was disclosed to the model (host-neutral
+   * disclosure ledger). Idempotent; the projection must belong to this
+   * session. Adapters call this instead of maintaining their own injection
+   * window, so "already in context" is one shared, session-owned record. */
+  markDisclosed(projectionId: string, sessionId?: string | null): boolean {
+    const owner = this.#projectionOwners.get(projectionId);
+    if (!owner) return false;
+    if (sessionId?.trim() && normalizedSessionId(sessionId) !== owner) return false;
+    const state = this.#sessions.get(owner);
+    if (!state) return false;
+    state.disclosedProjectionIds.add(projectionId);
+    this.#touch(state);
+    return true;
+  }
+
   observe(input: {
     sessionId: string;
     statement: string;
@@ -262,6 +284,7 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
       temporaryProjectionActive: state.temporaryProjectionActive,
       items,
       edges: frame ? [...frame.edges.values()].map((edge) => ({ ...edge })) : [],
+      disclosedProjectionIds: [...state.disclosedProjectionIds],
     };
   }
 
@@ -290,6 +313,7 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
       temporaryProjectionActive: state.temporaryProjectionActive,
       items,
       edges: [...frame.edges.values()].map((edge) => ({ ...edge })),
+      disclosedProjectionIds: [...state.disclosedProjectionIds],
     };
   }
 
@@ -319,6 +343,7 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
         projections: new Map(),
         projectionOrder: [],
         frames: new Map(),
+        disclosedProjectionIds: new Set(),
         touchedAt: this.#now(),
       };
       this.#sessions.set(sessionId, state);

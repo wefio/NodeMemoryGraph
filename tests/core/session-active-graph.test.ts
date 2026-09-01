@@ -232,6 +232,31 @@ test("reasoning artifacts: TTL-bound hypotheses expire from live snapshots", () 
   assert.equal(after.items.length, 0, "expired artifact no longer surfaced");
 });
 
+test("disclosure ledger: markDisclosed records surfaced projections per session", () => {
+  let now = Date.parse("2026-08-29T00:00:00.000Z");
+  const runtime = new SessionActiveGraphRuntime<string>({ now: () => now });
+  const projection = runtime.registerProjection(
+    graph("t-a", "session-a", "task-alpha", "memory-a"),
+    [{ traceId: "t-a", memoryIds: new Set(["memory-a"]), value: "a" }],
+  );
+  // Not yet disclosed.
+  assert.deepEqual(runtime.snapshot("session-a")?.disclosedProjectionIds, []);
+  // Mark disclosed; the ledger records it.
+  assert.equal(runtime.markDisclosed(projection.projectionId, "session-a"), true);
+  assert.deepEqual(runtime.snapshot("session-a")?.disclosedProjectionIds, [
+    projection.projectionId,
+  ]);
+  // Cross-session mark is rejected.
+  assert.equal(runtime.markDisclosed(projection.projectionId, "session-b"), false);
+  // Idempotent within the session.
+  assert.equal(runtime.markDisclosed(projection.projectionId, "session-a"), true);
+  assert.equal(
+    runtime.snapshot("session-a")?.disclosedProjectionIds.length,
+    1,
+    "idempotent, not duplicated",
+  );
+});
+
 function graph(id: string, sessionId: string, taskId: string, memoryId: string): ActiveGraph {
   return {
     id,
