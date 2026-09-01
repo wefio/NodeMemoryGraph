@@ -114,7 +114,12 @@ export function renderCompactSearchSurface(
   context: CompactSearchContext,
   options: SearchSurfaceOptions = {},
 ): string {
-  if (context.candidates.length === 0) return options.emptyText ?? "No matching NMG memory found.";
+  const fileLines = (context.files ?? []).map(
+    (hit) => `- file=${hit.path}; excerpt=${hit.excerpt}`,
+  );
+  if (context.candidates.length === 0 && fileLines.length === 0) {
+    return options.emptyText ?? "No matching NMG memory found.";
+  }
   const lines = context.candidates.map((candidate) => {
     const flags = [candidate.external ? "[external]" : "", candidate.open ? "[open]" : ""].filter(
       Boolean,
@@ -132,6 +137,7 @@ export function renderCompactSearchSurface(
   return [
     options.preamble,
     ...lines,
+    ...fileLines,
     context.logicalChainCount > 0
       ? `logical_chains=${context.logicalChainCount}; use nmg_get for compact chain structure with exact evidence.`
       : "",

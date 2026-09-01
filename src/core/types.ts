@@ -840,8 +840,22 @@ export interface RetrievalFilterUsage {
   selectivity: number;
 }
 
+export interface FileHit {
+  /** Path relative to the project root. */
+  path: string;
+  /** Short excerpt around the first match. */
+  excerpt: string;
+  /** Relevance score: negated FTS bm25, so larger is more relevant. */
+  score: number;
+}
+
 export interface MemoryContext {
   results: MemorySearchResult[];
+  /** File-content source hits (bounded passive-scope FTS), separate from
+   *  memory results. Files are a search index, not memory — they never carry
+   *  provenance/scope/verification and never enter STG/LTG. Present only when
+   *  the file content source is enabled for the searched project. */
+  files?: FileHit[];
   /** Chain edges (DAG) collected during expandChains: the directed edges of
    *  every chain surfaced. Lets the presentation layer render a chain as a
    *  DAG (branching `A --> B & C`) instead of a linear position sequence.

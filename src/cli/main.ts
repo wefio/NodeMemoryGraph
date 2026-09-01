@@ -581,12 +581,19 @@ function humanResult(value: unknown): string {
         memory: { id: string; memoryType: string; tier: number; statement: string };
         node: { canonicalName: string };
       }>;
+      files?: Array<{ path: string; excerpt: string }>;
       timings?: { timings?: Record<string, number>; totalMs?: number };
     };
     const lines = context.results.map(
       ({ memory, node }) =>
         `${memory.id}\t${memory.memoryType}\tL${memory.tier}\t${node.canonicalName}\t${memory.statement}`,
     );
+    if (context.files && context.files.length > 0) {
+      lines.push("FILES:");
+      for (const file of context.files) {
+        lines.push(`${file.path}\t${file.excerpt}`);
+      }
+    }
     if (context.timings) {
       const sections = Object.entries(context.timings.timings ?? {})
         .sort((left, right) => right[1] - left[1])
