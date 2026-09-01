@@ -27,13 +27,16 @@ were measured with v1 and are conservative. Key knobs:
 `SearchOptions.leafBlockRouting`, `leafBlockRoutingMaxMembers` (default 12),
 prompt version `leaf-summary-v1` in `src/integration/leaf-summarizer.ts`.
 
-## How to run anything
+## How to reproduce this historical state
 
-Current invocation (the historical Shell wrapper has been removed):
+This note records the 2026-08-18 experimental arms. The current product-surface
+protocol and supported options are canonical in `evals/retrieval/README.md`;
+`--hybrid` was retired when the evaluator stopped exposing benchmark-only search
+arms. The current equivalent product-path invocation is:
 
 ```powershell
 .benchmarks/bge-venv/Scripts/python.exe evals/omnimemeval/bge_server.py --device cuda
-npm run eval:retrieval -- --dataset <datasets> --hybrid
+npm run eval:retrieval -- --dataset <datasets>
 ```
 
 Stores persist in `.benchmarks/retrieval-stores/<dataset>/` and are reused;

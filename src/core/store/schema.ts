@@ -13,7 +13,7 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-import { ftsIndexedText } from "./search-ranking.ts";
+import { ftsIndexedText, surfaceIndexedText } from "./search-ranking.ts";
 import { recallTriggersFromStoredMarkers } from "../recall-triggers.ts";
 import { encodeVector, parseVector } from "./vector-codec.ts";
 
@@ -453,6 +453,13 @@ export function migrate(db: DatabaseSync): void {
       tokenize = 'unicode61'
     );
 
+    CREATE VIRTUAL TABLE IF NOT EXISTS memory_surface_fts USING fts5(
+      content,
+      content = '',
+      contentless_delete = 1,
+      tokenize = 'trigram'
+    );
+
     CREATE TABLE IF NOT EXISTS state_key_aliases (
       alias_key TEXT NOT NULL,
       scope_json TEXT NOT NULL,
@@ -566,7 +573,7 @@ export function migrate(db: DatabaseSync): void {
 }
 
 const FTS_TEXT_FORMAT_KEY = "fts_text_format";
-const FTS_TEXT_FORMAT = "unicode61-han-bigram-recall-trigger-v2";
+const FTS_TEXT_FORMAT = "unicode61-han-bigram-recall-trigger-surface-trigram-v3";
 
 /** One-time, versioned rebuild; normal store opens perform one metadata lookup. */
 function ensureFtsTextFormat(db: DatabaseSync): void {
@@ -577,18 +584,24 @@ function ensureFtsTextFormat(db: DatabaseSync): void {
 
   const rows = db
     .prepare(
-      `SELECT m.id, m.statement, m.markers_json, n.canonical_name, h.content
+      `SELECT m.id, m.statement, m.markers_json, n.canonical_name, h.content,
+              r.rowid AS registry_rowid
        FROM memory_records m
        JOIN memory_nodes n ON n.id = m.node_id
        JOIN history_records h ON h.id = m.evidence_id
+       JOIN memory_fts_registry r ON r.memory_id = m.id
        WHERE m.storage_state = 'indexed'`,
     )
     .all() as Row[];
   db.exec("BEGIN IMMEDIATE");
   try {
     db.prepare("DELETE FROM memory_fts").run();
+    db.prepare("DELETE FROM memory_surface_fts").run();
     const insert = db.prepare(
       "INSERT INTO memory_fts(memory_id, statement, node_name, evidence) VALUES (?, ?, ?, ?)",
+    );
+    const insertSurface = db.prepare(
+      "INSERT INTO memory_surface_fts(rowid, content) VALUES (?, ?)",
     );
     for (const row of rows) {
       insert.run(
@@ -597,6 +610,12 @@ function ensureFtsTextFormat(db: DatabaseSync): void {
         ftsIndexedText(String(row.canonical_name)),
         ftsIndexedText(
           `${String(row.content)} ${recallTriggersFromStoredMarkers(row.markers_json).join(" ")}`.trim(),
+        ),
+      );
+      insertSurface.run(
+        Number(row.registry_rowid),
+        surfaceIndexedText(
+          `${String(row.statement)} ${String(row.canonical_name)} ${String(row.content)} ${recallTriggersFromStoredMarkers(row.markers_json).join(" ")}`,
         ),
       );
     }

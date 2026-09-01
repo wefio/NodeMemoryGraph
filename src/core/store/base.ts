@@ -52,6 +52,8 @@ import {
   ftsIndexedText,
   memoryEmbeddingText,
   normalizeStatement,
+  surfaceAnchorExpression,
+  surfaceIndexedText,
   type StoreRow as Row,
 } from "./search-ranking.ts";
 
@@ -1221,6 +1223,11 @@ export class NmgStoreBase {
         .get(derivedId);
       if (!remaining) {
         this.db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(derivedId);
+        this.db
+          .prepare(
+            "DELETE FROM memory_surface_fts WHERE rowid IN (SELECT rowid FROM memory_fts_registry WHERE memory_id = ?)",
+          )
+          .run(derivedId);
         this.db.prepare("DELETE FROM memory_fts_registry WHERE memory_id = ?").run(derivedId);
         this.db.prepare("DELETE FROM memory_embeddings WHERE memory_id = ?").run(derivedId);
         this.db.prepare("DELETE FROM memory_index_delta WHERE memory_id = ?").run(derivedId);
@@ -1743,7 +1750,14 @@ export class NmgStoreBase {
       .prepare("SELECT markers_json FROM memory_records WHERE id = ?")
       .get(memoryId) as Row | undefined;
     const triggers = recallTriggersFromStoredMarkers(row?.markers_json).join(" ");
+    this.db
+      .prepare("INSERT OR IGNORE INTO memory_fts_registry(memory_id) VALUES (?)")
+      .run(memoryId);
+    const registry = this.db
+      .prepare("SELECT rowid FROM memory_fts_registry WHERE memory_id = ?")
+      .get(memoryId) as Row;
     this.db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
+    this.db.prepare("DELETE FROM memory_surface_fts WHERE rowid = ?").run(Number(registry.rowid));
     this.db
       .prepare(
         "INSERT INTO memory_fts(memory_id, statement, node_name, evidence) VALUES (?, ?, ?, ?)",
@@ -1755,8 +1769,11 @@ export class NmgStoreBase {
         ftsIndexedText(`${evidence.content} ${triggers}`.trim()),
       );
     this.db
-      .prepare("INSERT OR IGNORE INTO memory_fts_registry(memory_id) VALUES (?)")
-      .run(memoryId);
+      .prepare("INSERT INTO memory_surface_fts(rowid, content) VALUES (?, ?)")
+      .run(
+        Number(registry.rowid),
+        surfaceIndexedText(`${statement} ${node.canonicalName} ${evidence.content} ${triggers}`),
+      );
   }
   ftsCandidates(query: string, limit: number): string[] {
     const expression = ftsExpression(query);
@@ -1766,6 +1783,18 @@ export class NmgStoreBase {
         "SELECT memory_id FROM memory_fts WHERE memory_fts MATCH ? ORDER BY bm25(memory_fts) LIMIT ?",
       )
       .all(expression, limit) as Row[];
+    return rows.map((row) => String(row.memory_id));
+  }
+  surfaceAnchorCandidates(query: string, limit: number): string[] {
+    const expression = surfaceAnchorExpression(query);
+    if (!expression) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT r.memory_id FROM memory_surface_fts s
+         JOIN memory_fts_registry r ON r.rowid = s.rowid
+         WHERE memory_surface_fts MATCH ? LIMIT ?`,
+      )
+      .all(expression, Math.max(1, Math.min(limit, 2_000))) as Row[];
     return rows.map((row) => String(row.memory_id));
   }
   ftsCandidatesInNodes(query: string, nodeIds: string[], limit: number): string[] {

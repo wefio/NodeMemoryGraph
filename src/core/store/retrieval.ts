@@ -173,6 +173,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
     // cross-cluster (maintenance / base)
     declare protected resolveActiveNodeName: (nodeName: string) => string;
     declare protected ftsCandidates: (query: string, limit: number) => string[];
+    declare protected surfaceAnchorCandidates: (query: string, limit: number) => string[];
     declare protected evidenceIds: (memoryId: string) => string[];
     declare protected evidenceRecords: (ids: string[]) => HistoryRecord[];
     declare protected resultsForNode: (
@@ -230,25 +231,22 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
           maxTier,
           limit: Math.min(50, Math.max(20, limit * 3)),
         };
-        const retrieve = () =>
-          semantic
-            ? options.vectorGranularity === "union"
-              ? mergeSemanticCandidates(
-                  query,
-                  [
-                    ...this.searchHierarchyByVector(
-                      query,
-                      semantic.queryVector,
-                      semantic.model,
-                      directOptions,
-                    ),
-                    ...this.searchByVector(query, semantic.queryVector, semantic.model, {
-                      ...directOptions,
-                      retrievalMode: "qwen3",
-                    }),
-                  ],
-                  directOptions.limit,
-                )
+        const retrieve = () => {
+          if (!semantic) return this.search(query, directOptions, filterUsage);
+          const semanticResults =
+            options.vectorGranularity === "union"
+              ? [
+                  ...this.searchHierarchyByVector(
+                    query,
+                    semantic.queryVector,
+                    semantic.model,
+                    directOptions,
+                  ),
+                  ...this.searchByVector(query, semantic.queryVector, semantic.model, {
+                    ...directOptions,
+                    retrievalMode: "qwen3",
+                  }),
+                ]
               : options.vectorGranularity === "records"
                 ? this.searchByVector(query, semantic.queryVector, semantic.model, {
                     ...directOptions,
@@ -259,8 +257,24 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
                     semantic.queryVector,
                     semantic.model,
                     directOptions,
-                  )
-            : this.search(query, directOptions, filterUsage);
+                  );
+          const surfaceIds = this.surfaceAnchorCandidates(query, MAX_SEARCH_CANDIDATES);
+          const surfaceResults =
+            surfaceIds.length === 0
+              ? []
+              : this.searchByVectorCandidates(
+                  query,
+                  semantic.queryVector,
+                  semantic.model,
+                  surfaceIds,
+                  { ...directOptions, retrievalMode: "fts5" },
+                );
+          return mergeSemanticCandidates(
+            query,
+            [...semanticResults, ...surfaceResults],
+            directOptions.limit,
+          );
+        };
         return perf ? perf.measure(SECTION.searchDirect, retrieve) : retrieve();
       };
       const directQpp = (results: readonly MemorySearchResult[]): QppTriggerDecision =>
@@ -1855,7 +1869,12 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       const retrievalMode = options.retrievalMode ?? "legacy";
       const ftsIds =
         retrievalMode === "fts5" || retrievalMode === "hybrid"
-          ? this.ftsCandidates(query, MAX_SEARCH_CANDIDATES)
+          ? [
+              ...new Set([
+                ...this.surfaceAnchorCandidates(query, MAX_SEARCH_CANDIDATES),
+                ...this.ftsCandidates(query, MAX_SEARCH_CANDIDATES),
+              ]),
+            ].slice(0, MAX_SEARCH_CANDIDATES)
           : [];
       if (retrievalMode === "fts5" && ftsIds.length === 0 && forcedCandidateIds.length === 0) {
         return [];

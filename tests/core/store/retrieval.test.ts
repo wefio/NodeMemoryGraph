@@ -148,6 +148,69 @@ test("FTS5 recalls a memory by an explicit recall trigger without exposing a dup
   });
 });
 
+test("surface-anchor retrieval preserves punctuation and Unicode normalization", () => {
+  withStore((store) => {
+    const saved = store.remember({
+      statement:
+        "The C++ worker at C:\\projects\\atlas-core\\worker.cpp failed with EADDRINUSE on v2.4.1.",
+      nodeName: "Atlas native worker",
+      memoryType: "event",
+    });
+
+    for (const query of [
+      "Why did `C++` fail?",
+      "Inspect C:\\projects\\atlas-core\\worker.cpp",
+      "What caused EADDRINUSE?",
+      "Was this fixed after ｖ２．４．１?",
+    ]) {
+      assert.ok(
+        store.surfaceAnchorCandidates(query, 8).includes(saved.memory.id),
+        `expected a surface-anchor match for ${query}`,
+      );
+    }
+  });
+});
+
+test("surface-anchor retrieval abstains for an ordinary semantic question", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "The user prefers concise explanations.",
+      nodeName: "Explanation preference",
+      memoryType: "preference",
+    });
+
+    assert.deepEqual(store.surfaceAnchorCandidates("How should this be explained?", 8), []);
+  });
+});
+
+test("semantic retrieval keeps exact surface anchors in the shared candidate pool", () => {
+  withStore((store) => {
+    const anchored = store.remember({
+      statement: "Atlas failed with EADDRINUSE.",
+      nodeName: "Atlas failure",
+      memoryType: "event",
+    });
+    const semanticOnly = store.remember({
+      statement: "A generic networking incident occurred.",
+      nodeName: "Network incident",
+      memoryType: "event",
+    });
+    store.upsertExternalEmbeddings("test-model", [
+      { memoryId: anchored.memory.id, vector: [0, 0, 0] },
+      { memoryId: semanticOnly.memory.id, vector: [1, 1, 1] },
+    ]);
+
+    const context = store.searchContext(
+      "What caused EADDRINUSE?",
+      { limit: 2, maxTier: 3, vectorGranularity: "records" },
+      { queryVector: [1, 1, 1], model: "test-model" },
+    );
+
+    assert.ok(context.results.some((result) => result.memory.id === anchored.memory.id));
+    assert.ok(context.results.some((result) => result.memory.id === semanticOnly.memory.id));
+  });
+});
+
 test("store open migrates a legacy raw Chinese FTS row exactly once", () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-fts-migration-"));
   const path = join(directory, "nmg.sqlite");
