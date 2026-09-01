@@ -290,10 +290,7 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
 
   /** Snapshot of one task frame (active or cooled), or null when the session
    * or frame does not exist. Lets an Agent inspect cooled state on task return. */
-  taskFrame(
-    sessionId: string,
-    taskFrameId: string,
-  ): SessionActiveGraphSnapshot | null {
+  taskFrame(sessionId: string, taskFrameId: string): SessionActiveGraphSnapshot | null {
     const state = this.#sessions.get(normalizedSessionId(sessionId));
     if (!state) return null;
     const frame = state.frames.get(taskFrameId.trim());
@@ -421,10 +418,7 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     );
     const ordered = all.sort((a, b) => compareEvictionPriority(a.item, b.item));
     let characters = ordered.reduce((sum, entry) => sum + entry.item.statement.length, 0);
-    while (
-      ordered.length > this.maxItemsPerSession ||
-      characters > this.maxCharactersPerSession
-    ) {
+    while (ordered.length > this.maxItemsPerSession || characters > this.maxCharactersPerSession) {
       const removed = ordered.shift();
       if (!removed) break;
       removed.frame.items.delete(removed.item.id);
