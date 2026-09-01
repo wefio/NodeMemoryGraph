@@ -1470,72 +1470,9 @@ export function apply(ctx: Context): () => void {
     : undefined
 
   // ── file-content scope observer (tools/result) ─────────────────────────────
-  // The file content source learns its search scope from the Agent's own search
-  // behaviour (docs/design/file-content-source-design.md §3.2): a non-empty
-  // `grep`/`read` result marks the searched files as hot zones, which the
-  // FileIndex records via addScopePath. This listener observes only — it never
-  // intercepts or mutates the tool lifecycle. Any parse failure is silent.
-  //
-  // The FileIndex is provided as an optional `fileIndex` service (addScopePath
-  // only) so the observer degrades to a no-op if it is ever absent.
-  const fileIndexService = new FileIndex({ projectRoot: workspaceRoot })
-  const provideFileIndex = ctx.provide
-    ? ctx.provide('fileIndex', { addScopePath: (path) => fileIndexService.addScopePath(path) })
-    : undefined
-  //
-  // FileIndex lives in src/core/file-index.ts (implemented in parallel) and is
-  // consumed as an OPTIONAL Cordis service: no static import, so the plugin
-  // typechecks and mounts before the index exists, and recording degrades to a
-  // no-op while `ctx.get('fileIndex')` is undefined.
-  function collectScopePaths(exec, result) {
-    // Tool name: the registry hands `exec.name` (dsh-tools ToolExecution); keep
-    // `exec.toolName` as a defensive alias for other host integrations. The DSH
-    // suites register exactly 'grep' (dsh-tool-fs-search) and 'read'
-    // (dsh-tool-fs); glob is a separate tool we intentionally do not observe.
-    const name = (exec && (exec.name || exec.toolName)) || ''
-    if (name !== 'grep' && name !== 'read') return
-    const fileIndex = ctx.get('fileIndex')
-    if (!fileIndex || typeof fileIndex.addScopePath !== 'function') return
-    // Arguments: `exec.arguments` (dsh-tools) with `exec.input` as an alias.
-    const args = (exec && (exec.arguments || exec.input)) || {}
-    const value = result && result.isError ? undefined : result && result.value
-    const paths = []
-    if (name === 'grep') {
-      // Hit file paths ride in the canonical value's `matches[].path` (workdir-
-      // relative display paths). Non-empty result ⇔ matches.length > 0.
-      const matches = value && Array.isArray(value.matches) ? value.matches : []
-      for (const match of matches) {
-        if (match && typeof match.path === 'string' && match.path) paths.push(match.path)
-      }
-      // The searched path arg (a file or directory the Agent pointed grep at)
-      // is itself a candidate hot zone when the search found something.
-      if (paths.length > 0 && args && typeof args.path === 'string' && args.path) {
-        paths.push(args.path)
-      }
-    } else if (name === 'read') {
-      // A non-empty read ⇔ it returned at least one line. Record both the
-      // requested path arg and the resolved display path (they usually agree).
-      const lines = value && Array.isArray(value.lines) ? value.lines : []
-      if (lines.length > 0) {
-        if (args && typeof args.file_path === 'string' && args.file_path) paths.push(args.file_path)
-        if (value && typeof value.path === 'string' && value.path) paths.push(value.path)
-      }
-    }
-    for (const path of paths) {
-      try {
-        fileIndex.addScopePath(path)
-      } catch {
-        // recording is best-effort; a failing index must not break the tool
-      }
-    }
-  }
-  const scopeObserverDisposer = ctx.on('tools/result', (exec, result) => {
-    try {
-      collectScopePaths(exec, result)
-    } catch {
-      // observation never throws into the tool registry
-    }
-  })
+  const scopeObserver = setupScopeObserver(ctx, workspaceRoot)
+  const scopeObserverDisposer = scopeObserver.disposer
+  const provideFileIndex = scopeObserver.provide
 
   // ── wake timer + startup ───────────────────────────────────────────────────
   // Single host-side timer polls the daemon for board entries every
@@ -1587,6 +1524,72 @@ export function apply(ctx: Context): () => void {
     recallBatch.clear()
     openSearches.clear()
     wakeBatch.clear()
-    try { fileIndexService.close() } catch { /* best-effort */ }
+    try { scopeObserver.service.close() } catch { /* best-effort */ }
   }
+}
+
+// ── file-content scope observer (tools/result) ───────────────────────────────
+// The file content source learns its search scope from the Agent's own search
+// behaviour (docs/design/file-content-source-design.md §3.2): a non-empty
+// `grep`/`read` result marks the searched files as hot zones, which the
+// FileIndex records via addScopePath. This listener observes only — it never
+// intercepts or mutates the tool lifecycle. Any parse failure is silent.
+//
+// The FileIndex is provided as an optional `fileIndex` service (addScopePath
+// only) so the observer degrades to a no-op if the service is ever absent.
+function setupScopeObserver(ctx, workspaceRoot) {
+  const service = new FileIndex({ projectRoot: workspaceRoot })
+  const provide = ctx.provide
+    ? ctx.provide('fileIndex', { addScopePath: (path) => service.addScopePath(path) })
+    : undefined
+  const collectScopePaths = (exec, result) => {
+    // Tool name: the registry hands `exec.name` (dsh-tools ToolExecution); keep
+    // `exec.toolName` as a defensive alias for other host integrations. The DSH
+    // suites register exactly 'grep' (dsh-tool-fs-search) and 'read'
+    // (dsh-tool-fs); glob is a separate tool we intentionally do not observe.
+    const name = (exec && (exec.name || exec.toolName)) || ''
+    if (name !== 'grep' && name !== 'read') return
+    const fileIndex = ctx.get('fileIndex')
+    if (!fileIndex || typeof fileIndex.addScopePath !== 'function') return
+    // Arguments: `exec.arguments` (dsh-tools) with `exec.input` as an alias.
+    const args = (exec && (exec.arguments || exec.input)) || {}
+    const value = result && result.isError ? undefined : result && result.value
+    const paths = []
+    if (name === 'grep') {
+      // Hit file paths ride in the canonical value's `matches[].path` (workdir-
+      // relative display paths). Non-empty result ⇔ matches.length > 0.
+      const matches = value && Array.isArray(value.matches) ? value.matches : []
+      for (const match of matches) {
+        if (match && typeof match.path === 'string' && match.path) paths.push(match.path)
+      }
+      // The searched path arg (a file or directory the Agent pointed grep at)
+      // is itself a candidate hot zone when the search found something.
+      if (paths.length > 0 && args && typeof args.path === 'string' && args.path) {
+        paths.push(args.path)
+      }
+    } else if (name === 'read') {
+      // A non-empty read ⇔ it returned at least one line. Record both the
+      // requested path arg and the resolved display path (they usually agree).
+      const lines = value && Array.isArray(value.lines) ? value.lines : []
+      if (lines.length > 0) {
+        if (args && typeof args.file_path === 'string' && args.file_path) paths.push(args.file_path)
+        if (value && typeof value.path === 'string' && value.path) paths.push(value.path)
+      }
+    }
+    for (const path of paths) {
+      try {
+        fileIndex.addScopePath(path)
+      } catch {
+        // recording is best-effort; a failing index must not break the tool
+      }
+    }
+  }
+  const disposer = ctx.on('tools/result', (exec, result) => {
+    try {
+      collectScopePaths(exec, result)
+    } catch {
+      // observation never throws into the tool registry
+    }
+  })
+  return { disposer, provide, service }
 }
