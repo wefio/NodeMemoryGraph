@@ -357,7 +357,6 @@ server.registerTool(
 
 interface BoardEntry {
   id: string;
-  sequence: number;
   kind: string;
   status: string;
   agentId: string;
@@ -371,7 +370,7 @@ interface BoardToolResult {
   action: string;
   entry?: BoardEntry;
   entries?: BoardEntry[];
-  nextCursor?: number;
+  nextCursor?: string | null;
   taskId?: string;
   agents?: Array<{
     agentName: string;

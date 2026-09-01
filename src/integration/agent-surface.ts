@@ -39,13 +39,12 @@ export interface TaskBoardSurfaceResult {
   action: string;
   entry?: TaskBoardSurfaceEntry;
   entries?: TaskBoardSurfaceEntry[];
-  nextCursor?: number;
+  nextCursor?: string | null;
   agents?: TaskBoardAgentEntry[];
 }
 
 export interface TaskBoardSurfaceEntry {
   id?: string;
-  sequence?: number;
   kind?: string;
   status?: string;
   agentId?: string;
@@ -258,10 +257,10 @@ export function renderTaskBoardSurface(
       const claim = entry.claimedBy ? ` [claimed by ${entry.claimedBy}]` : "";
       const ack = entry.ackedBy?.length ? ` (✅ acked by ${entry.ackedBy.join(", ")})` : "";
       lines.push(
-        `- #${String(entry.sequence ?? "?")} ${String(entry.id ?? "?")} [${String(entry.kind ?? "entry")}/${String(entry.status ?? "open")}]${claim}${ack} ${String(entry.agentId ?? "unknown")}: ${excerpt(String(entry.content ?? ""), 500)}`,
+        `- ${String(entry.id ?? "?")} [${String(entry.kind ?? "entry")}/${String(entry.status ?? "open")}]${claim}${ack} ${String(entry.agentId ?? "unknown")}: ${excerpt(String(entry.content ?? ""), 500)}`,
       );
     }
-    if (result.action === "read") lines.push(`nextCursor=${String(result.nextCursor ?? 0)}`);
+    if (result.action === "read") lines.push(`nextCursor=${String(result.nextCursor ?? "")}`);
   }
   lines.push("Temporary coordination only; use nmg_remember separately for durable knowledge.");
   if (options.includeConventions !== false) lines.push(TASK_BOARD_CONVENTIONS);

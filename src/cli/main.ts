@@ -453,7 +453,6 @@ function humanResult(value: unknown): string {
   }
   if (result.action === "read" && Array.isArray(result.entries)) {
     const entries = result.entries as Array<{
-      sequence: number;
       id: string;
       agentId: string;
       kind: string;
@@ -465,13 +464,13 @@ function humanResult(value: unknown): string {
       : `${entries
           .map(
             (entry) =>
-              `${entry.sequence}\t${entry.id}\t${entry.agentId}\t${entry.kind}\t${entry.status}\t${entry.content}`,
+              `${entry.id}\t${entry.agentId}\t${entry.kind}\t${entry.status}\t${entry.content}`,
           )
           .join("\n")}\nnextCursor=${String(result.nextCursor)}\n`;
   }
   if ((result.action === "put" || result.action === "resolve") && result.entry) {
-    const entry = result.entry as { id: string; sequence: number; status: string };
-    return `Task board ${String(result.action)}: ${entry.id} (#${entry.sequence}, ${entry.status}).\n`;
+    const entry = result.entry as { id: string; status: string };
+    return `Task board ${String(result.action)}: ${entry.id} (${entry.status}).\n`;
   }
   if ("pruned" in result && typeof result.pruned === "number") {
     return `Pruned ${String(result.pruned)} retrieval traces.\n`;

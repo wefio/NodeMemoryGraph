@@ -632,7 +632,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   --to AGENT                 Wake only this stable agent name; omit to broadcast
   --ttl-seconds N            Lifetime from 60 seconds to 30 days (default: 1 day)
   --expires-at ISO           Explicit expiry instead of --ttl-seconds
-  --after-cursor N           Read only entries after this task-local sequence
+  --after-cursor ID         Read only entries after this opaque cursor (the id of the last seen entry)
   --include-resolved         Include resolved entries when reading`,
     buildParams: (values): NmgTaskBoardParams => {
       if (values.positionals.length < 2) {
@@ -661,7 +661,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
       action: "read",
       taskId: singlePositional(values, "board read"),
       agentId: requiredOption(values, "agent"),
-      afterCursor: numericOption(values, "after-cursor"),
+      afterCursor: firstOption(values, "after-cursor"),
       limit: numericOption(values, "limit"),
       includeResolved: values.flags.has("include-resolved"),
     }),

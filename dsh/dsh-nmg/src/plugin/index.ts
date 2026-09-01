@@ -568,7 +568,7 @@ export function apply(ctx: Context): () => void {
 
   function wakeEntryLine(entry) {
     return (
-      '#' + entry.sequence + ' ' + entry.id + ' [' + entry.kind + '/' + entry.status + '] ' +
+      '#' + (entry.id || '?') + ' [' + entry.kind + '/' + entry.status + '] ' +
       (entry.agentId || '?') + ': ' + truncate(entry.content, 200)
     )
   }
@@ -641,7 +641,7 @@ export function apply(ctx: Context): () => void {
     const excerpt = String(entry.content || '').length > 140 ? String(entry.content || '').slice(0, 140) + '…' : String(entry.content || '')
     const label = entry.kind === 'question' ? '问题' : entry.kind === 'blocker' ? '阻塞' : '交接'
     const broadcast =
-      '[NMG board 协作广播] 频道 ' + (entry.taskId || '?') + ' 有 #' + entry.sequence +
+      '[NMG board 协作广播] 频道 ' + (entry.taskId || '?') + ' 有 #' + (entry.id || '?') +
       ' 未认领的' + label + '（open）：' + excerpt +
       '。有空的 agent 可用 nmg_board read taskId=' + (entry.taskId || '?') + ' 查看详情、claim 认领处理。'
     await daemonCall('taskBoard', {
@@ -919,7 +919,7 @@ export function apply(ctx: Context): () => void {
 
   function wakeMessageText(entry) {
     return (
-      '[NMG board] 新黑板条目 #' + entry.sequence + ' [' + entry.kind + '] ' +
+      '[NMG board] 新黑板条目 #' + (entry.id || '?') + ' [' + entry.kind + '] ' +
       (entry.taskId || '?') + ' by ' + (entry.agentId || '?') + ':\n' +
       truncate(entry.content, 400)
     )
@@ -974,7 +974,6 @@ export function apply(ctx: Context): () => void {
       return {
         entries: batch.map((entry) => ({
           id: entry.id,
-          sequence: entry.sequence,
           taskId: entry.taskId,
           kind: entry.kind,
           status: entry.status,
@@ -1212,7 +1211,7 @@ export function apply(ctx: Context): () => void {
         entryId: { type: 'string', description: 'Entry to resolve/claim/release.' },
         resolution: { type: 'string', description: 'Resolution note (resolve).' },
         reason: { type: 'string', description: 'Reason for acknowledge/subscribe/unsubscribe.' },
-        afterCursor: { type: 'integer', description: 'Read only entries after this sequence (read).' },
+        afterCursor: { type: 'string', description: 'Opaque cursor: id of the last seen entry (read).' },
         limit: { type: 'integer', description: 'Max entries (read).' },
         includeResolved: { type: 'boolean', description: 'Include resolved entries (read).' },
         ttlSeconds: { type: 'integer', description: 'Entry lifetime 60..2592000 (put).' },

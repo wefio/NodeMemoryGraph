@@ -1544,7 +1544,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         resolution: Type.Optional(Type.String()),
         reason: Type.Optional(Type.String()),
         leaseSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 86_400 })),
-        afterCursor: Type.Optional(Type.Number({ minimum: 0 })),
+        afterCursor: Type.Optional(
+          Type.String({ description: "不透明游标：上一条已读 entry 的 id（增量读续点）" }),
+        ),
         limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
         includeResolved: Type.Optional(Type.Boolean()),
         ttlSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 2_592_000 })),
@@ -1644,7 +1646,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
                 kind: "board_projection",
                 sourceId: `board:${taskId}:${entry.id}`,
                 nodeId: `board:${taskId}`,
-                statement: `[task-board ${taskId} #${entry.sequence} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
+                statement: `[task-board ${taskId} #${entry.id} ${entry.kind} by ${entry.agentId}] ${entry.content}`,
               }),
             ),
           );
@@ -1901,7 +1903,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       const excerpt = pick.content.length > 140 ? `${pick.content.slice(0, 140)}…` : pick.content;
       const label = kindLabel(pick.kind);
       pi.sendUserMessage(
-        `[NMG board] 你订阅的频道 ${pick.taskId} 有新${label}：#${pick.sequence} — ${excerpt}（open，可认领）。需要的话用 nmg_board read 查看详情、claim 认领处理。`,
+        `[NMG board] 你订阅的频道 ${pick.taskId} 有新${label}：#${pick.id} — ${excerpt}（open，可认领）。需要的话用 nmg_board read 查看详情、claim 认领处理。`,
       );
       // Delivery receipt: this session has been reached for this entry, so the
       // wake loop will not re-notify it (idempotent in the store).
@@ -2739,7 +2741,7 @@ interface TaskBoardToolResult {
   action: "put" | "read" | "resolve" | "claim" | "release" | "acknowledge" | "discover";
   entry?: TaskBoardToolEntry;
   entries?: TaskBoardToolEntry[];
-  nextCursor?: number;
+  nextCursor?: string | null;
   delivered?: string[];
   acked?: string[];
   /** discover: online agent roster (A2A discovery localised). */
@@ -2843,7 +2845,7 @@ export async function maybeBroadcastToWorld(input: {
   if (worldCheck.delivered.includes(entry.id)) return false;
   const excerpt = entry.content.length > 140 ? `${entry.content.slice(0, 140)}…` : entry.content;
   const label = kindLabel(entry.kind);
-  const broadcast = `[NMG board 协作广播] 频道 ${entry.taskId} 有 #${entry.sequence} 未认领的${label}（open）：${excerpt}。有空的 agent 可用 nmg_board read taskId=${entry.taskId} 查看详情、claim 认领处理。`;
+  const broadcast = `[NMG board 协作广播] 频道 ${entry.taskId} 有 #${entry.id} 未认领的${label}（open）：${excerpt}。有空的 agent 可用 nmg_board read taskId=${entry.taskId} 查看详情、claim 认领处理。`;
   await invoke("taskBoard", {
     action: "put",
     taskId: WORLD_BOARD_ID,
