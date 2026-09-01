@@ -1,5 +1,4 @@
 import { existsSync, readFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -158,7 +157,7 @@ function resolveEnvFile(repoRoot: string, omniRoot: string, input: string): stri
 }
 
 function configValue(config: string, key: string): string | undefined {
-  const match = config.match(new RegExp(`^${key}=(?:\"([^\"]*)\"|'([^']*)'|([^\\s#]+))`, "m"));
+  const match = config.match(new RegExp(`^${key}=(?:"([^"]*)"|'([^']*)'|([^\\s#]+))`, "m"));
   return match?.[1] ?? match?.[2] ?? match?.[3];
 }
 
@@ -357,13 +356,47 @@ export function createRunPlan(
 
 export async function runPlan(plan: RunPlan): Promise<number> {
   await preflightEmbeddingProvider(loadBenchmarkEnvironment(plan));
-  const result = spawnSync(plan.bash, plan.args, {
+  const { spawn } = await import("node:child_process");
+  const { ResourceSampler, writeResourceReport } = await import(
+    "./resource-observability.ts"
+  );
+
+  const child = spawn(plan.bash, plan.args, {
     cwd: plan.omniRoot,
     env: plan.environment,
     stdio: "inherit",
   });
-  if (result.error) throw result.error;
-  return result.status ?? 1;
+
+  // Full-run resource observability: sample the spawned process tree at a low
+  // fixed cadence. Purely observational — scheduling and arguments untouched.
+  const sampler = new ResourceSampler({
+    label: `${plan.suite}@${plan.version}`,
+    rootPid: child.pid ?? process.pid,
+    cadenceMs: 5_000,
+  });
+  sampler.start();
+
+  const exitCode = await new Promise<number>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      resolve(code ?? (signal ? 1 : 0));
+    });
+  });
+  await sampler.stop();
+
+  // Write one bounded report beside the run's result directory.
+  try {
+    const resultDir = join(
+      plan.omniRoot,
+      "results",
+      SUITES[plan.suite].resultFolder,
+      plan.version,
+    );
+    writeResourceReport(sampler.report, resultDir);
+  } catch {
+    // A missing/unwritable result dir must not fail the run itself.
+  }
+  return exitCode;
 }
 
 function isMainModule(): boolean {

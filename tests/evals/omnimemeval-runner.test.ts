@@ -10,6 +10,7 @@ import {
   loadBenchmarkEnvironment,
   parseRunOptions,
   preflightEmbeddingProvider,
+  runPlan,
   type BenchmarkConfig,
   type BenchmarkSuite,
 } from "../../evals/omnimemeval/run.ts";
@@ -53,10 +54,10 @@ test("one config supplies common and suite-specific official arguments", () => {
   >;
   suites.beam = ["--scale", "100k", "--judge-batch-size", "4"];
   const repoRoot = fixtureRepo("beam", { suites });
-  const plan = createRunPlan(
-    parseRunOptions(["beam", "--config", "benchmark.json"]),
-    { repoRoot, now: new Date("2026-08-28T01:02:03.456Z") },
-  );
+  const plan = createRunPlan(parseRunOptions(["beam", "--config", "benchmark.json"]), {
+    repoRoot,
+    now: new Date("2026-08-28T01:02:03.456Z"),
+  });
 
   assert.equal(plan.version, "beam_20260828T010203Z");
   assert.deepEqual(plan.args.slice(-7), [
@@ -148,10 +149,9 @@ test("resume rejects config drift instead of silently changing the run", () => {
   );
   assert.throws(
     () =>
-      createRunPlan(
-        parseRunOptions(["--resume", resultDir, "--config", "benchmark.json"]),
-        { repoRoot },
-      ),
+      createRunPlan(parseRunOptions(["--resume", resultDir, "--config", "benchmark.json"]), {
+        repoRoot,
+      }),
     /Resume config drift: --workers was 1, now 2/,
   );
 });
@@ -200,19 +200,16 @@ test("embedding preflight probes the configured provider before a benchmark star
 
 test("embedding preflight fails before execution when the provider is unavailable", async () => {
   await assert.rejects(
-    preflightEmbeddingProvider(
-      { NMG_EMBED_PROVIDER: "openai" },
-      () => ({
-        indexId: "test-index",
-        model: "test-model",
-        profile: "plain",
-        embed: async () => [],
-        embedDocuments: async () => [],
-        embedQueries: async () => {
-          throw new Error("fetch failed");
-        },
-      }),
-    ),
+    preflightEmbeddingProvider({ NMG_EMBED_PROVIDER: "openai" }, () => ({
+      indexId: "test-index",
+      model: "test-model",
+      profile: "plain",
+      embed: async () => [],
+      embedDocuments: async () => [],
+      embedQueries: async () => {
+        throw new Error("fetch failed");
+      },
+    })),
     /embedding provider preflight failed.*fetch failed/i,
   );
 });
@@ -227,4 +224,34 @@ test("explicit cache-only mode skips the provider preflight", async () => {
     },
   );
   assert.equal(factoryCalls, 0);
+});
+
+test("runPlan writes a bounded resource report and propagates the exit code", async () => {
+  const repoRoot = fixtureRepo("locomo");
+  const omniRoot = join(repoRoot, ".benchmarks", "official", "OmniMemEval");
+  // Point the runner at a real quick command instead of the shell stub: sleep
+  // long enough for the sampler to capture at least one tick, then exit 0.
+  const scriptPath = join(omniRoot, "scripts", SUITES.locomo.runner);
+  writeFileSync(scriptPath, "#!/usr/bin/env bash\nsleep 1\nexit 0\n", "utf8");
+  const plan = createRunPlan(parseRunOptions(["locomo", "--config", "benchmark.json"]), {
+    repoRoot,
+  });
+  const code = await runPlan(plan);
+  assert.equal(code, 0);
+
+  const reportPath = join(
+    omniRoot,
+    "results",
+    SUITES.locomo.resultFolder,
+    plan.version,
+    "resource_report.json",
+  );
+  const report = JSON.parse(readFileSync(reportPath, "utf8")) as {
+    label: string;
+    ticks: unknown[];
+    summary: { processCountMax: number };
+  };
+  assert.equal(report.label, `locomo@${plan.version}`);
+  assert.ok(report.ticks.length >= 1, "captured at least one tick");
+  assert.ok(report.summary.processCountMax >= 1);
 });
