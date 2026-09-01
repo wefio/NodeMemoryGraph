@@ -1488,11 +1488,16 @@ export function apply(ctx: Context): () => void {
   // typechecks and mounts before the index exists, and recording degrades to a
   // no-op while `ctx.get('fileIndex')` is undefined.
   function collectScopePaths(exec, result) {
-    const name = exec && exec.name
+    // Tool name: the registry hands `exec.name` (dsh-tools ToolExecution); keep
+    // `exec.toolName` as a defensive alias for other host integrations. The DSH
+    // suites register exactly 'grep' (dsh-tool-fs-search) and 'read'
+    // (dsh-tool-fs); glob is a separate tool we intentionally do not observe.
+    const name = (exec && (exec.name || exec.toolName)) || ''
     if (name !== 'grep' && name !== 'read') return
     const fileIndex = ctx.get('fileIndex')
     if (!fileIndex || typeof fileIndex.addScopePath !== 'function') return
-    const args = (exec && exec.arguments) || {}
+    // Arguments: `exec.arguments` (dsh-tools) with `exec.input` as an alias.
+    const args = (exec && (exec.arguments || exec.input)) || {}
     const value = result && result.isError ? undefined : result && result.value
     const paths = []
     if (name === 'grep') {

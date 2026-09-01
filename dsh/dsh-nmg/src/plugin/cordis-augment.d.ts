@@ -73,7 +73,15 @@ declare module '@deepseek-ai/cordis' {
      * `exec.agent`.
      */
     'tools/result'(
-      exec: Readonly<{ name: string; arguments: unknown; agent?: unknown }>,
+      exec: Readonly<{
+        name: string
+        /** Defensive alias for non-dsh-tools hosts. */
+        toolName?: string
+        arguments: unknown
+        /** Defensive alias for non-dsh-tools hosts. */
+        input?: unknown
+        agent?: unknown
+      }>,
       result: Readonly<{ isError: boolean; value?: unknown; content?: unknown }>,
     ): undefined
   }
