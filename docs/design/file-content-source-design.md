@@ -2,10 +2,11 @@
 
 **Status:** superseded
 **Updated:** 2026-09-01
-**Superseded by:** [memory-anchors-design.md](memory-anchors-design.md) — the
-full-text file index is dropped in favor of sparse, Agent-authored anchors as an
-independent searchable source. This document is kept for lineage; its
-"files are not memory" and separated-presentation conclusions carry forward.
+**Superseded by:** [memory-tesserae-design.md](memory-tesserae-design.md) — the
+full-text file index is dropped in favor of sparse, Agent-authored tesserae
+(bookmarks) as an independent searchable source. This document is kept for
+lineage; its "files are not memory" and separated-presentation conclusions
+carry forward.
 
 This document proposes giving `nmg search` a second content source — the
 project's own files and documents — so an Agent does not have to re-discover the

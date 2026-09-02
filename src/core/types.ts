@@ -376,10 +376,10 @@ export interface RememberInput {
   expiresAt?: string;
   writeReason?: string;
   writeSource?: MemoryWriteSource;
-  /** Optional file anchors (bookmarks) attached to this memory. Each anchor
+  /** Optional file tesserae (bookmarks) attached to this memory. Each tessera
    *  points into a project file (path + content snippet). Writing is active —
-   *  the Agent supplies anchors when the memory refers to a file location. */
-  anchors?: AnchorInput[];
+   *  the Agent supplies tesserae when the memory refers to a file location. */
+  tesserae?: TesseraInput[];
   /** Disable per-phase timing for this write (default: enabled). */
   perf?: boolean;
 }
@@ -853,12 +853,12 @@ export interface FileHit {
   score: number;
 }
 
-/** A file location a memory points into (a bookmark). Content-anchored: the
+/** A file location a memory points into (a tessera / bookmark). Content-anchored: the
  *  snippet relocates on read, so no line number is ever persisted. */
-export interface AnchorRecord {
-  /** Stable anchor id (independent of any memory id). */
+export interface TesseraRecord {
+  /** Stable tessera id (independent of any memory id). */
   id: string;
-  /** Project-relative file path the anchor points into. */
+  /** Project-relative file path the tessera points into. */
   path: string;
   /** Short content excerpt used for relocation, never a line number. */
   snippet: string;
@@ -866,39 +866,39 @@ export interface AnchorRecord {
   label: string;
   /** Optional kind, e.g. "code" | "doc" | "note". */
   kind?: string;
-  /** Owning memory id, when the anchor was raised by a memory write. */
+  /** Owning memory id, when the tessera was raised by a memory write. */
   memoryId?: string;
   createdAt: string;
 }
 
-/** Anchor input on a memory write (agent-supplied, active). */
-export interface AnchorInput {
+/** Tessera input on a memory write (agent-supplied, active). */
+export interface TesseraInput {
   path: string;
   snippet: string;
   label?: string;
   kind?: string;
 }
 
-/** Anchor hit surfaced by search — an anchor row plus its resolved line, or a
+/** Tessera hit surfaced by search — a tessera row plus its resolved line, or a
  *  staleness marker when the snippet no longer exists in the file. */
-export interface AnchorHit {
+export interface TesseraHit {
   id: string;
   path: string;
   label: string;
   kind?: string;
   memoryId?: string;
-  /** The content snippet this anchor relocates by (also shown as excerpt). */
+  /** The content snippet this tessera relocates by (also shown as excerpt). */
   snippet?: string;
   /** Resolved line in the current file (1-based), when the snippet was found. */
   line?: number;
-  /** True when the snippet no longer exists in the file (stale anchor). */
+  /** True when the snippet no longer exists in the file (stale tessera). */
   stale?: boolean;
   /** Relevance score when matched via FTS; higher is more relevant. */
   score?: number;
 }
 
-/** Marker kind linking a memory to one of its anchors (memory ↔ anchor). */
-export const ANCHOR_REF_MARKER = "anchor_ref";
+/** Marker kind linking a memory to one of its tesserae (memory ↔ tessera). */
+export const TESSERA_REF_MARKER = "tessera_ref";
 
 export interface MemoryContext {
   results: MemorySearchResult[];
@@ -907,10 +907,10 @@ export interface MemoryContext {
    *  provenance/scope/verification and never enter STG/LTG. Present only when
    *  the file content source is enabled for the searched project. */
   files?: FileHit[];
-  /** Anchor (bookmark) hits, an independent searchable source alongside
+  /** Tessera (bookmark) hits, an independent searchable source alongside
    *  memory. Each hit carries the resolved line in the current file, or a
    *  staleness marker when the snippet no longer exists. */
-  anchors?: AnchorHit[];
+  tesserae?: TesseraHit[];
   /** Chain edges (DAG) collected during expandChains: the directed edges of
    *  every chain surfaced. Lets the presentation layer render a chain as a
    *  DAG (branching `A --> B & C`) instead of a linear position sequence.

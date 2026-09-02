@@ -64,7 +64,7 @@ import { assertTemporalValidity } from "../semantic-domain.ts";
 import { recallTriggerMarkers } from "../recall-triggers.ts";
 import { type ScopeWriteIndexRow, writeTokens } from "./scope-write-index.ts";
 
-/** Merge caller markers with auto-generated anchor_ref markers. Kept as a
+/** Merge caller markers with auto-generated tessera_ref markers. Kept as a
  *  module-level function so rememberInner's cyclomatic complexity stays flat. */
 function mergeMarkers(
   base: readonly MemoryMarker[] | undefined,
@@ -501,12 +501,12 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
             : undefined;
         const supersedesId =
           input.supersedesId ?? (automaticPrevious ? String(automaticPrevious.id) : undefined);
-        // Memory anchors: agent-supplied bookmarks attached to this write.
-        // Anchor ids are pre-generated so the anchor_ref markers can ride the
+        // Memory tesserae: agent-supplied bookmarks attached to this write.
+        // Tessera ids are pre-generated so the tessera_ref markers can ride the
         // same memory write (no second transaction); rows land after addMemory
         // so they can carry the memory id. Content-anchored — snippet only,
         // never a line number.
-        const { anchorPlan, anchorMarkers } = this.#planAnchorWrites(input);
+        const { tesseraPlan, tesseraMarkers } = this.#planTesseraWrites(input);
         let supersededNodeId: string | undefined;
         if (supersedesId) {
           const previous = this.db
@@ -551,7 +551,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           predicateKey: input.predicateKey,
           extractMethod: input.extractMethod,
           claims: input.claims,
-          markers: mergeMarkers(input.markers, anchorMarkers),
+          markers: mergeMarkers(input.markers, tesseraMarkers),
           recallTriggers: input.recallTriggers,
           tier: input.tier,
           importance: input.importance,
@@ -584,8 +584,8 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         if (supersededNodeId && supersededNodeId !== node.id) {
           this.refreshNodeResidence(supersededNodeId, memory.createdAt);
         }
-        // Land anchor rows inside the same transaction as the memory write.
-        this.#insertAnchorRows(anchorPlan, memory.id);
+        // Land tessera rows inside the same transaction as the memory write.
+        this.#insertTesseraRows(tesseraPlan, memory.id);
         if (manageTransaction) this.db.exec("COMMIT");
         const written = { history, node, memory };
         return {
@@ -600,46 +600,46 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       }
     }
 
-    /** Pre-generate anchor rows and their anchor_ref markers for a memory write.
-     *  Invalid anchors (missing path or snippet) are skipped. */
-    #planAnchorWrites(input: RememberInput): {
-      anchorPlan: Array<{
+    /** Pre-generate tessera rows and their tessera_ref markers for a memory write.
+     *  Invalid tesserae (missing path or snippet) are skipped. */
+    #planTesseraWrites(input: RememberInput): {
+      tesseraPlan: Array<{
         id: string;
         path: string;
         snippet: string;
         label: string;
         kind?: string;
       }>;
-      anchorMarkers: MemoryMarker[];
+      tesseraMarkers: MemoryMarker[];
     } {
-      const anchorPlan: Array<{
+      const tesseraPlan: Array<{
         id: string;
         path: string;
         snippet: string;
         label: string;
         kind?: string;
       }> = [];
-      const anchorMarkers: MemoryMarker[] = [];
-      for (const anchor of input.anchors ?? []) {
-        const path = String(anchor.path ?? "").trim();
-        const snippet = String(anchor.snippet ?? "").trim();
-        if (!path || !snippet) continue; // anchors need a file + content to relocate
+      const tesseraMarkers: MemoryMarker[] = [];
+      for (const tessera of input.tesserae ?? []) {
+        const path = String(tessera.path ?? "").trim();
+        const snippet = String(tessera.snippet ?? "").trim();
+        if (!path || !snippet) continue; // tesserae need a file + content to relocate
         const id = randomUUID();
-        anchorPlan.push({
+        tesseraPlan.push({
           id,
           path,
           snippet,
-          label: String(anchor.label ?? "").trim(),
-          kind: anchor.kind?.trim() || undefined,
+          label: String(tessera.label ?? "").trim(),
+          kind: tessera.kind?.trim() || undefined,
         });
-        anchorMarkers.push({ kind: "anchor_ref", attributes: { anchorId: id, path } });
+        tesseraMarkers.push({ kind: "tessera_ref", attributes: { tesseraId: id, path } });
       }
-      return { anchorPlan, anchorMarkers };
+      return { tesseraPlan, tesseraMarkers };
     }
 
-    /** Insert planned anchor rows inside the memory-write transaction. */
-    #insertAnchorRows(
-      anchorPlan: Array<{
+    /** Insert planned tessera rows inside the memory-write transaction. */
+    #insertTesseraRows(
+      tesseraPlan: Array<{
         id: string;
         path: string;
         snippet: string;
@@ -648,14 +648,14 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       }>,
       memoryId: string,
     ): void {
-      if (anchorPlan.length === 0) return;
-      const insertAnchor = this.db.prepare(
-        `INSERT INTO anchors (id, path, snippet, label, kind, memory_id, created_at)
+      if (tesseraPlan.length === 0) return;
+      const insertTessera = this.db.prepare(
+        `INSERT INTO tesserae (id, path, snippet, label, kind, memory_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       );
       const createdAt = new Date().toISOString();
-      for (const plan of anchorPlan) {
-        insertAnchor.run(
+      for (const plan of tesseraPlan) {
+        insertTessera.run(
           plan.id,
           plan.path,
           plan.snippet,

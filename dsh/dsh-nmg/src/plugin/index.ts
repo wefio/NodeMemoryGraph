@@ -1155,7 +1155,7 @@ export function apply(ctx: Context): () => void {
         residence: { type: 'string', enum: ['ltg', 'stg'], description: 'ltg (durable) or stg (session/task-local).' },
         writeReason: { type: 'string', description: 'Durable-write justification.' },
         scope: { type: 'object', additionalProperties: true, description: 'Applicability scope, e.g. {"project":"nmg"}.' },
-        anchors: { type: 'array', maxItems: 10, items: { type: 'object', properties: { path: { type: 'string', description: 'Project-relative file path the bookmark points into.' }, snippet: { type: 'string', description: 'Exact short content excerpt from that file used for relocation.' }, label: { type: 'string', description: 'Optional one-line searchable label.' }, kind: { type: 'string', description: 'Optional kind: code | doc | note.' } }, required: ['path', 'snippet'] }, description: 'Optional file bookmarks (anchors): point this memory at file locations you actually saw. One bookmark per {path, snippet} — snippet is the relocation key, so copy it verbatim from the file.' },
+        tesserae: { type: 'array', maxItems: 10, items: { type: 'object', properties: { path: { type: 'string', description: 'Project-relative file path the bookmark points into.' }, snippet: { type: 'string', description: 'Exact short content excerpt from that file used for relocation.' }, label: { type: 'string', description: 'Optional one-line searchable label.' }, kind: { type: 'string', description: 'Optional kind: code | doc | note.' } }, required: ['path', 'snippet'] }, description: 'Optional file bookmarks (tesserae): point this memory at file locations you actually saw. One bookmark per {path, snippet} — snippet is the relocation key, so copy it verbatim from the file.' },
       },
       required: [],
     },
@@ -1201,7 +1201,7 @@ export function apply(ctx: Context): () => void {
         return 'nmg_remember save requires statement and nodeName.'
       }
       const params: Record<string, any> = { statement: args.statement, nodeName: args.nodeName, projectDir: workspaceRoot }
-      if (args.anchors && Array.isArray(args.anchors)) params.anchors = args.anchors
+      if (args.tesserae && Array.isArray(args.tesserae)) params.tesserae = args.tesserae
       if (args.memoryType) params.memoryType = args.memoryType
       if (args.recallTriggers) params.recallTriggers = args.recallTriggers
       if (args.stateKey) params.stateKey = args.stateKey
