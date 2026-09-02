@@ -1033,14 +1033,18 @@ function rememberParams(values: OptionValues): NmgRememberParams {
 /** Parse repeatable `--anchor PATH::SNIPPET[:LABEL]` options into AnchorInput
  *  entries. The snippet is everything up to the next `::` (or the end); the
  *  optional label follows a second `::`. Paths must not contain `::`. */
-function parseAnchorOptions(raw: unknown): Array<{ path: string; snippet: string; label?: string }> | undefined {
+function parseAnchorOptions(
+  raw: unknown,
+): Array<{ path: string; snippet: string; label?: string }> | undefined {
   const values = Array.isArray(raw) ? raw : raw === undefined ? [] : [raw];
   const anchors: Array<{ path: string; snippet: string; label?: string }> = [];
   for (const value of values) {
     const text = String(value ?? "");
     const parts = text.split("::");
     if (parts.length < 2 || !parts[0]!.trim() || !parts[1]!.trim()) {
-      throw new Error("--anchor must be PATH::SNIPPET (path then :: then content snippet), optionally ::LABEL");
+      throw new Error(
+        "--anchor must be PATH::SNIPPET (path then :: then content snippet), optionally ::LABEL",
+      );
     }
     const path = parts[0]!.trim();
     const snippet = parts[1]!.trim();

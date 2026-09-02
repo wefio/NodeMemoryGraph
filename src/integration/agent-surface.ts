@@ -118,11 +118,7 @@ export function renderCompactSearchSurface(
     (hit) => `- file=${hit.path}; excerpt=${hit.excerpt}`,
   );
   const anchorLines = (context.anchors ?? []).map((anchor) => {
-    const position = anchor.stale
-      ? "(stale)"
-      : anchor.line
-        ? `:${anchor.line}`
-        : "";
+    const position = anchor.stale ? "(stale)" : anchor.line ? `:${anchor.line}` : "";
     return `- anchor=${anchor.path}${position}; label=${anchor.label || "(bookmark)"}`;
   });
   if (context.candidates.length === 0 && fileLines.length === 0 && anchorLines.length === 0) {

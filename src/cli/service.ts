@@ -22,7 +22,6 @@ import {
 import type {
   AnchorInput,
   AnchorHit,
-  AnchorRecord,
   LeafSummaryProvider,
   NodeSummaryProvider,
   RememberInput,
@@ -1541,13 +1540,7 @@ export class NmgService {
     const linesFor = (path: string): string[] | null => {
       const abs = resolve(projectRoot, path);
       if (cache.has(abs)) return cache.get(abs)!;
-      let lines: string[] | null = null;
-      try {
-        const content = readFileSync(abs, "utf8");
-        lines = content.split(/\r?\n/);
-      } catch {
-        lines = null;
-      }
+      const lines = readLinesSafe(abs);
       cache.set(abs, lines);
       return lines;
     };
@@ -1905,10 +1898,7 @@ function optionalEvidenceSource(
 
 /** Parse the optional anchors array on a remember write. Each anchor needs a
  *  path and a snippet (the relocation key); label/kind are optional. */
-function optionalAnchors(
-  params: Record<string, unknown>,
-  key: string,
-): AnchorInput[] | undefined {
+function optionalAnchors(params: Record<string, unknown>, key: string): AnchorInput[] | undefined {
   const value = params[key];
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.length > 10) {
@@ -1926,6 +1916,17 @@ function optionalAnchors(
       kind: optionalString(anchor, "kind"),
     };
   });
+}
+
+/** Read a file's lines, or null when unreadable/missing. Used by anchor
+ *  snippet relocation. */
+function readLinesSafe(absPath: string): string[] | null {
+  try {
+    const content = readFileSync(absPath, "utf8");
+    return content.split(/\r?\n/);
+  } catch {
+    return null;
+  }
 }
 
 function parseExportMemoriesParams(value: unknown): NmgExportMemoriesParams {

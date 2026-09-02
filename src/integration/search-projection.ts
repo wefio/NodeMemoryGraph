@@ -1,11 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type {
-  AnchorHit,
-  FileHit,
-  MemoryContext,
-  MemorySearchResult,
-} from "../core/types.ts";
+import type { AnchorHit, FileHit, MemoryContext, MemorySearchResult } from "../core/types.ts";
 import type { SessionDisclosureLevel } from "../core/session-active-graph.ts";
 import { logicalChainCount, logicalChainNames } from "./chain-projection.ts";
 

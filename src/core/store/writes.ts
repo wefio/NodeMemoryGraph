@@ -66,7 +66,10 @@ import { type ScopeWriteIndexRow, writeTokens } from "./scope-write-index.ts";
 
 /** Merge caller markers with auto-generated anchor_ref markers. Kept as a
  *  module-level function so rememberInner's cyclomatic complexity stays flat. */
-function mergeMarkers(base: readonly MemoryMarker[] | undefined, extra: readonly MemoryMarker[]): MemoryMarker[] {
+function mergeMarkers(
+  base: readonly MemoryMarker[] | undefined,
+  extra: readonly MemoryMarker[],
+): MemoryMarker[] {
   return [...(base ?? []), ...extra];
 }
 
@@ -636,7 +639,13 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
 
     /** Insert planned anchor rows inside the memory-write transaction. */
     #insertAnchorRows(
-      anchorPlan: Array<{ id: string; path: string; snippet: string; label: string; kind?: string }>,
+      anchorPlan: Array<{
+        id: string;
+        path: string;
+        snippet: string;
+        label: string;
+        kind?: string;
+      }>,
       memoryId: string,
     ): void {
       if (anchorPlan.length === 0) return;
@@ -646,7 +655,15 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
       );
       const createdAt = new Date().toISOString();
       for (const plan of anchorPlan) {
-        insertAnchor.run(plan.id, plan.path, plan.snippet, plan.label, plan.kind ?? null, memoryId, createdAt);
+        insertAnchor.run(
+          plan.id,
+          plan.path,
+          plan.snippet,
+          plan.label,
+          plan.kind ?? null,
+          memoryId,
+          createdAt,
+        );
       }
     }
 
