@@ -5,6 +5,15 @@ import type { ActiveGraph, ActiveGraphEdge } from "./types.ts";
 export type SessionActiveGraphItemKind =
   "semantic_memory" | "tool_observation" | "board_projection" | "reasoning_artifact";
 
+export type SessionDisclosureLevel = "header" | "exact" | "evidence";
+
+export interface SessionDisclosureEntry {
+  memoryId: string;
+  contentHash: string;
+  disclosure: SessionDisclosureLevel;
+  turn: number;
+}
+
 export interface SessionActiveGraphItem {
   id: string;
   kind: SessionActiveGraphItemKind;
@@ -58,6 +67,10 @@ export interface SessionActiveGraphSnapshot {
    * An adapter marks a projection as disclosed instead of keeping its own
    * injection window; the ledger is session-local and memory-resident. */
   disclosedProjectionIds: string[];
+  /** Content-level disclosure ledger used by every adapter to fold unchanged
+   * memory without confusing retrieval with model-visible evidence. */
+  disclosureTurn: number;
+  disclosures: SessionDisclosureEntry[];
 }
 
 export interface SessionActiveGraphRuntimeOptions {
@@ -68,6 +81,8 @@ export interface SessionActiveGraphRuntimeOptions {
   /** Bounded cooling set: how many task frames (active + cooled) a session may
    * keep at once. The oldest cooled frame is evicted beyond this cap. */
   maxTaskFramesPerSession?: number;
+  maxDisclosureTurns?: number;
+  maxDisclosuresPerSession?: number;
   now?: () => number;
 }
 
@@ -95,6 +110,8 @@ interface SessionState<TPart> {
   /** Host-neutral disclosure ledger: projection ids that have been surfaced to
    * the model. Session-local, memory-resident, cleared with the session. */
   disclosedProjectionIds: Set<string>;
+  disclosureTurn: number;
+  disclosures: Map<string, SessionDisclosureEntry>;
   touchedAt: number;
 }
 
@@ -114,6 +131,8 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
   readonly maxCharactersPerSession: number;
   readonly maxProjectionsPerSession: number;
   readonly maxTaskFramesPerSession: number;
+  readonly maxDisclosureTurns: number;
+  readonly maxDisclosuresPerSession: number;
 
   constructor(options: SessionActiveGraphRuntimeOptions = {}) {
     this.#now = options.now ?? Date.now;
@@ -127,6 +146,8 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     );
     this.maxProjectionsPerSession = bounded(options.maxProjectionsPerSession, 1, 10_000, 128);
     this.maxTaskFramesPerSession = bounded(options.maxTaskFramesPerSession, 1, 1_024, 8);
+    this.maxDisclosureTurns = bounded(options.maxDisclosureTurns, 1, 10_000, 12);
+    this.maxDisclosuresPerSession = bounded(options.maxDisclosuresPerSession, 1, 100_000, 128);
   }
 
   registerProjection(
@@ -203,6 +224,82 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     state.disclosedProjectionIds.add(projectionId);
     this.#touch(state);
     return true;
+  }
+
+  /** Advance the session-owned model-turn clock and expire old disclosure
+   * entries. Adapters call this once for a new user turn, never for tool-loop
+   * re-entry within the same turn. */
+  beginDisclosureTurn(sessionId: string): number {
+    const state = this.#state(normalizedSessionId(sessionId));
+    state.disclosureTurn += 1;
+    for (const [memoryId, entry] of state.disclosures) {
+      if (state.disclosureTurn - entry.turn >= this.maxDisclosureTurns) {
+        state.disclosures.delete(memoryId);
+      }
+    }
+    this.#touch(state);
+    return state.disclosureTurn;
+  }
+
+  clearDisclosures(sessionId: string): boolean {
+    const state = this.#sessions.get(normalizedSessionId(sessionId));
+    if (!state) return false;
+    state.disclosureTurn = 0;
+    state.disclosures.clear();
+    state.disclosedProjectionIds.clear();
+    this.#touch(state);
+    return true;
+  }
+
+  /** Atomically decide which candidate memories need model-visible rendering
+   * and record the resulting disclosure depth. A deeper disclosure or changed
+   * content is fresh; an unchanged equal/deeper entry is folded. */
+  disclose(input: {
+    sessionId: string;
+    projectionId?: string | null;
+    disclosure: SessionDisclosureLevel;
+    entries: Array<{ memoryId: string; contentHash: string }>;
+  }): { freshMemoryIds: string[]; foldedMemoryIds: string[] } {
+    const sessionId = normalizedSessionId(input.sessionId);
+    if (input.projectionId) {
+      const owner = this.#projectionOwners.get(input.projectionId);
+      if (!owner) throw new Error(`active graph ${input.projectionId} does not exist`);
+      if (owner !== sessionId) {
+        throw new Error(`active graph ${input.projectionId} belongs to another session`);
+      }
+    }
+    const state = this.#state(sessionId);
+    const freshMemoryIds: string[] = [];
+    const foldedMemoryIds: string[] = [];
+    for (const raw of input.entries) {
+      const memoryId = raw.memoryId.trim();
+      const contentHash = raw.contentHash.trim();
+      if (!memoryId || !contentHash) continue;
+      const previous = state.disclosures.get(memoryId);
+      const alreadyAvailable =
+        previous?.contentHash === contentHash &&
+        disclosureRank(previous.disclosure) >= disclosureRank(input.disclosure);
+      if (alreadyAvailable) {
+        foldedMemoryIds.push(memoryId);
+        continue;
+      }
+      freshMemoryIds.push(memoryId);
+      state.disclosures.delete(memoryId);
+      state.disclosures.set(memoryId, {
+        memoryId,
+        contentHash,
+        disclosure: input.disclosure,
+        turn: state.disclosureTurn,
+      });
+    }
+    while (state.disclosures.size > this.maxDisclosuresPerSession) {
+      const oldest = state.disclosures.keys().next().value;
+      if (oldest === undefined) break;
+      state.disclosures.delete(oldest);
+    }
+    if (input.projectionId) state.disclosedProjectionIds.add(input.projectionId);
+    this.#touch(state);
+    return { freshMemoryIds, foldedMemoryIds };
   }
 
   observe(input: {
@@ -285,6 +382,8 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
       items,
       edges: frame ? [...frame.edges.values()].map((edge) => ({ ...edge })) : [],
       disclosedProjectionIds: [...state.disclosedProjectionIds],
+      disclosureTurn: state.disclosureTurn,
+      disclosures: [...state.disclosures.values()].map((entry) => ({ ...entry })),
     };
   }
 
@@ -311,6 +410,8 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
       items,
       edges: [...frame.edges.values()].map((edge) => ({ ...edge })),
       disclosedProjectionIds: [...state.disclosedProjectionIds],
+      disclosureTurn: state.disclosureTurn,
+      disclosures: [...state.disclosures.values()].map((entry) => ({ ...entry })),
     };
   }
 
@@ -341,6 +442,8 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
         projectionOrder: [],
         frames: new Map(),
         disclosedProjectionIds: new Set(),
+        disclosureTurn: 0,
+        disclosures: new Map(),
         touchedAt: this.#now(),
       };
       this.#sessions.set(sessionId, state);
@@ -446,6 +549,7 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
       const removed = state.projectionOrder.shift();
       if (!removed) break;
       state.projections.delete(removed);
+      state.disclosedProjectionIds.delete(removed);
       this.#projectionOwners.delete(removed);
     }
   }
@@ -463,6 +567,10 @@ export class SessionActiveGraphRuntime<TPart = unknown> {
     this.#sessions.delete(state.sessionId);
     this.#sessions.set(state.sessionId, state);
   }
+}
+
+function disclosureRank(level: SessionDisclosureLevel): number {
+  return { header: 0, exact: 1, evidence: 2 }[level];
 }
 
 function copyPart<TPart>(part: ActiveGraphProjectionPart<TPart>): ActiveGraphProjectionPart<TPart> {

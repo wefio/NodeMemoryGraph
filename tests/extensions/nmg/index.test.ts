@@ -19,9 +19,9 @@ import nmgExtension, {
   MEMORY_POLICY,
   PI_BRANCH_SHAPE_VERSION,
   projectPiBranch,
+  piUserTurnKey,
   resolvePiEvidenceSource,
   selectPiEvidenceSource,
-  SessionInjectionWindow,
   SessionRecallFlow,
   SessionTaskWindow,
   SKILLOPT_POLICY_CHANNELS,
@@ -825,6 +825,16 @@ test("Pi branch projection fails closed on an incompatible message shape", () =>
       .supported,
     false,
   );
+});
+
+test("Pi user-turn identity distinguishes repeated prompts without splitting tool loops", () => {
+  const first = [{ type: "message", id: "user-1", message: { role: "user" } }];
+  const toolLoop = [...first, { type: "message", id: "tool-1", message: { role: "toolResult" } }];
+  const repeated = [...toolLoop, { type: "message", id: "user-2", message: { role: "user" } }];
+  assert.equal(piUserTurnKey({ getBranch: () => first }, "same"), "message:user-1");
+  assert.equal(piUserTurnKey({ getBranch: () => toolLoop }, "same"), "message:user-1");
+  assert.equal(piUserTurnKey({ getBranch: () => repeated }, "same"), "message:user-2");
+  assert.equal(piUserTurnKey({}, "same"), "prompt:same");
 });
 
 test("Pi evidence resolution versions references and explains degraded provenance", () => {
@@ -1961,31 +1971,6 @@ test("revoked records show metadata but withhold the statement", () => {
   assert.doesNotMatch(evidence, /modern electronic music festivals/);
 });
 
-test("session injection window folds duplicates but permits deeper disclosure", () => {
-  const window = new SessionInjectionWindow();
-  const context = memoryContext("memory-1", "Use SQLite.", "SQLite works offline.");
-  window.beginTurn("session-a");
-
-  assert.match(window.format("session-a", context, "header"), /Use SQLite/);
-  assert.match(window.format("session-a", context, "header"), /already_in_context=true/);
-  assert.match(window.format("session-a", context, "evidence"), /SQLite works offline/);
-  assert.match(window.format("session-a", context, "exact"), /already_in_context=true/);
-  assert.match(window.format("session-b", context, "header"), /Use SQLite/);
-});
-
-test("session injection window reinjects changed and expired content", () => {
-  const window = new SessionInjectionWindow(2);
-  const original = memoryContext("memory-1", "Use SQLite.", "SQLite works offline.");
-  window.beginTurn("session-a");
-  window.format("session-a", original, "evidence");
-
-  const changed = memoryContext("memory-1", "Use SQLite.", "SQLite also supports local tests.");
-  assert.match(window.format("session-a", changed, "evidence"), /local tests/);
-  window.beginTurn("session-a");
-  window.beginTurn("session-a");
-  assert.match(window.format("session-a", changed, "evidence"), /local tests/);
-});
-
 test("session recall flow requires evidence progression after two searches", () => {
   const flow = new SessionRecallFlow();
   assert.equal(flow.beginTurn("session-a", "first request"), true);
@@ -2099,26 +2084,6 @@ test("session task window applies the memory gate to ordinary, cue, and recall p
   assert.equal(recall?.limit, 12);
   assert.equal(recall?.graphHops, 1);
 });
-
-function memoryContext(id: string, statement: string, evidence: string): MemoryContext {
-  return {
-    results: [
-      {
-        memory: {
-          id,
-          statement,
-          memoryType: "constraint",
-          tier: 1,
-          truthStatus: "asserted",
-          scope: {},
-          markers: [],
-        },
-        node: { canonicalName: "Atlas storage" },
-        evidence: { content: evidence },
-      },
-    ],
-  } as unknown as MemoryContext;
-}
 
 test("composeNmgContextMessage: injects a completion nudge block when provided", async () => {
   const { composeNmgContextMessage, composeNmgSystemPrompt } =

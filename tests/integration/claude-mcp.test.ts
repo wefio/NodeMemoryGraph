@@ -33,8 +33,14 @@ test("MCP adapter permits coordination to be explicitly disabled", async () => {
   try {
     await client.connect(transport);
     const tools = await client.listTools();
-    assert.equal(tools.tools.some((tool) => tool.name === "nmg_board"), false);
-    assert.equal(tools.tools.some((tool) => tool.name === "nmg_search"), true);
+    assert.equal(
+      tools.tools.some((tool) => tool.name === "nmg_board"),
+      false,
+    );
+    assert.equal(
+      tools.tools.some((tool) => tool.name === "nmg_search"),
+      true,
+    );
   } finally {
     await client.close().catch(() => undefined);
     rmSync(dataDir, { recursive: true, force: true });
@@ -94,6 +100,11 @@ test("MCP adapter registers, discovers, and directs to a stable agent", async ()
     const activeGraphId = /activeGraphId=([^\s]+)/u.exec(textOf(recalled))?.[1];
     assert.ok(activeGraphId);
     assert.match(textOf(recalled), new RegExp(memoryId, "u"));
+    const repeated = await client.callTool({
+      name: "nmg_search",
+      arguments: { query: "stable Active Graph session", limit: 4 },
+    });
+    assert.match(textOf(repeated), /already_in_context=true/u);
     const exact = await client.callTool({
       name: "nmg_get",
       arguments: { memoryIds: [memoryId], activeGraphId },

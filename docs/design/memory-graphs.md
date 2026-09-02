@@ -267,10 +267,11 @@ the turn number.
 Within 12 turns, unchanged content already disclosed deeply enough is folded
 to an `already_in_context` reference. A deeper request, changed evidence,
 expiry from the window, or another session renders it again. The window is
-bounded to 128 references and cleared at session shutdown. It is context-cache
-metadata inside AG, not an authoritative usage outcome. Tool and Task Board
-observations have moved to the daemon-owned AG; the Pi-local injection window
-still implements this disclosure cache until the ledger is migrated.
+bounded to 128 references, cleared when compaction removes model context, and
+destroyed at session shutdown. It is context-cache metadata inside AG, not an
+authoritative usage outcome. Pi, DSH, WorkBuddy and MCP use the same daemon-owned
+ledger while retaining host-specific rendering; a failed ledger call reveals
+requested evidence rather than silently suppressing it.
 
 Every persisted projection trace carries its owning harness `sessionId`. Trace reads,
 disclosure, diagnostic attribution, and verified feedback must present the same identity;
@@ -281,9 +282,8 @@ which resolves internally to one or more persisted retrieval traces.
 Sending the projection identity with an explicit `nmg_get` makes exact evidence
 expansion observable disclosure. Automatic recall and answer overlap remain diagnostic exposure,
 not proof that the model used a memory. Only verified user/tool/benchmark
-outcomes may train. Pi's `session_before_compact` event
-clears the injection window so evidence removed by compaction can be rendered
-again.
+outcomes may train. Pi's `session_before_compact` event clears the daemon
+disclosure ledger so evidence removed by compaction can be rendered again.
 
 ### Shared Task Board (cross-Agent coordination, not a memory graph)
 

@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
+
 import type { FileHit, MemoryContext, MemorySearchResult } from "../core/types.ts";
+import type { SessionDisclosureLevel } from "../core/session-active-graph.ts";
 import { logicalChainCount, logicalChainNames } from "./chain-projection.ts";
 
 export const SEARCH_PREVIEW_CHARS = 320;
@@ -56,4 +59,35 @@ export function compactSearchContext(context: MemoryContext): CompactSearchConte
     deferredMemoryIds: context.progressiveDisclosure?.deferredMemoryIds ?? [],
     ...(context.files && context.files.length > 0 ? { files: context.files } : {}),
   };
+}
+
+/** Stable hash of the content that a particular disclosure depth will expose.
+ * It lets the daemon own duplicate folding without owning host rendering. */
+export function memoryDisclosureEntries(
+  context: MemoryContext,
+  disclosure: SessionDisclosureLevel,
+): Array<{ memoryId: string; contentHash: string }> {
+  return context.results.map((result) => {
+    const visible =
+      disclosure === "header"
+        ? `${result.node.canonicalName}\n${result.memory.memoryType}\n${searchPreview(result.memory)}`
+        : disclosure === "exact"
+          ? result.memory.statement
+          : `${result.memory.statement}\n${result.evidence.content}`;
+    return {
+      memoryId: result.memory.id,
+      contentHash: createHash("sha256").update(visible).digest("base64url"),
+    };
+  });
+}
+
+export function compactDisclosureEntries(
+  context: CompactSearchContext,
+): Array<{ memoryId: string; contentHash: string }> {
+  return context.candidates.map((candidate) => ({
+    memoryId: candidate.id,
+    contentHash: createHash("sha256")
+      .update(`${candidate.node}\n${candidate.type}\n${candidate.preview}`)
+      .digest("base64url"),
+  }));
 }

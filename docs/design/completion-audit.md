@@ -72,12 +72,13 @@ to use it explicitly for one suitable task.
 
 ## Actual active blockers
 
-Four active work families remain; the first is remaining AG implementation work and the
-other three prevent evidence-backed default activation of adaptive policies:
+Four active work families remain; the first is narrower AG completion work and
+the other three prevent evidence-backed default activation of adaptive policies:
 
-1. The session Active Graph runtime core is implemented; automatic task-frame
-   lifecycle, branch ownership, shared disclosure accounting and one combined
-   runtime budget remain incomplete.
+1. The session AG core, explicit frame/branch lifecycle, bounded runtime items,
+   and shared adapter disclosure ledger are implemented. Automatic semantic
+   frame classification, the full multidimensional budget `B`, and optional
+   typed HA/MGR artifact admission remain incomplete.
 2. Natural Pi tasks rarely contain independently verified claim/evidence outcomes.
 3. Retrieval/controller gains have not yet passed matched quality **and** token,
    tool-round, latency, and rollback gates.

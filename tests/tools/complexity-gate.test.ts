@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { evaluateComplexityDiff } from "../../tools/complexity-gate.ts";
+import { evaluateComplexityDiff, functionIdentityAtLine } from "../../tools/complexity-gate.ts";
 
 interface Finding {
   file: string;
@@ -96,4 +96,24 @@ test("removed methods are ignored", () => {
   const current = new Map<string, Finding>();
   const { violations } = evaluateComplexityDiff(baseline, current, 15);
   assert.deepEqual(violations, []);
+});
+
+test("anonymous callback identities survive unrelated line shifts", () => {
+  const before = `pi.on("before_agent_start", async (event) => {\n  if (event.prompt) return event.prompt;\n});\n`;
+  const after = `const unrelated = true;\n\n${before}`;
+  assert.equal(functionIdentityAtLine("adapter.ts", before, 1), "pi.on:before_agent_start#1");
+  assert.equal(functionIdentityAtLine("adapter.ts", after, 3), "pi.on:before_agent_start#1");
+});
+
+test("variable arrows and private methods have stable identities", () => {
+  const source = `const menu = async () => true;\nclass Service {\n  #get() { return true; }\n}\n`;
+  assert.equal(functionIdentityAtLine("adapter.ts", source, 1), "menu");
+  assert.equal(functionIdentityAtLine("adapter.ts", source, 3), "#get");
+});
+
+test("multiple callbacks in one call receive distinct identities", () => {
+  const source = `run(() => first(), () => second());\n`;
+  assert.equal(functionIdentityAtLine("adapter.ts", source, 1), "run#0");
+  const secondColumnSource = `run(\n  () => first(),\n  () => second(),\n);\n`;
+  assert.equal(functionIdentityAtLine("adapter.ts", secondColumnSource, 3), "run#1");
 });

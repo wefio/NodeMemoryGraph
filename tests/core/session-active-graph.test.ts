@@ -71,10 +71,9 @@ test("task frames: switching frames keeps a bounded cooling set and task return 
 
   // Switch to frame B: the task-alpha frame must cool, not disappear.
   now += 1_000;
-  const beta = runtime.registerProjection(
-    graph("trace-b", "session-a", "task-beta", "memory-b"),
-    [{ traceId: "trace-b", memoryIds: new Set(["memory-b"]), value: "vb" }],
-  );
+  const beta = runtime.registerProjection(graph("trace-b", "session-a", "task-beta", "memory-b"), [
+    { traceId: "trace-b", memoryIds: new Set(["memory-b"]), value: "vb" },
+  ]);
   assert.equal(beta.parentProjectionId, null, "cross-frame projection has no same-frame parent");
   // Alpha items remain reachable via the cooled frame (not evicted).
   assert.ok(runtime.taskFrame("session-a", "task-alpha"), "cooled frame is still retrievable");
@@ -255,6 +254,85 @@ test("disclosure ledger: markDisclosed records surfaced projections per session"
     1,
     "idempotent, not duplicated",
   );
+});
+
+test("disclosure ledger: folds unchanged content but re-discloses deeper or changed evidence", () => {
+  const runtime = new SessionActiveGraphRuntime<string>({
+    maxDisclosureTurns: 2,
+    maxDisclosuresPerSession: 4,
+  });
+  const projection = runtime.registerProjection(
+    graph("t-a", "session-a", "task-alpha", "memory-a"),
+    [{ traceId: "t-a", memoryIds: new Set(["memory-a"]), value: "a" }],
+  );
+
+  assert.equal(runtime.beginDisclosureTurn("session-a"), 1);
+  assert.deepEqual(
+    runtime.disclose({
+      sessionId: "session-a",
+      projectionId: projection.projectionId,
+      disclosure: "header",
+      entries: [{ memoryId: "memory-a", contentHash: "hash-a" }],
+    }),
+    { freshMemoryIds: ["memory-a"], foldedMemoryIds: [] },
+  );
+  assert.deepEqual(
+    runtime.disclose({
+      sessionId: "session-a",
+      projectionId: projection.projectionId,
+      disclosure: "header",
+      entries: [{ memoryId: "memory-a", contentHash: "hash-a" }],
+    }),
+    { freshMemoryIds: [], foldedMemoryIds: ["memory-a"] },
+  );
+  assert.deepEqual(
+    runtime.disclose({
+      sessionId: "session-a",
+      projectionId: projection.projectionId,
+      disclosure: "evidence",
+      entries: [{ memoryId: "memory-a", contentHash: "hash-a" }],
+    }),
+    { freshMemoryIds: ["memory-a"], foldedMemoryIds: [] },
+  );
+  assert.deepEqual(
+    runtime.disclose({
+      sessionId: "session-a",
+      projectionId: projection.projectionId,
+      disclosure: "evidence",
+      entries: [{ memoryId: "memory-a", contentHash: "hash-b" }],
+    }),
+    { freshMemoryIds: ["memory-a"], foldedMemoryIds: [] },
+  );
+  assert.equal(runtime.snapshot("session-a")?.disclosures[0]?.contentHash, "hash-b");
+});
+
+test("disclosure ledger: turn expiry and projection ownership are session isolated", () => {
+  const runtime = new SessionActiveGraphRuntime<string>({ maxDisclosureTurns: 2 });
+  const projection = runtime.registerProjection(
+    graph("t-a", "session-a", "task-alpha", "memory-a"),
+    [{ traceId: "t-a", memoryIds: new Set(["memory-a"]), value: "a" }],
+  );
+  runtime.beginDisclosureTurn("session-a");
+  runtime.disclose({
+    sessionId: "session-a",
+    projectionId: projection.projectionId,
+    disclosure: "header",
+    entries: [{ memoryId: "memory-a", contentHash: "hash-a" }],
+  });
+
+  assert.throws(
+    () =>
+      runtime.disclose({
+        sessionId: "session-b",
+        projectionId: projection.projectionId,
+        disclosure: "header",
+        entries: [{ memoryId: "memory-a", contentHash: "hash-a" }],
+      }),
+    /belongs to another session/u,
+  );
+  runtime.beginDisclosureTurn("session-a");
+  runtime.beginDisclosureTurn("session-a");
+  assert.deepEqual(runtime.snapshot("session-a")?.disclosures, []);
 });
 
 function graph(id: string, sessionId: string, taskId: string, memoryId: string): ActiveGraph {
