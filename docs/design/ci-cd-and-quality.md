@@ -293,9 +293,11 @@ Verifier 在 Agent 变更之后独立运行，检查至少分为结构、行为�
 
 默认 `FileReceiptSink` 把 receipt 写入被 Git 忽略的 `.rcp/receipts/`，并在同目录的
 `inflight/` 下维护异常中断恢复标记。标记不是 receipt 或证明，正常终态会被清除。Receipt
-服务本地幂等、恢复和操作者审计，不随 PR 传播，也不能单独充当第三方可验证证明；
-`npm run agent:verify` 只写最近一次 `.nmg/verification/latest.json`，不会生成 RCP
-receipt。只有 `nmg-rcp reconcile --apply` 经过 `ReceiptSink` 才产生 receipt。
+服务本地幂等、恢复和操作者审计，不随 PR 传播，也不能单独充当第三方可验证证明。
+`npm run agent:verify` 仍写最近一次 `.nmg/verification/latest.json`；当选中 scope 被唯一一个
+RCP Contract 完整覆盖时，它还会自动以 workspace-ready 模式执行单次 reconcile，把同一批
+本地检查交给 RCP verifier 并经 `ReceiptSink` 生成 receipt。没有适用 Contract 时保持原有
+普通验证；多个 Contract 同时完整覆盖时失败关闭，要求先消除 intent 歧义。
 Receipt store 可有索引数据库或外部 artifact/attestation provider，但规范 receipt 必须
 绑定 immutable input/output identity。外部 provider 在出现跨机器复核需求前保持延后。
 GitHub required checks 只接受受信 verifier 的结果；PR 描述和评论用于解释，不作为唯一
@@ -385,6 +387,10 @@ nmg-rcp forge-bind .rcp/contracts/change.yaml --pr 42
 nmg-rcp reconcile .rcp/contracts/change.yaml --apply --workspace-ready \
   --pr 42 --operation-key pr-ci --nmg disabled
 ```
+
+日常 Agent 开发不需要额外记忆该命令：`npm run agent:verify` 会自动发现唯一完整覆盖当前
+scope 的 Contract，并执行等价的 workspace-ready reconcile。独立 `nmg-rcp` CLI 仍用于
+plan、外部 harness、恢复、PR/forge 绑定以及显式管理场景。
 
 `reconcile` 默认只 plan；`--apply` 还必须显式选择当前 workspace 或外部 harness。
 本地验证 receipt 与 PR/CI receipt 使用不同 `operation-key`，但都绑定同一 Contract

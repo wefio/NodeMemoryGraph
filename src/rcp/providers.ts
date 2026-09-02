@@ -214,9 +214,11 @@ export class LocalNpmVerifierProvider implements VerifierProvider {
   };
 
   readonly timeoutMs: number;
+  readonly streamOutput: boolean;
 
-  constructor(timeoutMs = 30 * 60 * 1_000) {
+  constructor(timeoutMs = 30 * 60 * 1_000, streamOutput = false) {
     this.timeoutMs = timeoutMs;
+    this.streamOutput = streamOutput;
   }
 
   async definitionDigest(request: {
@@ -257,7 +259,7 @@ export class LocalNpmVerifierProvider implements VerifierProvider {
         });
         continue;
       }
-      checks.push(runNpmScriptCheck(request.root, name, this.timeoutMs));
+      checks.push(runNpmScriptCheck(request.root, name, this.timeoutMs, this.streamOutput));
     }
     return {
       provider: this.descriptor,

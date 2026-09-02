@@ -8,7 +8,8 @@
 **Implementation status:** the single-attempt run-to-completion control plane was merged through
 PR #3 and subsequently hardened at its evidence and recovery boundaries. Contract compilation, observation, WorkOrders,
 independent verification, append-only local receipts, provider boundaries, Draft
-PR binding, and optional/no-NMG operation have deterministic product tests and a
+PR binding, automatic `agent:verify` delegation for uniquely covered changes, and
+optional/no-NMG operation have deterministic product tests and a
 real Contract-bound PR/CI/local-receipt run. Continuous reconciliation and portable
 third-party attestations remain deferred.
 
@@ -132,8 +133,10 @@ full completion criteria are owned by
   prose executable or prove semantic equivalence by itself.
 - The default `FileReceiptSink` writes `.rcp/receipts/`, which is intentionally
   ignored by Git. Those receipts support local idempotency and operator audit, but
-  are not portable third-party attestations and are not produced by
-  `npm run agent:verify` alone.
+  are not portable third-party attestations. The standard `npm run agent:verify`
+  entry automatically delegates to one RCP Contract only when that Contract fully
+  and uniquely covers the selected scopes; otherwise it keeps ordinary verification,
+  and overlapping Contracts fail closed instead of being guessed.
 - GitHub CI remains the repository's remote verification authority. A future
   artifact/attestation provider may publish receipt evidence when an independently
   reproducible external proof is required.

@@ -8,6 +8,7 @@ import test from "node:test";
 
 import {
   buildVerificationPlan,
+  discoverApplicableRcpContract,
   executeVerificationPlan,
   type VerificationCommandResult,
 } from "../../tools/agent-verify.ts";
@@ -338,6 +339,113 @@ test("CLI automatically routes dirty Git files when called without scope argumen
   );
   assert.notEqual(cleanResult.status, 0);
   assert.match(cleanResult.stderr, /--require-clean found \d+ dirty files/);
+});
+
+test("CLI automatically reconciles the unique RCP contract covering dirty scopes", () => {
+  const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-rcp-"));
+  mkdirSync(join(root, "docs"), { recursive: true });
+  mkdirSync(join(root, "src"), { recursive: true });
+  mkdirSync(join(root, ".rcp", "contracts"), { recursive: true });
+  writeFileSync(join(root, "docs", "owner.md"), "# Owner\n");
+  writeFileSync(join(root, "src", "file.ts"), "export const value = 1;\n");
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({
+      name: "fixture",
+      version: "1.0.0",
+      scripts: { pass: 'node -e "process.exit(0)"' },
+    }),
+  );
+  writeFileSync(
+    join(root, "agent-context.yaml"),
+    "version: 1\nroutes:\n  - id: fixture\n    paths: [src/**]\n    owners: [docs/owner.md]\n    tests: []\n    verify:\n      blocking: [pass]\n      advisory: []\n",
+  );
+  writeFileSync(
+    join(root, ".rcp", "contracts", "fixture.yaml"),
+    [
+      "apiVersion: repository.nmg.dev/v1alpha1",
+      "kind: AgentChange",
+      "metadata:",
+      "  id: fixture-change",
+      "spec:",
+      "  intent: Verify fixture changes",
+      "  scope:",
+      "    include: [src/**]",
+      "    exclude: []",
+      "  preserve: [owner remains authoritative]",
+      "  invariants: [changes stay in scope]",
+      "  verification:",
+      "    routes: [fixture]",
+      "    checks: [pass]",
+      "    forgeChecks: []",
+      "  authority:",
+      "    mode: apply",
+      "",
+    ].join("\n"),
+  );
+  const git = (args: string[]) =>
+    spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
+  assert.equal(git(["init", "--quiet"]).status, 0);
+  assert.equal(git(["config", "user.email", "verify@example.invalid"]).status, 0);
+  assert.equal(git(["config", "user.name", "Verify Test"]).status, 0);
+  assert.equal(git(["add", "."]).status, 0);
+  assert.equal(git(["commit", "--quiet", "-m", "fixture"]).status, 0);
+  writeFileSync(join(root, "src", "file.ts"), "export const value = 2;\n");
+
+  const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--json"],
+    { encoding: "utf8", windowsHide: true },
+  );
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout) as {
+    rcp?: { status: string; contractId: string; receiptPath?: string };
+  };
+  assert.equal(payload.rcp?.status, "verified");
+  assert.equal(payload.rcp?.contractId, "fixture-change");
+  assert.ok(payload.rcp?.receiptPath);
+  assert.equal(existsSync(payload.rcp!.receiptPath!), true);
+
+  const evidence = JSON.parse(
+    readFileSync(join(root, ".nmg", "verification", "latest.json"), "utf8"),
+  ) as { rcp?: { status: string; receiptPath?: string }; result?: { ok: boolean } };
+  assert.equal(evidence.rcp?.status, "verified");
+  assert.equal(evidence.result?.ok, true);
+});
+
+test("RCP auto-discovery refuses to choose between overlapping contracts", () => {
+  const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-rcp-ambiguous-"));
+  const directory = join(root, ".rcp", "contracts");
+  mkdirSync(directory, { recursive: true });
+  const contract = (id: string) =>
+    [
+      "apiVersion: repository.nmg.dev/v1alpha1",
+      "kind: AgentChange",
+      "metadata:",
+      `  id: ${id}`,
+      "spec:",
+      "  intent: Verify fixture changes",
+      "  scope:",
+      "    include: [src/**]",
+      "    exclude: []",
+      "  preserve: [owner remains authoritative]",
+      "  invariants: [changes stay in scope]",
+      "  verification:",
+      "    routes: [fixture]",
+      "    checks: [pass]",
+      "    forgeChecks: []",
+      "  authority:",
+      "    mode: apply",
+      "",
+    ].join("\n");
+  writeFileSync(join(directory, "first.yaml"), contract("first"));
+  writeFileSync(join(directory, "second.yaml"), contract("second"));
+
+  assert.throws(
+    () => discoverApplicableRcpContract(root, ["src/file.ts"]),
+    /multiple RCP contracts cover the selected scope: first, second/,
+  );
 });
 
 test("CLI attributes command timeout and persists the failure", () => {

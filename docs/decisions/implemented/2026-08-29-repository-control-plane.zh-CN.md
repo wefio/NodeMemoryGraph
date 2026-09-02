@@ -7,8 +7,9 @@
 
 **实现状态：** 单次 run-to-completion 控制面已通过 PR #3 合并，随后完成证据与恢复边界加固。
 Contract 编译、仓库观察、WorkOrder、独立验证、本地 append-only receipt、provider 边界、
-Draft PR 绑定及 optional/no-NMG 路径已有确定性产品测试和真实 Contract-bound
-PR/CI/本地 receipt 闭环。持续协调与可供第三方独立复核的 portable attestation 仍延后。
+唯一完整覆盖变更时由 `agent:verify` 自动委托、Draft PR 绑定及 optional/no-NMG 路径已有
+确定性产品测试和真实 Contract-bound PR/CI/本地 receipt 闭环。持续协调与可供第三方
+独立复核的 portable attestation 仍延后。
 
 ## 问题
 
@@ -107,7 +108,9 @@ RCP 只通过窄 provider 扩展 repository/forge、harness、verifier、policy�
 - 已实现 CLI 把 Contract、scope 观测、WorkOrder、命名检查、forge 状态与一份
   append-only receipt 绑定起来；它不会自动执行 preservation 文本，也不自行证明语义等价。
 - 默认 `FileReceiptSink` 写入被 Git 忽略的 `.rcp/receipts/`。这些 receipt 用于本地幂等和
-  操作者审计，不是可移植的第三方 attestation，也不会由 `npm run agent:verify` 单独产生。
+  操作者审计，不是可移植的第三方 attestation。标准入口 `npm run agent:verify` 仅在一个
+  RCP Contract 完整且唯一覆盖选中 scope 时自动委托并生成 receipt；没有匹配时保持普通
+  验证，多个 Contract 重叠时失败关闭而不猜测。
 - GitHub CI 仍是仓库远程验证权威。只有出现独立外部证明需求时，才增加 artifact/
   attestation provider 发布 receipt 证据。
 - 当前只实现单次 run-to-completion；watcher、queue、持续收敛、通用 catalog 与多租户仍需

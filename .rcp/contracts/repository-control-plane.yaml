@@ -18,6 +18,7 @@ spec:
       - package.json
       - src/rcp/**
       - tests/rcp/**
+      - tests/tools/agent-verify.test.ts
       - tools/agent-verify.ts
       - tools/repo-context.ts
       - tools/verify-package.ts
