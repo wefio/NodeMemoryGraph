@@ -1025,7 +1025,7 @@ export function apply(ctx: Context): () => void {
     output: textOutput,
     async execute(args, exec) {
       const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      const params: Record<string, any> = { query: args.query, projectDir: workspaceRoot, sessionId }
+      const params: Record<string, unknown> = { query: args.query, projectDir: workspaceRoot, sessionId }
       if (args.limit != null) params.limit = args.limit
       if (args.maxTier != null) params.maxTier = args.maxTier
       if (args.graphHops != null) params.graphHops = args.graphHops
@@ -1087,7 +1087,7 @@ export function apply(ctx: Context): () => void {
       const ids = Array.isArray(args.memoryIds) ? args.memoryIds : []
       if (ids.length === 0) return 'nmg_get requires at least one memory ID.'
       const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
-      const params: Record<string, any> = { memoryIds: ids, projectDir: workspaceRoot, sessionId }
+      const params: Record<string, unknown> = { memoryIds: ids, projectDir: workspaceRoot, sessionId }
       if (args.activeGraphId) params.activeGraphId = args.activeGraphId
       if (args.graphHops != null) params.graphHops = args.graphHops
       const argv = ['get'].concat(ids)

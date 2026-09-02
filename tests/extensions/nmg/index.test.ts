@@ -2085,26 +2085,6 @@ test("session task window applies the memory gate to ordinary, cue, and recall p
   assert.equal(recall?.graphHops, 1);
 });
 
-function memoryContext(id: string, statement: string, evidence: string): MemoryContext {
-  return {
-    results: [
-      {
-        memory: {
-          id,
-          statement,
-          memoryType: "constraint",
-          tier: 1,
-          truthStatus: "asserted",
-          scope: {},
-          markers: [],
-        },
-        node: { canonicalName: "Atlas storage" },
-        evidence: { content: evidence },
-      },
-    ],
-  } as unknown as MemoryContext;
-}
-
 test("composeNmgContextMessage: injects a completion nudge block when provided", async () => {
   const { composeNmgContextMessage, composeNmgSystemPrompt } =
     await import("../../../.pi/extensions/nmg/index.ts");
