@@ -507,6 +507,44 @@ export function migrate(db: DatabaseSync): void {
       counter INTEGER NOT NULL DEFAULT 0
     );
 
+    -- Memory anchors (bookmarks): content-anchored file locations a memory
+    -- points into. Independent searchable source (label/path/snippet FTS);
+    -- memory ↔ anchor linkage rides the open-string markers channel
+    -- (ANCHOR_REF_MARKER), so no schema coupling to memory_records is needed
+    -- here beyond an optional soft memory_id back-pointer. Snippet is the
+    -- relocation key — line numbers are never persisted (they drift on edit).
+    CREATE TABLE IF NOT EXISTS anchors (
+      id TEXT PRIMARY KEY,
+      path TEXT NOT NULL,
+      snippet TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      kind TEXT,
+      memory_id TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_anchors_path ON anchors(path);
+    CREATE INDEX IF NOT EXISTS idx_anchors_memory ON anchors(memory_id) WHERE memory_id IS NOT NULL;
+    CREATE VIRTUAL TABLE IF NOT EXISTS anchors_fts USING fts5(
+      label,
+      snippet,
+      path UNINDEXED,
+      content = 'anchors',
+      content_rowid = 'rowid',
+      tokenize = 'unicode61'
+    );
+    CREATE TRIGGER IF NOT EXISTS anchors_fts_ai AFTER INSERT ON anchors BEGIN
+      INSERT INTO anchors_fts (rowid, label, snippet, path) VALUES (new.rowid, new.label, new.snippet, new.path);
+    END;
+    CREATE TRIGGER IF NOT EXISTS anchors_fts_ad AFTER DELETE ON anchors BEGIN
+      INSERT INTO anchors_fts (anchors_fts, rowid, label, snippet, path)
+      VALUES ('delete', old.rowid, old.label, old.snippet, old.path);
+    END;
+    CREATE TRIGGER IF NOT EXISTS anchors_fts_au AFTER UPDATE ON anchors BEGIN
+      INSERT INTO anchors_fts (anchors_fts, rowid, label, snippet, path)
+      VALUES ('delete', old.rowid, old.label, old.snippet, old.path);
+      INSERT INTO anchors_fts (rowid, label, snippet, path) VALUES (new.rowid, new.label, new.snippet, new.path);
+    END;
+
     CREATE INDEX IF NOT EXISTS idx_memory_records_node_tier
       ON memory_records(node_id, tier);
     CREATE INDEX IF NOT EXISTS idx_memory_records_tier_priority

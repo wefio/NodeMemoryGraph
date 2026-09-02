@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import {
@@ -19,7 +19,14 @@ import {
   createNodeSummaryProviderFromEnv,
   drainNodeSummaries,
 } from "../integration/node-summarizer.ts";
-import type { LeafSummaryProvider, NodeSummaryProvider, RememberInput } from "../core/types.ts";
+import type {
+  AnchorInput,
+  AnchorHit,
+  AnchorRecord,
+  LeafSummaryProvider,
+  NodeSummaryProvider,
+  RememberInput,
+} from "../core/types.ts";
 import { NmgStore } from "../core/store.ts";
 import {
   SessionActiveGraphRuntime,
@@ -1380,8 +1387,17 @@ export class NmgService {
     if (projectDir) {
       fileHits = this.#searchProjectFiles(projectDir, query, options.limit ?? 8);
     }
+    // Anchor (bookmark) source: independent of projectDir — anchors live in the
+    // shared store and are searched alongside memory. Snippet relocation to a
+    // line needs the project root (to read the current file), so the resolver
+    // is applied here, not in the store.
+    const anchorHits = this.#resolveAnchorLines(
+      this.#searchAnchorSource(query, options.limit ?? 8),
+      projectDir,
+    );
     const withFiles = <T extends MemoryContext>(context: T): T => {
       if (fileHits.length > 0) context.files = fileHits;
+      if (anchorHits.length > 0) context.anchors = anchorHits;
       return context;
     };
     const runOne = async (store: NmgStore, raw: string): Promise<MemoryContext> => {
@@ -1498,6 +1514,55 @@ export class NmgService {
     } catch {
       // Read-through caching is optional. LTG fallback remains authoritative.
     }
+  }
+
+  /** Search the anchor (bookmark) source across stores. Anchor rows are in the
+   *  store (independent of any project index), so this does not need a
+   *  projectDir; snippet relocation to a line is applied when a project root
+   *  is available at call time. */
+  #searchAnchorSource(query: string, limit: number): AnchorHit[] {
+    const anchorLimit = Math.max(1, Math.min(limit, 10));
+    const rows = this.#getStore().searchAnchors(query, anchorLimit);
+    return rows.map((row) => ({
+      id: row.id,
+      path: row.path,
+      label: row.label,
+      kind: row.kind,
+      memoryId: row.memoryId,
+      snippet: row.snippet,
+    }));
+  }
+
+  /** Resolve anchor snippets to current line numbers against a project root.
+   *  Best-effort: file missing/unreadable or snippet absent marks stale. */
+  #resolveAnchorLines(anchors: AnchorHit[], projectRoot?: string): AnchorHit[] {
+    if (!projectRoot || anchors.length === 0) return anchors;
+    const cache = new Map<string, string[] | null>(); // absPath -> lines | null
+    const linesFor = (path: string): string[] | null => {
+      const abs = resolve(projectRoot, path);
+      if (cache.has(abs)) return cache.get(abs)!;
+      let lines: string[] | null = null;
+      try {
+        const content = readFileSync(abs, "utf8");
+        lines = content.split(/\r?\n/);
+      } catch {
+        lines = null;
+      }
+      cache.set(abs, lines);
+      return lines;
+    };
+    return anchors.map((anchor) => {
+      if (!anchor.snippet) return { ...anchor, stale: true };
+      const lines = linesFor(anchor.path);
+      if (!lines) return { ...anchor, stale: true };
+      const target = anchor.snippet.trim();
+      // Snippet is the relocation key: locate the line whose content contains
+      // it (or that it contains, for short fragments). Best-effort single-line
+      // relocation in the MVP.
+      const found = lines.findIndex((line) => line.includes(target));
+      if (found === -1) return { ...anchor, stale: true };
+      return { ...anchor, line: found + 1 };
+    });
   }
 
   #get(params: NmgGetParams): NmgMethodResult["get"] {
@@ -1801,6 +1866,7 @@ function parseRememberParams(value: unknown): NmgRememberParams {
     sourceRef: optionalString(params, "sourceRef"),
     markers: optionalMarkers(params, "markers"),
     recallTriggers: optionalRecallTriggers(params),
+    anchors: optionalAnchors(params, "anchors"),
     unsafe: optionalBoolean(params, "unsafe"),
     projectDir: optionalString(params, "projectDir"),
   };
@@ -1835,6 +1901,31 @@ function optionalEvidenceSource(
     sourceMessageId: requiredString(source, "sourceMessageId"),
     sourceRef: optionalString(source, "sourceRef"),
   };
+}
+
+/** Parse the optional anchors array on a remember write. Each anchor needs a
+ *  path and a snippet (the relocation key); label/kind are optional. */
+function optionalAnchors(
+  params: Record<string, unknown>,
+  key: string,
+): AnchorInput[] | undefined {
+  const value = params[key];
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 10) {
+    throw new NmgProtocolError("INVALID_PARAMS", `${key} must be an array of at most 10 anchors`);
+  }
+  return value.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new NmgProtocolError("INVALID_PARAMS", `${key} entries must be objects`);
+    }
+    const anchor = entry as Record<string, unknown>;
+    return {
+      path: requiredString(anchor, "path"),
+      snippet: requiredString(anchor, "snippet"),
+      label: optionalString(anchor, "label"),
+      kind: optionalString(anchor, "kind"),
+    };
+  });
 }
 
 function parseExportMemoriesParams(value: unknown): NmgExportMemoriesParams {

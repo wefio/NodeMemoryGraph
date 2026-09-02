@@ -64,6 +64,12 @@ import { assertTemporalValidity } from "../semantic-domain.ts";
 import { recallTriggerMarkers } from "../recall-triggers.ts";
 import { type ScopeWriteIndexRow, writeTokens } from "./scope-write-index.ts";
 
+/** Merge caller markers with auto-generated anchor_ref markers. Kept as a
+ *  module-level function so rememberInner's cyclomatic complexity stays flat. */
+function mergeMarkers(base: readonly MemoryMarker[] | undefined, extra: readonly MemoryMarker[]): MemoryMarker[] {
+  return [...(base ?? []), ...extra];
+}
+
 export function withWrites<TBase extends Constructor>(Base: TBase) {
   return class extends Base {
     // Base-class members (resolved at assembly time)
@@ -492,6 +498,12 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
             : undefined;
         const supersedesId =
           input.supersedesId ?? (automaticPrevious ? String(automaticPrevious.id) : undefined);
+        // Memory anchors: agent-supplied bookmarks attached to this write.
+        // Anchor ids are pre-generated so the anchor_ref markers can ride the
+        // same memory write (no second transaction); rows land after addMemory
+        // so they can carry the memory id. Content-anchored — snippet only,
+        // never a line number.
+        const { anchorPlan, anchorMarkers } = this.#planAnchorWrites(input);
         let supersededNodeId: string | undefined;
         if (supersedesId) {
           const previous = this.db
@@ -536,7 +548,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           predicateKey: input.predicateKey,
           extractMethod: input.extractMethod,
           claims: input.claims,
-          markers: input.markers,
+          markers: mergeMarkers(input.markers, anchorMarkers),
           recallTriggers: input.recallTriggers,
           tier: input.tier,
           importance: input.importance,
@@ -569,6 +581,8 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         if (supersededNodeId && supersededNodeId !== node.id) {
           this.refreshNodeResidence(supersededNodeId, memory.createdAt);
         }
+        // Land anchor rows inside the same transaction as the memory write.
+        this.#insertAnchorRows(anchorPlan, memory.id);
         if (manageTransaction) this.db.exec("COMMIT");
         const written = { history, node, memory };
         return {
@@ -580,6 +594,59 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         if (manageTransaction) this.db.exec("ROLLBACK");
         this.invalidateScopeWriteIndexes(scopeJson);
         throw error;
+      }
+    }
+
+    /** Pre-generate anchor rows and their anchor_ref markers for a memory write.
+     *  Invalid anchors (missing path or snippet) are skipped. */
+    #planAnchorWrites(input: RememberInput): {
+      anchorPlan: Array<{
+        id: string;
+        path: string;
+        snippet: string;
+        label: string;
+        kind?: string;
+      }>;
+      anchorMarkers: MemoryMarker[];
+    } {
+      const anchorPlan: Array<{
+        id: string;
+        path: string;
+        snippet: string;
+        label: string;
+        kind?: string;
+      }> = [];
+      const anchorMarkers: MemoryMarker[] = [];
+      for (const anchor of input.anchors ?? []) {
+        const path = String(anchor.path ?? "").trim();
+        const snippet = String(anchor.snippet ?? "").trim();
+        if (!path || !snippet) continue; // anchors need a file + content to relocate
+        const id = randomUUID();
+        anchorPlan.push({
+          id,
+          path,
+          snippet,
+          label: String(anchor.label ?? "").trim(),
+          kind: anchor.kind?.trim() || undefined,
+        });
+        anchorMarkers.push({ kind: "anchor_ref", attributes: { anchorId: id, path } });
+      }
+      return { anchorPlan, anchorMarkers };
+    }
+
+    /** Insert planned anchor rows inside the memory-write transaction. */
+    #insertAnchorRows(
+      anchorPlan: Array<{ id: string; path: string; snippet: string; label: string; kind?: string }>,
+      memoryId: string,
+    ): void {
+      if (anchorPlan.length === 0) return;
+      const insertAnchor = this.db.prepare(
+        `INSERT INTO anchors (id, path, snippet, label, kind, memory_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      );
+      const createdAt = new Date().toISOString();
+      for (const plan of anchorPlan) {
+        insertAnchor.run(plan.id, plan.path, plan.snippet, plan.label, plan.kind ?? null, memoryId, createdAt);
       }
     }
 
