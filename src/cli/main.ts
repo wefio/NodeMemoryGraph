@@ -434,6 +434,29 @@ function parseOptions(args: readonly string[]): OptionValues {
   return { flags, options, positionals };
 }
 
+/** Append the FILES / ANCHORS source-section lines of a search result. Kept as
+ *  its own helper so humanResult's branching stays under the complexity gate. */
+function sourceSectionLines(
+  files: Array<{ path: string; excerpt: string }> | undefined,
+  anchors: Array<{ path: string; label: string; line?: number; stale?: boolean }> | undefined,
+): string[] {
+  const lines: string[] = [];
+  if (files && files.length > 0) {
+    lines.push("FILES:");
+    for (const file of files) {
+      lines.push(`${file.path}\t${file.excerpt}`);
+    }
+  }
+  if (anchors && anchors.length > 0) {
+    lines.push("ANCHORS:");
+    for (const anchor of anchors) {
+      const position = anchor.stale ? "(stale)" : anchor.line ? `:${anchor.line}` : "";
+      lines.push(`${anchor.path}${position}\t${anchor.label}`);
+    }
+  }
+  return lines;
+}
+
 function humanResult(value: unknown): string {
   const result = value as Record<string, unknown>;
   if (result.action === "discover" && Array.isArray(result.agents)) {
@@ -582,18 +605,14 @@ function humanResult(value: unknown): string {
         node: { canonicalName: string };
       }>;
       files?: Array<{ path: string; excerpt: string }>;
+      anchors?: Array<{ path: string; label: string; line?: number; stale?: boolean }>;
       timings?: { timings?: Record<string, number>; totalMs?: number };
     };
     const lines = context.results.map(
       ({ memory, node }) =>
         `${memory.id}\t${memory.memoryType}\tL${memory.tier}\t${node.canonicalName}\t${memory.statement}`,
     );
-    if (context.files && context.files.length > 0) {
-      lines.push("FILES:");
-      for (const file of context.files) {
-        lines.push(`${file.path}\t${file.excerpt}`);
-      }
-    }
+    lines.push(...sourceSectionLines(context.files, context.anchors));
     if (context.timings) {
       const sections = Object.entries(context.timings.timings ?? {})
         .sort((left, right) => right[1] - left[1])

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type {
   ActiveGraphBudget,
+  AnchorInput,
   ClaimOutcomeEvent,
   ClaimPosterior,
   MemoryActor,
@@ -253,6 +254,10 @@ export interface NmgRememberParams {
   markers?: MemoryMarker[];
   /** Short aliases or likely query phrases used only for recall routing. */
   recallTriggers?: string[];
+  /** Optional file anchors (bookmarks): path + content snippet pointing into a
+   *  project file. Persisted with the memory; searchable as an independent
+   *  source. */
+  anchors?: AnchorInput[];
   projectDir?: string;
 }
 

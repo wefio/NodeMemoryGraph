@@ -54,6 +54,7 @@ import type {
   ActiveGraphBudget,
   ActiveGraphBudgetUsage,
   ActiveGraphSelection,
+  AnchorRecord,
   LeafBlock,
   HistoryRecord,
   MemoryContext,
@@ -1638,6 +1639,71 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         [],
         filterUsage,
       );
+    }
+
+    /** Search the anchor (bookmark) source independently of memory. Matches on
+     *  the agent-written label via FTS. Anchors are content-anchored file
+     *  pointers — the snippet relocation to a line happens in the service layer
+     *  (which knows the project root); the store only returns raw rows. */
+    searchAnchors(query: string, limit = 8): AnchorRecord[] {
+      const expression = ftsExpression(query);
+      if (!expression) return [];
+      const rows = this.db
+        .prepare(
+          `SELECT a.id, a.path, a.snippet, a.label, a.kind, a.memory_id, a.created_at
+           FROM anchors_fts f
+           JOIN anchors a ON a.rowid = f.rowid
+           WHERE anchors_fts MATCH ?
+           ORDER BY bm25(anchors_fts)
+           LIMIT ?`,
+        )
+        .all(expression, Math.max(1, Math.min(limit, 50))) as Array<{
+        id: string;
+        path: string;
+        snippet: string;
+        label: string;
+        kind: string | null;
+        memory_id: string | null;
+        created_at: string;
+      }>;
+      return rows.map((row) => ({
+        id: row.id,
+        path: row.path,
+        snippet: row.snippet,
+        label: row.label,
+        kind: row.kind ?? undefined,
+        memoryId: row.memory_id ?? undefined,
+        createdAt: row.created_at,
+      }));
+    }
+
+    /** Load anchors by id (used when resolving anchor_ref markers on a memory). */
+    getAnchorsByIds(ids: readonly string[]): AnchorRecord[] {
+      if (ids.length === 0) return [];
+      const placeholders = ids.map(() => "?").join(",");
+      const rows = this.db
+        .prepare(
+          `SELECT id, path, snippet, label, kind, memory_id, created_at
+           FROM anchors WHERE id IN (${placeholders})`,
+        )
+        .all(...ids) as Array<{
+        id: string;
+        path: string;
+        snippet: string;
+        label: string;
+        kind: string | null;
+        memory_id: string | null;
+        created_at: string;
+      }>;
+      return rows.map((row) => ({
+        id: row.id,
+        path: row.path,
+        snippet: row.snippet,
+        label: row.label,
+        kind: row.kind ?? undefined,
+        memoryId: row.memory_id ?? undefined,
+        createdAt: row.created_at,
+      }));
     }
 
     searchByVector(

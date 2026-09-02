@@ -1,7 +1,11 @@
 # File content source for search
 
-**Status:** proposed
+**Status:** superseded
 **Updated:** 2026-09-01
+**Superseded by:** [memory-anchors-design.md](memory-anchors-design.md) — the
+full-text file index is dropped in favor of sparse, Agent-authored anchors as an
+independent searchable source. This document is kept for lineage; its
+"files are not memory" and separated-presentation conclusions carry forward.
 
 This document proposes giving `nmg search` a second content source — the
 project's own files and documents — so an Agent does not have to re-discover the
@@ -136,6 +140,12 @@ already provide the observation seam.
 - Not a document-management system: no file versions, no document lifecycle.
 - Lexical-first by default; vector is an optional future enhancement, not a
   requirement (per §4 finding).
+- **No structured-unit parsing for now** (surveyed 2026-09-02): code-symbol
+  units (tree-sitter) and Markdown section anchors (mdast) are reliable in
+  principle, but document-side "concept units" have no deterministic parser —
+  prose structure lives at the semantic layer, not the syntax layer. We leave
+  an extractor protocol slot (crawler → per-type extractor → unit rows) and do
+  not implement it until a real gap or a mature tool demands it.
 
 ## 6. MVP path
 
@@ -155,3 +165,9 @@ already provide the observation seam.
 - Scope auto-growth cap and decay (avoid unbounded scope growth).
 - Whether the file index should be per-project (`.nmg/`) or share the daemon
   store; per-project keeps it isolated and deletable.
+- **Structured-unit evolution (deferred, protocol slot only)**: the current
+  index is whole-file blob. A future extractor layer could emit unit rows
+  (`path, kind, name, start_line, end_line`) for code (tree-sitter) and
+  Markdown (mdast heading sections), giving file:line anchors instead of
+  trigram fragments. Document "concept units" have no deterministic parser and
+  are deliberately not pursued; semantic understanding stays with embeddings.
