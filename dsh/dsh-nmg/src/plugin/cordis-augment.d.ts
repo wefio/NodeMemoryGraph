@@ -66,6 +66,33 @@ declare module '@deepseek-ai/cordis' {
     'agent/inbox/inserted'(payload: { message: unknown }): void
     /** An agent was disposed (agent loop). */
     'agent/disposed'(payload: unknown): void
+    /**
+     * A tool call settled (dsh-tools registry). `exec` is the frozen execution
+     * (name + parsed arguments), `result` the frozen dispatch outcome. Listeners
+     * observe only — failures are contained by the registry. Scope-filtered by
+     * `exec.agent`.
+     */
+    'tools/result'(
+      exec: Readonly<{
+        name: string
+        /** Defensive alias for non-dsh-tools hosts. */
+        toolName?: string
+        arguments: unknown
+        /** Defensive alias for non-dsh-tools hosts. */
+        input?: unknown
+        agent?: unknown
+      }>,
+      result: Readonly<{ isError: boolean; value?: unknown; content?: unknown }>,
+    ): undefined
+  }
+
+  interface Context {
+    /**
+     * Optional NMG file-content index (src/core/file-index.ts). Consumed
+     * opportunistically by the `tools/result` scope observer; never injected, so
+     * the plugin mounts before/without the index and skips recording when absent.
+     */
+    fileIndex?: { addScopePath(path: string): void }
   }
 }
 

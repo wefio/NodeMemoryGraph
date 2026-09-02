@@ -69,6 +69,8 @@ import { scopesOverlap, validityIntervalsOverlap } from "../core/semantic-domain
 import { sameScope } from "../core/scope.ts";
 import { normalizeRecallTriggers } from "../core/recall-triggers.ts";
 import { searchMemoryContext } from "../integration/search.ts";
+import { FileIndex } from "../core/file-index.ts";
+import type { FileHit } from "../core/types.ts";
 import { ControllerPolicyChannel } from "../integration/controller-channel.ts";
 import {
   LAB_CAPABILITIES,
@@ -154,6 +156,7 @@ export class NmgService {
   #labShadowController: ControllerPolicyChannel | undefined;
   #store: NmgStore | undefined;
   readonly #stgStores = new Map<string, NmgStore>();
+  readonly #fileIndexes = new Map<string, FileIndex>();
   readonly #sessionActiveGraphs = new SessionActiveGraphRuntime<NmgStore>();
   #embeddingClient: EmbeddingClient | undefined | null;
   #embeddingError: string | null = null;
@@ -523,6 +526,8 @@ export class NmgService {
     this.#store = undefined;
     for (const store of this.#stgStores.values()) store.close();
     this.#stgStores.clear();
+    for (const index of this.#fileIndexes.values()) index.close();
+    this.#fileIndexes.clear();
     this.#sessionActiveGraphs.clear();
   }
 
@@ -1367,6 +1372,18 @@ export class NmgService {
     };
     const raws = [query, ...(queries ?? [])];
     const embedding = this.#configuredEmbeddingClient();
+    // File content source: bounded passive-scan index of the project's own
+    // files (scope learned from Agent search behaviour). Only enabled when a
+    // projectDir is supplied — files are a project-local search index, not
+    // part of the shared memory store.
+    let fileHits: FileHit[] = [];
+    if (projectDir) {
+      fileHits = this.#searchProjectFiles(projectDir, query, options.limit ?? 8);
+    }
+    const withFiles = <T extends MemoryContext>(context: T): T => {
+      if (fileHits.length > 0) context.files = fileHits;
+      return context;
+    };
     const runOne = async (store: NmgStore, raw: string): Promise<MemoryContext> => {
       const { semantic, filters } = parseAdvancedQuery(raw);
       const ctx = await searchMemoryContext(store, embedding, semantic, searchOptions);
@@ -1377,32 +1394,36 @@ export class NmgService {
       this.#syncStgWorkingSet(store, options.scope);
       const local = await runOne(store, raw);
       if (local.results.length > 0 && local.activeGraph?.qpp?.trigger === false) {
-        return this.#registerSearchProjection(local, activeGraphPartsFor(store, local));
+        return withFiles(this.#registerSearchProjection(local, activeGraphPartsFor(store, local)));
       }
       const sharedStore = this.#getStore();
       const shared = await runOne(sharedStore, raw);
       if (local.results.length === 0) {
-        return this.#registerSearchProjection(shared, activeGraphPartsFor(sharedStore, shared));
+        return withFiles(
+          this.#registerSearchProjection(shared, activeGraphPartsFor(sharedStore, shared)),
+        );
       }
       const merged = mergeStgLtgContexts(local, shared);
-      return this.#registerSearchProjection(
-        merged,
-        [
-          local.activeGraph
-            ? {
-                store,
-                traceId: local.activeGraph.id,
-                memoryIds: new Set(local.activeGraph.memoryIds),
-              }
-            : undefined,
-          shared.activeGraph
-            ? {
-                store: this.#getStore(),
-                traceId: shared.activeGraph.id,
-                memoryIds: new Set(shared.activeGraph.memoryIds),
-              }
-            : undefined,
-        ].filter(isActiveGraphStorePart),
+      return withFiles(
+        this.#registerSearchProjection(
+          merged,
+          [
+            local.activeGraph
+              ? {
+                  store,
+                  traceId: local.activeGraph.id,
+                  memoryIds: new Set(local.activeGraph.memoryIds),
+                }
+              : undefined,
+            shared.activeGraph
+              ? {
+                  store: this.#getStore(),
+                  traceId: shared.activeGraph.id,
+                  memoryIds: new Set(shared.activeGraph.memoryIds),
+                }
+              : undefined,
+          ].filter(isActiveGraphStorePart),
+        ),
       );
     };
 
@@ -1410,7 +1431,9 @@ export class NmgService {
       if (!projectDir) {
         const store = this.#getStore();
         const context = await runOne(store, raws[0]!);
-        return this.#registerSearchProjection(context, activeGraphPartsFor(store, context));
+        return withFiles(
+          this.#registerSearchProjection(context, activeGraphPartsFor(store, context)),
+        );
       }
       return searchAcross(this.#getStgStore(projectDir, sessionId), raws[0]!);
     }
@@ -1431,7 +1454,30 @@ export class NmgService {
       }
     }
     if (searchOptions.limit) primary.results = primary.results.slice(0, searchOptions.limit);
-    return this.#registerSearchProjection(primary, parts);
+    return withFiles(this.#registerSearchProjection(primary, parts));
+  }
+
+  /** Incrementally scan the project's file scope and run the file-content
+   *  source query. Best-effort: any file-index failure degrades to memory-only
+   *  search rather than failing the request. */
+  #searchProjectFiles(projectDir: string, query: string, limit: number): FileHit[] {
+    try {
+      const index = this.#fileIndexFor(projectDir);
+      index.crawl();
+      return index.search(query, limit);
+    } catch {
+      return [];
+    }
+  }
+
+  #fileIndexFor(projectDir: string): FileIndex {
+    const key = resolve(projectDir);
+    let index = this.#fileIndexes.get(key);
+    if (!index) {
+      index = new FileIndex({ projectRoot: key });
+      this.#fileIndexes.set(key, index);
+    }
+    return index;
   }
 
   #syncStgWorkingSet(store: NmgStore, scope: MemoryScope | undefined): void {

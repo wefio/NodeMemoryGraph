@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { MemoryContext, MemorySearchResult } from "../core/types.ts";
+import type { FileHit, MemoryContext, MemorySearchResult } from "../core/types.ts";
 import type { SessionDisclosureLevel } from "../core/session-active-graph.ts";
 import { logicalChainCount, logicalChainNames } from "./chain-projection.ts";
 
@@ -34,6 +34,9 @@ export interface CompactSearchContext {
   logicalChainCount: number;
   activeGraphId: string | null;
   deferredMemoryIds: string[];
+  /** File-content source hits (bounded passive-scope FTS), separate from
+   *  memory candidates. Present when the file source is enabled. */
+  files?: FileHit[];
 }
 
 /** Agent-facing search projection. Exact records and evidence remain behind `nmg get`. */
@@ -54,6 +57,7 @@ export function compactSearchContext(context: MemoryContext): CompactSearchConte
     logicalChainCount: logicalChainCount(context),
     activeGraphId: context.activeGraph?.id ?? null,
     deferredMemoryIds: context.progressiveDisclosure?.deferredMemoryIds ?? [],
+    ...(context.files && context.files.length > 0 ? { files: context.files } : {}),
   };
 }
 
