@@ -87,7 +87,19 @@ or remove it when its exit criteria are met.
    or use `--require-clean` in an equivalent clean tree. CI automatically runs the
    named `verify:*` package contracts on push and pull request.
 6. Commit one coherent change with only owned files. Leave unrelated user or Agent work untouched.
-7. Resolve the in-flight goal after the task is completed or deliberately
+   Commit messages follow the repository's conventional style
+   (`type(scope): summary` + a body that says what changed and why, one change
+   per commit). A commit is a proposal, not a proof: the verification evidence
+   (targeted test + `agent:verify`) is what makes it hold, so do not claim a
+   check passed in the message unless it ran.
+7. When opening a pull request, read `.github/pull_request_template.md` and
+   follow it as the PR prompt: fill the three description blocks (What / Why /
+   Changes) from the change, and self-check every box in the completion
+   checklist before marking the PR ready — the checklist is the same contract
+   CI enforces, and it catches locally what a CI round-trip would cost. Draft
+   PRs and CI status are owned by the forge; the template checklist is the
+   submitter's own pre-flight, not a substitute for `All checks passed`.
+8. Resolve the in-flight goal after the task is completed or deliberately
    abandoned. The board records that work is active, not a step-by-step history;
    Git and verification evidence remain the source of actual implementation state.
 
