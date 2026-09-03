@@ -250,14 +250,9 @@ export function mergeStgLtgContexts(local: MemoryContext, shared: MemoryContext)
         ]),
     ).values(),
   ];
-  const files =
-    local.files && shared.files
-      ? [...new Map([...local.files, ...shared.files].map((hit) => [hit.path, hit])).values()]
-      : (local.files ?? shared.files);
   return {
     results,
     ...(chainEdges.length > 0 ? { chainEdges } : {}),
-    ...(files ? { files } : {}),
     relations: [
       ...new Map(
         [...(local.relations ?? []), ...shared.relations].map((relation) => [

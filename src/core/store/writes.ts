@@ -609,6 +609,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         snippet: string;
         label: string;
         kind?: string;
+        fileSimhash?: string;
       }>;
       tesseraMarkers: MemoryMarker[];
     } {
@@ -618,6 +619,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         snippet: string;
         label: string;
         kind?: string;
+        fileSimhash?: string;
       }> = [];
       const tesseraMarkers: MemoryMarker[] = [];
       for (const tessera of input.tesserae ?? []) {
@@ -631,6 +633,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           snippet,
           label: String(tessera.label ?? "").trim(),
           kind: tessera.kind?.trim() || undefined,
+          fileSimhash: tessera.fileSimhash,
         });
         tesseraMarkers.push({ kind: "tessera_ref", attributes: { tesseraId: id, path } });
       }
@@ -645,13 +648,14 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
         snippet: string;
         label: string;
         kind?: string;
+        fileSimhash?: string;
       }>,
       memoryId: string,
     ): void {
       if (tesseraPlan.length === 0) return;
       const insertTessera = this.db.prepare(
-        `INSERT INTO tesserae (id, path, snippet, label, kind, memory_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tesserae (id, path, snippet, label, kind, memory_id, created_at, file_simhash)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       const createdAt = new Date().toISOString();
       for (const plan of tesseraPlan) {
@@ -663,6 +667,7 @@ export function withWrites<TBase extends Constructor>(Base: TBase) {
           plan.kind ?? null,
           memoryId,
           createdAt,
+          plan.fileSimhash ?? null,
         );
       }
     }

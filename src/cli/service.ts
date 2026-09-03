@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 
 import {
   configuredProvider,
@@ -75,8 +75,7 @@ import { scopesOverlap, validityIntervalsOverlap } from "../core/semantic-domain
 import { sameScope } from "../core/scope.ts";
 import { normalizeRecallTriggers } from "../core/recall-triggers.ts";
 import { searchMemoryContext } from "../integration/search.ts";
-import { FileIndex } from "../core/file-index.ts";
-import type { FileHit } from "../core/types.ts";
+import { simhash64, simhashToHex, simhashFromHex, hammingDistance } from "../core/simhash.ts";
 import { ControllerPolicyChannel } from "../integration/controller-channel.ts";
 import {
   LAB_CAPABILITIES,
@@ -162,7 +161,6 @@ export class NmgService {
   #labShadowController: ControllerPolicyChannel | undefined;
   #store: NmgStore | undefined;
   readonly #stgStores = new Map<string, NmgStore>();
-  readonly #fileIndexes = new Map<string, FileIndex>();
   readonly #sessionActiveGraphs = new SessionActiveGraphRuntime<NmgStore>();
   #embeddingClient: EmbeddingClient | undefined | null;
   #embeddingError: string | null = null;
@@ -537,8 +535,6 @@ export class NmgService {
     this.#store = undefined;
     for (const store of this.#stgStores.values()) store.close();
     this.#stgStores.clear();
-    for (const index of this.#fileIndexes.values()) index.close();
-    this.#fileIndexes.clear();
     this.#sessionActiveGraphs.clear();
   }
 
@@ -1027,8 +1023,14 @@ export class NmgService {
     const bypassMarkers: MemoryMarker[] = params.unsafe
       ? [{ kind: "write_bypass", attributes: { policy: "unsafe" } }]
       : [];
+    // Best-effort SimHash drift fingerprint: computed at write time from the
+    // project file when a project root is known, so a later snippet relocation
+    // can survive a small edit or file move. Absent for project-less writes —
+    // the tessera still writes, without drift tolerance.
+    const tesserae = this.#withTesseraSimhashes(memory.tesserae, projectDir);
     const input: RememberInput = {
       ...memory,
+      tesserae,
       markers: [...(memory.markers ?? []), ...bypassMarkers],
       // LTG rows are project/session-global: never attach a session_id. STG
       // rows keep the caller's sessionId (escape-hatch validated in the store).
@@ -1038,6 +1040,27 @@ export class NmgService {
       writeSource: params.writeSource ?? "agent",
     };
     return { store, input };
+  }
+
+  /** Stamp each tessera with a 64-bit SimHash of its target file (16-hex), or
+   *  leave it absent when the file is unreadable at write time (or no project
+   *  root is known). Fingerprint is drift tolerance only — it never gates or
+   *  alters the write. */
+  #withTesseraSimhashes(
+    tesserae: TesseraInput[] | undefined,
+    projectDir: string | undefined,
+  ): TesseraInput[] | undefined {
+    if (!projectDir || !tesserae || tesserae.length === 0) return tesserae;
+    return tesserae.map((tessera) => {
+      if (!tessera.path) return tessera;
+      try {
+        const content = readFileSafe(resolve(projectDir, tessera.path));
+        if (content === null) return tessera;
+        return { ...tessera, fileSimhash: simhashToHex(simhash64(content)) };
+      } catch {
+        return tessera; // never fail a memory write for a missing fingerprint
+      }
+    });
   }
 
   #signalMaintenance(store: NmgStore, kind: "write" | "access", force = false, count = 1): void {
@@ -1388,14 +1411,6 @@ export class NmgService {
     };
     const raws = [query, ...(queries ?? [])];
     const embedding = this.#configuredEmbeddingClient();
-    // File content source: bounded passive-scan index of the project's own
-    // files (scope learned from Agent search behaviour). Only enabled when a
-    // projectDir is supplied — files are a project-local search index, not
-    // part of the shared memory store.
-    let fileHits: FileHit[] = [];
-    if (projectDir) {
-      fileHits = this.#searchProjectFiles(projectDir, query, options.limit ?? 8);
-    }
     // Tessera (bookmark) source: independent of projectDir — tesserae live in the
     // shared store and are searched alongside memory. Snippet relocation to a
     // line needs the project root (to read the current file), so the resolver
@@ -1404,8 +1419,7 @@ export class NmgService {
       this.#searchTesseraSource(query, options.limit ?? 8),
       projectDir,
     );
-    const withFiles = <T extends MemoryContext>(context: T): T => {
-      if (fileHits.length > 0) context.files = fileHits;
+    const withTesserae = <T extends MemoryContext>(context: T): T => {
       if (tesseraHits.length > 0) context.tesserae = tesseraHits;
       return context;
     };
@@ -1425,17 +1439,19 @@ export class NmgService {
       this.#syncStgWorkingSet(store, options.scope);
       const local = await runOne(store, raw);
       if (local.results.length > 0 && local.activeGraph?.qpp?.trigger === false) {
-        return withFiles(this.#registerSearchProjection(local, activeGraphPartsFor(store, local)));
+        return withTesserae(
+          this.#registerSearchProjection(local, activeGraphPartsFor(store, local)),
+        );
       }
       const sharedStore = this.#getStore();
       const shared = await runOne(sharedStore, raw);
       if (local.results.length === 0) {
-        return withFiles(
+        return withTesserae(
           this.#registerSearchProjection(shared, activeGraphPartsFor(sharedStore, shared)),
         );
       }
       const merged = mergeStgLtgContexts(local, shared);
-      return withFiles(
+      return withTesserae(
         this.#registerSearchProjection(
           merged,
           [
@@ -1462,7 +1478,7 @@ export class NmgService {
       if (!projectDir) {
         const store = this.#getStore();
         const context = await runOne(store, raws[0]!);
-        return withFiles(
+        return withTesserae(
           this.#registerSearchProjection(context, activeGraphPartsFor(store, context)),
         );
       }
@@ -1485,30 +1501,7 @@ export class NmgService {
       }
     }
     if (searchOptions.limit) primary.results = primary.results.slice(0, searchOptions.limit);
-    return withFiles(this.#registerSearchProjection(primary, parts));
-  }
-
-  /** Incrementally scan the project's file scope and run the file-content
-   *  source query. Best-effort: any file-index failure degrades to memory-only
-   *  search rather than failing the request. */
-  #searchProjectFiles(projectDir: string, query: string, limit: number): FileHit[] {
-    try {
-      const index = this.#fileIndexFor(projectDir);
-      index.crawl();
-      return index.search(query, limit);
-    } catch {
-      return [];
-    }
-  }
-
-  #fileIndexFor(projectDir: string): FileIndex {
-    const key = resolve(projectDir);
-    let index = this.#fileIndexes.get(key);
-    if (!index) {
-      index = new FileIndex({ projectRoot: key });
-      this.#fileIndexes.set(key, index);
-    }
-    return index;
+    return withTesserae(this.#registerSearchProjection(primary, parts));
   }
 
   #syncStgWorkingSet(store: NmgStore, scope: MemoryScope | undefined): void {
@@ -1545,6 +1538,7 @@ export class NmgService {
       kind: row.kind,
       memoryId: row.memoryId,
       snippet: row.snippet,
+      fileSimhash: row.fileSimhash,
     }));
   }
 
@@ -1562,16 +1556,70 @@ export class NmgService {
     };
     return tesserae.map((tessera) => {
       if (!tessera.snippet) return { ...tessera, stale: true };
-      const lines = linesFor(tessera.path);
-      if (!lines) return { ...tessera, stale: true };
       const target = tessera.snippet.trim();
-      // Snippet is the relocation key: locate the line whose content contains
-      // it (or that it contains, for short fragments). Best-effort single-line
-      // relocation in the MVP.
-      const found = lines.findIndex((line) => line.includes(target));
-      if (found === -1) return { ...tessera, stale: true };
-      return { ...tessera, line: found + 1 };
+      const pathLines = linesFor(tessera.path);
+      if (pathLines) {
+        // Stage 1 — exact relocation against the stored path.
+        const found = pathLines.findIndex((line) => line.includes(target));
+        if (found !== -1) return { ...tessera, line: found + 1 };
+      }
+      // Stage 2 — SimHash drift fallback. The stored path no longer relocates
+      // (edited or moved). Compare the stored file fingerprint against current
+      // files; a near-identical document (Hamming ≤ 6) elsewhere is the same
+      // file after a move — locate the snippet there. Never auto-rewrites the
+      // row; a stored file that still matches but lost the snippet is stale.
+      const relocated = this.#relocateTesseraViaSimhash(tessera, target, projectRoot);
+      return relocated ?? { ...tessera, stale: true };
     });
+  }
+
+  /** SimHash drift relocation: find a current file whose fingerprint is within
+   *  Hamming SIMHASH_DRIFT_THRESHOLD of the tessera's stored fingerprint and
+   *  locate the snippet inside it. Only meaningful when the stored path no
+   *  longer relocates the snippet (file moved or rewritten). Returns a resolved
+   *  hit, or null when no candidate contains the snippet. */
+  #relocateTesseraViaSimhash(
+    tessera: TesseraHit,
+    snippet: string,
+    projectRoot: string,
+  ): TesseraHit | null {
+    const stored = tessera.fileSimhash;
+    if (!stored) return null;
+    const storedFingerprint = simhashFromHex(stored);
+    const absStoredPath = resolve(projectRoot, tessera.path);
+    const current = readLinesSafe(absStoredPath);
+    if (current) {
+      // (a) The stored file still exists. If it still resembles the written
+      // document (Hamming ≤ threshold), the snippet itself was rewritten —
+      // honestly stale: relocation by content cannot recover a fragment that no
+      // longer exists. If it no longer resembles the document, the file was
+      // replaced/rewritten — also not a move to chase.
+      const currentFingerprint = simhash64(current.join("\n"));
+      const storedPathMatches =
+        hammingDistance(currentFingerprint, storedFingerprint) <= SIMHASH_DRIFT_THRESHOLD;
+      if (storedPathMatches) return null;
+    }
+    // (b) The stored file is gone or rewritten past tolerance: the tessera may
+    // point at a document that moved. Scan project files for a near-identical
+    // file and locate the snippet there. Only a file whose fingerprint matches
+    // AND whose content contains the snippet is accepted — never guessed.
+    for (const candidate of projectCandidateFiles(projectRoot)) {
+      if (absStoredPath === resolve(candidate)) continue; // tried above
+      const candidateLines = readLinesSafe(candidate);
+      if (!candidateLines) continue;
+      const candidateFingerprint = simhash64(candidateLines.join("\n"));
+      if (hammingDistance(candidateFingerprint, storedFingerprint) > SIMHASH_DRIFT_THRESHOLD) {
+        continue;
+      }
+      const line = locateSnippetLine(candidateLines, snippet);
+      if (line !== null) {
+        // Canonical project-relative path: always forward slashes, matching how
+        // tesserae paths are stored and searched (Windows relative() yields \).
+        const rel = relative(projectRoot, candidate).replaceAll("\\", "/");
+        return { ...tessera, path: rel, line, relocated: true };
+      }
+    }
+    return null;
   }
 
   #get(params: NmgGetParams): NmgMethodResult["get"] {
@@ -1958,6 +2006,74 @@ function optionalTesserae(
       kind: optionalString(tessera, "kind"),
     };
   });
+}
+
+/** Max Hamming distance for a SimHash drift match. Measured on real repo
+ *  files (5–60 KB): near-identical pairs sit at 1–3, unrelated at ~24, so 6
+ *  cleanly separates without false positives (see simhash.ts). */
+const SIMHASH_DRIFT_THRESHOLD = 6;
+
+/** Files scanned by the SimHash drift fallback when the stored tessera path
+ *  no longer relocates (moved-file case). Bounded walk of a project root:
+ *  skips VCS/dependency/build directories and non-regular files, caps at
+ *  SIMHASH_SCOPE_MAX_FILES so a pathological tree cannot stall a search. */
+const SIMHASH_SCOPE_MAX_FILES = 200;
+
+const SIMHASH_SCOPE_SKIP_DIRS = new Set([
+  ".git",
+  ".hg",
+  ".svn",
+  "node_modules",
+  "dist",
+  "build",
+  ".cache",
+  ".benchmarks",
+]);
+
+/** Locate a snippet inside file lines. Returns the 1-based line whose content
+ *  contains the snippet, or null. Snippet is the relocation key — MVP keeps
+ *  single-line relocation (a snippet spanning an edit's new line boundary is
+ *  reported stale rather than guessed). */
+function locateSnippetLine(lines: string[], snippet: string): number | null {
+  const found = lines.findIndex((line) => line.includes(snippet));
+  return found === -1 ? null : found + 1;
+}
+
+/** Bounded, order-stable list of readable files under a project root that the
+ *  SimHash fallback may scan. Never follows symlinks out of the root. */
+function projectCandidateFiles(root: string, limit = SIMHASH_SCOPE_MAX_FILES): string[] {
+  const files: string[] = [];
+  const walk = (dir: string): void => {
+    if (files.length >= limit) return;
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // unreadable directory — skip
+    }
+    for (const entry of entries) {
+      if (files.length >= limit) return;
+      const name = entry.name;
+      if (entry.isDirectory()) {
+        if (!name.startsWith(".") && !SIMHASH_SCOPE_SKIP_DIRS.has(name)) walk(`${dir}/${name}`);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      files.push(`${dir}/${name}`);
+    }
+  };
+  walk(root);
+  return files;
+}
+
+/** Read a file's full content, or null when unreadable/missing. Used by the
+ *  tessera write-time SimHash computation. */
+function readFileSafe(absPath: string): string | null {
+  try {
+    return readFileSync(absPath, "utf8");
+  } catch {
+    return null;
+  }
 }
 
 /** Read a file's lines, or null when unreadable/missing. Used by tessera

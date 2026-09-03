@@ -844,15 +844,6 @@ export interface RetrievalFilterUsage {
   selectivity: number;
 }
 
-export interface FileHit {
-  /** Path relative to the project root. */
-  path: string;
-  /** Short excerpt around the first match. */
-  excerpt: string;
-  /** Relevance score: negated FTS bm25, so larger is more relevant. */
-  score: number;
-}
-
 /** A file location a memory points into (a tessera / bookmark). Content-anchored: the
  *  snippet relocates on read, so no line number is ever persisted. */
 export interface TesseraRecord {
@@ -869,6 +860,10 @@ export interface TesseraRecord {
   /** Owning memory id, when the tessera was raised by a memory write. */
   memoryId?: string;
   createdAt: string;
+  /** 64-bit SimHash (16-hex) of the target file at write time; used for drift
+   *  relocation when the snippet no longer matches in path. Absent for rows
+   *  written without a readable file (or pre-ticket-8 stores). */
+  fileSimhash?: string;
 }
 
 /** Tessera input on a memory write (agent-supplied, active). */
@@ -877,6 +872,11 @@ export interface TesseraInput {
   snippet: string;
   label?: string;
   kind?: string;
+  /** 64-bit SimHash (16-hex) of the target file, computed by the service layer
+   *  when the file is readable at write time. Best-effort drift tolerance —
+   *  absent when no file was available (e.g. LTG writes without a project
+   *  root); never agent-supplied. */
+  fileSimhash?: string;
 }
 
 /** Tessera hit surfaced by search — a tessera row plus its resolved line, or a
@@ -893,6 +893,12 @@ export interface TesseraHit {
   line?: number;
   /** True when the snippet no longer exists in the file (stale tessera). */
   stale?: boolean;
+  /** True when relocation succeeded via the SimHash drift fallback (file moved
+   *  or edited since the tessera was written), not the stored path. */
+  relocated?: boolean;
+  /** 64-bit SimHash (16-hex) of the target file at write time; the drift
+   *  fallback key. */
+  fileSimhash?: string;
   /** Relevance score when matched via FTS; higher is more relevant. */
   score?: number;
 }
@@ -902,11 +908,6 @@ export const TESSERA_REF_MARKER = "tessera_ref";
 
 export interface MemoryContext {
   results: MemorySearchResult[];
-  /** File-content source hits (bounded passive-scope FTS), separate from
-   *  memory results. Files are a search index, not memory — they never carry
-   *  provenance/scope/verification and never enter STG/LTG. Present only when
-   *  the file content source is enabled for the searched project. */
-  files?: FileHit[];
   /** Tessera (bookmark) hits, an independent searchable source alongside
    *  memory. Each hit carries the resolved line in the current file, or a
    *  staleness marker when the snippet no longer exists. */

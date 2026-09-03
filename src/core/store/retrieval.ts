@@ -1650,7 +1650,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       if (!expression) return [];
       const rows = this.db
         .prepare(
-          `SELECT a.id, a.path, a.snippet, a.label, a.kind, a.memory_id, a.created_at
+          `SELECT a.id, a.path, a.snippet, a.label, a.kind, a.memory_id, a.created_at, a.file_simhash
            FROM tesserae_fts f
            JOIN tesserae a ON a.rowid = f.rowid
            WHERE tesserae_fts MATCH ?
@@ -1665,6 +1665,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         kind: string | null;
         memory_id: string | null;
         created_at: string;
+        file_simhash: string | null;
       }>;
       return rows.map((row) => ({
         id: row.id,
@@ -1674,6 +1675,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         kind: row.kind ?? undefined,
         memoryId: row.memory_id ?? undefined,
         createdAt: row.created_at,
+        fileSimhash: row.file_simhash ?? undefined,
       }));
     }
 
@@ -1683,7 +1685,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       const placeholders = ids.map(() => "?").join(",");
       const rows = this.db
         .prepare(
-          `SELECT id, path, snippet, label, kind, memory_id, created_at
+          `SELECT id, path, snippet, label, kind, memory_id, created_at, file_simhash
            FROM tesserae WHERE id IN (${placeholders})`,
         )
         .all(...ids) as Array<{
@@ -1694,6 +1696,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         kind: string | null;
         memory_id: string | null;
         created_at: string;
+        file_simhash: string | null;
       }>;
       return rows.map((row) => ({
         id: row.id,
@@ -1703,6 +1706,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
         kind: row.kind ?? undefined,
         memoryId: row.memory_id ?? undefined,
         createdAt: row.created_at,
+        fileSimhash: row.file_simhash ?? undefined,
       }));
     }
 

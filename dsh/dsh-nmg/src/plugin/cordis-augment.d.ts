@@ -85,15 +85,6 @@ declare module '@deepseek-ai/cordis' {
       result: Readonly<{ isError: boolean; value?: unknown; content?: unknown }>,
     ): undefined
   }
-
-  interface Context {
-    /**
-     * Optional NMG file-content index (src/core/file-index.ts). Consumed
-     * opportunistically by the `tools/result` scope observer; never injected, so
-     * the plugin mounts before/without the index and skips recording when absent.
-     */
-    fileIndex?: { addScopePath(path: string): void }
-  }
 }
 
 export {}

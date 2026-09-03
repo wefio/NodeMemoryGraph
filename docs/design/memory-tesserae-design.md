@@ -64,6 +64,11 @@ Rationale: maintaining a file index is expensive and its marginal value over
 tesserae + direct tool access is low. The file is the content host; NMG only
 needs *pointers into it*.
 
+The design declared the drop; the **code removal is ticket 8** (the original
+tesserae PR shipped with `file-index.ts` still live — every search still
+crawled it). Removing the full-text machinery is prerequisite to the drift
+tolerance below: tesserae need a file fingerprint, not a file index.
+
 ### 3.2 Tesserae are an independent, searchable source
 
 A **tessera** (a bookmark) is a first-class row, not a field glued onto a
@@ -93,16 +98,35 @@ memory is superseded), a matching tessera is still found.
 
 A tessera stores a **content snippet**, never a line number. Line numbers drift
 on every edit; content is relocatable. To resolve a tessera, locate its snippet
-in the current file (exact match → position; fuzzy fallback → nearest match;
-absent → tessera is stale). This is the established pattern from
+in the current file (exact match → position; absent → tessera is stale). This
+is the established pattern from
 [gptme hash-anchored editing](https://github.com/gptme/gptme/blob/ae707fc8233e77d4da97fc74f94db1eaff1e381a/gptme/tools/_anchored.py),
 [agentic-bookmarks self-healing anchors](https://github.com/super-mega-lab/agentic-bookmarks),
 and [haido `hash_at_link` drift detection](https://github.com/lebac-svg/haido/blob/HEAD/docs/DESIGN.md):
 never persist a position that the file can invalidate; persist content and
 relocate.
 
-Staleness is **objective**: resolve on read; if the snippet no longer exists,
-report the tessera as stale (memory stays valid — only the position is gone).
+**Drift tolerance (ticket 8).** A tessera additionally stores a 64-bit SimHash
+fingerprint of its target file (`tesserae.file_simhash`, computed once at write
+time). Relocation is two-stage:
+
+1. **Exact** — locate the snippet line in `tessera.path` (`includes`). Hit → done.
+2. **Fingerprint fallback** — exact miss does not immediately mean stale. Compare
+   the stored file SimHash against the current files in scope (all readable
+   files under the project). If one is within Hamming ≤ 6 — the same document
+   after small edits, or the file after a move — re-locate the snippet against
+   that candidate file. SimHash is document-level: measured on real repo files
+   (5–60 KB), near-identical pairs sit at Hamming 1–3 and unrelated at ~24, so
+   ≤ 6 cleanly separates (100% recall / 0.24% false positive), while short
+   memory/snippet text has no such signal and is never fingerprinted this way.
+
+The fingerprint finds a *candidate file*; the snippet match confirms the exact
+position. The tessera row is never auto-rewritten — the caller decides whether
+to update `path` after confirmation.
+
+Staleness is **objective**: resolve on read; if the snippet no longer exists
+anywhere the fingerprint points (exact or fallback), report the tessera as
+stale (memory stays valid — only the position is gone).
 
 ### 3.4 Markers are the index pointer between memory and tessera
 
@@ -171,7 +195,10 @@ conclusions that are still true — files are not memory; scope discipline
 matters; separated presentation is sane — but **drops the file index itself** in
 favor of sparse, Agent-authored tesserae. The maintenance-heavy machinery
 (`.nmg-search-scope`, incremental crawler, file FTS, scope observer) is not part
-of this design.
+of this design, and ticket 8 removes the code that PR #18 left behind
+(`file-index.ts`, the per-search crawl, the DSH scope observer). The only
+machine-derived file signal tesserae keep is a single 64-bit SimHash per
+target file (§3.3) — a drift detector, not an index.
 
 ## 7. Open questions (deferred)
 
