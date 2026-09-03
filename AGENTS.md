@@ -16,3 +16,7 @@ Before modifying the repository, follow `skills/repo-development/SKILL.md`:
 
 For documentation changes, also follow `skills/doc-maintenance/SKILL.md`. For using
 NMG memory or its coordination board, follow `skills/nmg-memory/SKILL.md`.
+
+Build outputs (`dist/`, `dsh/dsh-nmg/lib/`, generated prompts) are not tracked;
+see the "Builds and generated artifacts" section of `skills/repo-development/SKILL.md`
+for reproduction order and `verify:packages` / `check:lock`.
