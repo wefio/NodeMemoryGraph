@@ -166,6 +166,11 @@ export class NmgService {
   readonly #sessionActiveGraphs = new SessionActiveGraphRuntime<NmgStore>();
   #embeddingClient: EmbeddingClient | undefined | null;
   #embeddingError: string | null = null;
+  /** When the embedding provider last failed; search skips provider calls
+   *  until this cooldown elapses so a down/rate-limited provider cannot hang
+   *  or fail every query. Mirrors degrade-on-persistent-failure practice. */
+  #embeddingCooldownUntil = 0;
+  readonly #embeddingCooldownMs = 30_000;
   #summaryProvider: LeafSummaryProvider | undefined | null;
   readonly #summaryDrains = new Set<NmgStore>();
   #nodeSummaryProvider: NodeSummaryProvider | undefined | null;
@@ -1047,6 +1052,11 @@ export class NmgService {
       else state.accesses += Math.max(1, count);
     }
     this.#maintenanceSignals.set(store, state);
+    // Every write/access tops up a bounded embedding batch immediately,
+    // independent of the maintenance thresholds below — so a low-activity
+    // store still converges toward a complete index and a new memory becomes
+    // vector-searchable within one operation cycle.
+    this.#drainEmbeddings(store);
     const policy = configuredMaintenancePolicy(this.#environment);
     const { writeThreshold, accessThreshold } = policy;
     if (
@@ -1401,7 +1411,13 @@ export class NmgService {
     };
     const runOne = async (store: NmgStore, raw: string): Promise<MemoryContext> => {
       const { semantic, filters } = parseAdvancedQuery(raw);
-      const ctx = await searchMemoryContext(store, embedding, semantic, searchOptions);
+      const ctx = await searchMemoryContext(
+        store,
+        embedding,
+        semantic,
+        searchOptions,
+        this.#embeddingDegradedReason(),
+      );
       ctx.results = applyAdvancedFilters(ctx.results, filters);
       return ctx;
     };
@@ -1765,20 +1781,43 @@ export class NmgService {
    * writes. Disabled by default so embedding traffic remains an explicit
    * deployment choice. Summary vectors may become pending after this pass;
    * their timestamps make the next bounded pass refresh them safely. */
+  /** Bounded per-operation embedding drain: tops up at most one batch per
+   *  target (records → leaves → nodes) so a remember/search always converges
+   *  toward a complete external index without hammering a rate-limited
+   *  provider. Provider presence (+key) implies auto-sync; the old
+   *  NMG_EMBED_AUTO_SYNC env is no longer required to enable it. Concurrent
+   *  drains per store are serialized; a 429/transient failure lands on
+   *  #embeddingError and the SQLite missing-vector queue keeps the rest for
+   *  the next operation. */
   #drainEmbeddings(store: NmgStore): void {
-    if (!isEnabled(this.#environment.NMG_EMBED_AUTO_SYNC) || this.#embeddingDrains.has(store)) {
-      return;
-    }
+    if (this.#embeddingDrains.has(store)) return;
     const client = this.#configuredEmbeddingClient();
     if (!client) return;
     this.#embeddingDrains.add(store);
-    void syncRecordEmbeddings(store, client)
-      .then(() => syncLeafEmbeddings(store, client))
-      .then(() => syncNodeEmbeddings(store, client))
+    const bounded = { maxBatches: 1 };
+    void syncRecordEmbeddings(store, client, 64, bounded)
+      .then(() => syncLeafEmbeddings(store, client, 64, bounded))
+      .then(() => syncNodeEmbeddings(store, client, 64, bounded))
+      .then(() => {
+        // Full drain success clears any prior cooldown.
+        this.#embeddingCooldownUntil = 0;
+        this.#embeddingError = null;
+      })
       .catch((error) => {
         this.#embeddingError = error instanceof Error ? error.message : String(error);
+        // Provider failure starts a cooldown so search stops attempting
+        // provider calls until it elapses; the bounded drain keeps retrying
+        // on later operations and lifts the cooldown on success.
+        this.#embeddingCooldownUntil = Date.now() + this.#embeddingCooldownMs;
       })
       .finally(() => this.#embeddingDrains.delete(store));
+  }
+
+  /** Reason to report when the embedding provider is cooling down after a
+   *  failure, or undefined when provider calls may proceed. */
+  #embeddingDegradedReason(): string | undefined {
+    if (this.#embeddingCooldownUntil <= Date.now()) return undefined;
+    return this.#embeddingError ?? "embedding provider unavailable (cooling down)";
   }
 
   #configuredSummaryProvider(): LeafSummaryProvider | undefined {
@@ -2933,8 +2972,4 @@ function optionalMarkers(params: Record<string, unknown>, key: string): MemoryMa
     }
     return { kind, attributes: attributes as MemoryMarker["attributes"] };
   });
-}
-
-function isEnabled(value: string | undefined): boolean {
-  return /^(?:1|true|yes|on)$/i.test(value?.trim() ?? "");
 }

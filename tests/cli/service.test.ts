@@ -1791,7 +1791,7 @@ test("CLI writes pass through the governed memory admission policy", async () =>
   }
 });
 
-test("an unbuilt optional embedding index degrades without blocking lexical search", async () => {
+test("a configured-but-unreachable embedding provider degrades search to lexical without blocking", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-degraded-"));
   const service = new NmgService({
     databasePath: join(directory, "nmg.sqlite"),
@@ -1810,7 +1810,13 @@ test("an unbuilt optional embedding index degrades without blocking lexical sear
     const searched = await service.invoke("search", { query: "Chinese explanations" });
     assert.equal(searched.results.length, 1);
     assert.equal(searched.retrieval?.mode, "lexical");
-    assert.equal(searched.retrieval?.reason, "embedding_index_not_ready");
+    // The provider is configured but unreachable (openai default endpoint with
+    // no local service): provider presence now implies auto-sync, so the
+    // bounded drain fails and search degrades to lexical rather than blocking.
+    // The reason depends on drain timing (index not yet begun vs provider call
+    // failed) but must always be an explicit degraded lexical fallback.
+    assert.equal(searched.retrieval?.degraded, true);
+    assert.match(searched.retrieval?.reason ?? "", /embedding_(unavailable|index_not_ready)/u);
   } finally {
     service.close();
     removeTempDirectory(directory);
@@ -1861,6 +1867,63 @@ test("opt-in embedding auto-sync makes remembered records available to hybrid se
     assert.equal(searched.retrieval?.mode, "hybrid");
     assert.equal(searched.retrieval?.degraded, false);
     assert.equal(searched.results[0]?.memory.statement, "Container vectors execute through CUDA.");
+    assert.ok((searched.results[0]?.vectorScore ?? 0) > 0);
+  } finally {
+    service.close();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    removeTempDirectory(directory);
+  }
+});
+
+test("provider presence alone (no AUTO_SYNC env) auto-syncs remembered records to hybrid search", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-embedding-default-"));
+  const server = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => (body += chunk));
+    request.on("end", () => {
+      const inputs = (JSON.parse(body) as { input: string[] }).input;
+      response.setHeader("content-type", "application/json");
+      response.end(
+        JSON.stringify({ data: inputs.map((_input, index) => ({ index, embedding: [0, 1] })) }),
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  // Deliberately no NMG_EMBED_AUTO_SYNC: a configured provider implies sync.
+  const service = new NmgService({
+    databasePath: join(directory, "nmg.sqlite"),
+    environment: {
+      NMG_EMBED_PROVIDER: "openai",
+      NMG_EMBED_BASE_URL: `http://127.0.0.1:${address.port}/v1`,
+      NMG_EMBED_MODEL: "test-embedding",
+    },
+  });
+  try {
+    await service.invoke("remember", {
+      statement: "Quasar streams arrive through the detector plane.",
+      nodeName: "Detector physics",
+      memoryType: "fact",
+    });
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const status = await service.invoke("status");
+      if (status.embedding.health?.lastSucceededAt) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const searched = await service.invoke("search", {
+      query: "Which detector plane do quasar streams hit?",
+      retrievalMode: "hybrid",
+    });
+    assert.equal(searched.retrieval?.mode, "hybrid");
+    assert.equal(searched.retrieval?.degraded, false);
+    assert.equal(
+      searched.results[0]?.memory.statement,
+      "Quasar streams arrive through the detector plane.",
+    );
     assert.ok((searched.results[0]?.vectorScore ?? 0) > 0);
   } finally {
     service.close();

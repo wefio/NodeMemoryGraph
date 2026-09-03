@@ -49,3 +49,4 @@ to one another. Missing translations are reported as warnings, not hard errors.
 
 - [Track build artifacts in version control](rejected/2026-09-02-track-build-artifacts-in-git.md) — regenerable outputs stay untracked; buildability is verified, not committed
 - [Keep the bookmark feature named "anchors"](rejected/2026-09-02-keep-bookmarks-named-anchors.md) — renamed to tesserae to end collision with surface/task/support anchors
+- [Local hashing vectors as a retrieval fallback](rejected/2026-09-03-hashing-vector-retrieval-fallback.md) — rejected as a semantic-retrieval signal (measured zero gain at 256-d); word-level uses remain an open candidate

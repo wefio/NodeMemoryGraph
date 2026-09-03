@@ -932,8 +932,10 @@ export interface MemoryContext {
   retrieval?: {
     mode: "hybrid" | "lexical";
     degraded: boolean;
-    reason?:
-      "embedding_index_missing_targets" | "embedding_index_not_ready" | "embedding_unavailable";
+    /** Why retrieval is degraded, when it is. The three embedding reasons are
+     *  the structured set; provider-cooldown callers may pass a free-form
+     *  string. */
+    reason?: string;
   };
   /** Per-phase timings, present unless timing was disabled via SearchOptions.perf. */
   timings?: PerfSnapshot;
