@@ -178,11 +178,18 @@ did build 96 vectors on 2026-09-01 and then never ran again.
   is never a dead end; the drain retries on later operations. Provider
   failures additionally start a 30s cooldown so a down provider cannot hang
   every query; search reports `degraded: true` with the reason.)
-- [ ] Retrieve with a local-hashing degrade when no external vector exists:
-  when an embedding provider is absent/unavailable AND the store has local
-  `nmg-hashing-v1` vectors, blend them with lexical (with `degraded: true` +
-  reason) instead of pure lexical. Current implementation degrades to plain
-  lexical; the local-hashing blend is the remaining slice of this item.
+- [x] Retrieve with a local-hashing degrade when no external vector exists —
+  **evaluated and closed: not doing.** The current fallback degrades to plain
+  lexical with `degraded: true` + reason, which is the intended end state. A
+  local-hashing blend was measured and rejected: on the real store, 256-d
+  `nmg-hashing-v1` blended retrieval is byte-identical to pure lexical
+  (self-recall 45/154 both arms; vector scores ≈ 0), matching the published
+  dimensionality bottleneck for low-dimensional hashing vectors. The known
+  fix — NUMEN-style very high dimensions (16K–32K) that beat BM25 — costs
+  enormous fixed memory per vector, which is not acceptable for a local,
+  SQLite-backed store. Feature-hashing/SimHash are word-level tools
+  (spelling, near-dedup), not semantic retrieval. See the rejected decision
+  record (2026-09-03-hashing-vector-retrieval-fallback).
 - [x] Drop the `NMG_EMBED_AUTO_SYNC` gate: presence of a configured provider
   (+key) implies auto-sync. Keep the env as an explicit *disable* switch.
 - [x] Persist embedding configuration at the deployment layer (User-level env /
@@ -212,10 +219,42 @@ failure with an unavailable-reason + fallback path (openclaw #94240/#101272).
 **Done when:** with a configured provider, a fresh `remember` produces a
 searchable vector within one operation cycle and a later `search` reports
 hybrid; a simulated 429 pauses the drain without `status = failed` and the next
-operation resumes it; with no provider (or provider down), search returns
-results using local hashing vectors and marks `degraded: true` with a reason;
-and a daemon restart with persisted config keeps embedding enabled (verified
-against the real store).
+operation resumes it; with no provider (or provider down), search degrades to
+lexical with `degraded: true` and an explicit reason; and a daemon restart with
+persisted config keeps embedding enabled (verified against the real store).
+
+## 7. Feature hashing / SimHash as a lexical-layer complement (candidate)
+
+Word-level uses of hashing were explicitly kept out of the rejected
+semantic-retrieval decision
+([2026-09-03-hashing-vector-retrieval-fallback](../decisions/rejected/2026-09-03-hashing-vector-retrieval-fallback.md));
+this ticket scopes the candidate
+([memory-system precedent](https://github.com/nikhilsitaram/claude-memory-system/issues/53)):
+
+- [ ] Evaluate whether `statementSimilarity` (word-set Jaccard) misses
+  near-duplicates whose spelling or word form differs ("embedding" vs
+  "embeddings", typos), and whether a stored 64-bit SimHash fingerprint
+  (Hamming ≤ 3) recalls candidates the Jaccard path cannot.
+- [ ] Decide where it plugs in: supersede / near-dup candidate recall on the
+  write path — NOT search ranking, NOT the rejected semantic-retrieval blend.
+- [ ] If adopted, keep the store small and offline: one integer column per
+  memory, in-memory index under ~KB per thousand entries, no external
+  dependency.
+
+**Available mechanism:** `statementSimilarity` (word-level Jaccard) exists and
+NMG acts only on exact normalized equality; surface anchors already give
+character-level (trigram) tolerance for explicit tokens. Supersede/dup
+candidates currently come from token overlap, which is blind to word-form
+variants.
+
+**Current blocker:** no fingerprint index; the exact gap (word-form/spelling
+variant recall) is asserted but not measured, and the write-path judge is not
+the current dedup consumer.
+
+**Done when:** a measurement shows the Jaccard path misses word-form variant
+duplicates that a SimHash pre-filter recalls (or shows the gap is already
+covered), with a decision recorded either way — no speculative index until the
+recall gap is real.
 
 ## Explicitly deferred — not missing current work
 

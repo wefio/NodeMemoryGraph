@@ -35,3 +35,4 @@
 
 - [将构建产物纳入版本控制](rejected/2026-09-02-track-build-artifacts-in-git.zh-CN.md) — 可再生输出保持不入库；可构建性靠验证而非提交
 - [书签功能继续命名为 "anchors"](rejected/2026-09-02-keep-bookmarks-named-anchors.zh-CN.md) — 改名为 tessera，终结与 surface/task/support anchors 的撞名
+- [本地哈希向量作为检索兜底](rejected/2026-09-03-hashing-vector-retrieval-fallback.zh-CN.md) — 作为语义检索信号被拒（256 维实测零增益）；词法级用途仍是开放候选
