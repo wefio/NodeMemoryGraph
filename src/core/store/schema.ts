@@ -552,7 +552,13 @@ export function migrate(db: DatabaseSync): void {
       label TEXT NOT NULL DEFAULT '',
       kind TEXT,
       memory_id TEXT,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      -- 64-bit SimHash of the target file at tessera write time (16 lowercase
+      -- hex). Drift tolerance: when the snippet no longer matches in the path,
+      -- compare this fingerprint against current files to find the document
+      -- after a small edit or move. Stored TEXT because the full unsigned
+      -- 64-bit range cannot round-trip through SQLite INTEGER (see simhash.ts).
+      file_simhash TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_tesserae_path ON tesserae(path);
     CREATE INDEX IF NOT EXISTS idx_tesserae_memory ON tesserae(memory_id) WHERE memory_id IS NOT NULL;
@@ -602,6 +608,7 @@ export function migrate(db: DatabaseSync): void {
   ensureHistoryColumns(db);
   ensureClaimOutcomeColumns(db);
   ensureEmbeddingTable(db);
+  ensureTesseraColumns(db);
   ensureNodeColumns(db);
   ensureRelationColumns(db);
   ensureTopologyProposalColumns(db);
@@ -749,6 +756,17 @@ export function ensureMemoryColumns(db: DatabaseSync): void {
     `CREATE INDEX IF NOT EXISTS idx_memory_records_session
      ON memory_records(session_id)`,
   );
+}
+
+/** Tessera drift fingerprint: adds `file_simhash` to stores created before
+ *  ticket 8 (CREATE TABLE IF NOT EXISTS is a no-op against the existing table). */
+export function ensureTesseraColumns(db: DatabaseSync): void {
+  const columns = new Set(
+    (db.prepare("PRAGMA table_info(tesserae)").all() as Row[]).map((row) => String(row.name)),
+  );
+  if (!columns.has("file_simhash")) {
+    db.exec("ALTER TABLE tesserae ADD COLUMN file_simhash TEXT");
+  }
 }
 
 export function ensureDeltaColumns(db: DatabaseSync): void {

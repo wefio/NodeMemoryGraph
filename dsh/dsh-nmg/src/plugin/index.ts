@@ -29,7 +29,6 @@ import {
   renderTaskBoardSurface,
 } from '../../../../src/integration/agent-surface.ts'
 import { loadPrompts, renderDisclosure } from '../../../../src/prompts/load.ts'
-import { FileIndex } from '../../../../src/core/file-index.ts'
 
 const nmgPrompts = loadPrompts()
 
@@ -1505,11 +1504,6 @@ export function apply(ctx: Context): () => void {
       })
     : undefined
 
-  // ── file-content scope observer (tools/result) ─────────────────────────────
-  const scopeObserver = setupScopeObserver(ctx, workspaceRoot)
-  const scopeObserverDisposer = scopeObserver.disposer
-  const provideFileIndex = scopeObserver.provide
-
   // ── wake timer + startup ───────────────────────────────────────────────────
   // Single host-side timer polls the daemon for board entries every
   // WAKE_INTERVAL_MS. The first poll also registers the agent and starts the
@@ -1535,8 +1529,6 @@ export function apply(ctx: Context): () => void {
     contextDisposer,
     ctx.on('agent/inbox/inserted', onInboxInserted),
     ctx.on('agent/disposed', onAgentDisposed),
-    scopeObserverDisposer,
-    ...(provideFileIndex ? [provideFileIndex] : []),
   ]
   if (coordinationEnabled) {
     disposers.push(
@@ -1560,84 +1552,6 @@ export function apply(ctx: Context): () => void {
     recallBatch.clear()
     openSearches.clear()
     wakeBatch.clear()
-    try { scopeObserver.service.close() } catch { /* best-effort */ }
   }
 }
 
-// ── file-content scope observer (tools/result) ───────────────────────────────
-// The file content source learns its search scope from the Agent's own search
-// behaviour (docs/design/file-content-source-design.md §3.2): a non-empty
-// `grep`/`read` result marks the searched files as hot zones, which the
-// FileIndex records via addScopePath. This listener observes only — it never
-// intercepts or mutates the tool lifecycle. Any parse failure is silent.
-//
-// The FileIndex is provided as an optional `fileIndex` service (addScopePath
-// only) so the observer degrades to a no-op if the service is ever absent.
-function setupScopeObserver(ctx, workspaceRoot) {
-  const service = new FileIndex({ projectRoot: workspaceRoot })
-  const provide = ctx.provide
-    ? ctx.provide('fileIndex', { addScopePath: (path) => service.addScopePath(path) })
-    : undefined
-  const collectScopePaths = (exec, result) => {
-    // Guard clauses keep the main flow linear (see complexity-reduction
-    // practice: guard clause + composed functions).
-    const name = (exec && (exec.name || exec.toolName)) || ''
-    if (name !== 'grep' && name !== 'read') return
-    const fileIndex = ctx.get('fileIndex')
-    if (!fileIndex || typeof fileIndex.addScopePath !== 'function') return
-    const paths = extractHitPaths(exec, result, name)
-    for (const path of paths) {
-      try {
-        fileIndex.addScopePath(path)
-      } catch {
-        // recording is best-effort; a failing index must not break the tool
-      }
-    }
-  }
-  const disposer = ctx.on('tools/result', (exec, result) => {
-    try {
-      collectScopePaths(exec, result)
-    } catch {
-      // observation never throws into the tool registry
-    }
-  })
-  return { disposer, provide, service }
-}
-
-/** Extract hot-zone candidate paths from a grep/read tool result. The tool
- *  name is `grep` (dsh-tool-fs-search) or `read` (dsh-tool-fs); glob is a
- *  separate tool we intentionally do not observe. */
-function extractHitPaths(exec, result, name) {
-  // Arguments: `exec.arguments` (dsh-tools) with `exec.input` as an alias.
-  const args = (exec && (exec.arguments || exec.input)) || {}
-  const value = result && result.isError ? undefined : result && result.value
-  if (name === 'grep') return grepHitPaths(value, args)
-  if (name === 'read') return readHitPaths(value, args)
-  return []
-}
-
-/** grep hit paths: match files (workdir-relative) + the searched path arg
- *  when the search found something. */
-function grepHitPaths(value, args) {
-  const paths = []
-  const matches = value && Array.isArray(value.matches) ? value.matches : []
-  for (const match of matches) {
-    if (match && typeof match.path === 'string' && match.path) paths.push(match.path)
-  }
-  if (paths.length > 0 && args && typeof args.path === 'string' && args.path) {
-    paths.push(args.path)
-  }
-  return paths
-}
-
-/** read hit paths: a non-empty read ⇔ at least one line; record the requested
- *  path arg and the resolved display path (they usually agree). */
-function readHitPaths(value, args) {
-  const paths = []
-  const lines = value && Array.isArray(value.lines) ? value.lines : []
-  if (lines.length > 0) {
-    if (args && typeof args.file_path === 'string' && args.file_path) paths.push(args.file_path)
-    if (value && typeof value.path === 'string' && value.path) paths.push(value.path)
-  }
-  return paths
-}

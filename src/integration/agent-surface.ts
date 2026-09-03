@@ -114,14 +114,11 @@ export function renderCompactSearchSurface(
   context: CompactSearchContext,
   options: SearchSurfaceOptions = {},
 ): string {
-  const fileLines = (context.files ?? []).map(
-    (hit) => `- file=${hit.path}; excerpt=${hit.excerpt}`,
-  );
   const tesseraLines = (context.tesserae ?? []).map((tessera) => {
     const position = tessera.stale ? "(stale)" : tessera.line ? `:${tessera.line}` : "";
     return `- tessera=${tessera.path}${position}; label=${tessera.label || "(bookmark)"}`;
   });
-  if (context.candidates.length === 0 && fileLines.length === 0 && tesseraLines.length === 0) {
+  if (context.candidates.length === 0 && tesseraLines.length === 0) {
     return options.emptyText ?? "No matching NMG memory found.";
   }
   const lines = context.candidates.map((candidate) => {
@@ -141,7 +138,6 @@ export function renderCompactSearchSurface(
   return [
     options.preamble,
     ...lines,
-    ...fileLines,
     ...tesseraLines,
     context.logicalChainCount > 0
       ? `logical_chains=${context.logicalChainCount}; use nmg_get for compact chain structure with exact evidence.`

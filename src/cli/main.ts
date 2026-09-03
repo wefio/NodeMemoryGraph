@@ -434,19 +434,12 @@ function parseOptions(args: readonly string[]): OptionValues {
   return { flags, options, positionals };
 }
 
-/** Append the FILES / TESSERAE source-section lines of a search result. Kept as
- *  its own helper so humanResult's branching stays under the complexity gate. */
+/** Append the TESSERAE source-section lines of a search result. Kept as its
+ *  own helper so humanResult's branching stays under the complexity gate. */
 function sourceSectionLines(
-  files: Array<{ path: string; excerpt: string }> | undefined,
   tesserae: Array<{ path: string; label: string; line?: number; stale?: boolean }> | undefined,
 ): string[] {
   const lines: string[] = [];
-  if (files && files.length > 0) {
-    lines.push("FILES:");
-    for (const file of files) {
-      lines.push(`${file.path}\t${file.excerpt}`);
-    }
-  }
   if (tesserae && tesserae.length > 0) {
     lines.push("TESSERAE:");
     for (const tessera of tesserae) {
@@ -604,7 +597,6 @@ function humanResult(value: unknown): string {
         memory: { id: string; memoryType: string; tier: number; statement: string };
         node: { canonicalName: string };
       }>;
-      files?: Array<{ path: string; excerpt: string }>;
       tesserae?: Array<{ path: string; label: string; line?: number; stale?: boolean }>;
       timings?: { timings?: Record<string, number>; totalMs?: number };
     };
@@ -612,7 +604,7 @@ function humanResult(value: unknown): string {
       ({ memory, node }) =>
         `${memory.id}\t${memory.memoryType}\tL${memory.tier}\t${node.canonicalName}\t${memory.statement}`,
     );
-    lines.push(...sourceSectionLines(context.files, context.tesserae));
+    lines.push(...sourceSectionLines(context.tesserae));
     if (context.timings) {
       const sections = Object.entries(context.timings.timings ?? {})
         .sort((left, right) => right[1] - left[1])
