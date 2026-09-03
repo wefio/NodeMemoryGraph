@@ -49,6 +49,46 @@ test("record embedding sync indexes only missing records and marks the index rea
   }
 });
 
+test("record embedding sync with maxBatches tops up one batch and leaves the index mid-flight", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-embedding-sync-bounded-"));
+  const store = new NmgStore(join(directory, "nmg.sqlite"));
+  const calls: string[][] = [];
+  const client = {
+    indexId: "bounded@test",
+    model: "test-model",
+    profile: "plain",
+    async embedDocuments(inputs: string[]) {
+      calls.push(inputs);
+      return inputs.map((_, index) => [index + 1]);
+    },
+  };
+  try {
+    store.remember({ statement: "Alpha memory", nodeName: "Alpha" });
+    store.remember({ statement: "Beta memory", nodeName: "Beta" });
+    store.remember({ statement: "Gamma memory", nodeName: "Gamma" });
+
+    const bounded = await syncRecordEmbeddings(store, client, 1, { maxBatches: 1 });
+    assert.equal(bounded.indexed, 1, "one batch of one record");
+    assert.equal(calls.length, 1);
+    assert.notEqual(bounded.health.status, "ready", "bounded run must not mark the index complete");
+    assert.equal(bounded.health.pending.records, 2, "remaining records stay queued");
+
+    const second = await syncRecordEmbeddings(store, client, 1, { maxBatches: 1 });
+    assert.equal(second.indexed, 1);
+    assert.equal(calls.length, 2);
+
+    // Draining to exhaustion completes the index.
+    const full = await syncRecordEmbeddings(store, client, 8);
+    assert.equal(full.indexed, 1);
+    assert.equal(full.health.status, "ready");
+    assert.equal(full.health.pending.records, 0);
+    assert.equal(calls.length, 3);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("record embedding sync persists retryable failure state", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-embedding-sync-failure-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));

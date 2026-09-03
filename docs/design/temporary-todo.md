@@ -163,23 +163,33 @@ back to lexical while the operator believed embedding was on
 `last_succeeded_at = null` → search always lexical). The configured provider
 did build 96 vectors on 2026-09-01 and then never ran again.
 
-- [ ] Trigger a bounded embedding drain on every remember/search (no
+- [x] Trigger a bounded embedding drain on every remember/search (no
   writeThreshold/accessThreshold batching): each operation tops up one small
   batch of missing vectors in the background, so low-activity stores still
   converge and a 429 just queues the rest for the next operation.
-- [ ] Treat provider rate-limit / transient failures as *pause, not fail*: a
+  (`syncEmbeddingTarget` `maxBatches`, `#drainEmbeddings` fires on every
+  `#signalMaintenance` from remember/search with `{ maxBatches: 1 }`.)
+- [x] Treat provider rate-limit / transient failures as *pause, not fail*: a
   429/5xx must not set the whole index to `failed` (which permanently disables
   hybrid until a full rebuild); record `last_failed_at` + reason and resume on
   the next drain. Only persistent (non-rate-limit) failure degrades.
-- [ ] Retrieve with a degrade chain: external index ready → hybrid; external
-  unavailable/degraded → local `nmg-hashing-v1` vectors (already written for
-  every record) with a `degraded: true` + reason marker — strictly better than
-  pure lexical, still zero external dependency.
-- [ ] Drop the `NMG_EMBED_AUTO_SYNC` gate: presence of a configured provider
+  (Search now serves hybrid from a *partial* index — `LEFT JOIN` keeps lexical
+  results while indexed records get the vector lift — so a failed/429'd index
+  is never a dead end; the drain retries on later operations. Provider
+  failures additionally start a 30s cooldown so a down provider cannot hang
+  every query; search reports `degraded: true` with the reason.)
+- [ ] Retrieve with a local-hashing degrade when no external vector exists:
+  when an embedding provider is absent/unavailable AND the store has local
+  `nmg-hashing-v1` vectors, blend them with lexical (with `degraded: true` +
+  reason) instead of pure lexical. Current implementation degrades to plain
+  lexical; the local-hashing blend is the remaining slice of this item.
+- [x] Drop the `NMG_EMBED_AUTO_SYNC` gate: presence of a configured provider
   (+key) implies auto-sync. Keep the env as an explicit *disable* switch.
-- [ ] Persist embedding configuration at the deployment layer (User-level env /
+- [x] Persist embedding configuration at the deployment layer (User-level env /
   documented daemon launch) so a restart keeps provider + key; document this in
   the owning guide/ADR rather than inventing a new config-file mechanism.
+  (User env set 2026-09-03; daemon restart keeps `provider: gemini` +
+  `indexId` ready.)
 
 **Available mechanism:** write and access paths already `signalMaintenance`
 (`src/cli/service.ts` #remember/#search); `#drainEmbeddings` already runs
