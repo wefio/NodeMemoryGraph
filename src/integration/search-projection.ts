@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { AnchorHit, FileHit, MemoryContext, MemorySearchResult } from "../core/types.ts";
+import type { TesseraHit, FileHit, MemoryContext, MemorySearchResult } from "../core/types.ts";
 import type { SessionDisclosureLevel } from "../core/session-active-graph.ts";
 import { logicalChainCount, logicalChainNames } from "./chain-projection.ts";
 
@@ -37,9 +37,9 @@ export interface CompactSearchContext {
   /** File-content source hits (bounded passive-scope FTS), separate from
    *  memory candidates. Present when the file source is enabled. */
   files?: FileHit[];
-  /** Anchor (bookmark) hits — file locations attached to memories, resolved to
+  /** Tessera (bookmark) hits — file locations attached to memories, resolved to
    *  lines (or marked stale) by the service layer. */
-  anchors?: AnchorHit[];
+  tesserae?: TesseraHit[];
 }
 
 /** Agent-facing search projection. Exact records and evidence remain behind `nmg get`. */
@@ -61,7 +61,7 @@ export function compactSearchContext(context: MemoryContext): CompactSearchConte
     activeGraphId: context.activeGraph?.id ?? null,
     deferredMemoryIds: context.progressiveDisclosure?.deferredMemoryIds ?? [],
     ...(context.files && context.files.length > 0 ? { files: context.files } : {}),
-    ...(context.anchors && context.anchors.length > 0 ? { anchors: context.anchors } : {}),
+    ...(context.tesserae && context.tesserae.length > 0 ? { tesserae: context.tesserae } : {}),
   };
 }
 

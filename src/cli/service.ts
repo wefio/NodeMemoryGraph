@@ -20,8 +20,8 @@ import {
   drainNodeSummaries,
 } from "../integration/node-summarizer.ts";
 import type {
-  AnchorInput,
-  AnchorHit,
+  TesseraInput,
+  TesseraHit,
   LeafSummaryProvider,
   NodeSummaryProvider,
   RememberInput,
@@ -1386,17 +1386,17 @@ export class NmgService {
     if (projectDir) {
       fileHits = this.#searchProjectFiles(projectDir, query, options.limit ?? 8);
     }
-    // Anchor (bookmark) source: independent of projectDir — anchors live in the
+    // Tessera (bookmark) source: independent of projectDir — tesserae live in the
     // shared store and are searched alongside memory. Snippet relocation to a
     // line needs the project root (to read the current file), so the resolver
     // is applied here, not in the store.
-    const anchorHits = this.#resolveAnchorLines(
-      this.#searchAnchorSource(query, options.limit ?? 8),
+    const tesseraHits = this.#resolveTesseraLines(
+      this.#searchTesseraSource(query, options.limit ?? 8),
       projectDir,
     );
     const withFiles = <T extends MemoryContext>(context: T): T => {
       if (fileHits.length > 0) context.files = fileHits;
-      if (anchorHits.length > 0) context.anchors = anchorHits;
+      if (tesseraHits.length > 0) context.tesserae = tesseraHits;
       return context;
     };
     const runOne = async (store: NmgStore, raw: string): Promise<MemoryContext> => {
@@ -1515,13 +1515,13 @@ export class NmgService {
     }
   }
 
-  /** Search the anchor (bookmark) source across stores. Anchor rows are in the
+  /** Search the tessera (bookmark) source across stores. Tessera rows are in the
    *  store (independent of any project index), so this does not need a
    *  projectDir; snippet relocation to a line is applied when a project root
    *  is available at call time. */
-  #searchAnchorSource(query: string, limit: number): AnchorHit[] {
-    const anchorLimit = Math.max(1, Math.min(limit, 10));
-    const rows = this.#getStore().searchAnchors(query, anchorLimit);
+  #searchTesseraSource(query: string, limit: number): TesseraHit[] {
+    const tesseraLimit = Math.max(1, Math.min(limit, 10));
+    const rows = this.#getStore().searchTesserae(query, tesseraLimit);
     return rows.map((row) => ({
       id: row.id,
       path: row.path,
@@ -1532,10 +1532,10 @@ export class NmgService {
     }));
   }
 
-  /** Resolve anchor snippets to current line numbers against a project root.
+  /** Resolve tessera snippets to current line numbers against a project root.
    *  Best-effort: file missing/unreadable or snippet absent marks stale. */
-  #resolveAnchorLines(anchors: AnchorHit[], projectRoot?: string): AnchorHit[] {
-    if (!projectRoot || anchors.length === 0) return anchors;
+  #resolveTesseraLines(tesserae: TesseraHit[], projectRoot?: string): TesseraHit[] {
+    if (!projectRoot || tesserae.length === 0) return tesserae;
     const cache = new Map<string, string[] | null>(); // absPath -> lines | null
     const linesFor = (path: string): string[] | null => {
       const abs = resolve(projectRoot, path);
@@ -1544,17 +1544,17 @@ export class NmgService {
       cache.set(abs, lines);
       return lines;
     };
-    return anchors.map((anchor) => {
-      if (!anchor.snippet) return { ...anchor, stale: true };
-      const lines = linesFor(anchor.path);
-      if (!lines) return { ...anchor, stale: true };
-      const target = anchor.snippet.trim();
+    return tesserae.map((tessera) => {
+      if (!tessera.snippet) return { ...tessera, stale: true };
+      const lines = linesFor(tessera.path);
+      if (!lines) return { ...tessera, stale: true };
+      const target = tessera.snippet.trim();
       // Snippet is the relocation key: locate the line whose content contains
       // it (or that it contains, for short fragments). Best-effort single-line
       // relocation in the MVP.
       const found = lines.findIndex((line) => line.includes(target));
-      if (found === -1) return { ...anchor, stale: true };
-      return { ...anchor, line: found + 1 };
+      if (found === -1) return { ...tessera, stale: true };
+      return { ...tessera, line: found + 1 };
     });
   }
 
@@ -1859,7 +1859,7 @@ function parseRememberParams(value: unknown): NmgRememberParams {
     sourceRef: optionalString(params, "sourceRef"),
     markers: optionalMarkers(params, "markers"),
     recallTriggers: optionalRecallTriggers(params),
-    anchors: optionalAnchors(params, "anchors"),
+    tesserae: optionalTesserae(params, "tesserae"),
     unsafe: optionalBoolean(params, "unsafe"),
     projectDir: optionalString(params, "projectDir"),
   };
@@ -1896,29 +1896,32 @@ function optionalEvidenceSource(
   };
 }
 
-/** Parse the optional anchors array on a remember write. Each anchor needs a
+/** Parse the optional tesserae array on a remember write. Each tessera needs a
  *  path and a snippet (the relocation key); label/kind are optional. */
-function optionalAnchors(params: Record<string, unknown>, key: string): AnchorInput[] | undefined {
+function optionalTesserae(
+  params: Record<string, unknown>,
+  key: string,
+): TesseraInput[] | undefined {
   const value = params[key];
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.length > 10) {
-    throw new NmgProtocolError("INVALID_PARAMS", `${key} must be an array of at most 10 anchors`);
+    throw new NmgProtocolError("INVALID_PARAMS", `${key} must be an array of at most 10 tesserae`);
   }
   return value.map((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       throw new NmgProtocolError("INVALID_PARAMS", `${key} entries must be objects`);
     }
-    const anchor = entry as Record<string, unknown>;
+    const tessera = entry as Record<string, unknown>;
     return {
-      path: requiredString(anchor, "path"),
-      snippet: requiredString(anchor, "snippet"),
-      label: optionalString(anchor, "label"),
-      kind: optionalString(anchor, "kind"),
+      path: requiredString(tessera, "path"),
+      snippet: requiredString(tessera, "snippet"),
+      label: optionalString(tessera, "label"),
+      kind: optionalString(tessera, "kind"),
     };
   });
 }
 
-/** Read a file's lines, or null when unreadable/missing. Used by anchor
+/** Read a file's lines, or null when unreadable/missing. Used by tessera
  *  snippet relocation. */
 function readLinesSafe(absPath: string): string[] | null {
   try {

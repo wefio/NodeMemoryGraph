@@ -434,11 +434,11 @@ function parseOptions(args: readonly string[]): OptionValues {
   return { flags, options, positionals };
 }
 
-/** Append the FILES / ANCHORS source-section lines of a search result. Kept as
+/** Append the FILES / TESSERAE source-section lines of a search result. Kept as
  *  its own helper so humanResult's branching stays under the complexity gate. */
 function sourceSectionLines(
   files: Array<{ path: string; excerpt: string }> | undefined,
-  anchors: Array<{ path: string; label: string; line?: number; stale?: boolean }> | undefined,
+  tesserae: Array<{ path: string; label: string; line?: number; stale?: boolean }> | undefined,
 ): string[] {
   const lines: string[] = [];
   if (files && files.length > 0) {
@@ -447,11 +447,11 @@ function sourceSectionLines(
       lines.push(`${file.path}\t${file.excerpt}`);
     }
   }
-  if (anchors && anchors.length > 0) {
-    lines.push("ANCHORS:");
-    for (const anchor of anchors) {
-      const position = anchor.stale ? "(stale)" : anchor.line ? `:${anchor.line}` : "";
-      lines.push(`${anchor.path}${position}\t${anchor.label}`);
+  if (tesserae && tesserae.length > 0) {
+    lines.push("TESSERAE:");
+    for (const tessera of tesserae) {
+      const position = tessera.stale ? "(stale)" : tessera.line ? `:${tessera.line}` : "";
+      lines.push(`${tessera.path}${position}\t${tessera.label}`);
     }
   }
   return lines;
@@ -605,14 +605,14 @@ function humanResult(value: unknown): string {
         node: { canonicalName: string };
       }>;
       files?: Array<{ path: string; excerpt: string }>;
-      anchors?: Array<{ path: string; label: string; line?: number; stale?: boolean }>;
+      tesserae?: Array<{ path: string; label: string; line?: number; stale?: boolean }>;
       timings?: { timings?: Record<string, number>; totalMs?: number };
     };
     const lines = context.results.map(
       ({ memory, node }) =>
         `${memory.id}\t${memory.memoryType}\tL${memory.tier}\t${node.canonicalName}\t${memory.statement}`,
     );
-    lines.push(...sourceSectionLines(context.files, context.anchors));
+    lines.push(...sourceSectionLines(context.files, context.tesserae));
     if (context.timings) {
       const sections = Object.entries(context.timings.timings ?? {})
         .sort((left, right) => right[1] - left[1])

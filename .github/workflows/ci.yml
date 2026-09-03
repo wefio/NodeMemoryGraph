@@ -26,6 +26,12 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      # Subpackage builds (verify:packages) use pnpm via the dsh/dsh-nmg
+      # pnpm-lock.yaml; corepack is bundled with the Node distribution.
+      - name: Enable corepack pnpm
+        run: |
+          corepack enable
+          pnpm --version
       - name: Shared static verification contract
         run: npm run verify:static
       - name: Dependency audit

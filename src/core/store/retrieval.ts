@@ -54,7 +54,7 @@ import type {
   ActiveGraphBudget,
   ActiveGraphBudgetUsage,
   ActiveGraphSelection,
-  AnchorRecord,
+  TesseraRecord,
   LeafBlock,
   HistoryRecord,
   MemoryContext,
@@ -1641,20 +1641,20 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       );
     }
 
-    /** Search the anchor (bookmark) source independently of memory. Matches on
-     *  the agent-written label via FTS. Anchors are content-anchored file
+    /** Search the tessera (bookmark) source independently of memory. Matches on
+     *  the agent-written label via FTS. Tesserae are content-anchored file
      *  pointers — the snippet relocation to a line happens in the service layer
      *  (which knows the project root); the store only returns raw rows. */
-    searchAnchors(query: string, limit = 8): AnchorRecord[] {
+    searchTesserae(query: string, limit = 8): TesseraRecord[] {
       const expression = ftsExpression(query);
       if (!expression) return [];
       const rows = this.db
         .prepare(
           `SELECT a.id, a.path, a.snippet, a.label, a.kind, a.memory_id, a.created_at
-           FROM anchors_fts f
-           JOIN anchors a ON a.rowid = f.rowid
-           WHERE anchors_fts MATCH ?
-           ORDER BY bm25(anchors_fts)
+           FROM tesserae_fts f
+           JOIN tesserae a ON a.rowid = f.rowid
+           WHERE tesserae_fts MATCH ?
+           ORDER BY bm25(tesserae_fts)
            LIMIT ?`,
         )
         .all(expression, Math.max(1, Math.min(limit, 50))) as Array<{
@@ -1677,14 +1677,14 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       }));
     }
 
-    /** Load anchors by id (used when resolving anchor_ref markers on a memory). */
-    getAnchorsByIds(ids: readonly string[]): AnchorRecord[] {
+    /** Load tesserae by id (used when resolving tessera_ref markers on a memory). */
+    getTesseraeByIds(ids: readonly string[]): TesseraRecord[] {
       if (ids.length === 0) return [];
       const placeholders = ids.map(() => "?").join(",");
       const rows = this.db
         .prepare(
           `SELECT id, path, snippet, label, kind, memory_id, created_at
-           FROM anchors WHERE id IN (${placeholders})`,
+           FROM tesserae WHERE id IN (${placeholders})`,
         )
         .all(...ids) as Array<{
         id: string;

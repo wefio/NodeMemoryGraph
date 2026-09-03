@@ -30,3 +30,8 @@
 ## 已实现决策
 
 - [外部 Repository Control Plane](implemented/2026-08-29-repository-control-plane.zh-CN.md)
+
+## 被拒决策
+
+- [将构建产物纳入版本控制](rejected/2026-09-02-track-build-artifacts-in-git.zh-CN.md) — 可再生输出保持不入库；可构建性靠验证而非提交
+- [书签功能继续命名为 "anchors"](rejected/2026-09-02-keep-bookmarks-named-anchors.zh-CN.md) — 改名为 tessera，终结与 surface/task/support anchors 的撞名

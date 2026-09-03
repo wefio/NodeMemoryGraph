@@ -202,7 +202,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
       "opened-at",
       "related-memory",
       "recall-trigger",
-      "anchor",
+      "tessera",
     ],
     flags: [],
     usageDetail: `Remember options:
@@ -224,7 +224,7 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
   --external-source REF      External provenance: web:URL or file:PATH
   --retrieved-at ISO         External retrieval timestamp (default: now)
   --content-hash HASH        Optional external content hash
-  --anchor PATH::SNIPPET[::LABEL]  Repeatable file bookmark: path, ::, content
+  --tessera PATH::SNIPPET[::LABEL]  Repeatable file bookmark: path, ::, content
                              snippet (relocation key), optional ::LABEL`,
     buildParams: rememberParams,
   },
@@ -1024,36 +1024,36 @@ function rememberParams(values: OptionValues): NmgRememberParams {
     openedAt: firstOption(values, "opened-at"),
     relatedMemoryIds: values.options.get("related-memory"),
     recallTriggers: values.options.get("recall-trigger"),
-    anchors: parseAnchorOptions(values.options.get("anchor")),
+    tesserae: parseTesseraOptions(values.options.get("tessera")),
     markers: externalMarker,
     projectDir: optionalResolvedPath(firstOption(values, "project-dir")),
   }) as unknown as NmgRememberParams;
 }
 
-/** Parse repeatable `--anchor PATH::SNIPPET[:LABEL]` options into AnchorInput
+/** Parse repeatable `--tessera PATH::SNIPPET[:LABEL]` options into TesseraInput
  *  entries. The snippet is everything up to the next `::` (or the end); the
  *  optional label follows a second `::`. Paths must not contain `::`. */
-function parseAnchorOptions(
+function parseTesseraOptions(
   raw: unknown,
 ): Array<{ path: string; snippet: string; label?: string }> | undefined {
   const values = Array.isArray(raw) ? raw : raw === undefined ? [] : [raw];
-  const anchors: Array<{ path: string; snippet: string; label?: string }> = [];
+  const tesserae: Array<{ path: string; snippet: string; label?: string }> = [];
   for (const value of values) {
     const text = String(value ?? "");
     const parts = text.split("::");
     if (parts.length < 2 || !parts[0]!.trim() || !parts[1]!.trim()) {
       throw new Error(
-        "--anchor must be PATH::SNIPPET (path then :: then content snippet), optionally ::LABEL",
+        "--tessera must be PATH::SNIPPET (path then :: then content snippet), optionally ::LABEL",
       );
     }
     const path = parts[0]!.trim();
     const snippet = parts[1]!.trim();
     const label = parts.length > 2 ? parts.slice(2).join("::").trim() : undefined;
-    const anchor: { path: string; snippet: string; label?: string } = { path, snippet };
-    if (label) anchor.label = label;
-    anchors.push(anchor);
+    const tessera: { path: string; snippet: string; label?: string } = { path, snippet };
+    if (label) tessera.label = label;
+    tesserae.push(tessera);
   }
-  return anchors.length > 0 ? anchors : undefined;
+  return tesserae.length > 0 ? tesserae : undefined;
 }
 
 function resolutionParams(

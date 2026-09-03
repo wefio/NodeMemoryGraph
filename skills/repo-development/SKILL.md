@@ -87,8 +87,75 @@ or remove it when its exit criteria are met.
    or use `--require-clean` in an equivalent clean tree. CI automatically runs the
    named `verify:*` package contracts on push and pull request.
 6. Commit one coherent change with only owned files. Leave unrelated user or Agent work untouched.
-7. Resolve the in-flight goal after the task is completed or deliberately
+   Commit messages follow the repository's conventional style
+   (`type(scope): summary` + a body that says what changed and why, one change
+   per commit). A commit is a proposal, not a proof: the verification evidence
+   (targeted test + `agent:verify`) is what makes it hold, so do not claim a
+   check passed in the message unless it ran.
+7. When opening a pull request, read `.github/pull_request_template.md` and
+   follow it as the PR prompt: fill the three description blocks (What / Why /
+   Changes) from the change, and self-check every box in the completion
+   checklist before marking the PR ready — the checklist is the same contract
+   CI enforces, and it catches locally what a CI round-trip would cost. Draft
+   PRs and CI status are owned by the forge; the template checklist is the
+   submitter's own pre-flight, not a substitute for `All checks passed`.
+8. Resolve the in-flight goal after the task is completed or deliberately
    abandoned. The board records that work is active, not a step-by-step history;
    Git and verification evidence remain the source of actual implementation state.
+
+## Repository Control Plane beyond agent:verify
+
+`npm run agent:verify` auto-discovers the contract that uniquely covers the
+current scope and runs the equivalent reconcile — that is the default for
+ordinary changes (see [`ci-cd-and-quality.md` §7.11](../../docs/design/ci-cd-and-quality.md)).
+Use the standalone `nmg-rcp` CLI (`node bin/nmg-rcp.mjs`, contract path first)
+only in the scenarios `agent:verify` does not cover:
+
+- **Check CI state without opening the browser:** `nmg-rcp forge-status --pr <n>`
+  reads the forge's status-check rollup (`checks[]` with name/conclusion). Use
+  it before claiming "checks pass" or deciding a PR is mergeable.
+- **Review what a reconcile would do before running it:**
+  `nmg-rcp plan <contract>` (and `nmg-rcp compile <contract>` when the contract
+  itself changed).
+- **Inspect verification evidence:** `nmg-rcp receipt-list` /
+  `nmg-rcp receipt-verify <receipt>` / `nmg-rcp receipt-scan` — receipts live
+  under `.rcp/receipts/` and are append-only.
+- **Retry after a failed reconcile, or run an explicit workspace-ready pass:**
+  `nmg-rcp reconcile <contract> --apply --workspace-ready [--recover-attempt]`.
+- **Bind a PR or create a draft PR through the forge provider:**
+  `nmg-rcp forge-bind <contract> --pr <n>` / `nmg-rcp forge-create <contract> --base main --head <branch>`.
+
+`--apply` never runs by default; reconcile plans unless `--apply` is explicit.
+When a Contract's status or verification drift from the design doc, update the
+owning document (this SKILL, `ci-cd-and-quality.md`, the RCP decision) in the
+same change — an improved tool that stays undocumented is a tool agents will
+not reach for.
+
+## Builds and generated artifacts
+
+Regenerable outputs are **not** tracked (see the rejected decision
+[Track build artifacts in version control](../../docs/decisions/rejected/2026-09-02-track-build-artifacts-in-git.md)):
+
+- `dist/` (root tsc build), `dsh/dsh-nmg/lib/` (tsdown), and
+  `src/prompts/nmg-prompts.generated.ts` (from `nmg-prompts.yaml`) are
+  gitignored; the tree stays clean only if you never `git add` them.
+- A change to `src/` that feeds a generated output is verified by
+  regeneration, not by committing the output.
+
+Reproduce locally, in this order:
+
+1. Root package: `npm ci` (or `npm install` when adding a dependency), then
+   `npm run build` — regenerates `src/prompts/nmg-prompts.generated.ts` and
+   `dist/`.
+2. Subpackages with their own lockfile (currently `dsh/dsh-nmg`, pnpm):
+   `cd dsh/dsh-nmg && pnpm install --frozen-lockfile && pnpm run build` —
+   regenerates `lib/`. `npm run verify:packages` runs every subpackage from a
+   frozen lockfile automatically.
+3. `npm run check:lock` fails when the root `package-lock.json` drifted from
+   `package.json`; fix with `npm install --package-lock-only`.
+
+When a change touches a subpackage's `src/`, `package.json`, or its lockfile,
+`npm run agent:verify` covers it through `verify:static` →
+`verify:packages`/`check:lock`.
 
 Never invoke live LLM, embedding, or full benchmark workloads unless the task explicitly calls for them.

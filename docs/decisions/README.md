@@ -44,3 +44,8 @@ to one another. Missing translations are reported as warnings, not hard errors.
 ## Implemented decisions
 
 - [External Repository Control Plane](implemented/2026-08-29-repository-control-plane.md)
+
+## Rejected decisions
+
+- [Track build artifacts in version control](rejected/2026-09-02-track-build-artifacts-in-git.md) — regenerable outputs stay untracked; buildability is verified, not committed
+- [Keep the bookmark feature named "anchors"](rejected/2026-09-02-keep-bookmarks-named-anchors.md) — renamed to tesserae to end collision with surface/task/support anchors
