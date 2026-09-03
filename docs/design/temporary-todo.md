@@ -229,7 +229,8 @@ Word-level uses of hashing were explicitly kept out of the rejected
 semantic-retrieval decision
 ([2026-09-03-hashing-vector-retrieval-fallback](../decisions/rejected/2026-09-03-hashing-vector-retrieval-fallback.md));
 this ticket scopes the candidate
-([memory-system precedent](https://github.com/nikhilsitaram/claude-memory-system/issues/53)):
+([memory-system precedent](https://github.com/nikhilsitaram/claude-memory-system/issues/53));
+design: [simhash-lexical-complement-design.md](simhash-lexical-complement-design.md).
 
 - [ ] Evaluate whether `statementSimilarity` (word-set Jaccard) misses
   near-duplicates whose spelling or word form differs ("embedding" vs
