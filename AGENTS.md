@@ -20,3 +20,10 @@ NMG memory or its coordination board, follow `skills/nmg-memory/SKILL.md`.
 Build outputs (`dist/`, `dsh/dsh-nmg/lib/`, generated prompts) are not tracked;
 see the "Builds and generated artifacts" section of `skills/repo-development/SKILL.md`
 for reproduction order and `verify:packages` / `check:lock`.
+
+`dsh/dsh-nmg` is consumed by the DSH web profile through a `link:` to this
+source directory, and the profile loads `lib/index.js` at startup. After a
+fresh clone or after pulling changes that touch `dsh/dsh-nmg/src`, run
+`cd dsh/dsh-nmg && pnpm install && pnpm run build` **before** starting `dsh web`
+— otherwise the web profile fails to boot with
+`Cannot find module ... @nmg/dsh-nmg/lib/index.js`.
