@@ -2,7 +2,7 @@
 
 **Purpose:** unresolved work only.
 **Authority:** working queue, not design specification or implementation history.
-**Updated:** 2026-09-01
+**Updated:** 2026-09-03
 
 Durable behavior belongs in the owning design or operating document; current
 implementation evidence belongs in
@@ -151,6 +151,61 @@ Python or leak benchmark operations into the product daemon.
 one shared daemon, each benchmark worker closes without stopping that daemon,
 and the bridge subprocess can be removed without changing official inputs,
 outputs, scoring, or product RPC semantics.
+
+## 6. Make embedding work by default on store and retrieve
+
+User requirement: embedding must be present on the normal write and search
+paths; local hashing is a fallback, not a substitute. Observed failure: the
+embedding config lived only in a repo `.env` that the daemon never reads, so a
+daemon restart silently dropped the API key and every subsequent search fell
+back to lexical while the operator believed embedding was on
+(`embedding_index_state.status = "failed"` after a single free-tier 429,
+`last_succeeded_at = null` → search always lexical). The configured provider
+did build 96 vectors on 2026-09-01 and then never ran again.
+
+- [ ] Trigger a bounded embedding drain on every remember/search (no
+  writeThreshold/accessThreshold batching): each operation tops up one small
+  batch of missing vectors in the background, so low-activity stores still
+  converge and a 429 just queues the rest for the next operation.
+- [ ] Treat provider rate-limit / transient failures as *pause, not fail*: a
+  429/5xx must not set the whole index to `failed` (which permanently disables
+  hybrid until a full rebuild); record `last_failed_at` + reason and resume on
+  the next drain. Only persistent (non-rate-limit) failure degrades.
+- [ ] Retrieve with a degrade chain: external index ready → hybrid; external
+  unavailable/degraded → local `nmg-hashing-v1` vectors (already written for
+  every record) with a `degraded: true` + reason marker — strictly better than
+  pure lexical, still zero external dependency.
+- [ ] Drop the `NMG_EMBED_AUTO_SYNC` gate: presence of a configured provider
+  (+key) implies auto-sync. Keep the env as an explicit *disable* switch.
+- [ ] Persist embedding configuration at the deployment layer (User-level env /
+  documented daemon launch) so a restart keeps provider + key; document this in
+  the owning guide/ADR rather than inventing a new config-file mechanism.
+
+**Available mechanism:** write and access paths already `signalMaintenance`
+(`src/cli/service.ts` #remember/#search); `#drainEmbeddings` already runs
+records→leaves→nodes incrementally from the SQLite missing-vector queue
+(`embeddingDocuments` with a limit, batch 64); every record already carries
+local hashing vectors (`memory_embeddings` model `nmg-hashing-v1`, 327 rows);
+`searchMemoryContext` already has a lexical fallback seam and a
+`degraded/reason` return shape; `embedding_index_state` already tracks
+running/ready/failed with `last_error`.
+
+**Current blocker:** the drain is gated behind the maintenance threshold
+(16 writes / 32 accesses) so low-activity use never converges; one 429 marks
+the index `failed` and there is no pause-and-resume; and without the env the
+configured provider silently disappears on daemon restart (operator's real
+incident). Industry practice confirms the direction: async post-write
+embedding with background queue and automatic semantic-search upgrade
+(mcp-memory-ts), and a provider lifecycle that degrades only on *persistent*
+failure with an unavailable-reason + fallback path (openclaw #94240/#101272).
+
+**Done when:** with a configured provider, a fresh `remember` produces a
+searchable vector within one operation cycle and a later `search` reports
+hybrid; a simulated 429 pauses the drain without `status = failed` and the next
+operation resumes it; with no provider (or provider down), search returns
+results using local hashing vectors and marks `degraded: true` with a reason;
+and a daemon restart with persisted config keeps embedding enabled (verified
+against the real store).
 
 ## Explicitly deferred — not missing current work
 
