@@ -781,9 +781,8 @@ export function ensureTesseraColumns(db: DatabaseSync): void {
 function ensureTesseraFtsSynced(db: DatabaseSync): void {
   try {
     const contentCount = (db.prepare("SELECT COUNT(*) AS n FROM tesserae").get() as Row).n;
-    const docsizeCount = (
-      db.prepare("SELECT COUNT(*) AS n FROM tesserae_fts_docsize").get() as Row
-    ).n;
+    const docsizeCount = (db.prepare("SELECT COUNT(*) AS n FROM tesserae_fts_docsize").get() as Row)
+      .n;
     if (contentCount !== docsizeCount) {
       db.exec("INSERT INTO tesserae_fts(tesserae_fts) VALUES('rebuild')");
     }

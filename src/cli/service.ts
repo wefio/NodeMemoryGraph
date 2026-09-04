@@ -1919,9 +1919,7 @@ export class NmgService {
    *  it elapses. */
   #embeddingDegradedReason(): string | undefined {
     if (this.#embeddingClient === null && this.#configuredProvider() !== null) {
-      return (
-        this.#embeddingError ?? "embedding provider configured but unavailable (missing key?)"
-      );
+      return this.#embeddingError ?? "embedding provider configured but unavailable (missing key?)";
     }
     if (this.#embeddingCooldownUntil <= Date.now()) return undefined;
     return this.#embeddingError ?? "embedding provider unavailable (cooling down)";
