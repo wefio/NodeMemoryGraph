@@ -25,7 +25,16 @@ async function withProject(
     await run(service, projectDir);
   } finally {
     service.close();
-    rmSync(root, { recursive: true, force: true });
+    // Windows keeps SQLite file handles briefly alive after close; a second
+    // service in a test widens that window, so removal tolerates it.
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      try {
+        rmSync(root, { recursive: true, force: true });
+        break;
+      } catch {
+        await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+      }
+    }
   }
 }
 
@@ -258,4 +267,81 @@ test("tessera simhash: backfill skips files that are unreadable, stamping nothin
     assert.ok(hit.stale, "honestly stale when the file is gone");
     assert.equal(hit.fileSimhash, undefined, "no fingerprint invented for a missing file");
   });
+});
+
+test("tessera fts: rows missing from the fts index are rebuilt and then backfilled", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const root = mkdtempSync(join(tmpdir(), "nmg-tessera-fts-heal-"));
+  const databasePath = join(root, "nmg.sqlite");
+  const projectDir = join(root, "project");
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(
+    join(projectDir, "alpha.ts"),
+    [
+      "export const alpha = 1;",
+      "// The indexing pipeline drains embedding batches.",
+      "export function beta() { return alpha; }",
+    ].join("\n"),
+  );
+  try {
+    // Simulate the live divergence observed in the LTG store: a row written by
+    // an older build whose schema predates the FTS sync triggers. Content row
+    // exists; the index (created later by the current schema) starts empty, so
+    // the row is invisible to tesserae search and any UPDATE touching it fails
+    // with SQLITE_CORRUPT from the trigger's FTS5 'delete'.
+    const legacy = new DatabaseSync(databasePath);
+    legacy.exec(`
+      CREATE TABLE tesserae (
+        id TEXT PRIMARY KEY,
+        path TEXT NOT NULL,
+        snippet TEXT NOT NULL,
+        label TEXT NOT NULL DEFAULT '',
+        kind TEXT,
+        memory_id TEXT,
+        created_at TEXT NOT NULL,
+        file_simhash TEXT
+      );
+    `);
+    legacy
+      .prepare(
+        `INSERT INTO tesserae (id, path, snippet, label, kind, memory_id, created_at, file_simhash)
+         VALUES (?, ?, ?, 'pipeline note', NULL, NULL, ?, NULL)`,
+      )
+      .run("55555555-5555-4555-8555-555555555555", "alpha.ts", "The indexing pipeline drains embedding batches.", new Date().toISOString());
+    legacy.close();
+
+    // Open with the current schema: FTS + triggers are created now, and the
+    // open-time self-heal must detect content/index divergence and rebuild.
+    const healed = new NmgService({ databasePath, environment: {} });
+    try {
+      const found = (await healed.invoke("search", {
+        query: "pipeline drains batches",
+        projectDir,
+      })) as { tesserae?: Array<{ path: string; fileSimhash?: string }> };
+      const hit = found.tesserae?.find((tessera) => tessera.path === "alpha.ts");
+      assert.ok(hit, "orphaned tessera is searchable again after the open-time rebuild");
+      assert.match(String(hit?.fileSimhash ?? ""), /^[0-9a-f]{16}$/u, "backfill stamps after heal");
+
+      const check = new DatabaseSync(databasePath, { readOnly: true });
+      const docsize = (
+        check.prepare("SELECT COUNT(*) AS n FROM tesserae_fts_docsize").get() as { n: number }
+      ).n;
+      const content = (
+        check.prepare("SELECT COUNT(*) AS n FROM tesserae").get() as { n: number }
+      ).n;
+      check.close();
+      assert.equal(docsize, content, "fts index converges to the content table");
+    } finally {
+      healed.close();
+    }
+  } finally {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      try {
+        rmSync(root, { recursive: true, force: true });
+        break;
+      } catch {
+        await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+      }
+    }
+  }
 });

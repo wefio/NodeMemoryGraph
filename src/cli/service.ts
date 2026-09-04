@@ -1547,24 +1547,42 @@ export class NmgService {
     }));
   }
 
-  /** One batched SimHash backfill pass per project root, per process: stamp the
-   *  drift fingerprint onto tesserae written before it existed (or whose file
-   *  was unreadable at write time). Runs on the first search that knows the
-   *  project root, so legacy bookmarks converge to drift tolerance without a
-   *  manual migration; update-at-most-once in the store means a re-run can
-   *  never overwrite a stamped fingerprint. Files unreadable now stay
-   *  honestly unstamped. Best-effort: never fails a search. */
+  /** One batched SimHash backfill pass per project root: stamp the drift
+   *  fingerprint onto tesserae written before it existed (or whose file was
+   *  unreadable at write time). Runs on searches that know the project root,
+   *  so legacy bookmarks converge to drift tolerance without a manual
+   *  migration; update-at-most-once in the store means a re-run can never
+   *  overwrite a stamped fingerprint. Per-row failures (file gone, transient
+   *  writer contention) skip that row only; the root is marked done once a
+   *  pass has nothing left to stamp, so an interrupted pass is retried by a
+   *  later search instead of being lost for the process lifetime. */
   #backfillTesseraSimhashes(projectDir: string | undefined): void {
     if (!projectDir) return;
     const root = resolve(projectDir);
     if (this.#tesseraBackfillRoots.has(root)) return;
-    this.#tesseraBackfillRoots.add(root);
     try {
       const store = this.#getStore();
-      for (const row of store.tesseraeMissingSimhash()) {
-        const content = readFileSafe(resolve(root, row.path));
-        if (content === null) continue;
-        store.updateTesseraSimhash(row.id, simhashToHex(simhash64(content)));
+      const missing = store.tesseraeMissingSimhash();
+      let unstamped = 0;
+      for (const row of missing) {
+        try {
+          const content = readFileSafe(resolve(root, row.path));
+          if (content === null) {
+            unstamped += 1;
+            continue;
+          }
+          if (!store.updateTesseraSimhash(row.id, simhashToHex(simhash64(content)))) {
+            unstamped += 1;
+          }
+        } catch {
+          unstamped += 1; // file vanished mid-pass, or a transient writer conflict
+        }
+      }
+      // Done only when this pass had nothing stampable left (all rows already
+      // stamped, or every remaining row is unreadable). A pass cut short by
+      // contention stays pending and retries on the next search.
+      if (missing.length === 0 || missing.length === unstamped) {
+        this.#tesseraBackfillRoots.add(root);
       }
     } catch {
       // backfill is pure drift-tolerance maintenance, never a search failure
