@@ -767,6 +767,29 @@ export function ensureTesseraColumns(db: DatabaseSync): void {
   if (!columns.has("file_simhash")) {
     db.exec("ALTER TABLE tesserae ADD COLUMN file_simhash TEXT");
   }
+  ensureTesseraFtsSynced(db);
+}
+
+/** Self-heal for the external-content tesserae FTS index: rows can end up in
+ *  the content table without a matching index entry when they were written by
+ *  an older build whose schema predates the sync triggers (observed live: 12
+ *  of 45 bookmarks were invisible to tesserae search and any UPDATE touching
+ *  them failed with SQLITE_CORRUPT because the trigger's FTS5 'delete' found
+ *  no docsize entry). 'rebuild' re-derives the whole index from the content
+ *  table, which is always authoritative. Cheap to check (two COUNTs at open);
+ *  the rebuild itself only runs on real divergence. */
+function ensureTesseraFtsSynced(db: DatabaseSync): void {
+  try {
+    const contentCount = (db.prepare("SELECT COUNT(*) AS n FROM tesserae").get() as Row).n;
+    const docsizeCount = (db.prepare("SELECT COUNT(*) AS n FROM tesserae_fts_docsize").get() as Row)
+      .n;
+    if (contentCount !== docsizeCount) {
+      db.exec("INSERT INTO tesserae_fts(tesserae_fts) VALUES('rebuild')");
+    }
+  } catch {
+    // A diverged index degrades search to the memory source only; never block
+    // store open on index maintenance.
+  }
 }
 
 export function ensureDeltaColumns(db: DatabaseSync): void {

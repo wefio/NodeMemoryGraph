@@ -1823,6 +1823,36 @@ test("a configured-but-unreachable embedding provider degrades search to lexical
   }
 });
 
+test("a configured provider whose client cannot construct (missing key) degrades search explicitly", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-embed-nokey-"));
+  const service = new NmgService({
+    databasePath: join(directory, "nmg.sqlite"),
+    environment: { NMG_EMBED_PROVIDER: "gemini" }, // no NMG_EMBED_API_KEY
+  });
+  try {
+    await service.invoke("remember", {
+      statement: "User prefers Chinese explanations.",
+      nodeName: "Language preference",
+      memoryType: "preference",
+    });
+    // Construction fails persistently (no client object, no cooldown), so the
+    // old behavior was a silent healthy-looking lexical mode. It must now be
+    // an explicit degradation carrying the construction error.
+    const searched = await service.invoke("search", { query: "Chinese explanations" });
+    assert.equal(searched.results.length, 1);
+    assert.equal(searched.retrieval?.mode, "lexical");
+    assert.equal(searched.retrieval?.degraded, true);
+    assert.match(searched.retrieval?.reason ?? "", /api key/iu);
+    const status = await service.invoke("status");
+    assert.equal(status.embedding.configured, true);
+    assert.equal(status.embedding.indexId, null);
+    assert.match(String(status.embedding.reason ?? ""), /api key/iu);
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
 test("opt-in embedding auto-sync makes remembered records available to hybrid search", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-embedding-auto-sync-"));
   const server = createServer((request, response) => {
