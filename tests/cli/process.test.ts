@@ -72,13 +72,17 @@ test("search compact JSON exposes bounded headers without exact evidence", () =>
       "--data-dir",
       directory,
     ]);
+    // A clean environment (no embedding provider configured) keeps plain
+    // lexical the normal mode: no retrieval metadata is projected. A configured
+    // provider that fails to construct is the explicit-degradation case and is
+    // covered separately in service.test.ts.
     const compact = runLauncher([
       "search",
       "Durable detail",
       "--compact-json",
       "--data-dir",
       directory,
-    ]) as {
+    ], { NMG_EMBED_PROVIDER: "", NMG_EMBED_BASE_URL: "" } ) as {
       candidates: Array<{ id: string; preview: string; chains: string[] }>;
       logicalChainCount: number;
       activeGraphId: string | null;

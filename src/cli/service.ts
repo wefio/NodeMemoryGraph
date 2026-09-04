@@ -174,6 +174,9 @@ export class NmgService {
   #nodeSummaryProvider: NodeSummaryProvider | undefined | null;
   readonly #nodeSummaryDrains = new Set<NmgStore>();
   readonly #embeddingDrains = new Set<NmgStore>();
+  /** Project roots whose tessera SimHash backfill pass already ran. One batched
+   *  pass per root per process: rows are stamped once, then never revisited. */
+  readonly #tesseraBackfillRoots = new Set<string>();
   readonly #stgSyncTimes = new WeakMap<NmgStore, Map<string, number>>();
   #shutdownRequested = false;
   readonly #maintenanceJobs = new Map<NmgStore, NodeJS.Immediate>();
@@ -1414,7 +1417,9 @@ export class NmgService {
     // Tessera (bookmark) source: independent of projectDir — tesserae live in the
     // shared store and are searched alongside memory. Snippet relocation to a
     // line needs the project root (to read the current file), so the resolver
-    // is applied here, not in the store.
+    // is applied here, not in the store. The root also unlocks the one-time
+    // legacy-fingerprint backfill.
+    this.#backfillTesseraSimhashes(projectDir);
     const tesseraHits = this.#resolveTesseraLines(
       this.#searchTesseraSource(query, options.limit ?? 8),
       projectDir,
@@ -1540,6 +1545,30 @@ export class NmgService {
       snippet: row.snippet,
       fileSimhash: row.fileSimhash,
     }));
+  }
+
+  /** One batched SimHash backfill pass per project root, per process: stamp the
+   *  drift fingerprint onto tesserae written before it existed (or whose file
+   *  was unreadable at write time). Runs on the first search that knows the
+   *  project root, so legacy bookmarks converge to drift tolerance without a
+   *  manual migration; update-at-most-once in the store means a re-run can
+   *  never overwrite a stamped fingerprint. Files unreadable now stay
+   *  honestly unstamped. Best-effort: never fails a search. */
+  #backfillTesseraSimhashes(projectDir: string | undefined): void {
+    if (!projectDir) return;
+    const root = resolve(projectDir);
+    if (this.#tesseraBackfillRoots.has(root)) return;
+    this.#tesseraBackfillRoots.add(root);
+    try {
+      const store = this.#getStore();
+      for (const row of store.tesseraeMissingSimhash()) {
+        const content = readFileSafe(resolve(root, row.path));
+        if (content === null) continue;
+        store.updateTesseraSimhash(row.id, simhashToHex(simhash64(content)));
+      }
+    } catch {
+      // backfill is pure drift-tolerance maintenance, never a search failure
+    }
   }
 
   /** Resolve tessera snippets to current line numbers against a project root.
@@ -1861,9 +1890,21 @@ export class NmgService {
       .finally(() => this.#embeddingDrains.delete(store));
   }
 
-  /** Reason to report when the embedding provider is cooling down after a
-   *  failure, or undefined when provider calls may proceed. */
+  /** Reason to report when the embedding provider is degraded, or undefined
+   *  when provider calls may proceed (or no provider was ever configured —
+   *  plain lexical is then the normal mode, not a degradation). Two failure
+   *  shapes are covered: a construction failure (provider configured but
+   *  unusable — e.g. a missing API key, no client object exists) is a
+   *  persistent state with no cooldown, so it must be reported directly or
+   *  every search would silently claim a healthy lexical mode; a runtime
+   *  provider failure (429, network) arms the cooldown and is reported until
+   *  it elapses. */
   #embeddingDegradedReason(): string | undefined {
+    if (this.#embeddingClient === null && this.#configuredProvider() !== null) {
+      return (
+        this.#embeddingError ?? "embedding provider configured but unavailable (missing key?)"
+      );
+    }
     if (this.#embeddingCooldownUntil <= Date.now()) return undefined;
     return this.#embeddingError ?? "embedding provider unavailable (cooling down)";
   }

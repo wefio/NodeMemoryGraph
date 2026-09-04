@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { NmgService } from "../../src/cli/service.ts";
@@ -161,5 +161,101 @@ test("tessera simhash: unrelated content rewrite reports stale, not relocated", 
     assert.ok(hit, "tessera hit still surfaces");
     assert.equal(hit.line, undefined, "no line resolved");
     assert.ok(hit.stale, "honestly stale after unrelated rewrite");
+  });
+});
+
+test("tessera simhash: legacy rows without a fingerprint are backfilled by the first search", async () => {
+  await withProject(async (service, projectDir) => {
+    // Write a real tessera, then strip its fingerprint to simulate a legacy
+    // row from before ticket 8 (the shape of every pre-existing bookmark).
+    await service.invoke("remember", {
+      statement: "alpha.ts pipeline drains batches",
+      nodeName: "alpha pipeline",
+      projectDir,
+      tesserae: [
+        {
+          path: "alpha.ts",
+          snippet: "The indexing pipeline drains embedding batches.",
+          label: "pipeline note",
+        },
+      ],
+    });
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(join(dirname(projectDir), "nmg.sqlite"));
+    db.prepare("UPDATE tesserae SET file_simhash = NULL").run();
+    db.close();
+
+    // First search while the file still exists: the backfill pass stamps the
+    // fingerprint from current content, and the hit carries it immediately.
+    const first = await service.invoke("search", {
+      query: "pipeline drains batches",
+      projectDir,
+    });
+    const before = first.tesserae?.find((tessera: { path: string }) => tessera.path === "alpha.ts");
+    assert.ok(before, "legacy tessera surfaces on the backfilling search");
+    assert.match(String(before.fileSimhash ?? ""), /^[0-9a-f]{16}$/u, "backfilled on first search");
+
+    // Now the file moves: the backfilled fingerprint enables SimHash recovery.
+    mkdirSync(join(projectDir, "lib"), { recursive: true });
+    writeFileSync(
+      join(projectDir, "lib", "alpha.ts"),
+      [
+        "export const alpha = 1;",
+        "// The indexing pipeline drains embedding batches.",
+        "export function beta() { return alpha; }",
+      ].join("\n"),
+    );
+    rmSync(join(projectDir, "alpha.ts"));
+
+    const searched = await service.invoke("search", {
+      query: "pipeline drains batches",
+      projectDir,
+    });
+    const hit = searched.tesserae?.find(
+      (tessera: { path: string }) => tessera.path === "lib/alpha.ts",
+    );
+    assert.ok(hit, "backfilled legacy tessera survives a file move");
+    assert.ok(hit.relocated, "recovered via the backfilled drift fingerprint");
+    // A second search still works — the stamp is never rewritten or doubled.
+    const again = await service.invoke("search", {
+      query: "pipeline drains batches",
+      projectDir,
+    });
+    assert.ok(
+      again.tesserae?.some((tessera: { path: string }) => tessera.path === "lib/alpha.ts"),
+      "second search still surfaces the relocated hit",
+    );
+  });
+});
+
+test("tessera simhash: backfill skips files that are unreadable, stamping nothing", async () => {
+  await withProject(async (service, projectDir) => {
+    await service.invoke("remember", {
+      statement: "alpha.ts pipeline drains batches",
+      nodeName: "alpha pipeline",
+      projectDir,
+      tesserae: [
+        {
+          path: "gone.ts",
+          snippet: "The indexing pipeline drains embedding batches.",
+          label: "pipeline note",
+        },
+      ],
+    });
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(join(dirname(projectDir), "nmg.sqlite"));
+    db.prepare("UPDATE tesserae SET file_simhash = NULL").run();
+    db.close();
+
+    const searched = await service.invoke("search", {
+      query: "pipeline drains batches",
+      projectDir,
+    });
+    // Search must not fail; the hit surfaces stale (file unreadable), and no
+    // fingerprint was invented for a file that cannot be read.
+    const hit = searched.tesserae?.find((tessera: { path: string }) => tessera.path === "gone.ts");
+    assert.ok(hit, "unbackfillable tessera still surfaces");
+    assert.ok(hit.stale, "honestly stale when the file is gone");
+    assert.equal(hit.fileSimhash, undefined, "no fingerprint invented for a missing file");
   });
 });

@@ -137,6 +137,9 @@ export function renderCompactSearchSurface(
   });
   return [
     options.preamble,
+    context.retrieval?.degraded
+      ? `[degraded retrieval: mode=${context.retrieval.mode}; reason=${context.retrieval.reason ?? "unknown"}] — results are lexical-only; vector ranking is unavailable until the embedding provider recovers.`
+      : "",
     ...lines,
     ...tesseraLines,
     context.logicalChainCount > 0

@@ -1710,6 +1710,33 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
       }));
     }
 
+    /** Lazy SimHash backfill: stamp a 16-hex drift fingerprint onto a tessera
+     *  written before the fingerprint existed. Update-at-most-once — an
+     *  already-stamped row is never rewritten (a fingerprint is the file as it
+     *  was at write time, not a moving baseline). Returns true when stamped. */
+    updateTesseraSimhash(id: string, fileSimhash: string): boolean {
+      if (!/^[0-9a-f]{16}$/u.test(fileSimhash)) return false;
+      const result = this.db
+        .prepare(
+          `UPDATE tesserae SET file_simhash = ?
+           WHERE id = ? AND file_simhash IS NULL`,
+        )
+        .run(fileSimhash, id);
+      return Number(result.changes) === 1;
+    }
+
+    /** Tesserae still missing a drift fingerprint, oldest first. Bounded: the
+     *  backfill caller stamps what it can in one pass. */
+    tesseraeMissingSimhash(limit = 200): Array<{ id: string; path: string }> {
+      const rows = this.db
+        .prepare(
+          `SELECT id, path FROM tesserae
+           WHERE file_simhash IS NULL ORDER BY created_at LIMIT ?`,
+        )
+        .all(Math.max(1, Math.min(limit, 1_000))) as Array<{ id: string; path: string }>;
+      return rows;
+    }
+
     searchByVector(
       query: string,
       queryVector: readonly number[],

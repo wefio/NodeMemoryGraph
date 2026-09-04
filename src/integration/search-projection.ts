@@ -37,6 +37,10 @@ export interface CompactSearchContext {
   /** Tessera (bookmark) hits — file locations attached to memories, resolved to
    *  lines (or marked stale) by the service layer. */
   tesserae?: TesseraHit[];
+  /** Retrieval health: present and `degraded: true` when results came back
+   *  lexically despite a configured provider (cooldown, missing key, index
+   *  not ready). Absent for callers that predate the field. */
+  retrieval?: MemoryContext["retrieval"];
 }
 
 /** Agent-facing search projection. Exact records and evidence remain behind `nmg get`. */
@@ -58,6 +62,9 @@ export function compactSearchContext(context: MemoryContext): CompactSearchConte
     activeGraphId: context.activeGraph?.id ?? null,
     deferredMemoryIds: context.progressiveDisclosure?.deferredMemoryIds ?? [],
     ...(context.tesserae && context.tesserae.length > 0 ? { tesserae: context.tesserae } : {}),
+    // Degraded retrieval must survive projection — a silently healthy-looking
+    // lexical surface is how a dead provider went unnoticed for weeks.
+    ...(context.retrieval?.degraded ? { retrieval: context.retrieval } : {}),
   };
 }
 
