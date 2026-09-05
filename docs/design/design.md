@@ -50,7 +50,11 @@ NMG through an optional client adapter, but the dependency direction is strictly
 `Repository Control Plane -> NMG client -> NMG daemon`. Git contracts, repository
 observations, verification receipts, pull-request state, and merge readiness
 remain control-plane or forge concerns; they do not become STG/LTG truth and the
-NMG daemon never schedules or reconciles repository work. The implemented core
+NMG daemon never schedules or reconciles repository work. An explicit RCP client
+may project a validated receipt into a named session/task frame as bounded
+`tool_observation` feedback through the existing AG RPC. This does not infer
+quest completion, admit a training reward, or transfer verification authority to
+NMG; full evidence remains in the receipt. The implemented core
 and deferred boundary are specified in
 [ci-cd-and-quality.md](ci-cd-and-quality.md#7-repository-control-plane) and the
 implemented [Repository Control Plane decision](../decisions/implemented/2026-08-29-repository-control-plane.md).

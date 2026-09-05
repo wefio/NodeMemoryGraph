@@ -10,6 +10,40 @@ model, and the candidate design that would close the remaining loop. It is
 written so a future Agent can pick the thread up without re-deriving the
 conversation.
 
+## Implementation boundary (partial, not design completion)
+
+The first code slice implements only:
+
+- `src/rcp/session-feedback.ts`: a validated receipt becomes a bounded temporary
+  tool observation in an explicitly named session/task frame. CLI opt-in uses
+  `reconcile ... --nmg optional --session-id <id> --task-frame-id <id>` and an
+  already-running compatible daemon. It does not start/stop a daemon, write
+  durable memory, mark a quest complete, or train a router. Receipt delivery
+  failures are diagnostics, not changes to the verifier's decision. Plan mode
+  and idempotent receipt reuse do not emit a new notification. AG visibility
+  still follows the existing activation/disclosure lifecycle.
+- `src/lab/context-router.ts`: an isolated 132-parameter action-value primitive
+  using the existing autodiff substrate, allowed-action selection, explicit
+  epsilon sampling with propensity, detached weight export, and observed-action
+  regression. It is not connected to automatic recall, not exposed as a new Lab
+  lease, and not a trained or enabled policy. Outcome admission remains the
+  caller's responsibility; arbitrary numeric rewards are not verified evidence.
+
+`tests/rcp/session-feedback.test.ts` exercises actual failed npm verification,
+receipt/contract binding, duplicate projection, session isolation, outage
+handling, plan behavior, and CLI-to-daemon HTTP delivery in a controlled fixture.
+`tests/core/context-router.test.ts` covers the small head in interpreted and
+compiled execution. These tests establish their exercised mechanisms, not
+natural task success, convergence, or causal intervention benefit.
+
+Still open: the unified lifecycle/event and intervention sample pipeline,
+versioned feature schema, four executor integration, validated outcome admission,
+bookmark content ingestion, long-lived quests, held-out learning experiments,
+and all default-activation gates. The original theoretical discussion below
+remains a draft; in particular, lifecycle facts and SimHash are **not** admitted
+as universally unbiased task rewards. Do not close the overall design task on
+this slice or its PR.
+
 ## 1. The replaced model
 
 Popular writing frames long agent tasks as a reliability product: if each step
@@ -467,10 +501,10 @@ immutable checkpoints; authority (plan/apply) sizes the step.
 Existing: contract/observe/reconcile, idempotent re-observation, changedPaths,
 fail-closed termination, receipts.
 
-Gaps: reconcile drift events do **not flow back** — neither into the session
-AG as observations nor into searchable memory for a later session. Continuous
-observation is deferred (correctly, until run-to-completion feedback latency is
-demonstrated fatal).
+Partial wiring: explicit CLI opt-in sends a newly recorded receipt into a named
+session AG as bounded feedback (see the implementation boundary above). General
+drift/lifecycle streaming, retry replay and cross-session memory admission remain
+open. Continuous observation is deferred until its need is measured.
 
 ### 5.3 AG (session Active Graph runtime)
 
@@ -485,8 +519,8 @@ projections (temporary, deduped, budgeted), typed edge layers that stop
 activation/reasoning from silently reinforcing semantic truth. Item kinds:
 `semantic_memory | tool_observation | board_projection | reasoning_artifact`.
 
-Gaps: reconcile events are not wired into `observe()`; external content
-fragments are not a first-class ingestible kind — AG ingests tool observations
+Partial wiring: RCP receipts can reach `observe()` through the explicit optional
+client bridge. External content fragments are not a first-class ingestible kind — AG ingests tool observations
 and board projections, but a bookmark (§5.4), an external snippet + path,
 cannot be added as content, and when a memory enters the AG as a
 `semantic_memory` item only its `statement` travels (its bookmarks do not ride
@@ -580,7 +614,8 @@ elaborates and decomposes, it does not self-initiate). Consequences:
    half of this.
 2. AG cannot ingest external content fragments; bookmark ingestion is the
    concrete first case (memory items enter the AG without their bookmarks).
-3. Reconcile drift events are not wired into AG `observe()`.
+3. Explicit newly recorded RCP receipt → AG `observe()` is implemented; general
+   drift streaming, notification replay and automatic harness feedback remain open.
 4. No intervention logging or ε-greedy exploration exists to make `u(d,p)`
    estimable (counterfactual data). Reuse pattern: learned-router gates
    (`examples ≥ N`, lexical guard, shadow-first) plus an always-random probe

@@ -405,6 +405,21 @@ revision，避免控制面输出改变自身输入。
 当前只实现 run-to-completion 路径。`continuous` 是 Contract 可声明的权限上限，不表示
 已经存在 watcher；在出现真实持续 contract 前，常驻 queue/catalog/watcher 仍明确延后。
 
+#### 可选的会话反馈
+
+`reconcile` 可显式附加 `--nmg optional --session-id <id> --task-frame-id <id>`，
+把本次已落盘的 receipt 投影到调用方指定的会话 AG。两项身份必须同时给出，不能以
+Contract ID 猜测会话。该路径只连接 `NMG_DATA_DIR` 下已经运行且协议/能力兼容的
+`nmg.sqlite` daemon，不启动、替换或停止它；也不执行普通 NMG recall 或发布黑板结果。
+
+反馈保留 receipt ID、Contract digest、observed revision、检查结果与有界诊断，作为
+`tool_observation` 遵守既有 AG 激活、去重和会话清理规则。receipt 仍是完整证据源，
+AG 摘要不是任务完成标签，也不会自动进入 LTG 或控制器训练。收据完整性与成功条件分开：
+scope 越界的 `failed` 收据可以保存并反馈，但不能作为成功复用；`verified` 收据仍须 scope
+匹配。RCP 通过随包 CLI 的 `nmg session observe` 通讯，不导入 NMG 内部模块。plan 和 receipt reuse
+不产生新通知；反馈失败只记入 `memoryDiagnostics`，不会改写验证结论。当前边界不含
+通用事件总线、自动重试投递、跨会话任务续接或学习策略激活。
+
 ### 7.12 CI 状态观察
 
 `.github/workflows/ci-status.yml` 在规范 `CI` workflow 完成后运行一个只读 GitHub-hosted

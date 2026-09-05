@@ -26,6 +26,7 @@ import type {
   NmgRollbackNodeTransformParams,
   NmgRetentionCandidatesParams,
   NmgSearchParams,
+  NmgSessionActiveGraphParams,
   NmgSetStorageStateParams,
   NmgSplitNodeParams,
   NmgSyncStgParams,
@@ -44,6 +45,8 @@ export interface CliCommandSpec {
   method?: NmgMethod;
   /** Local command dispatched by main.ts without RPC (e.g. the inspect TUI). */
   local?: boolean;
+  /** Session-owned state is meaningful only in an existing resident daemon. */
+  requiresResident?: boolean;
   /** Set false to reject COMMON_FLAGS (e.g. --json) for this command. */
   includeCommonFlags?: boolean;
   /** CLI words, e.g. ["search"] or ["retention", "candidates"]. */
@@ -64,6 +67,25 @@ export const COMMON_OPTIONS = ["data-dir", "db"] as const;
 export const COMMON_FLAGS = ["json"] as const;
 
 export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
+  {
+    method: "sessionActiveGraph",
+    words: ["session", "observe"],
+    requiresResident: true,
+    usageLine:
+      "nmg session observe TEXT --session-id ID --task-frame-id ID --source-id ID [--json]",
+    options: ["session-id", "task-frame-id", "source-id"],
+    flags: [],
+    usageDetail:
+      "Session observations require an already-running compatible daemon. They are temporary tool observations, not durable memories or completion labels.",
+    buildParams: (values): NmgSessionActiveGraphParams => ({
+      action: "observe",
+      statement: singlePositional(values, "session observe"),
+      sessionId: requiredOption(values, "session-id"),
+      taskFrameId: requiredOption(values, "task-frame-id"),
+      sourceId: requiredOption(values, "source-id"),
+      kind: "tool_observation",
+    }),
+  },
   {
     method: "lab",
     words: ["lab", "list"],
