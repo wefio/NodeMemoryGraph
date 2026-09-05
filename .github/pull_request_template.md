@@ -44,7 +44,9 @@
 ### CI 完成确认
 
 <!-- 用 RCP/forge 观察确认，不逐个 job 轮询。RCP 节的
-     `nmg-rcp forge-status --pr <PR号>` 是权威读法；下面两项是其补充。 -->
+     `nmg-rcp forge-status --pr <PR号>` 是权威读法；下面两项是其补充。
+     CI 从 push 到全部检查完成通常约一分半，可稍等后 `nmg-rcp forge-status --pr <PR号>` 复查，
+     不要按固定时长人工反复轮询或把“看起来在跑”当作“已通过”。 -->
 
 - [ ] `nmg-rcp forge-status --pr <PR号>` 的 `All checks passed` 为 SUCCESS
       （或 CI Status Snapshot `.nmg-ci/status.json`：`conclusion: "success"` 且 `failures: []`）
