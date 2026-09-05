@@ -70,6 +70,22 @@ to use it explicitly for one suitable task.
 | Repository Control Plane | External Contract-to-Agent-to-Code-to-Verifier run-to-completion reconciliation with separate desired, observed, receipt and forge truth domains; optional one-way NMG integration | `src/rcp/`, `nmg-rcp` CLI, standard `agent:verify` auto-delegation for uniquely covered scopes, shared context/verification primitives, deterministic RCP tests, validated receipt reuse, verifier/route binding, fail-closed Git/forge provenance, local receipt scan, bounded process harness and explicit interrupted-attempt recovery | **Verified core** | The default receipt store and in-flight journal are local and Git-ignored: they support operator audit, idempotency and replay-safe recovery, not portable third-party proof. Unmatched scopes keep ordinary verification; overlapping Contracts fail closed. Continuous reconciliation and external attestation are explicitly deferred. |
 | Cloud and sandbox | Pluggable future integration only; no default dependency | explicit product boundary | **Out of scope** | Pi sandbox plugins own execution isolation; cloud waits for multi-device scope. |
 
+## Agent convergence feedback implementation slice
+
+The [feedback design](agent-convergence-feedback-design.md) remains **partial**,
+not completed by a documentation or implementation PR. `SessionFeedbackProvider`
+and the explicit RCP CLI session/task target send validated, newly recorded
+receipts into temporary AG observations. Controlled tests cover a real failing
+check, HTTP delivery, identity binding, deduplication and failure isolation.
+They do not prove overall task completion or natural Agent improvement.
+
+The 132-parameter `ContextRouter` numerical primitive has action-mask, sampling,
+observed-action update and weight round-trip tests, including compiled execution.
+It is not automatically invoked, trained from natural outcomes, or exposed as a
+new self-service Lab capability. Unified event/sample collection, fixed feature
+semantics, executor integration, outcome admission and held-out efficacy remain
+open. No completed status or default promotion is implied.
+
 ## Actual active blockers
 
 Four active work families remain; the first is narrower AG completion work and

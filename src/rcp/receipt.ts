@@ -10,7 +10,6 @@ export function validateReceipt(receipt: RepositoryReceipt): ReceiptValidation {
   const errors: string[] = [];
   validateReceiptIdentity(receipt, errors);
   validateWorkOrderBinding(receipt, errors);
-  if (!receipt.scope.matched) errors.push("actual scope does not match declared scope");
   if (receipt.decision === "verified") validateVerifiedDecision(receipt, errors);
   const expectedId = receiptId({ ...receipt, receiptId: "" });
   if (receipt.receiptId !== expectedId) errors.push("receiptId does not match canonical content");
@@ -49,6 +48,7 @@ function validateWorkOrderBinding(receipt: RepositoryReceipt, errors: string[]):
 }
 
 function validateVerifiedDecision(receipt: RepositoryReceipt, errors: string[]): void {
+  if (!receipt.scope.matched) errors.push("actual scope does not match declared scope");
   if (receipt.harness.status !== "completed") {
     errors.push("verified receipt has incomplete harness");
   }

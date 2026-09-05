@@ -42,7 +42,7 @@ import { NmgService } from "./service.ts";
 import { histogramQuantile } from "../core/perf.ts";
 import type { MemoryContext } from "../core/types.ts";
 import { compactSearchContext } from "../integration/search-projection.ts";
-import { assertDaemonProtocol } from "./daemon-client.ts";
+import { assertDaemonCapability, assertDaemonProtocol, parseDaemonHello } from "./daemon-client.ts";
 
 // The CLI surface (synopsis, option details, known options/flags) is
 // assembled from the command registry in commands.ts; only the daemon
@@ -115,20 +115,7 @@ export async function runCli(
   }
 
   try {
-    const state = readServerState(serverStatePath(service.databasePath));
-    let result: unknown;
-    if (state?.transport === "http" && isProcessAlive(state.pid)) {
-      if (state.protocol !== NMG_PROTOCOL_VERSION) {
-        assertDaemonProtocol((await httpCall(state, "hello")) as NmgHelloResult);
-      }
-      result = await httpCall(
-        state,
-        parsed.command,
-        (parsed.params ?? {}) as Record<string, unknown>,
-      );
-    } else {
-      result = await service.invoke(parsed.command, parsed.params);
-    }
+    const result = await invokeCliMethod(service, parsed.command, parsed);
     const output =
       parsed.compactJson && parsed.command === "search"
         ? compactSearchContext(result as MemoryContext)
@@ -145,6 +132,29 @@ export async function runCli(
   } finally {
     service.close();
   }
+}
+
+async function invokeCliMethod(
+  service: NmgService,
+  method: NmgMethod,
+  parsed: ParsedArguments,
+): Promise<unknown> {
+  const state = readServerState(serverStatePath(service.databasePath));
+  if (state?.transport === "http" && isProcessAlive(state.pid)) {
+    if (parsed.requiresResident) {
+      const hello = parseDaemonHello(await httpCall(state, "hello"));
+      assertDaemonCapability(
+        new Set(hello.capabilities),
+        method,
+        hello.methods ? new Set(hello.methods) : undefined,
+      );
+    } else if (state.protocol !== NMG_PROTOCOL_VERSION) {
+      assertDaemonProtocol((await httpCall(state, "hello")) as NmgHelloResult);
+    }
+    return httpCall(state, method, parsed.params ?? {});
+  }
+  if (parsed.requiresResident) throw new Error("session observations require a running NMG daemon");
+  return service.invoke(method, parsed.params);
 }
 
 async function runDaemonCommand(
@@ -306,6 +316,7 @@ interface ParsedArguments {
     | NmgPerfParams;
   json: boolean;
   compactJson?: boolean;
+  requiresResident?: boolean;
   dataDirectory?: string;
   databasePath?: string;
   /** Local `graph` command: output HTML path. */
@@ -365,6 +376,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
   }
   return {
     command: spec.method!,
+    requiresResident: spec.requiresResident,
     params: spec.buildParams(values) as ParsedArguments["params"],
     json: values.flags.has("json"),
     compactJson: values.flags.has("compact-json"),

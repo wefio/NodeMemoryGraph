@@ -1,7 +1,8 @@
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { compileContractFile } from "../contract.ts";
 import { planWorkOrder, readRouteDeclarations } from "../planner.ts";
@@ -17,7 +18,8 @@ import {
 import { validateReceipt } from "../receipt.ts";
 import { reconcileOnce } from "../reconcile.ts";
 import { LocalRepositoryProvider } from "../repository.ts";
-import type { NmgMemoryClient } from "../providers.ts";
+import { SessionFeedbackProvider, type SessionFeedbackTarget } from "../session-feedback.ts";
+import type { MemoryProvider, NmgMemoryClient } from "../providers.ts";
 import type { RepositoryContractIr, RepositoryReceipt } from "../types.ts";
 
 interface CliOptions {
@@ -40,6 +42,8 @@ interface CliOptions {
   headRef?: string;
   title?: string;
   body?: string;
+  sessionId?: string;
+  taskFrameId?: string;
 }
 
 interface CliOptionState extends Omit<CliOptions, "receiptDirectory"> {
@@ -222,7 +226,18 @@ async function reconcileContract(
       harness,
       verifier: new LocalNpmVerifierProvider(),
       receipts: new FileReceiptSink(options.receiptDirectory),
-      memory: memoryProvider(options.nmgMode, options.root),
+      memory: memoryProvider(
+        options.nmgMode,
+        options.root,
+        options.sessionId && options.taskFrameId
+          ? {
+              sessionId: options.sessionId,
+              taskFrameId: options.taskFrameId,
+              contractId: contract.id,
+              contractDigest: contract.contractDigest,
+            }
+          : undefined,
+      ),
       forge: options.pullRequestNumber === undefined ? undefined : new GitHubForgeProvider(),
     },
   );
@@ -272,6 +287,15 @@ const valueOptionHandlers: Record<
   "--head": (state, value) => (state.headRef = value),
   "--title": (state, value) => (state.title = value),
   "--body": (state, value) => (state.body = value),
+  "--session-id": (state, value) => {
+    if (!value?.trim() || value.startsWith("--")) throw new Error("--session-id requires a value");
+    state.sessionId = value.trim();
+  },
+  "--task-frame-id": (state, value) => {
+    if (!value?.trim() || value.startsWith("--"))
+      throw new Error("--task-frame-id requires a value");
+    state.taskFrameId = value.trim();
+  },
   "--harness-command": (state, value) => (state.harnessCommand = value),
   "--harness-arg": (state, value) => state.harnessArgs.push(value ?? ""),
 };
@@ -325,6 +349,17 @@ function consumeNmgMode(args: string[], index: number, state: CliOptionState): n
 }
 
 function resolveCliOptions(state: CliOptionState): CliOptions {
+  if (
+    (state.sessionId || state.taskFrameId) &&
+    (!state.sessionId ||
+      !state.taskFrameId ||
+      state.nmgMode === "disabled" ||
+      state.command !== "reconcile")
+  ) {
+    throw new Error(
+      "session feedback requires reconcile, --session-id, --task-frame-id, and --nmg optional|required",
+    );
+  }
   const root = resolve(state.root);
   return {
     ...state,
@@ -334,7 +369,11 @@ function resolveCliOptions(state: CliOptionState): CliOptions {
   };
 }
 
-function memoryProvider(mode: CliOptions["nmgMode"], root: string): NmgMemoryProvider | undefined {
+function memoryProvider(
+  mode: CliOptions["nmgMode"],
+  root: string,
+  target?: SessionFeedbackTarget,
+): MemoryProvider | undefined {
   if (mode === "disabled") return undefined;
   const client: NmgMemoryClient = {
     recall: async (query) => {
@@ -380,7 +419,33 @@ function memoryProvider(mode: CliOptions["nmgMode"], root: string): NmgMemoryPro
     });
     if (result.status !== 0) throw new Error("required NMG provider is unavailable");
   }
-  return new NmgMemoryProvider(client);
+  const memory = new NmgMemoryProvider(client);
+  if (!target) return memory;
+  const feedback = new SessionFeedbackProvider(target, async (observation) => {
+    // The resident-only CLI owns protocol negotiation. RCP does not import NMG
+    // internals or start/stop its daemon. A bounded child also bounds outages.
+    const launcher = fileURLToPath(new URL("../../../bin/nmg.mjs", import.meta.url));
+    await promisify(execFile)(
+      process.execPath,
+      [
+        launcher,
+        "session",
+        "observe",
+        observation.statement,
+        "--session-id",
+        observation.sessionId,
+        "--task-frame-id",
+        observation.taskFrameId,
+        "--source-id",
+        observation.sourceId,
+        "--json",
+      ],
+      { cwd: root, timeout: 10_000, windowsHide: true, maxBuffer: 64 * 1024 },
+    );
+  });
+  // Explicit session feedback is observation-only: do not launch the ordinary
+  // recall CLI (which can start a daemon or acquire embeddings) as a side effect.
+  return feedback;
 }
 
 function runNmg(root: string, args: string[]): string {
@@ -471,6 +536,8 @@ Options:
   --title <text>           Draft PR title (default Contract intent)
   --body <text>            optional prose before the machine Contract binding
   --nmg <mode>             disabled (default), optional, or required
+  --session-id <id>        opt into receipt feedback to this existing NMG session
+  --task-frame-id <id>     explicit feedback task frame (requires --session-id and NMG)
 `;
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
