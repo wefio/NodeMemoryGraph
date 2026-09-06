@@ -1135,6 +1135,12 @@ export interface TaskBoardEntry {
   resolvedAt: string | null;
   resolvedBy: string | null;
   resolution: string | null;
+  /** Reviewable-finalize veto (P1): set when an independent reviewer (not the
+   * resolver) marks this self-reported resolve as contested, so it is not
+   * accepted downstream as validated completion. Null until a veto. */
+  vetoedBy: string | null;
+  vetoedAt: string | null;
+  vetoReason: string | null;
   /** Lease-based claim: the agent working this entry. A claim is live while
    * claimedBy is set and claimExpiresAt is in the future. */
   claimedBy: string | null;

@@ -2314,3 +2314,40 @@ test("task board inbox RPC returns directed and outstanding actionable work", as
     removeTempDirectory(directory);
   }
 });
+
+test("task board veto RPC marks a resolve contested by an independent reviewer", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-board-veto-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    const put = await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "ch-v",
+      agentId: "claimer",
+      kind: "handoff",
+      content: "Claimed work.",
+    });
+    if (put.action !== "put") throw new Error("expected put");
+    await service.invoke("taskBoard", {
+      action: "resolve",
+      taskId: "ch-v",
+      entryId: put.entry.id,
+      agentId: "claimer",
+      resolution: "self-reported done",
+    });
+    const veto = await service.invoke("taskBoard", {
+      action: "veto",
+      taskId: "ch-v",
+      entryId: put.entry.id,
+      agentId: "reviewer",
+      reason: "unverified",
+    });
+    assert.equal(veto.action, "veto");
+    if (veto.action !== "veto") throw new Error("expected veto");
+    assert.equal(veto.entry.vetoedBy, "reviewer");
+    assert.equal(veto.entry.vetoReason, "unverified");
+    assert.equal(veto.entry.status, "resolved");
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});

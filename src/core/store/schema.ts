@@ -966,6 +966,20 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
         "CHECK (serial_state IN ('outstanding', 'pending', 'stale'))",
     );
   }
+  // Reviewable finalize (P1 veto, board-governance): an independent reviewer
+  // (not the resolver) can mark a self-reported resolve as contested, so the
+  // resolve is not accepted downstream as validated completion (de-biases
+  // false-complete for the converge calibrator). Entry stays resolved; the
+  // veto is an auditable flag (who/when/why). Null until a veto is recorded.
+  if (!existing.has("vetoed_by")) {
+    db.exec("ALTER TABLE task_board_entries ADD COLUMN vetoed_by TEXT");
+  }
+  if (!existing.has("vetoed_at")) {
+    db.exec("ALTER TABLE task_board_entries ADD COLUMN vetoed_at TEXT");
+  }
+  if (!existing.has("veto_reason")) {
+    db.exec("ALTER TABLE task_board_entries ADD COLUMN veto_reason TEXT");
+  }
   // Delivery receipts: which session a wake already reached for an entry — the
   // authoritative "already notified, do not re-notify" record (replaces the
   // ephemeral notified[] array in board-wake-state.json). (session_id,

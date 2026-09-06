@@ -2373,6 +2373,7 @@ function parseStgPurgeSessionParams(value: unknown): NmgStgPurgeSessionParams {
  * so adding another read-style action does not raise the parser's complexity. */
 const TASK_BOARD_READ_STYLE = new Set<string>(["read", "readPreviews"]);
 const TASK_BOARD_DIRECTED_STYLE = new Set<string>(["readDirected", "readInbox"]);
+const TASK_BOARD_ACK_STYLE = new Set<string>(["acknowledge", "veto"]);
 
 function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
   const params = objectParams(value);
@@ -2383,6 +2384,7 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
     "readDirected",
     "readInbox",
     "resolve",
+    "veto",
     "acknowledge",
     "claim",
     "release",
@@ -2520,10 +2522,10 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
       leaseSeconds: optionalInteger(params, "leaseSeconds", 60, 86_400),
     };
   }
-  if (action === "acknowledge") {
+  if (TASK_BOARD_ACK_STYLE.has(action)) {
     return {
       ...entryBase,
-      action,
+      action: action as "acknowledge" | "veto",
       reason: optionalString(params, "reason"),
     };
   }
@@ -2616,6 +2618,10 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
       action: "acknowledge",
       entry: store.getTaskBoardEntryById(p.taskId, p.entryId)!,
     };
+  },
+  veto: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"veto">;
+    return { action: "veto", entry: store.vetoTaskBoardEntry(p) };
   },
   unsubscribe: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"unsubscribe">;

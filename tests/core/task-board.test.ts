@@ -800,3 +800,54 @@ test("task board serial handoff promotes pending on claim, resolve, and expiry",
     assert.equal(stateOf(store, fresh.id), "outstanding");
   });
 });
+
+test("veto flags a resolved entry by an independent reviewer and is auditable", () => {
+  withStore((store) => {
+    const future = "2099-01-01T00:00:00.000Z";
+    const entry = store.putTaskBoardEntry({
+      taskId: "ch-v",
+      agentId: "claimer",
+      kind: "handoff",
+      content: "Claimed work.",
+      expiresAt: future,
+    });
+    store.resolveTaskBoardEntry({
+      taskId: "ch-v",
+      entryId: entry.id,
+      agentId: "claimer",
+      resolution: "self-reported done",
+    });
+    // Resolver cannot veto its own resolve.
+    assert.throws(() =>
+      store.vetoTaskBoardEntry({ taskId: "ch-v", entryId: entry.id, agentId: "claimer" }),
+    );
+    // Independent reviewer vetoes it.
+    const vetoed = store.vetoTaskBoardEntry({
+      taskId: "ch-v",
+      entryId: entry.id,
+      agentId: "reviewer",
+      reason: "output not verified",
+    });
+    assert.equal(vetoed.status, "resolved", "veto does not reopen the entry");
+    assert.equal(vetoed.resolvedBy, "claimer");
+    assert.equal(vetoed.vetoedBy, "reviewer");
+    assert.equal(vetoed.vetoReason, "output not verified");
+    assert.ok(vetoed.vetoedAt !== null);
+  });
+});
+
+test("veto rejects an entry that is not resolved", () => {
+  withStore((store) => {
+    const future = "2099-01-01T00:00:00.000Z";
+    const entry = store.putTaskBoardEntry({
+      taskId: "ch-v",
+      agentId: "claimer",
+      kind: "handoff",
+      content: "Still open.",
+      expiresAt: future,
+    });
+    assert.throws(() =>
+      store.vetoTaskBoardEntry({ taskId: "ch-v", entryId: entry.id, agentId: "reviewer" }),
+    );
+  });
+});

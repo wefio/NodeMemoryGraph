@@ -438,6 +438,37 @@ export class NmgStoreBase {
     this.promoteNextSerialPending(input.taskId);
     return this.taskBoardEntry(input.entryId)!;
   }
+  /** Reviewable finalize (P1 veto): an independent reviewer — not the agent who
+   * resolved the entry — flags a self-reported resolve as contested. The entry
+   * stays resolved (board lifecycle/serial promotion are untouched); the veto
+   * is an auditable mark so downstream does not accept the resolve as validated
+   * completion (de-biases false-complete for the converge calibrator). */
+  vetoTaskBoardEntry(input: {
+    taskId: string;
+    entryId: string;
+    agentId: string;
+    reason?: string;
+  }): TaskBoardEntry {
+    const existing = this.taskBoardEntry(input.entryId);
+    if (!existing || existing.taskId !== input.taskId) {
+      throw new Error(`task board entry not found in task ${input.taskId}`);
+    }
+    if (existing.status !== "resolved") {
+      throw new Error(`only a resolved entry can be vetoed (${input.entryId})`);
+    }
+    if (existing.resolvedBy !== null && existing.resolvedBy === input.agentId) {
+      throw new Error(`the resolver cannot veto its own resolve (${input.entryId})`);
+    }
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE task_board_entries
+         SET vetoed_by = ?, vetoed_at = ?, veto_reason = ?
+         WHERE id = ? AND task_id = ?`,
+      )
+      .run(input.agentId, now, input.reason ?? null, input.entryId, input.taskId);
+    return this.taskBoardEntry(input.entryId)!;
+  }
   /** True when a board entry carries a live claim (holder set, lease not expired). */
   private taskBoardClaimLive(entry: TaskBoardEntry, now: string): boolean {
     return entry.claimedBy !== null && entry.claimExpiresAt !== null && entry.claimExpiresAt > now;
@@ -2310,6 +2341,9 @@ function mapTaskBoardEntry(row: Row): TaskBoardEntry {
       row.serial_state === null
         ? null
         : (String(row.serial_state) as TaskBoardEntry["serialState"]),
+    vetoedBy: row.vetoed_by === null ? null : String(row.vetoed_by),
+    vetoedAt: row.vetoed_at === null ? null : String(row.vetoed_at),
+    vetoReason: row.veto_reason === null ? null : String(row.veto_reason),
     ackedBy: [],
   };
 }

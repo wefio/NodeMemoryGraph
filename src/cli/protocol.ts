@@ -566,6 +566,12 @@ export interface NmgTaskBoardReleaseParams extends NmgTaskBoardBase {
   entryId: string;
 }
 
+export interface NmgTaskBoardVetoParams extends NmgTaskBoardBase {
+  action: "veto";
+  entryId: string;
+  reason?: string;
+}
+
 export interface NmgTaskBoardListParams {
   action: "list";
   agentId: string;
@@ -664,6 +670,7 @@ export type NmgTaskBoardParams =
   | NmgTaskBoardReadInboxParams
   | NmgTaskBoardReadPreviewsParams
   | NmgTaskBoardResolveParams
+  | NmgTaskBoardVetoParams
   | NmgTaskBoardAcknowledgeParams
   | NmgTaskBoardClaimParams
   | NmgTaskBoardReleaseParams
@@ -863,7 +870,10 @@ export type NmgMethodResult = {
   syncStg: { copied: number; projectDir: string };
   stgPurgeSession: { purged: number; projectDir: string };
   taskBoard:
-    | { action: "put" | "resolve" | "claim" | "release" | "acknowledge"; entry: TaskBoardEntry }
+    | {
+        action: "put" | "resolve" | "claim" | "release" | "acknowledge" | "veto";
+        entry: TaskBoardEntry;
+      }
     | { action: "read"; entries: TaskBoardEntry[]; nextCursor: string | null }
     | { action: "readDirected"; entries: TaskBoardEntry[] }
     | { action: "readInbox"; entries: TaskBoardEntry[] }
