@@ -32,6 +32,7 @@ import type {
   PerfSnapshot,
   TaskBoardEntry,
   TaskBoardKind,
+  TaskBoardStatus,
   TopologyProposal,
   VectorEmbedder,
 } from "../types.ts";
@@ -342,6 +343,55 @@ export class NmgStoreBase {
     const ackMap = this.taskBoardAckMap(entries.map((entry) => entry.id));
     for (const entry of entries) entry.ackedBy = ackMap.get(entry.id) ?? [];
     return entries;
+  }
+  /** Compact, low-context view over one channel's open entries (F1 in the
+   *  board-governance proposal). Returns a bounded per-entry projection that
+   *  omits the full body — the long content/evidence stays out of the wire
+   *  until the reader asks for it via a full read or an explicit expansion of a
+   *  `memory=<id>` pointer. Ordering and cursor semantics match readTaskBoard so
+   *  an incremental sync can page over the compact view without re-reading
+   *  full bodies. */
+  readTaskBoardPreviews(input: {
+    taskId: string;
+    afterCursor?: string;
+    limit?: number;
+    includeResolved?: boolean;
+    now?: string;
+  }): {
+    previews: Array<{
+      id: string;
+      taskId: string;
+      kind: TaskBoardKind;
+      status: TaskBoardStatus;
+      agentId: string;
+      to: string | null;
+      claimedBy: string | null;
+      serialState: TaskBoardEntry["serialState"];
+      ackCount: number;
+      createdAt: string;
+      resolvedAt: string | null;
+      /** Bounded one-line preview of content, or the whole content when it is
+       *  already short (for example a lone `memory=<id>` pointer). */
+      preview: string;
+    }>;
+    nextCursor: string | null;
+  } {
+    const { entries, nextCursor } = this.readTaskBoard(input);
+    const previews = entries.map((entry) => ({
+      id: entry.id,
+      taskId: entry.taskId,
+      kind: entry.kind,
+      status: entry.status,
+      agentId: entry.agentId,
+      to: entry.to,
+      claimedBy: entry.claimedBy,
+      serialState: entry.serialState,
+      ackCount: entry.ackedBy.length,
+      createdAt: entry.createdAt,
+      resolvedAt: entry.resolvedAt,
+      preview: taskBoardPreview(entry.content),
+    }));
+    return { previews, nextCursor };
   }
   resolveTaskBoardEntry(input: {
     taskId: string;
@@ -2212,6 +2262,16 @@ export class NmgStoreBase {
       return row ? [mapHistory(row)] : [];
     });
   }
+}
+
+/** Bounded preview used by the compact read (readTaskBoardPreviews): a lone
+ * memory pointer is already the intended low-context form and is returned whole;
+ * anything longer is collapsed to a single bounded line so a sync never carries
+ * a full body it did not ask for. */
+function taskBoardPreview(content: string, max = 200): string {
+  if (content.trim().startsWith("memory=")) return content.trim();
+  const single = content.replace(/\s+/g, " ").trim();
+  return single.length <= max ? single : `${single.slice(0, max - 1)}…`;
 }
 
 function mapTaskBoardEntry(row: Row): TaskBoardEntry {
