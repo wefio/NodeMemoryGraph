@@ -30,6 +30,10 @@ test("CLI compiles and plans a Contract without mutating the repository", () => 
   assert.equal(planned.workOrder.schema, "repository.work-order/v1alpha1");
   assert.deepEqual(planned.workOrder.verificationChecks, ["check"]);
   assert.equal(planned.workOrder.budget.timeoutMs, 1234);
+  const textPlan = run(root, ["plan", contract]);
+  assert.equal(textPlan.status, 0, textPlan.stderr);
+  assert.match(textPlan.stdout, /Observation completed: \d+ files, \d+ bytes/);
+  assert.equal(typeof JSON.parse(plan.stdout).observation.observedBytes, "number");
 });
 
 test("CLI apply is fail-closed without an explicit harness boundary", () => {

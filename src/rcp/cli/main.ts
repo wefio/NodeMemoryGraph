@@ -182,7 +182,12 @@ async function planContract(options: CliOptions, contract: RepositoryContractIr)
     routes: readRouteDeclarations(options.root),
     executionTimeoutMs: options.harnessTimeoutMs,
   });
-  emit(options.json, { contract, observation, workOrder }, formatPlan(workOrder));
+  const text = [
+    formatPlan(workOrder),
+    `Observation completed: ${observation.files.length} files, ${observation.observedBytes ?? 0} bytes of regular-file content (post-read).`,
+    ...observation.diagnostics.map((message) => `Observation diagnostic: ${message}`),
+  ].join("\n");
+  emit(options.json, { contract, observation, workOrder }, text);
   return 0;
 }
 
