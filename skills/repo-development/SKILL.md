@@ -131,6 +131,19 @@ owning document (this SKILL, `ci-cd-and-quality.md`, the RCP decision) in the
 same change — an improved tool that stays undocumented is a tool agents will
 not reach for.
 
+**Observation must not scan oversized directories by default.** `collectFiles`
+prunes to directories reachable by the contract include scope, so a huge
+untracked tree (for example benchmark venvs/datasets) is never read unless an
+include pattern reaches it. A catch-all or wide include that would read more
+than a soft bound (~256 MiB) emits a non-blocking diagnostic so the cost is
+visible before apply; it is never silently skipped. To genuinely require a
+large path, list it explicitly in the contract `include` scope — that is the
+documented escape hatch. Do not add per-run environment bypasses, expand the
+code skip-list (`.git`/`.nmg`/`node_modules`/`.rcp/receipts`) to make an
+observation "fast enough", or lower the soft bound ad hoc; adjust the scope or
+accept the declared cost. Exceeding the soft bound is not a failure and never
+justifies changing digest semantics.
+
 ## Builds and generated artifacts
 
 Regenerable outputs are **not** tracked (see the rejected decision

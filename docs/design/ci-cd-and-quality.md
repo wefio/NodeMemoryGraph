@@ -184,6 +184,16 @@ daemon 不解析 contract、不启动 Agent、不判断 CI、不拥有 PR，也�
 Contract 描述 desired state；Observer 产生 observed state；Receipt 只证明某次输入上
 执行了什么及结果如何。任何一者都不能通过覆盖另外两者来“收敛”。
 
+Repository Observer 按 contract scope 做安全目录剪枝：只下潜到至少一个 include
+glob 可达的目录（前导 glob 段使整树可达、禁用剪枝），per-file 过滤语义不变。
+测量驱动：一个锚定窄 contract 在含 ~67GB 未跟踪大数据目录（如 benchmark venv/数据）
+的仓库根上，观察从读哈希整棵子树降为只读可达文件（本仓库实测 157ms/36 文件，且
+不再进入这些 gitignored 大目录）。宽/`**` scope 若会读到超过软界（约 256MiB）的内容
+会产出非阻塞诊断以暴露成本；超大目录默认不扫，需要时显式列入 include 即为受支持
+的逃生门。Agent 操作规则（不随手扩跳过表、不用 env 绕过、不临时降软界）以
+`skills/repo-development/SKILL.md` 为权威；观察是否尊重 `.gitignore` 属 digest 语义的
+独立决策，不在剪枝范围内。
+
 ### 7.3 Contract surface 与 IR
 
 第一版使用容易编辑的 YAML/JSON 声明面，并编译为稳定、Agent-neutral 的 Contract
