@@ -19,6 +19,8 @@ export const PI_REMEMBER_ACTIONS = [
 export const COMMON_BOARD_ACTIONS = [
   "put",
   "read",
+  "readInbox",
+  "readPreviews",
   "resolve",
   "acknowledge",
   "claim",

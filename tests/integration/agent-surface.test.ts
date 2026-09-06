@@ -106,7 +106,9 @@ test("shared agent surface keeps search compact and evidence exact", () => {
   assert.ok(search.indexOf("NMG MEMORY CANDIDATES") < search.indexOf("memory=memory-a"));
   assert.ok(search.indexOf("memory=memory-b") < search.indexOf("NMG search metadata: count=2"));
   assert.ok(evidence.indexOf("NMG selected evidence:") < evidence.indexOf("Atlas receives input."));
-  assert.ok(evidence.indexOf("Atlas emits output.") < evidence.indexOf("NMG evidence metadata: count=2"));
+  assert.ok(
+    evidence.indexOf("Atlas emits output.") < evidence.indexOf("NMG evidence metadata: count=2"),
+  );
 });
 
 test("shared remember surface bounds semantic follow-up candidates", () => {
@@ -152,4 +154,60 @@ test("shared task-board surface renders coordination without promoting it to mem
   assert.match(rendered, /nextCursor=7/u);
   assert.match(rendered, /Temporary coordination only/u);
   assert.match(rendered, /nmg_remember/u);
+});
+
+test("task-board readPreviews renders a compact view without full bodies", () => {
+  const longBody = "A very long body that never rides on the wire ".repeat(40).trim();
+  const rendered = renderTaskBoardSurface(
+    {
+      action: "readPreviews",
+      previews: [
+        {
+          id: "e1",
+          kind: "question",
+          status: "open",
+          agentId: "agent-a",
+          claimedBy: null,
+          ackCount: 2,
+          preview: longBody,
+        },
+        {
+          id: "e2",
+          kind: "handoff",
+          status: "open",
+          agentId: "agent-b",
+          claimedBy: null,
+          preview: "memory=abc123",
+        },
+      ],
+      nextCursor: "e2",
+    },
+    { taskId: "ch-x" },
+  );
+  assert.match(rendered, /Compact view/u);
+  assert.match(rendered, /\[question\/open\]/u);
+  assert.match(rendered, /memory=abc123/u);
+  // The long body was collapsed to a bounded preview, not echoed in full.
+  assert.doesNotMatch(rendered, /A very long body that never rides the wire A very long body/u);
+  assert.match(rendered, /nextCursor=e2/u);
+});
+
+test("task-board readInbox labels the actionable-for-me view", () => {
+  const rendered = renderTaskBoardSurface(
+    {
+      action: "readInbox",
+      entries: [
+        {
+          id: "e1",
+          kind: "handoff",
+          status: "open",
+          agentId: "sender",
+          content: "Review the staged handoff for correctness.",
+        },
+      ],
+    },
+    { taskId: "ch-y" },
+  );
+  assert.match(rendered, /Actionable for me/u);
+  assert.match(rendered, /Review the staged handoff/u);
 });
