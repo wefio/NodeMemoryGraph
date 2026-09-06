@@ -29,7 +29,9 @@ export function buildContextDataset(options: {
   const identities = new Map<string, string>();
   for (const event of options.events) {
     const sample = event.sample;
-    const { execution: _execution, outcome: _outcome, ...decision } = sample;
+    const decision = { ...sample };
+    delete decision.execution;
+    delete decision.outcome;
     const identity = JSON.stringify(decision);
     const prior = identities.get(sample.decisionId);
     if (prior !== undefined && prior !== identity) throw new Error("decision ID collision");
