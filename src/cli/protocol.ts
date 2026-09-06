@@ -36,6 +36,7 @@ import type {
   TopologyProposal,
   TaskBoardEntry,
   TaskBoardKind,
+  TaskBoardPreview,
   TruthStatus,
 } from "../core/types.ts";
 import type {
@@ -523,6 +524,24 @@ export interface NmgTaskBoardReadDirectedParams {
   limit?: number;
 }
 
+/** Actionable-for-me inbox (F2): open handoff/question/blocker work across
+ * all boards the agent should act on — directed to it, or the currently
+ * offered un-directed broadcast actionable on a channel. Same shape as
+ * readDirected. */
+export interface NmgTaskBoardReadInboxParams {
+  action: "readInbox";
+  agentId: string;
+  agentName: string;
+  limit?: number;
+}
+
+export interface NmgTaskBoardReadPreviewsParams extends NmgTaskBoardBase {
+  action: "readPreviews";
+  afterCursor?: string;
+  limit?: number;
+  includeResolved?: boolean;
+}
+
 export interface NmgTaskBoardResolveParams extends NmgTaskBoardBase {
   action: "resolve";
   entryId: string;
@@ -545,6 +564,12 @@ export interface NmgTaskBoardClaimParams extends NmgTaskBoardBase {
 export interface NmgTaskBoardReleaseParams extends NmgTaskBoardBase {
   action: "release";
   entryId: string;
+}
+
+export interface NmgTaskBoardVetoParams extends NmgTaskBoardBase {
+  action: "veto";
+  entryId: string;
+  reason?: string;
 }
 
 export interface NmgTaskBoardListParams {
@@ -642,7 +667,10 @@ export type NmgTaskBoardParams =
   | NmgTaskBoardPutParams
   | NmgTaskBoardReadParams
   | NmgTaskBoardReadDirectedParams
+  | NmgTaskBoardReadInboxParams
+  | NmgTaskBoardReadPreviewsParams
   | NmgTaskBoardResolveParams
+  | NmgTaskBoardVetoParams
   | NmgTaskBoardAcknowledgeParams
   | NmgTaskBoardClaimParams
   | NmgTaskBoardReleaseParams
@@ -842,9 +870,14 @@ export type NmgMethodResult = {
   syncStg: { copied: number; projectDir: string };
   stgPurgeSession: { purged: number; projectDir: string };
   taskBoard:
-    | { action: "put" | "resolve" | "claim" | "release" | "acknowledge"; entry: TaskBoardEntry }
+    | {
+        action: "put" | "resolve" | "claim" | "release" | "acknowledge" | "veto";
+        entry: TaskBoardEntry;
+      }
     | { action: "read"; entries: TaskBoardEntry[]; nextCursor: string | null }
     | { action: "readDirected"; entries: TaskBoardEntry[] }
+    | { action: "readInbox"; entries: TaskBoardEntry[] }
+    | { action: "readPreviews"; previews: TaskBoardPreview[]; nextCursor: string | null }
     | {
         action: "list";
         boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }>;

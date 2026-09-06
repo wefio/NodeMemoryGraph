@@ -2238,3 +2238,116 @@ test("task board subscriptions gate broadcast wake while directed delivery uses 
     removeTempDirectory(directory);
   }
 });
+
+test("task board compact preview RPC omits full bodies but keeps ordering", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-board-preview-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "task-a",
+      agentId: "agent-a",
+      kind: "question",
+      content: "memory=abc123",
+    });
+    await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "task-a",
+      agentId: "agent-b",
+      kind: "result",
+      content: "A long body ".repeat(40).trim(),
+    });
+    const previews = await service.invoke("taskBoard", {
+      action: "readPreviews",
+      taskId: "task-a",
+      agentId: "reader",
+    });
+    assert.equal(previews.action, "readPreviews");
+    if (previews.action !== "readPreviews") throw new Error("expected readPreviews");
+    assert.equal(previews.previews.length, 2);
+    // Lone memory pointer is whole; a long body collapses to a bounded preview.
+    assert.equal(previews.previews[0]!.preview, "memory=abc123");
+    assert.ok(previews.previews[1]!.preview.length <= 200);
+    // The full RPC read still returns the complete body.
+    const full = await service.invoke("taskBoard", {
+      action: "read",
+      taskId: "task-a",
+      agentId: "reader",
+    });
+    if (full.action !== "read") throw new Error("expected read");
+    assert.ok(full.entries[1]!.content.length > 200);
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("task board inbox RPC returns directed and outstanding actionable work", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-board-inbox-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "ch-a",
+      agentId: "sender",
+      kind: "handoff",
+      content: "Directed to me.",
+      to: "kimi",
+    });
+    await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "ch-b",
+      agentId: "sender",
+      kind: "question",
+      content: "Broadcast question.",
+    });
+    const inbox = await service.invoke("taskBoard", {
+      action: "readInbox",
+      agentId: "kimi-002",
+      agentName: "kimi",
+    });
+    assert.equal(inbox.action, "readInbox");
+    if (inbox.action !== "readInbox") throw new Error("expected readInbox");
+    assert.equal(inbox.entries.length, 2);
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("task board veto RPC marks a resolve contested by an independent reviewer", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-board-veto-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    const put = await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "ch-v",
+      agentId: "claimer",
+      kind: "handoff",
+      content: "Claimed work.",
+    });
+    if (put.action !== "put") throw new Error("expected put");
+    await service.invoke("taskBoard", {
+      action: "resolve",
+      taskId: "ch-v",
+      entryId: put.entry.id,
+      agentId: "claimer",
+      resolution: "self-reported done",
+    });
+    const veto = await service.invoke("taskBoard", {
+      action: "veto",
+      taskId: "ch-v",
+      entryId: put.entry.id,
+      agentId: "reviewer",
+      reason: "unverified",
+    });
+    assert.equal(veto.action, "veto");
+    if (veto.action !== "veto") throw new Error("expected veto");
+    assert.equal(veto.entry.vetoedBy, "reviewer");
+    assert.equal(veto.entry.vetoReason, "unverified");
+    assert.equal(veto.entry.status, "resolved");
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});

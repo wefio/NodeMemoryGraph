@@ -1135,6 +1135,12 @@ export interface TaskBoardEntry {
   resolvedAt: string | null;
   resolvedBy: string | null;
   resolution: string | null;
+  /** Reviewable-finalize veto (P1): set when an independent reviewer (not the
+   * resolver) marks this self-reported resolve as contested, so it is not
+   * accepted downstream as validated completion. Null until a veto. */
+  vetoedBy: string | null;
+  vetoedAt: string | null;
+  vetoReason: string | null;
   /** Lease-based claim: the agent working this entry. A claim is live while
    * claimedBy is set and claimExpiresAt is in the future. */
   claimedBy: string | null;
@@ -1154,6 +1160,25 @@ export interface TaskBoardEntry {
    * entry. Populated by the store on read/put/claim/release/resolve.
    * Logical "N checkmarks" rendered from a physical row table. */
   ackedBy: string[];
+}
+
+/** Compact projection of one task-board entry for a low-context read
+ * (board-governance F1). Omits the full body; ordering/cursor match the full
+ * read so an incremental sync can page over the compact view. */
+export interface TaskBoardPreview {
+  id: string;
+  taskId: string;
+  kind: TaskBoardKind;
+  status: TaskBoardStatus;
+  agentId: string;
+  to: string | null;
+  claimedBy: string | null;
+  serialState: TaskBoardEntry["serialState"];
+  ackCount: number;
+  createdAt: string;
+  resolvedAt: string | null;
+  /** Bounded one-line preview of content (a lone `memory=<id>` pointer is whole). */
+  preview: string;
 }
 
 export interface RecallCue {

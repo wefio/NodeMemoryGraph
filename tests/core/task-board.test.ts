@@ -103,6 +103,43 @@ test("task board supports cursor reads, cross-agent resolution, and expiry", () 
   });
 });
 
+test("compact preview read omits long bodies but keeps ordering and cursor", () => {
+  withStore((store) => {
+    const first = store.putTaskBoardEntry({
+      taskId: "task-a",
+      agentId: "agent-a",
+      kind: "question",
+      content: "memory=abc123",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const second = store.putTaskBoardEntry({
+      taskId: "task-a",
+      agentId: "agent-b",
+      kind: "result",
+      content: "A very long body that must not ride along on a compact sync. ".repeat(20).trim(),
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    const { previews, nextCursor } = store.readTaskBoardPreviews({ taskId: "task-a" });
+    assert.equal(previews.length, 2);
+    assert.equal(nextCursor, second.id);
+    // Lone memory pointers are returned whole; long bodies collapse to <= 200 chars.
+    assert.equal(previews[0]!.preview, "memory=abc123");
+    assert.ok(previews[1]!.preview.length <= 200);
+    assert.ok(previews[1]!.preview.endsWith("…"));
+    // Compact rows still carry the coordination-relevant projection, not full bodies.
+    assert.deepEqual(
+      previews.map((p) => p.id),
+      [first.id, second.id],
+    );
+    assert.equal(previews[0]!.kind, "question");
+    assert.equal(previews[0]!.status, "open");
+    assert.equal(previews[0]!.ackCount, 0);
+    // The full read still returns the complete body for the entry.
+    const full = store.readTaskBoard({ taskId: "task-a" });
+    assert.ok(full.entries[1]!.content.length > 200);
+  });
+});
+
 test("task board content never enters semantic memory search", () => {
   withStore((store) => {
     store.putTaskBoardEntry({
@@ -146,8 +183,81 @@ test("directed inbox reaches its target across named channels without a subscrip
       agentId: "stable-agent-id",
       agentName: "pi-main",
     });
-    assert.deepEqual(entries.map((entry) => entry.id), [target.id]);
+    assert.deepEqual(
+      entries.map((entry) => entry.id),
+      [target.id],
+    );
     assert.equal(entries[0]!.taskId, "private-handoff");
+  });
+});
+
+test("inbox surfaces directed and outstanding-broadcast actionables, not pending/note/resolved", () => {
+  withStore((store) => {
+    const future = "2099-01-01T00:00:00.000Z";
+    const directed = store.putTaskBoardEntry({
+      taskId: "ch-a",
+      agentId: "sender",
+      kind: "handoff",
+      content: "For me.",
+      to: "pi-main",
+      expiresAt: future,
+    });
+    const outstanding = store.putTaskBoardEntry({
+      taskId: "ch-b",
+      agentId: "sender",
+      kind: "question",
+      content: "Broadcast question on ch-b.",
+      expiresAt: future,
+    });
+    // Second un-directed actionable on ch-b is queued (pending), not mine yet.
+    store.putTaskBoardEntry({
+      taskId: "ch-b",
+      agentId: "sender",
+      kind: "blocker",
+      content: "Queued behind the outstanding one.",
+      expiresAt: future,
+    });
+    // Notify-only kinds are never actionable.
+    store.putTaskBoardEntry({
+      taskId: "ch-c",
+      agentId: "sender",
+      kind: "note",
+      content: "Just a note.",
+      expiresAt: future,
+    });
+    // A directed-to-other stays out.
+    store.putTaskBoardEntry({
+      taskId: "ch-d",
+      agentId: "sender",
+      kind: "handoff",
+      content: "Not for me.",
+      to: "pi-other",
+      expiresAt: future,
+    });
+    // A directed entry already resolved is gone.
+    const resolved = store.putTaskBoardEntry({
+      taskId: "ch-e",
+      agentId: "sender",
+      kind: "handoff",
+      content: "Done.",
+      to: "pi-main",
+      expiresAt: future,
+    });
+    store.resolveTaskBoardEntry({
+      taskId: "ch-e",
+      entryId: resolved.id,
+      agentId: "pi-main",
+      resolution: "done",
+    });
+
+    const entries = store.readInboxTaskBoard({
+      agentId: "stable-agent-id",
+      agentName: "pi-main",
+    });
+    const ids = entries.map((entry) => entry.id);
+    assert.ok(ids.includes(directed.id), "directed handoff in inbox");
+    assert.ok(ids.includes(outstanding.id), "outstanding broadcast actionable in inbox");
+    assert.equal(entries.length, 2, "no pending/note/other/resolved in inbox");
   });
 });
 
@@ -688,5 +798,56 @@ test("task board serial handoff promotes pending on claim, resolve, and expiry",
     // No throw, no phantom outstanding in a fresh channel.
     const fresh = putHandoff("serial-promo-5", "fresh", "2099-01-01T00:00:00.000Z");
     assert.equal(stateOf(store, fresh.id), "outstanding");
+  });
+});
+
+test("veto flags a resolved entry by an independent reviewer and is auditable", () => {
+  withStore((store) => {
+    const future = "2099-01-01T00:00:00.000Z";
+    const entry = store.putTaskBoardEntry({
+      taskId: "ch-v",
+      agentId: "claimer",
+      kind: "handoff",
+      content: "Claimed work.",
+      expiresAt: future,
+    });
+    store.resolveTaskBoardEntry({
+      taskId: "ch-v",
+      entryId: entry.id,
+      agentId: "claimer",
+      resolution: "self-reported done",
+    });
+    // Resolver cannot veto its own resolve.
+    assert.throws(() =>
+      store.vetoTaskBoardEntry({ taskId: "ch-v", entryId: entry.id, agentId: "claimer" }),
+    );
+    // Independent reviewer vetoes it.
+    const vetoed = store.vetoTaskBoardEntry({
+      taskId: "ch-v",
+      entryId: entry.id,
+      agentId: "reviewer",
+      reason: "output not verified",
+    });
+    assert.equal(vetoed.status, "resolved", "veto does not reopen the entry");
+    assert.equal(vetoed.resolvedBy, "claimer");
+    assert.equal(vetoed.vetoedBy, "reviewer");
+    assert.equal(vetoed.vetoReason, "output not verified");
+    assert.ok(vetoed.vetoedAt !== null);
+  });
+});
+
+test("veto rejects an entry that is not resolved", () => {
+  withStore((store) => {
+    const future = "2099-01-01T00:00:00.000Z";
+    const entry = store.putTaskBoardEntry({
+      taskId: "ch-v",
+      agentId: "claimer",
+      kind: "handoff",
+      content: "Still open.",
+      expiresAt: future,
+    });
+    assert.throws(() =>
+      store.vetoTaskBoardEntry({ taskId: "ch-v", entryId: entry.id, agentId: "reviewer" }),
+    );
   });
 });

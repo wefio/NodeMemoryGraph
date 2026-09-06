@@ -39,6 +39,7 @@ export interface TaskBoardSurfaceResult {
   action: string;
   entry?: TaskBoardSurfaceEntry;
   entries?: TaskBoardSurfaceEntry[];
+  previews?: TaskBoardSurfacePreview[];
   nextCursor?: string | null;
   agents?: TaskBoardAgentEntry[];
 }
@@ -51,6 +52,20 @@ export interface TaskBoardSurfaceEntry {
   content?: string;
   claimedBy?: string | null;
   ackedBy?: string[];
+}
+
+export interface TaskBoardSurfacePreview {
+  id?: string;
+  taskId?: string;
+  kind?: string;
+  status?: string;
+  agentId?: string;
+  to?: string | null;
+  claimedBy?: string | null;
+  ackCount?: number;
+  createdAt?: string;
+  resolvedAt?: string | null;
+  preview?: string;
 }
 
 export interface TaskBoardSurfaceOptions {
@@ -251,7 +266,6 @@ export function renderTaskBoardSurface(
           "Use nmg_board action=put with to=<agent name> for directed delivery.",
         ].join("\n");
   }
-  const entries = result.entries ?? (result.entry ? [result.entry] : []);
   const lines: string[] = [];
   for (const board of options.directory ?? []) {
     if (lines.length === 0) lines.push("Active named channels (world channel lobby):");
@@ -260,19 +274,53 @@ export function renderTaskBoardSurface(
     );
   }
   if (lines.length > 0) lines.push("");
-  if (entries.length === 0) {
-    lines.push(options.emptyText ?? `Task board ${options.taskId} has no matching entries.`);
-  } else {
-    for (const entry of entries) {
-      const claim = entry.claimedBy ? ` [claimed by ${entry.claimedBy}]` : "";
-      const ack = entry.ackedBy?.length ? ` (✅ acked by ${entry.ackedBy.join(", ")})` : "";
-      lines.push(
-        `- ${String(entry.id ?? "?")} [${String(entry.kind ?? "entry")}/${String(entry.status ?? "open")}]${claim}${ack} ${String(entry.agentId ?? "unknown")}: ${excerpt(String(entry.content ?? ""), 500)}`,
-      );
-    }
-    if (result.action === "read") lines.push(`nextCursor=${String(result.nextCursor ?? "")}`);
-  }
+  renderBoardItems(result, options, lines);
   lines.push("Temporary coordination only; use nmg_remember separately for durable knowledge.");
   if (options.includeConventions !== false) lines.push(TASK_BOARD_CONVENTIONS);
   return lines.join("\n");
+}
+
+/** Low-context per-action body for renderTaskBoardSurface: compact previews
+ * (readPreviews), the actionable-for-me inbox (readInbox), or a normal full
+ * entry read — each appended as rows to `lines`. */
+function renderBoardItems(
+  result: TaskBoardSurfaceResult,
+  options: TaskBoardSurfaceOptions,
+  lines: string[],
+): void {
+  if (result.action === "readPreviews") {
+    const previews = result.previews ?? [];
+    if (previews.length === 0) {
+      lines.push(options.emptyText ?? `Task board ${options.taskId} has no matching entries.`);
+      return;
+    }
+    lines.push("Compact view (use action=read for full bodies / nmg_get for pointers):");
+    for (const preview of previews) lines.push(renderPreviewRow(preview));
+    lines.push(`nextCursor=${String(result.nextCursor ?? "")}`);
+    return;
+  }
+  if (result.action === "readInbox") {
+    lines.push(
+      "Actionable for me (directed to me, or the current outstanding broadcast on a channel):",
+    );
+  }
+  const entries = result.entries ?? (result.entry ? [result.entry] : []);
+  if (entries.length === 0) {
+    lines.push(options.emptyText ?? `Task board ${options.taskId} has no matching entries.`);
+    return;
+  }
+  for (const entry of entries) lines.push(renderEntryRow(entry));
+  if (result.action === "read") lines.push(`nextCursor=${String(result.nextCursor ?? "")}`);
+}
+
+function renderPreviewRow(preview: TaskBoardSurfacePreview): string {
+  const claim = preview.claimedBy ? ` [claimed by ${preview.claimedBy}]` : "";
+  const ack = preview.ackCount ? ` (✅ acked ${preview.ackCount})` : "";
+  return `- ${String(preview.id ?? "?")} [${String(preview.kind ?? "entry")}/${String(preview.status ?? "open")}]${claim}${ack} ${String(preview.agentId ?? "unknown")}: ${excerpt(String(preview.preview ?? ""), 200)}`;
+}
+
+function renderEntryRow(entry: TaskBoardSurfaceEntry): string {
+  const claim = entry.claimedBy ? ` [claimed by ${entry.claimedBy}]` : "";
+  const ack = entry.ackedBy?.length ? ` (✅ acked by ${entry.ackedBy.join(", ")})` : "";
+  return `- ${String(entry.id ?? "?")} [${String(entry.kind ?? "entry")}/${String(entry.status ?? "open")}]${claim}${ack} ${String(entry.agentId ?? "unknown")}: ${excerpt(String(entry.content ?? ""), 500)}`;
 }

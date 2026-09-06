@@ -347,160 +347,7 @@ export class NmgService {
       }
       case "taskBoard": {
         const parsed = parseTaskBoardParams(params);
-        if (parsed.action === "put") {
-          const expiresAt =
-            parsed.expiresAt ??
-            new Date(Date.now() + (parsed.ttlSeconds ?? 86_400) * 1_000).toISOString();
-          return {
-            action: "put",
-            entry: this.#getStore().putTaskBoardEntry({
-              taskId: parsed.taskId,
-              agentId: parsed.agentId,
-              sourceSessionId: parsed.sourceSessionId,
-              kind: parsed.kind ?? "note",
-              content: parsed.content,
-              expiresAt,
-              to: parsed.to,
-            }),
-          } as NmgMethodResult[M];
-        }
-        if (parsed.action === "read") {
-          return {
-            action: "read",
-            ...this.#getStore().readTaskBoard(parsed),
-          } as NmgMethodResult[M];
-        }
-        if (parsed.action === "readDirected") {
-          return {
-            action: "readDirected",
-            entries: this.#getStore().readDirectedTaskBoard(parsed),
-          } as NmgMethodResult[M];
-        }
-        if (parsed.action === "list") {
-          return {
-            action: "list",
-            boards: this.#getStore().listTaskBoards(),
-          } as NmgMethodResult[M];
-        }
-        if (parsed.action === "claim") {
-          return {
-            action: "claim",
-            entry: this.#getStore().claimTaskBoardEntry(parsed),
-          } as NmgMethodResult[M];
-        }
-        if (parsed.action === "release") {
-          return {
-            action: "release",
-            entry: this.#getStore().releaseTaskBoardEntry(parsed),
-          } as NmgMethodResult[M];
-        }
-        if (parsed.action === "deliveryCheck") {
-          const store = this.#getStore();
-          return {
-            action: "deliveryCheck",
-            delivered: parsed.entryIds.filter((entryId) =>
-              store.hasTaskBoardDelivery({ entryId, sessionId: parsed.sessionId }),
-            ),
-            acked: [
-              ...store.taskBoardAckedIds(parsed.entryIds, [parsed.sessionId, parsed.agentId]),
-            ],
-            suppressed: store.isTaskBoardSuppressed({
-              sessionId: parsed.sessionId,
-              taskId: parsed.taskId,
-            }),
-          } as NmgMethodResult[M];
-        }
-        if (parsed.action === "recordDelivery") {
-          this.#getStore().recordTaskBoardDelivery({
-            entryId: parsed.entryId,
-            sessionId: parsed.sessionId,
-            source: parsed.source,
-          });
-          return { action: "recordDelivery", recorded: true } as NmgMethodResult[M];
-        }
-        if (parsed.action === "acknowledge") {
-          this.#getStore().acknowledgeTaskBoardEntry({
-            entryId: parsed.entryId,
-            agentId: parsed.agentId,
-            reason: parsed.reason,
-          });
-          return {
-            action: "acknowledge",
-            entry: this.#getStore().getTaskBoardEntryById(parsed.taskId, parsed.entryId)!,
-          } as NmgMethodResult[M];
-        }
-        if (parsed.action === "unsubscribe") {
-          this.#getStore().unsubscribeTaskBoard({
-            sessionId: parsed.sessionId,
-            taskId: parsed.taskId,
-          });
-          this.#getStore().suppressTaskBoard({
-            sessionId: parsed.sessionId,
-            taskId: parsed.taskId,
-          });
-          return { action: "unsubscribe", taskId: parsed.taskId } as NmgMethodResult[M];
-        }
-        if (parsed.action === "subscribe") {
-          this.#getStore().subscribeTaskBoard({
-            sessionId: parsed.sessionId,
-            taskId: parsed.taskId,
-          });
-          this.#getStore().unsuppressTaskBoard({
-            sessionId: parsed.sessionId,
-            taskId: parsed.taskId,
-          });
-          return { action: "subscribe", taskId: parsed.taskId } as NmgMethodResult[M];
-        }
-        if (parsed.action === "registerAgent") {
-          this.#getStore().registerTaskBoardAgent({
-            id: parsed.id,
-            agentName: parsed.agentName,
-            description: parsed.description,
-            version: parsed.version,
-            url: parsed.url,
-            capabilities: parsed.capabilities,
-            skills: parsed.skills,
-            supportedInterfaces: parsed.supportedInterfaces,
-          });
-          return {
-            action: "registerAgent",
-            agentName: parsed.agentName,
-            id: parsed.id,
-          } as NmgMethodResult[M];
-        }
-        if (parsed.action === "heartbeat") {
-          this.#getStore().heartbeatTaskBoardAgent({ id: parsed.id });
-          return { action: "heartbeat", agentName: "", id: parsed.id } as NmgMethodResult[M];
-        }
-        if (parsed.action === "rename") {
-          this.#getStore().renameTaskBoardAgent({
-            id: parsed.id,
-            agentName: parsed.agentName,
-          });
-          return {
-            action: "rename",
-            agentName: parsed.agentName,
-            id: parsed.id,
-          } as NmgMethodResult[M];
-        }
-        if (parsed.action === "discover") {
-          return {
-            action: "discover",
-            agents: this.#getStore().discoverTaskBoardAgents({
-              capabilities: parsed.capabilities,
-            }),
-          } as NmgMethodResult[M];
-        }
-        if (parsed.action === "listSubscriptions") {
-          return {
-            action: "listSubscriptions",
-            subscriptions: this.#getStore().listTaskBoardSubscriptions(parsed.sessionId),
-          } as NmgMethodResult[M];
-        }
-        return {
-          action: "resolve",
-          entry: this.#getStore().resolveTaskBoardEntry(parsed),
-        } as NmgMethodResult[M];
+        return taskBoardHandlers[parsed.action](this.#getStore(), parsed) as NmgMethodResult[M];
       }
       case "chainCreate":
         return this.#chainCreate(parseChainCreateParams(params)) as NmgMethodResult[M];
@@ -2521,13 +2368,23 @@ function parseStgPurgeSessionParams(value: unknown): NmgStgPurgeSessionParams {
   };
 }
 
+/** Read-style actions share one parse shape (taskId/agentId + paging). A Set
+ * guard costs a single decision point regardless of how many actions it holds,
+ * so adding another read-style action does not raise the parser's complexity. */
+const TASK_BOARD_READ_STYLE = new Set<string>(["read", "readPreviews"]);
+const TASK_BOARD_DIRECTED_STYLE = new Set<string>(["readDirected", "readInbox"]);
+const TASK_BOARD_ACK_STYLE = new Set<string>(["acknowledge", "veto"]);
+
 function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
   const params = objectParams(value);
   const action = requiredEnum(params, "action", [
     "put",
     "read",
+    "readPreviews",
     "readDirected",
+    "readInbox",
     "resolve",
+    "veto",
     "acknowledge",
     "claim",
     "release",
@@ -2578,9 +2435,9 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
   if (action === "list") {
     return { action, agentId };
   }
-  if (action === "readDirected") {
+  if (TASK_BOARD_DIRECTED_STYLE.has(action)) {
     return {
-      action,
+      action: action as "readDirected" | "readInbox",
       agentId,
       agentName: requiredString(params, "agentName"),
       limit: optionalInteger(params, "limit", 1, 200),
@@ -2644,10 +2501,10 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
       expiresAt,
     };
   }
-  if (action === "read") {
+  if (TASK_BOARD_READ_STYLE.has(action)) {
     return {
       ...base,
-      action,
+      action: action as "read" | "readPreviews",
       afterCursor: optionalString(params, "afterCursor"),
       limit: optionalInteger(params, "limit", 1, 200),
       includeResolved: optionalBoolean(params, "includeResolved"),
@@ -2665,19 +2522,162 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
       leaseSeconds: optionalInteger(params, "leaseSeconds", 60, 86_400),
     };
   }
-  if (action === "acknowledge") {
+  if (TASK_BOARD_ACK_STYLE.has(action)) {
     return {
       ...entryBase,
-      action,
+      action: action as "acknowledge" | "veto",
       reason: optionalString(params, "reason"),
     };
   }
   return {
     ...entryBase,
-    action,
+    action: "resolve",
     resolution: optionalString(params, "resolution"),
   };
 }
+
+type TaskBoardParamsOf<A extends NmgTaskBoardParams["action"]> = Extract<
+  NmgTaskBoardParams,
+  { action: A }
+>;
+type TaskBoardHandler = (
+  store: NmgStore,
+  parsed: NmgTaskBoardParams,
+) => NmgMethodResult["taskBoard"];
+
+/** Table-driven taskBoard dispatch: adding a new action is one record entry
+ * instead of another branch in the (already large) `invoke` dispatcher, so the
+ * per-method complexity gate does not ratchet with every protocol addition. */
+const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> = {
+  put: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"put">;
+    const expiresAt =
+      p.expiresAt ?? new Date(Date.now() + (p.ttlSeconds ?? 86_400) * 1_000).toISOString();
+    return {
+      action: "put",
+      entry: store.putTaskBoardEntry({
+        taskId: p.taskId,
+        agentId: p.agentId,
+        sourceSessionId: p.sourceSessionId,
+        kind: p.kind ?? "note",
+        content: p.content,
+        expiresAt,
+        to: p.to,
+      }),
+    };
+  },
+  read: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"read">;
+    return { action: "read", ...store.readTaskBoard(p) };
+  },
+  readDirected: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"readDirected">;
+    return { action: "readDirected", entries: store.readDirectedTaskBoard(p) };
+  },
+  readInbox: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"readInbox">;
+    return { action: "readInbox", entries: store.readInboxTaskBoard(p) };
+  },
+  readPreviews: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"readPreviews">;
+    return { action: "readPreviews", ...store.readTaskBoardPreviews(p) };
+  },
+  list: (store) => ({ action: "list", boards: store.listTaskBoards() }),
+  claim: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"claim">;
+    return { action: "claim", entry: store.claimTaskBoardEntry(p) };
+  },
+  release: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"release">;
+    return { action: "release", entry: store.releaseTaskBoardEntry(p) };
+  },
+  deliveryCheck: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"deliveryCheck">;
+    return {
+      action: "deliveryCheck",
+      delivered: p.entryIds.filter((entryId) =>
+        store.hasTaskBoardDelivery({ entryId, sessionId: p.sessionId }),
+      ),
+      acked: [...store.taskBoardAckedIds(p.entryIds, [p.sessionId, p.agentId])],
+      suppressed: store.isTaskBoardSuppressed({ sessionId: p.sessionId, taskId: p.taskId }),
+    };
+  },
+  recordDelivery: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"recordDelivery">;
+    store.recordTaskBoardDelivery({
+      entryId: p.entryId,
+      sessionId: p.sessionId,
+      source: p.source,
+    });
+    return { action: "recordDelivery", recorded: true };
+  },
+  acknowledge: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"acknowledge">;
+    store.acknowledgeTaskBoardEntry({ entryId: p.entryId, agentId: p.agentId, reason: p.reason });
+    return {
+      action: "acknowledge",
+      entry: store.getTaskBoardEntryById(p.taskId, p.entryId)!,
+    };
+  },
+  veto: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"veto">;
+    return { action: "veto", entry: store.vetoTaskBoardEntry(p) };
+  },
+  unsubscribe: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"unsubscribe">;
+    store.unsubscribeTaskBoard({ sessionId: p.sessionId, taskId: p.taskId });
+    store.suppressTaskBoard({ sessionId: p.sessionId, taskId: p.taskId });
+    return { action: "unsubscribe", taskId: p.taskId };
+  },
+  subscribe: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"subscribe">;
+    store.subscribeTaskBoard({ sessionId: p.sessionId, taskId: p.taskId });
+    store.unsuppressTaskBoard({ sessionId: p.sessionId, taskId: p.taskId });
+    return { action: "subscribe", taskId: p.taskId };
+  },
+  registerAgent: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"registerAgent">;
+    store.registerTaskBoardAgent({
+      id: p.id,
+      agentName: p.agentName,
+      description: p.description,
+      version: p.version,
+      url: p.url,
+      capabilities: p.capabilities,
+      skills: p.skills,
+      supportedInterfaces: p.supportedInterfaces,
+    });
+    return { action: "registerAgent", agentName: p.agentName, id: p.id };
+  },
+  heartbeat: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"heartbeat">;
+    store.heartbeatTaskBoardAgent({ id: p.id });
+    return { action: "heartbeat", agentName: "", id: p.id };
+  },
+  rename: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"rename">;
+    store.renameTaskBoardAgent({ id: p.id, agentName: p.agentName });
+    return { action: "rename", agentName: p.agentName, id: p.id };
+  },
+  discover: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"discover">;
+    return {
+      action: "discover",
+      agents: store.discoverTaskBoardAgents({ capabilities: p.capabilities }),
+    };
+  },
+  listSubscriptions: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"listSubscriptions">;
+    return {
+      action: "listSubscriptions",
+      subscriptions: store.listTaskBoardSubscriptions(p.sessionId),
+    };
+  },
+  resolve: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"resolve">;
+    return { action: "resolve", entry: store.resolveTaskBoardEntry(p) };
+  },
+};
 
 function parseRetentionCandidatesParams(value: unknown): NmgRetentionCandidatesParams {
   const params = objectParams(value);

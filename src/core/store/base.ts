@@ -32,6 +32,7 @@ import type {
   PerfSnapshot,
   TaskBoardEntry,
   TaskBoardKind,
+  TaskBoardPreview,
   TopologyProposal,
   VectorEmbedder,
 } from "../types.ts";
@@ -343,6 +344,69 @@ export class NmgStoreBase {
     for (const entry of entries) entry.ackedBy = ackMap.get(entry.id) ?? [];
     return entries;
   }
+  /** Actionable-for-me inbox (F2 in the board-governance proposal): the open
+   *  actionable work (handoff/question/blocker) across all boards this agent
+   *  should act on — either addressed to it directly, or the currently offered
+   *  broadcast actionable (un-directed 'outstanding') on a channel. Bounded: at
+   *  most one outstanding broadcast per channel plus all directed entries, so
+   *  unlike a full channel scan it stays a compact todo read. Ordering (oldest
+   *  first) matches readDirectedTaskBoard. */
+  readInboxTaskBoard(input: {
+    agentId: string;
+    agentName: string;
+    limit?: number;
+    now?: string;
+  }): TaskBoardEntry[] {
+    const now = input.now ?? new Date().toISOString();
+    this.pruneExpiredTaskBoardEntries(now);
+    const targets = [...new Set([input.agentId.trim(), input.agentName.trim()].filter(Boolean))];
+    if (targets.length === 0) return [];
+    const placeholders = targets.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM task_board_entries
+         WHERE status = 'open' AND expires_at > ?
+           AND kind IN ('handoff', 'question', 'blocker')
+           AND ([to] IN (${placeholders}) OR ([to] IS NULL AND serial_state = 'outstanding'))
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
+      )
+      .all(now, ...targets, Math.max(1, Math.min(input.limit ?? 50, 200))) as Row[];
+    const entries = rows.map(mapTaskBoardEntry);
+    const ackMap = this.taskBoardAckMap(entries.map((entry) => entry.id));
+    for (const entry of entries) entry.ackedBy = ackMap.get(entry.id) ?? [];
+    return entries;
+  }
+  /** Compact, low-context view over one channel's open entries (F1 in the
+   *  board-governance proposal). Returns a bounded per-entry projection that
+   *  omits the full body — the long content/evidence stays out of the wire
+   *  until the reader asks for it via a full read or an explicit expansion of a
+   *  `memory=<id>` pointer. Ordering and cursor semantics match readTaskBoard so
+   *  an incremental sync can page over the compact view without re-reading
+   *  full bodies. */
+  readTaskBoardPreviews(input: {
+    taskId: string;
+    afterCursor?: string;
+    limit?: number;
+    includeResolved?: boolean;
+    now?: string;
+  }): { previews: TaskBoardPreview[]; nextCursor: string | null } {
+    const { entries, nextCursor } = this.readTaskBoard(input);
+    const previews = entries.map((entry) => ({
+      id: entry.id,
+      taskId: entry.taskId,
+      kind: entry.kind,
+      status: entry.status,
+      agentId: entry.agentId,
+      to: entry.to,
+      claimedBy: entry.claimedBy,
+      serialState: entry.serialState,
+      ackCount: entry.ackedBy.length,
+      createdAt: entry.createdAt,
+      resolvedAt: entry.resolvedAt,
+      preview: taskBoardPreview(entry.content),
+    }));
+    return { previews, nextCursor };
+  }
   resolveTaskBoardEntry(input: {
     taskId: string;
     entryId: string;
@@ -372,6 +436,37 @@ export class NmgStoreBase {
     // Reply-gated serial handoff: the outstanding actionable is done — promote
     // the earliest pending to outstanding so the next one can be worked.
     this.promoteNextSerialPending(input.taskId);
+    return this.taskBoardEntry(input.entryId)!;
+  }
+  /** Reviewable finalize (P1 veto): an independent reviewer — not the agent who
+   * resolved the entry — flags a self-reported resolve as contested. The entry
+   * stays resolved (board lifecycle/serial promotion are untouched); the veto
+   * is an auditable mark so downstream does not accept the resolve as validated
+   * completion (de-biases false-complete for the converge calibrator). */
+  vetoTaskBoardEntry(input: {
+    taskId: string;
+    entryId: string;
+    agentId: string;
+    reason?: string;
+  }): TaskBoardEntry {
+    const existing = this.taskBoardEntry(input.entryId);
+    if (!existing || existing.taskId !== input.taskId) {
+      throw new Error(`task board entry not found in task ${input.taskId}`);
+    }
+    if (existing.status !== "resolved") {
+      throw new Error(`only a resolved entry can be vetoed (${input.entryId})`);
+    }
+    if (existing.resolvedBy !== null && existing.resolvedBy === input.agentId) {
+      throw new Error(`the resolver cannot veto its own resolve (${input.entryId})`);
+    }
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE task_board_entries
+         SET vetoed_by = ?, vetoed_at = ?, veto_reason = ?
+         WHERE id = ? AND task_id = ?`,
+      )
+      .run(input.agentId, now, input.reason ?? null, input.entryId, input.taskId);
     return this.taskBoardEntry(input.entryId)!;
   }
   /** True when a board entry carries a live claim (holder set, lease not expired). */
@@ -2214,6 +2309,16 @@ export class NmgStoreBase {
   }
 }
 
+/** Bounded preview used by the compact read (readTaskBoardPreviews): a lone
+ * memory pointer is already the intended low-context form and is returned whole;
+ * anything longer is collapsed to a single bounded line so a sync never carries
+ * a full body it did not ask for. */
+function taskBoardPreview(content: string, max = 200): string {
+  if (content.trim().startsWith("memory=")) return content.trim();
+  const single = content.replace(/\s+/g, " ").trim();
+  return single.length <= max ? single : `${single.slice(0, max - 1)}…`;
+}
+
 function mapTaskBoardEntry(row: Row): TaskBoardEntry {
   return {
     id: String(row.id),
@@ -2236,6 +2341,9 @@ function mapTaskBoardEntry(row: Row): TaskBoardEntry {
       row.serial_state === null
         ? null
         : (String(row.serial_state) as TaskBoardEntry["serialState"]),
+    vetoedBy: row.vetoed_by === null ? null : String(row.vetoed_by),
+    vetoedAt: row.vetoed_at === null ? null : String(row.vetoed_at),
+    vetoReason: row.veto_reason === null ? null : String(row.veto_reason),
     ackedBy: [],
   };
 }
