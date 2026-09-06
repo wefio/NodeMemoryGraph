@@ -2238,3 +2238,46 @@ test("task board subscriptions gate broadcast wake while directed delivery uses 
     removeTempDirectory(directory);
   }
 });
+
+test("task board compact preview RPC omits full bodies but keeps ordering", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-board-preview-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "task-a",
+      agentId: "agent-a",
+      kind: "question",
+      content: "memory=abc123",
+    });
+    await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "task-a",
+      agentId: "agent-b",
+      kind: "result",
+      content: "A long body ".repeat(40).trim(),
+    });
+    const previews = await service.invoke("taskBoard", {
+      action: "readPreviews",
+      taskId: "task-a",
+      agentId: "reader",
+    });
+    assert.equal(previews.action, "readPreviews");
+    if (previews.action !== "readPreviews") throw new Error("expected readPreviews");
+    assert.equal(previews.previews.length, 2);
+    // Lone memory pointer is whole; a long body collapses to a bounded preview.
+    assert.equal(previews.previews[0]!.preview, "memory=abc123");
+    assert.ok(previews.previews[1]!.preview.length <= 200);
+    // The full RPC read still returns the complete body.
+    const full = await service.invoke("taskBoard", {
+      action: "read",
+      taskId: "task-a",
+      agentId: "reader",
+    });
+    if (full.action !== "read") throw new Error("expected read");
+    assert.ok(full.entries[1]!.content.length > 200);
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});

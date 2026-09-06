@@ -32,7 +32,7 @@ import type {
   PerfSnapshot,
   TaskBoardEntry,
   TaskBoardKind,
-  TaskBoardStatus,
+  TaskBoardPreview,
   TopologyProposal,
   VectorEmbedder,
 } from "../types.ts";
@@ -357,25 +357,7 @@ export class NmgStoreBase {
     limit?: number;
     includeResolved?: boolean;
     now?: string;
-  }): {
-    previews: Array<{
-      id: string;
-      taskId: string;
-      kind: TaskBoardKind;
-      status: TaskBoardStatus;
-      agentId: string;
-      to: string | null;
-      claimedBy: string | null;
-      serialState: TaskBoardEntry["serialState"];
-      ackCount: number;
-      createdAt: string;
-      resolvedAt: string | null;
-      /** Bounded one-line preview of content, or the whole content when it is
-       *  already short (for example a lone `memory=<id>` pointer). */
-      preview: string;
-    }>;
-    nextCursor: string | null;
-  } {
+  }): { previews: TaskBoardPreview[]; nextCursor: string | null } {
     const { entries, nextCursor } = this.readTaskBoard(input);
     const previews = entries.map((entry) => ({
       id: entry.id,

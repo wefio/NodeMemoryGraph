@@ -2368,11 +2368,17 @@ function parseStgPurgeSessionParams(value: unknown): NmgStgPurgeSessionParams {
   };
 }
 
+/** Read-style actions share one parse shape (taskId/agentId + paging). A Set
+ * guard costs a single decision point regardless of how many actions it holds,
+ * so adding another read-style action does not raise the parser's complexity. */
+const TASK_BOARD_READ_STYLE = new Set<string>(["read", "readPreviews"]);
+
 function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
   const params = objectParams(value);
   const action = requiredEnum(params, "action", [
     "put",
     "read",
+    "readPreviews",
     "readDirected",
     "resolve",
     "acknowledge",
@@ -2491,10 +2497,10 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
       expiresAt,
     };
   }
-  if (action === "read") {
+  if (TASK_BOARD_READ_STYLE.has(action)) {
     return {
       ...base,
-      action,
+      action: action as "read" | "readPreviews",
       afterCursor: optionalString(params, "afterCursor"),
       limit: optionalInteger(params, "limit", 1, 200),
       includeResolved: optionalBoolean(params, "includeResolved"),
@@ -2563,6 +2569,10 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
   readDirected: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"readDirected">;
     return { action: "readDirected", entries: store.readDirectedTaskBoard(p) };
+  },
+  readPreviews: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"readPreviews">;
+    return { action: "readPreviews", ...store.readTaskBoardPreviews(p) };
   },
   list: (store) => ({ action: "list", boards: store.listTaskBoards() }),
   claim: (store, parsed) => {

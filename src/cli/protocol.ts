@@ -36,6 +36,7 @@ import type {
   TopologyProposal,
   TaskBoardEntry,
   TaskBoardKind,
+  TaskBoardPreview,
   TruthStatus,
 } from "../core/types.ts";
 import type {
@@ -523,6 +524,13 @@ export interface NmgTaskBoardReadDirectedParams {
   limit?: number;
 }
 
+export interface NmgTaskBoardReadPreviewsParams extends NmgTaskBoardBase {
+  action: "readPreviews";
+  afterCursor?: string;
+  limit?: number;
+  includeResolved?: boolean;
+}
+
 export interface NmgTaskBoardResolveParams extends NmgTaskBoardBase {
   action: "resolve";
   entryId: string;
@@ -642,6 +650,7 @@ export type NmgTaskBoardParams =
   | NmgTaskBoardPutParams
   | NmgTaskBoardReadParams
   | NmgTaskBoardReadDirectedParams
+  | NmgTaskBoardReadPreviewsParams
   | NmgTaskBoardResolveParams
   | NmgTaskBoardAcknowledgeParams
   | NmgTaskBoardClaimParams
@@ -845,6 +854,7 @@ export type NmgMethodResult = {
     | { action: "put" | "resolve" | "claim" | "release" | "acknowledge"; entry: TaskBoardEntry }
     | { action: "read"; entries: TaskBoardEntry[]; nextCursor: string | null }
     | { action: "readDirected"; entries: TaskBoardEntry[] }
+    | { action: "readPreviews"; previews: TaskBoardPreview[]; nextCursor: string | null }
     | {
         action: "list";
         boards: Array<{ taskId: string; entryCount: number; lastUpdatedAt: string }>;

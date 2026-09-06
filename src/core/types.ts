@@ -1156,6 +1156,25 @@ export interface TaskBoardEntry {
   ackedBy: string[];
 }
 
+/** Compact projection of one task-board entry for a low-context read
+ * (board-governance F1). Omits the full body; ordering/cursor match the full
+ * read so an incremental sync can page over the compact view. */
+export interface TaskBoardPreview {
+  id: string;
+  taskId: string;
+  kind: TaskBoardKind;
+  status: TaskBoardStatus;
+  agentId: string;
+  to: string | null;
+  claimedBy: string | null;
+  serialState: TaskBoardEntry["serialState"];
+  ackCount: number;
+  createdAt: string;
+  resolvedAt: string | null;
+  /** Bounded one-line preview of content (a lone `memory=<id>` pointer is whole). */
+  preview: string;
+}
+
 export interface RecallCue {
   nodeId: string;
   canonicalName: string;
