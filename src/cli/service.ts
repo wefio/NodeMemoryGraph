@@ -2372,6 +2372,7 @@ function parseStgPurgeSessionParams(value: unknown): NmgStgPurgeSessionParams {
  * guard costs a single decision point regardless of how many actions it holds,
  * so adding another read-style action does not raise the parser's complexity. */
 const TASK_BOARD_READ_STYLE = new Set<string>(["read", "readPreviews"]);
+const TASK_BOARD_DIRECTED_STYLE = new Set<string>(["readDirected", "readInbox"]);
 
 function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
   const params = objectParams(value);
@@ -2380,6 +2381,7 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
     "read",
     "readPreviews",
     "readDirected",
+    "readInbox",
     "resolve",
     "acknowledge",
     "claim",
@@ -2431,9 +2433,9 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
   if (action === "list") {
     return { action, agentId };
   }
-  if (action === "readDirected") {
+  if (TASK_BOARD_DIRECTED_STYLE.has(action)) {
     return {
-      action,
+      action: action as "readDirected" | "readInbox",
       agentId,
       agentName: requiredString(params, "agentName"),
       limit: optionalInteger(params, "limit", 1, 200),
@@ -2527,7 +2529,7 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
   }
   return {
     ...entryBase,
-    action,
+    action: "resolve",
     resolution: optionalString(params, "resolution"),
   };
 }
@@ -2569,6 +2571,10 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
   readDirected: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"readDirected">;
     return { action: "readDirected", entries: store.readDirectedTaskBoard(p) };
+  },
+  readInbox: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"readInbox">;
+    return { action: "readInbox", entries: store.readInboxTaskBoard(p) };
   },
   readPreviews: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"readPreviews">;

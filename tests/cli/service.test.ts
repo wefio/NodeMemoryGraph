@@ -2281,3 +2281,36 @@ test("task board compact preview RPC omits full bodies but keeps ordering", asyn
     removeTempDirectory(directory);
   }
 });
+
+test("task board inbox RPC returns directed and outstanding actionable work", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-board-inbox-"));
+  const service = new NmgService({ databasePath: join(directory, "nmg.sqlite"), environment: {} });
+  try {
+    await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "ch-a",
+      agentId: "sender",
+      kind: "handoff",
+      content: "Directed to me.",
+      to: "kimi",
+    });
+    await service.invoke("taskBoard", {
+      action: "put",
+      taskId: "ch-b",
+      agentId: "sender",
+      kind: "question",
+      content: "Broadcast question.",
+    });
+    const inbox = await service.invoke("taskBoard", {
+      action: "readInbox",
+      agentId: "kimi-002",
+      agentName: "kimi",
+    });
+    assert.equal(inbox.action, "readInbox");
+    if (inbox.action !== "readInbox") throw new Error("expected readInbox");
+    assert.equal(inbox.entries.length, 2);
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});

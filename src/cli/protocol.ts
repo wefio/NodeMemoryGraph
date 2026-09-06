@@ -524,6 +524,17 @@ export interface NmgTaskBoardReadDirectedParams {
   limit?: number;
 }
 
+/** Actionable-for-me inbox (F2): open handoff/question/blocker work across
+ * all boards the agent should act on — directed to it, or the currently
+ * offered un-directed broadcast actionable on a channel. Same shape as
+ * readDirected. */
+export interface NmgTaskBoardReadInboxParams {
+  action: "readInbox";
+  agentId: string;
+  agentName: string;
+  limit?: number;
+}
+
 export interface NmgTaskBoardReadPreviewsParams extends NmgTaskBoardBase {
   action: "readPreviews";
   afterCursor?: string;
@@ -650,6 +661,7 @@ export type NmgTaskBoardParams =
   | NmgTaskBoardPutParams
   | NmgTaskBoardReadParams
   | NmgTaskBoardReadDirectedParams
+  | NmgTaskBoardReadInboxParams
   | NmgTaskBoardReadPreviewsParams
   | NmgTaskBoardResolveParams
   | NmgTaskBoardAcknowledgeParams
@@ -854,6 +866,7 @@ export type NmgMethodResult = {
     | { action: "put" | "resolve" | "claim" | "release" | "acknowledge"; entry: TaskBoardEntry }
     | { action: "read"; entries: TaskBoardEntry[]; nextCursor: string | null }
     | { action: "readDirected"; entries: TaskBoardEntry[] }
+    | { action: "readInbox"; entries: TaskBoardEntry[] }
     | { action: "readPreviews"; previews: TaskBoardPreview[]; nextCursor: string | null }
     | {
         action: "list";

@@ -183,8 +183,81 @@ test("directed inbox reaches its target across named channels without a subscrip
       agentId: "stable-agent-id",
       agentName: "pi-main",
     });
-    assert.deepEqual(entries.map((entry) => entry.id), [target.id]);
+    assert.deepEqual(
+      entries.map((entry) => entry.id),
+      [target.id],
+    );
     assert.equal(entries[0]!.taskId, "private-handoff");
+  });
+});
+
+test("inbox surfaces directed and outstanding-broadcast actionables, not pending/note/resolved", () => {
+  withStore((store) => {
+    const future = "2099-01-01T00:00:00.000Z";
+    const directed = store.putTaskBoardEntry({
+      taskId: "ch-a",
+      agentId: "sender",
+      kind: "handoff",
+      content: "For me.",
+      to: "pi-main",
+      expiresAt: future,
+    });
+    const outstanding = store.putTaskBoardEntry({
+      taskId: "ch-b",
+      agentId: "sender",
+      kind: "question",
+      content: "Broadcast question on ch-b.",
+      expiresAt: future,
+    });
+    // Second un-directed actionable on ch-b is queued (pending), not mine yet.
+    store.putTaskBoardEntry({
+      taskId: "ch-b",
+      agentId: "sender",
+      kind: "blocker",
+      content: "Queued behind the outstanding one.",
+      expiresAt: future,
+    });
+    // Notify-only kinds are never actionable.
+    store.putTaskBoardEntry({
+      taskId: "ch-c",
+      agentId: "sender",
+      kind: "note",
+      content: "Just a note.",
+      expiresAt: future,
+    });
+    // A directed-to-other stays out.
+    store.putTaskBoardEntry({
+      taskId: "ch-d",
+      agentId: "sender",
+      kind: "handoff",
+      content: "Not for me.",
+      to: "pi-other",
+      expiresAt: future,
+    });
+    // A directed entry already resolved is gone.
+    const resolved = store.putTaskBoardEntry({
+      taskId: "ch-e",
+      agentId: "sender",
+      kind: "handoff",
+      content: "Done.",
+      to: "pi-main",
+      expiresAt: future,
+    });
+    store.resolveTaskBoardEntry({
+      taskId: "ch-e",
+      entryId: resolved.id,
+      agentId: "pi-main",
+      resolution: "done",
+    });
+
+    const entries = store.readInboxTaskBoard({
+      agentId: "stable-agent-id",
+      agentName: "pi-main",
+    });
+    const ids = entries.map((entry) => entry.id);
+    assert.ok(ids.includes(directed.id), "directed handoff in inbox");
+    assert.ok(ids.includes(outstanding.id), "outstanding broadcast actionable in inbox");
+    assert.equal(entries.length, 2, "no pending/note/other/resolved in inbox");
   });
 });
 

@@ -344,6 +344,38 @@ export class NmgStoreBase {
     for (const entry of entries) entry.ackedBy = ackMap.get(entry.id) ?? [];
     return entries;
   }
+  /** Actionable-for-me inbox (F2 in the board-governance proposal): the open
+   *  actionable work (handoff/question/blocker) across all boards this agent
+   *  should act on — either addressed to it directly, or the currently offered
+   *  broadcast actionable (un-directed 'outstanding') on a channel. Bounded: at
+   *  most one outstanding broadcast per channel plus all directed entries, so
+   *  unlike a full channel scan it stays a compact todo read. Ordering (oldest
+   *  first) matches readDirectedTaskBoard. */
+  readInboxTaskBoard(input: {
+    agentId: string;
+    agentName: string;
+    limit?: number;
+    now?: string;
+  }): TaskBoardEntry[] {
+    const now = input.now ?? new Date().toISOString();
+    this.pruneExpiredTaskBoardEntries(now);
+    const targets = [...new Set([input.agentId.trim(), input.agentName.trim()].filter(Boolean))];
+    if (targets.length === 0) return [];
+    const placeholders = targets.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM task_board_entries
+         WHERE status = 'open' AND expires_at > ?
+           AND kind IN ('handoff', 'question', 'blocker')
+           AND ([to] IN (${placeholders}) OR ([to] IS NULL AND serial_state = 'outstanding'))
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
+      )
+      .all(now, ...targets, Math.max(1, Math.min(input.limit ?? 50, 200))) as Row[];
+    const entries = rows.map(mapTaskBoardEntry);
+    const ackMap = this.taskBoardAckMap(entries.map((entry) => entry.id));
+    for (const entry of entries) entry.ackedBy = ackMap.get(entry.id) ?? [];
+    return entries;
+  }
   /** Compact, low-context view over one channel's open entries (F1 in the
    *  board-governance proposal). Returns a bounded per-entry projection that
    *  omits the full body — the long content/evidence stays out of the wire
