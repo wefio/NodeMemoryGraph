@@ -36,6 +36,24 @@ handling, plan behavior, and CLI-to-daemon HTTP delivery in a controlled fixture
 compiled execution. These tests establish their exercised mechanisms, not
 natural task success, convergence, or causal intervention benefit.
 
+A subsequent in-process research boundary, `src/lab/context-intervention.ts`,
+validates a versioned decision/execution/outcome envelope before asking a
+caller-supplied independent evidence verifier to admit it. Natural, benchmark,
+and synthetic origins stay explicit. Shadow choices, cancelled/timed-out
+execution, scope/version mismatch, reopened outcomes, invalid windows and
+missing evidence cannot produce an admitted row. This is not a receipt
+validator, JSON parser, persistent event collector, or automatic training path;
+feature semantics, deduplication and later revocation remain upstream duties.
+
+Benchmark tasks may supply calibration data when natural samples are scarce.
+Execute the intervention before labelling it; official answers alone are not
+counterfactual action outcomes. Split entire source tasks/conversations across
+training, tuning and held-out evaluation, and keep benchmark conclusions scoped
+to that distribution. Compare fixed rules and the linear baseline before adding
+explicit history statistics, recurrent low-dimensional state or history-node
+connections. None of those history architectures is implemented or selected by
+this admission boundary; the design remains revisable by measured evidence.
+
 Still open: the unified lifecycle/event and intervention sample pipeline,
 versioned feature schema, four executor integration, validated outcome admission,
 bookmark content ingestion, long-lived quests, held-out learning experiments,
