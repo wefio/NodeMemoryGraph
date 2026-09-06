@@ -25,6 +25,13 @@ export interface ContextIntervention {
     startedAt: number;
     endedAt: number;
     status: "completed" | "cancelled" | "timeout";
+    /** Fingerprint of generated context, not proof of actual model exposure. */
+    result?: {
+      contentHash: string;
+      evidenceIds: string[];
+      characters: number;
+      toolCalls: number;
+    };
   };
   outcome?: {
     taskId: string;
@@ -58,7 +65,7 @@ export function admitContextIntervention(
   input: ContextIntervention,
   verifyEvidence: (sample: Readonly<ContextIntervention>) => boolean,
 ): ContextInterventionAdmission {
-  if (!validDecision(input)) return { reason: "invalid-decision" };
+  if (!isContextDecisionValid(input)) return { reason: "invalid-decision" };
   if (!validExecution(input)) return { reason: "not-executed" };
   if (!validOutcome(input)) return { reason: "invalid-outcome" };
   // Neither caller mutation nor verifier mutation may change the admitted row.
@@ -73,7 +80,7 @@ export function admitContextIntervention(
   return { reason: "admitted", sample: snapshot };
 }
 
-function validDecision(input: ContextIntervention): boolean {
+export function isContextDecisionValid(input: ContextIntervention): boolean {
   if (
     input.schemaVersion !== 1 ||
     ![
@@ -131,6 +138,22 @@ function validWindow(
   );
 }
 
+function validExecutionCosts(
+  execution: NonNullable<ContextIntervention["execution"]>,
+  outcome: NonNullable<ContextIntervention["outcome"]>,
+): boolean {
+  if (!execution.result) return true; // Historical v1 rows need external verification.
+  return (
+    /^[a-f0-9]{64}$/u.test(execution.result.contentHash) &&
+    execution.result.evidenceIds.every(named) &&
+    Number.isSafeInteger(execution.result.characters) &&
+    execution.result.characters >= 0 &&
+    Number.isSafeInteger(execution.result.toolCalls) &&
+    execution.result.toolCalls >= 0 &&
+    outcome.costs.toolCalls >= execution.result.toolCalls
+  );
+}
+
 function validOutcome(input: ContextIntervention): boolean {
   const execution = input.execution;
   const outcome = input.outcome;
@@ -141,6 +164,7 @@ function validOutcome(input: ContextIntervention): boolean {
     outcome.taskId !== input.taskId ||
     outcome.acceptanceVersion !== input.acceptanceVersion ||
     !validWindow(execution, outcome) ||
+    !validExecutionCosts(execution, outcome) ||
     !Number.isFinite(outcome.reward) ||
     Math.abs(outcome.reward) > 1 ||
     !outcome.evidenceRefs.length ||
