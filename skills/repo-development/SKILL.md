@@ -131,6 +131,23 @@ owning document (this SKILL, `ci-cd-and-quality.md`, the RCP decision) in the
 same change — an improved tool that stays undocumented is a tool agents will
 not reach for.
 
+**Do not recursively scan oversized directories by default.** This is an
+Agent operating rule for searches, inventories, size estimation, and repository
+observation—not a claim that the runtime enforces a size-based rejection.
+Avoid known large dataset, benchmark, virtual-environment, and generated trees
+unless the task explicitly requires them. Start with named files or narrow
+paths; do not walk an entire large tree merely to estimate whether it is large.
+When a large-tree scan is genuinely needed, obtain explicit authorization for
+the paths and bound the scan to that scope. A broad wildcard alone is not a
+substitute for that authorization.
+
+For RCP, choose narrow contract includes before observing. Directory pruning
+only avoids include-unreachable subtrees; it is not a size guard, and broad
+patterns may still reach large trees. Never silently omit in-scope files to
+reduce cost, since that would change observation/digest semantics. Runtime
+observation behavior is owned by
+[`ci-cd-and-quality.md` §7.2](../../docs/design/ci-cd-and-quality.md#72-真相域).
+
 ## Builds and generated artifacts
 
 Regenerable outputs are **not** tracked (see the rejected decision

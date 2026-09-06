@@ -1,6 +1,6 @@
 # Agent convergence under feedback density
 
-**Status:** draft — candidate design, not an implementation or default-policy claim
+**Status:** v1 experimental specification — implementation partial; theory and default activation unproven
 **Date:** 2026-09-03
 
 This document consolidates a design discussion into a single blueprint: a
@@ -10,7 +10,7 @@ model, and the candidate design that would close the remaining loop. It is
 written so a future Agent can pick the thread up without re-deriving the
 conversation.
 
-## Implementation boundary (partial, not design completion)
+## Implementation boundary (partial, not system completion)
 
 The first code slice implements only:
 
@@ -36,13 +36,44 @@ handling, plan behavior, and CLI-to-daemon HTTP delivery in a controlled fixture
 compiled execution. These tests establish their exercised mechanisms, not
 natural task success, convergence, or causal intervention benefit.
 
-Still open: the unified lifecycle/event and intervention sample pipeline,
-versioned feature schema, four executor integration, validated outcome admission,
-bookmark content ingestion, long-lived quests, held-out learning experiments,
-and all default-activation gates. The original theoretical discussion below
-remains a draft; in particular, lifecycle facts and SimHash are **not** admitted
-as universally unbiased task rewards. Do not close the overall design task on
-this slice or its PR.
+A subsequent in-process research boundary, `src/lab/context-intervention.ts`,
+validates a versioned decision/execution/outcome envelope before asking a
+caller-supplied independent evidence verifier to admit it. Natural, benchmark,
+and synthetic origins stay explicit. Shadow choices, cancelled/timed-out
+execution, scope/version mismatch, reopened outcomes, invalid windows and
+missing evidence cannot produce an admitted row. This is not a receipt
+validator, JSON parser, persistent event collector, or automatic training path;
+the harness remains responsible for authenticating external evidence.
+
+Benchmark tasks may supply calibration data when natural samples are scarce.
+Execute the intervention before labelling it; official answers alone are not
+counterfactual action outcomes. Split entire source tasks/conversations across
+training, tuning and held-out evaluation, and keep benchmark conclusions scoped
+to that distribution. Compare fixed rules and the linear baseline before adding
+explicit history statistics, recurrent low-dimensional state or history-node
+connections. None of those history architectures is implemented or selected by
+this admission boundary; the design remains revisable by measured evidence.
+
+The next experimental slice implements `context-features.ts` (versioned values
+and missing masks), `context-executor.ts` (bounded fixed action adapters), and
+`context-trial.ts` (awaited decision-before-execution sink and outcome admission).
+`context-journal.ts` supplies a bounded single-writer append/fsync journal with
+phase/identity checks, duplicate-execution refusal and replay; a stale lock or
+torn tail requires operator inspection rather than automatic recovery.
+`evals/controller-shadow/context-dataset.ts` replays revisions, rejects decision
+identity collisions, retracts reopened labels, and partitions by caller-supplied
+source group. These are explicit harness APIs, not automatic Pi/AG actuation.
+The custom LoCoMo context probe exercises all four actions and trains a linear
+head on training groups only. Its evidence-only metric is not answer accuracy;
+see the [component report](../experiments/context-router-component-2026-09-06.md).
+
+Still open: general lifecycle producers, production recovery orchestration,
+main-model exposure integration, external evidence-verifier adapters, bookmark
+content ingestion, long-lived quest continuation, end-to-end held-out tasks,
+and default-activation gates. Section 9 specifies these boundaries and their
+acceptance criteria; it does not pretend they are implemented. The original
+theory remains provisional, and lifecycle facts/SimHash are not universally
+unbiased rewards. Do not close the overall implementation task on this slice.
 
 ## 1. The replaced model
 
@@ -660,7 +691,162 @@ multi-commit task:
 The measurements decide whether the theory earns permanent architecture (§6)
 or stays a documented model.
 
-## 9. Related documents
+## 9. Executable v1 specification and decision gates
+
+This section and §3.12 override incompatible earlier theoretical claims. The
+objective is verified task utility per end-to-end resource budget, not fitting
+lifecycle labels. The specification is revisable; failure to beat a fixed rule
+is a valid experiment result and blocks extra architecture by default.
+
+### 9.1 Runtime ownership and dataflow
+
+```text
+RCP / board / bookmark / harness event (source-owned identity and version)
+  -> session/task-frame observation (bounded, temporary, replay-idempotent)
+  -> pre-action feature snapshot + permission/budget mask
+  -> fixed fallback OR explicitly authorized experimental router
+  -> decision journal (must succeed before any side effect)
+  -> fixed action executor -> host model exposure
+  -> fixed-window external verifier + measured costs
+  -> outcome journal -> admission -> grouped offline dataset
+  -> train / validation selection / untouched test -> reviewed policy artifact
+```
+
+No new authoritative global event service is required. Producers retain their
+own facts and supply references through adapters. The harness owns the join and
+ordered journal; AG owns temporary working state, not task acceptance. Board
+resolve is a self-report event, commit a version event, and SimHash a textual
+change event. They can trigger attention, never automatically a task reward.
+RCP verifies only its declared contract. A failed receipt is useful feedback,
+not evidence of either whole-task failure or permission to widen scope.
+
+### 9.2 Exact feature contract
+
+`context-features-v1` has 16 values followed by 16 missing indicators. Missing
+is `(0,1)`; observed zero is `(0,0)`. Ratios are in `[0,1]`, previous verified
+reward in `[-1,1]`. The three counts saturate at 32 and divide by 32.
+
+| Index | Feature | Encoding |
+| --- | --- | --- |
+| 0 | contextOccupancy | used / hard context capacity |
+| 1 | remainingTokenRatio | remaining / initial token budget |
+| 2 | remainingToolRatio | remaining / initial tool-call budget |
+| 3 | topCandidateScore | bounded score under a versioned retrieval procedure |
+| 4 | candidateScoreGap | first minus second bounded score |
+| 5 | candidateCount | count / 32, saturated |
+| 6 | candidateRedundancy | duplicate fraction under fixed identity rules |
+| 7 | candidateFreshness | fraction whose source version remains current |
+| 8 | stepsSinceVerification | count / 32, saturated |
+| 9 | consecutiveFailures | count / 32, saturated |
+| 10 | returnedFromInterruption | observed 0 or 1 |
+| 11–14 | previousNone/Cue/Resurface/Retrieve | previous executed action one-hot |
+| 15 | previousReward | earlier independently verified window only |
+
+Unavailable measurements stay missing, never guessed by an LLM. Empty or zero
+initial budgets yield missing ratios plus hard action denial, not division by
+zero. All features must be available before selection. History is task/frame
+scoped, clears on acceptance-version changes, and cannot read future outcomes.
+The history-free ablation masks indices 8–15 with their missing indicators.
+
+### 9.3 Actions, journal and failure handling
+
+`none` returns no extra content; it does not cancel mandatory safety feedback.
+`cue` uses the fixed versioned reminder. `resurface` selects whole existing
+fragments in caller-provided order. `retrieve` invokes one fixed procedure with
+an abort signal and context cap. The host checks authorization before calling
+and before exposure. Whole-fragment truncation preserves source identity; a
+fragment too large is omitted rather than silently rewritten. All actions share
+the same hard envelope. Cost subtraction never raises that envelope.
+
+The journal records immutable decision, execution and outcome revisions. An
+unwritten decision cannot execute. A write failure after execution leaves an
+unknown outcome and forbids automatic re-execution; reconcile with the external
+tool's idempotency identity first. Exact repeated delivery is deduplicated;
+changed decisions under the same ID are errors. An error or reopening revision
+retracts the label on dataset rebuild. Existing trained artifacts containing a
+retracted label must be invalidated/retrained before promotion, not silently
+patched by treating reopening as another independent negative example.
+
+`runContextTrial` awaits every sink barrier, including asynchronous sinks. Its
+execution revision fingerprints generated content and source IDs and records
+actual executor tool calls. Evaluation receives a copy; the independent verifier
+receives a separate actual-result snapshot, not an evaluator-mutated object.
+Outcome tool-call totals below the executor count are rejected even on dataset
+replay. Tokens, reward, model exposure and broader-window costs still require
+source-backed verification; neither a digest nor `() => true` authenticates them.
+Timeout abort signals are distinguished from other executor cancellations.
+
+`ContextTrialJournal` is an optional local durable sink, not a distributed event
+service. It holds an exclusive lifetime lock, appends/fsyncs each record, checks
+identity/phase transitions, refuses duplicate decision reservations, preserves
+reopening and replays latest states. A corrupt/torn tail or stale lock fails
+closed; an uncertain write poisons the instance. Size caps stop further writes
+rather than silently rotating away idempotency evidence. Operators must inspect
+crash state before unlocking/rotation. Cross-journal/task serialization, safe
+recovery, model exposure and external evidence verification remain host duties;
+local fsync is not portable third-party attestation or a distributed transaction.
+
+### 9.4 Learner and low-dimensional history decision
+
+The initial architecture remains `32 -> 4`, 132 parameters, observed-action
+squared-error regression using the existing autodiff substrate. Selection is
+cost-adjusted epsilon-greedy over allowed actions; propensity is a sampling
+probability, not calibrated confidence. Do not train on a shadow choice. Snapshot
+branches label only actions actually executed in each branch.
+
+First compare fixed rules, the history-free linear head, and that same head
+with measured history features. Only if held-out sequential tasks show an
+unresolved history-dependent error should the next comparison add an 8-dimensional
+recurrent state or bounded causal history-node attention. Such nodes belong to
+Agent decision steps, not inaccessible main-LLM hidden layers. Their parameters,
+state reset rules, gradient tests, compute and memory limits must be specified
+in that experiment before fitting. There is no reason yet to implement either
+this network or the optional 596-parameter MLP merely to fill a diagram.
+
+### 9.5 Calibration and activation
+
+Benchmark data is allowed for training and calibration; natural data volume is
+not a prerequisite for an offline experiment. Preserve source dataset hash,
+conversation/task group, executor/feature/acceptance versions, policy identity,
+actual execution, outcome window, provenance and cost measurement method.
+Synthetic fixtures establish mechanisms only. Source groups, not nearby rows
+or paraphrases, define independent train/validation/test partitions. Select
+hyperparameters on validation only; after inspecting test results, subsequent
+changes require a new independent evaluation or an explicitly exploratory label.
+
+The LoCoMo component probe is custom lexical evidence scoring, not a product
+retrieval benchmark. It cannot test cue utility, sequential history or main-model
+success. The official answer pipeline remains owned by OmniMemEval; integration
+must preserve official scoring and compare matched context interventions under
+identical main-model settings. End-to-end windows include later model/tool cost,
+rework and final acceptance, not only inserted characters.
+
+Promotion requires a predeclared task metric, non-inferiority margin, budget and
+failure thresholds; held-out independent groups; uncertainty estimates; no safety
+violations; and no unacceptable quality/cost regression relative to the fixed
+fallback. Until these are supplied, the gate is closed rather than inventing
+thresholds after seeing results. Policy artifacts bind data/code/feature hashes,
+training settings and approval scope. The host can revert to the fixed rule
+without changing memory content. A good offline score alone never enables the
+policy globally.
+
+### 9.6 Remaining integration acceptance
+
+| Integration | Required acceptance before calling it complete |
+| --- | --- |
+| Lifecycle producers | source IDs, replay dedup, task/frame isolation and failure receipts reach AG without becoming rewards |
+| Bookmarked fragments | exact source/version checks, external text treated as data, total AG budget enforced, stale/missing source remains explicit |
+| Long-lived quests | existing governed memory stores externally approved target/version/evidence; resume revalidates it, not trusts board resolve |
+| Model exposure | captured projection matches actual injected context; cancelled/non-exposed actions cannot become executed-model samples |
+| Production journal | local duplicate/replay protection exists; cross-journal recovery, task serialization and late-reopen invalidation of dependent deployed artifacts remain required |
+| Outcome admission | independent source adapters verify score, identity, window and costs; unverified self-report remains excluded |
+| Efficacy | matched held-out main-model tasks beat or meet predeclared fallback quality/cost gates; component tests do not substitute |
+
+These gates distinguish a specified design from an implemented system and an
+implemented system from an empirically useful default. No overall completion
+claim is authorized while these integrations remain open.
+
+## 10. Related documents
 
 - [`docs/design/session-active-graph-runtime-design.md`](session-active-graph-runtime-design.md) — AG runtime blueprint (§4 gap surfaces)
 - [`docs/decisions/proposed/2026-08-29-session-active-graph-runtime.md`](../decisions/proposed/2026-08-29-session-active-graph-runtime.md)

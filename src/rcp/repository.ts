@@ -7,6 +7,8 @@ import type { ObservedFile, ObservedRepository, RepositoryContractIr } from "./t
 
 const SKIP_DIRECTORIES = new Set([".git", ".nmg", "node_modules"]);
 const SKIP_PATH_PREFIXES = [".rcp/receipts"];
+/** Soft cost signal only; it never blocks a declared wide scope. */
+const OBSERVATION_SOFT_BYTES = 256 * 1024 * 1024;
 
 export interface RepositoryProvider {
   readonly descriptor: {
@@ -53,14 +55,60 @@ export function isPathAllowed(path: string, scope: RepositoryContractIr["scope"]
   );
 }
 
+/** Can any file under the relative directory match any include pattern?
+ * Conservative prefix reasoning: a directory is pruned only when no include
+ * glob could reach a file inside it. Leading literal segments before the first
+ * glob segment anchor reachability; a glob in the first segment (for example
+ * a leading double-star segment or a top-level `*.md`) can match anywhere
+ * and disables pruning. Exclude patterns
+ * only narrow per-file matches and never broaden reachability, so they are
+ * ignored here. Over-approximation (descending where a single `*` segment
+ * could not actually reach) is safe; under-approximation is not.
+ */
+export function scopeDirectoryReachable(directory: string, include: readonly string[]): boolean {
+  const dir = normalizeRepositoryPath(directory);
+  if (!dir) return true; // the repository root is always traversed
+  return include.some((pattern) => includePatternReaches(pattern, dir));
+}
+
+function includePatternReaches(pattern: string, dir: string): boolean {
+  const normalized = normalizeRepositoryPath(pattern);
+  if (!normalized) return false;
+  const segments = normalized.split("/");
+  if (hasGlob(segments[0]!)) return true; // may match anywhere
+  const literals: string[] = [];
+  for (const segment of segments) {
+    if (hasGlob(segment)) break;
+    literals.push(segment);
+  }
+  const prefix = literals.join("/");
+  if (literals.length === segments.length) {
+    // No glob anywhere: the pattern is a literal file path. A bare root-level
+    // file (one segment) matches nothing inside a subdirectory.
+    if (literals.length === 1) return false;
+    const parent = literals.slice(0, -1).join("/");
+    return dir === parent || parent.startsWith(`${dir}/`);
+  }
+  // A glob follows the literal prefix: reachable directories lie at-or-under
+  // the prefix (at-or-under over-approximation is safe for a single `*`).
+  return dir === prefix || dir.startsWith(`${prefix}/`) || prefix.startsWith(`${dir}/`);
+}
+
+function hasGlob(segment: string): boolean {
+  return segment.includes("*") || segment.includes("?");
+}
+
 export function observeRepository(
   root: string,
   contract: RepositoryContractIr,
+  options?: { softBytes?: number },
 ): ObservedRepository {
   const resolvedRoot = resolve(root);
+  const softBytes = options?.softBytes ?? OBSERVATION_SOFT_BYTES;
   const diagnostics: string[] = [];
   const files: ObservedFile[] = [];
-  collectFiles(resolvedRoot, resolvedRoot, contract, files, diagnostics);
+  const stats = { bytes: 0 };
+  collectFiles(resolvedRoot, resolvedRoot, contract, files, diagnostics, stats);
   files.sort((left, right) => left.path.localeCompare(right.path));
   const observedGit = observeGitWorktree(resolvedRoot);
   const git = {
@@ -68,6 +116,13 @@ export function observeRepository(
     dirtyFiles: observedGit.dirtyFiles.filter((path) => !isSkippedRepositoryPath(path)),
   };
   if (!git.available && git.error) diagnostics.push(git.error);
+  if (stats.bytes > softBytes) {
+    diagnostics.push(
+      `declared scope reaches ${files.length} file(s) totalling ` +
+        `${Math.round(stats.bytes / (1024 * 1024))} MiB of content to read; ` +
+        "a catch-all or wide include can make observation expensive",
+    );
+  }
   const observedRevision = digestObservation(contract, files);
   return {
     root: normalizeRepositoryPath(resolvedRoot),
@@ -75,6 +130,7 @@ export function observeRepository(
     git,
     files,
     diagnostics,
+    observedBytes: stats.bytes,
   };
 }
 
@@ -102,6 +158,7 @@ function collectFiles(
   contract: RepositoryContractIr,
   output: ObservedFile[],
   diagnostics: string[],
+  stats: { bytes: number },
 ): void {
   if (!existsSync(directory)) return;
   for (const entry of readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
@@ -115,7 +172,10 @@ function collectFiles(
     }
     const stat = lstatSync(absolute);
     if (stat.isDirectory()) {
-      collectFiles(root, absolute, contract, output, diagnostics);
+      // Prune only directories no include pattern can reach; per-file scope
+      // filtering below is unchanged. Receipt and skip rules still apply first.
+      if (!scopeDirectoryReachable(local, contract.scope.include)) continue;
+      collectFiles(root, absolute, contract, output, diagnostics, stats);
       continue;
     }
     if (!isPathAllowed(local, contract.scope)) continue;
@@ -124,6 +184,7 @@ function collectFiles(
         output.push({ path: local, kind: "symlink", digest: digestBytes(readlinkSync(absolute)) });
       } else if (stat.isFile()) {
         output.push({ path: local, kind: "file", digest: digestBytes(readFileSync(absolute)) });
+        stats.bytes += stat.size;
       }
     } catch (cause) {
       diagnostics.push(`${local}: ${cause instanceof Error ? cause.message : String(cause)}`);

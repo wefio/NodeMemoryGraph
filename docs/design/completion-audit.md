@@ -82,9 +82,21 @@ They do not prove overall task completion or natural Agent improvement.
 The 132-parameter `ContextRouter` numerical primitive has action-mask, sampling,
 observed-action update and weight round-trip tests, including compiled execution.
 It is not automatically invoked, trained from natural outcomes, or exposed as a
-new self-service Lab capability. Unified event/sample collection, fixed feature
-semantics, executor integration, outcome admission and held-out efficacy remain
-open. No completed status or default promotion is implied.
+new self-service Lab capability. The experimental harness now has a versioned
+32-feature encoder, four bounded context executor adapters, ordered trial events,
+caller-verified outcome admission and source-grouped dataset replay. Trial sinks
+are awaited; a bounded local append/fsync journal checks phases, output identity
+and duplicate execution reservations. Generated-output fingerprints and executor
+call counts bind admission to execution without proving model exposure.
+Reopening retracts a row on rebuild; production artifact revocation remains unwired.
+The [LoCoMo component probe](../experiments/context-router-component-2026-09-06.md)
+collected 6128 action rows and fitted a linear head, but matched fixed retrieve
+on held-out evidence coverage. It used custom lexical ranking, no main LLM and
+no official answer scoring. Validation-only cost sensitivity and per-source-group
+counts now expose the degenerate policy and small independent sample size.
+General lifecycle producers, production recovery orchestration, model exposure,
+external verifier adapters and end-to-end efficacy remain
+open. No completed system status or default promotion is implied.
 
 ## Actual active blockers
 

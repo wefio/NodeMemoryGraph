@@ -184,6 +184,19 @@ daemon 不解析 contract、不启动 Agent、不判断 CI、不拥有 PR，也�
 Contract 描述 desired state；Observer 产生 observed state；Receipt 只证明某次输入上
 执行了什么及结果如何。任何一者都不能通过覆盖另外两者来“收敛”。
 
+Repository Observer 按 contract include 做保守目录剪枝：仅跳过可证明没有 include
+能够匹配其后代文件的目录。首段含通配符时保守禁用剪枝，并不表示该模式实际匹配
+所有目录。逐文件 allow/exclude 过滤语义不变；剪枝前的实现也在读取内容、计算哈希
+之前过滤文件。优化目标是减少无关目录枚举与后代 metadata 调用，不是消除原本不存在
+的全树内容哈希。此前约 67GB 的目录体积统计不是实际读取字节或加速比证据。
+
+当前 `observedBytes` 累计成功读取的普通文件的 stat 大小，超过默认 256MiB 时在
+观察完成后附加非阻塞诊断；它不是扫描前估计或大小硬门禁。文本 plan 展示观察完成后的
+文件数、字节数和诊断；JSON plan 保留 observation 字段。两者均不是读取前预警。
+Agent 默认不扫描超大目录的操作规则由 `skills/repo-development/SKILL.md` 维护；
+运行时仍须完整观察 scope 内文件，不可静默跳过。是否尊重 `.gitignore` 是独立的
+摘要语义决策，不在本次剪枝范围内。
+
 ### 7.3 Contract surface 与 IR
 
 第一版使用容易编辑的 YAML/JSON 声明面，并编译为稳定、Agent-neutral 的 Contract

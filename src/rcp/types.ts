@@ -68,6 +68,8 @@ export interface ObservedRepository {
   git: GitObservation;
   files: ObservedFile[];
   diagnostics: string[];
+  /** Bytes of file content actually read for the digest (soft cost signal). */
+  observedBytes?: number;
 }
 
 export interface ProviderDescriptor {
