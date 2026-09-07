@@ -90,14 +90,21 @@ test("feedback labels map to RSCB outcomes with a stable priority", () => {
     contextOutcomeFromFeedback({ evidenceSufficient: true, taskSuccess: true }),
     "verified",
   );
+  // The model often sets only evidenceSufficient; it must still count as verified.
+  assert.equal(contextOutcomeFromFeedback({ evidenceSufficient: true }), "verified");
   assert.equal(contextOutcomeFromFeedback({ excessiveNoise: true }), "rejected");
 });
 
 test("feedback labels with no usable signal map to null, never a silent vote", () => {
   assert.equal(contextOutcomeFromFeedback({}), null);
   assert.equal(contextOutcomeFromFeedback({ taskSuccess: false }), null);
-  assert.equal(contextOutcomeFromFeedback({ evidenceSufficient: true }), null);
-  assert.equal(contextOutcomeFromFeedback({ taskSuccess: false, expansionUseful: false }), null);
+  assert.equal(contextOutcomeFromFeedback({ expansionUseful: true }), null);
+  assert.equal(
+    contextOutcomeFromFeedback({ taskSuccess: false, expansionUseful: false }),
+    null,
+  );
+  // Contradictory: sufficient evidence yet the task failed -> no vote.
+  assert.equal(contextOutcomeFromFeedback({ evidenceSufficient: true, taskSuccess: false }), null);
 });
 
 test("feedback-mapped outcome feeds the RSCB reward for the executed action", () => {

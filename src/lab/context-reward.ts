@@ -94,12 +94,10 @@ export function contextOutcomeFromFeedback(
   if (labels.memoryMisleading === true) return "falsePositive";
   if (labels.noMemoryNeeded === true) return "rejected";
   if (labels.evidenceSufficient === false) return "insufficient";
-  if (
-    labels.evidenceSufficient === true &&
-    (labels.taskSuccess === true || labels.expansionUseful === true)
-  ) {
-    return "verified";
-  }
+  // Verified = the recalled evidence was sufficient and the task did not fail.
+  // The model often sets only evidenceSufficient, so expansionUseful/taskSuccess
+  // are NOT required; taskSuccess=false vetoes (contradictory -> no vote).
+  if (labels.evidenceSufficient === true && labels.taskSuccess !== false) return "verified";
   if (labels.excessiveNoise === true) return "rejected";
   return null;
 }

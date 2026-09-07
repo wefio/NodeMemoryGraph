@@ -240,9 +240,12 @@ Design decisions reached with the user after research (RSCB-MC, arxiv 2604.27283
 - **Explicit label->outcome mapping** `contextOutcomeFromFeedback(labels)` in
   `src/lab/context-reward.ts`: priority falsePositive (memoryMisleading) >
   rejected (noMemoryNeeded) > insufficient (evidenceSufficient=false) >
-  verified (sufficient && (taskSuccess||expansionUseful)); noise falls to
-  rejected; no-signal -> null (skipped, never a silent vote). Tests 10/10;
-  shadow/report/skillopt/calibrate/tau 53/53; extension index 47/47; tsc clean.
+  verified (evidenceSufficient=true && taskSuccess!==false; expansionUseful NOT
+  required — real rows often set only evidenceSufficient); noise falls to
+  rejected; no-signal / contradictory -> null (skipped, never a silent vote).
+  Tests 10/10. Validated on 108 real natural feedback rows: 68 map
+  (verified 35 / rejected 13 / insufficient 20), mean reward +0.124;
+  memoryMisleading not yet present in old data (field just added).
 - **Cost stays separated**: lambda*K is subtracted at SELECTION (Q - lambda*K),
   never in the outcome reward, else it double-counts (matches context-cost.ts
   comment). This keeps the reward minimal and correct.
