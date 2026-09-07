@@ -55,7 +55,9 @@ test("online learner: one staged decision + feedback runs one observed-action up
     activeGraph: undefined,
   });
   const before = learner.parameters();
-  learner.stage("graph-1", features, "retrieve");
+  learner.stage("graph-1", "session-1", features, "retrieve");
+  assert.equal(learner.latestStagedGraph("session-1"), "graph-1");
+  assert.equal(learner.latestStagedGraph("other-session"), null);
   const out = learner.consumeFeedback("graph-1", { evidenceSufficient: true });
   assert.equal(out.trained, true);
   assert.equal(out.reward, 0.6); // verified for an injection action
@@ -73,7 +75,7 @@ test("consumeFeedback is a no-op without a staged decision or usable labels", ()
   const learner = new ContextRouterOnlineLearner(onlineRouterStatePath(dir));
   assert.equal(learner.consumeFeedback("graph-x", { evidenceSufficient: true }).trained, false);
   const features = contextFeaturesFromMemory({ results: [result(10)], activeGraph: undefined });
-  learner.stage("graph-y", features, "retrieve");
+  learner.stage("graph-y", "session-2", features, "retrieve");
   // Contradictory labels map to null -> skipped, never a silent vote.
   assert.equal(
     learner.consumeFeedback("graph-y", { evidenceSufficient: true, taskSuccess: false }).trained,

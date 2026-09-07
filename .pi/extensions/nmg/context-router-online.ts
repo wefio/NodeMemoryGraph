@@ -90,6 +90,7 @@ export function contextFeaturesFromMemory(
 }
 
 interface StagedDecision {
+  sessionId: string;
   features: number[];
   action: ContextAction;
 }
@@ -119,14 +120,23 @@ export class ContextRouterOnlineLearner {
   }
 
   /** Called right after an auto-recall staged/injected a retrieval graph. */
-  stage(graphId: string, features: number[], action: ContextAction): void {
+  stage(graphId: string, sessionId: string, features: number[], action: ContextAction): void {
     if (this.#pending.size >= MAX_PENDING) {
       // Evict the oldest staged decision so an always-unrated stream cannot grow
       // this map without bound.
       const oldest = this.#pending.keys().next().value;
       if (oldest !== undefined) this.#pending.delete(oldest);
     }
-    this.#pending.set(graphId, { features, action });
+    this.#pending.set(graphId, { sessionId, features, action });
+  }
+
+  /** Newest staged decision in this session (feedback binding fallback when the
+   *  controller shadow is disabled and cannot resolve the graph itself). */
+  latestStagedGraph(sessionId: string): string | null {
+    for (const graphId of [...this.#pending.keys()].reverse()) {
+      if (this.#pending.get(graphId)?.sessionId === sessionId) return graphId;
+    }
+    return null;
   }
 
   /** Called when feedback for graphId arrives. Returns false when there is no

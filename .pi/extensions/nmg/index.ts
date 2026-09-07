@@ -343,7 +343,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         try {
           const graphId = fullContext.activeGraph?.id;
           if (graphId) {
-            contextOnlineLearner.stage(graphId, contextFeaturesFromMemory(fullContext), "retrieve");
+            contextOnlineLearner.stage(
+              graphId,
+              sessionId,
+              contextFeaturesFromMemory(fullContext),
+              "retrieve",
+            );
           }
         } catch {
           // Online learning must never break automatic recall.
@@ -1279,7 +1284,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       if (params.action === "feedback") {
         const sessionId = ctx.sessionManager.getSessionId();
         const activeGraphId =
-          params.activeGraphId ?? controllerShadow.latestActiveGraphId(sessionId);
+          params.activeGraphId ??
+          controllerShadow.latestActiveGraphId(sessionId) ??
+          contextOnlineLearner?.latestStagedGraph(sessionId) ??
+          null;
         if (!activeGraphId) {
           throw new Error(
             "action=feedback requires an activeGraphId or a retrieval in the current Pi session",
@@ -1299,9 +1307,17 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         if (Object.values(labels).every((value) => value === undefined)) {
           throw new Error("action=feedback requires at least one label or feedbackNote");
         }
-        const recorded = await controllerShadow.feedback(activeGraphId, sessionId, labels);
+        // Shadow log is best-effort (only records when the shadow is enabled).
+        // The online learner is independent of it and runs whenever a staged
+        // decision + usable label exist, so no env var is needed.
+        let recorded = false;
+        try {
+          recorded = await controllerShadow.feedback(activeGraphId, sessionId, labels);
+        } catch {
+          recorded = false;
+        }
         let online = "";
-        if (recorded && contextOnlineLearner) {
+        if (contextOnlineLearner) {
           try {
             const trained = contextOnlineLearner.consumeFeedback(activeGraphId, labels);
             contextOnlineLearner.persistIfDirty();
@@ -1316,7 +1332,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           { recorded, activeGraphId },
           recorded
             ? `Retrieval feedback recorded for shadow calibration.${online}`
-            : "Feedback was not recorded: controller shadow is disabled or the Active Graph belongs to another session.",
+            : `Retrieval feedback processed.${online || " Shadow log disabled (set NMG_CONTROLLER_SHADOW=1 to also record natural feedback events)."}`,
         );
       }
       if (params.action === "forget") {
