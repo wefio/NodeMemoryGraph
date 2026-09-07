@@ -5,13 +5,20 @@
 # Runs only on the files this commit stages; other authors' files are untouched,
 # so it is safe in a shared worktree. Requires prettier (devDependency).
 #
+# Scoped to the root Prettier surface only (src/, .pi/, workbuddy-plugin/) — the
+# exact paths format:check verifies. Sub-packages with their own style/format
+# pipeline (e.g. dsh/dsh-nmg) are deliberately excluded: root Prettier would
+# reformat the whole file and break their tooling/tests.
+#
 # Configure once per clone:
 #   git config core.hooksPath .githooks
 set -eu
 
 # Staged files this commit actually changes (added/copied/modified). Deleted
 # files are excluded: prettier has nothing to format on a path that is gone.
-files="$(git diff --cached --name-only --diff-filter=ACM -- '*.ts' || true)"
+# Keep only paths under the root Prettier surface.
+files="$(git diff --cached --name-only --diff-filter=ACM -- '*.ts' \
+  | grep -E '^(src|\\.pi|workbuddy-plugin)/' || true)"
 [ -z "$files" ] && exit 0
 
 # Format only files still present on disk, then re-stage what prettier rewrote.

@@ -56,8 +56,6 @@ test("online learner: one staged decision + feedback runs one observed-action up
   });
   const before = learner.parameters();
   learner.stage("graph-1", "session-1", features, "retrieve");
-  assert.equal(learner.latestStagedGraph("session-1"), "graph-1");
-  assert.equal(learner.latestStagedGraph("other-session"), null);
   const out = learner.consumeFeedback("graph-1", { evidenceSufficient: true });
   assert.equal(out.trained, true);
   assert.equal(out.reward, 0.6); // verified for an injection action
@@ -67,6 +65,19 @@ test("online learner: one staged decision + feedback runs one observed-action up
   assert.notDeepEqual(before, after, "weights should move after the update");
   const reloaded = loadOnlineRouter(path);
   assert.deepEqual(reloaded.parameters(), after);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("consumeFeedback binds by exact graph id — no session-scoped fallback", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nmg-online-"));
+  const learner = new ContextRouterOnlineLearner(onlineRouterStatePath(dir));
+  const features = contextFeaturesFromMemory({ results: [result(10)], activeGraph: undefined });
+  learner.stage("graph-a", "session-1", features, "retrieve");
+  // Same session but a different (never-staged) graph: must NOT fall back to
+  // graph-a, otherwise feedback meant for one recall trains on another.
+  assert.equal(learner.consumeFeedback("graph-b", { evidenceSufficient: true }).trained, false);
+  // The original staged decision is untouched and still trains when named.
+  assert.equal(learner.consumeFeedback("graph-a", { evidenceSufficient: true }).trained, true);
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -97,6 +108,11 @@ test("persistence round-trips and corrupt state falls back to a fresh router", (
   saveOnlineRouter(router, path);
   assert.deepEqual(loadOnlineRouter(path).parameters(), router.parameters());
   writeFileSync(path, "{not json", "utf8");
-  assert.equal(loadOnlineRouter(path).parameters().every((x) => x === 0), true);
+  assert.equal(
+    loadOnlineRouter(path)
+      .parameters()
+      .every((x) => x === 0),
+    true,
+  );
   rmSync(dir, { recursive: true, force: true });
 });

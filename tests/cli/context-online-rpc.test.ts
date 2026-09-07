@@ -16,14 +16,14 @@ test("recordFeedback is exposed on the RPC catalog", async () => {
   });
   try {
     const hello = await service.invoke("hello");
-    assert.ok(hello.methods.includes("recordFeedback"));
+    assert.ok(hello.methods?.includes("recordFeedback"));
   } finally {
     service.close();
     removeTempDirectory(directory);
   }
 });
 
-test("only autoRecall searches stage; recordFeedback trains and persists the shared learner", async () => {
+test("any disclosure search stages; internal probes do not; feedback trains only the graph it names", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-context-online-rpc-"));
   const service = new NmgService({
     databasePath: join(directory, "nmg.sqlite"),
@@ -37,8 +37,9 @@ test("only autoRecall searches stage; recordFeedback trains and persists the sha
       sourceActor: "user",
     });
 
-    // A plain (explicit nmg_search-style) search is NOT an auto-recall decision:
-    // its graph must not be staged, so feedback on it cannot train.
+    // An explicit (model-invoked nmg_search-style) search surfaced a disclosure
+    // graph, so it IS stageable: the ask is allowed on every recall, and its
+    // feedback names the graph that was actually shown.
     const plain = await service.invoke("search", { query: "lazy stdlib" });
     const plainId = plain.activeGraph?.id;
     assert.ok(plainId);
@@ -46,16 +47,23 @@ test("only autoRecall searches stage; recordFeedback trains and persists the sha
       activeGraphId: plainId,
       evidenceSufficient: true,
     });
-    assert.equal(plainFb.trained, false);
+    assert.equal(plainFb.trained, true);
+    assert.equal(plainFb.reward, 0.6);
+    assert.ok(existsSync(join(directory, "context-router-online.json")));
 
-    // An autoRecall search stages its injected graph in the daemon learner.
-    const auto = await service.invoke("search", {
+    // An internal probe opts out via persistTrace:false; its graph must not be
+    // staged, so feedback on it cannot train.
+    const probe = await service.invoke("search", {
       query: "lazy stdlib",
-      sessionId: "session-online",
-      autoRecall: true,
+      persistTrace: false,
     });
-    const graphId = auto.activeGraph?.id;
-    assert.ok(graphId);
+    const probeId = probe.activeGraph?.id;
+    assert.ok(probeId);
+    const probeFb = await service.invoke("recordFeedback", {
+      activeGraphId: probeId,
+      evidenceSufficient: true,
+    });
+    assert.equal(probeFb.trained, false);
 
     // Feedback for a foreign/unknown graph is best-effort and never throws.
     const foreign = await service.invoke("recordFeedback", {
@@ -64,36 +72,14 @@ test("only autoRecall searches stage; recordFeedback trains and persists the sha
     });
     assert.equal(foreign.trained, false);
 
-    // A usable label on the staged graph trains one observed-action update.
-    const trained = await service.invoke("recordFeedback", {
-      activeGraphId: graphId,
-      evidenceSufficient: true,
-    });
-    assert.equal(trained.trained, true);
-    assert.equal(trained.reward, 0.6);
-    assert.ok(trained.loss !== undefined);
-    assert.ok(existsSync(join(directory, "context-router-online.json")));
-
-    // Without an explicit activeGraphId the daemon resolves the session's most
-    // recently staged decision (natural-feedback semantics, server-side).
-    const auto2 = await service.invoke("search", {
-      query: "lazy stdlib",
-      sessionId: "session-online",
-      autoRecall: true,
-    });
-    assert.ok(auto2.activeGraph?.id);
-    const bySession = await service.invoke("recordFeedback", {
+    // No latest-staged fallback: feedback without an explicit activeGraphId is
+    // skipped rather than bound to whatever was staged most recently.
+    const unresolved = await service.invoke("recordFeedback", {
       sessionId: "session-online",
       noMemoryNeeded: true,
     });
-    assert.equal(bySession.trained, true);
-    assert.equal(bySession.activeGraphId, auto2.activeGraph?.id);
-    assert.equal(bySession.reward, -0.2);
-    const unresolved = await service.invoke("recordFeedback", {
-      sessionId: "session-unknown",
-      evidenceSufficient: true,
-    });
     assert.equal(unresolved.trained, false);
+    assert.equal(unresolved.activeGraphId, null);
   } finally {
     service.close();
     removeTempDirectory(directory);

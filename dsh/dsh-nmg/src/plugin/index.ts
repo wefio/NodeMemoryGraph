@@ -308,11 +308,6 @@ export function apply(ctx: Context): () => void {
   const sessionTokenTotals = new Map() // sessionId -> total estimated recall tokens
   const recallBatch = new Map() // sessionId -> recall[] (newest first, capped at MAX_RECALL_HISTORY)
   const MAX_RECALL_HISTORY = 5 // per-session recall rounds kept for the floating indicator
-  // One-shot online-feedback nudge queue (display timing only; the daemon owns
-  // staging/learning). Set when the previous turn's recall injected memory;
-  // shown once in the next context assembly; cleared when shown or when
-  // feedback is forwarded for the session.
-  const onlineNudgeQueue = new Map() // sessionId -> one-shot nudge text
   const openSearches = new Map() // sessionId -> Promise that resolves once the stash is written
 
   function nextGeneration(sessionId) {
@@ -429,21 +424,6 @@ export function apply(ctx: Context): () => void {
       const sessionId = String(agent.id)
       const query = extractUserPrompt(message)
       if (!query) return
-      // One-shot online-feedback nudge: the recall injected for the previous
-      // turn is now judgeable. Queue the prompt once per injected recall.
-      const recallStack = recallBatch.get(sessionId)
-      const prevRecall = Array.isArray(recallStack) ? recallStack[0] : undefined
-      if (
-        prevRecall &&
-        Array.isArray(prevRecall.candidates) &&
-        prevRecall.candidates.length > 0 &&
-        !prevRecall.nudgeShown &&
-        !prevRecall.fedBack &&
-        contextOnlineLearningEnabled()
-      ) {
-        prevRecall.nudgeShown = true
-        onlineNudgeQueue.set(sessionId, nmgPrompts.online_feedback_nudge)
-      }
       const generation = nextGeneration(sessionId)
       const run = (async () => {
         try {
@@ -507,6 +487,16 @@ export function apply(ctx: Context): () => void {
     }
   }
 
+  // Feedback affordance: recall output carries the ask, so every recall is
+  // allowed to be rated (the daemon owns staging/learning; this only attaches
+  // the ask and forwards feedback). Attached once at the first presentation of
+  // each recall snapshot — the DSH recall text is re-surfaced on later turns,
+  // so a per-snapshot flag stops it from nagging every turn.
+  function recallFeedbackAffordance(graphId) {
+    if (!graphId || !contextOnlineLearningEnabled()) return ''
+    return renderDisclosure(nmgPrompts.recall_feedback_affordance, { graph_id: String(graphId) })
+  }
+
   // The `systemPrompt.context` provider: return the current recall snapshot for
   // the assembling agent, or empty text (contributes nothing). The agent loop
   // materializes the resolved text as a user-role snapshot appended to the turn's
@@ -515,12 +505,14 @@ export function apply(ctx: Context): () => void {
     if (!agent) return ''
     try {
       const id = String(agent.id)
-      const queued = onlineNudgeQueue.get(id)
-      if (queued !== undefined) onlineNudgeQueue.delete(id)
       const stack = recallBatch.get(id)
       const latest = Array.isArray(stack) ? stack[0] : stack
-      const recall = latest && latest.text ? latest.text : ''
-      return queued !== undefined && queued !== '' ? queued + '\n\n' + recall : recall
+      let recall = latest && latest.text ? latest.text : ''
+      if (latest && latest.text && latest.activeGraphId && !latest.nudgeShown && !latest.fedBack) {
+        latest.nudgeShown = true
+        recall = recall + '\n\n' + recallFeedbackAffordance(latest.activeGraphId)
+      }
+      return recall
     } catch {
       return ''
     }
@@ -564,7 +556,6 @@ export function apply(ctx: Context): () => void {
         recallGenerations.delete(id)
         sessionTokenTotals.delete(id)
         recallBatch.delete(id)
-        onlineNudgeQueue.delete(id)
         openSearches.delete(id)
         wakeBatch.delete(id)
         lastAgents.delete(id)
@@ -1219,8 +1210,8 @@ export function apply(ctx: Context): () => void {
         ].some((key) => args[key] !== undefined)
         if (!labelled) return 'nmg_remember feedback requires at least one label.'
         // Shared layer: forward thin to the daemon-owned online learner. The
-        // daemon resolves the staged auto-recall graph (explicit activeGraphId,
-        // else this session's latest) and applies one RSCB update.
+        // daemon trains only on the exact graph the feedback names (no
+        // latest-staged fallback).
         const result = await invokeRpcOnly(
           'recordFeedback',
           {
@@ -1239,11 +1230,10 @@ export function apply(ctx: Context): () => void {
           exec.signal,
         )
         if (!result.ok) return result.error
-        // Real feedback (applied or not) addressed this session's staged
-        // decision; stop nudging.
+        // Real feedback addressed the recall it names (the affordance rode with
+        // the recall output; nothing queued to clear).
         const stagedStack = recallBatch.get(sessionId)
         if (Array.isArray(stagedStack) && stagedStack[0]) stagedStack[0].fedBack = true
-        onlineNudgeQueue.delete(sessionId)
         const data = result.data as
           | { trained?: boolean; reward?: number; loss?: number }
           | null

@@ -329,15 +329,13 @@ completion_nudge: >-
 # One-shot reminder on the turn after an online auto-recall injected memory.
 # Shown only when a staged decision for this session exists and has not been
 # rated; the daemon resolves the staged graph by session id (shared layer).
-online_feedback_nudge: >-
-  NMG auto-recall injected memory during the previous turn. If you can judge
-  from that turn whether the injected memory actually helped or hurt the work,
-  call nmg_remember action=feedback now with explicit values for
-  evidenceSufficient, expansionUseful, excessiveNoise, and noMemoryNeeded
-  (optionally taskSuccess and userCorrection). The daemon maps your labels to
-  one context-router reward update. Omit the call when any label would be a
-  guess, or when no auto-recall memory was injected — this is a one-shot
-  reminder, never an instruction to invent labels.
+recall_feedback_affordance: >-
+  This recall surfaced memory with activeGraphId={graph_id}. If that content
+  helped, went unused, or misled the current work, you may rate it: call
+  nmg_remember action=feedback with activeGraphId={graph_id} and only the
+  labels you can judge (evidenceSufficient, expansionUseful, excessiveNoise,
+  noMemoryNeeded; optionally taskSuccess and userCorrection). Omit the call
+  when any label would be a guess — never invent labels.
 
 # Shadow-only, one-shot reminder on the turn after a retrieval outcome.
 shadow_feedback_nudge: >-

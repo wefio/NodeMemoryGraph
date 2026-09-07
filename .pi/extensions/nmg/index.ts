@@ -112,31 +112,25 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     shadowEnabled() || qpp1Mode !== "off" || qpp2Mode !== "off" || controllerRerankMode !== "off",
   );
   // Online learning is DAEMON-OWNED (shared layer): the daemon stages every
-  // auto-recall search flagged autoRecall and persists the router at
-  // <dataDir>/context-router-online.json. This adapter only marks its recall
-  // searches autoRecall and forwards feedback — no learner logic lives here.
+  // search that surfaced a disclosure graph (auto recall and explicit search
+  // alike) and persists the router at <dataDir>/context-router-online.json.
+  // This adapter only attaches the feedback affordance to recall output and
+  // forwards feedback — no learner logic or ask-scheduling lives here.
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
   const coordinationToolsEnabled = coordinationEnabled();
-  // Online learning is daemon-owned (src/lab/context-router-online.ts: the
-  // daemon decides staging by the same gate). This adapter only avoids pointless
-  // nudges when it is disabled. The gate literal is inlined here because the pi
-  // package cannot import that module — it pulls node:fs + the learner dep tree
-  // across the thin-extension pack boundary.
+  // The online-learning gate is inlined here because the pi package cannot
+  // import the learner module — it pulls node:fs + the learner dep tree across
+  // the thin-extension pack boundary. The daemon owns the real gate; this only
+  // avoids attaching a meaningless affordance when learning is disabled.
   const onlineLearningActive = () => process.env.NMG_CONTEXT_ONLINE_LEARNING !== "0";
-  // One-shot online-feedback nudge (display timing only; the daemon owns
-  // staging/learning). Set when an auto-recall injects memory; shown once on
-  // the next new user turn; cleared when feedback is forwarded or the session
-  // ends. Mirrors the shadow nudge cadence, but targets the online staged
-  // graph (resolved daemon-side by session id), not the shadow dataset.
-  const onlineFeedbackPending = new Map<
-    string,
-    { activeGraphId: string | null; nudged: boolean }
-  >();
-  const popOnlineFeedbackNudge = (sessionId: string): string => {
-    const entry = onlineFeedbackPending.get(sessionId);
-    if (!entry || entry.nudged) return "";
-    entry.nudged = true;
-    return nmgPrompts.online_feedback_nudge;
+  // Feedback affordance: recall output itself carries the ask, so it is allowed
+  // on every recall (automatic pre-turn injection and the model's own nmg_search
+  // results alike). The consumer rates the recall it is looking at, naming the
+  // activeGraphId shown right there — no one-shot next-turn scheduler, which
+  // missed recalls that never armed it and silently suppressed the ask.
+  const recallFeedbackAffordance = (graphId: string | null | undefined): string => {
+    if (!graphId || !onlineLearningActive()) return "";
+    return renderDisclosure(nmgPrompts.recall_feedback_affordance, { graph_id: graphId });
   };
   // Most recent event context, used by the board wake loop to test isIdle and
   // to resolve the current session id outside an event handler.
@@ -277,10 +271,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           memory_ids: pendingClaimOutcome.memoryIds.join(","),
         })
       : "";
-    const onlineFeedbackNudge = isNewUserTurn ? popOnlineFeedbackNudge(sessionId) : "";
-    const nudge = [completionNudge, feedbackNudge, claimOutcomeNudge, onlineFeedbackNudge]
-      .filter(Boolean)
-      .join("\n");
+    const nudge = [completionNudge, feedbackNudge, claimOutcomeNudge].filter(Boolean).join("\n");
     let reasoningCheckpoint = "";
     if (labToolsEnabled) {
       try {
@@ -365,17 +356,17 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // candidates that were merely injected.
       agentAttributionFlow.note(sessionId, fullContext);
       const recordCount = (recalled.match(/memory=/g) ?? []).length;
-      if (recordCount > 0 && onlineLearningActive()) {
-        onlineFeedbackPending.set(sessionId, {
-          activeGraphId: fullContext.activeGraph?.id ?? null,
-          nudged: false,
-        });
-      }
       const searchNudge = formatSearchRecommendation(context, recommendationMode);
       const recallContext = composeNmgContextMessage(
         recalled,
         "",
-        [nudge, searchNudge].filter(Boolean).join("\n"),
+        [
+          nudge,
+          searchNudge,
+          recordCount > 0 ? recallFeedbackAffordance(fullContext.activeGraph?.id) : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
         runtimeContext,
       );
       return {
@@ -790,7 +781,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     recallFlow.clear(sessionId);
     agentAttributionFlow.clear(sessionId);
     controllerShadow.clear(sessionId);
-    onlineFeedbackPending.delete(sessionId);
     if (!connectionPromise) return;
     const active = await connectionPromise.catch(() => undefined);
     if (!active) {
@@ -1358,9 +1348,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         } catch {
           online = " (online update skipped).";
         }
-        // Any real feedback means this session's staged decision was addressed;
-        // stop nudging (a no-staged-decision result still clears the nudge).
-        onlineFeedbackPending.delete(sessionId);
+        // Any real feedback addressed the recall it names; nothing to clear here
+        // (the affordance rides with recall output, it is not scheduled).
         return toolResult(
           { recorded, activeGraphId: params.activeGraphId ?? shadowGraphId ?? daemonGraphId },
           `Retrieval feedback processed.${online}${recorded ? "" : " Shadow log not recorded (set NMG_CONTROLLER_SHADOW=1 to also record natural shadow events)."}`,
@@ -1655,9 +1644,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         result.results.map((entry) => entry.memory.id),
       );
       const text = await formatDisclosedContext(sessionId, result, "header");
-      await controllerShadow.retrieval(fullResult, sessionId, "tool", text);
+      const surfaced = [text, recallFeedbackAffordance(fullResult.activeGraph?.id)]
+        .filter(Boolean)
+        .join("\n");
+      await controllerShadow.retrieval(fullResult, sessionId, "tool", surfaced);
       agentAttributionFlow.note(sessionId, fullResult);
-      return toolResult(result, text);
+      return toolResult(result, surfaced);
     },
   });
 

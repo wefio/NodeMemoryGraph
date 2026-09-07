@@ -126,7 +126,9 @@ export class ContextRouterOnlineLearner {
     return this.#router.parameters();
   }
 
-  /** Called right after an auto-recall staged/injected a retrieval graph. */
+  /** Called after any recall that surfaced a disclosure graph to a consumer
+   *  (automatic pre-turn recall and the model's own explicit search alike).
+   *  persistTrace:false internal probes never reach here. */
   stage(graphId: string, sessionId: string, features: number[], action: ContextAction): void {
     if (this.#pending.size >= MAX_PENDING) {
       // Evict the oldest staged decision so an always-unrated stream cannot grow
@@ -137,17 +139,12 @@ export class ContextRouterOnlineLearner {
     this.#pending.set(graphId, { sessionId, features, action });
   }
 
-  /** Newest staged decision in this session (feedback binding fallback when the
-   *  controller shadow is disabled and cannot resolve the graph itself). */
-  latestStagedGraph(sessionId: string): string | null {
-    for (const graphId of [...this.#pending.keys()].reverse()) {
-      if (this.#pending.get(graphId)?.sessionId === sessionId) return graphId;
-    }
-    return null;
-  }
-
   /** Called when feedback for graphId arrives. Returns false when there is no
-   *  staged decision, no usable label, or the graph is foreign. */
+   *  staged decision, no usable label, or the graph is foreign. Binding is
+   *  explicit: only the exact graphId the feedback names trains (the recall
+   *  surface shows that id). There is deliberately no session-scoped fallback
+   *  here — a fallback bound feedback to whatever was staged most recently,
+   *  which was usually an unrelated recall, so it was removed. */
   consumeFeedback(
     graphId: string,
     labels: ContextFeedbackLabels,
