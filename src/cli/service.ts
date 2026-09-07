@@ -1135,10 +1135,13 @@ export class NmgService {
     try {
       const learner = this.#getOnlineLearner();
       if (!learner) return result; // online learning disabled
-      const graphId =
-        params.activeGraphId ??
-        (params.sessionId ? learner.latestStagedGraph(params.sessionId) : null);
-      if (!graphId) return result; // nothing staged to bind this feedback to
+      // Feedback binds only to the graph it names (the recall surface shows the
+      // activeGraphId the consumer is rating). No latest-staged fallback: that
+      // fallback bound feedback to an unrelated staged decision whenever the
+      // rated recall was not itself staged (e.g. an explicit search), silently
+      // training on the wrong context. Skip rather than mis-bind.
+      const graphId = params.activeGraphId;
+      if (!graphId) return result; // no explicit graph: nothing safe to train on
       const trained = learner.consumeFeedback(graphId, params);
       learner.persistIfDirty();
       if (trained.trained) {
@@ -1302,13 +1305,16 @@ export class NmgService {
     }
   }
 
-  /** Daemon-owned stage + consume for online context-use learning. A search
-   *  flagged autoRecall stages its injected graph; recordFeedback then applies
-   *  the RSCB reward as one observed-action update. Both host adapters (pi,
-   *  dsh) just forward — no adapter holds learner logic. */
+  /** Daemon-owned stage + consume for online context-use learning. Every search
+   *  that surfaced a disclosure graph to a consumer is stageable — automatic
+   *  pre-turn recall and the model's own explicit search alike (any recall may
+   *  be rated). Internal probes opt out via persistTrace:false. recordFeedback
+   *  then applies the RSCB reward as one observed-action update against the
+   *  exact graph the feedback names. Both host adapters (pi, dsh) just forward
+   *  — no adapter holds learner logic. */
   async #search(params: NmgSearchParams): Promise<NmgMethodResult["search"]> {
     const context = await this.#searchImpl(params);
-    if (params.autoRecall === true) this.#stageOnlineDecision(params, context);
+    if (params.persistTrace !== false) this.#stageOnlineDecision(params, context);
     return context;
   }
 
