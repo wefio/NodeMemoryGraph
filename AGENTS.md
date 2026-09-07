@@ -27,6 +27,9 @@ in `docs/design/hidden-features-registry.md`, regardless of ownership or status
 (rule: `docs/decisions/implemented/2026-09-07-register-hidden-features.md`); add
 or update the row in the same change that introduces or alters the gate.
 
+Formatting is enforced by a commit hook (`.githooks/pre-commit` runs Prettier on
+staged `.ts` files). Configure once per clone: `git config core.hooksPath .githooks`.
+
 Build outputs (`dist/`, `dsh/dsh-nmg/lib/`, generated prompts) are not tracked;
 see the "Builds and generated artifacts" section of `skills/repo-development/SKILL.md`
 for reproduction order and `verify:packages` / `check:lock`.
