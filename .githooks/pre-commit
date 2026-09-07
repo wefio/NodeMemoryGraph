@@ -1,0 +1,19 @@
+#!/bin/sh
+# Auto-format staged TypeScript files with Prettier before commit.
+#
+# Zero-dependency guard so formatting drift never reaches CI (format:check).
+# Runs only on the files this commit stages; other authors' files are untouched,
+# so it is safe in a shared worktree. Requires prettier (devDependency).
+#
+# Configure once per clone:
+#   git config core.hooksPath .githooks
+set -eu
+
+# Staged files this commit actually changes (added/copied/modified). Deleted
+# files are excluded: prettier has nothing to format on a path that is gone.
+files="$(git diff --cached --name-only --diff-filter=ACM -- '*.ts' || true)"
+[ -z "$files" ] && exit 0
+
+# Format only files still present on disk, then re-stage what prettier rewrote.
+echo "$files" | tr '\n' '\0' | xargs -0 -r npx --no-install prettier --write
+echo "$files" | tr '\n' '\0' | xargs -0 -r git add
