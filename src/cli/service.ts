@@ -238,9 +238,7 @@ export class NmgService {
           parseRecordClaimOutcomesParams(params),
         ) as NmgMethodResult[M];
       case "recordFeedback":
-        return this.#recordFeedback(
-          parseRecordFeedbackParams(params),
-        ) as NmgMethodResult[M];
+        return this.#recordFeedback(parseRecordFeedbackParams(params)) as NmgMethodResult[M];
       case "search":
         return (await this.#search(parseSearchParams(params))) as NmgMethodResult[M];
       case "get":
@@ -1320,7 +1318,12 @@ export class NmgService {
       if (!graphId) return; // no disclosure graph: nothing for feedback to bind to
       const learner = this.#getOnlineLearner();
       if (!learner) return; // online learning disabled (NMG_CONTEXT_ONLINE_LEARNING=0)
-      learner.stage(graphId, params.sessionId ?? "", contextFeaturesFromMemory(context), "retrieve");
+      learner.stage(
+        graphId,
+        params.sessionId ?? "",
+        contextFeaturesFromMemory(context),
+        "retrieve",
+      );
     } catch {
       // Online learning must never break a recall search.
     }

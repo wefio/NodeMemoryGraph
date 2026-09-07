@@ -18,10 +18,7 @@ export type ContextRecallOutcome =
 
 /** Actions that put memory content into the answer context. none/cue inject no
  * memory content, so they cannot be verified/rejected/false-positive. */
-export const INJECTION_ACTIONS: ReadonlySet<ContextAction> = new Set([
-  "resurface",
-  "retrieve",
-]);
+export const INJECTION_ACTIONS: ReadonlySet<ContextAction> = new Set(["resurface", "retrieve"]);
 
 /** RSCB-MC asymmetric outcome reward (Equation 12 minus the latency/token cost
  * terms, which are already subtracted at selection as lambda*K so they are NOT

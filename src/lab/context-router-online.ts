@@ -1,10 +1,7 @@
 import { dirname, join } from "node:path";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { ContextRouter, type ContextAction } from "./context-router.ts";
-import {
-  encodeContextFeatures,
-  type ContextFeatureState,
-} from "./context-features.ts";
+import { encodeContextFeatures, type ContextFeatureState } from "./context-features.ts";
 import {
   contextOutcomeFromFeedback,
   contextUseReward,

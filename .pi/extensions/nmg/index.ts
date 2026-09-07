@@ -1344,7 +1344,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
             memoryMisleading: params.memoryMisleading,
             note: params.feedbackNote,
           });
-          const result = raw as { trained?: boolean; reward?: number; loss?: number; activeGraphId?: string | null } | null | undefined;
+          const result = raw as
+            | { trained?: boolean; reward?: number; loss?: number; activeGraphId?: string | null }
+            | null
+            | undefined;
           daemonGraphId = result?.activeGraphId ?? null;
           online =
             result && result.trained
