@@ -7,14 +7,11 @@ export const COMMON_REMEMBER_ACTIONS = [
   "forget",
   "resolve",
   "reopen",
-  "claim_outcome",
-] as const;
-
-export const PI_REMEMBER_ACTIONS = [
-  ...COMMON_REMEMBER_ACTIONS.slice(0, -1),
   "feedback",
   "claim_outcome",
 ] as const;
+
+export const PI_REMEMBER_ACTIONS = [...COMMON_REMEMBER_ACTIONS] as const;
 
 export const COMMON_BOARD_ACTIONS = [
   "put",

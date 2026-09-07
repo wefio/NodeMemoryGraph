@@ -27,7 +27,7 @@ test("host-neutral action contracts are unique and Pi only adds host-owned actio
   );
   assert.deepEqual(
     PI_REMEMBER_ACTIONS.filter((action) => !COMMON_REMEMBER_ACTIONS.includes(action as never)),
-    ["feedback"],
+    [],
   );
 });
 

@@ -1,5 +1,13 @@
 // NMG adapter for DeepSeek Harness — community-standard dual-face host package.
 //
+// HOST-ADAPTER BOUNDARY (shared layer rule): this package is a thin transport
+// only. Every NMG capability (recall staging, context-use feedback / online
+// learning, shadow events, nudges, …) lives in the SHARED layer — src/* core
+// modules and the daemon RPC surface (NmgService methods) — never implemented
+// or forked here. A capability that works in one adapter (pi / dsh / …) but not
+// another is a defect: add it to src/ + the daemon, then have every adapter
+// forward the same RPC. Duplicating logic adapter-side drifts and goes stale.
+//
 // Host half: registers model tools (nmg_search / nmg_get / nmg_remember /
 // nmg_board / nmg_lab / nmg_daemon) into the host `tools` registry and implements
 // AUTOMATIC RECALL on `agent/pre-step`. Inside this package the half runs in the
@@ -379,6 +387,7 @@ export function apply(ctx: Context): () => void {
         maxTier: tier,
         graphHops: 1,
         tieredDisclosure: true,
+        autoRecall: true,
         projectDir: workspaceRoot,
         sessionId,
       }, budget)
@@ -1121,7 +1130,7 @@ export function apply(ctx: Context): () => void {
 
   const rememberTool = {
     name: 'nmg_remember',
-    description: 'Save or update durable memory through the shared NMG lifecycle contract. Never save secrets, chatter, unverified model claims, or transient failures.',
+    description: 'Save or update durable memory through the shared NMG lifecycle contract. Never save secrets, chatter, unverified model claims, or transient failures. action=feedback rates a recalled graph (shared context-use learning) and is forwarded to the daemon; no labels = rejected.',
     parameters: {
       type: 'object',
       properties: {
@@ -1135,7 +1144,15 @@ export function apply(ctx: Context): () => void {
         relationConfidence: { type: 'number', description: 'Relation confidence 0..1.' },
         resolutionReason: { type: 'string', description: 'Reason for supersede/resolve/reopen.' },
         semanticTaskId: { type: 'string', description: 'Independent task identity for claim_outcome.' },
-        activeGraphId: { type: 'string', description: 'Active graph that produced the evaluated claim.' },
+        activeGraphId: { type: 'string', description: 'Active graph that produced the evaluated claim or the recall being rated (feedback).' },
+        taskSuccess: { type: 'boolean', description: 'feedback: the recalled context helped the task complete.' },
+        userCorrection: { type: 'boolean', description: 'feedback: the user visibly corrected a claim the recall led to.' },
+        evidenceSufficient: { type: 'boolean', description: 'feedback: the recalled evidence was sufficient (recall quality, not answer correctness).' },
+        expansionUseful: { type: 'boolean', description: 'feedback: expanding a folded memory added real value.' },
+        excessiveNoise: { type: 'boolean', description: 'feedback: the injected recall was mostly noise.' },
+        noMemoryNeeded: { type: 'boolean', description: 'feedback: no memory context was needed at all.' },
+        memoryMisleading: { type: 'boolean', description: 'feedback: the recalled memory itself was wrong/stale/contradictory for this use.' },
+        feedbackNote: { type: 'string', description: 'feedback: concise reason for the labels.' },
         claimOutcome: { type: 'string', enum: ['supported', 'contradicted'] },
         claimSourceLineage: { type: 'string', description: 'Stable attributable source lineage.' },
         claimIndexes: { type: 'array', items: { type: 'integer' } },
@@ -1162,6 +1179,47 @@ export function apply(ctx: Context): () => void {
     async execute(args, exec) {
       const action = args.action || 'save'
       const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
+      if (action === 'feedback') {
+        const labelled = [
+          'taskSuccess',
+          'userCorrection',
+          'evidenceSufficient',
+          'expansionUseful',
+          'excessiveNoise',
+          'noMemoryNeeded',
+          'memoryMisleading',
+        ].some((key) => args[key] !== undefined)
+        if (!labelled) return 'nmg_remember feedback requires at least one label.'
+        // Shared layer: forward thin to the daemon-owned online learner. The
+        // daemon resolves the staged auto-recall graph (explicit activeGraphId,
+        // else this session's latest) and applies one RSCB update.
+        const result = await invokeRpcOnly(
+          'recordFeedback',
+          {
+            activeGraphId: args.activeGraphId,
+            sessionId,
+            taskSuccess: args.taskSuccess,
+            userCorrection: args.userCorrection,
+            evidenceSufficient: args.evidenceSufficient,
+            expansionUseful: args.expansionUseful,
+            excessiveNoise: args.excessiveNoise,
+            noMemoryNeeded: args.noMemoryNeeded,
+            memoryMisleading: args.memoryMisleading,
+            note: args.feedbackNote,
+            semanticTaskId: args.semanticTaskId,
+          },
+          exec.signal,
+        )
+        if (!result.ok) return result.error
+        const data = result.data as
+          | { trained?: boolean; reward?: number; loss?: number }
+          | null
+          | undefined
+        return data && data.trained
+          ? 'Retrieval feedback applied: one online router update (reward=' + data.reward +
+            (data.loss != null ? ', loss=' + Number(data.loss).toFixed(4) : '') + ').'
+          : 'Retrieval feedback processed but not applied (no staged decision or no usable label); skipped.'
+      }
       if (action === 'claim_outcome') {
         if (!args.memoryId || !args.claimOutcome || !args.semanticTaskId || !args.claimSourceLineage) {
           return 'nmg_remember claim_outcome requires memoryId, claimOutcome, semanticTaskId, and claimSourceLineage.'

@@ -1,3 +1,13 @@
+// Pi host adapter for NMG.
+//
+// HOST-ADAPTER BOUNDARY (shared layer rule): this extension is a thin transport
+// only. Every NMG capability (recall staging, context-use feedback / online
+// learning, shadow events, nudges, …) lives in the SHARED layer — src/* core
+// modules and the daemon RPC surface (NmgService methods) — never implemented
+// or forked here. A capability that works in one adapter (pi / dsh / …) but not
+// another is a defect: add it to src/ + the daemon, then have every adapter
+// forward the same RPC. Duplicating logic adapter-side drifts and goes stale.
+
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -68,12 +78,6 @@ import {
   shadowCollectionOrigin,
   shadowEnabled,
 } from "./controller-shadow.ts";
-import {
-  ContextRouterOnlineLearner,
-  contextFeaturesFromMemory,
-  contextOnlineLearningEnabled,
-  onlineRouterStatePath,
-} from "./context-router-online.ts";
 
 /**
  * NMG Pi extension.
@@ -107,14 +111,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     resolveNmgDataDir(),
     shadowEnabled() || qpp1Mode !== "off" || qpp2Mode !== "off" || controllerRerankMode !== "off",
   );
-  // Online learner over the real auto-recall loop: stage (features, action) at
-  // each injected retrieval, update once on its feedback, persist weights.
-  // Enabled by default — auto-recall behaviour never changes (only a tiny
-  // observed-action update runs when feedback arrives). Disable with
-  // NMG_CONTEXT_ONLINE_LEARNING=0.
-  const contextOnlineLearner = contextOnlineLearningEnabled()
-    ? new ContextRouterOnlineLearner(onlineRouterStatePath(resolveNmgDataDir()))
-    : null;
+  // Online learning is DAEMON-OWNED (shared layer): the daemon stages every
+  // auto-recall search flagged autoRecall and persists the router at
+  // <dataDir>/context-router-online.json. This adapter only marks its recall
+  // searches autoRecall and forwards feedback — no learner logic lives here.
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
   const coordinationToolsEnabled = coordinationEnabled();
   // Most recent event context, used by the board wake loop to test isIdle and
@@ -144,7 +144,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       | "sessionActiveGraph"
       | "taskBoard"
       | "recordActiveGraphAttribution"
-      | "recordClaimOutcomes",
+      | "recordClaimOutcomes"
+      | "recordFeedback",
     params: Record<string, unknown>,
   ) => invokeDaemon(await connection(), method, params);
 
@@ -322,6 +323,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         secondPass: qpp2Mode === "active",
         graphHops: Math.min(1, recallRequest.graphHops),
         tieredDisclosure: true,
+        // Tell the daemon this is an automatic recall decision: it stages the
+        // injected graph for online learning (explicit nmg_search stays unstaged).
+        autoRecall: true,
       })) as MemoryContext;
       if (controllerRerankMode === "active") {
         context = await controllerShadow.rerank(context);
@@ -336,24 +340,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // attribution window so agent_end can distinguish surfaced evidence from
       // candidates that were merely injected.
       agentAttributionFlow.note(sessionId, fullContext);
-      // Gated online learning: stage the decision (features + the action
-      // auto-recall actually took = retrieve) so a later feedback on this graph
-      // can run one observed-action update. Never affects recall behaviour.
-      if (contextOnlineLearner) {
-        try {
-          const graphId = fullContext.activeGraph?.id;
-          if (graphId) {
-            contextOnlineLearner.stage(
-              graphId,
-              sessionId,
-              contextFeaturesFromMemory(fullContext),
-              "retrieve",
-            );
-          }
-        } catch {
-          // Online learning must never break automatic recall.
-        }
-      }
       const recordCount = (recalled.match(/memory=/g) ?? []).length;
       const searchNudge = formatSearchRecommendation(context, recommendationMode);
       const recallContext = composeNmgContextMessage(
@@ -1283,16 +1269,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       }
       if (params.action === "feedback") {
         const sessionId = ctx.sessionManager.getSessionId();
-        const activeGraphId =
-          params.activeGraphId ??
-          controllerShadow.latestActiveGraphId(sessionId) ??
-          contextOnlineLearner?.latestStagedGraph(sessionId) ??
-          null;
-        if (!activeGraphId) {
-          throw new Error(
-            "action=feedback requires an activeGraphId or a retrieval in the current Pi session",
-          );
-        }
         const labels = {
           taskSuccess: params.taskSuccess,
           userCorrection: params.userCorrection,
@@ -1307,32 +1283,50 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         if (Object.values(labels).every((value) => value === undefined)) {
           throw new Error("action=feedback requires at least one label or feedbackNote");
         }
-        // Shadow log is best-effort (only records when the shadow is enabled).
-        // The online learner is independent of it and runs whenever a staged
-        // decision + usable label exist, so no env var is needed.
+        // Pi's own natural shadow-events dataset is best-effort and only records
+        // when the controller shadow is enabled. It does NOT gate online learning.
         let recorded = false;
+        let shadowGraphId: string | null = null;
         try {
-          recorded = await controllerShadow.feedback(activeGraphId, sessionId, labels);
+          shadowGraphId = params.activeGraphId ?? controllerShadow.latestActiveGraphId(sessionId);
+          if (shadowGraphId) {
+            recorded = await controllerShadow.feedback(shadowGraphId, sessionId, labels);
+          }
         } catch {
           recorded = false;
         }
+        // Online learning is DAEMON-OWNED (shared layer): forward thin. The
+        // daemon resolves the staged graph (explicit activeGraphId, else the
+        // session's latest) and runs the single observed-action update.
         let online = "";
-        if (contextOnlineLearner) {
-          try {
-            const trained = contextOnlineLearner.consumeFeedback(activeGraphId, labels);
-            contextOnlineLearner.persistIfDirty();
-            online = trained.trained
-              ? ` Online router updated (reward=${trained.reward}, loss=${trained.loss?.toFixed(4)}).`
-              : " (no staged decision or no usable label; skipped).";
-          } catch {
-            online = " (online update skipped).";
-          }
+        let daemonGraphId: string | null = null;
+        try {
+          const raw = await invoke("recordFeedback", {
+            activeGraphId: params.activeGraphId,
+            sessionId,
+            taskSuccess: params.taskSuccess,
+            userCorrection: params.userCorrection,
+            evidenceSufficient: params.evidenceSufficient,
+            expansionUseful: params.expansionUseful,
+            excessiveNoise: params.excessiveNoise,
+            noMemoryNeeded: params.noMemoryNeeded,
+            memoryMisleading: params.memoryMisleading,
+            note: params.feedbackNote,
+          });
+          const result = raw as { trained?: boolean; reward?: number; loss?: number; activeGraphId?: string | null } | null | undefined;
+          daemonGraphId = result?.activeGraphId ?? null;
+          online =
+            result && result.trained
+              ? ` Online router updated (reward=${result.reward}, loss=${result.loss?.toFixed(4)}).`
+              : result
+                ? " (no staged decision or no usable label; skipped)."
+                : " (daemon unavailable; skipped).";
+        } catch {
+          online = " (online update skipped).";
         }
         return toolResult(
-          { recorded, activeGraphId },
-          recorded
-            ? `Retrieval feedback recorded for shadow calibration.${online}`
-            : `Retrieval feedback processed.${online || " Shadow log disabled (set NMG_CONTROLLER_SHADOW=1 to also record natural feedback events)."}`,
+          { recorded, activeGraphId: params.activeGraphId ?? shadowGraphId ?? daemonGraphId },
+          `Retrieval feedback processed.${online}${recorded ? "" : " Shadow log not recorded (set NMG_CONTROLLER_SHADOW=1 to also record natural shadow events)."}`,
         );
       }
       if (params.action === "forget") {

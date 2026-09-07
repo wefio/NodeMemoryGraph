@@ -51,6 +51,7 @@ import type {
   LabCapabilityDescriptor,
   LabScope,
 } from "../integration/lab-capabilities.ts";
+import type { ContextFeedbackLabels } from "../lab/context-reward.ts";
 
 // This is a compatibility epoch, not a feature revision. Additive RPCs,
 // optional fields, and capabilities remain within the same epoch and are
@@ -124,6 +125,7 @@ const RPC_DESCRIPTOR_SOURCE = {
   rememberBatch: { optionalCapability: "batch-remember" },
   resolveRemember: {},
   recordClaimOutcomes: {},
+  recordFeedback: {},
   search: {},
   retentionCandidates: {},
   setStorageState: {},
@@ -331,6 +333,19 @@ export interface NmgRecordClaimOutcomesParams extends RecordClaimOutcomesInput {
   projectDir?: string;
 }
 
+/** Online context-use feedback (RSCB-style): labels for one recalled graph. */
+export interface NmgRecordFeedbackParams extends ContextFeedbackLabels {
+  /** Active graph of the auto-recall decision the feedback labels. Optional:
+   *  when omitted, the daemon binds the most recently staged decision for
+   *  `sessionId` (natural-feedback semantics, resolved server-side). */
+  activeGraphId?: string;
+  /** Session owning the recall; required to resolve the latest staged graph
+   *  when activeGraphId is absent. */
+  sessionId?: string;
+  /** Free-form note from the labelling model (informational). */
+  note?: string;
+}
+
 export interface NmgSearchParams {
   query: string;
   /** Extra retrieval clauses fused with the primary query (union of results). */
@@ -358,6 +373,10 @@ export interface NmgSearchParams {
   strongHitInitialTarget?: number;
   progressiveWarmDisclosure?: boolean;
   tieredDisclosure?: boolean;
+  /** True only for the host's automatic recall search — the one whose injected
+   *  graph is eligible for online learning. Explicit nmg_search tool calls stay
+   *  unstaged (the model chose them, so they are not auto-recall decisions). */
+  autoRecall?: boolean;
   /** Internal planning probes are not eligible for feedback and must not persist a trace. */
   persistTrace?: boolean;
   /** Hard Active Graph envelope selected by a caller-side controller. */
@@ -832,6 +851,12 @@ export type NmgMethodResult = {
     consolidationCandidates: string[];
     consolidatedMemories: Array<{ sourceMemoryId: string; memoryId: string }>;
     retractedMemories: Array<{ sourceMemoryId: string; memoryId: string }>;
+  };
+  recordFeedback: {
+    trained: boolean;
+    reward?: number;
+    loss?: number;
+    activeGraphId: string | null;
   };
   search: MemoryContext;
   get: MemoryContext & { missingMemoryIds: string[] };
