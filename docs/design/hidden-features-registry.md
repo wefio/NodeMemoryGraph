@@ -1,0 +1,44 @@
+# Hidden features registry
+
+Living ledger: every capability that is not active by default (env-gated or mode
+flagged) must have a row here, regardless of ownership or status. Rule:
+`docs/decisions/implemented/2026-09-07-register-hidden-features.md`.
+
+Keep this current in the same change that adds or alters a gate. Sweep method
+(2026-09-07): grep `process.env.NMG_*` across `.pi/extensions/nmg`,
+`dsh/dsh-nmg/src`, `src/` + the mode helpers in `src/integration/config.ts`
+(they read via an `environment` parameter, so literal `process.env` scans miss
+them).
+
+## Feature register
+
+| Feature | Gate(s) | Default | Values / meaning | Location | Owner | Status |
+|---|---|---|---|---|---|---|
+| Online context-use learning (ContextRouter) | `NMG_CONTEXT_ONLINE_LEARNING` | **ON** | `"0"` = off (any other value incl. `"false"` = on). Daemon stages every `autoRecall` graph; `recordFeedback` → RSCB reward → one router update; state `<dataDir>/context-router-online.json` (132 params, no rows persisted) | `src/lab/context-router-online.ts`, `src/cli/service.ts` | this feature (local commits) | default-on / in-progress-local |
+| Controller shadow evaluation | `NMG_CONTROLLER_SHADOW` | off | `"1"` = on. Writes shadow events jsonl + the old `shadow_feedback_nudge`; powers QPP/rerank datasets | `.pi/extensions/nmg/controller-shadow.ts` | earlier feature | opt-in / dormant (superseded by online learning for the router) |
+| Shadow collection-origin tag | `NMG_SHADOW_COLLECTION_ORIGIN` | natural | `natural` / `controlled` label on shadow events | `controller-shadow.ts` | earlier feature | opt-in |
+| Controller runtime-state file | `NMG_CONTROLLER_RUNTIME_STATE` | auto path | file path for learned controller state | `controller-shadow.ts` | earlier feature | opt-in |
+| Controller activation-receipt file | `NMG_CONTROLLER_ACTIVATION_RECEIPT` | — | file path for activation receipt | `controller-shadow.ts` | earlier feature | opt-in |
+| QPP1 learned fold | `NMG_QPP1_MODE` | off | `off` / `shadow` / `active` | `src/integration/config.ts` + pi ext | earlier feature | opt-in / dormant |
+| QPP2 second-pass fold | `NMG_QPP2_MODE` | off | `off` / `shadow` / `active` | `src/integration/config.ts` + pi ext | earlier feature | opt-in / dormant |
+| Controller (DC) runtime rerank | `NMG_CONTROLLER_RUNTIME_MODE` | off | `off` / `shadow` / `controlled` / `active` | `src/integration/config.ts` + pi ext | earlier feature | opt-in / dormant |
+| Search-recommendation nudge | `NMG_SEARCH_RECOMMENDATION` | off | `off` / `advisory` / `guardrail` | `src/integration/config.ts` + pi ext | earlier feature | opt-in |
+| Lab tools (reasoning workspace, memory-graph reasoner, controller shadow; also dsh `dsh-nmg`) | `NMG_ENABLE_LAB_TOOLS` | off | `"1"` = on | pi ext / dsh plugin / daemon `lab` RPC | earlier feature | opt-in |
+| Autodiff graph compile | `NMG_AUTODIFF_COMPILE` | off | compile autodiff graphs to JS for speed | `src/lab/autodiff.ts` | core | opt-in / perf knob |
+| Auto-recall tuning knobs | `NMG_AUTO_RECALL_TIER` (1), `NMG_AUTO_RECALL_LIMIT` (13), `NMG_AUTO_RECALL_INITIAL_TARGET` (13), `NMG_AUTO_RECALL_STRONG_HIT_TOP_GAP` (0.05), `NMG_AUTO_RECALL_STRONG_HIT_INITIAL_TARGET` (3) | as listed | tune the default-on auto-recall | pi ext + dsh plugin | core | knobs of a default-on feature |
+| Board wake cadence | `NMG_BOARD_WAKE_INTERVAL_SEC` | — | wake interval for board coordination loop | dsh plugin | earlier feature | knob |
+| Daemon idle timeout | `NMG_DAEMON_IDLE_TIMEOUT_MS` | — | daemon idle shutdown | `src/cli/http-server.ts` | core | knob |
+| Agent identity / capabilities | `NMG_AGENT_ID`, `NMG_AGENT_CAPABILITIES`, `NMG_AGENT_ONLINE_MS`, `DSH_SESSION_ID` | auto | board/agent registration identity | pi ext / dsh / `src/core/store/base.ts` | core | config |
+| Paths | `NMG_DATA_DIR`, `NMG_PROJECT_DIR`, `HOME`, `USERPROFILE` | — | data/project directories | pi ext / dsh | core | config |
+| Model selection | `NMG_EMBED_MODEL`, `NMG_SUMMARY_MODEL`, `NMG_JUDGE_MODEL`, `EVAL_MODEL`, `ANSWER_MODEL` | provider default | choose embedding/summarizer/judge/eval/answer model | embedding providers + summarizers | core | config |
+| Retrieval backend mode (RPC param, not env) | `retrievalMode` | legacy | `legacy` / `fts5` / `hashing` / `qwen3` / `hybrid` | `src/cli/service.ts` (RPC) | core | config/knob |
+| **Online auto-recall feedback prompt (was MISSING WIRE)** | — (no new gate; follows online learning default) | ON | Fixed 2026-09-07: adapter-local one-shot `online_feedback_nudge` — set when an auto-recall injects memory, shown once on the next new user turn, asks the consumer to call `nmg_remember action=feedback` (daemon resolves the staged graph by session id); cleared on feedback or session end. Prompt: `online_feedback_nudge` in `src/prompts/nmg-prompts.yaml`. pi + dsh both wired. Optional fallback still open: mechanical end-of-turn labeler (option B) if voluntary nudges still under-produce | pi + dsh adapters | — | implemented (2026-09-07) / follow-up B optional |
+
+## Conventions
+
+- Add a row in the same change that introduces a gate. Update the row on any
+  change to a gate's name, default, owner, mode set, or status.
+- A gate read through an `environment` parameter (not a literal `process.env.X`)
+  still gets a row — those are the easiest to lose.
+- "Planned / open" rows are allowed: intended capabilities that exist only as a
+  dead link must stay visible so they cannot silently vanish again.
