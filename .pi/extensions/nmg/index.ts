@@ -78,7 +78,6 @@ import {
   shadowCollectionOrigin,
   shadowEnabled,
 } from "./controller-shadow.ts";
-import { contextOnlineLearningEnabled } from "./context-router-online.ts";
 
 /**
  * NMG Pi extension.
@@ -118,6 +117,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   // searches autoRecall and forwards feedback — no learner logic lives here.
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
   const coordinationToolsEnabled = coordinationEnabled();
+  // Online learning is daemon-owned (src/lab/context-router-online.ts: the
+  // daemon decides staging by the same gate). This adapter only avoids pointless
+  // nudges when it is disabled. The gate literal is inlined here because the pi
+  // package cannot import that module — it pulls node:fs + the learner dep tree
+  // across the thin-extension pack boundary.
+  const onlineLearningActive = () => process.env.NMG_CONTEXT_ONLINE_LEARNING !== "0";
   // One-shot online-feedback nudge (display timing only; the daemon owns
   // staging/learning). Set when an auto-recall injects memory; shown once on
   // the next new user turn; cleared when feedback is forwarded or the session
@@ -360,7 +365,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // candidates that were merely injected.
       agentAttributionFlow.note(sessionId, fullContext);
       const recordCount = (recalled.match(/memory=/g) ?? []).length;
-      if (recordCount > 0 && contextOnlineLearningEnabled()) {
+      if (recordCount > 0 && onlineLearningActive()) {
         onlineFeedbackPending.set(sessionId, {
           activeGraphId: fullContext.activeGraph?.id ?? null,
           nudged: false,
