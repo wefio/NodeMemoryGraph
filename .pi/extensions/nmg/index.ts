@@ -1329,7 +1329,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         // Online learning is DAEMON-OWNED (shared layer): forward thin. The
         // daemon resolves the staged graph (explicit activeGraphId, else the
         // session's latest) and runs the single observed-action update.
-        let online = "";
+        let online: string;
         let daemonGraphId: string | null = null;
         try {
           const raw = await invoke("recordFeedback", {
