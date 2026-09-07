@@ -1024,6 +1024,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       noMemoryNeeded: Type.Optional(
         Type.Boolean({ description: nmgPrompts.feedback_label_parameter_description }),
       ),
+      memoryMisleading: Type.Optional(
+        Type.Boolean({ description: nmgPrompts.feedback_misleading_parameter_description }),
+      ),
       feedbackNote: Type.Optional(
         Type.String({ description: nmgPrompts.feedback_note_parameter_description }),
       ),
@@ -1262,6 +1265,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           expansionUseful: params.expansionUseful,
           excessiveNoise: params.excessiveNoise,
           noMemoryNeeded: params.noMemoryNeeded,
+          memoryMisleading: params.memoryMisleading,
           note: params.feedbackNote,
           semanticTaskId: params.semanticTaskId,
         };

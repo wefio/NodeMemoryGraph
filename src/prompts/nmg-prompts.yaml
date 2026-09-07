@@ -289,6 +289,11 @@ feedback_label_parameter_description: >-
   Explicit observed label for action=feedback. Omit when unknown; false means
   the condition was actually reviewed and absent, not merely that nobody said it.
 
+feedback_misleading_parameter_description: >-
+  Explicit observed label for action=feedback: the recalled memory itself was
+  causally wrong, stale, or contradictory for this use (a false-positive
+  injection). Omit when unknown; set true only when actually observed.
+
 semantic_task_id_parameter_description: >-
   Optional stable identifier shared by retries of the same semantic task. It is
   used for calibration deduplication, not session authorization or memory scope.
