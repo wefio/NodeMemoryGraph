@@ -21,6 +21,7 @@ import {
   buildRouteVerificationPlan,
   executeVerificationPlan,
   npmCommandRunner,
+  type VerificationCommandResult,
   type VerificationRunResult,
 } from "../src/rcp/verification.ts";
 export {
