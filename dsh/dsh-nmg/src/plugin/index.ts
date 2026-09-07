@@ -1,5 +1,13 @@
 // NMG adapter for DeepSeek Harness — community-standard dual-face host package.
 //
+// HOST-ADAPTER BOUNDARY (shared layer rule): this package is a thin transport
+// only. Every NMG capability (recall staging, context-use feedback / online
+// learning, shadow events, nudges, …) lives in the SHARED layer — src/* core
+// modules and the daemon RPC surface (NmgService methods) — never implemented
+// or forked here. A capability that works in one adapter (pi / dsh / …) but not
+// another is a defect: add it to src/ + the daemon, then have every adapter
+// forward the same RPC. Duplicating logic adapter-side drifts and goes stale.
+//
 // Host half: registers model tools (nmg_search / nmg_get / nmg_remember /
 // nmg_board / nmg_lab / nmg_daemon) into the host `tools` registry and implements
 // AUTOMATIC RECALL on `agent/pre-step`. Inside this package the half runs in the
@@ -29,6 +37,7 @@ import {
   renderTaskBoardSurface,
 } from '../../../../src/integration/agent-surface.ts'
 import { loadPrompts, renderDisclosure } from '../../../../src/prompts/load.ts'
+import { contextOnlineLearningEnabled } from '../../../../src/lab/context-router-online.ts'
 
 const nmgPrompts = loadPrompts()
 
@@ -299,6 +308,11 @@ export function apply(ctx: Context): () => void {
   const sessionTokenTotals = new Map() // sessionId -> total estimated recall tokens
   const recallBatch = new Map() // sessionId -> recall[] (newest first, capped at MAX_RECALL_HISTORY)
   const MAX_RECALL_HISTORY = 5 // per-session recall rounds kept for the floating indicator
+  // One-shot online-feedback nudge queue (display timing only; the daemon owns
+  // staging/learning). Set when the previous turn's recall injected memory;
+  // shown once in the next context assembly; cleared when shown or when
+  // feedback is forwarded for the session.
+  const onlineNudgeQueue = new Map() // sessionId -> one-shot nudge text
   const openSearches = new Map() // sessionId -> Promise that resolves once the stash is written
 
   function nextGeneration(sessionId) {
@@ -379,6 +393,7 @@ export function apply(ctx: Context): () => void {
         maxTier: tier,
         graphHops: 1,
         tieredDisclosure: true,
+        autoRecall: true,
         projectDir: workspaceRoot,
         sessionId,
       }, budget)
@@ -414,6 +429,21 @@ export function apply(ctx: Context): () => void {
       const sessionId = String(agent.id)
       const query = extractUserPrompt(message)
       if (!query) return
+      // One-shot online-feedback nudge: the recall injected for the previous
+      // turn is now judgeable. Queue the prompt once per injected recall.
+      const recallStack = recallBatch.get(sessionId)
+      const prevRecall = Array.isArray(recallStack) ? recallStack[0] : undefined
+      if (
+        prevRecall &&
+        Array.isArray(prevRecall.candidates) &&
+        prevRecall.candidates.length > 0 &&
+        !prevRecall.nudgeShown &&
+        !prevRecall.fedBack &&
+        contextOnlineLearningEnabled()
+      ) {
+        prevRecall.nudgeShown = true
+        onlineNudgeQueue.set(sessionId, nmgPrompts.online_feedback_nudge)
+      }
       const generation = nextGeneration(sessionId)
       const run = (async () => {
         try {
@@ -459,6 +489,8 @@ export function apply(ctx: Context): () => void {
             sessionTotal,
             candidates: fresh,
             activeGraphId: recall.activeGraphId,
+            nudgeShown: false,
+            fedBack: false,
           }
           const history = recallBatch.get(sessionId)
           recallBatch.set(sessionId, [entry, ...(history || [])].slice(0, MAX_RECALL_HISTORY))
@@ -482,9 +514,13 @@ export function apply(ctx: Context): () => void {
   function recallTextFor(agent) {
     if (!agent) return ''
     try {
-      const stack = recallBatch.get(String(agent.id))
+      const id = String(agent.id)
+      const queued = onlineNudgeQueue.get(id)
+      if (queued !== undefined) onlineNudgeQueue.delete(id)
+      const stack = recallBatch.get(id)
       const latest = Array.isArray(stack) ? stack[0] : stack
-      return latest && latest.text ? latest.text : ''
+      const recall = latest && latest.text ? latest.text : ''
+      return queued !== undefined && queued !== '' ? queued + '\n\n' + recall : recall
     } catch {
       return ''
     }
@@ -528,6 +564,7 @@ export function apply(ctx: Context): () => void {
         recallGenerations.delete(id)
         sessionTokenTotals.delete(id)
         recallBatch.delete(id)
+        onlineNudgeQueue.delete(id)
         openSearches.delete(id)
         wakeBatch.delete(id)
         lastAgents.delete(id)
@@ -1121,7 +1158,7 @@ export function apply(ctx: Context): () => void {
 
   const rememberTool = {
     name: 'nmg_remember',
-    description: 'Save or update durable memory through the shared NMG lifecycle contract. Never save secrets, chatter, unverified model claims, or transient failures.',
+    description: 'Save or update durable memory through the shared NMG lifecycle contract. Never save secrets, chatter, unverified model claims, or transient failures. action=feedback rates a recalled graph (shared context-use learning) and is forwarded to the daemon; no labels = rejected.',
     parameters: {
       type: 'object',
       properties: {
@@ -1135,7 +1172,15 @@ export function apply(ctx: Context): () => void {
         relationConfidence: { type: 'number', description: 'Relation confidence 0..1.' },
         resolutionReason: { type: 'string', description: 'Reason for supersede/resolve/reopen.' },
         semanticTaskId: { type: 'string', description: 'Independent task identity for claim_outcome.' },
-        activeGraphId: { type: 'string', description: 'Active graph that produced the evaluated claim.' },
+        activeGraphId: { type: 'string', description: 'Active graph that produced the evaluated claim or the recall being rated (feedback).' },
+        taskSuccess: { type: 'boolean', description: 'feedback: the recalled context helped the task complete.' },
+        userCorrection: { type: 'boolean', description: 'feedback: the user visibly corrected a claim the recall led to.' },
+        evidenceSufficient: { type: 'boolean', description: 'feedback: the recalled evidence was sufficient (recall quality, not answer correctness).' },
+        expansionUseful: { type: 'boolean', description: 'feedback: expanding a folded memory added real value.' },
+        excessiveNoise: { type: 'boolean', description: 'feedback: the injected recall was mostly noise.' },
+        noMemoryNeeded: { type: 'boolean', description: 'feedback: no memory context was needed at all.' },
+        memoryMisleading: { type: 'boolean', description: 'feedback: the recalled memory itself was wrong/stale/contradictory for this use.' },
+        feedbackNote: { type: 'string', description: 'feedback: concise reason for the labels.' },
         claimOutcome: { type: 'string', enum: ['supported', 'contradicted'] },
         claimSourceLineage: { type: 'string', description: 'Stable attributable source lineage.' },
         claimIndexes: { type: 'array', items: { type: 'integer' } },
@@ -1162,6 +1207,52 @@ export function apply(ctx: Context): () => void {
     async execute(args, exec) {
       const action = args.action || 'save'
       const sessionId = exec && exec.agent && exec.agent.id ? String(exec.agent.id) : hostSessionId
+      if (action === 'feedback') {
+        const labelled = [
+          'taskSuccess',
+          'userCorrection',
+          'evidenceSufficient',
+          'expansionUseful',
+          'excessiveNoise',
+          'noMemoryNeeded',
+          'memoryMisleading',
+        ].some((key) => args[key] !== undefined)
+        if (!labelled) return 'nmg_remember feedback requires at least one label.'
+        // Shared layer: forward thin to the daemon-owned online learner. The
+        // daemon resolves the staged auto-recall graph (explicit activeGraphId,
+        // else this session's latest) and applies one RSCB update.
+        const result = await invokeRpcOnly(
+          'recordFeedback',
+          {
+            activeGraphId: args.activeGraphId,
+            sessionId,
+            taskSuccess: args.taskSuccess,
+            userCorrection: args.userCorrection,
+            evidenceSufficient: args.evidenceSufficient,
+            expansionUseful: args.expansionUseful,
+            excessiveNoise: args.excessiveNoise,
+            noMemoryNeeded: args.noMemoryNeeded,
+            memoryMisleading: args.memoryMisleading,
+            note: args.feedbackNote,
+            semanticTaskId: args.semanticTaskId,
+          },
+          exec.signal,
+        )
+        if (!result.ok) return result.error
+        // Real feedback (applied or not) addressed this session's staged
+        // decision; stop nudging.
+        const stagedStack = recallBatch.get(sessionId)
+        if (Array.isArray(stagedStack) && stagedStack[0]) stagedStack[0].fedBack = true
+        onlineNudgeQueue.delete(sessionId)
+        const data = result.data as
+          | { trained?: boolean; reward?: number; loss?: number }
+          | null
+          | undefined
+        return data && data.trained
+          ? 'Retrieval feedback applied: one online router update (reward=' + data.reward +
+            (data.loss != null ? ', loss=' + Number(data.loss).toFixed(4) : '') + ').'
+          : 'Retrieval feedback processed but not applied (no staged decision or no usable label); skipped.'
+      }
       if (action === 'claim_outcome') {
         if (!args.memoryId || !args.claimOutcome || !args.semanticTaskId || !args.claimSourceLineage) {
           return 'nmg_remember claim_outcome requires memoryId, claimOutcome, semanticTaskId, and claimSourceLineage.'

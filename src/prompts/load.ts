@@ -43,6 +43,7 @@ export interface NmgPrompts {
   mcp_active_graph_id_parameter_description: string;
   feedback_note_parameter_description: string;
   feedback_label_parameter_description: string;
+  feedback_misleading_parameter_description: string;
   semantic_task_id_parameter_description: string;
   claim_outcome_parameter_description: string;
   claim_outcome_source_parameter_description: string;
@@ -53,6 +54,7 @@ export interface NmgPrompts {
   search_progression_required: string;
   search_recommendation: string;
   completion_nudge: string;
+  online_feedback_nudge: string;
   shadow_feedback_nudge: string;
   shadow_claim_outcome_nudge: string;
   search_disclosure: string;

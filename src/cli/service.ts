@@ -78,6 +78,12 @@ import { searchMemoryContext } from "../integration/search.ts";
 import { simhash64, simhashToHex, simhashFromHex, hammingDistance } from "../core/simhash.ts";
 import { ControllerPolicyChannel } from "../integration/controller-channel.ts";
 import {
+  ContextRouterOnlineLearner,
+  contextFeaturesFromMemory,
+  contextOnlineLearningEnabled,
+  onlineRouterStatePath,
+} from "../lab/context-router-online.ts";
+import {
   LAB_CAPABILITIES,
   LabActivationAuthority,
   type LabCapability,
@@ -117,6 +123,7 @@ import {
   type NmgRememberParams,
   type NmgRememberBatchParams,
   type NmgRecordClaimOutcomesParams,
+  type NmgRecordFeedbackParams,
   type NmgResolveRememberParams,
   type NmgRollbackNodeTransformParams,
   type NmgRetentionCandidatesParams,
@@ -159,6 +166,10 @@ export class NmgService {
   readonly #labAuthority = new LabActivationAuthority();
   readonly #reasoningWorkspaces: ReasoningWorkspaces;
   #labShadowController: ControllerPolicyChannel | undefined;
+  /** Daemon-owned online learner for the context-use feedback loop (shared
+   *  layer). Lazily constructed on first stage/feedback; null while the online
+   *  learning gate is off. State persists at <dataDir>/context-router-online.json. */
+  #onlineLearner: ContextRouterOnlineLearner | null | undefined;
   #store: NmgStore | undefined;
   readonly #stgStores = new Map<string, NmgStore>();
   readonly #sessionActiveGraphs = new SessionActiveGraphRuntime<NmgStore>();
@@ -200,6 +211,16 @@ export class NmgService {
     return this.#shutdownRequested;
   }
 
+  /** Lazily construct the daemon-owned online learner (shared state file). */
+  #getOnlineLearner(): ContextRouterOnlineLearner | null {
+    if (this.#onlineLearner === undefined) {
+      this.#onlineLearner = contextOnlineLearningEnabled(this.#environment)
+        ? new ContextRouterOnlineLearner(onlineRouterStatePath(this.#dataDirectory))
+        : null;
+    }
+    return this.#onlineLearner;
+  }
+
   async invoke<M extends NmgMethod>(method: M, params?: unknown): Promise<NmgMethodResult[M]> {
     switch (method) {
       case "hello":
@@ -216,6 +237,8 @@ export class NmgService {
         return this.#recordClaimOutcomes(
           parseRecordClaimOutcomesParams(params),
         ) as NmgMethodResult[M];
+      case "recordFeedback":
+        return this.#recordFeedback(parseRecordFeedbackParams(params)) as NmgMethodResult[M];
       case "search":
         return (await this.#search(parseSearchParams(params))) as NmgMethodResult[M];
       case "get":
@@ -1101,6 +1124,35 @@ export class NmgService {
     };
   }
 
+  /** Consume one labeled auto-recall graph (RSCB context-use feedback) into the
+   *  daemon-owned online learner. No usable label or no staged decision → not
+   *  trained. Best-effort: never breaks the remember path on a foreign graph. */
+  #recordFeedback(params: NmgRecordFeedbackParams): NmgMethodResult["recordFeedback"] {
+    const result: NmgMethodResult["recordFeedback"] = {
+      trained: false,
+      activeGraphId: null,
+    };
+    try {
+      const learner = this.#getOnlineLearner();
+      if (!learner) return result; // online learning disabled
+      const graphId =
+        params.activeGraphId ??
+        (params.sessionId ? learner.latestStagedGraph(params.sessionId) : null);
+      if (!graphId) return result; // nothing staged to bind this feedback to
+      const trained = learner.consumeFeedback(graphId, params);
+      learner.persistIfDirty();
+      if (trained.trained) {
+        result.trained = true;
+        result.reward = trained.reward;
+        result.loss = trained.loss;
+      }
+      result.activeGraphId = graphId;
+    } catch {
+      // Feedback must never break the surrounding remember call.
+    }
+    return result;
+  }
+
   #recordClaimOutcomes(
     params: NmgRecordClaimOutcomesParams,
   ): NmgMethodResult["recordClaimOutcomes"] {
@@ -1250,7 +1302,34 @@ export class NmgService {
     }
   }
 
+  /** Daemon-owned stage + consume for online context-use learning. A search
+   *  flagged autoRecall stages its injected graph; recordFeedback then applies
+   *  the RSCB reward as one observed-action update. Both host adapters (pi,
+   *  dsh) just forward — no adapter holds learner logic. */
   async #search(params: NmgSearchParams): Promise<NmgMethodResult["search"]> {
+    const context = await this.#searchImpl(params);
+    if (params.autoRecall === true) this.#stageOnlineDecision(params, context);
+    return context;
+  }
+
+  #stageOnlineDecision(params: NmgSearchParams, context: MemoryContext): void {
+    try {
+      const graphId = context.activeGraph?.id;
+      if (!graphId) return; // no disclosure graph: nothing for feedback to bind to
+      const learner = this.#getOnlineLearner();
+      if (!learner) return; // online learning disabled (NMG_CONTEXT_ONLINE_LEARNING=0)
+      learner.stage(
+        graphId,
+        params.sessionId ?? "",
+        contextFeaturesFromMemory(context),
+        "retrieve",
+      );
+    } catch {
+      // Online learning must never break a recall search.
+    }
+  }
+
+  async #searchImpl(params: NmgSearchParams): Promise<NmgMethodResult["search"]> {
     const { query, queries, projectDir, sessionId, ...options } = params;
     const searchOptions: SearchOptions = {
       ...options,
@@ -2090,6 +2169,22 @@ function optionalClaimOutcomeEvidenceSource(
   };
 }
 
+function parseRecordFeedbackParams(value: unknown): NmgRecordFeedbackParams {
+  const params = objectParams(value);
+  return {
+    activeGraphId: optionalString(params, "activeGraphId"),
+    sessionId: optionalString(params, "sessionId"),
+    taskSuccess: optionalBoolean(params, "taskSuccess"),
+    userCorrection: optionalBoolean(params, "userCorrection"),
+    evidenceSufficient: optionalBoolean(params, "evidenceSufficient"),
+    expansionUseful: optionalBoolean(params, "expansionUseful"),
+    excessiveNoise: optionalBoolean(params, "excessiveNoise"),
+    noMemoryNeeded: optionalBoolean(params, "noMemoryNeeded"),
+    memoryMisleading: optionalBoolean(params, "memoryMisleading"),
+    note: optionalString(params, "note"),
+  };
+}
+
 function parseSearchParams(value: unknown): NmgSearchParams {
   const params = objectParams(value);
   return {
@@ -2118,6 +2213,7 @@ function parseSearchParams(value: unknown): NmgSearchParams {
     strongHitInitialTarget: optionalInteger(params, "strongHitInitialTarget", 1, 50),
     progressiveWarmDisclosure: optionalBoolean(params, "progressiveWarmDisclosure"),
     tieredDisclosure: optionalBoolean(params, "tieredDisclosure"),
+    autoRecall: optionalBoolean(params, "autoRecall"),
     persistTrace: optionalBoolean(params, "persistTrace"),
     activeGraphBudget: optionalActiveGraphBudget(params, "activeGraphBudget"),
     perf: optionalBoolean(params, "perf"),

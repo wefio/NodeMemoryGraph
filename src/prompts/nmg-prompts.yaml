@@ -289,6 +289,11 @@ feedback_label_parameter_description: >-
   Explicit observed label for action=feedback. Omit when unknown; false means
   the condition was actually reviewed and absent, not merely that nobody said it.
 
+feedback_misleading_parameter_description: >-
+  Explicit observed label for action=feedback: the recalled memory itself was
+  causally wrong, stale, or contradictory for this use (a false-positive
+  injection). Omit when unknown; set true only when actually observed.
+
 semantic_task_id_parameter_description: >-
   Optional stable identifier shared by retries of the same semantic task. It is
   used for calibration deduplication, not session authorization or memory scope.
@@ -320,6 +325,19 @@ completion_nudge: >-
   available: you may recall relevant decisions (nmg_search) or save this
   turn's key conclusions (nmg_remember) if useful. This is only a reminder;
   it does not affect the current work.
+
+# One-shot reminder on the turn after an online auto-recall injected memory.
+# Shown only when a staged decision for this session exists and has not been
+# rated; the daemon resolves the staged graph by session id (shared layer).
+online_feedback_nudge: >-
+  NMG auto-recall injected memory during the previous turn. If you can judge
+  from that turn whether the injected memory actually helped or hurt the work,
+  call nmg_remember action=feedback now with explicit values for
+  evidenceSufficient, expansionUseful, excessiveNoise, and noMemoryNeeded
+  (optionally taskSuccess and userCorrection). The daemon maps your labels to
+  one context-router reward update. Omit the call when any label would be a
+  guess, or when no auto-recall memory was injected — this is a one-shot
+  reminder, never an instruction to invent labels.
 
 # Shadow-only, one-shot reminder on the turn after a retrieval outcome.
 shadow_feedback_nudge: >-

@@ -106,6 +106,8 @@ export interface ShadowFeedbackEvent extends ShadowEventBase {
   expansionUseful: boolean | null;
   excessiveNoise: boolean | null;
   noMemoryNeeded: boolean | null;
+  /** Recalled memory itself was causally wrong/stale/contradictory (RSCB false positive). */
+  memoryMisleading: boolean | null;
   note?: string;
 }
 
@@ -297,6 +299,7 @@ export class ShadowEvaluationLog {
     expansionUseful?: boolean | null;
     excessiveNoise?: boolean | null;
     noMemoryNeeded?: boolean | null;
+    memoryMisleading?: boolean | null;
     note?: string;
     semanticTaskId?: string;
     collectionOrigin?: ShadowFeedbackEvent["collectionOrigin"];
@@ -315,6 +318,7 @@ export class ShadowEvaluationLog {
       expansionUseful: input.expansionUseful ?? null,
       excessiveNoise: input.excessiveNoise ?? null,
       noMemoryNeeded: input.noMemoryNeeded ?? null,
+      memoryMisleading: input.memoryMisleading ?? null,
       note: input.note?.trim() || undefined,
     });
   }

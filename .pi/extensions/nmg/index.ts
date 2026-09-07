@@ -1,3 +1,13 @@
+// Pi host adapter for NMG.
+//
+// HOST-ADAPTER BOUNDARY (shared layer rule): this extension is a thin transport
+// only. Every NMG capability (recall staging, context-use feedback / online
+// learning, shadow events, nudges, …) lives in the SHARED layer — src/* core
+// modules and the daemon RPC surface (NmgService methods) — never implemented
+// or forked here. A capability that works in one adapter (pi / dsh / …) but not
+// another is a defect: add it to src/ + the daemon, then have every adapter
+// forward the same RPC. Duplicating logic adapter-side drifts and goes stale.
+
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -101,8 +111,33 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     resolveNmgDataDir(),
     shadowEnabled() || qpp1Mode !== "off" || qpp2Mode !== "off" || controllerRerankMode !== "off",
   );
+  // Online learning is DAEMON-OWNED (shared layer): the daemon stages every
+  // auto-recall search flagged autoRecall and persists the router at
+  // <dataDir>/context-router-online.json. This adapter only marks its recall
+  // searches autoRecall and forwards feedback — no learner logic lives here.
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
   const coordinationToolsEnabled = coordinationEnabled();
+  // Online learning is daemon-owned (src/lab/context-router-online.ts: the
+  // daemon decides staging by the same gate). This adapter only avoids pointless
+  // nudges when it is disabled. The gate literal is inlined here because the pi
+  // package cannot import that module — it pulls node:fs + the learner dep tree
+  // across the thin-extension pack boundary.
+  const onlineLearningActive = () => process.env.NMG_CONTEXT_ONLINE_LEARNING !== "0";
+  // One-shot online-feedback nudge (display timing only; the daemon owns
+  // staging/learning). Set when an auto-recall injects memory; shown once on
+  // the next new user turn; cleared when feedback is forwarded or the session
+  // ends. Mirrors the shadow nudge cadence, but targets the online staged
+  // graph (resolved daemon-side by session id), not the shadow dataset.
+  const onlineFeedbackPending = new Map<
+    string,
+    { activeGraphId: string | null; nudged: boolean }
+  >();
+  const popOnlineFeedbackNudge = (sessionId: string): string => {
+    const entry = onlineFeedbackPending.get(sessionId);
+    if (!entry || entry.nudged) return "";
+    entry.nudged = true;
+    return nmgPrompts.online_feedback_nudge;
+  };
   // Most recent event context, used by the board wake loop to test isIdle and
   // to resolve the current session id outside an event handler.
   let latestAgentCtx: ExtensionContext | undefined;
@@ -130,7 +165,8 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       | "sessionActiveGraph"
       | "taskBoard"
       | "recordActiveGraphAttribution"
-      | "recordClaimOutcomes",
+      | "recordClaimOutcomes"
+      | "recordFeedback",
     params: Record<string, unknown>,
   ) => invokeDaemon(await connection(), method, params);
 
@@ -241,7 +277,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           memory_ids: pendingClaimOutcome.memoryIds.join(","),
         })
       : "";
-    const nudge = [completionNudge, feedbackNudge, claimOutcomeNudge].filter(Boolean).join("\n");
+    const onlineFeedbackNudge = isNewUserTurn ? popOnlineFeedbackNudge(sessionId) : "";
+    const nudge = [completionNudge, feedbackNudge, claimOutcomeNudge, onlineFeedbackNudge]
+      .filter(Boolean)
+      .join("\n");
     let reasoningCheckpoint = "";
     if (labToolsEnabled) {
       try {
@@ -308,6 +347,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         secondPass: qpp2Mode === "active",
         graphHops: Math.min(1, recallRequest.graphHops),
         tieredDisclosure: true,
+        // Tell the daemon this is an automatic recall decision: it stages the
+        // injected graph for online learning (explicit nmg_search stays unstaged).
+        autoRecall: true,
       })) as MemoryContext;
       if (controllerRerankMode === "active") {
         context = await controllerShadow.rerank(context);
@@ -323,6 +365,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // candidates that were merely injected.
       agentAttributionFlow.note(sessionId, fullContext);
       const recordCount = (recalled.match(/memory=/g) ?? []).length;
+      if (recordCount > 0 && onlineLearningActive()) {
+        onlineFeedbackPending.set(sessionId, {
+          activeGraphId: fullContext.activeGraph?.id ?? null,
+          nudged: false,
+        });
+      }
       const searchNudge = formatSearchRecommendation(context, recommendationMode);
       const recallContext = composeNmgContextMessage(
         recalled,
@@ -742,6 +790,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     recallFlow.clear(sessionId);
     agentAttributionFlow.clear(sessionId);
     controllerShadow.clear(sessionId);
+    onlineFeedbackPending.delete(sessionId);
     if (!connectionPromise) return;
     const active = await connectionPromise.catch(() => undefined);
     if (!active) {
@@ -1024,6 +1073,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       noMemoryNeeded: Type.Optional(
         Type.Boolean({ description: nmgPrompts.feedback_label_parameter_description }),
       ),
+      memoryMisleading: Type.Optional(
+        Type.Boolean({ description: nmgPrompts.feedback_misleading_parameter_description }),
+      ),
       feedbackNote: Type.Optional(
         Type.String({ description: nmgPrompts.feedback_note_parameter_description }),
       ),
@@ -1248,13 +1300,6 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       }
       if (params.action === "feedback") {
         const sessionId = ctx.sessionManager.getSessionId();
-        const activeGraphId =
-          params.activeGraphId ?? controllerShadow.latestActiveGraphId(sessionId);
-        if (!activeGraphId) {
-          throw new Error(
-            "action=feedback requires an activeGraphId or a retrieval in the current Pi session",
-          );
-        }
         const labels = {
           taskSuccess: params.taskSuccess,
           userCorrection: params.userCorrection,
@@ -1262,18 +1307,63 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           expansionUseful: params.expansionUseful,
           excessiveNoise: params.excessiveNoise,
           noMemoryNeeded: params.noMemoryNeeded,
+          memoryMisleading: params.memoryMisleading,
           note: params.feedbackNote,
           semanticTaskId: params.semanticTaskId,
         };
         if (Object.values(labels).every((value) => value === undefined)) {
           throw new Error("action=feedback requires at least one label or feedbackNote");
         }
-        const recorded = await controllerShadow.feedback(activeGraphId, sessionId, labels);
+        // Pi's own natural shadow-events dataset is best-effort and only records
+        // when the controller shadow is enabled. It does NOT gate online learning.
+        let recorded = false;
+        let shadowGraphId: string | null = null;
+        try {
+          shadowGraphId = params.activeGraphId ?? controllerShadow.latestActiveGraphId(sessionId);
+          if (shadowGraphId) {
+            recorded = await controllerShadow.feedback(shadowGraphId, sessionId, labels);
+          }
+        } catch {
+          recorded = false;
+        }
+        // Online learning is DAEMON-OWNED (shared layer): forward thin. The
+        // daemon resolves the staged graph (explicit activeGraphId, else the
+        // session's latest) and runs the single observed-action update.
+        let online: string;
+        let daemonGraphId: string | null = null;
+        try {
+          const raw = await invoke("recordFeedback", {
+            activeGraphId: params.activeGraphId,
+            sessionId,
+            taskSuccess: params.taskSuccess,
+            userCorrection: params.userCorrection,
+            evidenceSufficient: params.evidenceSufficient,
+            expansionUseful: params.expansionUseful,
+            excessiveNoise: params.excessiveNoise,
+            noMemoryNeeded: params.noMemoryNeeded,
+            memoryMisleading: params.memoryMisleading,
+            note: params.feedbackNote,
+          });
+          const result = raw as
+            | { trained?: boolean; reward?: number; loss?: number; activeGraphId?: string | null }
+            | null
+            | undefined;
+          daemonGraphId = result?.activeGraphId ?? null;
+          online =
+            result && result.trained
+              ? ` Online router updated (reward=${result.reward}, loss=${result.loss?.toFixed(4)}).`
+              : result
+                ? " (no staged decision or no usable label; skipped)."
+                : " (daemon unavailable; skipped).";
+        } catch {
+          online = " (online update skipped).";
+        }
+        // Any real feedback means this session's staged decision was addressed;
+        // stop nudging (a no-staged-decision result still clears the nudge).
+        onlineFeedbackPending.delete(sessionId);
         return toolResult(
-          { recorded, activeGraphId },
-          recorded
-            ? "Retrieval feedback recorded for shadow calibration."
-            : "Feedback was not recorded: controller shadow is disabled or the Active Graph belongs to another session.",
+          { recorded, activeGraphId: params.activeGraphId ?? shadowGraphId ?? daemonGraphId },
+          `Retrieval feedback processed.${online}${recorded ? "" : " Shadow log not recorded (set NMG_CONTROLLER_SHADOW=1 to also record natural shadow events)."}`,
         );
       }
       if (params.action === "forget") {

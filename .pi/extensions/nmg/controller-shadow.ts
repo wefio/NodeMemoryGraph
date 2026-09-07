@@ -234,6 +234,7 @@ export class ControllerShadowBridge {
       expansionUseful?: boolean;
       excessiveNoise?: boolean;
       noMemoryNeeded?: boolean;
+      memoryMisleading?: boolean;
       note?: string;
       semanticTaskId?: string;
     },
