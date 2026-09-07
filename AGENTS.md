@@ -17,6 +17,11 @@ Before modifying the repository, follow `skills/repo-development/SKILL.md`:
 For documentation changes, also follow `skills/doc-maintenance/SKILL.md`. For using
 NMG memory or its coordination board, follow `skills/nmg-memory/SKILL.md`.
 
+Meta-rule: NMG's own rules are governed too. A change to a standing rule, Skill
+convention, or decision convention is itself a governed decision — record it with
+its alternatives in the same change, keep one home per rule, and prefer a
+mechanical check over a repeated reminder (see `skills/doc-maintenance/SKILL.md`).
+
 Build outputs (`dist/`, `dsh/dsh-nmg/lib/`, generated prompts) are not tracked;
 see the "Builds and generated artifacts" section of `skills/repo-development/SKILL.md`
 for reproduction order and `verify:packages` / `check:lock`.

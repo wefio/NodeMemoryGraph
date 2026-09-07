@@ -44,6 +44,7 @@ to one another. Missing translations are reported as warnings, not hard errors.
 ## Implemented decisions
 
 - [External Repository Control Plane](implemented/2026-08-29-repository-control-plane.md)
+- [Self-governance meta-rule: NMG's own rules are governed](implemented/2026-09-07-self-governance-meta-rule.md)
 
 ## Rejected decisions
 

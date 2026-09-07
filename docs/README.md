@@ -102,6 +102,7 @@ rules and must not invent additional policy.
 | Paired documents exist, link to each other, and retain broadly aligned heading structures                      | bilingual pairs                                                                                                      | warning       |
 | Run-report filenames end in `-YYYY-MM-DD.md`; rolling summaries and notes use `-results.md` or `-notes.md`     | documents under `experiments/`                                                                                       | warning       |
 | Explicit decision supersession metadata uses valid local links in both directions                              | decision records that declare supersession                                                                           | warning       |
+| Standing rule docs stay within a byte budget (rules 2,000 words ~ 15,000 B; AGENTS.md and indexes 5,000 B)      | AGENTS.md, each high-read `skills/*/SKILL.md`, the decision index                                                   | error         |
 | Translation quality, design correctness, experimental conclusions, and prose style                             | all documents                                                                                                        | not automated |
 
 An error means the repository's documented public or normative interface is
