@@ -68,6 +68,12 @@ import {
   shadowCollectionOrigin,
   shadowEnabled,
 } from "./controller-shadow.ts";
+import {
+  ContextRouterOnlineLearner,
+  contextFeaturesFromMemory,
+  contextOnlineLearningEnabled,
+  onlineRouterStatePath,
+} from "./context-router-online.ts";
 
 /**
  * NMG Pi extension.
@@ -101,6 +107,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     resolveNmgDataDir(),
     shadowEnabled() || qpp1Mode !== "off" || qpp2Mode !== "off" || controllerRerankMode !== "off",
   );
+  // Gated online learner over the real auto-recall loop: stage (features,
+  // action) at each injected retrieval, update once on its feedback, persist
+  // weights. Null (default) = completely inert; auto-recall never changes.
+  const contextOnlineLearner = contextOnlineLearningEnabled()
+    ? new ContextRouterOnlineLearner(onlineRouterStatePath(resolveNmgDataDir()))
+    : null;
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
   const coordinationToolsEnabled = coordinationEnabled();
   // Most recent event context, used by the board wake loop to test isIdle and
@@ -322,6 +334,19 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // attribution window so agent_end can distinguish surfaced evidence from
       // candidates that were merely injected.
       agentAttributionFlow.note(sessionId, fullContext);
+      // Gated online learning: stage the decision (features + the action
+      // auto-recall actually took = retrieve) so a later feedback on this graph
+      // can run one observed-action update. Never affects recall behaviour.
+      if (contextOnlineLearner) {
+        try {
+          const graphId = fullContext.activeGraph?.id;
+          if (graphId) {
+            contextOnlineLearner.stage(graphId, contextFeaturesFromMemory(fullContext), "retrieve");
+          }
+        } catch {
+          // Online learning must never break automatic recall.
+        }
+      }
       const recordCount = (recalled.match(/memory=/g) ?? []).length;
       const searchNudge = formatSearchRecommendation(context, recommendationMode);
       const recallContext = composeNmgContextMessage(
@@ -1273,10 +1298,22 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           throw new Error("action=feedback requires at least one label or feedbackNote");
         }
         const recorded = await controllerShadow.feedback(activeGraphId, sessionId, labels);
+        let online = "";
+        if (recorded && contextOnlineLearner) {
+          try {
+            const trained = contextOnlineLearner.consumeFeedback(activeGraphId, labels);
+            contextOnlineLearner.persistIfDirty();
+            online = trained.trained
+              ? ` Online router updated (reward=${trained.reward}, loss=${trained.loss?.toFixed(4)}).`
+              : " (no staged decision or no usable label; skipped).";
+          } catch {
+            online = " (online update skipped).";
+          }
+        }
         return toolResult(
           { recorded, activeGraphId },
           recorded
-            ? "Retrieval feedback recorded for shadow calibration."
+            ? `Retrieval feedback recorded for shadow calibration.${online}`
             : "Feedback was not recorded: controller shadow is disabled or the Active Graph belongs to another session.",
         );
       }
