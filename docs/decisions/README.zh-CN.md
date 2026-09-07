@@ -30,6 +30,7 @@
 ## 已实现决策
 
 - [外部 Repository Control Plane](implemented/2026-08-29-repository-control-plane.zh-CN.md)
+- [自治理元规则：NMG 自身的规则也受治理](implemented/2026-09-07-self-governance-meta-rule.zh-CN.md)
 
 ## 被拒决策
 

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parse as parseYaml } from "yaml";
@@ -13,6 +13,20 @@ export interface DocumentationReport {
 // this file only translates its mechanically checkable rules into diagnostics.
 
 const lifecycle = new Set(["proposed", "implemented", "rejected", "archived"]);
+
+// Byte ceilings for standing rule documents that generative Agents read every
+// session. Policy owner is docs/README.md#ci-contract (the byte-budget row).
+// Budgets are set by the maintainer: rule/skill docs are capped at 2,000 words
+// (~15,000 B at ~7.3 B/word, rounded); AGENTS.md and indexes at 5,000 B each.
+// Raise a ceiling only when the content genuinely needs the space, never to
+// absorb bloat.
+const BYTE_BUDGETS: Record<string, number> = {
+  "AGENTS.md": 5000,
+  "skills/doc-maintenance/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
+  "skills/repo-development/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
+  "skills/nmg-memory/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
+  "docs/decisions/README.md": 5000,
+};
 const publicPairs = [
   ["README.md", "README.zh-CN.md"],
   ["docs/README.md", "docs/README.zh-CN.md"],
@@ -331,6 +345,16 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
       !/-(results|notes)\.md$/.test(parts[2])
     ) {
       report.warnings.push(`${display}: experiment report filename should end in -YYYY-MM-DD.md`);
+    }
+  }
+  for (const [rel, maxBytes] of Object.entries(BYTE_BUDGETS)) {
+    const p = join(root, rel);
+    if (!existsSync(p)) continue; // budget applies to present standing docs, not synthetic trees
+    const size = statSync(p).size;
+    if (size > maxBytes) {
+      report.errors.push(
+        `${rel}: ${size}B exceeds ${maxBytes}B byte budget (docs/README.md#ci-contract)`,
+      );
     }
   }
   return report;
