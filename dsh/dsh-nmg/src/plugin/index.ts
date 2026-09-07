@@ -37,6 +37,7 @@ import {
   renderTaskBoardSurface,
 } from '../../../../src/integration/agent-surface.ts'
 import { loadPrompts, renderDisclosure } from '../../../../src/prompts/load.ts'
+import { contextOnlineLearningEnabled } from '../../../../src/lab/context-router-online.ts'
 
 const nmgPrompts = loadPrompts()
 
@@ -307,6 +308,11 @@ export function apply(ctx: Context): () => void {
   const sessionTokenTotals = new Map() // sessionId -> total estimated recall tokens
   const recallBatch = new Map() // sessionId -> recall[] (newest first, capped at MAX_RECALL_HISTORY)
   const MAX_RECALL_HISTORY = 5 // per-session recall rounds kept for the floating indicator
+  // One-shot online-feedback nudge queue (display timing only; the daemon owns
+  // staging/learning). Set when the previous turn's recall injected memory;
+  // shown once in the next context assembly; cleared when shown or when
+  // feedback is forwarded for the session.
+  const onlineNudgeQueue = new Map() // sessionId -> one-shot nudge text
   const openSearches = new Map() // sessionId -> Promise that resolves once the stash is written
 
   function nextGeneration(sessionId) {
@@ -423,6 +429,21 @@ export function apply(ctx: Context): () => void {
       const sessionId = String(agent.id)
       const query = extractUserPrompt(message)
       if (!query) return
+      // One-shot online-feedback nudge: the recall injected for the previous
+      // turn is now judgeable. Queue the prompt once per injected recall.
+      const recallStack = recallBatch.get(sessionId)
+      const prevRecall = Array.isArray(recallStack) ? recallStack[0] : undefined
+      if (
+        prevRecall &&
+        Array.isArray(prevRecall.candidates) &&
+        prevRecall.candidates.length > 0 &&
+        !prevRecall.nudgeShown &&
+        !prevRecall.fedBack &&
+        contextOnlineLearningEnabled()
+      ) {
+        prevRecall.nudgeShown = true
+        onlineNudgeQueue.set(sessionId, nmgPrompts.online_feedback_nudge)
+      }
       const generation = nextGeneration(sessionId)
       const run = (async () => {
         try {
@@ -468,6 +489,8 @@ export function apply(ctx: Context): () => void {
             sessionTotal,
             candidates: fresh,
             activeGraphId: recall.activeGraphId,
+            nudgeShown: false,
+            fedBack: false,
           }
           const history = recallBatch.get(sessionId)
           recallBatch.set(sessionId, [entry, ...(history || [])].slice(0, MAX_RECALL_HISTORY))
@@ -491,9 +514,13 @@ export function apply(ctx: Context): () => void {
   function recallTextFor(agent) {
     if (!agent) return ''
     try {
-      const stack = recallBatch.get(String(agent.id))
+      const id = String(agent.id)
+      const queued = onlineNudgeQueue.get(id)
+      if (queued !== undefined) onlineNudgeQueue.delete(id)
+      const stack = recallBatch.get(id)
       const latest = Array.isArray(stack) ? stack[0] : stack
-      return latest && latest.text ? latest.text : ''
+      const recall = latest && latest.text ? latest.text : ''
+      return queued !== undefined && queued !== '' ? queued + '\n\n' + recall : recall
     } catch {
       return ''
     }
@@ -537,6 +564,7 @@ export function apply(ctx: Context): () => void {
         recallGenerations.delete(id)
         sessionTokenTotals.delete(id)
         recallBatch.delete(id)
+        onlineNudgeQueue.delete(id)
         openSearches.delete(id)
         wakeBatch.delete(id)
         lastAgents.delete(id)
@@ -1211,6 +1239,11 @@ export function apply(ctx: Context): () => void {
           exec.signal,
         )
         if (!result.ok) return result.error
+        // Real feedback (applied or not) addressed this session's staged
+        // decision; stop nudging.
+        const stagedStack = recallBatch.get(sessionId)
+        if (Array.isArray(stagedStack) && stagedStack[0]) stagedStack[0].fedBack = true
+        onlineNudgeQueue.delete(sessionId)
         const data = result.data as
           | { trained?: boolean; reward?: number; loss?: number }
           | null

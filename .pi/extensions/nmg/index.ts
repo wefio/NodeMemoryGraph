@@ -78,6 +78,7 @@ import {
   shadowCollectionOrigin,
   shadowEnabled,
 } from "./controller-shadow.ts";
+import { contextOnlineLearningEnabled } from "./context-router-online.ts";
 
 /**
  * NMG Pi extension.
@@ -117,6 +118,21 @@ export default function nmgExtension(pi: ExtensionAPI): void {
   // searches autoRecall and forwards feedback — no learner logic lives here.
   const labToolsEnabled = process.env.NMG_ENABLE_LAB_TOOLS === "1";
   const coordinationToolsEnabled = coordinationEnabled();
+  // One-shot online-feedback nudge (display timing only; the daemon owns
+  // staging/learning). Set when an auto-recall injects memory; shown once on
+  // the next new user turn; cleared when feedback is forwarded or the session
+  // ends. Mirrors the shadow nudge cadence, but targets the online staged
+  // graph (resolved daemon-side by session id), not the shadow dataset.
+  const onlineFeedbackPending = new Map<
+    string,
+    { activeGraphId: string | null; nudged: boolean }
+  >();
+  const popOnlineFeedbackNudge = (sessionId: string): string => {
+    const entry = onlineFeedbackPending.get(sessionId);
+    if (!entry || entry.nudged) return "";
+    entry.nudged = true;
+    return nmgPrompts.online_feedback_nudge;
+  };
   // Most recent event context, used by the board wake loop to test isIdle and
   // to resolve the current session id outside an event handler.
   let latestAgentCtx: ExtensionContext | undefined;
@@ -256,7 +272,10 @@ export default function nmgExtension(pi: ExtensionAPI): void {
           memory_ids: pendingClaimOutcome.memoryIds.join(","),
         })
       : "";
-    const nudge = [completionNudge, feedbackNudge, claimOutcomeNudge].filter(Boolean).join("\n");
+    const onlineFeedbackNudge = isNewUserTurn ? popOnlineFeedbackNudge(sessionId) : "";
+    const nudge = [completionNudge, feedbackNudge, claimOutcomeNudge, onlineFeedbackNudge]
+      .filter(Boolean)
+      .join("\n");
     let reasoningCheckpoint = "";
     if (labToolsEnabled) {
       try {
@@ -341,6 +360,12 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       // candidates that were merely injected.
       agentAttributionFlow.note(sessionId, fullContext);
       const recordCount = (recalled.match(/memory=/g) ?? []).length;
+      if (recordCount > 0 && contextOnlineLearningEnabled()) {
+        onlineFeedbackPending.set(sessionId, {
+          activeGraphId: fullContext.activeGraph?.id ?? null,
+          nudged: false,
+        });
+      }
       const searchNudge = formatSearchRecommendation(context, recommendationMode);
       const recallContext = composeNmgContextMessage(
         recalled,
@@ -760,6 +785,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     recallFlow.clear(sessionId);
     agentAttributionFlow.clear(sessionId);
     controllerShadow.clear(sessionId);
+    onlineFeedbackPending.delete(sessionId);
     if (!connectionPromise) return;
     const active = await connectionPromise.catch(() => undefined);
     if (!active) {
@@ -1324,6 +1350,9 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         } catch {
           online = " (online update skipped).";
         }
+        // Any real feedback means this session's staged decision was addressed;
+        // stop nudging (a no-staged-decision result still clears the nudge).
+        onlineFeedbackPending.delete(sessionId);
         return toolResult(
           { recorded, activeGraphId: params.activeGraphId ?? shadowGraphId ?? daemonGraphId },
           `Retrieval feedback processed.${online}${recorded ? "" : " Shadow log not recorded (set NMG_CONTROLLER_SHADOW=1 to also record natural shadow events)."}`,

@@ -54,6 +54,7 @@ export interface NmgPrompts {
   search_progression_required: string;
   search_recommendation: string;
   completion_nudge: string;
+  online_feedback_nudge: string;
   shadow_feedback_nudge: string;
   shadow_claim_outcome_nudge: string;
   search_disclosure: string;
