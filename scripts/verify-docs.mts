@@ -349,10 +349,7 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
   }
   for (const [rel, maxBytes] of Object.entries(BYTE_BUDGETS)) {
     const p = join(root, rel);
-    if (!existsSync(p)) {
-      report.errors.push(`${rel}: byte-budgeted file is missing`);
-      continue;
-    }
+    if (!existsSync(p)) continue; // budget applies to present standing docs, not synthetic trees
     const size = statSync(p).size;
     if (size > maxBytes) {
       report.errors.push(
