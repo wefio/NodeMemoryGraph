@@ -27,6 +27,16 @@ Keep the workflow small, evidence-based, and friendly to concurrent Agents.
 - Keep one authoritative writer for each fact. Observe or reference GitHub,
   Contracts, repository state, verification receipts, and NMG memory through
   their owning interfaces rather than mirroring them into a competing store.
+- In a shared or parallel-Agent worktree, isolate before you commit. Run
+  `git status --short` first: other Agents' uncommitted changes, or a HEAD that
+  moved under you, mean the tree is shared. Never `git add -A` or `git commit -a`
+  there; stage only your owned paths. When the worktree is actively shared,
+  prefer a dedicated `git worktree add` for your change, commit only your files,
+  and hand the shared tree back by reverting only your files to HEAD. A commit
+  that silently swallows another Agent's working tree is a coordination failure,
+  not a merge. When the change lands or is abandoned, remove the dedicated
+  worktree and its branch (`git worktree remove <path>` then `git branch -D
+  <name>`) so used-up worktrees do not accumulate.
 
 ## Before editing
 
