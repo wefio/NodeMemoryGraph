@@ -19,10 +19,10 @@ function result(combinedScore: number): MemoryResult {
   return { combinedScore } as unknown as MemoryResult;
 }
 
-test("online learning is gated off by default", () => {
-  assert.equal(contextOnlineLearningEnabled({}), false);
-  assert.equal(contextOnlineLearningEnabled({ NMG_CONTEXT_ONLINE_LEARNING: "0" }), false);
+test("online learning is on by default and disable via env 0", () => {
+  assert.equal(contextOnlineLearningEnabled({}), true);
   assert.equal(contextOnlineLearningEnabled({ NMG_CONTEXT_ONLINE_LEARNING: "1" }), true);
+  assert.equal(contextOnlineLearningEnabled({ NMG_CONTEXT_ONLINE_LEARNING: "0" }), false);
 });
 
 test("featuresFromMemory yields 32 normalized features and reflects the batch", () => {

@@ -107,9 +107,11 @@ export default function nmgExtension(pi: ExtensionAPI): void {
     resolveNmgDataDir(),
     shadowEnabled() || qpp1Mode !== "off" || qpp2Mode !== "off" || controllerRerankMode !== "off",
   );
-  // Gated online learner over the real auto-recall loop: stage (features,
-  // action) at each injected retrieval, update once on its feedback, persist
-  // weights. Null (default) = completely inert; auto-recall never changes.
+  // Online learner over the real auto-recall loop: stage (features, action) at
+  // each injected retrieval, update once on its feedback, persist weights.
+  // Enabled by default — auto-recall behaviour never changes (only a tiny
+  // observed-action update runs when feedback arrives). Disable with
+  // NMG_CONTEXT_ONLINE_LEARNING=0.
   const contextOnlineLearner = contextOnlineLearningEnabled()
     ? new ContextRouterOnlineLearner(onlineRouterStatePath(resolveNmgDataDir()))
     : null;

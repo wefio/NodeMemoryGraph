@@ -12,10 +12,13 @@ import {
 } from "../../../src/lab/context-reward.ts";
 import type { MemoryContext, MemorySearchResult } from "../../../src/core/types.ts";
 
-/** Online learning gate. Off by default; no auto-recall behaviour changes and no
- *  weights are touched unless NMG_CONTEXT_ONLINE_LEARNING=1. */
-export function contextOnlineLearningEnabled(env: Record<string, string | undefined> = process.env) {
-  return env.NMG_CONTEXT_ONLINE_LEARNING === "1";
+/** Online learning gate. ON by default (it never changes auto-recall behaviour
+ *  and only runs a tiny observed-action update when feedback arrives). Set
+ *  NMG_CONTEXT_ONLINE_LEARNING=0 to disable. */
+export function contextOnlineLearningEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return env.NMG_CONTEXT_ONLINE_LEARNING !== "0";
 }
 
 export function onlineRouterStatePath(dataDir: string): string {
@@ -91,6 +94,9 @@ interface StagedDecision {
   action: ContextAction;
 }
 
+/** Upper bound on staged decisions awaiting feedback (oldest evicted). */
+const MAX_PENDING = 512;
+
 /** Minimal online learner over the real auto-recall loop. One staged decision
  *  per retrieval graph is matched to its later feedback by graphId, then a
  *  single observed-action regression runs immediately and weights persist.
@@ -114,6 +120,12 @@ export class ContextRouterOnlineLearner {
 
   /** Called right after an auto-recall staged/injected a retrieval graph. */
   stage(graphId: string, features: number[], action: ContextAction): void {
+    if (this.#pending.size >= MAX_PENDING) {
+      // Evict the oldest staged decision so an always-unrated stream cannot grow
+      // this map without bound.
+      const oldest = this.#pending.keys().next().value;
+      if (oldest !== undefined) this.#pending.delete(oldest);
+    }
     this.#pending.set(graphId, { features, action });
   }
 
