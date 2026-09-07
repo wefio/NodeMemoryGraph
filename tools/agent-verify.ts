@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { collectAgentContext, type AgentContextReport } from "./repo-context.ts";
+import { planNarrowVerify } from "./narrow-verify.ts";
 import { compileContractFile } from "../src/rcp/contract.ts";
 import { readRouteDeclarations } from "../src/rcp/planner.ts";
 import {
@@ -70,6 +72,7 @@ function parseArgs(args: string[]) {
   let includeAdvisory = false;
   let json = false;
   let requireClean = false;
+  let narrow = false;
   let timeoutMs = 30 * 60 * 1_000;
   let output: string | undefined;
   let help = false;
@@ -77,6 +80,7 @@ function parseArgs(args: string[]) {
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === "--changed") changed = true;
+    else if (argument === "--narrow") narrow = true;
     else if (argument === "--dry-run") dryRun = true;
     else if (argument === "--include-advisory") includeAdvisory = true;
     else if (argument === "--json") json = true;
@@ -103,6 +107,7 @@ function parseArgs(args: string[]) {
   return {
     root: resolvedRoot,
     changed,
+    narrow,
     dryRun,
     includeAdvisory,
     json,
@@ -124,6 +129,9 @@ When one RCP Contract fully and uniquely covers those paths, verification
 automatically runs its workspace-ready reconciliation and records a receipt.
   --changed              derive scopes from dirty Git paths; requires Git inspection
   --scope <path>         legacy spelling for a path; positional paths are preferred
+  --narrow               fast path: for a change cleanly owned by one non-shared route,
+                         run that route's own tests + always-run checks instead of the
+                         whole blocking suite; escalates to the full gate on shared paths
   --include-advisory     run advisory checks in addition to blocking checks
   --dry-run              print and persist the plan without running checks
   --require-clean        reject a dirty Git worktree
@@ -229,6 +237,88 @@ async function executeRcpVerification(
 }
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
+
+/** Run an arbitrary command (npm script or node --test globs) and shape the
+ *  result like the rest of the verification plan. */
+function runCommand(
+  label: string,
+  argv: string[],
+  cwd: string,
+  timeoutMs: number,
+  classification: "blocking",
+  routes: string[],
+): VerificationCommandResult {
+  const startedAt = Date.now();
+  const child = spawnSync(argv[0], argv.slice(1), {
+    cwd,
+    encoding: "utf8",
+    windowsHide: true,
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: timeoutMs,
+  });
+  const ok = !child.error && !child.signal && child.status === 0;
+  const output = `${child.stdout ?? ""}${child.stderr ?? ""}${child.error?.message ?? ""}`;
+  return {
+    command: label,
+    classification,
+    routes,
+    status: ok ? "passed" : "failed",
+    exitCode: child.status ?? undefined,
+    durationMs: Date.now() - startedAt,
+    reason: ok ? undefined : child.error?.message ?? `exit ${child.status ?? "?"}`,
+    output: ok ? undefined : output.slice(-8000),
+  };
+}
+
+function npmArgv(name: string): string[] {
+  if (process.env.npm_execpath) return [process.execPath, process.env.npm_execpath, "run", name];
+  if (process.platform === "win32") return ["cmd.exe", "/d", "/s", "/c", `npm run ${name}`];
+  return ["npm", "run", name];
+}
+
+/** Narrow fast path: always-run shared npm scripts, then the owning route's own
+ *  tests via node --test. Returns the composed result (empty test set → shared
+ *  only). */
+function runNarrowVerify(
+  root: string,
+  plan: ReturnType<typeof planNarrowVerify>,
+  timeoutMs: number,
+  dryRun = false,
+): VerificationRunResult {
+  const route = plan.route;
+  const results: VerificationCommandResult[] = [];
+  const skipped = (command: string): VerificationCommandResult => ({
+    command,
+    classification: "blocking",
+    routes: route ? [route.id] : [],
+    status: "skipped",
+    durationMs: 0,
+    reason: "dry run",
+  });
+  for (const command of plan.shared) {
+    results.push(
+      dryRun ? skipped(command) : runCommand(command, npmArgv(command), root, timeoutMs, "blocking", route ? [route.id] : []),
+    );
+  }
+  if (plan.testGlobs.length) {
+    const label = `node --test (${route!.id})`;
+    if (dryRun) {
+      results.push(skipped(label));
+    } else {
+      const nodeArgs = [
+        "--experimental-strip-types",
+        "--test",
+        "--test-concurrency=4",
+        ...plan.testGlobs,
+      ];
+      results.push(
+        runCommand(label, [process.execPath, ...nodeArgs], root, timeoutMs, "blocking", [route!.id]),
+      );
+    }
+  }
+  return { ok: results.every((item) => item.status !== "failed"), results };
+}
+
 if (invokedPath === fileURLToPath(import.meta.url)) {
   try {
     const options = parseArgs(process.argv.slice(2));
@@ -254,16 +344,37 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     const contract = options.dryRun
       ? null
       : discoverApplicableRcpContract(options.root, report.scopes);
-    const execution = contract
-      ? await executeRcpVerification(report, contract, options)
-      : {
-          result: await executeVerificationPlan(buildVerificationPlan(report), {
-            includeAdvisory: options.includeAdvisory,
-            dryRun: options.dryRun,
-            run: npmCommandRunner(options.root, options.json, options.timeoutMs),
-          }),
-          rcp: undefined,
-        };
+    // Narrow fast path (additive; the full gate stays the default and the
+    // authority): only when the caller opts in AND the change is cleanly owned
+    // by one non-shared route. Any shared/cross-cutting scope escalates to the
+    // declared whole blocking set.
+    const narrowPlan =
+      !contract && options.narrow
+        ? planNarrowVerify(report.routes, report.scopes)
+        : null;
+    let execution: Awaited<ReturnType<typeof executeRcpVerification>> | {
+      result: VerificationRunResult;
+      rcp?: undefined;
+    };
+    if (narrowPlan?.narrow) {
+      execution = {
+        result: runNarrowVerify(options.root, narrowPlan, options.timeoutMs, options.dryRun),
+      };
+    } else {
+      if (narrowPlan && !narrowPlan.narrow && report.routes.length) {
+        report.warnings.push(`--narrow escalated to full: ${narrowPlan.escalationReason}`);
+      }
+      execution = contract
+        ? await executeRcpVerification(report, contract, options)
+        : {
+            result: await executeVerificationPlan(buildVerificationPlan(report), {
+              includeAdvisory: options.includeAdvisory,
+              dryRun: options.dryRun,
+              run: npmCommandRunner(options.root, options.json, options.timeoutMs),
+            }),
+            rcp: undefined,
+          };
+    }
     const { result, rcp } = execution;
     const finishedAt = new Date().toISOString();
     const evidence = {
@@ -274,6 +385,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
       runtime: { node: process.version, platform: process.platform, arch: process.arch },
       options: {
         changed: options.changed,
+        narrow: options.narrow,
         dryRun: options.dryRun,
         includeAdvisory: options.includeAdvisory,
         requireClean: options.requireClean,
