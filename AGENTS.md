@@ -22,6 +22,11 @@ convention, or decision convention is itself a governed decision — record it w
 its alternatives in the same change, keep one home per rule, and prefer a
 mechanical check over a repeated reminder (see `skills/doc-maintenance/SKILL.md`).
 
+Every hidden (env-gated / mode-flagged / non-default) feature must be registered
+in `docs/design/hidden-features-registry.md`, regardless of ownership or status
+(rule: `docs/decisions/implemented/2026-09-07-register-hidden-features.md`); add
+or update the row in the same change that introduces or alters the gate.
+
 Build outputs (`dist/`, `dsh/dsh-nmg/lib/`, generated prompts) are not tracked;
 see the "Builds and generated artifacts" section of `skills/repo-development/SKILL.md`
 for reproduction order and `verify:packages` / `check:lock`.
