@@ -40,6 +40,7 @@ to one another. Missing translations are reported as warnings, not hard errors.
 ## Open proposals
 
 - [Session-owned Active Graph runtime](proposed/2026-08-29-session-active-graph-runtime.md)
+- [RCP lightweight verification by default](proposed/2026-09-07-rcp-lightweight-verification-default.md)
 
 ## Implemented decisions
 

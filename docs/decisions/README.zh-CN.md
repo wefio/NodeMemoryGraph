@@ -26,6 +26,7 @@
 ## 开放提案
 
 - [会话级 Active Graph 运行时](proposed/2026-08-29-session-active-graph-runtime.zh-CN.md)
+- [RCP 轻量化验证默认为窄](proposed/2026-09-07-rcp-lightweight-verification-default.zh-CN.md)
 
 ## 已实现决策
 
