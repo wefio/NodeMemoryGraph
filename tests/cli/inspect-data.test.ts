@@ -14,6 +14,10 @@ import {
   searchTraces,
 } from "../../src/cli/inspect-data.ts";
 import { NmgService } from "../../src/cli/service.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
+
+// In-process NmgService inherits process.env; keep recall lexical (test-env.ts).
+stripProviderEnv();
 
 test("inspect queries read memories, evidence, and traces from a live database", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-inspect-"));
@@ -43,10 +47,7 @@ test("inspect queries read memories, evidence, and traces from a live database",
       assert.equal(detail.statement, "The Atlas project must remain offline-first.");
       assert.deepEqual(detail.scope, { project: "atlas" });
       assert.equal(detail.evidence.length, 1);
-      assert.equal(
-        detail.evidence[0]!.content,
-        "The Atlas project must remain offline-first.",
-      );
+      assert.equal(detail.evidence[0]!.content, "The Atlas project must remain offline-first.");
       assert.equal(getMemoryDetail(db, "missing-memory"), null);
 
       const traces = listTraces(db);

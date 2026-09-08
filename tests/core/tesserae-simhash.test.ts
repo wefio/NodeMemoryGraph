@@ -5,6 +5,10 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 
 import { NmgService } from "../../src/cli/service.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
+
+// In-process NmgService inherits process.env; keep recall lexical (test-env.ts).
+stripProviderEnv();
 
 async function withProject(
   run: (service: NmgService, projectDir: string) => void | Promise<void>,
@@ -307,7 +311,12 @@ test("tessera fts: rows missing from the fts index are rebuilt and then backfill
         `INSERT INTO tesserae (id, path, snippet, label, kind, memory_id, created_at, file_simhash)
          VALUES (?, ?, ?, 'pipeline note', NULL, NULL, ?, NULL)`,
       )
-      .run("55555555-5555-4555-8555-555555555555", "alpha.ts", "The indexing pipeline drains embedding batches.", new Date().toISOString());
+      .run(
+        "55555555-5555-4555-8555-555555555555",
+        "alpha.ts",
+        "The indexing pipeline drains embedding batches.",
+        new Date().toISOString(),
+      );
     legacy.close();
 
     // Open with the current schema: FTS + triggers are created now, and the
@@ -326,9 +335,8 @@ test("tessera fts: rows missing from the fts index are rebuilt and then backfill
       const docsize = (
         check.prepare("SELECT COUNT(*) AS n FROM tesserae_fts_docsize").get() as { n: number }
       ).n;
-      const content = (
-        check.prepare("SELECT COUNT(*) AS n FROM tesserae").get() as { n: number }
-      ).n;
+      const content = (check.prepare("SELECT COUNT(*) AS n FROM tesserae").get() as { n: number })
+        .n;
       check.close();
       assert.equal(docsize, content, "fts index converges to the content table");
     } finally {

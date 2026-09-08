@@ -11,6 +11,10 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NmgService } from "../../src/cli/service.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
+
+// In-process NmgService inherits process.env; keep recall lexical (test-env.ts).
+stripProviderEnv();
 
 function sampleData(): GraphData {
   return {
@@ -33,7 +37,11 @@ function sampleData(): GraphData {
 }
 
 test("renderGraphHtml inlines style, script, and escaped data", () => {
-  const templates = { html: "<s><!--NMG_STYLE--></s><d><!--NMG_DATA--></d><j><!--NMG_SCRIPT--></j>", css: "CSS", js: "JS" };
+  const templates = {
+    html: "<s><!--NMG_STYLE--></s><d><!--NMG_DATA--></d><j><!--NMG_SCRIPT--></j>",
+    css: "CSS",
+    js: "JS",
+  };
   const data = sampleData();
   data.nodes[0]!.statements = ["breaks </script> tags"];
   const html = renderGraphHtml(data, templates);

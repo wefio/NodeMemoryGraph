@@ -25,6 +25,10 @@ import { NmgService } from "../../src/cli/service.ts";
 import { httpHandler } from "../../src/cli/http-server.ts";
 import { connectDaemon, invokeDaemon, type DaemonConnection } from "../../src/cli/daemon-client.ts";
 import { serverStatePath } from "../../src/cli/lifecycle.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
+
+// Spawns real daemons that inherit process.env; keep recall lexical.
+stripProviderEnv();
 
 const TOKEN = "chaos-token";
 
@@ -144,12 +148,18 @@ test("chaos 5xx: plain Error propagates, no reconnect, service recovers", async 
   try {
     h.setFault(inject({ status5xxRate: 1, status5xxCode: 503 }));
     await assert.rejects(invokeDaemon(h.conn, "search", { query: "x" }), (e: Error) => {
-      assert.equal(e.constructor, Error, "5xx must surface as a plain Error, not a network TypeError");
+      assert.equal(
+        e.constructor,
+        Error,
+        "5xx must surface as a plain Error, not a network TypeError",
+      );
       assert.match(e.message, /503/);
       return true;
     });
     h.setFault(off());
-    const r = (await invokeDaemon(h.conn, "search", { query: "recovered" })) as { results?: unknown[] };
+    const r = (await invokeDaemon(h.conn, "search", { query: "recovered" })) as {
+      results?: unknown[];
+    };
     assert.ok(Array.isArray(r.results), "same server serves normal calls after the fault window");
   } finally {
     await h.close();
@@ -181,7 +191,9 @@ test("chaos abort hangup: TypeError drives reconnect, then recovery succeeds", a
     });
     // Recovery: fault window over, same connection serves again.
     h.setFault(off());
-    const r = (await invokeDaemon(h.conn, "search", { query: "after abort" })) as { results?: unknown[] };
+    const r = (await invokeDaemon(h.conn, "search", { query: "after abort" })) as {
+      results?: unknown[];
+    };
     assert.ok(Array.isArray(r.results));
   } finally {
     await h.close();
@@ -197,7 +209,9 @@ test("chaos abort reset: ECONNRESET surfaces as TypeError, recovers", async () =
       return true;
     });
     h.setFault(off());
-    const r = (await invokeDaemon(h.conn, "search", { query: "after reset" })) as { results?: unknown[] };
+    const r = (await invokeDaemon(h.conn, "search", { query: "after reset" })) as {
+      results?: unknown[];
+    };
     assert.ok(Array.isArray(r.results));
   } finally {
     await h.close();

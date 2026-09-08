@@ -4,6 +4,12 @@ import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
+import { stripProviderEnv } from "../helpers/test-env.ts";
+
+// The tutorial script starts its own daemon from this process's environment;
+// drop any ambient embedding/summary/judge provider so recall stays lexical.
+stripProviderEnv();
+
 const root = resolve(import.meta.dirname, "../..");
 
 test("first-recall tutorial runs the isolated remember-search-get loop", () => {

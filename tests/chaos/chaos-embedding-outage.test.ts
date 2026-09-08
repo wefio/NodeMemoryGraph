@@ -18,6 +18,10 @@ import { NmgService } from "../../src/cli/service.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { createEmbeddingClientFromEnv } from "../../src/core/embedding-provider.ts";
 import { syncRecordEmbeddings } from "../../src/core/embedding-sync.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
+
+// In-process NmgService inherits process.env; keep recall lexical (test-env.ts).
+stripProviderEnv();
 
 const DEAD_EMBEDDING_ENV = {
   ...process.env,

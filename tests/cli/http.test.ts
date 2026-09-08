@@ -10,6 +10,10 @@ import { httpHandler } from "../../src/cli/http-server.ts";
 import type { ServerState } from "../../src/cli/lifecycle.ts";
 import { NMG_PROTOCOL_VERSION, NMG_RPC_CATALOG_FINGERPRINT } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
+
+// In-process NmgService inherits process.env; keep recall lexical (test-env.ts).
+stripProviderEnv();
 
 type EphemeralServer = { state: ServerState };
 

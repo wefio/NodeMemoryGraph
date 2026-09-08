@@ -8,6 +8,10 @@ import test from "node:test";
 import { readGraphData } from "../../src/cli/graph-data.ts";
 import { openInspectDb } from "../../src/cli/inspect-data.ts";
 import { NmgService } from "../../src/cli/service.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
+
+// In-process NmgService inherits process.env; keep recall lexical (test-env.ts).
+stripProviderEnv();
 
 test("graph projection reads nodes, memories, and all three edge layers", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-graph-"));
@@ -67,9 +71,21 @@ test("graph projection reads nodes, memories, and all three edge layers", async 
        VALUES (?, ?, ?, ?, ?)`,
     );
     // Already consolidated — must be excluded from the candidate layer.
-    pairSignal.run(nodeId("Atlas sync"), nodeId("Atlas architecture"), 5, 5, new Date().toISOString());
+    pairSignal.run(
+      nodeId("Atlas sync"),
+      nodeId("Atlas architecture"),
+      5,
+      5,
+      new Date().toISOString(),
+    );
     // Genuine candidate awaiting consolidation.
-    pairSignal.run(nodeId("Atlas deploy"), nodeId("Atlas architecture"), 3, 1, new Date().toISOString());
+    pairSignal.run(
+      nodeId("Atlas deploy"),
+      nodeId("Atlas architecture"),
+      3,
+      1,
+      new Date().toISOString(),
+    );
     // Below the noise floor — must not surface.
     pairSignal.run(nodeId("Atlas deploy"), nodeId("Atlas sync"), 1, 0, new Date().toISOString());
     writable.close();
@@ -100,7 +116,10 @@ test("graph projection reads nodes, memories, and all three edge layers", async 
       assert.equal(candidates[0]!.observations, 3);
       assert.ok(Math.abs(candidates[0]!.strength - 1 / 3) < 1e-9);
       const candidatePair = [candidates[0]!.source, candidates[0]!.target].sort();
-      assert.deepEqual(candidatePair, [nodeId("Atlas architecture"), nodeId("Atlas deploy")].sort());
+      assert.deepEqual(
+        candidatePair,
+        [nodeId("Atlas architecture"), nodeId("Atlas deploy")].sort(),
+      );
 
       const supersedes = graph.edges.filter((edge) => edge.layer === "supersedes");
       assert.equal(supersedes.length, 1);

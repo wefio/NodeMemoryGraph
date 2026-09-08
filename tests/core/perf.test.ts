@@ -8,6 +8,11 @@ import test from "node:test";
 import { histogramAdd, histogramQuantile, PerfTimer } from "../../src/core/perf.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { HashingVectorEmbedder } from "../../src/core/vector.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
+
+// Perf probes spawn real daemons; an ambient embedding provider would add
+// network latency and skew the measurements.
+stripProviderEnv();
 
 function withStore(run: (store: NmgStore) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-perf-"));
@@ -345,9 +350,7 @@ test("SQLite PRAGMA tuning is applied on open", () => {
     // store's own connection was configured at construction. WAL + NORMAL +
     // busy_timeout are the multi-writer contract.
     const probe = new DatabaseSync(database, { readOnly: true });
-    const wal = probe.prepare("PRAGMA journal_mode").get() as
-      | { journal_mode: string }
-      | undefined;
+    const wal = probe.prepare("PRAGMA journal_mode").get() as { journal_mode: string } | undefined;
     assert.equal(wal?.journal_mode, "wal", "WAL journal mode");
     const idx = probe
       .prepare(
