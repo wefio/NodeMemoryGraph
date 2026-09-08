@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 /**
  * Self-contained recall instances — a source-agnostic benchmark substrate.
@@ -131,8 +131,6 @@ export function readRecallInstances(path: string): RecallInstance[] {
   }
   return instances;
 }
-
-const precisionLabels = new Set<RecallLabel>(["on_target", "partial"]);
 
 /** Append one label to the ledger (best-effort; never throws). */
 export function appendRecallLabel(dataDir: string, entry: RecallLabelEntry): void {

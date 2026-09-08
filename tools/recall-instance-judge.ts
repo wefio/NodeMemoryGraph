@@ -119,7 +119,6 @@ async function main(argv: string[]): Promise<number> {
   const all = readRecallInstances(recallInstancesPath(directory));
   const existing = readRecallLabels(recallLabelsPath(directory));
   const instances = limit ? all.slice(0, limit) : all;
-  const labeledInstances = applyRecallLabels(instances, existing);
   const baseUrl = process.env.NMG_JUDGE_BASE_URL;
   const model = process.env.NMG_JUDGE_MODEL;
   const apiKey = process.env.NMG_JUDGE_API_KEY;
