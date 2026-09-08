@@ -1,88 +1,67 @@
-# RCP lightweight verification by default (proposal)
+# RCP lightweight verification by default
 
 [中文](2026-09-07-rcp-lightweight-verification-default.zh-CN.md)
 
 **Status:** proposed
 **Date:** 2026-09-07
-**Relates to:** [repository-control-plane](../implemented/2026-08-29-repository-control-plane.md),
-[narrow-route-verification](../implemented/2026-09-07-narrow-route-verification.md),
-[repo-development](../../../skills/repo-development/SKILL.md)
 
 ## Problem
 
-The RCP gate guards the repository and must never block normal development.
-Today a change that hits a core or adapter route pays the whole declared
-blocking set — most routes declare `[check, test:product, build]`, and
-`test:product` runs every product test directory regardless of what changed —
-while the identical-class `dsh-adapter` already declares only `[check]`. The
-declarations are internally inconsistent, and no route expresses its own
-*bounded* verification. #31 added the narrow path as an opt-in
-(`agent:verify --narrow`), but the default authoritative gate is unchanged, so
-everyday development still pays the whole suite, and the adapter-leaf routes
-still over-run `test:product`.
+Coarse route checks can rerun the product suite for small changes. The optional
+narrow path and Contract-bound reconciliation have different execution and
+recording paths. Their results must not be described as interchangeable without
+checking their actual obligations and coverage.
+
+Reliability of the verifier is a separate concern. The accepted fixed-baseline
+implementation is owned by the [RCP decision](../implemented/2026-08-29-repository-control-plane.md)
+and [operating contract](../../design/ci-cd-and-quality.md#713-fixed-trusted-baseline-verification).
+It does not implement this default-change proposal.
 
 ## Proposal
 
-Verification is a **composition of lightweight primitives over one
-vocabulary**; running the full gate for a change is just running every narrow
-piece that change needs. Make narrow the **default**:
+Keep the default unchanged until a conservative selection rule and its evidence
+exist. A future narrow default would run applicable baseline-owned acceptance
+obligations and all required shared checks, escalating when dependencies are
+unknown. Route ownership alone is not a sound dependency analysis.
 
-1. **Narrow by default, escalate on doubt.** A change cleanly owned by exactly
-   one non-shared route runs that route's own tests (`node --test
-   <route.tests>`) plus the always-run shared invariants (`check`/tsc, `docs:check`,
-   `format:check`, `lint`, `package:check`). Any shared / cross-cutting /
-   ambiguous / unowned path escalates to the declared whole blocking set.
-   "When in doubt, run full" is the whole safety rule.
-2. **Shared-root list** (`src/ tests/ scripts/ tools/ .github/ package.json
-   tsconfig*.json agent-context.yaml AGENTS.md`) is always full — a change
-   there has unbounded blast radius and must never be guessed narrow.
-3. **Align adapter-leaf routes.** `pi-adapter` / `claude-adapter` /
-   `workbuddy-adapter` over-run `test:product` today; align them to their own
-   bounded tests (each already declares `tests:`), matching `dsh-adapter`.
-   Core/shared routes keep the whole suite.
-4. **No new executor, no primitive registry.** The underlying tools already
-   accept the narrow globs (`node --test <route.tests>`); narrowing needs only
-   route granularity + a coverage rule, not machinery.
-
-Default flips in `agent:verify` (and any RCP route verification), with
-`--full` forcing the whole set and `--narrow` forcing narrow. The coverage
-rule is a tested pure function (`tools/narrow-verify.ts`, already present from
-#31).
+Record the selected obligations, omitted checks and selection reason. A partial
+run supports only its named claims, not a claim that the full gate ran. Integrate
+such evidence with reconciliation only after defining the compatibility and
+failure rules; this proposal does not claim that integration already exists.
 
 ## Alternatives considered
 
-- **Primitive registry** (split coarse scripts into atomic checks with
-  `scopeable`/`fix` metadata). Rejected: redundant — every tool a script wraps
-  already runs on a file subset; the real gap was route granularity + a
-  coverage rule, not a new executor.
-- **Per-route npm test scripts.** Rejected: a pile of scripts to keep in sync;
-  deriving `node --test <route.tests>` from the route declaration is one source
-  of truth.
-- **Three tiers (narrow / medium / full).** Rejected: the medium tier adds
-  judgement with no safety gain; two levels reason more cleanly.
-- **Keep opt-in only.** Rejected for the default: it leaves everyday
-  development paying the whole suite and does not fix the adapter-leaf
-  inconsistency.
+- **Fixed trusted baseline first:** accepted separately. It prevents an ordinary
+  candidate from weakening both implementation and acceptance rules; it does not
+  by itself reduce test execution cost.
+- **Self-hashed receipts as succinct proofs:** rejected. Anyone can fabricate a
+  result and recompute its hash. Receipt validation checks self-consistency, not
+  execution authenticity; there is no independently anchored digest chain here.
+- **PCP/SNARK/STARK:** legitimate proof-system techniques, not inherently
+  unreliable because of probabilistic soundness. They can certify specified
+  computations under their assumptions. Deferred because this local workflow
+  has no implemented proof relation, prover or cost evidence requiring them.
+- **Formal verification of a small decision kernel:** remains possible; a model
+  proof needs a justified connection to the running implementation. No such
+  proof is claimed by the current RCP.
+- **Retain explicit narrow/full choices:** remains the conservative option until
+  selection evidence justifies a default change.
 
 ## Acceptance criteria
 
-- A one-line change confined to a leaf adapter's own domain runs only that
-  route's tests + shared checks (no `test:product`), on the default path.
-- A change touching any shared/cross-cutting path runs the full blocking set.
-- The coverage rule's classification (single clean owner → narrow; else full)
-  is covered by `tests/tools/narrow-verify.test.ts`.
-- The authoritative gate for un-owned/ambiguous changes is never weaker than
-  today's full set.
-- Route declarations remain the single source of per-domain verification.
+- Demonstrate that selected checks cover the affected baseline obligations;
+  ambiguous or unknown dependency cases must not silently omit obligations.
+- Test shared-check inclusion, missing/failed/skipped/timeout handling, and
+  explicit partial-versus-full reporting.
+- Bound evidence to the candidate snapshot and trusted policy/verifier versions.
+- Never infer all design claims are implemented from a green aggregate result.
+- Measure execution savings against the unchanged default on representative
+  changes before changing it.
 
 ## Risks
 
-- **Silent coverage loss** if a route's `tests:` glob stops covering code it
-  owns. Mitigated by the safety rule: any path not cleanly owned by one route,
-  or under a shared root, escalates to full — narrow only ever applies to an
-  unambiguous single-owner, non-shared file.
-- **Ownership drift** as files move between routes. Mitigated by the
-  ambiguity/escalation default (0 or >1 owners → full) rather than guessing.
-- **Adoption resistance**: default flip changes behaviour for every route
-  verification. Mitigated by keeping `--full`/`--narrow` explicit and the
-  shared-root escalation unchanged.
+Incomplete dependencies can make a narrow selection unsound. Tests can encode
+incorrect or incomplete requirements. Hashes and deterministic execution do not
+repair either problem. Even a full test suite is not a general correctness proof.
+Trusted local installations assume a non-hostile runtime and same-user processes;
+protection against malicious same-user modification requires a different boundary.

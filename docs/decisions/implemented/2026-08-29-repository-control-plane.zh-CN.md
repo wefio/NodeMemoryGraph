@@ -26,7 +26,8 @@ Contract 编译、仓库观察、WorkOrder、独立验证、本地 append-only r
 
 引入外部、Agent-neutral 的 Repository Control Plane（RCP）。它把版本化 Repository
 Contract 编译成规范 IR，观察仓库，评估策略，产生受限 WorkOrder，把工作委托给 Agent
-harness，独立验证结果并记录不可变 receipt。每次显式调用只执行一次有界协调尝试，
+harness，独立运行所选检查并通过 append-only API 记录 receipt。该 API 不使文件不可篡改，
+也不认证写入者。每次显式调用只执行一次有界协调尝试，
 终态为 verified、failed 或 blocked；当前没有实现迭代收敛。
 
 依赖方向严格单向：
@@ -43,7 +44,7 @@ NMG 可以提供回忆、可迁移经验和 Task Board 通知，但不解析 Con
 
 1. Git 中的 Contract 拥有仓库期望状态；
 2. Repository Observer 输出拥有指定 revision/worktree 的当前状态；
-3. 不可变 receipt 拥有验证事实，并绑定 Contract digest、commit、scope、verifier
+3. Receipt 记录执行者的观测，并绑定 Contract digest、commit、scope、verifier
    identity、checks 与 evidence；
 4. Git forge 拥有 PR 与 merge 状态。
 
@@ -88,6 +89,17 @@ RCP 只通过窄 provider 扩展 repository/forge、harness、verifier、policy�
 [ci-cd-and-quality.md §7](../../design/ci-cd-and-quality.md#7-repository-control-plane)
 拥有。
 
+### 固定可信基线
+
+显式固定基线 CLI 从单独批准的外部安装验证具名候选 Git commit。验收策略和测试定义来自
+安装版本，临时快照中的候选产品是被测物。规则或依赖变化需要单独审阅并安装新版本，不能
+由候选自行晋升。它扩展本地工作流，不静默增强普通 reconcile，也不切换轻量默认。
+命令、支持的输入与验收边界由
+[§7.13](../../design/ci-cd-and-quality.md#713-fixed-trusted-baseline-verification) 拥有。
+
+该选择借用证据产出与小接受规则的分离，不声称密码学简洁性。对抗性契约检查位于
+`tests/rcp/trusted.test.ts`；存在实现与在某环境完成验证是两种不同状态。
+
 ## 考虑过的替代方案
 
 1. **把控制面放进 NMG daemon。** 拒绝；仓库权限不是记忆，这会反转依赖，并让核心
@@ -100,6 +112,14 @@ RCP 只通过窄 provider 扩展 repository/forge、harness、verifier、policy�
    语义，但完整运行时会在最小 contract 尚未验证前使本地闭环过重。
 5. **把 Task Board 或 NMG LTG 当 work system of record。** 拒绝；TTL 协作和语义记忆
    不能替代版本化 desired state、仓库观测、forge 状态和不可变验证 receipt。
+
+6. **候选拥有测试并给收据自哈希。** 不足以提供可信基线验证：候选可以同时削弱代码与测试，
+   或伪造结果并重算摘要。固定基线规则处理前者，本地结果来源仍依赖可信执行路径。
+7. **本地服务、独立账户或随机端口。** 对当前非恶意同用户工作流暂缓；固定外部安装更简单，
+   随机端口不构成防篡改边界。
+8. **PCP/SNARK/STARK 或形式证明内核。** 本切片不需要，不是因数学不可能而拒绝。
+   计算证明能校验指定执行，形式验证能建立指定内核性质，但本实现不具备这些保证；
+   引入需要具体证明关系与部署、成本证据。
 
 ## 后果
 
@@ -130,7 +150,9 @@ RCP 只通过窄 provider 扩展 repository/forge、harness、verifier、policy�
   并由稳定 ID/digest 连接。
 - Provider 可能成为权限逃逸口。必须要求 capability declaration、policy、scope match，
   对未知操作失败关闭。
-- 过程指标可能鼓励仪式而非有用工程。Receipt 证明执行与来源，不证明设计本身正确。
+- 过程指标可能鼓励仪式而非有用工程。本地 receipt 摘要只检查自洽，不证明执行真相或来源。
+  具名验收测试仅支持对应义务，不证明任意设计文本已实现。固定安装假设本地工具与依赖可信，
+  不防恶意同用户或管理员修改；哈希和确定性代码都不是形式证明。
 
 ## 参考资料
 

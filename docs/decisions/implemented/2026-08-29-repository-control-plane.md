@@ -34,7 +34,8 @@ sources of truth between Git, receipts, and LTG.
 Introduce a Repository Control Plane (RCP) as an external, Agent-neutral control
 plane. It compiles versioned repository Contracts into a canonical IR, observes
 the repository, evaluates policy, emits bounded WorkOrders, delegates work to an
-Agent harness, independently verifies the result, and records an immutable receipt.
+Agent harness, independently runs the selected checks and records a receipt through an append-only API.
+This API does not make its files immutable or authenticate their producer.
 Each explicit invocation performs one bounded reconciliation attempt ending in a
 verified, failed, or blocked result. Iterative convergence is not implemented.
 
@@ -54,7 +55,7 @@ The control plane keeps four truth domains separate:
 
 1. Git Contracts own desired repository state.
 2. Repository Observer output owns current state for a named revision/worktree.
-3. Immutable receipts own verification facts and bind Contract digest, commit,
+3. Receipts record the executor's observations and bind Contract digest, commit,
    scope, verifier identity, checks, and evidence.
 4. The Git forge owns PR and merge state.
 
@@ -106,6 +107,22 @@ The normative data contracts, lifecycle, security defaults, phased plan, and
 full completion criteria are owned by
 [ci-cd-and-quality.md §7](../../design/ci-cd-and-quality.md#7-repository-control-plane).
 
+### Fixed trusted baseline
+
+The opt-in fixed-baseline CLI uses a separately approved external installation to
+verify an explicit candidate Git commit. Acceptance policy and test definitions
+come from that installation; candidate product code is tested in a disposable
+snapshot. Rule/dependency changes require a separately reviewed new installation,
+never candidate self-promotion. This extends the local workflow; it does not
+silently strengthen ordinary reconciliation or flip the lightweight default.
+Commands, supported inputs and acceptance boundaries are owned by
+[§7.13](../../design/ci-cd-and-quality.md#713-fixed-trusted-baseline-verification).
+
+The choice borrows the separation of evidence production and small acceptance
+rules, not a claim of cryptographic succinctness. Its adversarial contract checks
+are in `tests/rcp/trusted.test.ts`; code presence is distinct from validation in a
+particular environment.
+
 ## Alternatives considered
 
 1. **Put the control plane inside NMG daemon.** Rejected because repository
@@ -123,6 +140,19 @@ full completion criteria are owned by
 5. **Use the Task Board or NMG LTG as the work system of record.** Rejected because
    TTL coordination and semantic memory cannot replace versioned desired state,
    repository observation, forge state, or immutable verification receipts.
+
+6. **Candidate-owned tests plus self-hashed receipts.** Insufficient for trusted
+   baseline verification: a candidate can weaken both implementation and tests,
+   or fabricate a receipt and recompute its digest. Fixed baseline rules address
+   the former; local result authenticity still assumes a trusted execution path.
+7. **Local services, separate accounts or random ports.** Deferred for this
+   non-hostile same-user workflow. A fixed external installation is simpler;
+   random ports do not provide tamper resistance.
+8. **PCP/SNARK/STARK or formally proved kernel.** Not required for this slice,
+   not rejected as mathematically impossible. Computational proofs can verify a
+   specified execution; formal verification can establish specified kernel
+   properties. Neither is implemented here. Adoption requires a concrete proof
+   relation and deployment/cost evidence.
 
 ## Consequences
 
@@ -161,8 +191,12 @@ full completion criteria are owned by
   domains must remain separately owned and joined by stable IDs/digests.
 - Provider plugins can become authority escape hatches. Capability declarations,
   policy checks, scope matching, and fail-closed unknown operations are required.
-- Process metrics can incentivize ritual rather than useful engineering. Receipts
-  prove execution and provenance, not that a design is inherently good.
+- Process metrics can incentivize ritual rather than useful engineering. A local
+  receipt's digest checks self-consistency, not execution truth or provenance.
+  Named acceptance tests support only their stated obligations; they do not prove
+  arbitrary prose is implemented. The fixed installation assumes trusted local
+  tools/dependencies and does not resist malicious same-user or administrator
+  modification. Hashes and deterministic code do not establish a formal proof.
 
 ## References
 

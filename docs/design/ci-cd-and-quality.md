@@ -177,12 +177,13 @@ daemon 不解析 contract、不启动 Agent、不判断 CI、不拥有 PR，也�
 | --- | --- | --- |
 | 期望仓库状态 | Git 中经版本控制的 Contract | catalog、编译缓存、NMG 记忆 |
 | 当前仓库状态 | 指定 commit/worktree 的 Repository Observer 输出 | Agent 描述、PR 文本 |
-| 验证事实 | 绑定 contract digest、observed content revision、verifier identity，并在 clean/forge 场景绑定 commit 的 immutable receipt | 日志摘要、Task Board result |
+| 验证事实 | 可信执行者的观测；本地 receipt 记录 contract digest、observed content revision、verifier identity，并在 clean/forge 场景绑定 commit | 自报日志、Task Board result、未经认证的 receipt |
 | PR/合并状态 | Git forge | 本地缓存、NMG |
 | Agent 工作记忆与经验 | 各 harness 与 NMG 的 AG/STG/LTG 边界 | RCP receipt 摘要 |
 
-Contract 描述 desired state；Observer 产生 observed state；Receipt 只证明某次输入上
-执行了什么及结果如何。任何一者都不能通过覆盖另外两者来“收敛”。
+Contract 描述 desired state；Observer 产生 observed state；Receipt 记录执行者声称的输入、
+检查及结果。只有信任执行者与记录来源时，才可把它用作该次执行的证据；自哈希不能证明
+执行发生。任何一者都不能通过覆盖另外两者来“收敛”。
 
 Repository Observer 按 contract include 做保守目录剪枝：仅跳过可证明没有 include
 能够匹配其后代文件的目录。首段含通配符时保守禁用剪枝，并不表示该模式实际匹配
@@ -279,7 +280,9 @@ Draft PR 是一次变更的持久在途实例和可审阅入口。Task Board 只
 ### 7.6 Verifier 与 receipt
 
 Verifier 在 Agent 变更之后独立运行，检查至少分为结构、行为、边界、来源四类。Receipt
-是 append-only 事实，不是操作日志，也不是自然语言完成声明。最小字段为：
+通过 sink API 追加写入，不是操作日志，也不是自然语言完成声明。文件本身并非不可篡改；
+自哈希、文件名校验与确定性仅检查记录自洽，不能认证来源或证明执行。
+最小字段为：
 
 ```json
 {
@@ -359,7 +362,8 @@ Run-to-completion 核心已通过真实 Contract-bound PR、远程 CI 和本地 
 - WorkOrder 把单次 attempt 和 timeout 预算传给 harness，process harness 只能采用相同或
   更严格的时限；
 - desired、observed、receipt 和 PR 状态分别可追踪且不存在竞争写入者；
-- Agent 无法通过自报完成、改弱检查或越权路径使 verifier 判定收敛；
+- 普通 reconcile 拒绝自报完成与已检测的 scope/检查失败，但不隔离候选版本的 npm、测试和规则；
+  固定基线模式对规则修改的独立审批边界见 §7.13；
 - 重复 reconcile 不重复执行同一 mutation；异常中断由本地 attempt journal 检出，只有
   显式 recovery 才会跳过 harness 并验证当前 workspace；
 - plan/apply/continuous 权限明确，破坏性动作默认不自动执行；
@@ -445,6 +449,52 @@ worker。它读取该 run 的 jobs 和失败步骤，向 GitHub Step Summary 输
 重读 GitHub 当前状态；workflow-run payload 和 artifact 都可能过期，不能成为第二套
 source of truth。未来若确有本地自动唤醒需求，可在外部增加轮询或 webhook event bridge，
 但不改变本节的只读状态契约。
+
+### 7.13 Fixed trusted baseline verification
+
+固定可信版本验证是显式本地命令，与普通 `reconcile` / `agent:verify` 分开；后者不自动获得
+本节的基线隔离保证。本节规范和 [RCP decision](../decisions/implemented/2026-08-29-repository-control-plane.md)
+共同拥有该选择；[轻量默认提案](../decisions/proposed/2026-09-07-rcp-lightweight-verification-default.md)
+仍为 proposed。
+
+```text
+# 操作者明确审阅一个包含本功能与验收策略的 commit；不自动提交工作区
+npm run rcp -- trust-install <repository> <reviewed-commit> <new-external-directory>
+
+# 用安装目录中的源文件启动；不用候选仓库中的验证器
+node --experimental-strip-types <new-external-directory>/src/rcp/trusted.ts verify <candidate-repository> <candidate-commit>
+```
+
+安装目录的父目录必须存在，目标必须不存在且位于候选仓库外。安装读取固定 Git commit，
+仅支持普通文件（拒绝 symlink/submodule），有界为 256 MiB 的 Git 输出；存在 lockfile 时
+自动 `npm ci --ignore-scripts --no-audit --no-fund`，不运行安装生命周期脚本。依赖安装失败即失败，
+不降级。需要 native 安装脚本或生成产物的验收若无法运行，其义务失败；不把缺环境当通过。
+升级重复执行安装命令到新目录并显式选择新入口，不覆盖旧安装，不自动信任候选。
+
+`.rcp/trusted-policy.json` 来自受审阅基线：`candidateRoots` 是可变产品目录，`obligations`
+为非空、唯一 ID 的具名主张、明确 `tests/*.test.ts` 路径和超时。当前策略仅允许 `src` 产品
+修改；所有其他路径变化（包括测试、测试 helper、工具、策略、根 package/lock/config、文档）
+都返回 `blocked` 并要求独立审批。允许目录内的 package/lock/tsconfig 也不能普通修改。
+新增义务、改测试或改依赖先按独立规则变更审阅并安装新基线，不能与普通产品变更一起偷偷放行。
+
+候选身份由一次解析得到的 commit 和 Git 内容摘要确定，不读取 dirty/untracked 工作区，
+也不自动 commit。验证将该快照展开到临时目录；测试及其 helper 与基线逐字节匹配，因此相对
+import 指向临时目录的候选产品实现，而非安装目录的旧产品。候选修改的 `src/rcp` 可作为被测物，
+不会替换外部裁决程序。依赖来自安装目录，候选依赖定义不得变化。安装源码全量摘要在运行前后
+复核；已有快照文件在运行后发生修改则失败。输出或测试环境的对抗性伪造不在本地信任边界内。
+
+每项义务用 Node test runner 的 TAP 完成计数裁决：退出 0、测试数非零、全部通过，且
+fail/cancelled/skipped/todo 均为零。缺失测试、无完成报告、异常、超时或任一义务失败均不通过。
+全部义务执行，不复用历史结果。JSON 输出绑定 invocation、候选 commit/content、基线
+commit/content、策略和验证器摘要及 Node 版本，包含实际具名主张与结果；退出码为
+0 passed、1 failed/输入异常、2 policy blocked。输出不作为第三方签名证明，不自动写 RCP
+receipt 或推进 `implemented`/合并状态；下游仅能引用这些具名义务，不得扩大成所有设计已实现。
+
+这是固定规则下重新执行测试，不是密码学 succinct argument，也不是形式验证。它针对普通
+Agent 的误改、自报完成和检查削弱，不防同权限恶意进程、管理员、被污染的 Node/Git/npm 或
+依赖，亦不保证测试规格完整。测试代码与产品代码同进程执行；缺权限隔离就不能宣称抗恶意
+代码。一次 JSON 自洽检查不能认证历史执行。相应对抗回归由 `tests/rcp/trusted.test.ts` 拥有；
+普通 full gate 不等于证明本设计或验证器正确。
 
 ## 8. 修改验证
 
