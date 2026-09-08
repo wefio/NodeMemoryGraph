@@ -84,6 +84,17 @@ import {
   onlineRouterStatePath,
 } from "../lab/context-router-online.ts";
 import {
+  appendRecallInstance,
+  appendRecallLabel,
+  boundCandidates,
+  instancesSurfacing,
+  readRecallInstances,
+  readRecallLabels,
+  recallInstancesEnabled,
+  recallInstancesPath,
+  recallLabelsPath,
+} from "../lab/recall-instance.ts";
+import {
   LAB_CAPABILITIES,
   LabActivationAuthority,
   type LabCapability,
@@ -1115,6 +1126,10 @@ export class NmgService {
         reason: params.reason,
       },
     });
+    // Write-path debt settlement: any outstanding recall instance that surfaced
+    // the now-superseded memory is settled on_target (store-verifiable — that
+    // memory was the current value the write just corrected).
+    this.#settleRecallDebtOnSupersede(params.supersededMemoryId);
     return {
       action: "supersede",
       newMemoryId: params.newMemoryId,
@@ -1314,8 +1329,67 @@ export class NmgService {
    *  — no adapter holds learner logic. */
   async #search(params: NmgSearchParams): Promise<NmgMethodResult["search"]> {
     const context = await this.#searchImpl(params);
-    if (params.persistTrace !== false) this.#stageOnlineDecision(params, context);
+    if (params.persistTrace !== false) {
+      this.#stageOnlineDecision(params, context);
+      this.#recordRecallInstance(params, context);
+    }
     return context;
+  }
+
+  /** Append one self-contained recall instance to the benchmark corpus for any
+   *  disclosure recall (auto or explicit). Offline-only capture: writes an
+   *  unlabeled instance; relevance labelling happens later against the trigger,
+   *  independent of the downstream answer. persistTrace:false internal probes
+   *  never reach here. Never breaks a recall search. */
+  #recordRecallInstance(params: NmgSearchParams, context: MemoryContext): void {
+    if (!recallInstancesEnabled(this.#environment)) return;
+    const graphId = context.activeGraph?.id;
+    if (!graphId) return; // no disclosure graph: nothing to bind the instance to
+    const trigger = [params.query, ...(params.queries ?? [])]
+      .filter((part): part is string => typeof part === "string" && part.length > 0)
+      .join(" | ");
+    if (!trigger) return;
+    appendRecallInstance(this.#dataDirectory, {
+      at: new Date().toISOString(),
+      kind: params.autoRecall ? "auto" : "explicit",
+      trigger,
+      activeGraphId: graphId,
+      sessionId: params.sessionId,
+      candidates: boundCandidates(
+        (context.results ?? []).map((result) => ({
+          memoryId: result.memory.id,
+          statement: result.memory.statement,
+          combinedScore: result.combinedScore,
+          recallReason: result.recallReason,
+        })),
+      ),
+    });
+  }
+
+  /** Remember-time debt settlement: when the write path supersedes a memory,
+   *  any outstanding (unlabeled) recall instance that surfaced that memory is
+   *  settled on_target. Store-verifiable — the superseded memory was the current
+   *  value the write corrected — so it is attributable evidence, never an
+   *  assistant self-report. Best-effort; never breaks the write path. */
+  #settleRecallDebtOnSupersede(supersededMemoryId: string): void {
+    if (!recallInstancesEnabled(this.#environment)) return;
+    try {
+      const instances = readRecallInstances(recallInstancesPath(this.#dataDirectory));
+      const labeled = new Set(
+        readRecallLabels(recallLabelsPath(this.#dataDirectory)).map((entry) => entry.activeGraphId),
+      );
+      for (const instance of instancesSurfacing(instances, supersededMemoryId)) {
+        if (labeled.has(instance.activeGraphId)) continue;
+        appendRecallLabel(this.#dataDirectory, {
+          activeGraphId: instance.activeGraphId,
+          label: "on_target",
+          source: "remember",
+          at: new Date().toISOString(),
+        });
+      }
+    } catch {
+      // Settlement is diagnostic; never breaks supersession.
+    }
   }
 
   #stageOnlineDecision(params: NmgSearchParams, context: MemoryContext): void {
