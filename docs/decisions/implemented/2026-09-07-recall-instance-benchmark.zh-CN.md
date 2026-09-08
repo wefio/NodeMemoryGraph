@@ -62,8 +62,7 @@ online router 优化的那一层,也不做任何因果 claim("这条帮了我的
 1. **remember 还债** —— 每次 supersession 触发;store 可验证;常开的生产者。
 2. **离线 judge** —— 按需对捕获日志跑。
 
-**后续(不在本改动):** 对记忆快照跑受控检索探针(`collectionOrigin=controlled`,复用既有
-rank-aware 检索评测),按需产出 gold 标签实例并喂同一 router 目标——实时数据稀薄时的确定性生产者。
+**也已实现:** **受控召回探针**(`tools/recall-probe.ts`,按需对 store 快照跑)——实时数据稀薄时的确定性生产者。无 gold:每条 manifest 行命名它的 trigger 应召回的记忆(写入者声明的召回意图),探针量测真实检索(词法、无需 embedding 提供方)是否让它浮出(`on_target`/`gap`),并在受控扰动下是否保持鲁棒。`collectionOrigin=controlled`,无 LLM、无 judge。来源:`src/lab/recall-probe.ts`。
 
 ## 考虑过的替代方案
 

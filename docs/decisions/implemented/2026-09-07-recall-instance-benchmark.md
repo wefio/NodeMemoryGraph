@@ -85,10 +85,13 @@ judge:
    the always-on producer.
 2. **offline judge** — on demand over the capture log.
 
-**Follow-up (not in this change):** a controlled retrieval probe over a memory
-snapshot (`collectionOrigin=controlled`, reusing the existing rank-aware
-retrieval eval) that emits gold-labelled instances on demand and feeds the same
-router objective — the deterministic producer when live data is thin.
+**Also implemented:** a **controlled recall probe** (`tools/recall-probe.ts`, on
+  demand over a store snapshot) — the deterministic producer when live data is
+  thin. Gold-free: each manifest row names the memory its trigger should recall
+  (writer-declared recall intent) and the probe measures whether real retrieval
+  (lexical, no embedding provider) surfaces it (`on_target`/`gap`) and stays
+  robust under controlled perturbation. `collectionOrigin=controlled`, no LLM,
+  no judge. Source: `src/lab/recall-probe.ts`.
 
 ## Alternatives considered
 
