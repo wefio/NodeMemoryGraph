@@ -9,6 +9,8 @@
 // narrow globs (route.tests), so this only adds route granularity + a coverage
 // rule, not machinery.
 
+import { NARROW_SHARED_CHECKS } from "../src/rcp/providers.ts";
+
 export interface RouteLike {
   id: string;
   paths: string[];
@@ -52,7 +54,9 @@ function underSharedRoot(scope: string): boolean {
   return SHARED_ROOTS.some(
     (root) =>
       normalized === root.replace(/\/$/, "") ||
-      (root.endsWith("/") ? normalized.startsWith(root) : normalized.startsWith(`${root}/`) || normalized === root),
+      (root.endsWith("/")
+        ? normalized.startsWith(root)
+        : normalized.startsWith(`${root}/`) || normalized === root),
   );
 }
 
@@ -75,14 +79,16 @@ export function planNarrowVerify(
   scopes: string[],
   opts: { sharedCommands?: string[] } = {},
 ): NarrowVerifyPlan {
-  const shared = opts.sharedCommands ?? ["check"];
+  const shared = opts.sharedCommands ?? [...NARROW_SHARED_CHECKS];
   const normalized = scopes.map((s) => s.replace(/\\/g, "/"));
   if (normalized.length === 0) {
     return { narrow: false, shared, testGlobs: [], escalationReason: "no changed paths given" };
   }
   const owners: Array<{ route: RouteLike; scope: string }> = [];
   for (const scope of normalized) {
-    const matched = routes.filter((route) => route.paths.some((pattern) => routeMatches(pattern, scope)));
+    const matched = routes.filter((route) =>
+      route.paths.some((pattern) => routeMatches(pattern, scope)),
+    );
     if (underSharedRoot(scope)) {
       return {
         narrow: false,

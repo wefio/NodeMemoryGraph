@@ -41,15 +41,15 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 ## 2. 执行轨道
 
-| 命令                    | 内容                                                 | 用途             |
-| ----------------------- | ---------------------------------------------------- | ---------------- |
-| `npm run test:product`  | core、CLI、adapter、docs、Skill、工具与 test support | 产品正确性       |
-| `npm run test:coverage` | 与 product 相同的集合并生成覆盖率                    | 阻塞 CI          |
-| `npm run test:research` | `tests/benchmarks`、`tests/evals`、`tests/official`  | 非阻塞研究表征   |
-| `npm run test:chaos`    | Windows 故障注入与进程/文件锁生命周期                | 独立阻塞轨道     |
-| `npm test`              | 所有 `tests/**/*.test.ts`                            | 本地完整兼容入口 |
-| `npm run verify:static` | build/package/type/lint/format/docs/context           | 本地与 CI 共用   |
-| `npm run verify:product-ci` | build + product coverage                         | 本地与 CI 共用   |
+| 命令                        | 内容                                                 | 用途             |
+| --------------------------- | ---------------------------------------------------- | ---------------- |
+| `npm run test:product`      | core、CLI、adapter、docs、Skill、工具与 test support | 产品正确性       |
+| `npm run test:coverage`     | 与 product 相同的集合并生成覆盖率                    | 阻塞 CI          |
+| `npm run test:research`     | `tests/benchmarks`、`tests/evals`、`tests/official`  | 非阻塞研究表征   |
+| `npm run test:chaos`        | Windows 故障注入与进程/文件锁生命周期                | 独立阻塞轨道     |
+| `npm test`                  | 所有 `tests/**/*.test.ts`                            | 本地完整兼容入口 |
+| `npm run verify:static`     | build/package/type/lint/format/docs/context          | 本地与 CI 共用   |
+| `npm run verify:product-ci` | build + product coverage                             | 本地与 CI 共用   |
 
 `eval:*`、`benchmark:*`、真实 LLM/embedding 与官方大数据集运行不进入 keyless CI。研究测试可以验证 adapter 和计分契约，但不得访问外部密钥或把实验常量提升为产品默认值。
 
@@ -173,13 +173,13 @@ daemon 不解析 contract、不启动 Agent、不判断 CI、不拥有 PR，也�
 
 每类状态只有一个权威所有者，派生缓存不得竞争：
 
-| 真相域 | 权威来源 | 非权威视图 |
-| --- | --- | --- |
-| 期望仓库状态 | Git 中经版本控制的 Contract | catalog、编译缓存、NMG 记忆 |
-| 当前仓库状态 | 指定 commit/worktree 的 Repository Observer 输出 | Agent 描述、PR 文本 |
-| 验证事实 | 可信执行者的观测；本地 receipt 记录 contract digest、observed content revision、verifier identity，并在 clean/forge 场景绑定 commit | 自报日志、Task Board result、未经认证的 receipt |
-| PR/合并状态 | Git forge | 本地缓存、NMG |
-| Agent 工作记忆与经验 | 各 harness 与 NMG 的 AG/STG/LTG 边界 | RCP receipt 摘要 |
+| 真相域               | 权威来源                                                                                                                            | 非权威视图                                      |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| 期望仓库状态         | Git 中经版本控制的 Contract                                                                                                         | catalog、编译缓存、NMG 记忆                     |
+| 当前仓库状态         | 指定 commit/worktree 的 Repository Observer 输出                                                                                    | Agent 描述、PR 文本                             |
+| 验证事实             | 可信执行者的观测；本地 receipt 记录 contract digest、observed content revision、verifier identity，并在 clean/forge 场景绑定 commit | 自报日志、Task Board result、未经认证的 receipt |
+| PR/合并状态          | Git forge                                                                                                                           | 本地缓存、NMG                                   |
+| Agent 工作记忆与经验 | 各 harness 与 NMG 的 AG/STG/LTG 边界                                                                                                | RCP receipt 摘要                                |
 
 Contract 描述 desired state；Observer 产生 observed state；Receipt 记录执行者声称的输入、
 检查及结果。只有信任执行者与记录来源时，才可把它用作该次执行的证据；自哈希不能证明
@@ -210,7 +210,7 @@ IR；暂不引入完整 CUE/OPA 运行时。借用 CUE 的约束语义和 OPA �
 apiVersion: repository.nmg.dev/v1alpha1
 kind: AgentChange
 metadata:
-  id: rcp-001                    # 被引用后保持稳定
+  id: rcp-001 # 被引用后保持稳定
 spec:
   intent: "what should be true"
   scope:
@@ -222,7 +222,7 @@ spec:
     routes: ["product"]
     checks: ["npm run agent:verify"]
   authority:
-    mode: plan                  # plan | apply | continuous
+    mode: plan # plan | apply | continuous
   extensions: {}
 ```
 
@@ -454,8 +454,8 @@ source of truth。未来若确有本地自动唤醒需求，可在外部增加�
 
 固定可信版本验证是显式本地命令，与普通 `reconcile` / `agent:verify` 分开；后者不自动获得
 本节的基线隔离保证。本节规范和 [RCP decision](../decisions/implemented/2026-08-29-repository-control-plane.md)
-共同拥有该选择；[轻量默认提案](../decisions/proposed/2026-09-07-rcp-lightweight-verification-default.md)
-仍为 proposed。
+共同拥有该选择；轻量默认已实现，见 §7.14 与
+[decision](../decisions/implemented/2026-09-07-rcp-lightweight-verification-default.md)。
 
 ```text
 # 操作者明确审阅一个包含本功能与验收策略的 commit；不自动提交工作区
@@ -496,8 +496,36 @@ Agent 的误改、自报完成和检查削弱，不防同权限恶意进程、�
 代码。一次 JSON 自洽检查不能认证历史执行。相应对抗回归由 `tests/rcp/trusted.test.ts` 拥有；
 普通 full gate 不等于证明本设计或验证器正确。
 
+### 7.14 轻量验证默认（narrow gate）
+
+`npm run agent:verify` 的默认 gate 由改动归属决定。当每个改动 scope 恰好被一个路由拥有，
+且没有任何 scope 落在共享 / 横切根（`src/`、`tests/`、`scripts/`、`tools/`、`.github/`、
+`package.json`、`package-lock.json`、`tsconfig.json`、`tsconfig.build.json`、
+`agent-context.yaml`、`AGENTS.md`）之下时走 narrow：运行常驻共享不变量 `check`、
+`docs:check`、`format:check`、`lint`、`package:check`，加上属主路由自己的
+`node --test` globs（合成为 `node-test:<routeId>` 检查）。其余情况（跨路由、无主、
+共享根、多个候选路由、无改动 scope）升级为路由声明的 blocking 集。`--full` 强制 full，
+`--narrow` 强制 narrow，两者互斥；有疑问时跑 full。
+
+narrow 与 full 都经 `reconcileOnce` 走 RCP 并写入 `.rcp/receipts/` receipt；没有 authored
+contract 覆盖时合成一个内存 contract，不存在旁路执行路径。receipt 的 `gate` 记录 `mode`
+（`narrow`/`full`）、可选 `reason` 与 `fullGateRun`（narrow 恒为 `false`），使“这次没有跑
+完整 gate”成为机器可读的可审计事实，而非推断。`validateReceipt` 拒绝 `fullGateRun` 与
+`mode` 矛盾的 receipt；`nmg-rcp receipt-verify` / `agent:verify --receipt <id>` 可独立复核。
+
+narrow 只减少运行的检查面，不削弱绑定：结果仍绑定候选 / 基线 / 验证器 / 策略 / 调用摘要，
+不复用历史证据，缺检查、跳过、超时、空报告、快照变动或依赖变化一律 fail-closed。
+narrow 不声称覆盖未运行的检查；`gate.fullGateRun=false` 就是这一事实的记录。选择规则是
+路由归属启发式，不是依赖分析：真实影响跨共享路径但未落在共享根上的改动仍可能不完整，
+因此归属不明时默认升级。对抗回归由 `tests/tools/agent-verify.test.ts`、
+`tests/tools/narrow-verify.test.ts` 与 `tests/rcp/receipts.test.ts` 拥有。
+
 ## 8. 修改验证
 
-普通产品改动至少运行目标测试、`npm run check`、`npm run test:product` 与 `npm run build`。文档按 [文档 CI 契约](../README.md#ci-contract)运行 `npm run docs:check`。仓库工具还运行 `npm run agent:context:check`；包边界运行 `npm run package:check`。
+普通产品改动的 gate 由 §7.14 的选择规则决定：narrow 运行共享不变量加属主路由测试，
+其余升级为完整 blocking 集。完整 gate 至少运行目标测试、`npm run check`、
+`npm run test:product` 与 `npm run build`。文档按 [文档 CI 契约](../README.md#ci-contract)
+运行 `npm run docs:check`。仓库工具还运行 `npm run agent:context:check`；包边界运行
+`npm run package:check`。
 
 提交只包含本任务拥有的文件。工作区有用户或其他 Agent 修改时必须保留，不能为获得“干净”结果回滚它们。

@@ -91,6 +91,15 @@ export interface RouteDeclaration {
   };
 }
 
+/** Which gate a verification run actually exercised, recorded so a narrow
+ *  result can never be read as a full-gate result. */
+export interface VerificationGate {
+  mode: "narrow" | "full";
+  reason?: string;
+  /** True only when the declared whole blocking set was run. */
+  fullGateRun: boolean;
+}
+
 export interface WorkOrder {
   schema: "repository.work-order/v1alpha1";
   id: string;
@@ -107,6 +116,7 @@ export interface WorkOrder {
   verificationChecks: string[];
   routes: string[];
   routeDigest: string;
+  gate: VerificationGate;
   authority: AuthorityMode;
   operationKey: string;
   budget: {
@@ -182,6 +192,7 @@ export interface RepositoryReceipt {
     routeDigest: string;
     routes: string[];
     verificationChecks: string[];
+    gate: VerificationGate;
     budget: WorkOrder["budget"];
   };
   scope: {
@@ -191,6 +202,9 @@ export interface RepositoryReceipt {
     matched: boolean;
   };
   checks: VerificationCheckResult[];
+  /** The gate this receipt actually exercised; narrow receipts carry
+   *  fullGateRun: false so they cannot be read as a full-gate result. */
+  gate: VerificationGate;
   forge?: Omit<ForgeObservation, "provider" | "checks"> & {
     provider: string;
     requiredChecks: string[];

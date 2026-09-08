@@ -10,6 +10,7 @@ export function validateReceipt(receipt: RepositoryReceipt): ReceiptValidation {
   const errors: string[] = [];
   validateReceiptIdentity(receipt, errors);
   validateWorkOrderBinding(receipt, errors);
+  validateGate(receipt, errors);
   if (receipt.decision === "verified") validateVerifiedDecision(receipt, errors);
   const expectedId = receiptId({ ...receipt, receiptId: "" });
   if (receipt.receiptId !== expectedId) errors.push("receiptId does not match canonical content");
@@ -25,6 +26,20 @@ function validateReceiptIdentity(receipt: RepositoryReceipt, errors: string[]): 
     errors.push("missing observed revision binding");
   }
   if (!receipt.verifier.id || !receipt.verifier.digest) errors.push("missing verifier identity");
+}
+
+function validateGate(receipt: RepositoryReceipt, errors: string[]): void {
+  const gate = receipt.gate;
+  if (!gate || (gate.mode !== "narrow" && gate.mode !== "full")) {
+    errors.push("missing or invalid verification gate");
+    return;
+  }
+  if (gate.fullGateRun !== (gate.mode === "full")) {
+    errors.push("gate.fullGateRun does not match gate.mode");
+  }
+  if (receipt.workOrder?.gate?.mode !== gate.mode) {
+    errors.push("receipt gate does not match its work order gate");
+  }
 }
 
 function validateWorkOrderBinding(receipt: RepositoryReceipt, errors: string[]): void {

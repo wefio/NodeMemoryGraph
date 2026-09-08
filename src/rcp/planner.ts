@@ -46,18 +46,36 @@ export function selectRoutes(
   return selected;
 }
 
+export interface NarrowPlanInput {
+  routeId: string;
+  checks: string[];
+  reason: string;
+}
+
 export function planWorkOrder(input: {
   contract: RepositoryContractIr;
   observation: ObservedRepository;
   routes: RouteDeclaration[];
   operationKey?: string;
   executionTimeoutMs?: number;
+  narrow?: NarrowPlanInput;
 }): WorkOrder {
-  const selected = selectRoutes(input.contract, input.routes);
-  const checks = unique([
-    ...input.contract.verification.checks,
-    ...selected.flatMap((route) => route.verify.blocking),
-  ]);
+  const narrow = input.narrow;
+  const selected = narrow
+    ? input.routes.filter((route) => route.id === narrow.routeId)
+    : selectRoutes(input.contract, input.routes);
+  if (narrow && selected.length !== 1) {
+    throw new Error(`narrow verification route is unavailable: ${narrow.routeId}`);
+  }
+  const checks = narrow
+    ? unique(narrow.checks)
+    : unique([
+        ...input.contract.verification.checks,
+        ...selected.flatMap((route) => route.verify.blocking),
+      ]);
+  const gate: WorkOrder["gate"] = narrow
+    ? { mode: "narrow", reason: narrow.reason, fullGateRun: false }
+    : { mode: "full", fullGateRun: true };
   const owners = unique(selected.flatMap((route) => route.owners));
   const routeIds = selected.map((route) => route.id);
   const routeDigest = digestCanonical(selected);
@@ -70,6 +88,7 @@ export function planWorkOrder(input: {
     operationKey,
     routeDigest,
     verificationChecks: checks,
+    gate,
     budget,
   });
   return {
@@ -88,6 +107,7 @@ export function planWorkOrder(input: {
     verificationChecks: checks,
     routes: routeIds,
     routeDigest,
+    gate,
     authority: input.contract.authority.mode,
     operationKey,
     budget,

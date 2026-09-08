@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { relative, resolve } from "node:path";
 
-import { attemptKey as workOrderAttemptKey, operationIdentity, planWorkOrder } from "./planner.ts";
+import {
+  attemptKey as workOrderAttemptKey,
+  operationIdentity,
+  planWorkOrder,
+  type NarrowPlanInput,
+} from "./planner.ts";
 import type {
   ForgeProvider,
   HarnessProvider,
@@ -52,6 +57,9 @@ export interface ReconcileRequest {
   invocationId?: string;
   recoverIncomplete?: boolean;
   executionTimeoutMs?: number;
+  /** Narrow verification plan: run only this route's bounded checks and record
+   *  a receipt whose gate.mode is "narrow" (fullGateRun false). */
+  narrow?: NarrowPlanInput;
 }
 
 interface PreparedReconciliation {
@@ -111,6 +119,7 @@ async function prepareReconciliation(
     routes: request.routes,
     operationKey: request.operationKey,
     executionTimeoutMs: request.executionTimeoutMs,
+    narrow: request.narrow,
   });
   const memoryDiagnostics = await recallMemory(providers.memory, request.contract, workOrder);
   const context: PreparationContext = {
@@ -717,6 +726,7 @@ function buildReceipt(input: BuildReceiptInput): RepositoryReceipt {
       routeDigest: input.workOrder.routeDigest,
       routes: input.workOrder.routes,
       verificationChecks: input.workOrder.verificationChecks,
+      gate: input.workOrder.gate,
       budget: input.workOrder.budget,
     },
     scope: {
@@ -726,6 +736,7 @@ function buildReceipt(input: BuildReceiptInput): RepositoryReceipt {
       matched: input.scopeMatched,
     },
     checks: input.verification.checks,
+    gate: input.workOrder.gate,
     forge: input.forge
       ? {
           provider: input.forge.provider.id,

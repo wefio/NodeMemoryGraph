@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -14,6 +14,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { canonicalJson, digestCanonical } from "./canonical.ts";
 import { validateReceipt } from "./receipt.ts";
 import { digestRepositoryPaths } from "./repository.ts";
+import { readRouteDeclarations } from "./planner.ts";
 import type {
   ForgeObservation,
   HarnessResult,
@@ -21,11 +22,12 @@ import type {
   RepositoryContractIr,
   ReconciliationAttempt,
   RepositoryReceipt,
+  RouteDeclaration,
   VerificationCheckResult,
   VerificationEvidence,
   WorkOrder,
 } from "./types.ts";
-import { runNpmScriptCheck } from "./verification.ts";
+import { outputTail, runNpmScriptCheck } from "./verification.ts";
 
 export interface HarnessProvider {
   readonly descriptor: ProviderDescriptor;
@@ -268,6 +270,163 @@ export class LocalNpmVerifierProvider implements VerifierProvider {
       checks,
     };
   }
+}
+
+/** Narrow verification: the always-run shared invariants plus the owning
+ *  route's own `node --test` globs (a synthetic `node-test:<routeId>` check,
+ *  because route tests are not npm scripts). */
+export const NARROW_SHARED_CHECKS = [
+  "check",
+  "docs:check",
+  "format:check",
+  "lint",
+  "package:check",
+] as const;
+
+export function nodeTestCheckName(routeId: string): string {
+  return `node-test:${routeId}`;
+}
+
+export class NarrowVerifierProvider implements VerifierProvider {
+  readonly descriptor: ProviderDescriptor = {
+    id: "narrow-verifier",
+    version: "1",
+    capabilities: ["npm-script-verification", "route-test-verification"],
+    operations: ["verify"],
+    authority: ["plan", "apply", "continuous"],
+  };
+
+  readonly timeoutMs: number;
+  readonly streamOutput: boolean;
+
+  constructor(timeoutMs = 30 * 60 * 1_000, streamOutput = false) {
+    this.timeoutMs = timeoutMs;
+    this.streamOutput = streamOutput;
+  }
+
+  async definitionDigest(request: {
+    root: string;
+    contract: RepositoryContractIr;
+    workOrder: WorkOrder;
+  }): Promise<string> {
+    const scripts = readPackageScripts(request.root);
+    return narrowDefinitionDigest(request.root, this.descriptor, request.workOrder, scripts);
+  }
+
+  async verify(request: {
+    root: string;
+    contract: RepositoryContractIr;
+    workOrder: WorkOrder;
+  }): Promise<VerificationEvidence> {
+    const scripts = readPackageScripts(request.root);
+    const verifierDigest = narrowDefinitionDigest(
+      request.root,
+      this.descriptor,
+      request.workOrder,
+      scripts,
+    );
+    const routes = readRouteDeclarations(request.root);
+    const checks: VerificationCheckResult[] = [];
+    for (const name of request.workOrder.verificationChecks) {
+      if (name.startsWith("node-test:")) {
+        checks.push(
+          runRouteTestsCheck(request.root, name, routes, this.timeoutMs, this.streamOutput),
+        );
+        continue;
+      }
+      const definition = scripts[name];
+      if (!definition) {
+        checks.push({
+          name,
+          status: "failed",
+          durationMs: 0,
+          reason: `missing npm script: ${name}`,
+        });
+        continue;
+      }
+      checks.push(runNpmScriptCheck(request.root, name, this.timeoutMs, this.streamOutput));
+    }
+    return {
+      provider: this.descriptor,
+      verifierDigest,
+      ok: checks.every((check) => check.status === "passed"),
+      checks,
+    };
+  }
+}
+
+function runRouteTestsCheck(
+  root: string,
+  name: string,
+  routes: RouteDeclaration[],
+  timeoutMs: number,
+  streamOutput: boolean,
+): VerificationCheckResult {
+  const routeId = name.slice("node-test:".length);
+  const route = routes.find((candidate) => candidate.id === routeId);
+  if (!route) return { name, status: "failed", durationMs: 0, reason: `unknown route: ${routeId}` };
+  if (!route.tests.length)
+    return { name, status: "failed", durationMs: 0, reason: `route has no own tests: ${routeId}` };
+  const started = performance.now();
+  const result = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", "--test", "--test-concurrency=4", ...route.tests],
+    {
+      cwd: root,
+      encoding: "utf8",
+      windowsHide: true,
+      stdio: "pipe",
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: timeoutMs,
+    },
+  );
+  const stdout = result.stdout ?? "";
+  const stderr = result.stderr ?? "";
+  if (streamOutput) {
+    process.stdout.write(stdout);
+    process.stderr.write(stderr);
+  }
+  const failed = Boolean(result.error || result.signal || result.status !== 0);
+  return {
+    name,
+    status: failed ? "failed" : "passed",
+    durationMs: Math.round(performance.now() - started),
+    exitCode: result.status ?? undefined,
+    reason: testFailureReason(result, failed),
+    evidence: failed ? outputTail(`${stdout}${stderr}${result.error?.message ?? ""}`) : undefined,
+  };
+}
+
+function testFailureReason(result: SpawnSyncReturns<string>, failed: boolean): string | undefined {
+  if (result.error?.message) return result.error.message;
+  if (result.signal) return `terminated by ${result.signal}`;
+  if (failed) return `exit ${result.status ?? "unknown"}`;
+  return undefined;
+}
+
+function narrowDefinitionDigest(
+  root: string,
+  provider: ProviderDescriptor,
+  workOrder: WorkOrder,
+  scripts: Record<string, string>,
+): string {
+  const routes = readRouteDeclarations(root).filter((route) => workOrder.routes.includes(route.id));
+  const definitions = workOrder.verificationChecks.map((name) => [name, scripts[name] ?? null]);
+  const repositoryInputs = digestRepositoryPaths(root, [
+    "package.json",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "agent-context.yaml",
+  ]);
+  return digestCanonical({
+    provider,
+    definitions,
+    routes,
+    repositoryInputs,
+    runtime: { node: process.version, platform: process.platform, arch: process.arch },
+  });
 }
 
 export class FileReceiptSink implements ReceiptSink {

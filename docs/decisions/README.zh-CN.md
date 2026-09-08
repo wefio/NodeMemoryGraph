@@ -26,11 +26,11 @@
 ## 开放提案
 
 - [会话级 Active Graph 运行时](proposed/2026-08-29-session-active-graph-runtime.zh-CN.md)
-- [RCP 轻量化验证默认为窄](proposed/2026-09-07-rcp-lightweight-verification-default.zh-CN.md)
 
 ## 已实现决策
 
 - [外部 Repository Control Plane](implemented/2026-08-29-repository-control-plane.zh-CN.md)
+- [RCP 默认轻量验证](implemented/2026-09-07-rcp-lightweight-verification-default.zh-CN.md)
 - [自治理元规则：NMG 自身的规则也受治理](implemented/2026-09-07-self-governance-meta-rule.zh-CN.md)
 
 ## 被拒决策

@@ -173,9 +173,18 @@ test("CLI dry-run emits a machine-readable plan without running checks", () => {
     results: VerificationCommandResult[];
   };
   assert.equal(payload.ok, true);
+  // docs/README.md is cleanly owned by the documentation route, so the default
+  // is narrow: the always-run shared invariants plus that route's own tests.
   assert.deepEqual(
     payload.results.map(({ command, status, reason }) => ({ command, status, reason })),
-    [{ command: "docs:check", status: "skipped", reason: "dry run" }],
+    [
+      { command: "check", status: "skipped", reason: "dry run" },
+      { command: "docs:check", status: "skipped", reason: "dry run" },
+      { command: "format:check", status: "skipped", reason: "dry run" },
+      { command: "lint", status: "skipped", reason: "dry run" },
+      { command: "package:check", status: "skipped", reason: "dry run" },
+      { command: "node --test (documentation)", status: "skipped", reason: "dry run" },
+    ],
   );
 });
 
@@ -241,7 +250,7 @@ test("CLI fails closed when --changed cannot inspect a Git worktree", () => {
   writeFileSync(join(root, "docs", "owner.md"), "# Owner\n");
   writeFileSync(
     join(root, "package.json"),
-    JSON.stringify({ name: "fixture", version: "1.0.0", scripts: { pass: "node -e \"\"" } }),
+    JSON.stringify({ name: "fixture", version: "1.0.0", scripts: { pass: 'node -e ""' } }),
   );
   writeFileSync(
     join(root, "agent-context.yaml"),
@@ -285,7 +294,10 @@ test("CLI accepts a positional scope without enabling changed-file discovery", (
     report: { scopes: string[]; routes: Array<{ id: string }> };
   };
   assert.deepEqual(payload.report.scopes, ["src/file.ts"]);
-  assert.deepEqual(payload.report.routes.map((route) => route.id), ["fixture"]);
+  assert.deepEqual(
+    payload.report.routes.map((route) => route.id),
+    ["fixture"],
+  );
 });
 
 test("CLI automatically routes dirty Git files when called without scope arguments", () => {
@@ -321,7 +333,10 @@ test("CLI automatically routes dirty Git files when called without scope argumen
     report: { routes: Array<{ id: string }> };
     results: VerificationCommandResult[];
   };
-  assert.deepEqual(payload.report.routes.map((route) => route.id), ["fixture"]);
+  assert.deepEqual(
+    payload.report.routes.map((route) => route.id),
+    ["fixture"],
+  );
   assert.equal(payload.results[0]?.status, "passed");
 
   const cleanResult = spawnSync(
@@ -406,6 +421,11 @@ test("CLI automatically reconciles the unique RCP contract covering dirty scopes
   assert.equal(payload.rcp?.contractId, "fixture-change");
   assert.ok(payload.rcp?.receiptPath);
   assert.equal(existsSync(payload.rcp!.receiptPath!), true);
+  const receipt = JSON.parse(readFileSync(payload.rcp!.receiptPath!, "utf8")) as {
+    gate: { mode: string; fullGateRun: boolean };
+  };
+  assert.equal(receipt.gate.mode, "full");
+  assert.equal(receipt.gate.fullGateRun, true);
 
   const evidence = JSON.parse(
     readFileSync(join(root, ".nmg", "verification", "latest.json"), "utf8"),
@@ -485,4 +505,85 @@ test("CLI attributes command timeout and persists the failure", () => {
   const payload = JSON.parse(result.stdout) as { results: VerificationCommandResult[] };
   assert.equal(payload.results[0]?.status, "failed");
   assert.equal(payload.results[0]?.errorKind, "timeout");
+});
+
+function narrowFixture(): string {
+  const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-narrow-"));
+  mkdirSync(join(root, "plugin"), { recursive: true });
+  mkdirSync(join(root, "tests", "plugin"), { recursive: true });
+  writeFileSync(join(root, "plugin", "index.ts"), "export const value = 1;\n");
+  writeFileSync(
+    join(root, "tests", "plugin", "plugin.test.ts"),
+    'import assert from "node:assert/strict";\nimport test from "node:test";\ntest("plugin ok", () => {\n  assert.equal(1, 1);\n});\n',
+  );
+  const ok = 'node -e "process.exit(0)"';
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({
+      name: "fixture",
+      version: "1.0.0",
+      scripts: {
+        check: ok,
+        "docs:check": ok,
+        "format:check": ok,
+        lint: ok,
+        "package:check": ok,
+        "test:product": 'node -e "process.exit(1)"',
+      },
+    }),
+  );
+  writeFileSync(
+    join(root, "agent-context.yaml"),
+    "version: 1\nroutes:\n  - id: plugin\n    paths: [plugin/**]\n    owners: []\n    tests: [tests/plugin/**]\n    verify:\n      blocking: [check, test:product]\n      advisory: []\n",
+  );
+  const git = (args: string[]) =>
+    spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
+  assert.equal(git(["init", "--quiet"]).status, 0);
+  assert.equal(git(["config", "user.email", "verify@example.invalid"]).status, 0);
+  assert.equal(git(["config", "user.name", "Verify Test"]).status, 0);
+  assert.equal(git(["add", "."]).status, 0);
+  assert.equal(git(["commit", "--quiet", "-m", "fixture"]).status, 0);
+  writeFileSync(join(root, "plugin", "index.ts"), "export const value = 2;\n");
+  return root;
+}
+
+function runVerify(root: string, extra: string[] = []) {
+  const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
+  return spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, ...extra, "--json"],
+    { encoding: "utf8", windowsHide: true },
+  );
+}
+
+test("narrow is the default and records an honest gate without test:product", () => {
+  const result = runVerify(narrowFixture());
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout) as {
+    rcp?: { status: string; receiptPath?: string };
+    ok: boolean;
+  };
+  assert.equal(payload.rcp?.status, "verified");
+  assert.equal(payload.ok, true);
+  const receipt = JSON.parse(readFileSync(payload.rcp!.receiptPath!, "utf8")) as {
+    gate: { mode: string; fullGateRun: boolean };
+    checks: Array<{ name: string }>;
+  };
+  assert.equal(receipt.gate.mode, "narrow");
+  assert.equal(receipt.gate.fullGateRun, false);
+  const names = receipt.checks.map((check) => check.name);
+  for (const shared of ["check", "docs:check", "format:check", "lint", "package:check"])
+    assert.ok(names.includes(shared), `missing shared check ${shared}`);
+  assert.ok(names.includes("node-test:plugin"));
+  assert.ok(!names.includes("test:product"), "narrow must not run the whole suite");
+});
+
+test("--full forces the declared blocking set instead of narrowing", () => {
+  const result = runVerify(narrowFixture(), ["--full"]);
+  const payload = JSON.parse(result.stdout) as {
+    results: VerificationCommandResult[];
+    rcp?: unknown;
+  };
+  assert.ok(payload.results.some((entry) => entry.command === "test:product"));
+  assert.equal(payload.rcp, undefined);
 });
