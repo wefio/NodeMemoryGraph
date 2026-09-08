@@ -504,8 +504,10 @@ Agent 的误改、自报完成和检查削弱，不防同权限恶意进程、�
 且没有任何 scope 落在共享 / 横切根（`src/`、`tests/`、`scripts/`、`tools/`、`.github/`、
 `package.json`、`package-lock.json`、`tsconfig.json`、`tsconfig.build.json`、
 `agent-context.yaml`、`AGENTS.md`）之下时走 narrow：运行常驻共享不变量 `check`、
-`docs:check`、`format:check`、`lint`、`package:check`，加上属主路由自己的
-`node --test` globs（合成为 `node-test:<routeId>` 检查）。其余情况（跨路由、无主、
+`docs:check`、`format:check`、`lint`、`package:check`，加上属主路由自己的测试文件
+（由路由 `tests:` 模式解析为具体文件，排除被匹配到的目录；零匹配时 fail-closed），
+合成为 `node-test:<routeId>` 检查；该子进程不继承父进程的 `NODE_TEST_CONTEXT`，
+否则 node 会跳过执行并把空过记为通过。其余情况（跨路由、无主、
 共享根、多个候选路由、无改动 scope）升级为路由声明的 blocking 集。`--full` 强制 full，
 `--narrow` 强制 narrow，两者互斥；有疑问时跑 full。
 

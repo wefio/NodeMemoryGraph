@@ -2,14 +2,16 @@ import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  globSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { canonicalJson, digestCanonical } from "./canonical.ts";
 import { validateReceipt } from "./receipt.ts";
@@ -355,6 +357,23 @@ export class NarrowVerifierProvider implements VerifierProvider {
   }
 }
 
+/** Expand a route's declared test patterns to concrete files. A `dir/**`
+ *  pattern also matches the directory itself, and node's test runner then tries
+ *  to load that directory as a test file and fails. Expanding to files avoids
+ *  that, and lets a route whose patterns match nothing fail closed instead of
+ *  reporting a vacuous pass over zero tests. */
+function resolveRouteTestFiles(root: string, patterns: string[]): string[] {
+  const files = new Set<string>();
+  for (const pattern of patterns) {
+    for (const match of globSync(pattern, { cwd: root })) {
+      const absolute = isAbsolute(match) ? match : join(root, match);
+      if (statSync(absolute, { throwIfNoEntry: false })?.isFile())
+        files.add(match.replace(/\\/g, "/"));
+    }
+  }
+  return [...files].sort();
+}
+
 function runRouteTestsCheck(
   root: string,
   name: string,
@@ -367,10 +386,23 @@ function runRouteTestsCheck(
   if (!route) return { name, status: "failed", durationMs: 0, reason: `unknown route: ${routeId}` };
   if (!route.tests.length)
     return { name, status: "failed", durationMs: 0, reason: `route has no own tests: ${routeId}` };
+  const testFiles = resolveRouteTestFiles(root, route.tests);
+  if (!testFiles.length)
+    return {
+      name,
+      status: "failed",
+      durationMs: 0,
+      reason: `route tests match no files: ${routeId}`,
+    };
+  // The route's own run must not inherit the parent's node:test context: with
+  // NODE_TEST_CONTEXT set, node skips running files ("run() is being called
+  // recursively") and the check would record a vacuous pass.
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
   const started = performance.now();
   const result = spawnSync(
     process.execPath,
-    ["--experimental-strip-types", "--test", "--test-concurrency=4", ...route.tests],
+    ["--experimental-strip-types", "--test", "--test-concurrency=4", ...testFiles],
     {
       cwd: root,
       encoding: "utf8",
@@ -378,6 +410,7 @@ function runRouteTestsCheck(
       stdio: "pipe",
       maxBuffer: 16 * 1024 * 1024,
       timeout: timeoutMs,
+      env,
     },
   );
   const stdout = result.stdout ?? "";

@@ -507,14 +507,16 @@ test("CLI attributes command timeout and persists the failure", () => {
   assert.equal(payload.results[0]?.errorKind, "timeout");
 });
 
-function narrowFixture(): string {
+function narrowFixture(
+  options: { failRouteTest?: boolean; routeTests?: string } = {},
+): string {
   const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-narrow-"));
   mkdirSync(join(root, "plugin"), { recursive: true });
   mkdirSync(join(root, "tests", "plugin"), { recursive: true });
   writeFileSync(join(root, "plugin", "index.ts"), "export const value = 1;\n");
   writeFileSync(
     join(root, "tests", "plugin", "plugin.test.ts"),
-    'import assert from "node:assert/strict";\nimport test from "node:test";\ntest("plugin ok", () => {\n  assert.equal(1, 1);\n});\n',
+    `import assert from "node:assert/strict";\nimport test from "node:test";\ntest("plugin ok", () => {\n  assert.equal(1, ${options.failRouteTest ? "2" : "1"});\n});\n`,
   );
   const ok = 'node -e "process.exit(0)"';
   writeFileSync(
@@ -534,7 +536,7 @@ function narrowFixture(): string {
   );
   writeFileSync(
     join(root, "agent-context.yaml"),
-    "version: 1\nroutes:\n  - id: plugin\n    paths: [plugin/**]\n    owners: []\n    tests: [tests/plugin/**]\n    verify:\n      blocking: [check, test:product]\n      advisory: []\n",
+    `version: 1\nroutes:\n  - id: plugin\n    paths: [plugin/**]\n    owners: []\n    tests: [${options.routeTests ?? "tests/plugin/**"}]\n    verify:\n      blocking: [check, test:product]\n      advisory: []\n`,
   );
   const git = (args: string[]) =>
     spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
@@ -586,4 +588,37 @@ test("--full forces the declared blocking set instead of narrowing", () => {
   };
   assert.ok(payload.results.some((entry) => entry.command === "test:product"));
   assert.equal(payload.rcp, undefined);
+});
+
+test("a failing route test fails the narrow gate instead of passing vacuously", () => {
+  const result = runVerify(narrowFixture({ failRouteTest: true }));
+  assert.notEqual(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout) as {
+    rcp?: { status: string; receiptPath?: string };
+    ok: boolean;
+  };
+  assert.equal(payload.ok, false);
+  assert.equal(payload.rcp?.status, "failed");
+  const receipt = JSON.parse(readFileSync(payload.rcp!.receiptPath!, "utf8")) as {
+    checks: Array<{ name: string; status: string }>;
+  };
+  assert.equal(
+    receipt.checks.find((check) => check.name === "node-test:plugin")?.status,
+    "failed",
+  );
+});
+
+test("route test patterns that match no files fail closed", () => {
+  const result = runVerify(narrowFixture({ routeTests: "tests/nope/**" }));
+  assert.notEqual(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout) as {
+    rcp?: { status: string; receiptPath?: string };
+  };
+  assert.equal(payload.rcp?.status, "failed");
+  const receipt = JSON.parse(readFileSync(payload.rcp!.receiptPath!, "utf8")) as {
+    checks: Array<{ name: string; status: string; reason?: string }>;
+  };
+  const check = receipt.checks.find((entry) => entry.name === "node-test:plugin");
+  assert.equal(check?.status, "failed");
+  assert.match(check?.reason ?? "", /match no files/);
 });

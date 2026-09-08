@@ -40,10 +40,13 @@ sound and the record is honest.
   contract covers the change, an in-memory contract is synthesized for the
   reconciliation. There is no side execution path.
 - **Always-run shared set.** Every narrow run runs `check`, `docs:check`,
-  `format:check`, `lint`, `package:check` plus the owning route's own
-  `node --test` globs (a synthetic `node-test:<routeId>` check, because route
-  tests are not npm scripts). A route's `verify.blocking` set is what a full
-  escalation runs.
+  `format:check`, `lint`, `package:check` plus the owning route's own tests: its
+  `tests:` patterns resolved to concrete files (a synthetic `node-test:<routeId>`
+  check, because route tests are not npm scripts). Resolution excludes matched
+  directories and fails closed when a route's patterns match no files; the child
+  run does not inherit the parent's `NODE_TEST_CONTEXT`, which would make node
+  skip the files and record a vacuous pass. A route's `verify.blocking` set is
+  what a full escalation runs.
 - **Honest gate record.** `RepositoryReceipt.gate` carries
   `{ mode: "narrow" | "full"; reason?: string; fullGateRun: boolean }`.
   `fullGateRun` is `false` for every narrow run, so "the full gate did not run"
