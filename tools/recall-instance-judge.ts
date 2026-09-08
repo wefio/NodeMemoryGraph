@@ -101,59 +101,75 @@ function aggregate(instances: RecallInstance[]): string {
   return lines.join("\n");
 }
 
-async function main(argv: string[]): Promise<number> {
-  let dir: string | undefined;
-  let limit: number | undefined;
-  let json = false;
+interface JudgeCliOptions {
+  dir?: string;
+  limit?: number;
+  json?: boolean;
+}
+
+function parseArgs(argv: string[]): JudgeCliOptions {
+  const options: JudgeCliOptions = {};
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    if (argument === "--dir") dir = argv[++index];
-    else if (argument === "--limit") limit = Number(argv[++index]);
-    else if (argument === "--json") json = true;
+    if (argument === "--dir") options.dir = argv[++index];
+    else if (argument === "--limit") options.limit = Number(argv[++index]);
+    else if (argument === "--json") options.json = true;
   }
-  if (!dir) {
+  return options;
+}
+
+/** Judge every not-yet-labelled instance via the configured model; returns the
+ *  number newly labelled. No-op (returns 0) without NMG_JUDGE_BASE_URL/MODEL. */
+async function labelBatch(
+  directory: string,
+  instances: RecallInstance[],
+  judged: Set<string>,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<number> {
+  const baseUrl = env.NMG_JUDGE_BASE_URL;
+  const model = env.NMG_JUDGE_MODEL;
+  if (!baseUrl || !model) return 0;
+  const classify = await chatClassifier(baseUrl, model, env.NMG_JUDGE_API_KEY);
+  let newlyLabeled = 0;
+  for (const instance of instances) {
+    if (judged.has(instance.activeGraphId)) continue;
+    const label = await classify(instance);
+    if (!label) continue;
+    appendRecallLabel(directory, {
+      activeGraphId: instance.activeGraphId,
+      label,
+      source: "judge",
+      at: new Date().toISOString(),
+    });
+    judged.add(instance.activeGraphId);
+    newlyLabeled += 1;
+  }
+  return newlyLabeled;
+}
+
+async function main(argv: string[]): Promise<number> {
+  const options = parseArgs(argv);
+  if (!options.dir) {
     process.stderr.write("usage: recall-instance-judge --dir <dataDir> [--limit N] [--json]\n");
     return 2;
   }
-  const directory = resolve(dir);
+  const directory = resolve(options.dir);
   const all = readRecallInstances(recallInstancesPath(directory));
   const existing = readRecallLabels(recallLabelsPath(directory));
-  const instances = limit ? all.slice(0, limit) : all;
-  const baseUrl = process.env.NMG_JUDGE_BASE_URL;
-  const model = process.env.NMG_JUDGE_MODEL;
-  const apiKey = process.env.NMG_JUDGE_API_KEY;
+  const instances = options.limit ? all.slice(0, options.limit) : all;
   const judged = new Set(existing.map((entry) => entry.activeGraphId));
-  let newlyLabeled = 0;
-  if (baseUrl && model) {
-    const classify = await chatClassifier(baseUrl, model, apiKey);
-    for (const instance of instances) {
-      if (judged.has(instance.activeGraphId)) continue;
-      const label = await classify(instance);
-      if (label) {
-        appendRecallLabel(directory, {
-          activeGraphId: instance.activeGraphId,
-          label,
-          source: "judge",
-          at: new Date().toISOString(),
-        });
-        judged.add(instance.activeGraphId);
-        newlyLabeled += 1;
-      }
-    }
-  }
+  const newlyLabeled = await labelBatch(directory, instances, judged);
   const final = applyRecallLabels(instances, readRecallLabels(recallLabelsPath(directory)));
-  if (json) {
+  const hadModel = Boolean(process.env.NMG_JUDGE_BASE_URL && process.env.NMG_JUDGE_MODEL);
+  if (options.json) {
     process.stdout.write(
       JSON.stringify({ instances: final, summary: summarizeLabels(final), newlyLabeled }, null, 2),
     );
   } else {
     process.stdout.write(aggregate(final));
-    if (!baseUrl || !model) {
-      process.stdout.write("\n(set NMG_JUDGE_BASE_URL + NMG_JUDGE_MODEL to semantically label)");
-    } else {
-      process.stdout.write(`\nnewlyLabeled=${newlyLabeled}`);
-    }
-    process.stdout.write("\n");
+    process.stdout.write(
+      hadModel ? `\nnewlyLabeled=${newlyLabeled}\n` : "\n(set NMG_JUDGE_BASE_URL + NMG_JUDGE_MODEL to semantically label)\n",
+    );
   }
   return 0;
 }
