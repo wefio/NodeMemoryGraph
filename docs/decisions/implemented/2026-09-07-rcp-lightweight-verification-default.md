@@ -45,8 +45,10 @@ sound and the record is honest.
   check, because route tests are not npm scripts). Resolution excludes matched
   directories and fails closed when a route's patterns match no files; the child
   run does not inherit the parent's `NODE_TEST_CONTEXT`, which would make node
-  skip the files and record a vacuous pass; a run that executes no tests also
-  fails. A route's `verify.blocking` set is what a full escalation runs.
+  skip the files and record a vacuous pass. Route tests use the same TAP
+  acceptance rule as the trusted baseline (`tests > 0`, `pass == tests`, and no
+  `fail`/`cancelled`/`skipped`/`todo`), so a skipped, empty, or non-executed run
+  is not a pass. A route's `verify.blocking` set is what a full escalation runs.
 - **Honest gate record.** `RepositoryReceipt.gate` carries
   `{ mode: "narrow" | "full"; reason?: string; fullGateRun: boolean }`.
   `fullGateRun` is `false` for every narrow run, so "the full gate did not run"

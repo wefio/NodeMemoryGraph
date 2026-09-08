@@ -507,7 +507,9 @@ Agent 的误改、自报完成和检查削弱，不防同权限恶意进程、�
 `docs:check`、`format:check`、`lint`、`package:check`，加上属主路由自己的测试文件
 （由路由 `tests:` 模式解析为具体文件，排除被匹配到的目录；零匹配时 fail-closed），
 合成为 `node-test:<routeId>` 检查；该子进程不继承父进程的 `NODE_TEST_CONTEXT`，
-否则 node 会跳过执行并把空过记为通过；执行 0 个测试同样判为失败。其余情况（跨路由、无主、
+否则 node 会跳过执行并把空过记为通过；路由测试采用与可信基线相同的 TAP 接受规则
+（`tests > 0`、`pass == tests`、`fail`/`cancelled`/`skipped`/`todo` 均为 0），
+因此跳过、只 skip 或零执行都不算通过。其余情况（跨路由、无主、
 共享根、多个候选路由、无改动 scope）升级为路由声明的 blocking 集。`--full` 强制 full，
 `--narrow` 强制 narrow，两者互斥；有疑问时跑 full。
 

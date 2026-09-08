@@ -17,6 +17,7 @@ import { canonicalJson, digestCanonical } from "./canonical.ts";
 import { validateReceipt } from "./receipt.ts";
 import { digestRepositoryPaths } from "./repository.ts";
 import { readRouteDeclarations } from "./planner.ts";
+import { testOutputPassed } from "./trusted.ts";
 import type {
   ForgeObservation,
   HarnessResult,
@@ -404,23 +405,22 @@ function routeTestCheckResult(
   stderr: string,
   durationMs: number,
 ): VerificationCheckResult {
-  const failed = Boolean(result.error || result.signal || result.status !== 0);
-  // A run that executed no tests is not a pass: node exits 0 when it skips the
-  // files, so the executed count is the evidence that the route tests ran.
-  const vacuous = !failed && parseExecutedTestCount(stdout) === 0;
-  const reason = vacuous
-    ? `route tests executed no tests: ${routeId}`
-    : testFailureReason(result, failed);
+  const exitFailed = Boolean(result.error || result.signal || result.status !== 0);
+  // Same acceptance rule as the trusted baseline: TAP must report tests > 0,
+  // pass == tests, and no fail/cancelled/skipped/todo. A run that executed
+  // nothing, or only skipped tests, is not a pass.
+  const tapFailed = !exitFailed && !testOutputPassed(stdout);
+  const failed = exitFailed || tapFailed;
+  const reason = tapFailed
+    ? `route tests did not pass the TAP acceptance rule: ${routeId}`
+    : testFailureReason(result, exitFailed);
   return {
     name,
-    status: failed || vacuous ? "failed" : "passed",
+    status: failed ? "failed" : "passed",
     durationMs,
     exitCode: result.status ?? undefined,
     reason,
-    evidence:
-      failed || vacuous
-        ? outputTail(`${stdout}${stderr}${result.error?.message ?? ""}`)
-        : undefined,
+    evidence: failed ? outputTail(`${stdout}${stderr}${result.error?.message ?? ""}`) : undefined,
   };
 }
 
@@ -441,7 +441,13 @@ function runRouteTestsCheck(
   const started = performance.now();
   const result = spawnSync(
     process.execPath,
-    ["--experimental-strip-types", "--test", "--test-concurrency=4", ...inputs.testFiles],
+    [
+      "--experimental-strip-types",
+      "--test",
+      "--test-reporter=tap",
+      "--test-concurrency=4",
+      ...inputs.testFiles,
+    ],
     {
       cwd: root,
       encoding: "utf8",
@@ -466,13 +472,6 @@ function runRouteTestsCheck(
     stderr,
     Math.round(performance.now() - started),
   );
-}
-
-/** Executed-test count from node's test-runner summary (tap `# tests N` or spec
- *  `ℹ tests N`). Zero means nothing ran, which must not be recorded as a pass. */
-export function parseExecutedTestCount(output: string): number {
-  const match = /(?:^|\n)(?:# tests (\d+)|ℹ tests (\d+))\b/.exec(output);
-  return match ? Number(match[1] ?? match[2]) : 0;
 }
 
 function testFailureReason(result: SpawnSyncReturns<string>, failed: boolean): string | undefined {
