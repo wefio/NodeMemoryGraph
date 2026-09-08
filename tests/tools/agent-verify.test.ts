@@ -12,6 +12,7 @@ import {
   executeVerificationPlan,
   type VerificationCommandResult,
 } from "../../tools/agent-verify.ts";
+import { parseExecutedTestCount } from "../../src/rcp/providers.ts";
 import type { AgentContextReport } from "../../tools/repo-context.ts";
 
 function report(): AgentContextReport {
@@ -507,9 +508,7 @@ test("CLI attributes command timeout and persists the failure", () => {
   assert.equal(payload.results[0]?.errorKind, "timeout");
 });
 
-function narrowFixture(
-  options: { failRouteTest?: boolean; routeTests?: string } = {},
-): string {
+function narrowFixture(options: { failRouteTest?: boolean; routeTests?: string } = {}): string {
   const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-narrow-"));
   mkdirSync(join(root, "plugin"), { recursive: true });
   mkdirSync(join(root, "tests", "plugin"), { recursive: true });
@@ -621,4 +620,18 @@ test("route test patterns that match no files fail closed", () => {
   const check = receipt.checks.find((entry) => entry.name === "node-test:plugin");
   assert.equal(check?.status, "failed");
   assert.match(check?.reason ?? "", /match no files/);
+});
+
+test("a route test run that executes no tests fails closed", () => {
+  // node exits 0 and prints no summary when it skips the files (e.g. a nested
+  // node:test context); the executed count must come from the summary, so an
+  // absent summary is zero and must not be recorded as a pass.
+  assert.equal(parseExecutedTestCount("# tests 12\n# pass 12\n"), 12);
+  assert.equal(parseExecutedTestCount("ℹ tests 7\nℹ pass 7\n"), 7);
+  assert.equal(
+    parseExecutedTestCount(
+      "Warning: node:test run() is being called recursively within a test file. skipping running files.\n",
+    ),
+    0,
+  );
 });

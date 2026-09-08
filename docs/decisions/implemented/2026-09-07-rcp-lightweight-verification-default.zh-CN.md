@@ -34,7 +34,7 @@ receipt，也不记录实际运行了哪个 gate。因此 narrow 运行的 recei
   `package:check`，加上属主路由自己的测试文件：由路由 `tests:` 模式解析为具体文件
   （排除被匹配到的目录；零匹配时 fail-closed），合成为 `node-test:<routeId>` 检查，
   因为路由测试不是 npm script。子进程不继承父进程的 `NODE_TEST_CONTEXT`，否则 node
-  会跳过执行并把空过记为通过。路由的 `verify.blocking` 集是 full 升级时运行的内容。
+  会跳过执行并把空过记为通过；执行 0 个测试同样判为失败。路由的 `verify.blocking` 集是 full 升级时运行的内容。
 - **诚实的 gate 记录。** `RepositoryReceipt.gate` 携带
   `{ mode: "narrow" | "full"; reason?: string; fullGateRun: boolean }`。narrow 运行的
   `fullGateRun` 恒为 `false`，因此“没有跑完整 gate”是机器可读的事实而非推断。
