@@ -3,9 +3,9 @@
 Third formal run series of the pinned retrieval-quality protocol
 (`evals/retrieval/`). Adds the leaf-block summary arm (`--summaries`) and the
 stacked arm (`--hybrid --summaries`). Companions:
-[retrieval-quality-baseline-2026-08-16.md](retrieval-quality-baseline-2026-08-16.md)
+[retrieval-quality-baseline-2026-08-16.md](baseline-2026-08-16.md)
 (lexical),
-[retrieval-quality-hybrid-2026-08-16.md](retrieval-quality-hybrid-2026-08-16.md)
+[retrieval-quality-hybrid-2026-08-16.md](hybrid-2026-08-16.md)
 (hybrid + LME full-500).
 
 Raw artifacts (`evals/results/retrieval/`):

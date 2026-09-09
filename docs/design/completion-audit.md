@@ -1,14 +1,12 @@
 # NMG design completion audit
 
 **Authority:** current requirement-to-evidence ledger. Normative intent remains
-in [design.md](design.md); document ownership is defined by
-[the documentation index](../README.md).
+in [design.md](design.md); implementation history in
+[implementation-lineage.md](implementation-lineage.md); document ownership is
+defined by [the documentation index](../README.md).
 
-**Status:** requirement ledger
+**Status:** current
 **Updated:** 2026-08-30
-**Normative source:** [design.md](design.md)
-**Implementation recovery:** [implementation-lineage.md](implementation-lineage.md)
-
 This ledger answers two different questions without conflating them:
 
 1. Is every intended NMG responsibility designed and owned by a component?
@@ -89,7 +87,7 @@ are awaited; a bounded local append/fsync journal checks phases, output identity
 and duplicate execution reservations. Generated-output fingerprints and executor
 call counts bind admission to execution without proving model exposure.
 Reopening retracts a row on rebuild; production artifact revocation remains unwired.
-The [LoCoMo component probe](../experiments/context-router-component-2026-09-06.md)
+The [LoCoMo component probe](../experiments/context/router-component-2026-09-06.md)
 collected 6128 action rows and fitted a linear head, but matched fixed retrieve
 on held-out evidence coverage. It used custom lexical ranking, no main LLM and
 no official answer scoring. Validation-only cost sensitivity and per-source-group

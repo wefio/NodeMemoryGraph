@@ -1,6 +1,6 @@
 # External Source Design（外部来源设计）
 
-**Status:** implemented across core protocol, CLI, and Pi adapter
+**Status:** current
 **Updated:** 2026-08-01
 **Related:** [memory-graphs.md](memory-graphs.md), [edge-activation-design.md](edge-activation-design.md), [tiered-disclosure-design.md](tiered-disclosure-design.md), design.md §5a/§9
 

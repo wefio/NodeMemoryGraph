@@ -3,7 +3,7 @@
 **Date:** 2026-09-07
 **Status:** external-literature synthesis (Exa/TinyFish web search); not a formal survey.
 **Purpose:** test the premises behind
-`docs/experiments/context-live-comparison-preregistration-2026-09-07.md` before running.
+`docs/experiments/context/live-comparison-preregistration-2026-09-07.md` before running.
 **Scope:** adaptive/selective retrieval, context cost-quality tradeoffs, long-term
 memory injection for agents, context selection/compression. English academic focus.
 

@@ -1,7 +1,7 @@
 # Agent convergence under feedback density
 
-**Status:** v1 experimental specification — implementation partial; theory and default activation unproven
-**Date:** 2026-09-03
+**Status:** draft — implementation partial; theory and default activation unproven
+**Updated:** 2026-09-03
 
 This document consolidates a design discussion into a single blueprint: a
 theory of why long agent tasks fail (and succeed), the literature that supports
@@ -65,7 +65,7 @@ identity collisions, retracts reopened labels, and partitions by caller-supplied
 source group. These are explicit harness APIs, not automatic Pi/AG actuation.
 The custom LoCoMo context probe exercises all four actions and trains a linear
 head on training groups only. Its evidence-only metric is not answer accuracy;
-see the [component report](../experiments/context-router-component-2026-09-06.md).
+see the [component report](../experiments/context/router-component-2026-09-06.md).
 
 Still open: general lifecycle producers, production recovery orchestration,
 main-model exposure integration, external evidence-verifier adapters, bookmark

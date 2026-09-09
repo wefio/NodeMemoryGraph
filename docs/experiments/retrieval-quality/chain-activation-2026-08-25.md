@@ -1,7 +1,7 @@
 # Retrieval-quality activation-gated chain expansion — 2026-08-25
 
 Follow-up to
-[retrieval-quality-chains-2026-08-24.md](retrieval-quality-chains-2026-08-24.md).
+[retrieval-quality-chains-2026-08-24.md](chains-2026-08-24.md).
 That run showed whole-chain `expandChains` is a coverage win but the context
 cost (159k chars, 27× lexical) is undeployable. This change replaces the
 default whole-chain expansion with **activation gating**, so a chain member is

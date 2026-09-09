@@ -1,7 +1,7 @@
 # NMG improvement areas
 
 **Created:** 2026-07-20
-**Status:** working notes, not a roadmap commitment
+**Status:** current
 **Authority:** historical gap analysis. Current design belongs in
 [design.md](design.md), implementation status in
 [completion-audit.md](completion-audit.md), and unresolved actions in

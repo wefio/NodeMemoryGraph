@@ -84,4 +84,4 @@ scoring, matched end-to-end budgets and sequential task outcomes for any history
 claim. This test set has now been inspected; later tuning against it is exploratory,
 not another independent held-out confirmation.
 
-Owning specification: [agent convergence feedback](../design/agent-convergence-feedback-design.md).
+Owning specification: [agent convergence feedback](../../design/agent-convergence-feedback-design.md).

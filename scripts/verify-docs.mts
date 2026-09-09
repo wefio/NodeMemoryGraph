@@ -264,6 +264,69 @@ function checkDecisionHeader(
   }
 }
 
+// A design document's header is the lines before its first section. The field
+// set is closed and the status is an enum, because the free-form vocabulary it
+// replaces had 21 distinct values across 19 documents and no machine could read
+// a state from them. An absent status means the document is current: the tier
+// holds current-state design, so only the exceptions have to say so.
+const DESIGN_HEADER_FIELDS = new Set([
+  "status",
+  "created",
+  "updated",
+  "authority",
+  "related",
+  "supersedes",
+  "superseded by",
+]);
+const DESIGN_STATUSES = ["draft", "current", "superseded"];
+
+function checkDesignHeader(path: string, text: string, report: DocumentationReport): void {
+  const display = path.replaceAll("\\", "/");
+  const archived = /[/\\]docs[/\\]design[/\\]archived[/\\]/.test(path);
+  const lines = text.split(/\r?\n/);
+  const firstSection = lines.findIndex((line) => /^##\s+/.test(line));
+  const header = firstSection === -1 ? lines : lines.slice(0, firstSection);
+  const counts = new Map<string, { name: string; count: number }>();
+  for (const line of header) {
+    const name = /^\*\*([^*]+):\*\*/.exec(line)?.[1];
+    if (!name) continue;
+    const key = name.toLowerCase();
+    const entry = counts.get(key) ?? { name, count: 0 };
+    entry.count += 1;
+    counts.set(key, entry);
+    if (!DESIGN_HEADER_FIELDS.has(key)) {
+      report.errors.push(
+        `${display}: unknown header field '**${name}:**'; header fields are ${[...DESIGN_HEADER_FIELDS].join(", ")}`,
+      );
+    }
+  }
+  for (const entry of counts.values()) {
+    if (entry.count > 1) {
+      report.errors.push(
+        `${display}: header field '**${entry.name}:**' appears ${entry.count} times`,
+      );
+    }
+  }
+  const status = header
+    .map((line) => /^\*\*Status:\*\*\s*(.+?)\s*$/i.exec(line)?.[1])
+    .find((value) => value !== undefined);
+  const token = status === undefined ? undefined : /^[A-Za-z]+/.exec(status)?.[0].toLowerCase();
+  if (token !== undefined && !DESIGN_STATUSES.includes(token)) {
+    report.errors.push(`${display}: Status '${token}' is not one of ${DESIGN_STATUSES.join(", ")}`);
+  }
+  if (token === "superseded") {
+    if (!counts.has("superseded by")) {
+      report.errors.push(`${display}: a superseded design needs a '**Superseded by:**' link`);
+    }
+    if (!archived) {
+      report.errors.push(`${display}: a superseded design belongs in docs/design/archived/`);
+    }
+  }
+  if (archived && token !== "superseded") {
+    report.errors.push(`${display}: documents in docs/design/archived/ must be superseded`);
+  }
+}
+
 function checkLocalLinks(
   root: string,
   path: string,
@@ -410,12 +473,16 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
         checkPairedLinksAndHeadings(path, counterpart, display, report);
       }
     }
+    if (parts[0] === "docs" && parts[1] === "design") {
+      checkDesignHeader(path, text, report);
+    }
+    const experimentName = parts[parts.length - 1];
     if (
       parts[0] === "docs" &&
       parts[1] === "experiments" &&
-      parts.length === 3 &&
-      !/-\d{4}-\d{2}-\d{2}\.md$/.test(parts[2]) &&
-      !/-(results|notes)\.md$/.test(parts[2])
+      parts.length >= 3 &&
+      !/-\d{4}-\d{2}-\d{2}\.md$/.test(experimentName) &&
+      !/-(results|notes)\.md$/.test(experimentName)
     ) {
       report.warnings.push(`${display}: experiment report filename should end in -YYYY-MM-DD.md`);
     }

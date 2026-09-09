@@ -17,7 +17,7 @@ Four arms of the pinned protocol are run and recorded:
 | LME-100 pinned (R@20) | 75.9% | — | 77.6% | — |
 
 Details, per-slice tables, cost analysis:
-[retrieval-quality-summaries-2026-08-18.md](retrieval-quality-summaries-2026-08-18.md)
+[retrieval-quality-summaries-2026-08-18.md](retrieval-quality/summaries-2026-08-18.md)
 (+ the baseline/hybrid docs it links).
 
 Code state: leaf-block summaries feature complete and tested (612+16 tests
@@ -73,7 +73,7 @@ summaries persist too (membersKey fingerprint), so re-runs cost no LLM calls.
   summaries, hysteresis refresh, node-FTS routing behind block hits. BEAM
   stacked 27.0% → 27.4%; LoCoMo unaffected by design (≥2-block gate,
   degenerate 1-block nodes). Details:
-  [retrieval-quality-node-summaries-2026-08-24.md](retrieval-quality-node-summaries-2026-08-24.md).
+  [retrieval-quality-node-summaries-2026-08-24.md](retrieval-quality/node-summaries-2026-08-24.md).
 - **Cross-block chain pull** (2026-08-24): after block-member selection, the
   remaining member budget (≤ `leafBlockRoutingMaxMembers`) pulls ±1-hop chain
   neighbors — explicit `memory_chain_edges` plus positional neighbors in
@@ -81,7 +81,7 @@ summaries persist too (membersKey fingerprint), so re-runs cost no LLM calls.
   chains carry members only, no edges). BEAM stacked+node 27.4% → 27.7%,
   any@20 65.1% → 80.0%, all@20 26.4% → 39.6%, event_ordering 15.6% → 17.4%
   (any@20 57.5% → 90.0%). Cost: ctx 51.1k → 159.4k chars. Details:
-  [retrieval-quality-chains-2026-08-24.md](retrieval-quality-chains-2026-08-24.md).
+  [retrieval-quality-chains-2026-08-24.md](retrieval-quality/chains-2026-08-24.md).
 - **Activation-gated chain expansion** (2026-08-25): the `expandChains`
   default is no longer whole-chain — members are appended when proximity
   (1/(1+dist to nearest hit)) + query-term overlap + 0.5×importance reaches
@@ -89,7 +89,7 @@ summaries persist too (membersKey fingerprint), so re-runs cost no LLM calls.
   BEAM: R@20 27.7% → 28.9% (noise), ctx 159.4k → 93.9k chars, but only ~40%
   of the coverage gain survives and event_ordering falls back to the
   no-chain level. Constants fixed by principle, not benchmark-swept. Details:
-  [retrieval-quality-chain-activation-2026-08-25.md](retrieval-quality-chain-activation-2026-08-25.md).
+  [retrieval-quality-chain-activation-2026-08-25.md](retrieval-quality/chain-activation-2026-08-25.md).
 
 ## Open work (not started)
 

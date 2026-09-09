@@ -2,7 +2,7 @@
 
 **Status:** superseded
 **Updated:** 2026-09-01
-**Superseded by:** [memory-tesserae-design.md](memory-tesserae-design.md) — the
+**Superseded by:** [memory-tesserae-design.md](../memory-tesserae-design.md) — the
 full-text file index is dropped in favor of sparse, Agent-authored tesserae
 (bookmarks) as an independent searchable source. This document is kept for
 lineage; its "files are not memory" and separated-presentation conclusions

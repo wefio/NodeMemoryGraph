@@ -1,6 +1,6 @@
 # Session Active Graph runtime
 
-**Status:** 0.12 / core + task/branch lifecycle + bounded runtime items + TTL artifacts + adapter-neutral disclosure ledger implemented
+**Status:** current — 0.12: core + task/branch lifecycle + bounded runtime items + TTL artifacts + adapter-neutral disclosure ledger
 **Updated:** 2026-09-01
 
 This topic document is the implementation blueprint for the session-owned Active

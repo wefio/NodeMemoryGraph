@@ -1,6 +1,6 @@
 # STG Isolated Store（STG 独立库）
 
-**Status:** project-local shared store with session-row isolation implemented
+**Status:** current
 **Updated:** 2026-08-13
 **Related:** [memory-graphs.md](memory-graphs.md) §1/§3/§5, [external-source-design.md](external-source-design.md), docs/design/design.md §1
 
