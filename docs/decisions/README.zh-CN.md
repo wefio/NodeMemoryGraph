@@ -26,6 +26,9 @@
 ## 开放提案
 
 - [会话级 Active Graph 运行时](proposed/2026-08-29-session-active-graph-runtime.zh-CN.md)
+- [显式声明「没验证什么」](proposed/2026-09-09-declare-what-was-not-verified.zh-CN.md)
+- [非平凡改动必须携带决策记录](proposed/2026-09-09-non-trivial-change-requires-decision.zh-CN.md)
+- [让已写明的文档规则真正生效](proposed/2026-09-09-enforce-documentation-rules.zh-CN.md)
 
 ## 已实现决策
 

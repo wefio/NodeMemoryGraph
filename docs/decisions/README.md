@@ -40,6 +40,9 @@ to one another. Missing translations are reported as warnings, not hard errors.
 ## Open proposals
 
 - [Session-owned Active Graph runtime](proposed/2026-08-29-session-active-graph-runtime.md)
+- [Declare what was not verified](proposed/2026-09-09-declare-what-was-not-verified.md)
+- [A non-trivial change carries a decision record](proposed/2026-09-09-non-trivial-change-requires-decision.md)
+- [Enforce the documented documentation rules](proposed/2026-09-09-enforce-documentation-rules.md)
 
 ## Implemented decisions
 
