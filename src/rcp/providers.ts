@@ -146,7 +146,6 @@ export class ExternalWorkspaceHarnessProvider implements HarnessProvider {
       provider: this.descriptor,
       status: "completed",
       summary: `workspace is ready for independent verification of ${workOrder.id}`,
-      artifacts: ["workspace"],
     };
   }
 }
@@ -204,7 +203,6 @@ export class ProcessHarnessProvider implements HarnessProvider {
               : `harness exited with ${result.status}`))
         : result.stdout.trim() || `harness completed ${workOrder.id}`,
       diagnostics: result.stderr.trim() ? [result.stderr.trim()] : [],
-      artifacts: failed ? [] : ["workspace"],
     };
   }
 }

@@ -278,9 +278,13 @@ RCP 区分两类资源：
 ### 7.5 Work Order、Agent 与 PR
 
 Route Planner 将 IR 与 observed state 转成 bounded `WorkOrder`，至少包含 contract ID/
-digest、允许路径、owner 文档、所需检查、保留项、禁止项、预算与预期产物。Agent 只能
+digest、允许路径、owner 文档、所需检查、保留项、断言、预算。Agent 只能
 提交 patch/PR 和证据，不能自行把 contract 标成 verified；超出 scope 时返回
 `scope_violation` 或提出 contract amendment。
+
+`expectedArtifacts`（预期产物）与 `HarnessResult.artifacts` 自首版起就是常量、无任何代码
+读取，也不进收据，2026-09-09 删除。若将来要做「产出物是否存在」的检查，应作为 per-contract
+的路径/glob 列表重新引入，而不是恢复一个无人读的字符串数组。
 
 Draft PR 是一次变更的持久在途实例和可审阅入口。Task Board 只负责短期发现、认领、
 阻塞与通知，并用稳定 ID 指向 WorkOrder/PR；它不是 WorkOrder 的 system of record。

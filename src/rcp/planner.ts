@@ -111,7 +111,6 @@ export function planWorkOrder(input: {
     authority: input.contract.authority.mode,
     operationKey,
     budget,
-    expectedArtifacts: ["patch", "verification-receipt"],
   };
 }
 
