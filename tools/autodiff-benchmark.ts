@@ -3,6 +3,8 @@ import { performance } from "node:perf_hooks";
 
 import { Tensor } from "../src/lab/autodiff.ts";
 import { DifferentiableController } from "../src/lab/differentiable-controller.ts";
+import { percentileNearestRank } from "./parts/stats.ts";
+import { requirePositiveInteger } from "./parts/numbers.ts";
 
 interface Benchmark<State> {
   name: string;
@@ -22,8 +24,8 @@ interface BenchmarkResult {
   checksum: number;
 }
 
-const rounds = positiveInteger(process.env.NMG_AUTODIFF_BENCH_ROUNDS ?? "7");
-const warmupIterations = positiveInteger(process.env.NMG_AUTODIFF_BENCH_WARMUP ?? "100");
+const rounds = requirePositiveInteger(process.env.NMG_AUTODIFF_BENCH_ROUNDS ?? "7");
+const warmupIterations = requirePositiveInteger(process.env.NMG_AUTODIFF_BENCH_WARMUP ?? "100");
 
 const featureCount = 32;
 const batchSize = 32;
@@ -124,8 +126,8 @@ function measure<State>(benchmark: Benchmark<State>): BenchmarkResult {
     durations.push(performance.now() - startedAt);
   }
   assert.ok(Number.isFinite(checksum), `${benchmark.name} produced a non-finite checksum`);
-  const medianMs = percentile(durations, 0.5);
-  const p95Ms = percentile(durations, 0.95);
+  const medianMs = percentileNearestRank(durations, 0.5);
+  const p95Ms = percentileNearestRank(durations, 0.95);
   return {
     name: benchmark.name,
     iterations: benchmark.iterations,
@@ -137,19 +139,6 @@ function measure<State>(benchmark: Benchmark<State>): BenchmarkResult {
     checksum,
   };
 }
-
-function percentile(values: readonly number[], quantile: number): number {
-  const sorted = [...values].sort((left, right) => left - right);
-  return sorted[Math.ceil(quantile * sorted.length) - 1]!;
-}
-
-function positiveInteger(value: string): number {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed < 1)
-    throw new Error(`expected positive integer: ${value}`);
-  return parsed;
-}
-
 function referenceFirstColumn(
   left: Float32Array,
   right: Float32Array,

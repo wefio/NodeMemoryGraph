@@ -2,7 +2,7 @@
 
 [English](2026-09-09-decision-header-block.md)
 
-**Status:** proposed
+**Status:** implemented
 
 ## 问题
 
@@ -23,7 +23,7 @@
 `**Date:**` 是最清楚的一例：每个带它的决策，其日期都等于文件名日期，而另外 8 条
 决策完全没有它——这个字段既冗余又不一致。
 
-## 提案
+## 决策
 
 决策在第一个章节之前携带一个固定字段块，由 `docs:check` 强制：
 
@@ -77,8 +77,9 @@ NMG 两者都有。
 头部块里的裸 `Word:` 行目前仍被当作散文接受，因为有一条未提交的决策带着没有粗体
 标记的 `Date:` 与 `Branch:`；拒绝它会让该 agent 的在途文件失败。等它落地后再议。
 
-## 验收标准
+## 验证
 
+截至 2026-09-09 已验证：
 - 重复字段、块内未知字段、缺少 `**Status:**`、以及在 `archived/` 之外使用
   `**Archived:**` 时 `docs:check` 失败，每种在 `tests/docs/verify-docs.test.ts`
   中都有测试。
@@ -86,7 +87,7 @@ NMG 两者都有。
 - `docs/decisions/README.md` 写明该块及其规则。
 - `npm run docs:check` 报 0 错误、且不新增警告。
 
-## 风险
+## 后果
 
 **裸 `Word:` 行仍被接受。** 没有粗体标记的字段会被当作散文，因此门禁只覆盖文档化
 的语法。

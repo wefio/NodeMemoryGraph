@@ -43,6 +43,7 @@ import {
   latestAutomaticRecallEvidence,
   officialRetrievalForMemoryIds,
 } from "./retrieval-evidence.ts";
+import { requirePositiveInteger } from "../../tools/parts/numbers.ts";
 
 interface SampleManifest {
   name: string;
@@ -69,7 +70,7 @@ type Mode =
 const root = resolve(import.meta.dirname, "../..");
 const dataDirectory = resolve(import.meta.dirname, "data");
 const mode = parseMode(process.argv[2]);
-const perType = positiveInteger(process.argv[3] ?? "1");
+const perType = requirePositiveInteger(process.argv[3] ?? "1");
 const sourceFile =
   mode === "oracle" || mode === "nmg-oracle"
     ? "longmemeval_oracle.json"
@@ -966,21 +967,15 @@ function requiredControllerCandidatePath(): string {
   }
   return path;
 }
-
-function positiveInteger(value: string): number {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new Error(`Expected a positive sample count, received: ${value}`);
-  }
-  return parsed;
-}
-
 function evalConcurrency(): number {
-  return Math.max(1, Math.min(positiveInteger(process.env.NMG_LONGMEM_CONCURRENCY ?? "4"), 16));
+  return Math.max(
+    1,
+    Math.min(requirePositiveInteger(process.env.NMG_LONGMEM_CONCURRENCY ?? "4"), 16),
+  );
 }
 
 function evalRepeats(): number {
-  return Math.min(positiveInteger(process.env.NMG_LONGMEM_REPEATS ?? "1"), 20);
+  return Math.min(requirePositiveInteger(process.env.NMG_LONGMEM_REPEATS ?? "1"), 20);
 }
 
 function retrievalJudgeEnabled(): boolean {

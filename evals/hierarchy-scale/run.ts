@@ -9,6 +9,7 @@ import {
   NmgStore,
   UsearchAnnIndex,
 } from "../../src/index.ts";
+import { percentileFloor } from "../../tools/parts/stats.ts";
 
 const sizes = (
   process.env.NMG_HIERARCHY_SIZES?.split(",").map(Number) ?? [100, 1_000, 10_000]
@@ -292,7 +293,7 @@ for (const size of sizes) {
       return {
         mode: mode.name,
         accuracy: queries.filter((query) => query.hit).length / queries.length,
-        latencyMs: { p50: percentile(latencies, 0.5), p95: percentile(latencies, 0.95) },
+        latencyMs: { p50: percentileFloor(latencies, 0.5), p95: percentileFloor(latencies, 0.95) },
         estimatedReturnedTokens: Math.ceil(
           queries.reduce((sum, query) => sum + query.returnedChars, 0) / 4,
         ),
@@ -365,11 +366,6 @@ function insertDistractors(path: string, count: number, nodeIds: string[]): void
     db.close();
   }
 }
-
-function percentile(sorted: number[], ratio: number): number {
-  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * ratio))] ?? 0;
-}
-
 function allNodeDocuments(store: NmgStore) {
   const documents = [];
   let cursor = "";

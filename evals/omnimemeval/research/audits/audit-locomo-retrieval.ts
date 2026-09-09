@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { mean, percentileNearestRank } from "../../../../tools/parts/stats.ts";
 
 interface Turn {
   dia_id: string;
@@ -25,9 +26,7 @@ interface SearchResult {
 
 const [datasetArg, ...resultArgs] = process.argv.slice(2);
 if (!datasetArg || resultArgs.length === 0) {
-  throw new Error(
-    "usage: audit-locomo-retrieval.ts <locomo10.json> <search-results.json> [...]",
-  );
+  throw new Error("usage: audit-locomo-retrieval.ts <locomo10.json> <search-results.json> [...]");
 }
 const dataset = JSON.parse(readFileSync(resolve(datasetArg), "utf8")) as LoCoMoSample[];
 for (const resultArg of resultArgs) {
@@ -38,11 +37,7 @@ for (const resultArg of resultArgs) {
   console.log(JSON.stringify(audit(dataset, results, resultArg), null, 2));
 }
 
-function audit(
-  samples: LoCoMoSample[],
-  results: Record<string, SearchResult[]>,
-  source: string,
-) {
+function audit(samples: LoCoMoSample[], results: Record<string, SearchResult[]>, source: string) {
   let questions = 0;
   let anyEvidence = 0;
   let allEvidence = 0;
@@ -60,10 +55,7 @@ function audit(
       for (const turn of value as Turn[]) evidenceText.set(turn.dia_id, turn.text);
     }
     const queryResults = new Map(
-      (results[`locomo_exp_user_${sampleIndex}`] ?? []).map((result) => [
-        result.query,
-        result,
-      ]),
+      (results[`locomo_exp_user_${sampleIndex}`] ?? []).map((result) => [result.query, result]),
     );
     for (const question of sample.qa) {
       if (question.category === 5) continue;
@@ -104,37 +96,32 @@ function audit(
     meanContextCharacters: mean(contextCharacters),
     latencyMs: {
       mean: mean(latencies),
-      p50: percentile(latencies, 0.5),
-      p95: percentile(latencies, 0.95),
-      p99: percentile(latencies, 0.99),
+      p50: percentileNearestRank(latencies, 0.5),
+      p95: percentileNearestRank(latencies, 0.95),
+      p99: percentileNearestRank(latencies, 0.99),
     },
     categoryEvidenceRecall: Object.fromEntries(
-      [...categories].sort(([left], [right]) => left - right).map(([category, value]) => [
-        category,
-        ratio(value.hits, value.total),
-      ]),
+      [...categories]
+        .sort(([left], [right]) => left - right)
+        .map(([category, value]) => [category, ratio(value.hits, value.total)]),
     ),
   };
 }
 
 function splitEvidenceIds(value: string): string[] {
-  return value.split(/[;,]\s*/u).map((item) => item.trim()).filter(Boolean);
+  return value
+    .split(/[;,]\s*/u)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function normalize(value: string): string {
-  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
 }
 
 function ratio(numerator: number, denominator: number): number {
   return denominator === 0 ? 0 : numerator / denominator;
-}
-
-function mean(values: number[]): number {
-  return values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function percentile(values: number[], quantile: number): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((left, right) => left - right);
-  return sorted[Math.max(0, Math.ceil(sorted.length * quantile) - 1)]!;
 }

@@ -11,6 +11,8 @@ import { cosineSimilarity, HashingVectorEmbedder } from "../../src/core/vector.t
 import { benchmarkIsolationArgs, counterbalancedOrder } from "../benchmarks/matched.ts";
 import { benchmarkCredentialEnvironment } from "../local-env.ts";
 import { loadNamesakesEntities, type NamesakesEntity, type NamesakesMention } from "./namesakes.ts";
+import { mean } from "../../tools/parts/stats.ts";
+import { positiveIntegerOr } from "../../tools/parts/numbers.ts";
 
 export type NamesakesAttributionArm = "clean" | "contaminated";
 
@@ -264,9 +266,12 @@ async function main(): Promise<void> {
     process.env.NMG_NAMESAKES_DATA ?? ".benchmarks/namesakes/data/Namesakes_entities.jsonl",
   );
   const threshold = finiteNumber(process.env.NMG_NAMESAKES_AGENT_THRESHOLD, 0.7);
-  const limit = positiveInteger(process.env.NMG_NAMESAKES_AGENT_CASES, 20);
-  const repeats = Math.min(10, positiveInteger(process.env.NMG_NAMESAKES_AGENT_REPEATS, 1));
-  const concurrency = Math.min(4, positiveInteger(process.env.NMG_NAMESAKES_AGENT_CONCURRENCY, 2));
+  const limit = positiveIntegerOr(process.env.NMG_NAMESAKES_AGENT_CASES, 20);
+  const repeats = Math.min(10, positiveIntegerOr(process.env.NMG_NAMESAKES_AGENT_REPEATS, 1));
+  const concurrency = Math.min(
+    4,
+    positiveIntegerOr(process.env.NMG_NAMESAKES_AGENT_CONCURRENCY, 2),
+  );
   const rows = await loadNamesakesEntities(source);
   const cases = buildNamesakesAttributionCases(rows, { threshold, limit });
   if (cases.length === 0) throw new Error("Namesakes produced no attribution cases");
@@ -591,21 +596,10 @@ function definedEnvironment(): Record<string, string> {
     ),
   };
 }
-
-function positiveInteger(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
 function finiteNumber(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
-
-function mean(values: readonly number[]): number {
-  return values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
 function ratio(numerator: number, denominator: number): number {
   return denominator === 0 ? 0 : numerator / denominator;
 }

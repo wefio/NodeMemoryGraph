@@ -25,6 +25,20 @@ function fixture(): string {
   return root;
 }
 
+test("the parts shelf fails when it names a part src/rcp no longer exports", () => {
+  const root = fixture();
+  mkdirSync(join(root, "src", "rcp"), { recursive: true });
+  mkdirSync(join(root, "docs", "guides"), { recursive: true });
+  writeFileSync(join(root, "src", "rcp", "index.ts"), "export function reconcileOnce(): void {}\n");
+  writeFileSync(
+    join(root, "docs", "guides", "parts.md"),
+    "# Shelf\n\n### `reconcileOnce(request)`\n\n### `removedPart()`\n",
+  );
+  const report = verifyDocumentation(root);
+  assert.ok(report.errors.some((error) => error.includes("'removedPart' is not exported")));
+  assert.ok(!report.errors.some((error) => error.includes("'reconcileOnce' is not exported")));
+});
+
 test("valid bilingual documentation surface passes", () => {
   const report = verifyDocumentation(fixture());
   assert.deepEqual(report.errors, []);
@@ -173,9 +187,14 @@ test("decision header fields are a closed, unique set", () => {
     join(directory, "2026-08-24-allowed.md"),
     `# Allowed\n\n**Status:** implemented\n**Relates to:** [x](../../README.md)\n\n${body}`,
   );
+  writeFileSync(
+    join(directory, "2026-08-24-archived.md"),
+    `# Archived\n\n**Status:** implemented\n**Archived:** 2026-08-24\n\n${body}`,
+  );
   const report = verifyDocumentation(root);
   assert.ok(report.errors.some((error) => error.includes("unknown header field '**Branch:**'")));
   assert.ok(report.errors.some((error) => error.includes("appears 2 times")));
+  assert.ok(report.errors.some((error) => error.includes("only valid in archived/")));
   assert.ok(!report.errors.some((error) => error.includes("2026-08-24-allowed.md")));
 });
 

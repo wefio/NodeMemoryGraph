@@ -2,7 +2,7 @@
 
 [中文](2026-09-09-decision-header-block.zh-CN.md)
 
-**Status:** proposed
+**Status:** implemented
 
 ## Problem
 
@@ -26,7 +26,7 @@ produces:
 to its filename, and eight decisions omit it entirely, so the field is both
 redundant and inconsistent.
 
-## Proposal
+## Decision
 
 A decision carries a fixed field block before its first section, enforced by
 `docs:check`:
@@ -89,8 +89,9 @@ Bare `Word:` lines in the header block are still accepted as prose, because one
 uncommitted decision carries `Date:` and `Branch:` without bold markers;
 rejecting them would fail that agent's in-flight file. Revisit once it lands.
 
-## Acceptance criteria
+## Verification
 
+Verified as of 2026-09-09:
 - `docs:check` fails a duplicate field, an unknown field in the block, a missing
   `**Status:**`, and `**Archived:**` outside `archived/`, each with a test in
   `tests/docs/verify-docs.test.ts`.
@@ -98,7 +99,7 @@ rejecting them would fail that agent's in-flight file. Revisit once it lands.
 - `docs/decisions/README.md` states the block and its rules.
 - `npm run docs:check` reports zero errors and no new warnings.
 
-## Risks
+## Consequences
 
 **Bare `Word:` lines stay accepted.** A field written without bold markers is
 treated as prose, so the gate covers the documented syntax only.

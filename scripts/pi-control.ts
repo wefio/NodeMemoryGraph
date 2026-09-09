@@ -11,19 +11,22 @@ import {
 import { resolvePiControlPaths } from "./pi-paths.ts";
 import { hardTimeout } from "./pi-timeout.ts";
 import { parsePiPromptTurns } from "./pi-turns.ts";
+import { positiveIntegerOr } from "../tools/parts/numbers.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const cliPath = resolve(root, "node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
 const extensionPath = resolve(root, ".pi/extensions/nmg/index.ts");
 const testModel = process.env.NMG_PI_MODEL || "deepseek/deepseek-v4-flash";
 const { agentDirectory, dataDirectory, projectDirectory } = resolvePiControlPaths(root);
-const promptTimeoutMs = positiveInteger("NMG_PI_TIMEOUT_MS", 90_000);
-const maximumToolCalls = positiveInteger("NMG_PI_MAX_TOOL_CALLS", 12);
+const promptTimeoutMs = positiveIntegerOr(process.env.NMG_PI_TIMEOUT_MS, 90_000);
+const maximumToolCalls = positiveIntegerOr(process.env.NMG_PI_MAX_TOOL_CALLS, 12);
 let helperDaemon: DaemonConnection | undefined;
 
 const [command, ...args] = process.argv.slice(2);
 if (command !== "state" && command !== "prompt") {
-  fail("Usage: npm run pi:state | npm run pi:prompt -- <message> | npm run pi:prompt -- --turn <message> [--turn <message> ...]");
+  fail(
+    "Usage: npm run pi:state | npm run pi:prompt -- <message> | npm run pi:prompt -- --turn <message> [--turn <message> ...]",
+  );
 }
 
 const client = new RpcClient({
@@ -135,12 +138,6 @@ function fail(message: string): never {
   process.stderr.write(`${message}\n`);
   process.exit(1);
 }
-
-function positiveInteger(name: string, fallback: number): number {
-  const parsed = Number.parseInt(process.env[name] ?? "", 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
-
 async function promptUntilSettled(client: RpcClient, message: string): Promise<void> {
   let unsubscribe = () => undefined;
   const settled = new Promise<void>((resolve) => {

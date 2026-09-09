@@ -27,6 +27,7 @@ import {
   readControllerActuation,
 } from "./controller-candidate.ts";
 import type { BenchmarkCase, BenchmarkSession } from "./types.ts";
+import { requirePositiveInteger } from "../../tools/parts/numbers.ts";
 
 type Benchmark = "beam" | "locomo" | "personamem";
 type Mode =
@@ -46,7 +47,7 @@ type EvaluationMode = Exclude<Mode, "matched" | "validate">;
 const root = resolve(import.meta.dirname, "../..");
 const benchmark = parseBenchmark(process.argv[2]);
 const mode = parseMode(process.argv[3]);
-const perCategory = positiveInteger(process.argv[4] ?? "1");
+const perCategory = requirePositiveInteger(process.argv[4] ?? "1");
 const allCases = loadCases(benchmark);
 const stratified = stratifiedSample(allCases, perCategory);
 const selected = process.env.NMG_BENCH_CASE
@@ -473,20 +474,15 @@ function requiredControllerCandidatePath(): string {
   }
   return path;
 }
-
-function positiveInteger(value: string): number {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed < 1)
-    throw new Error(`Expected positive integer: ${value}`);
-  return parsed;
-}
-
 function contextBudget(): number {
   return Math.max(2_000, Number.parseInt(process.env.NMG_BENCH_CONTEXT_CHARS ?? "12000", 10));
 }
 
 function concurrency(): number {
-  return Math.max(1, Math.min(positiveInteger(process.env.NMG_BENCH_CONCURRENCY ?? "4"), 16));
+  return Math.max(
+    1,
+    Math.min(requirePositiveInteger(process.env.NMG_BENCH_CONCURRENCY ?? "4"), 16),
+  );
 }
 
 function timeout(): number {
@@ -494,7 +490,7 @@ function timeout(): number {
 }
 
 function repeats(): number {
-  return Math.max(1, Math.min(positiveInteger(process.env.NMG_BENCH_REPEATS ?? "1"), 20));
+  return Math.max(1, Math.min(requirePositiveInteger(process.env.NMG_BENCH_REPEATS ?? "1"), 20));
 }
 
 function safeName(value: string): string {

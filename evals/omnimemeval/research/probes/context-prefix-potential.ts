@@ -5,6 +5,7 @@
  * prefix caches require those bytes to appear in the same leading order.
  */
 import { readFileSync } from "node:fs";
+import { percentileScaled } from "../../../../tools/parts/stats.ts";
 
 type Row = Record<string, unknown>;
 
@@ -43,13 +44,6 @@ function groupsFor(suite: string, payload: Record<string, Row[]>): Map<string, R
   }
   return groups;
 }
-
-function percentile(values: number[], fraction: number): number {
-  if (values.length === 0) return 0;
-  const ordered = [...values].sort((a, b) => a - b);
-  return ordered[Math.min(ordered.length - 1, Math.round((ordered.length - 1) * fraction))]!;
-}
-
 function analyze(suite: string, path: string): Record<string, unknown> {
   const payload = JSON.parse(readFileSync(path, "utf8")) as Record<string, Row[]>;
   const groups = groupsFor(suite, payload);
@@ -115,18 +109,18 @@ function analyze(suite: string, path: string): Record<string, unknown> {
     multiRowGroups: [...groups.values()].filter((group) => group.length > 1).length,
     contextChars: {
       average: Math.round(average(contextLengths)),
-      p50: percentile(contextLengths, 0.5),
-      p95: percentile(contextLengths, 0.95),
+      p50: percentileScaled(contextLengths, 0.5),
+      p95: percentileScaled(contextLengths, 0.95),
     },
     adjacentPrefixChars: {
       average: Math.round(average(prefixes)),
-      p50: percentile(prefixes, 0.5),
-      p95: percentile(prefixes, 0.95),
+      p50: percentileScaled(prefixes, 0.5),
+      p95: percentileScaled(prefixes, 0.95),
     },
     stableSortedEvidencePrefixChars: {
       average: Math.round(average(stableEvidencePrefixes)),
-      p50: percentile(stableEvidencePrefixes, 0.5),
-      p95: percentile(stableEvidencePrefixes, 0.95),
+      p50: percentileScaled(stableEvidencePrefixes, 0.5),
+      p95: percentileScaled(stableEvidencePrefixes, 0.95),
     },
     sameFirstEvidenceRate: adjacentPairs === 0 ? null : sameFirstBlock / adjacentPairs,
     groupedSameFirstEvidenceRate:

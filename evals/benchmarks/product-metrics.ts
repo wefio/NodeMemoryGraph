@@ -2,6 +2,7 @@ import type { ControllerMatchedProductMetrics } from "../../src/lab/controller-g
 import type { AgentTokenUsage } from "../agent-telemetry.ts";
 import type { UnifiedRowScore } from "../official/unified-score.ts";
 import type { ControllerActuationSummary } from "./controller-candidate.ts";
+import { mean } from "../../tools/parts/stats.ts";
 
 export interface MatchedProductRow {
   id?: string;
@@ -175,8 +176,4 @@ function aggregateArm(rows: readonly MatchedProductRow[]) {
     meanTokens: mean(rows.map((row) => row.tokenUsage!.total)),
     meanEndToEndLatencyMs: mean(rows.map((row) => row.durationMs)),
   };
-}
-
-function mean(values: readonly number[]): number {
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }

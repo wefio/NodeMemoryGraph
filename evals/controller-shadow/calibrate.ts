@@ -11,12 +11,10 @@ import {
   type ControllerTrainingExample,
 } from "../../src/lab/differentiable-controller.ts";
 import type { ActiveGraphSelection } from "../../src/core/types.ts";
-import {
-  buildShadowDataset,
-  summarizeShadowDataset,
-  type ShadowDatasetRow,
-} from "./dataset.ts";
+import { buildShadowDataset, summarizeShadowDataset, type ShadowDatasetRow } from "./dataset.ts";
 import { readShadowEvents, resolveShadowEventPath } from "./report.ts";
+import { mean } from "../../tools/parts/stats.ts";
+import { requirePositiveInteger } from "../../tools/parts/numbers.ts";
 
 export interface ShadowCalibrationOptions {
   epochs?: number;
@@ -47,10 +45,10 @@ export function calibrateShadowController(
   rows: readonly ShadowDatasetRow[],
   options: ShadowCalibrationOptions = {},
 ) {
-  const epochs = positiveInteger(options.epochs ?? 40, "epochs");
+  const epochs = requirePositiveInteger(options.epochs ?? 40, "epochs");
   const learningRate = bounded(options.learningRate ?? 0.03, 0.0001, 1);
   const residualWeight = bounded(options.residualWeight ?? 0.1, 0, 1);
-  const topNodes = positiveInteger(options.topNodes ?? 3, "topNodes");
+  const topNodes = requirePositiveInteger(options.topNodes ?? 3, "topNodes");
   const train = rows.filter((row) => row.split === "train");
   const validation = rows.filter((row) => row.split === "validation");
   if (train.length === 0 || validation.length === 0) {
@@ -74,8 +72,8 @@ export function calibrateShadowController(
   const evaluated = validation.map((row) => evaluateRow(row, controller, residualWeight, topNodes));
   const baseline = classificationMetrics(evaluated.map((row) => row.baseline));
   const learned = classificationMetrics(evaluated.map((row) => row.learned));
-  const candidateRecall = average(evaluated.map((row) => row.candidateRecall));
-  const controlAccuracy = average(evaluated.map((row) => Number(row.controlCorrect)));
+  const candidateRecall = mean(evaluated.map((row) => row.candidateRecall));
+  const controlAccuracy = mean(evaluated.map((row) => Number(row.controlCorrect)));
   const trainingPrimaryTargets = primaryEvidenceTargets(train);
   const validationPrimaryTargets = primaryEvidenceTargets(validation);
   const trainingExactTargets = exactAttributionEvidenceTargets(train);
@@ -93,8 +91,8 @@ export function calibrateShadowController(
     learnedRecall: learned.recall,
     baselinePrecision: baseline.precision,
     learnedPrecision: learned.precision,
-    baselineInferenceMs: average(evaluated.map((row) => row.baselineInferenceMs)),
-    learnedInferenceMs: average(evaluated.map((row) => row.inferenceMs)),
+    baselineInferenceMs: mean(evaluated.map((row) => row.baselineInferenceMs)),
+    learnedInferenceMs: mean(evaluated.map((row) => row.inferenceMs)),
   });
 
   return {
@@ -125,8 +123,8 @@ export function calibrateShadowController(
       baseline,
       learned,
       controlAccuracy,
-      baselineMeanInferenceMs: average(evaluated.map((row) => row.baselineInferenceMs)),
-      meanInferenceMs: average(evaluated.map((row) => row.inferenceMs)),
+      baselineMeanInferenceMs: mean(evaluated.map((row) => row.baselineInferenceMs)),
+      meanInferenceMs: mean(evaluated.map((row) => row.inferenceMs)),
       costs: summarizeCosts(validation),
     },
     gate,
@@ -280,14 +278,14 @@ function binaryExamples(features: Record<string, number[]>, useful: ReadonlySet<
 
 function summarizeCosts(rows: readonly ShadowDatasetRow[]) {
   return {
-    retrievalLatencyMs: average(rows.map((row) => row.retrieval.costs.retrievalLatencyMs)),
-    controllerLatencyMs: average(rows.map((row) => row.retrieval.costs.controllerLatencyMs)),
-    endToEndLatencyMs: average(
+    retrievalLatencyMs: mean(rows.map((row) => row.retrieval.costs.retrievalLatencyMs)),
+    controllerLatencyMs: mean(rows.map((row) => row.retrieval.costs.controllerLatencyMs)),
+    endToEndLatencyMs: mean(
       rows.map((row) => row.outcome?.endToEndLatencyMs ?? 0).filter((value) => value > 0),
     ),
-    toolRounds: average(rows.map((row) => row.outcome?.toolRounds ?? 0)),
-    injectedTokens: average(rows.map((row) => row.retrieval.costs.injectedEstimatedTokens)),
-    retrievedTokens: average(rows.map((row) => row.retrieval.costs.estimatedTokens)),
+    toolRounds: mean(rows.map((row) => row.outcome?.toolRounds ?? 0)),
+    injectedTokens: mean(rows.map((row) => row.retrieval.costs.injectedEstimatedTokens)),
+    retrievedTokens: mean(rows.map((row) => row.retrieval.costs.estimatedTokens)),
   };
 }
 
@@ -325,16 +323,6 @@ function bounded(value: number, minimum: number, maximum: number): number {
   if (!Number.isFinite(value)) throw new Error("controller calibration value must be finite");
   return Math.min(maximum, Math.max(minimum, value));
 }
-
-function positiveInteger(value: number, name: string): number {
-  if (!Number.isInteger(value) || value < 1) throw new Error(`${name} must be a positive integer`);
-  return value;
-}
-
-function average(values: readonly number[]): number {
-  return values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
 function fileFingerprint(path: string): string | null {
   return existsSync(path) ? createHash("sha256").update(readFileSync(path)).digest("hex") : null;
 }

@@ -1,3 +1,4 @@
+import { percentileNearestRank } from "../../tools/parts/stats.ts";
 /**
  * Pure scoring for the formalized retrieval-quality benchmark.
  *
@@ -64,16 +65,17 @@ export function scoreQuestion(input: QuestionInput, direction: MatchDirection): 
     Math.min(input.rankedCandidateCount ?? candidates.length, candidates.length),
   );
 
-  const firstHitRanks = (candidateCount: number): Array<number | null> => golds.map((gold) => {
-    for (let index = 0; index < candidateCount; index += 1) {
-      const parts = candidates[index]!;
-      const hit = parts.some((part) =>
-        direction === "gold-in-candidate" ? part.includes(gold) : gold.includes(part),
-      );
-      if (hit) return index + 1;
-    }
-    return null;
-  });
+  const firstHitRanks = (candidateCount: number): Array<number | null> =>
+    golds.map((gold) => {
+      for (let index = 0; index < candidateCount; index += 1) {
+        const parts = candidates[index]!;
+        const hit = parts.some((part) =>
+          direction === "gold-in-candidate" ? part.includes(gold) : gold.includes(part),
+        );
+        if (hit) return index + 1;
+      }
+      return null;
+    });
   const goldRanks = firstHitRanks(candidates.length);
   const rankedGoldRanks = firstHitRanks(rankedCandidateCount);
 
@@ -201,9 +203,12 @@ export function aggregate(
     },
     meanContextChars: ratio(contextCharsTotal, questionsWithGolds),
     latencyMs: {
-      mean: ratio(latencies.reduce((sum, value) => sum + value, 0), latencies.length),
-      p50: percentile(latencies, 0.5),
-      p95: percentile(latencies, 0.95),
+      mean: ratio(
+        latencies.reduce((sum, value) => sum + value, 0),
+        latencies.length,
+      ),
+      p50: percentileNearestRank(latencies, 0.5),
+      p95: percentileNearestRank(latencies, 0.95),
     },
   };
 }
@@ -226,10 +231,4 @@ export function aggregateByCategory(
 
 function ratio(numerator: number, denominator: number): number {
   return denominator === 0 ? 0 : numerator / denominator;
-}
-
-function percentile(values: readonly number[], quantile: number): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((left, right) => left - right);
-  return sorted[Math.max(0, Math.ceil(sorted.length * quantile) - 1)]!;
 }
