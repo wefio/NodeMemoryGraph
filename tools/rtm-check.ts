@@ -138,17 +138,17 @@ export function checkRtm(rootDirectory = process.cwd()): RtmReport {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const report = checkRtm();
-  for (const error of report.errors) console.error(`error: ${error}`);
+  for (const error of report.errors) process.stderr.write(`error: ${error}\n`);
   for (const uncovered of report.uncovered) {
-    console.error(`error: assertion has no resolvable check: ${uncovered}`);
+    process.stderr.write(`error: assertion has no resolvable check: ${uncovered}\n`);
   }
   if (report.orphans.length > 0) {
-    console.log(`note: checks claimed by no assertion: ${report.orphans.join(", ")}`);
+    process.stdout.write(`note: checks claimed by no assertion: ${report.orphans.join(", ")}\n`);
   }
-  console.log(
+  process.stdout.write(
     `rtm: ${report.contracts} contracts, ${report.assertions} assertions, ${report.verified} verified, ` +
       `${report.documentedOnly} documented-only, ${report.uncovered.length} uncovered, ` +
-      `${report.orphans.length} orphan checks`,
+      `${report.orphans.length} orphan checks\n`,
   );
   if (report.errors.length > 0 || report.uncovered.length > 0) process.exitCode = 1;
 }

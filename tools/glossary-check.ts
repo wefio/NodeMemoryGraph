@@ -229,14 +229,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const name = process.argv[nameIndex + 1] ?? "";
     const entry = resolveTerm(name);
     if (!entry) {
-      console.error(`error: unknown term or alias '${name}'`);
+      process.stderr.write(`error: unknown term or alias '${name}'\n`);
       process.exitCode = 1;
     } else {
       process.stdout.write(`${entry.term}\t${entry.owner}\t${entry.anchor}\n`);
     }
   } else {
     const report = checkGlossary();
-    for (const error of report.errors) console.error(`error: ${error}`);
+    for (const error of report.errors) process.stderr.write(`error: ${error}\n`);
     process.stdout.write(`glossary: ${report.terms} terms, ${report.errors.length} errors\n`);
     if (report.errors.length > 0) process.exitCode = 1;
   }
