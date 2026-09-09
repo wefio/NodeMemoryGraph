@@ -7,6 +7,7 @@ export interface DocumentationReport {
   files: number;
   errors: string[];
   warnings: string[];
+  decisions: { implemented: number; open: number };
 }
 
 // Implements docs/README.md#ci-contract. That documented table owns policy;
@@ -177,6 +178,20 @@ function checkDecision(
       report.errors.push(`${display}: empty section '${alternatives.join(" / ")}'`);
     }
   }
+  if (kind === "implemented") {
+    const proposalEra: string[][] = [
+      ["Proposal", "提案"],
+      ["Plan", "计划"],
+      ["Acceptance criteria", "验收标准"],
+    ];
+    for (const banned of proposalEra) {
+      if (sectionBody(text, banned) !== undefined) {
+        report.errors.push(
+          `${display}: implemented decision must not carry the proposal-era heading '${banned[0]}'`,
+        );
+      }
+    }
+  }
   if (kind === "archived" && !/^\*\*Archived:\*\*\s*\d{4}-\d{2}-\d{2}/im.test(text)) {
     report.errors.push(`${display}: archived decisions need an Archived date`);
   }
@@ -260,7 +275,12 @@ function isContractDocument(display: string): boolean {
 
 export function verifyDocumentation(rootDirectory = process.cwd()): DocumentationReport {
   const root = resolve(rootDirectory);
-  const report: DocumentationReport = { files: 0, errors: [], warnings: [] };
+  const report: DocumentationReport = {
+    files: 0,
+    errors: [],
+    warnings: [],
+    decisions: { implemented: 0, open: 0 },
+  };
   const candidates = new Set<string>();
   for (const name of ["README.md", "README.zh-CN.md"]) {
     const path = join(root, name);
@@ -333,6 +353,13 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
     }
     if (parts[0] === "docs" && parts[1] === "decisions" && lifecycle.has(parts[2])) {
       checkDecision(path, text, parts[2], report);
+      if (parts[2] === "implemented" && !display.endsWith(".zh-CN.md")) {
+        report.decisions.implemented += 1;
+        const deferred = sectionBody(text, ["Deferred", "未完成项"]);
+        if (deferred !== undefined && deferred.length > 0 && !/^none\.?$/i.test(deferred)) {
+          report.decisions.open += 1;
+        }
+      }
       if (!path.endsWith(".zh-CN.md")) {
         const counterpart = decisionCounterpart(path);
         checkPairedLinksAndHeadings(path, counterpart, display, report);
@@ -366,6 +393,9 @@ function printReport(report: DocumentationReport): void {
   for (const error of report.errors) console.error(`error: ${error}`);
   console.log(
     `docs: ${report.files} files, ${report.errors.length} errors, ${report.warnings.length} warnings`,
+  );
+  console.log(
+    `decisions: ${report.decisions.implemented} implemented, ${report.decisions.open} with open items`,
   );
 }
 

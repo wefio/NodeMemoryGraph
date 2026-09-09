@@ -11,7 +11,9 @@ process choices; the normative behavior remains in `docs/design/`.
 - `proposed/` — open proposal. Required sections: Problem, Proposal,
   Alternatives considered, Acceptance criteria, Risks.
 - `implemented/` — accepted and implemented decision. Required sections:
-  Problem, Decision, Alternatives considered, Consequences.
+  Problem, Decision, Alternatives considered, Consequences. Proposal-era
+  headings (`## Proposal`, `## Plan`, `## Acceptance criteria`) fail
+  `docs:check`; unfinished or unverified items belong under `## Deferred`.
 - `rejected/` — rejected proposal kept for future context. Preserve its proposal
   and alternatives, and state why it was rejected.
 - `archived/` — a formerly implemented decision no longer governing the current
@@ -37,24 +39,11 @@ links and make the pair point both ways:
 Decision notes should normally have an English and `.zh-CN.md` version that link
 to one another. Missing translations are reported as warnings, not hard errors.
 
-## Open proposals
+## Finding a decision
 
-- [Session-owned Active Graph runtime](proposed/2026-08-29-session-active-graph-runtime.md)
-- [Declare what was not verified](proposed/2026-09-09-declare-what-was-not-verified.md)
-- [A non-trivial change carries a decision record](proposed/2026-09-09-non-trivial-change-requires-decision.md)
-- [Enforce the documented documentation rules](proposed/2026-09-09-enforce-documentation-rules.md)
-
-## Implemented decisions
-
-- [External Repository Control Plane](implemented/2026-08-29-repository-control-plane.md)
-- [RCP lightweight verification by default](implemented/2026-09-07-rcp-lightweight-verification-default.md)
-- [Self-governance meta-rule: NMG's own rules are governed](implemented/2026-09-07-self-governance-meta-rule.md)
-- [Requirements traceability matrix and mutation testing for verification](implemented/2026-09-08-requirements-traceability-matrix.md) — the rule is enforced; mutation score and the `eval:`/`metric:` namespaces are open
-- [Repository terminology index](implemented/2026-09-08-repository-terminology-index.md) — the process vocabulary is registered and validated; product concepts stay in the concept map
-- [Run the Windows chaos job on main pushes only](implemented/2026-09-09-chaos-tests-on-main-pushes.md) — 1 failure in 153 runs, on main; saves runner minutes, not pull-request wall clock
-
-## Rejected decisions
-
-- [Track build artifacts in version control](rejected/2026-09-02-track-build-artifacts-in-git.md) — regenerable outputs stay untracked; buildability is verified, not committed
-- [Keep the bookmark feature named "anchors"](rejected/2026-09-02-keep-bookmarks-named-anchors.md) — renamed to tesserae to end collision with surface/task/support anchors
-- [Local hashing vectors as a retrieval fallback](rejected/2026-09-03-hashing-vector-retrieval-fallback.md) — rejected as a semantic-retrieval signal (measured zero gain at 256-d); word-level uses remain an open candidate
+The lifecycle directory tree is the inventory: browse
+`docs/decisions/{proposed,implemented,rejected,archived}/` or search the
+repository. There is no itemized index, because such a list restates each note's
+title and open items, duplicates their home, and drifts once nothing checks it.
+`npm run docs:check` prints how many decisions are implemented and how many
+carry open items.

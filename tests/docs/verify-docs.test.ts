@@ -154,3 +154,44 @@ test("uncategorized documentation content at docs root warns", () => {
   assert.deepEqual(report.errors, []);
   assert.ok(report.warnings.some((warning) => warning.includes("must live in design/")));
 });
+
+test("implemented decisions reject every proposal-era heading", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "decisions", "implemented");
+  mkdirSync(directory, { recursive: true });
+  const headings = ["Proposal", "Plan", "Acceptance criteria"];
+  headings.forEach((heading, index) => {
+    writeFileSync(
+      join(directory, `2026-08-2${index}-banned.md`),
+      `# Banned\n\n**Status:** implemented\n\n## Problem\nP\n\n## Decision\nD\n\n` +
+        `## Alternatives considered\nA\n\n## ${heading}\nB\n\n## Consequences\nC\n`,
+    );
+  });
+  const report = verifyDocumentation(root);
+  for (const heading of headings) {
+    assert.ok(
+      report.errors.some((error) => error.includes(`proposal-era heading '${heading}'`)),
+      `expected a failure for '${heading}'`,
+    );
+  }
+});
+
+test("the decision summary counts non-empty Deferred sections", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "decisions", "implemented");
+  mkdirSync(directory, { recursive: true });
+  const body =
+    "**Status:** implemented\n\n## Problem\nP\n\n## Decision\nD\n\n" +
+    "## Alternatives considered\nA\n\n";
+  writeFileSync(
+    join(directory, "2026-08-24-open.md"),
+    `# Open\n\n${body}## Deferred\n- remaining work\n\n## Consequences\nC\n`,
+  );
+  writeFileSync(
+    join(directory, "2026-08-24-done.md"),
+    `# Done\n\n${body}## Deferred\n\nNone.\n\n## Consequences\nC\n`,
+  );
+  const report = verifyDocumentation(root);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.decisions, { implemented: 2, open: 1 });
+});

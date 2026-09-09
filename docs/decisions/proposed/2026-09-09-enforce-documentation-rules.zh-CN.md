@@ -74,7 +74,7 @@ skill 的 Workflow 第 3 步已经把每类事实分配到各自的界面；缺�
 ## 验收标准
 
 - 当 `implemented/` 决策带有提案期标题时 `docs:check` 失败，且每个被禁标题在
-  `tests/scripts/verify-docs.test.ts` 中都有测试。
+  `tests/docs/verify-docs.test.ts` 中都有测试。
 - `docs:check` 打印决策摘要行，并把带非空 `## Deferred` 的决策计为 open，且有测试。
 - 三条被迁移的决策在两种语言里都把未完成项记在 `## Deferred` 之下。
 - `docs/decisions/README.md` 不再逐条列出决策，同时仍写明生命周期契约。

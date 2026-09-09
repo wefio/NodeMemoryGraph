@@ -7,7 +7,7 @@
 ## 生命周期
 
 - `proposed/`：开放提案。必需章节：问题、提案、考虑过的替代方案、验收标准、风险。
-- `implemented/`：已接受并实现的决策。必需章节：问题、决策、考虑过的替代方案、后果。
+- `implemented/`：已接受并实现的决策。必需章节：问题、决策、考虑过的替代方案、后果。提案期标题（`## Proposal`、`## Plan`、`## Acceptance criteria`）会让 `docs:check` 失败；未完成或未验证的项归入 `## Deferred`。
 - `rejected/`：保留供以后参考的被拒提案；保留提案与替代方案，并说明拒绝原因。
 - `archived/`：曾经实现、但已不再约束当前系统的决策；写明归档日期和后继者（如有）。
 
@@ -23,24 +23,9 @@
 
 决策记录通常应提供互相链接的英文版和 `.zh-CN.md` 版。缺少译文只产生警告，不作为硬错误。
 
-## 开放提案
+## 如何找到一条决策
 
-- [会话级 Active Graph 运行时](proposed/2026-08-29-session-active-graph-runtime.zh-CN.md)
-- [显式声明「没验证什么」](proposed/2026-09-09-declare-what-was-not-verified.zh-CN.md)
-- [非平凡改动必须携带决策记录](proposed/2026-09-09-non-trivial-change-requires-decision.zh-CN.md)
-- [让已写明的文档规则真正生效](proposed/2026-09-09-enforce-documentation-rules.zh-CN.md)
-
-## 已实现决策
-
-- [外部 Repository Control Plane](implemented/2026-08-29-repository-control-plane.zh-CN.md)
-- [RCP 默认轻量验证](implemented/2026-09-07-rcp-lightweight-verification-default.zh-CN.md)
-- [自治理元规则：NMG 自身的规则也受治理](implemented/2026-09-07-self-governance-meta-rule.zh-CN.md)
-- [用需求可追溯矩阵与变异测试支撑验证](implemented/2026-09-08-requirements-traceability-matrix.zh-CN.md) — 规则已强制；变异分数与 `eval:`/`metric:` 命名空间仍开放
-- [仓库术语索引](implemented/2026-09-08-repository-terminology-index.zh-CN.md) — 流程词汇已登记并校验；产品概念仍在概念地图里
-- [Windows 混沌测试只在推送到 main 时运行](implemented/2026-09-09-chaos-tests-on-main-pushes.zh-CN.md) — 153 次里只失败 1 次且在 main 上；省的是 runner 分钟，不是 PR 墙钟
-
-## 被拒决策
-
-- [将构建产物纳入版本控制](rejected/2026-09-02-track-build-artifacts-in-git.zh-CN.md) — 可再生输出保持不入库；可构建性靠验证而非提交
-- [书签功能继续命名为 "anchors"](rejected/2026-09-02-keep-bookmarks-named-anchors.zh-CN.md) — 改名为 tessera，终结与 surface/task/support anchors 的撞名
-- [本地哈希向量作为检索兜底](rejected/2026-09-03-hashing-vector-retrieval-fallback.zh-CN.md) — 作为语义检索信号被拒（256 维实测零增益）；词法级用途仍是开放候选
+生命周期目录树就是清单：浏览 `docs/decisions/{proposed,implemented,rejected,archived}/`，
+或搜索仓库。这里没有条目化索引，因为那种列表会重述每份记录的标题与未完成项、重复它们
+的家，并且在无人检查时逐渐漂移。`npm run docs:check` 会打印有多少条决策已实现、
+其中多少条带着未完成项。

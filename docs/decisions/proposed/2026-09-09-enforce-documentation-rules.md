@@ -88,7 +88,7 @@ working.
 ## Acceptance criteria
 
 - `docs:check` fails an `implemented/` decision carrying a proposal-era heading,
-  with a test for each banned heading in `tests/scripts/verify-docs.test.ts`.
+  with a test for each banned heading in `tests/docs/verify-docs.test.ts`.
 - `docs:check` prints the decision summary line, and counts a decision with a
   non-empty `## Deferred` as open, with a test.
 - The three migrated decisions record their open items under `## Deferred` in
