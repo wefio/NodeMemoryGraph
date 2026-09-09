@@ -326,7 +326,7 @@ function synthesizeNarrowContract(
     intent: `Narrow verification of ${scopes.join(", ") || "selected scopes"} via route ${routeId}`,
     scope: { include: [...scopes].sort(), exclude: [] },
     preserve: [],
-    invariants: [],
+    assertions: [],
     verification: { routes: [routeId], checks: [...checks].sort(), forgeChecks: [] },
     authority: { mode: "apply" as const },
     extensions: {},

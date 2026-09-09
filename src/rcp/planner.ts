@@ -103,7 +103,7 @@ export function planWorkOrder(input: {
     excludedPaths: input.contract.scope.exclude,
     owners,
     preserve: input.contract.preserve,
-    invariants: input.contract.invariants,
+    assertions: input.contract.assertions,
     verificationChecks: checks,
     routes: routeIds,
     routeDigest,

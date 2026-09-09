@@ -3,7 +3,7 @@
 // Principle: verification is a composition of lightweight primitives over one
 // vocabulary. A change that is cleanly owned by one route's bounded domain runs
 // that route's OWN tests (node --test <route.tests>) plus the always-run shared
-// invariants; a change touching any shared / cross-cutting file falls back to
+// checks; a change touching any shared / cross-cutting file falls back to
 // the declared whole blocking set. When in doubt, run full — that is the whole
 // safety rule. No new executor: the tools the scripts wrap already accept the
 // narrow globs (route.tests), so this only adds route granularity + a coverage
@@ -24,7 +24,7 @@ export interface NarrowVerifyPlan {
   narrow: boolean;
   /** The single owning route (only when narrow). */
   route?: RouteLike;
-  /** Always-run shared invariants for any change. */
+  /** Always-run shared checks for any change. */
   shared: string[];
   /** node --test globs from the owning route's own tests (may be empty). */
   testGlobs: string[];

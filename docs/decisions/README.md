@@ -46,6 +46,8 @@ to one another. Missing translations are reported as warnings, not hard errors.
 - [External Repository Control Plane](implemented/2026-08-29-repository-control-plane.md)
 - [RCP lightweight verification by default](implemented/2026-09-07-rcp-lightweight-verification-default.md)
 - [Self-governance meta-rule: NMG's own rules are governed](implemented/2026-09-07-self-governance-meta-rule.md)
+- [Requirements traceability matrix and mutation testing for verification](implemented/2026-09-08-requirements-traceability-matrix.md) — the rule is enforced; mutation score and the `eval:`/`metric:` namespaces are open
+- [Repository terminology index](implemented/2026-09-08-repository-terminology-index.md) — the process vocabulary is registered and validated; product concepts stay in the concept map
 
 ## Rejected decisions
 

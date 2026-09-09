@@ -174,15 +174,17 @@ test("CLI dry-run emits a machine-readable plan without running checks", () => {
   };
   assert.equal(payload.ok, true);
   // docs/README.md is cleanly owned by the documentation route, so the default
-  // is narrow: the always-run shared invariants plus that route's own tests.
+  // is narrow: the always-run shared checks plus that route's own tests.
   assert.deepEqual(
     payload.results.map(({ command, status, reason }) => ({ command, status, reason })),
     [
       { command: "check", status: "skipped", reason: "dry run" },
       { command: "docs:check", status: "skipped", reason: "dry run" },
       { command: "format:check", status: "skipped", reason: "dry run" },
+      { command: "glossary:check", status: "skipped", reason: "dry run" },
       { command: "lint", status: "skipped", reason: "dry run" },
       { command: "package:check", status: "skipped", reason: "dry run" },
+      { command: "rtm:check", status: "skipped", reason: "dry run" },
       { command: "node --test (documentation)", status: "skipped", reason: "dry run" },
     ],
   );
@@ -388,7 +390,12 @@ test("CLI automatically reconciles the unique RCP contract covering dirty scopes
       "    include: [src/**]",
       "    exclude: []",
       "  preserve: [owner remains authoritative]",
-      "  invariants: [changes stay in scope]",
+      "  assertions:",
+      "    - id: scope-discipline",
+      "      statement: Changes stay in scope",
+      "      check: check",
+      "      kind: test",
+      "      stage: unit",
       "  verification:",
       "    routes: [fixture]",
       "    checks: [pass]",
@@ -450,7 +457,12 @@ test("RCP auto-discovery refuses to choose between overlapping contracts", () =>
       "    include: [src/**]",
       "    exclude: []",
       "  preserve: [owner remains authoritative]",
-      "  invariants: [changes stay in scope]",
+      "  assertions:",
+      "    - id: scope-discipline",
+      "      statement: Changes stay in scope",
+      "      check: check",
+      "      kind: test",
+      "      stage: unit",
       "  verification:",
       "    routes: [fixture]",
       "    checks: [pass]",
@@ -528,6 +540,8 @@ function narrowFixture(
         check: ok,
         "docs:check": ok,
         "format:check": ok,
+        "glossary:check": ok,
+        "rtm:check": ok,
         lint: ok,
         "package:check": ok,
         "test:product": 'node -e "process.exit(1)"',
@@ -574,7 +588,15 @@ test("narrow is the default and records an honest gate without test:product", ()
   assert.equal(receipt.gate.mode, "narrow");
   assert.equal(receipt.gate.fullGateRun, false);
   const names = receipt.checks.map((check) => check.name);
-  for (const shared of ["check", "docs:check", "format:check", "lint", "package:check"])
+  for (const shared of [
+    "check",
+    "docs:check",
+    "format:check",
+    "glossary:check",
+    "lint",
+    "package:check",
+    "rtm:check",
+  ])
     assert.ok(names.includes(shared), `missing shared check ${shared}`);
   assert.ok(names.includes("node-test:plugin"));
   assert.ok(!names.includes("test:product"), "narrow must not run the whole suite");

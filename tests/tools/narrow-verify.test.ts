@@ -39,7 +39,15 @@ test("a change cleanly owned by one leaf route narrows to its own tests", () => 
   assert.equal(plan.narrow, true);
   assert.equal(plan.route!.id, "pi-adapter");
   assert.deepEqual(plan.testGlobs, ["tests/extensions/**", "tests/integration/**"]);
-  assert.deepEqual(plan.shared, ["check", "docs:check", "format:check", "lint", "package:check"]);
+  assert.deepEqual(plan.shared, [
+    "check",
+    "docs:check",
+    "format:check",
+    "glossary:check",
+    "lint",
+    "package:check",
+    "rtm:check",
+  ]);
 });
 
 test("a leaf route with no own tests narrows to shared checks only", () => {
@@ -47,7 +55,15 @@ test("a leaf route with no own tests narrows to shared checks only", () => {
   assert.equal(plan.narrow, true);
   assert.equal(plan.route!.id, "dsh-adapter");
   assert.deepEqual(plan.testGlobs, []);
-  assert.deepEqual(plan.shared, ["check", "docs:check", "format:check", "lint", "package:check"]);
+  assert.deepEqual(plan.shared, [
+    "check",
+    "docs:check",
+    "format:check",
+    "glossary:check",
+    "lint",
+    "package:check",
+    "rtm:check",
+  ]);
 });
 
 test("a shared/cross-cutting path escalates to full", () => {

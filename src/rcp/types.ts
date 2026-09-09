@@ -18,6 +18,41 @@ export interface ContractDiagnostic {
   source: SourceLocation;
 }
 
+export const ASSERTION_KINDS = [
+  "test",
+  "property",
+  "runtime-assertion",
+  "metamorphic",
+  "coverage",
+  "proof",
+] as const;
+export type AssertionKind = (typeof ASSERTION_KINDS)[number];
+
+export const ASSERTION_STAGES = [
+  "requirement",
+  "acceptance",
+  "unit",
+  "integration",
+  "e2e",
+  "deploy",
+  "observability",
+  "outcome",
+] as const;
+export type AssertionStage = (typeof ASSERTION_STAGES)[number];
+
+/** One declared design claim plus the evidence that supports it. `check` names
+ *  a runnable check; `documentedOnly` marks a claim that nothing checks yet, so
+ *  the gap stays visible instead of being implied by a green suite. */
+export interface ContractAssertion {
+  id: string;
+  statement: string;
+  check?: string;
+  documentedOnly?: boolean;
+  kind?: AssertionKind;
+  stage?: AssertionStage;
+  context?: string;
+}
+
 export interface RepositoryContractIr {
   apiVersion: typeof RCP_CONTRACT_API_VERSION;
   kind: typeof RCP_CONTRACT_KIND;
@@ -28,7 +63,7 @@ export interface RepositoryContractIr {
     exclude: string[];
   };
   preserve: string[];
-  invariants: string[];
+  assertions: ContractAssertion[];
   verification: {
     routes: string[];
     checks: string[];
@@ -112,7 +147,7 @@ export interface WorkOrder {
   excludedPaths: string[];
   owners: string[];
   preserve: string[];
-  invariants: string[];
+  assertions: ContractAssertion[];
   verificationChecks: string[];
   routes: string[];
   routeDigest: string;

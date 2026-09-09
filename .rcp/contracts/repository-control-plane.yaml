@@ -30,11 +30,32 @@ spec:
     - NMG daemon and Core do not depend on or own the Repository Control Plane
     - experiments remain non-normative and non-blocking
     - unrelated working-tree changes remain untouched
-  invariants:
-    - plan is the default and mutation requires explicit apply authority plus a harness boundary
-    - implementing harness output cannot self-certify verification or weaken checks during execution
-    - desired state, observed state, receipts, forge state and memory have separate owners
-    - failed attempts remain append-only and do not prevent a corrected retry
+  assertions:
+    - id: plan-mode-default
+      statement: Plan mode emits a WorkOrder without executing or recording
+      check: "node-test:repository-control-plane#plan mode emits a WorkOrder without executing or recording"
+      kind: test
+      stage: unit
+    - id: apply-requires-harness-boundary
+      statement: Apply is fail-closed without an explicit harness boundary
+      check: "node-test:repository-control-plane#CLI apply is fail-closed without an explicit harness boundary"
+      kind: test
+      stage: unit
+    - id: harness-cannot-self-certify
+      statement: An implementing harness cannot weaken its verifier during execution
+      check: "node-test:repository-control-plane#an implementing harness cannot weaken its verifier during execution"
+      kind: test
+      stage: unit
+    - id: truth-domains-separate
+      statement: RCP core remains outside NMG Core, daemon and integration boundaries
+      check: "node-test:repository-control-plane#RCP core remains outside NMG Core, daemon and integration boundaries"
+      kind: test
+      stage: integration
+    - id: failed-attempts-append-only
+      statement: Failed attempts remain append-only without preventing a later retry
+      check: "node-test:repository-control-plane#failed attempts remain append-only without preventing a later retry"
+      kind: test
+      stage: unit
   verification:
     routes:
       - ci-and-tests
@@ -46,7 +67,9 @@ spec:
       - build
       - check
       - docs:check
+      - glossary:check
       - package:check
+      - rtm:check
       - test:product
     forgeChecks:
       - All checks passed

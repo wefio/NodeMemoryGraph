@@ -275,15 +275,17 @@ export class LocalNpmVerifierProvider implements VerifierProvider {
   }
 }
 
-/** Narrow verification: the always-run shared invariants plus the owning
+/** Narrow verification: the always-run shared checks plus the owning
  *  route's own `node --test` globs (a synthetic `node-test:<routeId>` check,
  *  because route tests are not npm scripts). */
 export const NARROW_SHARED_CHECKS = [
   "check",
   "docs:check",
   "format:check",
+  "glossary:check",
   "lint",
   "package:check",
+  "rtm:check",
 ] as const;
 
 export function nodeTestCheckName(routeId: string): string {
@@ -363,7 +365,7 @@ export class NarrowVerifierProvider implements VerifierProvider {
  *  to load that directory as a test file and fails. Expanding to files avoids
  *  that, and lets a route whose patterns match nothing fail closed instead of
  *  reporting a vacuous pass over zero tests. */
-function resolveRouteTestFiles(root: string, patterns: string[]): string[] {
+export function resolveRouteTestFiles(root: string, patterns: string[]): string[] {
   const files = new Set<string>();
   for (const pattern of patterns) {
     for (const match of globSync(pattern, { cwd: root })) {

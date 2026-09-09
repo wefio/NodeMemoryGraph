@@ -18,6 +18,7 @@ import {
 import { validateReceipt } from "../receipt.ts";
 import { reconcileOnce } from "../reconcile.ts";
 import { runTrustedCli } from "../trusted.ts";
+import type { ContractAssertion } from "../types.ts";
 import { LocalRepositoryProvider } from "../repository.ts";
 import { SessionFeedbackProvider, type SessionFeedbackTarget } from "../session-feedback.ts";
 import type { MemoryProvider, NmgMemoryClient } from "../providers.ts";
@@ -491,12 +492,21 @@ function formatPlan(order: {
   id: string;
   intent: string;
   allowedPaths: string[];
+  owners: string[];
+  preserve: string[];
+  assertions: ContractAssertion[];
   verificationChecks: string[];
 }): string {
   return [
     `${order.id}: ${order.intent}`,
     `scope: ${order.allowedPaths.join(", ")}`,
+    `owners: ${order.owners.join(", ") || "(none)"}`,
     `checks: ${order.verificationChecks.join(", ")}`,
+    ...order.preserve.map((item) => `preserve: ${item}`),
+    ...order.assertions.map(
+      (assertion) =>
+        `assertion: ${assertion.id} — ${assertion.statement} [${assertion.check ?? "documented-only"}]`,
+    ),
   ].join("\n");
 }
 

@@ -127,7 +127,7 @@
     "complexity:gate": "node --experimental-strip-types tools/complexity-gate.ts",
     "verify:packages": "node --experimental-strip-types tools/verify-packages.ts",
     "check:lock": "node --experimental-strip-types tools/check-lock.ts",
-    "verify:static": "npm run build && npm run package:check && npm run check && npm run check:lock && npm run lint && npm run format:check && npm run docs:check && npm run agent:context:check && npm run complexity:gate && npm run verify:packages",
+    "verify:static": "npm run build && npm run package:check && npm run check && npm run check:lock && npm run lint && npm run format:check && npm run docs:check && npm run agent:context:check && npm run complexity:gate && npm run verify:packages && npm run glossary:check && npm run rtm:check",
     "verify:product-ci": "npm run build && npm run test:coverage",
     "verify:research": "npm run prompts:generate && npm run test:research",
     "verify:node-compat": "npm run build && npm run check && npm run package:check",
@@ -137,7 +137,9 @@
     "test:product": "node --experimental-strip-types --test --test-concurrency=4 \"tests/cli/**/*.test.ts\" \"tests/core/**/*.test.ts\" \"tests/docker/**/*.test.ts\" \"tests/docs/**/*.test.ts\" \"tests/extensions/**/*.test.ts\" \"tests/guardrails/**/*.test.ts\" \"tests/integration/**/*.test.ts\" \"tests/prompts/**/*.test.ts\" \"tests/rcp/**/*.test.ts\" \"tests/scripts/**/*.test.ts\" \"tests/skills/**/*.test.ts\" \"tests/support/**/*.test.ts\" \"tests/tools/**/*.test.ts\"",
     "test:research": "node --experimental-strip-types --test --test-concurrency=4 \"tests/benchmarks/**/*.test.ts\" \"tests/evals/**/*.test.ts\" \"tests/official/**/*.test.ts\"",
     "test:chaos": "npm run build && node --experimental-strip-types --test \"tests/chaos/*.test.ts\"",
-    "test:cg": "node --experimental-strip-types --test tests/core/autodiff.test.ts tests/core/differentiable-controller.test.ts tests/core/hierarchical-activation.test.ts tests/core/memory-graph-reasoner.test.ts tests/core/fork-merge.test.ts tests/core/robustness.test.ts"
+    "test:cg": "node --experimental-strip-types --test tests/core/autodiff.test.ts tests/core/differentiable-controller.test.ts tests/core/hierarchical-activation.test.ts tests/core/memory-graph-reasoner.test.ts tests/core/fork-merge.test.ts tests/core/robustness.test.ts",
+    "glossary:check": "node --experimental-strip-types tools/glossary-check.ts",
+    "rtm:check": "node --experimental-strip-types tools/rtm-check.ts"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",

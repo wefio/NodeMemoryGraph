@@ -116,7 +116,7 @@ routes:
       - skills/doc-maintenance/SKILL.md
     tests: [tests/docs/**, tests/skills/**]
     verify:
-      blocking: [docs:check]
+      blocking: [docs:check, glossary:check]
       advisory: []
 
   - id: evaluation

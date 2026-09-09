@@ -32,6 +32,8 @@
 - [外部 Repository Control Plane](implemented/2026-08-29-repository-control-plane.zh-CN.md)
 - [RCP 默认轻量验证](implemented/2026-09-07-rcp-lightweight-verification-default.zh-CN.md)
 - [自治理元规则：NMG 自身的规则也受治理](implemented/2026-09-07-self-governance-meta-rule.zh-CN.md)
+- [用需求可追溯矩阵与变异测试支撑验证](implemented/2026-09-08-requirements-traceability-matrix.zh-CN.md) — 规则已强制；变异分数与 `eval:`/`metric:` 命名空间仍开放
+- [仓库术语索引](implemented/2026-09-08-repository-terminology-index.zh-CN.md) — 流程词汇已登记并校验；产品概念仍在概念地图里
 
 ## 被拒决策
 

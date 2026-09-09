@@ -63,7 +63,7 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 `verify:static`、`verify:product-ci`、`verify:research`、`verify:node-compat` 和
 `verify:chaos` 这些命名 package contract，使本地可复现入口和远程 CI 保持同源：
 
-- `static`：build、package、type、lint、format、文档、Agent context 与生产依赖审计；
+- `static`：build、package、type、lint、format、文档、术语索引、需求追溯、Agent context 与生产依赖审计；
 - `tests`：Node 24 产品测试和覆盖率；
 - `research-tests`：研究/benchmark adapter 表征，`continue-on-error`；
 - `node-compat`：最低支持版本 Node 22.19 的 build/package；
@@ -219,7 +219,12 @@ spec:
     include: ["src/**"]
     exclude: ["docs/experiments/**"]
   preserve: ["public protocol compatibility"]
-  invariants: ["NMG daemon must not depend on RCP"]
+  assertions:
+    - id: daemon-independent
+      statement: "NMG daemon must not depend on RCP"
+      check: "node-test:daemon-cli"
+      kind: test
+      stage: unit
   verification:
     routes: ["product"]
     checks: ["npm run agent:verify"]
@@ -227,6 +232,8 @@ spec:
     mode: plan # plan | apply | continuous
   extensions: {}
 ```
+
+每条 assertion 必须解析到 `check`——package.json script、`node-test:<route>`（route 级证据），或 `node-test:<route>#<测试名>`（指向一条具名测试，`rtm:check` 会在该 route 的测试文件里核实名字真实存在）——或显式标为 `documentedOnly: true`；两者都无则编译失败。`rtm:check` 在 `verify:static`、窄化共享检查与两份 contract 中阻塞运行，并打印一行覆盖率统计（断言数、已验证、仅文档、未覆盖、孤儿）。**收据目前只记录每个检查的通过/失败与摘要绑定，不记录覆盖率数字**：evidence 只在检查失败时写入。矩阵全绿只说明「声明的断言被检查过了」，不说明设计正确。
 
 编译后的 IR 规范化默认值、路径、source locations、diagnostics、extension namespace
 和 `contractDigest`。语法升级不得改变稳定 `metadata.id`；未知必需字段失败关闭，未知

@@ -5,10 +5,13 @@ import { parse as parseYaml } from "yaml";
 
 import { digestCanonical } from "./canonical.ts";
 import {
+  ASSERTION_KINDS,
+  ASSERTION_STAGES,
   RCP_CONTRACT_API_VERSION,
   RCP_CONTRACT_KIND,
   type AuthorityMode,
   type CompileContractResult,
+  type ContractAssertion,
   type ContractDiagnostic,
   type RepositoryContractIr,
   type SourceLocation,
@@ -20,7 +23,7 @@ const SPEC_FIELDS = new Set([
   "intent",
   "scope",
   "preserve",
-  "invariants",
+  "assertions",
   "verification",
   "authority",
   "extensions",
@@ -28,6 +31,15 @@ const SPEC_FIELDS = new Set([
 const SCOPE_FIELDS = new Set(["include", "exclude"]);
 const VERIFICATION_FIELDS = new Set(["routes", "checks", "forgeChecks"]);
 const AUTHORITY_FIELDS = new Set(["mode"]);
+const ASSERTION_FIELDS = new Set([
+  "id",
+  "statement",
+  "check",
+  "documentedOnly",
+  "kind",
+  "stage",
+  "context",
+]);
 const AUTHORITY_MODES = new Set<AuthorityMode>(["plan", "apply", "continuous"]);
 
 export interface ContractSource {
@@ -46,7 +58,7 @@ interface ContractIdentity {
 interface ContractSpecFields {
   scope: NormalizedContract["scope"];
   preserve: string[];
-  invariants: string[];
+  assertions: ContractAssertion[];
   verification: NormalizedContract["verification"];
   authority: NormalizedContract["authority"];
   extensions: Record<string, unknown>;
@@ -175,7 +187,7 @@ function compileContractSpec(
   const include = stringArray(scope.include, "spec.scope.include", error, { required: true });
   const exclude = stringArray(scope.exclude, "spec.scope.exclude", error);
   const preserve = stringArray(spec.preserve, "spec.preserve", error);
-  const invariants = stringArray(spec.invariants, "spec.invariants", error);
+  const assertions = compileAssertions(spec.assertions, error);
   const routes = stringArray(verification.routes, "spec.verification.routes", error);
   const checks = stringArray(verification.checks, "spec.verification.checks", error, {
     required: true,
@@ -194,7 +206,7 @@ function compileContractSpec(
   return {
     scope: { include: uniqueSorted(include), exclude: uniqueSorted(exclude) },
     preserve: uniqueSorted(preserve),
-    invariants: uniqueSorted(invariants),
+    assertions,
     verification: {
       routes: uniqueSorted(routes),
       checks: uniqueSorted(checks),
@@ -203,6 +215,110 @@ function compileContractSpec(
     authority: { mode },
     extensions,
   };
+}
+
+function compileAssertions(value: unknown, error: ContractError): ContractAssertion[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    error("contract.assertions", "spec.assertions must be an array", "spec.assertions");
+    return [];
+  }
+  const assertions: ContractAssertion[] = [];
+  const seen = new Set<string>();
+  value.forEach((raw, index) => {
+    const assertion = compileAssertion(raw, index, error);
+    if (!assertion) return;
+    if (seen.has(assertion.id)) {
+      error(
+        "contract.assertion-id",
+        `spec.assertions[${index}].id is duplicated: ${assertion.id}`,
+        `spec.assertions[${index}].id`,
+      );
+      return;
+    }
+    seen.add(assertion.id);
+    assertions.push(assertion);
+  });
+  return assertions;
+}
+
+function checkEvidence(
+  raw: Record<string, unknown>,
+  check: string | undefined,
+  documentedOnly: boolean,
+  field: string,
+  error: ContractError,
+): void {
+  if (raw.documentedOnly !== undefined && typeof raw.documentedOnly !== "boolean") {
+    error(
+      "contract.assertion-evidence",
+      `${field}.documentedOnly must be a boolean`,
+      `${field}.documentedOnly`,
+    );
+  }
+  if (!check && !documentedOnly) {
+    error("contract.assertion-evidence", `${field} needs a check or documentedOnly: true`, field);
+  }
+  if (check && documentedOnly) {
+    error(
+      "contract.assertion-evidence",
+      `${field} cannot declare both a check and documentedOnly`,
+      field,
+    );
+  }
+}
+
+function compileAssertion(
+  raw: unknown,
+  index: number,
+  error: ContractError,
+): ContractAssertion | undefined {
+  const field = `spec.assertions[${index}]`;
+  if (!isRecord(raw)) {
+    error("contract.assertion", `${field} must be an object`, field);
+    return undefined;
+  }
+  for (const key of Object.keys(raw)) {
+    if (!ASSERTION_FIELDS.has(key)) {
+      error("contract.assertion-field", `${field}.${key} is not supported`, `${field}.${key}`);
+    }
+  }
+  const id = requiredText(raw.id, `${field}.id`, error);
+  const statement = requiredText(raw.statement, `${field}.statement`, error);
+  const check = optionalText(raw.check, `${field}.check`, error);
+  const documentedOnly = raw.documentedOnly === true;
+  checkEvidence(raw, check, documentedOnly, field, error);
+  const kind = enumField(raw.kind, ASSERTION_KINDS, `${field}.kind`, error);
+  const stage = enumField(raw.stage, ASSERTION_STAGES, `${field}.stage`, error);
+  const context = optionalText(raw.context, `${field}.context`, error);
+  if (!id || !statement) return undefined;
+  return {
+    id,
+    statement,
+    ...(check ? { check } : {}),
+    ...(documentedOnly ? { documentedOnly: true } : {}),
+    ...(kind ? { kind } : {}),
+    ...(stage ? { stage } : {}),
+    ...(context ? { context } : {}),
+  };
+}
+
+function optionalText(value: unknown, field: string, error: ContractError): string | undefined {
+  return value === undefined ? undefined : requiredText(value, field, error);
+}
+
+function enumField<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  field: string,
+  error: ContractError,
+): T | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !allowed.includes(value as T)) {
+    error("contract.assertion-enum", `${field} must be one of ${allowed.join(", ")}`, field);
+    return undefined;
+  }
+  return value as T;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

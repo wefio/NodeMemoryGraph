@@ -13,7 +13,15 @@ test("YAML and JSON compile to the same canonical Contract digest", () => {
     spec: {
       authority: { mode: "apply" },
       verification: { checks: ["check"], forgeChecks: ["product"], routes: ["source"] },
-      invariants: ["do not modify outside scope"],
+      assertions: [
+        {
+          id: "scope-discipline",
+          statement: "Do not modify outside scope",
+          check: "check",
+          kind: "test",
+          stage: "unit",
+        },
+      ],
       preserve: ["public API"],
       scope: { exclude: ["src/generated/**"], include: ["src/**"] },
       intent: "Update the fixture source",
