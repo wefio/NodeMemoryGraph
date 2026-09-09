@@ -260,7 +260,7 @@ WAL and `busy_timeout` remain resilience mechanisms, not authorization for
 independent multi-process writers. Read-only replicas or a worker-thread database
 queue are deferred until measured event-loop contention violates the latency
 budget. See `design.md` section 4.1.1 for the normative contract and
-`docs/experiments/scale-evaluation-2026-08-09.md` for the 32-session probe.
+`docs/experiments/store/scale-evaluation-2026-08-09.md` for the 32-session probe.
 
 ---
 

@@ -481,6 +481,7 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
       parts[0] === "docs" &&
       parts[1] === "experiments" &&
       parts.length >= 3 &&
+      !new Set(["README.md", "README.zh-CN.md"]).has(experimentName) &&
       !/-\d{4}-\d{2}-\d{2}\.md$/.test(experimentName) &&
       !/-(results|notes)\.md$/.test(experimentName)
     ) {

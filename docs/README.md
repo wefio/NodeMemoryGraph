@@ -48,15 +48,13 @@ copying the whole implementation narrative.
   commits that materially reduce rediscovery or regression risk.
 - **`decisions/`** — lifecycle-managed design and process decisions. See
   [decisions/README.md](decisions/README.md).
-- **`experiments/`** — measured evidence. Run reports are named
-  `<slug>-<date>.md`; a line of three or more runs lives in its topic directory
-  (`retrieval-quality/`, `context/`, `topology/`, `qpp/`) and drops the topic
-  prefix from the filename. Retrieval-quality series:
+- **`experiments/`** — measured evidence, grouped by the line of inquiry each run
+  answers ([topic list](experiments/README.md)). Retrieval-quality series:
   [baseline](experiments/retrieval-quality/baseline-2026-08-16.md) →
   [hybrid](experiments/retrieval-quality/hybrid-2026-08-16.md) →
   [summaries + stacked](experiments/retrieval-quality/summaries-2026-08-18.md).
   Related records include the
-  [node-summary acceleration research](experiments/node-summary-accelerated-retrieval-2026-08-19.md)
+  [node-summary acceleration research](experiments/retrieval/node-summary-accelerated-retrieval-2026-08-19.md)
   and the current [benchmark result summary](experiments/benchmark-results.md).
 
 Rule of thumb: _how NMG works or should work_ belongs in `design/`; _why this

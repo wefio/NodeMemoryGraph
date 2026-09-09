@@ -29,9 +29,13 @@
 `Superseded by` 链接，且文档必须位于 `docs/design/archived/`；该目录里的任何文档也
 必须是 `superseded`。
 
-**experiments。** 同一条线上三个以上运行放进主题子目录（`retrieval-quality/`、
-`context/`、`topology/`、`qpp/`），文件名去掉冗余的主题前缀。运行报告仍命名为
-`<slug>-<YYYY-MM-DD>.md`。
+**experiments。** 每次运行都放进**它回答的那条探究线**所对应的主题目录——
+`retrieval-quality/`、`retrieval/`、`context/`、`topology/`、`qpp/`、`benchmarks/`、
+`store/`、`runtime/`。`benchmarks/` 收纳数据集运行（LongMemEval、LoCoMo、BEAM、
+HaluMem），并把数据集名保留为文件名前缀，因为这个前缀命名的是数据集，不是目录。报告
+命名为 `<slug>-<YYYY-MM-DD>.md`，当 slug 的前缀与目录名重复时去掉该前缀；只有
+`benchmark-results.md` 留在顶层，因为它跨主题。主题清单与命名规则住在
+`docs/experiments/README.md`。
 
 规则住在 `skills/doc-maintenance/SKILL.md`；门禁是
 `scripts/verify-docs.mts` 里的 `checkDesignHeader`，测试在
@@ -46,6 +50,10 @@
 
 **给 experiments 做生命周期轴。** 38 份已结题 / 2 份未结题；一个状态目录会装下几乎
 所有文件。
+
+**只给「三个以上运行」的线做主题目录。** 本次改动的第一版用了这个阈值。它把 21 个
+一次性运行留在一堆没有解释的顶层文件里——一种肉眼可见不完整的分类，因而也是读者无法
+信任其完整性的分类。
 
 **给 design 用 YAML front matter。** 决策头部块已经否决过它；同样的理由适用，而且
 design 的散文会为它已经陈述的事实多出一种语法。
@@ -69,5 +77,6 @@ churn 目前也不划算。记入 Deferred。
 `docs/design/` 现在有一个归档文档（`archived/file-content-source-design.md`），没有
 自由文本状态值。18 条状态句变成枚举令牌，其警示信息保留为限定语，因此没有丢失信息。
 封闭集之外的六个字段（`Date`、`Owner`、`Commits`、`Purpose`、`Normative source`、
-`Implementation recovery`）变成 `Updated:` 或散文。`docs/experiments/` 有四个主题
-子目录，其文件名门禁现在检查 basename，因此主题子目录内的报告仍会被检查日期。
+`Implementation recovery`）变成 `Updated:` 或散文。`docs/experiments/` 现在有 8 个
+主题目录，容纳每一次运行；其文件名门禁现在检查 basename，因此主题子目录内的报告仍会
+被检查日期。`benchmark-results.md` 是唯一留在顶层的记录，因为它跨主题。

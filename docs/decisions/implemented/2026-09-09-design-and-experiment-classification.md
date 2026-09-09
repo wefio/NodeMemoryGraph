@@ -35,9 +35,15 @@ tier is defined as current-state design, so only the exceptions have to say so.
 `superseded` requires a `Superseded by` link, and the document must live in
 `docs/design/archived/`; anything in that directory must be `superseded`.
 
-**Experiments.** A line of three or more runs lives in its topic directory
-(`retrieval-quality/`, `context/`, `topology/`, `qpp/`) and drops the redundant
-topic prefix from the filename. Run reports stay named `<slug>-<YYYY-MM-DD>.md`.
+**Experiments.** Every run lives in the topic directory that names the line of
+inquiry it answers — `retrieval-quality/`, `retrieval/`, `context/`, `topology/`,
+`qpp/`, `benchmarks/`, `store/`, `runtime/`. `benchmarks/` groups the dataset
+runs (LongMemEval, LoCoMo, BEAM, HaluMem) and keeps the dataset name as the
+filename prefix, because that prefix names the dataset, not the directory.
+Reports are named `<slug>-<YYYY-MM-DD>.md` and the slug drops the topic prefix
+when it repeats the directory name; only `benchmark-results.md` stays at the top
+level, because it spans topics. The topic list and the naming rule live in
+`docs/experiments/README.md`.
 
 The rule lives in `skills/doc-maintenance/SKILL.md`; the gate is
 `checkDesignHeader` in `scripts/verify-docs.mts`, with tests in
@@ -54,6 +60,11 @@ not a classifier.
 
 **A lifecycle axis for experiments.** Experiments are 38 concluded / 2 open; a
 state directory would hold almost every file.
+
+**Topic directories only for lines of three or more runs.** The first cut of
+this change used that threshold. It left 21 one-off runs in an unexplained
+top-level pile — a classification that is visibly partial, and therefore a
+classification a reader cannot trust to be complete.
 
 **YAML front matter for designs.** The decision header block rejected it for
 decisions; the same reasons apply, and design prose would gain a second syntax
@@ -82,6 +93,7 @@ designs.
 Eighteen status sentences became enum tokens with their caveats kept as
 qualifiers, so no information was lost. Six fields outside the closed set
 (`Date`, `Owner`, `Commits`, `Purpose`, `Normative source`,
-`Implementation recovery`) became `Updated:` or prose. `docs/experiments/` has
-four topic directories, and its filename gate now checks the basename, so a
-report inside a topic directory is still date-checked.
+`Implementation recovery`) became `Updated:` or prose. `docs/experiments/` has eight topic directories holding every run, and its
+filename gate now checks the basename, so a report inside a topic directory is
+still date-checked. `benchmark-results.md` remains the only top-level record,
+because it spans topics.
