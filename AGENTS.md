@@ -15,7 +15,12 @@ Before modifying the repository, follow `skills/repo-development/SKILL.md`:
    worktree, use `-- <owned-path>` so unrelated changes stay outside the plan.
 
 For documentation changes, also follow `skills/doc-maintenance/SKILL.md`. For using
-NMG memory or its coordination board, follow `skills/nmg-memory/SKILL.md`.
+NMG memory or its coordination board, follow `skills/nmg-memory/SKILL.md`. Before
+writing a one-off script or ad-hoc analysis, write one — follow
+`skills/script-reuse/SKILL.md` to make it right (flags, refuse missing input, assert on
+the result, record what it measured). The ready parts on `docs/guides/parts.md` are an
+optional shortcut, not a precondition; do not commit a new entry point for a one-off
+need.
 
 Meta-rule: NMG's own rules are governed too. A change to a standing rule, Skill
 convention, or decision convention is itself a governed decision — record it with

@@ -27,6 +27,7 @@ const BYTE_BUDGETS: Record<string, number> = {
   "skills/repo-development/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
   "skills/nmg-memory/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
   "skills/verification-traceability/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
+  "skills/script-reuse/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
   "docs/decisions/README.md": 5000,
 };
 const publicPairs = [
@@ -381,6 +382,46 @@ function isContractDocument(display: string): boolean {
   return /^skills\/[^/]+\/SKILL\.md$/.test(display);
 }
 
+const PARTS_SHELF = "docs/guides/parts.md";
+
+/**
+ * Every part named in a `### `name(...)`` heading of the shelf must still be
+ * exported from src/rcp. A rename is exactly the drift a reader would otherwise
+ * pay for by opening the source instead of trusting the shelf.
+ */
+function checkPartsShelf(root: string, report: DocumentationReport): void {
+  const directories = [join(root, "src", "rcp"), join(root, "tools", "parts")].filter(existsSync);
+  if (directories.length === 0) return;
+  const exported = new Set<string>();
+  for (const directory of directories) {
+    for (const file of readdirSync(directory)) {
+      if (!file.endsWith(".ts")) continue;
+      const source = readFileSync(join(directory, file), "utf8");
+      for (const match of source.matchAll(
+        /^export (?:async )?(?:function|const|class|interface|type) ([A-Za-z_][A-Za-z0-9_]*)/gm,
+      )) {
+        exported.add(match[1]!);
+      }
+    }
+  }
+  for (const rel of [PARTS_SHELF, PARTS_SHELF.replace(/\.md$/, ".zh-CN.md")]) {
+    const path = join(root, rel);
+    if (!existsSync(path)) continue;
+    const named = new Set(
+      [...readFileSync(path, "utf8").matchAll(/^### `([A-Za-z_][A-Za-z0-9_]*)\(/gm)].map(
+        (match) => match[1]!,
+      ),
+    );
+    for (const name of [...named].sort()) {
+      if (!exported.has(name)) {
+        report.errors.push(
+          `${rel}: '${name}' is not exported from src/rcp or tools/parts; the shelf is stale`,
+        );
+      }
+    }
+  }
+}
+
 export function verifyDocumentation(rootDirectory = process.cwd()): DocumentationReport {
   const root = resolve(rootDirectory);
   const report: DocumentationReport = {
@@ -488,6 +529,7 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
       report.warnings.push(`${display}: experiment report filename should end in -YYYY-MM-DD.md`);
     }
   }
+  checkPartsShelf(root, report);
   for (const [rel, maxBytes] of Object.entries(BYTE_BUDGETS)) {
     const p = join(root, rel);
     if (!existsSync(p)) continue; // budget applies to present standing docs, not synthetic trees
