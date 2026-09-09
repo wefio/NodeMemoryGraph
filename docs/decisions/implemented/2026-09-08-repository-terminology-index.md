@@ -3,8 +3,6 @@
 [中文](2026-09-08-repository-terminology-index.zh-CN.md)
 
 **Status:** implemented
-**Date:** 2026-09-08
-**Branch:** feat/rcp-lightweight-verification
 
 ## Problem
 

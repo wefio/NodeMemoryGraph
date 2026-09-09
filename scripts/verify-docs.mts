@@ -143,6 +143,7 @@ function checkDecision(
   report: DocumentationReport,
 ): void {
   const display = path.replaceAll("\\", "/");
+  checkDecisionHeader(path, text, kind, report);
   const status = /^\*\*Status:\*\*\s*(.+?)\s*$/im.exec(text)?.[1].toLowerCase();
   const expected = kind;
   if (status !== expected) {
@@ -216,6 +217,50 @@ function checkDecision(
     if (!reciprocated) {
       report.warnings.push(`${display}: '${match[1]}' link is not reciprocated by ${match[2]}`);
     }
+  }
+}
+
+// The header block of a decision is the lines before its first section. It
+// carries a closed set of fields so the vocabulary cannot drift: anything else
+// is prose and belongs below the block.
+const HEADER_FIELDS = new Set(["status", "supersedes", "superseded by", "relates to", "archived"]);
+
+function checkDecisionHeader(
+  path: string,
+  text: string,
+  kind: string,
+  report: DocumentationReport,
+): void {
+  const display = path.replaceAll("\\", "/");
+  const lines = text.split(/\r?\n/);
+  const firstSection = lines.findIndex((line) => /^##\s+/.test(line));
+  const header = firstSection === -1 ? lines : lines.slice(0, firstSection);
+  const counts = new Map<string, { name: string; count: number }>();
+  for (const line of header) {
+    const name = /^\*\*([^*]+):\*\*/.exec(line)?.[1];
+    if (!name) continue;
+    const key = name.toLowerCase();
+    const entry = counts.get(key) ?? { name, count: 0 };
+    entry.count += 1;
+    counts.set(key, entry);
+    if (!HEADER_FIELDS.has(key)) {
+      report.errors.push(
+        `${display}: unknown header field '**${name}:**'; header fields are ${[...HEADER_FIELDS].join(", ")}`,
+      );
+    }
+  }
+  for (const [key, entry] of counts) {
+    if (entry.count > 1) {
+      report.errors.push(
+        `${display}: header field '**${entry.name}:**' appears ${entry.count} times`,
+      );
+    }
+    if (key === "archived" && kind !== "archived") {
+      report.errors.push(`${display}: '**Archived:**' is only valid in archived/`);
+    }
+  }
+  if (!counts.has("status")) {
+    report.errors.push(`${display}: missing required header field '**Status:**'`);
   }
 }
 

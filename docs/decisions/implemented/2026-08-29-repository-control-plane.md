@@ -2,10 +2,9 @@
 
 [中文](2026-08-29-repository-control-plane.zh-CN.md)
 
-**Status:** implemented  
-**Date:** 2026-08-29
+**Status:** implemented
 
-**Implementation status:** the single-attempt run-to-completion control plane was merged through
+The single-attempt run-to-completion control plane was merged through
 PR #3 and subsequently hardened at its evidence and recovery boundaries. Contract compilation, observation, WorkOrders,
 independent verification, append-only local receipts, provider boundaries, Draft
 PR binding, automatic `agent:verify` delegation for uniquely covered changes, and

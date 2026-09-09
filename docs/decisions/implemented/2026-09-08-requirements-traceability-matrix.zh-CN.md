@@ -3,8 +3,6 @@
 [English](2026-09-08-requirements-traceability-matrix.md)
 
 **Status:** implemented
-**Date:** 2026-09-08
-**Branch:** feat/rcp-lightweight-verification
 
 ## 问题
 

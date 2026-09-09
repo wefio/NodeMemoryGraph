@@ -3,7 +3,6 @@
 [English](2026-09-09-non-trivial-change-requires-decision.md)
 
 **Status:** implemented
-**Date:** 2026-09-09
 
 ## 问题
 

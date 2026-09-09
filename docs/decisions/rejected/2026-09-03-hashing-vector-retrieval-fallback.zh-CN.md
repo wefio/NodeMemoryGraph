@@ -3,7 +3,6 @@
 [English](2026-09-03-hashing-vector-retrieval-fallback.md)
 
 **Status:** rejected  
-**Date:** 2026-09-03
 
 ## Problem
 

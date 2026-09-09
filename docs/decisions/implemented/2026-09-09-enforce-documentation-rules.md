@@ -3,7 +3,6 @@
 [中文](2026-09-09-enforce-documentation-rules.zh-CN.md)
 
 **Status:** implemented
-**Date:** 2026-09-09
 
 ## Problem
 

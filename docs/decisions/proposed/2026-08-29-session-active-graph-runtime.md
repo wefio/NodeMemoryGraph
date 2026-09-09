@@ -3,9 +3,8 @@
 [中文](2026-08-29-session-active-graph-runtime.zh-CN.md)
 
 **Status:** proposed
-**Date:** 2026-08-29
 
-**Partial implementation (2026-08-29):** protocol v9 and
+Partial implementation as of 2026-08-29: protocol v9 and
 `SessionActiveGraphRuntime` now provide daemon-owned session state, immutable
 projection identities, projection-to-trace provenance, Pi tool/Task Board
 ingestion, deterministic release, session-isolated HA fast state, and

@@ -3,7 +3,6 @@
 [English](2026-09-09-declare-what-was-not-verified.md)
 
 **Status:** implemented
-**Date:** 2026-09-09
 
 ## 问题
 

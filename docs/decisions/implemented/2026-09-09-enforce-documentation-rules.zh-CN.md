@@ -3,7 +3,6 @@
 [English](2026-09-09-enforce-documentation-rules.md)
 
 **Status:** implemented
-**Date:** 2026-09-09
 
 ## 问题
 

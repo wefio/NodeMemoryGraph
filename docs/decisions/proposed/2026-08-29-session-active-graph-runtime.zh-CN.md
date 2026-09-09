@@ -3,9 +3,8 @@
 [English](2026-08-29-session-active-graph-runtime.md)
 
 **Status:** proposed
-**Date:** 2026-08-29
 
-**部分实现（2026-08-29）：** protocol v9 与 `SessionActiveGraphRuntime` 已提供
+截至 2026-08-29 已部分实现：protocol v9 与 `SessionActiveGraphRuntime` 已提供
 daemon 所有的会话状态、不可变 projection 身份、projection-to-trace 来源映射、Pi
 工具/Task Board 观察接入、确定性释放、按会话隔离的 HA 快状态，以及受 projection
 预算约束的 MGR 调用。自动 task/branch 生命周期、统一总预算、共享披露账本和带 TTL

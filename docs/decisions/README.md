@@ -25,6 +25,29 @@ Decision filenames use `YYYY-MM-DD-kebab-case.md`; translations add `.zh-CN`
 before `.md`. The same dated slug may exist in only one lifecycle directory.
 Required sections must contain content, not only a heading.
 
+## The header block
+
+Before the first section, a decision carries a fixed field block that
+`docs:check` enforces:
+
+```markdown
+# <title>
+
+[<counterpart>](<slug>.<lang>.md)
+
+**Status:** <proposed|implemented|rejected|archived>
+[**Supersedes:** [..](..)]
+[**Superseded by:** [..](..)]
+[**Relates to:** [..](..)]
+[**Archived:** YYYY-MM-DD]
+```
+
+`**Status:**` is required and must equal the lifecycle directory. `**Archived:**`
+is valid only under `archived/`. Relationship fields take relative links. Each
+field appears at most once, and any other `**Field:**` line in the block fails
+the check: a prose note goes below the block. The date lives in the filename, so
+there is no `**Date:**` field.
+
 Before creating a note, search for the existing owner. Update that note when a
 new choice refines the same decision. If a decision fully supersedes another,
 cross-link both notes and archive the old one; if supersession is partial, keep

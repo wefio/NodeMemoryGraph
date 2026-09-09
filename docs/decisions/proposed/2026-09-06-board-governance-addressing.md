@@ -3,7 +3,6 @@
 [中文](2026-09-06-board-governance-addressing.zh-CN.md)
 
 **Status:** proposed
-**Date:** 2026-09-06
 **Relates to:** [board-find-serial-a2a-compat-2026-08-13](../../design/board-find-serial-a2a-compat-2026-08-13.md),
 [agent-convergence-feedback-design](../../design/agent-convergence-feedback-design.md)
 

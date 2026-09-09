@@ -3,8 +3,6 @@
 [English](2026-09-09-chaos-tests-on-main-pushes.md)
 
 **Status:** implemented
-**Date:** 2026-09-09
-**Branch:** feat/rcp-lightweight-verification
 
 ## 问题
 

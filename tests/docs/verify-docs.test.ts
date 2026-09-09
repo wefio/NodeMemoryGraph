@@ -155,6 +155,43 @@ test("uncategorized documentation content at docs root warns", () => {
   assert.ok(report.warnings.some((warning) => warning.includes("must live in design/")));
 });
 
+test("decision header fields are a closed, unique set", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "decisions", "implemented");
+  mkdirSync(directory, { recursive: true });
+  const body =
+    "## Problem\nP\n\n## Decision\nD\n\n## Alternatives considered\nA\n\n## Consequences\nC\n";
+  writeFileSync(
+    join(directory, "2026-08-24-unknown.md"),
+    `# Unknown\n\n**Status:** implemented\n**Branch:** x\n\n${body}`,
+  );
+  writeFileSync(
+    join(directory, "2026-08-24-duplicate.md"),
+    `# Duplicate\n\n**Status:** implemented\n**Status:** rejected\n\n${body}`,
+  );
+  writeFileSync(
+    join(directory, "2026-08-24-allowed.md"),
+    `# Allowed\n\n**Status:** implemented\n**Relates to:** [x](../../README.md)\n\n${body}`,
+  );
+  const report = verifyDocumentation(root);
+  assert.ok(report.errors.some((error) => error.includes("unknown header field '**Branch:**'")));
+  assert.ok(report.errors.some((error) => error.includes("appears 2 times")));
+  assert.ok(!report.errors.some((error) => error.includes("2026-08-24-allowed.md")));
+});
+
+test("a header field below the first section is not a header field", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "decisions", "implemented");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, "2026-08-24-late.md"),
+    "# Late\n\n## Problem\nP\n\n**Status:** implemented\n\n## Decision\nD\n\n" +
+      "## Alternatives considered\nA\n\n## Consequences\nC\n",
+  );
+  const report = verifyDocumentation(root);
+  assert.ok(report.errors.some((error) => error.includes("missing required header field")));
+});
+
 test("implemented decisions reject every proposal-era heading", () => {
   const root = fixture();
   const directory = join(root, "docs", "decisions", "implemented");

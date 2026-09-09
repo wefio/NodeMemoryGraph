@@ -2,10 +2,9 @@
 
 [English](2026-08-29-repository-control-plane.md)
 
-**Status:** implemented  
-**Date:** 2026-08-29
+**Status:** implemented
 
-**实现状态：** 单次 run-to-completion 控制面已通过 PR #3 合并，随后完成证据与恢复边界加固。
+单次 run-to-completion 控制面已通过 PR #3 合并，随后完成证据与恢复边界加固。
 Contract 编译、仓库观察、WorkOrder、独立验证、本地 append-only receipt、provider 边界、
 唯一完整覆盖变更时由 `agent:verify` 自动委托、Draft PR 绑定及 optional/no-NMG 路径已有
 确定性产品测试和真实 Contract-bound PR/CI/本地 receipt 闭环。持续协调与可供第三方
