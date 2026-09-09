@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { writeJsonAtomic } from "../../tools/parts/fs.ts";
 import { resolveNmgDataDir } from "../../src/cli/data-path.ts";
 import {
   buildShadowDataset,
@@ -169,13 +170,6 @@ function parseArguments(argv: readonly string[]): CliOptions {
   return result;
 }
 
-function writeAtomic(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`);
-  renameSync(temporary, path);
-}
-
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const options = parseArguments(process.argv.slice(2));
   const eventPath = resolveShadowEventPath(options.eventPath);
@@ -188,6 +182,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       stgPaths: options.stgPaths,
     }),
   });
-  if (options.outputPath) writeAtomic(options.outputPath, packet);
+  if (options.outputPath) writeJsonAtomic(options.outputPath, packet);
   process.stdout.write(`${JSON.stringify({ eventPath, outputPath: options.outputPath ?? null, ...packet }, null, 2)}\n`);
 }

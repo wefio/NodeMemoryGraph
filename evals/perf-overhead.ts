@@ -18,6 +18,7 @@ import { performance } from "node:perf_hooks";
 import { DatabaseSync } from "node:sqlite";
 
 import { NmgStore } from "../src/index.ts";
+import { percentileFloor } from "../tools/parts/stats.ts";
 
 const SIZES = [1_000, 10_000];
 const QUERIES = [
@@ -30,12 +31,6 @@ const QUERIES = [
 ];
 const ITERATIONS = 30;
 const outputDir = join(process.cwd(), "evals", "scale", ".tmp");
-
-function percentile(sorted: number[], ratio: number): number {
-  if (sorted.length === 0) return 0;
-  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * ratio))]!;
-}
-
 function seedStore(path: string, size: number): void {
   rmSync(path, { force: true });
   const seed = new NmgStore(path);
@@ -145,9 +140,9 @@ for (const size of SIZES) {
     const sortedOff = [...off].sort((a, b) => a - b);
     const latencyStats = (sorted: number[]): Record<string, number> => ({
       avg: sorted.reduce((sum, ms) => sum + ms, 0) / sorted.length,
-      median: percentile(sorted, 0.5),
-      p95: percentile(sorted, 0.95),
-      p99: percentile(sorted, 0.99),
+      median: percentileFloor(sorted, 0.5),
+      p95: percentileFloor(sorted, 0.95),
+      p99: percentileFloor(sorted, 0.99),
     });
     const onStats = latencyStats(sortedOn);
     const offStats = latencyStats(sortedOff);
@@ -175,7 +170,8 @@ for (const size of SIZES) {
       latencyMs: {
         perfOn: onStats,
         perfOff: offStats,
-        overheadPct: offStats.median > 0 ? ((onStats.median - offStats.median) / offStats.median) * 100 : null,
+        overheadPct:
+          offStats.median > 0 ? ((onStats.median - offStats.median) / offStats.median) * 100 : null,
       },
       phaseProfile,
     });

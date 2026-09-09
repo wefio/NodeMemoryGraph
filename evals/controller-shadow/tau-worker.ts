@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { DEFAULT_QPP_THRESHOLD } from "../../src/core/qpp.ts";
+import { writeJsonAtomic } from "../../tools/parts/fs.ts";
 import { buildShadowDataset, type ShadowDatasetRow } from "./dataset.ts";
 import { readShadowEvents, resolveShadowEventPath } from "./report.ts";
 
@@ -156,17 +156,10 @@ function fingerprint(rows: readonly ShadowDatasetRow[], previous: number, candid
     .digest("hex");
 }
 
-function writeAtomic(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  renameSync(temporary, path);
-}
-
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const eventsPath = resolveShadowEventPath(process.argv[2]);
   const outputPath = resolve(process.argv[3] ?? `${eventsPath}.tau-candidate.json`);
   const artifact = calibrateRollingTau(buildShadowDataset(readShadowEvents(eventsPath)).rows);
-  writeAtomic(outputPath, artifact);
+  writeJsonAtomic(outputPath, artifact);
   process.stdout.write(`${JSON.stringify({ eventsPath, outputPath, ...artifact }, null, 2)}\n`);
 }

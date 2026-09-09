@@ -1,3 +1,4 @@
+import { percentileNearestRank } from "../../tools/parts/stats.ts";
 export interface EvaluationResult {
   questionId: string;
   mode: string;
@@ -156,8 +157,8 @@ export function summarizeLatencyByMode(
             durations.length === 0
               ? 0
               : Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length),
-          p50Ms: percentile(durations, 0.5),
-          p95Ms: percentile(durations, 0.95),
+          p50Ms: percentileNearestRank(durations, 0.5),
+          p95Ms: percentileNearestRank(durations, 0.95),
         },
       ];
     }),
@@ -359,10 +360,4 @@ function wilsonInterval(successes: number, total: number): { lower: number; uppe
     lower: Math.max(0, centre - margin),
     upper: Math.min(1, centre + margin),
   };
-}
-
-function percentile(sortedValues: readonly number[], quantile: number): number {
-  if (sortedValues.length === 0) return 0;
-  const index = Math.ceil(quantile * sortedValues.length) - 1;
-  return sortedValues[Math.max(0, index)]!;
 }

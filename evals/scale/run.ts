@@ -2,11 +2,8 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { DatabaseSync } from "node:sqlite";
-import {
-  createEmbeddingClientFromEnv,
-  type EmbeddingClient,
-  NmgStore,
-} from "../../src/index.ts";
+import { createEmbeddingClientFromEnv, type EmbeddingClient, NmgStore } from "../../src/index.ts";
+import { percentileFloor } from "../../tools/parts/stats.ts";
 
 const DEFAULT_SIZES = [100, 1_000, 10_000, 100_000];
 const sizes = (process.env.NMG_SCALE_SIZES?.split(",").map(Number) ?? DEFAULT_SIZES).filter(
@@ -141,8 +138,8 @@ for (const size of sizes) {
         }),
       ),
       latencyMs: {
-        p50: percentile(latencies, 0.5),
-        p95: percentile(latencies, 0.95),
+        p50: percentileFloor(latencies, 0.5),
+        p95: percentileFloor(latencies, 0.95),
         max: latencies.at(-1) ?? 0,
       },
       estimatedReturnedTokens: Math.ceil(
@@ -219,12 +216,6 @@ function insertDistractors(path: string, count: number): void {
     db.close();
   }
 }
-
-function percentile(sorted: number[], ratio: number): number {
-  if (sorted.length === 0) return 0;
-  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * ratio))]!;
-}
-
 async function indexWithClient(
   store: NmgStore,
   client: EmbeddingClient,

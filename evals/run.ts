@@ -9,6 +9,8 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { decideMemoryLoad, NmgStore } from "../src/index.ts";
 import type { MemoryLoadMode, MemoryTier } from "../src/core/types.ts";
 import { attemptedToolCall, successfulToolCall } from "./tool-events.ts";
+import { mapConcurrent } from "../tools/parts/async.ts";
+import { definedEnvironment } from "../tools/parts/env.ts";
 
 interface EvalCase {
   id: string;
@@ -322,30 +324,4 @@ function summarizeEvents(events: AgentSessionEvent[]): string {
       })
       .join(",") || "<none>"
   );
-}
-
-function definedEnvironment(): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(process.env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
-    ),
-  );
-}
-
-async function mapConcurrent<T, R>(
-  values: T[],
-  concurrency: number,
-  worker: (value: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(values.length);
-  let nextIndex = 0;
-  await Promise.all(
-    Array.from({ length: concurrency }, async () => {
-      while (nextIndex < values.length) {
-        const index = nextIndex++;
-        results[index] = await worker(values[index]!);
-      }
-    }),
-  );
-  return results;
 }

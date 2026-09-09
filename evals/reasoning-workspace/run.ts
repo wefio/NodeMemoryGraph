@@ -2,6 +2,8 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { RpcClient, type AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import { mapConcurrent } from "../../tools/parts/async.ts";
+import { definedEnvironment } from "../../tools/parts/env.ts";
 
 interface Case {
   id: string;
@@ -294,14 +296,6 @@ function readWorkspace(dataDirectory: string): { nodeCount: number; contents: st
   }
 }
 
-function definedEnvironment(): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(process.env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
-    ),
-  );
-}
-
 function distractorContext(): string {
   return Array.from(
     { length: 1_600 },
@@ -309,24 +303,4 @@ function distractorContext(): string {
       `Archive item ${index}: telemetry channel ${index % 37} reported nominal status; ` +
       `reference checksum ${(index * 2_654_435_761).toString(16)}.`,
   ).join("\n");
-}
-
-async function mapConcurrent<T, R>(
-  values: readonly T[],
-  concurrency: number,
-  worker: (value: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(values.length);
-  let nextIndex = 0;
-  async function runWorker(): Promise<void> {
-    while (nextIndex < values.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      results[index] = await worker(values[index]!);
-    }
-  }
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, values.length) }, () => runWorker()),
-  );
-  return results;
 }

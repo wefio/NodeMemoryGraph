@@ -39,6 +39,7 @@ export {
   type VerificationRunResult,
   type VerificationStatus,
 } from "../src/rcp/verification.ts";
+import { requirePositiveInteger } from "./parts/numbers.ts";
 
 export function buildVerificationPlan(report: AgentContextReport) {
   return buildRouteVerificationPlan(report.routes);
@@ -95,7 +96,10 @@ function parseArgs(args: string[]) {
     else if (argument === "--require-clean") requireClean = true;
     else if (argument === "--help" || argument === "-h") help = true;
     else if (argument === "--timeout-ms") {
-      timeoutMs = positiveInteger(requireValue(args, ++index, "--timeout-ms"), "--timeout-ms");
+      timeoutMs = requirePositiveInteger(
+        requireValue(args, ++index, "--timeout-ms"),
+        "--timeout-ms",
+      );
     } else if (argument === "--output") {
       output = requireValue(args, ++index, "--output");
     } else if (argument === "--root") root = args[++index] ?? root;
@@ -124,14 +128,6 @@ function parseArgs(args: string[]) {
     help,
   };
 }
-
-function positiveInteger(value: string, name: string): number {
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0)
-    throw new Error(`${name} requires a positive integer`);
-  return parsed;
-}
-
 function requireValue(args: string[], index: number, name: string): string {
   const value = args[index];
   if (!value) throw new Error(`${name} requires a value`);

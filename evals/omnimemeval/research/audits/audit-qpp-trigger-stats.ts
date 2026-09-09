@@ -8,8 +8,12 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { mean } from "../../../../tools/parts/stats.ts";
 
-const ROOT = new URL("../../.benchmarks/", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+const ROOT = new URL("../../.benchmarks/", import.meta.url).pathname.replace(
+  /^\/([A-Za-z]:)/,
+  "$1",
+);
 
 function sqliteFiles(directory: string): string[] {
   const out: string[] = [];
@@ -77,16 +81,16 @@ for (const file of files) {
   }
   db.close();
 }
-
-function mean(values: number[]): number {
-  return values.length === 0 ? 0 : values.reduce((a, b) => a + b, 0) / values.length;
-}
 function percent(part: number, total: number): string {
   return total === 0 ? "0%" : `${((part / total) * 100).toFixed(1)}%`;
 }
 
-console.log(`traces: ${traces} | with expansion: ${withExpansion} (${percent(withExpansion, traces)})`);
-console.log(`trigger: ${triggers.trigger} (${percent(triggers.trigger, traces)}) | ok: ${triggers.ok} (${percent(triggers.ok, traces)})`);
+console.log(
+  `traces: ${traces} | with expansion: ${withExpansion} (${percent(withExpansion, traces)})`,
+);
+console.log(
+  `trigger: ${triggers.trigger} (${percent(triggers.trigger, traces)}) | ok: ${triggers.ok} (${percent(triggers.ok, traces)})`,
+);
 console.log("reason distribution:");
 for (const [k, v] of [...reason.entries()].sort((a, b) => b[1] - a[1])) {
   console.log(`  ${k.padEnd(28)} ${v} (${percent(v, traces)})`);
@@ -95,6 +99,8 @@ console.log("expansion stoppedBecause:");
 for (const [k, v] of [...stopped.entries()].sort((a, b) => b[1] - a[1])) {
   console.log(`  ${k.padEnd(28)} ${v} (${percent(v, withExpansion)})`);
 }
-console.log(`stages per expansion: mean ${mean(stages).toFixed(2)} | max ${stages.length ? Math.max(...stages) : 0}`);
+console.log(
+  `stages per expansion: mean ${mean(stages).toFixed(2)} | max ${stages.length ? Math.max(...stages) : 0}`,
+);
 console.log(`qpp score: mean ${mean(qppScores).toFixed(3)} | n=${qppScores.length}`);
 console.log(`top1: mean ${mean(top1).toFixed(3)} | n=${top1.length}`);

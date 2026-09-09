@@ -27,6 +27,8 @@ import { resolveBenchmarkData } from "../official/data-path.ts";
 import { loadBeam, loadLocomo, stratifiedSample } from "../benchmarks/loaders.ts";
 import type { BenchmarkCase } from "../benchmarks/types.ts";
 import { matchedProductMetricsFromArtifact } from "../benchmarks/product-metrics.ts";
+import { mean } from "../../tools/parts/stats.ts";
+import { requirePositiveInteger } from "../../tools/parts/numbers.ts";
 
 type SupportedBenchmark = "beam" | "locomo";
 const QPP2_FEATURE_COUNT = 15;
@@ -56,10 +58,10 @@ interface PreparedCorpus {
 
 const root = resolve(import.meta.dirname, "../..");
 const benchmark = parseBenchmark(process.argv[2]);
-const perCategory = positiveInteger(process.argv[3] ?? "4");
-const epochs = positiveInteger(process.env.NMG_CONTROLLER_EPOCHS ?? "80");
-const topNodes = positiveInteger(process.env.NMG_CONTROLLER_TOP_NODES ?? "2");
-const requestedBudgetFolds = positiveInteger(process.env.NMG_CONTROLLER_BUDGET_FOLDS ?? "5");
+const perCategory = requirePositiveInteger(process.argv[3] ?? "4");
+const epochs = requirePositiveInteger(process.env.NMG_CONTROLLER_EPOCHS ?? "80");
+const topNodes = requirePositiveInteger(process.env.NMG_CONTROLLER_TOP_NODES ?? "2");
+const requestedBudgetFolds = requirePositiveInteger(process.env.NMG_CONTROLLER_BUDGET_FOLDS ?? "5");
 const runDirectory = resolve(
   root,
   "evals/controller/results",
@@ -129,7 +131,7 @@ const adaptiveQpp2Tradeoff95 = summarizeCompression(
 const adaptiveQpp2Tradeoff98 = summarizeCompression(
   budgetRows.map((row) => ({ expanded: row.autodiffQpp, compressed: row.adaptiveQpp2_98 })),
 );
-const candidateRecall = average(rows.map((row) => row.candidateRecall));
+const candidateRecall = mean(rows.map((row) => row.candidateRecall));
 const latencyTolerance = Number.parseFloat(process.env.NMG_CONTROLLER_LATENCY_FACTOR ?? "4");
 const recallTolerance = Number.parseFloat(process.env.NMG_CONTROLLER_RECALL_TOLERANCE ?? "0.01");
 const matchedProductArtifactPath = process.env.NMG_CONTROLLER_MATCHED_PRODUCT_REPORT
@@ -839,7 +841,7 @@ function qpp2Features(
     entry.selection.rank / Math.max(1, candidates.length),
     nodeCount / Math.max(1, candidates.length),
     pairwise[0] ?? 0,
-    average(pairwise.slice(0, 3)),
+    mean(pairwise.slice(0, 3)),
     pairwise.filter((score) => score >= 0.7).length / Math.max(1, pairwise.length),
     graphSupport,
     secondOrderRelevance,
@@ -1014,17 +1016,17 @@ function projectFibonacciTier(fraction: number, maximum: number): number {
 
 function summarizeBudget(rows: BudgetPolicyResult[]) {
   return {
-    recall: average(rows.map((row) => row.recall)),
-    precision: average(rows.map((row) => row.precision)),
+    recall: mean(rows.map((row) => row.recall)),
+    precision: mean(rows.map((row) => row.precision)),
     evidenceFound: sum(rows.map((row) => row.evidenceFound)),
     officialEvidence: sum(rows.map((row) => row.officialEvidence)),
-    visibleMemories: average(rows.map((row) => row.visibleMemories)),
-    estimatedTokens: average(rows.map((row) => row.estimatedTokens)),
-    initialTier: average(rows.map((row) => row.initialTier)),
-    finalTier: average(rows.map((row) => row.finalTier)),
-    stages: average(rows.map((row) => row.stages)),
-    qppStopRate: average(rows.map((row) => Number(row.qppStopped))),
-    inferenceMs: average(rows.map((row) => row.inferenceMs)),
+    visibleMemories: mean(rows.map((row) => row.visibleMemories)),
+    estimatedTokens: mean(rows.map((row) => row.estimatedTokens)),
+    initialTier: mean(rows.map((row) => row.initialTier)),
+    finalTier: mean(rows.map((row) => row.finalTier)),
+    stages: mean(rows.map((row) => row.stages)),
+    qppStopRate: mean(rows.map((row) => Number(row.qppStopped))),
+    inferenceMs: mean(rows.map((row) => row.inferenceMs)),
   };
 }
 
@@ -1032,21 +1034,21 @@ function summarizeCompression(
   rows: Array<{ expanded: BudgetPolicyResult; compressed: BudgetPolicyResult }>,
 ) {
   return {
-    evidenceRetention: average(
+    evidenceRetention: mean(
       rows.map(({ expanded, compressed }) =>
         expanded.evidenceFound === 0
           ? 1
           : Math.min(1, compressed.evidenceFound / expanded.evidenceFound),
       ),
     ),
-    tokenCompression: average(
+    tokenCompression: mean(
       rows.map(({ expanded, compressed }) =>
         expanded.estimatedTokens === 0
           ? 0
           : 1 - compressed.estimatedTokens / expanded.estimatedTokens,
       ),
     ),
-    recordCompression: average(
+    recordCompression: mean(
       rows.map(({ expanded, compressed }) =>
         expanded.visibleMemories === 0
           ? 0
@@ -1099,9 +1101,9 @@ function selectionMetrics(
 
 function summarize(rows: Array<ReturnType<typeof selectionMetrics>>) {
   return {
-    recall: average(rows.map((row) => row.recall)),
-    precision: average(rows.map((row) => row.precision)),
-    inferenceMs: average(rows.map((row) => row.inferenceMs)),
+    recall: mean(rows.map((row) => row.recall)),
+    precision: mean(rows.map((row) => row.precision)),
+    inferenceMs: mean(rows.map((row) => row.inferenceMs)),
   };
 }
 
@@ -1148,17 +1150,9 @@ function parseBenchmark(value: string | undefined): SupportedBenchmark {
   if (value === "beam" || value === "locomo") return value;
   throw new Error("controller benchmark must be locomo or beam");
 }
-
-function positiveInteger(value: string): number {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed < 1)
-    throw new Error(`expected positive integer: ${value}`);
-  return parsed;
-}
-
 function candidateLimit(name: string, fallback: number): number {
   const configured = process.env[name];
-  return configured ? positiveInteger(configured) : fallback;
+  return configured ? requirePositiveInteger(configured) : fallback;
 }
 
 function vectorGranularity(): "hierarchy" | "records" | "union" {
@@ -1220,8 +1214,8 @@ function summarizeEvidenceCohesion(values: PreparedCase[]) {
       }
     }
   }
-  const evidenceMean = average(evidencePairs);
-  const evidenceNoiseMean = average(evidenceNoisePairs);
+  const evidenceMean = mean(evidencePairs);
+  const evidenceNoiseMean = mean(evidenceNoisePairs);
   return {
     category: "LoCoMo category 1 (official multi-hop)",
     eligibleCases,
@@ -1233,11 +1227,6 @@ function summarizeEvidenceCohesion(values: PreparedCase[]) {
     assumptionSupported: evidencePairs.length > 0 && evidenceMean > evidenceNoiseMean,
   };
 }
-
-function average(values: number[]): number {
-  return values.length === 0 ? 0 : sum(values) / values.length;
-}
-
 function sum(values: number[]): number {
   return values.reduce((total, value) => total + value, 0);
 }

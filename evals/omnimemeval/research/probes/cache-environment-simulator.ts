@@ -3,6 +3,7 @@
  * Prompt text is consumed only while producing fixed-byte prefix checkpoints.
  */
 import { createHash } from "node:crypto";
+import { percentileScaled } from "../../../../tools/parts/stats.ts";
 
 export const DEFAULT_PREFIX_BLOCK_BYTES = 512;
 
@@ -131,13 +132,6 @@ export function buildPrefixCheckpoints(
 function cacheKey(checkpoint: PrefixCheckpoint): string {
   return `${checkpoint.length}:${checkpoint.hash}`;
 }
-
-function percentile(values: readonly number[], fraction: number): number {
-  if (values.length === 0) return 0;
-  const ordered = [...values].sort((left, right) => left - right);
-  return ordered[Math.min(ordered.length - 1, Math.round((ordered.length - 1) * fraction))]!;
-}
-
 function deterministicJitter(id: string, rangeMs: number): number {
   if (rangeMs <= 0) return 0;
   const value = createHash("sha256").update(id).digest().readUInt32BE(0) / 0xffffffff;
@@ -202,7 +196,8 @@ export function simulateCacheEnvironment(
     const prefillMs = (missingBytes / 1024) * environment.prefillMsPerKb;
     const decodeMs = (request.outputTokens ?? 0) * environment.decodeMsPerToken;
     const serviceMs = environment.cacheLookupMs + prefillMs + decodeMs;
-    const cacheReadyAtMs = serviceStartMs + environment.cacheLookupMs + prefillMs + environment.cacheBuildMs;
+    const cacheReadyAtMs =
+      serviceStartMs + environment.cacheLookupMs + prefillMs + environment.cacheBuildMs;
     const cacheEntry = {
       readyAtMs: cacheReadyAtMs,
       expiresAtMs: cacheReadyAtMs + environment.cacheTtlMs,
@@ -243,8 +238,8 @@ export function simulateCacheEnvironment(
         latencies.length === 0
           ? 0
           : latencies.reduce((sum, value) => sum + value, 0) / latencies.length,
-      p50: percentile(latencies, 0.5),
-      p95: percentile(latencies, 0.95),
+      p50: percentileScaled(latencies, 0.5),
+      p95: percentileScaled(latencies, 0.95),
     },
     requestResults,
   };

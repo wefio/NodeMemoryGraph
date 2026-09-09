@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import type { PerfSnapshot } from "../../src/core/types.ts";
+import { percentileNearestRank } from "../../tools/parts/stats.ts";
 
 interface PerfRow {
   userId: string;
@@ -33,23 +34,21 @@ const report = Object.fromEntries(
         section,
         {
           count: values.length,
-          p50: percentile(values, 0.5),
-          p95: percentile(values, 0.95),
-          p99: percentile(values, 0.99),
+          p50: percentileNearestRank(values, 0.5),
+          p95: percentileNearestRank(values, 0.95),
+          p99: percentileNearestRank(values, 0.99),
         },
       ];
     }),
 );
 
-console.log(JSON.stringify({ path, userPrefix: userPrefix ?? null, samples: rows.length, report }, null, 2));
+console.log(
+  JSON.stringify({ path, userPrefix: userPrefix ?? null, samples: rows.length, report }, null, 2),
+);
 
 function add(section: string, value: number): void {
   if (!Number.isFinite(value)) return;
   const values = samples.get(section) ?? [];
   values.push(value);
   samples.set(section, values);
-}
-
-function percentile(sorted: readonly number[], ratio: number): number {
-  return sorted[Math.max(0, Math.ceil(sorted.length * ratio) - 1)] ?? 0;
 }
