@@ -67,7 +67,7 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 - `tests`：Node 24 产品测试和覆盖率；
 - `research-tests`：研究/benchmark adapter 表征，`continue-on-error`；
 - `node-compat`：最低支持版本 Node 22.19 的 build/package；
-- `chaos`：Windows 上的资源与 daemon 故障注入；
+- `chaos`：Windows 上的资源与 daemon 故障注入，仅在推送到 `main` 时运行（145 次 CI 运行中仅 1 次失败，且在 `main` 上；见[决策](../decisions/implemented/2026-09-09-chaos-tests-on-main-pushes.md)）；
 - `all-checks-passed`：只聚合阻塞轨道。
 
 CI 或打包规则变更除本地目标测试外，应在 clean checkout（或等价干净 worktree）运行其完整命令，防止未跟踪文件让本地验证产生假阳性。

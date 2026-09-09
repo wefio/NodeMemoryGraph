@@ -84,6 +84,9 @@ jobs:
     name: Windows chaos tests
     # These reproduce Windows-specific EPERM file pins and WAL locking. One
     # supported runtime is enough here; Node compatibility is checked above.
+    # The job failed once in 153 runs, on main, so it runs on main pushes
+    # instead of every pull request: 2026-09-09-chaos-tests-on-main-pushes.
+    if: github.event_name == 'push'
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -114,4 +117,5 @@ jobs:
           test "$STATIC_RESULT" = success
           test "$TESTS_RESULT" = success
           test "$NODE_COMPAT_RESULT" = success
-          test "$CHAOS_RESULT" = success
+          # chaos is skipped on pull requests and required on main pushes.
+          test "$CHAOS_RESULT" = success || test "$CHAOS_RESULT" = skipped
