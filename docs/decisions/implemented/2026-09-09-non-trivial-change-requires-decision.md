@@ -2,7 +2,7 @@
 
 [中文](2026-09-09-non-trivial-change-requires-decision.zh-CN.md)
 
-**Status:** proposed
+**Status:** implemented
 **Date:** 2026-09-09
 
 ## Problem
@@ -25,7 +25,7 @@ update at least one decision note in the same pull request, and only a purely
 mechanical or local edit is exempt. NMG has the record format and the lifecycle
 gates but not the obligation.
 
-## Proposal
+## Decision
 
 Every non-trivial change adds or updates at least one decision record in the
 same pull request. Updating the record that already owns the decision satisfies
@@ -63,24 +63,21 @@ are the ones a future reader most needs to reconstruct.
 counting files, but it produces records for typo fixes, which trains reviewers to
 ignore them.
 
-## Acceptance criteria
+## Verification
 
 - `skills/repo-development/SKILL.md` defines non-trivial, lists the exempt
-  categories, and requires the record in the same pull request.
+  categories, and requires the record in the same commit.
 - `.github/pull_request_template.md` carries the requirement as a checklist item.
-- The next change that alters behavior, a contract, structure, tooling, test
-  strategy, or a format cites the decision record it added or updated.
-- No gate is added, and the decision records why: the judgment is not
+- This decision is its own first case: it was added with the rule it describes.
+- No gate exists, and the decision records why: the judgment is not
   mechanizable, so a gate would measure the wording rather than the work.
 
-## Risks
+## Consequences
 
-**Over-recording.** If reviewers accept a record for every trivial change, the
-decision tree fills with noise. The exemption list is the counterweight, and the
-review of the record itself is the check.
-
-**Under-recording by habit.** Without a gate, an agent that forgets produces no
-signal. The mitigation is that the pull-request checklist item is visible in the
-same place the reviewer already reads, and the omission is itself a reviewable
-claim under
-[declare what was not verified](2026-09-09-declare-what-was-not-verified.md).
+- **Over-recording.** If reviewers accept a record for every trivial change, the
+  decision tree fills with noise. The exemption list is the counterweight, and the
+  review of the record itself is the check.
+- **Under-recording by habit.** Without a gate, an agent that forgets produces no
+  signal. The pull-request checklist item is visible in the same place the
+  reviewer already reads, and the omission is itself a reviewable claim under
+  [declare what was not verified](2026-09-09-declare-what-was-not-verified.md).

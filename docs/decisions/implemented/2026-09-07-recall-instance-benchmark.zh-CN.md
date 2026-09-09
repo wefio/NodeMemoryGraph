@@ -41,7 +41,10 @@ online router 优化的那一层,也不做任何因果 claim("这条帮了我的
     或 judge 运行的数据源。
   - **离线 judge**(`tools/recall-instance-judge.ts`,按需):取
     `on_target | partial | noise | misleading | gap`。`gap` 描述缺失情形——该召回的
-    记忆没被召回——这是检索层也必须核算的充分性失败。
+    记忆没被召回——这是检索层也必须核算的充分性失败。判分者可以是外部模型
+    (`NMG_JUDGE_*`),也可以是 agent 本人:`--list` 逐条打印实例(trigger + 候选 + 现标签)
+    供阅读,`--set <graphId>=<label>` 记录人工判断;两者写同一条 `source: judge`
+    账本记录,非法标签或未知实例一律拒绝而非猜测。
 - 语料即 benchmark 基底:被还债/judge 的实例累积成回归/分析集并提供真实检索级标签。
 
 ## 后果

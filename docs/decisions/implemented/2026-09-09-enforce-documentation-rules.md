@@ -2,7 +2,7 @@
 
 [中文](2026-09-09-enforce-documentation-rules.zh-CN.md)
 
-**Status:** proposed
+**Status:** implemented
 **Date:** 2026-09-09
 
 ## Problem
@@ -26,9 +26,12 @@ authoritative". Nothing checks either one, and the repository violates both.
 A rule that exists only as prose is a claim about the repository, not a property
 of it. The gap is not a missing checklist; it is an unenforced one.
 
-## Proposal
+## Decision
 
-`docs:check` enforces the two checklist items that are mechanically checkable.
+`docs:check` enforces the two checklist items that are mechanically checkable. It
+enforces exactly the headings the skill bans: `## Risks` is not among them, and
+the 2026-08-29 control-plane decision states its accepted risks in the present
+tense, so that heading stays.
 
 - An `implemented/` decision containing `## Proposal`, `## Plan`,
   `## Acceptance criteria`, or `## Risks` fails the check. Unfinished or
@@ -85,28 +88,27 @@ class in the path (`{lifecycle}/{class}/`). NMG has 21 decisions; renaming all o
 them to gain a filter buys little now. Revisit when browsing the tree stops
 working.
 
-## Acceptance criteria
+## Verification
 
-- `docs:check` fails an `implemented/` decision carrying a proposal-era heading,
-  with a test for each banned heading in `tests/docs/verify-docs.test.ts`.
-- `docs:check` prints the decision summary line, and counts a decision with a
-  non-empty `## Deferred` as open, with a test.
+- `docs:check` fails an `implemented/` decision carrying `## Proposal`,
+  `## Plan`, or `## Acceptance criteria`, with a test for each banned heading in
+  `tests/docs/verify-docs.test.ts`.
+- `docs:check` prints the decision summary line and counts a decision with a
+  non-empty `## Deferred` as open; both are covered by tests.
 - The three migrated decisions record their open items under `## Deferred` in
   both languages.
 - `docs/decisions/README.md` no longer lists individual decisions and still
   states the lifecycle contract.
 - `npm run docs:check` reports zero errors and no new warnings.
 
-## Risks
+## Consequences
 
-**Mechanical compliance.** Renaming `## Acceptance criteria` to `## Deferred`
-satisfies the gate without moving the content's meaning. The migration is
-reviewed in this change; the gate only keeps the heading from coming back.
-
-**Discovery.** Removing the lists means "which decisions exist?" is answered by
-the directory tree and search. The summary line and the README's pointer to the
-tree are the compensation; if browsing the tree stops working, the class-axis
-alternative becomes relevant.
-
-**The unenforced remainder.** Three checklist items stay prose. That is honest,
-not solved: the design-doc defect was caught by reading, and will be again.
+- **Mechanical compliance.** Renaming `## Acceptance criteria` to `## Deferred`
+  satisfies the gate without moving the content's meaning. The migration was
+  reviewed; the gate only keeps the heading from coming back.
+- **Discovery.** Removing the lists means "which decisions exist?" is answered by
+  the directory tree and search. The summary line and the README's pointer to the
+  tree are the compensation; if browsing the tree stops working, the class-axis
+  alternative becomes relevant.
+- **The unenforced remainder.** Three checklist items stay prose. That is honest,
+  not solved: the design-doc defect was caught by reading, and will be again.

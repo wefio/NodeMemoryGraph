@@ -53,7 +53,12 @@ answer" claim.
   - **offline judge** (`tools/recall-instance-judge.ts`, on demand): one of
     `on_target | partial | noise | misleading | gap`. `gap` names the missing
     case — a memory that should have been recalled was not — the sufficiency
-    failure the retrieval layer must also account for.
+    failure the retrieval layer must also account for. The judge may be an
+    external model (`NMG_JUDGE_*`) or the agent itself: `--list` prints each
+    instance (trigger + candidates + current label) for reading, and
+    `--set <graphId>=<label>` records a manual judgement; both write the same
+    `source: judge` ledger entry, and an invalid label or unknown instance is
+    rejected rather than guessed.
 - The corpus is the benchmark substrate: settled/judged instances accumulate
   into a regression/analysis set and provide real retrieval-level labels.
 

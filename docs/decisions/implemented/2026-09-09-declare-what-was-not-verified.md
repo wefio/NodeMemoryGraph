@@ -2,7 +2,7 @@
 
 [中文](2026-09-09-declare-what-was-not-verified.zh-CN.md)
 
-**Status:** proposed
+**Status:** implemented
 **Date:** 2026-09-09
 
 ## Problem
@@ -25,7 +25,7 @@ not build, test, or reproduce. NMG has no equivalent obligation, and the
 receipt that never carried coverage numbers, a field that was declared and never
 read.
 
-## Proposal
+## Decision
 
 Every agent-delivered change declares its unverified surface in the pull request
 that carries it, in a `## Not verified` section of the pull-request description.
@@ -61,23 +61,27 @@ check could require a non-empty section. It would be satisfied by the word
 `None.`, and it would add a network and token dependency to a gate whose current
 inputs are local files. The reminder is the template; the content is reviewed.
 
-## Acceptance criteria
+## Verification
 
-- `skills/repo-development/SKILL.md` states the obligation and its scope.
-- `.github/pull_request_template.md` carries a `## Not verified` section whose
-  guidance names routes, platforms, environments, build modes, and reproducers.
+- `skills/repo-development/SKILL.md` states the obligation and its scope in the
+  pull-request step.
+- `.github/pull_request_template.md` carries a `## 未验证项` section with a
+  `**Not verified**` line whose guidance names routes, platforms, environments,
+  build modes, and reproducers.
 - Unfinished or unverified items use the `## Deferred` section owned by
   [enforce the documented documentation rules](2026-09-09-enforce-documentation-rules.md).
-- A reader of a merged pull request can answer "what did this change not
-  verify?" without reading the diff.
+- A reader of a merged pull request can answer "what did this change not verify?"
+  without reading the diff.
 
-## Risks
+## Consequences
 
-**Ritual compliance.** A required section invites an unconsidered `None.`. The
-mitigation is that it is read in the same review as the change, where a wrong
-`None.` is a checkable claim about a known surface.
-
-**Overlap with `## Consequences`.** A decision already records what it gave up.
-The section is narrower: a surface that was not verified, not a trade-off that
-was accepted. When both exist, `## Consequences` owns the trade-off and
-`## Deferred` owns the omission.
+- **Ritual compliance.** A required section invites an unconsidered `None.`. It
+  is read in the same review as the change, where a wrong `None.` is a checkable
+  claim about a known surface.
+- **No check exists.** Nothing verifies that the section is filled, because no
+  test distinguishes "this change needs no verification" from "this change claims
+  it needs none"; a gate would be satisfied by writing a sentence.
+- **Overlap with the trade-off record.** A decision already records what it gave
+  up. The section is narrower: a surface that was not verified, not a trade-off
+  that was accepted. When both exist, the trade-off record owns the trade-off and
+  `## Deferred` owns the omission.

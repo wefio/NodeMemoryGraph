@@ -2,7 +2,7 @@
 
 [English](2026-09-09-enforce-documentation-rules.md)
 
-**Status:** proposed
+**Status:** implemented
 **Date:** 2026-09-09
 
 ## 问题
@@ -25,9 +25,11 @@ Acceptance criteria」，以及「当源码或生成器才是权威时，手抄�
 只存在于散文里的规则，是**关于仓库的声明**，不是仓库的属性。缺口不是少一份清单，
 而是那份清单**没有被执行**。
 
-## 提案
+## 决策
 
-`docs:check` 执行清单里两条可机械检查的条目。
+`docs:check` 执行清单里两条可机械检查的条目。它执行的**恰好**是 skill 所禁的
+标题集合：`## Risks` 不在其中，而 2026-08-29 的 control plane 决策以现在时陈述
+它已接受的风险，因此该标题保留。
 
 - 当 `implemented/` 决策出现 `## Proposal`、`## Plan`、`## Acceptance criteria`
   或 `## Risks` 时，检查失败。未完成或未验证的项移到 `## Deferred`，即
@@ -71,23 +73,23 @@ skill 的 Workflow 第 3 步已经把每类事实分配到各自的界面；缺�
 （`{lifecycle}/{class}/`）。NMG 只有 21 条决策，为获得一个筛选维度而重命名全部
 文件收益很小。等浏览这棵树不再够用时再议。
 
-## 验收标准
+## 验证
 
-- 当 `implemented/` 决策带有提案期标题时 `docs:check` 失败，且每个被禁标题在
-  `tests/docs/verify-docs.test.ts` 中都有测试。
-- `docs:check` 打印决策摘要行，并把带非空 `## Deferred` 的决策计为 open，且有测试。
+- 当 `implemented/` 决策带有 `## Proposal`、`## Plan` 或 `## Acceptance criteria`
+  时 `docs:check` 失败，且每个被禁标题在 `tests/docs/verify-docs.test.ts` 中都有
+  测试。
+- `docs:check` 打印决策摘要行，并把带非空 `## Deferred` 的决策计为 open；两者都有
+  测试覆盖。
 - 三条被迁移的决策在两种语言里都把未完成项记在 `## Deferred` 之下。
 - `docs/decisions/README.md` 不再逐条列出决策，同时仍写明生命周期契约。
 - `npm run docs:check` 报 0 错误、且不新增警告。
 
-## 风险
+## 后果
 
-**机械遵从。** 把 `## Acceptance criteria` 改名为 `## Deferred` 就能满足门禁，而
-不必移动内容的含义。迁移在本次改动中审阅；门禁只负责不让这个标题回来。
-
-**发现能力。** 删掉清单意味着「有哪些决策？」由目录树和搜索来回答。摘要行与
-README 指向目录树的说明是补偿；如果浏览这棵树不再够用，分类轴那个替代方案就该
-重新考虑。
-
-**未被执行的剩余部分。** 清单里还有三条只靠散文。这是诚实的状态，不是已解决的
-问题：设计文档那处缺陷是靠阅读发现的，以后还会如此。
+- **机械遵从。** 把 `## Acceptance criteria` 改名为 `## Deferred` 就能满足门禁，
+  而不必移动内容的含义。迁移经过了审阅；门禁只负责不让这个标题回来。
+- **发现能力。** 删掉清单意味着「有哪些决策？」由目录树和搜索来回答。摘要行与
+  README 指向目录树的说明是补偿；如果浏览这棵树不再够用，分类轴那个替代方案就该
+  重新考虑。
+- **未被执行的剩余部分。** 清单里还有三条只靠散文。这是诚实的状态，不是已解决的
+  问题：设计文档那处缺陷是靠阅读发现的，以后还会如此。
