@@ -3,7 +3,7 @@
 **Status:** pre-registered (protocol only, **not yet run**).
 **Date:** 2026-09-07
 **Owner context:** `docs/design/agent-convergence-feedback-design.md` §9.4–9.6.
-**Predecessor:** `docs/experiments/context-live-canary-2026-09-07.md` (proved the
+**Predecessor:** `docs/experiments/context/live-canary-2026-09-07.md` (proved the
 decision → real-model exposure → official-grading → usage path is wired; n=3,
 no value claim).
 

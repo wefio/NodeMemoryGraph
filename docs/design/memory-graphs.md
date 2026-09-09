@@ -1,6 +1,6 @@
 # Memory Graphs: STG / LTG / AG
 
-**Status:** consolidated design note
+**Status:** current
 
 Implementation note: isolated STG is wired through the core, daemon, CLI, and
 Pi adapter. One physical STG database is stored per `projectDir`; records and

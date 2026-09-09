@@ -3,7 +3,6 @@
 [English](2026-09-02-track-build-artifacts-in-git.md)
 
 **Status:** rejected  
-**Date:** 2026-09-02
 
 ## Problem
 

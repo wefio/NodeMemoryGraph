@@ -1,10 +1,10 @@
 # Memory tesserae: bookmarks as a searchable source
 
-**Status:** proposed
+**Status:** draft
 **Updated:** 2026-09-02
 
 This document supersedes the file-content-source design
-([file-content-source-design.md](file-content-source-design.md)) as the owner of
+([file-content-source-design.md](archived/file-content-source-design.md)) as the owner of
 "how an Agent reaches file content through NMG". It records a first-principles
 redesign reached through an extended design discussion (surveyed 2026-09-02).
 
@@ -27,7 +27,7 @@ every session re-discovers file locations by hand (`grep` / `read` / `glob`).
 
 The previous answer was a **file content index**: passively scan files, index
 their full text, and search them as a second source
-([file-content-source-design.md](file-content-source-design.md)). Experience
+([file-content-source-design.md](archived/file-content-source-design.md)). Experience
 with the MVP showed this direction is usable but not good: whole-file blobs,
 trigram fragments with no surface anchors, and — decisively — **a whole index to
 maintain** (scope file, incremental crawler, content hashes, file FTS, scope
@@ -189,7 +189,7 @@ memory through supersede/delete.
 
 ## 6. Relation to the superseded design
 
-[file-content-source-design.md](file-content-source-design.md) proposed a
+[file-content-source-design.md](archived/file-content-source-design.md) proposed a
 full-text file index as a second search source. This design keeps its
 conclusions that are still true — files are not memory; scope discipline
 matters; separated presentation is sane — but **drops the file index itself** in

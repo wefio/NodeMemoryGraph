@@ -3,7 +3,6 @@
 [English](2026-09-07-rcp-lightweight-verification-default.md)
 
 **Status:** implemented
-**Date:** 2026-09-07
 
 ## 问题
 

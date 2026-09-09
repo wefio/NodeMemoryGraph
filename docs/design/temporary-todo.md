@@ -1,6 +1,5 @@
 # NMG active TODO list
 
-**Purpose:** unresolved work only.
 **Authority:** working queue, not design specification or implementation history.
 **Updated:** 2026-09-03
 

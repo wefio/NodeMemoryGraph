@@ -3,8 +3,6 @@
 [English](2026-09-09-chaos-tests-on-main-pushes.md)
 
 **Status:** implemented
-**Date:** 2026-09-09
-**Branch:** feat/rcp-lightweight-verification
 
 ## 问题
 
@@ -38,15 +36,15 @@
 - **删掉混沌套件。** 否决：它抓到过真实缺陷（migration 失败时 SQLite 句柄未关闭，导致文件在 Windows 上被永久占用）。
 - **改为把研究表征 job 挪走。** 不适用：它本来就是非阻塞的，而且 130 次里失败过 4 次。
 
-## 验收标准
+## 验证
 
-截至 2026-09-09 已满足：
+截至 2026-09-09 已验证：
 
 - `chaos` job 声明了仅推送条件，PR 会跳过它。
 - `all-checks-passed` 对 `chaos` 接受 `skipped`，于是 PR 仍报绿色，而 `main` 推送仍要求真实成功。
 - `npm run test:chaos`、`verify:chaos` 与 `chaos` route 均未改动。
 
-仍未满足：
+## 未完成项
 
 - 窗口只有 19 天、145 次运行。更长的窗口才能让 0.65% 这个数字更硬。
 - 受影响路径触发未实现。

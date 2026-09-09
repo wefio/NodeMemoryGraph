@@ -154,3 +154,130 @@ test("uncategorized documentation content at docs root warns", () => {
   assert.deepEqual(report.errors, []);
   assert.ok(report.warnings.some((warning) => warning.includes("must live in design/")));
 });
+
+test("decision header fields are a closed, unique set", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "decisions", "implemented");
+  mkdirSync(directory, { recursive: true });
+  const body =
+    "## Problem\nP\n\n## Decision\nD\n\n## Alternatives considered\nA\n\n## Consequences\nC\n";
+  writeFileSync(
+    join(directory, "2026-08-24-unknown.md"),
+    `# Unknown\n\n**Status:** implemented\n**Branch:** x\n\n${body}`,
+  );
+  writeFileSync(
+    join(directory, "2026-08-24-duplicate.md"),
+    `# Duplicate\n\n**Status:** implemented\n**Status:** rejected\n\n${body}`,
+  );
+  writeFileSync(
+    join(directory, "2026-08-24-allowed.md"),
+    `# Allowed\n\n**Status:** implemented\n**Relates to:** [x](../../README.md)\n\n${body}`,
+  );
+  const report = verifyDocumentation(root);
+  assert.ok(report.errors.some((error) => error.includes("unknown header field '**Branch:**'")));
+  assert.ok(report.errors.some((error) => error.includes("appears 2 times")));
+  assert.ok(!report.errors.some((error) => error.includes("2026-08-24-allowed.md")));
+});
+
+test("a header field below the first section is not a header field", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "decisions", "implemented");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, "2026-08-24-late.md"),
+    "# Late\n\n## Problem\nP\n\n**Status:** implemented\n\n## Decision\nD\n\n" +
+      "## Alternatives considered\nA\n\n## Consequences\nC\n",
+  );
+  const report = verifyDocumentation(root);
+  assert.ok(report.errors.some((error) => error.includes("missing required header field")));
+});
+
+test("implemented decisions reject every proposal-era heading", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "decisions", "implemented");
+  mkdirSync(directory, { recursive: true });
+  const headings = ["Proposal", "Plan", "Acceptance criteria"];
+  headings.forEach((heading, index) => {
+    writeFileSync(
+      join(directory, `2026-08-2${index}-banned.md`),
+      `# Banned\n\n**Status:** implemented\n\n## Problem\nP\n\n## Decision\nD\n\n` +
+        `## Alternatives considered\nA\n\n## ${heading}\nB\n\n## Consequences\nC\n`,
+    );
+  });
+  const report = verifyDocumentation(root);
+  for (const heading of headings) {
+    assert.ok(
+      report.errors.some((error) => error.includes(`proposal-era heading '${heading}'`)),
+      `expected a failure for '${heading}'`,
+    );
+  }
+});
+
+test("the decision summary counts non-empty Deferred sections", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "decisions", "implemented");
+  mkdirSync(directory, { recursive: true });
+  const body =
+    "**Status:** implemented\n\n## Problem\nP\n\n## Decision\nD\n\n" +
+    "## Alternatives considered\nA\n\n";
+  writeFileSync(
+    join(directory, "2026-08-24-open.md"),
+    `# Open\n\n${body}## Deferred\n- remaining work\n\n## Consequences\nC\n`,
+  );
+  writeFileSync(
+    join(directory, "2026-08-24-done.md"),
+    `# Done\n\n${body}## Deferred\n\nNone.\n\n## Consequences\nC\n`,
+  );
+  const report = verifyDocumentation(root);
+  assert.deepEqual(report.errors, []);
+  assert.deepEqual(report.decisions, { implemented: 2, open: 1 });
+});
+
+test("design documents accept only the closed header field set and the status enum", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "design");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, "bad-design.md"),
+    "# Bad\n\n**Status:** implemented across core protocol\n**Owner:** someone\n\n## Body\n",
+  );
+  const report = verifyDocumentation(root);
+  assert.ok(
+    report.errors.some((error) => error.includes("is not one of draft, current, superseded")),
+  );
+  assert.ok(report.errors.some((error) => error.includes("unknown header field '**Owner:**'")));
+});
+
+test("a superseded design must live in archived/ and name its successor", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "design");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "dead-design.md"), "# Dead\n\n**Status:** superseded\n\n## Body\n");
+  const report = verifyDocumentation(root);
+  assert.ok(report.errors.some((error) => error.includes("belongs in docs/design/archived/")));
+  assert.ok(report.errors.some((error) => error.includes("needs a '**Superseded by:**' link")));
+});
+
+test("documents in design/archived/ must be superseded", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "design", "archived");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "live-design.md"), "# Live\n\n**Status:** current\n\n## Body\n");
+  const report = verifyDocumentation(root);
+  assert.ok(report.errors.some((error) => error.includes("must be superseded")));
+});
+
+test("a current design and an archived superseded design pass", () => {
+  const root = fixture();
+  mkdirSync(join(root, "docs", "design", "archived"), { recursive: true });
+  writeFileSync(
+    join(root, "docs", "design", "live-design.md"),
+    "# Live\n\n**Status:** current — calibrated later\n**Related:** [Old](archived/old-design.md)\n\n## Body\n",
+  );
+  writeFileSync(
+    join(root, "docs", "design", "archived", "old-design.md"),
+    "# Old\n\n**Status:** superseded\n**Superseded by:** [Live](../live-design.md)\n\n## Body\n",
+  );
+  const report = verifyDocumentation(root);
+  assert.deepEqual(report.errors, []);
+});

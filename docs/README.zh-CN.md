@@ -22,10 +22,10 @@
 
 - **从这里开始：**先用[概念地图](guides/concept-map.zh-CN.md)理解术语和 owner，再运行[第一次回忆教程](guides/first-recall.zh-CN.md)。
 - **`guides/`**：非规范导航与经过测试的演练。
-- **`design/`**：架构、数据模型、算法和流程契约；[实现沿革索引](design/implementation-lineage.md)只记录能显著降低重新定位或重复犯错成本的 commit。
+- **`design/`**：架构、数据模型、算法和流程契约；被取代的设计移入 `design/archived/`。[实现沿革索引](design/implementation-lineage.md)只记录能显著降低重新定位或重复犯错成本的 commit。
 - **`decisions/`**：带生命周期的设计与流程决策，见 [decisions/README.zh-CN.md](decisions/README.zh-CN.md)。
-- **`experiments/`**：测量证据。运行报告通常命名为 `<topic>-<date>.md`。相关入口包括
-  [节点摘要加速检索调研](experiments/node-summary-accelerated-retrieval-2026-08-19.md)
+- **`experiments/`**：测量证据，按每次运行回答的探究线分组（见[主题清单](experiments/README.zh-CN.md)）。相关入口包括
+  [节点摘要加速检索调研](experiments/retrieval/node-summary-accelerated-retrieval-2026-08-19.md)
   和当前 [benchmark 结果汇总](experiments/benchmark-results.md)。
 
 简化判断：NMG _怎样工作或应该怎样工作_ 写入 `design/`；_为什么这样选择_ 写入 `decisions/`；_实际测到了什么_ 写入 `experiments/`。实验 commit 只有被明确的设计或决策 owner 接纳后，才会成为规范。

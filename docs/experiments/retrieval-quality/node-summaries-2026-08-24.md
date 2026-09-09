@@ -1,7 +1,7 @@
 # Retrieval-quality node-summary tier — 2026-08-24
 
 Follow-up to
-[retrieval-quality-summaries-2026-08-18.md](retrieval-quality-summaries-2026-08-18.md):
+[retrieval-quality-summaries-2026-08-18.md](summaries-2026-08-18.md):
 adds the **node-summary tier** to the summaries arm. Node summaries are one
 LLM-written index text per node, built **from the node's leaf-block summaries**
 (never raw memories), persisted on `memory_nodes` + `memory_node_fts`, routed

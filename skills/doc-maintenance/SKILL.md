@@ -58,6 +58,15 @@ fact narrated as history, is drift waiting to happen:
 - Emphasis inflation: bold, CAPS, or "critically" everywhere means nothing stands
   out. Reserve it for the clause that changes behavior.
 
+**Headers are a closed vocabulary.** A record's header block — the lines before
+its first `##` — carries only the fields its surface documents, and `docs:check`
+rejects anything else. A decision's set is in
+[decisions/README.md](../../docs/decisions/README.md). A design carries
+`**Status:** draft | current | superseded` (absent means current) plus at most
+`Created`, `Updated`, `Authority`, `Related`, `Supersedes`, `Superseded by`; a
+superseded design lives in `docs/design/archived/` and names its successor.
+Free-form status sentences are what this replaced.
+
 ## Workflow
 
 1. **Classify the change before writing.** Decide whether it changes normative

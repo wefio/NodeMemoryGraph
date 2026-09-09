@@ -1,6 +1,6 @@
 # NMG design baseline
 
-**Status:** 0.11 / core persistence stable; session Active Graph runtime core implemented
+**Status:** current — 0.11: core persistence stable; session Active Graph runtime core implemented
 **Updated:** 2026-08-29
 
 ## 1. Definition

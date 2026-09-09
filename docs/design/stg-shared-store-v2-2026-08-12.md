@@ -1,7 +1,7 @@
 # STG Shared-Store v2：物理共享 + 逻辑隔离
 
-**Status:** 已实现；会话行隔离、匿名读取和 daemon 并发契约已验证
-**Date:** 2026-08-12
+**Status:** current — 会话行隔离、匿名读取和 daemon 并发契约已验证
+**Updated:** 2026-08-12
 **Supersedes:** [stg-isolated-store.md](stg-isolated-store.md)（v1：session-private per-session 文件）
 **Related:** [memory-graphs.md](memory-graphs.md) §1/§3/§5, docs/design/design.md §1, `src/core/stg.ts`, `src/core/store/schema.ts`, `src/cli/service.ts`
 

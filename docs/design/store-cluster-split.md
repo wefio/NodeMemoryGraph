@@ -1,8 +1,9 @@
 # Store Cluster Split（store.ts 方法簇拆分）
 
-**Status:** done（2026-08-01；2026-08-03 消除基类 stub，见 §2.2 更新）
-**Commits:** f3cd3b7（#private → protected）、5bcc4ef（守卫测试，红）、444983d（组装 + 98 测试）、stub 消除（helper 上移）
+**Status:** current — 2026-08-01 完成；2026-08-03 消除基类 stub，见 §2.2
 **Related:** [memory-graphs.md](memory-graphs.md), [stg-isolated-store.md](stg-isolated-store.md)
+
+实现提交：f3cd3b7（#private → protected）、5bcc4ef（守卫测试，红）、444983d（组装 + 98 测试）、stub 消除（helper 上移）。
 
 ## 1. 背景
 

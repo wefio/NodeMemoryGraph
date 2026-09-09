@@ -3,8 +3,6 @@
 [English](2026-09-08-requirements-traceability-matrix.md)
 
 **Status:** implemented
-**Date:** 2026-09-08
-**Branch:** feat/rcp-lightweight-verification
 
 ## 问题
 
@@ -62,16 +60,16 @@ RCP 有两个作用：**作为入口引导 agent**，以及**独立验证并记�
 - **采用 GSN/SACM 工具链。** 借结构（claim / argument / evidence / context / assumption），不借 XML 元模型与工具。
 - **整体采用 Spec Kit / Kiro / Tessl。** 借阶段形状（constitution、specify、plan、tasks、implement、validate）与 `spec-kit-trace` 的矩阵，不借 branch-per-spec 工作流；本仓库已有 contract 与 route。
 
-## 验收标准
+## 验证
 
-截至 2026-09-08 已满足：
+截至 2026-09-08 已验证：
 
 - `invariants: string[]` 被 `assertions` 取代，两份 authored contract 完成迁移。
 - 既无 `check` 又无 `documented-only` 的断言失败：契约编译不过，`rtm:check` 也失败。
 - `rtm:check` 在窄化与 full 两条路径上都是阻塞项，对解析不到的 check 与不存在的具名测试失败关闭，并报告孤儿 check 但不因此失败。
 - 文档写明：矩阵全绿意味着「声明的断言被检查过了」，不是「设计正确」。
 
-仍未满足：
+## 未完成项
 
 - `agent:verify` 不打印覆盖表；`rtm:check` 只打印一行统计。收据记录每个 check 的通过/失败与摘要绑定，**不**记录覆盖率数字——check 的 evidence 只在失败时写入。
 - `rtm:check` 的规则摘要未钉在 `.rcp/trusted-policy.json`。

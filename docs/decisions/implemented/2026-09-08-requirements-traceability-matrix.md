@@ -3,8 +3,6 @@
 [中文](2026-09-08-requirements-traceability-matrix.zh-CN.md)
 
 **Status:** implemented
-**Date:** 2026-09-08
-**Branch:** feat/rcp-lightweight-verification
 
 ## Problem
 
@@ -201,9 +199,9 @@ preserve entries and assertions.
   `spec-kit-trace`'s matrix, not the branch-per-spec workflow; this repository
   already has contracts and routes.
 
-## Acceptance criteria
+## Verification
 
-Met as of 2026-09-08:
+Verified as of 2026-09-08:
 
 - `invariants: string[]` is replaced by `assertions`, and both authored
   contracts migrated.
@@ -215,7 +213,7 @@ Met as of 2026-09-08:
 - The docs state that a green matrix means "the declared assertions were
   checked", not "the design is correct".
 
-Open:
+## Deferred
 
 - `agent:verify` does not print a coverage table; `rtm:check` prints one summary
   line. The receipt records each check's pass/fail and its digests, but not the

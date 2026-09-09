@@ -43,17 +43,18 @@ copying the whole implementation narrative.
   routes, then the executable [first-recall tutorial](guides/first-recall.md).
 - **`guides/`** — non-normative navigation and tested walkthroughs.
 - **`design/`** — architecture, data models, algorithms, and process contracts.
-  The [implementation lineage](design/implementation-lineage.md) records only
+  Superseded designs move to `design/archived/`. The
+  [implementation lineage](design/implementation-lineage.md) records only
   commits that materially reduce rediscovery or regression risk.
 - **`decisions/`** — lifecycle-managed design and process decisions. See
   [decisions/README.md](decisions/README.md).
-- **`experiments/`** — measured evidence. Run reports should normally be named
-  `<topic>-<date>.md`. Retrieval-quality series:
-  [baseline](experiments/retrieval-quality-baseline-2026-08-16.md) →
-  [hybrid](experiments/retrieval-quality-hybrid-2026-08-16.md) →
-  [summaries + stacked](experiments/retrieval-quality-summaries-2026-08-18.md).
+- **`experiments/`** — measured evidence, grouped by the line of inquiry each run
+  answers ([topic list](experiments/README.md)). Retrieval-quality series:
+  [baseline](experiments/retrieval-quality/baseline-2026-08-16.md) →
+  [hybrid](experiments/retrieval-quality/hybrid-2026-08-16.md) →
+  [summaries + stacked](experiments/retrieval-quality/summaries-2026-08-18.md).
   Related records include the
-  [node-summary acceleration research](experiments/node-summary-accelerated-retrieval-2026-08-19.md)
+  [node-summary acceleration research](experiments/retrieval/node-summary-accelerated-retrieval-2026-08-19.md)
   and the current [benchmark result summary](experiments/benchmark-results.md).
 
 Rule of thumb: _how NMG works or should work_ belongs in `design/`; _why this

@@ -3,7 +3,6 @@
 [中文](2026-09-02-keep-bookmarks-named-anchors.zh-CN.md)
 
 **Status:** rejected  
-**Date:** 2026-09-02
 
 ## Problem
 

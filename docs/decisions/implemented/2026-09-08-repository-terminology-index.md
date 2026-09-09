@@ -3,8 +3,6 @@
 [中文](2026-09-08-repository-terminology-index.zh-CN.md)
 
 **Status:** implemented
-**Date:** 2026-09-08
-**Branch:** feat/rcp-lightweight-verification
 
 ## Problem
 
@@ -100,9 +98,9 @@ or alias to its owner, which is the retrieval path.
   maintainer; the needed properties are a canonical name, aliases, one owner,
   and a status.
 
-## Acceptance criteria
+## Verification
 
-Met as of 2026-09-08:
+Verified as of 2026-09-08:
 
 - One machine-readable term table exists and every entry resolves to an existing
   owner file and heading.
@@ -112,7 +110,7 @@ Met as of 2026-09-08:
 - `glossary:check` is blocking on the narrow and full paths.
 - Retrieval resolves a term or alias to its owner (`glossary:check --resolve`).
 
-Open:
+## Deferred
 
 - The table covers the process vocabulary. The product concepts stay in the
   concept map, which the table references, so they are not indexed in the same
@@ -131,7 +129,7 @@ Open:
   what keeps it alive.
 - The index cannot prove nothing is missing; it can only prove that every
   registered term has one home. "Not found" must never be read as "does not
-  exist". The open criteria above are part of that boundary: product terms and
+  exist". The `## Deferred` items are part of that boundary: product terms and
   newly created concepts are not yet covered by the guard.
 - Aliases raise retrieval recall but do not guarantee a hit; a miss is still
   possible, which is why the guard is creation-time duplicate detection.

@@ -7,6 +7,7 @@ export interface DocumentationReport {
   files: number;
   errors: string[];
   warnings: string[];
+  decisions: { implemented: number; open: number };
 }
 
 // Implements docs/README.md#ci-contract. That documented table owns policy;
@@ -142,6 +143,7 @@ function checkDecision(
   report: DocumentationReport,
 ): void {
   const display = path.replaceAll("\\", "/");
+  checkDecisionHeader(path, text, kind, report);
   const status = /^\*\*Status:\*\*\s*(.+?)\s*$/im.exec(text)?.[1].toLowerCase();
   const expected = kind;
   if (status !== expected) {
@@ -177,6 +179,20 @@ function checkDecision(
       report.errors.push(`${display}: empty section '${alternatives.join(" / ")}'`);
     }
   }
+  if (kind === "implemented") {
+    const proposalEra: string[][] = [
+      ["Proposal", "提案"],
+      ["Plan", "计划"],
+      ["Acceptance criteria", "验收标准"],
+    ];
+    for (const banned of proposalEra) {
+      if (sectionBody(text, banned) !== undefined) {
+        report.errors.push(
+          `${display}: implemented decision must not carry the proposal-era heading '${banned[0]}'`,
+        );
+      }
+    }
+  }
   if (kind === "archived" && !/^\*\*Archived:\*\*\s*\d{4}-\d{2}-\d{2}/im.test(text)) {
     report.errors.push(`${display}: archived decisions need an Archived date`);
   }
@@ -201,6 +217,113 @@ function checkDecision(
     if (!reciprocated) {
       report.warnings.push(`${display}: '${match[1]}' link is not reciprocated by ${match[2]}`);
     }
+  }
+}
+
+// The header block of a decision is the lines before its first section. It
+// carries a closed set of fields so the vocabulary cannot drift: anything else
+// is prose and belongs below the block.
+const HEADER_FIELDS = new Set(["status", "supersedes", "superseded by", "relates to", "archived"]);
+
+function checkDecisionHeader(
+  path: string,
+  text: string,
+  kind: string,
+  report: DocumentationReport,
+): void {
+  const display = path.replaceAll("\\", "/");
+  const lines = text.split(/\r?\n/);
+  const firstSection = lines.findIndex((line) => /^##\s+/.test(line));
+  const header = firstSection === -1 ? lines : lines.slice(0, firstSection);
+  const counts = new Map<string, { name: string; count: number }>();
+  for (const line of header) {
+    const name = /^\*\*([^*]+):\*\*/.exec(line)?.[1];
+    if (!name) continue;
+    const key = name.toLowerCase();
+    const entry = counts.get(key) ?? { name, count: 0 };
+    entry.count += 1;
+    counts.set(key, entry);
+    if (!HEADER_FIELDS.has(key)) {
+      report.errors.push(
+        `${display}: unknown header field '**${name}:**'; header fields are ${[...HEADER_FIELDS].join(", ")}`,
+      );
+    }
+  }
+  for (const [key, entry] of counts) {
+    if (entry.count > 1) {
+      report.errors.push(
+        `${display}: header field '**${entry.name}:**' appears ${entry.count} times`,
+      );
+    }
+    if (key === "archived" && kind !== "archived") {
+      report.errors.push(`${display}: '**Archived:**' is only valid in archived/`);
+    }
+  }
+  if (!counts.has("status")) {
+    report.errors.push(`${display}: missing required header field '**Status:**'`);
+  }
+}
+
+// A design document's header is the lines before its first section. The field
+// set is closed and the status is an enum, because the free-form vocabulary it
+// replaces had 21 distinct values across 19 documents and no machine could read
+// a state from them. An absent status means the document is current: the tier
+// holds current-state design, so only the exceptions have to say so.
+const DESIGN_HEADER_FIELDS = new Set([
+  "status",
+  "created",
+  "updated",
+  "authority",
+  "related",
+  "supersedes",
+  "superseded by",
+]);
+const DESIGN_STATUSES = ["draft", "current", "superseded"];
+
+function checkDesignHeader(path: string, text: string, report: DocumentationReport): void {
+  const display = path.replaceAll("\\", "/");
+  const archived = /[/\\]docs[/\\]design[/\\]archived[/\\]/.test(path);
+  const lines = text.split(/\r?\n/);
+  const firstSection = lines.findIndex((line) => /^##\s+/.test(line));
+  const header = firstSection === -1 ? lines : lines.slice(0, firstSection);
+  const counts = new Map<string, { name: string; count: number }>();
+  for (const line of header) {
+    const name = /^\*\*([^*]+):\*\*/.exec(line)?.[1];
+    if (!name) continue;
+    const key = name.toLowerCase();
+    const entry = counts.get(key) ?? { name, count: 0 };
+    entry.count += 1;
+    counts.set(key, entry);
+    if (!DESIGN_HEADER_FIELDS.has(key)) {
+      report.errors.push(
+        `${display}: unknown header field '**${name}:**'; header fields are ${[...DESIGN_HEADER_FIELDS].join(", ")}`,
+      );
+    }
+  }
+  for (const entry of counts.values()) {
+    if (entry.count > 1) {
+      report.errors.push(
+        `${display}: header field '**${entry.name}:**' appears ${entry.count} times`,
+      );
+    }
+  }
+  const status = header
+    .map((line) => /^\*\*Status:\*\*\s*(.+?)\s*$/i.exec(line)?.[1])
+    .find((value) => value !== undefined);
+  const token = status === undefined ? undefined : /^[A-Za-z]+/.exec(status)?.[0].toLowerCase();
+  if (token !== undefined && !DESIGN_STATUSES.includes(token)) {
+    report.errors.push(`${display}: Status '${token}' is not one of ${DESIGN_STATUSES.join(", ")}`);
+  }
+  if (token === "superseded") {
+    if (!counts.has("superseded by")) {
+      report.errors.push(`${display}: a superseded design needs a '**Superseded by:**' link`);
+    }
+    if (!archived) {
+      report.errors.push(`${display}: a superseded design belongs in docs/design/archived/`);
+    }
+  }
+  if (archived && token !== "superseded") {
+    report.errors.push(`${display}: documents in docs/design/archived/ must be superseded`);
   }
 }
 
@@ -260,7 +383,12 @@ function isContractDocument(display: string): boolean {
 
 export function verifyDocumentation(rootDirectory = process.cwd()): DocumentationReport {
   const root = resolve(rootDirectory);
-  const report: DocumentationReport = { files: 0, errors: [], warnings: [] };
+  const report: DocumentationReport = {
+    files: 0,
+    errors: [],
+    warnings: [],
+    decisions: { implemented: 0, open: 0 },
+  };
   const candidates = new Set<string>();
   for (const name of ["README.md", "README.zh-CN.md"]) {
     const path = join(root, name);
@@ -333,17 +461,29 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
     }
     if (parts[0] === "docs" && parts[1] === "decisions" && lifecycle.has(parts[2])) {
       checkDecision(path, text, parts[2], report);
+      if (parts[2] === "implemented" && !display.endsWith(".zh-CN.md")) {
+        report.decisions.implemented += 1;
+        const deferred = sectionBody(text, ["Deferred", "未完成项"]);
+        if (deferred !== undefined && deferred.length > 0 && !/^none\.?$/i.test(deferred)) {
+          report.decisions.open += 1;
+        }
+      }
       if (!path.endsWith(".zh-CN.md")) {
         const counterpart = decisionCounterpart(path);
         checkPairedLinksAndHeadings(path, counterpart, display, report);
       }
     }
+    if (parts[0] === "docs" && parts[1] === "design") {
+      checkDesignHeader(path, text, report);
+    }
+    const experimentName = parts[parts.length - 1];
     if (
       parts[0] === "docs" &&
       parts[1] === "experiments" &&
-      parts.length === 3 &&
-      !/-\d{4}-\d{2}-\d{2}\.md$/.test(parts[2]) &&
-      !/-(results|notes)\.md$/.test(parts[2])
+      parts.length >= 3 &&
+      !new Set(["README.md", "README.zh-CN.md"]).has(experimentName) &&
+      !/-\d{4}-\d{2}-\d{2}\.md$/.test(experimentName) &&
+      !/-(results|notes)\.md$/.test(experimentName)
     ) {
       report.warnings.push(`${display}: experiment report filename should end in -YYYY-MM-DD.md`);
     }
@@ -366,6 +506,9 @@ function printReport(report: DocumentationReport): void {
   for (const error of report.errors) console.error(`error: ${error}`);
   console.log(
     `docs: ${report.files} files, ${report.errors.length} errors, ${report.warnings.length} warnings`,
+  );
+  console.log(
+    `decisions: ${report.decisions.implemented} implemented, ${report.decisions.open} with open items`,
   );
 }
 

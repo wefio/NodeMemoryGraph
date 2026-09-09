@@ -1,6 +1,6 @@
 # Edge Activation Design
 
-**Status:** core runtime implemented; advanced calibration remains experimental
+**Status:** current — advanced calibration remains experimental
 **Updated:** 2026-08-01
 
 ## 1. Principle

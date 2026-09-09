@@ -11,6 +11,16 @@
 
 ---
 
+## 未验证项
+
+<!-- 声明本 PR 没有验证到的范围：没跑的路由、没构建或没启动的平台与环境、没覆盖的
+     构建模式、没有复现步骤的行为。确实没有遗留项时写 None.。
+     这是范围声明，不是证据：它不能替代任何检查，门禁全绿也不会让它变得多余。 -->
+
+**Not verified**（没验证什么）：
+
+---
+
 ## 完成检查项
 
 <!-- 合并前逐项核对。GitHub 拥有 PR/CI 状态；本清单只是让提交者自己先过一遍。 -->
@@ -22,6 +32,7 @@
 - [ ] 改了依赖或 lockfile 时：`npm run check:lock` 通过、根 `package-lock.json` 已同步、`npm audit --omit=dev --audit-level=high` 无漏洞
 - [ ] 改了子包（`dsh/dsh-nmg` 等）时：`npm run verify:packages` 通过（frozen-lockfile install + build），`pnpm-lock.yaml`/lockfile 随 package.json 同步
 - [ ] 文档改动跑过 `npm run docs:check`；决策/设计改动遵循 doc-maintenance 规范
+- [ ] `## 未验证项` 已填写（无遗留项时写 `None.`）；非平凡改动已携带决策记录
 - [ ] 新代码方法圈复杂度不超阈值（CodeFactor / `npm run complexity:gate`）
 - [ ] 未提交可再生产物：`dist/`、`dsh/dsh-nmg/lib/`、`src/prompts/nmg-prompts.generated.ts`、`.nmg-search-scope` 不入库（见 `docs/decisions/rejected/2026-09-02-track-build-artifacts-in-git.md`）
 

@@ -83,8 +83,13 @@ or remove it when its exit criteria are met.
 ## Implement and verify
 
 1. Make the smallest coherent change; keep optional infrastructure behind a narrow adapter.
-2. Update the owning design when behavior or process changes. Follow
-   [`doc-maintenance`](../doc-maintenance/SKILL.md).
+2. Update the owning design when behavior or process changes. A non-trivial
+   change also adds or updates at least one record under `docs/decisions/` in the
+   same commit. It is non-trivial when it alters behavior, a contract shared
+   across files or packages, package or module structure, process or tooling,
+   test strategy, or an on-disk, wire, or configuration format; formatting,
+   comment wording, typo fixes, and behavior-free dependency bumps are exempt.
+   Follow [`doc-maintenance`](../doc-maintenance/SKILL.md).
 3. Run the targeted test, then `npm run agent:verify`. With no arguments it
    automatically detects Git changes, selects routes, executes the exact blocking
    checks, and overwrites `.nmg/verification/latest.json` with structured evidence.
@@ -104,8 +109,13 @@ or remove it when its exit criteria are met.
    check passed in the message unless it ran.
 7. When opening a pull request, read `.github/pull_request_template.md` and
    follow it as the PR prompt: fill the three description blocks (What / Why /
-   Changes) from the change, and self-check every box in the completion
-   checklist before marking the PR ready — the checklist is the same contract
+   Changes) from the change plus `未验证项`, which names the surface the change did
+   not exercise — a route that did not run, a platform or environment that was not
+   built or booted, a build mode, or a behavior with no reproducer. Write `None.`
+   only when nothing is outstanding. That declaration states scope; it never
+   replaces a check and a green gate never makes it unnecessary. Then self-check
+   every box in the completion checklist before marking the PR ready — the
+   checklist is the same contract
    CI enforces, and it catches locally what a CI round-trip would cost. Draft
    PRs and CI status are owned by the forge; the template checklist is the
    submitter's own pre-flight, not a substitute for `All checks passed`.

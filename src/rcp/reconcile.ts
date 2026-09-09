@@ -375,7 +375,6 @@ async function applyReconciliation(
         provider: providers.harness.descriptor,
         status: "completed",
         summary: "recovering incomplete attempt by verifying the existing workspace without replay",
-        artifacts: [],
       }
     : await executeHarness(providers.harness, workOrder);
   conditions.push({
@@ -489,7 +488,6 @@ async function executeHarness(
       status: "failed",
       summary: `harness provider failed: ${errorMessage(cause)}`,
       diagnostics: [errorMessage(cause)],
-      artifacts: [],
     };
   }
 }

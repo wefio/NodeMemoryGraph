@@ -3,8 +3,6 @@
 [中文](2026-09-09-chaos-tests-on-main-pushes.zh-CN.md)
 
 **Status:** implemented
-**Date:** 2026-09-09
-**Branch:** feat/rcp-lightweight-verification
 
 ## Problem
 
@@ -54,16 +52,16 @@ The suite itself is unchanged. `npm run test:chaos`, `verify:chaos` and the
 - **Move the research characterization job instead.** Not applicable: it is
   already non-blocking, and it failed 4 times in 130 runs.
 
-## Acceptance criteria
+## Verification
 
-Met as of 2026-09-09:
+Verified as of 2026-09-09:
 
 - The `chaos` job declares a push-only condition, so pull requests skip it.
 - `all-checks-passed` accepts `skipped` for `chaos`, so a pull request still
   reports green while a `main` push still requires a real success.
 - `npm run test:chaos`, `verify:chaos` and the `chaos` route are unchanged.
 
-Open:
+## Deferred
 
 - The window is 19 days and 145 runs. A longer window would firm up the 0.65%.
 - The affected-path trigger is not implemented.

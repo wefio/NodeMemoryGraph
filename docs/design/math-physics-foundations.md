@@ -1,6 +1,6 @@
 # NMG 数学与物理基础：当前状态与可补之处
 
-**Status:** 诚实评估 / honest assessment
+**Status:** current
 **Created:** 2026-07-20
 
 上一版文档犯了常见错误：用理论反向解释设计，暗示"因为数学上正确所以设计合理"。

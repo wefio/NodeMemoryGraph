@@ -1,6 +1,6 @@
 # Tiered Disclosure Design（层级渐进披露）
 
-**Status:** deterministic QPP gate implemented; calibrated SPRT remains future work
+**Status:** current — calibrated SPRT remains future work
 **Updated:** 2026-08-25
 **Related:** [edge-activation-design.md](edge-activation-design.md), [fibonacci-progressive-recall.md](fibonacci-progressive-recall.md), docs/design/design.md §7.1, §11
 

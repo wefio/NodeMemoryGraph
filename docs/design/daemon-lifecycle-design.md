@@ -1,6 +1,6 @@
 # NMG Daemon 生命周期加固设计（Idle 超时 / 自动重拉 / 数量上限）
 
-**Status:** implemented（2026-08-02 实机验证通过，见 §8）
+**Status:** current — 2026-08-02 实机验证通过，见 §8
 **Updated:** 2026-08-25
 **Related:** [stg-isolated-store.md](stg-isolated-store.md), [memory-graphs.md](memory-graphs.md), [external-source-design.md](external-source-design.md), [design.md](design.md)
 

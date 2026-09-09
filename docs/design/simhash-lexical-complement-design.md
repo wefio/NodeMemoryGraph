@@ -1,8 +1,9 @@
 # SimHash 词法层补充设计（工单 7）
 
-**Status:** proposed  
-**Owner:** supersession 候选召回（写路径），与 `supersession-design.md` 互补  
-**Date:** 2026-09-03
+**Status:** draft  
+**Updated:** 2026-09-03
+
+Owner: supersession 候选召回（写路径），与 `supersession-design.md` 互补。
 
 ## 1. 问题
 

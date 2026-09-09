@@ -158,14 +158,12 @@ export interface WorkOrder {
     maxAttempts: 1;
     timeoutMs: number;
   };
-  expectedArtifacts: string[];
 }
 
 export interface HarnessResult {
   provider: ProviderDescriptor;
   status: "completed" | "blocked" | "failed";
   summary: string;
-  artifacts?: string[];
   diagnostics?: string[];
 }
 
