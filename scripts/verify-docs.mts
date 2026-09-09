@@ -25,6 +25,7 @@ const BYTE_BUDGETS: Record<string, number> = {
   "skills/doc-maintenance/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
   "skills/repo-development/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
   "skills/nmg-memory/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
+  "skills/verification-traceability/SKILL.md": 15000, // 2,000 words x ~7.3 B/word
   "docs/decisions/README.md": 5000,
 };
 const publicPairs = [

@@ -18,6 +18,41 @@ export interface ContractDiagnostic {
   source: SourceLocation;
 }
 
+export const ASSERTION_KINDS = [
+  "test",
+  "property",
+  "runtime-assertion",
+  "metamorphic",
+  "coverage",
+  "proof",
+] as const;
+export type AssertionKind = (typeof ASSERTION_KINDS)[number];
+
+export const ASSERTION_STAGES = [
+  "requirement",
+  "acceptance",
+  "unit",
+  "integration",
+  "e2e",
+  "deploy",
+  "observability",
+  "outcome",
+] as const;
+export type AssertionStage = (typeof ASSERTION_STAGES)[number];
+
+/** One declared design claim plus the evidence that supports it. `check` names
+ *  a runnable check; `documentedOnly` marks a claim that nothing checks yet, so
+ *  the gap stays visible instead of being implied by a green suite. */
+export interface ContractAssertion {
+  id: string;
+  statement: string;
+  check?: string;
+  documentedOnly?: boolean;
+  kind?: AssertionKind;
+  stage?: AssertionStage;
+  context?: string;
+}
+
 export interface RepositoryContractIr {
   apiVersion: typeof RCP_CONTRACT_API_VERSION;
   kind: typeof RCP_CONTRACT_KIND;
@@ -28,7 +63,7 @@ export interface RepositoryContractIr {
     exclude: string[];
   };
   preserve: string[];
-  invariants: string[];
+  assertions: ContractAssertion[];
   verification: {
     routes: string[];
     checks: string[];
@@ -91,6 +126,15 @@ export interface RouteDeclaration {
   };
 }
 
+/** Which gate a verification run actually exercised, recorded so a narrow
+ *  result can never be read as a full-gate result. */
+export interface VerificationGate {
+  mode: "narrow" | "full";
+  reason?: string;
+  /** True only when the declared whole blocking set was run. */
+  fullGateRun: boolean;
+}
+
 export interface WorkOrder {
   schema: "repository.work-order/v1alpha1";
   id: string;
@@ -103,10 +147,11 @@ export interface WorkOrder {
   excludedPaths: string[];
   owners: string[];
   preserve: string[];
-  invariants: string[];
+  assertions: ContractAssertion[];
   verificationChecks: string[];
   routes: string[];
   routeDigest: string;
+  gate: VerificationGate;
   authority: AuthorityMode;
   operationKey: string;
   budget: {
@@ -182,6 +227,7 @@ export interface RepositoryReceipt {
     routeDigest: string;
     routes: string[];
     verificationChecks: string[];
+    gate: VerificationGate;
     budget: WorkOrder["budget"];
   };
   scope: {
@@ -191,6 +237,9 @@ export interface RepositoryReceipt {
     matched: boolean;
   };
   checks: VerificationCheckResult[];
+  /** The gate this receipt actually exercised; narrow receipts carry
+   *  fullGateRun: false so they cannot be read as a full-gate result. */
+  gate: VerificationGate;
   forge?: Omit<ForgeObservation, "provider" | "checks"> & {
     provider: string;
     requiredChecks: string[];

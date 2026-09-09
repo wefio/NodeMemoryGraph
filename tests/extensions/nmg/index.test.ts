@@ -37,6 +37,12 @@ import {
   ControllerShadowBridge,
   shadowEnabled,
 } from "../../../.pi/extensions/nmg/controller-shadow.ts";
+import { stripProviderEnv } from "../../helpers/test-env.ts";
+
+// The extension spawns its own daemon from this process's environment; drop any
+// ambient embedding/summary/judge provider so recall stays lexical and
+// deterministic. Tests that want a provider must configure it explicitly.
+stripProviderEnv();
 
 function extensionHarness() {
   const handlers = new Map<string, (...args: unknown[]) => Promise<unknown>>();

@@ -1,0 +1,82 @@
+# Repository terminology index.
+#
+# One row per concept. `owner` + `anchor` must resolve to a heading in a real
+# document; the table points at the contract, it does not restate it. Aliases
+# exist so a search that uses different words still lands on the same home.
+# Product concepts stay in the concept map; this table owns the process and
+# repository vocabulary. Validated by `npm run glossary:check`.
+#
+# See docs/decisions/implemented/2026-09-08-repository-terminology-index.md
+version: 1
+conceptMap: docs/guides/concept-map.md
+terms:
+  - term: contract
+    aliases: [RCP contract, 契约]
+    owner: docs/design/ci-cd-and-quality.md
+    anchor: "7.3 Contract surface 与 IR"
+    status: canonical
+  - term: work order
+    aliases: [WorkOrder, 工作单]
+    owner: docs/design/ci-cd-and-quality.md
+    anchor: "7.5 Work Order、Agent 与 PR"
+    status: canonical
+  - term: route
+    aliases: [route declaration, 路由]
+    owner: docs/design/ci-cd-and-quality.md
+    anchor: "5. Agent 原生仓库上下文"
+    status: canonical
+  - term: receipt
+    aliases: [verification receipt, 收据]
+    owner: docs/design/ci-cd-and-quality.md
+    anchor: "7.6 Verifier 与 receipt"
+    status: canonical
+  - term: gate
+    aliases: [narrow gate, full gate, 窄化, 轻量验证, 全量门]
+    owner: docs/design/ci-cd-and-quality.md
+    anchor: "7.14 轻量验证默认（narrow gate）"
+    status: canonical
+  - term: trusted baseline
+    aliases: [trusted install, 可信基线]
+    owner: docs/design/ci-cd-and-quality.md
+    anchor: "7.13 Fixed trusted baseline verification"
+    status: canonical
+  - term: invariant
+    aliases: [invariants, 不变量]
+    owner: docs/design/ci-cd-and-quality.md
+    anchor: "7.3 Contract surface 与 IR"
+    status: canonical
+  - term: assertion
+    aliases: [contract assertion, 断言]
+    owner: docs/decisions/implemented/2026-09-08-requirements-traceability-matrix.md
+    anchor: Decision
+    status: canonical
+  - term: check
+    aliases: [verification check, 仓库检查]
+    owner: docs/decisions/implemented/2026-09-08-requirements-traceability-matrix.md
+    anchor: Decision
+    status: canonical
+  - term: check kind
+    aliases: [kind, 检查种类]
+    owner: docs/decisions/implemented/2026-09-08-requirements-traceability-matrix.md
+    anchor: Decision
+    status: canonical
+  - term: stage
+    aliases: [chain stage, 链节]
+    owner: docs/decisions/implemented/2026-09-08-requirements-traceability-matrix.md
+    anchor: Decision
+    status: canonical
+  - term: evidence
+    aliases: [evidence source, 证据]
+    owner: docs/decisions/implemented/2026-09-08-requirements-traceability-matrix.md
+    anchor: Decision
+    status: canonical
+  - term: assertion context
+    aliases: [context, 断言上下文]
+    owner: docs/decisions/implemented/2026-09-08-requirements-traceability-matrix.md
+    anchor: Decision
+    status: canonical
+  - term: terminology index
+    aliases: [glossary, 术语索引, 术语表]
+    owner: docs/decisions/implemented/2026-09-08-repository-terminology-index.md
+    anchor: Decision
+    status: canonical

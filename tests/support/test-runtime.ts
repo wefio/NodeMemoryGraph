@@ -10,6 +10,7 @@ import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
 import { createTestRuntime, type TestEffectScope } from "./cordis-adapter.ts";
 
 export interface TestWorkspace {
@@ -93,7 +94,11 @@ export function testDatabase(): TestPlugin {
 export function testDaemon(): TestPlugin {
   return async (context, runtime) => {
     const database = runtime.database();
-    const service = new NmgService({ databasePath: database.path });
+    const service = new NmgService({
+      databasePath: database.path,
+      // Test daemons must not inherit an ambient embedding provider.
+      environment: stripProviderEnv({ ...process.env }),
+    });
     const token = randomBytes(32).toString("base64url");
     let server!: Server;
     server = createServer(httpHandler(service, token, () => server.closeAllConnections?.()));

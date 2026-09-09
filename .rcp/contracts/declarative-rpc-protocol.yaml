@@ -26,13 +26,46 @@ spec:
     - Pi MCP DSH CLI WorkBuddy and benchmark behavior remains unchanged unless a capability is explicitly optional
     - catalog fingerprints are discovery and cache identities rather than compatibility verdicts
     - unrelated working-tree changes remain untouched
-  invariants:
-    - one frozen runtime catalog defines method existence and optional capability metadata
-    - daemon hello publishes the catalog methods and deterministic fingerprint
-    - clients validate hello structure and refresh negotiated discovery state after reconnect
-    - an optional RPC call requires both advertised method existence and its declared capability
-    - runtime registration and hot reload remain unavailable until a bounded trusted use case is specified
-    - registry and explicit service handlers cannot drift silently
+  assertions:
+    - id: frozen-runtime-catalog
+      statement: One frozen runtime catalog defines method existence and optional capability metadata
+      check: "node-test:daemon-cli#RPC catalog is frozen and has a deterministic normalized fingerprint"
+      kind: test
+      stage: integration
+    - id: hello-publishes-catalog-fingerprint
+      statement: Daemon hello publishes the catalog methods and deterministic fingerprint
+      check: "node-test:daemon-cli#JSON-RPC over HTTP round-trips hello, remember, search, and get"
+      kind: test
+      stage: integration
+    - id: hello-structure-validated
+      statement: Clients validate hello structure and preserve unknown capabilities
+      check: "node-test:daemon-cli#hello parser validates discovery shape while preserving unknown capabilities"
+      kind: test
+      stage: integration
+    - id: reconnect-refreshes-discovery
+      statement: Reconnect refreshes negotiated discovery state
+      check: "node-test:daemon-cli#invokeDaemon reconnects after the daemon dies mid-session"
+      kind: test
+      stage: integration
+    - id: optional-rpc-requires-advertised-method
+      statement: An optional RPC call requires the method to be advertised
+      check: "node-test:daemon-cli#advertised method discovery gates calls independently of capability metadata"
+      kind: test
+      stage: integration
+    - id: optional-rpc-requires-capability
+      statement: An optional RPC call requires its declared capability
+      check: "node-test:daemon-cli#optional method guard fails only when the invoked capability is unavailable"
+      kind: test
+      stage: integration
+    - id: runtime-registration-deferred
+      statement: Runtime registration and hot reload remain unavailable until a bounded trusted use case is specified
+      documentedOnly: true
+      context: absence claim; no test asserts the unavailability
+    - id: registry-no-silent-drift
+      statement: Registry and explicit service handlers cannot drift silently
+      check: "node-test:daemon-cli#http server implements every method the service supports"
+      kind: test
+      stage: integration
   verification:
     routes:
       - daemon-cli
@@ -43,6 +76,8 @@ spec:
       - build
       - check
       - docs:check
+      - glossary:check
+      - rtm:check
       - test:product
     forgeChecks:
       - All checks passed

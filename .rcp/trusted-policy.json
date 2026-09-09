@@ -1,0 +1,24 @@
+{
+  "schema": "repository.trusted-policy/v1",
+  "candidateRoots": ["src"],
+  "obligations": [
+    {
+      "id": "rcp-contract-rejection",
+      "claim": "Contract compiler satisfies the baseline contract validation examples; not a proof of arbitrary design intent.",
+      "tests": ["tests/rcp/contract.test.ts"],
+      "timeoutMs": 120000
+    },
+    {
+      "id": "rcp-reconciliation-boundaries",
+      "claim": "RCP satisfies the baseline reconciliation, recovery, scope and receipt regression examples.",
+      "tests": ["tests/rcp/reconcile.test.ts", "tests/rcp/receipts.test.ts"],
+      "timeoutMs": 180000
+    },
+    {
+      "id": "trusted-verification-boundaries",
+      "claim": "The candidate trusted-verification implementation satisfies the baseline fixed-installation adversarial regression examples.",
+      "tests": ["tests/rcp/trusted.test.ts"],
+      "timeoutMs": 180000
+    }
+  ]
+}

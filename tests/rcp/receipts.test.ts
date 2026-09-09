@@ -5,7 +5,7 @@ import test from "node:test";
 
 import { FileReceiptSink } from "../../src/rcp/providers.ts";
 import type { RepositoryReceipt } from "../../src/rcp/types.ts";
-import { receiptId } from "../../src/rcp/receipt.ts";
+import { receiptId, validateReceipt } from "../../src/rcp/receipt.ts";
 import { repositoryFixture } from "./fixture.ts";
 
 test("receipt scan reports valid and malformed append-only entries", async () => {
@@ -21,6 +21,18 @@ test("receipt scan reports valid and malformed append-only entries", async () =>
   assert.equal(entries.length, 2);
   assert.equal(entries.filter((entry) => entry.valid).length, 1);
   assert.ok(entries.some((entry) => entry.errors.some((error) => /JSON|parse/i.test(error))));
+});
+
+test("a receipt whose gate contradicts its mode is invalid", () => {
+  const valid = fixtureReceipt();
+  const inconsistent: RepositoryReceipt = {
+    ...valid,
+    gate: { mode: "narrow", fullGateRun: true },
+    workOrder: { ...valid.workOrder, gate: { mode: "narrow", fullGateRun: true } },
+  };
+  const validation = validateReceipt({ ...inconsistent, receiptId: receiptId(inconsistent) });
+  assert.equal(validation.valid, false);
+  assert.ok(validation.errors.some((error) => /fullGateRun/.test(error)));
 });
 
 function fixtureReceipt(): RepositoryReceipt {
@@ -41,10 +53,12 @@ function fixtureReceipt(): RepositoryReceipt {
       routeDigest: "sha256:routes",
       routes: ["source"],
       verificationChecks: ["check"],
+      gate: { mode: "full", fullGateRun: true },
       budget: { maxAttempts: 1, timeoutMs: 30_000 },
     },
     scope: { declared: ["src/**"], excluded: [], actual: [], matched: true },
     checks: [{ name: "check", status: "passed", durationMs: 1 }],
+    gate: { mode: "full", fullGateRun: true },
     decision: "verified",
     diagnostics: [],
   };

@@ -17,6 +17,8 @@ import {
 } from "../providers.ts";
 import { validateReceipt } from "../receipt.ts";
 import { reconcileOnce } from "../reconcile.ts";
+import { runTrustedCli } from "../trusted.ts";
+import type { ContractAssertion } from "../types.ts";
 import { LocalRepositoryProvider } from "../repository.ts";
 import { SessionFeedbackProvider, type SessionFeedbackTarget } from "../session-feedback.ts";
 import type { MemoryProvider, NmgMemoryClient } from "../providers.ts";
@@ -52,6 +54,9 @@ interface CliOptionState extends Omit<CliOptions, "receiptDirectory"> {
 
 export async function runRcpCli(args: string[]): Promise<number> {
   try {
+    if (args[0] === "trust-install" || args[0] === "trusted-verify") {
+      return runTrustedCli([args[0] === "trust-install" ? "install" : "verify", ...args.slice(1)]);
+    }
     return await executeCommand(parseArgs(args));
   } catch (cause) {
     process.stderr.write(`${cause instanceof Error ? cause.message : String(cause)}\n`);
@@ -487,12 +492,21 @@ function formatPlan(order: {
   id: string;
   intent: string;
   allowedPaths: string[];
+  owners: string[];
+  preserve: string[];
+  assertions: ContractAssertion[];
   verificationChecks: string[];
 }): string {
   return [
     `${order.id}: ${order.intent}`,
     `scope: ${order.allowedPaths.join(", ")}`,
+    `owners: ${order.owners.join(", ") || "(none)"}`,
     `checks: ${order.verificationChecks.join(", ")}`,
+    ...order.preserve.map((item) => `preserve: ${item}`),
+    ...order.assertions.map(
+      (assertion) =>
+        `assertion: ${assertion.id} — ${assertion.statement} [${assertion.check ?? "documented-only"}]`,
+    ),
   ].join("\n");
 }
 
@@ -514,10 +528,14 @@ function formatResult(result: {
 const usage = `Usage: nmg-rcp <command> [contract] [options]
 
 Commands:
+  trust-install <repo> <reviewed-commit> <new-external-dir>
+                           explicitly approve a fresh fixed verifier installation
+  trusted-verify <repo> <commit>
+                           run baseline acceptance from an external trusted installation
   compile <contract>       validate and normalize a repository Contract
   plan <contract>          observe the repository and emit a bounded WorkOrder
   reconcile <contract>     plan by default; use --apply to verify an executed change
-  receipt-verify <path>    validate an immutable receipt
+  receipt-verify <path>    check receipt self-consistency (not execution authenticity)
   receipt-list             list local receipt entries and validation state
   receipt-scan             validate the complete local receipt store
   forge-status --pr <n>    observe a GitHub pull request

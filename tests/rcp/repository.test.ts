@@ -5,6 +5,7 @@ import fs, {
   readdirSync,
   lstatSync,
   readlinkSync,
+  rmSync,
   writeFileSync,
   type PathLike,
 } from "node:fs";
@@ -223,6 +224,18 @@ test("observed revision changes with scoped content and reports exact changed pa
   const after = observeRepository(root, contract());
   assert.notEqual(after.observedRevision, before.observedRevision);
   assert.deepEqual(changedPaths(before, after), ["src/value.ts"]);
+});
+
+// Negative control: the edit-only case above has a single changed path, so it
+// cannot pin ordering. Dropping the sort fails here and nowhere else; a mutant
+// that reports only additions or only removals fails here too.
+test("changed paths are sorted and include removals", () => {
+  const root = repositoryFixture();
+  const before = observeRepository(root, contract());
+  rmSync(join(root, "src", "value.ts"));
+  writeFileSync(join(root, "src", "added.ts"), "export const added = true;\n");
+  const after = observeRepository(root, contract());
+  assert.deepEqual(changedPaths(before, after), ["src/added.ts", "src/value.ts"]);
 });
 
 test("receipt output never changes a broad repository observation", () => {

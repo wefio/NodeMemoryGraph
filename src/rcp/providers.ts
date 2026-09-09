@@ -1,19 +1,23 @@
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  globSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { canonicalJson, digestCanonical } from "./canonical.ts";
 import { validateReceipt } from "./receipt.ts";
 import { digestRepositoryPaths } from "./repository.ts";
+import { readRouteDeclarations } from "./planner.ts";
+import { testOutputPassed } from "./trusted.ts";
 import type {
   ForgeObservation,
   HarnessResult,
@@ -21,11 +25,12 @@ import type {
   RepositoryContractIr,
   ReconciliationAttempt,
   RepositoryReceipt,
+  RouteDeclaration,
   VerificationCheckResult,
   VerificationEvidence,
   WorkOrder,
 } from "./types.ts";
-import { runNpmScriptCheck } from "./verification.ts";
+import { outputTail, runNpmScriptCheck } from "./verification.ts";
 
 export interface HarnessProvider {
   readonly descriptor: ProviderDescriptor;
@@ -268,6 +273,239 @@ export class LocalNpmVerifierProvider implements VerifierProvider {
       checks,
     };
   }
+}
+
+/** Narrow verification: the always-run shared checks plus the owning
+ *  route's own `node --test` globs (a synthetic `node-test:<routeId>` check,
+ *  because route tests are not npm scripts). */
+export const NARROW_SHARED_CHECKS = [
+  "check",
+  "docs:check",
+  "format:check",
+  "glossary:check",
+  "lint",
+  "package:check",
+  "rtm:check",
+] as const;
+
+export function nodeTestCheckName(routeId: string): string {
+  return `node-test:${routeId}`;
+}
+
+export class NarrowVerifierProvider implements VerifierProvider {
+  readonly descriptor: ProviderDescriptor = {
+    id: "narrow-verifier",
+    version: "1",
+    capabilities: ["npm-script-verification", "route-test-verification"],
+    operations: ["verify"],
+    authority: ["plan", "apply", "continuous"],
+  };
+
+  readonly timeoutMs: number;
+  readonly streamOutput: boolean;
+
+  constructor(timeoutMs = 30 * 60 * 1_000, streamOutput = false) {
+    this.timeoutMs = timeoutMs;
+    this.streamOutput = streamOutput;
+  }
+
+  async definitionDigest(request: {
+    root: string;
+    contract: RepositoryContractIr;
+    workOrder: WorkOrder;
+  }): Promise<string> {
+    const scripts = readPackageScripts(request.root);
+    return narrowDefinitionDigest(request.root, this.descriptor, request.workOrder, scripts);
+  }
+
+  async verify(request: {
+    root: string;
+    contract: RepositoryContractIr;
+    workOrder: WorkOrder;
+  }): Promise<VerificationEvidence> {
+    const scripts = readPackageScripts(request.root);
+    const verifierDigest = narrowDefinitionDigest(
+      request.root,
+      this.descriptor,
+      request.workOrder,
+      scripts,
+    );
+    const routes = readRouteDeclarations(request.root);
+    const checks: VerificationCheckResult[] = [];
+    for (const name of request.workOrder.verificationChecks) {
+      if (name.startsWith("node-test:")) {
+        checks.push(
+          runRouteTestsCheck(request.root, name, routes, this.timeoutMs, this.streamOutput),
+        );
+        continue;
+      }
+      const definition = scripts[name];
+      if (!definition) {
+        checks.push({
+          name,
+          status: "failed",
+          durationMs: 0,
+          reason: `missing npm script: ${name}`,
+        });
+        continue;
+      }
+      checks.push(runNpmScriptCheck(request.root, name, this.timeoutMs, this.streamOutput));
+    }
+    return {
+      provider: this.descriptor,
+      verifierDigest,
+      ok: checks.every((check) => check.status === "passed"),
+      checks,
+    };
+  }
+}
+
+/** Expand a route's declared test patterns to concrete files. A `dir/**`
+ *  pattern also matches the directory itself, and node's test runner then tries
+ *  to load that directory as a test file and fails. Expanding to files avoids
+ *  that, and lets a route whose patterns match nothing fail closed instead of
+ *  reporting a vacuous pass over zero tests. */
+export function resolveRouteTestFiles(root: string, patterns: string[]): string[] {
+  const files = new Set<string>();
+  for (const pattern of patterns) {
+    for (const match of globSync(pattern, { cwd: root })) {
+      const absolute = isAbsolute(match) ? match : join(root, match);
+      if (statSync(absolute, { throwIfNoEntry: false })?.isFile())
+        files.add(match.replace(/\\/g, "/"));
+    }
+  }
+  return [...files].sort();
+}
+
+function routeTestFailure(name: string, reason: string): VerificationCheckResult {
+  return { name, status: "failed", durationMs: 0, reason };
+}
+
+/** Resolve a `node-test:<routeId>` check to the route's own test files, or the
+ *  failure that stops it before running anything. */
+function resolveRouteTestInputs(
+  root: string,
+  name: string,
+  routes: RouteDeclaration[],
+): { testFiles: string[] } | { failure: VerificationCheckResult } {
+  const routeId = name.slice("node-test:".length);
+  const route = routes.find((candidate) => candidate.id === routeId);
+  if (!route) return { failure: routeTestFailure(name, `unknown route: ${routeId}`) };
+  if (!route.tests.length)
+    return { failure: routeTestFailure(name, `route has no own tests: ${routeId}`) };
+  const testFiles = resolveRouteTestFiles(root, route.tests);
+  if (!testFiles.length)
+    return { failure: routeTestFailure(name, `route tests match no files: ${routeId}`) };
+  return { testFiles };
+}
+
+function routeTestCheckResult(
+  name: string,
+  routeId: string,
+  result: SpawnSyncReturns<string>,
+  stdout: string,
+  stderr: string,
+  durationMs: number,
+): VerificationCheckResult {
+  const exitFailed = Boolean(result.error || result.signal || result.status !== 0);
+  // Same acceptance rule as the trusted baseline: TAP must report tests > 0,
+  // pass == tests, and no fail/cancelled/skipped/todo. A run that executed
+  // nothing, or only skipped tests, is not a pass.
+  const tapFailed = !exitFailed && !testOutputPassed(stdout);
+  const failed = exitFailed || tapFailed;
+  const reason = tapFailed
+    ? `route tests did not pass the TAP acceptance rule: ${routeId}`
+    : testFailureReason(result, exitFailed);
+  return {
+    name,
+    status: failed ? "failed" : "passed",
+    durationMs,
+    exitCode: result.status ?? undefined,
+    reason,
+    evidence: failed ? outputTail(`${stdout}${stderr}${result.error?.message ?? ""}`) : undefined,
+  };
+}
+
+function runRouteTestsCheck(
+  root: string,
+  name: string,
+  routes: RouteDeclaration[],
+  timeoutMs: number,
+  streamOutput: boolean,
+): VerificationCheckResult {
+  const inputs = resolveRouteTestInputs(root, name, routes);
+  if ("failure" in inputs) return inputs.failure;
+  // The route's own run must not inherit the parent's node:test context: with
+  // NODE_TEST_CONTEXT set, node skips running files ("run() is being called
+  // recursively") and the check would record a vacuous pass.
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const started = performance.now();
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      "--test",
+      "--test-reporter=tap",
+      "--test-concurrency=4",
+      ...inputs.testFiles,
+    ],
+    {
+      cwd: root,
+      encoding: "utf8",
+      windowsHide: true,
+      stdio: "pipe",
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: timeoutMs,
+      env,
+    },
+  );
+  const stdout = result.stdout ?? "";
+  const stderr = result.stderr ?? "";
+  if (streamOutput) {
+    process.stdout.write(stdout);
+    process.stderr.write(stderr);
+  }
+  return routeTestCheckResult(
+    name,
+    name.slice("node-test:".length),
+    result,
+    stdout,
+    stderr,
+    Math.round(performance.now() - started),
+  );
+}
+
+function testFailureReason(result: SpawnSyncReturns<string>, failed: boolean): string | undefined {
+  if (result.error?.message) return result.error.message;
+  if (result.signal) return `terminated by ${result.signal}`;
+  if (failed) return `exit ${result.status ?? "unknown"}`;
+  return undefined;
+}
+
+function narrowDefinitionDigest(
+  root: string,
+  provider: ProviderDescriptor,
+  workOrder: WorkOrder,
+  scripts: Record<string, string>,
+): string {
+  const routes = readRouteDeclarations(root).filter((route) => workOrder.routes.includes(route.id));
+  const definitions = workOrder.verificationChecks.map((name) => [name, scripts[name] ?? null]);
+  const repositoryInputs = digestRepositoryPaths(root, [
+    "package.json",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "agent-context.yaml",
+  ]);
+  return digestCanonical({
+    provider,
+    definitions,
+    routes,
+    repositoryInputs,
+    runtime: { node: process.version, platform: process.platform, arch: process.arch },
+  });
 }
 
 export class FileReceiptSink implements ReceiptSink {

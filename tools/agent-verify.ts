@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { collectAgentContext, type AgentContextReport } from "./repo-context.ts";
 import { planNarrowVerify } from "./narrow-verify.ts";
+import { digestCanonical } from "../src/rcp/canonical.ts";
 import { compileContractFile } from "../src/rcp/contract.ts";
 import { readRouteDeclarations } from "../src/rcp/planner.ts";
 import {
@@ -13,9 +14,13 @@ import {
   ExternalWorkspaceHarnessProvider,
   FileReceiptSink,
   LocalNpmVerifierProvider,
+  NarrowVerifierProvider,
+  NARROW_SHARED_CHECKS,
+  nodeTestCheckName,
 } from "../src/rcp/providers.ts";
 import { reconcileOnce } from "../src/rcp/reconcile.ts";
 import { isPathAllowed, LocalRepositoryProvider } from "../src/rcp/repository.ts";
+import { RCP_CONTRACT_API_VERSION, RCP_CONTRACT_KIND } from "../src/rcp/types.ts";
 import type { ReconciliationResult, RepositoryContractIr } from "../src/rcp/types.ts";
 import {
   buildRouteVerificationPlan,
@@ -74,6 +79,7 @@ function parseArgs(args: string[]) {
   let json = false;
   let requireClean = false;
   let narrow = false;
+  let full = false;
   let timeoutMs = 30 * 60 * 1_000;
   let output: string | undefined;
   let help = false;
@@ -82,33 +88,30 @@ function parseArgs(args: string[]) {
     const argument = args[index];
     if (argument === "--changed") changed = true;
     else if (argument === "--narrow") narrow = true;
+    else if (argument === "--full") full = true;
     else if (argument === "--dry-run") dryRun = true;
     else if (argument === "--include-advisory") includeAdvisory = true;
     else if (argument === "--json") json = true;
     else if (argument === "--require-clean") requireClean = true;
     else if (argument === "--help" || argument === "-h") help = true;
     else if (argument === "--timeout-ms") {
-      timeoutMs = Number(args[++index]);
-      if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
-        throw new Error("--timeout-ms requires a positive integer");
-      }
+      timeoutMs = positiveInteger(requireValue(args, ++index, "--timeout-ms"), "--timeout-ms");
     } else if (argument === "--output") {
-      output = args[++index];
-      if (!output) throw new Error("--output requires a path");
+      output = requireValue(args, ++index, "--output");
     } else if (argument === "--root") root = args[++index] ?? root;
     else if (argument === "--scope") {
-      const scope = args[++index];
-      if (!scope) throw new Error("--scope requires a path");
-      scopes.push(scope);
+      scopes.push(requireValue(args, ++index, "--scope"));
     } else if (argument.startsWith("-")) throw new Error(`unknown argument: ${argument}`);
     else scopes.push(argument);
   }
   if (!changed && !scopes.length) changed = true;
+  if (narrow && full) throw new Error("--narrow and --full are mutually exclusive");
   const resolvedRoot = resolve(root);
   return {
     root: resolvedRoot,
     changed,
     narrow,
+    full,
     dryRun,
     includeAdvisory,
     json,
@@ -122,6 +125,19 @@ function parseArgs(args: string[]) {
   };
 }
 
+function positiveInteger(value: string, name: string): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0)
+    throw new Error(`${name} requires a positive integer`);
+  return parsed;
+}
+
+function requireValue(args: string[], index: number, name: string): string {
+  const value = args[index];
+  if (!value) throw new Error(`${name} requires a value`);
+  return value;
+}
+
 const usage = `Usage: npm run agent:verify -- [paths...] [options]
 
 Paths select matching verification routes directly and do not require Git.
@@ -130,9 +146,12 @@ When one RCP Contract fully and uniquely covers those paths, verification
 automatically runs its workspace-ready reconciliation and records a receipt.
   --changed              derive scopes from dirty Git paths; requires Git inspection
   --scope <path>         legacy spelling for a path; positional paths are preferred
-  --narrow               fast path: for a change cleanly owned by one non-shared route,
-                         run that route's own tests + always-run checks instead of the
-                         whole blocking suite; escalates to the full gate on shared paths
+  --narrow               force narrow: for a change cleanly owned by one non-shared
+                         route, run that route's own tests + the always-run shared
+                         checks instead of the whole blocking suite; escalates to the
+                         full gate on shared paths. Narrow is already the default when
+                         the change is cleanly owned.
+  --full                 force the declared whole blocking set (no narrowing)
   --include-advisory     run advisory checks in addition to blocking checks
   --dry-run              print and persist the plan without running checks
   --require-clean        reject a dirty Git worktree
@@ -223,8 +242,7 @@ async function executeRcpVerification(
   return {
     result: {
       ok:
-        (reconciliation.status === "verified" || reconciliation.status === "reused") &&
-        advisory.ok,
+        (reconciliation.status === "verified" || reconciliation.status === "reused") && advisory.ok,
       results,
     },
     rcp: {
@@ -234,6 +252,89 @@ async function executeRcpVerification(
       receiptPath: reconciliation.receiptPath,
       conditions: reconciliation.conditions,
     },
+  };
+}
+
+async function executeNarrowVerification(
+  contract: RepositoryContractIr,
+  options: {
+    root: string;
+    timeoutMs: number;
+    includeAdvisory: boolean;
+    json: boolean;
+    routeId: string;
+    checks: string[];
+    reason: string;
+  },
+): Promise<{ result: VerificationRunResult; rcp: RcpEvidence }> {
+  const reconciliation = await reconcileOnce(
+    {
+      root: options.root,
+      contract,
+      routes: readRouteDeclarations(options.root),
+      requestedMode: "apply",
+      operationKey: "agent-verify-narrow",
+      executionTimeoutMs: options.timeoutMs,
+      narrow: { routeId: options.routeId, checks: options.checks, reason: options.reason },
+    },
+    {
+      repository: new LocalRepositoryProvider(),
+      policy: new DefaultPolicyProvider(),
+      harness: new ExternalWorkspaceHarnessProvider(),
+      verifier: new NarrowVerifierProvider(options.timeoutMs, !options.json),
+      receipts: new FileReceiptSink(join(options.root, ".rcp", "receipts")),
+    },
+  );
+  const blocking = (reconciliation.receipt?.checks ?? []).map((check) => ({
+    command: check.name,
+    classification: "blocking" as const,
+    routes: reconciliation.workOrder.routes,
+    status: check.status,
+    exitCode: check.exitCode,
+    durationMs: check.durationMs,
+    reason: check.reason,
+    output: check.evidence,
+  }));
+  return {
+    result: {
+      ok: reconciliation.status === "verified" || reconciliation.status === "reused",
+      results: blocking,
+    },
+    rcp: {
+      status: reconciliation.status,
+      contractId: contract.id,
+      contractDigest: contract.contractDigest,
+      receiptPath: reconciliation.receiptPath,
+      conditions: reconciliation.conditions,
+    },
+  };
+}
+
+/** Build an in-memory narrow contract when no authored contract covers the
+ *  change, so a narrow run still produces a real, digest-bound RCP receipt. */
+function synthesizeNarrowContract(
+  root: string,
+  scopes: string[],
+  routeId: string,
+  checks: string[],
+): RepositoryContractIr {
+  const safeRoute = routeId.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
+  const normalized = {
+    apiVersion: RCP_CONTRACT_API_VERSION,
+    kind: RCP_CONTRACT_KIND,
+    id: `agent-verify-narrow-${safeRoute}`,
+    intent: `Narrow verification of ${scopes.join(", ") || "selected scopes"} via route ${routeId}`,
+    scope: { include: [...scopes].sort(), exclude: [] },
+    preserve: [],
+    assertions: [],
+    verification: { routes: [routeId], checks: [...checks].sort(), forgeChecks: [] },
+    authority: { mode: "apply" as const },
+    extensions: {},
+  };
+  return {
+    ...normalized,
+    source: { path: join(root, ".rcp", "contracts", "agent-verify-narrow.generated.yaml") },
+    contractDigest: digestCanonical(normalized),
   };
 }
 
@@ -266,7 +367,7 @@ function runCommand(
     status: ok ? "passed" : "failed",
     exitCode: child.status ?? undefined,
     durationMs: Date.now() - startedAt,
-    reason: ok ? undefined : child.error?.message ?? `exit ${child.status ?? "?"}`,
+    reason: ok ? undefined : (child.error?.message ?? `exit ${child.status ?? "?"}`),
     output: ok ? undefined : output.slice(-8000),
   };
 }
@@ -298,7 +399,16 @@ function runNarrowVerify(
   });
   for (const command of plan.shared) {
     results.push(
-      dryRun ? skipped(command) : runCommand(command, npmArgv(command), root, timeoutMs, "blocking", route ? [route.id] : []),
+      dryRun
+        ? skipped(command)
+        : runCommand(
+            command,
+            npmArgv(command),
+            root,
+            timeoutMs,
+            "blocking",
+            route ? [route.id] : [],
+          ),
     );
   }
   if (plan.testGlobs.length) {
@@ -313,7 +423,9 @@ function runNarrowVerify(
         ...plan.testGlobs,
       ];
       results.push(
-        runCommand(label, [process.execPath, ...nodeArgs], root, timeoutMs, "blocking", [route!.id]),
+        runCommand(label, [process.execPath, ...nodeArgs], root, timeoutMs, "blocking", [
+          route!.id,
+        ]),
       );
     }
   }
@@ -345,25 +457,41 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     const contract = options.dryRun
       ? null
       : discoverApplicableRcpContract(options.root, report.scopes);
-    // Narrow fast path (additive; the full gate stays the default and the
-    // authority): only when the caller opts in AND the change is cleanly owned
-    // by one non-shared route. Any shared/cross-cutting scope escalates to the
-    // declared whole blocking set.
-    const narrowPlan =
-      !contract && options.narrow
-        ? planNarrowVerify(report.routes, report.scopes)
-        : null;
-    let execution: Awaited<ReturnType<typeof executeRcpVerification>> | {
-      result: VerificationRunResult;
-      rcp?: undefined;
-    };
-    if (narrowPlan?.narrow) {
-      execution = {
-        result: runNarrowVerify(options.root, narrowPlan, options.timeoutMs, options.dryRun),
-      };
+    // Narrow is the default for a change cleanly owned by one non-shared route;
+    // any shared/cross-cutting/ambiguous/unowned path escalates to the declared
+    // whole blocking set. --full forces full; --narrow forces narrow (and warns
+    // when the change is not cleanly owned).
+    const narrowPlan = planNarrowVerify(report.routes, report.scopes);
+    const route = narrowPlan.route;
+    const wantNarrow = !options.full && (options.narrow || narrowPlan.narrow);
+    const narrowChecks = route
+      ? [...NARROW_SHARED_CHECKS, ...(route.tests.length ? [nodeTestCheckName(route.id)] : [])]
+      : [];
+    let execution:
+      | Awaited<ReturnType<typeof executeRcpVerification>>
+      | {
+          result: VerificationRunResult;
+          rcp?: undefined;
+        };
+    if (wantNarrow && narrowPlan.narrow && route) {
+      execution = options.dryRun
+        ? { result: runNarrowVerify(options.root, narrowPlan, options.timeoutMs, true) }
+        : await executeNarrowVerification(
+            contract ??
+              synthesizeNarrowContract(options.root, report.scopes, route.id, narrowChecks),
+            {
+              root: options.root,
+              timeoutMs: options.timeoutMs,
+              includeAdvisory: options.includeAdvisory,
+              json: options.json,
+              routeId: route.id,
+              checks: narrowChecks,
+              reason: `cleanly owned by route ${route.id}`,
+            },
+          );
     } else {
-      if (narrowPlan && !narrowPlan.narrow && report.routes.length) {
-        report.warnings.push(`--narrow escalated to full: ${narrowPlan.escalationReason}`);
+      if (wantNarrow && !narrowPlan.narrow && report.routes.length) {
+        report.warnings.push(`narrow escalated to full: ${narrowPlan.escalationReason}`);
       }
       execution = contract
         ? await executeRcpVerification(report, contract, options)

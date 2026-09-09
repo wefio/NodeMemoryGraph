@@ -8,6 +8,12 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { connectDaemon, invokeDaemon } from "../../src/cli/daemon-client.ts";
 import { NmgStore } from "../../src/core/store.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
+
+// The spawned MCP server inherits this process's environment; drop any ambient
+// embedding/summary/judge provider so recall does not depend on an external
+// service.
+stripProviderEnv();
 
 const serverPath = resolve(
   import.meta.dirname,

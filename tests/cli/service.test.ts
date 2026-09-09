@@ -10,6 +10,10 @@ import { NmgService } from "../../src/cli/service.ts";
 import { NmgStore } from "../../src/core/store.ts";
 import { stgStorePath } from "../../src/core/stg.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
+
+// In-process NmgService inherits process.env; keep recall lexical (test-env.ts).
+stripProviderEnv();
 
 test("status and hello do not create or open the database", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-status-"));

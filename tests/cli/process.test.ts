@@ -8,6 +8,11 @@ import { pathToFileURL } from "node:url";
 
 import { NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
+
+// This file starts real daemons that inherit process.env; drop any ambient
+// embedding/summary/judge provider so recall stays lexical and deterministic.
+stripProviderEnv();
 
 const root = resolve(import.meta.dirname, "../..");
 const launcher = resolve(root, "bin/nmg.mjs");
@@ -76,13 +81,10 @@ test("search compact JSON exposes bounded headers without exact evidence", () =>
     // lexical the normal mode: no retrieval metadata is projected. A configured
     // provider that fails to construct is the explicit-degradation case and is
     // covered separately in service.test.ts.
-    const compact = runLauncher([
-      "search",
-      "Durable detail",
-      "--compact-json",
-      "--data-dir",
-      directory,
-    ], { NMG_EMBED_PROVIDER: "", NMG_EMBED_BASE_URL: "" } ) as {
+    const compact = runLauncher(
+      ["search", "Durable detail", "--compact-json", "--data-dir", directory],
+      { NMG_EMBED_PROVIDER: "", NMG_EMBED_BASE_URL: "" },
+    ) as {
       candidates: Array<{ id: string; preview: string; chains: string[] }>;
       logicalChainCount: number;
       activeGraphId: string | null;

@@ -16,6 +16,11 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
+import { stripProviderEnv } from "../helpers/test-env.ts";
+
+// Spawns real daemons that inherit process.env; keep recall lexical.
+stripProviderEnv();
+
 const root = resolve(import.meta.dirname, "../..");
 
 test("chaos SIGKILL: pre-crash memories survive, fresh daemon finds them, zero residue", () => {

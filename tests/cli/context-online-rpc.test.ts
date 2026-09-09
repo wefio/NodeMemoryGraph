@@ -6,6 +6,10 @@ import test from "node:test";
 
 import { NmgService } from "../../src/cli/service.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
+import { stripProviderEnv } from "../helpers/test-env.ts";
+
+// In-process NmgService inherits process.env; keep recall lexical (test-env.ts).
+stripProviderEnv();
 
 test("recordFeedback is exposed on the RPC catalog", async () => {
   const directory = mkdtempSync(join(tmpdir(), "nmg-context-online-catalog-"));
