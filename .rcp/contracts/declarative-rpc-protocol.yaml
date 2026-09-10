@@ -29,40 +29,56 @@ spec:
   assertions:
     - id: frozen-runtime-catalog
       statement: One frozen runtime catalog defines method existence and optional capability metadata
+      domain: every daemon build that exposes the runtime catalog
+      assumes: [catalog-is-derived, route-tests-emit-tap, route-globs-resolve]
       check: "node-test:daemon-cli#RPC catalog is frozen and has a deterministic normalized fingerprint"
       kind: test
       stage: integration
     - id: hello-publishes-catalog-fingerprint
       statement: Daemon hello publishes the catalog methods and deterministic fingerprint
+      domain: every `hello` response the daemon CLI produces
+      assumes: [route-tests-emit-tap, route-globs-resolve]
       check: "node-test:daemon-cli#JSON-RPC over HTTP round-trips hello, remember, search, and get"
       kind: test
       stage: integration
     - id: hello-structure-validated
       statement: Clients validate hello structure and preserve unknown capabilities
+      domain: every `hello` payload a client parses, including payloads carrying capabilities the client does not know
+      assumes: [route-tests-emit-tap, route-globs-resolve]
       check: "node-test:daemon-cli#hello parser validates discovery shape while preserving unknown capabilities"
       kind: test
       stage: integration
     - id: reconnect-refreshes-discovery
       statement: Reconnect refreshes negotiated discovery state
+      domain: every reconnect after the daemon process exits mid-session
+      assumes: [route-tests-emit-tap, route-globs-resolve, test-environment-not-inherited]
       check: "node-test:daemon-cli#invokeDaemon reconnects after the daemon dies mid-session"
       kind: test
       stage: integration
     - id: optional-rpc-requires-advertised-method
       statement: An optional RPC call requires the method to be advertised
+      domain: every optional RPC call whose method is absent from the advertised set
+      assumes: [route-tests-emit-tap, route-globs-resolve]
       check: "node-test:daemon-cli#advertised method discovery gates calls independently of capability metadata"
       kind: test
       stage: integration
     - id: optional-rpc-requires-capability
       statement: An optional RPC call requires its declared capability
+      domain: every optional RPC call whose declared capability is unavailable
+      assumes: [route-tests-emit-tap, route-globs-resolve]
       check: "node-test:daemon-cli#optional method guard fails only when the invoked capability is unavailable"
       kind: test
       stage: integration
     - id: runtime-registration-deferred
       statement: Runtime registration and hot reload remain unavailable until a bounded trusted use case is specified
+      domain: every runtime registration and hot-reload path in the daemon
+      assumes: []
       documentedOnly: true
       context: absence claim; no test asserts the unavailability
     - id: registry-no-silent-drift
       statement: Registry and explicit service handlers cannot drift silently
+      domain: every method the service supports, against every method the HTTP server implements
+      assumes: [catalog-is-derived, route-tests-emit-tap, route-globs-resolve]
       check: "node-test:daemon-cli#http server implements every method the service supports"
       kind: test
       stage: integration

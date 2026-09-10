@@ -33,26 +33,36 @@ spec:
   assertions:
     - id: plan-mode-default
       statement: Plan mode emits a WorkOrder without executing or recording
+      domain: every reconcile request that declares no mode
+      assumes: [route-tests-emit-tap, route-globs-resolve]
       check: "node-test:repository-control-plane#plan mode emits a WorkOrder without executing or recording"
       kind: test
       stage: unit
     - id: apply-requires-harness-boundary
       statement: Apply is fail-closed without an explicit harness boundary
+      domain: every apply request whose contract declares no harness boundary
+      assumes: [route-tests-emit-tap, route-globs-resolve]
       check: "node-test:repository-control-plane#CLI apply is fail-closed without an explicit harness boundary"
       kind: test
       stage: unit
     - id: harness-cannot-self-certify
       statement: An implementing harness cannot weaken its verifier during execution
+      domain: every verifier invoked through the execution path, including one the harness itself installed
+      assumes: [route-tests-emit-tap, route-globs-resolve]
       check: "node-test:repository-control-plane#an implementing harness cannot weaken its verifier during execution"
       kind: test
       stage: unit
     - id: truth-domains-separate
       statement: RCP core remains outside NMG Core, daemon and integration boundaries
+      domain: every module reachable from `src/rcp`
+      assumes: [route-tests-emit-tap, route-globs-resolve]
       check: "node-test:repository-control-plane#RCP core remains outside NMG Core, daemon and integration boundaries"
       kind: test
       stage: integration
     - id: failed-attempts-append-only
       statement: Failed attempts remain append-only without preventing a later retry
+      domain: every failed reconcile attempt and every retry that follows it
+      assumes: [route-tests-emit-tap, route-globs-resolve, git-observation-is-accurate]
       check: "node-test:repository-control-plane#failed attempts remain append-only without preventing a later retry"
       kind: test
       stage: unit

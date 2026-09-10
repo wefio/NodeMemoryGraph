@@ -47,14 +47,14 @@ checkable; "the package works" is not, and belongs in `documented-only`.
 
 ## Choose the cheapest kind that can actually fail
 
-| Situation | `kind` | Why |
-| --- | --- | --- |
-| You can write the expected output | `test` | most direct |
-| A relation holds for all inputs | `property` | examples are a sample; properties are not |
-| The condition must hold while running | `runtime-assertion` | design-by-contract; fails at the boundary, not only in a suite |
-| No expected output exists | `metamorphic` | assert a relation between runs instead of a value |
-| The claim is about structure, not behaviour | `coverage` | statement, branch, MC/DC |
-| Pure logic where "for all inputs" matters | `proof` | Dafny or LemmaScript |
+| Situation                                   | `kind`              | Why                                                            |
+| ------------------------------------------- | ------------------- | -------------------------------------------------------------- |
+| You can write the expected output           | `test`              | most direct                                                    |
+| A relation holds for all inputs             | `property`          | examples are a sample; properties are not                      |
+| The condition must hold while running       | `runtime-assertion` | design-by-contract; fails at the boundary, not only in a suite |
+| No expected output exists                   | `metamorphic`       | assert a relation between runs instead of a value              |
+| The claim is about structure, not behaviour | `coverage`          | statement, branch, MC/DC                                       |
+| Pure logic where "for all inputs" matters   | `proof`             | Dafny or LemmaScript                                           |
 
 ## No oracle? Use a metamorphic relation
 
@@ -92,3 +92,46 @@ and float math are outside the fragment. Use `proof` only where the claim is
 pure, central, and worth "for all inputs"; use `property` elsewhere. LemmaScript
 annotates real TypeScript with `//@`, so it avoids the model gap plain Dafny
 has.
+
+## State the domain, not just the property
+
+An assertion is a triple: `statement` is P, `domain` is D, `assumes` is A.
+
+```
+∀ x ∈ D,  A(x) ⇒ P(x)
+```
+
+The compiler requires `domain` and `assumes`; `assumes` ids resolve to
+`docs/design/assumptions.yaml`. `strength` says what the evidence buys:
+`decision` for a procedure that decides P for every x in D, `witness` for a
+sample that passed — which is what most `node-test:` evidence is, and why
+`rtm:check` reports `bound`, never `verified`.
+
+A domain that is vague passes the check. The instrument that catches it is
+mutation testing: a surviving mutant whose change lies outside the stated domain
+means the `domain` line is wrong, not the test. Write the domain statement first,
+then decide what to do with the mutant.
+
+## A counterexample needs a reproducer
+
+An opinion that something looks wrong and an input that shows the claim is false are
+different things, and only the second is a counterexample. A challenge goes in
+`.rcp/counterexamples.yaml`:
+
+- `open` — **must** carry a `reproducer`: a command, an input, or a case another Agent
+  can run. If you cannot produce one, say so and record it as `unsubstantiated`; that
+  state exists so a real but unfalsifiable concern stays visible without blocking.
+- `resolved` — must name what changed: the product, the evidence, or a `domain` line.
+- `claim` names what was challenged, and need not resolve. A challenge against
+  something not yet in the ledger is often the valuable one.
+
+`docs:check` enforces both. The reason for the reproducer is that someone other than
+the reporter decides whether the challenge holds: the model proposes doubts, it does
+not settle them.
+
+Claims, assumptions and open challenges live in the contracts, the register and
+`.rcp/counterexamples.yaml`. This section states the rule once; the reasoning is in
+[the claim-ledger design](../../docs/design/verification-claims.md) and in
+[the domain decision](../../docs/decisions/implemented/2026-09-09-assertion-domain-and-strength.md)
+and
+[the reproducer decision](../../docs/decisions/implemented/2026-09-09-counterexample-needs-a-reproducer.md).
