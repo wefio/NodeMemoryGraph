@@ -1,6 +1,7 @@
 # Recall instances: a self-contained, source-agnostic retrieval benchmark
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 Date: 2026-09-07
 Branch: pr/recall-instance-benchmark
 

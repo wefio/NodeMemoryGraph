@@ -2,7 +2,8 @@
 
 [English](2026-09-09-design-and-experiment-classification.md)
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 
 ## 问题
 

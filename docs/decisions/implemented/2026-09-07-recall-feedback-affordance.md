@@ -1,6 +1,7 @@
 # Attach the online feedback ask to every recall (not a scheduled auto-only nudge)
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 Date: 2026-09-07
 Branch: pr/feedback-affordance
 

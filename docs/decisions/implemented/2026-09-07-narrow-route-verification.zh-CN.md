@@ -1,6 +1,7 @@
 # 窄域验证:轻量件组合成完整门
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 Date: 2026-09-07
 Branch: pr/rcp-narrow-verify
 

@@ -2,7 +2,8 @@
 
 [中文](2026-09-09-gates-assert-results-not-tools.zh-CN.md)
 
-**Status:** proposed
+**Status:** implemented  
+**Approved:** explicit
 
 ## Problem
 
@@ -14,9 +15,9 @@ standardized, convenient tools already exist. Three findings converge:
   files over targeted tools, accepting roughly twice the token cost;
   Claude-family Agents favoured `ripgrep` (68% of search tasks) and Cursor
   favoured AST queries.
-- **The reward structure rewards it.** *The Tool-Overuse Illusion*
+- **The reward structure rewards it.** _The Tool-Overuse Illusion_
   (arXiv 2604.19749) shows models suffer a knowledge epistemic illusion about
-  their own capability boundary, and that outcome-only rewards *increase*
+  their own capability boundary, and that outcome-only rewards _increase_
   unnecessary tool calls (up to +65% as training steps grow), while balancing
   rewards cuts them by 66.7%/60.7% without losing accuracy.
 - **It is industry-scale.** GitClear's 211M-changed-line study (2020–2024) shows
@@ -31,9 +32,9 @@ change; the session that audited script usage never ran it. `nmg-rcp` is invoked
 by no npm script and no workflow, while a 538-line tool composes the same library
 by hand.
 
-The mitigation literature agrees on the mechanism: *"everything you feed an Agent
-through its context window is, in the end, a suggestion"* and *"an Agent that can
-validate is good; an Agent that must validate is better"*. A reminder is not a
+The mitigation literature agrees on the mechanism: _"everything you feed an Agent
+through its context window is, in the end, a suggestion"_ and _"an Agent that can
+validate is good; an Agent that must validate is better"_. A reminder is not a
 mechanism.
 
 But the obvious next step — make the verifier require the tool — is wrong three
@@ -42,7 +43,7 @@ the same bytes), it forbids legitimate variation, and a verifier that gates its
 own adoption is self-certifying, which this repository already forbids
 (`harness-cannot-self-certify`).
 
-## Proposal
+## Decision
 
 **A gate may assert a property of the result. It may not require a particular
 tool, entry point, or file.**
@@ -81,13 +82,29 @@ does not self-correct.
 (`2026-09-09-register-every-entry-point`).** Kept, but demoted. It answers "what
 is this for", not "will it be used". It is documentation, not enforcement.
 
-## Acceptance criteria
+**What now has to hold:**
 
 - The duplication check fails on a part defined twice and passes on the same part
   defined once; `tests/` covers both.
 - The failure message names no file, tool, or entry point that the Agent must use.
 - No RCP check requires `nmg-rcp`; the checks assert repository properties.
 - This research is cited in the decision, so the next reader does not repeat it.
+
+## Consequences
+
+- The rule is in force: a gate may assert a property of the result, never the identity of
+  a tool, an entry point, or a file. Two sections of the parts shelf cite it, so it
+  governs.
+- Its corollaries are already visible in the repository: a verifier may not gate its own
+  adoption (`harness-cannot-self-certify`), and a gate that only one implementation can
+  satisfy is a disguised tool requirement.
+- `2026-09-09-register-every-entry-point` is demoted by this rule: a registry cannot be
+  enforced, so it is documentation.
+- Cost: the rule itself cannot be checked — "does this gate assert a property of the
+  result" is not decidable from the gate's text. Review is the only enforcement.
+- **Repeal condition: if the duplication check named under Deferred is not built within
+  three months, repeal the rule.** A rule whose only mechanism never arrives is a
+  reminder.
 
 ## Risks
 
@@ -103,3 +120,6 @@ is this for", not "will it be used". It is documentation, not enforcement.
 
 - The parts shelf — making reuse cheaper — is a separate change and is not a
   precondition for this one.
+- **The duplication check is not built.** The rule is in force, but "no part implemented
+  twice" has no gate yet: this decision is implemented as a rule and deferred as a
+  mechanism.

@@ -36,6 +36,7 @@ Before the first section, a decision carries a fixed field block that
 [<counterpart>](<slug>.<lang>.md)
 
 **Status:** <proposed|implemented|rejected|archived>
+[**Approved:** <explicit|auto|unrecorded>]
 [**Supersedes:** [..](..)]
 [**Superseded by:** [..](..)]
 [**Relates to:** [..](..)]
@@ -47,6 +48,12 @@ is valid only under `archived/`. Relationship fields take relative links. Each
 field appears at most once, and any other `**Field:**` line in the block fails
 the check: a prose note goes below the block. The date lives in the filename, so
 there is no `**Date:**` field.
+
+`**Approved:**` is required under `implemented/` and says who accepted the record:
+`explicit` for the user, `auto` for the Agent under
+[the approval tiers](implemented/2026-09-09-approval-tiers.md), and `unrecorded` for a
+record accepted before that rule existed — debt, replaced with `explicit` when the
+record is next touched.
 
 Before creating a note, search for the existing owner. Update that note when a
 new choice refines the same decision. If a decision fully supersedes another,

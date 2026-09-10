@@ -2,8 +2,8 @@
 
 [中文](2026-08-29-repository-control-plane.zh-CN.md)
 
-**Status:** implemented
-
+**Status:** implemented  
+**Approved:** unrecorded
 The single-attempt run-to-completion control plane was merged through
 PR #3 and subsequently hardened at its evidence and recovery boundaries. Contract compilation, observation, WorkOrders,
 independent verification, append-only local receipts, provider boundaries, Draft

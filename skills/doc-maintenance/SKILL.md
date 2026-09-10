@@ -30,6 +30,14 @@ change deliberate rather than silent.
 - **Keep a new rule reversible and grounded.** Prefer a documented convention
   over entrenched machinery. A rule that needs new space, or replaces an existing
   rule, records what it costs and what it beat.
+- **Most docs need no approval.** Approval attaches to normative content that no
+  check can decide, not to the `docs/**` prefix. The test is _if this file were
+  wrong, what would fail?_ — a check means the check approves, nothing means the
+  edit is free. Where a doc has a checkable property and no check yet, write the
+  check instead of asking. See
+  [the approval tiers](../../docs/decisions/implemented/2026-09-09-approval-tiers.md);
+  a record whose substance the user already agreed goes straight into
+  `implemented/` with `**Approved:** explicit`, and is never parked in `proposed/`.
 
 ## One home per fact and the slop checklist
 

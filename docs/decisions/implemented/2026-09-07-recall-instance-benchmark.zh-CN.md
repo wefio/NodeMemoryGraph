@@ -1,6 +1,7 @@
 # 召回实例:一个自包含、来源无关的检索 benchmark
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 Date: 2026-09-07
 Branch: pr/recall-instance-benchmark
 

@@ -2,7 +2,8 @@
 
 [English](2026-09-09-declare-what-was-not-verified.md)
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** explicit
 
 ## 问题
 

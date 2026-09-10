@@ -294,7 +294,7 @@ const concurrency = positiveIntegerOr(process.env.NMG_BENCH_CONCURRENCY, 4);
 ## 零件永远不携带什么
 
 零件只携带**装配**，从不携带**判断**。窄还是全量、改动是否可以接受，只能留在一处被审查的
-地方。见 `docs/decisions/proposed/2026-09-09-gates-assert-results-not-tools.md`。
+地方。见 `docs/decisions/implemented/2026-09-09-gates-assert-results-not-tools.md`。
 
 ## 本页如何保持诚实
 

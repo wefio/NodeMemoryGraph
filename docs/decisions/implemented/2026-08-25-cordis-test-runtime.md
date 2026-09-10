@@ -2,7 +2,8 @@
 
 [中文](2026-08-25-cordis-test-runtime.zh-CN.md)
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 
 ## Problem
 

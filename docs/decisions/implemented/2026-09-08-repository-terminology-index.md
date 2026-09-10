@@ -2,7 +2,8 @@
 
 [中文](2026-09-08-repository-terminology-index.zh-CN.md)
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 
 ## Problem
 

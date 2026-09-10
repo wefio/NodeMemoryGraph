@@ -307,7 +307,7 @@ members disagree does not get merged into one name; it gets one name per meaning
 
 A part carries **assembly**, never **judgement**. Choosing narrow versus full, or
 deciding whether a change is acceptable, stays in one reviewed place. See
-`docs/decisions/proposed/2026-09-09-gates-assert-results-not-tools.md`.
+`docs/decisions/implemented/2026-09-09-gates-assert-results-not-tools.md`.
 
 ## How this page stays honest
 
