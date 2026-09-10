@@ -24,6 +24,7 @@
 [<对照语言>](<slug>.<lang>.md)
 
 **Status:** <proposed|implemented|rejected|archived>
+[**Approved:** <explicit|auto|unrecorded>]
 [**Supersedes:** [..](..)]
 [**Superseded by:** [..](..)]
 [**Relates to:** [..](..)]
@@ -33,6 +34,11 @@
 `**Status:**` 必填，且必须等于生命周期目录名。`**Archived:**` 只在 `archived/` 下
 有效。关系字段取相对链接。每个字段最多出现一次；块内出现其它 `**字段：**` 行会
 让检查失败——散文式说明写在块下方。日期住在文件名里，因此没有 `**Date:**` 字段。
+
+`**Approved:**` 在 `implemented/` 下必填，说明谁接受了这条记录：`explicit` 是用户，
+`auto` 是 Agent 按[批准分层](implemented/2026-09-09-approval-tiers.zh-CN.md)接受，
+`unrecorded` 是该规则存在之前被接受、没有留下行为的记录——欠账，下次触碰时改成
+`explicit`。
 
 创建记录前先搜索已有的信息所有者。同一决策被细化时更新原记录；完全替代时双向链接并归档旧记录；部分替代时保留双方并明确剩余适用范围。使用元数据时，采用本地 Markdown 链接，双方必须互相指向：
 

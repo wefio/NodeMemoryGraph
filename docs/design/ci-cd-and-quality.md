@@ -51,6 +51,8 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 | `npm run verify:static`     | build/package/type/lint/format/docs/context          | 本地与 CI 共用   |
 | `npm run verify:product-ci` | build + product coverage                             | 本地与 CI 共用   |
 
+另有三个命令只用于本地，刻意不作为 CI 轨道：`npm run lint:fix`（与 `lint` 同一 ESLint 范围，加 `--fix`）、`npm run hotspot:modules`（对 store 各方法做静态调用点计数）、`npm run perf:hotspots`（从某个 store 的 `perf_aggregates` 打印分段延迟占比）。
+
 `eval:*`、`benchmark:*`、真实 LLM/embedding 与官方大数据集运行不进入 keyless CI。研究测试可以验证 adapter 和计分契约，但不得访问外部密钥或把实验常量提升为产品默认值。
 
 任何启动 daemon / MCP server 的测试在模块顶层调用 `tests/helpers/test-env.ts` 的 `stripProviderEnv()`，清空环境中的 `NMG_EMBED*` / `NMG_SUMMARY*` / `NMG_JUDGE*`。该约定由 `tests/support/test-env-guard.test.ts` 机械检查：扫描 `tests/**/*.test.ts`，凡是 spawn daemon（`connectDaemon(`、`StdioClientTransport`、`bin/nmg.mjs`、tutorial 脚本、pi extension harness）却没有模块顶层调用者一律失败。被测 daemon 继承测试进程环境；存在 ambient provider（如 `NMG_EMBED_PROVIDER=gemini`）时，recall 会依赖外部服务而变得缓慢且不确定。需要 provider 的测试必须显式传入环境，不得依赖 ambient 配置。

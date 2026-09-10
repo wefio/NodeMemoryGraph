@@ -2,7 +2,8 @@
 
 [English](2026-09-07-rcp-lightweight-verification-default.md)
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 
 ## 问题
 

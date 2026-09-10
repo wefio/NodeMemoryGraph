@@ -2,7 +2,8 @@
 
 [中文](2026-09-09-chaos-tests-on-main-pushes.zh-CN.md)
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 
 ## Problem
 

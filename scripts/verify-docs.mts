@@ -224,7 +224,17 @@ function checkDecision(
 // The header block of a decision is the lines before its first section. It
 // carries a closed set of fields so the vocabulary cannot drift: anything else
 // is prose and belongs below the block.
-const HEADER_FIELDS = new Set(["status", "supersedes", "superseded by", "relates to", "archived"]);
+const HEADER_FIELDS = new Set([
+  "status",
+  "approved",
+  "supersedes",
+  "superseded by",
+  "relates to",
+  "archived",
+]);
+/** How an implemented record was accepted. `unrecorded` is debt, like
+ *  `documented-only`: accepted before the rule existed, without a recorded act. */
+const APPROVAL_VALUES = ["explicit", "auto", "unrecorded"] as const;
 
 function checkDecisionHeader(
   path: string,
@@ -262,6 +272,20 @@ function checkDecisionHeader(
   }
   if (!counts.has("status")) {
     report.errors.push(`${display}: missing required header field '**Status:**'`);
+  }
+  if (kind === "implemented") {
+    const approved = header
+      .map((line) => /^\*\*Approved:\*\*\s*(.+?)\s*$/i.exec(line)?.[1])
+      .find((value) => value !== undefined);
+    if (approved === undefined) {
+      report.errors.push(
+        `${display}: '**Approved:**' is required; one of ${APPROVAL_VALUES.join(", ")}`,
+      );
+    } else if (!APPROVAL_VALUES.some((allowed) => allowed === approved.toLowerCase())) {
+      report.errors.push(
+        `${display}: '**Approved:**' must be one of ${APPROVAL_VALUES.join(", ")}`,
+      );
+    }
   }
 }
 
@@ -383,6 +407,8 @@ function isContractDocument(display: string): boolean {
 }
 
 const PARTS_SHELF = "docs/guides/parts.md";
+const COUNTEREXAMPLES_PATH = ".rcp/counterexamples.yaml";
+const COUNTEREXAMPLE_STATUSES = ["open", "resolved", "unsubstantiated"] as const;
 
 /**
  * Every part named in a `### `name(...)`` heading of the shelf must still be
@@ -418,6 +444,57 @@ function checkPartsShelf(root: string, report: DocumentationReport): void {
           `${rel}: '${name}' is not exported from src/rcp or tools/parts; the shelf is stale`,
         );
       }
+    }
+  }
+}
+
+/** `.rcp/counterexamples.yaml` is the only home for an open challenge. An `open`
+ *  entry must carry the input that shows the claim is false; `unsubstantiated`
+ *  exists for a concern that cannot be reproduced, so it must not carry one. */
+function checkCounterexamples(root: string, report: DocumentationReport): void {
+  const path = join(root, COUNTEREXAMPLES_PATH);
+  if (!existsSync(path)) return;
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(readFileSync(path, "utf8"));
+  } catch (cause) {
+    report.errors.push(`${COUNTEREXAMPLES_PATH}: ${(cause as Error).message}`);
+    return;
+  }
+  const entries = (parsed as { counterexamples?: unknown } | undefined)?.counterexamples;
+  if (!Array.isArray(entries)) {
+    report.errors.push(`${COUNTEREXAMPLES_PATH}: needs a 'counterexamples' list`);
+    return;
+  }
+  const seen = new Set<string>();
+  for (const [index, raw] of entries.entries()) {
+    const entry = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const where = `${COUNTEREXAMPLES_PATH}: counterexamples[${index}]`;
+    const id = typeof entry.id === "string" ? entry.id.trim() : "";
+    if (!id) report.errors.push(`${where}.id is required`);
+    else if (seen.has(id)) report.errors.push(`${where}.id is duplicated: ${id}`);
+    else seen.add(id);
+    if (typeof entry.claim !== "string" || !entry.claim.trim()) {
+      report.errors.push(`${where}.claim is required: name what was challenged`);
+    }
+    const status = typeof entry.status === "string" ? entry.status.trim() : "";
+    if (!COUNTEREXAMPLE_STATUSES.some((allowed) => allowed === status)) {
+      report.errors.push(`${where}.status must be one of ${COUNTEREXAMPLE_STATUSES.join(", ")}`);
+      continue;
+    }
+    const reproducer = typeof entry.reproducer === "string" ? entry.reproducer.trim() : "";
+    if (status === "unsubstantiated" && reproducer) {
+      report.errors.push(`${where}: an unsubstantiated entry must not carry a reproducer`);
+    }
+    if (status !== "unsubstantiated" && !reproducer) {
+      report.errors.push(`${where}: a ${status} entry needs a reproducer`);
+    }
+    const resolution = typeof entry.resolution === "string" ? entry.resolution.trim() : "";
+    if (status === "resolved" && !resolution) {
+      report.errors.push(`${where}: a resolved entry needs a resolution`);
+    }
+    if (status !== "resolved" && entry.resolution !== undefined) {
+      report.errors.push(`${where}: only a resolved entry carries a resolution`);
     }
   }
 }
@@ -530,6 +607,7 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
     }
   }
   checkPartsShelf(root, report);
+  checkCounterexamples(root, report);
   for (const [rel, maxBytes] of Object.entries(BYTE_BUDGETS)) {
     const p = join(root, rel);
     if (!existsSync(p)) continue; // budget applies to present standing docs, not synthetic trees

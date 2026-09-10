@@ -109,7 +109,6 @@
     "eval:concurrency": "node --experimental-strip-types evals/concurrency/run.ts",
     "eval:perf-overhead": "node --experimental-strip-types evals/perf-overhead.ts",
     "eval:hierarchy": "node --experimental-strip-types evals/hierarchy-scale/run.ts",
-    "index:qwen3": "node --experimental-strip-types scripts/index-qwen3.ts",
     "index:embeddings": "node --experimental-strip-types scripts/index-qwen3.ts",
     "index:status": "node --experimental-strip-types scripts/embedding-status.ts",
     "index:ann": "node --experimental-strip-types scripts/build-ann.ts",

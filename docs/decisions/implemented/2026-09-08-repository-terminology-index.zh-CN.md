@@ -2,7 +2,8 @@
 
 [English](2026-09-08-repository-terminology-index.md)
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 
 ## 问题
 

@@ -7,6 +7,7 @@ import { digestCanonical } from "./canonical.ts";
 import {
   ASSERTION_KINDS,
   ASSERTION_STAGES,
+  ASSERTION_STRENGTHS,
   RCP_CONTRACT_API_VERSION,
   RCP_CONTRACT_KIND,
   type AuthorityMode,
@@ -34,6 +35,9 @@ const AUTHORITY_FIELDS = new Set(["mode"]);
 const ASSERTION_FIELDS = new Set([
   "id",
   "statement",
+  "domain",
+  "assumes",
+  "strength",
   "check",
   "documentedOnly",
   "kind",
@@ -242,6 +246,28 @@ function compileAssertions(value: unknown, error: ContractError): ContractAssert
   return assertions;
 }
 
+function checkClaim(
+  domain: string | undefined,
+  assumes: string[] | undefined,
+  field: string,
+  error: ContractError,
+): void {
+  if (!domain) {
+    error(
+      "contract.assertion-claim",
+      `${field}.domain is required: name the cases the statement covers`,
+      field,
+    );
+  }
+  if (assumes === undefined) {
+    error(
+      "contract.assertion-claim",
+      `${field}.assumes is required; use [] when the claim rests on nothing registered`,
+      field,
+    );
+  }
+}
+
 function checkEvidence(
   raw: Record<string, unknown>,
   check: string | undefined,
@@ -288,6 +314,10 @@ function compileAssertion(
   const check = optionalText(raw.check, `${field}.check`, error);
   const documentedOnly = raw.documentedOnly === true;
   checkEvidence(raw, check, documentedOnly, field, error);
+  const domain = optionalText(raw.domain, `${field}.domain`, error);
+  const assumes = optionalTextList(raw.assumes, `${field}.assumes`, error);
+  const strength = enumField(raw.strength, ASSERTION_STRENGTHS, `${field}.strength`, error);
+  checkClaim(domain, assumes, field, error);
   const kind = enumField(raw.kind, ASSERTION_KINDS, `${field}.kind`, error);
   const stage = enumField(raw.stage, ASSERTION_STAGES, `${field}.stage`, error);
   const context = optionalText(raw.context, `${field}.context`, error);
@@ -295,6 +325,9 @@ function compileAssertion(
   return {
     id,
     statement,
+    ...(domain ? { domain } : {}),
+    ...(assumes ? { assumes } : {}),
+    ...(strength ? { strength } : {}),
     ...(check ? { check } : {}),
     ...(documentedOnly ? { documentedOnly: true } : {}),
     ...(kind ? { kind } : {}),
@@ -305,6 +338,24 @@ function compileAssertion(
 
 function optionalText(value: unknown, field: string, error: ContractError): string | undefined {
   return value === undefined ? undefined : requiredText(value, field, error);
+}
+
+function optionalTextList(
+  value: unknown,
+  field: string,
+  error: ContractError,
+): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    error("contract.assertion-list", `${field} must be an array`, field);
+    return undefined;
+  }
+  const entries: string[] = [];
+  for (const [index, entry] of value.entries()) {
+    const text = requiredText(entry, `${field}[${index}]`, error);
+    if (text) entries.push(text);
+  }
+  return entries;
 }
 
 function enumField<T extends string>(

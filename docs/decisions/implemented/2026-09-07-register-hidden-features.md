@@ -1,6 +1,7 @@
 # Register every hidden (env-gated / non-default) feature
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 Date: 2026-09-07
 Branch: feat/meta-rule-governance
 

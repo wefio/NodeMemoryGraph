@@ -40,12 +40,30 @@ export const ASSERTION_STAGES = [
 ] as const;
 export type AssertionStage = (typeof ASSERTION_STAGES)[number];
 
+/** What the evidence behind an assertion actually buys. `decision` is a
+ *  deterministic procedure that decides the property for every case in the stated
+ *  domain; `witness` is a sample that passed. Absent means `witness`, so an
+ *  incomplete backfill can never overstate. An assertion with no evidence at all
+ *  is marked `documentedOnly`, which is a different axis. */
+export const ASSERTION_STRENGTHS = ["decision", "witness"] as const;
+export type AssertionStrength = (typeof ASSERTION_STRENGTHS)[number];
+
 /** One declared design claim plus the evidence that supports it. `check` names
  *  a runnable check; `documentedOnly` marks a claim that nothing checks yet, so
- *  the gap stays visible instead of being implied by a green suite. */
+ *  the gap stays visible instead of being implied by a green suite.
+ *
+ *  A claim is a triple: `statement` is P, `domain` is D, `assumes` is A. The
+ *  compiler requires `domain` and `assumes`, so a compiled contract always states
+ *  what the evidence covers and what it rests on. */
 export interface ContractAssertion {
   id: string;
   statement: string;
+  /** D — the cases the statement is claimed over. */
+  domain?: string;
+  /** A — ids in `docs/design/assumptions.yaml`. May be empty. */
+  assumes?: string[];
+  /** What the evidence buys; absent means `witness`. */
+  strength?: AssertionStrength;
   check?: string;
   documentedOnly?: boolean;
   kind?: AssertionKind;

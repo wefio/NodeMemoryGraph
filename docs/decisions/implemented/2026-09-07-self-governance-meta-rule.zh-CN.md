@@ -2,7 +2,8 @@
 
 [English](2026-09-07-self-governance-meta-rule.md)
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 
 ## 问题
 

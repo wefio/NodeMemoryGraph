@@ -1,6 +1,7 @@
 # 把在线反馈的发问点附着到每一次召回(而非一次性的 auto-only 提示)
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 Date: 2026-09-07
 Branch: pr/feedback-affordance
 

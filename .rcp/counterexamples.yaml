@@ -1,0 +1,26 @@
+# Challenges raised against a claim, each carrying the input that shows it.
+#
+# An `open` entry must carry a `reproducer`: a command, an input, or a case another
+# Agent can run. A concern that cannot be reproduced is recorded as
+# `unsubstantiated` — visible, and not blocking anything.
+#
+# `claim` names what was challenged (an assertion id, a check name, or a document).
+# It does not have to resolve: a challenge against something not yet in the ledger
+# is often the valuable one.
+#
+# See docs/decisions/implemented/2026-09-09-counterexample-needs-a-reproducer.md.
+counterexamples:
+  - id: ce-2026-09-09-001
+    claim: "check:rtm:check"
+    status: resolved
+    reproducer: |
+      rm tests/cli/daemon-client.test.ts && npm run rtm:check
+    observed: >-
+      A route-level `node-test:<route>` check resolved as long as the route id
+      existed, even when the route's `tests` globs matched no file at all, so the
+      assertion would have been reported bound with nothing behind it. No authored
+      assertion used the bare form, which is why it stayed latent.
+    resolution: >-
+      createResolver now requires the route to resolve to at least one file before
+      either the bare or the named form binds; regression test added in
+      tests/tools/rtm-check.test.ts

@@ -198,6 +198,19 @@ shared cache is the single source of truth. Run `--prune-stores` after a run
 to drop all stores except the current run's (ingestion rebuilds them; the
 shared embedding cache is what actually makes reruns cheap).
 
+## One-off measurement scripts
+
+Each measures one property and none of them runs in CI. They write JSON or text to
+stdout, so redirect it if you want to keep the numbers.
+
+| Command                                      | Measures                                                                                                                       |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `npm run eval:concurrency`                   | Concurrent writers across sessions into a temporary store, then one read per session; prints write/read latency p50, p95, p99. |
+| `npm run eval:perf-overhead`                 | `searchContext` with performance timing on and off, at two store sizes, plus a phase profile from one run.                     |
+| `npm run eval:recall-compression`            | The same recall payload in the recall representations, compared by context size.                                               |
+| `npm run benchmark:merge:longmem`            | Merges LongMemEval shard result files into one result set (`merge-longmemeval-shards.ts`).                                     |
+| `npm run benchmark:ablate:reverse-retrieval` | The reverse-retrieval ablation; its arms and runner are described in `omnimemeval/README.md`.                                  |
+
 ## Benchmark roles
 
 | Suite               | Primary role                  | NMG mechanisms under test                                                                          |
@@ -208,7 +221,7 @@ shared embedding cache is what actually makes reruns cheap).
 | LoCoMo              | Relational-memory gate        | temporal and causal links, multi-hop evidence, node-to-leaf expansion and event summarization      |
 | BEAM                | Scale and cache-pressure gate | progressive retrieval, cache misses, maintenance cost and growth from 128K through 10M tokens      |
 | Reasoning workspace | Lab scratchpad gate           | explicit task-state retention, Pi compaction recovery, overhead, and unsupported scratchpad claims |
-| SkillOpt policy     | Offline policy decision gate  | answer/expand/stop, noise folding, held-out policy selection, matched Pi promotion                   |
+| SkillOpt policy     | Offline policy decision gate  | answer/expand/stop, noise folding, held-out policy selection, matched Pi promotion                 |
 
 The suites are reported separately. Their scores must not be averaged into one
 number because they measure different distributions and failure modes.

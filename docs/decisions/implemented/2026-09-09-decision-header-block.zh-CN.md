@@ -2,7 +2,8 @@
 
 [English](2026-09-09-decision-header-block.md)
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** explicit
 
 ## 问题
 

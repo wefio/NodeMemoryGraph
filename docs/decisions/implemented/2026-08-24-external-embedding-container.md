@@ -2,7 +2,8 @@
 
 [中文](2026-08-24-external-embedding-container.zh-CN.md)
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 
 ## Problem
 

@@ -1,0 +1,32 @@
+# Assumptions the control-plane claims rest on.
+#
+# An assertion states its domain (D) and the assumptions it rests on (A) with
+# `assumes:` ids that resolve here. This register is the only home for an
+# assumption: an id that appears nowhere else is invented inline.
+#
+# `falsifiedBy` is the field that keeps this honest. It names the observation
+# that would show the assumption is false. An assumption with no falsification
+# path is a guess — either delete it or turn it into an assertion with evidence.
+#
+# See docs/decisions/implemented/2026-09-09-assertion-domain-and-strength.md.
+assumptions:
+  - id: route-tests-emit-tap
+    statement: The route test runner writes a TAP summary to stdout and exits non-zero when any test fails
+    owner: repository-tooling
+    falsifiedBy: run a route test with a failing case and observe the exit status and stdout
+  - id: route-globs-resolve
+    statement: A route's `tests` patterns resolve to the files that hold its named cases
+    owner: repository-tooling
+    falsifiedBy: move a route's test file and observe whether `npm run rtm:check` still binds its assertions
+  - id: test-environment-not-inherited
+    statement: Route tests are not steered by switches inherited from the invoking process
+    owner: repository-tooling
+    falsifiedBy: run one route test with NODE_TEST_CONTEXT set and compare the result
+  - id: git-observation-is-accurate
+    statement: The repository observation used by reconcile reflects the working tree at the moment it is read
+    owner: repository-control-plane
+    falsifiedBy: edit a tracked file between two observations and confirm `changedPaths` reports it
+  - id: catalog-is-derived
+    statement: The runtime catalog is derived from the service surface rather than maintained as a second list
+    owner: daemon-cli
+    falsifiedBy: add a service method without touching the catalog and rerun the registry test

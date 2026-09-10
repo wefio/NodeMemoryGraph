@@ -2,7 +2,8 @@
 
 [English](2026-09-09-non-trivial-change-requires-decision.md)
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** explicit
 
 ## 问题
 

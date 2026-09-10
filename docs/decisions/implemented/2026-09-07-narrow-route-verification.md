@@ -1,6 +1,7 @@
 # Narrow per-domain verification: lightweight checks compose up to the full gate
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 Date: 2026-09-07
 Branch: pr/rcp-narrow-verify
 

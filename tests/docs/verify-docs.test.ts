@@ -39,6 +39,67 @@ test("the parts shelf fails when it names a part src/rcp no longer exports", () 
   assert.ok(!report.errors.some((error) => error.includes("'reconcileOnce' is not exported")));
 });
 
+function counterexampleFixture(entry: string[]): string {
+  const root = fixture();
+  mkdirSync(join(root, ".rcp"), { recursive: true });
+  writeFileSync(
+    join(root, ".rcp", "counterexamples.yaml"),
+    ["counterexamples:", ...entry, ""].join("\n"),
+  );
+  return root;
+}
+
+test("a counterexample ledger enforces a reproducer per status", () => {
+  assert.deepEqual(
+    verifyDocumentation(
+      counterexampleFixture([
+        "  - id: ce-1",
+        "    claim: some-claim",
+        "    status: resolved",
+        "    reproducer: npm run rtm:check",
+        "    resolution: fixed the resolver",
+      ]),
+    ).errors,
+    [],
+  );
+
+  const open = verifyDocumentation(
+    counterexampleFixture(["  - id: ce-1", "    claim: some-claim", "    status: open"]),
+  );
+  assert.ok(open.errors.some((error) => error.includes("a open entry needs a reproducer")));
+
+  const unsubstantiated = verifyDocumentation(
+    counterexampleFixture([
+      "  - id: ce-1",
+      "    claim: some-claim",
+      "    status: unsubstantiated",
+      "    reproducer: npm run rtm:check",
+    ]),
+  );
+  assert.ok(
+    unsubstantiated.errors.some((error) =>
+      error.includes("an unsubstantiated entry must not carry a reproducer"),
+    ),
+  );
+
+  const unresolved = verifyDocumentation(
+    counterexampleFixture([
+      "  - id: ce-1",
+      "    claim: some-claim",
+      "    status: resolved",
+      "    reproducer: npm run rtm:check",
+    ]),
+  );
+  assert.ok(
+    unresolved.errors.some((error) => error.includes("a resolved entry needs a resolution")),
+  );
+
+  const unnamed = verifyDocumentation(
+    counterexampleFixture(["  - id: ce-1", "    status: unsubstantiated"]),
+  );
+  assert.ok(unnamed.errors.some((error) => error.includes(".claim is required")));
+});
+
 test("valid bilingual documentation surface passes", () => {
   const report = verifyDocumentation(fixture());
   assert.deepEqual(report.errors, []);
@@ -79,7 +140,7 @@ test("a missing decision translation warns but does not fail", () => {
   mkdirSync(directory, { recursive: true });
   writeFileSync(
     join(directory, "2026-08-24-choice.md"),
-    "# Choice\n\n**Status:** implemented\n\n## Problem\nP\n\n## Decision\nD\n\n" +
+    "# Choice\n\n**Status:** implemented  \n**Approved:** explicit\n\n## Problem\nP\n\n## Decision\nD\n\n" +
       "## Alternatives considered\nA\n\n## Consequences\nC\n",
   );
   const report = verifyDocumentation(root);
@@ -87,10 +148,34 @@ test("a missing decision translation warns but does not fail", () => {
   assert.ok(report.warnings.some((warning) => warning.includes("counterpart")));
 });
 
+test("implemented decisions must record how they were approved", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "decisions", "implemented");
+  mkdirSync(directory, { recursive: true });
+  const body =
+    "\n## Problem\nP\n\n## Decision\nD\n\n## Alternatives considered\nA\n\n## Consequences\nC\n";
+  writeFileSync(
+    join(directory, "2026-08-24-missing.md"),
+    `# Missing\n\n**Status:** implemented\n${body}`,
+  );
+  writeFileSync(
+    join(directory, "2026-08-24-bad.md"),
+    `# Bad\n\n**Status:** implemented  \n**Approved:** maybe\n${body}`,
+  );
+  writeFileSync(
+    join(directory, "2026-08-24-ok.md"),
+    `# Ok\n\n**Status:** implemented  \n**Approved:** explicit\n${body}`,
+  );
+  const report = verifyDocumentation(root);
+  assert.ok(report.errors.some((error) => error.includes("'**Approved:**' is required")));
+  assert.ok(report.errors.some((error) => error.includes("'**Approved:**' must be one of")));
+  assert.ok(!report.errors.some((error) => error.includes("2026-08-24-ok")));
+});
+
 test("decision filenames and lifecycle locations are unique", () => {
   const root = fixture();
   const content =
-    "# Choice\n\n**Status:** implemented\n\n## Problem\nP\n\n## Decision\nD\n\n" +
+    "# Choice\n\n**Status:** implemented  \n**Approved:** explicit\n\n## Problem\nP\n\n## Decision\nD\n\n" +
     "## Alternatives considered\nA\n\n## Consequences\nC\n";
   for (const lifecycle of ["implemented", "archived"]) {
     const directory = join(root, "docs", "decisions", lifecycle);
@@ -135,7 +220,7 @@ test("bilingual decisions warn when they do not link to each other", () => {
   const directory = join(root, "docs", "decisions", "implemented");
   mkdirSync(directory, { recursive: true });
   const body =
-    "**Status:** implemented\n\n## Problem\nP\n\n## Decision\nD\n\n" +
+    "**Status:** implemented  \n**Approved:** explicit\n\n## Problem\nP\n\n## Decision\nD\n\n" +
     "## Alternatives considered\nA\n\n## Consequences\nC\n";
   writeFileSync(join(directory, "2026-08-24-choice.md"), `# Choice\n\n${body}`);
   writeFileSync(join(directory, "2026-08-24-choice.zh-CN.md"), `# 选择\n\n${body}`);
@@ -177,19 +262,19 @@ test("decision header fields are a closed, unique set", () => {
     "## Problem\nP\n\n## Decision\nD\n\n## Alternatives considered\nA\n\n## Consequences\nC\n";
   writeFileSync(
     join(directory, "2026-08-24-unknown.md"),
-    `# Unknown\n\n**Status:** implemented\n**Branch:** x\n\n${body}`,
+    `# Unknown\n\n**Status:** implemented  \n**Approved:** explicit\n**Branch:** x\n\n${body}`,
   );
   writeFileSync(
     join(directory, "2026-08-24-duplicate.md"),
-    `# Duplicate\n\n**Status:** implemented\n**Status:** rejected\n\n${body}`,
+    `# Duplicate\n\n**Status:** implemented  \n**Approved:** explicit\n**Status:** rejected\n\n${body}`,
   );
   writeFileSync(
     join(directory, "2026-08-24-allowed.md"),
-    `# Allowed\n\n**Status:** implemented\n**Relates to:** [x](../../README.md)\n\n${body}`,
+    `# Allowed\n\n**Status:** implemented  \n**Approved:** explicit\n**Relates to:** [x](../../README.md)\n\n${body}`,
   );
   writeFileSync(
     join(directory, "2026-08-24-archived.md"),
-    `# Archived\n\n**Status:** implemented\n**Archived:** 2026-08-24\n\n${body}`,
+    `# Archived\n\n**Status:** implemented  \n**Approved:** explicit\n**Archived:** 2026-08-24\n\n${body}`,
   );
   const report = verifyDocumentation(root);
   assert.ok(report.errors.some((error) => error.includes("unknown header field '**Branch:**'")));
@@ -204,7 +289,7 @@ test("a header field below the first section is not a header field", () => {
   mkdirSync(directory, { recursive: true });
   writeFileSync(
     join(directory, "2026-08-24-late.md"),
-    "# Late\n\n## Problem\nP\n\n**Status:** implemented\n\n## Decision\nD\n\n" +
+    "# Late\n\n## Problem\nP\n\n**Status:** implemented  \n**Approved:** explicit\n\n## Decision\nD\n\n" +
       "## Alternatives considered\nA\n\n## Consequences\nC\n",
   );
   const report = verifyDocumentation(root);
@@ -219,7 +304,7 @@ test("implemented decisions reject every proposal-era heading", () => {
   headings.forEach((heading, index) => {
     writeFileSync(
       join(directory, `2026-08-2${index}-banned.md`),
-      `# Banned\n\n**Status:** implemented\n\n## Problem\nP\n\n## Decision\nD\n\n` +
+      `# Banned\n\n**Status:** implemented  \n**Approved:** explicit\n\n## Problem\nP\n\n## Decision\nD\n\n` +
         `## Alternatives considered\nA\n\n## ${heading}\nB\n\n## Consequences\nC\n`,
     );
   });
@@ -237,7 +322,7 @@ test("the decision summary counts non-empty Deferred sections", () => {
   const directory = join(root, "docs", "decisions", "implemented");
   mkdirSync(directory, { recursive: true });
   const body =
-    "**Status:** implemented\n\n## Problem\nP\n\n## Decision\nD\n\n" +
+    "**Status:** implemented  \n**Approved:** explicit\n\n## Problem\nP\n\n## Decision\nD\n\n" +
     "## Alternatives considered\nA\n\n";
   writeFileSync(
     join(directory, "2026-08-24-open.md"),

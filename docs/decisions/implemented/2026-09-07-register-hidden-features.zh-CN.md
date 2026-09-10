@@ -1,6 +1,7 @@
 # 登记所有隐藏(环境变量门控 / 非默认)功能
 
-**Status:** implemented
+**Status:** implemented  
+**Approved:** unrecorded
 Date: 2026-09-07
 Branch: feat/meta-rule-governance
 

@@ -17,6 +17,8 @@ test("YAML and JSON compile to the same canonical Contract digest", () => {
         {
           id: "scope-discipline",
           statement: "Do not modify outside scope",
+          domain: "every change this contract produces",
+          assumes: [],
           check: "check",
           kind: "test",
           stage: "unit",

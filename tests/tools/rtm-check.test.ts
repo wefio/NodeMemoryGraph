@@ -58,6 +58,18 @@ function fixture(assertions: string): string {
     ].join("\n"),
   );
   write(root, ".rcp/contracts/fixture.yaml", contractYaml(assertions));
+  write(
+    root,
+    "docs/design/assumptions.yaml",
+    [
+      "assumptions:",
+      "  - id: fixture-assumption",
+      "    statement: Fixture assumption",
+      "    owner: source",
+      "    falsifiedBy: rerun the fixture",
+      "",
+    ].join("\n"),
+  );
   write(root, "tests/sample.test.ts", 'test("covers one", () => {});\n');
   return root;
 }
@@ -71,16 +83,22 @@ function withFixture(t: test.TestContext, assertions: string, run: (root: string
 const TRACEABLE = [
   "    - id: one",
   "      statement: One claim",
+  "      domain: every fixture case",
+  "      assumes: [fixture-assumption]",
   '      check: "node-test:source#covers one"',
   "      kind: test",
   "      stage: unit",
   "    - id: two",
   "      statement: Two claim",
+  "      domain: every fixture case",
+  "      assumes: []",
   "      check: node-test:source",
   "      kind: test",
   "      stage: integration",
   "    - id: three",
   "      statement: Three claim",
+  "      domain: every fixture case",
+  "      assumes: []",
   "      documentedOnly: true",
   "",
 ].join("\n");
@@ -94,6 +112,8 @@ test("a named test resolves to per-claim evidence, and a missing name fails clos
     [
       "    - id: one",
       "      statement: One claim",
+      "      domain: every fixture case",
+      "      assumes: []",
       '      check: "node-test:source#no such test"',
       "      kind: test",
       "      stage: unit",
@@ -122,8 +142,11 @@ test("every assertion resolves to a check, a route test, or documented-only", (t
     assert.deepEqual(report.errors, []);
     assert.deepEqual(report.uncovered, []);
     assert.equal(report.assertions, 3);
-    assert.equal(report.verified, 2);
+    assert.equal(report.bound, 2);
+    assert.equal(report.proven, 0);
+    assert.equal(report.witness, 2);
     assert.equal(report.documentedOnly, 1);
+    assert.equal(report.assumptions, 1);
   });
 });
 
@@ -133,6 +156,8 @@ test("an assertion whose check does not resolve fails closed", (t) => {
     [
       "    - id: one",
       "      statement: One claim",
+      "      domain: every fixture case",
+      "      assumes: []",
       "      check: no:such:check",
       "      kind: test",
       "      stage: unit",
@@ -142,7 +167,7 @@ test("an assertion whose check does not resolve fails closed", (t) => {
       const report = checkRtm(root);
       assert.equal(report.uncovered.length, 1);
       assert.match(report.uncovered[0], /one -> no:such:check/u);
-      assert.equal(report.verified, 0);
+      assert.equal(report.bound, 0);
     },
   );
 });
@@ -150,7 +175,14 @@ test("an assertion whose check does not resolve fails closed", (t) => {
 test("an assertion with neither a check nor documented-only fails closed", (t) => {
   withFixture(
     t,
-    ["    - id: one", "      statement: One claim", "      kind: test", ""].join("\n"),
+    [
+      "    - id: one",
+      "      statement: One claim",
+      "      domain: every fixture case",
+      "      assumes: []",
+      "      kind: test",
+      "",
+    ].join("\n"),
     (root) => {
       const report = checkRtm(root);
       assert.match(report.errors.join("\n"), /needs a check or documentedOnly/u);
@@ -164,6 +196,8 @@ test("duplicate assertion ids and unknown fields fail closed", (t) => {
     [
       "    - id: one",
       "      statement: One claim",
+      "      domain: every fixture case",
+      "      assumes: []",
       "      check: check",
       "    - id: one",
       "      statement: Duplicate id",
@@ -179,6 +213,8 @@ test("duplicate assertion ids and unknown fields fail closed", (t) => {
     [
       "    - id: one",
       "      statement: One claim",
+      "      domain: every fixture case",
+      "      assumes: []",
       "      check: check",
       "      note: nope",
       "",
@@ -195,6 +231,8 @@ test("an unknown kind or stage fails closed", (t) => {
     [
       "    - id: one",
       "      statement: One claim",
+      "      domain: every fixture case",
+      "      assumes: []",
       "      check: check",
       "      kind: vibe",
       "      stage: unit",
@@ -209,6 +247,8 @@ test("an unknown kind or stage fails closed", (t) => {
     [
       "    - id: one",
       "      statement: One claim",
+      "      domain: every fixture case",
+      "      assumes: []",
       "      check: check",
       "      stage: deployment",
       "",
@@ -225,4 +265,53 @@ test("a declared check no assertion claims is reported as an orphan, not a failu
     assert.deepEqual(report.orphans, ["check", "unused:check"]);
     assert.deepEqual(report.errors, []);
   });
+});
+
+test("an assertion without a domain fails closed", (t) => {
+  withFixture(
+    t,
+    [
+      "    - id: one",
+      "      statement: One claim",
+      "      assumes: []",
+      "      check: check",
+      "",
+    ].join("\n"),
+    (root) => {
+      assert.match(checkRtm(root).errors.join("\n"), /\.domain is required/u);
+    },
+  );
+});
+
+test("an assumption that resolves nowhere fails closed", (t) => {
+  withFixture(
+    t,
+    [
+      "    - id: one",
+      "      statement: One claim",
+      "      domain: every fixture case",
+      "      assumes: [not-registered]",
+      "      check: check",
+      "",
+    ].join("\n"),
+    (root) => {
+      assert.match(checkRtm(root).errors.join("\n"), /'not-registered' is assumed/u);
+    },
+  );
+});
+
+test("a route-level check fails closed when the route resolves to no file", (t) => {
+  const assertions = [
+    "    - id: one",
+    "      statement: One claim",
+    "      domain: every fixture case",
+    "      assumes: []",
+    "      check: node-test:source",
+    "",
+  ].join("\n");
+  const root = fixture(assertions);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  assert.deepEqual(checkRtm(root).uncovered, []);
+  rmSync(join(root, "tests", "sample.test.ts"));
+  assert.equal(checkRtm(root).uncovered.length, 1);
 });
