@@ -9,7 +9,7 @@ const args = parseArgs(process.argv.slice(2));
 const python = resolve(
   args.python ??
     process.env.NMG_HALUMEM_PYTHON ??
-    resolve(root, ".benchmarks/omni-venv/Scripts/python.exe"),
+    resolve(root, ".benchmarks/bge-venv/Scripts/python.exe"),
 );
 if (!existsSync(python)) throw new Error(`HaluMem Python environment not found: ${python}`);
 
