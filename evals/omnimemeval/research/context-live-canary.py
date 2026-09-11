@@ -20,7 +20,7 @@ effectiveness claim, does NOT generate training/admission labels, and does not
 substitute for a benchmark. It never prints env values / secrets.
 
 Run (dry):   python evals/omnimemeval/research/context-live-canary.py --config <cfg.json> --dry-run
-Run (live):  same without --dry-run (uses omni-venv python; official modules are
+Run (live):  same without --dry-run (uses bge-venv python; official modules are
              resolved from the gitignored OmniMemEval scripts dir, never edited).
 """
 

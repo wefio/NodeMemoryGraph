@@ -313,9 +313,21 @@ function buildRunEnvironment(
   environment.PYTHONUTF8 = "1";
   environment.PYTHONIOENCODING = "utf-8";
   const venvFolder = process.platform === "win32" ? "Scripts" : "bin";
-  const venvPath = join(repoRoot, ".benchmarks", "omni-venv", venvFolder);
+  // One benchmark venv serves every suite. NMG_BENCH_VENV names the directory
+  // under .benchmarks/ (default "bge-venv", which carries the CUDA embedding
+  // stack plus the official runners' requirements).
+  const venvPath = join(
+    repoRoot,
+    ".benchmarks",
+    process.env.NMG_BENCH_VENV ?? "bge-venv",
+    venvFolder,
+  );
   if (existsSync(venvPath)) {
     environment.PATH = `${venvPath}${process.platform === "win32" ? ";" : ":"}${environment.PATH ?? ""}`;
+  } else {
+    // Without this the run silently uses whatever python is on PATH, which is
+    // how a missing venv turns into wrong results instead of a loud failure.
+    process.stderr.write(`benchmark venv missing at ${venvPath}; using the python on PATH\n`);
   }
   return environment;
 }

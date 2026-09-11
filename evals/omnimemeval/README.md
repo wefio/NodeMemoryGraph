@@ -28,6 +28,30 @@ The files in this directory are split by responsibility:
 This separation keeps `npm run benchmark:omni -- <suite>` as the single public
 execution path while preserving reproducibility of past investigations.
 
+## Benchmark venv
+
+One venv serves every suite and the embedding server: `.benchmarks/bge-venv`
+(Python 3.13, `torch 2.13.0+cu126`). It is not built by any repo script, so this
+is the only record of what it contains — do not delete it without reading this.
+
+```powershell
+uv venv .benchmarks/bge-venv --python 3.13
+uv pip install --python .benchmarks/bge-venv/Scripts/python.exe `
+  -r .benchmarks/official/OmniMemEval/requirements_user_memory.txt
+```
+
+`requirements_agentbench.txt` (BEAM) adds `swebench`, `pyserini`, `faiss-cpu`,
+and `tevatron` from git; install it only when those suites are needed.
+
+Both requirement files list `torch` and `torchvision` **unpinned**. A plain
+`-r` install can therefore replace the CUDA build with the default PyPI build
+and silently drop GPU acceleration, so keep them out of `-r` and install torch
+from the CUDA index instead.
+
+`benchmark:omni` prepends the venv to `PATH` (`NMG_BENCH_VENV` overrides the
+directory name). `eval:halumem:score` uses the venv's `python.exe` by default and
+accepts `--python` or `NMG_HALUMEM_PYTHON`.
+
 ## Reverse-retrieval recall probe
 
 `research/ablations/reverse-retrieval-ablation.py` compares equal-size
@@ -52,7 +76,7 @@ at Top-1. Structured control markers such as `forget` are projected into LLM
 instructions after retrieval and therefore do not impose a minimum window size.
 
 ```powershell
-.benchmarks\omni-venv\Scripts\python.exe `
+.benchmarks\bge-venv\Scripts\python.exe `
   evals\omnimemeval\research\ablations\reverse-retrieval-ablation.py `
   --data .benchmarks\official\OmniMemEval\data\longmemeval\longmemeval_s_cleaned.json `
   --output .benchmarks\results\reverse-retrieval-temporal-full.json `
@@ -704,7 +728,7 @@ The delta over `timefinal` partly reflects regenerated search results rather
 than code changes, so it is read as "no regression, positive direction", not
 as a measured improvement.
 
-Reproduce with (Python 3.12 venv at `.benchmarks/omni-venv`, `PYTHONUTF8=1`):
+Reproduce with (venv at `.benchmarks/bge-venv`, `PYTHONUTF8=1`):
 
 ```powershell
 bash scripts/run_locomo_eval.sh --lib nmg --env .env.nmg --version no_memory_timefinal --from-step 3 --skip-failed-judge 1
