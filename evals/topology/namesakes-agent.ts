@@ -430,7 +430,7 @@ function createClient(): RpcClient {
     provider: "deepseek",
     model: "deepseek-v4-flash",
     env: {
-      ...definedEnvironment(),
+      ...definedEnvironment(benchmarkCredentialEnvironment(root)),
       PI_CODING_AGENT_DIR: mkdtempSync(resolve(stateRoot, "agent-")),
     },
     args: [

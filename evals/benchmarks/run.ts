@@ -353,7 +353,7 @@ function createClient(dataDirectory?: string, itemMode?: EvaluationMode): RpcCli
     provider: "deepseek",
     model: "deepseek-v4-flash",
     env: {
-      ...definedEnvironment(),
+      ...definedEnvironment(benchmarkCredentialEnvironment(root)),
       PI_CODING_AGENT_DIR: piAgentDirectory,
       ...(dataDirectory ? { NMG_DATA_DIR: dataDirectory } : {}),
       ...(isMatchedMode(itemMode) ? controllerMatchedEnvironment(itemMode) : {}),

@@ -914,7 +914,7 @@ function createClient(nmgDirectory?: string, runMode?: Exclude<Mode, "matched">)
     provider: "deepseek",
     model: "deepseek-v4-flash",
     env: {
-      ...definedEnvironment(),
+      ...definedEnvironment(benchmarkCredentialEnvironment(root)),
       PI_CODING_AGENT_DIR: piAgentDirectory,
       ...(nmgDirectory ? { NMG_DATA_DIR: nmgDirectory } : {}),
       ...(isMatchedMode(runMode) ? controllerMatchedEnvironment(runMode) : {}),
