@@ -28,6 +28,8 @@ import {
 } from "./controller-candidate.ts";
 import type { BenchmarkCase, BenchmarkSession } from "./types.ts";
 import { requirePositiveInteger } from "../../tools/parts/numbers.ts";
+import { mapConcurrent } from "../../tools/parts/async.ts";
+import { definedEnvironment } from "../../tools/parts/env.ts";
 
 type Benchmark = "beam" | "locomo" | "personamem";
 type Mode =
@@ -351,7 +353,7 @@ function createClient(dataDirectory?: string, itemMode?: EvaluationMode): RpcCli
     provider: "deepseek",
     model: "deepseek-v4-flash",
     env: {
-      ...definedEnvironment(),
+      ...definedEnvironment(benchmarkCredentialEnvironment(root)),
       PI_CODING_AGENT_DIR: piAgentDirectory,
       ...(dataDirectory ? { NMG_DATA_DIR: dataDirectory } : {}),
       ...(isMatchedMode(itemMode) ? controllerMatchedEnvironment(itemMode) : {}),
@@ -495,34 +497,4 @@ function repeats(): number {
 
 function safeName(value: string): string {
   return value.replace(/[^a-z0-9._-]+/giu, "_").slice(0, 120);
-}
-
-async function mapConcurrent<Input, Output>(
-  values: readonly Input[],
-  limit: number,
-  worker: (value: Input) => Promise<Output>,
-): Promise<Output[]> {
-  const results = new Array<Output>(values.length);
-  let cursor = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(limit, values.length) }, async () => {
-      while (cursor < values.length) {
-        const index = cursor;
-        cursor += 1;
-        results[index] = await worker(values[index]!);
-      }
-    }),
-  );
-  return results;
-}
-
-function definedEnvironment(): Record<string, string> {
-  return {
-    ...benchmarkCredentialEnvironment(root),
-    ...Object.fromEntries(
-      Object.entries(process.env).filter(
-        (entry): entry is [string, string] => entry[1] !== undefined,
-      ),
-    ),
-  };
 }

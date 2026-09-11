@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -15,6 +15,7 @@ import { buildShadowDataset, summarizeShadowDataset, type ShadowDatasetRow } fro
 import { readShadowEvents, resolveShadowEventPath } from "./report.ts";
 import { mean } from "../../tools/parts/stats.ts";
 import { requirePositiveInteger } from "../../tools/parts/numbers.ts";
+import { writeJsonAtomic } from "../../tools/parts/fs.ts";
 
 export interface ShadowCalibrationOptions {
   epochs?: number;
@@ -326,14 +327,6 @@ function bounded(value: number, minimum: number, maximum: number): number {
 function fileFingerprint(path: string): string | null {
   return existsSync(path) ? createHash("sha256").update(readFileSync(path)).digest("hex") : null;
 }
-
-function writeAtomic(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`);
-  renameSync(temporary, path);
-}
-
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const args = process.argv.slice(2);
   const compact = args.includes("--compact");
@@ -372,7 +365,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       dataset: { tasks: dataset.tasks, excludedGraphs: dataset.excludedGraphs },
       calibration,
     };
-    writeAtomic(resultPath, artifact);
+    writeJsonAtomic(resultPath, artifact);
     // Keep complete learned parameters in the artifact. Console output is an
     // operator-facing readiness summary; dumping every weight obscures the gate.
     process.stdout.write(

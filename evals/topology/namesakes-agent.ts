@@ -13,6 +13,7 @@ import { benchmarkCredentialEnvironment } from "../local-env.ts";
 import { loadNamesakesEntities, type NamesakesEntity, type NamesakesMention } from "./namesakes.ts";
 import { mean } from "../../tools/parts/stats.ts";
 import { positiveIntegerOr } from "../../tools/parts/numbers.ts";
+import { definedEnvironment } from "../../tools/parts/env.ts";
 
 export type NamesakesAttributionArm = "clean" | "contaminated";
 
@@ -429,7 +430,7 @@ function createClient(): RpcClient {
     provider: "deepseek",
     model: "deepseek-v4-flash",
     env: {
-      ...definedEnvironment(),
+      ...definedEnvironment(benchmarkCredentialEnvironment(root)),
       PI_CODING_AGENT_DIR: mkdtempSync(resolve(stateRoot, "agent-")),
     },
     args: [
@@ -584,17 +585,6 @@ function sumUsage(results: readonly ArmResult[]): TokenUsage {
     }),
     { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
   );
-}
-
-function definedEnvironment(): Record<string, string> {
-  return {
-    ...benchmarkCredentialEnvironment(root),
-    ...Object.fromEntries(
-      Object.entries(process.env).filter(
-        (entry): entry is [string, string] => entry[1] !== undefined,
-      ),
-    ),
-  };
 }
 function finiteNumber(value: string | undefined, fallback: number): number {
   const parsed = Number(value);

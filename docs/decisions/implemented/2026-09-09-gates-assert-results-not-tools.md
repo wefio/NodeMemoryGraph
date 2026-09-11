@@ -102,9 +102,9 @@ is this for", not "will it be used". It is documentation, not enforcement.
   enforced, so it is documentation.
 - Cost: the rule itself cannot be checked — "does this gate assert a property of the
   result" is not decidable from the gate's text. Review is the only enforcement.
-- **Repeal condition: if the duplication check named under Deferred is not built within
-  three months, repeal the rule.** A rule whose only mechanism never arrives is a
-  reminder.
+- **No mechanical repeal trigger.** The rule is a review convention, not a gate: it has
+  no mechanism of its own and is repealed by an explicit decision. A trigger was
+  considered and withdrawn — see "Not doing" below.
 
 ## Risks
 
@@ -116,10 +116,24 @@ is this for", not "will it be used". It is documentation, not enforcement.
 - Deduplication can be satisfied by promoting the worse implementation.
   Accepted: ranking quality is a review matter, and no gate can do it.
 
-## Deferred
+## Not doing
 
-- The parts shelf — making reuse cheaper — is a separate change and is not a
-  precondition for this one.
-- **The duplication check is not built.** The rule is in force, but "no part implemented
-  twice" has no gate yet: this decision is implemented as a rule and deferred as a
-  mechanism.
+- The parts shelf — making reuse cheaper — was a separate change and landed as
+  `docs/guides/parts.md`; it is not a precondition for the rule.
+- **The duplication check will not be built.** It was measured on 2026-09-09 and the
+  measurement is the durable part, not the checker:
+  - 260 files scanned, 1757 bodies of ≥20 tokens, **24 groups already duplicated** —
+    `ratio` 6×, `digest`/`textHash` 4×, `parseArgs` 3×, `errorMessage` 3×,
+    `mean`/`average` 3×, and so on. A whole-repository gate would be red on arrival, so
+    it would have to be new-only, which means reading the diff — and then it fights any
+    dirty worktree, the failure mode `complexity:gate` already shows.
+  - The normaliser that catches renamed copies **cannot see the family that motivated
+    the rule**: the eleven `percentile` copies differ by one token, so none of them
+    would be reported. The property would have to be named "no identical body twice",
+    not "no part implemented twice".
+  - The measurement did earn its keep once: it found six local definitions in four
+    files that `docs/guides/parts.md` claimed had been migrated, because a baseline
+    type-check probe had reverted them. Fixed in `198e8e95`.
+
+  Keeping this here so a future proposal to build the checker starts from the
+  measurement rather than repeating it.

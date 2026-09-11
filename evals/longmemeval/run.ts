@@ -44,6 +44,8 @@ import {
   officialRetrievalForMemoryIds,
 } from "./retrieval-evidence.ts";
 import { requirePositiveInteger } from "../../tools/parts/numbers.ts";
+import { mapConcurrent } from "../../tools/parts/async.ts";
+import { definedEnvironment } from "../../tools/parts/env.ts";
 
 interface SampleManifest {
   name: string;
@@ -912,7 +914,7 @@ function createClient(nmgDirectory?: string, runMode?: Exclude<Mode, "matched">)
     provider: "deepseek",
     model: "deepseek-v4-flash",
     env: {
-      ...definedEnvironment(),
+      ...definedEnvironment(benchmarkCredentialEnvironment(root)),
       PI_CODING_AGENT_DIR: piAgentDirectory,
       ...(nmgDirectory ? { NMG_DATA_DIR: nmgDirectory } : {}),
       ...(isMatchedMode(runMode) ? controllerMatchedEnvironment(runMode) : {}),
@@ -988,35 +990,4 @@ function modelTimeout(): number {
     30_000,
     Number.parseInt(process.env.NMG_LONGMEM_TIMEOUT_MS ?? "300000", 10) || 300_000,
   );
-}
-
-async function mapConcurrent<Input, Output>(
-  values: readonly Input[],
-  concurrency: number,
-  worker: (value: Input) => Promise<Output>,
-): Promise<Output[]> {
-  const results = new Array<Output>(values.length);
-  let cursor = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, values.length) }, async () => {
-      while (true) {
-        const index = cursor;
-        cursor += 1;
-        if (index >= values.length) return;
-        results[index] = await worker(values[index]!);
-      }
-    }),
-  );
-  return results;
-}
-
-function definedEnvironment(): Record<string, string> {
-  return {
-    ...benchmarkCredentialEnvironment(root),
-    ...Object.fromEntries(
-      Object.entries(process.env).filter(
-        (entry): entry is [string, string] => entry[1] !== undefined,
-      ),
-    ),
-  };
 }
