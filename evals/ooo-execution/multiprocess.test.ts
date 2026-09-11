@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import type { ServerState } from "../../src/cli/lifecycle.ts";
+import type { TaskBoardEntry } from "../../src/core/types.ts";
+import type { BoardTicket } from "./board-admission.ts";
 
 import { Actor } from "./process-driver.ts";
 
@@ -45,8 +47,9 @@ test(
       ]);
       assert.deepEqual(duplicates.sort(), ["accepted", "duplicate"]);
       assert.equal(
-        (await second.call("board")).filter(
-          (entry: any) => entry.kind === "handoff" && JSON.parse(entry.content).id === "C",
+        (await second.call<TaskBoardEntry[]>("board")).filter(
+          (entry: TaskBoardEntry) =>
+            entry.kind === "handoff" && JSON.parse(entry.content).id === "C",
         ).length,
         0,
       );
@@ -67,7 +70,7 @@ test(
         "stale",
         "expired even before reassignment",
       );
-      const replacement = await second.call("take", { task: "A" });
+      const replacement = await second.call<BoardTicket>("take", { task: "A" });
       assert.equal(replacement.attempt, 2);
       await daemon.call("resume");
       assert.equal(await late, "stale");
@@ -80,8 +83,9 @@ test(
       await aCommitted;
       assert.deepEqual(await daemon.call("accepted"), { A: "4", B: "6" });
       assert.equal(
-        (await second.call("board")).filter(
-          (entry: any) => entry.kind === "handoff" && JSON.parse(entry.content).id === "C",
+        (await second.call<TaskBoardEntry[]>("board")).filter(
+          (entry: TaskBoardEntry) =>
+            entry.kind === "handoff" && JSON.parse(entry.content).id === "C",
         ).length,
         0,
       );
@@ -95,10 +99,11 @@ test(
       assert.equal(await first.call("deliver", { task: "A" }), "stale");
       assert.equal(await second.call("deliver", { task: "A" }), "duplicate");
 
-      const board = await second.call("board");
+      const board = await second.call<TaskBoardEntry[]>("board");
       assert.equal(
         board.filter(
-          (entry: any) => entry.kind === "handoff" && JSON.parse(entry.content).id === "C",
+          (entry: TaskBoardEntry) =>
+            entry.kind === "handoff" && JSON.parse(entry.content).id === "C",
         ).length,
         1,
       );
@@ -111,7 +116,11 @@ test(
       endpoint = (await daemon.ready) as ServerState;
       await daemon.call("setNow", { now });
       await second.call("connect", { endpoint, agent: "worker-2" });
-      assert.ok((await second.call("board")).some((entry: any) => entry.id === resultId));
+      assert.ok(
+        (await second.call<TaskBoardEntry[]>("board")).some(
+          (entry: TaskBoardEntry) => entry.id === resultId,
+        ),
+      );
       await daemon.call("pauseAfterCommit");
       const committed = daemon.event("committed");
       const interrupted = assert.rejects(
@@ -120,7 +129,9 @@ test(
       );
       await committed;
       assert.equal(
-        (await second.call("board")).filter((entry: any) => entry.kind === "decision").length,
+        (await second.call<TaskBoardEntry[]>("board")).filter(
+          (entry: TaskBoardEntry) => entry.kind === "decision",
+        ).length,
         2,
       );
       // Crash after durable acceptance but before the board decision is published.
@@ -136,11 +147,14 @@ test(
       ]);
       assert.deepEqual(verdicts, ["duplicate", "duplicate"]);
       assert.deepEqual(await daemon.call("accepted"), { A: "4", B: "6", C: "10" });
-      const accepted = (await second.call("board")).filter(
-        (entry: any) => entry.kind === "decision",
+      const accepted = (await second.call<TaskBoardEntry[]>("board")).filter(
+        (entry: TaskBoardEntry) => entry.kind === "decision",
       );
       assert.equal(accepted.length, 3);
-      assert.equal(accepted.filter((entry: any) => JSON.parse(entry.content).id === "C").length, 1);
+      assert.equal(
+        accepted.filter((entry: TaskBoardEntry) => JSON.parse(entry.content).id === "C").length,
+        1,
+      );
     } finally {
       await Promise.all(actors.map((actor) => actor.kill()));
       rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -185,8 +199,9 @@ test(
       await assert.rejects(first.call("requestClaim", { task: "B" }), /not selected/);
       assert.deepEqual(await daemon.call("accepted"), { A: "4" });
       assert.equal(
-        (await second.call("board")).filter(
-          (entry: any) => entry.kind === "handoff" && JSON.parse(entry.content).id === "C",
+        (await second.call<TaskBoardEntry[]>("board")).filter(
+          (entry: TaskBoardEntry) =>
+            entry.kind === "handoff" && JSON.parse(entry.content).id === "C",
         ).length,
         0,
       );

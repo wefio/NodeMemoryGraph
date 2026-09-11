@@ -3,6 +3,11 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Actor } from "./process-driver.ts";
+import type { BoardTicket } from "./board-admission.ts";
+import type { PiRun } from "../../.pi/extensions/nmg/ooo-execution.ts";
+
+/** What a `solve` command returns: the run's own measurements plus the host verdict. */
+type Solved = PiRun & { verdict: string; workerPid: number; taskId: string };
 
 if (!process.argv.includes("--live"))
   throw new Error("Explicit --live required: this runs three real Pi tasks");
@@ -22,9 +27,9 @@ try {
   const results = [];
   assert.equal(await daemon.call("next"), "B");
   const run = async (worker: Actor, task: string) => {
-    const ticket = await worker.call("take", { task });
+    const ticket = await worker.call<BoardTicket>("take", { task });
     const start = Date.now();
-    const execution = await worker.call("solve", { task, provider, model }, 65_000);
+    const execution = await worker.call<Solved>("solve", { task, provider, model }, 65_000);
     assert.equal(execution.verdict, "accepted", `${task}: ${execution.verdict}`);
     console.log(
       `${task}: accepted, ${execution.reads} snapshot read(s), ${execution.tokens} tokens`,
@@ -47,7 +52,7 @@ try {
     "two real Pi worker processes",
   );
   assert.equal(await daemon.call("next"), null);
-  const accepted = await daemon.call("accepted");
+  const accepted = await daemon.call<Record<string, string>>("accepted");
   assert.equal(accepted.C, `${accepted.A}\n${accepted.B}`);
   const report = {
     startedAt,

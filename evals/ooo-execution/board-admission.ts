@@ -79,6 +79,22 @@ interface Row {
   patch_files: string | null;
   patch_editable: string | null;
 }
+/** A worker-supplied submission payload, admitted only when it has the two fields the
+ *  protocol needs. Everything else in it is ignored, never trusted. */
+function parsePayload(content: string): { ticket: BoardTicket; artifact: string } | null {
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(content);
+  } catch {
+    return null;
+  }
+  if (!candidate || typeof candidate !== "object") return null;
+  const { ticket, artifact } = candidate as { ticket?: unknown; artifact?: unknown };
+  if (!ticket || typeof ticket !== "object" || typeof artifact !== "string") return null;
+  if (typeof (ticket as BoardTicket).taskId !== "string") return null;
+  return { ticket: ticket as BoardTicket, artifact };
+}
+
 export interface BoardTicket {
   runId: string;
   taskId: string;
@@ -440,16 +456,11 @@ export class BoardAdmission extends NmgStore {
     if (!id || !agentId) throw new Error("task and agent required");
     if (this.cancelled() !== null) throw new Error("round cancelled");
     return this.transaction(() => {
-      const row = this.row(id);
-      if (row.artifact !== null) throw new Error("task completed");
-      if (!row.entry_id) throw new Error("unfulfilled dependencies");
-      if (this.live(row)) throw new Error("task already claimed");
-      // Selection and claim share one write transaction across all workers.
-      if (this.next() !== id) throw new Error("task not selected by narrow dispatch");
+      const row = this.claimableRow(id);
       const dependencies = this.inputs(row);
       const entry = this.claimTaskBoardEntry({
         taskId: channel,
-        entryId: row.entry_id,
+        entryId: row.entry_id!,
         agentId,
         leaseSeconds: 60,
         now: new Date(this.now).toISOString(),
@@ -476,16 +487,20 @@ export class BoardAdmission extends NmgStore {
         input: row.input,
         operation: spec ? null : (row.operation as ProbeOperation),
         dependencies,
-        patch: spec
-          ? {
-              // The ticket carries the frozen work itself: hand-listing fields made the
-              // driver and the coordinator disagree the moment the work gained one.
-              ...frozen!.work,
-              digest: frozen!.digest,
-            }
-          : undefined,
+        patch: frozen ? { ...frozen.work, digest: frozen.digest } : undefined,
       };
     });
+  }
+
+  /** Every reason a task cannot be claimed right now, checked inside the claim
+   *  transaction so selection and claim see the same state. */
+  private claimableRow(id: string): Row {
+    const row = this.row(id);
+    if (row.artifact !== null) throw new Error("task completed");
+    if (!row.entry_id) throw new Error("unfulfilled dependencies");
+    if (this.live(row)) throw new Error("task already claimed");
+    if (this.next() !== id) throw new Error("task not selected by narrow dispatch");
+    return row;
   }
 
   private bound(ticket: BoardTicket, row: Row): boolean {
@@ -545,6 +560,31 @@ export class BoardAdmission extends NmgStore {
   }
 
   async submit(resultId: string): Promise<string> {
+    const parsed = this.readSubmission(resultId);
+    if (typeof parsed === "string") return parsed;
+    const { ticket, artifact, row } = parsed;
+    const commit = this.proposalCommit(row, artifact);
+    if (row.artifact !== null) {
+      this.publishReady();
+      return commit !== null && row.artifact === commit ? "duplicate" : "rejected";
+    }
+    if (!this.live(row)) return "stale";
+    if (commit === null) return "rejected";
+    // Candidate text is re-derived from the same frozen input the host owns; a
+    // worker-supplied "passed" field or verdict never reaches this decision.
+    if (this.patchSpec(row) && !(await this.verifyCandidate(row, commit))) return "rejected";
+    await this.afterVerify();
+    const verdict = this.commitArtifact(ticket, commit);
+    await this.afterCommit();
+    this.publishReady();
+    return verdict;
+  }
+
+  /** The submitted board entry, validated as data and bound to the task it names. A
+   *  string result is the verdict of that validation, not an error. */
+  private readSubmission(
+    resultId: string,
+  ): { ticket: BoardTicket; artifact: string; row: Row } | "rejected" | "stale" {
     const result = this.getTaskBoardEntryById(channel, resultId);
     if (
       !result ||
@@ -553,21 +593,9 @@ export class BoardAdmission extends NmgStore {
       Date.parse(result.expiresAt) <= this.now
     )
       return "rejected";
-    let candidate: { ticket: BoardTicket; artifact: string };
-    try {
-      candidate = JSON.parse(result.content);
-    } catch {
-      return "rejected";
-    }
-    if (
-      !candidate ||
-      typeof candidate !== "object" ||
-      !candidate.ticket ||
-      typeof candidate.ticket.taskId !== "string" ||
-      typeof candidate.artifact !== "string"
-    )
-      return "rejected";
-    const { ticket, artifact } = candidate;
+    const payload = parsePayload(result.content);
+    if (!payload) return "rejected";
+    const { ticket, artifact } = payload;
     if (result.agentId !== ticket.owner) return "rejected";
     let row: Row;
     try {
@@ -575,30 +603,26 @@ export class BoardAdmission extends NmgStore {
     } catch {
       return "rejected";
     }
-    if (!this.bound(ticket, row)) return "stale";
-    const commit = this.proposalCommit(row, artifact);
-    if (row.artifact !== null) {
-      this.publishReady();
-      return commit !== null && row.artifact === commit ? "duplicate" : "rejected";
+    return this.bound(ticket, row) ? { ticket, artifact, row } : "stale";
+  }
+
+  /** A patch task's verification is a host call that may throw or abstain; only an
+   *  explicit accept is acceptance. */
+  private async verifyCandidate(row: Row, commit: string): Promise<boolean> {
+    try {
+      const outcome = await this.patchSpec(row)!.verify(JSON.parse(commit) as PatchSubmission);
+      return outcome === "accept";
+    } catch {
+      return false;
     }
-    if (!this.live(row)) return "stale";
-    if (commit === null) return "rejected";
-    if (this.patchSpec(row)) {
-      // Candidate text is re-derived from the same frozen input the host owns;
-      // a worker-supplied "passed" field or verdict never reaches this decision.
-      // A rejected attempt keeps its claim: the same worker may correct it, and
-      // only a reissued attempt (new digest) or a lapsed lease fences it.
-      let outcome: "accept" | "reject" | "undecidable" = "undecidable";
-      try {
-        outcome = await this.patchSpec(row)!.verify(JSON.parse(commit) as PatchSubmission);
-      } catch {
-        return "rejected";
-      }
-      if (outcome !== "accept") return "rejected";
-    }
-    await this.afterVerify();
-    const verdict = this.transaction(() => {
-      row = this.row(ticket.taskId);
+  }
+
+  /** The commit re-checks the fence inside its own transaction: verification is await-
+   *  capable, so the ticket may have been retired while it ran. A rejected attempt keeps
+   *  its claim — only a reissued attempt (new digest) or a lapsed lease fences it. */
+  private commitArtifact(ticket: BoardTicket, commit: string): string {
+    return this.transaction(() => {
+      const row = this.row(ticket.taskId);
       if (!this.bound(ticket, row)) return "stale";
       if (row.artifact !== null) return row.artifact === commit ? "duplicate" : "rejected";
       if (!this.live(row)) return "stale";
@@ -611,9 +635,6 @@ export class BoardAdmission extends NmgStore {
       });
       return "accepted";
     });
-    await this.afterCommit();
-    this.publishReady();
-    return verdict;
   }
 
   accepted(): Record<string, string> {

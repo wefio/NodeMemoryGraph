@@ -7,6 +7,7 @@ import {
   preparePatchWork,
   patchSubmission,
   type ConclusionKind,
+  type FrozenPatchTask,
   type FrozenPatchWork,
   type PatchSubmission,
 } from "../../src/integration/ooo-patch.ts";
@@ -138,8 +139,86 @@ const plan: ProbePlan = [
 
 /** Host driver for one A/B/C round: the check is real and concurrent with B, the
  *  bypass is the coordinator's decision, and every acceptance is host-verified. */
+/** The round's check verdict as the terminal evidence the board records. */
+/** Round inputs with their documented defaults applied once, so the orchestrator reads
+ *  resolved values instead of repeating `??` at every use. */
+function cycleDefaults(options: CycleOptions) {
+  return {
+    runChecks: (options.runChecks ?? verifyCandidate) as CheckRunner,
+    noChangeCases: structuredClone(options.noChangeCases ?? {}),
+    declared: structuredClone(options.mutations ?? {}),
+    maxReopens: options.maxReopens ?? 1,
+  };
+}
+
+function checkOutcome(
+  verdict: CheckOutcomeSummary["verdict"],
+): "passed" | "failed" | "undecidable" {
+  if (verdict === "accept") return "passed";
+  return verdict === "reject" ? "failed" : "undecidable";
+}
+
+/** The check's own duration: issued-to-terminal, from the recorded timestamps. */
+function checkWindow(timeline: CycleResult["timeline"]): number {
+  const at = (step: string) => Date.parse(timeline.find((e) => e.step === step)?.at ?? "0");
+  return at("check-finished") - at("check-issued") || 0;
+}
+
+/** One line per check, in order: the evidence the coordinator and the worker both see. */
+function describeOutcomes(result: CheckOutcomeSummary): string {
+  return result.outcomes.map((item) => `${item.label}=${item.status}`).join(", ");
+}
+
+/** Every check in the round must have reported a pass for a no-change claim to stand. */
+function allChecksPassed(result: CheckOutcomeSummary, checks: readonly CandidateCheck[]): boolean {
+  return checks.every(({ label }) =>
+    result.outcomes.some((item) => item.label === label && item.status === "passed"),
+  );
+}
+
+/** The driver and the coordinator must agree on the frozen work, or the round is not
+ *  running the same task. A bare "mismatch" cost two debugging rounds, so the error
+ *  names the fields that differ. */
+function assertFrozenMatches(
+  frozen: FrozenPatchWork,
+  claimed: FrozenPatchTask & { digest: string },
+) {
+  if (frozen.digest === claimed.digest) return;
+  const own = frozen.work as unknown as Record<string, unknown>;
+  const theirs = claimed as unknown as Record<string, unknown>;
+  const differing = Object.keys(own).filter(
+    (key) => JSON.stringify(own[key]) !== JSON.stringify(theirs[key]),
+  );
+  const detail = differing
+    .map((key) => `${key}=${JSON.stringify(own[key])} vs ${JSON.stringify(theirs[key])}`)
+    .join(" | ");
+  throw new Error(
+    `frozen digest mismatch: ${frozen.digest.slice(0, 12)} vs ${claimed.digest.slice(0, 12)}; ` +
+      `differing fields: ${differing.join(", ") || "none"} ${detail}`,
+  );
+}
+
+/** The coordinator stays the acceptance authority; this records why the shared
+ *  contract rejected an artifact, which is otherwise invisible. */
+function logContractError(
+  log: (step: string, detail?: string) => void,
+  taskId: string,
+  frozen: FrozenPatchWork,
+  artifact: string,
+) {
+  try {
+    patchSubmission(frozen, artifact);
+  } catch (error) {
+    log(
+      `contract-error:${taskId}`,
+      (error instanceof Error ? error.message : String(error)).slice(0, 300),
+    );
+  }
+}
+
 export async function runCycle(options: CycleOptions): Promise<CycleResult> {
-  const runChecks = (options.runChecks ?? verifyCandidate) as CheckRunner;
+  const defaults = cycleDefaults(options);
+  const runChecks = defaults.runChecks;
   const directory = options.databaseDir ?? mkdtempSync(join(tmpdir(), "ooo-cycle-db-"));
   const specs: Record<string, PatchTaskSpec> = {};
   const gate = new BoardAdmission(join(directory, "store.sqlite"), plan, specs);
@@ -147,8 +226,8 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   const verdicts: Record<string, string> = {};
   const submissions: Record<string, PatchSubmission> = {};
   const rejections: CycleResult["rejections"] = [];
-  const noChangeCases = structuredClone(options.noChangeCases ?? {});
-  const declared = structuredClone(options.mutations ?? {});
+  const noChangeCases = defaults.noChangeCases;
+  const declared = defaults.declared;
   const killed: Record<string, string[]> = {};
   const survived: Record<string, string[]> = {};
   const workers: CycleResult["measurements"]["workers"] = {};
@@ -217,89 +296,124 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   const record = async (result: CheckOutcomeSummary) => {
     const failed = result.outcomes.find((item) => item.status !== "passed");
     const detail =
-      `${result.verdict}: ${result.outcomes.map((item) => `${item.label}=${item.status}`).join(", ")}` +
+      `${result.verdict}: ${describeOutcomes(result)}` +
       (failed?.log ? ` | ${failed.log.slice(-600)}` : "");
     log("candidate-check", detail);
     return result.verdict;
   };
-  const patchVerifier = (task: "A" | "B") => async (submission: PatchSubmission) => {
+  /** Case rules resolve against a title the host can actually see; an unresolved case
+   *  fails closed rather than being matched by the worker's own words. */
+  const resolveCases = (
+    task: string,
+    cases: readonly CaseRule[],
+    available: ReadonlySet<string>,
+    cited: ReadonlyMap<string, string>,
+  ): boolean => {
+    for (const rule of cases)
+      if (!caseResolved(rule, available, cited)) {
+        log(
+          cited.size ? "citation-unresolved" : "case-unresolved",
+          cited.size
+            ? `${task} ${rule.name} -> ${cited.get(rule.name) ?? "none"}`
+            : `${task} ${rule.name} -> no test title matching ${rule.token}`,
+        );
+        return false;
+      }
+    return true;
+  };
+  /** The retention rule of mutation-guided testing: a new test is worth keeping only if
+   *  it passes on the intact implementation and fails on a declared mutant. */
+  const runMutationProof = async (
+    task: string,
+    candidate: Readonly<Record<string, string>>,
+    mutants: readonly Mutation[],
+  ) => {
+    for (const mutation of mutants) {
+      const run = await check(mutate(candidate, mutation));
+      const killedIt = run.verdict === "reject";
+      (killedIt ? (killed[task] ??= []) : (survived[task] ??= [])).push(mutation.id);
+      log(killedIt ? "mutant-killed" : "mutant-survived", `${task} ${mutation.id}`);
+    }
+  };
+  /** A patch candidate: the premise must hold, the declared cases must resolve, the
+   *  candidate must pass intact, and it must close at least one declared gap. */
+  const verifyPatch = async (
+    task: "A" | "B",
+    submission: Extract<PatchSubmission, { kind: "patch" }>,
+  ) => {
     const mutants = declared[task] ?? [];
+    // The mutant premise gates acceptance, not the start of work: awaiting the
+    // concurrently proved matrix here keeps a false premise from accepting anything.
+    await matrix;
+    if (premiseFailed) {
+      log("premise-invalid", `${task}: a declared mutant is already detected`);
+      return "reject";
+    }
+    const candidate = { ...options.baseline, ...submission.files };
     // Proven-gap mode replaces the title-token rule for patches, rather than stacking
     // with it: a surviving mutant is strictly stronger evidence than a title match, and
     // a round that declares both would reject a candidate for the weaker rule.
     const cases = mutants.length ? [] : (noChangeCases[task] ?? []);
-    if (submission.kind === "patch") {
-      // The mutant premise gates acceptance, not the start of work: awaiting the
-      // concurrently proved matrix here keeps a false premise from accepting anything.
-      await matrix;
-      if (premiseFailed) {
-        log("premise-invalid", `${task}: a declared mutant is already detected`);
-        return "reject";
-      }
-      const candidate = { ...options.baseline, ...submission.files };
-      const available = titles(candidate);
-      for (const rule of cases)
-        if (!caseResolved(rule, available, new Map())) {
-          log("case-unresolved", `${task} ${rule.name} -> no test title matching ${rule.token}`);
-          return "reject";
-        }
-      // The retention rule of mutation-guided testing: a new test is worth keeping
-      // only if it passes on the intact implementation and fails on a mutant.
-      const intact = await check(candidate);
-      if (intact.verdict !== "accept") return record(intact);
-      for (const mutation of mutants) {
-        const run = await check(mutate(candidate, mutation));
-        if (run.verdict === "reject") {
-          (killed[task] ??= []).push(mutation.id);
-          log("mutant-killed", `${task} ${mutation.id}`);
-        } else {
-          (survived[task] ??= []).push(mutation.id);
-          log("mutant-survived", `${task} ${mutation.id}`);
-        }
-      }
-      if (mutants.length && !killed[task]?.length) {
-        log("gap-not-closed", `${task}: no declared mutant killed`);
-        return "reject";
-      }
-      return record(intact);
+    if (!resolveCases(task, cases, titles(candidate), new Map())) return "reject";
+    const intact = await check(candidate);
+    if (intact.verdict !== "accept") return record(intact);
+    await runMutationProof(task, candidate, mutants);
+    if (mutants.length && !killed[task]?.length) {
+      log("gap-not-closed", `${task}: no declared mutant killed`);
+      return "reject";
     }
+    return record(intact);
+  };
+  /** The refusals a conclusion can hit before any check runs, as a verdict or null. */
+  const conclusionRefusal = (
+    task: "A" | "B",
+    submission: Extract<PatchSubmission, { kind: "conclusion" }>,
+    mutants: readonly Mutation[],
+  ): "reject" | null => {
     // A blocked report is not completed work: it must not unlock A or C.
     if (submission.conclusion === "cannot-complete") {
       log("blocked", `${task}: ${submission.summary.slice(0, 300)}`);
       return "reject";
     }
     if (submission.conclusion !== "no-change-needed") return "reject";
-    // When the host has proved a surviving mutant, "no change needed" is false by
-    // the host's own evidence, so it cannot be accepted on any citation.
+    // When the host has proved a surviving mutant, "no change needed" is false by the
+    // host's own evidence, so it cannot be accepted on any citation.
     if (mutants.length) {
       log("gap-proven", `${task}: ${mutants.length} declared mutant(s) survived the frozen suite`);
       return "reject";
     }
     if (!noChangeCases[task]?.length) return "reject";
-    // A no-change claim is only as good as a citation the host can resolve: an
-    // invented, misquoted, or missing citation fails closed.
-    const cited = new Map(submission.citations.map((item) => [item.case, item.test]));
+    return null;
+  };
+  /** No-change claims are only as good as a citation the host can resolve: an invented,
+   *  misquoted, or missing citation fails closed. */
+  const conclusionCasesResolved = (task: "A" | "B", submission: PatchSubmission) => {
+    const cases = noChangeCases[task] ?? [];
+    const cited = new Map(
+      submission.kind === "conclusion" ? submission.citations.map((i) => [i.case, i.test]) : [],
+    );
     const unknown = [...cited.keys()].find((name) => !cases.some((rule) => rule.name === name));
     if (unknown) {
       log("citation-unresolved", `${task} unknown case ${unknown}`);
-      return "reject";
+      return false;
     }
-    for (const rule of cases)
-      if (!caseResolved(rule, frozenTitles, cited)) {
-        log("citation-unresolved", `${task} ${rule.name} -> ${cited.get(rule.name) ?? "none"}`);
-        return "reject";
-      }
+    return resolveCases(task, cases, frozenTitles, cited);
+  };
+  const verifyConclusion = async (
+    task: "A" | "B",
+    submission: Extract<PatchSubmission, { kind: "conclusion" }>,
+  ) => {
+    const refusal = conclusionRefusal(task, submission, declared[task] ?? []);
+    if (refusal) return refusal;
+    if (!conclusionCasesResolved(task, submission)) return "reject";
     const result = await check(options.baseline);
-    if (
-      !options.checks.length ||
-      options.checks.some(
-        ({ label }) =>
-          !result.outcomes.some((item) => item.label === label && item.status === "passed"),
-      )
-    )
-      return "undecidable";
+    if (!options.checks.length || !allChecksPassed(result, options.checks)) return "undecidable";
     return record(result);
   };
+  const patchVerifier = (task: "A" | "B") => async (submission: PatchSubmission) =>
+    submission.kind === "patch"
+      ? verifyPatch(task, submission)
+      : verifyConclusion(task, submission);
   const composedVerifier =
     (abFiles: Readonly<Record<string, string>>) => async (submission: PatchSubmission) => {
       // C may only promote what the host itself can re-verify as a composed candidate.
@@ -355,63 +469,33 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
       budget: ticket.patch.budget,
       limits: ticket.patch.limits,
     });
-    if (frozen.digest !== ticket.patch.digest) {
-      // A bare "mismatch" cost two debugging rounds; the error states what differs.
-      const differing = Object.keys(frozen.work).filter(
-        (key) =>
-          JSON.stringify((frozen.work as unknown as Record<string, unknown>)[key]) !==
-          JSON.stringify((ticket.patch as unknown as Record<string, unknown>)[key]),
-      );
-      throw new Error(
-        `frozen digest mismatch: ${frozen.digest.slice(0, 12)} vs ${ticket.patch.digest.slice(0, 12)}; ` +
-          `differing fields: ${differing.join(", ") || "none"} ` +
-          differing
-            .map(
-              (key) =>
-                `${key}=${JSON.stringify((frozen.work as unknown as Record<string, unknown>)[key])} vs ${JSON.stringify((ticket.patch as unknown as Record<string, unknown>)[key])}`,
-            )
-            .join(" | "),
-      );
-    }
+    assertFrozenMatches(frozen, ticket.patch);
     log(`claim:${taskId}`, `attempt=${ticket.attempt} digest=${frozen.digest.slice(0, 12)}`);
     // A worker that fails or returns truncated output produced no artifact: it is a
     // failed attempt with recorded reason, not a crashed round and not a retry.
-    let artifact: string;
-    let pushback: { dependency: string; requirement: string; evidence: string } | undefined;
-    try {
-      const produced = await options.worker(taskId, frozen, ticket.dependencies);
-      if (typeof produced === "string") artifact = produced;
-      else {
-        artifact = produced.artifact;
-        pushback = produced.pushback;
-        if (produced.metrics) workers[taskId] = { ...produced.metrics, ms: Date.now() - claimedAt };
-      }
-      if (pushback) {
-        lastPushback = pushback;
-        log(
-          `pushback:${taskId}`,
-          `${pushback.dependency} ${pushback.requirement}: ${pushback.evidence.slice(0, 200)}`,
-        );
-        verdicts[taskId] = "blocked-by-dependency";
-        return "blocked-by-dependency";
-      }
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      log(`worker-failed:${taskId}`, reason.slice(0, 400));
-      rejections.push({ task: taskId, attempt: ticket.attempt, artifact: reason.slice(0, 2_000) });
+    const produced = await callWorker(taskId, frozen, ticket.dependencies);
+    if (produced.metrics) workers[taskId] = { ...produced.metrics, ms: Date.now() - claimedAt };
+    if (produced.failure) {
+      log(`worker-failed:${taskId}`, produced.failure.slice(0, 400));
+      rejections.push({
+        task: taskId,
+        attempt: ticket.attempt,
+        artifact: produced.failure.slice(0, 2_000),
+      });
       verdicts[taskId] = "rejected";
       return "rejected";
     }
-    // The coordinator stays the acceptance authority; this local parse only records
-    // why the shared contract rejected an artifact, which is otherwise invisible.
-    try {
-      patchSubmission(frozen, artifact);
-    } catch (error) {
+    const artifact = produced.artifact!;
+    if (produced.pushback) {
+      lastPushback = produced.pushback;
       log(
-        `contract-error:${taskId}`,
-        (error instanceof Error ? error.message : String(error)).slice(0, 300),
+        `pushback:${taskId}`,
+        `${produced.pushback.dependency} ${produced.pushback.requirement}: ${produced.pushback.evidence.slice(0, 200)}`,
       );
+      verdicts[taskId] = "blocked-by-dependency";
+      return "blocked-by-dependency";
     }
+    logContractError(log, taskId, frozen, artifact);
     const entry = gate.putTaskBoardEntry({
       taskId: "ooo-process-probe",
       agentId: ticket.owner,
@@ -431,6 +515,26 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
         artifact: artifact.slice(0, 2_000),
       });
     return verdict;
+  };
+
+  /** One worker invocation, with the failure of a worker call turned into a recorded
+   *  attempt rather than a crashed round. */
+  const callWorker = async (
+    taskId: string,
+    frozen: FrozenPatchWork,
+    dependencies: Record<string, string>,
+  ): Promise<{
+    artifact?: string;
+    pushback?: { dependency: string; requirement: string; evidence: string };
+    metrics?: WorkerMetrics;
+    failure?: string;
+  }> => {
+    try {
+      const produced = await options.worker(taskId, frozen, dependencies);
+      return typeof produced === "string" ? { artifact: produced } : produced;
+    } catch (error) {
+      return { failure: error instanceof Error ? error.message : String(error) };
+    }
   };
 
   /** Installs a task's host spec. Kept in one place because a reopened task must be
@@ -496,23 +600,15 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     const outcome = await background;
     gate.submitCheck({
       ticket,
-      outcome:
-        outcome.verdict === "accept"
-          ? "passed"
-          : outcome.verdict === "reject"
-            ? "failed"
-            : "undecidable",
-      log: outcome.outcomes
-        .map((item) => `${item.label}=${item.status}`)
-        .join(", ")
-        .slice(0, 4_000),
+      outcome: checkOutcome(outcome.verdict),
+      log: describeOutcomes(outcome).slice(0, 4_000),
     });
     log("check-terminal", outcome.verdict);
     log("dispatch-after-bypass", gate.next() ?? "none");
 
     installA(
       `\n\nCheck ${ticket.checkId} finished with ${outcome.verdict} ` +
-        `(${outcome.outcomes.map((item) => `${item.label}=${item.status}`).join(", ")}). ` +
+        `(${describeOutcomes(outcome)}). ` +
         "Fix a defect this check exposed, or return a no-change conclusion citing one listed case.",
     );
     let a = await runTask("A");
@@ -534,12 +630,54 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
       return { files, result };
     };
     let { files: abFiles, result: composed } = await compose();
+    /** The round's report, assembled once the phase above has produced its outcome. */
+    const buildResult = (): CycleResult => ({
+      timeline,
+      verdicts,
+      submissions,
+      rejections,
+      killed,
+      survived,
+      measurements: {
+        workers,
+        hiddenWaitMs: hiddenWait(),
+        checkMs: checkWindow(timeline),
+        hostChecks,
+        hostMs,
+        reopens,
+      },
+      accepted: gate.accepted(),
+      composed: { verdict: composed.verdict, files: Object.keys(abFiles) },
+    });
+
+    /** C's frozen envelope names the composed candidate it may promote, so it is
+     *  installed immediately before every attempt; a reopen changes both. */
+    const installC = () => {
+      specs.C = {
+        instruction:
+          "Act as the composition task for this round. A and B already ran; the host has its own composed " +
+          "check result. Your submission is accepted only as a promote-candidate conclusion: the host " +
+          "rejects any other kind, because the composed candidate is the round's product and nothing " +
+          "else can carry it. Return it only when the composed check passed and nothing in the " +
+          "submissions weakens verification; if it did not pass, say so instead and explain what is " +
+          "wrong, which is recorded as a blocked report rather than an accepted composition.\n" +
+          `A=${a}; B=${b}; composed check=${composed.verdict} ` +
+          `(${describeOutcomes(composed)}).`,
+        files: { ...options.baseline, ...abFiles },
+        editable: options.aEditable,
+        budget: options.budget,
+        limits: options.limits,
+        visible: options.visible?.C,
+        admittedConclusions: options.admitted?.C,
+        verify: composedVerifier(abFiles),
+      };
+    };
 
     /* Bounded downstream pushback: a dependent's declared precondition that the host
      * can prove unmet reopens the responsible task with fresh input and fresh check
      * evidence, which fences everything bound to the invalidated value. Exhausting the
      * budget stops the round with evidence instead of repairing in place forever. */
-    const maxReopens = options.maxReopens ?? 1;
+    const maxReopens = defaults.maxReopens;
     let blocked: string | null = null;
     const reopenDependency = async (task: "A" | "B", requirement: string, tail: string) => {
       if (reopens.length >= maxReopens) {
@@ -558,16 +696,8 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
         const rerun = await check(options.baseline);
         gate.submitCheck({
           ticket: fresh,
-          outcome:
-            rerun.verdict === "accept"
-              ? "passed"
-              : rerun.verdict === "reject"
-                ? "failed"
-                : "undecidable",
-          log: rerun.outcomes
-            .map((item) => `${item.label}=${item.status}`)
-            .join(", ")
-            .slice(0, 4_000),
+          outcome: checkOutcome(rerun.verdict),
+          log: describeOutcomes(rerun).slice(0, 4_000),
         });
         log("check-terminal", rerun.verdict);
         installA(
@@ -575,7 +705,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
             `
 
 Check ${fresh.checkId} finished with ${rerun.verdict} ` +
-            `(${rerun.outcomes.map((item) => `${item.label}=${item.status}`).join(", ")}).`,
+            `(${describeOutcomes(rerun)}).`,
         );
         a = await runTask("A");
       } else {
@@ -585,51 +715,29 @@ Check ${fresh.checkId} finished with ${rerun.verdict} ` +
       ({ files: abFiles, result: composed } = await compose());
       return true;
     };
-    for (;;) {
-      // Host-provable preconditions first: a requirement the host can evaluate is
-      // rejected before the dependent spends a worker call on an input it cannot use.
+    /** Host-provable preconditions first: a requirement the host can evaluate is rejected
+     *  before the dependent spends a worker call on an input it cannot use. True means the
+     *  dependency was reopened and the loop must run again. */
+    const handleUnmetPrecondition = async (): Promise<boolean> => {
       const unmet = firstUnmet("C");
-      if (unmet) {
-        const note = `C requires ${describe(unmet)}`;
-        log("dependency-rejected", note);
-        const reopened = await reopenDependency(
-          unmet.task as "A" | "B",
-          note,
-          `
+      if (!unmet) return false;
+      const note = `C requires ${describe(unmet)}`;
+      log("dependency-rejected", note);
+      return await reopenDependency(
+        unmet.task as "A" | "B",
+        note,
+        `
 
 A downstream task rejected your accepted artifact: it requires ${describe(unmet)}. ` +
-            "Produce a version whose evidence satisfies that requirement, or state why it cannot.",
-        );
-        if (reopened) continue;
-        break;
-      }
-      // C's frozen envelope names the composed candidate it may promote, so it is
-      // installed immediately before every attempt; a reopen changes both.
-      specs.C = {
-        instruction:
-          "Act as the composition task for this round. A and B already ran; the host has its own composed " +
-          "check result. Your submission is accepted only as a promote-candidate conclusion: the host " +
-          "rejects any other kind, because the composed candidate is the round's product and nothing " +
-          "else can carry it. Return it only when the composed check passed and nothing in the " +
-          "submissions weakens verification; if it did not pass, say so instead and explain what is " +
-          "wrong, which is recorded as a blocked report rather than an accepted composition.\n" +
-          `A=${a}; B=${b}; composed check=${composed.verdict} ` +
-          `(${composed.outcomes.map((item) => `${item.label}=${item.status}`).join(", ")}).`,
-        files: { ...options.baseline, ...abFiles },
-        editable: options.aEditable,
-        budget: options.budget,
-        limits: options.limits,
-        visible: options.visible?.C,
-        admittedConclusions: options.admitted?.C,
-        verify: composedVerifier(abFiles),
-      };
-      const c = await runTask("C");
-      if (c !== "blocked-by-dependency") break;
-      // The dependent discovered mid-attempt that its input is unusable. That report is
-      // evidence about its own execution, not a judgement about the dependency: the host
-      // still decides, and reopening is what makes the dependency run again.
+          "Produce a version whose evidence satisfies that requirement, or state why it cannot.",
+      );
+    };
+    /** The dependent discovered mid-attempt that its input is unusable. That report is
+     *  evidence about its own execution, not a judgement about the dependency: the host
+     *  still decides, and reopening is what makes the dependency run again. */
+    const handlePushback = async (): Promise<boolean> => {
       const pushed = lastPushback!;
-      const reopened = await reopenDependency(
+      return await reopenDependency(
         pushed.dependency as "A" | "B",
         `C cannot satisfy ${pushed.requirement} from ${pushed.dependency}: ${pushed.evidence.slice(0, 300)}`,
         `
@@ -637,31 +745,18 @@ A downstream task rejected your accepted artifact: it requires ${describe(unmet)
 The downstream task reported that your artifact cannot satisfy ${pushed.requirement}. ` +
           `Its evidence: ${pushed.evidence.slice(0, 500)}`,
       );
-      if (reopened) continue;
+    };
+    for (;;) {
+      if (await handleUnmetPrecondition()) continue;
+      installC();
+      const c = await runTask("C");
+      if (c !== "blocked-by-dependency") break;
+      if (await handlePushback()) continue;
       break;
     }
 
     if (blocked) verdicts.C = "blocked";
-    return {
-      timeline,
-      verdicts,
-      submissions,
-      rejections,
-      killed,
-      survived,
-      measurements: {
-        workers,
-        hiddenWaitMs: hiddenWait(),
-        checkMs:
-          Date.parse(timeline.find((e) => e.step === "check-finished")?.at ?? "0") -
-            Date.parse(timeline.find((e) => e.step === "check-issued")?.at ?? "0") || 0,
-        hostChecks,
-        hostMs,
-        reopens,
-      },
-      accepted: gate.accepted(),
-      composed: { verdict: composed.verdict, files: Object.keys(abFiles) },
-    };
+    return buildResult();
   } finally {
     gate.close();
     if (!options.databaseDir) rmSync(directory, { recursive: true, force: true });

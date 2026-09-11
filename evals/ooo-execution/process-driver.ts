@@ -3,12 +3,24 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 // Research process driver. IPC controls timing; jobs/results travel over HTTP/board.
+
+/** Messages the fixture process sends back over the IPC channel: a named event, or the
+ *  reply to one request. Typed rather than `any`, because this channel is the whole
+ *  timing mechanism of the multi-process probe. */
+type FixtureMessage =
+  | { event: string; value?: unknown }
+  | { id: string; value?: unknown }
+  | { id: string; error: string };
+
 export class Actor {
   child: ChildProcess;
   stderr = "";
-  pending = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void }>();
-  events = new Map<string, (value: any) => void>();
-  ready: Promise<any>;
+  pending = new Map<
+    string,
+    { resolve: (value: unknown) => void; reject: (error: Error) => void }
+  >();
+  events = new Map<string, (value: unknown) => void>();
+  ready: Promise<unknown>;
 
   constructor(role: string, database: string) {
     const environment = Object.fromEntries(
@@ -29,8 +41,9 @@ export class Actor {
       this.stderr += String(chunk);
     });
     this.child.stdout!.resume();
-    this.child.on("message", (message: any) => {
-      if (message.event) {
+    this.child.on("message", (raw: unknown) => {
+      const message = raw as FixtureMessage;
+      if ("event" in message) {
         this.events.get(message.event)?.(message.value);
         this.events.delete(message.event);
         return;
@@ -38,7 +51,7 @@ export class Actor {
       const pending = this.pending.get(message.id);
       if (!pending) return;
       this.pending.delete(message.id);
-      if (message.error) pending.reject(new Error(message.error));
+      if ("error" in message) pending.reject(new Error(message.error));
       else pending.resolve(message.value);
     });
     this.child.on("exit", () => {
@@ -48,7 +61,7 @@ export class Actor {
     });
   }
 
-  event(name: string): Promise<any> {
+  event(name: string): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(
         () => reject(new Error(`missing ${name}: ${this.stderr}`)),
@@ -62,7 +75,11 @@ export class Actor {
     });
   }
 
-  call(action: string, args: Record<string, unknown> = {}, timeoutMs = 20_000): Promise<any> {
+  call<T = unknown>(
+    action: string,
+    args: Record<string, unknown> = {},
+    timeoutMs = 20_000,
+  ): Promise<T> {
     return new Promise((resolve, reject) => {
       const id = randomUUID();
       const timeout = setTimeout(() => {
@@ -73,7 +90,7 @@ export class Actor {
       this.pending.set(id, {
         resolve: (value) => {
           clearTimeout(timeout);
-          resolve(value);
+          resolve(value as T);
         },
         reject: (error) => {
           clearTimeout(timeout);
