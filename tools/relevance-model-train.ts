@@ -129,6 +129,9 @@ interface Options {
   /** Cuts for the `rrf` family (fused rule-ranking score). Undefined uses the
    *  split's own quantile ladder; an empty list disables the family. */
   rrfCuts?: number[];
+  /** Rotation of the certification split: at this sample size one split is one
+   *  draw, so the offset is swept to see whether a finding survives it. */
+  splitOffset: number;
   risk: RiskUnit;
   /** Train against the scale-bound retrieval block as well (default: no). */
   embeddings: boolean;
@@ -156,6 +159,7 @@ const DEFAULT_OPTIONS: Options = {
   // depends on the path, so they are never hardcoded.
   modelFloors: [0.2, 0.35, 0.5, 0.65, 0.8],
   fusionWeights: [0.2, 0.5, 0.8],
+  splitOffset: 0,
   risk: "question",
   embeddings: false,
   embedder: "",
@@ -270,6 +274,10 @@ const FLAGS: Record<string, FlagSpec> = {
     takesValue: true,
     apply: (options, value) =>
       void (options.rrfCuts = value === "none" ? [] : numberList(value, "--rrf-cuts")),
+  },
+  "--split-offset": {
+    takesValue: true,
+    apply: (options, value) => void (options.splitOffset = Number(value)),
   },
   "--risk": {
     takesValue: true,
@@ -1275,10 +1283,11 @@ interface CertSplit {
 }
 
 /** Every fifth question to test, the next fifth to calibration, the rest to training. */
-function certificationSplit(groups: readonly Group[]): CertSplit {
+function certificationSplit(groups: readonly Group[], offset = 0): CertSplit {
   const split: CertSplit = { train: [], cal: [], test: [] };
   groups.forEach((group, index) => {
-    (index % 5 === 0 ? split.test : index % 5 === 1 ? split.cal : split.train).push(group);
+    const slot = (index + offset) % 5;
+    (slot === 0 ? split.test : slot === 1 ? split.cal : split.train).push(group);
   });
   if (split.train.length === 0 || split.cal.length === 0 || split.test.length === 0) {
     throw new Error("certification split produced an empty side");
@@ -1372,13 +1381,20 @@ async function runCertification(options: Options, groups: Group[]): Promise<numb
     if (!(alpha > 0 && alpha < 1))
       throw new Error(`--alphas values must be in (0,1), got ${alpha}`);
   }
+  if (!Number.isInteger(options.splitOffset) || options.splitOffset < 0) {
+    throw new Error(`--split-offset must be a non-negative integer, got ${options.splitOffset}`);
+  }
   for (const weight of options.fusionWeights) {
     if (!(weight >= 0 && weight <= 1)) {
       throw new Error(`--fusion-weights must be in [0,1], got ${weight}`);
     }
   }
   const unit: RiskUnit = options.risk;
-  const { train: trainGroups, cal: calGroups, test: testGroups } = certificationSplit(groups);
+  const {
+    train: trainGroups,
+    cal: calGroups,
+    test: testGroups,
+  } = certificationSplit(groups, options.splitOffset);
   const examples = trainGroups.flatMap((group) =>
     group.features.map((features, row) => ({ features, label: group.labels[row] as 0 | 1 })),
   );
