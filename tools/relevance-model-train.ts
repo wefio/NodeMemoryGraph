@@ -356,6 +356,8 @@ function buildItemModel(options: Options): RelevanceModel {
 const userKey = (userId: string) => createHash("sha256").update(userId).digest("hex").slice(0, 24);
 
 interface Group {
+  /** The query text this list answers; absent in caches written before it was kept. */
+  query?: string;
   features: number[][];
   labels: number[];
   /** Raw first-stage score per candidate (for the program gate cv + hard negs). */
@@ -1119,7 +1121,12 @@ async function buildQrelsGroups(
         positives.has(result.node.canonicalName.slice(QRELS_NODE_PREFIX.length)) ? 1 : 0,
       );
       if (labels.some((label) => label === 1)) judgedSeen += 1;
-      groups.push({ features, labels, raw: features.map((row) => Math.expm1(row[0]!)) });
+      groups.push({
+        features,
+        labels,
+        query: query.text,
+        raw: features.map((row) => Math.expm1(row[0]!)),
+      });
     }
     if (judgedSeen === 0) {
       throw new Error(
