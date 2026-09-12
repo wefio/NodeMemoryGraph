@@ -47,6 +47,22 @@ export interface RelevanceModelState {
   /** Identity of the embedder that produced the training scores (`indexId` of
    *  the embedding index, or "none" for a lexical-only head). */
   embedder?: string;
+  /**
+   * Provenance. `domain` says which kind of data the head was trained on, and a
+   * runtime only loads a head whose domain is its own. Absent on artifacts written
+   * before provenance was kept, and those are refused rather than trusted: that is
+   * what keeps a head trained on an out-of-domain corpus — an IR dataset, or a
+   * memory benchmark — from being armed by accident.
+   */
+  domain?: string;
+  /** Where the labels came from, e.g. "qrels" or "display-labels". */
+  labelSource?: string;
+  /** What one training row is: "item" (a candidate) or "display" (one recall). */
+  unit?: string;
+  /** ISO timestamp of the training run. */
+  trainedAt?: string;
+  /** For a query-level head: the share of queries it is calibrated to open. */
+  targetCoverage?: number;
   mean: number[];
   std: number[];
   inputWeights: number[];
@@ -70,6 +86,12 @@ interface ModelOptions {
   columns?: number[];
   blocks?: string[];
   embedder?: string;
+  /** Training-domain provenance; see {@link RelevanceModelState.domain}. */
+  domain?: string;
+  labelSource?: string;
+  unit?: string;
+  trainedAt?: string;
+  targetCoverage?: number;
   mean?: ArrayLike<number>;
   std?: ArrayLike<number>;
   state?: RelevanceModelState;
@@ -180,6 +202,12 @@ export class RelevanceModel {
   readonly blocks: string[];
   /** Embedder identity the training scores came from, or "". */
   readonly embedder: string;
+  /** Training domain this head declares, or "" when it declares none. */
+  readonly domain: string;
+  readonly labelSource: string;
+  readonly unit: string;
+  readonly trainedAt: string;
+  readonly targetCoverage: number;
   readonly #mean: Float32Array;
   readonly #std: Float32Array;
   readonly #inputWeights: Tensor;
@@ -197,6 +225,11 @@ export class RelevanceModel {
     this.hidden = state?.hidden ?? options.hidden ?? 8;
     this.blocks = [...(state?.blocks ?? options.blocks ?? [])];
     this.embedder = state?.embedder ?? options.embedder ?? "";
+    this.domain = state?.domain ?? options.domain ?? "";
+    this.labelSource = state?.labelSource ?? options.labelSource ?? "";
+    this.unit = state?.unit ?? options.unit ?? "";
+    this.trainedAt = state?.trainedAt ?? options.trainedAt ?? "";
+    this.targetCoverage = state?.targetCoverage ?? options.targetCoverage ?? 0;
     const normalization = initialNormalization(state, options, this.featureCount);
     this.#mean = normalization.mean;
     this.#std = normalization.std;
@@ -304,6 +337,15 @@ export class RelevanceModel {
   acceptsEmbedder(identity: string): boolean {
     if (!this.requiresEmbeddedScores()) return true;
     return this.embedder !== "" && this.embedder === identity;
+  }
+
+  /**
+   * May a runtime whose own domain is `domain` load this head? A head that cannot
+   * say where it was trained is refused, because "I do not know" must not behave
+   * like "it is fine".
+   */
+  acceptsDomain(domain: string): boolean {
+    return this.domain !== "" && this.domain === domain;
   }
 
   #clamped(probability: Tensor): Tensor {
@@ -437,6 +479,11 @@ export class RelevanceModel {
       columns: [...this.columns],
       blocks: [...this.blocks],
       embedder: this.embedder,
+      domain: this.domain,
+      labelSource: this.labelSource,
+      unit: this.unit,
+      trainedAt: this.trainedAt,
+      targetCoverage: this.targetCoverage,
       mean: [...this.#mean],
       std: [...this.#std],
       inputWeights: [...this.#inputWeights.data],

@@ -134,3 +134,28 @@ test("a malformed column list is refused at load, not predicted from", () => {
   );
   assert.throws(() => RelevanceModel.fromJSON({ ...state, columns: [] }), /at least one column/u);
 });
+
+test("provenance is written, read back, and gates loading by domain", () => {
+  const model = new RelevanceModel({
+    domain: "recall",
+    labelSource: "display-labels",
+    unit: "display",
+    targetCoverage: 0.7,
+  });
+  const state = model.toJSON();
+  assert.equal(state.domain, "recall");
+  assert.equal(state.labelSource, "display-labels");
+  assert.equal(state.unit, "display");
+  assert.equal(state.targetCoverage, 0.7);
+
+  const restored = new RelevanceModel({ state });
+  assert.equal(restored.domain, "recall");
+  assert.equal(restored.acceptsDomain("recall"), true);
+  assert.equal(restored.acceptsDomain("ir-corpus"), false);
+  // A head that cannot say where it was trained must not behave like a safe one.
+  assert.equal(new RelevanceModel().acceptsDomain("recall"), false);
+  assert.equal(
+    new RelevanceModel({ state: { ...state, domain: undefined } }).acceptsDomain("recall"),
+    false,
+  );
+});
