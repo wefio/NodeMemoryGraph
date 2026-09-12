@@ -159,3 +159,27 @@ export function sufficiencyFeatures(
 ): number[] {
   return [...shapeFeatures(scores, tau), ...querySurfaceFeatures(query)];
 }
+
+/**
+ * The threshold that opens approximately `targetCoverage` of the queries that pass
+ * through it — the calibration knob for "how often is a recall worth opening".
+ *
+ * It needs no labels: opening a fraction of queries is a property of the score
+ * distribution, so the knob is available in production from live logits alone.
+ * Labels are needed only to choose WHICH coverage to run at (see the coverage
+ * curve in docs/experiments/retrieval-quality/sufficiency-shape-features-2026-09-12.md).
+ *
+ * Ties are not broken: a run of equal scores opens together, so the realised
+ * coverage can exceed the target by the size of that run.
+ */
+export function coverageThreshold(scores: readonly number[], targetCoverage: number): number {
+  if (!(targetCoverage > 0 && targetCoverage <= 1)) {
+    throw new Error(`target coverage must be in (0,1], got ${targetCoverage}`);
+  }
+  if (scores.length === 0) {
+    throw new Error("calibrating a coverage threshold needs at least one score");
+  }
+  const ordered = ranked(scores);
+  const wanted = Math.min(ordered.length, Math.max(1, Math.ceil(targetCoverage * ordered.length)));
+  return ordered[wanted - 1]!;
+}
