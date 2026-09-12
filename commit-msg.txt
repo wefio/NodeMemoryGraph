@@ -1,20 +1,12 @@
-fix(pi): register the round tool by default
+fix(package): pack the new extension module
 
-The environment gate was wrong, and the review called it correctly: a consumer that has to be
-switched on is not a consumer, and I had effectively kept the tool out of my own sessions while
-describing it as the thing that makes the shared layer reachable.
+`verify-package` walks the packed file closure from `extensions/nmg.ts` and fails when a relative
+import is not itself packed. The new `.pi/extensions/nmg/ooo-round.ts` is reached through the
+extension index but was not in `files`, so both the static contract and the Node 22 job failed with
+"packed Pi extension has missing runtime imports" — a real packaging gap that CI caught and that
+local runs missed, because the gate needs `node_modules` and the branch was not where I had them.
 
-The tool is now registered unconditionally, like `nmg_search`, `nmg_remember` and `nmg_board`. The
-real cost boundary stays where it belongs, per call: `live` is the switch that spends tokens, and it
-is absent unless asked for, so the default replays recorded answers and spends nothing.
+Verified locally with the gate itself: `npm run package:check` now reports
+`package closure ok: 163 runtime files, 250 packed files`.
 
-Two mechanical consequences, both of which would have caught the mistake:
-
-- The extension suite asserts the exact tool inventory twice, and both assertions now have to name
-  `ooo_round`; they failed until they did. The inventory test is the reason this change is provable
-  rather than asserted.
-- The registry entry for the round entry point no longer claims a session-surface gate. The `evals/`
-  CLI row stays registered as a non-default capability, because that is still true of the CLI.
-
-Evidence: extension suite 47/47, adapter tests 3/3 (the gate test is gone with the gate), `tsc
---noEmit` clean, ESLint clean, LSP 0 diagnostics, `docs:check` clean.
+The file imports only node builtins, so no further pack entries are needed.

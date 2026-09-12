@@ -20,6 +20,7 @@
   "files": [
     ".pi/extensions/nmg/controller-shadow.ts",
     ".pi/extensions/nmg/index.ts",
+    ".pi/extensions/nmg/ooo-round.ts",
     "bin/nmg-rcp.mjs",
     "bin/nmg.mjs",
     "dist/",
