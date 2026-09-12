@@ -13,6 +13,7 @@ import {
 } from "../../src/integration/ooo-patch.ts";
 
 import { mutate, type Mutation } from "./mutation.ts";
+import { RoundLog, type RoundEvent, type RoundEventInput } from "./round-log.ts";
 
 export type WorkerMetrics = {
   tokens?: number;
@@ -105,6 +106,10 @@ export interface CycleOptions {
   /** Bounded downstream pushback. Exhausting it stops the round with evidence rather
    *  than repairing a failing version forever. */
   maxReopens?: number;
+  /** Where the round records what happened. Omission keeps it in memory, which is what
+   *  the deterministic tests use; a live round writes it next to its report so the round
+   *  can be replayed without a model. */
+  roundLog?: RoundLog;
   databaseDir?: string;
 }
 
@@ -129,6 +134,8 @@ export interface CycleResult {
     reopens: string[];
   };
   composed: { verdict: string; files: string[] };
+  /** The round's own record, in order. Replaying it needs no model call. */
+  log: readonly RoundEvent[];
 }
 
 const plan: ProbePlan = [
@@ -217,6 +224,9 @@ function logContractError(
 }
 
 export async function runCycle(options: CycleOptions): Promise<CycleResult> {
+  const roundLog = options.roundLog ?? new RoundLog();
+  const trace = (event: RoundEventInput) =>
+    roundLog.append({ ...event, at: new Date().toISOString() } as RoundEvent);
   const defaults = cycleDefaults(options);
   const runChecks = defaults.runChecks;
   const directory = options.databaseDir ?? mkdtempSync(join(tmpdir(), "ooo-cycle-db-"));
@@ -333,6 +343,12 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
       const killedIt = run.verdict === "reject";
       (killedIt ? (killed[task] ??= []) : (survived[task] ??= [])).push(mutation.id);
       log(killedIt ? "mutant-killed" : "mutant-survived", `${task} ${mutation.id}`);
+      trace({
+        kind: "mutant",
+        taskId: task,
+        id: mutation.id,
+        outcome: killedIt ? "killed" : "survived",
+      });
     }
   };
   /** A patch candidate: the premise must hold, the declared cases must resolve, the
@@ -471,12 +487,25 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     });
     assertFrozenMatches(frozen, ticket.patch);
     log(`claim:${taskId}`, `attempt=${ticket.attempt} digest=${frozen.digest.slice(0, 12)}`);
+    trace({
+      kind: "claim",
+      taskId,
+      attempt: ticket.attempt,
+      digest: frozen.digest,
+      owner: ticket.owner,
+    });
     // A worker that fails or returns truncated output produced no artifact: it is a
     // failed attempt with recorded reason, not a crashed round and not a retry.
     const produced = await callWorker(taskId, frozen, ticket.dependencies);
     if (produced.metrics) workers[taskId] = { ...produced.metrics, ms: Date.now() - claimedAt };
     if (produced.failure) {
       log(`worker-failed:${taskId}`, produced.failure.slice(0, 400));
+      trace({
+        kind: "worker-failed",
+        taskId,
+        attempt: ticket.attempt,
+        reason: produced.failure.slice(0, 2_000),
+      });
       rejections.push({
         task: taskId,
         attempt: ticket.attempt,
@@ -486,12 +515,26 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
       return "rejected";
     }
     const artifact = produced.artifact!;
+    trace({
+      kind: "artifact",
+      taskId,
+      attempt: ticket.attempt,
+      artifact: artifact.slice(0, 256_000),
+      metrics: produced.metrics,
+    });
     if (produced.pushback) {
       lastPushback = produced.pushback;
       log(
         `pushback:${taskId}`,
         `${produced.pushback.dependency} ${produced.pushback.requirement}: ${produced.pushback.evidence.slice(0, 200)}`,
       );
+      trace({
+        kind: "pushback",
+        taskId,
+        dependency: produced.pushback.dependency,
+        requirement: produced.pushback.requirement,
+        evidence: produced.pushback.evidence.slice(0, 2_000),
+      });
       verdicts[taskId] = "blocked-by-dependency";
       return "blocked-by-dependency";
     }
@@ -505,6 +548,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     });
     const verdict = await gate.submit(entry.id);
     log(`submit:${taskId}`, verdict);
+    trace({ kind: "verdict", taskId, attempt: ticket.attempt, verdict });
     verdicts[taskId] = verdict;
     const accepted = verdict === "accepted" ? gate.accepted()[taskId] : undefined;
     if (accepted) submissions[taskId] = JSON.parse(accepted) as PatchSubmission;
@@ -572,6 +616,11 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   };
 
   try {
+    trace({
+      kind: "plan",
+      tasks: ["A", "B", "C"],
+      checks: options.checks.map((check) => check.label),
+    });
     // Class A/D: proving the declared mutants survive is required work that does not
     // depend on B's model call, so it runs concurrently with it instead of before the
     // round. The verifier awaits it, so a false premise still fails closed.
@@ -581,8 +630,10 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
           const run = await check(mutate(options.baseline, mutation));
           if (run.verdict === "accept") {
             log("mutant-survived-baseline", `${task} ${mutation.id}`);
+            trace({ kind: "mutant", taskId: task, id: mutation.id, outcome: "survived" });
           } else {
             log("precondition-failed", `${task} ${mutation.id} is already detected`);
+            trace({ kind: "mutant", taskId: task, id: mutation.id, outcome: "killed" });
             premiseFailed = true;
           }
         }
@@ -592,6 +643,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     installB("");
     const ticket = gate.issueCheck("A", "protocol-check-host");
     log("check-issued", ticket.checkId);
+    trace({ kind: "check-issued", taskId: "A", ticket });
     const background = check(options.baseline).then((result) => {
       log("check-finished", result.verdict);
       return result;
@@ -604,6 +656,12 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
       log: describeOutcomes(outcome).slice(0, 4_000),
     });
     log("check-terminal", outcome.verdict);
+    trace({
+      kind: "check-result",
+      taskId: "A",
+      verdict: outcome.verdict,
+      outcomes: outcome.outcomes.map((item) => ({ label: item.label, status: item.status })),
+    });
     log("dispatch-after-bypass", gate.next() ?? "none");
 
     installA(
@@ -648,6 +706,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
       },
       accepted: gate.accepted(),
       composed: { verdict: composed.verdict, files: Object.keys(abFiles) },
+      log: roundLog.recorded(),
     });
 
     /** C's frozen envelope names the composed candidate it may promote, so it is
@@ -687,12 +746,14 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
       }
       const invalidated = gate.reopen(task, requirement);
       reopens.push(task);
+      trace({ kind: "reopen", taskId: task, requirement, invalidated });
       log("reopen", `${task} invalidated=${invalidated.join(",") || "none"}`);
       if (task === "A") {
         // Fresh evidence bound to the new input: a reopened task must not consume the
         // check result that justified the artifact just invalidated.
         const fresh = gate.issueCheck("A", "protocol-check-host");
         log("check-issued", fresh.checkId);
+        trace({ kind: "check-issued", taskId: "A", ticket: fresh });
         const rerun = await check(options.baseline);
         gate.submitCheck({
           ticket: fresh,
@@ -700,6 +761,12 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
           log: describeOutcomes(rerun).slice(0, 4_000),
         });
         log("check-terminal", rerun.verdict);
+        trace({
+          kind: "check-result",
+          taskId: "A",
+          verdict: rerun.verdict,
+          outcomes: rerun.outcomes.map((item) => ({ label: item.label, status: item.status })),
+        });
         installA(
           tail +
             `
@@ -756,7 +823,15 @@ The downstream task reported that your artifact cannot satisfy ${pushed.requirem
     }
 
     if (blocked) verdicts.C = "blocked";
-    return buildResult();
+    const result = buildResult();
+    roundLog.append({
+      kind: "terminal",
+      at: new Date().toISOString(),
+      accepted: result.accepted,
+      verdicts: result.verdicts,
+      composed: { verdict: result.composed.verdict, files: [...result.composed.files] },
+    });
+    return result;
   } finally {
     gate.close();
     if (!options.databaseDir) rmSync(directory, { recursive: true, force: true });

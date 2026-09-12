@@ -544,6 +544,42 @@ conclusion; that is a concrete target for the next cost investigation, not a sch
 pushback, reopen) still has only deterministic tests, because C's declared requirement was
 satisfied on the first attempt and no reopen was needed.
 
+## S2 slice 2: the round logs itself, and replays without a model — 2026-09-11
+
+The durable-execution split this repository already uses elsewhere is "deterministic
+orchestration, uncertain work recorded as an activity result". A model call is such an
+activity, so replaying a round must not call a model again, and the verdicts must follow
+from the frozen inputs plus the recorded answers.
+
+`evals/ooo-execution/round-log.ts` adds the record: a JSON-lines event stream (plan, check
+issued/terminal, claim, artifact or worker failure, pushback, verdict, each mutant outcome,
+reopen, terminal state) plus `recordedWorker(events)`, which answers from the log instead of
+from a model, and `compareTerminal(recorded, replayed)`.
+
+**Replay found a real non-determinism.** The first replay did not reproduce the round: A's
+frozen instruction embedded the check's `checkId`, which was a fresh `randomUUID()` per
+issue, so every round's digest differed and the host refused the recorded artifact as
+`stale patch digest`. That is the correct refusal — the envelope really was different. The
+fix belongs in the coordinator: a check's identity is now derived from the round's own state
+(`digest([taskId, attempt])`, scoped to the store, with `runId` still the discriminator), so
+the same round produces the same envelopes. Nothing else in the round was non-deterministic:
+timestamps appear in events but not in digests, and attempts are part of both.
+
+| Property                    | Evidence (`evals/ooo-execution/replay.test.ts`, 5 tests)                                                               |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| replay reproduces the round | a logged A/B/C round replays to an empty `compareTerminal`, with exactly the three recorded attempts and no model call |
+| the log is not trusted      | an artifact edited in the log completes the round with a _different_ verdict: the host re-checks it                    |
+| truncation is detected      | a missing recorded attempt is reported as a recorded worker failure, and the terminal state diverges at that task      |
+| a malformed log is refused  | not-JSON, an unknown kind, and a missing timestamp each fail the read instead of being skipped                         |
+| replay is still a round     | a faithfully replayed artifact the host refuses is still rejected                                                      |
+
+The live cycle writes `.nmg/ooo-live/round.jsonl`, so a real round can be re-verified later
+by re-running the host checks against its recorded answers — the ~200k worker tokens of a
+round are not needed to re-check what it produced. What replay does **not** establish: that a
+_new_ log line cannot change the verdict for a reason the host cannot see (only the host's
+own checks are re-derived), and that the log is tamper-evident (it is not: nothing
+chains the lines, and a reader that trusted it would be trusting an ordinary file).
+
 ## S2 slice 1: recovery, explicit termination, cancellation — 2026-09-11
 
 Offline only; no model calls. S2's exit criterion is "after fault injection: no duplicate

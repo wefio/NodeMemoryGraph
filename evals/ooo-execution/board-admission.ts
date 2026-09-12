@@ -365,7 +365,13 @@ export class BoardAdmission extends NmgStore {
       const ticket = Object.freeze({
         runId: this.runId,
         taskId: id,
-        checkId: randomUUID(),
+        // Derived from the round's own state, never from a clock or a random source. The
+        // identity ends up inside the frozen instruction the worker is handed, so a random
+        // id made every round's envelope different and a logged round unreplayable: the
+        // host refused the recorded artifact for a digest it could no longer reproduce.
+        // Its scope is the store, and one store is one round, so this stays unique where
+        // it has to be.
+        checkId: digest([id, attempt]).slice(0, 32),
         attempt,
         inputDigest: this.inputDigest(row),
         owner,

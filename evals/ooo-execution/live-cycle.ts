@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { runCycle, type Requirement } from "./cycle.ts";
 import { mutate, type Mutation } from "./mutation.ts";
+import { RoundLog } from "./round-log.ts";
 import { verifyCandidate } from "./candidate.ts";
 import {
   executePiPatch,
@@ -114,6 +115,9 @@ const result = await runCycle({
   baseline,
   checks,
   noChangeCases: cases,
+  // The round records itself as it runs, so it can be replayed later without a model:
+  // replay re-checks the recorded answers through the host and re-derives every verdict.
+  roundLog: new RoundLog(".nmg/ooo-live/round.jsonl"),
   mutations: { B: mutants },
   requires: { C: requirements },
   maxReopens: 1,
