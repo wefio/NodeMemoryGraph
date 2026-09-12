@@ -1,3 +1,14 @@
+/**
+ * Weighted reciprocal-rank fusion over several ranked routes.
+ *
+ * Status: an unadopted Lab primitive. Nothing in `src/`, `tools/` or `evals/` calls
+ * it, and that is deliberate — `docs/design/design.md` §11.1 ("Query formation and
+ * route fusion boundary") keeps the default path appending unique secondary-query
+ * results after the primary ranking, and admits fusion only once a shared bounded
+ * implementation and matched product tests show a benefit outside one benchmark
+ * distribution. The design's intended consumer is the posterior-weighted ranking
+ * described in §5c ("Confidence as a posterior").
+ */
 export interface RankedRoute {
   ids: readonly string[];
   weight?: number;
