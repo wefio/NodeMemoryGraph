@@ -92,6 +92,10 @@ export interface CycleOptions {
    *  coordinator, and kills the process tree of every check still running, so a cancelled
    *  round leaves no orphan worker or check process behind. */
   signal?: AbortSignal;
+  /** Cancellation can also arrive as durable state written by *another* process (a CLI
+   *  `cancel` on a round it does not own). The round polls this while it runs, and the
+   *  decision is the same one `signal` expresses, so both share a single path. */
+  watchCancellation?: () => string | null;
   /** Independently reviewed, task-specific no-change claims, fixed before the round.
    *  Omission disables no-change acceptance; test names alone are not coverage proof. */
   noChangeCases?: Partial<Record<"A" | "B", readonly CaseRule[]>>;
@@ -272,7 +276,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
         revision: options.revision,
         files,
         checks: options.checks,
-        signal: options.signal,
+        signal: own.signal,
       });
     } finally {
       hostChecks += 1;
@@ -303,6 +307,10 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   };
   const log = (step: string, detail?: string) =>
     timeline.push({ at: new Date().toISOString(), step, detail });
+  /** In-flight checks are killed through this controller, which both cancellation channels
+   *  abort: the operator's signal, and the store when another process asked for the stop. */
+  const own = new AbortController();
+  options.signal?.addEventListener("abort", () => own.abort(), { once: true });
   /** Operator cancellation, recorded once and fenced in the coordinator.
    *
    *  The coordinator is the authority, so the round does not merely stop: it cancels the
@@ -310,13 +318,26 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
    *  ticket. That is what makes a late artifact `stale` instead of accepted into a round
    *  nobody is waiting for. Returns true when the round must stop dispatching. */
   const stopped = () => {
-    if (cancelled !== null) return true;
-    if (!options.signal?.aborted) return false;
-    gate.cancel("operator cancelled the round");
-    cancelled = gate.cancelled() ?? "operator cancelled the round";
-    log("cancelled", "operator cancelled the round");
+    if (cancelled === null) {
+      const reason = options.signal?.aborted
+        ? "operator cancelled the round"
+        : (options.watchCancellation?.() ?? null);
+      if (reason === null) return false;
+      gate.cancel(reason);
+      cancelled = gate.cancelled() ?? reason;
+      // A cancelled round must not keep a check running: this kills its process tree.
+      own.abort();
+      log("cancelled", reason);
+    }
     return true;
   };
+  /** A round waiting on a long check still has to notice a cancellation from another
+   *  process, so the store is polled rather than only consulted at dispatch points. */
+  const watcher = options.watchCancellation
+    ? setInterval(() => {
+        if (stopped()) clearInterval(watcher);
+      }, 250)
+    : undefined;
   /** How much of the unresolved external wait the out-of-order task actually covered.
    *  Computed from real timestamps: claimed-to-submitted overlap with issued-to-terminal. */
   const hiddenWait = () => {
@@ -682,6 +703,56 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     };
   };
 
+  /** A round that is already cancelled never starts: the explicit terminal state is the whole
+   *  point of cancellation, and a round that threw `round cancelled` from its first coordinator
+   *  call would leave the operator with an exception instead of a decision. */
+  const cancelledResult = (): CycleResult => {
+    const verdicts = { A: "cancelled", B: "cancelled", C: "cancelled" };
+    const result: CycleResult = {
+      timeline,
+      verdicts,
+      submissions: {},
+      accepted: {},
+      rejections: [],
+      killed: {},
+      survived: {},
+      measurements: {
+        workers: {},
+        hiddenWaitMs: 0,
+        checkMs: 0,
+        hostChecks: 0,
+        hostMs: 0,
+        reopens: [],
+      },
+      composed: { verdict: "undecidable", files: [] },
+      log: [],
+      cancelled: cancelled ?? "cancelled before dispatch",
+    };
+    trace({
+      kind: "plan",
+      tasks: ["A", "B", "C"],
+      checks: options.checks.map((check) => check.label),
+      revision: options.revision,
+      checkDigest: checksDigest(options.checks),
+    });
+    trace({
+      kind: "terminal",
+      accepted: {},
+      verdicts,
+      composed: { verdict: "undecidable", files: [] },
+      cancelled: result.cancelled!,
+    });
+    return { ...result, log: roundLog.recorded() };
+  };
+
+  if (stopped()) {
+    // The gate is this function's connection to the round's store: the early path has to close
+    // it too, or a cancelled round leaves the database locked behind it.
+    const early = cancelledResult();
+    gate.close();
+    return early;
+  }
+
   try {
     trace({
       kind: "plan",
@@ -927,6 +998,7 @@ The downstream task reported that your artifact cannot satisfy ${pushed.requirem
     });
     return result;
   } finally {
+    if (watcher) clearInterval(watcher);
     gate.close();
     if (!options.databaseDir) rmSync(directory, { recursive: true, force: true });
   }

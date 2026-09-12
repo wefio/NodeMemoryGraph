@@ -663,6 +663,10 @@ export class BoardAdmission extends NmgStore {
    *  afterwards. A late artifact submitted under the retired attempt is rejected as
    *  stale rather than accepted into a round nobody is waiting for. */
   cancel(reason: string): string[] {
+    // The first decision is the one that took effect, so cancelling twice is a no-op that
+    // keeps the original reason: a later caller must not rewrite what the round terminated on.
+    const already = this.cancelled();
+    if (already !== null) return [];
     const withdrawn: string[] = [];
     this.transaction(() => {
       for (const row of this.db
