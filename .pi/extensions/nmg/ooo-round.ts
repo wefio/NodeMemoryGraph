@@ -4,8 +4,9 @@
 // owning selection, attempts, fencing and acceptance.
 //
 // Deliberate properties:
-//   - Off unless NMG_OOO_TOOLS=1. A tool in every session costs context, and this path is still an
-//     experiment; the registry records the gate.
+//   - Registered by default, like the other NMG tools: a consumer that has to be switched on is not
+//     a consumer. The cost boundary is per call instead — `live` is what spends tokens, and it is
+//     absent unless asked for.
 //   - `submit` never blocks the session. A live round takes minutes, and the CLI's own `submit`
 //     waits for the terminal event, so this starts it detached with a log and the caller polls
 //     `status` — which is exactly the cross-process property the design asks for.
@@ -25,11 +26,6 @@ export interface OooRoundParams {
   runDir?: string;
   reason?: string;
   live?: boolean;
-}
-
-/** A hidden capability, so it is explicitly gated and registered. */
-export function oooToolsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.NMG_OOO_TOOLS === "1";
 }
 
 const CLI = "evals/ooo-execution/round-cli.ts";

@@ -1,39 +1,20 @@
-refactor(ooo): move the shared layer into src/integration
+fix(pi): register the round tool by default
 
-The design says the shared layer owns the host-agnostic plan, selection, task version and
-acceptance state, with the Pi adapter kept thin and the research launcher allowed to stay behind.
-That layer had been living in `evals/`, which is why nothing in daily work could reach it: the
-coordinator, the round orchestrator, the host verification and the round record were all outside
-the product tree, and the only way in was a research CLI.
+The environment gate was wrong, and the review called it correctly: a consumer that has to be
+switched on is not a consumer, and I had effectively kept the tool out of my own sessions while
+describing it as the thing that makes the shared layer reachable.
 
-Moved, unchanged in behaviour:
+The tool is now registered unconditionally, like `nmg_search`, `nmg_remember` and `nmg_board`. The
+real cost boundary stays where it belongs, per call: `live` is the switch that spends tokens, and it
+is absent unless asked for, so the default replays recorded answers and spends nothing.
 
-| was | now |
-| --- | --- |
-| `evals/ooo-execution/board-admission.ts` | `src/integration/ooo-board.ts` |
-| `evals/ooo-execution/cycle.ts` | `src/integration/ooo-cycle.ts` |
-| `evals/ooo-execution/candidate.ts` | `src/integration/ooo-candidate.ts` |
-| `evals/ooo-execution/mutation.ts` | `src/integration/ooo-mutation.ts` |
-| `evals/ooo-execution/patch-verifier.ts` | `src/integration/ooo-verifier.ts` |
-| `evals/ooo-execution/round-log.ts` | `src/integration/ooo-round-log.ts` |
+Two mechanical consequences, both of which would have caught the mistake:
 
-`evals/ooo-execution/` keeps the research launchers (`live-*`, `round-{spec,runner,cli,compare}`),
-the probes and the tests, which now import the shared layer from `src/`. The three existing
-contracts (`ooo-execution.ts`, `ooo-patch.ts`, `ooo-check.ts`) are untouched.
+- The extension suite asserts the exact tool inventory twice, and both assertions now have to name
+  `ooo_round`; they failed until they did. The inventory test is the reason this change is provable
+  rather than asserted.
+- The registry entry for the round entry point no longer claims a session-surface gate. The `evals/`
+  CLI row stays registered as a non-default capability, because that is still true of the CLI.
 
-Consequences worth stating, not hiding:
-
-- The moved code is now inside `tsc --noEmit`, ESLint and the complexity gate, which it was not
-  before (project lint and tsc both excluded `evals/`). It passes all three unchanged.
-- It is in the product tree but still not on any product runtime path: nothing in `src/cli`
-  imports it, and no session tool is registered - `.pi/extensions/nmg/ooo-execution.ts` exists but
-  the extension index does not import it, which the registry row now says outright.
-- The design doc's S3 boundary sentence said the entry point "stays under `evals/`", which was
-  true when written and is no longer; it now names the shared layer, the launchers and the
-  remaining gap.
-
-Evidence: 82 offline OoO tests pass at `--test-concurrency=1` (the same count as before the move),
-`tsc --noEmit` clean (it now covers the moved files), ESLint clean on all six, the complexity gate
-reports only another agent's unchanged file, LSP 0 diagnostics, `docs:check` 185 files 0 errors
-0 warnings. This branch is based on the `hiddenWaitMs` correction because the moved orchestrator is
-what that fix calibrates, so the two belong in one review.
+Evidence: extension suite 47/47, adapter tests 3/3 (the gate test is gone with the gate), `tsc
+--noEmit` clean, ESLint clean, LSP 0 diagnostics, `docs:check` clean.

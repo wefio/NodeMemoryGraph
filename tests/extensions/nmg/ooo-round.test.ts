@@ -5,16 +5,9 @@ import { test } from "node:test";
 
 import {
   describeStart,
-  oooToolsEnabled,
   roundArgv,
   type OooRoundParams,
 } from "../../../.pi/extensions/nmg/ooo-round.ts";
-
-test("the round tool is off unless explicitly enabled", () => {
-  assert.equal(oooToolsEnabled({}), false, "a session without the flag gets no round tool");
-  assert.equal(oooToolsEnabled({ NMG_OOO_TOOLS: "0" }), false);
-  assert.equal(oooToolsEnabled({ NMG_OOO_TOOLS: "1" }), true);
-});
 
 test("every action refuses what it cannot answer, by name", () => {
   const missingRunDir = () => roundArgv({ action: "status" } satisfies OooRoundParams);
