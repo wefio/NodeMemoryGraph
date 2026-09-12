@@ -13,7 +13,7 @@ import {
 } from "../../src/integration/ooo-patch.ts";
 
 import { mutate, type Mutation } from "./mutation.ts";
-import { RoundLog, type RoundEvent, type RoundEventInput } from "./round-log.ts";
+import { RoundLog, checksDigest, type RoundEvent, type RoundEventInput } from "./round-log.ts";
 
 export type WorkerMetrics = {
   tokens?: number;
@@ -56,6 +56,9 @@ export type CheckRunner = (options: {
   files: Readonly<Record<string, string>>;
   revision: string;
   checks: readonly CandidateCheck[];
+  /** Present when the round can be cancelled: a runner that spawns processes must kill
+   *  their trees on abort rather than leave them running for a round nobody waits for. */
+  signal?: AbortSignal;
 }) => Promise<CheckOutcomeSummary>;
 
 export type CaseRule = {
@@ -85,6 +88,10 @@ export interface CycleOptions {
     timeoutMs: number;
   }; /** Overridable so the deterministic test does not create worktrees. */
   runChecks?: CheckRunner;
+  /** Operator cancellation. Aborting it stops dispatch, fences the round in the
+   *  coordinator, and kills the process tree of every check still running, so a cancelled
+   *  round leaves no orphan worker or check process behind. */
+  signal?: AbortSignal;
   /** Independently reviewed, task-specific no-change claims, fixed before the round.
    *  Omission disables no-change acceptance; test names alone are not coverage proof. */
   noChangeCases?: Partial<Record<"A" | "B", readonly CaseRule[]>>;
@@ -136,6 +143,8 @@ export interface CycleResult {
   composed: { verdict: string; files: string[] };
   /** The round's own record, in order. Replaying it needs no model call. */
   log: readonly RoundEvent[];
+  /** Set when the operator cancelled the round: the reason, as the coordinator stored it. */
+  cancelled?: string;
 }
 
 const plan: ProbePlan = [
@@ -244,6 +253,9 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   const reopens: string[] = [];
   let lastPushback: { dependency: string; requirement: string; evidence: string } | undefined;
   let premiseFailed = false;
+  /** Set when the operator cancels: the round stops dispatching, fences itself in the
+   *  coordinator, and reports the reason instead of finishing as if it had run. */
+  let cancelled: string | null = null;
   /** A premise that could not be measured is not a premise that failed: the round must
    *  stop, but it must say which of the two happened. */
   let premiseUnmeasured = false;
@@ -260,6 +272,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
         revision: options.revision,
         files,
         checks: options.checks,
+        signal: options.signal,
       });
     } finally {
       hostChecks += 1;
@@ -290,6 +303,20 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   };
   const log = (step: string, detail?: string) =>
     timeline.push({ at: new Date().toISOString(), step, detail });
+  /** Operator cancellation, recorded once and fenced in the coordinator.
+   *
+   *  The coordinator is the authority, so the round does not merely stop: it cancels the
+   *  round it is running, which advances every attempt and retires every live claim and
+   *  ticket. That is what makes a late artifact `stale` instead of accepted into a round
+   *  nobody is waiting for. Returns true when the round must stop dispatching. */
+  const stopped = () => {
+    if (cancelled !== null) return true;
+    if (!options.signal?.aborted) return false;
+    gate.cancel("operator cancelled the round");
+    cancelled = gate.cancelled() ?? "operator cancelled the round";
+    log("cancelled", "operator cancelled the round");
+    return true;
+  };
   /** How much of the unresolved external wait the out-of-order task actually covered.
    *  Computed from real timestamps: claimed-to-submitted overlap with issued-to-terminal. */
   const hiddenWait = () => {
@@ -466,8 +493,41 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   const firstUnmet = (task: "A" | "B" | "C") =>
     (options.requires?.[task] ?? []).find((requirement) => !requirementMet(requirement));
 
+  /** A task whose instruction says "the host proved these faults survive" depends on that
+   *  proof: if the premise is false the task as stated does not exist, and dispatching it
+   *  anyway spends a full model call on work the host then refuses on its own evidence
+   *  (measured: 204k tokens). The proof is seconds of host time, so it is awaited before the
+   *  dispatch instead of being raced against the model. Returns the refusal reason, or null
+   *  when the task may run. */
+  const premiseRefusal = async (taskId: string): Promise<string | null> => {
+    if (!(declared[taskId as "A" | "B"] ?? []).length) return null;
+    await matrix;
+    if (!premiseFailed && !premiseUnmeasured) return null;
+    const reason = premiseFailed
+      ? `${taskId} declares a fault the frozen suite already detects`
+      : `${taskId}'s declared fault could not be measured`;
+    // Nothing is claimed yet, but something *was* published: the round announced this task's
+    // handoff, and the board serializes actionable entries, so leaving it outstanding would
+    // block every later claim in the round.
+    gate.withdrawHandoff(taskId, reason);
+    log(premiseFailed ? "premise-invalid" : "premise-unmeasured", `${taskId}: not dispatched`);
+    trace({
+      kind: "worker-failed",
+      taskId,
+      attempt: 0,
+      reason: `premise-invalid: ${reason}`,
+    });
+    rejections.push({ task: taskId, attempt: 0, artifact: `${taskId} not dispatched: ${reason}` });
+    verdicts[taskId] = "rejected";
+    return reason;
+  };
+
   /** One worker invocation only. A rejected claim is not artificially expired. */
   const runTask = async (taskId: string) => {
+    if (stopped()) {
+      verdicts[taskId] ??= "cancelled";
+      return undefined;
+    }
     // Selection belongs to the coordinator: an unreleased dependency or a live
     // claim on another task means this task simply does not run in this round.
     const selected = gate.next();
@@ -475,37 +535,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
       log(`skip:${taskId}`, `selected=${selected ?? "none"}`);
       return undefined;
     }
-    // A task whose instruction says "the host proved these faults survive" depends on that
-    // proof: if the premise is false the task as stated does not exist, and dispatching it
-    // anyway spends a full model call on work the host then refuses on its own evidence
-    // (measured: 204k tokens). The proof is seconds of host time, so it is awaited here,
-    // before the dispatch, instead of being raced against the model.
-    if ((declared[taskId as "A" | "B"] ?? []).length) {
-      await matrix;
-      if (premiseFailed || premiseUnmeasured) {
-        const reason = premiseFailed
-          ? `${taskId} declares a fault the frozen suite already detects`
-          : `${taskId}'s declared fault could not be measured`;
-        // Nothing is claimed yet, but something *was* published: the round announced this
-        // task's handoff, and the board serializes actionable entries, so leaving it
-        // outstanding would block every later claim in the round.
-        gate.withdrawHandoff(taskId, reason);
-        log(premiseFailed ? "premise-invalid" : "premise-unmeasured", `${taskId}: not dispatched`);
-        trace({
-          kind: "worker-failed",
-          taskId,
-          attempt: 0,
-          reason: `premise-invalid: ${reason}`,
-        });
-        rejections.push({
-          task: taskId,
-          attempt: 0,
-          artifact: `${taskId} not dispatched: ${reason}`,
-        });
-        verdicts[taskId] = "rejected";
-        return "rejected";
-      }
-    }
+    if ((await premiseRefusal(taskId)) !== null) return "rejected";
     const ticket = gate.claim(taskId, `worker-${taskId}`);
     const claimedAt = Date.now();
     if (!ticket.patch) throw new Error("round tasks must be patch tasks");
@@ -657,6 +687,8 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
       kind: "plan",
       tasks: ["A", "B", "C"],
       checks: options.checks.map((check) => check.label),
+      revision: options.revision,
+      checkDigest: checksDigest(options.checks),
     });
     // Class A/D: proving the declared mutants survive is required work that does not
     // depend on B's model call, so it runs concurrently with it instead of before the
@@ -728,8 +760,21 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
             if (options.baseline[path] !== content) files[path] = content;
       return files;
     };
-    const compose = async () => {
+    const compose = async (): Promise<{
+      files: Record<string, string>;
+      result: CheckOutcomeSummary;
+    }> => {
       const files = changedFiles();
+      // A cancelled round does not keep verifying: the operator decided the round's work is
+      // not wanted, and its composition must not be promoted on a check nobody asked for.
+      if (stopped())
+        return {
+          files: {},
+          result: {
+            verdict: "undecidable" as const,
+            outcomes: [{ label: "cancelled", status: "undecidable" as const }],
+          },
+        };
       const result = await check({ ...options.baseline, ...files });
       log("composed-check", result.verdict);
       return { files, result };
@@ -737,6 +782,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     let { files: abFiles, result: composed } = await compose();
     /** The round's report, assembled once the phase above has produced its outcome. */
     const buildResult = (): CycleResult => ({
+      ...(cancelled ? { cancelled } : {}),
       timeline,
       verdicts,
       submissions,
@@ -877,6 +923,7 @@ The downstream task reported that your artifact cannot satisfy ${pushed.requirem
       accepted: result.accepted,
       verdicts: result.verdicts,
       composed: { verdict: result.composed.verdict, files: [...result.composed.files] },
+      ...(result.cancelled ? { cancelled: result.cancelled } : {}),
     });
     return result;
   } finally {

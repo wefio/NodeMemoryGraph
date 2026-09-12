@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -14,6 +14,9 @@ export interface CheckOutcome {
   status: "passed" | "failed" | "undecidable";
   exitCode: number | null;
   log: string;
+  /** The round was cancelled while this check ran. Recorded separately from a plain
+   *  `undecidable` because it is a decision, not an inconclusive measurement. */
+  aborted?: boolean;
 }
 
 export interface CandidateResult {
@@ -33,29 +36,108 @@ function checkEnvironment(): NodeJS.ProcessEnv {
   );
 }
 
+/** Kills a check and everything it spawned.
+ *
+ *  `child.kill()` reaches the direct child only, so a check that spawns a test runner of its
+ *  own leaves that grandchild running after the round is gone — an orphan process doing work
+ *  for a round nobody is waiting for. Cancellation therefore kills the tree, and on Windows
+ *  that is what `taskkill /T` is for. */
+function killTree(child: ChildProcess): void {
+  const pid = child.pid;
+  if (pid === undefined || child.exitCode !== null) return;
+  try {
+    if (process.platform === "win32")
+      execFileSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+    else process.kill(-pid, "SIGKILL");
+  } catch {
+    // Already gone, or not ours to kill: the outcome stays undecidable either way.
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // Nothing left to kill.
+    }
+  }
+}
+
+interface RunResult {
+  ok: boolean;
+  undecidable: boolean;
+  aborted?: boolean;
+  exitCode: number | null;
+  log: string;
+}
+
 function run(
   command: string,
   args: readonly string[],
   cwd: string,
   timeoutMs: number,
-): Promise<{ ok: boolean; undecidable: boolean; exitCode: number | null; log: string }> {
+  signal?: AbortSignal,
+): Promise<RunResult> {
   return new Promise((resolve) => {
-    execFile(
-      command,
-      [...args],
-      { cwd, timeout: timeoutMs, maxBuffer: 1_000_000, env: checkEnvironment() },
-      (error, stdout, stderr) => {
-        const log = (stdout + stderr).slice(-MAX_LOG);
-        if (!error) return resolve({ ok: true, undecidable: false, exitCode: 0, log });
-        const exitCode = typeof error.code === "number" ? error.code : null;
-        // A signal, timeout, or missing tool is inconclusive, never a rejection.
-        const undecidable = (error as { killed?: boolean }).killed === true || exitCode === null;
-        resolve({ ok: false, undecidable, exitCode, log });
-      },
+    if (signal?.aborted)
+      return resolve({
+        ok: false,
+        undecidable: true,
+        aborted: true,
+        exitCode: null,
+        log: "cancelled before start",
+      });
+    // `spawn`, not `execFile`: the POSIX branch of the tree kill needs a detached process
+    // group, which `execFile`'s options do not expose.
+    const child = spawn(command, [...args], {
+      cwd,
+      env: checkEnvironment(),
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+    });
+    let output = "";
+    let settled = false;
+    let timedOut = false;
+    let aborted = false;
+    const finish = (result: RunResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(result);
+    };
+    const collect = (chunk: Buffer) => {
+      output = (output + chunk.toString()).slice(-2_000_000);
+    };
+    child.stdout?.on("data", collect);
+    child.stderr?.on("data", collect);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killTree(child);
+    }, timeoutMs);
+    const onAbort = () => {
+      aborted = true;
+      killTree(child);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    child.on("error", (error: Error) =>
+      finish({ ok: false, undecidable: true, exitCode: null, log: error.message }),
     );
+    child.on("close", (code: number | null, killedBy: NodeJS.Signals | null) => {
+      const log = output.slice(-MAX_LOG);
+      if (code === 0 && !aborted && !timedOut)
+        return finish({ ok: true, undecidable: false, exitCode: 0, log });
+      // A signal, timeout, or missing tool is inconclusive, never a rejection.
+      const undecidable = timedOut || aborted || killedBy !== null || code === null;
+      finish({
+        ok: false,
+        undecidable,
+        exitCode: code,
+        log: log || (aborted ? "cancelled" : "no output"),
+        ...(aborted ? { aborted: true } : {}),
+      });
+    });
   });
 }
 
+/** Git calls are never cancelled: cleanup has to run even when the round was cancelled,
+ *  or the cancelled round leaks its worktree. */
 function git(repository: string, args: readonly string[], timeoutMs: number) {
   return run("git", args, repository, timeoutMs);
 }
@@ -101,6 +183,8 @@ export async function verifyCandidate(options: {
   revision: string;
   checks: readonly CandidateCheck[];
   timeoutMs?: number;
+  /** Operator cancellation: in-flight checks are killed with their process tree. */
+  signal?: AbortSignal;
 }): Promise<CandidateResult> {
   const timeoutMs = options.timeoutMs ?? 180_000;
   const paths = Object.keys(options.files);
@@ -132,13 +216,15 @@ export async function verifyCandidate(options: {
       await writeFile(target, content, "utf8");
     }
     for (const check of options.checks) {
-      const result = await run(check.command, check.args, worktree, timeoutMs);
+      const result = await run(check.command, check.args, worktree, timeoutMs, options.signal);
       outcomes.push({
         label: check.label,
         status: result.ok ? "passed" : result.undecidable ? "undecidable" : "failed",
         exitCode: result.exitCode,
         log: result.log,
+        ...(result.aborted ? { aborted: true } : {}),
       });
+      if (result.aborted) break;
     }
   } finally {
     await git(options.repository, ["worktree", "remove", "--force", worktree], 60_000);

@@ -12,13 +12,26 @@
 //     rejection or an explicit failure, never a reproduced verdict.
 //   - model calls are not re-executed. A different worker answer is a different round,
 //     which is why the log records the answer rather than the prompt that produced it.
+import { createHash } from "node:crypto";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import type { CheckTicket } from "../../src/integration/ooo-check.ts";
 import type { CycleWorker, WorkerMetrics } from "./cycle.ts";
 
 /** One recorded round event, in the order the round produced it. */
 export type RoundEvent =
-  | { kind: "plan"; at: string; tasks: string[]; checks: string[] }
+  | {
+      kind: "plan";
+      at: string;
+      tasks: string[];
+      checks: string[];
+      /** The revision the round's candidate worktrees are checked out from, so a replay
+       *  verifies what the round verified instead of whatever `HEAD` happens to be now. */
+      revision?: string;
+      /** The frozen verification rules. They are not part of any task's frozen work, so
+       *  without this a replay could verify a differently-defined check and still report a
+       *  reproduction: the verifier has to be frozen by the round, not by the process. */
+      checkDigest?: string;
+    }
   | { kind: "check-issued"; at: string; taskId: string; ticket: CheckTicket }
   | {
       kind: "check-result";
@@ -62,6 +75,8 @@ export type RoundEvent =
       accepted: Record<string, string>;
       verdicts: Record<string, string>;
       composed: { verdict: string; files: string[] };
+      /** The round's explicit terminal decision, when it was not a normal completion. */
+      cancelled?: string;
     };
 
 /** `Omit` over a discriminated union collapses to the properties every member shares, so
@@ -178,6 +193,67 @@ export function recordedWorker(events: readonly RoundEvent[]): CycleWorker {
       throw new Error(`round log has no artifact for ${taskId} attempt ${attempt}`);
     return artifact;
   };
+}
+
+/** A digest of the verification rules a round runs under: the commands, their arguments and
+ *  their labels. Computed the same way at record and replay time, from the same inputs. */
+export function checksDigest(
+  checks: readonly { label: string; command: string; args: readonly string[] }[],
+): string {
+  const canonical = checks
+    .map((check) => ({ label: check.label, command: check.command, args: [...check.args] }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+/** A round's frozen work per task and attempt: the identity of everything the round was
+ *  handed (baseline files, instruction, declared faults, budgets, limits). Every input
+ *  change moves it, which is what makes it usable as the round's identity. */
+export function frozenDigests(log: readonly RoundEvent[]): Map<string, string> {
+  const digests = new Map<string, string>();
+  for (const event of log)
+    if (event.kind === "claim") digests.set(`${event.taskId}#${event.attempt}`, event.digest);
+  return digests;
+}
+
+/** The recorded plan, or null when the log has none. */
+export function recordedPlan(
+  events: readonly RoundEvent[],
+): Extract<RoundEvent, { kind: "plan" }> | null {
+  return events.find((event) => event.kind === "plan") ?? null;
+}
+
+/** Whether a replay was handed the same frozen work the log recorded.
+ *
+ *  A replay given different inputs is a *different round*: it can still finish with the same
+ *  verdicts by coincidence, and then the log looks reproduced when it was not. Comparing the
+ *  frozen digests is the cheap check that names the difference instead: it covers the baseline
+ *  files and every other input at once, because all of them feed the digest. */
+export function compareFrozen(
+  recorded: readonly RoundEvent[],
+  replayed: readonly RoundEvent[],
+): string[] {
+  const before = frozenDigests(recorded);
+  const after = frozenDigests(replayed);
+  const differences: string[] = [];
+  const checksBefore = recordedPlan(recorded)?.checkDigest;
+  const checksAfter = recordedPlan(replayed)?.checkDigest;
+  if (checksBefore !== checksAfter)
+    differences.push(
+      `verification rules: ${checksBefore?.slice(0, 12) ?? "not recorded"} -> ` +
+        `${checksAfter?.slice(0, 12) ?? "not recorded"}`,
+    );
+  for (const key of [...new Set([...before.keys(), ...after.keys()])].sort()) {
+    const left = before.get(key);
+    const right = after.get(key);
+    if (left === right) continue;
+    if (left === undefined)
+      differences.push(`${key}: not claimed in the log -> ${right!.slice(0, 12)}`);
+    else if (right === undefined)
+      differences.push(`${key}: ${left.slice(0, 12)} -> not claimed in the replay`);
+    else differences.push(`${key}: ${left.slice(0, 12)} -> ${right.slice(0, 12)}`);
+  }
+  return differences;
 }
 
 /** Compares a replayed round with the terminal state its log recorded. Returns the
