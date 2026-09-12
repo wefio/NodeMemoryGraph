@@ -591,6 +591,39 @@ on what its instruction asserts_:
   outstanding, and because the board serializes actionable entries, every later claim in the
   round was blocked. `withdrawHandoff` resolves that entry and fences the attempt.
 
+### Round 7 promotion — 2026-09-12
+
+Promotion followed an explicit human decision (as in rounds 5 and 6). The candidate replaced
+`evals/ooo-execution/check-events.test.ts` (9,450 → 10,752 bytes, 16 → 17 test titles); the
+previous version is kept at `.nmg/ooo-live/check-events.test.ts.round6-promoted`. The two fixed
+check files now run 22 tests.
+
+| Fault                                | before promotion | promoted baseline |
+| ------------------------------------ | ---------------- | ----------------- |
+| `bound-ignores-runid`                | survived         | **killed**        |
+| `reopen-keeps-attempt`               | killed           | killed            |
+| `bound-ignores-input-digest`         | survived         | survived          |
+| `bound-ignores-claimed-at`           | survived         | survived          |
+| `issueCheck-skips-stale-input-guard` | survived         | survived          |
+| `cancel-keeps-check-tickets`         | survived         | survived          |
+| `withdraw-handoff-keeps-entry`       | survived         | survived          |
+
+Re-measured on the promoted tree, as the rule requires: the new baseline detects what the
+candidate detected, and detects nothing less than the old baseline did. Five faults still
+survive, so the next round's premise exists without re-deriving it — and `bound-ignores-runid`
+must be dropped from the declared list, since declaring it again would now be a false premise.
+
+**Open, attributed: two load-sensitive test flakes.** In the combined run
+(`evals/ooo-execution/*.test.ts` + `tests/integration/*.test.ts`) two tests failed once each and
+passed in isolation and on every re-run: `MCP adapter registers, discovers, and directs to a
+stable agent` and `recovery: a lapsed claim is a new generation, not a silent success`. The
+recovery test drives `gate.now` as a logical clock (`BoardAdmission.now`, and `claim()` passes
+it to the board as `now`, so it is not a real-clock dependency); what makes it load-sensitive is
+not yet diagnosed, and three deliberately loaded re-runs did not reproduce it. This matters
+before wiring `evals/` into CI: a gate that fails for load reasons is a gate people learn to
+re-run, so the flake must be understood or the eval tests must run with bounded concurrency
+first.
+
 Round 6's fault is now detected by the baseline that round produced, so declaring it again
 would be a false premise: the declared list is refreshed by probing candidates against the
 _current_ frozen suite (`MUTATION_SPEC=<spec> mutation-probe.ts`) — a probe result is only
