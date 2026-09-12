@@ -1434,6 +1434,10 @@ export class NmgService {
           statement: result.memory.statement,
           combinedScore: result.combinedScore,
           recallReason: result.recallReason,
+          lexicalScore: result.lexicalScore,
+          vectorScore: result.vectorScore,
+          routeScore: result.routeScore,
+          memoryType: result.memory.memoryType,
         })),
       ),
     });

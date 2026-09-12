@@ -40,6 +40,16 @@ export interface RecallCandidate {
   statement: string;
   combinedScore?: number;
   recallReason?: string;
+  /**
+   * The score split the runtime ranked with. A head trained on the combined score
+   * alone cannot be reproduced at runtime, because the feature vector reads the
+   * parts; captures older than this carry none of them.
+   */
+  lexicalScore?: number;
+  vectorScore?: number;
+  routeScore?: number;
+  /** Memory type, which the product's query-performance components read. */
+  memoryType?: string;
 }
 
 export interface RecallInstance {
