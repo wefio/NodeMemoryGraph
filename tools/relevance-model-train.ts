@@ -1042,6 +1042,7 @@ function readQrels(path: string): Map<string, Set<string>> {
 
 function ingestQrelsDocs(store: NmgStore, docs: readonly QrelsDoc[], project: string): number {
   let written = 0;
+  const startedAt = Date.now();
   for (let start = 0; start < docs.length; start += QRELS_BATCH) {
     const batch = docs.slice(start, start + QRELS_BATCH).map((doc) => ({
       statement: `${doc.title ? `${doc.title}. ` : ""}${doc.text ?? ""}`.slice(0, 4000),
@@ -1049,7 +1050,15 @@ function ingestQrelsDocs(store: NmgStore, docs: readonly QrelsDoc[], project: st
       truthStatus: "verified" as const,
       scope: { project },
     }));
+    const batchStartedAt = Date.now();
     written += store.rememberMany(batch).length;
+    // The ingest is a one-time, minutes-long cost, so its progress and its
+    // per-batch cost belong in the log: a stall has to be visible where it
+    // happens, not inferred from a frozen row count afterwards.
+    process.stderr.write(
+      `  qrels ingest ${written}/${docs.length} (+${batch.length} in ${Date.now() - batchStartedAt}ms, ${Date.now() - startedAt}ms total)
+`,
+    );
   }
   return written;
 }
