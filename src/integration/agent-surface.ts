@@ -52,6 +52,10 @@ export interface TaskBoardSurfaceEntry {
   content?: string;
   claimedBy?: string | null;
   ackedBy?: string[];
+  deliveredBy?: string | null;
+  deliverableDigest?: string | null;
+  verdict?: string | null;
+  judgedBy?: string | null;
 }
 
 export interface TaskBoardSurfacePreview {
@@ -63,6 +67,10 @@ export interface TaskBoardSurfacePreview {
   to?: string | null;
   claimedBy?: string | null;
   ackCount?: number;
+  deliveredBy?: string | null;
+  deliverableDigest?: string | null;
+  verdict?: string | null;
+  judgedBy?: string | null;
   createdAt?: string;
   resolvedAt?: string | null;
   preview?: string;
@@ -245,7 +253,7 @@ export function renderRememberSurface(
 }
 
 export const TASK_BOARD_CONVENTIONS =
-  "Board conventions (on use): entries may carry memory=<id> references to LTG records — readers expand them with nmg_get; open entries can be claimed by one Agent (lease-based, expired claims return to the pool) and released; resolve a request once it is answered — a resolved entry is closed and must not be replied to (reopen only with new substance); keep entries concise and temporary; taskId is the only channel boundary (no DMs, mentions, groups, or pinning).";
+  "Board conventions (on use): entries may carry memory=<id> references to LTG records — readers expand them with nmg_get; open entries can be claimed by one Agent (lease-based, expired claims return to the pool) and released; a claim ends in a deliverable — the holder records it with action=deliver (digest, optional ref/summary) and a *different* agent records the ruling with action=judge (accepted|rejected|undecidable, reason required), because a self-report is not an acceptance; resolve a request once it is answered — a resolved entry is closed and must not be replied to (reopen only with new substance); keep entries concise and temporary; taskId is the only channel boundary (no DMs, mentions, groups, or pinning).";
 
 /** Host-neutral board rendering. Host-only actions such as Pi rename remain in
  * the adapter and can bypass this renderer. */
@@ -316,11 +324,27 @@ function renderBoardItems(
 function renderPreviewRow(preview: TaskBoardSurfacePreview): string {
   const claim = preview.claimedBy ? ` [claimed by ${preview.claimedBy}]` : "";
   const ack = preview.ackCount ? ` (✅ acked ${preview.ackCount})` : "";
-  return `- ${String(preview.id ?? "?")} [${String(preview.kind ?? "entry")}/${String(preview.status ?? "open")}]${claim}${ack} ${String(preview.agentId ?? "unknown")}: ${excerpt(String(preview.preview ?? ""), 200)}`;
+  return `- ${String(preview.id ?? "?")} [${String(preview.kind ?? "entry")}/${String(preview.status ?? "open")}]${claim}${ack}${renderJudgement(preview)} ${String(preview.agentId ?? "unknown")}: ${excerpt(String(preview.preview ?? ""), 200)}`;
+}
+
+/** Delivery and verdict, rendered right after the claim: what was handed in, and
+ * who ruled on it. A claimed entry whose holder has delivered is no longer "in
+ * progress" — the digest is the identity of what must be judged, and the verdict
+ * is what says whether it was accepted. */
+function renderJudgement(entry: {
+  deliveredBy?: string | null;
+  deliverableDigest?: string | null;
+  verdict?: string | null;
+  judgedBy?: string | null;
+}): string {
+  const digest = entry.deliverableDigest ? ` ${String(entry.deliverableDigest).slice(0, 12)}` : "";
+  const delivered = entry.deliveredBy ? ` [delivered by ${entry.deliveredBy}${digest}]` : "";
+  const judged = entry.verdict ? ` [verdict ${entry.verdict} by ${entry.judgedBy ?? "?"}]` : "";
+  return `${delivered}${judged}`;
 }
 
 function renderEntryRow(entry: TaskBoardSurfaceEntry): string {
   const claim = entry.claimedBy ? ` [claimed by ${entry.claimedBy}]` : "";
   const ack = entry.ackedBy?.length ? ` (✅ acked by ${entry.ackedBy.join(", ")})` : "";
-  return `- ${String(entry.id ?? "?")} [${String(entry.kind ?? "entry")}/${String(entry.status ?? "open")}]${claim}${ack} ${String(entry.agentId ?? "unknown")}: ${excerpt(String(entry.content ?? ""), 500)}`;
+  return `- ${String(entry.id ?? "?")} [${String(entry.kind ?? "entry")}/${String(entry.status ?? "open")}]${claim}${ack}${renderJudgement(entry)} ${String(entry.agentId ?? "unknown")}: ${excerpt(String(entry.content ?? ""), 500)}`;
 }

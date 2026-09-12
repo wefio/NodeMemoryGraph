@@ -22,6 +22,8 @@ export const COMMON_BOARD_ACTIONS = [
   "acknowledge",
   "claim",
   "release",
+  "deliver",
+  "judge",
   "unsubscribe",
   "subscribe",
   "discover",

@@ -118,10 +118,16 @@ this completion", the verdict says "here is what it was judged against, by
 someone else").
 
 Surface: store methods + the daemon's `taskBoard` method and params, matching how
-`veto` is exposed. No Pi tool action and no CLI subcommand are added for this
-slice: a surface nobody calls is cost, not capability. The consumer that
-introduces it is the restricted out-of-order round, which publishes its work
-items on the board and records delivery/acceptance through these verbs.
+`veto` is exposed. The first slice added no Pi tool action and no CLI subcommand:
+a surface nobody calls is cost, not capability, and the consumer that was to
+introduce it was the restricted out-of-order round. That deferral ended once the
+verbs had a consumer a session can actually reach (follow-on slice, 2026-09-12):
+`deliver` and `judge` are now ordinary board actions on every adapter
+(`COMMON_BOARD_ACTIONS`), and `nmg board deliver` / `nmg board judge` are CLI
+subcommands whose required values (`--digest`, `--verdict` with `--reason`) are
+refused by name before any RPC is made. The read surface renders the pair
+(`[delivered by … digest …]`, `[verdict … by …]`), because a verdict nobody can
+read is not an acceptance.
 
 ### Non-goals (deliberately not adopted)
 
@@ -165,6 +171,9 @@ items on the board and records delivery/acceptance through these verbs.
 - Scope restricts an entry's visibility to its authorized agent subset.
 - Single-owner execution and wake frugality are preserved (no regression to
   all-to-all broadcast or duplicated work).
+- The verb pair is reachable from the public surface of every adapter (a board
+  action, plus a CLI subcommand), and a delivered/verdict state is visible where
+  entries are read — reachability is part of the acceptance, not a follow-up.
 
 ## Risks
 

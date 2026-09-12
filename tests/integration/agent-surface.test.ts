@@ -130,6 +130,35 @@ test("shared remember surface bounds semantic follow-up candidates", () => {
   assert.match(rendered, /decide semantically/u);
 });
 
+test("a delivered and judged entry renders its deliverable and verdict, not just its claim", () => {
+  const rendered = renderTaskBoardSurface(
+    {
+      action: "read",
+      entries: [
+        {
+          id: "entry-2",
+          kind: "handoff",
+          status: "open",
+          agentId: "coordinator",
+          content: "Run the suites and hand in the raw output.",
+          claimedBy: "worker-7",
+          ackedBy: [],
+          deliveredBy: "worker-7",
+          deliverableDigest: "24fb32103aafae2bc963a7e7deecaf1bc36702d697bc7abd8e1f67af01b525b1",
+          verdict: "accepted",
+          judgedBy: "coordinator",
+        },
+      ],
+    },
+    { taskId: "ooo-process-probe" },
+  );
+
+  assert.match(rendered, /\[claimed by worker-7\]/u);
+  assert.match(rendered, /\[delivered by worker-7 24fb32103aaf\]/u);
+  assert.match(rendered, /\[verdict accepted by coordinator\]/u);
+  assert.match(rendered, /a self-report is not an acceptance/u);
+});
+
 test("shared task-board surface renders coordination without promoting it to memory", () => {
   const rendered = renderTaskBoardSurface(
     {

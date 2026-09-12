@@ -63,8 +63,11 @@ board_description: >-
   Coordinate through a temporary blackboard shared by NMG clients. Without a
   taskId, entries land on the shared world channel; reading it lists active
   named channels you can join by name. Entries expire automatically and retain
-  writer attribution (NMG_AGENT_ID). Use put/read/resolve; full conventions
-  (memory pointers, boundaries) are disclosed in each tool result.
+  writer attribution (NMG_AGENT_ID). Use put/read/resolve; a claim can end in a
+  deliverable (deliver: digest, optional ref/summary) that a *different* agent
+  rules on (judge: accepted/rejected/undecidable with a reason) — a self-report
+  is not an acceptance. Full conventions (memory pointers, boundaries) are
+  disclosed in each tool result.
 
 lab_description: >-
   Discover and temporarily enable optional NMG capabilities for the current

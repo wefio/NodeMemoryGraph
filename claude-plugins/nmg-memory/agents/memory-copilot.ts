@@ -435,6 +435,19 @@ if (coordinationEnabled())
         entryId: z.string().optional(),
         resolution: z.string().optional(),
         reason: z.string().optional(),
+        digest: z
+          .string()
+          .optional()
+          .describe("deliver only: the sha256 identity of the artifact being handed in"),
+        ref: z.string().optional().describe("deliver only: where the artifact can be read"),
+        summary: z
+          .string()
+          .optional()
+          .describe("deliver only: what the artifact contains, in one line"),
+        verdict: z
+          .enum(["accepted", "rejected", "undecidable"])
+          .optional()
+          .describe("judge only: your ruling on someone else's deliverable"),
         leaseSeconds: z.number().int().min(60).max(86_400).optional(),
         afterCursor: z.number().int().min(0).optional(),
         limit: z.number().int().min(1).max(200).optional(),
@@ -599,15 +612,20 @@ function searchH(r: MemoryContext, foldedMemoryIds: string[] = []): string {
   const forget = r.results.some(({ memory: m }) =>
     (m.markers ?? []).some((marker) => marker.kind === "forget"),
   );
-  return [renderSearchSurface(r, {
-    emptyText: "No NMG match.",
-    preamble: renderDisclosure(nmgPrompts.search_disclosure, {}),
-    postamble: renderDisclosure(nmgPrompts.search_disclosure_metadata, {
-      count: String(r.results.length),
-      next_step: nextStep,
-      forget_hint: forget ? nmgPrompts.forget_hint : "",
+  return [
+    renderSearchSurface(r, {
+      emptyText: "No NMG match.",
+      preamble: renderDisclosure(nmgPrompts.search_disclosure, {}),
+      postamble: renderDisclosure(nmgPrompts.search_disclosure_metadata, {
+        count: String(r.results.length),
+        next_step: nextStep,
+        forget_hint: forget ? nmgPrompts.forget_hint : "",
+      }),
     }),
-  }), foldedDisclosureText(foldedMemoryIds)].filter(Boolean).join("\n");
+    foldedDisclosureText(foldedMemoryIds),
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function memText(
@@ -617,15 +635,20 @@ function memText(
   const forget = r.results.some(({ memory }) =>
     (memory.markers ?? []).some((marker) => marker.kind === "forget"),
   );
-  return [renderEvidenceSurface(r, {
-    preamble: renderDisclosure(nmgPrompts.get_disclosure, {}),
-    postamble: renderDisclosure(nmgPrompts.get_disclosure_metadata, {
-      count: String(r.results.length),
-      next_step: "",
-      forget_hint: forget ? nmgPrompts.forget_hint : "",
+  return [
+    renderEvidenceSurface(r, {
+      preamble: renderDisclosure(nmgPrompts.get_disclosure, {}),
+      postamble: renderDisclosure(nmgPrompts.get_disclosure_metadata, {
+        count: String(r.results.length),
+        next_step: "",
+        forget_hint: forget ? nmgPrompts.forget_hint : "",
+      }),
+      missingMemoryIds: r.missingMemoryIds,
     }),
-    missingMemoryIds: r.missingMemoryIds,
-  }), foldedDisclosureText(foldedMemoryIds)].filter(Boolean).join("\n");
+    foldedDisclosureText(foldedMemoryIds),
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function formatBoard(
