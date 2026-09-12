@@ -13,7 +13,7 @@ import type { Constructor } from "./store-ctor.ts";
 import { randomUUID } from "node:crypto";
 import { extractEventWindow } from "./advanced-query.ts";
 import { applyRelevanceGate } from "../relevance-gate.ts";
-import { applyLearnedGate } from "../learned-gate.ts";
+import { applyLearnedGate, rerankByRelevance } from "../learned-gate.ts";
 import { nowMs, PerfTimer, SECTION } from "../perf.ts";
 import type { PerfSnapshot } from "../perf.ts";
 import {
@@ -100,10 +100,16 @@ function applyRelevanceGates(
   limit: number,
   options: SearchOptions,
 ): MemorySearchResult[] {
+  // Order first, then spend the budget: a scorer that only deletes from an
+  // already-truncated list can never recover a candidate another rule ranked
+  // below the cut, which is the ceiling of a deletion-only gate.
+  const ordered = options.relevanceModel
+    ? rerankByRelevance(query, surfaced, options.relevanceModel)
+    : surfaced;
   const gated =
     options.relevanceFloor === undefined
-      ? surfaced.slice(0, limit)
-      : applyRelevanceGate(surfaced, {
+      ? ordered.slice(0, limit)
+      : applyRelevanceGate(ordered, {
           floor: options.relevanceFloor,
           limit,
           minZ: options.relevanceMinZ,

@@ -25,3 +25,24 @@ export function applyLearnedGate<T extends MemorySearchResult>(
   const features = relevanceFeatureMatrix(query, results, options);
   return results.filter((_, index) => model.predict(features[index]!) >= floor);
 }
+
+/**
+ * Re-rank by the model's score instead of deleting with it. A gate can only
+ * remove what another rule already placed inside the budget, so it can never
+ * recover a good candidate that rule ranked below the cut; ordering the whole
+ * pool and *then* spending the budget can. The original order is the tie-break,
+ * so equal scores keep the retriever's own preference.
+ */
+export function rerankByRelevance<T extends MemorySearchResult>(
+  query: string,
+  results: readonly T[],
+  model: RelevanceModelLike,
+  options: RelevanceFeatureOptions = {},
+): T[] {
+  if (results.length <= 1) return [...results];
+  const features = relevanceFeatureMatrix(query, results, options);
+  return results
+    .map((result, index) => ({ result, index, score: model.predict(features[index]!) }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map((entry) => entry.result);
+}
