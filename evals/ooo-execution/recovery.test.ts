@@ -150,6 +150,20 @@ test("recovery: a lapsed claim is a new generation, not a silent success", async
   assert.equal(await submitPatch(gate, resumed, patchArtifact(resumed.patch!.digest)), "accepted");
 });
 
+test("recovery: the first cancellation is the decision, and a second one does not rewrite it", (t) => {
+  const s = store();
+  t.after(() => {
+    s.close();
+    s.clean();
+  });
+  const gate = s.open();
+  gate.claim("B", "worker-1");
+  gate.cancel("operator stopped the round");
+  const withdrawn = gate.cancel("something else entirely");
+  assert.deepEqual(withdrawn, [], "a second cancellation withdraws nothing");
+  assert.equal(gate.cancelled(), "operator stopped the round");
+});
+
 test("recovery: a check that never reports ends explicitly instead of waiting forever", (t) => {
   const s = store();
   t.after(() => {

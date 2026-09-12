@@ -544,6 +544,52 @@ conclusion; that is a concrete target for the next cost investigation, not a sch
 pushback, reopen) still has only deterministic tests, because C's declared requirement was
 satisfied on the first attempt and no reopen was needed.
 
+## S3 entry points: submit / status / cancel from a spec — 2026-09-12
+
+The stage asks for entry points only for actions that were repeated by hand, and for those to
+follow shapes that already exist in durable-agent harnesses. What was repeated by hand was
+editing `live-cycle.ts` to change the round's inputs, and reading its stdout to learn the
+outcome; what had no entry point at all was cancellation. So:
+
+| File              | Role                                                                                                                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `round-spec.ts`   | describes a round as data: baseline paths, checks, both tasks' instruction/editable/visible subset, case rules, declared faults, admitted conclusions, preconditions, budget, limits, worker kind |
+| `round-runner.ts` | freezes the spec into a round, writes the run directory (store, log, `run.json`), and reports state                                                                                               |
+| `round-cli.ts`    | `submit <spec> --run-dir <dir> [--live]`, `status --run-dir <dir>`, `cancel --run-dir <dir> --reason <text>`                                                                                      |
+
+Repeating a supported round needs no script edit: the same spec runs once (recording its log)
+and then re-runs with `worker.kind = "replay"` pointed at that log. The round's identity check
+from the S2 slice is what makes that safe — a spec whose frozen work differs from the log's is
+refused by name rather than replayed into a different round.
+
+Cancellation is now cross-process, which is what S2's mechanism was missing: `cancel` writes
+the decision into the round's own store, and the running round polls that store (every 250 ms
+while it waits, and at every dispatch point), then cancels itself, advances every attempt, and
+kills the in-flight check's process tree. The offline test proves the contract the cheap way: a
+cancellation written by _another process_ before the round starts means the round spends **zero
+worker calls**, reports `cancelled`, and accepts nothing.
+
+Four defects surfaced while building this, all in the round rather than in the entry point:
+
+1. **A round whose store already recorded a cancellation threw** `round cancelled` from its
+   first coordinator call instead of terminating explicitly. It now returns a cancelled result
+   (verdicts `cancelled`, composition `undecidable`) after tracing its plan and terminal events.
+2. **That early path leaked the coordinator's store connection**, which on Windows blocked the
+   run directory from being removed (`EPERM`) — the leak was the cause, not the cleanup.
+3. **`cancel()` was not idempotent**: a second cancellation overwrote the first reason, so the
+   round's recorded terminal decision could be rewritten after the fact. The first decision now
+   stands, and `recovery.test.ts` pins it.
+4. **The raw artifact contract requires the `kind` discriminator** (`kind: "conclusion"`), which
+   the artifact _tool_ adds for the model. Writing answers by hand for a test is therefore not
+   the same as the tool path, and the host refused one with `invalid patch structure` — a
+   reminder that the tool is a convenience over the contract, not the contract.
+
+Scope, stated plainly: the entry point lives under `evals/` behind `npm run ooo:round`, the
+round engine still lives in `evals/ooo-execution/`, and no product CLI was touched. The spec is
+operator-authored, so spec paths are not treated as untrusted input; the paths that _do_ enter
+the frozen envelope stay repository-relative so a spec means the same thing on another machine,
+while a recorded log may be archived anywhere.
+
 ## S2 exit: cancellation with real processes, and a replay bound to its round — 2026-09-12
 
 S2's exit condition has two halves. The recovery half was already covered by
