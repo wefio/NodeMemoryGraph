@@ -11,9 +11,15 @@
 // never return a tier that the runtime cannot execute. Add a GPU tier only when
 // an executable backend exists and has been calibrated against these CPU tiers.
 //
-// This module is deliberately UOp-free: callers (e.g. autodiff.ts) map their
-// graph nodes to MetricNode descriptors so the cost model stays testable and
+// This module is deliberately UOp-free: an intended caller would map its graph
+// nodes to MetricNode descriptors so the cost model stays testable and
 // independent of the internal IR representation.
+//
+// Status: an unadopted Lab primitive. Nothing imports it — not even autodiff.ts,
+// which this comment previously named — so nothing currently maps graph nodes to
+// MetricNode. The calibration above is the artifact of
+// docs/experiments/runtime/backend-selection-cost-model-2026-08-10.md and is kept
+// with the measurement rather than re-derived.
 
 export type ExecutionTier = "interpreter" | "compiled-tape";
 
