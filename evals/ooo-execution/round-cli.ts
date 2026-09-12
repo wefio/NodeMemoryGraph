@@ -8,6 +8,7 @@
 // the round's own durable state, so they work from other processes and across restarts — which
 // is the point of the stage: a supported round is repeated without editing a research script.
 import { readFileSync } from "node:fs";
+import { compareModes, describe } from "./round-compare.ts";
 import { parseRoundSpec } from "./round-spec.ts";
 import {
   cancelRun,
@@ -20,7 +21,8 @@ import {
 const USAGE = `usage:
   round-cli.ts submit <spec.json> --run-dir <dir> [--live]
   round-cli.ts status --run-dir <dir>
-  round-cli.ts cancel --run-dir <dir> --reason <text>`;
+  round-cli.ts cancel --run-dir <dir> --reason <text>
+  round-cli.ts compare <spec.json> --out <dir> [--runs <n>]`;
 
 /** A tiny flag reader: unknown flags are refused rather than ignored. */
 function flags(argv: readonly string[], allowed: readonly string[]) {
@@ -57,7 +59,6 @@ async function submit(argv: readonly string[], repository: string) {
     spec,
     { repository, revision, baseline },
     {
-      spec,
       live: values.live === true,
     },
   );
@@ -84,12 +85,28 @@ function cancel(argv: readonly string[]) {
   console.log(`cancellation recorded: ${stored}`);
 }
 
+/** S4: run both dispatch orders over one spec and print what was measured. */
+async function compare(argv: readonly string[], repository: string) {
+  const [specPath, ...rest] = argv;
+  if (!specPath || specPath.startsWith("--")) throw new Error(USAGE);
+  const values = flags(rest, ["out", "runs"]);
+  const output = required(values, "out");
+  const runs = values.runs === undefined ? 1 : Number(values.runs);
+  if (!Number.isSafeInteger(runs) || runs < 1) throw new Error("--runs must be a positive integer");
+  const spec = parseRoundSpec(JSON.parse(readFileSync(specPath, "utf8")));
+  const comparison = await compareModes({ spec, repository, outputDirectory: output, times: runs });
+  for (const line of describe(comparison)) console.log(line);
+  console.log(`arms: ${comparison.arms.length}, worker ${comparison.worker}`);
+  if (!comparison.qualityParity) process.exitCode = 1;
+}
+
 const [command, ...rest] = process.argv.slice(2);
 const repository = process.cwd();
 try {
   if (command === "submit") await submit(rest, repository);
   else if (command === "status") status(rest);
   else if (command === "cancel") cancel(rest);
+  else if (command === "compare") await compare(rest, repository);
   else throw new Error(USAGE);
 } catch (error) {
   console.error(`round-cli: ${error instanceof Error ? error.message : String(error)}`);

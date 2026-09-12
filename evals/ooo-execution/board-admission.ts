@@ -272,11 +272,13 @@ export class BoardAdmission extends NmgStore {
   }
 
   private publish(kind: "handoff" | "decision", content: string): string {
-    // The real board put owns its transaction. Recover a post-put/pre-link crash
-    // by adopting the existing publication instead of creating another message.
+    // The real board put owns its transaction. Recover a post-put/pre-link crash by adopting
+    // the existing publication instead of creating another message — but only while it is still
+    // open: a *resolved* publication with the same content is a finished handoff, and adopting
+    // it would link the row to an entry nobody can claim.
     const existing = this.db
       .prepare(
-        "SELECT id FROM task_board_entries WHERE task_id=? AND agent_id='coordinator' AND kind=? AND content=? ORDER BY id LIMIT 1",
+        "SELECT id FROM task_board_entries WHERE task_id=? AND agent_id='coordinator' AND kind=? AND content=? AND status='open' ORDER BY id LIMIT 1",
       )
       .get(channel, kind, content);
     if (existing) return String(existing.id);
@@ -300,12 +302,34 @@ export class BoardAdmission extends NmgStore {
         "decision",
         JSON.stringify({ id: row.id, attempt: row.attempt, artifact: row.artifact }),
       );
+    // A published handoff for a task that is no longer the selected one must give the board's
+    // serial slot back. The plan can move past it (a waiting task became ready first, which is
+    // exactly what ordered execution does), and an unclaimed, unselected handoff would then
+    // block every later claim in the round. Nothing is fenced here: no ticket exists for a task
+    // nobody claimed, so only the publication is retired.
+    const selected = this.next();
+    for (const row of this.db
+      .prepare("SELECT * FROM ooo_probe_tasks WHERE entry_id IS NOT NULL ORDER BY id")
+      .all() as unknown as Row[]) {
+      if (row.id === selected || this.live(row)) continue;
+      try {
+        this.resolveTaskBoardEntry({
+          taskId: channel,
+          entryId: row.entry_id!,
+          agentId: "coordinator",
+          resolution: "no longer the selected task",
+        });
+      } catch {
+        // Already resolved or expired: the slot is free either way.
+      }
+      this.db.prepare("UPDATE ooo_probe_tasks SET entry_id=NULL WHERE id=?").run(row.id);
+    }
     const rows = this.db
       .prepare("SELECT * FROM ooo_probe_tasks WHERE entry_id IS NULL ORDER BY id")
       .all() as unknown as Row[];
     for (const row of rows) {
       // Do not occupy the board's serial outstanding slot with a waiting task.
-      if (row.id !== this.next()) continue;
+      if (row.id !== selected) continue;
       if ((JSON.parse(row.dependencies) as string[]).some((id) => this.row(id).artifact === null))
         continue;
       const entryId = this.publish(
@@ -503,7 +527,13 @@ export class BoardAdmission extends NmgStore {
   private claimableRow(id: string): Row {
     const row = this.row(id);
     if (row.artifact !== null) throw new Error("task completed");
-    if (!row.entry_id) throw new Error("unfulfilled dependencies");
+    // Three distinct refusals, each named for what it is; they used to share one misleading
+    // message ("unfulfilled dependencies") that sent readers after a dependency problem that
+    // did not exist. Dependencies are checked first because they explain *why* nothing was
+    // published, which is the more useful answer when both are true.
+    if ((JSON.parse(row.dependencies) as string[]).some((id) => this.row(id).artifact === null))
+      throw new Error("unfulfilled dependencies");
+    if (!row.entry_id) throw new Error("no published handoff for this task");
     if (this.live(row)) throw new Error("task already claimed");
     if (this.next() !== id) throw new Error("task not selected by narrow dispatch");
     return row;

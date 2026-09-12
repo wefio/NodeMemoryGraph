@@ -31,6 +31,9 @@ export type RoundEvent =
        *  without this a replay could verify a differently-defined check and still report a
        *  reproduction: the verifier has to be frozen by the round, not by the process. */
       checkDigest?: string;
+      /** Dispatch order the round ran under. A replay of a sequential round as an out-of-order
+       *  one is not the same round, so the mode is part of the identity too. */
+      mode?: string;
     }
   | { kind: "check-issued"; at: string; taskId: string; ticket: CheckTicket }
   | {
@@ -243,6 +246,19 @@ export function compareFrozen(
       `verification rules: ${checksBefore?.slice(0, 12) ?? "not recorded"} -> ` +
         `${checksAfter?.slice(0, 12) ?? "not recorded"}`,
     );
+  const modeBefore = recordedPlan(recorded)?.mode;
+  const modeAfter = recordedPlan(replayed)?.mode;
+  if (modeBefore !== modeAfter)
+    differences.push(
+      `dispatch order: ${modeBefore ?? "not recorded"} -> ${modeAfter ?? "not recorded"}`,
+    );
+  differences.push(...digestDifferences(before, after));
+  return differences;
+}
+
+/** One line per task whose frozen work differs, naming both sides. */
+function digestDifferences(before: Map<string, string>, after: Map<string, string>): string[] {
+  const differences: string[] = [];
   for (const key of [...new Set([...before.keys(), ...after.keys()])].sort()) {
     const left = before.get(key);
     const right = after.get(key);

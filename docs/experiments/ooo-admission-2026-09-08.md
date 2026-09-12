@@ -544,6 +544,60 @@ conclusion; that is a concrete target for the next cost investigation, not a sch
 pushback, reopen) still has only deterministic tests, because C's declared requirement was
 satisfied on the first attempt and no reopen was needed.
 
+## S4 comparison harness: ordered versus out-of-order on one frozen plan — 2026-09-12
+
+The stage's requirement is a comparison on the _same_ frozen plan that reports quality, time,
+tokens, failures and human intervention, and that does not presume a benefit. So the round
+gained a second dispatch order:
+
+- `mode: "ooo"` (default) — the waiting task's check is issued, the independent task runs while
+  it is outstanding, then the fixed plan is dispatched in order. This is the design under test.
+- `mode: "sequential"` — the check is awaited before anything is dispatched. Same plan, same
+  inputs, same checks, same acceptance rules; only the order differs.
+
+The mode is part of the round's identity (`compareFrozen` compares it), so a sequential round
+cannot be replayed as an out-of-order one and still count as the same round.
+
+`round-compare.ts` runs both arms `N` times, keeps every arm's own store, log and record, and
+reports: verdicts and acceptances (quality), wall clock, host checks and host ms, the covered
+wait, tokens, cache reads, worker check runs, mutants killed and surviving, failures and
+reopens. A comparison whose arms disagree about quality says so and exits non-zero **instead of**
+comparing times — the arms would not be the same round.
+
+Measured on the offline arms (recorded answers, real host checks, `times: 1`):
+
+```
+ooo:        verdicts {"B":"accepted","A":"accepted","C":"accepted"} accepted {"A":"…","B":"…","C":"…"}
+ooo:        wall 5166 ms, host 5868 ms over 5 check(s), hidden wait 775 ms, tokens 0, …
+sequential: verdicts {"B":"accepted","A":"accepted","C":"accepted"} accepted {"A":"…","B":"…","C":"…"}
+sequential: wall 4533 ms, host 4429 ms over 5 check(s), hidden wait 0 ms, tokens 0, …
+out-of-order minus sequential wall clock: 633 ms (slower) — reported, not treated as a result on its own
+```
+
+Read honestly: in this arm the answers are recorded, so the worker returns instantly and there
+is **no model time to overlap** — the out-of-order arm is 633 ms _slower_, and that is host-check
+scheduling overhead, not the design's effect. The only arm that can speak about tokens and real
+wall time is a live one, which spends a full round per arm per repetition. That is an operator
+decision, so it is stated here as not-yet-run rather than guessed at.
+
+Two real coordinator defects surfaced only because ordered execution exercises a path the
+out-of-order round never took, and both would have blocked any ordered run:
+
+1. **An unclaimed handoff for a task that is no longer selected held the board's serial slot.**
+   In ordered execution the check becomes terminal while B's handoff is still outstanding, so A —
+   now the selected task — could not claim: `entry …_000002 is pending until the prior serial
+entry is claimed`. `publishReady()` now retires the publication of any task that is neither
+   selected nor live, without fencing it (no ticket exists for a task nobody claimed).
+2. **`publish()` adopted a resolved publication with identical content.** The adoption rule
+   exists to recover a post-put/pre-link crash, but it matched any entry with that content —
+   including the one the previous fix had just resolved — so the row was linked to an entry
+   nobody could claim (`already resolved`). Adoption now requires `status='open'`.
+
+A third, smaller one: `claimableRow()` reported "unfulfilled dependencies" for a task that simply
+had no published handoff, which sent readers after a dependency problem that did not exist. The
+three refusals are now named for what they are, with dependencies checked first because they
+explain _why_ nothing was published.
+
 ## S3 entry points: submit / status / cancel from a spec — 2026-09-12
 
 The stage asks for entry points only for actions that were repeated by hand, and for those to
