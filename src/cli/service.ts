@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 
 import {
   configuredProvider,
@@ -25,6 +25,7 @@ import type {
   LeafSummaryProvider,
   NodeSummaryProvider,
   RememberInput,
+  RelevanceModelLike,
 } from "../core/types.ts";
 import { NmgStore } from "../core/store.ts";
 import {
@@ -74,6 +75,12 @@ import {
 } from "../lab/memory-graph-reasoner.ts";
 import { scopesOverlap, validityIntervalsOverlap } from "../core/semantic-domain.ts";
 import { sameScope } from "../core/scope.ts";
+import {
+  DEFAULT_MODEL_FLOOR,
+  DEFAULT_RELEVANCE_FLOOR,
+  DEFAULT_RELEVANCE_MAX_CV,
+} from "../core/relevance-gate.ts";
+import { readRelevanceModel } from "../lab/relevance-model.ts";
 import { normalizeRecallTriggers } from "../core/recall-triggers.ts";
 import { searchMemoryContext } from "../integration/search.ts";
 import { simhash64, simhashToHex, simhashFromHex, hammingDistance } from "../core/simhash.ts";
@@ -202,6 +209,11 @@ export class NmgService {
   readonly #tesseraBackfillRoots = new Set<string>();
   readonly #stgSyncTimes = new WeakMap<NmgStore, Map<string, number>>();
   #shutdownRequested = false;
+  /** Lazily loaded learned relevance gate; undefined until first read, null when
+   *  no model is configured or it fails to load. */
+  #relevanceModel: RelevanceModelLike | null | undefined;
+  /** Human-readable reason the learned gate is or is not active. */
+  #relevanceModelNote = "unread";
   readonly #maintenanceJobs = new Map<NmgStore, NodeJS.Immediate>();
   readonly #maintenanceSignals = new Map<
     NmgStore,
@@ -210,21 +222,81 @@ export class NmgService {
 
   constructor(options: NmgServiceOptions = {}) {
     const environment = options.environment ?? process.env;
+    const databasePath = options.databasePath ? resolve(options.databasePath) : undefined;
+    // Diagnostic artifacts (recall corpus, router state, controller shadow) live
+    // beside the database. When only `--db` is given, the data directory follows
+    // it instead of silently falling back to the shared default — otherwise a
+    // test daemon with a temp DB still writes its corpus into the developer's
+    // ~/.nmg. An explicit data-dir still wins.
     const dataDirectory = options.dataDirectory
       ? resolve(options.dataDirectory)
-      : resolveNmgDataDir(environment);
-    this.databasePath = resolve(options.databasePath ?? join(dataDirectory, "nmg.sqlite"));
+      : databasePath
+        ? dirname(databasePath)
+        : resolveNmgDataDir(environment);
+    this.databasePath = databasePath ?? join(dataDirectory, "nmg.sqlite");
     this.#dataDirectory = dataDirectory;
     this.#environment = environment;
     this.#reasoningWorkspaces = new ReasoningWorkspaces(join(dataDirectory, "lab", "reasoning"));
+  }
+
+  get dataDirectory(): string {
+    return this.#dataDirectory;
   }
 
   get shutdownRequested(): boolean {
     return this.#shutdownRequested;
   }
 
-  /** Lazily construct the daemon-owned online learner (shared state file). */
-  #getOnlineLearner(): ContextRouterOnlineLearner | null {
+  /** Load and cache the learned relevance gate from the data directory's
+   *  `relevance-model.json` — opt-in by producing (and placing) a validated
+   *  model; there is no env switch. */
+  #getRelevanceModel(): RelevanceModelLike | undefined {
+    if (this.#relevanceModel === undefined) {
+      this.#relevanceModel = this.#loadRelevanceModel();
+    }
+    return this.#relevanceModel ?? undefined;
+  }
+
+  /** Why the learned gate is or is not active (diagnostics; also asserted in tests). */
+  get relevanceModelStatus(): string {
+    this.#getRelevanceModel();
+    return this.#relevanceModelNote;
+  }
+
+  /** The embedding index this runtime embeds with, or "none" when degraded. */
+  #embeddingIdentity(): string {
+    return this.#configuredEmbeddingClient()?.indexId ?? "none";
+  }
+
+  /**
+   * Load the learned gate, refusing one whose absolute scores came from another
+   * embedder. An absolute score scale is not comparable across embedders, and
+   * using it anyway fails *silently*: the numbers still look plausible while the
+   * threshold no longer separates anything. A head that does not read the
+   * scale-bound feature block is embedder-free and loads anywhere.
+   */
+  #loadRelevanceModel(): RelevanceModelLike | null {
+    let model: RelevanceModelLike | null;
+    try {
+      model = readRelevanceModel(join(this.#dataDirectory, "relevance-model.json"));
+    } catch (error) {
+      this.#relevanceModelNote = `unreadable: ${error instanceof Error ? error.message : String(error)}`;
+      return null;
+    }
+    if (!model) {
+      this.#relevanceModelNote = "absent";
+      return null;
+    }
+    const identity = this.#embeddingIdentity();
+    if (model.acceptsEmbedder && !model.acceptsEmbedder(identity)) {
+      this.#relevanceModelNote = `refused: trained on embedder ${model.embedder ?? "unknown"}, runtime is ${identity}`;
+      return null;
+    }
+    this.#relevanceModelNote = `loaded (runtime embedder ${identity})`;
+    return model;
+  }
+
+  /** Lazily construct the daemon-owned online learner (shared state file). */ #getOnlineLearner(): ContextRouterOnlineLearner | null {
     if (this.#onlineLearner === undefined) {
       this.#onlineLearner = contextOnlineLearningEnabled(this.#environment)
         ? new ContextRouterOnlineLearner(onlineRouterStatePath(this.#dataDirectory))
@@ -1418,6 +1490,15 @@ export class NmgService {
       graphHops: options.graphHops ?? configuredGraphHops(1, this.#environment),
       expandChains: options.expandChains ?? true,
       progressiveWarmDisclosure: options.progressiveWarmDisclosure ?? true,
+      // Program-side relevance gate: ON by default (deterministic; only removes
+      // candidates). No env switch — see src/core/relevance-gate.ts.
+      relevanceFloor: DEFAULT_RELEVANCE_FLOOR,
+      relevanceMaxCv: DEFAULT_RELEVANCE_MAX_CV,
+      // Model gate: opt-in by placing a validated model at
+      // <dataDir>/relevance-model.json. Best-effort — a missing/malformed model
+      // leaves the path fully deterministic.
+      relevanceModel: this.#getRelevanceModel(),
+      relevanceModelFloor: DEFAULT_MODEL_FLOOR,
     };
     const raws = [query, ...(queries ?? [])];
     const embedding = this.#configuredEmbeddingClient();
