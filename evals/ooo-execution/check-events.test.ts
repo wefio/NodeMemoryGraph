@@ -3,8 +3,8 @@ import test, { type TestContext } from "node:test";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BoardAdmission } from "./board-admission.ts";
-import { expectedRename, verifyRenameCandidate } from "./patch-verifier.ts";
+import { BoardAdmission } from "../../src/integration/ooo-board.ts";
+import { expectedRename, verifyRenameCandidate } from "../../src/integration/ooo-verifier.ts";
 import {
   checkResultValid,
   sameCheck,

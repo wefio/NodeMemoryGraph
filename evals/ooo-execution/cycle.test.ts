@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import test from "node:test";
 import { promisify } from "node:util";
-import { runCycle, type CheckRunner } from "./cycle.ts";
+import { runCycle, type CheckRunner } from "../../src/integration/ooo-cycle.ts";
 import { preparePatchWork, type FrozenPatchWork } from "../../src/integration/ooo-patch.ts";
 
 const run = promisify(execFile);

@@ -16,10 +16,10 @@ import { join } from "node:path";
 import test from "node:test";
 import type { ServerState } from "../../src/cli/lifecycle.ts";
 import type { TaskBoardEntry } from "../../src/core/types.ts";
-import type { BoardTicket } from "./board-admission.ts";
+import type { BoardTicket } from "../../src/integration/ooo-board.ts";
 import { Actor } from "./process-driver.ts";
-import { verifyCandidate } from "./candidate.ts";
-import { runCycle } from "./cycle.ts";
+import { verifyCandidate } from "../../src/integration/ooo-candidate.ts";
+import { runCycle } from "../../src/integration/ooo-cycle.ts";
 
 /** A check that reports its own pid and a grandchild's, then outlives the round. */
 function longCheck(marker: string): string {

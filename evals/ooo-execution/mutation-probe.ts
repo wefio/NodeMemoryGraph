@@ -3,8 +3,8 @@
 // Point MUTATION_SPEC at a JSON {paths?, checks?, mutants} file to probe a candidate
 // fault class before a round declares it; without it the built-in list is used.
 import { readFileSync } from "node:fs";
-import { verifyCandidate, type CandidateCheck } from "./candidate.ts";
-import { mutate, type Mutation } from "./mutation.ts";
+import { verifyCandidate, type CandidateCheck } from "../../src/integration/ooo-candidate.ts";
+import { mutate, type Mutation } from "../../src/integration/ooo-mutation.ts";
 
 const repository = process.cwd();
 const revision = process.env.MUTATION_REVISION ?? "HEAD";

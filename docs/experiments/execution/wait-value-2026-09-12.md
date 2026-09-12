@@ -77,7 +77,7 @@ event, so the saving is not obtained by breaking the ordering rule.
 the host has verified the candidate. Because the verification window outlasts the check, the metric
 reported essentially the whole check as hidden even when the task's own work lasted a fraction of
 it — the (0s, 0s) point is the proof: 713 ms of "hidden wait" with nothing to hide behind. It is now
-the claim-to-return window (`evals/ooo-execution/cycle.ts`), with two regression tests in
+the claim-to-return window (`src/integration/ooo-cycle.ts`), with two regression tests in
 `cycle.test.ts`: the invariant that nothing independent means nothing reported (0 ms at (0s, 0s)),
 and a discriminating case (1.5 s check, 0.2 s task) that reports 2 053 ms instead of 1 539 ms under
 the old definition — reverting the metric fails that test. Historical figures quoted elsewhere

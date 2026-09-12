@@ -14,8 +14,8 @@
 //     which is why the log records the answer rather than the prompt that produced it.
 import { createHash } from "node:crypto";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
-import type { CheckTicket } from "../../src/integration/ooo-check.ts";
-import type { CycleWorker, WorkerMetrics } from "./cycle.ts";
+import type { CheckTicket } from "./ooo-check.ts";
+import type { CycleWorker, WorkerMetrics } from "./ooo-cycle.ts";
 
 /** One recorded round event, in the order the round produced it. */
 export type RoundEvent =

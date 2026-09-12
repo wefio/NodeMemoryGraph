@@ -9,10 +9,20 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { BoardAdmission, type ProbePlan } from "./board-admission.ts";
-import { verifyCandidate } from "./candidate.ts";
-import { runCycle, type CycleOptions, type CycleResult, type CycleWorker } from "./cycle.ts";
-import { RoundLog, readRoundLog, recordedWorker, terminalEvent } from "./round-log.ts";
+import { BoardAdmission, type ProbePlan } from "../../src/integration/ooo-board.ts";
+import { verifyCandidate } from "../../src/integration/ooo-candidate.ts";
+import {
+  runCycle,
+  type CycleOptions,
+  type CycleResult,
+  type CycleWorker,
+} from "../../src/integration/ooo-cycle.ts";
+import {
+  RoundLog,
+  readRoundLog,
+  recordedWorker,
+  terminalEvent,
+} from "../../src/integration/ooo-round-log.ts";
 import type { RoundSpec, SpecWorker } from "./round-spec.ts";
 
 /** The plan the round runs under, written into the run directory so a *different* process can

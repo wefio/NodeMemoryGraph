@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BoardAdmission, type PatchTaskSpec, type ProbePlan } from "./board-admission.ts";
-import { verifyCandidate, type CandidateCheck } from "./candidate.ts";
+import { BoardAdmission, type PatchTaskSpec, type ProbePlan } from "./ooo-board.ts";
+import { verifyCandidate, type CandidateCheck } from "./ooo-candidate.ts";
 import {
   preparePatchWork,
   patchSubmission,
@@ -10,10 +10,10 @@ import {
   type FrozenPatchWork,
   type PatchSubmission,
   type ConclusionKind,
-} from "../../src/integration/ooo-patch.ts";
+} from "./ooo-patch.ts";
 
-import { mutate, type Mutation } from "./mutation.ts";
-import { RoundLog, checksDigest, type RoundEvent, type RoundEventInput } from "./round-log.ts";
+import { mutate, type Mutation } from "./ooo-mutation.ts";
+import { RoundLog, checksDigest, type RoundEvent, type RoundEventInput } from "./ooo-round-log.ts";
 
 export type WorkerMetrics = {
   tokens?: number;

@@ -3,8 +3,12 @@ import test, { type TestContext } from "node:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BoardAdmission, type PatchTaskSpec, type ProbePlan } from "./board-admission.ts";
-import { expectedRename } from "./patch-verifier.ts";
+import {
+  BoardAdmission,
+  type PatchTaskSpec,
+  type ProbePlan,
+} from "../../src/integration/ooo-board.ts";
+import { expectedRename } from "../../src/integration/ooo-verifier.ts";
 import type { PatchSubmission } from "../../src/integration/ooo-patch.ts";
 
 const source = readFileSync(

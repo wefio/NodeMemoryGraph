@@ -13,8 +13,8 @@
 //     cost. That spends money in both arms, so it is an explicit operator decision.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type CycleResult, type CycleWorker, runCycle } from "./cycle.ts";
-import { readRoundLog, terminalEvent } from "./round-log.ts";
+import { type CycleResult, type CycleWorker, runCycle } from "../../src/integration/ooo-cycle.ts";
+import { readRoundLog, terminalEvent } from "../../src/integration/ooo-round-log.ts";
 import { cycleOptionsFor, readBaseline, specDigest, specWorker } from "./round-runner.ts";
 import type { RoundSpec } from "./round-spec.ts";
 

@@ -1,11 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { NmgStore } from "../../src/core/store.ts";
-import {
-  checkResultValid,
-  sameCheck,
-  type CheckTicket,
-  type CheckResult,
-} from "../../src/integration/ooo-check.ts";
+import { checkResultValid, sameCheck, type CheckTicket, type CheckResult } from "./ooo-check.ts";
 import {
   patchCandidate,
   patchSubmission,
@@ -15,7 +10,7 @@ import {
   type PatchBudget,
   type PatchLimits,
   type PatchSubmission,
-} from "../../src/integration/ooo-patch.ts";
+} from "./ooo-patch.ts";
 
 export type ProbeOperation = SnapshotWork["operation"];
 
@@ -33,11 +28,7 @@ export interface PatchTaskSpec {
   limits?: PatchLimits;
   verify: (submission: PatchSubmission) => Promise<"accept" | "reject" | "undecidable">;
 }
-import {
-  nextTask,
-  snapshotAnswer,
-  type SnapshotWork,
-} from "../../src/integration/ooo-execution.ts";
+import { nextTask, snapshotAnswer, type SnapshotWork } from "./ooo-execution.ts";
 
 export type ProbePlan = readonly (readonly [
   string,
