@@ -65,6 +65,7 @@ import {
   type MemoryTier,
   type SearchOptions,
 } from "../core/types.ts";
+import { TASK_BOARD_VERDICTS } from "../core/types.ts";
 import { assessMemoryWrite } from "../core/write-policy.ts";
 import {
   MemoryGraphReasoner,
@@ -2561,6 +2562,8 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
     "readInbox",
     "resolve",
     "veto",
+    "deliver",
+    "judge",
     "acknowledge",
     "claim",
     "release",
@@ -2691,25 +2694,56 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
     action,
     entryId: requiredString(params, "entryId"),
   };
+  const entryStyle = parseEntryStyleTaskBoardParams(action, entryBase, params);
+  if (entryStyle) return entryStyle;
+  return {
+    ...entryBase,
+    action: "resolve",
+    resolution: optionalString(params, "resolution"),
+  };
+}
+
+/** The entry-scoped actions, which share one parse shape: an entryId plus their own
+ *  fields. Kept out of parseTaskBoardParams so that adding an entry-scoped action costs
+ *  the parser nothing — a branch here is a decision point there, and the parser is
+ *  already the most complex function in this file. */
+function parseEntryStyleTaskBoardParams(
+  action: NmgTaskBoardParams["action"],
+  entryBase: Record<string, unknown>,
+  params: Record<string, unknown>,
+): NmgTaskBoardParams | null {
   if (action === "claim") {
     return {
       ...entryBase,
       action,
       leaseSeconds: optionalInteger(params, "leaseSeconds", 60, 86_400),
-    };
+    } as NmgTaskBoardParams;
   }
   if (TASK_BOARD_ACK_STYLE.has(action)) {
     return {
       ...entryBase,
       action: action as "acknowledge" | "veto",
       reason: optionalString(params, "reason"),
-    };
+    } as NmgTaskBoardParams;
   }
-  return {
-    ...entryBase,
-    action: "resolve",
-    resolution: optionalString(params, "resolution"),
-  };
+  if (action === "deliver") {
+    return {
+      ...entryBase,
+      action,
+      digest: requiredString(params, "digest"),
+      ref: optionalString(params, "ref"),
+      summary: optionalString(params, "summary"),
+    } as NmgTaskBoardParams;
+  }
+  if (action === "judge") {
+    return {
+      ...entryBase,
+      action,
+      verdict: requiredEnum(params, "verdict", TASK_BOARD_VERDICTS),
+      reason: optionalString(params, "reason"),
+    } as NmgTaskBoardParams;
+  }
+  return null;
 }
 
 type TaskBoardParamsOf<A extends NmgTaskBoardParams["action"]> = Extract<
@@ -2798,6 +2832,14 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
   veto: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"veto">;
     return { action: "veto", entry: store.vetoTaskBoardEntry(p) };
+  },
+  deliver: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"deliver">;
+    return { action: "deliver", entry: store.deliverTaskBoardEntry(p) };
+  },
+  judge: (store, parsed) => {
+    const p = parsed as TaskBoardParamsOf<"judge">;
+    return { action: "judge", entry: store.judgeTaskBoardEntry(p) };
   },
   unsubscribe: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"unsubscribe">;

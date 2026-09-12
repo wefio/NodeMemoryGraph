@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   BoardAdmission,
+  channel,
   type PatchTaskSpec,
   type ProbePlan,
 } from "../../src/integration/ooo-board.ts";
@@ -93,6 +94,76 @@ test("contract: a verified patch candidate is what dependents bind to, and only 
   const answer = String(Number(dependent.input) * 2);
   assert.equal(await submitPatch(gate, dependent, answer), "accepted");
   assert.deepEqual(Object.keys(gate.accepted()).sort(), ["D", "P"]);
+});
+
+test("acceptance lands on the board as a deliverable and an outside verdict, not a self-report", async (t) => {
+  const gate = fixture(t);
+  const ticket = gate.claim("P", "worker-p");
+  const entryId = gate
+    .readTaskBoard({ taskId: channel })
+    .entries.find((entry) => entry.claimedBy === "worker-p")!.id;
+  const artifact = JSON.stringify({
+    digest: ticket.patch!.digest,
+    files: [{ path: "src/integration/ooo-execution.ts", content: expected }],
+  });
+  assert.equal(await submitPatch(gate, ticket, artifact), "accepted");
+
+  // The round used to close this entry with resolveTaskBoardEntry(agentId:
+  // "coordinator") — a self-report. What must be true now is that the artifact
+  // is recorded against the claim that produced it and that someone other than
+  // its producer judged it.
+  const judged = gate.getTaskBoardEntryById(channel, entryId)!;
+  assert.equal(judged.deliveredBy, "worker-p");
+  assert.equal(judged.verdict, "accepted");
+  assert.equal(judged.judgedBy, "coordinator");
+  assert.notEqual(judged.judgedBy, judged.deliveredBy);
+  assert.equal(judged.judgedDigest, judged.deliverableDigest);
+  assert.notEqual(judged.deliverableDigest, null);
+  assert.equal(judged.status, "resolved", "the lifecycle close still happens");
+});
+
+test("the board verdict is what accepts an artifact, not the round's own column", async (t) => {
+  const gate = fixture(t);
+  const ticket = gate.claim("P", "worker-p");
+  const entryId = gate
+    .readTaskBoard({ taskId: channel })
+    .entries.find((entry) => entry.claimedBy === "worker-p")!.id;
+  const artifact = JSON.stringify({
+    digest: ticket.patch!.digest,
+    files: [{ path: "src/integration/ooo-execution.ts", content: expected }],
+  });
+  assert.equal(await submitPatch(gate, ticket, artifact), "accepted");
+  assert.deepEqual(Object.keys(gate.accepted()), ["P"]);
+
+  // The protocol lets an outside reviewer re-judge the delivered artifact. Acceptance
+  // must follow the verdict, not the round's own row: the value is still stored there,
+  // and it must stop counting as accepted.
+  gate.judgeTaskBoardEntry({
+    taskId: channel,
+    entryId,
+    agentId: "auditor",
+    verdict: "rejected",
+    reason: "re-tested and failed",
+  });
+  assert.deepEqual(gate.accepted(), {});
+});
+
+test("cancellation is announced on the board, not only in the round's own store", (t) => {
+  const gate = fixture(t);
+  gate.claim("P", "worker-p");
+  gate.cancel("operator stopped the round");
+
+  // The terminal decision has to be visible to agents that were not the caller, which is
+  // what makes a cross-process cancel work at all.
+  const announcement = gate
+    .readTaskBoard({ taskId: channel, includeResolved: true })
+    .entries.find(
+      (entry) =>
+        entry.kind === "decision" && entry.content.includes("cancel: operator stopped the round"),
+    );
+  assert.ok(announcement, "another agent must be able to see that the round ended");
+  assert.equal(announcement.agentId, "coordinator");
+  assert.equal(gate.cancelled(), "operator stopped the round");
 });
 
 test("safety: worker-supplied approval is ignored and a reissued attempt fences the old artifact", async (t) => {
