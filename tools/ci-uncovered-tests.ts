@@ -73,27 +73,29 @@ export function testCoverage(root: string): Coverage {
 function main(argv: readonly string[], root: string): number {
   const mode = argv[0] ?? "--check";
   const coverage = testCoverage(root);
+  // `process.stdout.write`, not `console.log`: this is a tool that pipes its output (the
+  // on-demand workflow runs the listed files), and the repository's lint warns on console.
   if (mode === "--list") {
-    for (const file of coverage.unreached) console.log(file);
+    for (const file of coverage.unreached) process.stdout.write(`${file}\n`);
     return 0;
   }
   if (mode !== "--check") throw new Error(`unknown mode: ${mode} (use --check or --list)`);
   // State the basis on success as well as failure: a gate that only speaks when it fails cannot
   // be told apart from one that never looked.
-  console.log(
+  process.stdout.write(
     `ci coverage: ${coverage.globs.length} glob(s) from ${CI_ENTRY_POINTS.join(", ")}, ` +
-      `${coverage.covered.size} test file(s) reached, ${coverage.unreached.length} unreached`,
+      `${coverage.covered.size} test file(s) reached, ${coverage.unreached.length} unreached\n`,
   );
   for (const file of coverage.unreached)
-    console.log(
+    process.stdout.write(
       `  unreached: ${file}` +
         (ACKNOWLEDGED_ROOTS.some((prefix) => file.startsWith(prefix))
-          ? " (acknowledged: on-demand only)"
-          : " (NOT acknowledged: add it to a CI job or to ACKNOWLEDGED_ROOTS with a reason)"),
+          ? " (acknowledged: on-demand only)\n"
+          : " (NOT acknowledged: add it to a CI job or to ACKNOWLEDGED_ROOTS with a reason)\n"),
     );
   if (coverage.unacknowledged.length) {
-    console.error(
-      `ci coverage FAILED: ${coverage.unacknowledged.length} test file(s) are in no CI job and not acknowledged`,
+    process.stderr.write(
+      `ci coverage FAILED: ${coverage.unacknowledged.length} test file(s) are in no CI job and not acknowledged\n`,
     );
     return 1;
   }
