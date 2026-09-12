@@ -343,19 +343,23 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
         if (stopped()) clearInterval(watcher);
       }, 250)
     : undefined;
-  /** How much of the unresolved external wait the out-of-order task actually covered.
-   *  Computed from real timestamps: claimed-to-submitted overlap with issued-to-terminal. */
+  /** How much of the unresolved external wait the out-of-order task's OWN WORK covered.
+   *  Computed from real timestamps: the task's claim-to-return window intersected with the
+   *  check's issued-to-terminal window. Deliberately not claim-to-submission: submission comes
+   *  after the host verified the candidate, and the verification window (the mutation matrix and
+   *  the candidate check) outlasts the check itself, so counting it would report the whole check
+   *  as hidden even when the task's own work lasted a fraction of it. */
   const hiddenWait = () => {
     const at = (step: string) =>
       Date.parse(timeline.find((entry) => entry.step === step)?.at ?? "");
     const claim = timeline.find((entry) => entry.step === "claim:B")?.at;
-    const submit = timeline.filter((entry) => entry.step === "submit:B").pop()?.at;
+    const returned = timeline.filter((entry) => entry.step === "worker-returned:B").pop()?.at;
     const issued = at("check-issued");
     const finished = at("check-finished");
-    if (!claim || !submit || isNaN(issued) || isNaN(finished)) return 0;
+    if (!claim || !returned || isNaN(issued) || isNaN(finished)) return 0;
     return Math.max(
       0,
-      Math.min(Date.parse(submit), finished) - Math.max(Date.parse(claim), issued),
+      Math.min(Date.parse(returned), finished) - Math.max(Date.parse(claim), issued),
     );
   };
   const check = (files: Readonly<Record<string, string>>) => hostCheck(files);
@@ -590,6 +594,9 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     // A worker that fails or returns truncated output produced no artifact: it is a
     // failed attempt with recorded reason, not a crashed round and not a retry.
     const produced = await callWorker(taskId, frozen, ticket.dependencies);
+    // The task's own work ends here. What follows (its verification) is host time, and the
+    // sequential arm pays it too, so it must not be counted as wait the task covered.
+    log(`worker-returned:${taskId}`, `attempt=${ticket.attempt}`);
     if (produced.metrics) workers[taskId] = { ...produced.metrics, ms: Date.now() - claimedAt };
     if (produced.failure) {
       log(`worker-failed:${taskId}`, produced.failure.slice(0, 400));

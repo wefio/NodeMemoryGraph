@@ -27,7 +27,8 @@ export interface Arm {
   /** Host verification: the cost this design adds, and the term that dominates every round. */
   hostMs: number;
   hostChecks: number;
-  /** The part of the external wait the independent task covered: zero for the control. */
+  /** The part of the external wait the independent task's own work covered (its claim-to-return
+   *  window, not its later verification): zero for the control. */
   hiddenWaitMs: number;
   tokens: number;
   cacheRead: number;
