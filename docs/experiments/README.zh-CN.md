@@ -21,5 +21,6 @@
 | `benchmarks/` | 数据集运行：LongMemEval、LoCoMo、BEAM、HaluMem |
 | `store/` | 存储：consolidation、规模、写路径 |
 | `runtime/` | 嵌入后端、autodiff 算子、controller shadow |
+| `execution/` | Agent 的受限乱序执行：等待到底值多少、机制覆盖了哪些实测失败模式（更早的准入实验仍在顶层） |
 
 `benchmark-results.md` 留在顶层，因为它跨主题。

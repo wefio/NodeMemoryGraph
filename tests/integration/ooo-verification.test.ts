@@ -11,8 +11,8 @@ import {
   snapshotText,
 } from "../../.pi/extensions/nmg/ooo-execution.ts";
 import { patchPrompt, preparePatchWork } from "../../src/integration/ooo-patch.ts";
-import { expectedRename, verifyRenameCandidate } from "../../evals/ooo-execution/patch-verifier.ts";
-import { mutate } from "../../evals/ooo-execution/mutation.ts";
+import { expectedRename, verifyRenameCandidate } from "../../src/integration/ooo-verifier.ts";
+import { mutate } from "../../src/integration/ooo-mutation.ts";
 
 const patchWorkFields = () => ({
   taskId: "run-1:A",

@@ -9,7 +9,11 @@ import test from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BoardAdmission, type PatchTaskSpec, type ProbePlan } from "./board-admission.ts";
+import {
+  BoardAdmission,
+  type PatchTaskSpec,
+  type ProbePlan,
+} from "../../src/integration/ooo-board.ts";
 
 const channel = "ooo-process-probe";
 const LEASE_MS = 60_000;

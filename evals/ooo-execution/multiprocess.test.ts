@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import type { ServerState } from "../../src/cli/lifecycle.ts";
 import type { TaskBoardEntry } from "../../src/core/types.ts";
-import type { BoardTicket } from "./board-admission.ts";
+import type { BoardTicket } from "../../src/integration/ooo-board.ts";
 
 import { Actor } from "./process-driver.ts";
 

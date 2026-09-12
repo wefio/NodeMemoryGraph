@@ -37,7 +37,7 @@ ownership, durable acceptance, or restart recovery.
 
 ## Multi-process probe
 
-Implementation: [board-admission.ts](../../evals/ooo-execution/board-admission.ts).
+Implementation: [board-admission.ts](../../src/integration/ooo-board.ts).
 Process bootstrap: [process-fixture.ts](../../evals/ooo-execution/process-fixture.ts).
 Scenario: [multiprocess.test.ts](../../evals/ooo-execution/multiprocess.test.ts).
 
@@ -332,7 +332,7 @@ different real defect in the round machinery itself. All runs used
 `deepseek/deepseek-v4-flash`, the revision and check command round 1 used, and the
 working tree was never modified.
 
-**The contract changes the runs forced** (all in `evals/ooo-execution/cycle.ts`,
+**The contract changes the runs forced** (all in `src/integration/ooo-cycle.ts`,
 `src/integration/ooo-patch.ts`, `.pi/extensions/nmg/ooo-execution.ts`):
 
 | Observed failure                                                                     | Change                                                                                                                                                                                                                                                                           |
@@ -672,7 +672,7 @@ A log that records no identity is replayed as **unverified**, not as a reproduct
 **Cancellation was mechanism-only.** `runCycle` now takes an operator `AbortSignal`; when it
 aborts, the round cancels itself in the coordinator (advancing every attempt, so a late artifact
 is `stale`), kills the process tree of every check still running, stops dispatching and stops
-composing, and records `cancelled` in its terminal state. `evals/ooo-execution/candidate.ts`
+composing, and records `cancelled` in its terminal state. `src/integration/ooo-candidate.ts`
 spawns checks with `detached` on POSIX and kills the tree with `taskkill /T` on Windows.
 
 Measured, with a deliberately weak first attempt reported as such:
@@ -788,7 +788,7 @@ orchestration, uncertain work recorded as an activity result". A model call is s
 activity, so replaying a round must not call a model again, and the verdicts must follow
 from the frozen inputs plus the recorded answers.
 
-`evals/ooo-execution/round-log.ts` adds the record: a JSON-lines event stream (plan, check
+`src/integration/ooo-round-log.ts` adds the record: a JSON-lines event stream (plan, check
 issued/terminal, claim, artifact or worker failure, pushback, verdict, each mutant outcome,
 reopen, terminal state) plus `recordedWorker(events)`, which answers from the log instead of
 from a model, and `compareTerminal(recorded, replayed)`.

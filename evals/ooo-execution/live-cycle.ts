@@ -4,8 +4,8 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { runCycle, type Requirement } from "./cycle.ts";
-import { mutate, type Mutation } from "./mutation.ts";
+import { runCycle, type Requirement } from "../../src/integration/ooo-cycle.ts";
+import { mutate, type Mutation } from "../../src/integration/ooo-mutation.ts";
 import {
   RoundLog,
   compareFrozen,
@@ -14,8 +14,8 @@ import {
   recordedPlan,
   recordedWorker,
   terminalEvent,
-} from "./round-log.ts";
-import { verifyCandidate } from "./candidate.ts";
+} from "../../src/integration/ooo-round-log.ts";
+import { verifyCandidate } from "../../src/integration/ooo-candidate.ts";
 import {
   executePiPatch,
   type CheckTool,

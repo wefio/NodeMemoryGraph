@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import test from "node:test";
-import { runCycle, type CheckRunner } from "./cycle.ts";
+import { promisify } from "node:util";
+import { runCycle, type CheckRunner } from "../../src/integration/ooo-cycle.ts";
 import { preparePatchWork, type FrozenPatchWork } from "../../src/integration/ooo-patch.ts";
+
+const run = promisify(execFile);
 
 const IMPL = "src/check.ts";
 const TESTS = "src/check.test.ts";
@@ -643,5 +647,92 @@ test("safety: a premise that could not be measured is refused as unmeasured, not
   assert.ok(
     result.log.some((event) => event.kind === "mutant" && event.outcome === "unmeasured"),
     JSON.stringify(result.log.filter((event) => event.kind === "mutant")),
+  );
+});
+
+/** Real CPU work for a chosen duration, in a real child process: not a sleep, so the overlap
+ *  measured here is real work overlapping real work. */
+const busy = (ms: number): string =>
+  `const end=Date.now()+${ms};let a=1;while(Date.now()<end){a=(a*16807)%2147483647;}if(a<=0)process.exit(3);`;
+
+const work = (ms: number) => (ms > 0 ? run(process.execPath, ["-e", busy(ms)]) : Promise.resolve());
+
+test("the hidden wait is the independent task's own work, not its later verification", async () => {
+  // The check is longer than the task's own work, while the task's verification (the candidate
+  // check the host runs afterwards) is longer still. Counting claim-to-submission therefore
+  // reports the whole check as hidden; counting claim-to-return reports what the task really
+  // covered. Only the second answer is the wait that out-of-order execution hid.
+  const checkMs = 1_500;
+  const taskMs = 200;
+  const slow: CheckRunner = async () => {
+    await work(checkMs);
+    return { verdict: "accept", outcomes: [{ label: "fixed", status: "passed" }] };
+  };
+  const result = await runCycle(
+    options(async (taskId, frozen) => {
+      if (taskId === "B") await work(taskMs);
+      if (taskId === "A")
+        return JSON.stringify({
+          digest: frozen.digest,
+          files: [{ path: IMPL, content: "export const a = 2;\n" }],
+        });
+      if (taskId === "B")
+        return JSON.stringify({
+          digest: frozen.digest,
+          files: [{ path: TESTS, content: "test('a', () => {}); test('b', () => {});\n" }],
+        });
+      return JSON.stringify({
+        digest: frozen.digest,
+        kind: "conclusion",
+        conclusion: "promote-candidate",
+        summary: "composed check passed",
+        evidence: "candidate-check accept",
+        citations: [],
+      });
+    }, slow),
+  );
+  assert.deepEqual(result.verdicts, { B: "accepted", A: "accepted", C: "accepted" });
+  const { hiddenWaitMs } = result.measurements;
+  assert.ok(
+    hiddenWaitMs < taskMs + 400,
+    `hidden wait ${hiddenWaitMs} ms must be bounded by B's own work (${taskMs} ms), not by the ${checkMs} ms check or by B's verification`,
+  );
+  assert.ok(
+    hiddenWaitMs > taskMs / 2,
+    `a real overlap should still be reported, got ${hiddenWaitMs}`,
+  );
+});
+
+test("with nothing independent to overlap, nothing is reported as hidden", async () => {
+  // The old definition reported the check's own window here (a few hundred milliseconds of
+  // dispatch and verification) even though no work was overlapped at all.
+  const result = await runCycle(
+    options(
+      async (taskId, frozen) => {
+        if (taskId === "A")
+          return JSON.stringify({
+            digest: frozen.digest,
+            files: [{ path: IMPL, content: "export const a = 2;\n" }],
+          });
+        if (taskId === "B")
+          return JSON.stringify({
+            digest: frozen.digest,
+            files: [{ path: TESTS, content: "test('a', () => {}); test('b', () => {});\n" }],
+          });
+        return JSON.stringify({
+          digest: frozen.digest,
+          kind: "conclusion",
+          conclusion: "promote-candidate",
+          summary: "composed check passed",
+          evidence: "candidate-check accept",
+          citations: [],
+        });
+      },
+      async () => ({ verdict: "accept", outcomes: [{ label: "fixed", status: "passed" }] }),
+    ),
+  );
+  assert.ok(
+    result.measurements.hiddenWaitMs < 100,
+    `no independent work ran, so hidden wait must be ~0, got ${result.measurements.hiddenWaitMs}`,
   );
 });
