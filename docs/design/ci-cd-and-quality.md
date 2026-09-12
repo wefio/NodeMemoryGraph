@@ -41,17 +41,19 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 ## 2. 执行轨道
 
-| 命令                        | 内容                                                 | 用途             |
-| --------------------------- | ---------------------------------------------------- | ---------------- |
-| `npm run test:product`      | core、CLI、adapter、docs、Skill、工具与 test support | 产品正确性       |
-| `npm run test:coverage`     | 与 product 相同的集合并生成覆盖率                    | 阻塞 CI          |
-| `npm run test:research`     | `tests/benchmarks`、`tests/evals`、`tests/official`  | 非阻塞研究表征   |
-| `npm run test:chaos`        | Windows 故障注入与进程/文件锁生命周期                | 独立阻塞轨道     |
-| `npm test`                  | 所有 `tests/**/*.test.ts`                            | 本地完整兼容入口 |
-| `npm run verify:static`     | build/package/type/lint/format/docs/context          | 本地与 CI 共用   |
-| `npm run verify:product-ci` | build + product coverage                             | 本地与 CI 共用   |
+| 命令                        | 内容                                                   | 用途             |
+| --------------------------- | ------------------------------------------------------ | ---------------- |
+| `npm run test:product`      | core、CLI、adapter、docs、Skill、工具与 test support   | 产品正确性       |
+| `npm run test:coverage`     | 与 product 相同的集合并生成覆盖率                      | 阻塞 CI          |
+| `npm run test:research`     | `tests/benchmarks`、`tests/evals`、`tests/official`    | 非阻塞研究表征   |
+| `npm run test:chaos`        | Windows 故障注入与进程/文件锁生命周期                  | 独立阻塞轨道     |
+| `npm test`                  | 所有 `tests/**/*.test.ts`                              | 本地完整兼容入口 |
+| `npm run verify:static`     | build/package/type/lint/format/docs/context/complexity | 本地与 CI 共用   |
+| `npm run verify:product-ci` | build + product coverage                               | 本地与 CI 共用   |
 
 另有三个命令只用于本地，刻意不作为 CI 轨道：`npm run lint:fix`（与 `lint` 同一 ESLint 范围，加 `--fix`）、`npm run hotspot:modules`（对 store 各方法做静态调用点计数）、`npm run perf:hotspots`（从某个 store 的 `perf_aggregates` 打印分段延迟占比）。
+
+`verify:static` 中的 `complexity:gate` 默认以 `git merge-base HEAD origin/main` 为基线（可用 `--base <ref>` 显式覆盖）。基线必须是 merge base 而不是 `HEAD`：后者只比较未提交的工作树，于是已提交到分支的改动完全不可见 —— 在 CI 的干净检出上它永远报“无改动”，等于每个 PR 都没有被这条 gate 检查过。因此每次运行都会**陈述自己用了哪个基线**，并**点名它未能测量的改动文件**（ESLint 拒绝某路径、或文件根本无法解析，都会产出“零发现”，与“量过且干净”无法区分）。
 
 `eval:*`、`benchmark:*`、真实 LLM/embedding 与官方大数据集运行不进入 keyless CI。研究测试可以验证 adapter 和计分契约，但不得访问外部密钥或把实验常量提升为产品默认值。
 

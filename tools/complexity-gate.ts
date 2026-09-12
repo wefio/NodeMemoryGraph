@@ -13,18 +13,30 @@
 //
 // Usage:
 //   node --experimental-strip-types tools/complexity-gate.ts [--base <ref>]
-//   --base defaults to `git merge-base HEAD origin/main`.
+//   --base defaults to `git merge-base HEAD origin/main`, so work already committed on a
+//   branch is part of the diff. A checkout with no merge base to use falls back to the
+//   working tree against HEAD.
+//
+// Every run states which baseline it used, and names any changed file it could not
+// measure. Both sentences exist because their absence produced false greens: a gate that
+// compares against the working tree on CI's clean checkout sees no files at all, and a
+// file the linter cannot parse yields no findings, which is indistinguishable from a file
+// that was measured and is clean.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const root = resolve(import.meta.dirname, "..");
+/** Distinguishes concurrent runs' temp probe files. */
+let probeCounter = 0;
+/** The gate judges code. A changed document, schema or lockfile is out of scope rather
+ *  than unmeasured: reporting it as "could not measure" would bury the one case that
+ *  matters, which is source the linter refused to look at. */
+export const LINTABLE = /\.(?:[cm]?[jt]sx?)$/u;
 const maxComplexity = 15;
-const baseRef = process.argv.includes("--base")
-  ? process.argv[process.argv.indexOf("--base") + 1]
-  : undefined;
 
 interface ComplexityFinding {
   file: string;
@@ -69,11 +81,11 @@ export function evaluateComplexityDiff(
 /** Parse `git status --porcelain` into changed-file paths (tracked modified,
  * staged, and untracked — i.e. every working-tree change). When `ref` is not
  * HEAD, committed differences vs the ref are added too (PR review mode). */
-function changedFiles(ref: string): string[] {
+export function changedFiles(ref: string, cwd: string = root): string[] {
   const files: string[] = [];
   if (ref !== "HEAD") {
     const committed = execFileSync("git", ["diff", "--name-only", "--diff-filter=AM", ref], {
-      cwd: root,
+      cwd,
       encoding: "utf8",
     })
       .split(/\r?\n/)
@@ -83,7 +95,7 @@ function changedFiles(ref: string): string[] {
   }
   // Uncommitted working-tree changes (staged + unstaged + untracked).
   const working = execFileSync("git", ["status", "--porcelain"], {
-    cwd: root,
+    cwd,
     encoding: "utf8",
   })
     .split(/\r?\n/)
@@ -91,16 +103,25 @@ function changedFiles(ref: string): string[] {
     .filter((line) => line && !line.startsWith('"'))
     .map((line) => line.split(" -> ").pop() ?? line);
   files.push(...working);
-  return [...new Set(files)].filter(Boolean).map((line) => resolve(root, line));
+  return [...new Set(files)].filter(Boolean).map((line) => resolve(cwd, line));
 }
 
 /** Complexity of each function in a source file via the eslint CLI with the
  * `complexity` rule. The CLI resolves the repository's flat config (parser,
  * TS support) correctly; lintText with an override config does not. */
-async function complexitiesFor(filePath: string, source: string): Promise<ComplexityFinding[]> {
-  // eslint needs a real file on disk for config matching; write to a temp
-  // path that preserves the extension so the TS parser is selected.
-  const temp = resolve(root, ".nmg-complexity-probe" + (filePath.endsWith(".ts") ? ".ts" : ".js"));
+export async function complexitiesFor(
+  filePath: string,
+  source: string,
+): Promise<{ findings: ComplexityFinding[]; measured: boolean }> {
+  // eslint needs a real file on disk for config matching; write to a temp path that
+  // preserves the extension so the TS parser is selected, and make the name unique so
+  // concurrent gate runs (the test suite runs files in parallel) cannot collide.
+  probeCounter += 1;
+  const temp = resolve(
+    root,
+    `.nmg-complexity-probe-${process.pid}-${probeCounter}` +
+      (filePath.endsWith(".ts") ? ".ts" : ".js"),
+  );
   const { writeFileSync, rmSync } = await import("node:fs");
   try {
     writeFileSync(temp, source, "utf8");
@@ -123,13 +144,20 @@ async function complexitiesFor(filePath: string, source: string): Promise<Comple
     );
     const output = result.stdout ?? "";
     const parsed = JSON.parse(output) as Array<{
-      messages: Array<{ line: number; ruleId: string; message: string }>;
+      messages: Array<{ line: number; ruleId: string; message: string; fatal?: boolean }>;
     }>;
-    return extractComplexityFindings(filePath, source, parsed);
+    // Three outcomes have to be told apart, because only one of them is evidence: linted
+    // with findings, linted with none, and never really linted. ESLint emits no entry at
+    // all when it refuses a path, and a file it cannot parse comes back as a single fatal
+    // message with no rule. Both are "not measured", and reporting either as "measured
+    // and clean" is how this gate produced false greens before.
+    const linted = parsed.length > 0 && !parsed.some((r) => r.messages.some((m) => m.fatal));
+    return {
+      findings: extractComplexityFindings(filePath, source, parsed),
+      measured: linted,
+    };
   } catch {
-    // A parse/config failure means we cannot measure this file; ignore it
-    // rather than fail the whole gate on an unrelated tooling issue.
-    return [];
+    return { findings: [], measured: false };
   } finally {
     try {
       rmSync(temp, { force: true });
@@ -207,9 +235,14 @@ function functionIdentity(node: ts.FunctionLikeDeclaration, sourceFile: ts.Sourc
   return `<anonymous:${node.kind}>`;
 }
 
-/** Complexity per (file, method-name) for a whole tree, keyed for diffing. */
-async function treeComplexities(files: string[]): Promise<Map<string, ComplexityFinding>> {
-  const map = new Map<string, ComplexityFinding>();
+/** Complexity per (file, method-name) for a whole tree, keyed for diffing, plus the
+ *  files the linter would not measure: a gate that cannot say which files it skipped
+ *  cannot distinguish a clean tree from one it never looked at. */
+async function treeComplexities(
+  files: string[],
+): Promise<{ findings: Map<string, ComplexityFinding>; unmeasured: string[] }> {
+  const findings = new Map<string, ComplexityFinding>();
+  const unmeasured: string[] = [];
   for (const file of files) {
     let source: string;
     try {
@@ -217,65 +250,117 @@ async function treeComplexities(files: string[]): Promise<Map<string, Complexity
     } catch {
       continue; // deleted or unreadable — not part of the comparison
     }
-    for (const finding of await complexitiesFor(file, source)) {
-      map.set(`${file}::${finding.name}`, finding);
-    }
+    const measured = await complexitiesFor(file, source);
+    if (!measured.measured) unmeasured.push(file);
+    for (const finding of measured.findings) findings.set(`${file}::${finding.name}`, finding);
   }
-  return map;
+  return { findings, unmeasured };
+}
+
+/** Which revision the gate compares against, and why. The "why" is printed on every
+ *  run: a gate that silently picks a different baseline than the reader assumes produces
+ *  exactly one observable outcome — a green line nobody can interpret. */
+export interface BaseChoice {
+  readonly ref: string;
+  readonly source: "explicit" | "merge-base" | "head";
+}
+
+/** `--base <ref>` wins. Otherwise the merge base with `origin/main`, so work already
+ *  committed on a branch is part of the diff. A checkout with no merge base to use
+ *  (shallow, or no `origin/main`) falls back to the working tree against HEAD, and says
+ *  so instead of degrading silently. */
+export function resolveBaseRef(argv: readonly string[], cwd: string): BaseChoice {
+  const flag = argv.indexOf("--base");
+  if (flag !== -1) return { ref: argv[flag + 1] ?? "HEAD", source: "explicit" };
+  try {
+    const mergeBase = execFileSync("git", ["merge-base", "HEAD", "origin/main"], {
+      cwd,
+      encoding: "utf8",
+    }).trim();
+    return mergeBase ? { ref: mergeBase, source: "merge-base" } : { ref: "HEAD", source: "head" };
+  } catch {
+    return { ref: "HEAD", source: "head" };
+  }
+}
+
+/** The baseline as one readable phrase, on the success line as well as on failure. */
+export function describeBasis(choice: BaseChoice): string {
+  if (choice.source === "explicit") return `--base ${choice.ref}`;
+  if (choice.source === "merge-base")
+    return `merge-base origin/main (${choice.ref.slice(0, 12)}): committed and working-tree changes`;
+  return "HEAD: working-tree changes only (no merge base with origin/main)";
+}
+
+/** Files the gate was asked to judge but could not measure. Empty means it measured
+ *  every changed file it read. */
+export function describeUnmeasured(
+  unmeasured: readonly string[],
+  cwd: string = root,
+  label = "",
+): string {
+  if (!unmeasured.length) return "";
+  const named = unmeasured.map((file) => file.slice(cwd.length + 1).replaceAll("\\", "/"));
+  return `complexity gate: could not measure ${named.length} ${label}changed code file(s) (the linter refused it or could not parse it): ${named.join(", ")}\n`;
 }
 
 async function main(): Promise<void> {
-  // Baseline: explicit --base wins; otherwise compare the uncommitted working
-  // tree against HEAD (the "am I about to make this worse?" check). For PR
-  // review against the target branch, pass `--base origin/main`.
-  let ref: string;
-  if (baseRef) {
-    ref = baseRef;
-  } else {
-    ref = "HEAD";
-  }
-  const files = changedFiles(ref);
+  const basis = resolveBaseRef(process.argv.slice(2), root);
+  const files = changedFiles(basis.ref, root).filter((file) => LINTABLE.test(file));
   if (files.length === 0) {
-    process.stdout.write("complexity gate: no changed files\n");
+    process.stdout.write(`complexity gate: no changed files (${describeBasis(basis)})\n`);
     return;
   }
 
-  // Baseline complexities: read each changed file at the base ref.
+  // Baseline complexities: read each changed file at the base ref. A file that is absent
+  // there is new, which is not the same as a file that could not be read.
   const baseline = new Map<string, ComplexityFinding>();
+  const unmeasuredBaseline: string[] = [];
   for (const file of files) {
     const relative = file.slice(root.length + 1).replaceAll("\\", "/");
     let source: string;
     try {
-      source = execFileSync("git", ["show", `${ref}:${relative}`], {
+      source = execFileSync("git", ["show", `${basis.ref}:${relative}`], {
         cwd: root,
         encoding: "utf8",
       });
     } catch {
       continue; // file did not exist at base (new file)
     }
-    for (const finding of await complexitiesFor(file, source)) {
-      baseline.set(`${file}::${finding.name}`, finding);
-    }
+    const measured = await complexitiesFor(file, source);
+    if (!measured.measured) unmeasuredBaseline.push(file);
+    for (const finding of measured.findings) baseline.set(`${file}::${finding.name}`, finding);
   }
 
   // Current complexities.
-  const current = await treeComplexities(files);
-
+  const { findings: current, unmeasured } = await treeComplexities(files);
   const { violations } = evaluateComplexityDiff(baseline, current, maxComplexity);
+  // Printed on both outcomes: the reader has to know which files this verdict covers.
+  const notes =
+    describeUnmeasured(unmeasured, root) +
+    describeUnmeasured(unmeasuredBaseline, root, "baseline ");
 
   if (violations.length > 0) {
     process.stderr.write(
-      `complexity gate FAILED (max ${maxComplexity}, diff vs ${ref}):\n${violations
+      `complexity gate FAILED (max ${maxComplexity}, ${describeBasis(basis)}):\n${violations
         .map((violation) => `  - ${violation}`)
-        .join("\n")}\n`,
+        .join("\n")}\n${notes}`,
     );
     process.exitCode = 1;
     return;
   }
   const capped = [...current.values()].filter((finding) => finding.complexity > maxComplexity);
   process.stdout.write(
-    `complexity gate ok: ${files.length} changed file(s), ${capped.length} method(s) above ${maxComplexity} unchanged from baseline\n`,
+    notes +
+      `complexity gate ok: ${files.length} changed code file(s) vs ${describeBasis(basis)}, ` +
+      `${capped.length} method(s) above ${maxComplexity} unchanged from baseline\n`,
   );
 }
 
-await main();
+// Only run when this file IS the entry point. Imported by
+// tests/tools/complexity-gate.test.ts, an unguarded `main()` re-runs the whole
+// gate inside the test process, where `process.argv` is the test runner's and
+// the ref argument is not a revision — the verdict then depends on which files
+// the bogus ref happens to select.
+const isEntryPoint =
+  process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isEntryPoint) await main();
