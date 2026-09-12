@@ -45,6 +45,14 @@ const arithmeticPlan: ProbePlan = [
 ];
 
 export const channel = "ooo-process-probe";
+
+/** Identity of an accepted artifact: sha256 of the canonical commit the round binds
+ *  dependents to. The board carries this short identity and never the bytes — the value
+ *  itself stays in the round's row and in the ready-signal decision entry. A verdict is
+ *  bound to this digest, so it cannot be inherited by a different artifact. */
+export function artifactDigest(commit: string): string {
+  return createHash("sha256").update(commit).digest("hex");
+}
 const policy = "narrow-snapshot-work/v3";
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
@@ -141,6 +149,13 @@ export class BoardAdmission extends NmgStore {
     // Additive migration: a round store outlives the process that created it, so a new
     // column must be added rather than assumed. Guarded by PRAGMA table_info, so it is
     // idempotent and an existing store keeps its state.
+    this.ensureColumns("ooo_probe_tasks", {
+      // Durable pointer to the entry whose verdict accepted this artifact. `entry_id`
+      // cannot serve that role: publishReady() clears it for tasks that are neither
+      // selected nor live (to release the board's serial slot), while the verdict must
+      // stay reachable. A pointer, not an authority — the verdict remains the authority.
+      accepted_entry_id: "TEXT",
+    });
     this.ensureColumns("ooo_probe_meta", {
       cancel_reason: "TEXT",
       cancelled_at: "TEXT",
@@ -486,6 +501,13 @@ export class BoardAdmission extends NmgStore {
         leaseSeconds: 60,
         now: new Date(this.now).toISOString(),
       });
+      // Two different counters, deliberately not merged: the board entry's
+      // `attempt` fences claims WITHIN one entry, while this one is the round's
+      // generation for the TASK, which must advance across entry reissues —
+      // reopen() withdraws a handoff and publishes a new entry, whose board
+      // attempt starts over. Deriving the generation from the entry would let a
+      // retired attempt be re-claimed under the same generation (measured: the
+      // recovery test caught exactly that), so the task generation stays here.
       const attempt = row.attempt + 1;
       if (!Number.isSafeInteger(attempt)) throw new Error("attempt exhausted");
       const spec = this.patchSpec(row);
@@ -654,6 +676,35 @@ export class BoardAdmission extends NmgStore {
       if (row.artifact !== null) return row.artifact === commit ? "duplicate" : "rejected";
       if (!this.live(row)) return "stale";
       this.db.prepare("UPDATE ooo_probe_tasks SET artifact=? WHERE id=?").run(commit, row.id);
+      // Acceptance is recorded as protocol, not as a self-report. The artifact is
+      // delivered against the claim it belongs to — the holder's own attempt, so
+      // deliveredBy is the agent that produced it, recorded by the coordinator on
+      // its behalf (the store's rule is "the live claim holder", which is exactly
+      // that agent) — and then judged by the coordinator, who is by construction
+      // not the deliverer. The resolve below stays the lifecycle close; it is no
+      // longer the only evidence that the work was accepted.
+      // `now` comes from the round's injected clock: a deterministic round must not
+      // read wall-clock time inside a protocol write.
+      const now = new Date(this.now).toISOString();
+      this.deliverTaskBoardEntry({
+        taskId: channel,
+        entryId: row.entry_id!,
+        agentId: ticket.owner,
+        digest: artifactDigest(commit),
+        summary: "host-verified artifact for this attempt",
+        now,
+      });
+      this.judgeTaskBoardEntry({
+        taskId: channel,
+        entryId: row.entry_id!,
+        agentId: "coordinator",
+        verdict: "accepted",
+        reason: "host verification accepted this artifact",
+        now,
+      });
+      this.db
+        .prepare("UPDATE ooo_probe_tasks SET accepted_entry_id=? WHERE id=?")
+        .run(row.entry_id!, row.id);
       this.resolveTaskBoardEntry({
         taskId: channel,
         entryId: row.entry_id!,
@@ -664,11 +715,31 @@ export class BoardAdmission extends NmgStore {
     });
   }
 
+  /** The accepted artifacts, by task id — the values dependents bind to.
+   *
+   *  The board verdict is what makes an artifact accepted; the private column only holds
+   *  the value (the canonical commit). Both facts are required, and the verdict must name
+   *  THIS artifact's digest: a verdict about a different artifact does not transfer, and a
+   *  row whose entry was judged rejected (say by an outside reviewer) stops counting as
+   *  accepted even though its value is still stored. */
   accepted(): Record<string, string> {
     const rows = this.db
-      .prepare("SELECT id, artifact FROM ooo_probe_tasks WHERE artifact IS NOT NULL ORDER BY id")
+      .prepare(
+        `SELECT t.id AS id, t.artifact AS artifact, e.verdict AS verdict, e.judged_digest AS judged_digest
+         FROM ooo_probe_tasks t
+         LEFT JOIN task_board_entries e ON e.id = t.accepted_entry_id
+         WHERE t.artifact IS NOT NULL
+         ORDER BY t.id`,
+      )
       .all();
-    return Object.fromEntries(rows.map((row) => [String(row.id), String(row.artifact)]));
+    const accepted: Record<string, string> = {};
+    for (const row of rows) {
+      const commit = String(row.artifact);
+      if (row.verdict !== "accepted") continue;
+      if (row.judged_digest !== artifactDigest(commit)) continue;
+      accepted[String(row.id)] = commit;
+    }
+    return accepted;
   }
 
   /** Invalidates a task's accepted artifact (or live claim) so it must run again, and

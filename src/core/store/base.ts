@@ -36,7 +36,7 @@ import type {
   TopologyProposal,
   VectorEmbedder,
 } from "../types.ts";
-import { WORLD_BOARD_ID } from "../types.ts";
+import { TASK_BOARD_VERDICTS, WORLD_BOARD_ID } from "../types.ts";
 import { histogramAdd } from "../perf.ts";
 import { Router } from "../router.ts";
 import { cosineSimilarity, HashingVectorEmbedder } from "../vector.ts";
@@ -469,6 +469,117 @@ export class NmgStoreBase {
       .run(input.agentId, now, input.reason ?? null, input.entryId, input.taskId);
     return this.taskBoardEntry(input.entryId)!;
   }
+  /** Deliver the claim holder's artifact for the current attempt (P1 slice).
+   * Only a live claim holder may deliver: an artifact nobody claimed the work
+   * for is not a deliverable, and the claim is what makes someone answerable
+   * for it. The digest names the artifact; a re-delivery inside the same
+   * attempt replaces it and voids any verdict about the previous digest (a
+   * verdict must never be inherited by a different artifact). */
+  deliverTaskBoardEntry(input: {
+    taskId: string;
+    entryId: string;
+    agentId: string;
+    digest: string;
+    ref?: string;
+    summary?: string;
+    now?: string;
+  }): TaskBoardEntry {
+    const now = input.now ?? new Date().toISOString();
+    const existing = this.taskBoardEntry(input.entryId);
+    if (!existing || existing.taskId !== input.taskId) {
+      throw new Error(`task board entry not found in task ${input.taskId}`);
+    }
+    if (existing.status !== "open") {
+      throw new Error(
+        `task board entry ${input.entryId} is ${existing.status}; a deliverable belongs to an open claim, not to a finalized entry`,
+      );
+    }
+    if (!this.taskBoardClaimLive(existing, now) || existing.claimedBy !== input.agentId) {
+      throw new Error(
+        `task board entry ${input.entryId} deliverable requires the live claim holder (holder: ${existing.claimedBy ?? "none"})`,
+      );
+    }
+    const result = this.db
+      .prepare(
+        `UPDATE task_board_entries
+         SET delivered_by = ?, delivered_at = ?, deliverable_digest = ?, deliverable_ref = ?,
+             deliverable_summary = ?, judged_by = NULL, judged_at = NULL, verdict = NULL,
+             verdict_reason = NULL, judged_digest = NULL
+         WHERE id = ? AND task_id = ? AND status = 'open'
+           AND claimed_by = ? AND claim_expires_at IS NOT NULL AND claim_expires_at > ?`,
+      )
+      .run(
+        input.agentId,
+        now,
+        input.digest,
+        input.ref ?? null,
+        input.summary ?? null,
+        input.entryId,
+        input.taskId,
+        input.agentId,
+        now,
+      );
+    if (Number(result.changes) === 0) {
+      throw new Error(
+        `task board entry ${input.entryId} lost its claim while delivering (released, expired, or reassigned); retry under a fresh claim`,
+      );
+    }
+    return this.taskBoardEntry(input.entryId)!;
+  }
+  /** Independent verdict on a delivered artifact (P1 slice). Acceptance is a
+   * protocol invariant, not a convention: the deliverer can never judge its own
+   * deliverable (mirrors "the resolver cannot veto its own resolve"). The
+   * verdict records the digest it judged, so it cannot be inherited by a
+   * different artifact, and `undecidable` stays distinct from `rejected`. */
+  judgeTaskBoardEntry(input: {
+    taskId: string;
+    entryId: string;
+    agentId: string;
+    verdict: (typeof TASK_BOARD_VERDICTS)[number];
+    reason?: string;
+    now?: string;
+  }): TaskBoardEntry {
+    const now = input.now ?? new Date().toISOString();
+    const existing = this.taskBoardEntry(input.entryId);
+    if (!existing || existing.taskId !== input.taskId) {
+      throw new Error(`task board entry not found in task ${input.taskId}`);
+    }
+    if (!TASK_BOARD_VERDICTS.includes(input.verdict)) {
+      throw new Error(
+        `unknown task board verdict ${input.verdict}; expected one of ${TASK_BOARD_VERDICTS.join(", ")}`,
+      );
+    }
+    if (existing.deliveredBy === null || existing.deliverableDigest === null) {
+      throw new Error(`task board entry ${input.entryId} has no deliverable to judge`);
+    }
+    if (existing.deliveredBy === input.agentId) {
+      throw new Error(
+        `the deliverer cannot judge its own deliverable (${input.entryId}); an independent judge is required`,
+      );
+    }
+    const result = this.db
+      .prepare(
+        `UPDATE task_board_entries
+         SET judged_by = ?, judged_at = ?, verdict = ?, verdict_reason = ?, judged_digest = ?
+         WHERE id = ? AND task_id = ? AND deliverable_digest = ?`,
+      )
+      .run(
+        input.agentId,
+        now,
+        input.verdict,
+        input.reason ?? null,
+        existing.deliverableDigest,
+        input.entryId,
+        input.taskId,
+        existing.deliverableDigest,
+      );
+    if (Number(result.changes) === 0) {
+      throw new Error(
+        `task board entry ${input.entryId} deliverable changed while judging; judge the current digest`,
+      );
+    }
+    return this.taskBoardEntry(input.entryId)!;
+  }
   /** True when a board entry carries a live claim (holder set, lease not expired). */
   private taskBoardClaimLive(entry: TaskBoardEntry, now: string): boolean {
     return entry.claimedBy !== null && entry.claimExpiresAt !== null && entry.claimExpiresAt > now;
@@ -553,6 +664,24 @@ export class NmgStoreBase {
         );
       }
       throw new Error(`task board entry ${input.entryId} claim conflicted; retry`);
+    }
+    // Attempt fencing: renewing your own live claim is the same attempt; any
+    // other claim starts attempt N+1 and clears the previous attempt's
+    // deliverable and verdict. Without this, work reassigned to another agent
+    // could still be read through a stale artifact (or a verdict about it).
+    const renewed = existing.claimedBy === input.agentId && this.taskBoardClaimLive(existing, now);
+    if (!renewed) {
+      this.db
+        .prepare(
+          `UPDATE task_board_entries
+           SET attempt = attempt + 1,
+               delivered_by = NULL, delivered_at = NULL, deliverable_digest = NULL,
+               deliverable_ref = NULL, deliverable_summary = NULL,
+               judged_by = NULL, judged_at = NULL, verdict = NULL,
+               verdict_reason = NULL, judged_digest = NULL
+           WHERE id = ?`,
+        )
+        .run(input.entryId);
     }
     // Reply-gated serial handoff: "回复=接手（claim）" — once the outstanding
     // actionable is claimed by an agent, the claim is the reply that lets the
@@ -2324,26 +2453,41 @@ function mapTaskBoardEntry(row: Row): TaskBoardEntry {
     id: String(row.id),
     taskId: String(row.task_id),
     agentId: String(row.agent_id),
-    sourceSessionId: row.source_session_id === null ? null : String(row.source_session_id),
+    sourceSessionId: optionalText(row.source_session_id),
     kind: String(row.kind) as TaskBoardKind,
     content: String(row.content),
     status: String(row.status) as TaskBoardEntry["status"],
     createdAt: String(row.created_at),
     expiresAt: String(row.expires_at),
-    resolvedAt: row.resolved_at === null ? null : String(row.resolved_at),
-    resolvedBy: row.resolved_by === null ? null : String(row.resolved_by),
-    resolution: row.resolution === null ? null : String(row.resolution),
-    claimedBy: row.claimed_by === null ? null : String(row.claimed_by),
-    claimedAt: row.claimed_at === null ? null : String(row.claimed_at),
-    claimExpiresAt: row.claim_expires_at === null ? null : String(row.claim_expires_at),
-    to: row.to === null ? null : String(row.to),
-    serialState:
-      row.serial_state === null
-        ? null
-        : (String(row.serial_state) as TaskBoardEntry["serialState"]),
-    vetoedBy: row.vetoed_by === null ? null : String(row.vetoed_by),
-    vetoedAt: row.vetoed_at === null ? null : String(row.vetoed_at),
-    vetoReason: row.veto_reason === null ? null : String(row.veto_reason),
+    resolvedAt: optionalText(row.resolved_at),
+    resolvedBy: optionalText(row.resolved_by),
+    resolution: optionalText(row.resolution),
+    claimedBy: optionalText(row.claimed_by),
+    claimedAt: optionalText(row.claimed_at),
+    claimExpiresAt: optionalText(row.claim_expires_at),
+    to: optionalText(row.to),
+    serialState: optionalText(row.serial_state) as TaskBoardEntry["serialState"],
+    vetoedBy: optionalText(row.vetoed_by),
+    vetoedAt: optionalText(row.vetoed_at),
+    vetoReason: optionalText(row.veto_reason),
+    attempt: Number(row.attempt ?? 0),
+    deliveredBy: optionalText(row.delivered_by),
+    deliveredAt: optionalText(row.delivered_at),
+    deliverableDigest: optionalText(row.deliverable_digest),
+    deliverableRef: optionalText(row.deliverable_ref),
+    deliverableSummary: optionalText(row.deliverable_summary),
+    judgedBy: optionalText(row.judged_by),
+    judgedAt: optionalText(row.judged_at),
+    verdict: optionalText(row.verdict) as TaskBoardEntry["verdict"],
+    verdictReason: optionalText(row.verdict_reason),
+    judgedDigest: optionalText(row.judged_digest),
     ackedBy: [],
   };
+}
+
+/** A nullable TEXT column as `string | null`. Written once rather than as one
+ *  ternary per field: the row mapper is a list of fields, not a decision tree,
+ *  and an absent nullable column has no value to invent. */
+function optionalText(value: unknown): string | null {
+  return value === null || value === undefined ? null : String(value);
 }

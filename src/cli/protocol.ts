@@ -20,6 +20,7 @@ import type {
   MemoryExportBundle,
   MemoryNodeKind,
   MemoryRecord,
+  TaskBoardVerdict,
   MemoryResolution,
   MemoryResidence,
   MemoryScope,
@@ -591,6 +592,28 @@ export interface NmgTaskBoardVetoParams extends NmgTaskBoardBase {
   reason?: string;
 }
 
+/** P1 slice: the claim holder delivers an artifact for the current attempt. The
+ * board stores the digest (identity), not the bytes: it stays a light
+ * coordination medium, and the digest is what a verdict is bound to. */
+export interface NmgTaskBoardDeliverParams extends NmgTaskBoardBase {
+  action: "deliver";
+  entryId: string;
+  digest: string;
+  /** Where the artifact can be read (path or reference). */
+  ref?: string;
+  summary?: string;
+}
+
+/** P1 slice: an independent verdict on a delivered artifact. The deliverer can
+ * never judge its own deliverable, and `undecidable` is a first-class outcome
+ * rather than a softer `rejected`. */
+export interface NmgTaskBoardJudgeParams extends NmgTaskBoardBase {
+  action: "judge";
+  entryId: string;
+  verdict: TaskBoardVerdict;
+  reason?: string;
+}
+
 export interface NmgTaskBoardListParams {
   action: "list";
   agentId: string;
@@ -690,6 +713,8 @@ export type NmgTaskBoardParams =
   | NmgTaskBoardReadPreviewsParams
   | NmgTaskBoardResolveParams
   | NmgTaskBoardVetoParams
+  | NmgTaskBoardDeliverParams
+  | NmgTaskBoardJudgeParams
   | NmgTaskBoardAcknowledgeParams
   | NmgTaskBoardClaimParams
   | NmgTaskBoardReleaseParams
@@ -896,7 +921,8 @@ export type NmgMethodResult = {
   stgPurgeSession: { purged: number; projectDir: string };
   taskBoard:
     | {
-        action: "put" | "resolve" | "claim" | "release" | "acknowledge" | "veto";
+        action:
+          "put" | "resolve" | "claim" | "release" | "acknowledge" | "veto" | "deliver" | "judge";
         entry: TaskBoardEntry;
       }
     | { action: "read"; entries: TaskBoardEntry[]; nextCursor: string | null }

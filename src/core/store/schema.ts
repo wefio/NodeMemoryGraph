@@ -620,6 +620,7 @@ export function migrate(db: DatabaseSync): void {
   ensureNodeSummaryColumns(db);
   ensureBinaryVectors(db);
   ensureTaskBoardColumns(db);
+  ensureTaskBoardDeliverableColumns(db);
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_history_source_message
       ON history_records(session_id, source_message_id)
@@ -893,6 +894,52 @@ export function ensureHistoryColumns(db: DatabaseSync): void {
   );
   if (!existing.has("source_message_id")) {
     db.exec("ALTER TABLE history_records ADD COLUMN source_message_id TEXT");
+  }
+}
+
+/** Attempt fencing, deliverable and verdict (board-governance P1 slice).
+ *
+ *  Split out of ensureTaskBoardColumns so that function stays a list of one-off
+ *  column additions rather than a decision tree. Idempotent and additive: an
+ *  existing store keeps its state and gains nullable columns.
+ *
+ *  Attempt fencing: a claim that does not renew a live claim by the same agent
+ *  starts a new attempt, and the previous attempt's deliverable and verdict are
+ *  cleared with it. Deliverable: the claim holder's artifact for the current
+ *  attempt, bound to a digest. Deliverable, verdict and veto are three distinct
+ *  things — the holder's artifact, an independent judgement of it, and a contest
+ *  of the holder's own resolve — and these columns add the first two; `resolve`
+ *  and the veto are untouched. `undecidable` is a first-class verdict, never a
+ *  softer `rejected`. */
+export function ensureTaskBoardDeliverableColumns(db: DatabaseSync): void {
+  const existing = new Set(
+    (db.prepare("PRAGMA table_info(task_board_entries)").all() as Row[]).map((row) =>
+      String(row.name),
+    ),
+  );
+  if (!existing.has("attempt")) {
+    db.exec("ALTER TABLE task_board_entries ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0");
+  }
+  for (const column of [
+    "delivered_by",
+    "delivered_at",
+    "deliverable_digest",
+    "deliverable_ref",
+    "deliverable_summary",
+    "judged_by",
+    "judged_at",
+    "verdict_reason",
+    "judged_digest",
+  ]) {
+    if (!existing.has(column)) {
+      db.exec(`ALTER TABLE task_board_entries ADD COLUMN ${column} TEXT`);
+    }
+  }
+  if (!existing.has("verdict")) {
+    db.exec(
+      "ALTER TABLE task_board_entries ADD COLUMN verdict TEXT " +
+        "CHECK (verdict IN ('accepted', 'rejected', 'undecidable'))",
+    );
   }
 }
 

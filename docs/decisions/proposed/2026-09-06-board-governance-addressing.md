@@ -82,6 +82,47 @@ adopt the incident's freeform shared-storage model.
   existing roster/identity; it is an addressing convenience, not a new
   scheduling layer.
 
+### P1 implementation slice: deliverable + verdict (2026-09-12)
+
+The veto alone can only block a self-report; it cannot say *what* was delivered,
+*who* judged it, or *which* artifact the judgement is about. The rounds work
+needed exactly that, and the field/verb design was simpler than a new surface:
+the board protocol itself gains the missing pair, so a round is a board
+participant rather than a parallel coordination medium.
+
+Two verbs, two column groups, additive (nullable; no lifecycle change):
+
+- **`deliver`** — only the **live claim holder** may deliver, so an artifact
+  nobody claimed the work for is not a deliverable. It stores the artifact's
+  **digest** (identity) plus an optional `ref` (where to read it) and a one-line
+  summary: the board stays a light coordination medium and never carries the
+  bytes. A re-delivery inside one attempt replaces the artifact and **voids any
+  verdict about the previous digest**.
+- **`judge`** — an independent verdict (`accepted` | `rejected` |
+  `undecidable`) that records the digest it judged. The deliverer **can never
+  judge its own deliverable**, the same mechanical way "the resolver cannot veto
+  its own resolve" already works. `undecidable` is first-class and is never
+  collapsed into `rejected`: "could not measure" and "measured and failed" are
+  different facts, and only `accepted` is what a dependent may rely on.
+- **Attempt fencing** — a claim that does not renew a live claim by the same
+  agent starts attempt N+1 and clears the previous attempt's deliverable and
+  verdict. Without it, work reassigned to another agent could still be read
+  through a stale artifact. A heartbeat by the holder is deliberately *not* a
+  new attempt: renewal must not discard work in progress.
+
+Deliverable, verdict, and veto are three different things and stay separate:
+the holder's artifact, an independent judgement of it, and a contest of the
+holder's own `resolve`. `resolve` remains the self-reported lifecycle close; the
+verdict is the positive counterpart to the veto (the veto says "do not trust
+this completion", the verdict says "here is what it was judged against, by
+someone else").
+
+Surface: store methods + the daemon's `taskBoard` method and params, matching how
+`veto` is exposed. No Pi tool action and no CLI subcommand are added for this
+slice: a surface nobody calls is cost, not capability. The consumer that
+introduces it is the restricted out-of-order round, which publishes its work
+items on the board and records delivery/acceptance through these verbs.
+
 ### Non-goals (deliberately not adopted)
 
 - Freeform shared-file storage (HF-style): keep typed entries + attribution +
@@ -114,6 +155,9 @@ adopt the incident's freeform shared-storage model.
   me.
 - An independent reviewer can block a premature `resolve`; the finalize keeps
   an auditable record (who claimed, who verified, who finalized).
+- A delivered artifact carries an identity (digest) that a verdict is bound to,
+  so acceptance is never inherited across artifacts, and `undecidable` is
+  recorded as itself rather than as `rejected`.
 - A work item with a `need` field surfaces to a capable agent without a manual
   discover-then-name step.
 - Entries carry a content hash by default; signing is available for
