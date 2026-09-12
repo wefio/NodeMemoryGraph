@@ -148,6 +148,14 @@ if (process.argv[2] === "daemon" || liveDaemon) {
     },
     next: () => authority.next(),
     accepted: () => authority.accepted(),
+    /** Operator cancellation, from another process. The coordinator owns the decision: the
+     *  round is fenced here, not merely stopped in the caller. */
+    cancel: (args) => {
+      const reason = String(args.reason ?? "operator cancelled the round");
+      authority.cancel(reason);
+      return authority.cancelled() ?? reason;
+    },
+    cancelled: () => authority.cancelled(),
   };
   // Async on purpose: a synchronous throw here would escape the IPC handler and kill the
   // fixture instead of answering the caller with an error.

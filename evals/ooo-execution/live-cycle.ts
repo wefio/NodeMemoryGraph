@@ -8,8 +8,10 @@ import { runCycle, type Requirement } from "./cycle.ts";
 import { mutate, type Mutation } from "./mutation.ts";
 import {
   RoundLog,
+  compareFrozen,
   compareTerminal,
   readRoundLog,
+  recordedPlan,
   recordedWorker,
   terminalEvent,
 } from "./round-log.ts";
@@ -31,13 +33,20 @@ if (!replayMode && (!provider || !model))
   throw new Error("Set PI_PROVIDER and PI_MODEL explicitly");
 const logPath = ".nmg/ooo-live/round.jsonl";
 const recordedEvents = replayMode ? readRoundLog(readFileSync(logPath, "utf8")) : [];
+/** A replay checks out the revision the round used, not whatever HEAD is now: a round's
+ *  identity is its inputs, and a moved HEAD would silently verify different code. */
+const recordedRevision = replayMode ? (recordedPlan(recordedEvents)?.revision ?? null) : null;
 const replayWorker = recordedWorker(recordedEvents);
 
 const repository = process.cwd();
-const revision = execFileSync("git", ["rev-parse", "HEAD"], {
-  cwd: repository,
-  encoding: "utf8",
-}).trim();
+const revision = replayMode
+  ? (recordedRevision ?? "")
+  : execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: repository,
+      encoding: "utf8",
+    }).trim();
+if (replayMode && !recordedRevision)
+  console.warn(`${logPath} records no revision: the replay reads the current checkout`);
 const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 
 /** Round-frozen baseline: every untracked OoO file the fixed check needs. */
@@ -242,16 +251,28 @@ const result = await runCycle({
 });
 
 /** In replay mode the round's own vocabulary is not enough: the question is whether the
- *  re-derived terminal state matches what the log recorded. */
+ *  re-derived terminal state matches what the log recorded — and whether this is the same
+ *  round at all. A replay handed different frozen work is a different round, which can finish
+ *  with the same verdicts by coincidence; that case must be named, not reported as a
+ *  reproduction. */
 if (replayMode) {
   const recorded = terminalEvent(recordedEvents);
   if (!recorded) throw new Error(`${logPath} has no terminal event`);
-  const differences = compareTerminal(recorded, result);
+  const plan = recordedPlan(recordedEvents);
+  const foreign = compareFrozen(recordedEvents, result.log);
+  const unverified = plan?.revision
+    ? []
+    : [`the log records no revision: this replay is not bound to a round identity`];
+  const differences = [...unverified, ...foreign, ...compareTerminal(recorded, result)];
   console.log(
-    differences.length
-      ? `replay diverged from the log:\n  - ${differences.join("\n  - ")}`
-      : `replay reproduced the round: ${recorded.composed.files.length} composed file(s), ` +
-          `${Object.keys(recorded.accepted).length} accepted task(s), no model call`,
+    foreign.length
+      ? `replay refused: the frozen work differs from the log, so this is a different round:\n` +
+          `  - ${foreign.join("\n  - ")}`
+      : differences.length
+        ? `replay diverged from the log:\n  - ${differences.join("\n  - ")}`
+        : `replay reproduced the round: ${recorded.composed.files.length} composed file(s), ` +
+          `${Object.keys(recorded.accepted).length} accepted task(s), no model call, ` +
+          `revision ${plan!.revision!.slice(0, 12)}`,
   );
   if (differences.length) process.exitCode = 1;
 }

@@ -13,8 +13,10 @@ import { join } from "node:path";
 import { runCycle, type CheckRunner, type CycleOptions, type CycleResult } from "./cycle.ts";
 import {
   RoundLog,
+  compareFrozen,
   compareTerminal,
   readRoundLog,
+  recordedPlan,
   recordedWorker,
   terminalEvent,
 } from "./round-log.ts";
@@ -218,4 +220,58 @@ test("a replay is a round like any other: it cannot accept what the host refuses
   );
   assert.deepEqual(result.accepted, {});
   assert.equal(result.verdicts.B, "rejected");
+});
+
+test("a replay handed a different round is refused by name, not reported as reproduced", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-replay-identity-"));
+  t.after(() =>
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
+  );
+  const path = join(directory, "round.jsonl");
+  const recorded = await runCycle(roundOptions({ roundLog: new RoundLog(path) }));
+  const events = readRoundLog(readFileSync(path, "utf8"));
+  const terminal = terminalEvent(events)!;
+  assert.deepEqual(compareFrozen(events, recorded.log), [], "a faithful round has no difference");
+  // The plan records which revision the round verified, so a replay checks out the same one.
+  assert.equal(recordedPlan(events)?.revision, "HEAD");
+
+  // The trap this check exists for: a replay can be handed a different round and still produce
+  // the same verdicts. Comparing terminal states alone would call that a reproduction.
+  const withDifferentCheck = await runCycle(
+    roundOptions({
+      worker: recordedWorker(events),
+      checks: [{ label: "protocol-regression", command: "node", args: ["-e", "process.exit(0)"] }],
+    }),
+  );
+  assert.deepEqual(
+    compareTerminal(terminal, withDifferentCheck),
+    [],
+    "the trap: identical verdicts",
+  );
+  const differences = compareFrozen(events, withDifferentCheck.log);
+  assert.equal(differences.length, 1, JSON.stringify(differences));
+  assert.match(differences[0]!, /^verification rules: [0-9a-f]{12} -> [0-9a-f]{12}$/);
+
+  // The per-task frozen work covers the baseline and every other task input; a change there
+  // makes the recorded artifacts stale, and the check names that instead of leaving it inferred.
+  const changedBaseline = await runCycle(
+    roundOptions({
+      worker: recordedWorker(events),
+      baseline: {
+        "src/probe.ts": "export const value = 2;\n",
+        "src/probe.test.ts": "test('probe identity', () => {});\n",
+      },
+    }),
+  );
+  const frozen = compareFrozen(events, changedBaseline.log);
+  for (const task of ["A", "C"])
+    assert.match(
+      frozen.find((line) => line.startsWith(`${task}#1`))!,
+      /not claimed in the replay$/,
+      JSON.stringify(frozen),
+    );
+  assert.match(
+    frozen.find((line) => line.startsWith("B#1"))!,
+    /^B#1: [0-9a-f]{12} -> [0-9a-f]{12}$/,
+  );
 });

@@ -544,6 +544,58 @@ conclusion; that is a concrete target for the next cost investigation, not a sch
 pushback, reopen) still has only deterministic tests, because C's declared requirement was
 satisfied on the first attempt and no reopen was needed.
 
+## S2 exit: cancellation with real processes, and a replay bound to its round — 2026-09-12
+
+S2's exit condition has two halves. The recovery half was already covered by
+`recovery.test.ts`; this closes the other two gaps the design itself listed: cancellation with
+real processes (improvement item 3) and a replay that either reproduces a round or refuses to
+pretend it did (item 1).
+
+**The replay was not bound to its round.** Promoting round 7's artifact changed
+`evals/ooo-execution/check-events.test.ts`, which is part of the frozen baseline and therefore
+of every task digest. The same `round.jsonl` then replayed to `A/B/C accepted -> rejected` —
+visible, but unattributed, and only visible by luck: a comparison of terminal states alone can
+match while the round differs. Writing the test for it produced the second finding: changing a
+check's **command** left both the frozen digests and the verdicts identical, because the
+verification rules are not part of any task's frozen work. So the round's identity now covers
+three things, and a replay checks all three and refuses by name:
+
+| Recorded                                                                              | Compared against                                                                       |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| per-task frozen digest (baseline files, instruction, declared faults, budget, limits) | the digests the replay actually claims                                                 |
+| `revision` (the checkout the round's candidates were verified against)                | used as the replay's revision, so a moved `HEAD` cannot silently verify different code |
+| `checkDigest` (check commands, arguments and labels)                                  | the rules the replay is about to run                                                   |
+
+A log that records no identity is replayed as **unverified**, not as a reproduction — the same
+"measured versus never looked" rule the complexity gate now follows.
+
+**Cancellation was mechanism-only.** `runCycle` now takes an operator `AbortSignal`; when it
+aborts, the round cancels itself in the coordinator (advancing every attempt, so a late artifact
+is `stale`), kills the process tree of every check still running, stops dispatching and stops
+composing, and records `cancelled` in its terminal state. `evals/ooo-execution/candidate.ts`
+spawns checks with `detached` on POSIX and kills the tree with `taskkill /T` on Windows.
+
+Measured, with a deliberately weak first attempt reported as such:
+
+| Test                                           | What it pins                                                                                                                                                                        |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| in-process, real child processes and worktrees | after cancellation the round is `cancelled`, nothing is accepted, composition is `undecidable`, the check **and its grandchild** are gone, and no candidate worktree is left behind |
+| real multi-process (`Actor` daemon + worker)   | the worker's in-flight delivery becomes `stale`, nothing is accepted, `C`'s handoff is never published, `next()` is empty, and the reason survives a daemon restart                 |
+
+Honest limits, both from measurement rather than assumption:
+
+- The tree kill is **redundant on Windows**: replacing it with a plain `child.kill("SIGKILL")`
+  still passes the test, because libuv puts non-detached children in a job object. The explicit
+  kill is what makes the property hold on POSIX (a detached process group plus `process.kill(-pid)`).
+- The test's grandchild is not detached. A check that **deliberately** detaches its children is
+  not covered by any assertion; what is proven is the shape our checks have (`node --test`
+  workers), not arbitrary escape.
+- Teeth check: disabling the cancellation path fails the in-process test (asserted), so the test
+  is sensitive to the code it claims to cover. The first version of the test — which compared
+  `git worktree list` before and after — was **racing** with other test files that create their
+  own worktrees; it passed alone and failed in the full parallel run three times. It now points
+  the OS temp dir at a directory it owns, so the leak check is about its own round.
+
 ## S2 slice 2, live round 7: the log replays a real round — 2026-09-12
 
 Round 7 ran the whole A/B/C round against the promoted baseline and was **accepted with no
