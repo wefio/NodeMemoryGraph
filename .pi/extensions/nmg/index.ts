@@ -28,6 +28,13 @@ import {
 } from "../../../src/cli/daemon-client.ts";
 import { resolveNmgDataDir } from "../../../src/cli/data-path.ts";
 import {
+  describeStart,
+  oooToolsEnabled,
+  shortRound,
+  startRound,
+  type OooRoundAction,
+} from "./ooo-round.ts";
+import {
   archiveOrStage,
   archiveNodeName,
   archiveStatement,
@@ -1027,6 +1034,58 @@ export default function nmgExtension(pi: ExtensionAPI): void {
       return toolResult(result, JSON.stringify(result, null, 2));
     },
   });
+
+  // The restricted out-of-order round, off unless asked for: it drives a research path whose
+  // shared layer lives in src/integration/ooo-*.ts, and a live round spends tokens.
+  if (oooToolsEnabled()) {
+    pi.registerTool({
+      name: "ooo_round",
+      label: "Restricted OoO round",
+      description:
+        "Drive one restricted out-of-order round (experimental, gated by NMG_OOO_TOOLS=1). " +
+        "action=submit starts the round detached from a spec JSON and returns immediately (a live " +
+        "round takes minutes and spends tokens); action=status reads the round's own run directory " +
+        "from another process; action=cancel records an operator decision that survives a restart. " +
+        "The coordinator, not this tool, decides acceptance.",
+      parameters: Type.Object({
+        action: Type.Union([
+          Type.Literal("submit"),
+          Type.Literal("status"),
+          Type.Literal("cancel"),
+        ]),
+        specPath: Type.Optional(
+          Type.String({ description: "submit only: path to the round spec JSON" }),
+        ),
+        runDir: Type.Optional(
+          Type.String({ description: "the round's own directory; required for every action" }),
+        ),
+        reason: Type.Optional(
+          Type.String({ description: "cancel only: why the round was stopped" }),
+        ),
+        live: Type.Optional(
+          Type.Boolean({
+            description:
+              "submit only: use real model calls (costs tokens); absent means recorded answers",
+          }),
+        ),
+      }),
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+        const request = {
+          action: params.action as OooRoundAction,
+          specPath: params.specPath,
+          runDir: params.runDir,
+          reason: params.reason,
+          live: params.live,
+        };
+        if (request.action === "submit") {
+          const started = startRound(projectDirectory(), request);
+          return toolResult(started, describeStart(request, started));
+        }
+        const reply = await shortRound(projectDirectory(), request);
+        return toolResult(reply, `round ${reply.action}: exit ${reply.code}\n${reply.output}`);
+      },
+    });
+  }
 
   pi.registerTool({
     name: "nmg_remember",
