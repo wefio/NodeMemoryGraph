@@ -1508,6 +1508,12 @@ async function main(argv: string[]): Promise<number> {
   // A qrels run must not report itself under the default --dataset name: the
   // label is the only thing tying a number to the corpus it came from.
   if (options.qrels) options.dataset = basename(resolve(options.qrels)) as Options["dataset"];
+  else if (options.cache) {
+    // A certification run over a cache built by --qrels inherits the corpus from
+    // the cache filename; otherwise its numbers look like another corpus.
+    const fromCache = basename(options.cache).match(/^qrels-(.+)-groups\.json$/);
+    if (fromCache) options.dataset = fromCache[1] as Options["dataset"];
+  }
   const groups = await loadGroups(options);
   const positives = groups.reduce(
     (sum, group) => sum + group.labels.filter((l) => l === 1).length,
