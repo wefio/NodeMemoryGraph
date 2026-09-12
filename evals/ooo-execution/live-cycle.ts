@@ -6,7 +6,13 @@ import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { runCycle, type Requirement } from "./cycle.ts";
 import { mutate, type Mutation } from "./mutation.ts";
-import { RoundLog } from "./round-log.ts";
+import {
+  RoundLog,
+  compareTerminal,
+  readRoundLog,
+  recordedWorker,
+  terminalEvent,
+} from "./round-log.ts";
 import { verifyCandidate } from "./candidate.ts";
 import {
   executePiPatch,
@@ -16,9 +22,16 @@ import {
 
 const provider = process.env.PI_PROVIDER;
 const model = process.env.PI_MODEL;
-if (!process.argv.includes("--live"))
-  throw new Error("pass --live explicitly: this calls the configured model");
-if (!provider || !model) throw new Error("Set PI_PROVIDER and PI_MODEL explicitly");
+/** Replay mode re-runs this round's host checks against the answers its log recorded. It
+ *  needs no provider: the model is the activity being replayed, not re-executed. */
+const replayMode = process.argv.includes("--replay");
+if (!replayMode && !process.argv.includes("--live"))
+  throw new Error("pass --live explicitly (this calls the configured model), or --replay");
+if (!replayMode && (!provider || !model))
+  throw new Error("Set PI_PROVIDER and PI_MODEL explicitly");
+const logPath = ".nmg/ooo-live/round.jsonl";
+const recordedEvents = replayMode ? readRoundLog(readFileSync(logPath, "utf8")) : [];
+const replayWorker = recordedWorker(recordedEvents);
 
 const repository = process.cwd();
 const revision = execFileSync("git", ["rev-parse", "HEAD"], {
@@ -59,13 +72,42 @@ const cases = {
 
 /** Host-owned mutants of the editable implementation. Each is proven to survive the
  *  frozen suite before the round starts (cycle.ts refuses the round otherwise), so
- *  "this fault goes undetected" is evidence rather than an assumption. */
+ *  "this fault goes undetected" is evidence rather than an assumption.
+ *
+ *  This list is refreshed by probing candidates against the *current* frozen suite
+ *  (`MUTATION_SPEC=<spec> mutation-probe.ts`); the fault the previous round proved is
+ *  now detected by the baseline that round produced, so re-declaring it would be a
+ *  false premise. All five below were reported `survived` against this revision. */
 const mutants: readonly Mutation[] = [
   {
-    id: "reopen-keeps-attempt",
+    id: "bound-ignores-runid",
     path: "evals/ooo-execution/board-admission.ts",
-    from: "SET artifact=NULL, attempt=attempt+1, owner=NULL",
-    to: "SET artifact=NULL, attempt=attempt, owner=NULL",
+    from: "        ticket.runId === this.runId &&\n",
+    to: "",
+  },
+  {
+    id: "bound-ignores-input-digest",
+    path: "evals/ooo-execution/board-admission.ts",
+    from: "        ticket.inputDigest === row.input_digest &&\n",
+    to: "",
+  },
+  {
+    id: "issueCheck-skips-stale-input-guard",
+    path: "evals/ooo-execution/board-admission.ts",
+    from: '      if (row.source_revision !== row.observed_revision) throw new Error("stale check input");\n',
+    to: "",
+  },
+  {
+    id: "cancel-keeps-check-tickets",
+    path: "evals/ooo-execution/board-admission.ts",
+    from: "      this.db.prepare(\"UPDATE ooo_probe_checks SET terminal='cancelled', cancelled=1\").run();\n",
+    to: "",
+  },
+  {
+    id: "withdraw-handoff-keeps-entry",
+    path: "evals/ooo-execution/board-admission.ts",
+    from: "      this.fenceRow(this.row(taskId), [], reason);",
+    to: "      void reason;",
   },
 ];
 
@@ -95,7 +137,10 @@ const checkTool: CheckTool = {
  *  evaluates these mechanically; the worker may also push back mid-attempt when what
  *  it received cannot satisfy one of them. */
 const requirements: readonly Requirement[] = [
-  { kind: "mutant-killed", task: "B", id: "reopen-keeps-attempt" },
+  // Derived from the round's own declaration, never written by hand: a hard-coded id goes
+  // stale as soon as a round closes the fault it names, and the stale requirement was
+  // exactly what B pushed back on with first-hand evidence from the frozen test file.
+  { kind: "mutant-killed", task: "B", id: mutants[0]!.id },
 ];
 const pushback: PushbackSpec = {
   requirements: requirements.map((requirement) => ({
@@ -117,7 +162,7 @@ const result = await runCycle({
   noChangeCases: cases,
   // The round records itself as it runs, so it can be replayed later without a model:
   // replay re-checks the recorded answers through the host and re-derives every verdict.
-  roundLog: new RoundLog(".nmg/ooo-live/round.jsonl"),
+  roundLog: replayMode ? undefined : new RoundLog(logPath),
   mutations: { B: mutants },
   requires: { C: requirements },
   maxReopens: 1,
@@ -158,7 +203,7 @@ const result = await runCycle({
   aEditable: ["src/integration/ooo-check.ts"],
   bEditable: ["evals/ooo-execution/check-events.test.ts"],
   budget: { perFile: 24_000, output: 48_000 },
-  limits: { turns: 10, reads: 6, timeoutMs: 180_000 },
+  limits: { turns: 10, reads: 6, timeoutMs: 240_000 },
   aInstruction:
     "You are the repair task of an out-of-order development round. The editable file owns the " +
     "external-check protocol: host-issued check identity, terminal evidence, fencing and expiry. " +
@@ -174,22 +219,42 @@ const result = await runCycle({
     "each is stated as the exact code change that introduces it. Add regression tests to the " +
     "editable test file so that the suite now detects them. The host accepts your patch only when " +
     "it passes on the intact implementation and fails on at least one listed mutation; a test that " +
-    "passes in both cases proves nothing and is rejected. A no-change conclusion is also rejected, " +
+    "passes in both cases proves nothing and is rejected. Closing one declared fault is enough: " +
+    "pick the one you can prove, and keep the added tests few and exact rather than covering all " +
+    "five, which is how the previous attempt overran its output budget and was recorded as a " +
+    "failed attempt. A no-change conclusion is also rejected, " +
     "because the host's own evidence already shows a gap. Change only that test file.",
-  worker: async (_taskId, frozen) => {
-    const run = await executePiPatch(frozen, provider, model, { check: checkTool, pushback });
-    runs.push(run.checks);
-    const metrics = {
-      tokens: run.tokens,
-      turns: run.turns,
-      checks: run.checks,
-      cacheRead: run.cacheRead,
-      cacheWrite: run.cacheWrite,
-    };
-    if (run.pushback) return { artifact: "", pushback: run.pushback, metrics };
-    return { artifact: run.artifact, metrics };
-  },
+  worker: replayMode
+    ? replayWorker
+    : async (_taskId, frozen) => {
+        const run = await executePiPatch(frozen, provider!, model!, { check: checkTool, pushback });
+        runs.push(run.checks);
+        const metrics = {
+          tokens: run.tokens,
+          turns: run.turns,
+          checks: run.checks,
+          cacheRead: run.cacheRead,
+          cacheWrite: run.cacheWrite,
+        };
+        if (run.pushback) return { artifact: "", pushback: run.pushback, metrics };
+        return { artifact: run.artifact, metrics };
+      },
 });
+
+/** In replay mode the round's own vocabulary is not enough: the question is whether the
+ *  re-derived terminal state matches what the log recorded. */
+if (replayMode) {
+  const recorded = terminalEvent(recordedEvents);
+  if (!recorded) throw new Error(`${logPath} has no terminal event`);
+  const differences = compareTerminal(recorded, result);
+  console.log(
+    differences.length
+      ? `replay diverged from the log:\n  - ${differences.join("\n  - ")}`
+      : `replay reproduced the round: ${recorded.composed.files.length} composed file(s), ` +
+          `${Object.keys(recorded.accepted).length} accepted task(s), no model call`,
+  );
+  if (differences.length) process.exitCode = 1;
+}
 
 const report = {
   finishedAt: new Date().toISOString(),

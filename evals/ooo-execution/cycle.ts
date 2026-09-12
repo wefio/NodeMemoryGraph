@@ -244,6 +244,9 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   const reopens: string[] = [];
   let lastPushback: { dependency: string; requirement: string; evidence: string } | undefined;
   let premiseFailed = false;
+  /** A premise that could not be measured is not a premise that failed: the round must
+   *  stop, but it must say which of the two happened. */
+  let premiseUnmeasured = false;
   /** Assigned when the round starts; the verifier awaits it so a false premise can
    *  never accept anything, while the work itself already runs beside the model call. */
   let matrix: Promise<void> = Promise.resolve();
@@ -361,8 +364,11 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     // The mutant premise gates acceptance, not the start of work: awaiting the
     // concurrently proved matrix here keeps a false premise from accepting anything.
     await matrix;
-    if (premiseFailed) {
-      log("premise-invalid", `${task}: a declared mutant is already detected`);
+    if (premiseFailed || premiseUnmeasured) {
+      log(
+        premiseFailed ? "premise-invalid" : "premise-unmeasured",
+        `${task}: ${premiseFailed ? "a declared mutant is already detected" : "the declared faults could not be measured"}`,
+      );
       return "reject";
     }
     const candidate = { ...options.baseline, ...submission.files };
@@ -468,6 +474,37 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     if (selected !== taskId) {
       log(`skip:${taskId}`, `selected=${selected ?? "none"}`);
       return undefined;
+    }
+    // A task whose instruction says "the host proved these faults survive" depends on that
+    // proof: if the premise is false the task as stated does not exist, and dispatching it
+    // anyway spends a full model call on work the host then refuses on its own evidence
+    // (measured: 204k tokens). The proof is seconds of host time, so it is awaited here,
+    // before the dispatch, instead of being raced against the model.
+    if ((declared[taskId as "A" | "B"] ?? []).length) {
+      await matrix;
+      if (premiseFailed || premiseUnmeasured) {
+        const reason = premiseFailed
+          ? `${taskId} declares a fault the frozen suite already detects`
+          : `${taskId}'s declared fault could not be measured`;
+        // Nothing is claimed yet, but something *was* published: the round announced this
+        // task's handoff, and the board serializes actionable entries, so leaving it
+        // outstanding would block every later claim in the round.
+        gate.withdrawHandoff(taskId, reason);
+        log(premiseFailed ? "premise-invalid" : "premise-unmeasured", `${taskId}: not dispatched`);
+        trace({
+          kind: "worker-failed",
+          taskId,
+          attempt: 0,
+          reason: `premise-invalid: ${reason}`,
+        });
+        rejections.push({
+          task: taskId,
+          attempt: 0,
+          artifact: `${taskId} not dispatched: ${reason}`,
+        });
+        verdicts[taskId] = "rejected";
+        return "rejected";
+      }
     }
     const ticket = gate.claim(taskId, `worker-${taskId}`);
     const claimedAt = Date.now();
@@ -624,6 +661,10 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     // Class A/D: proving the declared mutants survive is required work that does not
     // depend on B's model call, so it runs concurrently with it instead of before the
     // round. The verifier awaits it, so a false premise still fails closed.
+    //
+    // Three outcomes, not two: an `undecidable` check measured nothing, and folding it into
+    // "already detected" turns a repository hiccup into a false premise — which is how a
+    // round once reported a surviving mutant as killed 76 ms after the previous one.
     matrix = (async () => {
       for (const [task, mutants] of Object.entries(declared))
         for (const mutation of mutants ?? []) {
@@ -631,11 +672,17 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
           if (run.verdict === "accept") {
             log("mutant-survived-baseline", `${task} ${mutation.id}`);
             trace({ kind: "mutant", taskId: task, id: mutation.id, outcome: "survived" });
-          } else {
+            continue;
+          }
+          if (run.verdict === "reject") {
             log("precondition-failed", `${task} ${mutation.id} is already detected`);
             trace({ kind: "mutant", taskId: task, id: mutation.id, outcome: "killed" });
             premiseFailed = true;
+            continue;
           }
+          log("premise-unmeasured", `${task} ${mutation.id} could not be measured`);
+          trace({ kind: "mutant", taskId: task, id: mutation.id, outcome: "unmeasured" });
+          premiseUnmeasured = true;
         }
     })();
     // B has no dependency on A, so it runs while A waits on the real check.

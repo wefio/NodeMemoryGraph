@@ -12,7 +12,7 @@
 //     rejection or an explicit failure, never a reproduced verdict.
 //   - model calls are not re-executed. A different worker answer is a different round,
 //     which is why the log records the answer rather than the prompt that produced it.
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import type { CheckTicket } from "../../src/integration/ooo-check.ts";
 import type { CycleWorker, WorkerMetrics } from "./cycle.ts";
 
@@ -46,7 +46,15 @@ export type RoundEvent =
       evidence: string;
     }
   | { kind: "verdict"; at: string; taskId: string; attempt: number; verdict: string }
-  | { kind: "mutant"; at: string; taskId: string; id: string; outcome: "killed" | "survived" }
+  | {
+      kind: "mutant";
+      at: string;
+      taskId: string;
+      id: string;
+      /** `unmeasured` is not a verdict about the fault: the check could not run, so the
+       *  premise is unproven rather than false. */
+      outcome: "killed" | "survived" | "unmeasured";
+    }
   | { kind: "reopen"; at: string; taskId: string; requirement: string; invalidated: string[] }
   | {
       kind: "terminal";
@@ -76,16 +84,19 @@ const KINDS = new Set([
   "terminal",
 ]);
 
-/** Appends round events as JSON lines. Append-only on purpose: a truncated or edited
- *  line is visible when the log is read back, and replay does not repair it. */
+/** Appends round events as JSON lines. Append-only within one round: a truncated or edited
+ *  line is visible when the log is read back, and replay does not repair it. A new round
+ *  starts a fresh file unless the caller asks to continue one (`append: true`), because a
+ *  file that accumulates several rounds replays as a mixture of all of them. */
 export class RoundLog {
   private readonly events: RoundEvent[] = [];
   /** Written as a field, not a constructor parameter property: this repository's scripts
    *  run under Node's strip-only TypeScript mode, which does not support them. */
   private readonly path?: string;
 
-  constructor(path?: string) {
+  constructor(path?: string, options: { append?: boolean } = {}) {
     this.path = path;
+    if (path && !options.append) writeFileSync(path, "", "utf8");
   }
 
   append(event: RoundEvent): void {

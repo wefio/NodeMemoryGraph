@@ -4,7 +4,9 @@ import { readFileSync } from "node:fs";
 import {
   ARTIFACT_TOOL,
   artifactEnvelope,
+  artifactFromText,
   checkToolCandidate,
+  resourceLoader,
   piCompletionAllowed,
   snapshotText,
 } from "../../.pi/extensions/nmg/ooo-execution.ts";
@@ -269,4 +271,53 @@ test("channel: the envelope refuses a kind the frozen rule does not admit", () =
     evidence: "dependency missing",
   });
   assert.equal(blocked.ok, true);
+});
+
+test("contract: a text answer obeys the tool's envelope, or the attempt fails with a reason", () => {
+  const frozen = patchWork();
+  // A patch written as text is normalised to the same envelope the tool produces.
+  const asText = artifactFromText(
+    frozen,
+    JSON.stringify({
+      digest: frozen.digest,
+      files: [{ path: "src/check.test.ts", content: "new\n" }],
+    }),
+  );
+  assert.deepEqual(JSON.parse(asText.ok ? asText.json : "{}"), {
+    digest: frozen.digest,
+    files: [{ path: "src/check.test.ts", content: "new\n" }],
+  });
+  // The shape a live round actually returned: conclusion fields, no files, null kind.
+  const unshaped = artifactFromText(
+    frozen,
+    JSON.stringify({
+      digest: frozen.digest,
+      summary: "added tests",
+      evidence: "...",
+      conclusion: null,
+      citations: [],
+    }),
+  );
+  assert.equal(unshaped.ok, false);
+  assert.match(errorOf(unshaped), /provide files, or a conclusion/);
+  // A wrong digest is named rather than passed to the host to refuse later.
+  const stale = artifactFromText(frozen, JSON.stringify({ digest: "0".repeat(64), files: [] }));
+  assert.equal(stale.ok, false);
+  assert.match(errorOf(stale), /digest must be exactly/);
+  assert.equal(artifactFromText(frozen, "I added the missing test.").ok, false);
+});
+
+/** The refusal text of a validator result, with the union narrowed once. */
+const errorOf = (result: ReturnType<typeof artifactFromText>): string => {
+  assert.equal(result.ok, false);
+  return result.ok ? "" : result.error;
+};
+
+test("contract: a patch attempt is told to answer through the artifact tool, not in prose", () => {
+  const patchMode = resourceLoader(true).getSystemPrompt() ?? "";
+  assert.match(patchMode, /calling the artifact tool/);
+  assert.doesNotMatch(patchMode, /must begin with '\{'/);
+  // The snapshot task has no envelope and keeps the JSON-in-text instruction.
+  const snapshotMode = resourceLoader(false).getSystemPrompt() ?? "";
+  assert.match(snapshotMode, /must begin with '\{'/);
 });

@@ -544,6 +544,58 @@ conclusion; that is a concrete target for the next cost investigation, not a sch
 pushback, reopen) still has only deterministic tests, because C's declared requirement was
 satisfied on the first attempt and no reopen was needed.
 
+## S2 slice 2, live round 7: the log replays a real round — 2026-09-12
+
+Round 7 ran the whole A/B/C round against the promoted baseline and was **accepted with no
+rejections** (`deepseek/deepseek-v4-flash`, revision `70731640`): B 116,424 tokens / 6 turns /
+11,421-byte patch, A 37,240 / 4, C 168,769 / 9, 322,433 worker tokens in total, 15 host
+checks / 29.4 s, `reopens 0`. B's patch added one test title (16 → 17) and was re-measured
+independently outside the round: the artifact passes intact and kills **two** declared
+faults — this round's target `bound-ignores-runid` and round 6's `reopen-keeps-attempt`.
+
+`--replay` then reproduced that round from `.nmg/ooo-live/round.jsonl` with **no model
+call**: same verdicts, same timeline, 15 host checks / 29.4 s. The live round cost 322,433
+worker tokens; re-checking what it produced costs none. Reported honestly: replay re-derives
+only what the host itself checks, so it is evidence about the _host's_ verdicts, not a proof
+that the recorded answers were the model's best ones.
+
+**Replay and the round found four real defects, all in the orchestration rather than in the
+model's answers:**
+
+1. **Non-deterministic orchestration.** A's frozen instruction embedded a per-issue random
+   `checkId`, so every round had a different digest and replay's first attempt was refused by
+   the host as `stale patch digest`. Check identity is now derived from the round's own state.
+2. **The text channel was a weaker contract.** A patch answer written as text was recorded
+   raw; the host could only refuse it as `invalid patch structure` after the model had been
+   paid for. Text answers now go through the same envelope as the artifact tool, so an
+   unshaped answer is a recorded failed attempt naming the reason.
+3. **The prompt pointed at the wrong channel.** The system prompt still said "your reply must
+   begin with `{`", which describes a text answer and is what the model followed. A patch
+   attempt is now told to answer through the artifact tool; the text path remains a validated
+   fallback.
+4. **A premise that could not be measured was reported as a false premise.** Concurrent
+   `git worktree add` calls intermittently failed, and the matrix folded `undecidable` into
+   "already detected" — one round reported a surviving mutant as killed **76 ms** after the
+   previous one. The proof now has three outcomes (`survived` / `killed` / `unmeasured`), an
+   unmeasured premise stops the round with `premise-unmeasured` rather than `premise-invalid`,
+   and the candidate worktree is retried a bounded number of times.
+
+Two further changes came out of the same round and belong to the same rule — _a task depends
+on what its instruction asserts_:
+
+- **The premise is proven before the dispatch.** One earlier round spent **204,164 tokens**
+  (B's entire call) on a premise that was already false. The proof is seconds of host time,
+  so it is awaited before the task is claimed; a false premise now costs zero worker tokens,
+  measured on the same fault list.
+- **A refused dispatch closes what it published.** Skipping a task left its board handoff
+  outstanding, and because the board serializes actionable entries, every later claim in the
+  round was blocked. `withdrawHandoff` resolves that entry and fences the attempt.
+
+Round 6's fault is now detected by the baseline that round produced, so declaring it again
+would be a false premise: the declared list is refreshed by probing candidates against the
+_current_ frozen suite (`MUTATION_SPEC=<spec> mutation-probe.ts`) — a probe result is only
+valid for the tree it measured.
+
 ## S2 slice 2: the round logs itself, and replays without a model — 2026-09-11
 
 The durable-execution split this repository already uses elsewhere is "deterministic

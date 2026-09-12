@@ -286,10 +286,15 @@ test("contract: a patch proves a case only by naming its frozen title token", as
 });
 
 test("contract: a declared mutant the baseline already detects invalidates the premise", async () => {
+  const dispatched: string[] = [];
   const optionsWith = () => ({
-    ...options(async (_task, frozen) =>
-      JSON.stringify({ digest: frozen.digest, files: [{ path: TESTS, content: "changed" }] }),
-    ),
+    ...options(async (task, frozen) => {
+      dispatched.push(task);
+      return JSON.stringify({
+        digest: frozen.digest,
+        files: [{ path: TESTS, content: "changed" }],
+      });
+    }),
     runChecks: async () => ({
       verdict: "reject" as const,
       outcomes: [{ label: "fixed", status: "failed" }],
@@ -303,6 +308,10 @@ test("contract: a declared mutant the baseline already detects invalidates the p
   assert.deepEqual(result.accepted, {});
   assert.ok(result.timeline.some((entry) => entry.step === "precondition-failed"));
   assert.ok(result.timeline.some((entry) => entry.step === "premise-invalid"));
+  // The premise gates the *dispatch*, not only the acceptance: a false premise must not
+  // spend a model call on work the host will refuse on its own evidence.
+  assert.ok(!dispatched.includes("B"), `B was dispatched anyway: ${JSON.stringify(dispatched)}`);
+  assert.ok(result.rejections.some((item) => item.task === "B" && item.attempt === 0));
 });
 
 test("contract: a patch is accepted only when it passes intact and kills a declared mutant", async () => {
@@ -600,4 +609,39 @@ test("safety: an artifact carrying the pre-check digest is rejected, not accepte
   assert.equal(result.verdicts.A, "rejected");
   assert.equal(result.verdicts.C, undefined);
   assert.deepEqual(Object.keys(result.accepted), ["B"]);
+});
+
+test("safety: a premise that could not be measured is refused as unmeasured, not as detected", async () => {
+  const dispatched: string[] = [];
+  let calls = 0;
+  const result = await runCycle({
+    ...options(async (task, frozen) => {
+      dispatched.push(task);
+      return JSON.stringify({
+        digest: frozen.digest,
+        files: [{ path: TESTS, content: "changed" }],
+      });
+    }),
+    // The mutant measurement cannot run at all: no result is a missing premise, never
+    // evidence that the fault is already covered.
+    runChecks: async ({ files }) => {
+      calls += 1;
+      return Object.values(files).some((text) => text.includes("MUTANT"))
+        ? {
+            verdict: "undecidable" as const,
+            outcomes: [{ label: "fixed", status: "undecidable" as const }],
+          }
+        : { verdict: "accept" as const, outcomes: [{ label: "fixed", status: "passed" as const }] };
+    },
+    mutations: { B: [mutant("m1", "export const a = 1; // MUTANT\n")] },
+  });
+  assert.ok(calls > 0, "the premise proof must actually run");
+  assert.equal(result.verdicts.B, "rejected");
+  assert.ok(result.timeline.some((entry) => entry.step === "premise-unmeasured"));
+  assert.ok(!result.timeline.some((entry) => entry.step === "precondition-failed"));
+  assert.ok(!dispatched.includes("B"), "an unproven premise must not spend a model call");
+  assert.ok(
+    result.log.some((event) => event.kind === "mutant" && event.outcome === "unmeasured"),
+    JSON.stringify(result.log.filter((event) => event.kind === "mutant")),
+  );
 });
