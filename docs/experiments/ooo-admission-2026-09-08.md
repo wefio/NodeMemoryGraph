@@ -544,6 +544,127 @@ conclusion; that is a concrete target for the next cost investigation, not a sch
 pushback, reopen) still has only deterministic tests, because C's declared requirement was
 satisfied on the first attempt and no reopen was needed.
 
+## S2 slice 2, live round 7: the log replays a real round — 2026-09-12
+
+Round 7 ran the whole A/B/C round against the promoted baseline and was **accepted with no
+rejections** (`deepseek/deepseek-v4-flash`, revision `70731640`): B 116,424 tokens / 6 turns /
+11,421-byte patch, A 37,240 / 4, C 168,769 / 9, 322,433 worker tokens in total, 15 host
+checks / 29.4 s, `reopens 0`. B's patch added one test title (16 → 17) and was re-measured
+independently outside the round: the artifact passes intact and kills **two** declared
+faults — this round's target `bound-ignores-runid` and round 6's `reopen-keeps-attempt`.
+
+`--replay` then reproduced that round from `.nmg/ooo-live/round.jsonl` with **no model
+call**: same verdicts, same timeline, 15 host checks / 29.4 s. The live round cost 322,433
+worker tokens; re-checking what it produced costs none. Reported honestly: replay re-derives
+only what the host itself checks, so it is evidence about the _host's_ verdicts, not a proof
+that the recorded answers were the model's best ones.
+
+**Replay and the round found four real defects, all in the orchestration rather than in the
+model's answers:**
+
+1. **Non-deterministic orchestration.** A's frozen instruction embedded a per-issue random
+   `checkId`, so every round had a different digest and replay's first attempt was refused by
+   the host as `stale patch digest`. Check identity is now derived from the round's own state.
+2. **The text channel was a weaker contract.** A patch answer written as text was recorded
+   raw; the host could only refuse it as `invalid patch structure` after the model had been
+   paid for. Text answers now go through the same envelope as the artifact tool, so an
+   unshaped answer is a recorded failed attempt naming the reason.
+3. **The prompt pointed at the wrong channel.** The system prompt still said "your reply must
+   begin with `{`", which describes a text answer and is what the model followed. A patch
+   attempt is now told to answer through the artifact tool; the text path remains a validated
+   fallback.
+4. **A premise that could not be measured was reported as a false premise.** Concurrent
+   `git worktree add` calls intermittently failed, and the matrix folded `undecidable` into
+   "already detected" — one round reported a surviving mutant as killed **76 ms** after the
+   previous one. The proof now has three outcomes (`survived` / `killed` / `unmeasured`), an
+   unmeasured premise stops the round with `premise-unmeasured` rather than `premise-invalid`,
+   and the candidate worktree is retried a bounded number of times.
+
+Two further changes came out of the same round and belong to the same rule — _a task depends
+on what its instruction asserts_:
+
+- **The premise is proven before the dispatch.** One earlier round spent **204,164 tokens**
+  (B's entire call) on a premise that was already false. The proof is seconds of host time,
+  so it is awaited before the task is claimed; a false premise now costs zero worker tokens,
+  measured on the same fault list.
+- **A refused dispatch closes what it published.** Skipping a task left its board handoff
+  outstanding, and because the board serializes actionable entries, every later claim in the
+  round was blocked. `withdrawHandoff` resolves that entry and fences the attempt.
+
+### Round 7 promotion — 2026-09-12
+
+Promotion followed an explicit human decision (as in rounds 5 and 6). The candidate replaced
+`evals/ooo-execution/check-events.test.ts` (9,450 → 10,752 bytes, 16 → 17 test titles); the
+previous version is kept at `.nmg/ooo-live/check-events.test.ts.round6-promoted`. The two fixed
+check files now run 22 tests.
+
+| Fault                                | before promotion | promoted baseline |
+| ------------------------------------ | ---------------- | ----------------- |
+| `bound-ignores-runid`                | survived         | **killed**        |
+| `reopen-keeps-attempt`               | killed           | killed            |
+| `bound-ignores-input-digest`         | survived         | survived          |
+| `bound-ignores-claimed-at`           | survived         | survived          |
+| `issueCheck-skips-stale-input-guard` | survived         | survived          |
+| `cancel-keeps-check-tickets`         | survived         | survived          |
+| `withdraw-handoff-keeps-entry`       | survived         | survived          |
+
+Re-measured on the promoted tree, as the rule requires: the new baseline detects what the
+candidate detected, and detects nothing less than the old baseline did. Five faults still
+survive, so the next round's premise exists without re-deriving it — and `bound-ignores-runid`
+must be dropped from the declared list, since declaring it again would now be a false premise.
+
+**Open, attributed: two load-sensitive test flakes.** In the combined run
+(`evals/ooo-execution/*.test.ts` + `tests/integration/*.test.ts`) two tests failed once each and
+passed in isolation and on every re-run: `MCP adapter registers, discovers, and directs to a
+stable agent` and `recovery: a lapsed claim is a new generation, not a silent success`. The
+recovery test drives `gate.now` as a logical clock (`BoardAdmission.now`, and `claim()` passes
+it to the board as `now`, so it is not a real-clock dependency); what makes it load-sensitive is
+not yet diagnosed, and three deliberately loaded re-runs did not reproduce it. This matters
+before wiring `evals/` into CI: a gate that fails for load reasons is a gate people learn to
+re-run, so the flake must be understood or the eval tests must run with bounded concurrency
+first.
+
+Round 6's fault is now detected by the baseline that round produced, so declaring it again
+would be a false premise: the declared list is refreshed by probing candidates against the
+_current_ frozen suite (`MUTATION_SPEC=<spec> mutation-probe.ts`) — a probe result is only
+valid for the tree it measured.
+
+## S2 slice 2: the round logs itself, and replays without a model — 2026-09-11
+
+The durable-execution split this repository already uses elsewhere is "deterministic
+orchestration, uncertain work recorded as an activity result". A model call is such an
+activity, so replaying a round must not call a model again, and the verdicts must follow
+from the frozen inputs plus the recorded answers.
+
+`evals/ooo-execution/round-log.ts` adds the record: a JSON-lines event stream (plan, check
+issued/terminal, claim, artifact or worker failure, pushback, verdict, each mutant outcome,
+reopen, terminal state) plus `recordedWorker(events)`, which answers from the log instead of
+from a model, and `compareTerminal(recorded, replayed)`.
+
+**Replay found a real non-determinism.** The first replay did not reproduce the round: A's
+frozen instruction embedded the check's `checkId`, which was a fresh `randomUUID()` per
+issue, so every round's digest differed and the host refused the recorded artifact as
+`stale patch digest`. That is the correct refusal — the envelope really was different. The
+fix belongs in the coordinator: a check's identity is now derived from the round's own state
+(`digest([taskId, attempt])`, scoped to the store, with `runId` still the discriminator), so
+the same round produces the same envelopes. Nothing else in the round was non-deterministic:
+timestamps appear in events but not in digests, and attempts are part of both.
+
+| Property                    | Evidence (`evals/ooo-execution/replay.test.ts`, 5 tests)                                                               |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| replay reproduces the round | a logged A/B/C round replays to an empty `compareTerminal`, with exactly the three recorded attempts and no model call |
+| the log is not trusted      | an artifact edited in the log completes the round with a _different_ verdict: the host re-checks it                    |
+| truncation is detected      | a missing recorded attempt is reported as a recorded worker failure, and the terminal state diverges at that task      |
+| a malformed log is refused  | not-JSON, an unknown kind, and a missing timestamp each fail the read instead of being skipped                         |
+| replay is still a round     | a faithfully replayed artifact the host refuses is still rejected                                                      |
+
+The live cycle writes `.nmg/ooo-live/round.jsonl`, so a real round can be re-verified later
+by re-running the host checks against its recorded answers — the ~200k worker tokens of a
+round are not needed to re-check what it produced. What replay does **not** establish: that a
+_new_ log line cannot change the verdict for a reason the host cannot see (only the host's
+own checks are re-derived), and that the log is tamper-evident (it is not: nothing
+chains the lines, and a reader that trusted it would be trusting an ordinary file).
+
 ## S2 slice 1: recovery, explicit termination, cancellation — 2026-09-11
 
 Offline only; no model calls. S2's exit criterion is "after fault injection: no duplicate

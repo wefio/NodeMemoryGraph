@@ -218,3 +218,26 @@ test("safety: each reopen consumes its own generation so repeated reopens cannot
   // at 0 and the first claim would restart at attempt 1.
   assert.equal(ticket.attempt, 3);
 });
+
+// Regression: `bound()` is the board's fence on a submitted artifact, and it must
+// bind *every* field of the claimed ticket, including the round identity. The
+// frozen suite substitutes attempt, expiry and inputDigest through the check path
+// but never submits an artifact under a ticket whose runId names another round: a
+// `bound` that drops `ticket.runId === this.runId` still matches, so a ticket
+// borrowed from a different run is admitted as the current one. `readSubmission`
+// reaches `bound` before any artifact validation, so a mismatched runId must be
+// refused as stale and nothing may be accepted no matter what text is attached.
+test("safety: an artifact submitted under a ticket from another run is stale, not admitted", async (t) => {
+  const { gate } = fixture(t);
+  // B is the selected task while A waits on its external event, so it is claimable.
+  const ticket = gate.claim("B", "worker-1");
+  const entry = gate.putTaskBoardEntry({
+    taskId: "ooo-process-probe",
+    agentId: ticket.owner,
+    kind: "result",
+    content: JSON.stringify({ ticket: { ...ticket, runId: "some-other-run" }, artifact: "6" }),
+    expiresAt: new Date(gate.now + 60_000).toISOString(),
+  });
+  assert.equal(await gate.submit(entry.id), "stale");
+  assert.deepEqual(gate.accepted(), {});
+});

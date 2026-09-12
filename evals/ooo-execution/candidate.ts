@@ -70,6 +70,28 @@ function safeRelative(path: string): boolean {
   );
 }
 
+/** Creates the candidate worktree, retrying a failure that is not a verdict.
+ *
+ *  Two verifications can legitimately run at once (the round's own check waits while the
+ *  premise matrix measures mutants), and concurrent `git worktree add` calls in one
+ *  repository intermittently fail on repository metadata. That failure is infrastructure,
+ *  not evidence: one round recorded it as "the mutant is already detected" in 76 ms, which
+ *  is a false premise reported as a measured one. The retry is bounded and its exhaustion
+ *  is reported as `undecidable` rather than silently folded into either verdict. */
+async function addWorktree(
+  repository: string,
+  worktree: string,
+  revision: string,
+): Promise<{ ok: boolean; exitCode: number | null; log: string }> {
+  let last = await git(repository, ["worktree", "remove", "--force", worktree], 60_000);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    last = await git(repository, ["worktree", "add", "--detach", worktree, revision], 60_000);
+    if (last.ok) return last;
+    await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+  }
+  return last;
+}
+
 /** Applies candidate files into an isolated git worktree of the frozen revision
  *  and runs the host's fixed checks there. Runs candidate code: this bounds
  *  accidental damage and absent context, not a hostile-code sandbox. */
@@ -90,11 +112,7 @@ export async function verifyCandidate(options: {
   const worktree = join(parent, "worktree");
   const outcomes: CheckOutcome[] = [];
   try {
-    const added = await git(
-      options.repository,
-      ["worktree", "add", "--detach", worktree, options.revision],
-      60_000,
-    );
+    const added = await addWorktree(options.repository, worktree, options.revision);
     if (!added.ok)
       return {
         verdict: "undecidable",

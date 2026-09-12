@@ -365,7 +365,13 @@ export class BoardAdmission extends NmgStore {
       const ticket = Object.freeze({
         runId: this.runId,
         taskId: id,
-        checkId: randomUUID(),
+        // Derived from the round's own state, never from a clock or a random source. The
+        // identity ends up inside the frozen instruction the worker is handed, so a random
+        // id made every round's envelope different and a logged round unreplayable: the
+        // host refused the recorded artifact for a digest it could no longer reproduce.
+        // Its scope is the store, and one store is one round, so this stays unique where
+        // it has to be.
+        checkId: digest([id, attempt]).slice(0, 32),
         attempt,
         inputDigest: this.inputDigest(row),
         owner,
@@ -661,25 +667,8 @@ export class BoardAdmission extends NmgStore {
     this.transaction(() => {
       for (const row of this.db
         .prepare("SELECT * FROM ooo_probe_tasks ORDER BY position")
-        .all() as unknown as Row[]) {
-        if (row.entry_id)
-          try {
-            this.resolveTaskBoardEntry({
-              taskId: channel,
-              entryId: row.entry_id,
-              agentId: "coordinator",
-              resolution: "round cancelled",
-            });
-          } catch {
-            // Already resolved or expired: nothing to withdraw.
-          }
-        if (row.artifact !== null || row.owner !== null) withdrawn.push(row.id);
-        this.db
-          .prepare(
-            "UPDATE ooo_probe_tasks SET artifact=NULL, attempt=attempt+1, owner=NULL, claim_time=NULL, external_ready=0, entry_id=NULL WHERE id=?",
-          )
-          .run(row.id);
-      }
+        .all() as unknown as Row[])
+        this.fenceRow(row, withdrawn);
       this.db.prepare("UPDATE ooo_probe_checks SET terminal='cancelled', cancelled=1").run();
       this.db
         .prepare("UPDATE ooo_probe_meta SET cancel_reason=?, cancelled_at=? WHERE id=1")
@@ -687,6 +676,42 @@ export class BoardAdmission extends NmgStore {
     });
     this.publish("decision", `cancel: ${reason}`.slice(0, 1_000));
     return withdrawn;
+  }
+
+  /** Withdraws one task's published handoff and leaves it unclaimed, because the
+   *  coordinator has decided not to dispatch it (its premise did not hold). The attempt
+   *  still advances, so an artifact produced for the withdrawn attempt arrives stale.
+   *
+   *  This is not bookkeeping: the board serializes actionable entries, so a handoff left
+   *  outstanding for a task nobody will claim blocks every later claim in the round. The
+   *  refusal has to close what it published. */
+  withdrawHandoff(taskId: string, reason: string): void {
+    this.transaction(() => {
+      this.fenceRow(this.row(taskId), [], reason);
+    });
+    this.publish("decision", `withdrawn: ${taskId}: ${reason}`.slice(0, 1_000));
+  }
+
+  /** Retires one row: resolves its published entry, then fences it so every live ticket
+   *  and artifact bound to the old attempt stops matching. */
+  private fenceRow(row: Row, dropped: string[], resolution = "round cancelled"): void {
+    if (row.entry_id)
+      try {
+        this.resolveTaskBoardEntry({
+          taskId: channel,
+          entryId: row.entry_id,
+          agentId: "coordinator",
+          resolution,
+        });
+      } catch {
+        // Already resolved or expired: nothing to withdraw.
+      }
+    if (row.artifact !== null || row.owner !== null) dropped.push(row.id);
+    this.db
+      .prepare(
+        "UPDATE ooo_probe_tasks SET artifact=NULL, attempt=attempt+1, owner=NULL, claim_time=NULL, external_ready=0, entry_id=NULL WHERE id=?",
+      )
+      .run(row.id);
   }
 
   /** The round's terminal reason, or null while it is still running. */
