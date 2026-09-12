@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { BoardAdmission, type ProbePlan } from "./board-admission.ts";
 import { verifyCandidate } from "./candidate.ts";
-import { runCycle, type CycleResult, type CycleWorker } from "./cycle.ts";
+import { runCycle, type CycleOptions, type CycleResult, type CycleWorker } from "./cycle.ts";
 import { RoundLog, readRoundLog, recordedWorker, terminalEvent } from "./round-log.ts";
 import type { RoundSpec, SpecWorker } from "./round-spec.ts";
 
@@ -116,7 +116,9 @@ export async function specWorker(
     },
   };
   return async (_taskId, frozen) => {
-    const run = await executePiPatch(frozen, worker.provider, worker.model, { checkTool });
+    const run = await executePiPatch(frozen, worker.provider, worker.model, {
+      check: checkTool,
+    });
     const metrics = { tokens: run.tokens, turns: run.turns, checks: run.checks };
     return run.pushback
       ? { artifact: "", pushback: run.pushback, metrics }
@@ -138,6 +140,46 @@ export function readBaseline(
     baseline: Object.fromEntries(
       spec.baseline.map((path) => [path, readFileSync(join(repository, path), "utf8")]),
     ),
+  };
+}
+
+/** The round options a spec defines. One home for the mapping, so `submit` and the S4
+ *  comparison cannot drift into running subtly different rounds from the same spec. */
+export function cycleOptionsFor(options: {
+  spec: RoundSpec;
+  repository: string;
+  revision: string;
+  baseline: Readonly<Record<string, string>>;
+  worker: CycleWorker;
+  runDirectory: string;
+  mode?: "ooo" | "sequential";
+  signal?: AbortSignal;
+  watchCancellation?: () => string | null;
+}): CycleOptions {
+  const { spec } = options;
+  return {
+    repository: options.repository,
+    revision: options.revision,
+    baseline: options.baseline,
+    checks: spec.checks,
+    worker: options.worker,
+    mode: options.mode ?? "ooo",
+    aInstruction: spec.a.instruction,
+    bInstruction: spec.b.instruction,
+    aEditable: spec.a.editable,
+    bEditable: spec.b.editable,
+    budget: spec.budget ?? { perFile: 24_000, output: 48_000 },
+    limits: spec.limits ?? { turns: 10, reads: 6, timeoutMs: 240_000 },
+    roundLog: new RoundLog(logPath(options.runDirectory)),
+    databaseDir: options.runDirectory,
+    ...(options.watchCancellation ? { watchCancellation: options.watchCancellation } : {}),
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(spec.noChangeCases ? { noChangeCases: spec.noChangeCases } : {}),
+    ...(spec.mutations ? { mutations: spec.mutations } : {}),
+    ...(spec.visible ? { visible: spec.visible } : {}),
+    ...(spec.admitted ? { admitted: spec.admitted } : {}),
+    ...(spec.requires ? { requires: spec.requires } : {}),
+    ...(spec.maxReopens === undefined ? {} : { maxReopens: spec.maxReopens }),
   };
 }
 
@@ -166,29 +208,18 @@ export async function runSpecifiedRound(options: {
   writeFileSync(recordPath(options.runDir), JSON.stringify(started, null, 2), "utf8");
   const store = ensureRoundStore(options.runDir);
   try {
-    const result = await runCycle({
-      repository: options.repository,
-      revision: options.revision,
-      baseline: options.baseline,
-      checks: options.spec.checks,
-      worker: options.worker,
-      aInstruction: options.spec.a.instruction,
-      bInstruction: options.spec.b.instruction,
-      aEditable: options.spec.a.editable,
-      bEditable: options.spec.b.editable,
-      budget: options.spec.budget ?? { perFile: 24_000, output: 48_000 },
-      limits: options.spec.limits ?? { turns: 10, reads: 6, timeoutMs: 240_000 },
-      roundLog: new RoundLog(logPath(options.runDir)),
-      databaseDir: options.runDir,
-      watchCancellation: () => store.cancelled(),
-      ...(options.signal ? { signal: options.signal } : {}),
-      ...(options.spec.noChangeCases ? { noChangeCases: options.spec.noChangeCases } : {}),
-      ...(options.spec.mutations ? { mutations: options.spec.mutations } : {}),
-      ...(options.spec.visible ? { visible: options.spec.visible } : {}),
-      ...(options.spec.admitted ? { admitted: options.spec.admitted } : {}),
-      ...(options.spec.requires ? { requires: options.spec.requires } : {}),
-      ...(options.spec.maxReopens === undefined ? {} : { maxReopens: options.spec.maxReopens }),
-    });
+    const result = await runCycle(
+      cycleOptionsFor({
+        spec: options.spec,
+        repository: options.repository,
+        revision: options.revision,
+        baseline: options.baseline,
+        worker: options.worker,
+        runDirectory: options.runDir,
+        watchCancellation: () => store.cancelled(),
+        ...(options.signal ? { signal: options.signal } : {}),
+      }),
+    );
     writeFileSync(
       recordPath(options.runDir),
       JSON.stringify(

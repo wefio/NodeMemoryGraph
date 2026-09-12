@@ -176,12 +176,17 @@ test(
       await first.call("connect", { endpoint, agent: "narrow-1" });
       await second.call("connect", { endpoint, agent: "narrow-2" });
       assert.equal(await daemon.call("next"), "B");
-      await assert.rejects(second.call("requestClaim", { task: "A" }), /dependencies/);
+      // A has no dependencies; what it lacks is a published handoff, because it is not the
+      // task narrow dispatch selected. The refusal now says that instead of blaming dependencies.
+      await assert.rejects(second.call("requestClaim", { task: "A" }), /no published handoff/);
       await assert.rejects(daemon.call("externalReady", { event: "invented" }), /unknown/);
       await first.call("take", { task: "B" });
       await daemon.call("externalReady", { event: "interface-response" });
       assert.equal(await daemon.call("next"), null, "ready A does not preempt running B");
-      await assert.rejects(second.call("requestClaim", { task: "A" }), /dependencies|not selected/);
+      await assert.rejects(
+        second.call("requestClaim", { task: "A" }),
+        /no published handoff|not selected/,
+      );
       await assert.rejects(second.call("requestClaim", { task: "C" }), /dependencies/);
       await daemon.call("pauseNext");
       const verified = daemon.event("verified");
@@ -196,7 +201,12 @@ test(
       await second.call("take", { task: "A" });
       assert.equal(await second.call("deliver", { task: "A" }), "accepted");
       assert.equal(await daemon.call("next"), null, "changed B needs review, not automatic retry");
-      await assert.rejects(first.call("requestClaim", { task: "B" }), /not selected/);
+      // B holds a changed input and was released when it stopped being the selected task, so
+      // either refusal is correct here: no published handoff, or not selected.
+      await assert.rejects(
+        first.call("requestClaim", { task: "B" }),
+        /no published handoff|not selected/,
+      );
       assert.deepEqual(await daemon.call("accepted"), { A: "4" });
       assert.equal(
         (await second.call<TaskBoardEntry[]>("board")).filter(

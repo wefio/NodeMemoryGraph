@@ -6,10 +6,10 @@ import { verifyCandidate, type CandidateCheck } from "./candidate.ts";
 import {
   preparePatchWork,
   patchSubmission,
-  type ConclusionKind,
   type FrozenPatchTask,
   type FrozenPatchWork,
   type PatchSubmission,
+  type ConclusionKind,
 } from "../../src/integration/ooo-patch.ts";
 
 import { mutate, type Mutation } from "./mutation.ts";
@@ -96,6 +96,11 @@ export interface CycleOptions {
    *  `cancel` on a round it does not own). The round polls this while it runs, and the
    *  decision is the same one `signal` expresses, so both share a single path. */
   watchCancellation?: () => string | null;
+  /** Dispatch order. `ooo` (default) runs the independent task while the waiting task's check
+   *  is outstanding, which is the design under test; `sequential` waits for the check first and
+   *  then runs the fixed plan in order. Same plan, inputs, checks and acceptance rules — only
+   *  the order differs, which is what an S4 comparison needs. */
+  mode?: "ooo" | "sequential";
   /** Independently reviewed, task-specific no-change claims, fixed before the round.
    *  Omission disables no-change acceptance; test names alone are not coverage proof. */
   noChangeCases?: Partial<Record<"A" | "B", readonly CaseRule[]>>;
@@ -734,6 +739,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
       checks: options.checks.map((check) => check.label),
       revision: options.revision,
       checkDigest: checksDigest(options.checks),
+      mode: options.mode ?? "ooo",
     });
     trace({
       kind: "terminal",
@@ -743,6 +749,55 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
       cancelled: result.cancelled!,
     });
     return { ...result, log: roundLog.recorded() };
+  };
+
+  /** The ordered phase: the waiting task's check is issued first, the independent task may run
+   *  while it is outstanding (`ooo`), and the fixed plan is then dispatched in order. Extracted
+   *  because both dispatch orders live here, and one function should not carry both the ordering
+   *  decision and every guard around it. */
+  /** The verdicts of the two independent tasks: C's frozen envelope states them, and a reopen
+   *  reassigns them, so they outlive the phase that produced them. */
+  let a: string | undefined;
+  let b: string | undefined;
+
+  const dispatchPhase = async () => {
+    installB("");
+    const ticket = gate.issueCheck("A", "protocol-check-host");
+    log("check-issued", ticket.checkId);
+    trace({ kind: "check-issued", taskId: "A", ticket });
+    const background = check(options.baseline).then((result) => {
+      log("check-finished", result.verdict);
+      return result;
+    });
+    // Sequential mode is the control: the check is awaited before any task is dispatched, so
+    // nothing overlaps the wait. The plan and every acceptance rule stay identical.
+    const outcome = (options.mode ?? "ooo") === "sequential" ? await background : null;
+    // In sequential mode nothing is dispatched before the check reports; otherwise B runs now,
+    // which is the out-of-order decision this design is about.
+    if (outcome) log("sequential-wait", "the check was awaited before any dispatch");
+    else b = await runTask("B");
+    const settled = outcome ?? (await background);
+    gate.submitCheck({
+      ticket,
+      outcome: checkOutcome(settled.verdict),
+      log: describeOutcomes(settled).slice(0, 4_000),
+    });
+    log("check-terminal", settled.verdict);
+    trace({
+      kind: "check-result",
+      taskId: "A",
+      verdict: settled.verdict,
+      outcomes: settled.outcomes.map((item) => ({ label: item.label, status: item.status })),
+    });
+    log("dispatch-after-bypass", gate.next() ?? "none");
+
+    installA(
+      `\n\nCheck ${ticket.checkId} finished with ${settled.verdict} ` +
+        `(${describeOutcomes(settled)}). ` +
+        "Fix a defect this check exposed, or return a no-change conclusion citing one listed case.",
+    );
+    a = await runTask("A");
+    b ??= await runTask("B");
   };
 
   if (stopped()) {
@@ -760,6 +815,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
       checks: options.checks.map((check) => check.label),
       revision: options.revision,
       checkDigest: checksDigest(options.checks),
+      mode: options.mode ?? "ooo",
     });
     // Class A/D: proving the declared mutants survive is required work that does not
     // depend on B's model call, so it runs concurrently with it instead of before the
@@ -790,36 +846,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     })();
     // B has no dependency on A, so it runs while A waits on the real check.
     // The declared gaps are part of the frozen instruction, so the digest binds them.
-    installB("");
-    const ticket = gate.issueCheck("A", "protocol-check-host");
-    log("check-issued", ticket.checkId);
-    trace({ kind: "check-issued", taskId: "A", ticket });
-    const background = check(options.baseline).then((result) => {
-      log("check-finished", result.verdict);
-      return result;
-    });
-    let b = await runTask("B");
-    const outcome = await background;
-    gate.submitCheck({
-      ticket,
-      outcome: checkOutcome(outcome.verdict),
-      log: describeOutcomes(outcome).slice(0, 4_000),
-    });
-    log("check-terminal", outcome.verdict);
-    trace({
-      kind: "check-result",
-      taskId: "A",
-      verdict: outcome.verdict,
-      outcomes: outcome.outcomes.map((item) => ({ label: item.label, status: item.status })),
-    });
-    log("dispatch-after-bypass", gate.next() ?? "none");
-
-    installA(
-      `\n\nCheck ${ticket.checkId} finished with ${outcome.verdict} ` +
-        `(${describeOutcomes(outcome)}). ` +
-        "Fix a defect this check exposed, or return a no-change conclusion citing one listed case.",
-    );
-    let a = await runTask("A");
+    await dispatchPhase();
 
     const changedFiles = () => {
       const files: Record<string, string> = {};
@@ -938,10 +965,10 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
 Check ${fresh.checkId} finished with ${rerun.verdict} ` +
             `(${describeOutcomes(rerun)}).`,
         );
-        a = await runTask("A");
+        await runTask("A");
       } else {
         installB(tail);
-        b = await runTask("B");
+        await runTask("B");
       }
       ({ files: abFiles, result: composed } = await compose());
       return true;
