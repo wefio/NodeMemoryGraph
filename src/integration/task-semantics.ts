@@ -435,17 +435,47 @@ export interface RecordedFacts {
   externalReady?: readonly string[];
 }
 
-/** The one acceptance test. Every caller that asks "is this accepted?" — the status
- *  query and dependency release alike — uses this and nothing else. Acceptance is not
- *  the existence of bytes: it needs a verdict recorded for the artifact, bound to that
- *  digest, on the unit's current revision, and not cancelled. */
+/** The facts a run records about one artifact. Delivery and acceptance are different
+ *  facts: bytes can exist while the verdict is pending, rejected, or about another
+ *  digest, and a rejection arriving later withdraws acceptance. */
+export interface AcceptedFact {
+  /** The stored artifact value, or null when nothing was delivered. */
+  artifact: string | null;
+  /** Digest of the artifact this fact describes, compared with `judgedDigest`. */
+  digest: string | null;
+  verdict: string | null;
+  judgedDigest: string | null;
+  /** False when the input revision the artifact was built from is no longer current. */
+  currentRevision: boolean;
+  cancelled?: boolean;
+}
+
+/** The single acceptance rule. The compiler's view and a round's stored rows both call
+ *  this, so a dependency cannot be released by one path on "bytes exist" while another
+ *  path reads the verdict. */
+export function acceptedFact(fact: AcceptedFact): boolean {
+  if (fact.cancelled) return false;
+  if (!fact.artifact || !fact.digest) return false;
+  if (!fact.currentRevision) return false;
+  if (fact.verdict !== "accepted") return false;
+  return fact.judgedDigest === fact.digest;
+}
+
+/** The one acceptance test over a derived view. Every caller that asks "is this
+ *  accepted?" — the status query and dependency release alike — uses this and nothing
+ *  else. Acceptance is not the existence of bytes. */
 export function isAccepted(unit: Pick<TaskUnit, "id" | "revision">, facts: RecordedFacts): boolean {
-  if (facts.cancellations?.includes(unit.id)) return false;
   const recordedRevision = facts.revisions?.[unit.id];
-  if (recordedRevision !== undefined && recordedRevision !== unit.revision) return false;
-  const artifact = facts.artifacts?.[unit.id];
+  const artifact = facts.artifacts?.[unit.id] ?? null;
   const recorded = facts.verdicts?.[unit.id];
-  return Boolean(artifact) && recorded?.verdict === "accepted" && recorded.digest === artifact;
+  return acceptedFact({
+    artifact,
+    digest: artifact,
+    verdict: recorded?.verdict ?? null,
+    judgedDigest: recorded?.digest ?? null,
+    currentRevision: recordedRevision === undefined || recordedRevision === unit.revision,
+    cancelled: facts.cancellations?.includes(unit.id) ?? false,
+  });
 }
 
 export function dispatchTasks(units: readonly TaskUnit[], facts: RecordedFacts): DispatchTask[] {
