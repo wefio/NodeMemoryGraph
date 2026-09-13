@@ -334,21 +334,20 @@ const caught = outcomes.reduce(
   (total, outcome) => total + outcome.mutants.filter((mutant) => mutant.caught).length,
   0,
 );
-console.log(
+const say = (line: string) => process.stdout.write(`${line}\n`);
+say(
   `targets: ${outcomes.length} of ${TARGETS.length} (${selected.map((entry) => entry.target).join(", ")})`,
 );
-console.log(`mutants: ${caught} of ${applicable} caught by the named test`);
-console.log(
+say(`mutants: ${caught} of ${applicable} caught by the named test`);
+say(
   `restored byte-identically: ${outcomes.filter((outcome) => outcome.restoredByteIdentically).length} of ${outcomes.length}`,
 );
 if (skipped.length > 0) {
-  console.log(
-    `not applicable in this checkout: ${skipped.length} (run with --targets to require them)`,
-  );
-  for (const reason of skipped) console.log(`  ${reason}`);
+  say(`not applicable in this checkout: ${skipped.length} (run with --targets to require them)`);
+  for (const reason of skipped) say(`  ${reason}`);
 }
-console.log(`measuredAt: ${new Date().toISOString()}`);
-for (const problem of problems) console.error(problem);
+say(`measuredAt: ${new Date().toISOString()}`);
+for (const problem of problems) process.stderr.write(`${problem}\n`);
 if (values.json)
   writeJsonAtomic(values.json, {
     targets: outcomes,
