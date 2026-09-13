@@ -128,5 +128,14 @@ test("the model refuses a plan that is not legal and one above its cap, by name"
 });
 
 test("what the model does not cover is named rather than silently absent", () => {
-  assert.deepEqual(UNMODELLED_BY_MODEL, ["external-waits", "real-verification", "wall-clock"]);
+  // The last two names come from the design's first discriminating case: units may be
+  // prepared before their dependencies settle, and two candidates on the same file do not
+  // become mergeable by themselves. Neither is modelled, so neither may be assumed.
+  assert.deepEqual(UNMODELLED_BY_MODEL, [
+    "external-waits",
+    "real-verification",
+    "wall-clock",
+    "mergeability",
+    "preparation",
+  ]);
 });
