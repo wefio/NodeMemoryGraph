@@ -14,17 +14,17 @@ the list found.
 
 Commands run in the implementation worktree (`feat/task-semantics-cases`), each with its exit status:
 
-| What                                                                        | Result                                                              |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `npm run check` (tsc + eslint + format + docs)                              | 0                                                                   |
-| `node --test tests/integration/task-semantics-cases.test.ts`                | 8 pass / 0 fail                                                     |
-| `tests/integration/task-semantics.test.ts`                                  | 13 pass / 0 fail                                                    |
-| `tests/integration/task-semantics-model.test.ts`                            | 7 pass / 0 fail                                                     |
-| `evals/ooo-execution/*.test.ts`                                             | 86 pass / 0 fail                                                    |
-| `npm test` (product)                                                        | 1440 pass / 0 fail                                                  |
-| `npm run complexity:gate`                                                   | 4 changed code files, 0 methods above 15                            |
-| `npm run docs:check`                                                        | 186 files, 0 errors                                                 |
-| `.nmg/teeth-check-task-semantics.mjs --targets=<the two semantics modules>` | 10 mutants, 10 caught by name, both files restored byte-identically |
+| What                                                                                        | Result                                                                                                                           |
+| ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run check` (tsc + eslint + format + docs)                                              | 0                                                                                                                                |
+| `node --test tests/integration/task-semantics-cases.test.ts`                                | 8 pass / 0 fail                                                                                                                  |
+| `tests/integration/task-semantics.test.ts`                                                  | 13 pass / 0 fail                                                                                                                 |
+| `tests/integration/task-semantics-model.test.ts`                                            | 7 pass / 0 fail                                                                                                                  |
+| `evals/ooo-execution/*.test.ts`                                                             | 86 pass / 0 fail                                                                                                                 |
+| `npm test` (product)                                                                        | 1440 pass / 0 fail                                                                                                               |
+| `npm run complexity:gate`                                                                   | 4 changed code files, 0 methods above 15                                                                                         |
+| `npm run docs:check`                                                                        | 186 files, 0 errors                                                                                                              |
+| `npm run mutation:teeth` (`tools/mutation-teeth.ts`, `--json` for the machine-readable run) | 14 of 14 applicable mutants caught by name; 6 reported not applicable in this checkout; 4 of 4 targets restored byte-identically |
 
 ## Bullet by bullet
 
@@ -49,16 +49,19 @@ Commands run in the implementation worktree (`feat/task-semantics-cases`), each 
 
 ## What the teeth check caught
 
+The mutation harness now lives in the repository as `tools/mutation-teeth.ts` (`npm run mutation:teeth`),
+so the evidence above can be re-run by a reviewer instead of being described. It reports three
+outcomes per target — the clean run passes, each mutant fails the suite _and_ the named test is what
+fails it, and the file is restored byte-identically — and it distinguishes a mutant that **survived**
+from one that is **not applicable in this checkout** (its code belongs to another branch). A named
+target (`--targets=…`) may not be inapplicable: there a missing anchor is a failure. The distinction
+is what keeps the count honest — "not applicable" is never counted as caught.
+
 The new mutant `assumption-may-carry-a-dependency` was **not** caught on the first run even though the
 test that should catch it passes. The harness was the problem: each target listed one suite, and the
 design's cases live in a new file, so the mutant was never run against them. The harness now takes a
 list of suites per target. This is the same failure class as the earlier stale-anchor finding — the
 check's own coverage drifts when the thing it checks moves.
-
-Three of the harness's targets cover code that only exists on the retention branch, so its mutants
-report "anchor not found, refusing to claim a check" there rather than passing quietly. The harness
-therefore takes a `--targets` filter: here it ran the two semantics modules (10 mutants, 10 caught);
-the full four-target run with 16 caught was measured on the branch that carries retention.
 
 ## What this does not do
 
