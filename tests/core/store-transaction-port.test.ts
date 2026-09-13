@@ -7,7 +7,7 @@
  * the caller swallows while the transaction is already half written.
  */
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -170,4 +170,24 @@ test("a failed rollback quarantines the connection instead of pretending it is u
       "the store must not accept work on a connection whose state is unknown",
     );
   });
+});
+
+test("the store runs its transaction boundary in exactly one place", () => {
+  // A mechanical check rather than a reminder: a hand-rolled BEGIN reappearing anywhere in the
+  // store is what makes a second boundary possible, and no behavioural test notices a path that
+  // still works by accident.
+  const source = readFileSync(new URL("../../src/core/store/base.ts", import.meta.url), "utf8");
+  const count = (needle: string) => source.split(needle).length - 1;
+  assert.equal(count("BEGIN IMMEDIATE"), 1, "one BEGIN, in writeTransaction");
+  assert.equal(count('"COMMIT"'), 1, "one COMMIT, in writeTransaction");
+  assert.equal(count('"ROLLBACK"'), 1, "one ROLLBACK, in writeTransaction");
+  const owned = source.slice(source.indexOf("writeTransaction<T>"), source.indexOf("withPort<T>"));
+  assert.equal(owned.includes("BEGIN IMMEDIATE"), true, "the BEGIN belongs to writeTransaction");
+  assert.equal(owned.includes('"COMMIT"'), true, "and so does the COMMIT");
+  // The one ROLLBACK lives in the store's own helper, which only the boundary calls.
+  assert.equal(
+    owned.split("this.rollback()").length - 1,
+    count("this.rollback()"),
+    "every rollback call is one the boundary made",
+  );
 });
