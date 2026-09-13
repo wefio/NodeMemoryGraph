@@ -10,7 +10,7 @@
 // after cancellation the check is gone, its worktree is gone, and nothing is accepted.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -104,6 +104,13 @@ test(
     const result = await round;
     // The round's decision is explicit and durable, not an implied timeout.
     assert.equal(result.cancelled, "operator cancelled the round");
+    // The round's store is a directory this round created, and it must not outlive it. The
+    // cancellation path returns early, so this is not the `finally`'s job alone.
+    assert.deepEqual(
+      readdirSync(directory).filter((name) => name.startsWith("ooo-cycle-db-")),
+      [],
+      "the cancelled round left its default store directory behind",
+    );
     assert.deepEqual(result.accepted, {});
     assert.equal(result.composed.verdict, "undecidable");
     assert.equal(
