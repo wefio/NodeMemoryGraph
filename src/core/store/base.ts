@@ -1249,8 +1249,7 @@ export class NmgStoreBase {
 
   /** Remove a memory reference from a chain. */
   removeMemoryFromChain(input: { chainId: string; memoryId: string }): boolean {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    return this.writeTransaction(() => {
       this.db
         .prepare(
           `DELETE FROM memory_chain_edges
@@ -1260,12 +1259,8 @@ export class NmgStoreBase {
       const result = this.db
         .prepare("DELETE FROM memory_chain_members WHERE chain_id = ? AND memory_id = ?")
         .run(input.chainId, input.memoryId);
-      this.db.exec("COMMIT");
       return result.changes > 0;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   // ── memory-chain DAG edges (pointers) ──
@@ -1781,8 +1776,9 @@ export class NmgStoreBase {
          updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    // The store owns the boundary. The cache refresh stays outside it, so a batch whose
+    // transaction did not commit cannot warm the cache either.
+    this.writeTransaction(() => {
       for (const item of embeddings) {
         upsert.run(
           item.nodeId,
@@ -1793,15 +1789,11 @@ export class NmgStoreBase {
           now,
         );
       }
-      this.db.exec("COMMIT");
-      for (const item of embeddings) {
-        this.updateVectorCache("node", model, item.nodeId, item.vector);
-      }
-      return embeddings.length;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
+    });
+    for (const item of embeddings) {
+      this.updateVectorCache("node", model, item.nodeId, item.vector);
     }
+    return embeddings.length;
   }
   storedNodeEmbeddings(model: string, afterNodeId = "", limit = 256): ExternalNodeEmbedding[] {
     const rows = this.db
@@ -1861,8 +1853,8 @@ export class NmgStoreBase {
          updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    // As above: the boundary is the store's, and the cache is warmed only after it commits.
+    this.writeTransaction(() => {
       for (const item of embeddings) {
         upsert.run(
           item.blockId,
@@ -1873,15 +1865,11 @@ export class NmgStoreBase {
           now,
         );
       }
-      this.db.exec("COMMIT");
-      for (const item of embeddings) {
-        this.updateVectorCache("leaf", model, item.blockId, item.vector);
-      }
-      return embeddings.length;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
+    });
+    for (const item of embeddings) {
+      this.updateVectorCache("leaf", model, item.blockId, item.vector);
     }
+    return embeddings.length;
   }
   storedLeafEmbeddings(model: string, afterBlockId = "", limit = 256): ExternalLeafEmbedding[] {
     const rows = this.db
@@ -1939,8 +1927,7 @@ export class NmgStoreBase {
          updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    this.writeTransaction(() => {
       for (const item of embeddings) {
         upsert.run(
           item.memoryId,
@@ -1951,12 +1938,8 @@ export class NmgStoreBase {
           now,
         );
       }
-      this.db.exec("COMMIT");
-      return embeddings.length;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
+    return embeddings.length;
   }
   storedEmbeddings(model: string, afterMemoryId = "", limit = 256): ExternalEmbedding[] {
     const rows = this.db
