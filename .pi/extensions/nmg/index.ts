@@ -38,6 +38,7 @@ import {
 import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import { memoryDisclosureEntries } from "../../../src/integration/search-projection.ts";
 import { PI_BOARD_ACTIONS, PI_REMEMBER_ACTIONS } from "../../../src/integration/tool-contract.ts";
+import { TASK_BOARD_VERDICTS } from "../../../src/core/types.ts";
 import { resolveSkillOptPolicyChannels } from "../../../src/lab/skillopt-policy.ts";
 import type {
   ActiveGraphBudget,
@@ -96,6 +97,29 @@ function databasePath(): string {
 
 function projectDirectory(): string {
   return process.env.NMG_PROJECT_DIR || process.cwd();
+}
+
+/** Name what a board verb is missing before the call leaves this process: the
+ *  daemon refuses the same calls, but a named local refusal is what an agent can
+ *  act on. Kept out of the tool's `execute` so the handler stays under the
+ *  complexity ceiling (the repo extracts, it does not exempt). */
+function assertBoardVerbCall(params: {
+  action?: string;
+  digest?: string | undefined;
+  verdict?: string | undefined;
+  reason?: string | undefined;
+}): void {
+  if (params.action === "deliver" && !params.digest) {
+    throw new Error("deliver requires digest: the sha256 identity of the artifact being handed in");
+  }
+  if (params.action === "judge" && !params.verdict) {
+    throw new Error("judge requires verdict: accepted | rejected | undecidable");
+  }
+  if (params.action === "judge" && !params.reason) {
+    throw new Error(
+      "judge requires reason: the ruling is recorded in the entry and survives a restart",
+    );
+  }
 }
 
 export default function nmgExtension(pi: ExtensionAPI): void {
@@ -1730,6 +1754,30 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         resolution: Type.Optional(Type.String()),
         reason: Type.Optional(Type.String()),
         leaseSeconds: Type.Optional(Type.Number({ minimum: 60, maximum: 86_400 })),
+        digest: Type.Optional(
+          Type.String({
+            description:
+              "deliver only: the sha256 identity of the artifact you are handing in; the judge recomputes it",
+          }),
+        ),
+        ref: Type.Optional(
+          Type.String({
+            description:
+              "deliver only: where the artifact can be read (a path or URL the judge can open)",
+          }),
+        ),
+        summary: Type.Optional(
+          Type.String({ description: "deliver only: what the artifact contains, in one line" }),
+        ),
+        verdict: Type.Optional(
+          Type.Union(
+            TASK_BOARD_VERDICTS.map((value) => Type.Literal(value)),
+            {
+              description:
+                "judge only: your ruling on someone else's deliverable. The deliverer can never judge it",
+            },
+          ),
+        ),
         afterCursor: Type.Optional(
           Type.String({ description: "不透明游标：上一条已读 entry 的 id（增量读续点）" }),
         ),
@@ -1761,6 +1809,7 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         const identity = loadOrCreateAgentIdentity(sessionId);
         const agentId = identity.id;
         const agentName = identity.agentName;
+        assertBoardVerbCall(params);
         // taskId is optional: without one, entries land on the shared world
         // channel (the lobby), which every Agent reads by default — no channel
         // name needs to be agreed on in advance. Explicit taskIds open named

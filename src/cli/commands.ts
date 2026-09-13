@@ -748,6 +748,49 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
     },
   },
   {
+    method: "taskBoard",
+    words: ["board", "deliver"],
+    usageLine:
+      "nmg board deliver TASK_ID ENTRY_ID --agent AGENT --digest SHA256 [--ref PATH_OR_URL] [--summary TEXT] [--json]",
+    options: ["agent", "digest", "ref", "summary"],
+    flags: [],
+    buildParams: (values): NmgTaskBoardParams => {
+      if (values.positionals.length !== 2) {
+        throw new Error("board deliver requires TASK_ID and ENTRY_ID");
+      }
+      return compactObject({
+        action: "deliver",
+        taskId: values.positionals[0],
+        entryId: values.positionals[1],
+        agentId: requiredOption(values, "agent"),
+        digest: requiredOption(values, "digest"),
+        ref: firstOption(values, "ref"),
+        summary: firstOption(values, "summary"),
+      }) as unknown as NmgTaskBoardParams;
+    },
+  },
+  {
+    method: "taskBoard",
+    words: ["board", "judge"],
+    usageLine:
+      "nmg board judge TASK_ID ENTRY_ID --agent AGENT --verdict accepted|rejected|undecidable --reason TEXT [--json]",
+    options: ["agent", "verdict", "reason"],
+    flags: [],
+    buildParams: (values): NmgTaskBoardParams => {
+      if (values.positionals.length !== 2) {
+        throw new Error("board judge requires TASK_ID and ENTRY_ID");
+      }
+      return compactObject({
+        action: "judge",
+        taskId: values.positionals[0],
+        entryId: values.positionals[1],
+        agentId: requiredOption(values, "agent"),
+        verdict: requiredOption(values, "verdict"),
+        reason: requiredOption(values, "reason"),
+      }) as unknown as NmgTaskBoardParams;
+    },
+  },
+  {
     method: "syncStg",
     words: ["stg", "sync"],
     usageLine: "nmg stg sync --project-dir DIR --scope KEY=VALUE [--limit N] [--json]",

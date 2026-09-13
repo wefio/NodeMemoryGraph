@@ -402,8 +402,79 @@ test("per-command help renders a focused usage for the command group", () => {
 test("per-command help groups multi-word commands and rejects unknown ones", () => {
   const board = cliCommandUsage("board");
   assert.ok(board);
-  for (const sub of ["discover", "put", "read", "resolve", "claim", "release"]) {
+  for (const sub of [
+    "discover",
+    "put",
+    "read",
+    "resolve",
+    "claim",
+    "release",
+    "deliver",
+    "judge",
+  ]) {
     assert.match(board!, new RegExp(`nmg board ${sub}`));
   }
   assert.equal(cliCommandUsage("definitely-not-a-command"), undefined);
+});
+
+test("board deliver and judge are public verbs with named refusals", () => {
+  const spec = (key: string) => {
+    const found = NMG_CLI_COMMANDS.find((candidate) => candidate.words.join(" ") === key);
+    assert.ok(found, `${key} must be a CLI command`);
+    return found!;
+  };
+
+  const delivered = spec("board deliver").buildParams({
+    flags: new Set<string>(),
+    positionals: ["chan", "entry-1"],
+    options: new Map([
+      ["agent", ["worker-7"]],
+      ["digest", ["abc123"]],
+      ["ref", [".nmg/board/out.txt"]],
+      ["summary", ["tests=27 pass=27"]],
+    ]),
+  }) as { action: string; agentId: string; digest: string; ref?: string; summary?: string };
+  assert.equal(delivered.action, "deliver");
+  assert.equal(delivered.agentId, "worker-7");
+  assert.equal(delivered.digest, "abc123");
+  assert.equal(delivered.ref, ".nmg/board/out.txt");
+  assert.equal(delivered.summary, "tests=27 pass=27");
+
+  const judged = spec("board judge").buildParams({
+    flags: new Set<string>(),
+    positionals: ["chan", "entry-1"],
+    options: new Map([
+      ["agent", ["coordinator"]],
+      ["verdict", ["accepted"]],
+      ["reason", ["digest recomputed"]],
+    ]),
+  }) as { action: string; verdict: string; reason: string };
+  assert.equal(judged.action, "judge");
+  assert.equal(judged.verdict, "accepted");
+  assert.equal(judged.reason, "digest recomputed");
+
+  // A missing required value is refused by name, before any daemon call.
+  const refused = (target: string, options: Array<[string, string[]]>) => {
+    assert.throws(
+      () =>
+        spec(target).buildParams({
+          flags: new Set<string>(),
+          positionals: ["chan", "entry-1"],
+          options: new Map(options),
+        }),
+      /required/u,
+      `${target} must refuse a missing required value`,
+    );
+  };
+  refused("board deliver", [["agent", ["worker-7"]]]);
+  refused("board judge", [
+    ["agent", ["coordinator"]],
+    ["verdict", ["accepted"]],
+  ]);
+
+  // Publishing the verbs is not enough: their flags must be discoverable from
+  // the CLI's own vocabulary, not from reading the source.
+  for (const name of ["digest", "ref", "summary", "verdict", "reason"]) {
+    assert.ok(CLI_KNOWN_OPTIONS.has(name), `--${name} must be a known option`);
+  }
 });
