@@ -640,7 +640,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     }
     logContractError(log, taskId, frozen, artifact);
     const entry = gate.putTaskBoardEntry({
-      taskId: "ooo-process-probe",
+      taskId: gate.channel,
       agentId: ticket.owner,
       kind: "result",
       content: JSON.stringify({ ticket, artifact }),

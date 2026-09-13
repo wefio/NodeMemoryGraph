@@ -8,7 +8,6 @@ import type { ServerState } from "../../src/cli/lifecycle.ts";
 import type { TaskBoardEntry } from "../../src/core/types.ts";
 import type { BoardTicket, BoardAdmission } from "../../src/integration/ooo-board.ts";
 
-const channel = "ooo-process-probe";
 type Command = { id: string; action: string; args: Record<string, unknown> };
 /** One command handler per action. A table rather than a switch, so adding an action
  *  does not add a branch to the dispatcher's own complexity. */
@@ -178,11 +177,19 @@ if (process.argv[2] === "daemon" || liveDaemon) {
       host: "127.0.0.1",
       port: address.port,
       token,
+      // The run's board channel travels with the endpoint: a worker must poll the channel its
+      // own run publishes to, and only the coordinator knows which one that is.
+      channel: authority.channel,
     },
   });
 } else if (process.argv[2] === "worker" || process.argv[2] === "pi-worker") {
   let endpoint: ServerState;
   let agent: string;
+  let channel = "";
+  const boardChannel = () => {
+    if (!channel) throw new Error("worker is not connected to a run");
+    return channel;
+  };
   // Local worker scratch only. Authority/generation/completion live in the daemon DB.
   const held = new Map<string, BoardTicket>();
   const admission = async (body: Record<string, unknown>): Promise<unknown> => {
@@ -199,7 +206,7 @@ if (process.argv[2] === "daemon" || liveDaemon) {
   const board = async (): Promise<TaskBoardEntry[]> => {
     const result = (await httpCall(endpoint, "taskBoard", {
       action: "read",
-      taskId: channel,
+      taskId: boardChannel(),
       agentId: agent,
       includeResolved: true,
       limit: 200,
@@ -212,7 +219,7 @@ if (process.argv[2] === "daemon" || liveDaemon) {
     const artifact = override ?? snapshotAnswer(ticket);
     const result = (await httpCall(endpoint, "taskBoard", {
       action: "put",
-      taskId: channel,
+      taskId: boardChannel(),
       agentId: agent,
       kind: "result",
       content: JSON.stringify({ ticket, artifact: override ?? artifact, passed: true }),
@@ -250,6 +257,8 @@ if (process.argv[2] === "daemon" || liveDaemon) {
     connect: (args) => {
       endpoint = args.endpoint as ServerState;
       agent = String(args.agent);
+      channel = String((args.endpoint as { channel?: string }).channel ?? "");
+      boardChannel();
       return process.pid;
     },
     board: () => board(),

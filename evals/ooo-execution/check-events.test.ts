@@ -232,7 +232,7 @@ test("safety: an artifact submitted under a ticket from another run is stale, no
   // B is the selected task while A waits on its external event, so it is claimable.
   const ticket = gate.claim("B", "worker-1");
   const entry = gate.putTaskBoardEntry({
-    taskId: "ooo-process-probe",
+    taskId: gate.channel,
     agentId: ticket.owner,
     kind: "result",
     content: JSON.stringify({ ticket: { ...ticket, runId: "some-other-run" }, artifact: "6" }),

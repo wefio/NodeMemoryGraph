@@ -15,7 +15,6 @@ import {
   type ProbePlan,
 } from "../../src/integration/ooo-board.ts";
 
-const channel = "ooo-process-probe";
 const LEASE_MS = 60_000;
 
 const plan: ProbePlan = [
@@ -64,7 +63,7 @@ function submitPatch(
   artifact: string,
 ): Promise<string> {
   const entry = gate.putTaskBoardEntry({
-    taskId: channel,
+    taskId: gate.channel,
     agentId: ticket.owner,
     kind: "result",
     content: JSON.stringify({ ticket, artifact }),

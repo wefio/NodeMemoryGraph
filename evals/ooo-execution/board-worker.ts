@@ -6,7 +6,7 @@
  *
  * Usage:
  *   node --experimental-strip-types evals/ooo-execution/board-worker.ts \
- *     --channel ooo-process-probe --out .nmg/board/worker-output.txt [--entry <id>]
+ *     --channel ooo-probe:<runId> --out .nmg/board/worker-output.txt [--entry <id>]
  *     [--store <path>] [--lease 1800] [--agent worker-ooo-<pid>] [--suites a.test.ts,b.test.ts]
  *
  * Refuses to run without a channel and an output path. Asserts that it holds the claim,
