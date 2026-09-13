@@ -160,6 +160,7 @@ const TARGETS: readonly Target[] = [
       "evals/ooo-execution/patch-cycle.test.ts",
       "tests/integration/ooo-run-namespace.test.ts",
       "tests/integration/ooo-task-tables.test.ts",
+      "tests/integration/ooo-transition-atomicity.test.ts",
     ],
     mutants: [
       {
@@ -170,6 +171,14 @@ const TARGETS: readonly Target[] = [
         to: '          "UPDATE ooo_probe_facts SET attempt=?, owner=?, claim_time=? WHERE ? IS NOT NULL AND id=?",',
         expect:
           "two runs in one store do not collide, do not see each other, and cancel separately",
+      },
+      {
+        // The composed write must join the transition it is called in: a publication that opens its
+        // own boundary commits even when the transition around it fails.
+        name: "round-publication-opens-its-own-transaction",
+        from: "      },\n      port,\n    ).id;",
+        to: "      },\n    ).id;",
+        expect: "the round's own publication rolls back with the transition that made it",
       },
       {
         // The cache exists to be recomputable. A rebuild that returns without writing is the
