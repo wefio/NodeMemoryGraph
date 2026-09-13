@@ -12,6 +12,8 @@
 import type { Constructor } from "./store-ctor.ts";
 import { randomUUID } from "node:crypto";
 import { extractEventWindow } from "./advanced-query.ts";
+import { applyRelevanceGate } from "../relevance-gate.ts";
+import { applyLearnedGate, rerankByRelevance } from "../learned-gate.ts";
 import { nowMs, PerfTimer, SECTION } from "../perf.ts";
 import type { PerfSnapshot } from "../perf.ts";
 import {
@@ -88,6 +90,34 @@ import {
 } from "./graph-policy.ts";
 
 const MAX_SEARCH_CANDIDATES = 500;
+
+/** Apply the two relevance gates and cap the list. The program gate is loose and
+ * always on; the learned gate is the strict half, ANDed after it. Both may drop
+ * every candidate — a recall is allowed to inject nothing. */
+function applyRelevanceGates(
+  query: string,
+  surfaced: MemorySearchResult[],
+  limit: number,
+  options: SearchOptions,
+): MemorySearchResult[] {
+  // Order first, then spend the budget: a scorer that only deletes from an
+  // already-truncated list can never recover a candidate another rule ranked
+  // below the cut, which is the ceiling of a deletion-only gate.
+  const ordered = options.relevanceModel
+    ? rerankByRelevance(query, surfaced, options.relevanceModel)
+    : surfaced;
+  const gated =
+    options.relevanceFloor === undefined
+      ? ordered.slice(0, limit)
+      : applyRelevanceGate(ordered, {
+          floor: options.relevanceFloor,
+          limit,
+          minZ: options.relevanceMinZ,
+          maxCv: options.relevanceMaxCv,
+        });
+  if (!options.relevanceModel) return gated;
+  return applyLearnedGate(query, gated, options.relevanceModel, options.relevanceModelFloor ?? 0.5);
+}
 
 function rankMainCandidates(
   query: string,
@@ -2245,7 +2275,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
             right.memory.importance - left.memory.importance,
         );
       }
-      const results = surfacedResults.slice(0, limit);
+      const results = applyRelevanceGates(query, surfacedResults, limit, options);
       for (const result of results) {
         result.memory.evidenceIds = this.evidenceIds(result.memory.id);
         result.evidenceRecords = this.evidenceRecords(result.memory.evidenceIds);

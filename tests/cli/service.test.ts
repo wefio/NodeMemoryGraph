@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
 import { NMG_METHODS, NMG_PROTOCOL_VERSION } from "../../src/cli/protocol.ts";
 import { NmgService } from "../../src/cli/service.ts";
+import { columnsForBlocks } from "../../src/core/relevance-features.ts";
 import { NmgStore } from "../../src/core/store.ts";
+import { RelevanceModel } from "../../src/lab/relevance-model.ts";
 import { stgStorePath } from "../../src/core/stg.ts";
 import { removeTempDirectory } from "../helpers/temp-directory.ts";
 import { stripProviderEnv } from "../helpers/test-env.ts";
@@ -32,6 +34,37 @@ test("status and hello do not create or open the database", async () => {
   } finally {
     service.close();
     removeTempDirectory(directory);
+  }
+});
+
+test("data directory follows an explicit --db path instead of the shared default", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-datadir-"));
+  const databasePath = join(directory, "nmg.sqlite");
+  const service = new NmgService({ databasePath, environment: {} });
+  try {
+    // A test daemon given only --db must not write its recall corpus / router
+    // state into the developer's shared ~/.nmg.
+    assert.equal(service.dataDirectory, resolve(directory));
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("an explicit data directory still wins over the database path", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-datadir-db-"));
+  const dataDirectory = mkdtempSync(join(tmpdir(), "nmg-cli-datadir-explicit-"));
+  const service = new NmgService({
+    dataDirectory,
+    databasePath: join(directory, "nmg.sqlite"),
+    environment: {},
+  });
+  try {
+    assert.equal(service.dataDirectory, resolve(dataDirectory));
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+    removeTempDirectory(dataDirectory);
   }
 });
 
@@ -2350,6 +2383,55 @@ test("task board veto RPC marks a resolve contested by an independent reviewer",
     assert.equal(veto.entry.vetoedBy, "reviewer");
     assert.equal(veto.entry.vetoReason, "unverified");
     assert.equal(veto.entry.status, "resolved");
+  } finally {
+    service.close();
+    removeTempDirectory(directory);
+  }
+});
+
+test("the learned gate is refused when its embedder is not the runtime's", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-gate-embedder-"));
+  const empty = mkdtempSync(join(tmpdir(), "nmg-cli-gate-none-"));
+  const emptyService = new NmgService({ dataDirectory: empty, environment: {} });
+  const service = new NmgService({ dataDirectory: directory, environment: {} });
+  try {
+    // The status is cached after the first read, so the empty directory gets its
+    // own service: that is also the production path (a model placed later needs a
+    // restart, which is why the provenance check is mechanical).
+    assert.equal(emptyService.relevanceModelStatus, "absent");
+    const foreign = new RelevanceModel({
+      columns: columnsForBlocks(["core", "retrieval"]),
+      blocks: ["core", "retrieval"],
+      embedder: "some-other-embedder::768",
+    });
+    writeFileSync(
+      join(directory, "relevance-model.json"),
+      JSON.stringify(foreign.toJSON()),
+      "utf8",
+    );
+    assert.equal(
+      service.relevanceModelStatus,
+      "refused: trained on embedder some-other-embedder::768, runtime is none",
+    );
+  } finally {
+    emptyService.close();
+    service.close();
+    removeTempDirectory(empty);
+    removeTempDirectory(directory);
+  }
+});
+
+test("a head that reads no absolute score loads whatever the runtime embedder is", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-cli-gate-core-"));
+  const service = new NmgService({ dataDirectory: directory, environment: {} });
+  try {
+    const core = new RelevanceModel({
+      columns: columnsForBlocks(["core"]),
+      blocks: ["core"],
+      embedder: "none",
+    });
+    writeFileSync(join(directory, "relevance-model.json"), JSON.stringify(core.toJSON()), "utf8");
+    assert.equal(service.relevanceModelStatus, "loaded (runtime embedder none)");
   } finally {
     service.close();
     removeTempDirectory(directory);
