@@ -142,16 +142,25 @@ const TARGETS: readonly Target[] = [
     suites: [
       "evals/ooo-execution/patch-cycle.test.ts",
       "tests/integration/ooo-run-namespace.test.ts",
+      "tests/integration/ooo-task-tables.test.ts",
     ],
     mutants: [
       {
         // The claim is the write that would corrupt a neighbour run: the same task id exists in
         // every run, so a claim that is not scoped by run claims somebody else's row too.
         name: "claim-is-not-scoped-to-its-run",
-        from: '          "UPDATE ooo_probe_tasks SET attempt=?, owner=?, claim_time=?, input_digest=? WHERE run_id=? AND id=?",',
-        to: '          "UPDATE ooo_probe_tasks SET attempt=?, owner=?, claim_time=?, input_digest=? WHERE ? IS NOT NULL AND id=?",',
+        from: '          "UPDATE ooo_probe_facts SET attempt=?, owner=?, claim_time=? WHERE run_id=? AND id=?",',
+        to: '          "UPDATE ooo_probe_facts SET attempt=?, owner=?, claim_time=? WHERE ? IS NOT NULL AND id=?",',
         expect:
           "two runs in one store do not collide, do not see each other, and cancel separately",
+      },
+      {
+        // The cache exists to be recomputable. A rebuild that returns without writing is the
+        // difference between "the sources decide" and "the schema says so".
+        name: "derived-rebuild-is-a-no-op",
+        from: "        this.putInputDigest(\n          row.id,\n          row.attempt >= 1 ? (frozen?.digest ?? this.inputDigest(row)) : null,\n        );",
+        to: "        void row.id;",
+        expect: "deleting the derived cache and rebuilding it yields the same view",
       },
       {
         name: "round-releases-dependents-on-delivered-bytes",
