@@ -171,10 +171,20 @@ async function main(argv: readonly string[]): Promise<number> {
   if (!BASELINE.every((file) => file.length > 0)) throw new Error("baseline is empty");
   const points: Point[] = [];
   {
-    const grid: Array<{ checkMs: number; workerMs: number }> = [
+    // The mandatory {0,0} control plus the requested grid, with a repeated point counted once:
+    // a duplicate would run twice into the same output directory, and the second run would find
+    // the first run's state there.
+    const requested: Array<{ checkMs: number; workerMs: number }> = [
       { checkMs: 0, workerMs: 0 },
       ...checks.flatMap((checkMs) => workers.map((workerMs) => ({ checkMs, workerMs }))),
     ];
+    const seen = new Set<string>();
+    const grid = requested.filter((point) => {
+      const key = `${point.checkMs}/${point.workerMs}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     for (const { checkMs, workerMs } of grid) {
       const directory = join(out, `check-${checkMs}-worker-${workerMs}`);
       mkdirSync(directory, { recursive: true });
