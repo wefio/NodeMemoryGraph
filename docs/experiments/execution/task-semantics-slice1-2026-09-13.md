@@ -21,30 +21,32 @@ checkable without any of that, so this run checked them instead of restating the
 
 ## What was built
 
-| file | lines | role |
-| --- | --- | --- |
-| `src/integration/task-semantics.ts` | 552 | the compiler: derives `TaskUnit[]` from `ProbePlan` + `PatchTaskSpec` + cycle `Requirement`s; freezes nothing itself (`preparePatchWork` still does); owns the single `isAccepted` predicate |
-| `src/integration/task-semantics-model.ts` | 179 | the model: enumerates legal settlement orders for `ordered` / `out-of-order` / `fused` over ≤4 units and counts waits, rollbacks, retries |
-| `tests/integration/task-semantics.test.ts` | 322 | 12 cases |
-| `tests/integration/task-semantics-model.test.ts` | 132 | 7 cases |
+| file                                             | lines | role                                                                                                                                                                                         |
+| ------------------------------------------------ | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/integration/task-semantics.ts`              | 552   | the compiler: derives `TaskUnit[]` from `ProbePlan` + `PatchTaskSpec` + cycle `Requirement`s; freezes nothing itself (`preparePatchWork` still does); owns the single `isAccepted` predicate |
+| `src/integration/task-semantics-model.ts`        | 179   | the model: enumerates legal settlement orders for `ordered` / `out-of-order` / `fused` over ≤4 units and counts waits, rollbacks, retries                                                    |
+| `tests/integration/task-semantics.test.ts`       | 322   | 12 cases                                                                                                                                                                                     |
+| `tests/integration/task-semantics-model.test.ts` | 132   | 7 cases                                                                                                                                                                                      |
 
 Nothing calls these from a runtime path yet. The design's migration order puts the compiler and
 the model first and the runners last; this is that first step and it is deliberately inert.
 
 ## Evidence
 
-| check | command | result |
-| --- | --- | --- |
-| types | `npm run check` | 0 errors |
-| complexity | `npm run complexity:gate` | `4 changed code file(s) … 0 method(s) above 15` |
-| lint / format | `npx eslint src/integration/task-semantics*.ts`, `npm run format:check` | clean |
-| compiler suite | `node --experimental-strip-types --test --test-concurrency=1 tests/integration/task-semantics.test.ts` | 12 pass, 0 fail |
-| model suite | `… tests/integration/task-semantics-model.test.ts` | 7 pass, 0 fail |
-| mutation teeth | `node <shared-checkout>/.nmg/teeth-check-task-semantics.mjs` | 8 of 8 mutants caught **by name**; both files restored byte-identically |
+| check          | command                                                                                                | result                                                                  |
+| -------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| types          | `npm run check`                                                                                        | 0 errors                                                                |
+| complexity     | `npm run complexity:gate`                                                                              | `4 changed code file(s) … 0 method(s) above 15`                         |
+| lint / format  | `npx eslint src/integration/task-semantics*.ts`, `npm run format:check`                                | clean                                                                   |
+| compiler suite | `node --experimental-strip-types --test --test-concurrency=1 tests/integration/task-semantics.test.ts` | 12 pass, 0 fail                                                         |
+| model suite    | `… tests/integration/task-semantics-model.test.ts`                                                     | 7 pass, 0 fail                                                          |
+| mutation teeth | `npm run mutation:teeth` (then a local script; see the note below)                                     | 8 of 8 mutants caught **by name**; both files restored byte-identically |
 
-The teeth script is a local one-off kept out of the repository, like the earlier board teeth
-checks; it takes its target paths relative to the working directory, so it is run from the
-worktree while living in the shared checkout.
+The teeth check now lives in the repository as `tools/mutation-teeth.ts` (`npm run mutation:teeth`),
+so the numbers above can be re-run. It was a local script while this slice landed; the mutants and
+their expected test names are the same. It reports which mutants are applicable in the checkout it
+runs in, so a target whose code lives on another branch is reported as not applicable rather than
+counted as caught.
 
 The teeth check reports three outcomes rather than one: the clean run must pass, each mutant
 must fail the suite under the expected test's name, and the mutated file must come back
@@ -56,7 +58,7 @@ The first `budget` mutant — delete the loop that refuses unknown keys inside `
 was **not caught**, and the suite still exited 0 with the mutation in place. The reason was not
 a weak assertion: `maxBytes` and `maxOutputTokens` are top-level spec fields, so they were
 refused by the neighbouring `SPEC_FIELDS` check and the inner loop was never reached. The
-mutant was *behaviourally equivalent*, which means the test could not have caught it by
+mutant was _behaviourally equivalent_, which means the test could not have caught it by
 construction — and, worse, that nothing pinned the inner loop at all.
 
 Two cases were added (`budget.bytesPerFile`, `limits.deadlineMs`, and a `perFile` above
@@ -69,19 +71,19 @@ difference.
 
 Numbers from `compareModes` on a `P → D` plan, both outcomes declared:
 
-| outcomes | mode | orders | waits | rollbacks |
-| --- | --- | --- | --- | --- |
-| `P` accepted, `D` accepted | ordered | 1 | 1..1 | 0..0 |
-| | out-of-order | 1 | 1..1 | 0..0 |
-| | fused | 2 | 0..1 | 0..0 |
-| `P` rejected, `D` accepted | ordered | 1 | 1..1 | 0..0 |
-| | out-of-order | 1 | 1..1 | 0..0 |
-| | fused | 2 | 0..1 | 0..1 |
+| outcomes                   | mode         | orders | waits | rollbacks |
+| -------------------------- | ------------ | ------ | ----- | --------- |
+| `P` accepted, `D` accepted | ordered      | 1      | 1..1  | 0..0      |
+|                            | out-of-order | 1      | 1..1  | 0..0      |
+|                            | fused        | 2      | 0..1  | 0..0      |
+| `P` rejected, `D` accepted | ordered      | 1      | 1..1  | 0..0      |
+|                            | out-of-order | 1      | 1..1  | 0..0      |
+|                            | fused        | 2      | 0..1  | 0..1      |
 
 The fused plan that starts `D` before `P` settles records `waits: 0, rollbacks: 1, retries: 1`
 and accepts nothing when `P` is rejected, while the plan that waits records `waits: 1,
 rollbacks: 0`. Fusion therefore buys order freedom and pays in rollback — the model states the
-trade rather than assuming it is free. Note also that the fused mode's *floor* is zero
+trade rather than assuming it is free. Note also that the fused mode's _floor_ is zero
 rollbacks in both tables: fusion may still choose to wait, which is why the comparison is
 reported as a spread and not as a single best case.
 
@@ -96,7 +98,7 @@ reported as a spread and not as a single best case.
   the round onto it is the remaining work.
 - The compiler refuses a read or write path outside the frozen files, an out-of-range budget, an
   unknown requirement kind, a cycle, and a spec without a verifier. It does not yet refuse a
-  refinement whose *data* dependencies are missing, because the design has no parent-obligation
+  refinement whose _data_ dependencies are missing, because the design has no parent-obligation
   mapping to check against — the refinement check here takes a host-declared split.
 
 ## Reproduction
@@ -107,5 +109,5 @@ npm run prompts:generate          # generated prompts are not tracked
 npm run check && npm run complexity:gate && npm run format:check
 node --experimental-strip-types --test --test-concurrency=1 tests/integration/task-semantics.test.ts
 node --experimental-strip-types --test --test-concurrency=1 tests/integration/task-semantics-model.test.ts
-node <shared-checkout>/.nmg/teeth-check-task-semantics.mjs   # local one-off, see above
+npm run mutation:teeth   # every mutant from slices 1-3, checked by name
 ```
