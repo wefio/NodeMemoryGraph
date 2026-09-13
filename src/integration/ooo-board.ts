@@ -157,18 +157,12 @@ export class BoardAdmission extends NmgStore {
       );
     `);
     this.createCheckTable();
-    this.createTaskTable();
-    this.migrateToRunScope();
-    // Additive migration: a round store outlives the process that created it, so a new
-    // column must be added rather than assumed. Guarded by PRAGMA table_info, so it is
-    // idempotent and an existing store keeps its state.
-    this.ensureColumns("ooo_probe_tasks", {
-      // Durable pointer to the entry whose verdict accepted this artifact. `entry_id`
-      // cannot serve that role: publishReady() clears it for tasks that are neither
-      // selected nor live (to release the board's serial slot), while the verdict must
-      // stay reachable. A pointer, not an authority — the verdict remains the authority.
-      accepted_entry_id: "TEXT",
-    });
+    this.createManifestTables();
+    this.migrateToTaskTables();
+    // The additive `accepted_entry_id` column this store used to carry is gone with the table
+    // that held it. It was a pointer to the entry whose verdict accepted an artifact, and the
+    // verdict is looked up by artifact digest now — a migrated store keeps the artifact plus the
+    // entries that decide it, and keeps no stale pointer that a reader could mistake for one.
     const wanted = `${policy}:${digest(plan)}`;
     const runs = this.db
       .prepare("SELECT run_id, policy FROM ooo_probe_runs ORDER BY created_at")
@@ -195,9 +189,13 @@ export class BoardAdmission extends NmgStore {
         [id, input, dependencies, effect, event, operation],
       ] of plan.entries()) {
         const spec = patchTasks[id];
+        // What the run froze, written once: the manifest is never updated afterwards. Beside it
+        // the facts of this task start empty (attempts and the external-ready event are facts the
+        // board does not carry), and the derived row is not created at all — a task with no
+        // derived row reads as one nobody has claimed.
         this.db
           .prepare(
-            "INSERT OR IGNORE INTO ooo_probe_tasks (run_id, id, revision, input, dependencies, position, effect, source_revision, observed_revision, wait_event, external_ready, operation, kind, patch_files, patch_editable) VALUES (?, ?, 'v1', ?, ?, ?, ?, 'input-v1', 'input-v1', ?, ?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO ooo_probe_manifest (run_id, id, revision, input, dependencies, position, effect, source_revision, wait_event, operation, kind, patch_files, patch_editable) VALUES (?, ?, 'v1', ?, ?, ?, ?, 'input-v1', ?, ?, ?, ?, ?)",
           )
           .run(
             runId,
@@ -207,28 +205,59 @@ export class BoardAdmission extends NmgStore {
             position,
             effect,
             event,
-            event ? 0 : 1,
             operation ?? "",
             spec ? "patch" : "snapshot",
             spec ? JSON.stringify(spec.files) : null,
             spec ? JSON.stringify(spec.editable) : null,
           );
+        this.db
+          .prepare(
+            "INSERT OR IGNORE INTO ooo_probe_facts (run_id, id, attempt, external_ready) VALUES (?, ?, 0, ?)",
+          )
+          .run(runId, id, event ? 0 : 1);
       }
     });
     this.publishReady();
   }
 
-  private createTaskTable(name = "ooo_probe_tasks") {
+  /**
+   * Three tables, because a task row carried three kinds of fact and the difference decides what
+   * may be rebuilt: what the run froze (immutable), what it appended (facts the board does not
+   * have), and what is recomputable from the frozen manifest (the digest of the input this attempt
+   * was claimed against). The claim holder is *not* in the last group: the board stops reporting
+   * `claimedBy` once the round resolves the entry, so who claimed is a fact, and a rebuild that
+   * tried to re-derive it would quietly lose it. Reads go through `ooo_probe_task_view`, which is a
+   * projection and not storage.
+   */
+  private createManifestTables() {
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS ${name} (
+      CREATE TABLE IF NOT EXISTS ooo_probe_manifest (
         run_id TEXT NOT NULL, id TEXT NOT NULL, revision TEXT NOT NULL, input TEXT NOT NULL,
-        dependencies TEXT NOT NULL, entry_id TEXT, attempt INTEGER NOT NULL DEFAULT 0, owner TEXT,
-        claim_time TEXT, input_digest TEXT, artifact TEXT, position INTEGER NOT NULL,
-        effect TEXT NOT NULL, source_revision TEXT NOT NULL, observed_revision TEXT NOT NULL,
-        wait_event TEXT, external_ready INTEGER NOT NULL, operation TEXT NOT NULL,
+        dependencies TEXT NOT NULL, position INTEGER NOT NULL, effect TEXT NOT NULL,
+        source_revision TEXT NOT NULL, wait_event TEXT, operation TEXT NOT NULL,
         kind TEXT NOT NULL DEFAULT 'snapshot', patch_files TEXT, patch_editable TEXT,
+        PRIMARY KEY (run_id, id)
+      );
+      CREATE TABLE IF NOT EXISTS ooo_probe_facts (
+        run_id TEXT NOT NULL, id TEXT NOT NULL, attempt INTEGER NOT NULL DEFAULT 0,
+        artifact TEXT, entry_id TEXT, external_ready INTEGER NOT NULL DEFAULT 0,
+        observed_revision TEXT, owner TEXT, claim_time TEXT,
         PRIMARY KEY (run_id, id), UNIQUE (run_id, entry_id)
       );
+      CREATE TABLE IF NOT EXISTS ooo_probe_derived (
+        run_id TEXT NOT NULL, id TEXT NOT NULL, input_digest TEXT, PRIMARY KEY (run_id, id)
+      );
+      DROP VIEW IF EXISTS ooo_probe_task_view;
+      CREATE VIEW ooo_probe_task_view AS
+        SELECT m.run_id, m.id, m.revision, m.input, m.dependencies, m.position, m.effect,
+          m.source_revision, m.wait_event, m.operation, m.kind, m.patch_files, m.patch_editable,
+          COALESCE(f.attempt, 0) AS attempt, f.artifact, f.entry_id,
+          COALESCE(f.external_ready, 0) AS external_ready,
+          COALESCE(f.observed_revision, m.source_revision) AS observed_revision,
+          f.owner, f.claim_time, d.input_digest
+        FROM ooo_probe_manifest m
+        LEFT JOIN ooo_probe_facts f ON f.run_id = m.run_id AND f.id = m.id
+        LEFT JOIN ooo_probe_derived d ON d.run_id = m.run_id AND d.id = m.id;
     `);
   }
 
@@ -242,11 +271,13 @@ export class BoardAdmission extends NmgStore {
   }
 
   /**
-   * Namespace a store built before runs existed, instead of discarding it. SQLite cannot change a
-   * primary key in place, so the rows are copied into a run-scoped table and the old one is dropped:
-   * a round's row is its evidence, and re-attributing evidence is worse than keeping it.
+   * Bring a store written before this split up to it: the old single task table is copied into the
+   * manifest, the facts and the derived cache, and the old table is dropped. Both earlier shapes
+   * are accepted — the pre-namespace one, which states its run in the single-row meta table, and
+   * the run-scoped one — because a round's rows are its evidence, and re-attributing or discarding
+   * them would be worse than migrating them.
    */
-  private migrateToRunScope(): void {
+  private migrateToTaskTables(): void {
     const columns = (table: string) =>
       new Set(
         (this.db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map(
@@ -256,22 +287,25 @@ export class BoardAdmission extends NmgStore {
     const meta = columns("ooo_probe_meta");
     const tasks = columns("ooo_probe_tasks");
     const checks = columns("ooo_probe_checks");
-    const needsTasks = tasks.size > 0 && !tasks.has("run_id");
-    const needsChecks = checks.size > 0 && !checks.has("run_id");
-    if (meta.size === 0 && !needsTasks && !needsChecks) return;
-    // A pre-namespace store states its run in the single-row meta table. Without that row the rows
-    // cannot be attributed to a run, and inventing one would manufacture history.
+    if (tasks.size === 0) {
+      if (meta.size > 0) throw new Error("legacy round store has meta but no task table");
+      return;
+    }
+    const scoped = tasks.has("run_id");
+    // A pre-namespace store states its run in the single-row meta table. Without that row the
+    // rows cannot be attributed to a run, and inventing one would manufacture history.
     const legacy = meta.size
       ? (this.db.prepare("SELECT * FROM ooo_probe_meta WHERE id=1").get() as unknown as
           | { run_id: string; policy: string; cancel_reason?: string; cancelled_at?: string }
           | undefined)
       : undefined;
     if (meta.size > 0 && !legacy) throw new Error("legacy round store has no meta row");
-    if ((needsTasks || needsChecks) && !legacy)
+    if (!scoped && !legacy)
       throw new Error(
         "legacy round store has rows but no run identity; refusing to attribute them",
       );
     const runId = legacy?.run_id ?? "";
+    const needsChecks = checks.size > 0 && !checks.has("run_id");
     this.transaction(() => {
       if (legacy)
         this.db
@@ -285,24 +319,31 @@ export class BoardAdmission extends NmgStore {
             legacy.cancelled_at ?? null,
             new Date(this.now).toISOString(),
           );
-      if (needsTasks) {
-        this.db.exec("ALTER TABLE ooo_probe_tasks RENAME TO ooo_probe_tasks_legacy");
-        this.createTaskTable("ooo_probe_tasks_scoped");
-        this.db
-          .prepare(
-            `INSERT INTO ooo_probe_tasks_scoped (run_id, id, revision, input, dependencies,
-               entry_id, attempt, owner, claim_time, input_digest, artifact, position, effect,
-               source_revision, observed_revision, wait_event, external_ready, operation, kind,
-               patch_files, patch_editable)
-             SELECT ?, id, revision, input, dependencies, entry_id, attempt, owner, claim_time,
-               input_digest, artifact, position, effect, source_revision, observed_revision,
-               wait_event, external_ready, operation, kind, patch_files, patch_editable
-             FROM ooo_probe_tasks_legacy`,
-          )
-          .run(runId);
-        this.db.exec("DROP TABLE ooo_probe_tasks_legacy");
-        this.db.exec("ALTER TABLE ooo_probe_tasks_scoped RENAME TO ooo_probe_tasks");
+      this.db.exec("ALTER TABLE ooo_probe_tasks RENAME TO ooo_probe_tasks_pre_split");
+      // Filling the missing run column first keeps the copy below a single statement per table
+      // instead of one variant per shape.
+      if (!scoped) {
+        this.db.exec("ALTER TABLE ooo_probe_tasks_pre_split ADD COLUMN run_id TEXT");
+        this.db.prepare("UPDATE ooo_probe_tasks_pre_split SET run_id=?").run(runId);
       }
+      this.createManifestTables();
+      this.db.exec(`
+        INSERT INTO ooo_probe_manifest (run_id, id, revision, input, dependencies, position,
+          effect, source_revision, wait_event, operation, kind, patch_files, patch_editable)
+        SELECT run_id, id, revision, input, dependencies, position, effect, source_revision,
+          wait_event, operation, kind, patch_files, patch_editable
+        FROM ooo_probe_tasks_pre_split;
+        INSERT INTO ooo_probe_facts (run_id, id, attempt, artifact, entry_id, external_ready,
+          observed_revision, owner, claim_time)
+        SELECT run_id, id, attempt, artifact, entry_id, external_ready, observed_revision,
+          owner, claim_time
+        FROM ooo_probe_tasks_pre_split;
+        INSERT INTO ooo_probe_derived (run_id, id, input_digest)
+        SELECT run_id, id, input_digest
+        FROM ooo_probe_tasks_pre_split;
+      `);
+      this.db.exec("DROP TABLE ooo_probe_tasks_pre_split");
+      if (meta.size > 0) this.db.exec("DROP TABLE ooo_probe_meta");
       if (needsChecks) {
         this.db.exec("ALTER TABLE ooo_probe_checks RENAME TO ooo_probe_checks_legacy");
         this.createCheckTable("ooo_probe_checks_scoped");
@@ -315,7 +356,6 @@ export class BoardAdmission extends NmgStore {
         this.db.exec("DROP TABLE ooo_probe_checks_legacy");
         this.db.exec("ALTER TABLE ooo_probe_checks_scoped RENAME TO ooo_probe_checks");
       }
-      if (meta.size > 0) this.db.exec("DROP TABLE ooo_probe_meta");
     });
   }
 
@@ -343,7 +383,7 @@ export class BoardAdmission extends NmgStore {
 
   private row(id: string): Row {
     const row = this.db
-      .prepare("SELECT * FROM ooo_probe_tasks WHERE run_id=? AND id=?")
+      .prepare("SELECT * FROM ooo_probe_task_view WHERE run_id=? AND id=?")
       .get(this.runId, id) as unknown as Row | undefined;
     if (!row) throw new Error("unknown task");
     return row;
@@ -433,7 +473,9 @@ export class BoardAdmission extends NmgStore {
     // Pending publications are derived from durable rows: a tiny transactional
     // outbox, drained by this single daemon after commit and on restart/retry.
     const delivered = this.db
-      .prepare("SELECT * FROM ooo_probe_tasks WHERE run_id=? AND artifact IS NOT NULL ORDER BY id")
+      .prepare(
+        "SELECT * FROM ooo_probe_task_view WHERE run_id=? AND artifact IS NOT NULL ORDER BY id",
+      )
       .all(this.runId) as unknown as Row[];
     for (const row of delivered)
       this.publish(
@@ -447,7 +489,9 @@ export class BoardAdmission extends NmgStore {
     // nobody claimed, so only the publication is retired.
     const selected = this.next();
     for (const row of this.db
-      .prepare("SELECT * FROM ooo_probe_tasks WHERE run_id=? AND entry_id IS NOT NULL ORDER BY id")
+      .prepare(
+        "SELECT * FROM ooo_probe_task_view WHERE run_id=? AND entry_id IS NOT NULL ORDER BY id",
+      )
       .all(this.runId) as unknown as Row[]) {
       if (row.id === selected || this.live(row)) continue;
       try {
@@ -470,11 +514,11 @@ export class BoardAdmission extends NmgStore {
           owner: RETENTION_OWNER,
         });
       this.db
-        .prepare("UPDATE ooo_probe_tasks SET entry_id=NULL WHERE run_id=? AND id=?")
+        .prepare("UPDATE ooo_probe_facts SET entry_id=NULL WHERE run_id=? AND id=?")
         .run(this.runId, row.id);
     }
     const rows = this.db
-      .prepare("SELECT * FROM ooo_probe_tasks WHERE run_id=? AND entry_id IS NULL ORDER BY id")
+      .prepare("SELECT * FROM ooo_probe_task_view WHERE run_id=? AND entry_id IS NULL ORDER BY id")
       .all(this.runId) as unknown as Row[];
     const accepted = this.acceptedArtifacts();
     for (const row of rows) {
@@ -495,7 +539,7 @@ export class BoardAdmission extends NmgStore {
         }),
       );
       this.db
-        .prepare("UPDATE ooo_probe_tasks SET entry_id=? WHERE run_id=? AND id=?")
+        .prepare("UPDATE ooo_probe_facts SET entry_id=? WHERE run_id=? AND id=?")
         .run(entryId, this.runId, row.id);
       // Pin what the round is about to reference. Without this the entry could be pruned
       // on its own TTL while the round still needs its verdict, and acceptance would
@@ -520,14 +564,19 @@ export class BoardAdmission extends NmgStore {
     if (
       this.db
         .prepare(
-          "SELECT 1 FROM ooo_probe_checks c JOIN ooo_probe_tasks t ON c.task_id=t.id AND c.run_id=t.run_id WHERE t.run_id=? AND t.wait_event=?",
+          "SELECT 1 FROM ooo_probe_checks c JOIN ooo_probe_task_view t ON c.task_id=t.id AND c.run_id=t.run_id WHERE t.run_id=? AND t.wait_event=?",
         )
         .get(this.runId, event)
     )
       throw new Error("managed check requires bound terminal evidence");
     const changed = this.db
-      .prepare("UPDATE ooo_probe_tasks SET external_ready=1 WHERE run_id=? AND wait_event=?")
-      .run(this.runId, event);
+      .prepare(
+        // `wait_event` is part of the frozen manifest, so the fact is written to the tasks whose
+        // manifest says they are waiting on this event. A view over three tables is not updatable,
+        // which is why this is a subquery rather than a single-table predicate.
+        "UPDATE ooo_probe_facts SET external_ready=1 WHERE run_id=? AND id IN (SELECT id FROM ooo_probe_manifest WHERE run_id=? AND wait_event=?)",
+      )
+      .run(this.runId, this.runId, event);
     if (!changed.changes) throw new Error("unknown external event");
     this.publishReady();
   }
@@ -616,7 +665,7 @@ export class BoardAdmission extends NmgStore {
       // Unknown completion is not evidence that the wait resolved.
       if (result.outcome !== "undecidable")
         this.db
-          .prepare("UPDATE ooo_probe_tasks SET external_ready=1 WHERE run_id=? AND id=?")
+          .prepare("UPDATE ooo_probe_facts SET external_ready=1 WHERE run_id=? AND id=?")
           .run(this.runId, row.id);
       return "accepted";
     });
@@ -628,7 +677,7 @@ export class BoardAdmission extends NmgStore {
     if (!revision.trim()) throw new Error("revision required");
     this.row(id);
     this.db
-      .prepare("UPDATE ooo_probe_tasks SET observed_revision=? WHERE run_id=? AND id=?")
+      .prepare("UPDATE ooo_probe_facts SET observed_revision=? WHERE run_id=? AND id=?")
       .run(revision, this.runId, id);
     this.publishReady();
   }
@@ -638,7 +687,7 @@ export class BoardAdmission extends NmgStore {
     // the explicit terminal decision the caller asked for.
     if (this.cancelled() !== null) return null;
     const rows = this.db
-      .prepare("SELECT * FROM ooo_probe_tasks WHERE run_id=? ORDER BY position")
+      .prepare("SELECT * FROM ooo_probe_task_view WHERE run_id=? ORDER BY position")
       .all(this.runId) as unknown as Row[];
     const accepted = this.acceptedArtifacts();
     // A task whose artifact is delivered but no longer accepted is not selectable: the
@@ -688,11 +737,15 @@ export class BoardAdmission extends NmgStore {
       if (!row.operation && !spec) throw new Error("patch task has no host spec");
       const frozen = spec ? this.patchFrozen({ ...row, attempt }, attempt) : null;
       const inputDigest = frozen ? frozen.digest : this.inputDigest(row);
+      // The attempt, the holder and the claim time are facts: the board stops reporting its claim
+      // once the entry is resolved, so they cannot be re-derived. The input digest is the cache,
+      // recomputable from the frozen manifest at any time.
       this.db
         .prepare(
-          "UPDATE ooo_probe_tasks SET attempt=?, owner=?, claim_time=?, input_digest=? WHERE run_id=? AND id=?",
+          "UPDATE ooo_probe_facts SET attempt=?, owner=?, claim_time=? WHERE run_id=? AND id=?",
         )
-        .run(attempt, agentId, entry.claimedAt, inputDigest, this.runId, id);
+        .run(attempt, agentId, entry.claimedAt, this.runId, id);
+      this.putInputDigest(id, inputDigest);
       return {
         runId: this.runId,
         taskId: id,
@@ -856,7 +909,7 @@ export class BoardAdmission extends NmgStore {
       if (this.delivered(row)) return row.artifact === commit ? "duplicate" : "rejected";
       if (!this.live(row)) return "stale";
       this.db
-        .prepare("UPDATE ooo_probe_tasks SET artifact=? WHERE run_id=? AND id=?")
+        .prepare("UPDATE ooo_probe_facts SET artifact=? WHERE run_id=? AND id=?")
         .run(commit, this.runId, row.id);
       // Acceptance is recorded as protocol, not as a self-report. The artifact is
       // delivered against the claim it belongs to — the holder's own attempt, so
@@ -944,7 +997,7 @@ export class BoardAdmission extends NmgStore {
   private acceptedArtifacts(): Record<string, string> {
     const rows = this.db
       .prepare(
-        "SELECT id, artifact, source_revision, observed_revision FROM ooo_probe_tasks " +
+        "SELECT id, artifact, source_revision, observed_revision FROM ooo_probe_task_view " +
           "WHERE run_id=? AND artifact IS NOT NULL ORDER BY id",
       )
       .all(this.runId) as unknown as Row[];
@@ -1005,7 +1058,7 @@ export class BoardAdmission extends NmgStore {
     const withdrawn: string[] = [];
     this.transaction(() => {
       for (const row of this.db
-        .prepare("SELECT * FROM ooo_probe_tasks WHERE run_id=? ORDER BY position")
+        .prepare("SELECT * FROM ooo_probe_task_view WHERE run_id=? ORDER BY position")
         .all(this.runId) as unknown as Row[])
         this.fenceRow(row, withdrawn);
       this.db
@@ -1053,9 +1106,48 @@ export class BoardAdmission extends NmgStore {
     if (row.artifact !== null || row.owner !== null) dropped.push(row.id);
     this.db
       .prepare(
-        "UPDATE ooo_probe_tasks SET artifact=NULL, attempt=attempt+1, owner=NULL, claim_time=NULL, external_ready=0, entry_id=NULL WHERE run_id=? AND id=?",
+        "UPDATE ooo_probe_facts SET artifact=NULL, attempt=attempt+1, owner=NULL, claim_time=NULL, external_ready=0, entry_id=NULL WHERE run_id=? AND id=?",
       )
       .run(this.runId, row.id);
+    this.putInputDigest(row.id, null);
+  }
+
+  /** Warm the cache for one task. There is exactly one derived column, and this is its writer. */
+  private putInputDigest(id: string, digest: string | null): void {
+    this.db
+      .prepare(
+        `INSERT INTO ooo_probe_derived (run_id, id, input_digest) VALUES (?, ?, ?)
+         ON CONFLICT(run_id, id) DO UPDATE SET input_digest=excluded.input_digest`,
+      )
+      .run(this.runId, id, digest);
+  }
+
+  /**
+   * Rebuild the cache from what decides it: the frozen manifest names the input digest of the
+   * attempt a task was claimed at. Nothing here is authoritative, so this is safe to call whenever
+   * the cache is suspect  -  and if it produces a different answer than the cache held, the cache was
+   * wrong, not the sources.
+   */
+  refreshDerived(): number {
+    const rows = this.db
+      .prepare("SELECT * FROM ooo_probe_task_view WHERE run_id=? ORDER BY position")
+      .all(this.runId) as unknown as Row[];
+    return this.transaction(() => {
+      let rebuilt = 0;
+      for (const row of rows) {
+        const frozen =
+          row.attempt >= 1 && this.patchTasks[row.id] !== undefined
+            ? this.patchFrozen(row, row.attempt)
+            : null;
+        // A task with no attempt has no digest to record: the ticket mints one at claim time.
+        this.putInputDigest(
+          row.id,
+          row.attempt >= 1 ? (frozen?.digest ?? this.inputDigest(row)) : null,
+        );
+        rebuilt += 1;
+      }
+      return rebuilt;
+    });
   }
 
   /** Refusing a store must not leave its file handle behind: the caller is told to open a
@@ -1096,7 +1188,7 @@ export class BoardAdmission extends NmgStore {
     const invalidated: string[] = [];
     this.transaction(() => {
       const rows = this.db
-        .prepare("SELECT * FROM ooo_probe_tasks WHERE run_id=? ORDER BY position")
+        .prepare("SELECT * FROM ooo_probe_task_view WHERE run_id=? ORDER BY position")
         .all(this.runId) as unknown as Row[];
       const affected = new Set([id]);
       // Transitive dependents: an artifact built from a value that no longer exists
@@ -1132,9 +1224,10 @@ export class BoardAdmission extends NmgStore {
         this.releaseRowRetention(row);
         this.db
           .prepare(
-            "UPDATE ooo_probe_tasks SET artifact=NULL, attempt=attempt+1, owner=NULL, claim_time=NULL, external_ready=0, entry_id=NULL WHERE run_id=? AND id=?",
+            "UPDATE ooo_probe_facts SET artifact=NULL, attempt=attempt+1, owner=NULL, claim_time=NULL, external_ready=0, entry_id=NULL WHERE run_id=? AND id=?",
           )
           .run(this.runId, taskId);
+        this.putInputDigest(taskId, null);
       }
     });
     this.publish("decision", `reopen ${invalidated.join(",")}: ${reason}`.slice(0, 1_000));
