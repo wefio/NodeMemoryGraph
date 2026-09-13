@@ -92,7 +92,6 @@ test("case 1: a join waits for every dependency, and concurrent candidates never
 
 test("case 2: a lost obligation or a widened permission is refused, and an assumption cannot stand in for a dependency", () => {
   const compiled = compileTaskUnits(joinInput());
-  const parent = compiled.units.find((unit) => unit.id === "P")!;
   const refusals = checkRefinement(compiled, {
     parent: "P",
     parts: ["J"],
