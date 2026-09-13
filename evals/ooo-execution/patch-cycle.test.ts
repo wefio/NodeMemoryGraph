@@ -250,3 +250,42 @@ test("safety: a host check that throws or is undecidable cannot accept a candida
   assert.equal(await submitPatch(gate, ticket, artifact), "rejected");
   assert.deepEqual(gate.accepted(), {});
 });
+
+test("an outside rejection withdraws the release of a dependent, and the round fails closed", async (t) => {
+  const gate = fixture(t);
+  const ticket = gate.claim("P", "worker-p");
+  const entryId = gate
+    .readTaskBoard({ taskId: channel })
+    .entries.find((entry) => entry.claimedBy === "worker-p")!.id;
+  const artifact = JSON.stringify({
+    digest: ticket.patch!.digest,
+    files: [{ path: "src/integration/ooo-execution.ts", content: expected }],
+  });
+  assert.equal(await submitPatch(gate, ticket, artifact), "accepted");
+  assert.equal(gate.next(), "D", "the dependent is selected while P's artifact is accepted");
+
+  gate.judgeTaskBoardEntry({
+    taskId: channel,
+    entryId,
+    agentId: "auditor",
+    verdict: "rejected",
+    reason: "re-tested and failed",
+  });
+
+  // One fact, one predicate: releasing D follows the verdict, not the stored value. The
+  // round used to keep scheduling dependents on "the artifact column is not null", which
+  // an outside reviewer cannot change — so a rejection it had already recorded was
+  // invisible to the very path that decides what may be built on.
+  assert.deepEqual(gate.accepted(), {});
+  assert.equal(gate.next(), null, "nothing is selected on work that is no longer accepted");
+  assert.throws(() => gate.claim("D", "worker-d"), /unfulfilled dependencies/u);
+  // Failing closed, not self-healing: the rejected artifact is still delivered, so it is
+  // not silently re-run either. Recovery is the coordinator's explicit reopen, because a
+  // second attempt nobody decided on is exactly the self-approval the fence prevents.
+  assert.throws(
+    () => gate.claim("P", "worker-p2"),
+    /delivered but not accepted; the coordinator must reopen it/u,
+  );
+  assert.deepEqual(gate.reopen("P", "auditor rejected the accepted artifact"), ["P"]);
+  assert.equal(gate.next(), "P", "after reopen the task is schedulable again");
+});

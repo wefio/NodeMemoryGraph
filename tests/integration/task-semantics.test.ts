@@ -11,6 +11,7 @@ import test from "node:test";
 import {
   MODELLED_ACTIONS,
   UNMODELLED_ACTIONS,
+  acceptedFact,
   checkRefinement,
   compileTaskUnits,
   deriveStatus,
@@ -318,5 +319,42 @@ test("refuses an unknown key inside budget or limits, and a range above the maxi
   );
   assert.ok(
     over.refusals.some((refusal) => refusal.field === "budget" && /exceeds/u.test(refusal.reason)),
+  );
+});
+
+test("acceptedFact is the single rule, and the view adapter does not grow its own", () => {
+  const digest = "d".repeat(64);
+  const base = {
+    artifact: "commit",
+    digest,
+    verdict: "accepted",
+    judgedDigest: digest,
+    currentRevision: true,
+  };
+  assert.equal(acceptedFact(base), true);
+  assert.equal(acceptedFact({ ...base, artifact: null }), false, "delivery is not acceptance");
+  assert.equal(
+    acceptedFact({ ...base, verdict: null }),
+    false,
+    "a missing verdict is not acceptance",
+  );
+  assert.equal(acceptedFact({ ...base, verdict: "undecidable" }), false);
+  assert.equal(
+    acceptedFact({ ...base, judgedDigest: "e".repeat(64) }),
+    false,
+    "a verdict about another digest does not transfer",
+  );
+  assert.equal(acceptedFact({ ...base, currentRevision: false }), false);
+  assert.equal(acceptedFact({ ...base, cancelled: true }), false);
+
+  const facts = {
+    artifacts: { P: digest },
+    verdicts: { P: { digest, verdict: "accepted" as const } },
+  };
+  assert.equal(isAccepted({ id: "P", revision: "4" }, facts), true);
+  assert.equal(
+    isAccepted({ id: "P", revision: "4" }, { artifacts: { P: digest } }),
+    false,
+    "the adapter must not accept on bytes either",
   );
 });

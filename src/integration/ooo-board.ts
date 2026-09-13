@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { NmgStore } from "../../src/core/store.ts";
+import { acceptedFact } from "./task-semantics.ts";
 import { checkResultValid, sameCheck, type CheckTicket, type CheckResult } from "./ooo-check.ts";
 import {
   patchCandidate,
@@ -227,18 +228,27 @@ export class BoardAdmission extends NmgStore {
   }
 
   private inputs(row: Row): Record<string, string> {
+    const accepted = this.acceptedArtifacts();
     return Object.fromEntries(
       (JSON.parse(row.dependencies) as string[]).map((id) => {
-        const dependency = this.row(id);
-        if (
-          dependency.artifact === null ||
-          dependency.source_revision !== dependency.observed_revision
-        )
+        const value = accepted[id];
+        // An accepted artifact is the only value a dependent may bind to: bytes whose
+        // verdict is pending, rejected, or about a retired revision are not an input.
+        // An unknown id is still reported as unknown, because "no such task" and "not
+        // accepted yet" send a reader to different places.
+        if (value === undefined) {
+          this.row(id);
           throw new Error("unfulfilled dependencies");
-        // Revisions and outputs are immutable after acceptance in this fixed-plan probe.
-        return [id, dependency.artifact];
+        }
+        return [id, value];
       }),
     );
+  }
+
+  /** Bytes exist. This is a delivery fact, not acceptance: it is what the arbitration in
+   *  submit()/commitArtifact() compares against, and it is not what releases a dependent. */
+  private delivered(row: Row): boolean {
+    return row.artifact !== null;
   }
 
   /** A task with no snapshot operation is a patch task; its host envelope is looked
@@ -300,10 +310,10 @@ export class BoardAdmission extends NmgStore {
   private publishReady(): void {
     // Pending publications are derived from durable rows: a tiny transactional
     // outbox, drained by this single daemon after commit and on restart/retry.
-    const accepted = this.db
+    const delivered = this.db
       .prepare("SELECT * FROM ooo_probe_tasks WHERE artifact IS NOT NULL ORDER BY id")
       .all() as unknown as Row[];
-    for (const row of accepted)
+    for (const row of delivered)
       this.publish(
         "decision",
         JSON.stringify({ id: row.id, attempt: row.attempt, artifact: row.artifact }),
@@ -333,10 +343,11 @@ export class BoardAdmission extends NmgStore {
     const rows = this.db
       .prepare("SELECT * FROM ooo_probe_tasks WHERE entry_id IS NULL ORDER BY id")
       .all() as unknown as Row[];
+    const accepted = this.acceptedArtifacts();
     for (const row of rows) {
       // Do not occupy the board's serial outstanding slot with a waiting task.
       if (row.id !== selected) continue;
-      if ((JSON.parse(row.dependencies) as string[]).some((id) => this.row(id).artifact === null))
+      if ((JSON.parse(row.dependencies) as string[]).some((id) => !Object.hasOwn(accepted, id)))
         continue;
       const entryId = this.publish(
         "handoff",
@@ -382,7 +393,7 @@ export class BoardAdmission extends NmgStore {
     if (this.cancelled() !== null) throw new Error("round cancelled");
     return this.transaction(() => {
       const row = this.row(id);
-      if (!row.wait_event || row.external_ready || row.artifact !== null)
+      if (!row.wait_event || row.external_ready || this.delivered(row))
         throw new Error("task is not waiting");
       if (row.source_revision !== row.observed_revision) throw new Error("stale check input");
       const previous = this.db
@@ -473,14 +484,21 @@ export class BoardAdmission extends NmgStore {
     const rows = this.db
       .prepare("SELECT * FROM ooo_probe_tasks ORDER BY position")
       .all() as unknown as Row[];
+    const accepted = this.acceptedArtifacts();
+    // A task whose artifact is delivered but no longer accepted is not selectable: the
+    // bytes still exist, so it cannot be claimed again either, and selecting it would
+    // publish a handoff nobody can claim. The coordinator recovers it with reopen().
+    const schedulable = rows.filter(
+      (row) => !this.delivered(row) || Object.hasOwn(accepted, row.id),
+    );
     return nextTask(
-      rows.map((row) => ({
+      schedulable.map((row) => ({
         id: row.id,
         effect: row.effect,
         sourceVersion: row.source_revision,
         observedVersion: row.observed_revision,
         dependencies: JSON.parse(row.dependencies) as string[],
-        accepted: row.artifact !== null,
+        accepted: Object.hasOwn(accepted, row.id),
         claimed: this.live(row),
         externalEvent: row.wait_event ?? undefined,
         externalReady: row.external_ready === 1,
@@ -539,12 +557,18 @@ export class BoardAdmission extends NmgStore {
    *  transaction so selection and claim see the same state. */
   private claimableRow(id: string): Row {
     const row = this.row(id);
-    if (row.artifact !== null) throw new Error("task completed");
+    if (this.delivered(row))
+      throw new Error(
+        Object.hasOwn(this.acceptedArtifacts(), row.id)
+          ? "task completed"
+          : "task delivered but not accepted; the coordinator must reopen it",
+      );
     // Three distinct refusals, each named for what it is; they used to share one misleading
     // message ("unfulfilled dependencies") that sent readers after a dependency problem that
     // did not exist. Dependencies are checked first because they explain *why* nothing was
     // published, which is the more useful answer when both are true.
-    if ((JSON.parse(row.dependencies) as string[]).some((id) => this.row(id).artifact === null))
+    const accepted = this.acceptedArtifacts();
+    if ((JSON.parse(row.dependencies) as string[]).some((id) => !Object.hasOwn(accepted, id)))
       throw new Error("unfulfilled dependencies");
     if (!row.entry_id) throw new Error("no published handoff for this task");
     if (this.live(row)) throw new Error("task already claimed");
@@ -613,7 +637,7 @@ export class BoardAdmission extends NmgStore {
     if (typeof parsed === "string") return parsed;
     const { ticket, artifact, row } = parsed;
     const commit = this.proposalCommit(row, artifact);
-    if (row.artifact !== null) {
+    if (this.delivered(row)) {
       this.publishReady();
       return commit !== null && row.artifact === commit ? "duplicate" : "rejected";
     }
@@ -673,7 +697,7 @@ export class BoardAdmission extends NmgStore {
     return this.transaction(() => {
       const row = this.row(ticket.taskId);
       if (!this.bound(ticket, row)) return "stale";
-      if (row.artifact !== null) return row.artifact === commit ? "duplicate" : "rejected";
+      if (this.delivered(row)) return row.artifact === commit ? "duplicate" : "rejected";
       if (!this.live(row)) return "stale";
       this.db.prepare("UPDATE ooo_probe_tasks SET artifact=? WHERE id=?").run(commit, row.id);
       // Acceptance is recorded as protocol, not as a self-report. The artifact is
@@ -715,31 +739,51 @@ export class BoardAdmission extends NmgStore {
     });
   }
 
-  /** The accepted artifacts, by task id — the values dependents bind to.
+  /** The tasks whose artifact is accepted right now, by task id — one query, one rule.
    *
    *  The board verdict is what makes an artifact accepted; the private column only holds
-   *  the value (the canonical commit). Both facts are required, and the verdict must name
-   *  THIS artifact's digest: a verdict about a different artifact does not transfer, and a
-   *  row whose entry was judged rejected (say by an outside reviewer) stops counting as
-   *  accepted even though its value is still stored. */
-  accepted(): Record<string, string> {
+   *  the value dependents bind to. Both facts are required, the verdict must name THIS
+   *  artifact's digest, and the revision it was built from must still be current — the
+   *  rule itself lives in acceptedFact(), because dependency release, selection and this
+   *  query must not be able to disagree about what "accepted" means. In particular a row
+   *  whose entry was later judged rejected (an outside reviewer can do that) stops
+   *  counting, and the round fails closed: dependents stay blocked until the coordinator
+   *  explicitly reopens the task. */
+  private acceptedArtifacts(): Record<string, string> {
     const rows = this.db
       .prepare(
-        `SELECT t.id AS id, t.artifact AS artifact, e.verdict AS verdict, e.judged_digest AS judged_digest
+        `SELECT t.id AS id, t.artifact AS artifact, t.source_revision AS source_revision,
+                t.observed_revision AS observed_revision, e.verdict AS verdict,
+                e.judged_digest AS judged_digest
          FROM ooo_probe_tasks t
          LEFT JOIN task_board_entries e ON e.id = t.accepted_entry_id
          WHERE t.artifact IS NOT NULL
          ORDER BY t.id`,
       )
       .all();
+    const cancelled = this.cancelled() !== null;
     const accepted: Record<string, string> = {};
     for (const row of rows) {
       const commit = String(row.artifact);
-      if (row.verdict !== "accepted") continue;
-      if (row.judged_digest !== artifactDigest(commit)) continue;
+      if (
+        !acceptedFact({
+          artifact: commit,
+          digest: artifactDigest(commit),
+          verdict: row.verdict === null ? null : String(row.verdict),
+          judgedDigest: row.judged_digest === null ? null : String(row.judged_digest),
+          currentRevision: row.source_revision === row.observed_revision,
+          cancelled,
+        })
+      )
+        continue;
       accepted[String(row.id)] = commit;
     }
     return accepted;
+  }
+
+  /** The accepted artifacts, by task id — the values dependents bind to. */
+  accepted(): Record<string, string> {
+    return this.acceptedArtifacts();
   }
 
   /** Invalidates a task's accepted artifact (or live claim) so it must run again, and
