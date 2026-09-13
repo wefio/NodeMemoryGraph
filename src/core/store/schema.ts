@@ -1067,6 +1067,21 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
     );
     CREATE INDEX IF NOT EXISTS idx_task_board_acks_entry
       ON task_board_acks(entry_id);
+    -- Retention: a reference that must outlive ordinary TTL pruning. A retained entry
+    -- survives pruneExpiredTaskBoardEntries until every retention on it is released or
+    -- its retained_until passes. This is what lets a durable record point at a board
+    -- entry (a verdict, a handoff) without the evidence aging out from under it, and it
+    -- is why a consumer does not have to copy the verdict into its own table.
+    CREATE TABLE IF NOT EXISTS task_board_retentions (
+      entry_id TEXT NOT NULL,
+      owner TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      retained_at TEXT NOT NULL,
+      retained_until TEXT,
+      PRIMARY KEY (entry_id, owner)
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_board_retentions_entry
+      ON task_board_retentions(entry_id);
     -- Explicit subscription registry (channel membership): a session that has
     -- joined a named channel receives wake notices for it. Topic-based
     -- pub/sub membership — the channel wakes only its members, never

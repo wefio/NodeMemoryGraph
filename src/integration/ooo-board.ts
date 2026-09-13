@@ -51,6 +51,10 @@ export const channel = "ooo-process-probe";
  *  dependents to. The board carries this short identity and never the bytes — the value
  *  itself stays in the round's row and in the ready-signal decision entry. A verdict is
  *  bound to this digest, so it cannot be inherited by a different artifact. */
+/** The round's own retention owner. Stable across processes and restarts, because an
+ *  entry pinned by a round must be releasable by the same name later. */
+const RETENTION_OWNER = "coordinator";
+
 export function artifactDigest(commit: string): string {
   return createHash("sha256").update(commit).digest("hex");
 }
@@ -338,6 +342,15 @@ export class BoardAdmission extends NmgStore {
       } catch {
         // Already resolved or expired: the slot is free either way.
       }
+      // A handoff nobody used is not evidence: its pin goes with it. A row whose artifact
+      // was delivered keeps its pin, because the verdict that accepts it must stay
+      // readable past this entry's own TTL.
+      if (!this.delivered(row))
+        this.releaseTaskBoardRetention({
+          taskId: channel,
+          entryId: row.entry_id!,
+          owner: RETENTION_OWNER,
+        });
       this.db.prepare("UPDATE ooo_probe_tasks SET entry_id=NULL WHERE id=?").run(row.id);
     }
     const rows = this.db
@@ -362,6 +375,16 @@ export class BoardAdmission extends NmgStore {
         }),
       );
       this.db.prepare("UPDATE ooo_probe_tasks SET entry_id=? WHERE id=?").run(entryId, row.id);
+      // Pin what the round is about to reference. Without this the entry could be pruned
+      // on its own TTL while the round still needs its verdict, and acceptance would
+      // silently disappear from a round that is still running.
+      this.retainTaskBoardEntry({
+        taskId: channel,
+        entryId,
+        owner: RETENTION_OWNER,
+        reason: `round ${this.runId ?? "initial"} handoff for ${row.id}`,
+        now: new Date(this.now).toISOString(),
+      });
     }
   }
 
@@ -726,9 +749,12 @@ export class BoardAdmission extends NmgStore {
         reason: "host verification accepted this artifact",
         now,
       });
-      this.db
-        .prepare("UPDATE ooo_probe_tasks SET accepted_entry_id=? WHERE id=?")
-        .run(row.entry_id!, row.id);
+      // No pointer column is written here any more. `accepted_entry_id` cached a derived
+      // fact (this artifact was accepted) in the round's private table, which meant two
+      // places could disagree about it. The entry is the authority, the round finds it by
+      // the digest of the artifact it holds, and the retention in publishReady() keeps
+      // that entry readable past its own TTL — so the fact stays derivable instead of
+      // being stored twice.
       this.resolveTaskBoardEntry({
         taskId: channel,
         entryId: row.entry_id!,
@@ -749,28 +775,66 @@ export class BoardAdmission extends NmgStore {
    *  whose entry was later judged rejected (an outside reviewer can do that) stops
    *  counting, and the round fails closed: dependents stay blocked until the coordinator
    *  explicitly reopens the task. */
+  /** Release every pin this round holds on a row: the one on the handoff it published and
+   *  the one on the entry that carries the verdict for its artifact. Dual on purpose —
+   *  publishReady() clears `entry_id` for a task that is no longer selected, so a release
+   *  that only knew the entry id would leak the pin on the verdict, and a release that only
+   *  knew the artifact would leak the pin on an unused handoff. Both are idempotent. */
+  private releaseRowRetention(row: Row): void {
+    if (row.entry_id)
+      this.releaseTaskBoardRetention({
+        taskId: channel,
+        entryId: row.entry_id,
+        owner: RETENTION_OWNER,
+      });
+    if (row.artifact !== null) this.releaseArtifactRetention(row.artifact);
+  }
+
+  /** Release this round's pins on the entries that carried `commit`'s verdict. Derived
+   *  from the artifact digest rather than a stored pointer, so it also works after
+   *  publishReady() has cleared `entry_id` for a task that is no longer selected. */
+  private releaseArtifactRetention(commit: string): void {
+    const digest = artifactDigest(commit);
+    const entries = this.db
+      .prepare("SELECT id FROM task_board_entries WHERE task_id = ? AND deliverable_digest = ?")
+      .all(channel, digest) as unknown as { id: string }[];
+    for (const entry of entries)
+      this.releaseTaskBoardRetention({
+        taskId: channel,
+        entryId: String(entry.id),
+        owner: RETENTION_OWNER,
+      });
+  }
+
   private acceptedArtifacts(): Record<string, string> {
     const rows = this.db
       .prepare(
-        `SELECT t.id AS id, t.artifact AS artifact, t.source_revision AS source_revision,
-                t.observed_revision AS observed_revision, e.verdict AS verdict,
-                e.judged_digest AS judged_digest
-         FROM ooo_probe_tasks t
-         LEFT JOIN task_board_entries e ON e.id = t.accepted_entry_id
-         WHERE t.artifact IS NOT NULL
-         ORDER BY t.id`,
+        "SELECT id, artifact, source_revision, observed_revision FROM ooo_probe_tasks " +
+          "WHERE artifact IS NOT NULL ORDER BY id",
       )
-      .all();
+      .all() as unknown as Row[];
+    // The verdict is looked up on the board by the digest of THIS attempt's artifact — no
+    // pointer column, because acceptance is the board's fact and retention keeps the entry
+    // readable. A verdict about another digest never transfers, and a later rejection of
+    // this digest withdraws acceptance.
+    const verdictOf = this.db.prepare(
+      `SELECT verdict, judged_digest FROM task_board_entries
+       WHERE task_id = ? AND deliverable_digest = ? AND verdict IS NOT NULL
+       ORDER BY judged_at DESC LIMIT 1`,
+    );
     const cancelled = this.cancelled() !== null;
     const accepted: Record<string, string> = {};
     for (const row of rows) {
       const commit = String(row.artifact);
+      const digest = artifactDigest(commit);
+      const recorded = verdictOf.get(channel, digest) as unknown as
+        { verdict: string | null; judged_digest: string | null } | undefined;
       if (
         !acceptedFact({
           artifact: commit,
-          digest: artifactDigest(commit),
-          verdict: row.verdict === null ? null : String(row.verdict),
-          judgedDigest: row.judged_digest === null ? null : String(row.judged_digest),
+          digest,
+          verdict: recorded?.verdict ?? null,
+          judgedDigest: recorded?.judged_digest ?? null,
           currentRevision: row.source_revision === row.observed_revision,
           cancelled,
         })
@@ -846,6 +910,9 @@ export class BoardAdmission extends NmgStore {
       } catch {
         // Already resolved or expired: nothing to withdraw.
       }
+    // The artifact is being cleared, so the round no longer relies on this entry's
+    // verdict: the pins go with the value they protected.
+    this.releaseRowRetention(row);
     if (row.artifact !== null || row.owner !== null) dropped.push(row.id);
     this.db
       .prepare(
@@ -913,6 +980,9 @@ export class BoardAdmission extends NmgStore {
           } catch {
             // Already resolved or expired: nothing to withdraw.
           }
+        // Same rule as fenceRow: the values these verdicts protected are being cleared, so
+        // the pins are no longer the round's to hold.
+        this.releaseRowRetention(row);
         this.db
           .prepare(
             "UPDATE ooo_probe_tasks SET artifact=NULL, attempt=attempt+1, owner=NULL, claim_time=NULL, external_ready=0, entry_id=NULL WHERE id=?",

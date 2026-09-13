@@ -289,3 +289,70 @@ test("an outside rejection withdraws the release of a dependent, and the round f
   assert.deepEqual(gate.reopen("P", "auditor rejected the accepted artifact"), ["P"]);
   assert.equal(gate.next(), "P", "after reopen the task is schedulable again");
 });
+
+test("acceptance survives the entry's own TTL, because the round retains what it references", async (t) => {
+  const gate = fixture(t);
+  const ticket = gate.claim("P", "worker-p");
+  const artifact = JSON.stringify({
+    digest: ticket.patch!.digest,
+    files: [{ path: "src/integration/ooo-execution.ts", content: expected }],
+  });
+  assert.equal(await submitPatch(gate, ticket, artifact), "accepted");
+  const entryId = gate
+    .readTaskBoard({ taskId: channel, includeResolved: true })
+    .entries.find((entry) => entry.deliveredBy === "worker-p")!.id;
+  assert.ok(
+    gate.listTaskBoardRetentions({ taskId: channel }).length > 0,
+    "publishing a handoff pins it: the round references an entry whose own TTL is 24h",
+  );
+
+  // Far past every TTL in the store. The global prune still removes entries nobody
+  // references (the round's own decision announcements), so the assertion is not a count:
+  // it is that the entry this run derives from is still there and still says accepted.
+  gate.pruneExpiredTaskBoardEntries("2099-01-01T00:00:00.000Z");
+  assert.ok(
+    gate.getTaskBoardEntryById(channel, entryId),
+    "the referenced entry survives its own expiry",
+  );
+  assert.deepEqual(
+    Object.keys(gate.accepted()),
+    ["P"],
+    "acceptance is re-derived from the retained verdict, not from a private column",
+  );
+  assert.equal(gate.next(), "D");
+
+  // Once the value it protected is invalidated, the pin goes with it and the entry becomes
+  // prunable again: retention defers the prune, it does not exempt the entry from it.
+  gate.reopen("P", "the artifact is no longer wanted");
+  assert.deepEqual(
+    gate.listTaskBoardRetentions({ taskId: channel }).filter((row) => row.entryId === entryId),
+    [],
+    "the pin on the entry this verdict lived in is gone (D's own handoff pin is not P's business)",
+  );
+  gate.pruneExpiredTaskBoardEntries("2099-01-01T00:00:00.000Z");
+  assert.equal(
+    gate.getTaskBoardEntryById(channel, entryId),
+    null,
+    "with the pin gone the expired entry is finally pruned",
+  );
+});
+
+test("cancelling a round releases the pins it held, so nothing it referenced leaks", async (t) => {
+  const gate = fixture(t);
+  const ticket = gate.claim("P", "worker-p");
+  const artifact = JSON.stringify({
+    digest: ticket.patch!.digest,
+    files: [{ path: "src/integration/ooo-execution.ts", content: expected }],
+  });
+  assert.equal(await submitPatch(gate, ticket, artifact), "accepted");
+  assert.ok(
+    gate.listTaskBoardRetentions({ taskId: channel }).length > 0,
+    "the round holds pins while it is running",
+  );
+
+  // Cancellation fences every row, and both kinds of pin go with the values they protected:
+  // the handoff published for the successor, and the entry whose verdict accepted P. A
+  // leaked pin would keep an entry alive forever in a round nobody is running.
+  gate.cancel("operator stopped the round");
+  assert.deepEqual(gate.listTaskBoardRetentions({ taskId: channel }), []);
+});

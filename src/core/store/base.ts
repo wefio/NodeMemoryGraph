@@ -1347,26 +1347,122 @@ export class NmgStoreBase {
       subscribedAt: String(row.subscribed_at),
     }));
   }
+  /** Pin a board entry against ordinary TTL pruning. The pin belongs to (entry, owner)
+   *  so two consumers can retain the same entry independently and each releases only its
+   *  own; `retainedUntil` bounds it when the caller can name an end (a run whose evidence
+   *  must outlive its own TTL passes nothing and relies on release).
+   *
+   *  Retention exists so that a derived fact does not need its own column: an entry that
+   *  is still referenced stays readable, and a consumer can re-derive the fact from it. */
+  retainTaskBoardEntry(input: {
+    taskId: string;
+    entryId: string;
+    owner: string;
+    reason: string;
+    retainedUntil?: string | null;
+    now?: string;
+  }): boolean {
+    const { taskId, entryId, owner, reason } = input;
+    if (!taskId || !entryId) throw new Error("retention requires a channel and an entry");
+    if (!owner.trim()) throw new Error("retention owner required");
+    if (!reason.trim()) throw new Error("retention reason required");
+    const until = input.retainedUntil ?? null;
+    if (until !== null && Number.isNaN(Date.parse(until)))
+      throw new Error("retainedUntil must be an ISO timestamp");
+    if (!this.getTaskBoardEntryById(taskId, entryId))
+      throw new Error("no such entry in this channel");
+    this.db
+      .prepare(
+        `INSERT INTO task_board_retentions (entry_id, owner, reason, retained_at, retained_until)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(entry_id, owner) DO UPDATE SET reason = excluded.reason,
+           retained_until = excluded.retained_until`,
+      )
+      .run(entryId, owner, reason, input.now ?? new Date().toISOString(), until);
+    return true;
+  }
+
+  /** Release this owner's pin. Other owners' pins on the same entry are untouched, and
+   *  the entry becomes prunable only when the last of them is gone. */
+  releaseTaskBoardRetention(input: { taskId: string; entryId: string; owner: string }): boolean {
+    if (!input.taskId || !input.entryId)
+      throw new Error("retention requires a channel and an entry");
+    if (!input.owner.trim()) throw new Error("retention owner required");
+    return (
+      Number(
+        this.db
+          .prepare("DELETE FROM task_board_retentions WHERE entry_id = ? AND owner = ?")
+          .run(input.entryId, input.owner).changes,
+      ) > 0
+    );
+  }
+
+  listTaskBoardRetentions(input: { taskId: string; entryId?: string }): Array<{
+    entryId: string;
+    owner: string;
+    reason: string;
+    retainedAt: string;
+    retainedUntil: string | null;
+  }> {
+    const rows = (
+      input.entryId
+        ? this.db
+            .prepare(
+              `SELECT r.* FROM task_board_retentions r JOIN task_board_entries e ON e.id = r.entry_id
+               WHERE e.task_id = ? AND r.entry_id = ? ORDER BY r.owner`,
+            )
+            .all(input.taskId, input.entryId)
+        : this.db
+            .prepare(
+              `SELECT r.* FROM task_board_retentions r JOIN task_board_entries e ON e.id = r.entry_id
+               WHERE e.task_id = ? ORDER BY r.entry_id, r.owner`,
+            )
+            .all(input.taskId)
+    ) as Row[];
+    return rows.map((row) => ({
+      entryId: String(row.entry_id),
+      owner: String(row.owner),
+      reason: String(row.reason),
+      retainedAt: String(row.retained_at),
+      retainedUntil: row.retained_until === null ? null : String(row.retained_until),
+    }));
+  }
+
+  /** A pin whose bound has passed stops pinning, so a caller that can name an end does not
+   *  leak retention forever. Unbounded pins are released explicitly. */
+  private expireStaleRetentions(now: string): void {
+    this.db
+      .prepare(
+        "DELETE FROM task_board_retentions WHERE retained_until IS NOT NULL AND retained_until <= ?",
+      )
+      .run(now);
+  }
+
   pruneExpiredTaskBoardEntries(now = new Date().toISOString(), taskId?: string): number {
-    // RAII: an expired entry's receipts die with it (same binding as resolve).
-    // Serial handoff: if an expired entry was the blocking outstanding, promote
-    // the earliest pending of that channel after the delete.
+    this.expireStaleRetentions(now);
+    // RAII: an expired entry's receipts die with it (same binding as resolve), except
+    // where a retention still pins the entry — a retained entry must outlive its TTL.
     if (taskId) {
       this.db
         .prepare(
           `DELETE FROM task_board_deliveries WHERE entry_id IN (
-             SELECT id FROM task_board_entries WHERE task_id = ? AND expires_at <= ?)`,
+             SELECT id FROM task_board_entries WHERE task_id = ? AND expires_at <= ?
+               AND id NOT IN (SELECT entry_id FROM task_board_retentions))`,
         )
         .run(taskId, now);
       this.db
         .prepare(
           `DELETE FROM task_board_acks WHERE entry_id IN (
-             SELECT id FROM task_board_entries WHERE task_id = ? AND expires_at <= ?)`,
+             SELECT id FROM task_board_entries WHERE task_id = ? AND expires_at <= ?
+               AND id NOT IN (SELECT entry_id FROM task_board_retentions))`,
         )
         .run(taskId, now);
       const changed = Number(
         this.db
-          .prepare("DELETE FROM task_board_entries WHERE task_id = ? AND expires_at <= ?")
+          .prepare(
+            `DELETE FROM task_board_entries WHERE task_id = ? AND expires_at <= ?
+               AND id NOT IN (SELECT entry_id FROM task_board_retentions)`,
+          )
           .run(taskId, now).changes,
       );
       this.promoteNextSerialPending(taskId);
@@ -1374,28 +1470,39 @@ export class NmgStoreBase {
     }
     // Collect channels whose blocking outstanding just expired, so their
     // pending queue can move after the delete (idempotent per channel).
+    // Serial handoff: if an expired entry was the blocking outstanding, promote
+    // the earliest pending of that channel after the delete. A retained entry is not
+    // expired for pruning purposes, so it cannot free the slot either.
     const expiredOutstandingTasks = (
       this.db
         .prepare(
           "SELECT DISTINCT task_id FROM task_board_entries " +
-            "WHERE serial_state = 'outstanding' AND expires_at <= ?",
+            "WHERE serial_state = 'outstanding' AND expires_at <= ? " +
+            "AND id NOT IN (SELECT entry_id FROM task_board_retentions)",
         )
         .all(now) as Row[]
     ).map((row) => String(row.task_id));
     this.db
       .prepare(
         `DELETE FROM task_board_deliveries WHERE entry_id IN (
-           SELECT id FROM task_board_entries WHERE expires_at <= ?)`,
+           SELECT id FROM task_board_entries WHERE expires_at <= ?
+             AND id NOT IN (SELECT entry_id FROM task_board_retentions))`,
       )
       .run(now);
     this.db
       .prepare(
         `DELETE FROM task_board_acks WHERE entry_id IN (
-           SELECT id FROM task_board_entries WHERE expires_at <= ?)`,
+           SELECT id FROM task_board_entries WHERE expires_at <= ?
+             AND id NOT IN (SELECT entry_id FROM task_board_retentions))`,
       )
       .run(now);
     const changed = Number(
-      this.db.prepare("DELETE FROM task_board_entries WHERE expires_at <= ?").run(now).changes,
+      this.db
+        .prepare(
+          `DELETE FROM task_board_entries WHERE expires_at <= ?
+             AND id NOT IN (SELECT entry_id FROM task_board_retentions)`,
+        )
+        .run(now).changes,
     );
     for (const t of expiredOutstandingTasks) this.promoteNextSerialPending(t);
     return changed;
