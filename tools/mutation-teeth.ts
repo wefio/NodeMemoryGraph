@@ -129,6 +129,14 @@ const TARGETS: readonly Target[] = [
         expect: "a failure the caller swallows still forbids the commit",
       },
       {
+        // The mechanical invariant: a hand-rolled BEGIN anywhere in the store makes a second
+        // boundary possible, and behaviour tests would not notice a path that still works.
+        name: "a-method-opens-its-own-transaction",
+        from: "  removeMemoryFromChain(input: { chainId: string; memoryId: string }): boolean {\n    return this.writeTransaction(() => {",
+        to: '  removeMemoryFromChain(input: { chainId: string; memoryId: string }): boolean {\n    this.db.exec("BEGIN IMMEDIATE");\n    return this.writeTransaction(() => {',
+        expect: "the store runs its transaction boundary in exactly one place",
+      },
+      {
         name: "stale-claim-may-deliver-again",
         from: "    if (!renewed) {",
         to: "    if (false && !renewed) {",
