@@ -68,6 +68,20 @@ import {
   mapSearchResult,
 } from "./rows.ts";
 
+export interface TransactionPort {
+  /** Which transition this port belongs to; the store matches it against the open one. */
+  readonly generation: number;
+}
+
+/** A callback that would keep a transaction open across an await is refused where it is handed in. */
+function refuseThenable(value: unknown, message: string): void {
+  const thenable =
+    value !== null &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof (value as { then?: unknown }).then === "function";
+  if (thenable) throw new Error(message);
+}
+
 export class NmgStoreBase {
   protected db: DatabaseSync;
   protected embedder: VectorEmbedder;
@@ -75,6 +89,11 @@ export class NmgStoreBase {
   protected vectorCaches = new Map<string, Float32VectorCache>();
   protected scopeWriteIndexes = new Map<string, ScopeWriteIndex>();
   protected scopeWriteIndexEnabled: boolean;
+  /** The open write transaction, if any. A port is the only way to join it. */
+  private openTransaction: { port: TransactionPort; rollbackOnly: boolean } | null = null;
+  private transactionGeneration = 0;
+  /** Set when ROLLBACK itself failed: the connection's state is unknown, so it takes no more work. */
+  private connectionQuarantined = false;
 
   constructor(
     databasePath: string,
@@ -195,21 +214,108 @@ export class NmgStoreBase {
     if (scopeJson) this.scopeWriteIndexes.delete(scopeJson);
     else this.scopeWriteIndexes.clear();
   }
-  putTaskBoardEntry(input: {
+  /**
+   * The store owns the transaction boundary: this is the only place that runs BEGIN/COMMIT. A
+   * caller already inside a transition must join it with the port this issued rather than open a
+   * second one, and a write entry reached inside a live transaction without that port is refused
+   * instead of guessed at — `openTransaction` is the store's own state, never the caller's claim.
+   */
+  writeTransaction<T>(callback: (port: TransactionPort) => T): T {
+    if (this.openTransaction)
+      throw new Error("a write transaction is already open: join it with the port it issued");
+    if (this.connectionQuarantined)
+      throw new Error("this connection is quarantined after a failed rollback");
+    this.db.exec("BEGIN IMMEDIATE");
+    const port: TransactionPort = { generation: ++this.transactionGeneration };
+    this.openTransaction = { port, rollbackOnly: false };
+    let value: T;
+    try {
+      value = callback(port);
+      refuseThenable(value, "a write transaction callback must be synchronous");
+    } catch (error) {
+      this.openTransaction = null;
+      this.rollback();
+      // The original failure is what the caller needs to see, whether ROLLBACK worked or not.
+      throw error;
+    }
+    const state = this.openTransaction;
+    this.openTransaction = null;
+    if (state?.rollbackOnly) {
+      this.rollback();
+      throw new Error("the transaction was marked rollback-only by a failing operation");
+    }
+    try {
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.rollback();
+      throw error;
+    }
+    return value;
+  }
+
+  /**
+   * Join the transition a port was issued for, synchronously and only while its callback runs. A
+   * port from another store, a port whose callback has returned, and a second BEGIN are all
+   * refused: nothing here infers authority from a flag or a depth counter.
+   */
+  withPort<T>(port: TransactionPort, work: () => T): T {
+    const state = this.openTransaction;
+    if (!state || state.port !== port)
+      throw new Error("this port is not the store's live transaction scope");
+    try {
+      const value = work();
+      refuseThenable(value, "work inside a transaction must be synchronous");
+      return value;
+    } catch (error) {
+      // Even if the caller catches this, the work up to the failure already happened. Only the
+      // outermost decides whether anything commits, and it will not.
+      state.rollbackOnly = true;
+      throw error;
+    }
+  }
+
+  private rollback(): void {
+    try {
+      this.db.exec("ROLLBACK");
+    } catch {
+      this.connectionQuarantined = true;
+    }
+  }
+
+  putTaskBoardEntry(
+    input: {
+      taskId: string;
+      agentId: string;
+      sourceSessionId?: string;
+      kind: TaskBoardKind;
+      content: string;
+      expiresAt: string;
+      /** Directed delivery: stable agent_name to wake for this entry. */
+      to?: string;
+    },
+    port?: TransactionPort,
+  ): TaskBoardEntry {
+    // Standalone and composed writes share this implementation: outside a transition this opens
+    // one, and inside one it joins the open transition instead of running a second BEGIN.
+    return port
+      ? this.withPort(port, () => this.insertTaskBoardEntry(input))
+      : this.writeTransaction(() => this.insertTaskBoardEntry(input));
+  }
+
+  /** The write itself, owning no boundary: whichever transaction is open decides whether it lands. */
+  private insertTaskBoardEntry(input: {
     taskId: string;
     agentId: string;
     sourceSessionId?: string;
     kind: TaskBoardKind;
     content: string;
     expiresAt: string;
-    /** Directed delivery: stable agent_name to wake for this entry. */
     to?: string;
   }): TaskBoardEntry {
     const now = new Date().toISOString();
     this.pruneExpiredTaskBoardEntries(now, input.taskId);
     let id: string;
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    {
       // Global monotonic counter (single row, never recycled). The id =
       // <createdAtMs>_<counter> is time-sortable, insertion-ordered for
       // same-millisecond entries, and globally unique across all channels.
@@ -261,10 +367,6 @@ export class NmgStoreBase {
           input.to ?? null,
           serialState,
         );
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
     }
     return this.taskBoardEntry(id)!;
   }
