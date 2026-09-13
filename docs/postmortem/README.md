@@ -137,6 +137,8 @@ nothing catches yet, which is the point of writing it down.
 
 | Class                   | Canonical case | Rule it produced |
 | ----------------------- | -------------- | ---------------- |
+| unchecked tooling       | 0001           |                  |
+| wrong-tree verification | 0002           |                  |
 | -----                   | -------------- | ---------------- |
 
 A class name is a short noun phrase, not a sentence, and it is not invented before
@@ -146,5 +148,7 @@ one place to read the whole taxonomy.
 
 ## Index
 
-| #    | Record                                                                    | Failure class           |
-| ---- | ------------------------------------------------------------------------- | ----------------------- |
+| #    | Record                                                                                        | Failure class           |
+| ---- | --------------------------------------------------------------------------------------------- | ----------------------- |
+| 0001 | [The tool that checks the others is not itself checked](0001-tools-outside-the-type-check.md) | unchecked tooling       |
+| 0002 | [The tree I verified was not the tree I pushed](0002-wrong-tree-verification.md)              | wrong-tree verification |
