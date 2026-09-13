@@ -24,8 +24,8 @@
 // that was measured and is clean.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
@@ -106,65 +106,172 @@ export function changedFiles(ref: string, cwd: string = root): string[] {
   return [...new Set(files)].filter(Boolean).map((line) => resolve(cwd, line));
 }
 
-/** Complexity of each function in a source file via the eslint CLI with the
- * `complexity` rule. The CLI resolves the repository's flat config (parser,
- * TS support) correctly; lintText with an override config does not. */
-export async function complexitiesFor(
-  filePath: string,
-  source: string,
-): Promise<{ findings: ComplexityFinding[]; measured: boolean }> {
-  // eslint needs a real file on disk for config matching; write to a temp path that
-  // preserves the extension so the TS parser is selected, and make the name unique so
-  // concurrent gate runs (the test suite runs files in parallel) cannot collide.
-  probeCounter += 1;
-  const temp = resolve(
-    root,
-    `.nmg-complexity-probe-${process.pid}-${probeCounter}` +
-      (filePath.endsWith(".ts") ? ".ts" : ".js"),
-  );
-  const { writeFileSync, rmSync } = await import("node:fs");
-  try {
-    writeFileSync(temp, source, "utf8");
-    // Run eslint through node directly (npx.cmd does not spawn reliably from
-    // Node on Windows). eslint exits non-zero when it finds errors, so use
-    // spawnSync and read stdout regardless of status.
-    const eslintEntry = resolve(root, "node_modules", "eslint", "bin", "eslint.js");
-    const result = spawnSync(
-      process.execPath,
-      [
-        eslintEntry,
-        "--no-warn-ignored",
-        "--format",
-        "json",
-        "--rule",
-        `complexity: ["error", ${maxComplexity}]`,
-        temp,
-      ],
-      { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
-    );
-    const output = result.stdout ?? "";
-    const parsed = JSON.parse(output) as Array<{
-      messages: Array<{ line: number; ruleId: string; message: string; fatal?: boolean }>;
-    }>;
-    // Three outcomes have to be told apart, because only one of them is evidence: linted
-    // with findings, linted with none, and never really linted. ESLint emits no entry at
-    // all when it refuses a path, and a file it cannot parse comes back as a single fatal
-    // message with no rule. Both are "not measured", and reporting either as "measured
-    // and clean" is how this gate produced false greens before.
-    const linted = parsed.length > 0 && !parsed.some((r) => r.messages.some((m) => m.fatal));
-    return {
-      findings: extractComplexityFindings(filePath, source, parsed),
-      measured: linted,
-    };
-  } catch {
-    return { findings: [], measured: false };
-  } finally {
+/** A file's source to measure, with the path its findings are keyed to. */
+export interface ComplexityProbe {
+  file: string;
+  source: string;
+}
+
+export interface ComplexityMeasure {
+  findings: ComplexityFinding[];
+  measured: boolean;
+}
+
+/** The probe keeps the file's own extension. ESLint selects the parser and the module
+ *  kind from it, so a `.mts` source written as `.js` fails with a syntax error — which
+ *  the gate then reports as "could not measure", a blind spot dressed as an honest
+ *  signal. (`.mts` does not end in `.ts`, which is how the earlier `endsWith(".ts")`
+ *  guess lost it.) */
+export function probeExtension(filePath: string): string {
+  return /\.(?:[cm]?[jt]sx?)$/u.exec(filePath)?.[0] ?? ".ts";
+}
+
+/** Windows caps a process argument list well below the number of files a large diff
+ *  carries, so probes are grouped by accumulated path length. */
+const PROBE_ARGUMENT_BUDGET = 6000;
+
+/** Probes live under the gitignored scratch root, not the repository root. An
+ *  interrupted run leaves files behind — the default SIGINT exit skips `finally` — and
+ *  scratch that `git status` can see is scratch the next run counts as a changed code
+ *  file, which would make the gate measure its own litter. */
+export function probeDirectory(): string {
+  return resolve(root, ".nmg", "complexity-probes");
+}
+
+/** Scratch this process has written and not yet removed, so an interrupted run can clean
+ *  up after itself. */
+const activeProbes = new Set<string>();
+
+function removeProbes(paths: Iterable<string>): void {
+  for (const path of paths) {
     try {
-      rmSync(temp, { force: true });
+      rmSync(path, { force: true });
     } catch {
       /* best-effort */
     }
+    activeProbes.delete(path);
   }
+}
+
+/** Registered by the entry point only: a library import must not install signal
+ *  handlers or call `process.exit` on someone else's SIGINT. */
+function installInterruptCleanup(): void {
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.once(signal, () => {
+      removeProbes(activeProbes);
+      process.exit(signal === "SIGINT" ? 130 : 143);
+    });
+  }
+}
+
+function probeBatches(probes: readonly string[]): string[][] {
+  const batches: string[][] = [];
+  let current: string[] = [];
+  let length = 0;
+  for (const path of probes) {
+    if (current.length > 0 && length + path.length > PROBE_ARGUMENT_BUDGET) {
+      batches.push(current);
+      current = [];
+      length = 0;
+    }
+    current.push(path);
+    length += path.length + 1;
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
+}
+
+interface EslintReport {
+  filePath: string;
+  messages: Array<{ line: number; ruleId: string; message: string; fatal?: boolean }>;
+}
+
+/** A spawn that produced nothing measured nothing: an unparseable stdout is the same
+ *  evidence as no stdout, and both mean "not measured". */
+function parseEslintReports(stdout: string): EslintReport[] {
+  try {
+    const parsed: unknown = JSON.parse(stdout);
+    return Array.isArray(parsed) ? (parsed as EslintReport[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Complexity of many files through as few ESLint processes as the command line
+ *  allows. The CLI resolves the repository's flat config (parser, TS support)
+ *  correctly; lintText with an override config does not. One process per file cost
+ *  about 0.8 s of process start each, so a 64-file diff spent roughly 100 s here — the
+ *  single slowest check in the repository, for a measurement ESLint already reports per
+ *  file in one run. */
+export async function complexitiesForMany(
+  entries: readonly ComplexityProbe[],
+): Promise<ComplexityMeasure[]> {
+  // eslint needs a real file on disk for config matching, and the name is unique so
+  // concurrent gate runs (the test suite runs files in parallel) cannot collide.
+  probeCounter += 1;
+  const run = probeCounter;
+  const directory = probeDirectory();
+  const probes = entries.map((entry, index) => ({
+    entry,
+    path: resolve(directory, `probe-${process.pid}-${run}-${index}${probeExtension(entry.file)}`),
+  }));
+  const byName = new Map(probes.map((probe) => [basename(probe.path), probe]));
+  const messagesByProbe = new Map<string, EslintReport["messages"]>();
+  try {
+    mkdirSync(directory, { recursive: true });
+    for (const probe of probes) {
+      writeFileSync(probe.path, probe.entry.source, "utf8");
+      activeProbes.add(probe.path);
+    }
+    // Run eslint through node directly (npx.cmd does not spawn reliably from Node on
+    // Windows). eslint exits non-zero when it finds errors, so read stdout regardless.
+    const eslintEntry = resolve(root, "node_modules", "eslint", "bin", "eslint.js");
+    for (const batch of probeBatches(probes.map((probe) => probe.path))) {
+      const result = spawnSync(
+        process.execPath,
+        [
+          eslintEntry,
+          "--no-warn-ignored",
+          "--format",
+          "json",
+          "--rule",
+          `complexity: ["error", ${maxComplexity}]`,
+          ...batch,
+        ],
+        { cwd: root, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+      );
+      for (const report of parseEslintReports(result.stdout ?? "")) {
+        const probe = byName.get(basename(report.filePath));
+        if (probe) messagesByProbe.set(probe.path, report.messages);
+      }
+    }
+  } finally {
+    removeProbes(probes.map((probe) => probe.path));
+  }
+  return probes.map((probe) => {
+    const messages = messagesByProbe.get(probe.path);
+    // Three outcomes have to be told apart, because only one of them is evidence: linted
+    // with findings, linted with none, and never really linted. ESLint emits no entry at
+    // all when it refuses a path, and a file it cannot parse comes back as a fatal
+    // message with no rule. Both are "not measured", and reporting either as "measured
+    // and clean" is how this gate produced false greens before.
+    if (!messages || messages.some((message) => message.fatal)) {
+      return { findings: [], measured: false };
+    }
+    return {
+      findings: extractComplexityFindings(probe.entry.file, probe.entry.source, [{ messages }]),
+      measured: true,
+    };
+  });
+}
+
+/** One file, for callers that measure a single source at a time. */
+export async function complexitiesFor(
+  filePath: string,
+  source: string,
+): Promise<ComplexityMeasure> {
+  const [measure] = await complexitiesForMany([{ file: filePath, source }]);
+  return measure!;
 }
 
 function extractComplexityFindings(
@@ -243,17 +350,22 @@ async function treeComplexities(
 ): Promise<{ findings: Map<string, ComplexityFinding>; unmeasured: string[] }> {
   const findings = new Map<string, ComplexityFinding>();
   const unmeasured: string[] = [];
+  const entries: ComplexityProbe[] = [];
   for (const file of files) {
-    let source: string;
     try {
-      source = readFileSync(file, "utf8");
+      entries.push({ file, source: readFileSync(file, "utf8") });
     } catch {
       continue; // deleted or unreadable — not part of the comparison
     }
-    const measured = await complexitiesFor(file, source);
-    if (!measured.measured) unmeasured.push(file);
-    for (const finding of measured.findings) findings.set(`${file}::${finding.name}`, finding);
   }
+  const measures = await complexitiesForMany(entries);
+  entries.forEach((entry, index) => {
+    const measure = measures[index]!;
+    if (!measure.measured) unmeasured.push(entry.file);
+    for (const finding of measure.findings) {
+      findings.set(`${entry.file}::${finding.name}`, finding);
+    }
+  });
   return { findings, unmeasured };
 }
 
@@ -304,6 +416,7 @@ export function describeUnmeasured(
 }
 
 async function main(): Promise<void> {
+  installInterruptCleanup();
   const basis = resolveBaseRef(process.argv.slice(2), root);
   const files = changedFiles(basis.ref, root).filter((file) => LINTABLE.test(file));
   if (files.length === 0) {
@@ -313,23 +426,31 @@ async function main(): Promise<void> {
 
   // Baseline complexities: read each changed file at the base ref. A file that is absent
   // there is new, which is not the same as a file that could not be read.
-  const baseline = new Map<string, ComplexityFinding>();
-  const unmeasuredBaseline: string[] = [];
+  const baselineSources: ComplexityProbe[] = [];
   for (const file of files) {
     const relative = file.slice(root.length + 1).replaceAll("\\", "/");
-    let source: string;
     try {
-      source = execFileSync("git", ["show", `${basis.ref}:${relative}`], {
-        cwd: root,
-        encoding: "utf8",
+      baselineSources.push({
+        file,
+        source: execFileSync("git", ["show", `${basis.ref}:${relative}`], {
+          cwd: root,
+          encoding: "utf8",
+        }),
       });
     } catch {
       continue; // file did not exist at base (new file)
     }
-    const measured = await complexitiesFor(file, source);
-    if (!measured.measured) unmeasuredBaseline.push(file);
-    for (const finding of measured.findings) baseline.set(`${file}::${finding.name}`, finding);
   }
+  const baseline = new Map<string, ComplexityFinding>();
+  const unmeasuredBaseline: string[] = [];
+  const baselineMeasures = await complexitiesForMany(baselineSources);
+  baselineSources.forEach((entry, index) => {
+    const measure = baselineMeasures[index]!;
+    if (!measure.measured) unmeasuredBaseline.push(entry.file);
+    for (const finding of measure.findings) {
+      baseline.set(`${entry.file}::${finding.name}`, finding);
+    }
+  });
 
   // Current complexities.
   const { findings: current, unmeasured } = await treeComplexities(files);

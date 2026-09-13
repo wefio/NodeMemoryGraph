@@ -14,14 +14,17 @@ import test from "node:test";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import {
   LINTABLE,
   changedFiles,
   complexitiesFor,
+  complexitiesForMany,
   describeBasis,
   describeUnmeasured,
   evaluateComplexityDiff,
+  probeDirectory,
+  probeExtension,
   resolveBaseRef,
 } from "../../tools/complexity-gate.ts";
 
@@ -144,4 +147,61 @@ test("a file that cannot be parsed is unmeasured, not clean", async (t) => {
   assert.equal(clean.measured, true);
   assert.deepEqual(clean.findings, []);
   t.diagnostic("complexitiesFor leaves no probe file behind");
+});
+
+test("a probe keeps the source extension, so a .mts file is measured", async () => {
+  // The probe used to be written as `.js` whenever the path did not end in `.ts`, and
+  // `.mts` does not end in `.ts`. The linter then parsed TypeScript as JavaScript, hit a
+  // syntax error, and reported the file as "could not measure" — never complexity-checked
+  // at all, while the output still looked like an honest unmeasured-file notice. Generic
+  // syntax is the tell: `const counts = new Map<string, { name: string }>()` parses as
+  // TypeScript and not as JavaScript.
+  const measure = await complexitiesFor(join(root, "probe-module.mts"), complexSource(20));
+  assert.equal(measure.measured, true);
+  assert.equal(measure.findings.length, 1);
+  assert.equal(measure.findings[0]!.name, "tangled");
+
+  // The probe name follows the source, not a guess about which extensions matter.
+  assert.equal(probeExtension("probe-module.mts"), ".mts");
+  assert.equal(probeExtension("probe-module.cts"), ".cts");
+  assert.equal(probeExtension("probe-module.jsx"), ".jsx");
+  assert.equal(probeExtension("probe-module.tsx"), ".tsx");
+  assert.equal(probeExtension("probe-module.mjs"), ".mjs");
+  assert.equal(probeExtension("probe-module.js"), ".js");
+  assert.equal(probeExtension("probe-module.txt"), ".ts");
+});
+
+test("one unparseable file in a batch leaves the others' verdicts alone", async () => {
+  // Batching puts many files into one linter run, so the per-file verdict has to survive a
+  // neighbour's fatal parse error. If it leaked, the batch would report a healthy file as
+  // unmeasured (loud but wrong) or as measured and clean (the false green the gate exists
+  // to prevent).
+  const [broken, tangled, clean] = await complexitiesForMany([
+    { file: join(root, "probe-broken.mts"), source: "export function broken( { return 1\n" },
+    { file: join(root, "probe-tangled.mts"), source: complexSource(20) },
+    { file: join(root, "probe-clean.mts"), source: "export const one = 1;\n" },
+  ]);
+  assert.equal(broken!.measured, false);
+  assert.deepEqual(broken!.findings, []);
+  assert.equal(tangled!.measured, true);
+  assert.equal(tangled!.findings.length, 1);
+  assert.equal(tangled!.findings[0]!.name, "tangled");
+  assert.equal(clean!.measured, true);
+  assert.deepEqual(clean!.findings, []);
+});
+
+test("probes are written where git cannot see them", () => {
+  // `git status --porcelain` is how the gate decides which files are changed, and probes
+  // are many now: a run interrupted after three batches left 42 of them in the repository
+  // root, each one looking to the next run like a changed code file to measure. The
+  // scratch directory has to stay ignored for the gate to keep measuring the diff and
+  // nothing else.
+  const probe = join(probeDirectory(), "probe-1-1-0.ts");
+  assert.doesNotThrow(() =>
+    execFileSync("git", ["check-ignore", "-q", relative(root, probe).replaceAll("\\", "/")], {
+      cwd: root,
+      stdio: "ignore",
+    }),
+  );
+  assert.equal(changedFiles("HEAD", root).includes(probe), false);
 });
