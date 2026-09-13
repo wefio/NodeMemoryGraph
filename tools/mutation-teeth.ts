@@ -139,8 +139,20 @@ const TARGETS: readonly Target[] = [
   },
   {
     target: "src/integration/ooo-board.ts",
-    suites: ["evals/ooo-execution/patch-cycle.test.ts"],
+    suites: [
+      "evals/ooo-execution/patch-cycle.test.ts",
+      "tests/integration/ooo-run-namespace.test.ts",
+    ],
     mutants: [
+      {
+        // The claim is the write that would corrupt a neighbour run: the same task id exists in
+        // every run, so a claim that is not scoped by run claims somebody else's row too.
+        name: "claim-is-not-scoped-to-its-run",
+        from: '          "UPDATE ooo_probe_tasks SET attempt=?, owner=?, claim_time=?, input_digest=? WHERE run_id=? AND id=?",',
+        to: '          "UPDATE ooo_probe_tasks SET attempt=?, owner=?, claim_time=?, input_digest=? WHERE ? IS NOT NULL AND id=?",',
+        expect:
+          "two runs in one store do not collide, do not see each other, and cancel separately",
+      },
       {
         name: "round-releases-dependents-on-delivered-bytes",
         from: "          verdict: recorded?.verdict ?? null,",
@@ -150,8 +162,8 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "verdict-lookup-not-bound-to-the-artifact",
-        from: "      const recorded = verdictOf.get(channel, digest) as unknown as",
-        to: '      const recorded = verdictOf.get(channel, "%") as unknown as',
+        from: "      const recorded = verdictOf.get(this.channel, digest) as unknown as",
+        to: '      const recorded = verdictOf.get(this.channel, "%") as unknown as',
         expect: "the board verdict is what accepts an artifact, not the round's own column",
       },
       {
@@ -163,7 +175,7 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "round-does-not-pin-what-it-references",
-        from: '      this.retainTaskBoardEntry({\n        taskId: channel,\n        entryId,\n        owner: RETENTION_OWNER,\n        reason: `round ${this.runId ?? "initial"} handoff for ${row.id}`,\n        now: new Date(this.now).toISOString(),\n      });',
+        from: '      this.retainTaskBoardEntry({\n        taskId: this.channel,\n        entryId,\n        owner: RETENTION_OWNER,\n        reason: `round ${this.runId ?? "initial"} handoff for ${row.id}`,\n        now: new Date(this.now).toISOString(),\n      });',
         to: "      void entryId;",
         expect:
           "acceptance survives the entry's own TTL, because the round retains what it references",
