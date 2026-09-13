@@ -136,8 +136,17 @@ function settlementOrders(units: readonly TaskUnit[], mode: RoundMode): string[]
   );
 }
 
-/** Named so that what the model does not cover is visible rather than silently absent. */
-export const UNMODELLED_BY_MODEL = ["external-waits", "real-verification", "wall-clock"] as const;
+/** Named so that what the model does not cover is visible rather than silently absent. The
+ *  design's first discriminating case asks that two concurrent candidates on the same file
+ *  not become mergeable by themselves, and that units can be *prepared* before their
+ *  dependencies settle; neither is modelled here, so neither may be assumed. */
+export const UNMODELLED_BY_MODEL = [
+  "external-waits",
+  "real-verification",
+  "wall-clock",
+  "mergeability",
+  "preparation",
+] as const;
 
 /** Compare the three modes over the same declared plan and outcomes. */
 export function compareModes(input: ModelInput): ModeReport {

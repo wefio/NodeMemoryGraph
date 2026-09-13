@@ -32,13 +32,13 @@ nothing in the scheduling path could see it. That is a defect, not a stylistic d
 
 ## What changed
 
-| site | before | after |
-| --- | --- | --- |
-| `acceptedFact()` in `src/integration/task-semantics.ts` | — | the rule, once: not cancelled, artifact and digest present, revision current, verdict `accepted`, `judgedDigest === digest` |
-| `isAccepted()` (view) | its own copy of the rule | delegates to `acceptedFact()` |
-| `acceptedArtifacts()` in `src/integration/ooo-board.ts` | `accepted()`'s query with its own verdict checks | one query supplying facts to `acceptedFact()`; `accepted()` delegates to it |
-| `inputs()`, `publishReady()`, `next()`, `claimableRow()` | `artifact !== null` | membership in `acceptedArtifacts()` |
-| `delivered(row)` | — | names the delivery fact where it is genuinely the question (`submit`, `commitArtifact`, the check guard) |
+| site                                                     | before                                           | after                                                                                                                       |
+| -------------------------------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `acceptedFact()` in `src/integration/task-semantics.ts`  | —                                                | the rule, once: not cancelled, artifact and digest present, revision current, verdict `accepted`, `judgedDigest === digest` |
+| `isAccepted()` (view)                                    | its own copy of the rule                         | delegates to `acceptedFact()`                                                                                               |
+| `acceptedArtifacts()` in `src/integration/ooo-board.ts`  | `accepted()`'s query with its own verdict checks | one query supplying facts to `acceptedFact()`; `accepted()` delegates to it                                                 |
+| `inputs()`, `publishReady()`, `next()`, `claimableRow()` | `artifact !== null`                              | membership in `acceptedArtifacts()`                                                                                         |
+| `delivered(row)`                                         | —                                                | names the delivery fact where it is genuinely the question (`submit`, `commitArtifact`, the check guard)                    |
 
 ## Behaviour, stated plainly
 
@@ -49,19 +49,19 @@ nothing in the scheduling path could see it. That is a defect, not a stylistic d
   coordinator must reopen it" — and recovery is the coordinator's explicit `reopen()`, which
   fences the task and its transitive dependents and clears the value.
 - **No rollback.** Work already dispatched against an artifact that is rejected afterwards is not
-  undone; the round has no rollback, and this change does not add one. It makes the *gate*
+  undone; the round has no rollback, and this change does not add one. It makes the _gate_
   consistent, which is why the offline model's `fused` mode records that cost instead of assuming
   it away.
 
 ## Evidence
 
-| check | command | result |
-| --- | --- | --- |
-| types / lint / format | `npm run check`, `npx eslint …`, `npm run format:check` | clean |
-| complexity | `npm run complexity:gate` | `6 changed code file(s) … 0 method(s) above 15` |
-| round suites | `node --experimental-strip-types --test --test-concurrency=1 "evals/ooo-execution/*.test.ts"` | 86 pass, 0 fail (was 85; one case added) |
-| compiler / model | the two slice-1 suites | 13 and 7 pass (compiler was 12; one case added) |
-| mutation teeth | `node <shared-checkout>/.nmg/teeth-check-task-semantics.mjs` | 11 of 11 mutants caught by name across 3 targets; each target restored byte-identically |
+| check                 | command                                                                                       | result                                                                                  |
+| --------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| types / lint / format | `npm run check`, `npx eslint …`, `npm run format:check`                                       | clean                                                                                   |
+| complexity            | `npm run complexity:gate`                                                                     | `6 changed code file(s) … 0 method(s) above 15`                                         |
+| round suites          | `node --experimental-strip-types --test --test-concurrency=1 "evals/ooo-execution/*.test.ts"` | 86 pass, 0 fail (was 85; one case added)                                                |
+| compiler / model      | the two slice-1 suites                                                                        | 13 and 7 pass (compiler was 12; one case added)                                         |
+| mutation teeth        | `npm run mutation:teeth`                                                                      | 11 of 11 mutants caught by name across 3 targets; each target restored byte-identically |
 
 The new round case is the defect in one place: submit an accepted artifact, confirm `next()` is
 the dependent, have an outside agent judge the entry `rejected`, then assert that acceptance is
@@ -95,5 +95,5 @@ npm run prompts:generate
 npm run check && npm run complexity:gate && npm run format:check
 node --experimental-strip-types --test --test-concurrency=1 "evals/ooo-execution/*.test.ts"
 node --experimental-strip-types --test --test-concurrency=1 tests/integration/task-semantics.test.ts
-node <shared-checkout>/.nmg/teeth-check-task-semantics.mjs   # local one-off, as in slice 1
+npm run mutation:teeth   # the same mutants, now a repository tool
 ```

@@ -215,6 +215,7 @@ function refuseRequirements(
   id: string,
   requirements: readonly Requirement[],
   ids: ReadonlySet<string>,
+  dependencies: readonly string[],
   refusals: Refusal[],
 ): void {
   const located = { task: id, field: "requires", obligation: "input-closure" as const };
@@ -230,6 +231,16 @@ function refuseRequirements(
       refusals.push({
         ...located,
         reason: `requirement names ${String(task)}, which is not a task in this plan`,
+      });
+    } else if (typeof task === "string" && !dependencies.includes(task)) {
+      // A Requirement is by its own contract a precondition on a *dependency's* accepted
+      // artifact. A condition about a task this unit does not depend on would let a soft
+      // assumption stand in for a real dependency: the unit would start without its input
+      // and nothing in the plan would say so.
+      refusals.push({
+        ...located,
+        obligation: "input-closure",
+        reason: `requirement is about ${task}, which is not a declared dependency of this unit`,
       });
     }
   }
@@ -411,7 +422,7 @@ export function compileTaskUnits(input: CompileInput): CompiledTasks {
     const dependencies = row[2].map(String);
     const requires = input.requires?.[id] ?? [];
     refuseDependencies(id, dependencies, ids, edges, refusals);
-    refuseRequirements(id, requires, ids, refusals);
+    refuseRequirements(id, requires, ids, dependencies, refusals);
     units.push(unitFor(row, index, dependencies, input.specs?.[id], requires, refusals));
   }
   return {
