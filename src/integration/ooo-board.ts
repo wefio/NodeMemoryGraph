@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { NmgStore } from "../../src/core/store.ts";
+import type { TransactionPort } from "../../src/core/store/base.ts";
 import { acceptedFact } from "./task-semantics.ts";
 import { checkResultValid, sameCheck, type CheckTicket, type CheckResult } from "./ooo-check.ts";
 import {
@@ -359,16 +360,13 @@ export class BoardAdmission extends NmgStore {
     });
   }
 
-  private transaction<T>(operation: () => T): T {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const result = operation();
-      this.db.exec("COMMIT");
-      return result;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+  /**
+   * One transition, on the store's boundary. The port is what lets a write that owns a boundary of
+   * its own (a board publication) join this one instead of opening a second BEGIN, and only the
+   * store decides whether the transition commits.
+   */
+  private transaction<T>(work: (port: TransactionPort) => T): T {
+    return this.writeTransaction(work);
   }
 
   private ensureColumns(table: string, columns: Readonly<Record<string, string>>) {
@@ -449,7 +447,12 @@ export class BoardAdmission extends NmgStore {
     ]);
   }
 
-  private publish(kind: "handoff" | "decision", content: string): string {
+  /**
+   * Publish a board entry, joining the transition this call belongs to when it is given a port.
+   * Without one it opens its own boundary, which is why a caller inside a transition must pass it:
+   * a second BEGIN is refused rather than nested.
+   */
+  private publish(kind: "handoff" | "decision", content: string, port?: TransactionPort): string {
     // The real board put owns its transaction. Recover a post-put/pre-link crash by adopting
     // the existing publication instead of creating another message — but only while it is still
     // open: a *resolved* publication with the same content is a finished handoff, and adopting
@@ -460,16 +463,19 @@ export class BoardAdmission extends NmgStore {
       )
       .get(this.channel, kind, content);
     if (existing) return String(existing.id);
-    return this.putTaskBoardEntry({
-      taskId: this.channel,
-      agentId: "coordinator",
-      kind,
-      content,
-      expiresAt: new Date(this.now + 86_400_000).toISOString(),
-    }).id;
+    return this.putTaskBoardEntry(
+      {
+        taskId: this.channel,
+        agentId: "coordinator",
+        kind,
+        content,
+        expiresAt: new Date(this.now + 86_400_000).toISOString(),
+      },
+      port,
+    ).id;
   }
 
-  private publishReady(): void {
+  private publishReady(port?: TransactionPort): void {
     // Pending publications are derived from durable rows: a tiny transactional
     // outbox, drained by this single daemon after commit and on restart/retry.
     const delivered = this.db
@@ -481,6 +487,7 @@ export class BoardAdmission extends NmgStore {
       this.publish(
         "decision",
         JSON.stringify({ id: row.id, attempt: row.attempt, artifact: row.artifact }),
+        port,
       );
     // A published handoff for a task that is no longer the selected one must give the board's
     // serial slot back. The plan can move past it (a waiting task became ready first, which is
@@ -537,6 +544,7 @@ export class BoardAdmission extends NmgStore {
           attempt: row.attempt,
           input: row.input,
         }),
+        port,
       );
       this.db
         .prepare("UPDATE ooo_probe_facts SET entry_id=? WHERE run_id=? AND id=?")
