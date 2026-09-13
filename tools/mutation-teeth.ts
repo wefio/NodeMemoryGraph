@@ -149,9 +149,9 @@ const TARGETS: readonly Target[] = [
           "an outside rejection withdraws the release of a dependent, and the round fails closed",
       },
       {
-        name: "acceptance-ignores-the-board-verdict",
-        from: "          verdict: row.verdict === null ? null : String(row.verdict),",
-        to: '          verdict: "accepted",',
+        name: "verdict-lookup-not-bound-to-the-artifact",
+        from: "      const recorded = verdictOf.get(channel, digest) as unknown as",
+        to: '      const recorded = verdictOf.get(channel, "%") as unknown as',
         expect: "the board verdict is what accepts an artifact, not the round's own column",
       },
       {
