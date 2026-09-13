@@ -90,7 +90,8 @@ test("two runs in one store do not collide, do not see each other, and cancel se
   assert.equal(second.accepted()["A"], undefined);
   assert.equal(second.claim("A", "worker-two").owner, "worker-two");
   assert.equal(
-    rows(database, "SELECT owner FROM ooo_probe_tasks WHERE run_id='run-one' AND id='A'")[0]!.owner,
+    rows(database, "SELECT owner FROM ooo_probe_task_view WHERE run_id='run-one' AND id='A'")[0]!
+      .owner,
     "worker-one",
     "the other run's row for the same task id belongs to the other run",
   );
@@ -188,7 +189,7 @@ test("a pre-namespace store is migrated in place, keeping its run, rows and term
   // copied before being compared as objects.
   const worked = rows(
     database,
-    "SELECT artifact, attempt, owner FROM ooo_probe_tasks WHERE id='A'",
+    "SELECT artifact, attempt, owner FROM ooo_probe_task_view WHERE id='A'",
   )[0]!;
   assert.deepEqual(
     { ...worked },
@@ -196,7 +197,7 @@ test("a pre-namespace store is migrated in place, keeping its run, rows and term
     "the artifact, the attempt and the owner are the stored ones",
   );
   assert.equal(
-    rows(database, "SELECT dependencies FROM ooo_probe_tasks WHERE id='C'")[0]!.dependencies,
+    rows(database, "SELECT dependencies FROM ooo_probe_task_view WHERE id='C'")[0]!.dependencies,
     '["A"]',
   );
   assert.equal(
@@ -220,5 +221,5 @@ test("a pre-namespace store is migrated in place, keeping its run, rows and term
     false,
     "the single-row table is gone, not copied forward",
   );
-  assert.equal(names.includes("ooo_probe_tasks_legacy"), false);
+  assert.equal(names.includes("ooo_probe_tasks_pre_split"), false);
 });
