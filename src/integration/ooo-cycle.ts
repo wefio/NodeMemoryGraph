@@ -322,6 +322,12 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
    *  round it is running, which advances every attempt and retires every live claim and
    *  ticket. That is what makes a late artifact `stale` instead of accepted into a round
    *  nobody is waiting for. Returns true when the round must stop dispatching. */
+  // The default directory is this function's scratch space, so the early return and the normal
+  // exit release it through one place rather than repeating the line and drifting apart.
+  const releaseDefaultDirectory = () => {
+    if (!options.databaseDir) rmSync(directory, { recursive: true, force: true });
+  };
+
   const stopped = () => {
     if (cancelled === null) {
       const reason = options.signal?.aborted
@@ -812,6 +818,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     // it too, or a cancelled round leaves the database locked behind it.
     const early = cancelledResult();
     gate.close();
+    releaseDefaultDirectory();
     return early;
   }
 
@@ -1034,6 +1041,6 @@ The downstream task reported that your artifact cannot satisfy ${pushed.requirem
   } finally {
     if (watcher) clearInterval(watcher);
     gate.close();
-    if (!options.databaseDir) rmSync(directory, { recursive: true, force: true });
+    releaseDefaultDirectory();
   }
 }
