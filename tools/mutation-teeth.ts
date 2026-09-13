@@ -200,6 +200,34 @@ const TARGETS: readonly Target[] = [
       },
     ],
   },
+  {
+    // The evidence drivers are not covered by tsc or eslint, so their own smoke test is the only
+    // thing that fails when one of them is edited wrongly. These two mutants are the defects the
+    // drivers were written around: the worker read only one reporter's count format and reported
+    // 0/0 for a passing run, and a deliverer could judge its own work.
+    target: "evals/ooo-execution/board-worker.ts",
+    suites: ["tests/integration/ooo-evidence-drivers.test.ts"],
+    mutants: [
+      {
+        name: "worker-reads-only-one-reporter-shape",
+        from: '    const spec = new RegExp(`^\u2139 ${label} (\\\\d+)$`, "m").exec(body);',
+        to: "    const spec = null;",
+        expect: "the worker claims, runs the named suite and delivers its digest",
+      },
+    ],
+  },
+  {
+    target: "evals/ooo-execution/board-judge.ts",
+    suites: ["tests/integration/ooo-evidence-drivers.test.ts"],
+    mutants: [
+      {
+        name: "judge-may-judge-its-own-delivery",
+        from: "  if (entry.deliveredBy === agentId) {",
+        to: "  if (false && entry.deliveredBy === agentId) {",
+        expect: "the board drivers run the protocol end to end on a scratch store",
+      },
+    ],
+  },
 ];
 
 interface MutantOutcome {
