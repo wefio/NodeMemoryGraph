@@ -15,14 +15,14 @@ check gets longer, and does the number the round reports measure the quantity th
 
 ## Method
 
-`.nmg/probe-check-duration.ts` drives the real `runCycle` through `compareModes`, so the
+`evals/ooo-execution/probe-check-duration.ts` drives the real `runCycle` through `compareModes`, so the
 orchestrator, the board, the candidate worktrees, the check processes and the acceptance rules are
 the production ones. Two dimensions are chosen rather than observed:
 
 - the round check does real CPU work of a chosen duration τ in a real child process;
 - task B additionally does real CPU work of a chosen duration β before returning its accepted answer.
 
-The probe itself is a local, uncommitted one-off (`.nmg/probe-check-duration.ts`): it states its sweep and the record below states the grid, so it can be rebuilt, while the metric change it verified is in `cycle.ts` with tests. A replay returns instantly, so an offline arm cannot be overlapped at all; CPU-bound workers are a
+The probe is committed at `evals/ooo-execution/probe-check-duration.ts` and takes its sweep from `--check-ms` / `--worker-ms`, writing both a table and a JSON record of what it measured, so the grid below can be re-run rather than rebuilt. Moving it into the repository is what exposed that it had rotted: its import of `round-log.ts` still pointed at the evals directory that file left in the OoO storage move, so it could no longer start. The metric change it verified is in `cycle.ts` with tests. A replay returns instantly, so an offline arm cannot be overlapped at all; CPU-bound workers are a
 **lower bound** for the real case, because two CPU-bound activities contend for cores while a model
 call mostly waits on the network. The answers are the ones the comparison test already uses, and the
 sweep asserts quality parity at every point (verdicts are identical across the whole grid).
