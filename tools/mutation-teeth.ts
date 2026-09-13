@@ -109,8 +109,25 @@ const TARGETS: readonly Target[] = [
     suites: [
       "tests/core/task-board-retention.test.ts",
       "tests/core/task-board-deliverable.test.ts",
+      "tests/core/store-transaction-port.test.ts",
     ],
     mutants: [
+      {
+        // The store owns the boundary: a write reached inside a transition without its port must be
+        // refused rather than become a second BEGIN.
+        name: "nested-write-transaction-is-allowed",
+        from: '    if (this.openTransaction)\n      throw new Error("a write transaction is already open: join it with the port it issued");',
+        to: '    if (this.openTransaction && false)\n      throw new Error("a write transaction is already open: join it with the port it issued");',
+        expect: "a write entry reached inside a transition without a port is refused, not nested",
+      },
+      {
+        // A failure the caller swallows still forbids the commit: nothing may be written up to the
+        // failure and then kept by a normal return value.
+        name: "swallowed-failure-still-commits",
+        from: "      state.rollbackOnly = true;",
+        to: "      void state.rollbackOnly;",
+        expect: "a failure the caller swallows still forbids the commit",
+      },
       {
         name: "stale-claim-may-deliver-again",
         from: "    if (!renewed) {",
