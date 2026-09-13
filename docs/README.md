@@ -26,9 +26,14 @@ different jobs and must not compete as independent sources of truth.
 6. **`experiments/`** contains observations: benchmark runs, audits, probes, and
    regressions. A result may motivate a decision, but does not become normative
    merely because it was measured.
-7. **`skills/`** contains Agent workflows. Skills tell an Agent how to maintain
+7. **`postmortem/`** contains incident records: a failure that escaped, the
+   mechanism behind it, why every safety net missed it, and the guardrails that
+   now catch the class. Its triage rule, required sections, promotion and
+   classification rules, and index are in
+   [postmortem/README.md](postmortem/README.md).
+8. **`skills/`** contains Agent workflows. Skills tell an Agent how to maintain
    or use the project; they link to canonical facts instead of duplicating them.
-8. **`guides/`** contains non-normative learning paths and maps. Guides exercise
+9. **`guides/`** contains non-normative learning paths and maps. Guides exercise
    public contracts and route readers to owners; they do not redefine design.
 
 When two files disagree, resolve the disagreement in the owning document rather
@@ -56,21 +61,24 @@ copying the whole implementation narrative.
   Related records include the
   [node-summary acceleration research](experiments/retrieval/node-summary-accelerated-retrieval-2026-08-19.md)
   and the current [benchmark result summary](experiments/benchmark-results.md).
+- **`postmortem/`** — numbered incident records with a failure-class index; read
+  [its index](postmortem/README.md) before writing one.
 
 Rule of thumb: _how NMG works or should work_ belongs in `design/`; _why this
 choice was made_ belongs in `decisions/`; _what was measured_ belongs in
-`experiments/`. An experiment commit does not become normative until an explicit
-design or decision owner accepts the result.
+`experiments/`; _what broke and why it escaped_ belongs in `postmortem/`. An
+experiment commit does not become normative until an explicit design or decision
+owner accepts the result.
 
 ## Bilingual policy
 
 NMG is bilingual without requiring mechanically identical translations.
 
 - Public entry documents are paired: root `README.md` / `README.zh-CN.md`, this
-  index, and the decision index.
-- New or materially changed decision notes should normally be paired. A missing
-  translation is a maintenance warning, not a blocker while the project is
-  evolving.
+  index, the decision index, and the post-mortem index.
+- New or materially changed decision notes and post-mortem records should
+  normally be paired. A missing translation is a maintenance warning, not a
+  blocker while the project is evolving.
 - Technical experiments, temporary investigations, and internal topic notes may
   use the language that best preserves the work.
 - Paired documents link to each other and preserve the same decisions, warnings,
@@ -92,19 +100,20 @@ This section is the policy owner for automated documentation checks. Change this
 table before changing `scripts/verify-docs.mts`; the script implements these
 rules and must not invent additional policy.
 
-| Rule                                                                                                           | Scope                                                                                                                | CI result     |
-| -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ------------- |
-| English/Chinese entry files both exist                                                                         | root README, docs index, decision index                                                                              | error         |
-| H1 and local links are valid                                                                                   | root README, docs index, normative design baseline, completion audit, decision indexes and records, each Skill entry | error         |
-| Filename, unique lifecycle location, exact status, and non-empty required sections match the decision contract | decision records                                                                                                     | error         |
-| Skill frontmatter contains a name matching its directory and a non-empty description                           | each `skills/<name>/SKILL.md`                                                                                        | error         |
-| H1 and local links are valid                                                                                   | all other docs and Skill references                                                                                  | warning       |
-| Content documents live under `design/`, `decisions/`, or `experiments/`                                        | direct children of `docs/` other than README and AGENTS                                                              | warning       |
-| Paired documents exist, link to each other, and retain broadly aligned heading structures                      | bilingual pairs                                                                                                      | warning       |
-| Run-report filenames end in `-YYYY-MM-DD.md`; rolling summaries and notes use `-results.md` or `-notes.md`     | documents under `experiments/`                                                                                       | warning       |
-| Explicit decision supersession metadata uses valid local links in both directions                              | decision records that declare supersession                                                                           | warning       |
-| Standing rule docs stay within a byte budget (rules 2,000 words ~ 15,000 B; AGENTS.md and indexes 5,000 B)      | AGENTS.md, each high-read `skills/*/SKILL.md`, the decision index                                                   | error         |
-| Translation quality, design correctness, experimental conclusions, and prose style                             | all documents                                                                                                        | not automated |
+| Rule                                                                                                                               | Scope                                                                                                                                               | CI result     |
+| ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| English/Chinese entry files both exist                                                                                             | root README, docs index, decision index, post-mortem index                                                                                          | error         |
+| H1 and local links are valid                                                                                                       | root README, docs index, normative design baseline, completion audit, decision indexes and records, post-mortem index and records, each Skill entry | error         |
+| Filename, unique lifecycle location, exact status, and non-empty required sections match the decision contract                     | decision records                                                                                                                                    | error         |
+| Filename, unique contiguous number, exact status, non-empty required sections, and one index row per record                        | post-mortem records and their index                                                                                                                 | error         |
+| Skill frontmatter contains a name matching its directory and a non-empty description                                               | each `skills/<name>/SKILL.md`                                                                                                                       | error         |
+| H1 and local links are valid                                                                                                       | all other docs and Skill references                                                                                                                 | warning       |
+| Content documents live under `design/`, `decisions/`, `experiments/`, or `postmortem/`                                             | direct children of `docs/` other than README and AGENTS                                                                                             | warning       |
+| Paired documents exist, link to each other, and retain broadly aligned heading structures                                          | bilingual pairs                                                                                                                                     | warning       |
+| Run-report filenames end in `-YYYY-MM-DD.md`; rolling summaries and notes use `-results.md` or `-notes.md`                         | documents under `experiments/`                                                                                                                      | warning       |
+| Explicit decision supersession metadata uses valid local links in both directions                                                  | decision records that declare supersession                                                                                                          | warning       |
+| Standing rule docs stay within a byte budget (rules 2,000 words ~ 15,000 B; AGENTS.md and indexes 5,000 B)                         | AGENTS.md, each high-read `skills/*/SKILL.md`, the decision index                                                                                   | error         |
+| Translation quality, design correctness, experimental conclusions, prose style, and whether a failure class was promoted to a rule | all documents                                                                                                                                       | not automated |
 
 An error means the repository's documented public or normative interface is
 broken in a mechanically reproducible way. A warning is maintenance input for an

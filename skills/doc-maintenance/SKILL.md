@@ -1,6 +1,6 @@
 ---
 name: doc-maintenance
-description: Maintain this repository's design, decision, experiment, bilingual, TODO, and operating documentation. Use whenever a change adds or revises behavior, architecture, process, evaluation evidence, public instructions, or when documentation is reorganized, translated, archived, deduplicated, or audited.
+description: Maintain this repository's design, decision, experiment, post-mortem, bilingual, TODO, and operating documentation. Use whenever a change adds or revises behavior, architecture, process, evaluation evidence, public instructions, an escaped failure and its guardrails, or when documentation is reorganized, translated, archived, deduplicated, or audited.
 ---
 
 # Documentation maintenance
@@ -90,6 +90,11 @@ Free-form status sentences are what this replaced.
    - Rationale and alternatives: a record under `docs/decisions/`.
    - Measured results: `docs/experiments/`; never promote a result into a design
      claim without an explicit decision.
+   - Failure narrative: a numbered record under `docs/postmortem/` when its
+     [triage rule](../../docs/postmortem/README.md#when-to-write-one) fires, with
+     its index row; when a class is promotable, its
+     [consumption rules](../../docs/postmortem/README.md#consumption-from-record-to-rule)
+     decide which owner the rule lands in.
    - Current implementation evidence: `docs/design/completion-audit.md`.
    - Unresolved action only: `docs/design/temporary-todo.md`; remove it when done.
    - User or Agent operation: README, Skill, or operating guide that owns it.
@@ -131,5 +136,8 @@ hardening fix, locate validation evidence, or avoid retrying a superseded design
 - Do not use `temporary-todo.md` as a changelog or completed-work archive.
 - Do not make every ordinary code change a decision record. Create one when the
   rationale, alternatives, compatibility, or consequences will matter later.
+- Do not make every fixed bug a post-mortem. The tier's
+  [triage rule](../../docs/postmortem/README.md#when-to-write-one) decides which
+  failures earn a record.
 - Do not block a useful change solely because a non-public translation is late.
 - Do not rewrite unrelated experiment reports while reorganizing documentation.

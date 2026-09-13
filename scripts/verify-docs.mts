@@ -34,6 +34,7 @@ const publicPairs = [
   ["README.md", "README.zh-CN.md"],
   ["docs/README.md", "docs/README.zh-CN.md"],
   ["docs/decisions/README.md", "docs/decisions/README.zh-CN.md"],
+  ["docs/postmortem/README.md", "docs/postmortem/README.zh-CN.md"],
 ];
 
 function markdownFiles(directory: string): string[] {
@@ -386,6 +387,222 @@ function checkLocalLinks(
   }
 }
 
+// A post-mortem is a backward-looking failure record: what broke, the mechanism
+// behind it, why every safety net missed it, and the guardrails that now catch
+// the class. Its sections are the questions the record has to answer, so the tier
+// cannot decay into a narrative pile, and its number is contiguous so the corpus
+// stays countable. Policy owner: docs/README.md#ci-contract.
+const POSTMORTEM_HEADER_FIELDS = new Set(["status"]);
+const POSTMORTEM_STATUSES = ["open", "resolved"];
+const POSTMORTEM_SECTIONS: string[][] = [
+  ["Executive summary", "执行摘要"],
+  ["Summary", "事件经过", "详细经过"],
+  ["Impact", "影响"],
+  ["Timeline", "时间线"],
+  ["Root cause", "根本原因", "根因"],
+  ["Guardrails added", "新增防护", "新增防线"],
+  ["Lessons", "经验教训", "教训"],
+];
+// `0001-slug.md` names a record and `0001-slug.zh-CN.md` is its translation. Numbering
+// and the index count records, so they read the English name; the naming rule accepts
+// either, because a tier whose records are meant to be paired cannot reject the name it
+// asks for. (It did: the Chinese counterpart was reported as misnamed, while the missing-
+// translation notice went the other way.)
+const POSTMORTEM_RECORD = /^docs\/postmortem\/(\d{4})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/;
+const POSTMORTEM_TRANSLATION = /^docs\/postmortem\/(\d{4})-[a-z0-9]+(?:-[a-z0-9]+)*\.zh-CN\.md$/;
+
+function isPostmortemFile(display: string): boolean {
+  return POSTMORTEM_RECORD.test(display) || POSTMORTEM_TRANSLATION.test(display);
+}
+
+const POSTMORTEM_INDEX = new Set(["README.md", "README.zh-CN.md"]);
+
+function postmortemCounterpart(path: string): string {
+  return path.endsWith(".zh-CN.md")
+    ? path.replace(/\.zh-CN\.md$/, ".md")
+    : path.replace(/\.md$/, ".zh-CN.md");
+}
+
+/** The header block is the lines before the first section: a closed field set whose
+ *  only member is `Status`. The name and its colon stay English even in a translation,
+ *  so a localized field is an unknown field — and says so, rather than reporting the
+ *  English field it replaced as missing. */
+function checkPostmortemHeader(
+  header: readonly string[],
+  display: string,
+  report: DocumentationReport,
+): void {
+  const counts = new Map<string, { name: string; count: number }>();
+  for (const line of header) {
+    const name = /^\*\*([^*]+)[:：]\*\*/.exec(line)?.[1];
+    if (!name) continue;
+    const key = name.toLowerCase();
+    const entry = counts.get(key) ?? { name, count: 0 };
+    entry.count += 1;
+    counts.set(key, entry);
+    if (!POSTMORTEM_HEADER_FIELDS.has(key)) {
+      report.errors.push(
+        `${display}: unknown header field '**${name}:**'; header fields are ${[...POSTMORTEM_HEADER_FIELDS].join(", ")}`,
+      );
+    }
+  }
+  for (const entry of counts.values()) {
+    if (entry.count > 1) {
+      report.errors.push(
+        `${display}: header field '**${entry.name}:**' appears ${entry.count} times`,
+      );
+    }
+  }
+  const status = header
+    .map((line) => /^\*\*Status:\*\*\s*(.+?)\s*$/i.exec(line)?.[1])
+    .find((value) => value !== undefined)
+    ?.toLowerCase();
+  if (status === undefined) {
+    report.errors.push(
+      `${display}: missing required header field '**Status:**' (the field name and its colon stay English in a translation; the sections are what may be translated)`,
+    );
+  } else if (!POSTMORTEM_STATUSES.some((allowed) => allowed === status)) {
+    report.errors.push(
+      `${display}: '**Status:**' must be one of ${POSTMORTEM_STATUSES.join(", ")}`,
+    );
+  }
+}
+
+function checkPostmortemRecord(
+  path: string,
+  text: string,
+  display: string,
+  report: DocumentationReport,
+): void {
+  const lines = text.split(/\r?\n/);
+  const firstSection = lines.findIndex((line) => /^##\s+/.test(line));
+  checkPostmortemHeader(
+    firstSection === -1 ? lines : lines.slice(0, firstSection),
+    display,
+    report,
+  );
+  for (const alternatives of POSTMORTEM_SECTIONS) {
+    const body = sectionBody(text, alternatives);
+    if (body === undefined) {
+      report.errors.push(`${display}: missing section '${alternatives[0]}'`);
+    } else if (!body) {
+      report.errors.push(`${display}: empty section '${alternatives[0]}'`);
+    }
+  }
+  if (path.endsWith(".zh-CN.md")) return;
+  const counterpart = postmortemCounterpart(path);
+  if (!existsSync(counterpart)) {
+    report.warnings.push(`${display}: bilingual post-mortem counterpart is missing`);
+    return;
+  }
+  checkPairedLinksAndHeadings(path, counterpart, display, report);
+}
+
+/** A file inside the tier is either a numbered record or a naming error. */
+function checkPostmortemFile(
+  path: string,
+  text: string,
+  display: string,
+  report: DocumentationReport,
+): void {
+  if (POSTMORTEM_INDEX.has(basename(path))) return;
+  if (!isPostmortemFile(display)) {
+    report.errors.push(
+      `${display}: a post-mortem record is named NNNN-kebab-case.md (with an optional .zh-CN translation) in docs/postmortem/`,
+    );
+    return;
+  }
+  checkPostmortemRecord(path, text, display, report);
+}
+
+/** A decision file also carries the counters `docs:check` prints, so the owner of a
+ *  record is the only place that counts one. */
+function checkDecisionFile(
+  path: string,
+  text: string,
+  display: string,
+  kind: string,
+  report: DocumentationReport,
+): void {
+  checkDecision(path, text, kind, report);
+  if (kind === "implemented" && !display.endsWith(".zh-CN.md")) {
+    report.decisions.implemented += 1;
+    const deferred = sectionBody(text, ["Deferred", "未完成项"]);
+    if (deferred !== undefined && deferred.length > 0 && !/^none\.?$/i.test(deferred)) {
+      report.decisions.open += 1;
+    }
+  }
+  if (path.endsWith(".zh-CN.md")) return;
+  checkPairedLinksAndHeadings(path, decisionCounterpart(path), display, report);
+}
+
+/** Numbers identify records, so one number may name one record and the run from
+ *  `0001` may not have gaps. */
+function checkPostmortemNumbers(
+  numbers: ReadonlyMap<string, string[]>,
+  report: DocumentationReport,
+): void {
+  for (const [number, files] of numbers) {
+    if (files.length > 1) {
+      report.errors.push(`docs/postmortem: number ${number} is used by ${files.sort().join(", ")}`);
+    }
+  }
+  const used = new Set([...numbers.keys()].map(Number));
+  for (let expected = 1; expected <= used.size; expected += 1) {
+    if (used.has(expected)) continue;
+    report.errors.push(
+      `docs/postmortem: numbering must be contiguous from 0001; ${String(expected).padStart(4, "0")} is missing`,
+    );
+  }
+}
+
+/** The index is a checked copy: every record is listed exactly once, and a row that
+ *  names no record fails through the contract-document link check. */
+function checkPostmortemIndex(
+  index: string,
+  records: readonly string[],
+  report: DocumentationReport,
+): void {
+  const listed = new Map<string, number>();
+  const links = withoutCodeFences(readFileSync(index, "utf8"));
+  for (const match of links.matchAll(/(?<!!)\[[^\]]*\]\(([^)]+)\)/g)) {
+    const target = match[1].trim().replace(/^<|>$/g, "").split("#", 1)[0].split("?", 1)[0];
+    const name = basename(target);
+    if (!POSTMORTEM_RECORD.exec(`docs/postmortem/${name}`)) continue;
+    listed.set(name, (listed.get(name) ?? 0) + 1);
+  }
+  for (const path of records) {
+    const name = basename(path);
+    const count = listed.get(name) ?? 0;
+    if (count === 0) {
+      report.errors.push(`docs/postmortem/README.md: '${name}' is not listed in the index`);
+    } else if (count > 1) {
+      report.errors.push(`docs/postmortem/README.md: '${name}' is listed ${count} times`);
+    }
+  }
+}
+
+/** The index is the one home for a record's failure class, so it is a checked
+ *  copy rather than a free one: every record is listed exactly once, and the
+ *  numbering is contiguous from 0001 so the corpus stays countable. */
+function checkPostmortems(root: string, report: DocumentationReport): void {
+  const directory = join(root, "docs", "postmortem");
+  if (!existsSync(directory)) return;
+  const records: string[] = [];
+  const numbers = new Map<string, string[]>();
+  for (const path of markdownFiles(directory)) {
+    const display = relative(root, path).replaceAll("\\", "/");
+    const match = POSTMORTEM_RECORD.exec(display);
+    if (!match) continue;
+    records.push(path);
+    const number = match[1]!;
+    numbers.set(number, [...(numbers.get(number) ?? []), display]);
+  }
+  checkPostmortemNumbers(numbers, report);
+  const index = join(directory, "README.md");
+  if (existsSync(index)) checkPostmortemIndex(index, records, report);
+}
+
 function isContractDocument(display: string): boolean {
   if (new Set(["README.md", "README.zh-CN.md"]).has(display)) return true;
   if (
@@ -396,11 +613,16 @@ function isContractDocument(display: string): boolean {
       "docs/design/completion-audit.md",
       "docs/decisions/README.md",
       "docs/decisions/README.zh-CN.md",
+      "docs/postmortem/README.md",
+      "docs/postmortem/README.zh-CN.md",
     ]).has(display)
   ) {
     return true;
   }
   if (/^docs\/decisions\/(proposed|implemented|rejected|archived)\/.+\.md$/.test(display)) {
+    return true;
+  }
+  if (isPostmortemFile(display)) {
     return true;
   }
   return /^skills\/[^/]+\/SKILL\.md$/.test(display);
@@ -574,25 +796,17 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
       !new Set(["README.md", "README.zh-CN.md", "AGENTS.md"]).has(parts[1])
     ) {
       report.warnings.push(
-        `${display}: documentation content must live in design/, decisions/, or experiments/`,
+        `${display}: documentation content must live in design/, decisions/, experiments/, or postmortem/`,
       );
     }
     if (parts[0] === "docs" && parts[1] === "decisions" && lifecycle.has(parts[2])) {
-      checkDecision(path, text, parts[2], report);
-      if (parts[2] === "implemented" && !display.endsWith(".zh-CN.md")) {
-        report.decisions.implemented += 1;
-        const deferred = sectionBody(text, ["Deferred", "未完成项"]);
-        if (deferred !== undefined && deferred.length > 0 && !/^none\.?$/i.test(deferred)) {
-          report.decisions.open += 1;
-        }
-      }
-      if (!path.endsWith(".zh-CN.md")) {
-        const counterpart = decisionCounterpart(path);
-        checkPairedLinksAndHeadings(path, counterpart, display, report);
-      }
+      checkDecisionFile(path, text, display, parts[2], report);
     }
     if (parts[0] === "docs" && parts[1] === "design") {
       checkDesignHeader(path, text, report);
+    }
+    if (parts[0] === "docs" && parts[1] === "postmortem") {
+      checkPostmortemFile(path, text, display, report);
     }
     const experimentName = parts[parts.length - 1];
     if (
@@ -608,6 +822,7 @@ export function verifyDocumentation(rootDirectory = process.cwd()): Documentatio
   }
   checkPartsShelf(root, report);
   checkCounterexamples(root, report);
+  checkPostmortems(root, report);
   for (const [rel, maxBytes] of Object.entries(BYTE_BUDGETS)) {
     const p = join(root, rel);
     if (!existsSync(p)) continue; // budget applies to present standing docs, not synthetic trees

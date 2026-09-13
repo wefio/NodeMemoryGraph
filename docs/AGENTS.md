@@ -6,8 +6,13 @@ the ownership rules in [README.md](README.md) or
 [README.zh-CN.md](README.zh-CN.md).
 
 Keep design intent, decision rationale, measured evidence, implementation status,
-and unresolved work in their owning documents. Do not duplicate an existing
-owner merely to preserve editing history; Git already does that.
+incident narrative, and unresolved work in their owning documents. Do not
+duplicate an existing owner merely to preserve editing history; Git already does
+that.
+
+A failure that escaped and meets the [post-mortem triage
+rule](postmortem/README.md#when-to-write-one) gets a numbered record under
+`postmortem/`, with its index row.
 
 Do not add conventional root community files such as `CODE_OF_CONDUCT.md` or
 `CONTRIBUTING.md` by default. NMG's repository collaboration surface is Agent-first:
