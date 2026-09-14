@@ -3,6 +3,11 @@
 **Status:** living ledger. Each row is one obligation from `docs/design/task-unit-semantics.md`;
 progress is counted in rows moved to `proven`, not in edits made.
 
+Counts at this revision: **A** 4/4 proven; **B** 6 proven + B6 proven with its tooth owed + B7 not
+applicable; **C** 3 proven (C3 with its tooth owed) + C4 owed; **D** 6 proven, 3 partly (D1, D8, D9),
+D7 owed and attempted; **E** excluded by the design; **F** not started; **G** 2 partly (G4, G6),
+5 owed.
+
 How a row earns `proven`: it names a test that fails when the code satisfying it is broken. Where
 such a mutation is registered, the mutant's name is given, because a test that cannot fail is a
 description rather than a pin. Every mutant name below was read from
@@ -144,6 +149,11 @@ Two consequences for the nodes above it:
   port and stop closing the connection, which touches 46 `runCycle(` call sites, all of them in
   `evals/**` - a tree neither `tsc` nor the product suite covers. It needs its own pass with the
   evals suites run afterwards, because a silent breakage there would not fail any gate.
-- The augmented contract itself (317 lines) is untracked in the shared checkout and is not on this
-  branch, so this ledger cites the design by section rather than by line. Carrying it in is not mine
-  to do alone: `docs/decisions/proposed/2026-09-13-task-unit-semantics.md` has the same author.
+- The design document *is* tracked: `main` carries the 272-line version (`1f2f22f2`, PR #54) and this
+  branch has that one. The revision the G family and the D-section quotes come from is a 355-line
+  update sitting **uncommitted** in the shared checkout (`sha256 903f3049cbfd78bb`, mtime 2026-09-14
+  14:27), whose worktree is 14 commits behind `main`. I had been calling that document untracked,
+  which was wrong: what is untracked is the newer revision, not the document. Every row here is
+  nevertheless derived from a revision no commit holds yet, so when it lands the rows that quote it -
+  G1-G7 and the D-section wording - have to be re-checked against the committed text. I did not carry
+  it in myself; the same author owns `docs/decisions/proposed/2026-09-13-task-unit-semantics.md`.
