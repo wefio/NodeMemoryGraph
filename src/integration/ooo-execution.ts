@@ -71,6 +71,10 @@ export interface DispatchTask {
   claimed: boolean;
   externalEvent?: string;
   externalReady: boolean;
+  /** Bytes exist for this task. Delivery and acceptance are different facts: a delivered artifact
+   *  whose verdict is not accepted (pending, rejected, or about another digest) leaves a task that
+   *  cannot be claimed again and must not be selected - the coordinator recovers it with reopen(). */
+  delivered?: boolean;
 }
 
 /** Input order and declarations belong to the coordinator, never the worker.
@@ -92,7 +96,11 @@ export function nextTask(plan: readonly DispatchTask[]): string | null {
     !waiting(task) &&
     ["read-only", "isolated-artifact"].includes(task.effect) &&
     task.dependencies.every((id) => valid(id));
-  const pending = plan.filter((task) => !valid(task.id));
+  // A task holding bytes nobody can claim is not a task to select, and it is not a reason to
+  // select nothing either: it is dropped from the plan, which is what the coordinator's reopen()
+  // is for. Selecting it would publish a handoff no reader could take.
+  const selectable = plan.filter((task) => task.accepted || !task.delivered);
+  const pending = selectable.filter((task) => !valid(task.id));
   // ponytail: scan the bounded experiment plan; no learned priorities or preemption.
   if (pending.some((task) => task.claimed) || pending.filter(waiting).length > 1) return null;
   const first = pending[0];

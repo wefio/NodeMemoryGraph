@@ -33,6 +33,7 @@ export interface PatchTaskSpec {
   verify: (submission: PatchSubmission) => Promise<"accept" | "reject" | "undecidable">;
 }
 import { nextTask, snapshotAnswer, type SnapshotWork } from "./ooo-execution.ts";
+import { compileTaskUnits, dispatchTasks, type RecordedFacts } from "./task-semantics.ts";
 
 export type ProbePlan = readonly (readonly [
   string,
@@ -240,6 +241,9 @@ export class BoardAdmission extends NmgStore {
   /** The board channel this run publishes to; never shared with another run. */
   readonly channel: string;
   private readonly patchTasks: Readonly<Record<string, PatchTaskSpec>>;
+  /** The declared plan, kept because the shared compiler needs it and the store only keeps the
+   *  rows it was expanded into. */
+  private readonly plan: ProbePlan;
 
   constructor(
     database: string,
@@ -249,6 +253,7 @@ export class BoardAdmission extends NmgStore {
   ) {
     super(database);
     this.patchTasks = patchTasks;
+    this.plan = plan;
     // A snapshot task can never carry host patch definitions. The opposite
     // direction is checked at claim time, because a round may install a task's
     // frozen envelope after construction but before it becomes claimable.
@@ -801,26 +806,59 @@ export class BoardAdmission extends NmgStore {
     const rows = this.db
       .prepare("SELECT * FROM ooo_probe_task_view WHERE run_id=? ORDER BY position")
       .all(this.runId) as unknown as Row[];
-    const accepted = this.acceptedArtifacts();
-    // A task whose artifact is delivered but no longer accepted is not selectable: the
-    // bytes still exist, so it cannot be claimed again either, and selecting it would
-    // publish a handoff nobody can claim. The coordinator recovers it with reopen().
-    const schedulable = rows.filter(
-      (row) => !this.delivered(row) || Object.hasOwn(accepted, row.id),
-    );
-    return nextTask(
-      schedulable.map((row) => ({
-        id: row.id,
-        effect: row.effect,
-        sourceVersion: row.source_revision,
-        observedVersion: row.observed_revision,
-        dependencies: JSON.parse(row.dependencies) as string[],
-        accepted: Object.hasOwn(accepted, row.id),
-        claimed: this.live(row),
-        externalEvent: row.wait_event ?? undefined,
-        externalReady: row.external_ready === 1,
-      })),
-    );
+    // The store is the fact source and the shared semantics is the rule. This used to be a second
+    // selection implementation standing beside task-semantics.ts, which is how a plan the compiler
+    // refuses could still be scheduled.
+    const compiled = compileTaskUnits({ plan: this.plan, specs: this.patchTasks });
+    if (!compiled.legal) {
+      // No silent degradation: a plan the compiler refuses is refused here, by name, with the
+      // refusals that say why - not scheduled on a hand-rolled reading of the same rows.
+      const first = compiled.refusals[0];
+      throw new Error(
+        `plan refused by the shared semantics: ${compiled.refusals.length} refusal(s); ` +
+          `first is ${String(first?.task)}/${String(first?.field)}: ${String(first?.reason)}`,
+      );
+    }
+    return nextTask(dispatchTasks(compiled.units, this.recordedFacts(rows)));
+  }
+
+  /** What the store recorded, in the shape the shared compiler reads. Acceptance comes from the
+   *  board's single acceptance reader, so the derived view cannot disagree with it about which
+   *  artifacts were accepted - only about eligibility, which is the compiler's business. */
+  private recordedFacts(rows: readonly Row[]): RecordedFacts {
+    const facts: {
+      artifacts: Record<string, string>;
+      verdicts: Record<
+        string,
+        { digest: string; verdict: "accepted" | "rejected" | "undecidable" }
+      >;
+      revisions: Record<string, string>;
+      sourceRevisions: Record<string, string>;
+      externalReady: string[];
+      claimed: string[];
+    } = {
+      artifacts: {},
+      verdicts: {},
+      revisions: {},
+      sourceRevisions: {},
+      externalReady: [],
+      claimed: [],
+    };
+    for (const row of rows) {
+      const artifact = this.acceptedArtifacts()[row.id] ?? row.artifact ?? null;
+      if (artifact !== null) {
+        const accepted = Object.hasOwn(this.acceptedArtifacts(), row.id);
+        facts.artifacts[row.id] = artifact;
+        // The verdict is bound to the artifact it judged: bytes that exist without an accepted
+        // verdict for those bytes are delivered, not accepted.
+        facts.verdicts[row.id] = { digest: artifact, verdict: accepted ? "accepted" : "rejected" };
+      }
+      facts.revisions[row.id] = row.observed_revision;
+      facts.sourceRevisions[row.id] = row.source_revision;
+      if (row.external_ready === 1) facts.externalReady.push(row.id);
+      if (this.live(row)) facts.claimed.push(row.id);
+    }
+    return facts;
   }
 
   claim(id: string, agentId: string): BoardTicket {
