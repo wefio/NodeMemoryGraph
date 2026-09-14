@@ -214,6 +214,7 @@ const TARGETS: readonly Target[] = [
       "tests/integration/ooo-transition-atomicity.test.ts",
       "tests/integration/ooo-acceptance-one-predicate.test.ts",
       "tests/integration/ooo-round-query.test.ts",
+      "tests/integration/ooo-ordinary-failure.test.ts",
     ],
     mutants: [
       {
@@ -285,6 +286,13 @@ const TARGETS: readonly Target[] = [
         expect: "the board verdict is what accepts an artifact, not the round's own column",
       },
       {
+        name: "cancellation-does-not-stop-a-claim",
+        ast: { within: "claim" },
+        from: '    if (!id || !agentId) throw new Error("task and agent required");\n    if (this.cancelled() !== null) throw new Error("round cancelled");',
+        to: '    if (!id || !agentId) throw new Error("task and agent required");',
+        expect: "a cancellation names the lease it revokes, and the batch behind it is refused",
+      },
+      {
         name: "round-does-not-pin-what-it-references",
         ast: { within: "publishReady" },
         from: '      this.retainTaskBoardEntry({\n        taskId: this.channel,\n        entryId,\n        owner: RETENTION_OWNER,\n        reason: `round ${this.runId ?? "initial"} handoff for ${row.id}`,\n        now: new Date(this.now).toISOString(),\n      });',
@@ -303,7 +311,10 @@ const TARGETS: readonly Target[] = [
   },
   {
     target: "src/integration/ooo-execution.ts",
-    suites: ["evals/ooo-execution/patch-cycle.test.ts"],
+    suites: [
+      "tests/integration/ooo-ordinary-failure.test.ts",
+      "evals/ooo-execution/patch-cycle.test.ts",
+    ],
     mutants: [
       {
         name: "selection-ignores-a-withdrawn-acceptance",
@@ -312,6 +323,13 @@ const TARGETS: readonly Target[] = [
         to: "  const selectable = plan;",
         expect:
           "an outside rejection withdraws the release of a dependent, and the round fails closed",
+      },
+      {
+        name: "a-live-claim-does-not-block-selection",
+        ast: { within: "nextTask" },
+        from: "  if (pending.some((task) => task.claimed) || pending.filter(waiting).length > 1) return null;",
+        to: "  if (pending.filter(waiting).length > 1) return null;",
+        expect: "with no fusion point the plan falls back to its declared order",
       },
     ],
   },
