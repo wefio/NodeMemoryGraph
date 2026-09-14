@@ -137,6 +137,13 @@ const TARGETS: readonly Target[] = [
     ],
     mutants: [
       {
+        // The handle, not a PRAGMA, is what makes this read-only: restoring writability must fail the test.
+        name: "the-read-only-factory-opens-a-writable-handle",
+        ast: { call: "DatabaseSync", argCount: 2 },
+        to: "new DatabaseSync(databasePath)",
+        expect: "a read-only open neither creates, migrates nor writes",
+      },
+      {
         // The store owns the boundary: a write reached inside a transition without its port must be
         // refused rather than become a second BEGIN.
         name: "nested-write-transaction-is-allowed",
