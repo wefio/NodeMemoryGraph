@@ -34,6 +34,7 @@ const plan: ProbePlan = [
 ];
 
 /** What the host's verification says next. A rejection is one host decision, not a board rule. */
+let verdictA: "accept" | "reject" = "accept";
 let verdictB: "accept" | "reject" = "accept";
 
 const specs: Record<string, PatchTaskSpec> = {
@@ -41,7 +42,7 @@ const specs: Record<string, PatchTaskSpec> = {
     instruction: "A works.",
     files: { [IMPL]: baseline[IMPL] },
     editable: [IMPL],
-    verify: async () => "accept",
+    verify: async () => verdictA,
   },
   B: {
     instruction: "B works.",
@@ -174,4 +175,40 @@ test("a split that drops a parent obligation is refused by name, with its locati
     dropped.some((refusal) => refusal.field.startsWith("obligations.")),
     "the refusal points at the obligation the split dropped: " + JSON.stringify(dropped),
   );
+});
+
+test("a later refusal does not withdraw the prefix that was already accepted", async (t) => {
+  const { gate, deliver, submitAs } = open("ordinary-prefix");
+  t.after(() => gate.close());
+  verdictA = "accept";
+  verdictB = "accept";
+
+  const ticketB = gate.claim("B", "worker-one") as BoardTicket;
+  assert.equal(await submitAs(ticketB, "worker-one", deliver(ticketB, TESTS, B_DONE)), "accepted");
+  assert.deepEqual(Object.keys(gate.accepted()), ["B"], "B is the accepted prefix");
+
+  // The next deliverable is refused. The accepted prefix has to survive it: a later failure is not a
+  // reason to un-accept work the host already accepted, and the refused task waits for its reopen.
+  verdictA = "reject";
+  const ticketA = gate.claim("A", "worker-two") as BoardTicket;
+  assert.equal(
+    await submitAs(ticketA, "worker-two", deliver(ticketA, IMPL, "export const a = 2;\n")),
+    "rejected",
+  );
+  assert.deepEqual(
+    Object.keys(gate.accepted()),
+    ["B"],
+    "the accepted prefix survives the later refusal",
+  );
+  assert.equal(gate.next(), null, "and the refused task is not re-selected on its own");
+
+  // Reopening it and accepting it completes the plan; the prefix was never lost along the way.
+  gate.reopen("A");
+  verdictA = "accept";
+  const retry = gate.claim("A", "worker-two") as BoardTicket;
+  assert.equal(
+    await submitAs(retry, "worker-two", deliver(retry, IMPL, "export const a = 2;\n")),
+    "accepted",
+  );
+  assert.deepEqual(Object.keys(gate.accepted()).sort(), ["A", "B"]);
 });
