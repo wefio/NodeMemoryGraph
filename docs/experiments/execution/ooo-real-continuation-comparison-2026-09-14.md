@@ -43,24 +43,26 @@ correctly.
 
 The continuation's naive failure rate looks like 50%. It is not. Reading each failure's cause:
 
-| cause                                                                                       | count | whose fault                            |
-| ------------------------------------------------------------------------------------------- | ----- | -------------------------------------- |
-| artifact path reused across repetitions, so the recorded digest no longer matched the bytes | 10    | the harness                            |
-| a failed stage kept its claim, so the retry was refused by its own predecessor              | 2     | the harness                            |
-| the upstream part 1 never passed, so no continuation existed to claim                       | 1     | the harness (upstream)                 |
-| `invalid patch structure`, submitted before the artifact was kept                           | 4     | unknown — the bytes were not preserved |
-| `cannot-complete`, a legal conclusion kind                                                  | 1     | the model                              |
-| a legal `no-change-needed` conclusion misread as a malformed patch                          | 1     | the harness (misclassification)        |
+| cause                                                                                       | count | whose fault                       |
+| ------------------------------------------------------------------------------------------- | ----- | --------------------------------- |
+| artifact path reused across repetitions, so the recorded digest no longer matched the bytes | 10    | the harness                       |
+| a failed stage kept its claim, so the retry was refused by its own predecessor              | 2     | the harness                       |
+| the upstream part 1 never passed, so no continuation existed to claim                       | 1     | the harness (upstream)            |
+| `no-change-needed`, read from the kept artifacts (r14, r19), misread as a malformed patch   | 2     | the harness (misclassification)   |
+| `cannot-complete`, read from the kept artifact (r22), a legal conclusion kind               | 1     | the model                         |
+| `promote-candidate` but not parseable (the earliest kept artifact)                          | 1     | the model                         |
+| `invalid patch structure`, artifact not preserved                                           | 2     | unknown — the bytes were not kept |
 
-So **13 of 20 failures were the harness's own defects**, one more was the harness misreading a legal
-conclusion, and at most 6 were the model's — of which only `cannot-complete` and the four
-unpreserved artifacts remain unclassified. The apparent instability of the continuation was mostly an
+So **13 of 20 failures were the harness's own defects**, and reading the kept artifacts split the
+rest: two were legal `no-change-needed` conclusions the harness misread as malformed patches, one was
+`cannot-complete`, and one was submitted as `promote-candidate` but could not be parsed. Two failures
+still have no preserved bytes, so their cause is not claimed. The apparent instability of the continuation was mostly an
 artefact of the instrument. That is the single most useful thing this comparison produced, and it is
 exactly the failure mode the check exists to catch: an instrument that reports its own faults as
 task variance.
 
-The four `invalid patch structure` cases deserve a note. The one artifact that _was_ preserved
-(`merge`, repetition r14) declares:
+The `invalid patch structure` cases deserve a note. Of the four, two were preserved and both
+declare the same thing - `merge`, repetitions r14 and r19:
 
 ```
 {"kind":"conclusion","conclusion":"no-change-needed","summary":"The delivered merge.ts already

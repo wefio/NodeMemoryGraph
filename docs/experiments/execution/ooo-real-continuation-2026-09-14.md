@@ -79,7 +79,7 @@ Nine model calls, 80 081 tokens, 84 395 ms of recorded work across both stages. 
 recorded the digest of the artifact it continued from, so each one provably started from what the
 first session delivered rather than from the original stub.
 
-Raw records: `ooo-real-continuation-2026-09-14-g7-run.jsonl` (the clean pass, 25 lines).
+Raw records: `archive/ooo-continuation-2026-09-14/run-logs/g7-run.jsonl` (the clean pass, 25 lines).
 
 ## What the process looks like when the tasks are alike
 
@@ -113,7 +113,7 @@ Raw records: `ooo-real-continuation-2026-09-14-g7-run.jsonl` (the clean pass, 25
 | retry in a fresh store                      | 2/2, 4 758 | **failed: `invalid patch structure`** | refused      |
 | retry after releasing the stale claim       | —          | 7/7, 4 turns, 6 964 tokens            | accepted 7/7 |
 
-Raw records: `ooo-real-continuation-2026-09-14-merge-retries.jsonl` (12 lines).
+Raw records: `archive/ooo-continuation-2026-09-14/run-logs/merge-retry.jsonl` (12 lines).
 
 ## Defects this run found in its own runner, and what they show
 
