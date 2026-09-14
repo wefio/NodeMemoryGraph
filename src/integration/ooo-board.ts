@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { NmgStore } from "../../src/core/store.ts";
 import type { TransactionPort } from "../../src/core/store/base.ts";
 import { acceptedFact } from "./task-semantics.ts";
@@ -122,6 +124,108 @@ export interface BoardTicket {
 
 /** Which run of a store to open. Omitted, a store with exactly one run continues it and a
  *  store with several refuses the ambiguity rather than guessing. */
+/** The accepted artifacts by task id, read off a connection the caller owns. */
+export function readAccepted(db: DatabaseSync, runId: string): Record<string, string> {
+  const rows = db
+    .prepare(
+      "SELECT id, artifact, source_revision, observed_revision FROM ooo_probe_task_view " +
+        "WHERE run_id=? AND artifact IS NOT NULL ORDER BY id",
+    )
+    .all(runId) as unknown as Row[];
+  // The verdict is looked up on the board by the digest of THIS attempt's artifact — no
+  // pointer column, because acceptance is the board's fact and retention keeps the entry
+  // readable. A verdict about another digest never transfers, and a later rejection of
+  // this digest withdraws acceptance.
+  const verdictOf = db.prepare(
+    `SELECT verdict, judged_digest FROM task_board_entries
+       WHERE task_id = ? AND deliverable_digest = ? AND verdict IS NOT NULL
+       ORDER BY judged_at DESC LIMIT 1`,
+  );
+  const cancelled = readCancelled(db, runId) !== null;
+  const accepted: Record<string, string> = {};
+  for (const row of rows) {
+    const commit = String(row.artifact);
+    const digest = artifactDigest(commit);
+    const recorded = verdictOf.get(roundChannel(runId), digest) as unknown as
+      { verdict: string | null; judged_digest: string | null } | undefined;
+    if (
+      !acceptedFact({
+        artifact: commit,
+        digest,
+        verdict: recorded?.verdict ?? null,
+        judgedDigest: recorded?.judged_digest ?? null,
+        currentRevision: row.source_revision === row.observed_revision,
+        cancelled,
+      })
+    )
+      continue;
+    accepted[String(row.id)] = commit;
+  }
+  return accepted;
+}
+/** The round's terminal reason, or null while it is still running. */
+export function readCancelled(db: DatabaseSync, runId: string): string | null {
+  const runs = db.prepare("SELECT cancel_reason FROM ooo_probe_runs WHERE run_id=?").get(runId) as
+    { cancel_reason?: string | null } | undefined;
+  return runs?.cancel_reason ?? null;
+}
+/** The owner's narrow query port: typed reads only, no write, no raw connection, no SQL and no close.
+ *  Constructing it creates nothing; the offline host opens its own read-only handle and asks for the
+ *  same port, so one implementation serves both paths. */
+export interface RoundQueryPort {
+  readonly cancelled: () => string | null;
+  readonly accepted: () => Record<string, string>;
+}
+
+/** The offline host's read-only path: a true read-only handle, no migration, no initialisation and no
+ *  publish, and nothing created when the file, the schema or the run is missing. The caller owns the
+ *  handle it gets back. */
+export function openRoundQuery(
+  databasePath: string,
+  runId?: string,
+): { readonly port: RoundQueryPort; readonly close: () => void } {
+  if (!existsSync(databasePath))
+    throw new Error("this round store does not exist; a read-only view does not create one");
+  const db = new DatabaseSync(databasePath, { readOnly: true });
+  // A refusal has to close the handle it just opened: an open handle keeps the file locked on Windows.
+  // An explicit annotation on the variable is what lets the compiler narrow after the call.
+  const refuse: (message: string) => never = (message) => {
+    try {
+      db.close();
+    } catch {
+      // Best effort; the refusal is what the caller needs.
+    }
+    throw new Error(message);
+  };
+  const table = (name: string) =>
+    db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name) !== undefined;
+  if (!table("ooo_probe_runs"))
+    refuse("this store carries no round schema; a read-only view does not migrate it");
+  // A store with several runs refuses to guess, exactly as the writable path does; naming the run is
+  // the caller's job, because picking one is an answer to somebody's evidence.
+  const runs = db
+    .prepare("SELECT run_id FROM ooo_probe_runs ORDER BY created_at")
+    .all() as unknown as {
+    run_id: string;
+  }[];
+  if (runId !== undefined && !runs.some((run) => run.run_id === runId))
+    refuse(`this store holds no run ${runId}`);
+  const resolved = runId ?? (runs.length === 1 ? runs[0]!.run_id : undefined);
+  if (resolved === undefined)
+    refuse(
+      runs.length === 0
+        ? "this store holds no run to read"
+        : `this store holds ${runs.length} runs; name the one to read`,
+    );
+  return {
+    port: {
+      cancelled: () => readCancelled(db, resolved),
+      accepted: () => readAccepted(db, resolved),
+    },
+    close: () => db.close(),
+  };
+}
+
 export interface BoardAdmissionOptions {
   runId?: string;
 }
@@ -1002,43 +1106,8 @@ export class BoardAdmission extends NmgStore {
       });
   }
 
-  private acceptedArtifacts(): Record<string, string> {
-    const rows = this.db
-      .prepare(
-        "SELECT id, artifact, source_revision, observed_revision FROM ooo_probe_task_view " +
-          "WHERE run_id=? AND artifact IS NOT NULL ORDER BY id",
-      )
-      .all(this.runId) as unknown as Row[];
-    // The verdict is looked up on the board by the digest of THIS attempt's artifact — no
-    // pointer column, because acceptance is the board's fact and retention keeps the entry
-    // readable. A verdict about another digest never transfers, and a later rejection of
-    // this digest withdraws acceptance.
-    const verdictOf = this.db.prepare(
-      `SELECT verdict, judged_digest FROM task_board_entries
-       WHERE task_id = ? AND deliverable_digest = ? AND verdict IS NOT NULL
-       ORDER BY judged_at DESC LIMIT 1`,
-    );
-    const cancelled = this.cancelled() !== null;
-    const accepted: Record<string, string> = {};
-    for (const row of rows) {
-      const commit = String(row.artifact);
-      const digest = artifactDigest(commit);
-      const recorded = verdictOf.get(this.channel, digest) as unknown as
-        { verdict: string | null; judged_digest: string | null } | undefined;
-      if (
-        !acceptedFact({
-          artifact: commit,
-          digest,
-          verdict: recorded?.verdict ?? null,
-          judgedDigest: recorded?.judged_digest ?? null,
-          currentRevision: row.source_revision === row.observed_revision,
-          cancelled,
-        })
-      )
-        continue;
-      accepted[String(row.id)] = commit;
-    }
-    return accepted;
+  acceptedArtifacts(): Record<string, string> {
+    return readAccepted(this.db, this.runId);
   }
 
   /** The accepted artifacts, by task id — the values dependents bind to. */
@@ -1167,10 +1236,7 @@ export class BoardAdmission extends NmgStore {
 
   /** The round's terminal reason, or null while it is still running. */
   cancelled(): string | null {
-    const runs = this.db
-      .prepare("SELECT cancel_reason FROM ooo_probe_runs WHERE run_id=?")
-      .get(this.runId) as { cancel_reason?: string | null } | undefined;
-    return runs?.cancel_reason ?? null;
+    return readCancelled(this.db, this.runId);
   }
 
   /** Explicit terminal decision for a check that never reported: otherwise a wait only
