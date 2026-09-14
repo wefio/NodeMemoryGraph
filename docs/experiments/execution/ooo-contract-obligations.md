@@ -4,7 +4,7 @@
 progress is counted in rows moved to `proven`, not in edits made.
 
 Counts at this revision: **A** 4/4 proven; **B** 6 proven + B6 proven with its tooth owed + B7 not
-applicable; **C** 4/4 proven (C3 with its tooth owed); **D** 11 proven (D7, D8, D9 included), 0 partly; **E** excluded by the design; **F** not started; **G** 2 partly (G4, G6), 5 owed.
+applicable; **C** 4/4 proven (C3 with its tooth owed); **D** 11 proven (D7, D8, D9 included), 0 partly; **E** excluded by the design; **F** not started; **G** 2 partly (G4, G6), 5 owed, and G1 is the gate: it is a wiring slice, not a test.
 
 How a row earns `proven`: it names a test that fails when the code satisfying it is broken. Where
 such a mutation is registered, the mutant's name is given, because a test that cannot fail is a
@@ -121,7 +121,7 @@ enters through an existing operation, with a stated contract and execution autho
 
 | node | obligation | state | evidence |
 | --- | --- | --- | --- |
-| G1 | An ordinary board handoff reaches the shared semantics, the execution facility and the acceptance path, with no `ooo_round` and no parallel task state | owed | this is the pre-condition for removing the tool, and it is not built |
+| G1 | An ordinary board handoff reaches semantics, execution and acceptance with no `ooo_round` | owed, and it is wiring rather than a test | Measured: `compileTaskUnits` / `dispatchTasks` / `deriveStatus` are called by `task-semantics-model.ts` and by tests, and by no coordination path. `task-semantics-model.ts` states its own half in its header - "It is not a runtime capability: nothing here dispatches, verifies, or publishes" - and `BoardAdmission.next()` is its own SQL implementation. `CompileInput` is `{ plan: ProbePlan, specs?, requires? }`, which is the board's own input, so there is no second task body to reconcile: the remaining work is to answer selection with `nextTask(dispatchTasks(units, facts))` while the store stays the source of the facts. Writing the test first would pin a path that does not exist yet |
 | G2 | On that path, a real accepted artifact and the dependency release it unlocks | owed | B5 proves the predicate, not that the ordinary path reaches it |
 | G3 | That path covers failure, cancellation, and the sequential fallback when nothing is independent | owed | the round covers these; the ordinary path does not exist yet |
 | G4 | The old entry's necessary query and cancel capabilities are reachable from the existing facilities | partly | status reads through `openRoundQuery` (D4) and cancel exists on the board, but no ordinary path reaches them |
