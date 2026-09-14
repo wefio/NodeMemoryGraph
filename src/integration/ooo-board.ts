@@ -953,6 +953,15 @@ export class BoardAdmission extends NmgStore {
     }
   }
 
+  /** The last post-commit notification failure, or null. A commit that landed is not undone by a
+   *  subscriber that could not be reached, so the two outcomes are reported separately: a caller
+   *  that reads a failed notification as "the submission failed" submits the same work twice. */
+  private notificationFailure: string | null = null;
+
+  lastNotificationFailure(): string | null {
+    return this.notificationFailure;
+  }
+
   async submit(resultId: string): Promise<string> {
     const parsed = this.readSubmission(resultId);
     if (typeof parsed === "string") return parsed;
@@ -969,8 +978,15 @@ export class BoardAdmission extends NmgStore {
     if (this.patchSpec(row) && !(await this.verifyCandidate(row, commit))) return "rejected";
     await this.afterVerify();
     const verdict = this.commitArtifact(ticket, commit);
-    await this.afterCommit();
-    this.publishReady();
+    // Past this line the round has the artifact: `verdict` is what happened. Everything below is
+    // notification, and failing to reach a subscriber is recorded rather than thrown, because the
+    // commit is not undone and a caller must not be told it was.
+    try {
+      await this.afterCommit();
+      this.publishReady();
+    } catch (error) {
+      this.notificationFailure = error instanceof Error ? error.message : String(error);
+    }
     return verdict;
   }
 

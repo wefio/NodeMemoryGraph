@@ -202,6 +202,8 @@ export class NmgService {
   readonly #tesseraBackfillRoots = new Set<string>();
   readonly #stgSyncTimes = new WeakMap<NmgStore, Map<string, number>>();
   #shutdownRequested = false;
+  /** Set by close(). New work is refused after this, so a shutdown cannot race a fresh request. */
+  #closing = false;
   readonly #maintenanceJobs = new Map<NmgStore, NodeJS.Immediate>();
   readonly #maintenanceSignals = new Map<
     NmgStore,
@@ -234,6 +236,8 @@ export class NmgService {
   }
 
   async invoke<M extends NmgMethod>(method: M, params?: unknown): Promise<NmgMethodResult[M]> {
+    if (this.#closing)
+      throw new NmgProtocolError("SHUTTING_DOWN", "the service is closing and takes no new work");
     switch (method) {
       case "hello":
         return this.#hello() as NmgMethodResult[M];
@@ -412,15 +416,19 @@ export class NmgService {
     }
   }
 
+  /** Closes in the order the design asks for: stop taking new work, revoke the timers and signals
+   *  that could start more of it, then close each store exactly once. A second call is a no-op, so
+   *  a shutdown path that runs twice cannot close a store out from under a live reader. */
   close(): void {
+    this.#closing = true;
     for (const job of this.#maintenanceJobs.values()) clearImmediate(job);
     this.#maintenanceJobs.clear();
     this.#maintenanceSignals.clear();
-    this.#store?.close();
+    const stores = [this.#store, ...this.#stgStores.values()];
     this.#store = undefined;
-    for (const store of this.#stgStores.values()) store.close();
     this.#stgStores.clear();
     this.#sessionActiveGraphs.clear();
+    for (const store of stores) if (store) store.close();
   }
 
   #hello(): NmgHelloResult {

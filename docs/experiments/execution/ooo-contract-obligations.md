@@ -43,16 +43,16 @@ description rather than a pin. Every mutant name below was read from
 
 | node | obligation | state | evidence |
 | --- | --- | --- | --- |
-| D1 | Only the owner opens, migrates, checkpoints and closes a Store | partly | the read-only open and the narrow port exist; the daemon's single close path does not (D8) |
+| D1 | Only the owner opens, migrates, checkpoints and closes a Store | partly | the read-only open, the narrow port and the daemon's ordered close exist; the round still owns its own store (D7) |
 | D2 | A port exposes no raw connection, SQL, transaction control or `close()` | proven | `RoundQueryPort` and `TransactionPort` in `src/integration/ooo-board.ts`; `tests/integration/ooo-round-query.test.ts` |
 | D3 | A write inside an open transition without a port is refused | proven | `tests/core/store-transaction-port.test.ts`; mutant `nested-write-transaction-is-allowed` |
-| D4 | status's borrowed view migrates nothing, publishes nothing, initialises nothing | proven | `tests/integration/ooo-round-query.test.ts` — **tooth owed** |
-| D5 | The two read paths agree on the same facts and the same evaluation time | owed | each path is tested for its own properties only |
+| D4 | status's borrowed view migrates nothing, publishes nothing, initialises nothing | proven | `tests/integration/ooo-round-query.test.ts`; mutant `the-status-read-path-opens-the-rounds-store` (the mutant opens the writer's path, and the suite catches it) |
+| D5 | The two read paths agree on the same facts and the same evaluation time | proven | `tests/integration/ooo-read-paths-agree.test.ts` — **tooth owed** |
 | D6 | A read-only open is protected by the handle, not by `query_only` | proven | `tests/core/store-readonly-open.test.ts`; mutant `the-read-only-factory-opens-a-writable-handle` |
 | D7 | `round` consumes an operations port and never calls `close()`; the outer host owns the Store | owed | no operations port exists yet |
-| D8 | Daemon close order: stop new work, fence in-flight, revoke and drain, finish started transactions, checkpoint and close once | owed | gated by D7 |
-| D9 | `submit()` states the commit result separately from a notification failure | owed | the design's own reading of the afterCommit path |
-| D10 | `runCycle`'s early-cancel branch is reachable, or it is dead code | owed | the leak is fixed; the mutation check says no test reaches that branch |
+| D8 | Daemon close order: stop new work, fence in-flight, revoke and drain, finish started transactions, checkpoint and close once | partly | `src/cli/service.ts` `close()` refuses new work, revokes the scheduled jobs and signals, and closes each store exactly once (`tests/cli/archive-shutdown.test.ts`, `tests/cli/service.test.ts`). The design's "fence in-flight" and "drain" steps have no test yet, and a synchronous `close()` cannot await them - that part is owed |
+| D9 | `submit()` states the commit result separately from a notification failure | partly | implemented: `submit()` returns the verdict once the commit lands and records a post-commit notification failure in `lastNotificationFailure()` instead of throwing (`src/integration/ooo-board.ts`). Regression evidence: `evals/ooo-execution` 88/88. A dedicated test that makes the notification fail is **owed** |
+| D10 | `runCycle`'s early-cancel branch is reachable, or it is dead code | proven | reachable, and pinned: `evals/ooo-execution/early-cancel.test.ts` fails with "the early-cancel path left its default store directory behind" when the branch's own release is removed, and the worker is never called. That mutation was run by hand in this pass and restored byte-identically; it is not yet registered in the mutation config, so this row is pinned by a recorded check rather than by a configured tooth |
 
 ## E. Optional HA/MGR integration (design: 复用 autodiff、HA 与 MGR)
 
@@ -70,7 +70,10 @@ this ledger may be reported as a result from them.
 ## Blocked, or not applicable, and why
 
 - B7 has nothing to fail: no JSONL export exists on this branch.
-- D5, D7, D8 and D9 are one area — the borrow and close contract — and D7 gates D8.
+- D7 is the one D node that is a refactor rather than a proof: the round must consume an operations
+  port and stop closing the connection, which touches 46 `runCycle(` call sites, all of them in
+  `evals/**` - a tree neither `tsc` nor the product suite covers. It needs its own pass with the
+  evals suites run afterwards, because a silent breakage there would not fail any gate.
 - The augmented contract itself (317 lines) is untracked in the shared checkout and is not on this
   branch, so this ledger cites the design by section rather than by line. Carrying it in is not mine
   to do alone: `docs/decisions/proposed/2026-09-13-task-unit-semantics.md` has the same author.

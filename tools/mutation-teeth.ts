@@ -214,8 +214,19 @@ const TARGETS: readonly Target[] = [
       "tests/integration/ooo-transition-atomicity.test.ts",
       ,
       "tests/integration/ooo-acceptance-one-predicate.test.ts",
+      ,
+      "tests/integration/ooo-round-query.test.ts",
     ],
     mutants: [
+      {
+        // The borrowed view must not reopen the writer's path: this mutant makes the read path
+        // migrate and publish the store it was asked only to read.
+        name: "the-status-read-path-opens-the-rounds-store",
+        ast: { within: "openRoundQuery" },
+        from: "const db = new DatabaseSync(databasePath, { readOnly: true });",
+        to: "const db = new BoardAdmission(databasePath) as unknown as DatabaseSync;",
+        expect: "the query port reads a round without migrating, publishing or exposing a write",
+      },
       {
         // Located inside the reader: a rename of the call proves the check counts call sites.
         name: "the-board-read-path-stops-calling-the-predicate",
