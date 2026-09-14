@@ -4,8 +4,7 @@
 progress is counted in rows moved to `proven`, not in edits made.
 
 Counts at this revision: **A** 4/4 proven; **B** 6 proven + B6 proven with its tooth owed + B7 not
-applicable; **C** 4/4 proven (C3 with its tooth owed); **D** 8 proven (D7 included), 2 partly (D1, D9),
-D8 partly; **E** excluded by the design; **F** not started; **G** 2 partly (G4, G6), 5 owed.
+applicable; **C** 4/4 proven (C3 with its tooth owed); **D** 9 proven (D7, D9 included), 1 partly (D1), D8 partly; **E** excluded by the design; **F** not started; **G** 2 partly (G4, G6), 5 owed.
 
 How a row earns `proven`: it names a test that fails when the code satisfying it is broken. Where
 such a mutation is registered, the mutant's name is given, because a test that cannot fail is a
@@ -55,7 +54,7 @@ description rather than a pin. Every mutant name below was read from
 | D6 | A read-only open is protected by the handle, not by `query_only` | proven | `tests/core/store-readonly-open.test.ts`; mutant `the-read-only-factory-opens-a-writable-handle` |
 | D7 | `round` consumes an operations port and never calls `close()`; the outer host owns the Store | proven | `OooRoundOperations` (13 methods, no `close`) + `openRoundStore()` in `src/integration/ooo-cycle.ts`; `CycleOptions.operations` is required, so there is no `ownsStore` branch. Both `gate.close()` calls and the default-directory release are gone, and the three task specs are installed through `installPatchTask` instead of into an object the round also handed to the constructor. evals 89/89; the CLI host opens the store and closes it after the round returns |
 | D8 | Daemon close order: stop new work, fence in-flight, revoke and drain, finish started transactions, checkpoint and close once | partly | `src/cli/service.ts` `close()` refuses new work, revokes the scheduled jobs and signals, and closes each store exactly once (`tests/cli/archive-shutdown.test.ts`, `tests/cli/service.test.ts`). The design's "fence in-flight" and "drain" steps have no test yet, and a synchronous `close()` cannot await them - that part is owed |
-| D9 | `submit()` states the commit result separately from a notification failure | partly | implemented: `submit()` returns the verdict once the commit lands and records a post-commit notification failure in `lastNotificationFailure()` instead of throwing (`src/integration/ooo-board.ts`). Regression evidence: `evals/ooo-execution` 88/88. A dedicated test that makes the notification fail is **owed** |
+| D9 | A post-commit notification failure is recorded, not thrown | proven | `evals/ooo-execution/notification.test.ts`: a real round whose first post-commit notification fails still accepts A, B and C, reports the message through `lastNotificationFailure()`, and a control round with a reachable notification reports nothing. Verified by mutation: deleting the `try`/`catch` in `submit()` makes the notification escape and the test fails. The seam took three tries to find - `publishReady` is private and is called without a port at the commit, and `afterCommit` also runs on non-commit paths, so the failure is gated on a commit having landed |
 | D10 | `runCycle`'s early-cancel branch is reachable, or it is dead code | proven | reachable, and pinned twice: `evals/ooo-execution/early-cancel.test.ts` fails with "database is not open" when the round closes the store it borrowed on that path (verified by hand and restored byte-identically). D7 removed the default directory the earlier version of this pin watched, so the pin moved to the borrowing contract |
 
 ## E. Optional HA/MGR integration (design: 复用 autodiff、HA 与 MGR)
