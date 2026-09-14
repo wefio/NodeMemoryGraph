@@ -83,6 +83,8 @@ function refuseThenable(value: unknown, message: string): void {
 }
 
 export class NmgStoreBase {
+  /** True when this store came from the read-only factory rather than a shared connection. */
+  protected readOnly = false;
   protected db: DatabaseSync;
   protected embedder: VectorEmbedder;
   protected router: Router;
@@ -101,21 +103,42 @@ export class NmgStoreBase {
     options: NmgStoreOptions = {},
   ) {
     mkdirSync(dirname(databasePath), { recursive: true });
-    this.db = new DatabaseSync(databasePath);
+    // A read-only open is a different factory, not a mode of the shared connection: it gets a
+    // handle that cannot write, and it neither migrates nor checkpoints.
+    this.readOnly = options.readOnly === true;
+    // A read-only factory neither creates the file nor migrates an old one, so both refusals happen
+    // here rather than surfacing as a driver-level "unable to open database file" with no reason.
+    if (this.readOnly && !existsSync(databasePath))
+      throw new Error("this store does not exist; a read-only open does not create one");
+    this.db = new DatabaseSync(databasePath, this.readOnly ? { readOnly: true } : {});
     this.embedder = embedder;
     this.router = new Router(embedder);
     this.scopeWriteIndexEnabled = options.scopeWriteIndex ?? false;
     try {
-      this.db.exec(`
-        PRAGMA foreign_keys = ON;
-        PRAGMA journal_mode = WAL;
-        PRAGMA synchronous = NORMAL;
-        PRAGMA cache_size = -64000;
-        PRAGMA temp_store = MEMORY;
-        PRAGMA mmap_size = 268435456;
-        PRAGMA busy_timeout = 5000;
-      `);
-      migrate(this.db);
+      // `journal_mode` rewrites the database header, so a read-only handle must not set it; the
+      // remaining pragmas are connection-local and harmless.
+      this.db.exec(
+        this.readOnly
+          ? `PRAGMA foreign_keys = ON;
+             PRAGMA cache_size = -64000;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA mmap_size = 268435456;
+             PRAGMA busy_timeout = 5000;`
+          : `PRAGMA foreign_keys = ON;
+             PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA cache_size = -64000;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA mmap_size = 268435456;
+             PRAGMA busy_timeout = 5000;`,
+      );
+      if (!this.readOnly) migrate(this.db);
+      // An existing file with no recognisable schema is not an empty store: reporting it as one would
+      // hide an unknown format behind default empties.
+      if (this.readOnly && !this.hasSchema())
+        throw new Error(
+          "this store has no recognisable schema; a read-only open does not migrate it",
+        );
       // checkpoint-on-open: fold any -wal left behind by a force-exit shutdown
       // (where close() never ran) into the main DB and truncate it, so WAL can
       // never accumulate across restarts. SQLite auto-recovers WAL frames on
@@ -123,7 +146,7 @@ export class NmgStoreBase {
       // checkpoints, so the common open path skips the blocking TRUNCATE
       // (stg-v2 review ③a; wal_checkpoint is synchronous disk I/O that stalls
       // the event loop when the WAL is large).
-      if (existsSync(`${databasePath}-wal`)) {
+      if (!this.readOnly && existsSync(`${databasePath}-wal`)) {
         try {
           if (statSync(`${databasePath}-wal`).size > 0) {
             this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
@@ -145,15 +168,25 @@ export class NmgStoreBase {
     }
   }
 
+  /** The core schema's marker table: present means this file was written by a version this code reads. */
+  private hasSchema(): boolean {
+    return (
+      this.db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_nodes'")
+        .get() !== undefined
+    );
+  }
+
   close(): void {
     // WAL checkpoint before close: without this the daemon's force-exit
     // shutdown leaves -wal files behind (v1 measured ~1.5G across 1681
     // session STG stores). TRUNCATE folds WAL into the main DB then resets it.
-    try {
-      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-    } catch {
-      // ignore — closing anyway
-    }
+    if (!this.readOnly)
+      try {
+        this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      } catch {
+        // ignore — closing anyway
+      }
     this.db.close();
   }
 
