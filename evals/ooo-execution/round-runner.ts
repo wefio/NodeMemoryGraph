@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { BoardAdmission, type ProbePlan } from "../../src/integration/ooo-board.ts";
+import { BoardAdmission, openRoundQuery, type ProbePlan } from "../../src/integration/ooo-board.ts";
 import { verifyCandidate } from "../../src/integration/ooo-candidate.ts";
 import {
   runCycle,
