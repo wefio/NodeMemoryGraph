@@ -332,6 +332,7 @@ const { values } = parseArgs({
     task: { type: "string" },
     stage: { type: "string" },
     run: { type: "string" },
+    rep: { type: "string" },
     live: { type: "boolean" },
   },
 });
@@ -354,7 +355,11 @@ const LIMITS = { turns: 10, reads: 5, timeoutMs: 300_000 } as const;
 
 const storePath = join(runDir, "board.sqlite");
 const logPath = join(runDir, "run.jsonl");
-const channelFor = (taskId: string) => `ooo-continuation:${taskId}`;
+// One channel is one parent task. A repetition label gives a repetition its own channel: the board
+// serialises actionable entries per channel, so two attempts in one channel would queue behind a
+// continuation that nobody has claimed yet.
+const channelFor = (taskId: string) =>
+  `ooo-continuation:${taskId}${values.rep ? `:${values.rep}` : ""}`;
 const agentFor = (name: string) => `${name}-${process.pid}`;
 
 /** Append one record to the run's own log: the report is read back from these bytes. */
@@ -421,6 +426,43 @@ function readyHandoff(
 if (role === "plan") {
   const store = openStore();
   try {
+    // --stage part2 opens one more continuation for an already-delivered part 1. Repeated openings
+    // against the same frozen input are how the same task is sampled more than once.
+    if (values.stage === "part2") {
+      const task = taskOf(values.task);
+      const channel = channelFor(task.id);
+      const delivered = store
+        .readTaskBoard({ taskId: channel, limit: 200 })
+        .entries.filter((candidate) => candidate.content.includes("stage=part1"))
+        .filter((candidate) => candidate.deliverableDigest)
+        .at(-1);
+      if (!delivered) throw new Error(`no delivered part1 artifact in ${channel} to continue from`);
+      const opened = store.putTaskBoardEntry({
+        taskId: channel,
+        agentId: "coordinator",
+        kind: "handoff",
+        content: [
+          `parent=${task.id}`,
+          "stage=part2",
+          `file=${task.path}`,
+          `continues=${delivered.id}`,
+          `part2=${task.part2}`,
+        ].join("\n"),
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      });
+      record({
+        role,
+        task: task.id,
+        channel,
+        entryId: opened.id,
+        stage: "part2",
+        at: new Date().toISOString(),
+      });
+      process.stdout.write(`${task.id}: opened a continuation (${opened.id})
+`);
+      store.close();
+      process.exit(0);
+    }
     for (const task of TASKS) {
       const channel = channelFor(task.id);
       const content = [
@@ -452,6 +494,12 @@ if (role === "part1" || role === "part2") {
   const channel = channelFor(task.id);
   const stage = role;
   const store = openStore();
+  // Declared outside the try so a failure can still report what the call cost: a failing attempt
+  // that leaves no cost behind biases exactly the comparison this check exists to make.
+  let execution: { tokens?: number; turns?: number; reads?: number; sessionId?: string } | null =
+    null;
+  let entryId: string | undefined;
+  let startedAt = 0;
   try {
     const agentId = agentFor(`worker-${stage}`);
     // Part 2 starts from what part 1 delivered, so it first has to retrieve that evidence and check
@@ -475,7 +523,7 @@ if (role === "part1" || role === "part2") {
       input = bytes.toString("utf8");
     }
 
-    const entryId = readyHandoff(store, channel, stage);
+    entryId = readyHandoff(store, channel, stage);
     const claimed = store.claimTaskBoardEntry({
       taskId: channel,
       entryId,
@@ -485,7 +533,7 @@ if (role === "part1" || role === "part2") {
     if (claimed.claimedBy !== agentId)
       throw new Error(`claim did not land: holder is ${claimed.claimedBy}`);
 
-    const startedAt = Date.now();
+    startedAt = Date.now();
     const frozen = preparePatchWork({
       taskId: `${channel}:${entryId}:${stage}`,
       attempt: 1,
@@ -494,7 +542,7 @@ if (role === "part1" || role === "part2") {
       editable: [task.path],
       limits: LIMITS,
     });
-    const execution = await executePiPatch(frozen, provider, model);
+    execution = await executePiPatch(frozen, provider, model);
     // A continuation may legitimately conclude that the delivered bytes are already the answer. That
     // is a legal outcome, and the artifact states it: the continuation hands the same bytes forward
     // and the fixed parent check still judges them. Any other failure stays a failure.
@@ -506,20 +554,44 @@ if (role === "part1" || role === "part2") {
       candidate = promoted;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (message !== "unchanged patch file") {
-        // Keep what the model actually submitted: "invalid patch structure" is a claim about bytes,
-        // and the bytes are the evidence for it.
-        const keptPath = join(runDir!, task.id, stage, "artifact.failed.txt");
-        mkdirSync(join(runDir!, task.id, stage), { recursive: true });
-        writeFileSync(keptPath, execution.artifact, "utf8");
-        throw new Error(`${message} (submitted artifact kept at ${keptPath})`);
+      // The artifact states its own kind. A conclusion envelope is a legal answer - the model is
+      // saying the delivered bytes already satisfy the task - and it must not be mistaken for a
+      // malformed patch, which is what string-matching the error message did.
+      let conclusionKind: string | null = null;
+      try {
+        const parsed = JSON.parse(execution.artifact) as { kind?: string; conclusion?: string };
+        if (parsed.kind === "conclusion" && typeof parsed.conclusion === "string") {
+          conclusionKind = parsed.conclusion;
+        }
+      } catch {
+        conclusionKind = null;
       }
-      conclusion = "no-change-needed";
-      candidate = input;
+      if (conclusionKind === null || !message.includes("unchanged patch file")) {
+        if (conclusionKind === "no-change-needed") {
+          conclusion = "no-change-needed";
+          candidate = input;
+        } else {
+          // Keep what the model actually submitted: "invalid patch structure" is a claim about
+          // bytes, and the bytes are the evidence for it.
+          const keptDir = join(runDir!, task.id, values.rep ? `${stage}-${values.rep}` : stage);
+          const keptPath = join(keptDir, "artifact.failed.txt");
+          mkdirSync(keptDir, { recursive: true });
+          writeFileSync(keptPath, execution.artifact, "utf8");
+          throw new Error(
+            `${message} (conclusion=${conclusionKind ?? "none"}, submitted artifact kept at ${keptPath})`,
+          );
+        }
+      } else {
+        conclusion = "no-change-needed";
+        candidate = input;
+      }
     }
 
-    const candidatePath = join(runDir!, task.id, stage, task.path);
-    mkdirSync(join(runDir!, task.id, stage), { recursive: true });
+    // One repetition must not overwrite another's artifact: the delivery record's digest is checked
+    // against these bytes later, and a shared path makes every earlier repetition look tampered with.
+    const stageDir = join(runDir!, task.id, values.rep ? `${stage}-${values.rep}` : stage);
+    const candidatePath = join(stageDir, task.path);
+    mkdirSync(stageDir, { recursive: true });
     writeFileSync(candidatePath, candidate, "utf8");
     const cases = stage === "part1" ? task.boundary : task.parent;
     const result = await check(candidatePath, cases);
@@ -584,6 +656,11 @@ if (role === "part1" || role === "part2") {
       pid: process.pid,
       stage,
       failed: [message],
+      turns: execution?.turns ?? null,
+      reads: execution?.reads ?? null,
+      tokens: execution?.tokens ?? null,
+      sessionId: execution?.sessionId ?? null,
+      wallMs: startedAt ? Date.now() - startedAt : null,
       at: new Date().toISOString(),
     });
     process.stdout.write(`${task.id} ${stage}: FAILED (${message})` + "\n");
