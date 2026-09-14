@@ -285,14 +285,6 @@ const TARGETS: readonly Target[] = [
         expect: "the board verdict is what accepts an artifact, not the round's own column",
       },
       {
-        name: "selection-ignores-a-withdrawn-acceptance",
-        ast: { within: "next" },
-        from: "    const schedulable = rows.filter(\n      (row) => !this.delivered(row) || Object.hasOwn(accepted, row.id),\n    );",
-        to: "    const schedulable = rows;",
-        expect:
-          "an outside rejection withdraws the release of a dependent, and the round fails closed",
-      },
-      {
         name: "round-does-not-pin-what-it-references",
         ast: { within: "publishReady" },
         from: '      this.retainTaskBoardEntry({\n        taskId: this.channel,\n        entryId,\n        owner: RETENTION_OWNER,\n        reason: `round ${this.runId ?? "initial"} handoff for ${row.id}`,\n        now: new Date(this.now).toISOString(),\n      });',
@@ -306,6 +298,20 @@ const TARGETS: readonly Target[] = [
         from: "    // The artifact is being cleared, so the round no longer relies on this entry's\n    // verdict: the pins go with the value they protected.\n    this.releaseRowRetention(row);",
         to: "    // The artifact is being cleared, so the round no longer relies on this entry's\n    // verdict: the pins go with the value they protected.",
         expect: "cancelling a round releases the pins it held, so nothing it referenced leaks",
+      },
+    ],
+  },
+  {
+    target: "src/integration/ooo-execution.ts",
+    suites: ["evals/ooo-execution/patch-cycle.test.ts"],
+    mutants: [
+      {
+        name: "selection-ignores-a-withdrawn-acceptance",
+        ast: { within: "nextTask" },
+        from: "  const selectable = plan.filter((task) => task.accepted || !task.delivered);",
+        to: "  const selectable = plan;",
+        expect:
+          "an outside rejection withdraws the release of a dependent, and the round fails closed",
       },
     ],
   },
