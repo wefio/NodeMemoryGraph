@@ -1,3 +1,4 @@
+import { openRoundStore } from "../../src/integration/ooo-cycle.ts";
 // S4: compare ordered execution with the out-of-order round on the same frozen plan.
 //
 // The comparison reports what it measured and does not presume a winner. Quality, wall time,
@@ -118,8 +119,8 @@ export async function compareModes(options: {
             },
           );
       const started = Date.now();
-      const result = await runCycle(
-        cycleOptionsFor({
+      const result = await runCycle({
+        ...cycleOptionsFor({
           spec: options.spec,
           repository: options.repository,
           revision,
@@ -128,7 +129,8 @@ export async function compareModes(options: {
           runDirectory,
           mode,
         }),
-      );
+        operations: openRoundStore(),
+      });
       arms.push(arm(mode, run, result, Date.now() - started));
     }
   // Compared by content, not by insertion order: the two modes accept in different orders, and

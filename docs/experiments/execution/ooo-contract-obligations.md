@@ -4,9 +4,8 @@
 progress is counted in rows moved to `proven`, not in edits made.
 
 Counts at this revision: **A** 4/4 proven; **B** 6 proven + B6 proven with its tooth owed + B7 not
-applicable; **C** 3 proven (C3 with its tooth owed) + C4 owed; **D** 6 proven, 3 partly (D1, D8, D9),
-D7 owed and attempted; **E** excluded by the design; **F** not started; **G** 2 partly (G4, G6),
-5 owed.
+applicable; **C** 4/4 proven (C3 with its tooth owed); **D** 8 proven (D7 included), 2 partly (D1, D9),
+D8 partly; **E** excluded by the design; **F** not started; **G** 2 partly (G4, G6), 5 owed.
 
 How a row earns `proven`: it names a test that fails when the code satisfying it is broken. Where
 such a mutation is registered, the mutant's name is given, because a test that cannot fail is a
@@ -42,22 +41,22 @@ description rather than a pin. Every mutant name below was read from
 | C1 | Deleting every derived cache yields the same view | proven | `tests/integration/ooo-task-tables.test.ts`; mutant `derived-rebuild-is-a-no-op` |
 | C2 | A lease crossing its boundary invalidates the old view | proven | `evals/ooo-execution/recovery.test.ts`; mutant `stale-claim-may-deliver-again` |
 | C3 | Concurrent readers of one ready task: one legal claim | proven | `tests/integration/ooo-managed-fence.test.ts` — **tooth owed** |
-| C4 | An unknown external result in a crash window is not guessed | owed | the plan's wait-event semantics have to be read first |
+| C4 | An unknown external result in a crash window is not guessed | proven | `tests/integration/ooo-external-window.test.ts`. `externalReady` refuses to make an event ready while a check for that task is outstanding ("managed check requires bound terminal evidence"), so the window cannot be closed by announcing it; after a restart the stored fact is still `external_ready = 0` with no artifact, and an invented event name is refused |
 
 ## D. Lifecycle and integration pre-conditions (design: 事务参与与连接生命周期, 当前实现与接入前置条件)
 
 | node | obligation | state | evidence |
 | --- | --- | --- | --- |
-| D1 | Only the owner opens, migrates, checkpoints and closes a Store | partly | the read-only open, the narrow port and the daemon's ordered close exist; the round still owns its own store (D7) |
+| D1 | Only the owner opens, migrates, checkpoints and closes a Store | partly | the round now borrows (D7) and the daemon's close is ordered, so what remains is D8's drain and in-flight fencing |
 | D2 | A port exposes no raw connection, SQL, transaction control or `close()` | proven | `RoundQueryPort` and `TransactionPort` in `src/integration/ooo-board.ts`; `tests/integration/ooo-round-query.test.ts` |
 | D3 | A write inside an open transition without a port is refused | proven | `tests/core/store-transaction-port.test.ts`; mutant `nested-write-transaction-is-allowed` |
 | D4 | status's borrowed view migrates nothing, publishes nothing, initialises nothing | proven | `tests/integration/ooo-round-query.test.ts`; mutant `the-status-read-path-opens-the-rounds-store` (the mutant opens the writer's path, and the suite catches it) |
 | D5 | The two read paths agree on the same facts and the same evaluation time | proven | `tests/integration/ooo-read-paths-agree.test.ts` — **tooth owed** |
 | D6 | A read-only open is protected by the handle, not by `query_only` | proven | `tests/core/store-readonly-open.test.ts`; mutant `the-read-only-factory-opens-a-writable-handle` |
-| D7 | `round` consumes an operations port and never calls `close()`; the outer host owns the Store | owed, attempted | an attempt was made and reverted: see "What the D7 attempt found" below. The port surface is measured: `cancel, cancelled, withdrawHandoff, next, claim, putTaskBoardEntry, channel, now, submit, accepted, issueCheck, submitCheck, reopen` — everything the round touches, and no `close` |
+| D7 | `round` consumes an operations port and never calls `close()`; the outer host owns the Store | proven | `OooRoundOperations` (13 methods, no `close`) + `openRoundStore()` in `src/integration/ooo-cycle.ts`; `CycleOptions.operations` is required, so there is no `ownsStore` branch. Both `gate.close()` calls and the default-directory release are gone, and the three task specs are installed through `installPatchTask` instead of into an object the round also handed to the constructor. evals 89/89; the CLI host opens the store and closes it after the round returns |
 | D8 | Daemon close order: stop new work, fence in-flight, revoke and drain, finish started transactions, checkpoint and close once | partly | `src/cli/service.ts` `close()` refuses new work, revokes the scheduled jobs and signals, and closes each store exactly once (`tests/cli/archive-shutdown.test.ts`, `tests/cli/service.test.ts`). The design's "fence in-flight" and "drain" steps have no test yet, and a synchronous `close()` cannot await them - that part is owed |
 | D9 | `submit()` states the commit result separately from a notification failure | partly | implemented: `submit()` returns the verdict once the commit lands and records a post-commit notification failure in `lastNotificationFailure()` instead of throwing (`src/integration/ooo-board.ts`). Regression evidence: `evals/ooo-execution` 88/88. A dedicated test that makes the notification fail is **owed** |
-| D10 | `runCycle`'s early-cancel branch is reachable, or it is dead code | proven | reachable, and pinned: `evals/ooo-execution/early-cancel.test.ts` fails with "the early-cancel path left its default store directory behind" when the branch's own release is removed, and the worker is never called. That mutation was run by hand in this pass and restored byte-identically; it is not yet registered in the mutation config, so this row is pinned by a recorded check rather than by a configured tooth |
+| D10 | `runCycle`'s early-cancel branch is reachable, or it is dead code | proven | reachable, and pinned twice: `evals/ooo-execution/early-cancel.test.ts` fails with "database is not open" when the round closes the store it borrowed on that path (verified by hand and restored byte-identically). D7 removed the default directory the earlier version of this pin watched, so the pin moved to the borrowing contract |
 
 ## E. Optional HA/MGR integration (design: 复用 autodiff、HA 与 MGR)
 
@@ -89,8 +88,8 @@ this ledger may be reported as a result from them.
 
 ## What the D7 attempt found
 
-The attempt was reverted, and the tree is back at the commit before it. Two findings are worth
-keeping, because both are about the round's ownership rather than about the edit mechanics:
+Both findings were fixed in the D7 commit; the record stays because the first one was a real defect in
+the round's ownership rather than an accident of editing.
 
 1. The round handed the store an **object it kept filling in**: `specs` was passed to the
    constructor and then assigned into task by task, so the store's behaviour depended on sharing

@@ -962,6 +962,14 @@ export class BoardAdmission extends NmgStore {
     return this.notificationFailure;
   }
 
+  /** The round freezes its tasks from its own options, not from the store the host opened, so it has
+   *  to install them on that store explicitly - and `openRoundStore` cannot know them. This used to
+   *  happen by handing the constructor an object literal and then filling that same object in, which
+   *  worked only while the round also created the store. */
+  installPatchTask(id: string, spec: PatchTaskSpec): void {
+    (this.patchTasks as Record<string, PatchTaskSpec>)[id] = spec;
+  }
+
   async submit(resultId: string): Promise<string> {
     const parsed = this.readSubmission(resultId);
     if (typeof parsed === "string") return parsed;

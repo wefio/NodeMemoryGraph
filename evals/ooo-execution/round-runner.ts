@@ -17,6 +17,7 @@ import {
   type CycleResult,
   type CycleWorker,
 } from "../../src/integration/ooo-cycle.ts";
+import { openRoundStore as openCycleRoundStore } from "../../src/integration/ooo-cycle.ts";
 import {
   RoundLog,
   readRoundLog,
@@ -181,7 +182,6 @@ export function cycleOptionsFor(options: {
     budget: spec.budget ?? { perFile: 24_000, output: 48_000 },
     limits: spec.limits ?? { turns: 10, reads: 6, timeoutMs: 240_000 },
     roundLog: new RoundLog(logPath(options.runDirectory)),
-    databaseDir: options.runDirectory,
     ...(options.watchCancellation ? { watchCancellation: options.watchCancellation } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
     ...(spec.noChangeCases ? { noChangeCases: spec.noChangeCases } : {}),
@@ -218,8 +218,11 @@ export async function runSpecifiedRound(options: {
   writeFileSync(recordPath(options.runDir), JSON.stringify(started, null, 2), "utf8");
   const store = ensureRoundStore(options.runDir);
   try {
-    const result = await runCycle(
-      cycleOptionsFor({
+    // The host owns the store: it opens it, the round borrows it, and this closes it once the
+    // round has returned.
+    const owned = openCycleRoundStore(storePath(options.runDir));
+    const result = await runCycle({
+      ...cycleOptionsFor({
         spec: options.spec,
         repository: options.repository,
         revision: options.revision,
@@ -229,7 +232,9 @@ export async function runSpecifiedRound(options: {
         watchCancellation: () => store.cancelled(),
         ...(options.signal ? { signal: options.signal } : {}),
       }),
-    );
+      operations: owned,
+    });
+    owned.close();
     writeFileSync(
       recordPath(options.runDir),
       JSON.stringify(

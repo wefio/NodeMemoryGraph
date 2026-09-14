@@ -1,7 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BoardAdmission, type PatchTaskSpec, type ProbePlan } from "./ooo-board.ts";
+import { BoardAdmission, type ProbePlan } from "./ooo-board.ts";
 import { verifyCandidate, type CandidateCheck } from "./ooo-candidate.ts";
 import {
   preparePatchWork,
@@ -126,7 +124,10 @@ export interface CycleOptions {
    *  the deterministic tests use; a live round writes it next to its report so the round
    *  can be replayed without a model. */
   roundLog?: RoundLog;
-  databaseDir?: string;
+  /** The round's store, opened by whoever owns it. Required, and deliberately not optional: an
+   *  `ownsStore` branch inside the round would make "who closes this" depend on which caller it was,
+   *  which is the ambiguity the design removes. */
+  operations: OooRoundOperations;
 }
 
 export interface CycleResult {
@@ -167,6 +168,34 @@ const plan: ProbePlan = [
 /** The round's check verdict as the terminal evidence the board records. */
 /** Round inputs with their documented defaults applied once, so the orchestrator reads
  *  resolved values instead of repeating `??` at every use. */
+/** What a round needs from the store it runs on, and nothing else: no connection, no transaction
+ *  control, no migration and no close(). The owner keeps those (design: 事务参与与连接生命周期 -
+ *  连接由外层拥有，round 只借用，只有一条路径). */
+export type OooRoundOperations = Pick<
+  BoardAdmission,
+  | "cancel"
+  | "cancelled"
+  | "withdrawHandoff"
+  | "next"
+  | "claim"
+  | "putTaskBoardEntry"
+  | "installPatchTask"
+  | "channel"
+  | "now"
+  | "submit"
+  | "accepted"
+  | "issueCheck"
+  | "submitCheck"
+  | "reopen"
+>;
+
+/** Opens the store a round runs on. Whoever calls this owns it and closes it; the round borrows the
+ *  connection. No argument means an in-memory store, which is what the deterministic round tests
+ *  use: they own nothing that has to outlive them. */
+export function openRoundStore(databasePath = ":memory:"): BoardAdmission {
+  return new BoardAdmission(databasePath, plan, {});
+}
+
 function cycleDefaults(options: CycleOptions) {
   return {
     runChecks: (options.runChecks ?? verifyCandidate) as CheckRunner,
@@ -247,9 +276,9 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     roundLog.append({ ...event, at: new Date().toISOString() } as RoundEvent);
   const defaults = cycleDefaults(options);
   const runChecks = defaults.runChecks;
-  const directory = options.databaseDir ?? mkdtempSync(join(tmpdir(), "ooo-cycle-db-"));
-  const specs: Record<string, PatchTaskSpec> = {};
-  const gate = new BoardAdmission(join(directory, "store.sqlite"), plan, specs);
+  // The round borrows its store from its owner: it opens nothing, migrates nothing and closes
+  // nothing. That is also why the early return below stops being a cleanup path of its own.
+  const gate: OooRoundOperations = options.operations;
   const timeline: CycleResult["timeline"] = [];
   const verdicts: Record<string, string> = {};
   const submissions: Record<string, PatchSubmission> = {};
@@ -322,12 +351,6 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
    *  round it is running, which advances every attempt and retires every live claim and
    *  ticket. That is what makes a late artifact `stale` instead of accepted into a round
    *  nobody is waiting for. Returns true when the round must stop dispatching. */
-  // The default directory is this function's scratch space, so the early return and the normal
-  // exit release it through one place rather than repeating the line and drifting apart.
-  const releaseDefaultDirectory = () => {
-    if (!options.databaseDir) rmSync(directory, { recursive: true, force: true });
-  };
-
   const stopped = () => {
     if (cancelled === null) {
       const reason = options.signal?.aborted
@@ -697,7 +720,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     "\nHost-frozen cases (case name and required title token): " +
     JSON.stringify(noChangeCases[task] ?? []);
   const installB = (tail: string) => {
-    specs.B = {
+    gate.installPatchTask("B", {
       instruction: options.bInstruction + tail + casesTail("B"),
       files: options.baseline,
       editable: options.bEditable,
@@ -706,10 +729,10 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
       visible: options.visible?.B,
       admittedConclusions: options.admitted?.B,
       verify: patchVerifier("B"),
-    };
+    });
   };
   const installA = (tail: string) => {
-    specs.A = {
+    gate.installPatchTask("A", {
       instruction: options.aInstruction + tail + casesTail("A"),
       files: options.baseline,
       editable: options.aEditable,
@@ -718,7 +741,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
       visible: options.visible?.A,
       admittedConclusions: options.admitted?.A,
       verify: patchVerifier("A"),
-    };
+    });
   };
 
   /** A round that is already cancelled never starts: the explicit terminal state is the whole
@@ -814,12 +837,9 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   };
 
   if (stopped()) {
-    // The gate is this function's connection to the round's store: the early path has to close
-    // it too, or a cancelled round leaves the database locked behind it.
-    const early = cancelledResult();
-    gate.close();
-    releaseDefaultDirectory();
-    return early;
+    // Nothing to release here any more: the round never owned the connection, so the early return
+    // is simply the decision, and the owner closes the store after this returns.
+    return cancelledResult();
   }
 
   try {
@@ -917,7 +937,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     /** C's frozen envelope names the composed candidate it may promote, so it is
      *  installed immediately before every attempt; a reopen changes both. */
     const installC = () => {
-      specs.C = {
+      gate.installPatchTask("C", {
         instruction:
           "Act as the composition task for this round. A and B already ran; the host has its own composed " +
           "check result. Your submission is accepted only as a promote-candidate conclusion: the host " +
@@ -934,7 +954,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
         visible: options.visible?.C,
         admittedConclusions: options.admitted?.C,
         verify: composedVerifier(abFiles),
-      };
+      });
     };
 
     /* Bounded downstream pushback: a dependent's declared precondition that the host
@@ -1040,7 +1060,5 @@ The downstream task reported that your artifact cannot satisfy ${pushed.requirem
     return result;
   } finally {
     if (watcher) clearInterval(watcher);
-    gate.close();
-    releaseDefaultDirectory();
   }
 }
