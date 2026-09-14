@@ -97,6 +97,21 @@ export class NmgStoreBase {
   /** Set when ROLLBACK itself failed: the connection's state is unknown, so it takes no more work. */
   private connectionQuarantined = false;
 
+  /** A read-only factory neither creates the file nor migrates an old one. Both refusals are named
+   *  here rather than surfacing as a driver-level "unable to open database file" with no reason, and
+   *  the decisions live here so the constructor is not the file's largest decision point. */
+  #refuseUnusableReadOnlyOpen(databasePath: string): void {
+    if (!this.readOnly) return;
+    if (!existsSync(databasePath))
+      throw new Error("this store does not exist; a read-only open does not create one");
+  }
+
+  #refuseUnrecognisableReadOnlyOpen(): void {
+    if (!this.readOnly) return;
+    if (this.hasSchema()) return;
+    throw new Error("this store has no recognisable schema; a read-only open does not migrate it");
+  }
+
   constructor(
     databasePath: string,
     embedder: VectorEmbedder = new HashingVectorEmbedder(),
@@ -108,9 +123,8 @@ export class NmgStoreBase {
     this.readOnly = options.readOnly === true;
     // A read-only factory neither creates the file nor migrates an old one, so both refusals happen
     // here rather than surfacing as a driver-level "unable to open database file" with no reason.
-    if (this.readOnly && !existsSync(databasePath))
-      throw new Error("this store does not exist; a read-only open does not create one");
-    this.db = new DatabaseSync(databasePath, this.readOnly ? { readOnly: true } : {});
+    this.#refuseUnusableReadOnlyOpen(databasePath);
+    this.db = new DatabaseSync(databasePath, readOnlyOpenOptions(this.readOnly));
     this.embedder = embedder;
     this.router = new Router(embedder);
     this.scopeWriteIndexEnabled = options.scopeWriteIndex ?? false;
@@ -135,10 +149,7 @@ export class NmgStoreBase {
       if (!this.readOnly) migrate(this.db);
       // An existing file with no recognisable schema is not an empty store: reporting it as one would
       // hide an unknown format behind default empties.
-      if (this.readOnly && !this.hasSchema())
-        throw new Error(
-          "this store has no recognisable schema; a read-only open does not migrate it",
-        );
+      this.#refuseUnrecognisableReadOnlyOpen();
       // checkpoint-on-open: fold any -wal left behind by a force-exit shutdown
       // (where close() never ran) into the main DB and truncate it, so WAL can
       // never accumulate across restarts. SQLite auto-recovers WAL frames on
@@ -2715,4 +2726,10 @@ function mapTaskBoardEntry(row: Row): TaskBoardEntry {
  *  and an absent nullable column has no value to invent. */
 function optionalText(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value);
+}
+
+/** The handle options for one open: a read-only factory gets a handle that cannot write, which is a
+ *  different factory rather than a mode of the shared connection. */
+function readOnlyOpenOptions(readOnly: boolean): { readOnly?: true } {
+  return readOnly ? { readOnly: true } : {};
 }

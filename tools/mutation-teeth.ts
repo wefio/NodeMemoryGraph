@@ -212,9 +212,7 @@ const TARGETS: readonly Target[] = [
       "tests/integration/ooo-run-namespace.test.ts",
       "tests/integration/ooo-task-tables.test.ts",
       "tests/integration/ooo-transition-atomicity.test.ts",
-      ,
       "tests/integration/ooo-acceptance-one-predicate.test.ts",
-      ,
       "tests/integration/ooo-round-query.test.ts",
     ],
     mutants: [
@@ -408,7 +406,7 @@ function matchText(
     .trim()
     .split(/\s+/u)
     .map((part) => [...part].map((ch) => (special.includes(ch) ? "\\" + ch : ch)).join(""))
-    .join("\s+");
+    .join("\\s+");
   const matches = [...haystack.matchAll(new RegExp(escaped, "gu"))];
   if (matches.length !== 1)
     return {
