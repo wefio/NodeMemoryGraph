@@ -49,23 +49,61 @@ description rather than a pin. Every mutant name below was read from
 | D4 | status's borrowed view migrates nothing, publishes nothing, initialises nothing | proven | `tests/integration/ooo-round-query.test.ts`; mutant `the-status-read-path-opens-the-rounds-store` (the mutant opens the writer's path, and the suite catches it) |
 | D5 | The two read paths agree on the same facts and the same evaluation time | proven | `tests/integration/ooo-read-paths-agree.test.ts` — **tooth owed** |
 | D6 | A read-only open is protected by the handle, not by `query_only` | proven | `tests/core/store-readonly-open.test.ts`; mutant `the-read-only-factory-opens-a-writable-handle` |
-| D7 | `round` consumes an operations port and never calls `close()`; the outer host owns the Store | owed | no operations port exists yet |
+| D7 | `round` consumes an operations port and never calls `close()`; the outer host owns the Store | owed, attempted | an attempt was made and reverted: see "What the D7 attempt found" below. The port surface is measured: `cancel, cancelled, withdrawHandoff, next, claim, putTaskBoardEntry, channel, now, submit, accepted, issueCheck, submitCheck, reopen` — everything the round touches, and no `close` |
 | D8 | Daemon close order: stop new work, fence in-flight, revoke and drain, finish started transactions, checkpoint and close once | partly | `src/cli/service.ts` `close()` refuses new work, revokes the scheduled jobs and signals, and closes each store exactly once (`tests/cli/archive-shutdown.test.ts`, `tests/cli/service.test.ts`). The design's "fence in-flight" and "drain" steps have no test yet, and a synchronous `close()` cannot await them - that part is owed |
 | D9 | `submit()` states the commit result separately from a notification failure | partly | implemented: `submit()` returns the verdict once the commit lands and records a post-commit notification failure in `lastNotificationFailure()` instead of throwing (`src/integration/ooo-board.ts`). Regression evidence: `evals/ooo-execution` 88/88. A dedicated test that makes the notification fail is **owed** |
 | D10 | `runCycle`'s early-cancel branch is reachable, or it is dead code | proven | reachable, and pinned: `evals/ooo-execution/early-cancel.test.ts` fails with "the early-cancel path left its default store directory behind" when the branch's own release is removed, and the worker is never called. That mutation was run by hand in this pass and restored byte-identically; it is not yet registered in the mutation config, so this row is pinned by a recorded check rather than by a configured tooth |
 
 ## E. Optional HA/MGR integration (design: 复用 autodiff、HA 与 MGR)
 
-Five obligations, all `deferred by design` — that section closes with "这些不扩大首个离线语义切片":
-an illegal best-scoring action is still refused, a soft premise cannot unlock a real dependency,
-closing or failing falls back to the rule policy, state does not leak across session or branch, and
-a parameter or projection version change does not reuse an old suggestion.
+**Closed as excluded from this slice, by the design's own sentence**, not deferred by me: the section
+ends with "本节记录复用方向，不把已有实验引擎标成已接入任务运行时，不改变现有启用门控，也不新增开关".
+The obligations below are therefore conditional ("可选 HA/MGR 接入时须证明"): they are owed by
+whoever wires that integration, not by this slice.
+
+1. an illegal best-scoring action is still refused;  2. a soft premise or `MemoryNode.requires`
+gating cannot unlock a real task dependency;  3. closing or failing falls back to the rule policy;
+4. state does not leak across session or branch;  5. a parameter or projection version change does
+not reuse an old suggestion.
+
+What the design does fix, and what this slice must not contradict: the reuse direction per owner
+(autodiff's Tensor/UOp for cost or action scoring, HA for activation and context-retention scores,
+MGR's traversal and what-if for sourced context or bounded hypotheses, the shared semantics layer
+for the legal action set and acceptance), the boundary each one keeps, and the wiring order — legal
+candidates from the shared semantics, then optional HA/MGR context or suggestions, then the shared
+policy ranking *inside* the legal set, then re-validation at claim and commit. A suggestion outside
+the set is refused, not scored higher; a new task or dependency needs an explicit plan revision; and
+association uses the existing run/task/attempt and AG projection identities, not a second task id or
+board kind.
 
 ## F. Later phase: the experiment arms
 
 The design's A–E arms and its stopping conditions are `not started`. They need a real model, budgets
 and repetitions, and the design forbids claiming a speedup without equal parent quality. Nothing in
 this ledger may be reported as a result from them.
+
+## What the D7 attempt found
+
+The attempt was reverted, and the tree is back at the commit before it. Two findings are worth
+keeping, because both are about the round's ownership rather than about the edit mechanics:
+
+1. The round handed the store an **object it kept filling in**: `specs` was passed to the
+   constructor and then assigned into task by task, so the store's behaviour depended on sharing
+   that mutable object with its caller. A host-opened store breaks that path, which is why the
+   first conversion produced 33 failures with `patch task has no host spec`. The port needs an
+   explicit install point - an `installPatchTask(id, spec)` on the owner's object - and the round
+   must call it instead of writing into a record it also handed over.
+2. `evals/ooo-execution/round-runner.ts` has its own `openRoundStore` that **validates** a store
+   rather than creating one. With the round no longer creating the store, the host has to create
+   it, so the two same-named functions have to be told apart at the call site (the src factory
+   aliased, the local validator left alone).
+
+What the pass did verify before reverting: with both fixes the evals suite went from 33 failures to
+4, and the remaining 4 were the `round-runner` name collision. The revert is not a verdict on the
+refactor; it is my own rule for this node, declared before starting it: an unconverged conversion
+of `evals/**` would leave the round's only real regression suite broken with no gate to notice.
+Next attempt should carry the install point in the same change, and run the evals suite as the first
+thing after the conversion, on a branch that can be thrown away.
 
 ## Blocked, or not applicable, and why
 
