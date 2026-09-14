@@ -200,8 +200,26 @@ const TARGETS: readonly Target[] = [
       "tests/integration/ooo-run-namespace.test.ts",
       "tests/integration/ooo-task-tables.test.ts",
       "tests/integration/ooo-transition-atomicity.test.ts",
+      ,
+      "tests/integration/ooo-acceptance-one-predicate.test.ts",
     ],
     mutants: [
+      {
+        // Located inside the reader: a rename of the call proves the check counts call sites.
+        name: "the-board-read-path-stops-calling-the-predicate",
+        ast: { within: "readAccepted" },
+        from: "acceptedFact({",
+        to: "locallyAccepted({",
+        expect: "acceptance has one home, and both readers reach it",
+      },
+      {
+        // A bypass that still type-checks: the suite must notice the second decision.
+        name: "the-board-decides-acceptance-on-its-own",
+        ast: { within: "readAccepted" },
+        from: "!acceptedFact({",
+        to: '!(recorded?.verdict === "accepted" ? false : true) && !acceptedFact({',
+        expect: "acceptance has one home, and both readers reach it",
+      },
       {
         // The claim is the write that would corrupt a neighbour run: the same task id exists in
         // every run, so a claim that is not scoped by run claims somebody else's row too.
@@ -232,17 +250,17 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "round-releases-dependents-on-delivered-bytes",
-        ast: { within: "acceptedArtifacts" },
-        from: "          verdict: recorded?.verdict ?? null,",
+        ast: { within: "readAccepted" },
+        from: "        verdict: recorded?.verdict ?? null,",
         to: '          verdict: "accepted",',
         expect:
           "an outside rejection withdraws the release of a dependent, and the round fails closed",
       },
       {
         name: "verdict-lookup-not-bound-to-the-artifact",
-        ast: { within: "acceptedArtifacts" },
-        from: "      const recorded = verdictOf.get(this.channel, digest) as unknown as",
-        to: '      const recorded = verdictOf.get(this.channel, "%") as unknown as',
+        ast: { within: "readAccepted" },
+        from: "    const recorded = verdictOf.get(roundChannel(runId), digest) as unknown as",
+        to: '    const recorded = verdictOf.get(roundChannel(runId), "%") as unknown as',
         expect: "the board verdict is what accepts an artifact, not the round's own column",
       },
       {
