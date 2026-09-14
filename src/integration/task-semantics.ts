@@ -444,6 +444,15 @@ export interface RecordedFacts {
   cancellations?: readonly string[];
   /** External waits that have actually become ready. */
   externalReady?: readonly string[];
+  /** Tasks with a live lease. A claim is a recorded fact about the run, not a property of the
+   *  artifact: the store owns it (claim owner, lease, attempt) and eligibility has to see it, or a
+   *  task already being worked on becomes selectable again. */
+  claimed?: readonly string[];
+  /** The revision each unit's input was declared at, as the store recorded it. A unit carries its
+   *  own declared revision, but "is this input still current" is a fact about the run: the store's
+   *  source revision is the identity of the plan the work was admitted under, and it is not the
+   *  same string as a task's declared revision. */
+  sourceRevisions?: Readonly<Record<string, string>>;
 }
 
 /** The facts a run records about one artifact. Delivery and acceptance are different
@@ -484,7 +493,13 @@ export function isAccepted(unit: Pick<TaskUnit, "id" | "revision">, facts: Recor
     digest: artifact,
     verdict: recorded?.verdict ?? null,
     judgedDigest: recorded?.digest ?? null,
-    currentRevision: recordedRevision === undefined || recordedRevision === unit.revision,
+    // The revision comparison is between two facts the store recorded: the revision the input was
+    // admitted under and the one observed since. A unit's own declared revision is the compiler's
+    // view of the plan and stands in only when no source revision was recorded - comparing a plan's
+    // declared revision against an observed one asks two different questions.
+    currentRevision:
+      recordedRevision === undefined ||
+      recordedRevision === (facts.sourceRevisions?.[unit.id] ?? unit.revision),
     cancelled: facts.cancellations?.includes(unit.id) ?? false,
   });
 }
@@ -493,13 +508,14 @@ export function dispatchTasks(units: readonly TaskUnit[], facts: RecordedFacts):
   return units.map((unit) => ({
     id: unit.id,
     effect: unit.effects.effect,
-    sourceVersion: unit.revision,
+    sourceVersion: facts.sourceRevisions?.[unit.id] ?? unit.revision,
     observedVersion: facts.revisions?.[unit.id] ?? unit.revision,
     dependencies: [...unit.inputs.dependencies],
     accepted: isAccepted(unit, facts),
-    claimed: false,
+    claimed: facts.claimed?.includes(unit.id) ?? false,
     externalEvent: unit.waitEvent ?? undefined,
     externalReady: facts.externalReady?.includes(unit.id) ?? false,
+    delivered: facts.artifacts?.[unit.id] !== undefined,
   }));
 }
 

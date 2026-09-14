@@ -5,7 +5,7 @@
  *
  * Usage:
  *   node --experimental-strip-types evals/ooo-execution/board-judge.ts \
- *     --channel ooo-process-probe --entry <id> --agent coordinator \
+ *     --channel ooo-probe:<runId> --entry <id> --agent coordinator \
  *     --verdict accepted|rejected|undecidable --reason "..." [--store <path>]
  */
 import { createHash } from "node:crypto";

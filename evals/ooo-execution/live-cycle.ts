@@ -1,3 +1,4 @@
+import { openRoundStore } from "../../src/integration/ooo-cycle.ts";
 // Explicit --live required. Real model calls, real git-worktree candidate checks,
 // real background check concurrent with B. Nothing in the working tree is modified.
 // Requires PI_PROVIDER and PI_MODEL; use the provider the user authorized.
@@ -164,6 +165,7 @@ const pushback: PushbackSpec = {
 const runs: number[] = [];
 
 const result = await runCycle({
+  operations: openRoundStore(),
   repository,
   revision,
   baseline,

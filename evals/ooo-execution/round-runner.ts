@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { BoardAdmission, type ProbePlan } from "../../src/integration/ooo-board.ts";
+import { BoardAdmission, openRoundQuery, type ProbePlan } from "../../src/integration/ooo-board.ts";
 import { verifyCandidate } from "../../src/integration/ooo-candidate.ts";
 import {
   runCycle,
@@ -17,6 +17,7 @@ import {
   type CycleResult,
   type CycleWorker,
 } from "../../src/integration/ooo-cycle.ts";
+import { openRoundStore as openCycleRoundStore } from "../../src/integration/ooo-cycle.ts";
 import {
   RoundLog,
   readRoundLog,
@@ -181,7 +182,6 @@ export function cycleOptionsFor(options: {
     budget: spec.budget ?? { perFile: 24_000, output: 48_000 },
     limits: spec.limits ?? { turns: 10, reads: 6, timeoutMs: 240_000 },
     roundLog: new RoundLog(logPath(options.runDirectory)),
-    databaseDir: options.runDirectory,
     ...(options.watchCancellation ? { watchCancellation: options.watchCancellation } : {}),
     ...(options.signal ? { signal: options.signal } : {}),
     ...(spec.noChangeCases ? { noChangeCases: spec.noChangeCases } : {}),
@@ -218,8 +218,11 @@ export async function runSpecifiedRound(options: {
   writeFileSync(recordPath(options.runDir), JSON.stringify(started, null, 2), "utf8");
   const store = ensureRoundStore(options.runDir);
   try {
-    const result = await runCycle(
-      cycleOptionsFor({
+    // The host owns the store: it opens it, the round borrows it, and this closes it once the
+    // round has returned.
+    const owned = openCycleRoundStore(storePath(options.runDir));
+    const result = await runCycle({
+      ...cycleOptionsFor({
         spec: options.spec,
         repository: options.repository,
         revision: options.revision,
@@ -229,7 +232,9 @@ export async function runSpecifiedRound(options: {
         watchCancellation: () => store.cancelled(),
         ...(options.signal ? { signal: options.signal } : {}),
       }),
-    );
+      operations: owned,
+    });
+    owned.close();
     writeFileSync(
       recordPath(options.runDir),
       JSON.stringify(
@@ -282,12 +287,14 @@ export function describeRun(runDir: string): string {
     if (terminal) lines.push(`log terminal: ${JSON.stringify(terminal.verdicts)}`);
   }
   if (existsSync(storePath(runDir))) {
-    const store = openRoundStore(runDir);
+    // A status read is borrowed: the owner's read-only query port neither migrates the store nor
+    // publishes anything, which constructing the board would have done.
+    const view = openRoundQuery(storePath(runDir));
     try {
-      lines.push(`coordinator cancelled: ${store.cancelled() ?? "no"}`);
-      lines.push(`coordinator accepted: ${JSON.stringify(store.accepted())}`);
+      lines.push(`coordinator cancelled: ${view.port.cancelled() ?? "no"}`);
+      lines.push(`coordinator accepted: ${JSON.stringify(view.port.accepted())}`);
     } finally {
-      store.close();
+      view.close();
     }
   }
   return lines.join("\n");

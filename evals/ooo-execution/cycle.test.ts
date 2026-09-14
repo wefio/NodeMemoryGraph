@@ -1,3 +1,4 @@
+import { openRoundStore } from "../../src/integration/ooo-cycle.ts";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import test from "node:test";
@@ -42,6 +43,7 @@ const options = (
   worker: Parameters<typeof runCycle>[0]["worker"],
   runner: CheckRunner = runChecks,
 ) => ({
+  operations: openRoundStore(),
   repository: process.cwd(),
   revision: "0".repeat(40),
   baseline,
@@ -179,6 +181,7 @@ test("contract: a no-change conclusion is accepted only when every frozen case r
   ];
   const run = (citations: { case: string; test: string }[]) =>
     runCycle({
+      operations: openRoundStore(),
       ...options(async (_task, frozen) =>
         JSON.stringify({
           digest: frozen.digest,
@@ -244,6 +247,7 @@ test("contract: only resolvable citations plus complete passing checks admit no-
     });
   for (const status of ["passed", "failed", "skipped"]) {
     const result = await runCycle({
+      operations: openRoundStore(),
       ...options(worker, async () => ({
         verdict: "accept",
         outcomes: [{ label: "fixed", status }],
@@ -255,6 +259,7 @@ test("contract: only resolvable citations plus complete passing checks admit no-
   const noCases = await runCycle(options(worker));
   assert.equal(noCases.verdicts.B, "rejected", "without host-frozen cases nothing is claimable");
   const empty = await runCycle({
+    operations: openRoundStore(),
     ...options(worker),
     checks: [],
     noChangeCases: { B: [{ name: "stale", token: "stale" }] },
@@ -267,6 +272,7 @@ test("contract: a patch proves a case only by naming its frozen title token", as
     JSON.stringify({ digest: frozen.digest, files: [{ path: TESTS, content }] });
   const rules = { B: [{ name: "late-result-after-cancellation", token: "cancellation" }] };
   const named = await runCycle({
+    operations: openRoundStore(),
     ...options(
       patch("test('a', () => {}); test('rejects a result after cancellation', () => {});\n"),
     ),
@@ -274,6 +280,7 @@ test("contract: a patch proves a case only by naming its frozen title token", as
   });
   assert.equal(named.verdicts.B, "accepted");
   const unnamed = await runCycle({
+    operations: openRoundStore(),
     ...options(patch("test('a', () => {}); test('tests a late result', () => {});\n")),
     noChangeCases: rules,
   });
@@ -281,6 +288,7 @@ test("contract: a patch proves a case only by naming its frozen title token", as
   assert.ok(unnamed.timeline.some((entry) => entry.step === "case-unresolved"));
   // An unstated token is never guessed: the same patch fails without one.
   const noToken = await runCycle({
+    operations: openRoundStore(),
     ...options(
       patch("test('a', () => {}); test('rejects a result after cancellation', () => {});\n"),
     ),
@@ -292,6 +300,7 @@ test("contract: a patch proves a case only by naming its frozen title token", as
 test("contract: a declared mutant the baseline already detects invalidates the premise", async () => {
   const dispatched: string[] = [];
   const optionsWith = () => ({
+    operations: openRoundStore(),
     ...options(async (task, frozen) => {
       dispatched.push(task);
       return JSON.stringify({
@@ -343,6 +352,7 @@ test("contract: a patch is accepted only when it passes intact and kills a decla
 
 test("contract: proven-gap mode replaces the title-token rule instead of stacking with it", async () => {
   const result = await runCycle({
+    operations: openRoundStore(),
     ...options(
       async (_task, frozen) =>
         JSON.stringify({
@@ -363,6 +373,7 @@ test("contract: proven-gap mode replaces the title-token rule instead of stackin
 test("contract: a declared mutant is stated in the frozen instruction, so the worker can target it", async () => {
   let instruction = "";
   const result = await runCycle({
+    operations: openRoundStore(),
     ...options(async (taskId, frozen) => {
       if (taskId === "B") instruction = frozen.work.instruction;
       return JSON.stringify({
@@ -388,11 +399,13 @@ test("safety: a proven surviving mutant makes a no-change conclusion false", asy
       citations: [{ case: "stale", test: "a" }],
     });
   const resolved = await runCycle({
+    operations: openRoundStore(),
     ...options(conclusion, mutationRunner),
     noChangeCases: { B: [{ name: "stale", token: "stale" }] },
   });
   assert.equal(resolved.verdicts.B, "accepted", "a resolved citation is enough without mutants");
   const proven = await runCycle({
+    operations: openRoundStore(),
     ...options(conclusion, mutationRunner),
     noChangeCases: { B: [{ name: "stale", token: "stale" }] },
     mutations: { B: [mutant("m1", "export const a = 1; // MUTANT\n")] },
@@ -404,6 +417,7 @@ test("safety: a proven surviving mutant makes a no-change conclusion false", asy
 test("contract: a declared precondition unmet by the accepted artifact reopens its producer", async () => {
   let aRuns = 0;
   const result = await runCycle({
+    operations: openRoundStore(),
     ...options(async (taskId, frozen) => {
       if (taskId === "C")
         return JSON.stringify({
@@ -442,6 +456,7 @@ test("contract: a declared precondition unmet by the accepted artifact reopens i
 
 test("safety: exhausting the reopen budget blocks the dependent instead of looping", async () => {
   const result = await runCycle({
+    operations: openRoundStore(),
     ...options(async (taskId, frozen) =>
       taskId === "C"
         ? JSON.stringify({
@@ -498,6 +513,7 @@ test("contract: a mid-attempt pushback ends the dependent and reopens the named 
   let aRuns = 0;
   const requirement = "A adds a test titled *plain* that really asserts the protocol";
   const result = await runCycle({
+    operations: openRoundStore(),
     ...options(async (taskId, frozen) => {
       if (taskId === "C") {
         cRuns.push(aRuns);
@@ -619,6 +635,7 @@ test("safety: a premise that could not be measured is refused as unmeasured, not
   const dispatched: string[] = [];
   let calls = 0;
   const result = await runCycle({
+    operations: openRoundStore(),
     ...options(async (task, frozen) => {
       dispatched.push(task);
       return JSON.stringify({

@@ -68,13 +68,49 @@ import {
   mapSearchResult,
 } from "./rows.ts";
 
+export interface TransactionPort {
+  /** Which transition this port belongs to; the store matches it against the open one. */
+  readonly generation: number;
+}
+
+/** A callback that would keep a transaction open across an await is refused where it is handed in. */
+function refuseThenable(value: unknown, message: string): void {
+  const thenable =
+    value !== null &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof (value as { then?: unknown }).then === "function";
+  if (thenable) throw new Error(message);
+}
+
 export class NmgStoreBase {
+  /** True when this store came from the read-only factory rather than a shared connection. */
+  protected readOnly = false;
   protected db: DatabaseSync;
   protected embedder: VectorEmbedder;
   protected router: Router;
   protected vectorCaches = new Map<string, Float32VectorCache>();
   protected scopeWriteIndexes = new Map<string, ScopeWriteIndex>();
   protected scopeWriteIndexEnabled: boolean;
+  /** The open write transaction, if any. A port is the only way to join it. */
+  private openTransaction: { port: TransactionPort; rollbackOnly: boolean } | null = null;
+  private transactionGeneration = 0;
+  /** Set when ROLLBACK itself failed: the connection's state is unknown, so it takes no more work. */
+  private connectionQuarantined = false;
+
+  /** A read-only factory neither creates the file nor migrates an old one. Both refusals are named
+   *  here rather than surfacing as a driver-level "unable to open database file" with no reason, and
+   *  the decisions live here so the constructor is not the file's largest decision point. */
+  #refuseUnusableReadOnlyOpen(databasePath: string): void {
+    if (!this.readOnly) return;
+    if (!existsSync(databasePath))
+      throw new Error("this store does not exist; a read-only open does not create one");
+  }
+
+  #refuseUnrecognisableReadOnlyOpen(): void {
+    if (!this.readOnly) return;
+    if (this.hasSchema()) return;
+    throw new Error("this store has no recognisable schema; a read-only open does not migrate it");
+  }
 
   constructor(
     databasePath: string,
@@ -82,21 +118,38 @@ export class NmgStoreBase {
     options: NmgStoreOptions = {},
   ) {
     mkdirSync(dirname(databasePath), { recursive: true });
-    this.db = new DatabaseSync(databasePath);
+    // A read-only open is a different factory, not a mode of the shared connection: it gets a
+    // handle that cannot write, and it neither migrates nor checkpoints.
+    this.readOnly = options.readOnly === true;
+    // A read-only factory neither creates the file nor migrates an old one, so both refusals happen
+    // here rather than surfacing as a driver-level "unable to open database file" with no reason.
+    this.#refuseUnusableReadOnlyOpen(databasePath);
+    this.db = new DatabaseSync(databasePath, readOnlyOpenOptions(this.readOnly));
     this.embedder = embedder;
     this.router = new Router(embedder);
     this.scopeWriteIndexEnabled = options.scopeWriteIndex ?? false;
     try {
-      this.db.exec(`
-        PRAGMA foreign_keys = ON;
-        PRAGMA journal_mode = WAL;
-        PRAGMA synchronous = NORMAL;
-        PRAGMA cache_size = -64000;
-        PRAGMA temp_store = MEMORY;
-        PRAGMA mmap_size = 268435456;
-        PRAGMA busy_timeout = 5000;
-      `);
-      migrate(this.db);
+      // `journal_mode` rewrites the database header, so a read-only handle must not set it; the
+      // remaining pragmas are connection-local and harmless.
+      this.db.exec(
+        this.readOnly
+          ? `PRAGMA foreign_keys = ON;
+             PRAGMA cache_size = -64000;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA mmap_size = 268435456;
+             PRAGMA busy_timeout = 5000;`
+          : `PRAGMA foreign_keys = ON;
+             PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA cache_size = -64000;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA mmap_size = 268435456;
+             PRAGMA busy_timeout = 5000;`,
+      );
+      if (!this.readOnly) migrate(this.db);
+      // An existing file with no recognisable schema is not an empty store: reporting it as one would
+      // hide an unknown format behind default empties.
+      this.#refuseUnrecognisableReadOnlyOpen();
       // checkpoint-on-open: fold any -wal left behind by a force-exit shutdown
       // (where close() never ran) into the main DB and truncate it, so WAL can
       // never accumulate across restarts. SQLite auto-recovers WAL frames on
@@ -104,7 +157,7 @@ export class NmgStoreBase {
       // checkpoints, so the common open path skips the blocking TRUNCATE
       // (stg-v2 review ③a; wal_checkpoint is synchronous disk I/O that stalls
       // the event loop when the WAL is large).
-      if (existsSync(`${databasePath}-wal`)) {
+      if (!this.readOnly && existsSync(`${databasePath}-wal`)) {
         try {
           if (statSync(`${databasePath}-wal`).size > 0) {
             this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
@@ -126,15 +179,25 @@ export class NmgStoreBase {
     }
   }
 
+  /** The core schema's marker table: present means this file was written by a version this code reads. */
+  private hasSchema(): boolean {
+    return (
+      this.db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_nodes'")
+        .get() !== undefined
+    );
+  }
+
   close(): void {
     // WAL checkpoint before close: without this the daemon's force-exit
     // shutdown leaves -wal files behind (v1 measured ~1.5G across 1681
     // session STG stores). TRUNCATE folds WAL into the main DB then resets it.
-    try {
-      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-    } catch {
-      // ignore — closing anyway
-    }
+    if (!this.readOnly)
+      try {
+        this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      } catch {
+        // ignore — closing anyway
+      }
     this.db.close();
   }
 
@@ -195,21 +258,108 @@ export class NmgStoreBase {
     if (scopeJson) this.scopeWriteIndexes.delete(scopeJson);
     else this.scopeWriteIndexes.clear();
   }
-  putTaskBoardEntry(input: {
+  /**
+   * The store owns the transaction boundary: this is the only place that runs BEGIN/COMMIT. A
+   * caller already inside a transition must join it with the port this issued rather than open a
+   * second one, and a write entry reached inside a live transaction without that port is refused
+   * instead of guessed at — `openTransaction` is the store's own state, never the caller's claim.
+   */
+  writeTransaction<T>(callback: (port: TransactionPort) => T): T {
+    if (this.openTransaction)
+      throw new Error("a write transaction is already open: join it with the port it issued");
+    if (this.connectionQuarantined)
+      throw new Error("this connection is quarantined after a failed rollback");
+    this.db.exec("BEGIN IMMEDIATE");
+    const port: TransactionPort = { generation: ++this.transactionGeneration };
+    this.openTransaction = { port, rollbackOnly: false };
+    let value: T;
+    try {
+      value = callback(port);
+      refuseThenable(value, "a write transaction callback must be synchronous");
+    } catch (error) {
+      this.openTransaction = null;
+      this.rollback();
+      // The original failure is what the caller needs to see, whether ROLLBACK worked or not.
+      throw error;
+    }
+    const state = this.openTransaction;
+    this.openTransaction = null;
+    if (state?.rollbackOnly) {
+      this.rollback();
+      throw new Error("the transaction was marked rollback-only by a failing operation");
+    }
+    try {
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.rollback();
+      throw error;
+    }
+    return value;
+  }
+
+  /**
+   * Join the transition a port was issued for, synchronously and only while its callback runs. A
+   * port from another store, a port whose callback has returned, and a second BEGIN are all
+   * refused: nothing here infers authority from a flag or a depth counter.
+   */
+  withPort<T>(port: TransactionPort, work: () => T): T {
+    const state = this.openTransaction;
+    if (!state || state.port !== port)
+      throw new Error("this port is not the store's live transaction scope");
+    try {
+      const value = work();
+      refuseThenable(value, "work inside a transaction must be synchronous");
+      return value;
+    } catch (error) {
+      // Even if the caller catches this, the work up to the failure already happened. Only the
+      // outermost decides whether anything commits, and it will not.
+      state.rollbackOnly = true;
+      throw error;
+    }
+  }
+
+  private rollback(): void {
+    try {
+      this.db.exec("ROLLBACK");
+    } catch {
+      this.connectionQuarantined = true;
+    }
+  }
+
+  putTaskBoardEntry(
+    input: {
+      taskId: string;
+      agentId: string;
+      sourceSessionId?: string;
+      kind: TaskBoardKind;
+      content: string;
+      expiresAt: string;
+      /** Directed delivery: stable agent_name to wake for this entry. */
+      to?: string;
+    },
+    port?: TransactionPort,
+  ): TaskBoardEntry {
+    // Standalone and composed writes share this implementation: outside a transition this opens
+    // one, and inside one it joins the open transition instead of running a second BEGIN.
+    return port
+      ? this.withPort(port, () => this.insertTaskBoardEntry(input))
+      : this.writeTransaction(() => this.insertTaskBoardEntry(input));
+  }
+
+  /** The write itself, owning no boundary: whichever transaction is open decides whether it lands. */
+  private insertTaskBoardEntry(input: {
     taskId: string;
     agentId: string;
     sourceSessionId?: string;
     kind: TaskBoardKind;
     content: string;
     expiresAt: string;
-    /** Directed delivery: stable agent_name to wake for this entry. */
     to?: string;
   }): TaskBoardEntry {
     const now = new Date().toISOString();
     this.pruneExpiredTaskBoardEntries(now, input.taskId);
     let id: string;
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    {
       // Global monotonic counter (single row, never recycled). The id =
       // <createdAtMs>_<counter> is time-sortable, insertion-ordered for
       // same-millisecond entries, and globally unique across all channels.
@@ -261,10 +411,6 @@ export class NmgStoreBase {
           input.to ?? null,
           serialState,
         );
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
     }
     return this.taskBoardEntry(id)!;
   }
@@ -1147,8 +1293,7 @@ export class NmgStoreBase {
 
   /** Remove a memory reference from a chain. */
   removeMemoryFromChain(input: { chainId: string; memoryId: string }): boolean {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    return this.writeTransaction(() => {
       this.db
         .prepare(
           `DELETE FROM memory_chain_edges
@@ -1158,12 +1303,8 @@ export class NmgStoreBase {
       const result = this.db
         .prepare("DELETE FROM memory_chain_members WHERE chain_id = ? AND memory_id = ?")
         .run(input.chainId, input.memoryId);
-      this.db.exec("COMMIT");
       return result.changes > 0;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   // ── memory-chain DAG edges (pointers) ──
@@ -1679,8 +1820,9 @@ export class NmgStoreBase {
          updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    // The store owns the boundary. The cache refresh stays outside it, so a batch whose
+    // transaction did not commit cannot warm the cache either.
+    this.writeTransaction(() => {
       for (const item of embeddings) {
         upsert.run(
           item.nodeId,
@@ -1691,15 +1833,11 @@ export class NmgStoreBase {
           now,
         );
       }
-      this.db.exec("COMMIT");
-      for (const item of embeddings) {
-        this.updateVectorCache("node", model, item.nodeId, item.vector);
-      }
-      return embeddings.length;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
+    });
+    for (const item of embeddings) {
+      this.updateVectorCache("node", model, item.nodeId, item.vector);
     }
+    return embeddings.length;
   }
   storedNodeEmbeddings(model: string, afterNodeId = "", limit = 256): ExternalNodeEmbedding[] {
     const rows = this.db
@@ -1759,8 +1897,8 @@ export class NmgStoreBase {
          updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    // As above: the boundary is the store's, and the cache is warmed only after it commits.
+    this.writeTransaction(() => {
       for (const item of embeddings) {
         upsert.run(
           item.blockId,
@@ -1771,15 +1909,11 @@ export class NmgStoreBase {
           now,
         );
       }
-      this.db.exec("COMMIT");
-      for (const item of embeddings) {
-        this.updateVectorCache("leaf", model, item.blockId, item.vector);
-      }
-      return embeddings.length;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
+    });
+    for (const item of embeddings) {
+      this.updateVectorCache("leaf", model, item.blockId, item.vector);
     }
+    return embeddings.length;
   }
   storedLeafEmbeddings(model: string, afterBlockId = "", limit = 256): ExternalLeafEmbedding[] {
     const rows = this.db
@@ -1837,8 +1971,7 @@ export class NmgStoreBase {
          updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    this.writeTransaction(() => {
       for (const item of embeddings) {
         upsert.run(
           item.memoryId,
@@ -1849,12 +1982,8 @@ export class NmgStoreBase {
           now,
         );
       }
-      this.db.exec("COMMIT");
-      return embeddings.length;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
+    return embeddings.length;
   }
   storedEmbeddings(model: string, afterMemoryId = "", limit = 256): ExternalEmbedding[] {
     const rows = this.db
@@ -2597,4 +2726,10 @@ function mapTaskBoardEntry(row: Row): TaskBoardEntry {
  *  and an absent nullable column has no value to invent. */
 function optionalText(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value);
+}
+
+/** The handle options for one open: a read-only factory gets a handle that cannot write, which is a
+ *  different factory rather than a mode of the shared connection. */
+function readOnlyOpenOptions(readOnly: boolean): { readOnly?: true } {
+  return readOnly ? { readOnly: true } : {};
 }

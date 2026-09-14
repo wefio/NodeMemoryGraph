@@ -1,3 +1,4 @@
+import { openRoundStore } from "../../src/integration/ooo-cycle.ts";
 // S2: a round is replayed from its log, not re-run.
 //
 // The property under test is narrow and checkable: with the worker answers taken from the
@@ -119,7 +120,12 @@ test("a round replays from its log to the same terminal state, with no worker ca
   );
   const path = join(directory, "round.jsonl");
 
-  const original = await runCycle(roundOptions({ roundLog: new RoundLog(path) }));
+  const original = await runCycle(
+    roundOptions({
+      operations: openRoundStore(),
+      roundLog: new RoundLog(path),
+    }),
+  );
   const events = readRoundLog(readFileSync(path, "utf8"));
   const recorded = terminalEvent(events);
   assert.ok(recorded, "the round must record its own terminal state");
@@ -129,6 +135,7 @@ test("a round replays from its log to the same terminal state, with no worker ca
   let calls = 0;
   const replayed = await runCycle(
     roundOptions({
+      operations: openRoundStore(),
       worker: async (taskId, frozen, dependencies) => {
         calls += 1;
         return recordedWorker(events)(taskId, frozen, dependencies);
@@ -149,7 +156,12 @@ test("an edited artifact in the log does not reproduce the verdict", async (t) =
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
   );
   const path = join(directory, "round.jsonl");
-  await runCycle(roundOptions({ roundLog: new RoundLog(path) }));
+  await runCycle(
+    roundOptions({
+      operations: openRoundStore(),
+      roundLog: new RoundLog(path),
+    }),
+  );
 
   // Rewrite B's recorded patch so it no longer carries the title its case rule asks for,
   // keeping everything else — including its digest field — exactly as recorded.
@@ -166,7 +178,12 @@ test("an edited artifact in the log does not reproduce the verdict", async (t) =
 
   const events = readRoundLog(readFileSync(editedPath, "utf8"));
   const recorded = terminalEvent(events)!;
-  const replayed = await runCycle(roundOptions({ worker: recordedWorker(events) }));
+  const replayed = await runCycle(
+    roundOptions({
+      operations: openRoundStore(),
+      worker: recordedWorker(events),
+    }),
+  );
 
   // The round completes, but not with the recorded outcome: the host re-checked the
   // artifact instead of trusting the log.
@@ -184,7 +201,12 @@ test("a truncated log is detected, not repaired", async (t) => {
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
   );
   const path = join(directory, "round.jsonl");
-  await runCycle(roundOptions({ roundLog: new RoundLog(path) }));
+  await runCycle(
+    roundOptions({
+      operations: openRoundStore(),
+      roundLog: new RoundLog(path),
+    }),
+  );
 
   // Drop the last recorded artifact. The replay cannot invent the answer, and the missing
   // attempt surfaces as a recorded failure rather than as a round that quietly differs.
@@ -197,7 +219,12 @@ test("a truncated log is detected, not repaired", async (t) => {
   const events = readRoundLog(truncated.join("\n") + "\n");
   const recorded = terminalEvent(events)!;
 
-  const replayed = await runCycle(roundOptions({ worker: recordedWorker(events) }));
+  const replayed = await runCycle(
+    roundOptions({
+      operations: openRoundStore(),
+      worker: recordedWorker(events),
+    }),
+  );
   assert.equal(replayed.verdicts.C, "rejected");
   assert.ok(
     replayed.rejections.some((item) => /no artifact for C attempt 1/.test(item.artifact)),
@@ -220,6 +247,7 @@ test("a replay is a round like any other: it cannot accept what the host refuses
   // Even a faithful log cannot talk the host into an acceptance it did not make.
   const result: CycleResult = await runCycle(
     roundOptions({
+      operations: openRoundStore(),
       worker: async () => ({ artifact: JSON.stringify({ digest: "f".repeat(64), files: [] }) }),
     }),
   );
@@ -233,7 +261,12 @@ test("a replay handed a different round is refused by name, not reported as repr
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
   );
   const path = join(directory, "round.jsonl");
-  const recorded = await runCycle(roundOptions({ roundLog: new RoundLog(path) }));
+  const recorded = await runCycle(
+    roundOptions({
+      operations: openRoundStore(),
+      roundLog: new RoundLog(path),
+    }),
+  );
   const events = readRoundLog(readFileSync(path, "utf8"));
   const terminal = terminalEvent(events)!;
   assert.deepEqual(compareFrozen(events, recorded.log), [], "a faithful round has no difference");
@@ -244,6 +277,7 @@ test("a replay handed a different round is refused by name, not reported as repr
   // the same verdicts. Comparing terminal states alone would call that a reproduction.
   const withDifferentCheck = await runCycle(
     roundOptions({
+      operations: openRoundStore(),
       worker: recordedWorker(events),
       checks: [{ label: "protocol-regression", command: "node", args: ["-e", "process.exit(0)"] }],
     }),
@@ -261,6 +295,7 @@ test("a replay handed a different round is refused by name, not reported as repr
   // makes the recorded artifacts stale, and the check names that instead of leaving it inferred.
   const changedBaseline = await runCycle(
     roundOptions({
+      operations: openRoundStore(),
       worker: recordedWorker(events),
       baseline: {
         "src/probe.ts": "export const value = 2;\n",
