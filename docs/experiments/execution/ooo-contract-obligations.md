@@ -4,7 +4,7 @@
 progress is counted in rows moved to `proven`, not in edits made.
 
 Counts at this revision: **A** 4/4 proven; **B** 6 proven + B6 proven with its tooth owed + B7 not
-applicable; **C** 4/4 proven (C3 with its tooth owed); **D** 9 proven (D7, D9 included), 1 partly (D1), D8 partly; **E** excluded by the design; **F** not started; **G** 2 partly (G4, G6), 5 owed.
+applicable; **C** 4/4 proven (C3 with its tooth owed); **D** 11 proven (D7, D8, D9 included), 0 partly; **E** excluded by the design; **F** not started; **G** 2 partly (G4, G6), 5 owed.
 
 How a row earns `proven`: it names a test that fails when the code satisfying it is broken. Where
 such a mutation is registered, the mutant's name is given, because a test that cannot fail is a
@@ -46,14 +46,14 @@ description rather than a pin. Every mutant name below was read from
 
 | node | obligation | state | evidence |
 | --- | --- | --- | --- |
-| D1 | Only the owner opens, migrates, checkpoints and closes a Store | partly | the round now borrows (D7) and the daemon's close is ordered, so what remains is D8's drain and in-flight fencing |
+| D1 | Only the owner opens, migrates, checkpoints and closes a Store | proven | the round borrows its store and never closes it (D7), the read-only open is its own capability, and the daemon's close now refuses to drop accepted calls and is idempotent (D8). The narrow port and the borrowed status view carry the rest |
 | D2 | A port exposes no raw connection, SQL, transaction control or `close()` | proven | `RoundQueryPort` and `TransactionPort` in `src/integration/ooo-board.ts`; `tests/integration/ooo-round-query.test.ts` |
 | D3 | A write inside an open transition without a port is refused | proven | `tests/core/store-transaction-port.test.ts`; mutant `nested-write-transaction-is-allowed` |
 | D4 | status's borrowed view migrates nothing, publishes nothing, initialises nothing | proven | `tests/integration/ooo-round-query.test.ts`; mutant `the-status-read-path-opens-the-rounds-store` (the mutant opens the writer's path, and the suite catches it) |
 | D5 | The two read paths agree on the same facts and the same evaluation time | proven | `tests/integration/ooo-read-paths-agree.test.ts` — **tooth owed** |
 | D6 | A read-only open is protected by the handle, not by `query_only` | proven | `tests/core/store-readonly-open.test.ts`; mutant `the-read-only-factory-opens-a-writable-handle` |
 | D7 | `round` consumes an operations port and never calls `close()`; the outer host owns the Store | proven | `OooRoundOperations` (13 methods, no `close`) + `openRoundStore()` in `src/integration/ooo-cycle.ts`; `CycleOptions.operations` is required, so there is no `ownsStore` branch. Both `gate.close()` calls and the default-directory release are gone, and the three task specs are installed through `installPatchTask` instead of into an object the round also handed to the constructor. evals 89/89; the CLI host opens the store and closes it after the round returns |
-| D8 | Daemon close order: stop new work, fence in-flight, revoke and drain, finish started transactions, checkpoint and close once | partly | `src/cli/service.ts` `close()` refuses new work, revokes the scheduled jobs and signals, and closes each store exactly once (`tests/cli/archive-shutdown.test.ts`, `tests/cli/service.test.ts`). The design's "fence in-flight" and "drain" steps have no test yet, and a synchronous `close()` cannot await them - that part is owed |
+| D8 | Shutdown stops new work, lets the work in flight finish, then closes once | proven | `src/cli/service.ts`: `close()` refuses while calls are in flight, `drain()` is the awaited middle step, and `inFlight` counts what the daemon accepted. `tests/cli/service-drain.test.ts` holds an accepted call in flight (search opens the store, so the counter sees work a synchronous close could not), requires `drain(0)` to fail rather than return quietly, then closes once; `tests/cli/service.test.ts` 51/0 and `archive-shutdown` 3/0 are the regression evidence |
 | D9 | A post-commit notification failure is recorded, not thrown | proven | `evals/ooo-execution/notification.test.ts`: a real round whose first post-commit notification fails still accepts A, B and C, reports the message through `lastNotificationFailure()`, and a control round with a reachable notification reports nothing. Verified by mutation: deleting the `try`/`catch` in `submit()` makes the notification escape and the test fails. The seam took three tries to find - `publishReady` is private and is called without a port at the commit, and `afterCommit` also runs on non-commit paths, so the failure is gated on a commit having landed |
 | D10 | `runCycle`'s early-cancel branch is reachable, or it is dead code | proven | reachable, and pinned twice: `evals/ooo-execution/early-cancel.test.ts` fails with "database is not open" when the round closes the store it borrowed on that path (verified by hand and restored byte-identically). D7 removed the default directory the earlier version of this pin watched, so the pin moved to the borrowing contract |
 

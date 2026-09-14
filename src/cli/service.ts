@@ -204,6 +204,8 @@ export class NmgService {
   #shutdownRequested = false;
   /** Set by close(). New work is refused after this, so a shutdown cannot race a fresh request. */
   #closing = false;
+  /** Calls accepted and not yet answered; see drain(). */
+  #inFlight = 0;
   readonly #maintenanceJobs = new Map<NmgStore, NodeJS.Immediate>();
   readonly #maintenanceSignals = new Map<
     NmgStore,
@@ -235,9 +237,41 @@ export class NmgService {
     return this.#onlineLearner;
   }
 
+  /** A call the daemon has accepted and not yet answered. Counted here rather than inferred from
+   *  the store, because it is the service, not the database, that a shutdown has to fence. */
+  get inFlight(): number {
+    return this.#inFlight;
+  }
+
+  /** Let the calls already accepted finish. Shutdown is a sequence - stop new work, then let the
+   *  work in flight finish, then close once - and the middle step needs an await, which a
+   *  synchronous close() does not have. So close() requires that this has happened, instead of
+   *  pretending it can fence a call it cannot see. */
+  async drain(timeoutMs = 5_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (this.#inFlight > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    if (this.#inFlight > 0) {
+      throw new NmgProtocolError(
+        "DRAINING",
+        `${this.#inFlight} calls were still in flight after ${timeoutMs}ms`,
+      );
+    }
+  }
+
   async invoke<M extends NmgMethod>(method: M, params?: unknown): Promise<NmgMethodResult[M]> {
     if (this.#closing)
       throw new NmgProtocolError("SHUTTING_DOWN", "the service is closing and takes no new work");
+    this.#inFlight += 1;
+    try {
+      return await this.#dispatch(method, params);
+    } finally {
+      this.#inFlight -= 1;
+    }
+  }
+
+  async #dispatch<M extends NmgMethod>(method: M, params?: unknown): Promise<NmgMethodResult[M]> {
     switch (method) {
       case "hello":
         return this.#hello() as NmgMethodResult[M];
@@ -420,6 +454,14 @@ export class NmgService {
    *  that could start more of it, then close each store exactly once. A second call is a no-op, so
    *  a shutdown path that runs twice cannot close a store out from under a live reader. */
   close(): void {
+    // A close that silently drops calls already accepted would lose writes that were answered as
+    // accepted; the sequence is drain() first, and this refuses rather than pretending.
+    if (this.#inFlight > 0) {
+      throw new NmgProtocolError(
+        "DRAINING",
+        `${this.#inFlight} calls were still in flight; drain before closing`,
+      );
+    }
     this.#closing = true;
     for (const job of this.#maintenanceJobs.values()) clearImmediate(job);
     this.#maintenanceJobs.clear();
