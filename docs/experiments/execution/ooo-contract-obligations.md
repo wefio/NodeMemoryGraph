@@ -105,6 +105,38 @@ of `evals/**` would leave the round's only real regression suite broken with no 
 Next attempt should carry the install point in the same change, and run the evals suite as the first
 thing after the conversion, on a branch that can be thrown away.
 
+## G. The product entry: collaboration absorbs OoO (design line 216, added after this ledger)
+
+This section answers the question the earlier sessions kept circling, and it rules out the cheap
+answer I would otherwise have reached for. OoO is an execution capability *inside* collaboration,
+absorbed by the board, the shared task semantics, the execution lifecycle and the acceptance
+facilities; an Agent uses it through an ordinary task handoff and never chooses or calls an
+dedicated OoO tool. Explicitly forbidden: a new `ooo` tool, a dedicated channel, a second task
+body, or a `board.runRound` wrapper - each of which would re-create a separate plan, state and
+lifecycle. Ordinary board text does not become an executable task by itself: only a handoff that
+enters through an existing operation, with a stated contract and execution authority, participates.
+
+| node | obligation | state | evidence |
+| --- | --- | --- | --- |
+| G1 | An ordinary board handoff reaches the shared semantics, the execution facility and the acceptance path, with no `ooo_round` and no parallel task state | owed | this is the pre-condition for removing the tool, and it is not built |
+| G2 | On that path, a real accepted artifact and the dependency release it unlocks | owed | B5 proves the predicate, not that the ordinary path reaches it |
+| G3 | That path covers failure, cancellation, and the sequential fallback when nothing is independent | owed | the round covers these; the ordinary path does not exist yet |
+| G4 | The old entry's necessary query and cancel capabilities are reachable from the existing facilities | partly | status reads through `openRoundQuery` (D4) and cancel exists on the board, but no ordinary path reaches them |
+| G5 | `ooo_round` leaves the product tool directory, with the tool directory, adapter, docs and hidden-features registry updated together | owed, gated by G1-G4 | `ooo_round` is declared compatibility-only: no new features, no dual-write, and it must not become the surface anything new is built on |
+| G6 | The task view is a projection of existing facts: no second editable task truth, and a model cannot confirm `accepted`, change a lease or overwrite a cancellation by patching state | partly | the state side is covered (B5, B6, D3, D4); the view's information classes and their owners are recorded in the design's table and are not asserted anywhere |
+| G7 | One real handoff at a legal boundary, with another Agent session continuing the same parent task from the view plus retrievable evidence, judged by the fixed parent check | owed | the design puts this after G1, and it needs a real model and budget |
+
+Two consequences for the nodes above it:
+
+- D7 (the round borrowing its store) stays worth doing and is now also the node that would let a
+  non-round host run the same operations, which is what G1 needs. It does not, by itself, move any G
+  node: G1 is about which entry point exists, not about who closes a connection.
+- The design's order is now: the B/C/D proofs, then the ordinary collaboration path (G1-G4), then the
+  one real continuation (G7), and only then the A-E arms. The A-E arms are unchanged; the
+  continuation check moved in front of them.
+
+
+
 ## Blocked, or not applicable, and why
 
 - B7 has nothing to fail: no JSONL export exists on this branch.
