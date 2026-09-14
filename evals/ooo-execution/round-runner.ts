@@ -282,12 +282,14 @@ export function describeRun(runDir: string): string {
     if (terminal) lines.push(`log terminal: ${JSON.stringify(terminal.verdicts)}`);
   }
   if (existsSync(storePath(runDir))) {
-    const store = openRoundStore(runDir);
+    // A status read is borrowed: the owner's read-only query port neither migrates the store nor
+    // publishes anything, which constructing the board would have done.
+    const view = openRoundQuery(storePath(runDir));
     try {
-      lines.push(`coordinator cancelled: ${store.cancelled() ?? "no"}`);
-      lines.push(`coordinator accepted: ${JSON.stringify(store.accepted())}`);
+      lines.push(`coordinator cancelled: ${view.port.cancelled() ?? "no"}`);
+      lines.push(`coordinator accepted: ${JSON.stringify(view.port.accepted())}`);
     } finally {
-      store.close();
+      view.close();
     }
   }
   return lines.join("\n");
