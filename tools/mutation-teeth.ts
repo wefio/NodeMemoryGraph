@@ -4,6 +4,11 @@
  * A test can pass for the wrong reason: the rule it claims to protect may be dead code, or the
  * assertion may hold for a reason other than the one written down. Each mutant below replaces one
  * load-bearing line with a plausible-but-wrong version; the suite must then fail, and the *expected
+ *
+ * Two rules the config learned the hard way. `expect` is the NAME of the test that must fail -
+ * prose there makes a real catch read as "NOT caught". The `ast` locator is indentation-sensitive,
+ * so an anchor whose leading spaces no longer match the file is a stale anchor to be fixed, not a
+ * cosmetic difference; and a site that cannot be located is a failure, never a claimed check.
  * test* must be the one that fails. Three outcomes per target, not two:
  *
  *   1. the clean tree passes the target's suites;
