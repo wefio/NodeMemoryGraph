@@ -15,13 +15,13 @@
 
 用户明确指出，这些约束来自沿 CPU 乱序执行与 ILP（指令级并行）的思路继续推演：先有合法指令的含义，再讨论如何调度执行资源；执行安排可以改变，提交边界仍需保留。任务粒度小于 Agent 粒度及运行时融合，是这条思路在协作系统中的延伸。
 
-| CPU 中的角色 | 本设计中的对应问题 |
-| --- | --- |
-| 指令的可观察语义 | Task IR 的输入、效果与接受义务 |
+| CPU 中的角色              | 本设计中的对应问题                          |
+| ------------------------- | ------------------------------------------- |
+| 指令的可观察语义          | Task IR 的输入、效果与接受义务              |
 | 指令/微操作与执行单元分离 | 逻辑任务与 Agent 会话分离；不是逐项硬件同构 |
-| 数据相关与就绪选择 | 版本化产物、事实依赖及受约束的资源效果 |
-| 执行完成与 retire 分离 | 生成、验证、发布分别处理 |
-| 分支恢复 | 候选作废、尝试围栏与分支上下文重建 |
+| 数据相关与就绪选择        | 版本化产物、事实依赖及受约束的资源效果      |
+| 执行完成与 retire 分离    | 生成、验证、发布分别处理                    |
+| 分支恢复                  | 候选作废、尝试围栏与分支上下文重建          |
 
 [BOOM 的 ROB 文档](https://docs.boom-core.org/en/latest/sections/reorder-buffer.html)具体展示了执行完成后等待顺序提交，以及异常时恢复已提交的重命名状态。这里借鉴的是保留可观察状态的边界，不把 blackboard 本身等同于 ROB，也不把会话复用等同于某种 CPU 指令融合实现。
 
@@ -41,14 +41,14 @@ CPU 类比还暴露出两个研究缺口：自然语言任务没有现成 ISA �
 
 合法粒度由边界决定，不由 token 数、文件数或一句指令的长度决定。一个单元至少满足以下义务：
 
-| 义务 | 可检查的表达 | 不满足时的处理 |
-| --- | --- | --- |
-| 输入闭合 | 所有必要数据绑定版本化引用；前置产物明确来自哪个任务 | 缺输入就等待或回推，不靠共享对话补齐 |
-| 产物可交接 | 有限大小、有类型、可定位的提案或证据引用 | “我已经想好了”不能解锁后继 |
-| 权限闭合 | 可读资源、提案写集、工具效果受宿主约束 | 未知效果按冲突处理；不能凭 worker 自报放行 |
-| 验收明确 | 宿主选定验证器和义务；accept/reject/undecidable 分开 | 无法判定保持未接受，不能当作成功 |
-| 可停止与作废 | attempt、租约、预算、取消边界明确 | 迟到结果只能记录，不能生效 |
-| 组合保真 | 子任务产物经明确组合仍覆盖父任务的全部义务 | 子任务各自通过不等于父任务完成 |
+| 义务         | 可检查的表达                                         | 不满足时的处理                             |
+| ------------ | ---------------------------------------------------- | ------------------------------------------ |
+| 输入闭合     | 所有必要数据绑定版本化引用；前置产物明确来自哪个任务 | 缺输入就等待或回推，不靠共享对话补齐       |
+| 产物可交接   | 有限大小、有类型、可定位的提案或证据引用             | “我已经想好了”不能解锁后继                 |
+| 权限闭合     | 可读资源、提案写集、工具效果受宿主约束               | 未知效果按冲突处理；不能凭 worker 自报放行 |
+| 验收明确     | 宿主选定验证器和义务；accept/reject/undecidable 分开 | 无法判定保持未接受，不能当作成功           |
+| 可停止与作废 | attempt、租约、预算、取消边界明确                    | 迟到结果只能记录，不能生效                 |
+| 组合保真     | 子任务产物经明确组合仍覆盖父任务的全部义务           | 子任务各自通过不等于父任务完成             |
 
 允许粒度小到“从固定源码提取一个接口事实并引用行与摘要”，前提是后继确实需要这个可检查事实。“先思考错误处理”若没有可交接结果，应留在一个单元内部。
 
@@ -58,19 +58,19 @@ CPU 类比还暴露出两个研究缺口：自然语言任务没有现成 ISA �
 
 Task IR 是从现有声明与记录计算出的只读视图；不接收另一份 `inputs/outputs/effects/accept` JSON，也不落一份可独立修改的 IR。下表中的概念名用于解释分析结果，输入与校验仍使用现有字段。需要新语义时扩展对应 owner，不增加同义字段。
 
-| 分析概念 | 当前字段与唯一类型 owner | 编译与边界 |
-| --- | --- | --- |
-| identity / intent | [BoardTicket、PatchTaskSpec](../../src/integration/ooo-board.ts)：`runId/taskId/revision/attempt/inputDigest`、`instruction`；[PatchWork](../../src/integration/ooo-patch.ts) | 复用现有身份与 `instruction`，不增加 `id/contractRevision/intent` 别名。board entry ID 与逻辑 taskId 不等同，绑定键包含 runId |
-| inputs | `PatchTaskSpec.files` → `FrozenPatchTask.files`；`ProbePlan` 依赖列表 → `BoardTicket.dependencies` | 文件内容冻结；依赖产物由宿主在认领时绑定。编译视图只派生引用与摘要；当前没有多端口输入语言 |
-| outputs | [PatchSubmission、ConclusionKind](../../src/integration/ooo-patch.ts)；`PatchTaskSpec.admittedConclusions`；board `deliverableDigest/Ref` | 沿用 patch/conclusion 和单次交付。`cannot-complete` 不因结构合法而成为成功。多输出端口与任意 artifact kind 尚不支持，不能偷偷序列化进说明文字 |
-| effects | `ProbePlan` 的 effect / [DispatchTask.effect](../../src/integration/ooo-execution.ts)；`PatchTaskSpec.visible/editable` | 现有 effect 是粗类别 `read-only/isolated-artifact`；worker 读范围来自 `visible`，提案写范围来自 `editable`，宿主验证还消费完整 `files`。它们不是完整的语义读写集；不透明工具效果按冲突处理 |
-| accept | `PatchTaskSpec.verify`；[CycleOptions.checks、CaseRule、Requirement](../../src/integration/ooo-cycle.ts)；board 独立 `verdict/judgedDigest` | 沿用宿主验证和 board 判定，不新增第二个 accepted。当前 `verify` 是进程内函数，不能持久化；恢复所需的可序列化验证描述必须从既有 checks/cases/mutations 等配置冻结，并由共享宿主重建，不存函数或任意 checker 字符串 |
-| budget | [PatchBudget](../../src/integration/ooo-patch.ts)：`perFile/output` | 限制输出字节，不是 tokens；取消独立的 `outputs.maxBytes` 别名。模型 token 预算若要成为可强制限制，应先扩展其 owner 与执行协议，当前视图不得假称支持 |
-| limits | `PatchLimits.turns/reads/timeoutMs` → `FrozenPatchTask.limits` | 保留原单位与执行时限，不另设 `deadlineMs`；不等于 board claim 的租约时限，也不等于轮次总预算 |
-| placement | 无现有等价字段 | 仅由共享调度策略产生临时融合/分配建议，不进入当前票据，不影响验收；`visible/editable` 不承担 placement 语义。持久化执行关联用记录中的任务/attempt/执行者引用，不复制任务声明 |
-| deps / requires | `ProbePlan` 依赖列表；`CycleOptions.requires: Requirement[]` | deps 是派发与产物依赖；requires 是 cycle 对已记录产物的 `verified/mutant-killed/test-title` 条件。两者不等同，当前 requires 不是通用授权/分支谓词注册表 |
-| external fact / assumptions | `ProbePlan` wait event、[外部检查票据](../../src/integration/ooo-check.ts)；无通用 assumptions 类型 | 检查事件保留原身份；本文的有限事实推测仍需在共享协议显式扩展，不能把缺失功能伪装成 `requires` 或票据已有字段 |
-| refinement | 无现有父义务映射类型 | 离线模型可验证预先给定的拆分关系；生产表示须扩展共享任务契约，不能成为 board 新 kind 或第二份任务正文 |
+| 分析概念                    | 当前字段与唯一类型 owner                                                                                                                                                      | 编译与边界                                                                                                                                                                                                        |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| identity / intent           | [BoardTicket、PatchTaskSpec](../../src/integration/ooo-board.ts)：`runId/taskId/revision/attempt/inputDigest`、`instruction`；[PatchWork](../../src/integration/ooo-patch.ts) | 复用现有身份与 `instruction`，不增加 `id/contractRevision/intent` 别名。board entry ID 与逻辑 taskId 不等同，绑定键包含 runId                                                                                     |
+| inputs                      | `PatchTaskSpec.files` → `FrozenPatchTask.files`；`ProbePlan` 依赖列表 → `BoardTicket.dependencies`                                                                            | 文件内容冻结；依赖产物由宿主在认领时绑定。编译视图只派生引用与摘要；当前没有多端口输入语言                                                                                                                        |
+| outputs                     | [PatchSubmission、ConclusionKind](../../src/integration/ooo-patch.ts)；`PatchTaskSpec.admittedConclusions`；board `deliverableDigest/Ref`                                     | 沿用 patch/conclusion 和单次交付。`cannot-complete` 不因结构合法而成为成功。多输出端口与任意 artifact kind 尚不支持，不能偷偷序列化进说明文字                                                                     |
+| effects                     | `ProbePlan` 的 effect / [DispatchTask.effect](../../src/integration/ooo-execution.ts)；`PatchTaskSpec.visible/editable`                                                       | 现有 effect 是粗类别 `read-only/isolated-artifact`；worker 读范围来自 `visible`，提案写范围来自 `editable`，宿主验证还消费完整 `files`。它们不是完整的语义读写集；不透明工具效果按冲突处理                        |
+| accept                      | `PatchTaskSpec.verify`；[CycleOptions.checks、CaseRule、Requirement](../../src/integration/ooo-cycle.ts)；board 独立 `verdict/judgedDigest`                                   | 沿用宿主验证和 board 判定，不新增第二个 accepted。当前 `verify` 是进程内函数，不能持久化；恢复所需的可序列化验证描述必须从既有 checks/cases/mutations 等配置冻结，并由共享宿主重建，不存函数或任意 checker 字符串 |
+| budget                      | [PatchBudget](../../src/integration/ooo-patch.ts)：`perFile/output`                                                                                                           | 限制输出字节，不是 tokens；取消独立的 `outputs.maxBytes` 别名。模型 token 预算若要成为可强制限制，应先扩展其 owner 与执行协议，当前视图不得假称支持                                                               |
+| limits                      | `PatchLimits.turns/reads/timeoutMs` → `FrozenPatchTask.limits`                                                                                                                | 保留原单位与执行时限，不另设 `deadlineMs`；不等于 board claim 的租约时限，也不等于轮次总预算                                                                                                                      |
+| placement                   | 无现有等价字段                                                                                                                                                                | 仅由共享调度策略产生临时融合/分配建议，不进入当前票据，不影响验收；`visible/editable` 不承担 placement 语义。持久化执行关联用记录中的任务/attempt/执行者引用，不复制任务声明                                      |
+| deps / requires             | `ProbePlan` 依赖列表；`CycleOptions.requires: Requirement[]`                                                                                                                  | deps 是派发与产物依赖；requires 是 cycle 对已记录产物的 `verified/mutant-killed/test-title` 条件。两者不等同，当前 requires 不是通用授权/分支谓词注册表                                                           |
+| external fact / assumptions | `ProbePlan` wait event、[外部检查票据](../../src/integration/ooo-check.ts)；无通用 assumptions 类型                                                                           | 检查事件保留原身份；本文的有限事实推测仍需在共享协议显式扩展，不能把缺失功能伪装成 `requires` 或票据已有字段                                                                                                      |
+| refinement                  | 无现有父义务映射类型                                                                                                                                                          | 离线模型可验证预先给定的拆分关系；生产表示须扩展共享任务契约，不能成为 board 新 kind 或第二份任务正文                                                                                                             |
 
 board `kind` 的唯一 owner 是 [TaskBoardKind](../../src/core/types.ts)。它描述协作消息用途：`handoff` 交接、`result` 返回、`decision` 判定；不是 patch/conclusion 类型，也不是 effect。OoO 行内的 patch/snapshot `kind` 又是内部任务类别。三者不得互相转换或新增 `task-ir` kind、工具、频道来承载重复定义。
 
@@ -127,11 +127,11 @@ W(B) ∩ (R(A) ∪ W(A)) = ∅
 
 把“猜 Agent 接下来想做什么”缩小为“对一个已声明、有限取值的事实提前准备候选”。必须分别表达三种门：
 
-| 门 | 能否提前越过 | 提交时要求 |
-| --- | --- | --- |
-| 数据输入 | 默认不能；缺失内容不能用一个 true 代替 | 精确输入与产物版本绑定 |
-| 分支事实 | 仅可丢弃、无外部写入的候选准备可研究 | 有权威事件证明假设，且版本仍有效 |
-| 权限/安全前提 | 不能作为可猜测分支 | 在执行动作之前已满足 |
+| 门            | 能否提前越过                           | 提交时要求                       |
+| ------------- | -------------------------------------- | -------------------------------- |
+| 数据输入      | 默认不能；缺失内容不能用一个 true 代替 | 精确输入与产物版本绑定           |
+| 分支事实      | 仅可丢弃、无外部写入的候选准备可研究   | 有权威事件证明假设，且版本仍有效 |
+| 权限/安全前提 | 不能作为可猜测分支                     | 在执行动作之前已满足             |
 
 例如 T 的测试提案只使用已冻结接口；发布 T 还需等待检查事件 g。若提案内容完全不依赖 g，移动纯准备工作到 g 之前属于依赖细化，不是推测。若 g 决定本轮是否需要 T，提前准备 T 才是可能白跑的控制推测。若 T 必须读取尚未产生的错误日志，猜“失败”仍不能补全输入，不能启动。
 
@@ -160,12 +160,12 @@ estimatedUtility = p * savedCriticalPath
 
 复用现有计算与推演能力，不为 OoO 另建可微引擎、激活系统或推理图存储。任务依赖图描述执行约束，autodiff 图描述数值运算，MGR 图描述记忆关联；它们可以通过版本化投影关联，但节点和边的语义不能直接等同。
 
-| 能力与 owner | 在任务协作中的复用方向 | 保留的边界 |
-| --- | --- | --- |
-| [autodiff](../../src/lab/autodiff.ts) 的 Tensor/UOp 与梯度计算 | 为明确构造的成本、收益或动作评分模型提供数值底座 | Agent 调用、离散调度和工具副作用不因表示成图就可微；不声称梯度穿过整个 Agent 任务 |
-| [HA：Hierarchical Activation](hierarchical-activation.md) | 对任务所需上下文做激活与保留评分，研究上下文复用的价值信号 | 激活分数不改变语义置信度、访问权限、硬预算或任务依赖；时间状态仍归 session/branch 所有 |
+| 能力与 owner                                                       | 在任务协作中的复用方向                                            | 保留的边界                                                                                               |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| [autodiff](../../src/lab/autodiff.ts) 的 Tensor/UOp 与梯度计算     | 为明确构造的成本、收益或动作评分模型提供数值底座                  | Agent 调用、离散调度和工具副作用不因表示成图就可微；不声称梯度穿过整个 Agent 任务                        |
+| [HA：Hierarchical Activation](hierarchical-activation.md)          | 对任务所需上下文做激活与保留评分，研究上下文复用的价值信号        | 激活分数不改变语义置信度、访问权限、硬预算或任务依赖；时间状态仍归 session/branch 所有                   |
 | [MGR：MemoryGraphReasoner](../../src/lab/memory-graph-reasoner.ts) | 利用已有遍历与 what-if 推演提出有来源的上下文、路径或有限假设候选 | `MemoryNode.requires` 的软门控不等于任务依赖成立；what-if 结果不等于真实检查结果，也不能自行开启推测执行 |
-| 共享任务语义与协调器 | 生成合法动作集合，校验建议并执行原子认领与提交 | 合法性和接受权不交给评分模型；建议失效、不可用或关闭时仍能确定性执行 |
+| 共享任务语义与协调器                                               | 生成合法动作集合，校验建议并执行原子认领与提交                    | 合法性和接受权不交给评分模型；建议失效、不可用或关闭时仍能确定性执行                                     |
 
 未来接线顺序是：共享语义计算合法候选 → 可选 HA/MGR 提供上下文或建议 → 共享策略在合法集合内排序 → 认领/提交点重新校验。模型提出集合外动作时拒绝，而不是提高分数后放行。需要新任务或新依赖的建议须走显式计划修订，不能隐式改写冻结计划。关联使用现有 run/task/attempt 和 AG 投影身份，不引入第二套任务 ID 或 board kind。
 
@@ -179,17 +179,17 @@ estimatedUtility = p * savedCriticalPath
 
 ## 共享层与黑板
 
-| 所有者 | 职责 |
-| --- | --- |
-| 共享任务语义模块 | 解析/规范化 Task IR、依赖与效果检查、拆分义务检查、合法融合候选 |
-| 共享运行时 | 计划冻结、选择/派发、票据、验证、发布、取消、费用与事件记录 |
-| 黑板及协调存储 | 跨进程发现、交接、认领、结果引用；经所有者操作更新权威状态 |
-| 共享 Agent Surface | 同一工具目录、参数/结果语义与可发现入口 |
-| harness 薄适配 | 原生工具 schema 编码、会话启动/恢复/终止、模型调用、能力与用量回报 |
+| 所有者             | 职责                                                               |
+| ------------------ | ------------------------------------------------------------------ |
+| 共享任务语义模块   | 解析/规范化 Task IR、依赖与效果检查、拆分义务检查、合法融合候选    |
+| 共享运行时         | 计划冻结、选择/派发、票据、验证、发布、取消、费用与事件记录        |
+| 黑板及协调存储     | 跨进程发现、交接、认领、结果引用；经所有者操作更新权威状态         |
+| 共享 Agent Surface | 同一工具目录、参数/结果语义与可发现入口                            |
+| harness 薄适配     | 原生工具 schema 编码、会话启动/恢复/终止、模型调用、能力与用量回报 |
 
 黑板是工具和载体，不凭自然语言条目推导依赖，也不充当裁判。共享运行时通过 board 的租约、attempt 与 deliver/judge 操作执行状态转移，具体持久化和写入权按下节固定。
 
-共享协议不意味着每个 harness 都有同等执行能力。适配器报告 capability；缺少会话复用或隔离能力时降级为独立执行，不能把正确性规则留给适配器自行解释。现有 Pi `ooo_round` 经研究 CLI 接线的形状不能作为最终共享入口。
+共享协议不意味着每个 harness 都有同等执行能力。适配器报告 capability；缺少会话复用或隔离能力时降级为独立执行，不能把正确性规则留给适配器自行解释。现有 Pi `ooo_round` 经研究 CLI 接线的形状不能作为最终共享入口。（`ooo_round` 已于 2026-09-14 离开产品工具目录，普通协作路径不需要专用工具；见 `docs/experiments/execution/ooo-contract-obligations.md` G5）
 
 ## 运行记录的物理归属与唯一写入者
 
@@ -199,14 +199,14 @@ estimatedUtility = p * savedCriticalPath
 
 新增持久化只承担两类事实：不可变的运行 manifest（冻结现有计划、配置与版本），以及 board 没有的追加运行事实。可以分别用 manifest 表与事件表实现，但不得增加与 board 竞争的每任务当前状态表。下面固定事实 owner；物理表名以迁移实现为准，同库与权威分工不变：
 
-| 事实 | 权威位置 | 写入与读取规则 |
-| --- | --- | --- |
-| runId、冻结计划/验证配置、输入及摘要、保留策略 | 不可变运行 manifest | 协调服务经 daemon Store 注册；依赖图从计划派生。新计划产生新版本，不能覆盖旧输入 |
-| 逻辑任务与 board entry 的绑定、检查签发与终态、候选字节或内容寻址引用、取消事实 | 同库追加运行事实，键含 runId/sequence，任务事实另带 taskId/attempt | 只保存不能从 manifest 或 board 推导的事实；取消事件与 board 围栏操作原子提交。候选存在不等于接受 |
-| claim owner、lease、attempt、deliverable、独立 verdict、resolve | 现有 board 记录 | board 生命周期操作是唯一写入逻辑；受管理条目的通用写请求也必须经过同一协调事务，禁止直接 judge/resolve 绕开运行围栏 |
-| 费用、执行尝试观察与恢复证据 | 同一追加运行事实 | 外部结果由宿主报告、协调服务验证后写；worker 不批准自己的产物。重复结果幂等，旧代次拒收；board 转移的历史可在事务内记录，但当前 board 状态仍只读 board |
-| ready/blocked/accepted 任务集合、依赖满足、取消后的有效性、融合候选 | 无权威存储；从上述来源计算 | 同一共享派生函数服务 status、next 与依赖解锁；可缓存，不允许独立写入或修复缓存来改事实 |
-| `round.jsonl`、`run.json`、工作目录日志 | 导出或执行产物 | JSONL 可导出作研究重放，文件不决定当前完成/取消状态；导出失败不回滚已提交判定 |
+| 事实                                                                            | 权威位置                                                           | 写入与读取规则                                                                                                                                         |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| runId、冻结计划/验证配置、输入及摘要、保留策略                                  | 不可变运行 manifest                                                | 协调服务经 daemon Store 注册；依赖图从计划派生。新计划产生新版本，不能覆盖旧输入                                                                       |
+| 逻辑任务与 board entry 的绑定、检查签发与终态、候选字节或内容寻址引用、取消事实 | 同库追加运行事实，键含 runId/sequence，任务事实另带 taskId/attempt | 只保存不能从 manifest 或 board 推导的事实；取消事件与 board 围栏操作原子提交。候选存在不等于接受                                                       |
+| claim owner、lease、attempt、deliverable、独立 verdict、resolve                 | 现有 board 记录                                                    | board 生命周期操作是唯一写入逻辑；受管理条目的通用写请求也必须经过同一协调事务，禁止直接 judge/resolve 绕开运行围栏                                    |
+| 费用、执行尝试观察与恢复证据                                                    | 同一追加运行事实                                                   | 外部结果由宿主报告、协调服务验证后写；worker 不批准自己的产物。重复结果幂等，旧代次拒收；board 转移的历史可在事务内记录，但当前 board 状态仍只读 board |
+| ready/blocked/accepted 任务集合、依赖满足、取消后的有效性、融合候选             | 无权威存储；从上述来源计算                                         | 同一共享派生函数服务 status、next 与依赖解锁；可缓存，不允许独立写入或修复缓存来改事实                                                                 |
+| `round.jsonl`、`run.json`、工作目录日志                                         | 导出或执行产物                                                     | JSONL 可导出作研究重放，文件不决定当前完成/取消状态；导出失败不回滚已提交判定                                                                          |
 
 事务内同时完成版本/租约/取消校验、board deliver/judge/resolve、产物关联与事件追加；失败则全部回滚。外部验证收据先生成，入事务后重核绑定，不能在持有写事务时等待模型或检查进程。断线重试以 run/task/attempt 和事件身份去重；未知检查结果保持无法判定，不从 PID 消失推断成功。
 
@@ -257,13 +257,13 @@ board TTL 需要显式的运行保留关系：运行记录引用的交付/判定
 
 后续性能实验按顺序隔离变量：
 
-| 实验臂 | 改变的内容 | 要回答的问题 |
-| --- | --- | --- |
-| A 粗任务基线 | 原父任务与原验收 | 真实成本与质量基线是什么 |
-| B 细任务、同一执行槽 | 拆分，独立会话 | 拆分本身增加多少交接与验证成本 |
-| C 同一细计划、多槽 | 仅改变执行槽数/合法顺序 | 确定并发能减少多少关键路径 |
-| D 同一细计划/槽数、融合 | 仅改变合法会话复用 | 节省是否超过上下文负担与等待 |
-| E 同 D、有限事实推测 | 仅加入有预算的候选准备 | 额外费用与失败恢复后是否仍有收益 |
+| 实验臂                  | 改变的内容              | 要回答的问题                     |
+| ----------------------- | ----------------------- | -------------------------------- |
+| A 粗任务基线            | 原父任务与原验收        | 真实成本与质量基线是什么         |
+| B 细任务、同一执行槽    | 拆分，独立会话          | 拆分本身增加多少交接与验证成本   |
+| C 同一细计划、多槽      | 仅改变执行槽数/合法顺序 | 确定并发能减少多少关键路径       |
+| D 同一细计划/槽数、融合 | 仅改变合法会话复用      | 节省是否超过上下文负担与等待     |
+| E 同 D、有限事实推测    | 仅加入有预算的候选准备  | 额外费用与失败恢复后是否仍有收益 |
 
 A/B 是任务分解比较，不能声称只改派发顺序；B/C、C/D、D/E 各自控制其余变量。父级验收固定，另记分解所需检查与规划成本。离线模型先覆盖不同粒度、依赖密度、共享上下文、事实命中率及验证成本；它只能发现逻辑错误和成本转折点，不能预测真实模型质量。
 

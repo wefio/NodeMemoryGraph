@@ -3,7 +3,9 @@
  * else, reaches the shared semantics, runs work, and has that work accepted by an independent
  * verdict - and accepting it releases the dependent that was waiting for it.
  *
- * Nothing here touches `ooo_round`, its CLI or the research entry: the point of G1 is that a caller
+ * Nothing here touches a dedicated OoO surface: `ooo_round` has left the product tool
+ * directory (ledger G5). The ordinary path below is what remains - a handoff, a deliverable and
+ * the board's own verdict. The point of G1 is that a caller
  * who only knows the board and the shared semantics can get the whole thing. The selection is
  * asserted through `next()`, which is now the compiler's answer, and cross-checked against
  * `deriveStatus` over the same recorded facts, so the two views are held together rather than
