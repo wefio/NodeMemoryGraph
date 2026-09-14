@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import { BoardAdmission, type ProbePlan } from "./ooo-board.ts";
 import { verifyCandidate, type CandidateCheck } from "./ooo-candidate.ts";
 import {
