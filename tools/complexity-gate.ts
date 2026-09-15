@@ -276,6 +276,10 @@ export function resolveBaseRef(argv: readonly string[], cwd: string): BaseChoice
     const mergeBase = execFileSync("git", ["merge-base", "HEAD", "origin/main"], {
       cwd,
       encoding: "utf8",
+      // No merge base is an ordinary checkout, and `catch` below already falls back
+      // to HEAD; forwarding git's "fatal" here would print a failure this gate does
+      // not have. Same reason as the `git show` probe in `main`.
+      stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     return mergeBase ? { ref: mergeBase, source: "merge-base" } : { ref: "HEAD", source: "head" };
   } catch {
@@ -319,9 +323,15 @@ async function main(): Promise<void> {
     const relative = file.slice(root.length + 1).replaceAll("\\", "/");
     let source: string;
     try {
+      // A file that is absent at the base ref is the ordinary case for new work, so
+      // git's "exists on disk, but not in <ref>" is expected here and not this gate's
+      // diagnostic to print. Without an explicit `stdio`, execFileSync forwards the
+      // child's stderr to ours, and a passing run then floods stderr with one `fatal:`
+      // per new file — which is what makes a real failure in that stream unreadable.
       source = execFileSync("git", ["show", `${basis.ref}:${relative}`], {
         cwd: root,
         encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
       });
     } catch {
       continue; // file did not exist at base (new file)
