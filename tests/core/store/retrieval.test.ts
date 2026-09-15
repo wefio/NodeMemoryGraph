@@ -42,6 +42,45 @@ test("searchContext returns results and relations for a lexical query", () => {
   });
 });
 
+test("relevanceFloor gates disclosed results and may abstain", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Atlas uses SQLite for persistence",
+      nodeName: "Atlas storage",
+      memoryType: "constraint",
+      importance: 0.9,
+    });
+    const ungated = store.searchContext("SQLite persistence");
+    assert.ok(ungated.results.length >= 1, "ungated search keeps the result");
+    // A floor above every bounded relevance returns nothing: k is a maximum.
+    const gated = store.searchContext("SQLite persistence", { relevanceFloor: 1 });
+    assert.equal(gated.results.length, 0, "floor above every score abstains");
+  });
+});
+
+test("relevanceModel gates disclosed results after the program gate", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Atlas uses SQLite for persistence",
+      nodeName: "Atlas storage",
+      memoryType: "constraint",
+      importance: 0.9,
+    });
+    const ungated = store.searchContext("SQLite persistence");
+    assert.ok(ungated.results.length >= 1);
+    const rejected = store.searchContext("SQLite persistence", {
+      relevanceModel: { predict: () => 0 },
+      relevanceModelFloor: 0.5,
+    });
+    assert.equal(rejected.results.length, 0, "model rejecting every candidate abstains");
+    const accepted = store.searchContext("SQLite persistence", {
+      relevanceModel: { predict: () => 1 },
+      relevanceModelFloor: 0.5,
+    });
+    assert.equal(accepted.results.length, ungated.results.length, "model accepting keeps the set");
+  });
+});
+
 test("searchContext returns results sorted by contextUsefulness", () => {
   withStore((store) => {
     store.remember({
@@ -142,7 +181,9 @@ test("FTS5 recalls a memory by an explicit recall trigger without exposing a dup
     });
 
     assert.deepEqual(
-      context.results.filter((result) => result.memory.id === saved.memory.id).map((result) => result.memory.id),
+      context.results
+        .filter((result) => result.memory.id === saved.memory.id)
+        .map((result) => result.memory.id),
       [saved.memory.id],
     );
   });
