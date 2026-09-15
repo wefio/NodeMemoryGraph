@@ -193,6 +193,15 @@ function initialTensors(
   };
 }
 
+function trainingIdentity(state: RelevanceModelState | undefined, options: ModelOptions) {
+  return {
+    domain: state?.domain ?? options.domain ?? "",
+    labelSource: state?.labelSource ?? options.labelSource ?? "",
+    unit: state?.unit ?? options.unit ?? "",
+    trainedAt: state?.trainedAt ?? options.trainedAt ?? "",
+  };
+}
+
 export class RelevanceModel {
   readonly featureCount: number;
   readonly hidden: number;
@@ -225,10 +234,11 @@ export class RelevanceModel {
     this.hidden = state?.hidden ?? options.hidden ?? 8;
     this.blocks = [...(state?.blocks ?? options.blocks ?? [])];
     this.embedder = state?.embedder ?? options.embedder ?? "";
-    this.domain = state?.domain ?? options.domain ?? "";
-    this.labelSource = state?.labelSource ?? options.labelSource ?? "";
-    this.unit = state?.unit ?? options.unit ?? "";
-    this.trainedAt = state?.trainedAt ?? options.trainedAt ?? "";
+    const identity = trainingIdentity(state, options);
+    this.domain = identity.domain;
+    this.labelSource = identity.labelSource;
+    this.unit = identity.unit;
+    this.trainedAt = identity.trainedAt;
     this.targetCoverage = state?.targetCoverage ?? options.targetCoverage ?? 0;
     const normalization = initialNormalization(state, options, this.featureCount);
     this.#mean = normalization.mean;

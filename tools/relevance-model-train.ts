@@ -1,10 +1,15 @@
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { DATASET_NAMES, loadDataset, type DatasetName } from "../evals/retrieval/datasets.ts";
-import { normalizeText } from "../evals/retrieval/score.ts";
+import {
+  digest,
+  judgedExamples,
+  loadTrainingManifest,
+  retentionMetrics,
+  validateTrainingData,
+  type TrainingData,
+} from "./relevance-training-data.ts";
 import {
   columnsForBlocks,
   relevanceFeatureMatrix,
@@ -13,21 +18,21 @@ import {
 } from "../src/core/relevance-features.ts";
 import { composeQpp, computeQppComponents } from "../src/core/qpp.ts";
 import { NmgStore } from "../src/core/store.ts";
-import type { QppCandidate } from "../src/core/types.ts";
+import type { QppCandidate, QppComponents } from "../src/core/types.ts";
 import { createEmbeddingClientFromEnv } from "../src/core/embedding-provider.ts";
 import { searchMemoryContext, type QueryEmbeddingClient } from "../src/integration/search.ts";
 import {
   RelevanceModel,
   type RelevanceLoss,
-  type RelevanceTrainingExample,
+  type RelevanceTrainingResult,
   type RelevanceTrainingPair,
 } from "../src/lab/relevance-model.ts";
 
 /**
  * Offline trainer + evaluator for the learned (model-side) relevance gate.
  *
- * Builds (features, label) pairs from an already-ingested benchmark store with
- * gold relevance (no embedding service), splits by QUESTION, mines hard
+ * Builds attributable candidate datasets, requires an explicit cross-corpus
+ * train/cal/test manifest, mines hard
  * negatives, trains pointwise (BCE / focal) then optionally pairwise (RankNet),
  * fits Platt calibration on a validation split, and reports the AND / union
  * trade-off against the deterministic program gate (flat-list abstain on the
@@ -35,18 +40,15 @@ import {
  *
  * Usage:
  *   node --experimental-strip-types tools/relevance-model-train.ts \
- *     --dataset locomo --out ~/.nmg/relevance-model.json \
+ *     --manifest ./training.json --out ./.benchmarks/relevance/candidate.json \
  *     [--loss bce|focal] [--pairwise] [--hard-negatives 8] [--epochs 300]
  *     [--hidden 8] [--lr 0.1] [--json]
  *
- * `--certify` switches to risk-controlled gate selection instead of training a
- * shippable model: it certifies (set-level cut, model floor) pairs on a held-out
+ * `--certify` switches to risk-controlled gate analysis instead of writing an
+ * offline candidate: it assesses (set-level cut, model floor) pairs on a held-out
  * calibration split at a target selection-conditioned risk alpha and reports the
  * chosen pair on a test split (see `certifyPoints`).
  */
-
-const DATASET_NAMES_SET = new Set<string>(DATASET_NAMES);
-const CV_FLOOR = 0.002; // program gate: abstain only when the list is flat
 
 import { reciprocalRankFusion, type RankedRoute } from "../src/lab/rank-fusion.ts";
 
@@ -60,7 +62,9 @@ import { reciprocalRankFusion, type RankedRoute } from "../src/lab/rank-fusion.t
  */
 const RULE_ROUTES = ["bounded", "idf_coverage", "term_coverage", "vector"] as const;
 /** Index of the bounded [0,1] hybrid score inside the feature row. */
-const FEATURE_INDEX = new Map(RELEVANCE_FEATURE_NAMES.map((name, index) => [name, index]));
+const FEATURE_INDEX = new Map<string, number>(
+  RELEVANCE_FEATURE_NAMES.map((name, index) => [name, index]),
+);
 /**
  * Query-level features the gate controller reads. It answers "how far should the
  * gate open for this query?" from how much usable signal the candidate set
@@ -103,7 +107,7 @@ const QUANTILE_TARGETS = [0.1, 0.25, 0.5, 0.75, 0.9, 0.97];
 const ISO_ACCEPTANCE_LEVELS = [0.05, 0.1, 0.15, 0.2, 0.3, 0.5];
 
 interface Options {
-  dataset: DatasetName;
+  dataset: string;
   storeRoot: string;
   out: string;
   loss: RelevanceLoss;
@@ -114,8 +118,12 @@ interface Options {
   learningRate: number;
   json: boolean;
   cache?: string;
-  /** Directory of a BEIR-style qrels dataset (corpus.jsonl/queries.jsonl/qrels/test.tsv). */
+  /** Directory of a BEIR-style qrels dataset; partition is explicit below. */
   qrels?: string;
+  qrelsSplit: string;
+  prepareOnly: boolean;
+  manifest?: string;
+  minRetention: number;
   certify: boolean;
   alphas: number[];
   delta: number;
@@ -140,9 +148,9 @@ interface Options {
 }
 
 const DEFAULT_OPTIONS: Options = {
-  dataset: "locomo",
+  dataset: "manifest",
   storeRoot: ".benchmarks/retrieval-stores",
-  out: resolve(process.env.HOME ?? process.cwd(), ".nmg", "relevance-model.json"),
+  out: resolve(".benchmarks/relevance/candidate.json"),
   loss: "bce",
   pairwise: false,
   hardNegatives: 8,
@@ -163,6 +171,9 @@ const DEFAULT_OPTIONS: Options = {
   risk: "question",
   embeddings: false,
   embedder: "",
+  qrelsSplit: "train",
+  prepareOnly: false,
+  minRetention: 1,
 };
 
 /** Strict comma-separated number list; a malformed list must not become [] . */
@@ -182,13 +193,6 @@ interface FlagSpec {
 
 /** Every accepted flag, its arity, and how it lands in {@link Options}. */
 const FLAGS: Record<string, FlagSpec> = {
-  "--dataset": {
-    takesValue: true,
-    apply: (options, value) => {
-      if (!DATASET_NAMES_SET.has(value)) throw new Error(`unknown dataset: ${value}`);
-      options.dataset = value as DatasetName;
-    },
-  },
   "--store-root": {
     takesValue: true,
     apply: (options, value) => {
@@ -229,6 +233,19 @@ const FLAGS: Record<string, FlagSpec> = {
   "--qrels": {
     takesValue: true,
     apply: (options, value) => void (options.qrels = value),
+  },
+  "--qrels-split": {
+    takesValue: true,
+    apply: (options, value) => void (options.qrelsSplit = value),
+  },
+  "--prepare-only": { takesValue: false, apply: (options) => void (options.prepareOnly = true) },
+  "--manifest": {
+    takesValue: true,
+    apply: (options, value) => void (options.manifest = resolve(value)),
+  },
+  "--min-retention": {
+    takesValue: true,
+    apply: (options, value) => void (options.minRetention = Number(value)),
   },
   "--cache": {
     takesValue: true,
@@ -296,7 +313,10 @@ function parseArgs(argv: string[]): Options {
     const flag = argv[index]!;
     const spec = FLAGS[flag];
     if (!spec) throw new Error(`unknown option: ${flag}`);
-    spec.apply(options, spec.takesValue ? (argv[++index] ?? "") : "");
+    const value = spec.takesValue ? argv[++index] : "";
+    if (spec.takesValue && (!value || value.startsWith("--")))
+      throw new Error(`${flag} requires a value`);
+    spec.apply(options, value ?? "");
   }
   return options;
 }
@@ -325,14 +345,9 @@ function itemHeadProvenance(options: Options): { blocks: FeatureBlockId[]; embed
  * to prevent.
  */
 function embeddingForRun(options: Options): QueryEmbeddingClient | undefined {
-  let client: QueryEmbeddingClient | undefined;
-  try {
-    client = createEmbeddingClientFromEnv(process.env) as QueryEmbeddingClient | undefined;
-  } catch (error) {
-    if (options.embeddings) throw error;
-    return undefined;
-  }
-  if (!options.embeddings) return client;
+  if (!options.embeddings) return undefined;
+  if (!options.embedder) throw new Error("--embeddings requires --embedder <indexId>");
+  const client = createEmbeddingClientFromEnv(process.env) as QueryEmbeddingClient | undefined;
   if (!client) {
     throw new Error("--embeddings requires a configured embedding provider (NMG_EMBED_*)");
   }
@@ -353,8 +368,6 @@ function buildItemModel(options: Options): RelevanceModel {
   });
 }
 
-const userKey = (userId: string) => createHash("sha256").update(userId).digest("hex").slice(0, 24);
-
 interface Group {
   /** The query text this list answers; absent in caches written before it was kept. */
   query?: string;
@@ -362,65 +375,6 @@ interface Group {
   labels: number[];
   /** Raw first-stage score per candidate (for the program gate cv + hard negs). */
   raw: number[];
-}
-
-async function buildGroups(
-  options: Options,
-  embedding: QueryEmbeddingClient | undefined,
-): Promise<Group[]> {
-  const spec = loadDataset(options.dataset, {});
-  const root = resolve(options.storeRoot, options.dataset);
-  if (!existsSync(root)) {
-    throw new Error(
-      `no ingested store at ${root}; run \`npm run eval:retrieval -- --dataset ${options.dataset}\``,
-    );
-  }
-  const stores = new Map<string, NmgStore>();
-  const getStore = (userId: string): NmgStore | null => {
-    const path = resolve(root, `${userKey(userId)}.sqlite`);
-    if (!existsSync(path)) return null;
-    let store = stores.get(path);
-    if (!store) {
-      store = new NmgStore(path);
-      stores.set(path, store);
-    }
-    return store;
-  };
-  const groups: Group[] = [];
-  for (const question of spec.questions) {
-    const store = getStore(question.userId);
-    if (!store) continue;
-    const context = await searchMemoryContext(store, embedding, question.query, {
-      limit: 20,
-      maxTier: 3,
-      graphHops: 1,
-      tieredDisclosure: true,
-      progressiveWarmDisclosure: false,
-      expandChains: true,
-    });
-    if (context.results.length === 0) continue;
-    const golds = question.golds.map(normalizeText).filter((gold) => gold.length > 0);
-    const features = relevanceFeatureMatrix(question.query, context.results);
-    const labels = context.results.map((result) => {
-      const text = normalizeText(
-        [result.memory.statement, ...(result.evidenceRecords ?? []).map((e) => e.content)].join(
-          " ",
-        ),
-      );
-      return golds.some((gold) =>
-        spec.direction === "gold-in-candidate" ? text.includes(gold) : gold.includes(text),
-      )
-        ? 1
-        : 0;
-    });
-    groups.push({
-      features,
-      labels,
-      raw: features.map((row) => Math.expm1(row[0]!)),
-    });
-  }
-  for (const store of stores.values()) store.close();
-  return groups;
 }
 
 function cvOf(values: number[]): number {
@@ -459,57 +413,6 @@ function expectedCalibrationError(scores: number[], labels: number[], bins = 10)
     total += (indices.length / scores.length) * Math.abs(confidence - accuracy);
   }
   return total;
-}
-
-function gateSweep(groups: Group[], model: RelevanceModel, floor: number) {
-  let kept = 0;
-  let keptPositive = 0;
-  let hitRecallKept = 0;
-  let totalHit = 0;
-  for (const group of groups) {
-    const keep = group.features
-      .map((_, index) => index)
-      .filter((index) => model.predict(group.features[index]!) >= floor);
-    kept += keep.length;
-    keptPositive += keep.filter((index) => group.labels[index] === 1).length;
-    if (group.labels.some((label) => label === 1)) {
-      totalHit += 1;
-      if (keep.some((index) => group.labels[index] === 1)) hitRecallKept += 1;
-    }
-  }
-  return {
-    floor,
-    kept,
-    keptPrecision: kept === 0 ? 0 : keptPositive / kept,
-    hitRecallKept: totalHit === 0 ? 0 : hitRecallKept / totalHit,
-  };
-}
-
-function compositionSweep(groups: Group[], model: RelevanceModel, floor: number) {
-  let totalHit = 0;
-  let program = 0;
-  let learned = 0;
-  let intersection = 0;
-  let union = 0;
-  for (const group of groups) {
-    if (!group.labels.some((label) => label === 1)) continue;
-    totalHit += 1;
-    const programKeeps = cvOf(group.raw) >= CV_FLOOR;
-    const learnedKeeps = group.labels.some(
-      (label, index) => label === 1 && model.predict(group.features[index]!) >= floor,
-    );
-    if (programKeeps) program += 1;
-    if (learnedKeeps) learned += 1;
-    if (programKeeps && learnedKeeps) intersection += 1;
-    if (programKeeps || learnedKeeps) union += 1;
-  }
-  return {
-    totalHit,
-    program: program / totalHit,
-    learned: learned / totalHit,
-    intersection: intersection / totalHit,
-    union: union / totalHit,
-  };
 }
 
 /**
@@ -1026,19 +929,29 @@ function readJsonl<T>(path: string): T[] {
     .map((line) => JSON.parse(line) as T);
 }
 
-/** TSV `query-id, corpus-id, score`; a score >= 1 is a positive judgment. */
-function readQrels(path: string): Map<string, Set<string>> {
+/** Preserve explicit zero judgments; absent judgments stay unknown. */
+export function readQrels(path: string): Map<string, Map<string, number>> {
   const lines = readFileSync(path, "utf8").trim().split(/\r?\n/);
   if (lines.length < 2) throw new Error(`${path} carries no judgments`);
-  const byQuery = new Map<string, Set<string>>();
+  const byQuery = new Map<string, Map<string, number>>();
   for (const line of lines.slice(1)) {
     const [queryId, corpusId, score] = line.split("\t");
-    if (!queryId || !corpusId || Number(score) < 1) continue;
-    const judged = byQuery.get(queryId) ?? new Set<string>();
-    judged.add(corpusId);
+    if (
+      !queryId ||
+      !corpusId ||
+      !score?.trim() ||
+      !Number.isFinite(Number(score)) ||
+      Number(score) < 0
+    )
+      throw new Error(`invalid qrel: ${line}`);
+    const judged = byQuery.get(queryId) ?? new Map<string, number>();
+    const label = Number(score) >= 1 ? 1 : 0;
+    if (judged.has(corpusId) && judged.get(corpusId) !== label)
+      throw new Error(`conflicting qrel: ${queryId}/${corpusId}`);
+    judged.set(corpusId, label);
     byQuery.set(queryId, judged);
   }
-  if (byQuery.size === 0) throw new Error(`${path} has no positive judgments`);
+  if (byQuery.size === 0) throw new Error(`${path} has no judgments`);
   return byQuery;
 }
 
@@ -1047,7 +960,7 @@ function ingestQrelsDocs(store: NmgStore, docs: readonly QrelsDoc[], project: st
   const startedAt = Date.now();
   for (let start = 0; start < docs.length; start += QRELS_BATCH) {
     const batch = docs.slice(start, start + QRELS_BATCH).map((doc) => ({
-      statement: `${doc.title ? `${doc.title}. ` : ""}${doc.text ?? ""}`.slice(0, 4000),
+      statement: `${doc.title ? `${doc.title}. ` : ""}${doc.text ?? ""}`,
       nodeName: `${QRELS_NODE_PREFIX}${doc._id}`,
       truthStatus: "verified" as const,
       scope: { project },
@@ -1065,16 +978,14 @@ function ingestQrelsDocs(store: NmgStore, docs: readonly QrelsDoc[], project: st
   return written;
 }
 
-/** Candidate groups over a qrels corpus, built through the production search. */
-async function buildQrelsGroups(
-  options: Options,
-  embedding: QueryEmbeddingClient | undefined,
-): Promise<Group[]> {
+function qrelsInputs(options: Options) {
   const dir = options.qrels;
   if (!dir) throw new Error("--qrels needs a directory");
   const corpusPath = resolve(dir, "corpus.jsonl");
   const queriesPath = resolve(dir, "queries.jsonl");
-  const qrelsPath = resolve(dir, "qrels/test.tsv");
+  if (!/^[a-zA-Z0-9_-]+$/.test(options.qrelsSplit))
+    throw new Error("--qrels-split must name a partition (train/dev/test)");
+  const qrelsPath = resolve(dir, `qrels/${options.qrelsSplit}.tsv`);
   for (const path of [corpusPath, queriesPath, qrelsPath]) {
     if (!existsSync(path)) throw new Error(`missing ${path}`);
   }
@@ -1083,29 +994,43 @@ async function buildQrelsGroups(
   const qrels = readQrels(qrelsPath);
   if (docs.length === 0 || queries.length === 0) throw new Error("empty corpus or queries");
   const project = basename(resolve(dir));
-  const dbPath = resolve(options.storeRoot, `qrels-${project}.sqlite`);
+  return { corpusPath, queriesPath, qrelsPath, docs, queries, qrels, project };
+}
+
+/** Candidate groups over a qrels corpus, built through the production search. */
+async function buildQrelsGroups(
+  options: Options,
+  embedding: QueryEmbeddingClient | undefined,
+): Promise<TrainingData> {
+  const { corpusPath, queriesPath, qrelsPath, docs, queries, qrels, project } =
+    qrelsInputs(options);
+  const corpusDigest = digest(readFileSync(corpusPath));
+  mkdirSync(options.storeRoot, { recursive: true });
+  const dbPath = resolve(options.storeRoot, `qrels-${project}-${corpusDigest.slice(0, 16)}.sqlite`);
   // Ingest is a ONE-TIME cost (thousands of rememberMany calls) and the store
-  // persists, so a run is reused. A completion marker keyed to the corpus size
+  // persists, so a run is reused. A completion marker keyed to the corpus content
   // is what makes reuse safe: a store that exists but carries fewer documents
   // (an interrupted ingest) would otherwise be searched silently.
   const markerPath = `${dbPath}.complete`;
   const complete =
-    existsSync(markerPath) && readFileSync(markerPath, "utf8").trim() === String(docs.length);
+    existsSync(dbPath) &&
+    existsSync(markerPath) &&
+    readFileSync(markerPath, "utf8").trim() === corpusDigest;
   if (!complete && existsSync(dbPath)) rmSync(dbPath, { force: true });
   const store = new NmgStore(dbPath);
-  const groups: Group[] = [];
+  const groups: TrainingData["groups"] = [];
   try {
     if (!complete) {
       const written = ingestQrelsDocs(store, docs, project);
       if (written !== docs.length) {
         throw new Error(`ingested ${written}/${docs.length} documents — refusing a partial store`);
       }
-      writeFileSync(markerPath, String(docs.length), "utf8");
+      writeFileSync(markerPath, corpusDigest, "utf8");
     }
     let judgedSeen = 0;
     for (const query of queries) {
-      const positives = qrels.get(query._id);
-      if (!positives) continue;
+      const judgments = qrels.get(query._id);
+      if (!judgments) continue;
       const context = await searchMemoryContext(store, embedding, query.text, {
         limit: 20,
         maxTier: 3,
@@ -1115,25 +1040,23 @@ async function buildQrelsGroups(
         expandChains: true,
         scope: { project },
       });
-      if (context.results.length === 0) continue;
       const features = relevanceFeatureMatrix(query.text, context.results);
-      const labels = context.results.map((result) =>
-        positives.has(result.node.canonicalName.slice(QRELS_NODE_PREFIX.length)) ? 1 : 0,
+      const candidateIds = context.results.map((result) =>
+        result.node.canonicalName.slice(QRELS_NODE_PREFIX.length),
       );
+      const labels = candidateIds.map((id) => judgments.get(id) ?? -1);
       if (labels.some((label) => label === 1)) judgedSeen += 1;
       groups.push({
         features,
         labels,
         query: query.text,
+        queryId: query._id,
+        sourceUnitId: query._id,
+        candidateIds,
         raw: features.map((row) => Math.expm1(row[0]!)),
       });
     }
-    if (judgedSeen === 0) {
-      throw new Error(
-        `no query surfaced a judged document (${queries.length} queries, ${qrels.size} judged): the store scope or the ingest is wrong`,
-      );
-    }
-    process.stdout.write(
+    process.stderr.write(
       `qrels ingest: ${docs.length} docs, ${queries.length} queries, ${qrels.size} judged queries` +
         ` -> ${groups.length} groups, ${judgedSeen} with a positive candidate
 `,
@@ -1141,20 +1064,37 @@ async function buildQrelsGroups(
   } finally {
     store.close();
   }
-  return groups;
+  return validateTrainingData({
+    version: 1,
+    corpusId: project,
+    corpusDigest,
+    labelSource: "qrels",
+    labelEvidence: `${qrelsPath} sha256:${digest(readFileSync(qrelsPath))}; queries sha256:${digest(readFileSync(queriesPath))}`,
+    sourceSplit: options.qrelsSplit,
+    featureNames: [...RELEVANCE_FEATURE_NAMES],
+    retrieval: {
+      protocol: "nmg-relevance-v1:k20:tier3:hop1:chains",
+      embedder: embedding?.indexId ?? "none",
+    },
+    groups,
+  });
 }
 
-async function loadGroups(options: Options): Promise<Group[]> {
-  const cache = options.cache ?? resolve(options.storeRoot, `${options.dataset}-groups.json`);
-  if (existsSync(cache)) {
-    return JSON.parse(readFileSync(cache, "utf8")) as Group[];
-  }
-  const groups = options.qrels
-    ? await buildQrelsGroups(options, embeddingForRun(options))
-    : await buildGroups(options, embeddingForRun(options));
+async function prepareTrainingData(options: Options): Promise<number> {
+  if (!options.qrels || !options.cache)
+    throw new Error(
+      "--prepare-only requires --qrels <directory> --qrels-split <partition> --cache <new-file>",
+    );
+  const cache = options.cache;
+  if (existsSync(cache))
+    throw new Error(`dataset already exists: ${cache}; use a new output to preserve provenance`);
+  const data = await buildQrelsGroups(options, embeddingForRun(options));
   mkdirSync(dirname(cache), { recursive: true });
-  writeFileSync(cache, JSON.stringify(groups), "utf8");
-  return groups;
+  writeFileSync(cache, JSON.stringify(data), { encoding: "utf8", flag: "wx" });
+  process.stdout.write(
+    `${JSON.stringify({ cache, corpus: data.corpusId, split: data.sourceSplit, ...retentionMetrics(data.groups, (group) => group.labels.map((_, index) => index)) })}\n`,
+  );
+  return 0;
 }
 
 function formatPoint(point: LatticePoint | undefined): string {
@@ -1298,19 +1238,6 @@ interface CertSplit {
   test: Group[];
 }
 
-/** Every fifth question to test, the next fifth to calibration, the rest to training. */
-function certificationSplit(groups: readonly Group[], offset = 0): CertSplit {
-  const split: CertSplit = { train: [], cal: [], test: [] };
-  groups.forEach((group, index) => {
-    const slot = (index + offset) % 5;
-    (slot === 0 ? split.test : slot === 1 ? split.cal : split.train).push(group);
-  });
-  if (split.train.length === 0 || split.cal.length === 0 || split.test.length === 0) {
-    throw new Error("certification split produced an empty side");
-  }
-  return split;
-}
-
 interface FamilyResult {
   family: LatticePoint["family"];
   point?: LatticePoint;
@@ -1392,7 +1319,7 @@ function isoLines(
  * signal (raw cv or the product's QPP score), which cut, and whether the model
  * gate buys any acceptance at a certified risk.
  */
-async function runCertification(options: Options, groups: Group[]): Promise<number> {
+function validateCertificationOptions(options: Options) {
   for (const alpha of options.alphas) {
     if (!(alpha > 0 && alpha < 1))
       throw new Error(`--alphas values must be in (0,1), got ${alpha}`);
@@ -1405,12 +1332,19 @@ async function runCertification(options: Options, groups: Group[]): Promise<numb
       throw new Error(`--fusion-weights must be in [0,1], got ${weight}`);
     }
   }
+}
+
+async function runCertification(
+  options: Options,
+  split: CertSplit,
+  provenance: unknown,
+): Promise<number> {
+  validateCertificationOptions(options);
+  const groups = [...split.train, ...split.cal, ...split.test];
+  if (groups.some((group) => group.labels.includes(-1)))
+    throw new Error("certification requires complete candidate judgments; unknown is not noise");
   const unit: RiskUnit = options.risk;
-  const {
-    train: trainGroups,
-    cal: calGroups,
-    test: testGroups,
-  } = certificationSplit(groups, options.splitOffset);
+  const { train: trainGroups, cal: calGroups, test: testGroups } = split;
   const examples = trainGroups.flatMap((group) =>
     group.features.map((features, row) => ({ features, label: group.labels[row] as 0 | 1 })),
   );
@@ -1431,19 +1365,19 @@ async function runCertification(options: Options, groups: Group[]): Promise<numb
     cv:
       options.cvCuts ??
       quantileCuts(
-        cal.map((entry) => entry.cv),
+        certGroups(trainGroups).map((entry) => entry.cv),
         QUANTILE_TARGETS,
       ),
     qpp:
       options.qppCuts ??
       quantileCuts(
-        cal.map((entry) => entry.qpp),
+        certGroups(trainGroups).map((entry) => entry.qpp),
         QUANTILE_TARGETS,
       ),
     controller:
       options.controllerCuts ??
       quantileCuts(
-        cal.map((entry) => controllerScore(entry, models)!),
+        certGroups(trainGroups).map((entry) => controllerScore(entry, models)!),
         QUANTILE_TARGETS,
       ),
     // Fusion weights are absolute (a convex weight), not data-derived cuts: a
@@ -1459,7 +1393,7 @@ async function runCertification(options: Options, groups: Group[]): Promise<numb
         // per-query maximum is nearly constant (a unanimous rank-1 candidate
         // scores the same in every query), which collapses the ladder to two
         // values and therefore to "keep everything" or "keep nothing".
-        cal.flatMap((entry) => [...rrfScores(entry).values()]),
+        certGroups(trainGroups).flatMap((entry) => [...rrfScores(entry).values()]),
         QUANTILE_TARGETS,
       ),
   };
@@ -1513,6 +1447,8 @@ async function runCertification(options: Options, groups: Group[]): Promise<numb
       `${JSON.stringify(
         {
           dataset: options.dataset,
+          provenance,
+          deploymentEligible: false,
           blocks: model.blocks,
           embedder: model.embedder,
           groups: groups.length,
@@ -1535,40 +1471,100 @@ async function runCertification(options: Options, groups: Group[]): Promise<numb
   return 0;
 }
 
+function validateTrainingOptions(options: Options) {
+  if (!(options.minRetention > 0 && options.minRetention <= 1))
+    throw new Error("--min-retention must be in (0,1]");
+  if (
+    !Number.isInteger(options.epochs) ||
+    options.epochs < 1 ||
+    !Number.isInteger(options.hidden) ||
+    options.hidden < 1 ||
+    !(options.learningRate > 0) ||
+    !Number.isFinite(options.learningRate)
+  )
+    throw new Error("epochs/hidden must be positive integers and lr must be finite and positive");
+}
+
 async function main(argv: string[]): Promise<number> {
   const options = parseArgs(argv);
-  // A qrels run must not report itself under the default --dataset name: the
-  // label is the only thing tying a number to the corpus it came from.
-  if (options.qrels) options.dataset = basename(resolve(options.qrels)) as Options["dataset"];
-  else if (options.cache) {
-    // A certification run over a cache built by --qrels inherits the corpus from
-    // the cache filename; otherwise its numbers look like another corpus.
-    const fromCache = basename(options.cache).match(/^qrels-(.+)-groups\.json$/);
-    if (fromCache) options.dataset = fromCache[1] as Options["dataset"];
+  validateTrainingOptions(options);
+  if (options.prepareOnly) return prepareTrainingData(options);
+  if (!options.manifest)
+    throw new Error(
+      "training requires --manifest <train/cal/test.json>; anonymous caches and answer-string pseudo-labels cannot train a model",
+    );
+  if (options.cache || options.qrels || options.splitOffset !== 0)
+    throw new Error(
+      "--manifest cannot be mixed with --cache, --qrels or split rotation; declare roles in the manifest",
+    );
+  const split = loadTrainingManifest(options.manifest);
+  const provenance = split.provenance;
+  const expectedEmbedder = provenance.retrieval.embedder;
+  if (options.embeddings && options.embedder !== expectedEmbedder)
+    throw new Error("--embedder differs from the dataset retrieval protocol");
+  options.dataset = [...new Set(provenance.sources.map((source) => source.corpusId))].join(
+    "+",
+  ) as Options["dataset"];
+  if (options.certify) {
+    if (!split.independentEvaluationUnits)
+      throw new Error(
+        "certification requires one query per source unit in cal/test; related variants are not independent trials",
+      );
+    return runCertification(options, split, provenance);
   }
-  const groups = await loadGroups(options);
+  return runTraining(options, split);
+}
+
+function trainHardNegatives(
+  model: RelevanceModel,
+  groups: Group[],
+  options: Options,
+): RelevanceTrainingResult | undefined {
+  if (!options.pairwise) return undefined;
+  const pairs: RelevanceTrainingPair[] = [];
+  for (const group of groups) {
+    const positiveIdx = group.labels
+      .map((label, index) => (label === 1 ? index : -1))
+      .filter((index) => index >= 0);
+    const negativeIdx = group.labels
+      .map((label, index) => (label === 0 ? index : -1))
+      .filter((index) => index >= 0)
+      .sort((a, b) => group.raw[b]! - group.raw[a]!)
+      .slice(0, options.hardNegatives);
+    for (const p of positiveIdx)
+      for (const n of negativeIdx)
+        pairs.push({ positiveFeatures: group.features[p]!, negativeFeatures: group.features[n]! });
+  }
+  return pairs.length > 0 ? model.trainPairs(pairs, { epochs: 60, learningRate: 0.05 }) : undefined;
+}
+
+function runTraining(options: Options, split: ReturnType<typeof loadTrainingManifest>): number {
+  const provenance = split.provenance;
+  const groups = [...split.train, ...split.cal, ...split.test];
   const positives = groups.reduce(
-    (sum, group) => sum + group.labels.filter((l) => l === 1).length,
+    (sum, group) => sum + group.labels.filter((label) => label === 1).length,
     0,
   );
-  if (positives === 0) throw new Error(`${options.dataset}: no gold hits — nothing to learn from`);
-  if (options.certify) return runCertification(options, groups);
 
-  const trainGroups: Group[] = [];
-  const valGroups: Group[] = [];
-  const testGroups: Group[] = [];
-  groups.forEach((group, index) => {
-    (index % 5 === 0 ? testGroups : index % 5 === 1 ? valGroups : trainGroups).push(group);
-  });
-  const flatten = (sets: Group[]): RelevanceTrainingExample[] =>
-    sets.flatMap((group) =>
-      group.features.map((features, row) => ({ features, label: group.labels[row] as 0 | 1 })),
-    );
-  const train = flatten(trainGroups);
-  const validation = flatten(valGroups);
-  const test = flatten(testGroups);
+  const { train: trainGroups, cal: valGroups, test: testGroups } = split;
+  const train = judgedExamples(trainGroups);
+  const validation = judgedExamples(valGroups);
+  const test = judgedExamples(testGroups);
   if (train.length === 0 || validation.length === 0 || test.length === 0) {
     throw new Error("split produced an empty side");
+  }
+  for (const [role, examples] of [
+    ["train", train],
+    ["cal", validation],
+    ["test", test],
+  ] as const) {
+    if (
+      !examples.some((example) => example.label === 0) ||
+      !examples.some((example) => example.label === 1)
+    )
+      throw new Error(
+        `${role} needs explicit positive AND negative judgments; do not fill unknown labels with zero`,
+      );
   }
 
   const model = buildItemModel(options);
@@ -1582,28 +1578,7 @@ async function main(argv: string[]): Promise<number> {
   // Hard-negative mining: per query with a positive, the negatives the first
   // stage ranked highest are the "semantically close but wrong" cases that the
   // live store is full of.
-  let pairwise: RelevanceTrainingResult | undefined;
-  if (options.pairwise) {
-    const pairs: RelevanceTrainingPair[] = [];
-    for (const group of trainGroups) {
-      const positiveIdx = group.labels.map((l, i) => (l === 1 ? i : -1)).filter((i) => i >= 0);
-      if (positiveIdx.length === 0) continue;
-      const negativeIdx = group.labels
-        .map((l, i) => (l === 0 ? i : -1))
-        .filter((i) => i >= 0)
-        .sort((a, b) => group.raw[b]! - group.raw[a]!)
-        .slice(0, options.hardNegatives);
-      for (const p of positiveIdx) {
-        for (const n of negativeIdx) {
-          pairs.push({
-            positiveFeatures: group.features[p]!,
-            negativeFeatures: group.features[n]!,
-          });
-        }
-      }
-    }
-    if (pairs.length > 0) pairwise = model.trainPairs(pairs, { epochs: 60, learningRate: 0.05 });
-  }
+  const pairwise = trainHardNegatives(model, trainGroups, options);
 
   const calibration = model.fitCalibration(validation);
   const afterTest = test.map((example) => model.predict(example.features));
@@ -1619,14 +1594,58 @@ async function main(argv: string[]): Promise<number> {
   const eceAfter = expectedCalibrationError(afterTest, testLabels);
   const brier = mean(afterTest.map((score, index) => (score - testLabels[index]!) ** 2));
 
-  const sweep = [0.2, 0.35, 0.5].map((floor) => gateSweep(testGroups, model, floor));
-  const composition = compositionSweep(testGroups, model, 0.5);
+  // Select only on calibration. Test sees one frozen operating point.
+  const select = (floor: number) => (group: Group) =>
+    group.features
+      .map((_, index) => index)
+      .filter((index) => model.predict(group.features[index]!) >= floor);
+  const calibrationPoints = [0, 0.2, 0.35, 0.5, 0.65, 0.8].map((floor) => ({
+    floor,
+    metrics: retentionMetrics(valGroups, select(floor)),
+  }));
+  const chosen = calibrationPoints
+    .filter(
+      (point) =>
+        (point.metrics.positiveRetention ?? 0) >= options.minRetention &&
+        (point.metrics.allPositiveRetention ?? 0) >= options.minRetention,
+    )
+    .sort(
+      (left, right) =>
+        (right.metrics.knownNoiseRemoved ?? 0) - (left.metrics.knownNoiseRemoved ?? 0) ||
+        left.floor - right.floor,
+    )[0]!;
+  const heldOut = retentionMetrics(testGroups, select(chosen.floor));
+  const testByCorpus = split.testDatasets.map((data) => ({
+    corpusId: data.corpusId,
+    sourceSplit: data.sourceSplit,
+    metrics: retentionMetrics(data.groups, select(chosen.floor)),
+  }));
 
   mkdirSync(dirname(options.out), { recursive: true });
-  writeFileSync(options.out, `${JSON.stringify(model.toJSON())}\n`, "utf8");
+  writeFileSync(
+    options.out,
+    `${JSON.stringify({ ...model.toJSON(), trainingProvenance: provenance, purpose: "offline-candidate" })}\n`,
+    "utf8",
+  );
 
   const report = {
     dataset: options.dataset,
+    provenance,
+    deploymentEligible: false,
+    baseline: retentionMetrics(testGroups, (group) => group.labels.map((_, index) => index)),
+    testByCorpus,
+    operatingPoint: {
+      selectedOn: "cal",
+      floor: chosen.floor,
+      minimumRetention: options.minRetention,
+      calibration: chosen.metrics,
+      test: heldOut,
+      retentionHolds: testByCorpus.every(
+        ({ metrics }) =>
+          (metrics.positiveRetention ?? 0) >= options.minRetention &&
+          (metrics.allPositiveRetention ?? 0) >= options.minRetention,
+      ),
+    },
     blocks: model.blocks,
     embedder: model.embedder,
     loss: options.loss,
@@ -1641,10 +1660,9 @@ async function main(argv: string[]): Promise<number> {
     aucAfter,
     eceAfter,
     brier,
-    gateSweep: sweep,
-    composition,
     out: options.out,
   };
+  writeFileSync(`${options.out}.report.json`, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   if (options.json) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
     return 0;
@@ -1654,8 +1672,7 @@ async function main(argv: string[]): Promise<number> {
       `  train ${train.length} / val ${validation.length} / test ${test.length}; loss=${training.loss.toFixed(4)}\n` +
       `  test AUC ${aucBefore.toFixed(3)} -> ${aucAfter.toFixed(3)} | ECE ${eceAfter.toFixed(3)} | Brier ${brier.toFixed(4)}\n` +
       `  calibration: scale=${calibration.scale.toFixed(3)} shift=${calibration.shift.toFixed(3)}\n` +
-      `  gate sweep: ${sweep.map((s) => `${s.floor}: prec=${s.keptPrecision.toFixed(3)} hitRecall=${s.hitRecallKept.toFixed(3)}`).join("; ")}\n` +
-      `  composition (gold questions, floor 0.5): program=${composition.program.toFixed(3)} learned=${composition.learned.toFixed(3)} AND=${composition.intersection.toFixed(3)} OR=${composition.union.toFixed(3)}\n` +
+      `  cross-corpus frozen floor ${chosen.floor}: ${JSON.stringify(heldOut)}\n` +
       `  model written to ${options.out}\n`,
   );
   return 0;

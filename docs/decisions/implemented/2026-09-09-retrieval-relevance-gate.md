@@ -36,6 +36,11 @@ selective classification / conformal abstention — is recorded in
 
 ## Decision
 
+Training-data provenance, independent evaluation and offline artifact output are
+governed by [independent relevance training](2026-09-15-independent-relevance-training.md).
+Historical measurements below retain their original label assumptions and are not
+model admission evidence.
+
 Two **loose** gates, ANDed. Each gate is deliberately loose — it removes only
 what it is good at removing — and a candidate enters context only if it passes
 **both**. A loose gate still rejects some noise; noise must therefore survive

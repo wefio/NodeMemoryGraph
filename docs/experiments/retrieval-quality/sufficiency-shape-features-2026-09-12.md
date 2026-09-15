@@ -159,6 +159,17 @@ requires a decision record and, if a new gate flag appears, a hidden-features re
 
 ## 8. Results so far (S4, S5)
 
+**Label audit (2026-09-15):** the local NFCorpus train/dev/test and SciFact
+train/test qrels contain no explicit zero-score judgments. The historical importer
+assigned zero to every candidate absent from the positive qrels. Consequently,
+the tables below use *assumed* negatives, not independently verified noise labels;
+they do not establish live noise reduction. The
+[training protocol](../../design/relevance-training.md) retains these candidates
+as unknown and refuses supervised fitting without explicit negative judgments.
+Rebuilding labeled datasets and cross-corpus evaluation are required before a new
+model-quality claim. The protocol's fixture tests exercise data isolation and
+reporting, not these benchmark scores.
+
 Head trained out of sample (5 folds, logistic on the 11 shape features); "coverage" is the
 fraction of queries left open after the threshold. Item precision is the share of injected
 items that are actually relevant, sufficient-recall the share of answerable queries whose
