@@ -247,6 +247,16 @@ interface Outcome {
   readonly mutants: readonly MutantOutcome[];
 }
 
+/** The failure lines a suite run reported. Used for both verdicts: a surviving mutant
+ *  and a clean run that failed. The clean run is the one that proves nothing, so
+ *  naming its failing case is what turns "the harness proves nothing" into a fix. */
+function observedFailures(out: string): string[] {
+  return out
+    .split("\n")
+    .filter((line) => line.startsWith("✖ ") || line.includes("Error"))
+    .slice(0, 3);
+}
+
 function runSuites(suites: readonly string[]): { ok: boolean; out: string } {
   try {
     const out = execFileSync(
@@ -303,7 +313,12 @@ for (const { target, suites, mutants } of selected) {
   }
   const original = readFileSync(target);
   const clean = runSuites(present);
-  if (!clean.ok) problems.push(`${target}: clean run failed, the harness proves nothing`);
+  if (!clean.ok)
+    problems.push(
+      `${target}: clean run failed, the harness proves nothing (observed: ${
+        observedFailures(clean.out).join(" | ") || "no failure line reported"
+      })`,
+    );
   const mutantOutcomes: MutantOutcome[] = [];
   for (const mutant of mutants) {
     const text = original.toString("utf8");
@@ -331,10 +346,7 @@ for (const { target, suites, mutants } of selected) {
         : { name: mutant.name, applicable: true, caught, note: "survived" },
     );
     if (!caught) {
-      const observed = result.out
-        .split("\n")
-        .filter((line) => line.startsWith("✖ ") || line.includes("Error"))
-        .slice(0, 3);
+      const observed = observedFailures(result.out);
       problems.push(
         `  mutant ${mutant.name}: NOT caught by "${mutant.expect}" (suite passed: ${result.ok}; observed: ${
           observed.join(" | ") || "no failure reported"
