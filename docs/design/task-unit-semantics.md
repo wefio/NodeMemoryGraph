@@ -315,6 +315,8 @@ board TTL 需要显式的运行保留关系：运行记录引用的交付/判定
 - [runCycle](../../src/integration/ooo-cycle.ts)拥有自建连接并在 finally 关闭；提前取消分支位于这个 finally 之前，只关闭 gate，遗漏默认临时数据库目录清理。借用模式不能照搬这些 close 路径，统一外层资源作用域也须覆盖初始化阶段。
 - `submit()` 在 `commitArtifact()` 后等待 `afterCommit` 并发布：后续异常发生时提交已经生效。接入接口需要明确提交结果与通知失败，不假定一次抛错证明数据库未提交。
 
+这三条依据在本分支上的当前状态与逐项证据见 [ooo-contract-obligations.md](../experiments/execution/ooo-contract-obligations.md) 的 D 组。
+
 迁移顺序是：先实现从既有契约与事实派生视图的纯函数；再注入共享事务 Store 与多轮命名空间，持久化最小 manifest/事实并接入受管理 board 生命周期与保留规则；最后让研究 runner 和薄适配经 daemon 调用。旧私有轮次只读保留作研究证据，不与新运行双写；需要重放时以新 runId 显式创建新轮次，不把旧 accepted 导入为新轮次接受。新运行身份与旧日志格式不兼容时明确拒绝，不能默默回放。
 
 ## 下一步可执行切片与停止条件

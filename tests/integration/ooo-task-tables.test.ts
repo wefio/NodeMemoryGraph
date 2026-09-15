@@ -151,6 +151,37 @@ test("the three tables hold the three kinds of fact, and a write lands in the ri
   assert.equal(view.artifact, null);
 });
 
+test("the frozen plan has one owner, and a second, different plan is refused", (t) => {
+  const { database } = fixture(t);
+  const frozen = (): Rows =>
+    rows(database, "SELECT * FROM ooo_probe_manifest WHERE run_id='split-run' ORDER BY id");
+  const before = frozen();
+  assert.equal(before.length, 2, "both tasks of the plan are frozen");
+
+  // The same two tasks in the other order are a different plan: the declared order is what the
+  // fallback dispatches by, so adopting it would silently replace the run's input.
+  const reordered: ProbePlan = [plan[1]!, plan[0]!];
+  assert.throws(
+    () => new BoardAdmission(database, reordered, specs, { runId: "split-run" }),
+    /probe policy changed/u,
+    "a second plan for a run that already has one is refused",
+  );
+  assert.deepEqual(
+    frozen(),
+    before,
+    "and the refused plan wrote nothing over the plan the run froze",
+  );
+
+  // The same plan is not a second one: reopening the run the store already holds is how a host
+  // continues a round, and it must not look like a new input.
+  const again = new BoardAdmission(database, plan, specs, { runId: "split-run" });
+  try {
+    assert.deepEqual(frozen(), before, "reopening with the same plan changes no frozen row");
+  } finally {
+    again.close();
+  }
+});
+
 test("deleting the derived cache and rebuilding it yields the same view", async (t) => {
   const { gate, database, deliver } = fixture(t);
   await deliver("A", "worker-one");

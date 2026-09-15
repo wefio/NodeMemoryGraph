@@ -80,6 +80,12 @@ test("one reader of the same ready task is given the claim, the second is refuse
   const gate = open("claim.sqlite", { runId: "run-claim" });
 
   assert.equal(gate.claim("A", "worker-one").owner, "worker-one");
+  const entryId = String(
+    rows(
+      database,
+      "SELECT entry_id FROM ooo_probe_task_view WHERE run_id='run-claim' AND id='A'",
+    )[0]!.entry_id,
+  );
 
   // The second reader of the same ready task is refused rather than handed the same work.
   assert.throws(() => gate.claim("A", "worker-two"));
@@ -89,6 +95,88 @@ test("one reader of the same ready task is given the claim, the second is refuse
     "worker-one",
     "the claim the store holds is the first one",
   );
+
+  // And the refusal is not the round's own bookkeeping. A second reader that reaches the board
+  // directly - the shape another process has, and the one the round's own check cannot see -
+  // must lose the same CAS. Without this the property holds only because one caller asked
+  // nicely, and the store would hand the same live claim to two readers.
+  const store = new NmgStore(database);
+  try {
+    assert.throws(
+      () => store.claimTaskBoardEntry({ taskId: gate.channel, entryId, agentId: "worker-two" }),
+      /already claimed by worker-one/u,
+      "the store refuses a live claim held by another reader",
+    );
+    assert.equal(
+      rows(
+        database,
+        "SELECT owner FROM ooo_probe_task_view WHERE run_id='run-claim' AND id='A'",
+      )[0]!.owner,
+      "worker-one",
+      "and the direct attempt did not reassign the round's own claim either",
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test("a claim the board retires inside the verification window cannot be committed", async (t) => {
+  const { directory, open } = scratch(t);
+  const database = join(directory, "retired.sqlite");
+  const gate = open("retired.sqlite", { runId: "run-retired" });
+  const ticket = gate.claim("A", "worker-one");
+  const entryId = String(
+    rows(
+      database,
+      "SELECT entry_id FROM ooo_probe_task_view WHERE run_id='run-retired' AND id='A'",
+    )[0]!.entry_id,
+  );
+
+  // The work is real and the host would accept it: the round is one transaction away from
+  // committing. What happens in between is another writer retiring the entry the round holds -
+  // verification is await-capable, which is exactly the window the design fences.
+  const artifact = JSON.stringify({
+    digest: ticket.patch!.digest,
+    files: [{ path: "a.ts", content: "export const a = 2;\n" }],
+  });
+  const result = gate.putTaskBoardEntry({
+    taskId: gate.channel,
+    agentId: "worker-one",
+    kind: "result",
+    content: JSON.stringify({ ticket, artifact }),
+    expiresAt: new Date(gate.now + 86_400).toISOString(),
+  });
+  gate.afterVerify = async () => {
+    const store = new NmgStore(database);
+    try {
+      store.resolveTaskBoardEntry({
+        taskId: gate.channel,
+        entryId,
+        agentId: "outsider",
+        resolution: "this entry is mine to close",
+      });
+    } finally {
+      store.close();
+    }
+  };
+
+  // The commit is where the claim is re-checked. A generic write cannot make the round ACCEPT
+  // anything - the board's own verbs are how an Agent works a handoff, so the fence is not that
+  // the write is impossible; it is that the decision taken before the wait is not applied after
+  // it. The retired attempt fails closed instead, and nothing is accepted on its behalf.
+  assert.equal(
+    await gate.submit(result.id),
+    "stale",
+    "an attempt whose claim was retired while it verified is stale, not committed",
+  );
+  assert.deepEqual(gate.accepted(), {}, "a retired attempt accepts nothing");
+  const after = rows(
+    database,
+    "SELECT owner, attempt, artifact FROM ooo_probe_task_view WHERE run_id='run-retired' AND id='A'",
+  )[0]!;
+  assert.equal(after.owner, "worker-one", "and the round's own claim is still its own fact");
+  assert.equal(after.attempt, 1, "the outsider's resolve opened no attempt either");
+  assert.equal(after.artifact, null, "no artifact bytes were written by the retired attempt");
 });
 
 test("a generic board claim on the round's entry leaves the round's own state alone", (t) => {

@@ -139,6 +139,7 @@ const TARGETS: readonly Target[] = [
       "tests/core/task-board-deliverable.test.ts",
       "tests/core/store-transaction-port.test.ts",
       "tests/core/store-readonly-open.test.ts",
+      "tests/integration/ooo-managed-fence.test.ts",
     ],
     mutants: [
       {
@@ -174,6 +175,16 @@ const TARGETS: readonly Target[] = [
         from: "    return this.writeTransaction(() => {",
         to: '    this.db.exec("BEGIN IMMEDIATE");\n    return this.writeTransaction(() => {',
         expect: "the store runs its transaction boundary in exactly one place",
+      },
+      {
+        // The claim CAS is the whole of the fence: a reader who cannot take a live claim must
+        // lose it, and the condition that says so is the only thing between two readers and the
+        // same work.
+        name: "a-live-claim-can-be-taken-by-another-agent",
+        ast: { within: "claimTaskBoardEntry" },
+        from: "           AND (\n             (claimed_by IS NULL OR claim_expires_at IS NULL OR claim_expires_at <= ?)\n             OR claimed_by = ?\n           )`,",
+        to: "           AND (\n             (claimed_by IS NULL OR claim_expires_at IS NULL OR claim_expires_at <= ?)\n             OR ? IS NOT NULL\n           )`,",
+        expect: "one reader of the same ready task is given the claim, the second is refused",
       },
       {
         name: "stale-claim-may-deliver-again",
@@ -215,6 +226,8 @@ const TARGETS: readonly Target[] = [
       "tests/integration/ooo-acceptance-one-predicate.test.ts",
       "tests/integration/ooo-round-query.test.ts",
       "tests/integration/ooo-ordinary-failure.test.ts",
+      "tests/integration/ooo-read-paths-agree.test.ts",
+      "tests/integration/ooo-managed-fence.test.ts",
     ],
     mutants: [
       {
@@ -306,6 +319,59 @@ const TARGETS: readonly Target[] = [
         from: "    // The artifact is being cleared, so the round no longer relies on this entry's\n    // verdict: the pins go with the value they protected.\n    this.releaseRowRetention(row);",
         to: "    // The artifact is being cleared, so the round no longer relies on this entry's\n    // verdict: the pins go with the value they protected.",
         expect: "cancelling a round releases the pins it held, so nothing it referenced leaks",
+      },
+      {
+        // The borrowed view is one implementation serving two paths. Letting the offline port
+        // answer from its own rule is exactly the divergence this target exists to catch.
+        name: "the-offline-reader-decides-acceptance-on-its-own",
+        ast: { within: "openRoundQuery" },
+        from: "      accepted: () => readAccepted(db, resolved),",
+        to: "      accepted: () => ({}),",
+        expect: "the owner's view and the offline reader report the same facts",
+      },
+      {
+        // Reopening withdraws what was built from the value that no longer exists. Clearing every
+        // accepted task instead takes back work the host already accepted.
+        name: "reopening-one-task-clears-every-acceptance",
+        ast: { within: "reopen" },
+        from: "      const affected = new Set([id]);",
+        to: "      const affected = new Set(rows.map((row) => row.id));",
+        expect: "a later refusal does not withdraw the prefix that was already accepted",
+      },
+      {
+        // The first decision is the one that took effect. A second cancellation that rewrites it
+        // is a state patch overwriting a terminal fact.
+        name: "a-second-cancellation-overwrites-the-first-decision",
+        ast: { within: "cancel" },
+        from: "    const already = this.cancelled();\n    if (already !== null) return [];",
+        to: "    const already = this.cancelled();\n    if (false && already !== null) return [];",
+        expect: "a cancellation names the lease it revokes, and the batch behind it is refused",
+      },
+      {
+        // The frozen plan is the run's input, and installing a second one over it is the second
+        // editable task truth the design forbids. The constructor refuses by policy digest.
+        name: "a-second-plan-silently-adopts-the-run",
+        from: "    if (recorded && recorded.policy !== wanted)",
+        to: "    if (false && recorded && recorded.policy !== wanted)",
+        expect: "the frozen plan has one owner, and a second, different plan is refused",
+      },
+      {
+        // Verification is await-capable, so a ticket can be retired while it runs. Dropping the
+        // re-check at the commit is how a decision made before the wait is applied after it.
+        name: "the-commit-trusts-a-claim-the-board-retired",
+        ast: { within: "commitArtifact" },
+        from: '      if (!this.live(row)) return "stale";',
+        to: '      if (false && !this.live(row)) return "stale";',
+        expect: "a claim the board retires inside the verification window cannot be committed",
+      },
+      {
+        // The decision is a fact in the store. Keeping it only in the process that made it is
+        // what would let a restart resume a stopped round.
+        name: "cancelling-a-round-forgets-its-reason",
+        ast: { within: "cancel" },
+        from: '        .prepare("UPDATE ooo_probe_runs SET cancel_reason=?, cancelled_at=? WHERE run_id=?")\n        .run(reason.slice(0, 1_000), new Date(this.now).toISOString(), this.runId);',
+        to: '        .prepare("UPDATE ooo_probe_runs SET cancel_reason=NULL, cancelled_at=? WHERE run_id=?")\n        .run(reason.slice(0, 1_000), new Date(this.now).toISOString(), this.runId);',
+        expect: "the terminal decision outlives the host that made it, and still refuses new work",
       },
     ],
   },
