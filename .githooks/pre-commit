@@ -5,10 +5,11 @@
 # Runs only on the files this commit stages; other authors' files are untouched,
 # so it is safe in a shared worktree. Requires prettier (devDependency).
 #
-# Scoped to the root Prettier surface only (src/, .pi/, workbuddy-plugin/) — the
-# exact paths format:check verifies. Sub-packages with their own style/format
-# pipeline (e.g. dsh/dsh-nmg) are deliberately excluded: root Prettier would
-# reformat the whole file and break their tooling/tests.
+# Scoped to the root Prettier surface — the exact paths `format:check` verifies, and
+# tests/tools/test-groups.test.ts asserts the two surfaces agree, so this comment
+# cannot drift from the check without a red test. Sub-packages with their own
+# style/format pipeline (e.g. dsh/dsh-nmg) are deliberately excluded: root Prettier
+# would reformat the whole file and break their tooling/tests.
 #
 # Configure once per clone:
 #   git config core.hooksPath .githooks
