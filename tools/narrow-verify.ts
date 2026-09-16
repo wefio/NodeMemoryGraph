@@ -3,11 +3,13 @@
 // Principle: verification is a composition of lightweight primitives over one
 // vocabulary. A change that is cleanly owned by one route's bounded domain runs
 // that route's OWN tests (node --test <route.tests>) plus the always-run shared
-// checks; a change touching any shared / cross-cutting file falls back to
-// the declared whole blocking set. When in doubt, run full — that is the whole
-// safety rule. No new executor: the tools the scripts wrap already accept the
-// narrow globs (route.tests), so this only adds route granularity + a coverage
-// rule, not machinery.
+// checks - unless that route declares the shared checks not applicable to its own
+// surface (`verify.sharedChecks: "none"`), which is a declaration its owner makes
+// and which never covers a shared/cross-cutting path; a change touching any shared /
+// cross-cutting file falls back to the declared whole blocking set. When in doubt, run
+// full - that is the whole safety rule. No new executor: the tools the scripts wrap
+// already accept the narrow globs (route.tests), so this only adds route granularity +
+// a coverage rule, not machinery.
 
 import { NARROW_SHARED_CHECKS } from "../src/rcp/providers.ts";
 
@@ -15,7 +17,7 @@ export interface RouteLike {
   id: string;
   paths: string[];
   tests: string[];
-  verify: { blocking: string[]; advisory: string[] };
+  verify: { blocking: string[]; advisory: string[]; sharedChecks?: "always" | "none" };
 }
 
 export interface NarrowVerifyPlan {
@@ -24,7 +26,8 @@ export interface NarrowVerifyPlan {
   narrow: boolean;
   /** The single owning route (only when narrow). */
   route?: RouteLike;
-  /** Always-run shared checks for any change. */
+  /** Always-run shared checks for any change, unless the owning route declares them not
+   *  applicable to its own surface (`verify.sharedChecks: "none"`). */
   shared: string[];
   /** node --test globs from the owning route's own tests (may be empty). */
   testGlobs: string[];
@@ -120,10 +123,14 @@ export function planNarrowVerify(
     };
   }
   const route = owners[0]!.route;
+  // The floor is the always-run shared checks. A route whose owner has declared it not applicable
+  // to that route's own surface drops it for a change the route solely owns; the route's own tests
+  // still run, and `verify.sharedChecks: "none"` is refused at config load unless they exist.
+  const declined = route.verify.sharedChecks === "none";
   return {
     narrow: true,
     route,
-    shared,
+    shared: declined ? [] : shared,
     testGlobs: route.tests,
   };
 }

@@ -192,6 +192,48 @@ test("route schema rejects duplicate ids and commands with conflicting classific
   );
 });
 
+test("verify.sharedChecks must be a known declaration, and declining needs its own tests", () => {
+  const root = fixture();
+  const write = (verify: string[]) =>
+    writeFileSync(
+      join(root, "agent-context.yaml"),
+      [
+        "version: 1",
+        "routes:",
+        "  - id: repository-tooling",
+        "    paths: [.gitignore]",
+        "    owners: []",
+        `    tests: ${verify[1]}`,
+        "    verify:",
+        "      blocking: [check]",
+        `      advisory: []`,
+        `      sharedChecks: ${verify[0]}`,
+        "",
+      ].join("\n"),
+    );
+
+  // A typo must not silently mean "always" (or silently mean "none").
+  write(["sometimes", "[tests/tools/**]"]);
+  assert.throws(
+    () => validateAgentContext(root),
+    /verify\.sharedChecks must be "always" or "none", not "sometimes"/,
+  );
+
+  // A route that declines the always-run shared checks and declares no tests of its own would leave
+  // a narrow plan with nothing to execute; a verification tool must never report that as a pass.
+  write(["none", "[]"]);
+  assert.throws(
+    () => validateAgentContext(root),
+    /a route that declines the shared checks must declare its own tests/,
+  );
+
+  // Declining with its own tests is a valid declaration, and so is the explicit default.
+  write(["none", "[tests/tools/**]"]);
+  assert.doesNotThrow(() => validateAgentContext(root));
+  write(["always", "[]"]);
+  assert.doesNotThrow(() => validateAgentContext(root));
+});
+
 test("markdown output remains a concise navigation surface", () => {
   const report = collectAgentContext(fixture(), ["src/store/rows.ts"]);
   const text = formatAgentContext(report);

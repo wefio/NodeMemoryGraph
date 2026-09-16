@@ -95,6 +95,54 @@ test("a change spanning multiple routes escalates to full", () => {
   assert.match(plan.escalationReason!, /spans multiple routes/u);
 });
 
+test("a route that declares the shared checks not applicable narrows to its own tests", () => {
+  // The declaration is the route owner's, not an inference from the path: a narrow plan for a
+  // change this route solely owns carries no always-run shared checks, and the route's own tests
+  // are still required - `verify.sharedChecks: none` without them is refused at config load.
+  const declined: RouteLike = {
+    id: "repository-tooling",
+    paths: [".gitignore"],
+    tests: ["tests/tools/**"],
+    verify: { blocking: ["check"], advisory: [], sharedChecks: "none" },
+  };
+  const plan = planNarrowVerify([declined], [".gitignore"]);
+  assert.equal(plan.narrow, true);
+  assert.equal(plan.route!.id, "repository-tooling");
+  assert.deepEqual(plan.shared, [], "the shared checks are not run for this surface");
+  assert.deepEqual(plan.testGlobs, ["tests/tools/**"], "and the route's own tests still are");
+});
+
+test("the declaration is not a way out of a shared/cross-cutting path", () => {
+  const declined: RouteLike = {
+    id: "repository-tooling",
+    paths: ["tools/**"],
+    tests: ["tests/tools/**"],
+    verify: { blocking: ["check"], advisory: [], sharedChecks: "none" },
+  };
+  const plan = planNarrowVerify([declined], ["tools/narrow-verify.ts"]);
+  assert.equal(plan.narrow, false, "a shared root still escalates to the declared blocking set");
+  assert.match(plan.escalationReason!, /shared/u);
+});
+
+test('declaring the shared checks "always" is what every route does by default', () => {
+  const explicit: RouteLike = {
+    id: "documentation",
+    paths: ["docs/**"],
+    tests: ["tests/docs/**"],
+    verify: { blocking: ["docs:check"], advisory: [], sharedChecks: "always" },
+  };
+  const plan = planNarrowVerify([explicit], ["docs/README.md"]);
+  assert.deepEqual(plan.shared, [
+    "check",
+    "docs:check",
+    "format:check",
+    "glossary:check",
+    "lint",
+    "package:check",
+    "rtm:check",
+  ]);
+});
+
 test("no changed paths escalates to full", () => {
   const plan = planNarrowVerify(ROUTES, []);
   assert.equal(plan.narrow, false);

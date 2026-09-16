@@ -15,7 +15,6 @@ import {
   FileReceiptSink,
   LocalNpmVerifierProvider,
   NarrowVerifierProvider,
-  NARROW_SHARED_CHECKS,
   nodeTestCheckName,
 } from "../src/rcp/providers.ts";
 import { reconcileOnce } from "../src/rcp/reconcile.ts";
@@ -338,6 +337,17 @@ const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
 
 /** Run an arbitrary command (npm script or node --test globs) and shape the
  *  result like the rest of the verification plan. */
+/** The receipt's `gate.reason`: why this change runs the narrow surface it runs. The one thing a
+ *  reader cannot infer from `mode` is that the owning route declared the always-run shared checks
+ *  not applicable to its own surface, so the reason says so instead of leaving it to be discovered
+ *  by counting checks. Exported because the receipt this produces is the auditable half of the
+ *  declaration. */
+export function narrowReason(routeId: string, sharedChecks: number): string {
+  return sharedChecks === 0
+    ? `cleanly owned by route ${routeId}; the route declares the always-run shared checks not applicable`
+    : `cleanly owned by route ${routeId}`;
+}
+
 function runCommand(
   label: string,
   argv: string[],
@@ -460,8 +470,10 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     const narrowPlan = planNarrowVerify(report.routes, report.scopes);
     const route = narrowPlan.route;
     const wantNarrow = !options.full && (options.narrow || narrowPlan.narrow);
+    // One home for the check list: the plan decides, including whether the owning route declared
+    // the shared checks not applicable to its own surface.
     const narrowChecks = route
-      ? [...NARROW_SHARED_CHECKS, ...(route.tests.length ? [nodeTestCheckName(route.id)] : [])]
+      ? [...narrowPlan.shared, ...(route.tests.length ? [nodeTestCheckName(route.id)] : [])]
       : [];
     let execution:
       | Awaited<ReturnType<typeof executeRcpVerification>>
@@ -482,7 +494,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
               json: options.json,
               routeId: route.id,
               checks: narrowChecks,
-              reason: `cleanly owned by route ${route.id}`,
+              reason: narrowReason(route.id, narrowPlan.shared.length),
             },
           );
     } else {

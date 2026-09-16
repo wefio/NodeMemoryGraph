@@ -9,6 +9,12 @@ import { digestRepositoryPaths, observeGitWorktree } from "../src/rcp/repository
 export interface VerificationConfig {
   blocking: string[];
   advisory: string[];
+  /** Whether the always-run shared checks (the narrow plan's floor) apply when this route solely
+   *  owns a change. `"none"` is a declaration the route's owner makes about its own surface, not
+   *  an inference: it is only honoured on the narrow path, it never covers a shared/cross-cutting
+   *  path, and it is refused when the route declares no tests - the plan would then execute
+   *  nothing, which is the one outcome a verification tool must never report as a pass. */
+  sharedChecks?: "always" | "none";
 }
 
 export interface RouteConfig {
@@ -160,21 +166,36 @@ function readConfig(root: string): AgentContextConfig {
         throw new Error(`${route.id}: ${field} must be a string array`);
       }
     }
-    if (
-      !route.verify ||
-      !isStringArray(route.verify.blocking) ||
-      !isStringArray(route.verify.advisory)
-    ) {
-      throw new Error(`${route.id}: verify must declare blocking and advisory script arrays`);
-    }
-    const overlap = route.verify.blocking.find((command) =>
-      route.verify.advisory.includes(command),
-    );
-    if (overlap) {
-      throw new Error(`${route.id}: npm script ${overlap} cannot be both blocking and advisory`);
-    }
+    validateRouteVerify(route);
   }
   return parsed as AgentContextConfig;
+}
+
+/** One route's verification declaration. Kept out of `readConfig` because that function is already
+ *  above the complexity gate's limit: a new rule must not ratchet it. */
+function validateRouteVerify(route: RouteConfig): void {
+  if (
+    !route.verify ||
+    !isStringArray(route.verify.blocking) ||
+    !isStringArray(route.verify.advisory)
+  ) {
+    throw new Error(`${route.id}: verify must declare blocking and advisory script arrays`);
+  }
+  const overlap = route.verify.blocking.find((command) => route.verify.advisory.includes(command));
+  if (overlap) {
+    throw new Error(`${route.id}: npm script ${overlap} cannot be both blocking and advisory`);
+  }
+  const sharedChecks = route.verify.sharedChecks;
+  if (sharedChecks !== undefined && sharedChecks !== "always" && sharedChecks !== "none") {
+    throw new Error(
+      `${route.id}: verify.sharedChecks must be "always" or "none", not ${JSON.stringify(sharedChecks)}`,
+    );
+  }
+  if (sharedChecks === "none" && !route.tests.length) {
+    throw new Error(
+      `${route.id}: a route that declines the shared checks must declare its own tests, or a narrow run would execute nothing`,
+    );
+  }
 }
 
 function isStringArray(value: unknown): value is string[] {

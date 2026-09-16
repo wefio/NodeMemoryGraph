@@ -666,6 +666,64 @@ const TARGETS: readonly Target[] = [
       },
     ],
   },
+  {
+    // The shared-floor decision: a route may declare the always-run shared checks not applicable to
+    // its own surface, and that declaration must be honoured for exactly that route and nothing else.
+    target: "tools/narrow-verify.ts",
+    suites: ["tests/tools/narrow-verify.test.ts"],
+    mutants: [
+      {
+        name: "the-declined-shared-checks-still-run",
+        from: '  const declined = route.verify.sharedChecks === "none";',
+        to: "  const declined = false;",
+        expect: "a route that declares the shared checks not applicable narrows to its own tests",
+      },
+      {
+        // An absent declaration means "always". Reading anything that is not the explicit
+        // "always" as a decline would silently drop the floor for every route that never asked.
+        name: "an-undeclared-route-is-read-as-declining",
+        from: 'route.verify.sharedChecks === "none"',
+        to: 'route.verify.sharedChecks !== "always"',
+        expect: "a change cleanly owned by one leaf route narrows to its own tests",
+      },
+    ],
+  },
+  {
+    // The declaration is refused at config load when it would leave a plan with nothing to execute,
+    // and an unknown value must not silently mean either answer.
+    target: "tools/repo-context.ts",
+    suites: ["tests/tools/repo-context.test.ts"],
+    mutants: [
+      {
+        name: "a-declined-floor-may-have-no-tests",
+        from: 'if (sharedChecks === "none" && !route.tests.length) {',
+        to: 'if (false && sharedChecks === "none" && !route.tests.length) {',
+        expect:
+          "verify.sharedChecks must be a known declaration, and declining needs its own tests",
+      },
+      {
+        name: "an-unknown-shared-checks-value-is-accepted",
+        from: 'if (sharedChecks !== undefined && sharedChecks !== "always" && sharedChecks !== "none") {',
+        to: 'if (false && sharedChecks !== undefined && sharedChecks !== "always" && sharedChecks !== "none") {',
+        expect:
+          "verify.sharedChecks must be a known declaration, and declining needs its own tests",
+      },
+    ],
+  },
+  {
+    // One home for the check list: the plan decides it, including a route's decline. A caller that
+    // rebuilt the floor from the constant would execute checks the plan said not to.
+    target: "tools/agent-verify.ts",
+    suites: ["tests/tools/agent-verify.test.ts"],
+    mutants: [
+      {
+        name: "the-caller-rebuilds-the-shared-floor",
+        from: "? [...narrowPlan.shared, ...(route.tests.length ? [nodeTestCheckName(route.id)] : [])]",
+        to: '? ["check", "docs:check", "format:check", "glossary:check", "lint", "package:check", "rtm:check", ...(route.tests.length ? [nodeTestCheckName(route.id)] : [])]',
+        expect: "a route that declines the shared checks plans only its own tests",
+      },
+    ],
+  },
 ];
 
 interface MutantOutcome {

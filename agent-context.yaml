@@ -159,6 +159,10 @@ routes:
     verify:
       blocking: [check, test:product, build, agent:context:check]
       advisory: []
+      # `.gitignore` is a declaration, not code: the always-run shared checks can all pass or fail
+      # identically whether or not it changed, and the one check that reads it (the complexity
+      # gate's probe scratch must stay invisible to git) lives in this route's own tests.
+      sharedChecks: none
 
   - id: repository-control-plane
     paths: [src/rcp/**, tests/rcp/**, bin/nmg-rcp.mjs]

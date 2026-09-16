@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,7 @@ import {
   buildVerificationPlan,
   discoverApplicableRcpContract,
   executeVerificationPlan,
+  narrowReason,
   type VerificationCommandResult,
 } from "../../tools/agent-verify.ts";
 import type { AgentContextReport } from "../../tools/repo-context.ts";
@@ -188,6 +189,112 @@ test("CLI dry-run emits a machine-readable plan without running checks", () => {
       { command: "node --test (documentation)", status: "skipped", reason: "dry run" },
     ],
   );
+});
+
+test("a route that declines the shared checks plans only its own tests", () => {
+  // `.gitignore` is the surface the repository-tooling route declares the always-run shared checks
+  // not applicable to; its own tests still run, and they are where the one assertion that reads
+  // ignore rules lives (`tests/tools/complexity-gate-base.test.ts`).
+  const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
+  const root = fileURLToPath(new URL("../..", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      script,
+      "--root",
+      root,
+      "--scope",
+      ".gitignore",
+      "--dry-run",
+      "--json",
+    ],
+    { encoding: "utf8", windowsHide: true },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout) as {
+    ok: boolean;
+    results: VerificationCommandResult[];
+  };
+  assert.equal(payload.ok, true);
+  assert.deepEqual(
+    payload.results.map(({ command, status }) => ({ command, status })),
+    [{ command: "node --test (repository-tooling)", status: "skipped" }],
+  );
+});
+
+test("a declining route's narrow run verifies on its own tests and nothing else", () => {
+  // The dry-run case above reads the printed plan; this one runs the whole path, so the claim is
+  // about what executed. The fixture declares no shared script at all, so a run that touched the
+  // floor would fail on a missing script rather than quietly pass, and the receipt is asserted to
+  // record the declaration, which is the auditable half of it.
+  const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-declined-"));
+  mkdirSync(join(root, "docs"), { recursive: true });
+  mkdirSync(join(root, "tests"), { recursive: true });
+  writeFileSync(join(root, "docs", "owner.md"), "# Owner\n");
+  writeFileSync(
+    join(root, "tests", "fixture.test.ts"),
+    'import test from "node:test";\ntest("the route can check its own surface", () => {});\n',
+  );
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({ name: "fixture", version: "1.0.0", scripts: {} }),
+  );
+  writeFileSync(
+    join(root, "agent-context.yaml"),
+    [
+      "version: 1",
+      "routes:",
+      "  - id: fixture",
+      "    paths: [docs/**]",
+      "    owners: [docs/owner.md]",
+      "    tests: [tests/fixture.test.ts]",
+      "    verify:",
+      "      blocking: [check]",
+      "      advisory: []",
+      "      sharedChecks: none",
+      "",
+    ].join("\n"),
+  );
+  const git = (args: string[]) =>
+    spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
+  assert.equal(git(["init", "--quiet"]).status, 0);
+  assert.equal(git(["config", "user.email", "verify@example.invalid"]).status, 0);
+  assert.equal(git(["config", "user.name", "Verify Test"]).status, 0);
+  assert.equal(git(["add", "."]).status, 0);
+  assert.equal(git(["commit", "--quiet", "-m", "fixture"]).status, 0);
+  writeFileSync(join(root, "docs", "owner.md"), "# Owner\n\nChanged.\n");
+
+  const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--json"],
+    { encoding: "utf8", windowsHide: true },
+  );
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout) as {
+    ok: boolean;
+    results: VerificationCommandResult[];
+    rcp?: { status: string; receiptPath?: string };
+  };
+  assert.equal(payload.ok, true);
+  assert.equal(payload.rcp?.status, "verified");
+  assert.deepEqual(
+    payload.results.map(({ command, status }) => ({ command, status })),
+    [{ command: "node-test:fixture", status: "passed" }],
+    "the route's own tests ran, and the always-run shared checks did not",
+  );
+  const receipt = JSON.parse(readFileSync(payload.rcp!.receiptPath!, "utf8")) as {
+    gate: { mode: string; reason?: string };
+  };
+  assert.equal(receipt.gate.mode, "narrow");
+  assert.match(receipt.gate.reason!, /declares the always-run shared checks not applicable/);
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+});
+
+test("the receipt reason records a route's decision to decline the shared checks", () => {
+  assert.match(narrowReason("repository-tooling", 0), /declares the always-run shared checks/);
+  assert.equal(narrowReason("documentation", 7), "cleanly owned by route documentation");
 });
 
 test("CLI executes npm scripts through a cross-platform child process", () => {
