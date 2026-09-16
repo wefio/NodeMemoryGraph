@@ -141,6 +141,7 @@ const TARGETS: readonly Target[] = [
       "tests/core/store-readonly-open.test.ts",
       "tests/core/store/task-runs.test.ts",
       "tests/integration/ooo-managed-fence.test.ts",
+      "tests/integration/ooo-managed-write.test.ts",
     ],
     mutants: [
       {
@@ -258,6 +259,15 @@ const TARGETS: readonly Target[] = [
         from: "    if (runs.size > 1)",
         to: "    if (runs.size > 1 && false)",
         expect: "an entry bound by two runs is refused rather than answered with one of them",
+      },
+      {
+        // A managed entry's write belongs to its run's scope: the store is the only thing that can
+        // tell a coordinated write from a verb reached around it.
+        name: "a-managed-entry-ignores-the-coordinated-scope",
+        ast: { within: "requireManagedWriteScope" },
+        from: "    if (this.coordinatedRun === binding.runId) return;",
+        to: "    if (true) return;",
+        expect: "a direct board verb cannot move an entry a run has adopted",
       },
     ],
   },
@@ -493,6 +503,49 @@ const TARGETS: readonly Target[] = [
         from: "  if (entry.deliveredBy === agentId) {",
         to: "  if (false && entry.deliveredBy === agentId) {",
         expect: "the board drivers run the protocol end to end on a scratch store",
+      },
+    ],
+  },
+  {
+    target: "src/integration/task-coordinator.ts",
+    suites: ["tests/integration/ooo-managed-write.test.ts"],
+    mutants: [
+      {
+        // The transition is the run's record of what happened to its entry; without it the board
+        // moved and the run has nothing to read.
+        name: "a-coordinated-write-skips-its-run-fact",
+        from: "    const fact = store.appendTaskRunFact(\n      {\n        runId: request.runId,\n        kind: managedTransitionKind(request.verb),\n        taskId: binding.taskId,\n        attempt: binding.attempt,\n        entryId: request.entryId,\n        payload: JSON.stringify({ actorId: request.actorId, status }),\n      },\n      port,\n    );",
+        to: "    const fact = { sequence: 0, recorded: true };",
+        expect: "a coordinated write lands the board transition and the run's fact together",
+      },
+      {
+        // A cancelled run is the end of its managed entries' lifecycle, and the fence is the only
+        // thing that says so.
+        name: "a-cancelled-run-still-accepts-writes",
+        from: "  if (cancelled)\n    return `run ${runId} was cancelled at sequence ${cancelled.sequence}; its managed entries take no further lifecycle writes`;",
+        to: "  if (cancelled && false)\n    return `run ${runId} was cancelled at sequence ${cancelled.sequence}; its managed entries take no further lifecycle writes`;",
+        expect: "a cancelled run takes no further lifecycle writes on what it adopted",
+      },
+      {
+        // The binding is re-read where the write happens, not where the caller decided to make it.
+        name: "a-coordinated-write-skips-the-binding-recheck",
+        from: "    if (binding.runId !== request.runId)",
+        to: "    if (false && binding.runId !== request.runId)",
+        expect: "a coordinated write refuses an entry that is not this run's",
+      },
+    ],
+  },
+  {
+    target: "src/cli/service.ts",
+    suites: ["tests/integration/ooo-managed-write.test.ts"],
+    mutants: [
+      {
+        // The routing is what keeps the daemon's verbs out of the store's refusal: a managed
+        // entry reached directly from a handler cannot be moved at all.
+        name: "the-daemon-verb-skips-the-coordinated-path",
+        from: "  const binding = store.taskRunForEntry(entryId);",
+        to: "  const binding = null;",
+        expect: "a daemon board verb routes a managed entry through the run's transition",
       },
     ],
   },

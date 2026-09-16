@@ -82,6 +82,7 @@ import {
 } from "../core/relevance-gate.ts";
 import { readRelevanceModel } from "../lab/relevance-model.ts";
 import { normalizeRecallTriggers } from "../core/recall-triggers.ts";
+import { coordinatedBoardWrite } from "../integration/task-coordinator.ts";
 import { searchMemoryContext } from "../integration/search.ts";
 import { simhash64, simhashToHex, simhashFromHex, hammingDistance } from "../core/simhash.ts";
 import { ControllerPolicyChannel } from "../integration/controller-channel.ts";
@@ -2896,6 +2897,28 @@ type TaskBoardHandler = (
   parsed: NmgTaskBoardParams,
 ) => NmgMethodResult["taskBoard"];
 
+/** A managed entry's lifecycle write belongs to its run's coordinated transition: the board verb
+ * and the run's own fact land together, or neither does. This is the only path that can move such
+ * an entry - the store refuses a direct verb on it - and an entry no run manages takes exactly the
+ * path it always took, so the ordinary board pays nothing for this beyond one indexed lookup. */
+function coordinatedEntryWrite<T>(
+  store: NmgStore,
+  verb: string,
+  entryId: string,
+  actorId: string,
+  apply: () => T,
+): T {
+  const binding = store.taskRunForEntry(entryId);
+  if (!binding) return apply();
+  return coordinatedBoardWrite(store, {
+    runId: binding.runId,
+    entryId,
+    verb,
+    actorId,
+    apply: () => apply(),
+  }).entry;
+}
+
 /** Table-driven taskBoard dispatch: adding a new action is one record entry
  * instead of another branch in the (already large) `invoke` dispatcher, so the
  * per-method complexity gate does not ratchet with every protocol addition. */
@@ -2936,11 +2959,21 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
   list: (store) => ({ action: "list", boards: store.listTaskBoards() }),
   claim: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"claim">;
-    return { action: "claim", entry: store.claimTaskBoardEntry(p) };
+    return {
+      action: "claim",
+      entry: coordinatedEntryWrite(store, "claim", p.entryId, p.agentId, () =>
+        store.claimTaskBoardEntry(p),
+      ),
+    };
   },
   release: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"release">;
-    return { action: "release", entry: store.releaseTaskBoardEntry(p) };
+    return {
+      action: "release",
+      entry: coordinatedEntryWrite(store, "release", p.entryId, p.agentId, () =>
+        store.releaseTaskBoardEntry(p),
+      ),
+    };
   },
   deliveryCheck: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"deliveryCheck">;
@@ -2964,7 +2997,9 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
   },
   acknowledge: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"acknowledge">;
-    store.acknowledgeTaskBoardEntry({ entryId: p.entryId, agentId: p.agentId, reason: p.reason });
+    coordinatedEntryWrite(store, "acknowledge", p.entryId, p.agentId, () =>
+      store.acknowledgeTaskBoardEntry({ entryId: p.entryId, agentId: p.agentId, reason: p.reason }),
+    );
     return {
       action: "acknowledge",
       entry: store.getTaskBoardEntryById(p.taskId, p.entryId)!,
@@ -2972,15 +3007,30 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
   },
   veto: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"veto">;
-    return { action: "veto", entry: store.vetoTaskBoardEntry(p) };
+    return {
+      action: "veto",
+      entry: coordinatedEntryWrite(store, "veto", p.entryId, p.agentId, () =>
+        store.vetoTaskBoardEntry(p),
+      ),
+    };
   },
   deliver: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"deliver">;
-    return { action: "deliver", entry: store.deliverTaskBoardEntry(p) };
+    return {
+      action: "deliver",
+      entry: coordinatedEntryWrite(store, "deliver", p.entryId, p.agentId, () =>
+        store.deliverTaskBoardEntry(p),
+      ),
+    };
   },
   judge: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"judge">;
-    return { action: "judge", entry: store.judgeTaskBoardEntry(p) };
+    return {
+      action: "judge",
+      entry: coordinatedEntryWrite(store, "judge", p.entryId, p.agentId, () =>
+        store.judgeTaskBoardEntry(p),
+      ),
+    };
   },
   unsubscribe: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"unsubscribe">;
@@ -3034,7 +3084,12 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
   },
   resolve: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"resolve">;
-    return { action: "resolve", entry: store.resolveTaskBoardEntry(p) };
+    return {
+      action: "resolve",
+      entry: coordinatedEntryWrite(store, "resolve", p.entryId, p.agentId, () =>
+        store.resolveTaskBoardEntry(p),
+      ),
+    };
   },
 };
 

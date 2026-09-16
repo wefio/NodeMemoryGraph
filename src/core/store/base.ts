@@ -93,6 +93,9 @@ export class NmgStoreBase {
   protected scopeWriteIndexEnabled: boolean;
   /** The open write transaction, if any. A port is the only way to join it. */
   private openTransaction: { port: TransactionPort; rollbackOnly: boolean } | null = null;
+  /** The run whose coordinated write scope is open, if any: the store's own state, set only by
+   *  `coordinateRunWrite` while its callback runs. */
+  private coordinatedRun: string | null = null;
   private transactionGeneration = 0;
   /** Set when ROLLBACK itself failed: the connection's state is unknown, so it takes no more work. */
   private connectionQuarantined = false;
@@ -258,6 +261,44 @@ export class NmgStoreBase {
     if (scopeJson) this.scopeWriteIndexes.delete(scopeJson);
     else this.scopeWriteIndexes.clear();
   }
+  /**
+   * Run one coordinated transition for a run: exactly one write transaction, and inside it the
+   * scope that lets the run's own managed entries be written. It is deliberately not a way to wrap
+   * a whole round or an asynchronous RPC in a database transaction - the callback is synchronous
+   * and the boundary closes with it - and it refuses a run this store cannot name, so a scope can
+   * never authorize writes for a run state that does not exist.
+   */
+  coordinateRunWrite<T>(runId: string, work: (port: TransactionPort) => T): T {
+    if (!this.taskRunManifestExists(runId))
+      throw new Error(
+        `run ${runId} is not registered; a managed write needs the run it belongs to`,
+      );
+    return this.writeTransaction((port) => {
+      const previous = this.coordinatedRun;
+      this.coordinatedRun = runId;
+      try {
+        return work(port);
+      } finally {
+        this.coordinatedRun = previous;
+      }
+    });
+  }
+
+  /**
+   * A board write on an entry a run manages belongs to that run's coordinated scope, and the
+   * scope is the store's own state rather than the caller's claim - so a direct call on a managed
+   * entry is refused instead of applied beside the run. An entry no run manages returns here
+   * without a transaction: the ordinary board path is unchanged, including its cost.
+   */
+  private requireManagedWriteScope(entryId: string): void {
+    const binding = this.taskRunForEntry(entryId);
+    if (!binding) return;
+    if (this.coordinatedRun === binding.runId) return;
+    throw new Error(
+      `entry ${entryId} is managed by run ${binding.runId}: its lifecycle writes go through the run's coordinated transition, not the board verb directly`,
+    );
+  }
+
   /**
    * The store owns the transaction boundary: this is the only place that runs BEGIN/COMMIT. A
    * caller already inside a transition must join it with the port this issued rather than open a
@@ -559,6 +600,7 @@ export class NmgStoreBase {
     agentId: string;
     resolution?: string;
   }): TaskBoardEntry {
+    this.requireManagedWriteScope(input.entryId);
     const existing = this.taskBoardEntry(input.entryId);
     if (!existing || existing.taskId !== input.taskId) {
       throw new Error(`task board entry not found in task ${input.taskId}`);
@@ -595,6 +637,7 @@ export class NmgStoreBase {
     agentId: string;
     reason?: string;
   }): TaskBoardEntry {
+    this.requireManagedWriteScope(input.entryId);
     const existing = this.taskBoardEntry(input.entryId);
     if (!existing || existing.taskId !== input.taskId) {
       throw new Error(`task board entry not found in task ${input.taskId}`);
@@ -630,6 +673,7 @@ export class NmgStoreBase {
     summary?: string;
     now?: string;
   }): TaskBoardEntry {
+    this.requireManagedWriteScope(input.entryId);
     const now = input.now ?? new Date().toISOString();
     const existing = this.taskBoardEntry(input.entryId);
     if (!existing || existing.taskId !== input.taskId) {
@@ -685,6 +729,7 @@ export class NmgStoreBase {
     reason?: string;
     now?: string;
   }): TaskBoardEntry {
+    this.requireManagedWriteScope(input.entryId);
     const now = input.now ?? new Date().toISOString();
     const existing = this.taskBoardEntry(input.entryId);
     if (!existing || existing.taskId !== input.taskId) {
@@ -773,6 +818,7 @@ export class NmgStoreBase {
     leaseSeconds?: number;
     now?: string;
   }): TaskBoardEntry {
+    this.requireManagedWriteScope(input.entryId);
     const now = input.now ?? new Date().toISOString();
     this.pruneExpiredTaskBoardEntries(now, input.taskId);
     const existing = this.taskBoardEntry(input.entryId);
@@ -848,6 +894,7 @@ export class NmgStoreBase {
     entryId: string;
     agentId: string;
   }): TaskBoardEntry {
+    this.requireManagedWriteScope(input.entryId);
     const result = this.db
       .prepare(
         `UPDATE task_board_entries
@@ -1000,6 +1047,7 @@ export class NmgStoreBase {
     reason?: string;
     now?: string;
   }): void {
+    this.requireManagedWriteScope(input.entryId);
     this.db
       .prepare(
         `INSERT INTO task_board_acks (id, entry_id, agent_id, acknowledged_at, reason)
@@ -1503,6 +1551,7 @@ export class NmgStoreBase {
     retainedUntil?: string | null;
     now?: string;
   }): boolean {
+    this.requireManagedWriteScope(input.entryId);
     const { taskId, entryId, owner, reason } = input;
     if (!taskId || !entryId) throw new Error("retention requires a channel and an entry");
     if (!owner.trim()) throw new Error("retention owner required");
@@ -1526,6 +1575,7 @@ export class NmgStoreBase {
   /** Release this owner's pin. Other owners' pins on the same entry are untouched, and
    *  the entry becomes prunable only when the last of them is gone. */
   releaseTaskBoardRetention(input: { taskId: string; entryId: string; owner: string }): boolean {
+    this.requireManagedWriteScope(input.entryId);
     if (!input.taskId || !input.entryId)
       throw new Error("retention requires a channel and an entry");
     if (!input.owner.trim()) throw new Error("retention owner required");
