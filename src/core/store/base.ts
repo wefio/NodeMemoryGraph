@@ -1681,6 +1681,318 @@ export class NmgStoreBase {
     entry.ackedBy = this.taskBoardAckMap([entry.id]).get(entry.id) ?? [];
     return entry;
   }
+
+  // ---- Task run records. The writable half of the run namespace: a run's frozen manifest, its
+  // frozen task plan, and the facts it appends. Each write takes an optional port, so a caller
+  // that already holds the store's transaction joins it instead of opening a second one - the
+  // board write and the run fact of one transition have to land together or not at all. Nothing
+  // here creates a table or a connection: the schema owns both (src/core/store/schema.ts).
+
+  /** Register a run's frozen identity. A retry after a lost response is a no-op; a second
+   *  registration that names a different plan or policy is refused, because a run cannot be
+   *  re-opened onto a different plan without becoming a different run. */
+  registerTaskRun(
+    input: {
+      runId: string;
+      planDigest: string;
+      policy: string;
+      revision: string;
+      retention: string;
+    },
+    port?: TransactionPort,
+  ): void {
+    return port
+      ? this.withPort(port, () => this.insertTaskRunManifest(input))
+      : this.writeTransaction(() => this.insertTaskRunManifest(input));
+  }
+
+  private insertTaskRunManifest(input: {
+    runId: string;
+    planDigest: string;
+    policy: string;
+    revision: string;
+    retention: string;
+  }): void {
+    const existing = this.db
+      .prepare("SELECT plan_digest, policy FROM task_run_manifest WHERE run_id = ?")
+      .get(input.runId) as Row | undefined;
+    if (existing) {
+      if (
+        String(existing.plan_digest) !== input.planDigest ||
+        String(existing.policy) !== input.policy
+      )
+        throw new Error(
+          `run ${input.runId} already froze a different plan; a new plan is a new run, not an overwrite`,
+        );
+      return;
+    }
+    this.db
+      .prepare(
+        "INSERT INTO task_run_manifest (run_id, plan_digest, policy, revision, retention, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        input.runId,
+        input.planDigest,
+        input.policy,
+        input.revision,
+        input.retention,
+        new Date().toISOString(),
+      );
+  }
+
+  /** Freeze one task of a run's plan. Frozen means frozen: the same task id with a different
+   *  input, position or operation is refused rather than replaced, since the plan is the thing
+   *  every later decision is read against. */
+  freezeTaskRunTask(
+    input: {
+      runId: string;
+      taskId: string;
+      position: number;
+      revision: string;
+      input: string;
+      dependencies: readonly string[];
+      effect: string;
+      waitEvent?: string | null;
+      operation?: string;
+      kind?: string;
+      patchFiles?: readonly string[] | null;
+      patchEditable?: readonly string[] | null;
+    },
+    port?: TransactionPort,
+  ): void {
+    return port
+      ? this.withPort(port, () => this.insertTaskRunTask(input))
+      : this.writeTransaction(() => this.insertTaskRunTask(input));
+  }
+
+  private insertTaskRunTask(input: {
+    runId: string;
+    taskId: string;
+    position: number;
+    revision: string;
+    input: string;
+    dependencies: readonly string[];
+    effect: string;
+    waitEvent?: string | null;
+    operation?: string;
+    kind?: string;
+    patchFiles?: readonly string[] | null;
+    patchEditable?: readonly string[] | null;
+  }): void {
+    if (!this.taskRunManifestExists(input.runId))
+      throw new Error(`run ${input.runId} is not registered; a task cannot be frozen into it`);
+    const dependencies = JSON.stringify(input.dependencies);
+    const existing = this.db
+      .prepare(
+        "SELECT input, dependencies, position, operation FROM task_run_tasks WHERE run_id = ? AND task_id = ?",
+      )
+      .get(input.runId, input.taskId) as Row | undefined;
+    if (existing) {
+      const same =
+        String(existing.input) === input.input &&
+        String(existing.dependencies) === dependencies &&
+        Number(existing.position) === input.position &&
+        String(existing.operation) === (input.operation ?? "");
+      if (!same)
+        throw new Error(
+          `run ${input.runId} already froze task ${input.taskId} with a different definition`,
+        );
+      return;
+    }
+    this.db
+      .prepare(
+        "INSERT INTO task_run_tasks (run_id, task_id, position, revision, input, dependencies, effect, wait_event, operation, kind, patch_files, patch_editable) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        input.runId,
+        input.taskId,
+        input.position,
+        input.revision,
+        input.input,
+        dependencies,
+        input.effect,
+        input.waitEvent ?? null,
+        input.operation ?? "",
+        input.kind ?? "snapshot",
+        input.patchFiles ? JSON.stringify(input.patchFiles) : null,
+        input.patchEditable ? JSON.stringify(input.patchEditable) : null,
+      );
+  }
+
+  /** Append one run fact, if it is not already there. The fact's own identity (run, kind, task,
+   *  attempt) is the duplicate key, which is what makes a retry after a lost response append once
+   *  instead of twice; `recorded: false` says the fact was already known, and is not a failure. */
+  appendTaskRunFact(
+    input: {
+      runId: string;
+      kind: string;
+      taskId?: string;
+      attempt?: number;
+      entryId?: string | null;
+      payload?: string | null;
+    },
+    port?: TransactionPort,
+  ): { sequence: number; recorded: boolean } {
+    return port
+      ? this.withPort(port, () => this.insertTaskRunFact(input))
+      : this.writeTransaction(() => this.insertTaskRunFact(input));
+  }
+
+  private insertTaskRunFact(input: {
+    runId: string;
+    kind: string;
+    taskId?: string;
+    attempt?: number;
+    entryId?: string | null;
+    payload?: string | null;
+  }): { sequence: number; recorded: boolean } {
+    const taskId = input.taskId ?? "";
+    const attempt = input.attempt ?? 0;
+    const known = this.db
+      .prepare(
+        "SELECT sequence FROM task_run_facts WHERE run_id = ? AND kind = ? AND task_id = ? AND attempt = ?",
+      )
+      .get(input.runId, input.kind, taskId, attempt) as Row | undefined;
+    if (known) return { sequence: Number(known.sequence), recorded: false };
+    if (!this.taskRunManifestExists(input.runId))
+      throw new Error(`run ${input.runId} is not registered; a fact cannot be appended to it`);
+    const next = this.db
+      .prepare("SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM task_run_facts WHERE run_id = ?")
+      .get(input.runId) as Row;
+    const sequence = Number(next.next);
+    this.db
+      .prepare(
+        "INSERT INTO task_run_facts (run_id, sequence, kind, task_id, attempt, entry_id, payload, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        input.runId,
+        sequence,
+        input.kind,
+        taskId,
+        attempt,
+        input.entryId ?? null,
+        input.payload ?? null,
+        new Date().toISOString(),
+      );
+    return { sequence, recorded: true };
+  }
+
+  /** The run's frozen identity, or null when this store holds no such run. A read: it registers
+   *  nothing and appends nothing, which is what lets a query path use it. */
+  taskRunManifest(runId: string): {
+    runId: string;
+    planDigest: string;
+    policy: string;
+    revision: string;
+    retention: string;
+    createdAt: string;
+  } | null {
+    const row = this.db.prepare("SELECT * FROM task_run_manifest WHERE run_id = ?").get(runId) as
+      Row | undefined;
+    if (!row) return null;
+    return {
+      runId: String(row.run_id),
+      planDigest: String(row.plan_digest),
+      policy: String(row.policy),
+      revision: String(row.revision),
+      retention: String(row.retention),
+      createdAt: String(row.created_at),
+    };
+  }
+
+  /** The tasks the run froze, in plan order. */
+  taskRunTasks(runId: string): {
+    taskId: string;
+    position: number;
+    revision: string;
+    input: string;
+    dependencies: string[];
+    effect: string;
+    waitEvent: string | null;
+    operation: string;
+    kind: string;
+    patchFiles: string[] | null;
+    patchEditable: string[] | null;
+  }[] {
+    const rows = this.db
+      .prepare("SELECT * FROM task_run_tasks WHERE run_id = ? ORDER BY position, task_id")
+      .all(runId) as Row[];
+    return rows.map((row) => ({
+      taskId: String(row.task_id),
+      position: Number(row.position),
+      revision: String(row.revision),
+      input: String(row.input),
+      dependencies: JSON.parse(String(row.dependencies)) as string[],
+      effect: String(row.effect),
+      waitEvent: row.wait_event === null ? null : String(row.wait_event),
+      operation: String(row.operation),
+      kind: String(row.kind),
+      patchFiles:
+        row.patch_files === null ? null : (JSON.parse(String(row.patch_files)) as string[]),
+      patchEditable:
+        row.patch_editable === null ? null : (JSON.parse(String(row.patch_editable)) as string[]),
+    }));
+  }
+
+  /** The run's appended facts in sequence order. `through` is how a caller asks for the facts as of
+   *  one point in the log, which is what a replay or a re-derivation needs. */
+  taskRunFacts(
+    runId: string,
+    through?: number,
+  ): {
+    sequence: number;
+    kind: string;
+    taskId: string;
+    attempt: number;
+    entryId: string | null;
+    payload: string | null;
+    recordedAt: string;
+  }[] {
+    const rows = this.db
+      .prepare("SELECT * FROM task_run_facts WHERE run_id = ? AND sequence <= ? ORDER BY sequence")
+      .all(runId, through ?? Number.MAX_SAFE_INTEGER) as Row[];
+    return rows.map((row) => ({
+      sequence: Number(row.sequence),
+      kind: String(row.kind),
+      taskId: String(row.task_id),
+      attempt: Number(row.attempt),
+      entryId: row.entry_id === null ? null : String(row.entry_id),
+      payload: row.payload === null ? null : String(row.payload),
+      recordedAt: String(row.recorded_at),
+    }));
+  }
+
+  /** Which run a board entry is bound to, or null when nothing here manages it. This is the one
+   *  question a caller holding only an entry id can ask: an entry bound by two runs is refused
+   *  rather than answered with one of them. */
+  taskRunForEntry(
+    entryId: string,
+  ): { runId: string; kind: string; taskId: string; attempt: number } | null {
+    const rows = this.db
+      .prepare(
+        "SELECT run_id, kind, task_id, attempt FROM task_run_facts WHERE entry_id = ? ORDER BY sequence",
+      )
+      .all(entryId) as Row[];
+    if (rows.length === 0) return null;
+    const runs = new Set(rows.map((row) => String(row.run_id)));
+    if (runs.size > 1)
+      throw new Error(
+        `entry ${entryId} is bound by ${runs.size} runs; a managed entry belongs to one`,
+      );
+    const first = rows[0]!;
+    return {
+      runId: String(first.run_id),
+      kind: String(first.kind),
+      taskId: String(first.task_id),
+      attempt: Number(first.attempt),
+    };
+  }
+
+  private taskRunManifestExists(runId: string): boolean {
+    return (
+      this.db.prepare("SELECT 1 FROM task_run_manifest WHERE run_id = ?").get(runId) !== undefined
+    );
+  }
   cascadeDerivedMemories(sourceMemoryId: string): void {
     const derivations = this.db
       .prepare("SELECT derived_memory_id FROM memory_derivations WHERE source_memory_id = ?")

@@ -139,6 +139,7 @@ const TARGETS: readonly Target[] = [
       "tests/core/task-board-deliverable.test.ts",
       "tests/core/store-transaction-port.test.ts",
       "tests/core/store-readonly-open.test.ts",
+      "tests/core/store/task-runs.test.ts",
       "tests/integration/ooo-managed-fence.test.ts",
     ],
     mutants: [
@@ -213,6 +214,50 @@ const TARGETS: readonly Target[] = [
         from: '        "DELETE FROM task_board_retentions WHERE retained_until IS NOT NULL AND retained_until <= ?",',
         to: '        "DELETE FROM task_board_retentions WHERE 0",',
         expect: "a bounded pin stops pinning when its bound passes",
+      },
+      {
+        // A run's plan is what every later decision is read against, so a second registration
+        // must not be able to replace it.
+        name: "a-second-plan-overwrites-the-frozen-one",
+        ast: { within: "insertTaskRunManifest" },
+        from: "      if (\n        String(existing.plan_digest) !== input.planDigest ||\n        String(existing.policy) !== input.policy\n      )",
+        to: "      if (\n        false &&\n        String(existing.plan_digest) !== input.planDigest &&\n        String(existing.policy) !== input.policy\n      )",
+        expect: "a run registers once, and a second plan for the same run is refused",
+      },
+      {
+        // Frozen means frozen: the same task id with a different definition is a different plan,
+        // and replacing it in place would rewrite the input a decision was already read against.
+        name: "a-frozen-task-is-replaced-by-a-different-definition",
+        ast: { within: "insertTaskRunTask" },
+        from: "      if (!same)",
+        to: "      if (!same && false)",
+        expect: "freezing a task twice is a no-op, and a different definition for it is refused",
+      },
+      {
+        // The fact's own identity is what makes a retry after a lost response append once.
+        name: "a-retried-run-fact-is-appended-twice",
+        ast: { within: "insertTaskRunFact" },
+        from: "    if (known) return { sequence: Number(known.sequence), recorded: false };",
+        to: "    if (known && false) return { sequence: Number(known.sequence), recorded: false };",
+        expect: "appending the same fact twice records it once and keeps the first sequence",
+      },
+      {
+        // The fact write has to join the transition the caller opened, not open a second one; the
+        // board write and the run fact of one transition stand or fall together.
+        name: "the-run-fact-opens-its-own-transaction",
+        ast: { within: "appendTaskRunFact" },
+        from: "    return port\n      ? this.withPort(port, () => this.insertTaskRunFact(input))\n      : this.writeTransaction(() => this.insertTaskRunFact(input));",
+        to: "    void port;\n    return this.writeTransaction(() => this.insertTaskRunFact(input));",
+        expect: "a board write and a run fact land together, and neither lands alone",
+      },
+      {
+        // One managed entry belongs to one run: answering with the first binding would hand a
+        // second run's facts to whoever asked.
+        name: "a-second-run-adopts-a-bound-entry",
+        ast: { within: "taskRunForEntry" },
+        from: "    if (runs.size > 1)",
+        to: "    if (runs.size > 1 && false)",
+        expect: "an entry bound by two runs is refused rather than answered with one of them",
       },
     ],
   },

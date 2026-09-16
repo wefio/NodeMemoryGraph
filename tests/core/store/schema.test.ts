@@ -42,6 +42,9 @@ test("migrate creates the core graph tables", () => {
       "embedding_index_state",
       "retrieval_traces",
       "task_board_entries",
+      "task_run_manifest",
+      "task_run_tasks",
+      "task_run_facts",
     ]) {
       assert.ok(tables.has(expected), `expected table ${expected}`);
     }

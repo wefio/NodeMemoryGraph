@@ -603,6 +603,60 @@ export function migrate(db: DatabaseSync): void {
       ON task_board_entries(task_id, status, created_at, id);
     CREATE INDEX IF NOT EXISTS idx_task_board_expiry
       ON task_board_entries(expires_at);
+
+    -- Task run records: what a run froze and what it appended, in the same database,
+    -- connection and transaction as the board. Named for what they store rather than
+    -- for the feature that first needed them, because a run log is general: a plan
+    -- can be executed by anything that can read a board.
+    --
+    -- Three tables and no fourth: the manifest is immutable, the facts are appended,
+    -- and the per-task current view is derived from the two (src/integration) instead
+    -- of stored, so nothing here can compete with the board as a second truth.
+    CREATE TABLE IF NOT EXISTS task_run_manifest (
+      run_id TEXT PRIMARY KEY,
+      plan_digest TEXT NOT NULL,
+      policy TEXT NOT NULL,
+      revision TEXT NOT NULL,
+      retention TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS task_run_tasks (
+      run_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      revision TEXT NOT NULL,
+      input TEXT NOT NULL,
+      dependencies TEXT NOT NULL,
+      effect TEXT NOT NULL,
+      wait_event TEXT,
+      operation TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT 'snapshot',
+      patch_files TEXT,
+      patch_editable TEXT,
+      PRIMARY KEY (run_id, task_id)
+    );
+
+    -- Appended run facts, keyed by run and sequence. The unique key is the fact's own
+    -- identity, so a caller that retries after a lost response appends once: run,
+    -- kind, task and attempt name the fact, and an empty task id is how a run-level
+    -- fact (a cancellation, a plan revision) avoids colliding with a task's.
+    CREATE TABLE IF NOT EXISTS task_run_facts (
+      run_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      task_id TEXT NOT NULL DEFAULT '',
+      attempt INTEGER NOT NULL DEFAULT 0,
+      entry_id TEXT,
+      payload TEXT,
+      recorded_at TEXT NOT NULL,
+      PRIMARY KEY (run_id, sequence),
+      UNIQUE (run_id, kind, task_id, attempt)
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_run_facts_task
+      ON task_run_facts(run_id, task_id, sequence);
+    CREATE INDEX IF NOT EXISTS idx_task_run_facts_entry
+      ON task_run_facts(run_id, entry_id);
   `);
   ensureMemoryColumns(db);
   ensureHistoryColumns(db);
