@@ -49,7 +49,6 @@ const insert = target.prepare(
 );
 
 let total = 0;
-let kept = 0;
 for (const src of SOURCES) {
   if (!existsSync(src)) {
     console.log(`skip (missing): ${src}`);
@@ -71,9 +70,8 @@ for (const src of SOURCES) {
     target.exec("BEGIN");
     try {
       for (const r of batch) {
-        const wasMissing = insert.run(r.index_id, r.input_kind, r.text_hash, r.vector_blob, r.created_at).changes > 0;
+        insert.run(r.index_id, r.input_kind, r.text_hash, r.vector_blob, r.created_at);
         rows += 1;
-        if (wasMissing) kept += 1;
       }
       target.exec("COMMIT");
     } catch (e) {

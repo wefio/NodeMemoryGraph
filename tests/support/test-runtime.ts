@@ -100,8 +100,9 @@ export function testDaemon(): TestPlugin {
       environment: stripProviderEnv({ ...process.env }),
     });
     const token = randomBytes(32).toString("base64url");
-    let server!: Server;
-    server = createServer(httpHandler(service, token, () => server.closeAllConnections?.()));
+    const server: Server = createServer(
+      httpHandler(service, token, () => server.closeAllConnections?.()),
+    );
     await listen(server);
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("test daemon did not bind TCP");

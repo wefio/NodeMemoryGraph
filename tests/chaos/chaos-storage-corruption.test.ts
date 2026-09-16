@@ -38,7 +38,6 @@ function tryDelete(dir: string, db: string): boolean {
     } catch {
       // Windows: the handle may still be pinned; retry a few times.
       // (The fs.rm maxRetries path is also armed, so this loop is a backstop.)
-      // eslint-disable-next-line no-loop-func
       void new Promise((r) => setTimeout(r, 100));
     }
   }

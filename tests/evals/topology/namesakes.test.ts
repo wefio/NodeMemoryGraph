@@ -62,7 +62,7 @@ function fixture(pageid: string): NamesakesEntity {
   ];
   const text = parts.join(" ");
   let cursor = 0;
-  const entities = parts.map((part, index) => {
+  const entities = parts.map((_part, index) => {
     const mention = index === 1 ? "J. Lee" : "Jordan Lee";
     const start = text.indexOf(mention, cursor);
     cursor = start + mention.length;

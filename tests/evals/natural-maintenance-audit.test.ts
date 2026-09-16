@@ -15,7 +15,7 @@ test("natural maintenance audit reads claim, consolidation, and topology evidenc
   const stgPath = join(directory, "stg.sqlite");
   const ltg = new NmgStore(ltgPath);
   const stg = new NmgStore(stgPath);
-  let stgMemoryId = "";
+  let stgMemoryId!: string;
   let retractedStgMemoryId = "";
   let retractedLtgMemoryId = "";
   let manualLtgMemoryId = "";

@@ -41,7 +41,7 @@ export function latestAutomaticRecallEvidence(
 ): AutomaticRecallEvidence | null {
   const databasePath = resolve(nmgDirectory, "nmg.sqlite");
   const database = new DatabaseSync(databasePath, { readOnly: true });
-  let traceId: string | null = null;
+  let traceId!: string | null;
   let sessionId: string | undefined;
   try {
     const row = database
