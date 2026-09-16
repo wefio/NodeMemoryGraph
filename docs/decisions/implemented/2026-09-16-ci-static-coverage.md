@@ -76,37 +76,37 @@ the detail is emitted as annotations rather than swallowed.
 The scan's first pass over the newly covered surface produced 11 findings. Nine were
 genuinely dead and were deleted; two were not dead code at all:
 
-| Finding | What it was |
-| ------- | ----------- |
-| `evals/omnimemeval/experiment-manifest.mjs:133,134` | `llmClientText` and the `llmClientPy` path that only fed it; the parameters it looked like it was for are read by `paramIn`. Deleted. |
-| `evals/omnimemeval/experiment-manifest.mjs:181,190,191` | `correct` and `anyHit` counters incremented every iteration and never read; the category breakdown uses `byCat` instead. Deleted. |
-| `evals/omnimemeval/merge-embedding-caches.mjs:52,76` | `kept`, and the `wasMissing` it counted; the summary reports duplicates as `total - finalCount`. Deleted. |
-| `evals/omnimemeval/research/probes/hyde-context.mjs:120` | `userId`, superseded by the `storeUserId` the store is actually keyed by. Deleted. |
-| `evals/retrieval/profile-size.ts:36` | An unused `catch (e)` binding. `catch {`. |
-| `evals/retrieval/run.ts:38` | An unused `NODE_SUMMARY_PROMPT_VERSION` import. Deleted. |
-| `evals/longmemeval/retrieval-evidence.ts:44` | `let traceId: string \| null = null` — the seed was never read, because every path that reads `traceId` exits through the assignment. Dead store. |
-| `evals/omnimemeval/research/probes/hyde-probe.mjs:167` | `let hydeCtx = baseCtx` — assigned before every read. Now a `const` inside the branch that assigns it. Dead store. |
-| `evals/halumem/agent-extract.ts:145` | Not dead code: a rejected extraction rethrows a new error without the parse failure that caused it. `{ cause: error }` keeps the symptom. |
-| `scripts/sync-nmg-skill.ts:140` | Not dead code: the lock-contention error dropped the `EEXIST` it was raised for. `{ cause: error }`. |
+| Finding                                                  | What it was                                                                                                                                       |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `evals/omnimemeval/experiment-manifest.mjs:133,134`      | `llmClientText` and the `llmClientPy` path that only fed it; the parameters it looked like it was for are read by `paramIn`. Deleted.             |
+| `evals/omnimemeval/experiment-manifest.mjs:181,190,191`  | `correct` and `anyHit` counters incremented every iteration and never read; the category breakdown uses `byCat` instead. Deleted.                 |
+| `evals/omnimemeval/merge-embedding-caches.mjs:52,76`     | `kept`, and the `wasMissing` it counted; the summary reports duplicates as `total - finalCount`. Deleted.                                         |
+| `evals/omnimemeval/research/probes/hyde-context.mjs:120` | `userId`, superseded by the `storeUserId` the store is actually keyed by. Deleted.                                                                |
+| `evals/retrieval/profile-size.ts:36`                     | An unused `catch (e)` binding. `catch {`.                                                                                                         |
+| `evals/retrieval/run.ts:38`                              | An unused `NODE_SUMMARY_PROMPT_VERSION` import. Deleted.                                                                                          |
+| `evals/longmemeval/retrieval-evidence.ts:44`             | `let traceId: string \| null = null` — the seed was never read, because every path that reads `traceId` exits through the assignment. Dead store. |
+| `evals/omnimemeval/research/probes/hyde-probe.mjs:167`   | `let hydeCtx = baseCtx` — assigned before every read. Now a `const` inside the branch that assigns it. Dead store.                                |
+| `evals/halumem/agent-extract.ts:145`                     | Not dead code: a rejected extraction rethrows a new error without the parse failure that caused it. `{ cause: error }` keeps the symptom.         |
+| `scripts/sync-nmg-skill.ts:140`                          | Not dead code: the lock-contention error dropped the `EEXIST` it was raised for. `{ cause: error }`.                                              |
 
 ### The 23 findings on `tests/`, judged one by one
 
 Five of these were reported as dead code and were actually dropped assertions — the
 evidence behind the advisory severity above:
 
-| Finding | Judgement |
-| ------- | --------- |
-| `core/graph-cycles.test.ts:120` (`m2`, `m3`, `m4` unused) | Dropped assertion, not dead code. The chain's head and tail were checked and `size === 5` was asserted, so a 5-element set of the wrong records passed. The assertion is now set equality against `ids`. |
-| `core/store/duplicates.test.ts:177` (`norm` unused) | Dropped assertion. Now asserts both same-normalized statements are retrieved, which is the sentence the neighbouring comment already claims. |
-| `core/store/duplicates.test.ts:375,381` (`old2026`, `new2033` unused) | Dropped assertion. The as-of ranking was checked through statement substrings only; the two record ids are now asserted against the slots those substrings found, so the ranking cannot be satisfied by a different record. |
-| `cli/service.test.ts:836,837` | Dead initializer. The ids are read after the `try`/`finally` that closes the service, so the `""` seed was never read; declared with a definite-assignment assertion like `tests/support/test-runtime.ts` already does. |
-| `evals/longmemeval/retrieval-evidence.test.ts:24`, `evals/natural-maintenance-audit.test.ts:18` | Same dead initializer. |
-| `cli/process.test.ts:3` (`mkdirSync`), `evals/omnimemeval-bridge.test.ts:8` (`NmgStore`) | Dead imports. Removed. |
-| `evals/omnimemeval-judge-provider.test.ts:86` (`init` unused) | A fetch-stub parameter that is not inspected. Renamed `_init`, matching the config's `argsIgnorePattern`. |
-| `extensions/nmg/index.test.ts:1457` (`error` unused) | The catch exists to retry a Windows handle release, not to inspect the error; `catch {` states that. |
-| `integration/controller-channel.test.ts:79,118` (8 × `no-useless-escape`) | `\"` inside a template literal. Noise, and the escapes are removed. |
-| `support/test-runtime.ts:104` (`prefer-const`) | Noise: the handler closes over the server it is built with; declared as a single `const`. |
-| `chaos/chaos-storage-corruption.test.ts:41` | A stale `eslint-disable-next-line no-loop-func` that no longer suppresses anything. Removed. |
+| Finding                                                                                         | Judgement                                                                                                                                                                                                                   |
+| ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core/graph-cycles.test.ts:120` (`m2`, `m3`, `m4` unused)                                       | Dropped assertion, not dead code. The chain's head and tail were checked and `size === 5` was asserted, so a 5-element set of the wrong records passed. The assertion is now set equality against `ids`.                    |
+| `core/store/duplicates.test.ts:177` (`norm` unused)                                             | Dropped assertion. Now asserts both same-normalized statements are retrieved, which is the sentence the neighbouring comment already claims.                                                                                |
+| `core/store/duplicates.test.ts:375,381` (`old2026`, `new2033` unused)                           | Dropped assertion. The as-of ranking was checked through statement substrings only; the two record ids are now asserted against the slots those substrings found, so the ranking cannot be satisfied by a different record. |
+| `cli/service.test.ts:836,837`                                                                   | Dead initializer. The ids are read after the `try`/`finally` that closes the service, so the `""` seed was never read; declared with a definite-assignment assertion like `tests/support/test-runtime.ts` already does.     |
+| `evals/longmemeval/retrieval-evidence.test.ts:24`, `evals/natural-maintenance-audit.test.ts:18` | Same dead initializer.                                                                                                                                                                                                      |
+| `cli/process.test.ts:3` (`mkdirSync`), `evals/omnimemeval-bridge.test.ts:8` (`NmgStore`)        | Dead imports. Removed.                                                                                                                                                                                                      |
+| `evals/omnimemeval-judge-provider.test.ts:86` (`init` unused)                                   | A fetch-stub parameter that is not inspected. Renamed `_init`, matching the config's `argsIgnorePattern`.                                                                                                                   |
+| `extensions/nmg/index.test.ts:1457` (`error` unused)                                            | The catch exists to retry a Windows handle release, not to inspect the error; `catch {` states that.                                                                                                                        |
+| `integration/controller-channel.test.ts:79,118` (8 × `no-useless-escape`)                       | `\"` inside a template literal. Noise, and the escapes are removed.                                                                                                                                                         |
+| `support/test-runtime.ts:104` (`prefer-const`)                                                  | Noise: the handler closes over the server it is built with; declared as a single `const`.                                                                                                                                   |
+| `chaos/chaos-storage-corruption.test.ts:41`                                                     | A stale `eslint-disable-next-line no-loop-func` that no longer suppresses anything. Removed.                                                                                                                                |
 
 ## Alternatives considered
 
@@ -164,4 +164,7 @@ evidence behind the advisory severity above:
 - `check:tests` reports 69 pre-existing type errors (37 under `tests/`, 26 in
   `workbuddy-plugin/nmg-hook.ts`, 5 under `evals/`, 1 under `tools/`). None of them is a
   liveness finding; paying them down and moving the step into `verify:static` is its own
-  change.
+  change. The count is a property of the tree, not of the step: the tree that merges
+  `feat/ooo-run-namespace` measures 74 (41 under `tests/`, everything else unchanged), the
+  four extra findings being that branch's own test files. Whoever merges it re-measures this
+  line rather than carrying 69 forward.

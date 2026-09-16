@@ -9,8 +9,9 @@ Verification commands, run in the worktree that holds this branch, with the valu
 revision (re-run them rather than trusting the numbers; the harness writes no log file):
 
 - `node --experimental-strip-types --test --test-concurrency=4 "evals/ooo-execution/"*.test.ts` -> 90 pass, 0 fail, exit 0
-- `npm run test:product` -> 1362 pass, 0 fail, exit 0
-- `node --experimental-strip-types tools/mutation-teeth.ts` -> 45 of 45 caught, 7 of 7 restored byte-identically, exit 0
+- `npm run test:product` -> 1366 pass, 0 fail, exit 0
+- `npm run mutation:teeth` -> 45 of 45 caught, 7 of 7 restored byte-identically, exit 0
+- `npm run lint` (now over `src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ tests/ evals/ scripts/ tools/`) -> 0 findings, exit 0; `npm run check` -> exit 0. `npm run agent:verify` on a path under `evals/` still fails on the evaluation route's TAP rule for the skipped LoCoMo bridge - by decision, the rule stays and the reason names the skip.
 - `node --experimental-strip-types --test --test-concurrency=4 tests/integration/ooo-ordinary-failure.test.ts tests/integration/ooo-managed-fence.test.ts tests/integration/ooo-read-paths-agree.test.ts tests/integration/ooo-round-query.test.ts tests/integration/ooo-task-tables.test.ts` -> 5, 3, 1, 2 and 4 pass, 0 fail, exit 0
 
 How a row earns `proven`: it names a test that fails when the code satisfying it is broken. Where
@@ -237,6 +238,11 @@ Two things that pass still owes, so that they are not discovered late: `BoardAdm
 copy of the run tables for the private research store (the design's "旧私有轮次只读保留作研究证据，
 不与新运行双写" makes them coexisting, not duplicated), and the retargeting has to move the archived
 evidence readers with it or refuse an old schema by name instead of reading it as empty. `evals/**`
-is the tree that neither `tsc` nor the product suite covers, so that pass runs the evals suites first.
+is the tree with the weakest gates, which is why that pass runs the evals suites first - weaker, not
+absent, since 2026-09-16 (#68): the widened `lint` now scans `evals/`, `tests/`, `scripts/` and
+`tools/` and is blocking, so a finding there fails `verify:static`; the tests surface is type-checked
+by the advisory `check:tests`, whose debt count is its exit criterion. What no gate covers is the
+`ooo-execution` drivers' behaviour - they need model calls - and that is what running the suites first
+is for.
 
 Nothing above claims progress: B6's row stays `partly` until the routing lands and a mutant pins it.
