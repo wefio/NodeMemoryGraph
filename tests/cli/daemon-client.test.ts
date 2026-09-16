@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import {
   assertDaemonCapability,
   assertDaemonProtocol,
+  daemonBuildProblem,
   daemonSupportsCapability,
   NmgDaemonCapabilityError,
   NmgDaemonCompatibilityError,
@@ -19,6 +23,45 @@ import {
   NMG_RPC_CATALOG_FINGERPRINT,
   fingerprintRpcCatalog,
 } from "../../src/cli/protocol.ts";
+
+// A daemon spawned in an unbuilt checkout used to fail as `NMG daemon did not become ready
+// within 10000ms`: the detached child dies importing `dist/`, and its stderr is deliberately
+// not reachable. These pin the replacement, which names the missing build instead.
+test("the daemon build check names a missing entrypoint", () => {
+  const problem = daemonBuildProblem(
+    join(tmpdir(), "nmg-absent-entrypoint.mjs"),
+    join(tmpdir(), "nmg-absent-built-cli.js"),
+  );
+  assert.match(problem ?? "", /daemon entrypoint is missing/);
+});
+
+test("the daemon build check names an unbuilt checkout and the command that fixes it", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-daemon-unbuilt-"));
+  try {
+    const entrypoint = join(directory, "nmg.mjs");
+    writeFileSync(entrypoint, "// entrypoint\n");
+    const problem = daemonBuildProblem(entrypoint, join(directory, "dist", "cli", "main.js"));
+    assert.ok(problem, "an unbuilt checkout must be reported, not left to time out");
+    assert.match(problem, /daemon CLI is not built/);
+    assert.match(problem, /npm run build/, "the fix must be named, not just the fault");
+  } finally {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+test("the daemon build check passes when both the entrypoint and the built CLI exist", () => {
+  const directory = mkdtempSync(join(tmpdir(), "nmg-daemon-built-"));
+  try {
+    const entrypoint = join(directory, "nmg.mjs");
+    const builtCli = join(directory, "dist", "cli", "main.js");
+    mkdirSync(dirname(builtCli), { recursive: true });
+    writeFileSync(entrypoint, "// entrypoint\n");
+    writeFileSync(builtCli, "// built\n");
+    assert.equal(daemonBuildProblem(entrypoint, builtCli), null);
+  } finally {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
 
 test("daemon protocol guard accepts the current compatibility epoch", () => {
   assert.doesNotThrow(() => assertDaemonProtocol({ protocol: NMG_PROTOCOL_VERSION }));

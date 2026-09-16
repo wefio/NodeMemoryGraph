@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { resolveNmgDataDir } from "./data-path.ts";
@@ -31,6 +31,25 @@ export interface DaemonConnection {
   databasePath: string;
 }
 
+/** What is wrong with the paths the daemon is spawned from, or `null` when both exist.
+ *
+ *  The daemon runs through the tracked `bin/nmg.mjs`, which imports the built CLI. A
+ *  checkout that has not been built has no `dist/`, and the child then exits before it
+ *  can answer `hello`. Its startup error is not reachable — the daemon is detached and
+ *  spawned with `stdio: "ignore"` so that it outlives this process — so without this
+ *  check the only symptom is `waitForState` timing out, which reads like a daemon fault
+ *  rather than a missing build. Both paths are passed in so this is testable. */
+export function daemonBuildProblem(entrypoint: string, builtCli: string): string | null {
+  if (!existsSync(entrypoint)) return `the daemon entrypoint is missing: ${entrypoint}`;
+  if (!existsSync(builtCli)) {
+    return (
+      `the daemon CLI is not built: ${builtCli} does not exist.\n` +
+      "  A fresh worktree has no dist/: run `npm run build` before starting a daemon from source."
+    );
+  }
+  return null;
+}
+
 export async function connectDaemon(databasePath: string): Promise<DaemonConnection> {
   const statePath = serverStatePath(databasePath);
   const existing = readyState(statePath);
@@ -56,6 +75,9 @@ export async function connectDaemon(databasePath: string): Promise<DaemonConnect
   await warnIfDaemonLimitExceeded();
 
   const entrypoint = resolve(import.meta.dirname, "../../bin/nmg.mjs");
+  const builtCli = resolve(import.meta.dirname, "../../dist/cli/main.js");
+  const buildProblem = daemonBuildProblem(entrypoint, builtCli);
+  if (buildProblem) throw new Error(`NMG daemon cannot start: ${buildProblem}`);
   const child = spawn(process.execPath, [entrypoint, "daemon", "run", "--db", databasePath], {
     detached: true,
     stdio: "ignore",
