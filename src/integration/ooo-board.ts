@@ -478,16 +478,6 @@ export class BoardAdmission extends NmgStore {
     return this.writeTransaction(work);
   }
 
-  private ensureColumns(table: string, columns: Readonly<Record<string, string>>) {
-    const existing = new Set(
-      (this.db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map(
-        (column) => column.name,
-      ),
-    );
-    for (const [name, type] of Object.entries(columns))
-      if (!existing.has(name)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
-  }
-
   private row(id: string): Row {
     const row = this.db
       .prepare("SELECT * FROM ooo_probe_task_view WHERE run_id=? AND id=?")
