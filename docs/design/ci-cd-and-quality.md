@@ -98,11 +98,13 @@ TestRuntime
 
 ## 5. Agent 原生仓库上下文
 
-根 `AGENTS.md` 只保存稳定启动协议。Agent 修改仓库前运行：
+根 `AGENTS.md` 保存稳定的查找协议。Agent 从任务术语、符号和目标目录定位实现与所属契约，按当前动作读取相关章节；入口不维护模块清单、命令或运行状态。所有权或检查要求不清楚时，可运行：
 
 ```powershell
 npm run agent:context -- --scope <目标路径>
 ```
+
+工具返回的 owner 路径用于定位，不要求整篇阅读，也不阻断直接搜索已知目标。文档按需阅读的维护规则由 `skills/doc-maintenance/SKILL.md` 拥有；开发验证仍按下节流程执行，不以是否调用查找工具作为正确性证据。
 
 `tools/repo-context.ts` 从 Git、`package.json`、`agent-context.yaml`、owner 文档和临时 guardrail manifest 生成当前任务视图。它是只读开发工具，不访问 NMG 数据库，不启动 daemon，也不调用 LLM 或 embedding。`--changed` 可以把当前工作树的全部改动作为 scope；共享脏工作树中应优先传入本任务拥有的精确 `--scope`，避免把其他 Agent 的改动误纳入计划。
 

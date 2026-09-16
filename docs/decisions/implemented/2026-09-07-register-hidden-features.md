@@ -1,7 +1,7 @@
 # Register every hidden (env-gated / non-default) feature
 
 **Status:** implemented  
-**Approved:** unrecorded
+**Approved:** explicit
 Date: 2026-09-07
 Branch: feat/meta-rule-governance
 
@@ -73,7 +73,8 @@ Rules:
   source of truth; an automated scan may later cross-check it.
 - **Gate the rule on agent:verify.** Deferred: wiring enforcement into the
   verify pipeline is a separate, larger change. The registry contract plus the
-  AGENTS.md pointer is the standing rule for now.
+  [development workflow trigger](../../../skills/repo-development/SKILL.md#implement-and-verify)
+  is the standing rule for now.
 
 ## Consequences
 
