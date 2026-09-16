@@ -516,6 +516,9 @@ export function dispatchTasks(units: readonly TaskUnit[], facts: RecordedFacts):
     externalEvent: unit.waitEvent ?? undefined,
     externalReady: facts.externalReady?.includes(unit.id) ?? false,
     delivered: facts.artifacts?.[unit.id] !== undefined,
+    // The same recorded fact the acceptance predicate reads, carried to the eligibility rule: a
+    // cancellation is not a property of the artifact, and both rules have to see it.
+    cancelled: facts.cancellations?.includes(unit.id) ?? false,
   }));
 }
 

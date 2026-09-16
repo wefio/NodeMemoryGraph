@@ -75,6 +75,12 @@ export interface DispatchTask {
    *  whose verdict is not accepted (pending, rejected, or about another digest) leaves a task that
    *  cannot be claimed again and must not be selected - the coordinator recovers it with reopen(). */
   delivered?: boolean;
+  /** The run recorded a cancellation for this task. A cancellation is a fact about the task, so it
+   *  gates dispatch the way a rejection gates a dependent: a cancelled task is not handed out, and
+   *  nothing may read one as a closed input. Acceptance already refuses a cancelled task; the gap
+   *  this closes is that the *eligibility* rule could not see it at all, so a cancelled task stayed
+   *  selectable as the next dispatch. */
+  cancelled?: boolean;
 }
 
 /** Input order and declarations belong to the coordinator, never the worker.
@@ -86,13 +92,15 @@ export function nextTask(plan: readonly DispatchTask[]): string | null {
     !!task.sourceVersion && task.sourceVersion === task.observedVersion;
   const valid = (id: string, visiting = new Set<string>()): boolean => {
     const task = byId.get(id);
-    if (!task || !task.accepted || !current(task) || visiting.has(id)) return false;
+    if (!task || !task.accepted || task.cancelled || !current(task) || visiting.has(id))
+      return false;
     const path = new Set(visiting).add(id);
     return task.dependencies.every((dependency) => valid(dependency, path));
   };
   const waiting = (task: DispatchTask) => !!task.externalEvent && !task.externalReady;
   const ready = (task: DispatchTask) =>
     current(task) &&
+    !task.cancelled &&
     !waiting(task) &&
     ["read-only", "isolated-artifact"].includes(task.effect) &&
     task.dependencies.every((id) => valid(id));

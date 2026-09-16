@@ -434,9 +434,26 @@ const TARGETS: readonly Target[] = [
     target: "src/integration/ooo-execution.ts",
     suites: [
       "tests/integration/ooo-ordinary-failure.test.ts",
+      "tests/integration/ooo-publication-invariants.test.ts",
       "evals/ooo-execution/patch-cycle.test.ts",
     ],
     mutants: [
+      {
+        // A cancellation is a fact about the task, so it gates dispatch the way a rejection gates
+        // a dependent. This is the half acceptance already had and eligibility did not.
+        name: "a-cancelled-task-is-still-dispatched",
+        ast: { within: "nextTask" },
+        from: "    current(task) &&\n    !task.cancelled &&",
+        to: "    current(task) &&",
+        expect: "a cancelled task is not dispatched, and nothing reads one as a closed input",
+      },
+      {
+        name: "the-dispatch-does-not-require-a-cancelled-input-to-be-closed",
+        ast: { within: "nextTask" },
+        from: "    if (!task || !task.accepted || task.cancelled || !current(task) || visiting.has(id))",
+        to: "    if (!task || !task.accepted || !current(task) || visiting.has(id))",
+        expect: "nextTask refuses a task marked cancelled, whatever else the caller set",
+      },
       {
         name: "selection-ignores-a-withdrawn-acceptance",
         ast: { within: "nextTask" },
@@ -451,6 +468,59 @@ const TARGETS: readonly Target[] = [
         from: "  if (pending.some((task) => task.claimed) || pending.filter(waiting).length > 1) return null;",
         to: "  if (pending.filter(waiting).length > 1) return null;",
         expect: "with no fusion point the plan falls back to its declared order",
+      },
+    ],
+  },
+  {
+    target: "src/integration/task-semantics-interleavings.ts",
+    suites: ["tests/integration/ooo-publication-invariants.test.ts"],
+    mutants: [
+      {
+        // Every condition in the checker is deleted once, and the case that names it has to fail:
+        // a condition no case can reach is a comment, not a check.
+        name: "the-completion-does-not-bind-the-verdict-to-the-bytes",
+        from: "    else if (verdict.digest !== artifact)",
+        to: "    else if (false && verdict.digest !== artifact)",
+        expect: "the checker reports a completion whose verdict judged other bytes",
+      },
+      {
+        // Whether an input is current, and whether its bytes are the bytes its verdict judged, is the
+        // one acceptance predicate's answer; the checker asks it instead of comparing by hand.
+        name: "the-input-is-not-required-to-be-accepted",
+        ast: { within: "checkInputs" },
+        from: "    if (dependencyUnit && !isAccepted(dependencyUnit, context.facts))",
+        to: "    if (false && dependencyUnit && !isAccepted(dependencyUnit, context.facts))",
+        expect: "the checker reports a completion resting on an input that drifted",
+      },
+      {
+        name: "the-input-may-be-cancelled",
+        ast: { within: "checkInputs" },
+        from: "    if (cancelled(context.facts, dependency))",
+        to: "    if (false && cancelled(context.facts, dependency))",
+        expect: "the checker reports a completion resting on a cancelled input",
+      },
+      {
+        name: "the-completion-ignores-a-cancelled-unit",
+        ast: { within: "checkCompletion" },
+        from: "  if (cancelled(context.facts, unit.id))",
+        to: "  if (false)",
+        expect: "the checker reports a completion of a cancelled unit",
+      },
+      {
+        name: "the-dispatch-does-not-require-a-closed-input",
+        ast: { within: "checkDispatch" },
+        from: '  checkInputs(context, unit, "dispatch");',
+        to: "  void checkInputs;",
+        expect: "the checker reports a dispatch whose input is not accepted",
+      },
+      {
+        // The enumeration is the other half of the claim: a merge that stops at the first order
+        // checks one interleaving and reports it as all of them.
+        name: "the-merge-enumerates-one-order",
+        ast: { within: "interleavings" },
+        from: "  return out;",
+        to: "  return out.slice(0, 1);",
+        expect: "the merge enumerates every legal order, not one of them",
       },
     ],
   },
@@ -471,9 +541,11 @@ const TARGETS: readonly Target[] = [
         expect: "a dependency that is not accepted makes fusion pay a rollback and a retry",
       },
       {
+        // The closure takes the unit-level predicate, so the marker names the two conditions it
+        // joins: a unit's own acceptance and every dependency being in the set.
         name: "acceptance-closure-dropped",
-        from: "        own(unit.id) && unit.inputs.dependencies.every((dependency) => accepted.has(dependency));",
-        to: "        own(unit.id);",
+        from: "        own(unit) && unit.inputs.dependencies.every((dependency) => accepted.has(dependency));",
+        to: "        own(unit);",
         expect: "a dependency that is not accepted makes fusion pay a rollback and a retry",
       },
     ],
