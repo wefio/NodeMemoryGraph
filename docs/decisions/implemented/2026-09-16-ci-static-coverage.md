@@ -56,17 +56,21 @@ matches a file that the script scans. It imports `eslint.config.js` and asks ESL
 and its first check is red on the pre-change config, where `evals/**/*.ts` and
 `scripts/**/*.ts` pointed outside the scanned surface.
 
-**The debt is visible in CI without being blocking.** The required `static` job gains two
-advisory steps, each with `continue-on-error` on the step rather than the job:
-`npm run lint:debt` (the same ESLint invocation with `--max-warnings 0`, so the staged
-findings are counted) and `npm run check:tests` (`tsc -p tsconfig.tests.json
---noUnusedLocals --noUnusedParameters`, which makes `tsconfig.tests.json` referenced for
-the first time). Both are expected to fail until the debt is paid, both report a real
-per-step result in the run, and neither joins the blocking set. A job-level
-`continue-on-error` was rejected before, in
-[2026-09-12](2026-09-12-visible-non-blocking-research-track.md): it makes a job in the
-checks list indistinguishable from one that never ran. A step is not in that list, so
-the distinction survives.
+**The debt is reported in CI without becoming a merge blocker.** The required `static`
+job gains two advisory steps: `npm run lint:debt` (the same ESLint invocation with
+`--max-warnings 0`, so the staged findings are counted) and `npm run check:tests`
+(`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`, which makes
+`tsconfig.tests.json` referenced for the first time). Both are expected to fail while the
+debt exists, and `continue-on-error` sits on each step rather than on the job, so the
+required aggregate stays green. What a reader gets on every run is one `warning`
+annotation per staged ESLint finding, one `error` annotation per type error, and the two
+exit codes in the job log. What they do not get is a red check in the checks list: the
+debt is deliberately not a merge blocker, and a check that cannot turn green until the
+debt reaches zero states a failure about something the repository decided not to fail on.
+Job-level `continue-on-error` remains rejected by
+[2026-09-12](2026-09-12-visible-non-blocking-research-track.md), where the objection was a
+job whose real result could not be told apart from one that never ran; emitting the
+detail as annotations rather than swallowing the step is what keeps that distinction here.
 
 ### The 11 findings staged on the newly scanned surfaces
 
@@ -113,6 +117,13 @@ dead code:
 - **Satisfy "warnings, not blocking" with a job-level `continue-on-error`.** Rejected by
   the precedent in [2026-09-12](2026-09-12-visible-non-blocking-research-track.md), and
   it would duplicate the job that already exists rather than report something new.
+- **Report the debt from its own non-blocking job, the shape `research-tests` uses.**
+  Rejected for now: it costs a second checkout and install, and it would put a red check
+  on every pull request for something the repository decided not to block on. The step
+  form carries the same information as annotations without claiming a failure the
+  aggregate does not honour. If this debt is still open when it becomes urgent, this is
+  the option to revisit — it is the only one of the two that a reader looking only at
+  the checks list would notice.
 - **Hand-write the Node globals instead of adding `globals`.** Rejected: a hand list
   recreates the exact defect being fixed — one missing global reports every use as
   undefined for as long as nobody notices.
@@ -131,13 +142,14 @@ dead code:
 - The `tests/` surface is type-checked for the first time, by an advisory step whose
   failure count is the debt. `tsconfig.tests.json` is now referenced by a script instead
   of being an unread file.
-- Staged warnings are real debt: they appear in every `npm run lint` run and as a red
-  advisory step on every CI run. The exit criterion is written down — when
+- Staged warnings are real debt: they appear in every `npm run lint` run and as
+  per-finding annotations on every CI run. The exit criterion is written down — when
   `npm run lint:debt` reports no findings for the rules staged in `eslint.config.js`,
   delete those lines and move `lint:debt` into `verify:static`.
-- Cost: the advisory steps stay red while the debt exists, which is honest but becomes
-  wallpaper if nobody pays it down. The counter-pressure is that the count is printed
-  every run and the staged lines are few and named.
+- Cost: the advisory steps fail on every run while the debt exists, and the checks list
+  still says `All checks passed`. The debt is reported, not enforced; a reader who only
+  looks at the check list will not see it. The annotations and the printed counts are the
+  counter-pressure, and the alternative above is the escape hatch if that is not enough.
 - Cost: an advisory step proves nothing about whether the scheduled debt work happens;
   only the exit criterion and ordinary review do.
 - Rollback: revert one commit. Nothing here migrates data or changes a runtime

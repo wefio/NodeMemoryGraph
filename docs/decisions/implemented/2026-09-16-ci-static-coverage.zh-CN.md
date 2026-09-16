@@ -46,13 +46,18 @@
 `calculateConfigForFile` 询问生效的 severity，所以注释无法让它通过；而它的第一条断言在改动前的
 配置上就是红的 —— 当时 `evals/**/*.ts` 与 `scripts/**/*.ts` 指向扫描面之外。
 
-**债在 CI 里可见，但不阻塞。** 必跑的 `static` job 增加两个 advisory 步骤，`continue-on-error`
-加在**步骤**而非 job 上：`npm run lint:debt`（同一条 ESLint 调用加 `--max-warnings 0`，让被分级的
-发现可被计数）与 `npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals
---noUnusedParameters`，这也是 `tsconfig.tests.json` 第一次被脚本引用）。两者在债还清之前预期失败，
-都在运行里给出真实的步骤结果，都不进入阻塞集。job 级 `continue-on-error` 此前已被
-[2026-09-12](2026-09-12-visible-non-blocking-research-track.md) 否决：它会让 checks 列表里的
-job 与"从未运行过"无法区分。步骤不在那份列表里，因此这个区分得以保留。
+**债在 CI 里被报告，但不会变成合并阻塞。** 必跑的 `static` job 增加两个 advisory 步骤：
+`npm run lint:debt`（同一条 ESLint 调用加 `--max-warnings 0`，让被分级的发现可被计数）与
+`npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`，
+这也是 `tsconfig.tests.json` 第一次被脚本引用）。两者在债存在期间预期失败，而
+`continue-on-error` 加在**步骤**而非 job 上，因此必跑聚合仍然为绿。每次运行读者能得到的是：
+每条被分级的 ESLint 发现一条 `warning` annotation、每个类型错误一条 `error` annotation，
+以及 job 日志里两个退出码。读者得不到的是 checks 列表里的红叉：这笔债刻意不是合并阻塞项，
+而一个在债清零前不可能变绿的 check，等于对一个仓库已决定不据此失败的东西宣布失败。
+job 级 `continue-on-error` 仍被
+[2026-09-12](2026-09-12-visible-non-blocking-research-track.md) 否决：那里的反对理由是 job 的真实
+结果与"从未运行过"无法区分；把细节以 annotation 形式发出而不是把步骤吞掉，就是这里保住该区分的
+做法。
 
 ### 新扫描面上被分级的 11 条发现
 
@@ -94,6 +99,10 @@ job 与"从未运行过"无法区分。步骤不在那份列表里，因此这�
 - **用 job 级 `continue-on-error` 实现"只警告、不阻塞"。** 被
   [2026-09-12](2026-09-12-visible-non-blocking-research-track.md) 的先例否决；那还会重复一个已经
   存在的 job，而不是报告新的东西。
+- **用一个独立的非阻塞 job 报告这笔债（`research-tests` 的形状）。** 目前否决：它要多一次
+  checkout 与 install，并会在每个 PR 上挂一个红叉，而这件事是仓库决定不阻塞的。步骤形式能携带
+  同样的信息，却不会声称一个聚合并不兑现的失败。如果这笔债在变得紧迫时仍未清掉，这就是应当重新
+  考虑的选项——两者之中，只有它会被只看 checks 列表的读者看到。
 - **手写 Node 全局变量而不加 `globals` 依赖。** 否决：手写清单会重新制造正在修的同一类缺陷 ——
   漏掉一个全局变量，就会让每个使用处长期被报成未定义。
 - **把配置当文本读取来做守卫。** 否决：那样注释与排版就能决定结果，而工单要求的正是"注释不能让它
@@ -107,11 +116,12 @@ job 与"从未运行过"无法区分。步骤不在那份列表里，因此这�
   落在扫描面之外或匹配不到任何文件。
 - `tests/` 这条面第一次获得类型检查，形式是一个 advisory 步骤，其失败计数就是债。
   `tsconfig.tests.json` 从一个没人读的文件变成了被脚本引用的文件。
-- 分级警告是真实的债：它出现在每一次 `npm run lint` 里，也在每次 CI 里表现为一个红色 advisory
-  步骤。退场标准已写明 —— 当 `npm run lint:debt` 对被分级的这些规则不再报出任何发现时，删除
+- 分级警告是真实的债：它出现在每一次 `npm run lint` 里，也在每次 CI 里表现为逐条 annotation。
+  退场标准已写明 —— 当 `npm run lint:debt` 对被分级的这些规则不再报出任何发现时，删除
   `eslint.config.js` 里那几行，并把 `lint:debt` 移入 `verify:static`。
-- 代价：债存在期间 advisory 步骤一直红着，这很诚实，但如果没人还债就会变成墙纸。反作用是每次运行
-  都打印计数，而被分级的行数很少且逐条有名。
+- 代价：债存在期间 advisory 步骤每次都失败，而 checks 列表仍然写着 `All checks passed`。这笔债被
+  报告，而不是被强制执行；只看 checks 列表的读者看不到它。annotation 与打印出来的计数是反作用
+  力，而上面的备选方案是它不够用时的出口。
 - 代价：advisory 步骤不能证明债是否真的在被还；只有退场标准和常规评审能做到。
 - 回滚：revert 一个 commit。这里没有数据迁移，也没有运行时契约变更。
 

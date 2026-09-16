@@ -72,7 +72,10 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 `verify:chaos` 这些命名 package contract，使本地可复现入口和远程 CI 保持同源：
 
 - `static`：build、package、type、lint、format、文档、术语索引、需求追溯、Agent context 与生产依赖审计；
-- `static` 内的两个 advisory 步骤：`lint:debt` 与 `check:tests`。`continue-on-error` 加在步骤上而非 job 上，`static` 仍是必跑且绿的 job，而尚未还清的债以红色步骤出现在运行里，不会被藏进一个永远绿的 check（决策：[静态覆盖面](../decisions/implemented/2026-09-16-ci-static-coverage.md)）；
+- `static` 内的两个 advisory 步骤：`lint:debt` 与 `check:tests`。`continue-on-error` 加在步骤上
+  而非 job 上，`static` 仍是必跑且绿的 job；尚未还清的债以逐条 annotation（ESLint 发现为
+  `warning`、类型错误为 `error`）与 job 日志里的退出码出现在运行里。它刻意不是合并阻塞项，也不
+  在 checks 列表里制造一个在债清零前不可能变绿的红叉（决策：[静态覆盖面](../decisions/implemented/2026-09-16-ci-static-coverage.md)）；
 - `tests`：Node 24 产品测试和覆盖率；
 - `research-tests`：研究/benchmark adapter 表征，**非阻塞但可见**：它不进入 `all-checks-passed`，因此失败不阻塞合并；但它不再带 `continue-on-error`，所以失败会以红色 check 出现在 PR 上，而不是永远显示绿色（决策：`docs/decisions/implemented/2026-09-12-visible-non-blocking-research-track.md`）。
 - `node-compat`：最低支持版本 Node 22.19 的 build/package；
