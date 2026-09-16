@@ -53,9 +53,9 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 另有三个命令只用于本地，刻意不作为 CI 轨道：`npm run lint:fix`（与 `lint` 同一 ESLint 范围，加 `--fix`）、`npm run hotspot:modules`（对 store 各方法做静态调用点计数）、`npm run perf:hotspots`（从某个 store 的 `perf_aggregates` 打印分段延迟占比）。
 
-`npm run lint` 的扫描面是 `src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ tests/ evals/ scripts/ tools/`。在 `evals/` 与 `scripts/` 这两个新增面上，已存在的发现按“规则 + 原因 + 退场方式”逐条在 `eslint.config.js` 里报为 `warn`；退场标准是 `lint:debt` 对这些规则不再有发现（决策：[静态覆盖面](../decisions/implemented/2026-09-16-ci-static-coverage.md)）。降级不允许把规则对某个目录整体关闭 —— 那会把检测能力与发现一起删掉。测试、研究 harness、脚本与仓库工具按设计打印，因此 `no-console` 对这些面关闭。扫描面自身由 `tests/tools/eslint-config-coverage.test.ts` 守住：`lint` 与 `lint:fix` 同面，且 config 里每个以目录锚定的 `files:` 块都必须落在扫描面内并仍能匹配到文件。
+`npm run lint` 的扫描面是 `src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ tests/ evals/ scripts/ tools/`。两条**活性规则**（`@typescript-eslint/no-unused-vars`、`no-useless-assignment`，都在断言"这个值从未被读取"）在 `tests/`、`evals/`、`scripts/`、`tools/` 上只报告为 `warn`，在 `src/` 上仍为 error：静态工具最容易在这里把活代码判成死的（`tests/core/graph-cycles.test.ts` 的三个"未使用绑定"实际是漏掉的断言），阻塞门禁会把修法推向删掉线索。其余规则对开发面与 `src/` 同标准（决策：[静态覆盖面](../decisions/implemented/2026-09-16-ci-static-coverage.md)）。测试、研究 harness、脚本与仓库工具按设计打印，因此 `no-console` 对这些面关闭。扫描面自身由 `tests/tools/eslint-config-coverage.test.ts` 守住：`lint` 与 `lint:fix` 同面，config 里每个以目录锚定的 `files:` 块都必须落在扫描面内并仍能匹配到文件，且生效 severity 由 ESLint 自己回答（提升某条规则是一次刻意改动）。
 
-`npm run lint:debt`（同一 lint 面加 `--max-warnings 0`，把分级发现变成可计数）与 `npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`，`tests/` 面第一次被类型检查）刻意不进入任何阻塞契约，只在 CI 以 advisory 步骤运行。
+`npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`，`tests/` 面第一次被类型检查）刻意不进入任何阻塞契约，只在 CI 以 advisory 步骤运行。
 
 `verify:static` 中的 `complexity:gate` 默认以 `git merge-base HEAD origin/main` 为基线（可用 `--base <ref>` 显式覆盖）。基线必须是 merge base 而不是 `HEAD`：后者只比较未提交的工作树，于是已提交到分支的改动完全不可见 —— 在 CI 的干净检出上它永远报“无改动”，等于每个 PR 都没有被这条 gate 检查过。因此每次运行都会**陈述自己用了哪个基线**，并**点名它未能测量的改动文件**（ESLint 拒绝某路径、或文件根本无法解析，都会产出“零发现”，与“量过且干净”无法区分）。
 
@@ -72,10 +72,7 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 `verify:chaos` 这些命名 package contract，使本地可复现入口和远程 CI 保持同源：
 
 - `static`：build、package、type、lint、format、文档、术语索引、需求追溯、Agent context 与生产依赖审计；
-- `static` 内的两个 advisory 步骤：`lint:debt` 与 `check:tests`。`continue-on-error` 加在步骤上
-  而非 job 上，`static` 仍是必跑且绿的 job；尚未还清的债以逐条 annotation（ESLint 发现为
-  `warning`、类型错误为 `error`）与 job 日志里的退出码出现在运行里。它刻意不是合并阻塞项，也不
-  在 checks 列表里制造一个在债清零前不可能变绿的红叉（决策：[静态覆盖面](../decisions/implemented/2026-09-16-ci-static-coverage.md)）；
+- `static` 内的 advisory 步骤：`check:tests`（`tests/` 面的类型检查 + 未使用局部量/参数）。`continue-on-error` 加在步骤上而非 job 上，`static` 仍是必跑且绿的 job；它的发现以 `error` annotation 与 job 日志里的退出码出现在运行里，刻意不是合并阻塞项（决策：[静态覆盖面](../decisions/implemented/2026-09-16-ci-static-coverage.md)）。同一 job 里拓宽后的 `lint` 把开发面上的活性发现报为 `warn`，同样以 annotation 出现在运行里而不失败构建；
 - `tests`：Node 24 产品测试和覆盖率；
 - `research-tests`：研究/benchmark adapter 表征，**非阻塞但可见**：它不进入 `all-checks-passed`，因此失败不阻塞合并；但它不再带 `continue-on-error`，所以失败会以红色 check 出现在 PR 上，而不是永远显示绿色（决策：`docs/decisions/implemented/2026-09-12-visible-non-blocking-research-track.md`）。
 - `node-compat`：最低支持版本 Node 22.19 的 build/package；

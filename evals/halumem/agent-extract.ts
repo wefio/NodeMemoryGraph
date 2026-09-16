@@ -144,6 +144,7 @@ async function main(): Promise<void> {
           writeFileSync(failurePath, raw, "utf8");
           throw new Error(
             `${error instanceof Error ? error.message : String(error)}; raw response saved to ${failurePath}`,
+            { cause: error },
           );
         }
         writeFileSync(cachePath, JSON.stringify(memories, null, 2), "utf8");

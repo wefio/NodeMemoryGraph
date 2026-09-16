@@ -19,9 +19,9 @@ import { ESLint } from "eslint";
 const rootUrl = new URL("../../", import.meta.url);
 const rootPath = fileURLToPath(rootUrl);
 
-const packageJson = JSON.parse(
-  readFileSync(new URL("package.json", rootUrl), "utf8"),
-) as { scripts: Record<string, string> };
+const packageJson = JSON.parse(readFileSync(new URL("package.json", rootUrl), "utf8")) as {
+  scripts: Record<string, string>;
+};
 
 interface FlatConfigEntry {
   readonly files?: string | readonly string[];
@@ -181,8 +181,15 @@ test("the exemptions the config declares are the ones ESLint applies", async () 
   assert.equal(await severityOf("tests/cli/process.test.ts", "no-console"), 0);
   assert.equal(await severityOf("src/core/store.ts", "no-console"), 1);
 
-  // Staged debt is reported, not silenced: evals/ warns where product code errors.
-  assert.equal(await severityOf("evals/retrieval/run.ts", "@typescript-eslint/no-unused-vars"), 1);
-  assert.equal(await severityOf("tests/tools/test-groups.test.ts", "@typescript-eslint/no-unused-vars"), 2);
+  // Liveness rules report on the developer surfaces and still fail product code.
+  for (const file of [
+    "tests/tools/test-groups.test.ts",
+    "evals/retrieval/run.ts",
+    "scripts/verify-docs.mts",
+  ]) {
+    assert.equal(await severityOf(file, "@typescript-eslint/no-unused-vars"), 1, file);
+    assert.equal(await severityOf(file, "no-useless-assignment"), 1, file);
+  }
   assert.equal(await severityOf("src/core/store.ts", "@typescript-eslint/no-unused-vars"), 2);
+  assert.equal(await severityOf("src/core/store.ts", "no-useless-assignment"), 2);
 });

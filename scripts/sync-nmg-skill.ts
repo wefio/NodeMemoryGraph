@@ -137,7 +137,7 @@ function acquireSyncLock(parent: string): () => void {
       const observedLock = readLock(lockPath);
       const owner = lockOwner(observedLock);
       if (owner !== undefined && processIsAlive(owner)) {
-        throw new Error(`NMG Skill sync already running in process ${owner}`);
+        throw new Error(`NMG Skill sync already running in process ${owner}`, { cause: error });
       }
       removeLockIfUnchanged(lockPath, observedLock);
     }

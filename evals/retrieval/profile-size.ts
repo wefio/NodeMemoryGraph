@@ -33,7 +33,7 @@ function main() {
       const nodes = db.prepare("SELECT COUNT(*) c FROM memory_nodes").get() as { c: number };
       const leafFts = db.prepare("SELECT COUNT(*) c FROM memory_leaf_fts").get() as { c: number };
       rows.push({ file, mem: mem.c, blocks: blocks.c, nodes: nodes.c, leafFts: leafFts.c });
-    } catch (e) {
+    } catch {
       rows.push({ file, mem: -1, blocks: -1, nodes: -1, leafFts: -1 });
     }
     db.close();

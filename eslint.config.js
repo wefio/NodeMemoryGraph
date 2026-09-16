@@ -40,18 +40,25 @@ export default tseslint.config(
     },
   },
   {
-    // Staged adoption: evals/ and scripts/ joined the lint surface in
-    // docs/decisions/implemented/2026-09-16-ci-static-coverage.md and still carry
-    // pre-existing findings there. Each firing rule is named on its own line and
-    // reported at `warn`, so the gate can land without folding an unrelated
-    // rewrite into it. Retire a line by fixing its findings, not by widening it:
-    // switching a rule off for a directory removes the detection as well as the
-    // finding.
-    files: ["evals/**/*.ts", "evals/**/*.mjs", "scripts/**/*.ts", "scripts/**/*.mts"],
+    // The liveness rules are advisory on the developer surfaces. "This value is never
+    // read" is the judgement a static tool most often gets wrong about code that is
+    // alive: the three unused bindings in tests/core/graph-cycles.test.ts were reported
+    // as dead code when the real defect was a missing assertion, and a blocking gate
+    // would have rewarded deleting the hint. On src/ they stay errors, because product
+    // code is reviewed as such and the rules have been enforced there since the start.
+    // tests/tools/eslint-config-coverage.test.ts pins these severities, so promoting a
+    // rule to error is a deliberate edit rather than a drift.
+    files: [
+      "tests/**/*.ts",
+      "evals/**/*.ts",
+      "evals/**/*.mjs",
+      "scripts/**/*.ts",
+      "scripts/**/*.mts",
+      "tools/**/*.ts",
+    ],
     rules: {
       "@typescript-eslint/no-unused-vars": "warn",
       "no-useless-assignment": "warn",
-      "preserve-caught-error": "warn",
     },
   },
   {

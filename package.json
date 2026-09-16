@@ -58,7 +58,6 @@
     "tutorial:first-recall": "node --experimental-strip-types scripts/tutorial-first-recall.ts",
     "lint": "eslint src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ tests/ evals/ scripts/ tools/",
     "lint:fix": "eslint --fix src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ tests/ evals/ scripts/ tools/",
-    "lint:debt": "eslint src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ tests/ evals/ scripts/ tools/ --max-warnings 0",
     "format": "prettier --write \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \".pi/**/*.ts\" \"workbuddy-plugin/**/*.ts\"",
     "test:coverage": "c8 node --experimental-strip-types --test --test-concurrency=2 \"tests/cli/**/*.test.ts\" \"tests/core/**/*.test.ts\" \"tests/docker/**/*.test.ts\" \"tests/docs/**/*.test.ts\" \"tests/extensions/**/*.test.ts\" \"tests/guardrails/**/*.test.ts\" \"tests/integration/**/*.test.ts\" \"tests/prompts/**/*.test.ts\" \"tests/rcp/**/*.test.ts\" \"tests/scripts/**/*.test.ts\" \"tests/skills/**/*.test.ts\" \"tests/support/**/*.test.ts\" \"tests/tools/**/*.test.ts\"",

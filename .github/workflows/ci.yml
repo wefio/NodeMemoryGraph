@@ -36,24 +36,23 @@ jobs:
         run: npm run ci:uncovered-tests
       - name: Shared static verification contract
         run: npm run verify:static
-      # Advisory, and deliberately not part of the blocking set. `verify:static` runs
-      # the widened `lint` (whose evals/ and scripts/ findings are staged as warnings
-      # in eslint.config.js) and the product-surface type check. It cannot report two
-      # things: the staged findings counted as debt, and the tests surface, which no
-      # blocking route type-checks. Both run here and both are expected to fail while
-      # the debt is paid down.
-      # The failure is reported, not enforced: the step runs and fails, ESLint emits one
-      # warning annotation per staged finding and tsc one error annotation per type
-      # error, and the exit codes are in this job's log. The checks list still says
-      # "All checks passed", because the debt is deliberately not a merge blocker — a
-      # track that cannot be told apart from "never ran" is the failure mode rejected in
+      # Advisory, and deliberately not part of the blocking set. `verify:static` runs the
+      # widened `lint`, which holds tests/, evals/, scripts/ and tools/ to the same rules
+      # as src/ except the two liveness rules (unused code, dead stores): a static "this
+      # value is never read" judgement is the one most often wrong about live code, so on
+      # the developer surfaces those two report as warnings instead of failing the build.
+      # What no blocking route does at all is type-check the tests surface, so
+      # `check:tests` runs it with unused locals and parameters enabled and is expected to
+      # fail while its pre-existing type errors are paid down.
+      # The failure is reported, not enforced: the step runs and fails, tsc emits one
+      # error annotation per finding, and its exit code is in this job's log. The checks
+      # list still says "All checks passed", because the remaining debt is deliberately
+      # not a merge blocker. A track that cannot be told apart from "never ran" is the
+      # failure mode rejected in
       # docs/decisions/implemented/2026-09-12-visible-non-blocking-research-track.md, and
-      # `continue-on-error` on a step (not on the job) is what keeps the aggregate green
-      # while the annotations carry the detail.
+      # `continue-on-error` on a step (not on the job) keeps the aggregate green while
+      # the annotations carry the detail.
       # See docs/decisions/implemented/2026-09-16-ci-static-coverage.md.
-      - name: Advisory lint debt (staged warnings, non-blocking)
-        continue-on-error: true
-        run: npm run lint:debt
       - name: Advisory tests-surface type check (non-blocking)
         continue-on-error: true
         run: npm run check:tests

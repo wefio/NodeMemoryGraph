@@ -117,7 +117,6 @@ let done = 0;
 for (let idx = SKIP; idx < rows.length; idx++) {
   if (results[idx]) { done += 1; continue; }
   const row = rows[idx];
-  const userId = `lme_exper_user_${SUFFIX}_${idx}`;
   // Stores are keyed by the ingest-version userId, not the output label.
   const storeUserId = `lme_exper_user_${VERSION}_${idx}`;
   const key = createHash("sha256").update(storeUserId).digest("hex").slice(0, 24);

@@ -1,4 +1,4 @@
-# The static gate names its surface, and stages the debt it cannot pay yet
+# The static gate names its surface, and leaves liveness findings to a human
 
 [中文](2026-09-16-ci-static-coverage.zh-CN.md)
 
@@ -29,67 +29,74 @@ Two further measurements set the size of the change. Widening the surface with t
 config as it stood produced 83 `no-undef` findings in the eight
 `evals/omnimemeval/**/*.mjs` probes, all false: the config declared no Node globals, so
 `process`, `console` and `fetch` read as undefined. And `tsconfig.tests.json` existed
-with nothing referencing it, so the `tests/` surface is type-checked by no route at all;
-running it with `--noUnusedLocals --noUnusedParameters` reports the unused code that the
-reviewer's finding belongs to.
+with nothing referencing it, so the `tests/` surface is type-checked by no route at all.
 
 ## Decision
 
 **The lint surface is the four directories plus `tests/`, `evals/`, `scripts/` and
-`tools/`.** `src/` is the only surface that reports as errors from day one, because it
-was the only one already scanned. The three rules that fire on the newly scanned
-research and script surfaces are reported at `warn`, named one rule per line in
-`eslint.config.js` with the reason and how to retire the line. Disabling a rule for a
-whole directory is not the mechanism: it removes the detection together with the
-findings. Node globals are declared once through the `globals` devDependency, which is
-what removes the 83 false findings.
+`tools/`.** Node globals are declared once through the `globals` devDependency, which is
+what removes the 83 false findings, and the `no-console` exemption names the directories
+it was always aimed at: tests, research harnesses, scripts and repository tooling print
+TAP output, measurement progress and diagnostics by design.
 
-**The exemption now applies where it was always aimed.** `no-console` is off for tests,
-research harnesses, scripts and repository tooling, which print TAP output, measurement
-progress and tool diagnostics by design, and on for product code.
+**The two liveness rules are advisory on the developer surfaces and stay errors on
+`src/`.** `@typescript-eslint/no-unused-vars` and `no-useless-assignment` both assert
+that a value is never read — the judgement a static tool is most likely to get wrong
+about code that is alive. It was wrong about this change's own first pass: the three
+unused bindings in `tests/core/graph-cycles.test.ts` were a missing assertion, not dead
+code, and the same class produced four more of the `tests/` findings below. Under a
+blocking rule the cheapest way to a green gate is to delete the hint. So on `tests/`,
+`evals/`, `scripts/` and `tools/` those two rules report and do not fail; on `src/` they
+fail, and did before this change. Promoting one back to an error is a deliberate edit to
+one line plus the severity the guard test pins.
 
 **The surface is checked, not asserted.** `tests/tools/eslint-config-coverage.test.ts`
 holds three properties: `lint` and `lint:fix` scan the same directories; every
 directory-anchored `files:` block lies inside those directories; every such block still
 matches a file that the script scans. It imports `eslint.config.js` and asks ESLint's own
-`calculateConfigForFile` for the effective severity, so a comment cannot make it pass —
-and its first check is red on the pre-change config, where `evals/**/*.ts` and
+`calculateConfigForFile` for the effective severity, so a comment cannot make it pass.
+Its first check is red on the pre-change config, where `evals/**/*.ts` and
 `scripts/**/*.ts` pointed outside the scanned surface.
 
-**The debt is reported in CI without becoming a merge blocker.** The required `static`
-job gains two advisory steps: `npm run lint:debt` (the same ESLint invocation with
-`--max-warnings 0`, so the staged findings are counted) and `npm run check:tests`
-(`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`, which makes
-`tsconfig.tests.json` referenced for the first time). Both are expected to fail while the
-debt exists, and `continue-on-error` sits on each step rather than on the job, so the
-required aggregate stays green. What a reader gets on every run is one `warning`
-annotation per staged ESLint finding, one `error` annotation per type error, and the two
-exit codes in the job log. What they do not get is a red check in the checks list: the
-debt is deliberately not a merge blocker, and a check that cannot turn green until the
-debt reaches zero states a failure about something the repository decided not to fail on.
-Job-level `continue-on-error` remains rejected by
-[2026-09-12](2026-09-12-visible-non-blocking-research-track.md), where the objection was a
-job whose real result could not be told apart from one that never ran; emitting the
-detail as annotations rather than swallowing the step is what keeps that distinction here.
+**Static checking and the unused-code scan run in CI, and the debt does not block.** The
+required `static` job runs the widened `lint`: liveness findings appear as warnings and
+as annotations on the run, and never fail the build, while everything else is held to the
+same standard as `src/`. One advisory step, `npm run check:tests`, runs
+`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters` — the first reference
+to `tsconfig.tests.json` — because no blocking route type-checks `tests/`. It is expected
+to fail while its pre-existing type errors are paid down; `continue-on-error` sits on the
+step, not on the job, so its findings appear as annotations and its exit code is in the
+job log while the required aggregate stays green. A job-level `continue-on-error` remains
+rejected by [2026-09-12](2026-09-12-visible-non-blocking-research-track.md): there the
+objection was a job whose real result could not be told apart from one that never ran, so
+the detail is emitted as annotations rather than swallowed.
 
-### The 11 findings staged on the newly scanned surfaces
+### What the first widened scan reported
 
-| Surface | Rule | Findings |
-| ------- | ---- | -------- |
-| `evals/` | `@typescript-eslint/no-unused-vars` | `omnimemeval/experiment-manifest.mjs:134,190,191`, `omnimemeval/merge-embedding-caches.mjs:76`, `omnimemeval/research/probes/hyde-context.mjs:120`, `retrieval/profile-size.ts:36`, `retrieval/run.ts:38` |
-| `evals/` | `no-useless-assignment` | `longmemeval/retrieval-evidence.ts:44`, `omnimemeval/research/probes/hyde-probe.mjs:167` |
-| `evals/` | `preserve-caught-error` | `halumem/agent-extract.ts:145` |
-| `scripts/` | `preserve-caught-error` | `sync-nmg-skill.ts:140` |
+The scan's first pass over the newly covered surface produced 11 findings. Nine were
+genuinely dead and were deleted; two were not dead code at all:
+
+| Finding | What it was |
+| ------- | ----------- |
+| `evals/omnimemeval/experiment-manifest.mjs:133,134` | `llmClientText` and the `llmClientPy` path that only fed it; the parameters it looked like it was for are read by `paramIn`. Deleted. |
+| `evals/omnimemeval/experiment-manifest.mjs:181,190,191` | `correct` and `anyHit` counters incremented every iteration and never read; the category breakdown uses `byCat` instead. Deleted. |
+| `evals/omnimemeval/merge-embedding-caches.mjs:52,76` | `kept`, and the `wasMissing` it counted; the summary reports duplicates as `total - finalCount`. Deleted. |
+| `evals/omnimemeval/research/probes/hyde-context.mjs:120` | `userId`, superseded by the `storeUserId` the store is actually keyed by. Deleted. |
+| `evals/retrieval/profile-size.ts:36` | An unused `catch (e)` binding. `catch {`. |
+| `evals/retrieval/run.ts:38` | An unused `NODE_SUMMARY_PROMPT_VERSION` import. Deleted. |
+| `evals/longmemeval/retrieval-evidence.ts:44` | `let traceId: string \| null = null` — the seed was never read, because every path that reads `traceId` exits through the assignment. Dead store. |
+| `evals/omnimemeval/research/probes/hyde-probe.mjs:167` | `let hydeCtx = baseCtx` — assigned before every read. Now a `const` inside the branch that assigns it. Dead store. |
+| `evals/halumem/agent-extract.ts:145` | Not dead code: a rejected extraction rethrows a new error without the parse failure that caused it. `{ cause: error }` keeps the symptom. |
+| `scripts/sync-nmg-skill.ts:140` | Not dead code: the lock-contention error dropped the `EEXIST` it was raised for. `{ cause: error }`. |
 
 ### The 23 findings on `tests/`, judged one by one
 
-`tests/` gets no staged downgrade. Each finding is either a dropped assertion — the same
-defect class as the review's `throws`, where a value was computed and never checked — or
-dead code:
+Five of these were reported as dead code and were actually dropped assertions — the
+evidence behind the advisory severity above:
 
 | Finding | Judgement |
 | ------- | --------- |
-| `core/graph-cycles.test.ts:120` (`m2`, `m3`, `m4` unused) | Dropped assertion. The chain's head and tail were checked and `size === 5` was asserted, so a 5-element set of the wrong records passed. The assertion is now set equality against `ids`. |
+| `core/graph-cycles.test.ts:120` (`m2`, `m3`, `m4` unused) | Dropped assertion, not dead code. The chain's head and tail were checked and `size === 5` was asserted, so a 5-element set of the wrong records passed. The assertion is now set equality against `ids`. |
 | `core/store/duplicates.test.ts:177` (`norm` unused) | Dropped assertion. Now asserts both same-normalized statements are retrieved, which is the sentence the neighbouring comment already claims. |
 | `core/store/duplicates.test.ts:375,381` (`old2026`, `new2033` unused) | Dropped assertion. The as-of ranking was checked through statement substrings only; the two record ids are now asserted against the slots those substrings found, so the ranking cannot be satisfied by a different record. |
 | `cli/service.test.ts:836,837` | Dead initializer. The ids are read after the `try`/`finally` that closes the service, so the `""` seed was never read; declared with a definite-assignment assertion like `tests/support/test-runtime.ts` already does. |
@@ -103,27 +110,22 @@ dead code:
 
 ## Alternatives considered
 
-- **Delete the dead `files:` block and stop.** Rejected: it removes the symptom (an
-  inert exemption) and keeps the condition (surfaces no gate reaches). The review's
-  finding would stay invisible.
-- **Widen the surface and clear the ledger in the same change.** Rejected: the 11
-  findings sit in research harnesses and a build script under concurrent work, and
-  rewriting them here would fold unrelated eval logic into a lint change and make the
-  review of both worse. The staged warnings keep the findings countable instead of
-  dropped.
+- **Delete the dead `files:` block and stop.** Rejected: it removes the symptom (an inert
+  exemption) and keeps the condition (surfaces no gate reaches). The review's finding
+  would stay invisible.
+- **Hold every rule on the newly covered surface at error.** Rejected: the two liveness
+  rules are the ones whose judgement the findings above show to be unreliable on this
+  code, and a blocking gate answers an unreliable finding by deleting the code it points
+  at. Reporting them costs nothing; failing on them would.
 - **Silence the new surfaces by switching rules off for `evals/` and `scripts/`.**
-  Rejected: that is the failure the guard test exists to prevent, and the ticket rules
-  it out. A rule left at `warn` keeps reporting.
+  Rejected: that is the failure the guard test exists to prevent. A rule left at `warn`
+  keeps reporting; a rule switched off stops.
+- **Leave the 11 findings in place as staged warnings.** Rejected once each was read: nine
+  were dead code, which is what the scan exists to remove, and the other two were a
+  dropped error cause. Staging them would have been paperwork over a ten-line fix.
 - **Satisfy "warnings, not blocking" with a job-level `continue-on-error`.** Rejected by
   the precedent in [2026-09-12](2026-09-12-visible-non-blocking-research-track.md), and
   it would duplicate the job that already exists rather than report something new.
-- **Report the debt from its own non-blocking job, the shape `research-tests` uses.**
-  Rejected for now: it costs a second checkout and install, and it would put a red check
-  on every pull request for something the repository decided not to block on. The step
-  form carries the same information as annotations without claiming a failure the
-  aggregate does not honour. If this debt is still open when it becomes urgent, this is
-  the option to revisit — it is the only one of the two that a reader looking only at
-  the checks list would notice.
 - **Hand-write the Node globals instead of adding `globals`.** Rejected: a hand list
   recreates the exact defect being fixed — one missing global reports every use as
   undefined for as long as nobody notices.
@@ -139,21 +141,16 @@ dead code:
 - A file under `tests/`, `evals/`, `scripts/` or `tools/` can no longer be added without
   being linted, and a `files:` block can no longer be anchored outside the scanned
   surface or match nothing.
+- Unused imports, unused variables and dead stores are reported on every developer
+  surface. Nine of them are gone with this change, and the next one is visible in the run
+  as a warning annotation rather than as a merge blocker.
 - The `tests/` surface is type-checked for the first time, by an advisory step whose
-  failure count is the debt. `tsconfig.tests.json` is now referenced by a script instead
+  failure count is its debt. `tsconfig.tests.json` is now referenced by a script instead
   of being an unread file.
-- Staged warnings are real debt: they appear in every `npm run lint` run and as
-  per-finding annotations on every CI run. The exit criterion is written down — when
-  `npm run lint:debt` reports no findings for the rules staged in `eslint.config.js`,
-  delete those lines and move `lint:debt` into `verify:static`.
-- Cost: the advisory steps fail on every run while the debt exists, and the checks list
-  still says `All checks passed`. The debt is reported, not enforced; a reader who only
-  looks at the check list will not see it. The annotations and the printed counts are the
-  counter-pressure, and the alternative above is the escape hatch if that is not enough.
-- Cost: an advisory step proves nothing about whether the scheduled debt work happens;
-  only the exit criterion and ordinary review do.
-- Rollback: revert one commit. Nothing here migrates data or changes a runtime
-  contract.
+- Cost: an advisory finding that nobody reads is not a gate. The counter-pressure is that
+  the findings are annotated on the diff and counted in the run, and the guard test keeps
+  the severities themselves from drifting silently.
+- Rollback: revert one commit. Nothing here migrates data or changes a runtime contract.
 
 ## Deferred
 
@@ -162,6 +159,9 @@ dead code:
   Prettier pass.
 - No route type-checks `evals/`, `scripts/`, or the `tools/` files outside the three
   names in `tsconfig.json`. `check:tests` is the first slice; the product surface with
-  the same flags reports one error, so the same staged treatment is available for a
-  later change.
-- The 11 staged findings listed above.
+  the same flags reports one error, so the same treatment is available for a later
+  change.
+- `check:tests` reports 69 pre-existing type errors (37 under `tests/`, 26 in
+  `workbuddy-plugin/nmg-hook.ts`, 5 under `evals/`, 1 under `tools/`). None of them is a
+  liveness finding; paying them down and moving the step into `verify:static` is its own
+  change.
