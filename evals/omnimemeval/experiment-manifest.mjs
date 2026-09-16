@@ -130,8 +130,6 @@ if (envFile && existsSync(envFile)) {
     if (m) env[m[1]] = m[2].replace(/^["']|["']$/g, "");
   }
 }
-const llmClientPy = join(omni, "scripts/utils/llm_client.py");
-const llmClientText = existsSync(llmClientPy) ? readFileSync(llmClientPy, "utf8") : "";
 const defaultParams = {
   // temperature/max_tokens are pinned per-stage in the LME scripts, not the client.
   answer_temperature: paramIn(join(omni, "scripts/longmemeval/lme_responses.py"), "temperature"),
@@ -178,7 +176,7 @@ try {
 
 const judged = JSON.parse(readFileSync(judgedPath, "utf8"));
 const byCat = {};
-let n = 0, correct = 0, anyHit = 0;
+let n = 0;
 const failures = [];
 for (const [uid, e] of Object.entries(judged)) {
   if (e.status !== "success") continue;
@@ -187,8 +185,6 @@ for (const [uid, e] of Object.entries(judged)) {
   const vals = Object.values(jj);
   const ok = vals.length > 0 && vals.every(Boolean);
   const any = vals.some(Boolean);
-  if (ok) correct += 1;
-  if (any) anyHit += 1;
   const cat = e.category ?? "unknown";
   byCat[cat] ??= { n: 0, correct: 0, anyHit: 0 };
   byCat[cat].n += 1;

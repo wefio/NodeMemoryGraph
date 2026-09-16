@@ -83,7 +83,7 @@ test("judge: code-fenced / malformed model output degrades to keep", async () =>
   const client = new OpenAiCompatibleJudgeClient({
     baseUrl: "https://x.example",
     model: "m",
-    fetch: (async (_url, init) => new Response(JSON.stringify({
+    fetch: (async (_url, _init) => new Response(JSON.stringify({
       choices: [{ message: { content: "```json\n{\"action\":\"merge\",\"memoryId\":\"c1\"}\n```" } }],
     }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch,
   });

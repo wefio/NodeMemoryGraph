@@ -35,7 +35,6 @@ import {
 import {
   createNodeSummaryProviderFromEnv,
   drainNodeSummaries,
-  NODE_SUMMARY_PROMPT_VERSION,
 } from "../../src/integration/node-summarizer.ts";
 import { OmniMemEvalBridge, type OmniRetrievedMemory } from "../omnimemeval/bridge.ts";
 import { DATASET_NAMES, loadDataset, PINNED_DEFAULTS, type DatasetSpec } from "./datasets.ts";

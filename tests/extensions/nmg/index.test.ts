@@ -1454,7 +1454,7 @@ test("Pi adapter connects, recalls through, and closes its owned HTTP daemon", a
       try {
         rmSync(directory, { recursive: true, force: true });
         break;
-      } catch (error) {
+      } catch {
         if (attempt === 59) {
           console.error(`rmSync left temp dir (Windows handle release): ${directory}`);
           break;

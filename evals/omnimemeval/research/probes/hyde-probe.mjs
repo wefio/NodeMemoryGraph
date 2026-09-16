@@ -164,7 +164,6 @@ for (const idx of picked) {
     continue;
   }
 
-  let hydeCtx = baseCtx;
   let hydeR = baseR;
   let hyde = "";
   if (evidences.length > 0) {
@@ -182,7 +181,7 @@ for (const idx of picked) {
     });
     const seen = new Set(base.results.map((r) => r.memory.id));
     const extra = hydeCandidates.results.filter((r) => !seen.has(r.memory.id));
-    hydeCtx = contextText([...base.results, ...extra]);
+    const hydeCtx = contextText([...base.results, ...extra]);
     hydeR = recallRate(hydeCtx, evidences);
   }
 

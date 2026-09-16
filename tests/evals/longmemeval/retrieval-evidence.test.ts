@@ -21,7 +21,7 @@ describe("LongMemEval automatic recall evidence", () => {
     const directory = mkdtempSync(join(tmpdir(), "nmg-longmem-evidence-"));
     directories.push(directory);
     const store = new NmgStore(join(directory, "nmg.sqlite"));
-    let memoryId = "";
+    let memoryId!: string;
     try {
       memoryId = store.remember({
         statement: "My personal best charity 5K time was 25:50.",

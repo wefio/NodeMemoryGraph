@@ -40,15 +40,18 @@ Keep the workflow small, evidence-based, and friendly to concurrent Agents.
 
 ## Before editing
 
-1. Run `npm run agent:context -- <target-path>`. Positional paths route the
-   explicit scope without consulting Git. Use `--changed` only when dirty Git
-   paths should be added automatically; that mode requires working Git inspection.
-   Treat `unknown` reconciliation as missing applicable evidence, and `drifted`
-   as a request to inspect the reported declaration, snapshot, or verification
-   mismatch. Neither status is an architectural verdict.
+1. Locate the target and its owning contract using the
+   [discovery protocol](../../AGENTS.md#find-the-context-for-the-next-action).
+   When ownership or checks are unclear, use `npm run agent:context -- <target-path>`.
+   Its owner paths are lookup candidates, not a requirement to read whole files.
+   Positional paths select explicit scope; `--changed` adds dirty Git paths.
+   Reconciliation `unknown` means missing applicable evidence; `drifted` means
+   inspect the reported mismatch. Neither status is an architectural verdict.
 2. Inspect `git status --short`; preserve unrelated changes and commit only your files.
-3. Read the returned owning design and the exact code you will modify. Experiments are evidence,
-   not normative design.
+3. Read the applicable sections of the owning design and the exact code you will
+   modify. For documentation or process changes, follow
+   [doc-maintenance](../doc-maintenance/SKILL.md); for one-off scripts or ad-hoc
+   analysis, follow [script-reuse](../script-reuse/SKILL.md).
 4. State a testable outcome. For defects and lifecycle work, write the failing behavior test first.
 5. Immediately before the first substantive file write, register one open in-flight
    goal on the `repo-development` Task Board channel. Its content contains only
@@ -83,6 +86,9 @@ or remove it when its exit criteria are met.
 ## Implement and verify
 
 1. Make the smallest coherent change; keep optional infrastructure behind a narrow adapter.
+   When adding or changing an environment gate, mode flag, or non-default feature,
+   apply the [hidden-feature registration rule](../../docs/decisions/implemented/2026-09-07-register-hidden-features.md#decision)
+   in the same change.
 2. Update the owning design when behavior or process changes. A non-trivial
    change also adds or updates at least one record under `docs/decisions/` in the
    same commit. It is non-trivial when it alters behavior, a contract shared
@@ -170,6 +176,9 @@ observation behavior is owned by
 
 ## Builds and generated artifacts
 
+Configure the formatting hook once per clone: `git config core.hooksPath .githooks`.
+The pre-commit hook runs Prettier on staged `.ts` files.
+
 Regenerable outputs are **not** tracked (see the rejected decision
 [Track build artifacts in version control](../../docs/decisions/rejected/2026-09-02-track-build-artifacts-in-git.md)):
 
@@ -188,6 +197,8 @@ Reproduce locally, in this order:
    `cd dsh/dsh-nmg && pnpm install --frozen-lockfile && pnpm run build` —
    regenerates `lib/`. `npm run verify:packages` runs every subpackage from a
    frozen lockfile automatically.
+   Before starting a linked DSH web profile, also follow the adapter's
+   [startup prerequisites](../../dsh/dsh-nmg/README.md#启动前构建).
 3. `npm run check:lock` fails when the root `package-lock.json` drifted from
    `package.json`; fix with `npm install --package-lock-only`.
 

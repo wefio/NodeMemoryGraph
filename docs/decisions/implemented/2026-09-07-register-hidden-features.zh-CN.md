@@ -1,7 +1,7 @@
 # 登记所有隐藏(环境变量门控 / 非默认)功能
 
 **Status:** implemented  
-**Approved:** unrecorded
+**Approved:** explicit
 Date: 2026-09-07
 Branch: feat/meta-rule-governance
 
@@ -56,7 +56,8 @@ NMG 有许多默认不激活、靠环境变量或模式开关启动的能力:con
   归属、意图,且会漏掉拼接式门控名(如经 `environment` 参数读取的模式开关,
   不是字面 `process.env.X`)。注册表为准;日后可用自动扫描做交叉校验。
 - **把规则挂到 agent:verify。** 推迟:把强制接入验证管线是另一件更大的改动。
-  现阶段常驻规则 = 注册表契约 + AGENTS.md 指针。
+  现阶段常驻规则 = 注册表契约 +
+  [开发流程触发点](../../../skills/repo-development/SKILL.md#implement-and-verify)。
 
 ## 后果
 

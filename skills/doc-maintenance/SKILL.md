@@ -6,8 +6,31 @@ description: Maintain this repository's design, decision, experiment, post-morte
 # Documentation maintenance
 
 Keep NMG documentation useful as an interface between users, Agents, design, and
-implementation. Read [the documentation index](../../docs/README.md) before
-editing. Use its Chinese counterpart when Chinese wording is part of the task.
+implementation. Use [the documentation index](../../docs/README.md#ownership-and-authority)
+to resolve ownership when it is unclear; read its CI contract when changing checks
+and its bilingual policy when changing paired content.
+
+## Content that can be read locally
+
+- Keep the root bootstrap limited to the discovery protocol and stable shared-work
+  principles. Put changing commands and setup at their operational owner.
+- A document explains its own subject; describe direct children only by purpose
+  and link to their owners for detail. Do not mirror a directory or symbol inventory
+  already recoverable from source. Add local orientation only where names and
+  structure leave a concrete ambiguity.
+- Give sections searchable subject names. Keep a rule's scope, necessary
+  definitions, conditions, and exceptions in the same readable section, or link
+  explicitly to the required definition. Label conditional procedures by their
+  trigger and background links by their purpose; do not imply every link is required.
+  If the necessary section is too large, narrow the action or read it in bounded
+  parts; do not drop a condition or exception to meet a reading budget.
+- Keep one authoritative text. Indexes and generated summaries are disposable
+  navigation aids with source references, not new specifications. Link current
+  knowledge by repository-relative path and section; bind historical evidence to
+  a shared revision. Do not make local memory IDs or a prior session necessary.
+- After a change, check affected incoming links and applicable workflow triggers.
+  Existing link checks catch broken targets; review must still check meaning and
+  whether the selected section contains the constraints needed to act.
 
 ## Meta-rule: NMG's own rules are governed
 

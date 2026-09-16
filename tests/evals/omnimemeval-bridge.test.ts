@@ -5,7 +5,6 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { OmniMemEvalBridge } from "../../evals/omnimemeval/bridge.ts";
-import { NmgStore } from "../../src/core/store.ts";
 
 test("OmniMemEval bridge ingests and retrieves isolated user memories", async () => {
   const root = mkdtempSync(join(tmpdir(), "nmg-omni-"));
