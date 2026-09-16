@@ -1,7 +1,7 @@
 # The contract's obligations, one node per line
 
-**Status:** living ledger. Each row is one obligation from `docs/design/task-unit-semantics.md`;
-progress is counted in rows moved to `proven`, not in edits made.
+**Authority:** living ledger for `docs/design/task-unit-semantics.md` — each row is one
+obligation from that design; progress is counted in rows moved to `proven`, not in edits made.
 
 Counts at this revision, computed from the rows below rather than from memory: **A** 4 proven, 0 partly, 0 owed (4 rows); **B** 6 proven, 1 partly, 0 owed (8 rows); **C** 4 proven, 0 partly, 0 owed (4 rows); **D** 10 proven, 0 partly, 0 owed (10 rows); **G** 7 proven, 0 partly, 0 owed (7 rows). **E** is recorded as excluded by the design's own sentence, **F** not started. The latest pass moved C3, D5, G3, G4 and G6 to proven, rewrote B6 to the half it can enforce, and added six mutants (40 of 40 caught, up from 33). B6's owed half is a slice rather than a guard: see the section at the end.
 
