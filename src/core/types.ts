@@ -497,6 +497,21 @@ export type RetrievalMode = (typeof RETRIEVAL_MODES)[number];
 export const VECTOR_GRANULARITIES = ["hierarchy", "records", "union"] as const;
 export type VectorGranularity = (typeof VECTOR_GRANULARITIES)[number];
 
+/** A learned relevance scorer (weights + normalisation). Kept structural so
+ *  core never depends on the lab model implementation. */
+export interface RelevanceModelLike {
+  predict(features: readonly number[]): number;
+  /** Embedder identity the head's absolute scores came from, when it declares one. */
+  readonly embedder?: string;
+  /**
+   * May the runtime's embedder feed this head? A head that does not read the
+   * scale-bound feature block is embedder-free and accepts anything; one that
+   * does must match the identity it was trained on. Optional so a minimal test
+   * double stays valid. Omitted = treated as embedder-free.
+   */
+  acceptsEmbedder?(identity: string): boolean;
+}
+
 export interface SearchOptions {
   /** Harness session that owns the resulting Active Graph and retrieval trace. */
   sessionId?: string;
@@ -511,6 +526,23 @@ export interface SearchOptions {
   includeHistorical?: boolean;
   maxTier?: MemoryTier;
   limit?: number;
+  /** Program-side relevance gate floor in [0, 1]. When set, results whose
+   *  bounded relevance is below the floor drop out before disclosure, so a
+   *  recall may return fewer — or zero — results (k is a maximum, not a target).
+   *  Omit for the ungated path. See
+   *  docs/decisions/implemented/2026-09-09-retrieval-relevance-gate.md. */
+  relevanceFloor?: number;
+  /** Per-query relative floor in σ above the query's own mean
+   *  (`NMG_RELEVANCE_MIN_Z`). Optional; scale-free. */
+  relevanceMinZ?: number;
+  /** Flat-list abstain level (`NMG_RELEVANCE_MAX_CV`). Optional; a candidate
+   *  list flatter than this injects nothing. */
+  relevanceMaxCv?: number;
+  /** Learned model gate (in-process; `NMG_RELEVANCE_MODEL`). When set it is
+   *  ANDed after the program gate. */
+  relevanceModel?: RelevanceModelLike;
+  /** Loose probability floor for the model gate; default 0.5. */
+  relevanceModelFloor?: number;
   graphHops?: number;
   retrievalMode?: RetrievalMode;
   /** Post-retrieval chain expansion: when a ranked result is a member of a

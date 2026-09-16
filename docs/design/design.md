@@ -1857,6 +1857,10 @@ product ranking. Arbitrary literal scans remain disallowed because the trigram
 index provides the bounded precision path without regex escaping or
 catastrophic-backtracking risk.
 
+Offline learned relevance uses the source and evaluation boundaries in
+[relevance-training.md](relevance-training.md). Its artifacts remain candidates;
+cross-corpus measurements do not grant runtime admission.
+
 ### 11.1 Query formation and route fusion boundary
 
 NMG accepts a primary query plus optional caller-generated `queries[]`. The
