@@ -113,12 +113,8 @@ const TASKS: Task[] = [
       },
       { name: "empty input", call: (m) => m.chunk([] as never, 3 as never), expected: [] },
       { name: "size one", call: (m) => m.chunk([7] as never, 1 as never), expected: [[7]] },
-      { name: "size zero", call: (m) => m.chunk([1] as never, 0 as never), expected: "throws" },
-      {
-        name: "fractional size",
-        call: (m) => m.chunk([1] as never, 1.5 as never),
-        expected: "throws",
-      },
+      throws("size zero", (m) => m.chunk([1] as never, 0 as never)),
+      throws("fractional size", (m) => m.chunk([1] as never, 1.5 as never)),
     ],
   },
   {
@@ -273,16 +269,8 @@ const TASKS: Task[] = [
         expected: [],
       },
       { name: "empty input", call: (m) => m.movingAverage([] as never, 3 as never), expected: [] },
-      {
-        name: "window zero",
-        call: (m) => m.movingAverage([1] as never, 0 as never),
-        expected: "throws",
-      },
-      {
-        name: "window not an integer",
-        call: (m) => m.movingAverage([1] as never, 1.5 as never),
-        expected: "throws",
-      },
+      throws("window zero", (m) => m.movingAverage([1] as never, 0 as never)),
+      throws("window not an integer", (m) => m.movingAverage([1] as never, 1.5 as never)),
     ],
   },
   {
