@@ -20,6 +20,11 @@ import type { TransactionPort } from "../core/store/base.ts";
  *  it and the fence that reads it must agree, and neither may guess at the string. */
 export const RUN_CANCELLED_FACT = "run-cancelled";
 
+/** The fact kind that binds a logical task to the board entry that carries it. The binding is a run
+ *  fact and not a board column because the board cannot keep it: an entry that a later attempt
+ *  replaces must not lose the record of what it used to carry. */
+export const ENTRY_BOUND_FACT = "entry-bound";
+
 /** A managed transition records itself under its own kind, so the run's log keeps claim, delivery,
  *  judgement and resolution apart instead of collapsing them into one per-(task, attempt) row. */
 export function managedTransitionKind(verb: string): string {
@@ -53,6 +58,34 @@ export interface ManagedWriteRequest<T> {
 export interface ManagedWriteOutcome<T> {
   entry: T;
   fact: { sequence: number; recorded: boolean };
+}
+
+/**
+ * Route one board write on an entry through its run when a run manages it, and leave an unmanaged
+ * entry on exactly the path it always took.
+ *
+ * This is the single routing rule: the daemon's board verbs and every in-process writer use it, so
+ * "managed" is decided in one place instead of by each caller's belief about the entry. An entry
+ * that no run has bound costs one indexed lookup and no transaction of its own.
+ */
+export function coordinatedEntryWrite<T>(
+  store: NmgStore,
+  request: {
+    verb: string;
+    entryId: string;
+    actorId: string;
+    apply: () => T;
+  },
+): T {
+  const binding = store.taskRunForEntry(request.entryId);
+  if (!binding) return request.apply();
+  return coordinatedBoardWrite(store, {
+    runId: binding.runId,
+    entryId: request.entryId,
+    verb: request.verb,
+    actorId: request.actorId,
+    apply: () => request.apply(),
+  }).entry;
 }
 
 /**
@@ -99,4 +132,91 @@ export function coordinatedBoardWrite<T>(
     );
     return { entry, fact };
   });
+}
+
+export interface EntryBindingRequest {
+  runId: string;
+  /** The logical task, as the run froze it. */
+  taskId: string;
+  /** The board channel the entry lives on. */
+  boardTaskId: string;
+  entryId: string;
+  /** Which attempt of that task the entry carries. A retry is a new attempt with its own entry. */
+  attempt?: number;
+}
+
+/**
+ * Bind one board entry to one of the run's frozen tasks, so that the entry's later lifecycle writes
+ * go through the run's coordinated transition instead of beside it.
+ *
+ * Every condition here is a fact this store already holds rather than a caller's claim: the run is
+ * registered and live, the task was frozen (a run cannot adopt an entry for work it never froze),
+ * the entry really is on the channel the caller names, and one entry carries one task. Re-binding
+ * the same task and attempt to the same entry is a retry and is not recorded twice; binding it to a
+ * different entry is refused rather than silently dropped, because the stored fact is keyed by task
+ * and attempt and would otherwise hide the disagreement.
+ */
+export function bindRunEntry(
+  store: NmgStore,
+  request: EntryBindingRequest,
+  port?: TransactionPort,
+): { sequence: number; recorded: boolean } {
+  const attempt = request.attempt ?? 1;
+  const work = (inner: TransactionPort): { sequence: number; recorded: boolean } => {
+    const refusal = managedWriteRefusal(store, request.runId);
+    if (refusal) throw new Error(refusal);
+    if (!isFrozen(store, request.runId, request.taskId))
+      throw new Error(
+        `run ${request.runId} never froze task ${request.taskId}; there is no task to bind an entry to`,
+      );
+    if (!store.getTaskBoardEntryById(request.boardTaskId, request.entryId))
+      throw new Error(
+        `no board entry ${request.entryId} on ${request.boardTaskId}; the binding names the entry it carries`,
+      );
+    const bound = store.taskRunForEntry(request.entryId);
+    if (bound && (bound.runId !== request.runId || bound.taskId !== request.taskId))
+      throw new Error(
+        `entry ${request.entryId} already carries task ${bound.taskId} of run ${bound.runId}; one entry carries one task`,
+      );
+    const existing = boundFact(store, request.runId, request.taskId, attempt);
+    if (existing && existing.entryId !== request.entryId)
+      throw new Error(
+        `task ${request.taskId} of run ${request.runId} already carries entry ${existing.entryId}; another entry is another attempt, not a rebinding`,
+      );
+    if (existing) return { sequence: existing.sequence, recorded: false };
+    return store.appendTaskRunFact(
+      {
+        runId: request.runId,
+        kind: ENTRY_BOUND_FACT,
+        taskId: request.taskId,
+        attempt,
+        entryId: request.entryId,
+      },
+      inner,
+    );
+  };
+  return port ? work(port) : store.coordinateRunWrite(request.runId, work);
+}
+
+/** Whether this run froze that task. Frozen is what a binding is a binding *to*. */
+function isFrozen(store: NmgStore, runId: string, taskId: string): boolean {
+  return store.taskRunTasks(runId).some((task) => task.taskId === taskId);
+}
+
+/** The binding already recorded for this task and attempt, if any. */
+function boundFact(
+  store: NmgStore,
+  runId: string,
+  taskId: string,
+  attempt: number,
+): { sequence: number; entryId: string | null } | undefined {
+  const fact = store
+    .taskRunFacts(runId)
+    .find(
+      (candidate) =>
+        candidate.kind === ENTRY_BOUND_FACT &&
+        candidate.taskId === taskId &&
+        candidate.attempt === attempt,
+    );
+  return fact && { sequence: fact.sequence, entryId: fact.entryId };
 }

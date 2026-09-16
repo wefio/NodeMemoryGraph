@@ -580,8 +580,51 @@ const TARGETS: readonly Target[] = [
   },
   {
     target: "src/integration/task-coordinator.ts",
-    suites: ["tests/integration/ooo-managed-write.test.ts"],
+    suites: [
+      "tests/integration/ooo-managed-write.test.ts",
+      "tests/integration/ooo-managed-adopt.test.ts",
+    ],
     mutants: [
+      {
+        // Binding is what makes an entry managed, so the refusal has to read the stored fact rather
+        // than whatever the caller believes about the entry.
+        name: "an-adopted-entry-takes-the-direct-path",
+        from: "  if (!binding) return request.apply();",
+        to: "  if (binding) return request.apply();",
+        expect:
+          "the routing rule sends a managed entry to its run and leaves an unmanaged one alone",
+      },
+      {
+        // A run cannot adopt an entry for work it never froze: otherwise the binding names a task
+        // no decision was ever read against.
+        name: "a-binding-ignores-whether-the-task-was-frozen",
+        from: "    if (!isFrozen(store, request.runId, request.taskId))",
+        to: "    if (false && !isFrozen(store, request.runId, request.taskId))",
+        expect: "a binding refuses what the store does not hold",
+      },
+      {
+        // The binding names an entry the board really holds, on the channel the caller names.
+        name: "a-binding-does-not-check-the-entry-exists",
+        from: "    if (!store.getTaskBoardEntryById(request.boardTaskId, request.entryId))",
+        to: "    if (false && !store.getTaskBoardEntryById(request.boardTaskId, request.entryId))",
+        expect: "a binding refuses what the store does not hold",
+      },
+      {
+        // One entry carries one task: without this a second run would fence an entry it does not
+        // own, and the fence would refuse the first run's own writes.
+        name: "one-entry-is-bound-to-two-tasks",
+        from: "    if (bound && (bound.runId !== request.runId || bound.taskId !== request.taskId))",
+        to: "    if (false && bound && (bound.runId !== request.runId || bound.taskId !== request.taskId))",
+        expect: "a binding refuses what the store does not hold",
+      },
+      {
+        // A second entry for the same task and attempt is a disagreement. The stored fact is keyed
+        // by task and attempt, so accepting it would keep the first binding and report the second.
+        name: "a-second-entry-rebinds-the-task",
+        from: "    if (existing && existing.entryId !== request.entryId)",
+        to: "    if (false && existing && existing.entryId !== request.entryId)",
+        expect: "a binding is idempotent for its task and attempt, and refuses a second entry",
+      },
       {
         // The transition is the run's record of what happened to its entry; without it the board
         // moved and the run has nothing to read.
@@ -612,11 +655,13 @@ const TARGETS: readonly Target[] = [
     suites: ["tests/integration/ooo-managed-write.test.ts"],
     mutants: [
       {
-        // The routing is what keeps the daemon's verbs out of the store's refusal: a managed
-        // entry reached directly from a handler cannot be moved at all.
+        // The routing is what keeps the daemon's verbs out of the store's refusal: a managed entry
+        // reached directly from a handler cannot be moved at all. The rule itself lives in the
+        // coordinator (one home for it), so this mutant pins that the daemon's claim still goes
+        // through it rather than at the store.
         name: "the-daemon-verb-skips-the-coordinated-path",
-        from: "  const binding = store.taskRunForEntry(entryId);",
-        to: "  const binding = null;",
+        from: '      entry: coordinatedEntryWrite(store, {\n        verb: "claim",\n        entryId: p.entryId,\n        actorId: p.agentId,\n        apply: () => store.claimTaskBoardEntry(p),\n      }),',
+        to: "      entry: store.claimTaskBoardEntry(p),",
         expect: "a daemon board verb routes a managed entry through the run's transition",
       },
     ],
