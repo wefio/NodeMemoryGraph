@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import test from "node:test";
 
-import { ShadowEvaluationLog } from "../../src/lab/shadow-evaluation.ts";
+import { acquireFileLock, ShadowEvaluationLog } from "../../src/lab/shadow-evaluation.ts";
 
 test("shadow evaluation separates retrieval, disclosure, attribution, outcome, and feedback", async () => {
   const directory = await mkdtemp(join(tmpdir(), "nmg-shadow-"));
@@ -208,6 +208,51 @@ test("shadow evaluation serializes cross-process appends and rotation", async ()
       }
     }
     assert.equal(graphIds.size, 60);
+  } finally {
+    await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
+  }
+});
+
+function permissionError(): NodeJS.ErrnoException {
+  const error = new Error("EPERM: operation not permitted") as NodeJS.ErrnoException;
+  error.code = "EPERM";
+  return error;
+}
+
+// The opener is injected because a real `EPERM` cannot be produced on demand. Without
+// these two, the retry classification is a claim: reverting it to `EEXIST` only would
+// leave every test in this file passing, which is how the defect reached `main`.
+test("a lock reported as EPERM is contention, and is waited out rather than refused", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "nmg-shadow-lock-"));
+  const lockPath = join(directory, "shadow.jsonl.lock");
+  let attempts = 0;
+  try {
+    const handle = acquireFileLock(lockPath, 500, (target) => {
+      attempts += 1;
+      // Windows reports an existing lock file this way while its owner releases it.
+      if (attempts === 1) throw permissionError();
+      return openSync(target, "wx");
+    });
+    assert.equal(attempts, 2, "the second attempt must be reached instead of throwing");
+    assert.equal(existsSync(lockPath), true);
+    closeSync(handle);
+  } finally {
+    await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
+  }
+});
+
+test("a lock that never frees still fails loudly, with the lock named", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "nmg-shadow-lock-timeout-"));
+  const lockPath = join(directory, "shadow.jsonl.lock");
+  try {
+    assert.throws(
+      () =>
+        acquireFileLock(lockPath, 30, () => {
+          throw permissionError();
+        }),
+      /shadow evaluation log lock timed out/,
+      "contention must not be swallowed into a silent success",
+    );
   } finally {
     await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
   }

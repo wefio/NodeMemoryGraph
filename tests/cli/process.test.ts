@@ -17,6 +17,20 @@ stripProviderEnv();
 const root = resolve(import.meta.dirname, "../..");
 const launcher = resolve(root, "bin/nmg.mjs");
 
+test("the launcher imports the built CLI the daemon client refuses to start without", () => {
+  // `src/cli/daemon-client.ts` refuses to spawn when `<root>/dist/cli/main.js` is absent,
+  // which is what turns an unbuilt checkout into a named failure instead of a 10s timeout.
+  // That check is only as good as the path it names, so the launcher's actual import is
+  // pinned to it here rather than left to a comment.
+  const specifiers = [...readFileSync(launcher, "utf8").matchAll(/from\s+"([^"]+)"/gu)].map(
+    (match) => match[1],
+  );
+  assert.ok(
+    specifiers.includes("../dist/cli/main.js"),
+    `bin/nmg.mjs must import ../dist/cli/main.js; it imports ${specifiers.join(", ")}`,
+  );
+});
+
 test("search compact JSON exposes bounded headers without exact evidence", () => {
   const directory = mkdtempSync(resolve(tmpdir(), "nmg-cli-compact-"));
   const statement = `Durable detail ${"x".repeat(420)}`;

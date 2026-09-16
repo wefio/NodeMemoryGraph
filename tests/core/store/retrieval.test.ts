@@ -7,6 +7,12 @@ import test from "node:test";
 
 import { NmgStore } from "../../../src/core/store.ts";
 
+/** Windows can still hold a handle to a just-closed store for a few milliseconds, so a
+ *  plain recursive remove intermittently fails with EPERM on an otherwise green run.
+ *  Retrying is what separates that flake from a real failure; the OoO drivers remove
+ *  their scratch trees the same way (evals/ooo-execution/multiprocess.test.ts). */
+const REMOVE_TEMP_TREE = { recursive: true, force: true, maxRetries: 5, retryDelay: 100 };
+
 function withStore(run: (store: NmgStore) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-retrieval-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
@@ -14,7 +20,7 @@ function withStore(run: (store: NmgStore) => void): void {
     run(store);
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(directory, REMOVE_TEMP_TREE);
   }
 }
 
@@ -39,6 +45,45 @@ test("searchContext returns results and relations for a lexical query", () => {
     assert.ok(ctx.results.length >= 1);
     assert.equal(ctx.results[0]?.node.canonicalName, "Atlas storage");
     assert.ok(Array.isArray(ctx.relations));
+  });
+});
+
+test("relevanceFloor gates disclosed results and may abstain", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Atlas uses SQLite for persistence",
+      nodeName: "Atlas storage",
+      memoryType: "constraint",
+      importance: 0.9,
+    });
+    const ungated = store.searchContext("SQLite persistence");
+    assert.ok(ungated.results.length >= 1, "ungated search keeps the result");
+    // A floor above every bounded relevance returns nothing: k is a maximum.
+    const gated = store.searchContext("SQLite persistence", { relevanceFloor: 1 });
+    assert.equal(gated.results.length, 0, "floor above every score abstains");
+  });
+});
+
+test("relevanceModel gates disclosed results after the program gate", () => {
+  withStore((store) => {
+    store.remember({
+      statement: "Atlas uses SQLite for persistence",
+      nodeName: "Atlas storage",
+      memoryType: "constraint",
+      importance: 0.9,
+    });
+    const ungated = store.searchContext("SQLite persistence");
+    assert.ok(ungated.results.length >= 1);
+    const rejected = store.searchContext("SQLite persistence", {
+      relevanceModel: { predict: () => 0 },
+      relevanceModelFloor: 0.5,
+    });
+    assert.equal(rejected.results.length, 0, "model rejecting every candidate abstains");
+    const accepted = store.searchContext("SQLite persistence", {
+      relevanceModel: { predict: () => 1 },
+      relevanceModelFloor: 0.5,
+    });
+    assert.equal(accepted.results.length, ungated.results.length, "model accepting keeps the set");
   });
 });
 
@@ -142,7 +187,9 @@ test("FTS5 recalls a memory by an explicit recall trigger without exposing a dup
     });
 
     assert.deepEqual(
-      context.results.filter((result) => result.memory.id === saved.memory.id).map((result) => result.memory.id),
+      context.results
+        .filter((result) => result.memory.id === saved.memory.id)
+        .map((result) => result.memory.id),
       [saved.memory.id],
     );
   });
@@ -243,7 +290,7 @@ test("store open migrates a legacy raw Chinese FTS row exactly once", () => {
     assert.ok(context.results.some((result) => result.memory.id === saved.memory.id));
   } finally {
     store?.close();
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(directory, REMOVE_TEMP_TREE);
   }
 });
 
