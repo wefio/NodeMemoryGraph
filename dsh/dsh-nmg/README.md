@@ -5,6 +5,19 @@ NMG（Node Memory Graph）在 DeepSeek Harness web 生态的宿主适配包。ts
 `cordis.patch.yml` 的 `insert: [{ id: nmg, name: '@nmg/dsh-nmg' }]` 挂进 web
 profile 的 host-composition。
 
+## 启动前构建
+
+DSH web profile 通过 `link:` 使用此源码目录，启动时加载 `lib/index.js`。
+首次克隆或拉取涉及本包源码的改动后，在本目录执行以下命令，再启动 `dsh web`：
+
+```sh
+pnpm install --frozen-lockfile
+pnpm run build
+```
+
+`lib/` 是不入库的构建产物；缺少它会导致启动报错
+`Cannot find module ... @nmg/dsh-nmg/lib/index.js`。
+
 ## 开发回路（重要：Web HMR 已关闭）
 
 **为什么热重载（HMR）是关闭的：**

@@ -1,47 +1,30 @@
 # NMG Agent bootstrap
 
-NMG is an Agent-native, local-first memory system. This file is only the stable
-bootstrap; it does not duplicate the repository's changing design or status.
+This entry owns the stable discovery protocol. Keep module inventories, commands,
+implementation status, and environment-specific setup at their current owners.
 
-Before modifying the repository, follow `skills/repo-development/SKILL.md`:
+## Find the context for the next action
 
-1. Run `npm run agent:context -- <target-path>`. Positional paths select routes
-   directly; `--changed` is a separate Git-dependent discovery mode.
-2. Follow the returned routes and read only their owning documents.
-3. Preserve unrelated working-tree changes.
-4. Do not treat experiments as normative design.
-5. After editing, run `npm run agent:verify`. It automatically routes the Git
-   changes and persists the latest verification evidence. In a shared dirty
-   worktree, use `-- <owned-path>` so unrelated changes stay outside the plan.
+1. Search for the task's terms, symbols, or error text in a narrow relevant scope.
+   Use the current directory tree and manifests to locate code; expand the search
+   only when that scope does not answer the question.
+2. Read applicable instructions along the target path and the nearest relevant
+   README. Find repository Skills by their names and descriptions; follow the
+   development workflow before editing and the specialized workflow when its
+   stated condition applies.
+3. Read the relevant contract section and the exact code or test involved. Keep
+   its definitions, conditions, and exceptions together. Follow a reference when
+   it supplies a missing definition, an affected dependency, or an applicable
+   obligation; a background link alone is not a requirement to read another file.
+4. Stop expanding when the next action, its constraints, and its verification are
+   clear. Reopen discovery when evidence conflicts or the task crosses a boundary.
 
-For documentation changes, also follow `skills/doc-maintenance/SKILL.md`. For using
-NMG memory or its coordination board, follow `skills/nmg-memory/SKILL.md`. Before
-writing a one-off script or ad-hoc analysis, write one — follow
-`skills/script-reuse/SKILL.md` to make it right (flags, refuse missing input, assert on
-the result, record what it measured). The ready parts on `docs/guides/parts.md` are an
-optional shortcut, not a precondition; do not commit a new entry point for a one-off
-need.
+## Maintain shared knowledge
 
-Meta-rule: NMG's own rules are governed too. A change to a standing rule, Skill
-convention, or decision convention is itself a governed decision — record it with
-its alternatives in the same change, keep one home per rule, and prefer a
-mechanical check over a repeated reminder (see `skills/doc-maintenance/SKILL.md`).
+Use current code and owning documents to establish facts; experiments and past
+decisions supply evidence and rationale. Update the existing owner with a behavior
+change rather than adding another summary. Preserve unrelated working-tree edits.
 
-Every hidden (env-gated / mode-flagged / non-default) feature must be registered
-in `docs/design/hidden-features-registry.md`, regardless of ownership or status
-(rule: `docs/decisions/implemented/2026-09-07-register-hidden-features.md`); add
-or update the row in the same change that introduces or alters the gate.
-
-Formatting is enforced by a commit hook (`.githooks/pre-commit` runs Prettier on
-staged `.ts` files). Configure once per clone: `git config core.hooksPath .githooks`.
-
-Build outputs (`dist/`, `dsh/dsh-nmg/lib/`, generated prompts) are not tracked;
-see the "Builds and generated artifacts" section of `skills/repo-development/SKILL.md`
-for reproduction order and `verify:packages` / `check:lock`.
-
-`dsh/dsh-nmg` is consumed by the DSH web profile through a `link:` to this
-source directory, and the profile loads `lib/index.js` at startup. After a
-fresh clone or after pulling changes that touch `dsh/dsh-nmg/src`, run
-`cd dsh/dsh-nmg && pnpm install && pnpm run build` **before** starting `dsh web`
-— otherwise the web profile fails to boot with
-`Cannot find module ... @nmg/dsh-nmg/lib/index.js`.
+Required knowledge must be recoverable from the shared repository or an explicit
+shared task reference. Local memory, indexes, and prior Agent sessions are optional
+accelerators, never the only source needed to continue work.
