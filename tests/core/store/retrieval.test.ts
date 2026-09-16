@@ -7,6 +7,12 @@ import test from "node:test";
 
 import { NmgStore } from "../../../src/core/store.ts";
 
+/** Windows can still hold a handle to a just-closed store for a few milliseconds, so a
+ *  plain recursive remove intermittently fails with EPERM on an otherwise green run.
+ *  Retrying is what separates that flake from a real failure; the OoO drivers remove
+ *  their scratch trees the same way (evals/ooo-execution/multiprocess.test.ts). */
+const REMOVE_TEMP_TREE = { recursive: true, force: true, maxRetries: 5, retryDelay: 100 };
+
 function withStore(run: (store: NmgStore) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-retrieval-"));
   const store = new NmgStore(join(directory, "nmg.sqlite"));
@@ -14,7 +20,7 @@ function withStore(run: (store: NmgStore) => void): void {
     run(store);
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(directory, REMOVE_TEMP_TREE);
   }
 }
 
@@ -284,7 +290,7 @@ test("store open migrates a legacy raw Chinese FTS row exactly once", () => {
     assert.ok(context.results.some((result) => result.memory.id === saved.memory.id));
   } finally {
     store?.close();
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(directory, REMOVE_TEMP_TREE);
   }
 });
 
