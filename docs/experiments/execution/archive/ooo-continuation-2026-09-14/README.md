@@ -55,7 +55,7 @@ the cost comparison in the sibling documents.
 - `../ooo-real-continuation-2026-09-14.md` - the G7 check itself: five tasks, one boundary each.
 - `../ooo-real-continuation-comparison-2026-09-14.md` - the comparison of the stable first stage against
   the continuations, and the failure classification this archive supports.
-- `../../../../experiments/execution/ooo-contract-obligations.md` - the ledger; row G7.
+- `../../../../design/task-unit-semantics-obligations.md` - the ledger; row G7.
 
 ## What this archive does not hold
 
