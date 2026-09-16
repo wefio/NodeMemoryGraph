@@ -567,6 +567,9 @@ if (role === "part1" || role === "part2") {
           writeFileSync(keptPath, execution.artifact, "utf8");
           throw new Error(
             `${message} (conclusion=${conclusionKind ?? "none"}, submitted artifact kept at ${keptPath})`,
+            // The message quotes the failure; the failure itself stays reachable as data, so a
+            // reader that needs the original (or its own cause) is not left parsing prose.
+            { cause: error },
           );
         }
       } else {
