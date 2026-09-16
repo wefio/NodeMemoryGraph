@@ -118,7 +118,7 @@ thing after the conversion, on a branch that can be thrown away.
 ## What the B6 attempt found
 
 The design asks that a generic write request on a managed entry go through the same coordinating
-transaction ("受管理条目的通用写请求也必须经过同一协调事务，禁止直接 judge/resolve 绕开运行栅栏").
+transaction ("受管理条目的通用写请求也必须经过同一协调事务，禁止直接 judge/resolve 绕开运行围栏").
 Reading every caller before writing the guard is what showed that the literal version of it is not a
 guard but a slice of the integration still outstanding:
 
@@ -188,9 +188,48 @@ Two consequences for the nodes above it:
 ## Blocked, or not applicable, and why
 
 - B7 has nothing to fail: no JSONL export exists on this branch.
-- D7 is the one D node that is a refactor rather than a proof: the round must consume an operations
-  port and stop closing the connection, which touches 46 `runCycle(` call sites, all of them in
-  `evals/**` - a tree neither `tsc` nor the product suite covers. It needs its own pass with the
-  evals suites run afterwards, because a silent breakage there would not fail any gate.
-- The design document _is_ tracked: `main` carries the 272-line version (`1f2f22f2`, PR #54) and this
-  Rows G1-G5 quote `docs/design/task-unit-semantics.md` as it stands in this branch: 273 lines, `sha256 d617c12b53da21bf`, and every quoted sentence was re-located in that file by its text, not by remembering a line number. A longer revision (355 lines, `sha256 903f3049cbfd78bb`) sits **uncommitted** in the shared checkout and belongs to another author; its extra lines come after the sentences quoted here, which are word-for-word the same in both, so these rows do not depend on which of the two lands.
+- D7 is neither blocked nor deferred: the port is in place and its row records it (13 operations and
+  no `close`, `CycleOptions.operations` required, the specs carried by `installPatchTask`). What
+  survives the first attempt is why it took two: the conversion touches `evals/**`, a tree neither
+  `tsc` nor the product suite covers, so a silent breakage there would fail no gate. A later pass
+  over the same tree runs the evals suites as its first act, not its last - that rule is what turned
+  the first attempt into a revert instead of a branch with a broken regression suite.
+- The design document is tracked and current here: this branch carries the 369-line revision,
+  `sha256 a7cebe00f503495d…` - the shared checkout's newer revision landed verbatim (`a061b2b5`,
+  squashed into `0d3dc09d`) - and `main` still carries the 272-line one (`1f2f22f2`, PR #54). Every
+  sentence these rows quote from the design was located by its text in that revision, not from a
+  remembered line number, and the re-check this pass caught one: the B6 obligation carried the wrong
+  character (`栅` for `围`) and could not be found in the file at all. Corrected. The rows therefore
+  do not depend on which revision lands, as long as the quoted sentences stay word-for-word.
+
+## The next pass: what is left, and what it needs decided
+
+Everything in A-G is proven, excluded by the design's own sentence (E) or has nothing to fail (B7),
+with one exception: **B6's owed half**. It is the design's own migration step 3 - "最后让研究 runner
+和薄适配经 daemon 调用" - read together with the truth table's managed-entry row: the daemon hosts the
+run, and a generic write on a managed entry is applied *inside* the coordinating transaction instead
+of beside it.
+
+Reading the code before declaring the slice found the obstacle, which is why this is written down
+before the pass rather than after it:
+
+- `BoardAdmission extends NmgStore` and opens its own file (`super(database)`), so today the run
+  namespace exists only on a connection the round itself created. The design forbids the convenient
+  direction in its own words - "共享协调器不继承 Store 来获得另一条连接" - and the round's port
+  (`OooRoundOperations`, a `Pick` of 13 methods) is already shaped as a borrowed capability.
+- So the namespace's schema creation and typed writes have to be reachable on a store the daemon
+  already owns, and the coordinator has to consume the store's transaction operations instead of
+  being a subclass. Two shapes are consistent with the contract, and this ledger does not pick
+  between them by itself:
+  1. the run namespace becomes part of the core schema (`src/core/store/schema.ts`), leaving the
+     coordinator a pure consumer of typed operations and adding no public store API; the cost is
+     that every store carries the namespace's tables whether or not it ever runs a round;
+  2. the store gains one narrow namespace capability the owner registers, so the owner still runs
+     the DDL inside its own migration and the coordinator still holds only typed operations; the cost
+     is new public store surface, which 事务参与与连接生命周期 otherwise keeps deliberately small.
+- Either way the acceptance criteria are already written down: the proven persistence obligations
+  (B2, B3, B4, B5) stay proven, and the new one is that a managed write lands with its run fact in
+  one transaction, tooth-backed. The state half already lives in
+  `tests/integration/ooo-managed-fence.test.ts`.
+
+Nothing here claims progress: the row stays `partly` until a pass implements it.
