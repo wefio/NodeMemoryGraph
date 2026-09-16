@@ -659,4 +659,8 @@ test("route tests that are only skipped do not pass", () => {
   const check = receipt.checks.find((entry) => entry.name === "node-test:plugin");
   assert.equal(check?.status, "failed");
   assert.match(check?.reason ?? "", /TAP acceptance rule/);
+  // The reason has to name what the rule rejected. This run's only defect is one declared skip,
+  // and without the counts the reader is sent looking for a broken test instead.
+  assert.match(check?.reason ?? "", /skipped 1/);
+  assert.match(check?.reason ?? "", /plugin ok/);
 });
