@@ -41,6 +41,10 @@ but cannot complete supervised fitting without explicit negatives. The tool chec
 provenance structure and overlap, not whether an external annotator told the truth.
 Held-out metrics remain conditional on observed judgments and the retrieved pool.
 
+Deterministic learning, artifact round-trip and provenance isolation tests are
+product contracts and run in the existing product/coverage route. They do not set
+benchmark quality targets or justify activating a model.
+
 ## Deferred
 
 An automatic verified-label producer, sufficiently large independent positive and
