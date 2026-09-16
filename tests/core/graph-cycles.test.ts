@@ -117,10 +117,15 @@ test("supersedeReachableFrom walks a deep chain and defends at depth", () => {
       ids.push(m.memory.id);
       prev = m.memory.id;
     }
-    const [m1, m2, m3, m4, m5] = ids;
+    const [m1, , , , m5] = ids;
     // Reachable set from the newest record is the whole chain.
     const reach = store.supersedeReachableFrom(m5!);
     assert.equal(reach.size, 5, "deep chain fully reachable");
+    assert.deepEqual(
+      [...reach].sort(),
+      [...ids].sort(),
+      "the reachable set is exactly the chain, not just a set of its size",
+    );
     assert.ok(reach.has(m1!) && reach.has(m5!), "chain head and tail present");
     // Adding a normal successor on top is fine.
     const m6 = store.remember({ nodeName: "预算", nodeKind: "topic", nodeSummary: "预算", statement: "深链预算v6", sessionId: "s1", sourceActor: "user" });

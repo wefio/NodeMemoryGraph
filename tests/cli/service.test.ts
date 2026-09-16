@@ -833,8 +833,8 @@ test("remember open, resolve, and reopen lifecycle survives service restart", as
   const directory = mkdtempSync(join(tmpdir(), "nmg-cli-open-memory-"));
   const databasePath = join(directory, "nmg.sqlite");
   const service = new NmgService({ databasePath, environment: {} });
-  let openMemoryId = "";
-  let anchorMemoryId = "";
+  let openMemoryId!: string;
+  let anchorMemoryId!: string;
   try {
     const anchor = await service.invoke("remember", {
       statement: "Atlas storage choice blocks deployment.",

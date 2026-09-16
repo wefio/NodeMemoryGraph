@@ -174,10 +174,14 @@ test("searchContext: duplicateOf marks a same-normalized later result", () => {
     store.remember({ statement: "I like dogs.", nodeName: "pets", scope: { user: "a" } });
     store.remember({ statement: "i like dogs", nodeName: "pets-again", scope: { user: "b" } });
     const context = store.searchContext("I like dogs", { limit: 10 });
-    const norm = context.results.map((r) => r.memory.statement);
     const marked = context.results.filter((r) => r.duplicateOf);
     // both same-normalized records can be present, but only one is "kept"
     const kept = context.results.filter((r) => !r.duplicateOf);
+    assert.ok(
+      context.results.some((r) => r.memory.statement === "I like dogs.") &&
+        context.results.some((r) => r.memory.statement === "i like dogs"),
+      "both same-normalized statements are retrieved",
+    );
     assert.ok(kept.length >= 1);
     if (marked.length > 0) {
       assert.equal(marked[0]!.memory.id !== marked[0]!.duplicateOf, true);
@@ -395,6 +399,8 @@ test("searchContext: as-of ranking lifts the record current at the asked date", 
     const i2026 = idx("work-life balance");
     assert.ok(i2033 >= 0, "2033 record must be retrieved");
     assert.ok(i2026 >= 0, "2026 record must be retrieved");
+    assert.equal(h.results[i2033]?.memory.id, new2033.memory.id, "the 2033 slot is the 2033 record");
+    assert.equal(h.results[i2026]?.memory.id, old2026.memory.id, "the 2026 slot is the 2026 record");
     assert.ok(i2033 < i2026, `as-of 2033 ranks the 2033 record (${i2033}) above 2026 (${i2026})`);
 
     // No window (current query): relevance order is untouched by the temporal boost.

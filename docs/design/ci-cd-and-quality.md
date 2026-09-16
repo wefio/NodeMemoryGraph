@@ -1,7 +1,7 @@
 # 代码质量与 CI/CD
 
 **Created:** 2026-07-20  
-**Updated:** 2026-08-31
+**Updated:** 2026-09-16
 **Authority:** 仓库测试、CI 与 Agent 开发流程契约
 
 NMG 的测试负责阻止可复现错误，不负责冻结尚未验证的设计。产品契约、研究测量与故障注入使用不同执行轨道，避免 benchmark 便利逻辑反向定义产品行为。
@@ -53,6 +53,10 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 另有三个命令只用于本地，刻意不作为 CI 轨道：`npm run lint:fix`（与 `lint` 同一 ESLint 范围，加 `--fix`）、`npm run hotspot:modules`（对 store 各方法做静态调用点计数）、`npm run perf:hotspots`（从某个 store 的 `perf_aggregates` 打印分段延迟占比）。
 
+`npm run lint` 的扫描面是 `src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ tests/ evals/ scripts/ tools/`。在 `evals/` 与 `scripts/` 这两个新增面上，已存在的发现按“规则 + 原因 + 退场方式”逐条在 `eslint.config.js` 里报为 `warn`；退场标准是 `lint:debt` 对这些规则不再有发现（决策：[静态覆盖面](../decisions/implemented/2026-09-16-ci-static-coverage.md)）。降级不允许把规则对某个目录整体关闭 —— 那会把检测能力与发现一起删掉。测试、研究 harness、脚本与仓库工具按设计打印，因此 `no-console` 对这些面关闭。扫描面自身由 `tests/tools/eslint-config-coverage.test.ts` 守住：`lint` 与 `lint:fix` 同面，且 config 里每个以目录锚定的 `files:` 块都必须落在扫描面内并仍能匹配到文件。
+
+`npm run lint:debt`（同一 lint 面加 `--max-warnings 0`，把分级发现变成可计数）与 `npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`，`tests/` 面第一次被类型检查）刻意不进入任何阻塞契约，只在 CI 以 advisory 步骤运行。
+
 `verify:static` 中的 `complexity:gate` 默认以 `git merge-base HEAD origin/main` 为基线（可用 `--base <ref>` 显式覆盖）。基线必须是 merge base 而不是 `HEAD`：后者只比较未提交的工作树，于是已提交到分支的改动完全不可见 —— 在 CI 的干净检出上它永远报“无改动”，等于每个 PR 都没有被这条 gate 检查过。因此每次运行都会**陈述自己用了哪个基线**，并**点名它未能测量的改动文件**（ESLint 拒绝某路径、或文件根本无法解析，都会产出“零发现”，与“量过且干净”无法区分）。
 
 `eval:*`、`benchmark:*`、真实 LLM/embedding 与官方大数据集运行不进入 keyless CI。研究测试可以验证 adapter 和计分契约，但不得访问外部密钥或把实验常量提升为产品默认值。
@@ -68,6 +72,7 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 `verify:chaos` 这些命名 package contract，使本地可复现入口和远程 CI 保持同源：
 
 - `static`：build、package、type、lint、format、文档、术语索引、需求追溯、Agent context 与生产依赖审计；
+- `static` 内的两个 advisory 步骤：`lint:debt` 与 `check:tests`。`continue-on-error` 加在步骤上而非 job 上，`static` 仍是必跑且绿的 job，而尚未还清的债以红色步骤出现在运行里，不会被藏进一个永远绿的 check（决策：[静态覆盖面](../decisions/implemented/2026-09-16-ci-static-coverage.md)）；
 - `tests`：Node 24 产品测试和覆盖率；
 - `research-tests`：研究/benchmark adapter 表征，**非阻塞但可见**：它不进入 `all-checks-passed`，因此失败不阻塞合并；但它不再带 `continue-on-error`，所以失败会以红色 check 出现在 PR 上，而不是永远显示绿色（决策：`docs/decisions/implemented/2026-09-12-visible-non-blocking-research-track.md`）。
 - `node-compat`：最低支持版本 Node 22.19 的 build/package；
