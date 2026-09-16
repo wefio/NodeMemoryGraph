@@ -10,6 +10,8 @@ coverage/
 .mcp.json
 /.benchmarks/
 /.playwright-cli/
+# Scratch and experiment output for a session; never a home for a necessary file (AGENTS.md).
+/.temp/
 graph.html
 /output/
 /design/

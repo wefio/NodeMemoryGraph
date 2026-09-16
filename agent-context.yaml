@@ -151,7 +151,7 @@ routes:
       advisory: []
 
   - id: repository-tooling
-    paths: [tools/**, scripts/**, AGENTS.md, agent-context.yaml, tsconfig.json]
+    paths: [tools/**, scripts/**, AGENTS.md, agent-context.yaml, tsconfig.json, .gitignore]
     owners:
       - docs/design/ci-cd-and-quality.md
       - docs/README.md
