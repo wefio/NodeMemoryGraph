@@ -9,7 +9,7 @@ Verification commands, run in the worktree that holds this branch, with the valu
 revision (re-run them rather than trusting the numbers; the harness writes no log file):
 
 - `node --experimental-strip-types --test --test-concurrency=4 "evals/ooo-execution/"*.test.ts` -> 90 pass, 0 fail, exit 0
-- `npm run test:product` -> 1288 pass, 0 fail, exit 0
+- `npm run test:product` -> 1354 pass, 0 fail, exit 0
 - `node --experimental-strip-types tools/mutation-teeth.ts` -> 40 of 40 caught, 7 of 7 restored byte-identically, exit 0
 - `node --experimental-strip-types --test --test-concurrency=4 tests/integration/ooo-ordinary-failure.test.ts tests/integration/ooo-managed-fence.test.ts tests/integration/ooo-read-paths-agree.test.ts tests/integration/ooo-round-query.test.ts tests/integration/ooo-task-tables.test.ts` -> 5, 3, 1, 2 and 4 pass, 0 fail, exit 0
 
@@ -149,10 +149,11 @@ guard but a slice of the integration still outstanding:
   `commitArtifact()` re-checks it after, so the retirement has to happen *inside* the verification
   window for the second check to be the one that decides.
 
-One harness note from the same pass: a clean run that fails prints only "clean run failed, the harness
-proves nothing", without the failing test names, and it flaked once in four runs on this target (the
-suite passes on its own and on the next harness run). Printing the observed failures for the clean run
-would make that verdict diagnosable instead of repeated.
+The harness note from that pass is closed: a failed clean run now reports the observed failure lines
+(`observedFailures` in `tools/mutation-teeth.ts`, main's #63 - this branch takes it by merging main,
+not by a change of its own), so the verdict is diagnosable instead of repeated. The one-in-four flake
+the note also recorded was never diagnosed here; the Windows temp-tree removal and shadow-lock flakes
+main repaired in #63/#64 are the nearest known causes, and they arrive in the same merge.
 
 ## G. The product entry: collaboration absorbs OoO (design line 216, added after this ledger)
 
