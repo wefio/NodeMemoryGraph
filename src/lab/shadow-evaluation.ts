@@ -419,13 +419,33 @@ export class ShadowEvaluationLog {
 
 const LOCK_WAIT = new Int32Array(new SharedArrayBuffer(4));
 
-function acquireFileLock(path: string, timeoutMs = 5_000): number {
+/** Whether a failed `open(..., "wx")` means "somebody else holds the lock".
+ *
+ *  An existing lock file is reported as `EEXIST`, and on Windows also as `EPERM`
+ *  while another process is creating or releasing it: a handle is still open, or the
+ *  file is in a delete-pending state. Both codes mean the same thing — wait for it —
+ *  and treating `EPERM` as fatal is what turned ordinary cross-process contention
+ *  into a refused durable append, because `#append` reports any thrown error as
+ *  `false`. A genuine permission problem is not hidden by this: the wait ends at the
+ *  deadline below and the lock error is thrown with the cause attached. */
+function isLockContention(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "EEXIST" || code === "EPERM";
+}
+
+/** Exported so the contention path has a test that can fail: the opener is injectable,
+ *  because a real `EPERM` cannot be produced on demand. */
+export function acquireFileLock(
+  path: string,
+  timeoutMs = 5_000,
+  open: (target: string) => number = (target) => openSync(target, "wx"),
+): number {
   const deadline = Date.now() + timeoutMs;
   while (true) {
     try {
-      return openSync(path, "wx");
+      return open(path);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if (!isLockContention(error)) throw error;
       try {
         if (Date.now() - statSync(path).mtimeMs > 30_000) unlinkSync(path);
       } catch {
