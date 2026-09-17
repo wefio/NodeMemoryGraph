@@ -600,6 +600,37 @@ const TARGETS: readonly Target[] = [
         to: '  if (false && (!state || state.transport !== "http" || !state.host || !state.port || !state.token)) {',
         expect: "a driver refuses without a daemon, and no driver opens a database of its own",
       },
+      {
+        // Whether a call to an endpoint the caller itself serves can be answered depends on the
+        // caller not blocking - the assumption that turned this failure into a 305-second wait.
+        name: "the-round-client-calls-the-endpoint-it-serves",
+        from: "  if (state.pid === process.pid) {",
+        to: "  if (false && state.pid === process.pid) {",
+        expect: "a client refuses to call the endpoint its own process serves",
+      },
+      {
+        // Without a bound, a blocked host is indistinguishable from a slow one, and the caller waits
+        // out the transport's own timeout instead of being told what to look at.
+        name: "the-round-client-has-no-limit-on-how-long-it-waits",
+        from: "    return await httpCall(state, method, params, { timeoutMs });",
+        to: "    return await httpCall(state, method, params, {});",
+        expect: "a call to a host that never answers gives up in seconds and names the reason",
+      },
+    ],
+  },
+  {
+    // A lease is the store's answer to "who serves this?" - a lease held by a process that is gone is
+    // a store nothing can serve, which is the same class of failure as a blocked host: the writer is
+    // absent and every client's answer depends on it coming back.
+    target: "src/cli/http-server.ts",
+    suites: ["tests/integration/ooo-evidence-drivers.test.ts"],
+    mutants: [
+      {
+        name: "the-serving-process-never-releases-its-lease",
+        from: "  lease.release();",
+        to: "  // lease.release();",
+        expect: "a host releases its lease when it stops, so the next host can take the store",
+      },
     ],
   },
   {

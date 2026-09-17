@@ -4,12 +4,25 @@
  *
  * This is the same composition the product daemon uses (`NmgService` + `serveHttp` + the store's
  * lease), and it is deliberately the *only* writer of that store while it runs: a round that both
- * served its store and wrote it from the harness process would be the two-writer shape the design
+ * served its store and wrote it from another connection would be the two-writer shape the design
  * rules out.
  *
- * `close()` asks the served endpoint to shut down, waits for it, and then closes the service; the
- * idle timeout is off by default, so a host lives until it is closed rather than racing the drivers.
+ * Two ways to run it, and the difference matters:
+ *
+ *  - `serveRoundStore` hosts in this process, for a caller that also *calls* the round entry
+ *    in-process (`host.call(...)`) - the design's offline-host shape. Such a process must not call
+ *    its own endpoint over HTTP: `round-client.ts` refuses that by the lease's pid, because a blocked
+ *    host cannot answer itself.
+ *  - `--store <path>` hosts as its own process, which is what a client that wants the wire needs
+ *    (the test that proves the drivers work does exactly this). Its idle timeout is a backstop, so a
+ *    host whose test died still exits instead of holding the store and the lease forever.
+ *
+ * `close()` asks the served endpoint to shut down, waits for it, and then closes the service.
  */
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
+
 import { httpCall } from "../../src/cli/http-client.ts";
 import { serveHttp } from "../../src/cli/http-server.ts";
 import {
@@ -19,11 +32,16 @@ import {
   type ServerState,
 } from "../../src/cli/lifecycle.ts";
 import { NmgService } from "../../src/cli/service.ts";
+import type { NmgMethod, NmgMethodResult } from "../../src/cli/protocol.ts";
 
 export interface RoundHost {
   databasePath: string;
   /** The endpoint as published on the store's lease; throws until it is published. */
   state(): ServerState;
+  /** This host's own call path: the round entry in-process, never the endpoint it serves. */
+  call<M extends NmgMethod>(method: M, params?: unknown): Promise<NmgMethodResult[M]>;
+  /** Resolves when the endpoint stops - its idle timeout, or a `shutdown` call. */
+  closed: Promise<void>;
   close(): Promise<void>;
 }
 
@@ -54,6 +72,8 @@ export async function serveRoundStore(
   return {
     databasePath,
     state,
+    call: (method, params) => service.invoke(method, params),
+    closed: served,
     close: async () => {
       try {
         await httpCall(state(), "shutdown");
@@ -64,4 +84,22 @@ export async function serveRoundStore(
       service.close();
     },
   };
+}
+
+const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
+if (invokedPath === fileURLToPath(import.meta.url)) {
+  const { values } = parseArgs({
+    options: { store: { type: "string" }, "idle-ms": { type: "string" } },
+  });
+  if (!values.store) throw new Error("--store is required: the round store this host serves");
+  // A host run as its own process is what a client that wants the wire needs. The idle timeout is the
+  // backstop: a host whose owner died still exits rather than holding the store and its lease.
+  const idleMs = Number(values["idle-ms"] ?? 120_000);
+  const host = await serveRoundStore(values.store, { idleTimeoutMs: idleMs });
+  const stop = () => void host.close();
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  process.stdout.write(`[host] serving ${host.databasePath} on pid ${process.pid}\n`);
+  await host.closed;
+  await host.close();
 }

@@ -15,15 +15,20 @@
  * (no daemon, no run) and one structural (no driver imports the store).
  */
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+
+import { httpCall } from "../../src/cli/http-client.ts";
 import test from "node:test";
 
-import { serveRoundStore, type RoundHost } from "../../evals/ooo-execution/round-host.ts";
-import { boardCall, runCall } from "../../evals/ooo-execution/round-client.ts";
+import { boardCall, roundDaemon, runCall } from "../../evals/ooo-execution/round-client.ts";
+import type { NmgMethodResult } from "../../src/cli/protocol.ts";
+import { readServerState, serverStatePath } from "../../src/cli/lifecycle.ts";
+import type { ServerState } from "../../src/cli/lifecycle.ts";
 
 const REPOSITORY = resolve(import.meta.dirname, "..", "..");
 const DRIVER = (name: string) => join(REPOSITORY, "evals", "ooo-execution", name);
@@ -68,8 +73,71 @@ const scratchDirectory = () => mkdtempSync(join(tmpdir(), "nmg-evidence-drivers-
 const digestOf = (path: string): string =>
   createHash("sha256").update(readFileSync(path)).digest("hex");
 
+/**
+ * A round host in its own process: the test is a client of it, exactly as a driver is.
+ *
+ * Hosting inside this process would make the test both the server and the caller, which the round
+ * client refuses (see the self-call case) - and the refusal is right: whether such a call can be
+ * answered depends on this process not blocking, which is the assumption that produced a 305-second
+ * failure the first time.
+ */
+async function startHost(
+  storePath: string,
+): Promise<{ state: () => ServerState; stop: () => Promise<void> }> {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const child: ChildProcess = spawn(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      DRIVER("round-host.ts"),
+      "--store",
+      storePath,
+      "--idle-ms",
+      "60000",
+    ],
+    { cwd: REPOSITORY, env, stdio: "ignore", windowsHide: true },
+  );
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const state = readServerState(serverStatePath(storePath));
+    if (state?.port && state.pid !== undefined) {
+      return {
+        state: () => {
+          const current = readServerState(serverStatePath(storePath));
+          if (!current?.port) throw new Error(`the host stopped serving ${storePath}`);
+          return current;
+        },
+        stop: async () => {
+          // Ask rather than kill, so the host's release path is what runs: a host that died holding
+          // its lease would leave the next host on this store with a lease it cannot take.
+          try {
+            await httpCall(readServerState(serverStatePath(storePath)) ?? { pid: 0 }, "shutdown");
+          } catch {
+            // Already gone; the wait below still applies.
+          }
+          const released = Date.now() + 4_000;
+          while (
+            Date.now() < released &&
+            readServerState(serverStatePath(storePath)) !== undefined
+          ) {
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+          child.kill();
+        },
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  child.kill();
+  throw new Error(`the round host never published an endpoint for ${storePath}`);
+}
+
 /** One board operation as a client of the round's host: the test does not open the store either. */
-async function board(host: RoundHost, params: Parameters<typeof boardCall>[1]) {
+async function board(
+  host: { state: () => ServerState },
+  params: Parameters<typeof boardCall>[1],
+): Promise<NmgMethodResult["taskBoard"]> {
   const result = await boardCall(host.state(), params);
   if (result.action !== params.action) {
     throw new Error(`the host answered ${result.action} to a ${params.action}`);
@@ -78,13 +146,100 @@ async function board(host: RoundHost, params: Parameters<typeof boardCall>[1]) {
 }
 
 /** One run transition, likewise from outside: registering and freezing are the runner's acts. */
-async function run(host: RoundHost, params: Parameters<typeof runCall>[1]) {
+async function run(
+  host: { state: () => ServerState },
+  params: Parameters<typeof runCall>[1],
+): Promise<NmgMethodResult["taskRun"]> {
   const result = await runCall(host.state(), params);
   if (result.action !== params.action) {
     throw new Error(`the host answered ${result.action} to a ${params.action}`);
   }
   return result;
 }
+
+test("a client refuses to call the endpoint its own process serves", () => {
+  const directory = scratchDirectory();
+  const storePath = join(directory, "self.sqlite");
+  // This process writes the lease, so by the lease's own record it is the host. That is the shape a
+  // harness takes when it hosts in-process and then calls itself over HTTP - and the shape that cannot
+  // work, because whether the call can be answered depends on this process not blocking.
+  writeFileSync(
+    serverStatePath(storePath),
+    JSON.stringify({
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      transport: "http",
+      host: "127.0.0.1",
+      port: 1,
+      token: "t",
+    }),
+    "utf8",
+  );
+  assert.throws(() => roundDaemon(storePath), /a host calls the round's entry in-process/u);
+});
+
+test("a host releases its lease when it stops, so the next host can take the store", async () => {
+  const directory = scratchDirectory();
+  const storePath = join(directory, "handover.sqlite");
+  const first = await startHost(storePath);
+  assert.ok(readServerState(serverStatePath(storePath)), "the first host publishes a lease");
+  await first.stop();
+  assert.equal(
+    readServerState(serverStatePath(storePath)),
+    undefined,
+    "a stopped host leaves no lease behind: a lease held by a dead process is a store nothing can serve",
+  );
+  const second = await startHost(storePath);
+  try {
+    const served = await board(second, { action: "list", agentId: "probe" });
+    assert.equal(served.action, "list", "the second host serves the store the first released");
+  } finally {
+    await second.stop();
+  }
+});
+
+test("a call to a host that never answers gives up in seconds and names the reason", async () => {
+  const directory = scratchDirectory();
+  const storePath = join(directory, "blocked.sqlite");
+  // A server that accepts the connection and never answers is what a blocked host looks like from a
+  // client. Its lease names another pid, because a client refuses the endpoint it serves itself.
+  const server = createServer(() => {});
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  try {
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    writeFileSync(
+      serverStatePath(storePath),
+      JSON.stringify({
+        pid: 999_999,
+        startedAt: new Date().toISOString(),
+        transport: "http",
+        host: "127.0.0.1",
+        port,
+        token: "t",
+      }),
+      "utf8",
+    );
+    const state = roundDaemon(storePath);
+    const started = Date.now();
+    // The race is what makes this a bounded check of a bound: without the client's own limit the
+    // transport would hold for minutes, and this case would report that instead of hanging.
+    const gaveUp = Promise.race([
+      boardCall(state, { action: "read", taskId: "c", agentId: "a" }, { timeoutMs: 250 }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("the client did not give up within 5s")), 5_000),
+      ),
+    ]);
+    await assert.rejects(gaveUp, /did not answer within 250ms: 127\.0\.0\.1:\d+ is served/u);
+    assert.ok(
+      Date.now() - started < 5_000,
+      "the bound is what ended the wait, not the transport's",
+    );
+  } finally {
+    server.closeAllConnections?.();
+    server.close();
+  }
+});
 
 test("a managed round's lifecycle from a driver process lands in the run's own log", async () => {
   const directory = scratchDirectory();
@@ -98,7 +253,7 @@ test("a managed round's lifecycle from a driver process lands in the run's own l
     "utf8",
   );
   const out = join(directory, "managed-output.txt");
-  const host = await serveRoundStore(storePath);
+  const host = await startHost(storePath);
   try {
     // The round's record first: a run, its frozen plan, and the entry it carries adopted in the same
     // transition that creates the entry - the runner's acts, all of them over the wire.
@@ -194,7 +349,7 @@ test("a managed round's lifecycle from a driver process lands in the run's own l
       },
     ]);
   } finally {
-    await host.close();
+    await host.stop();
   }
 });
 
@@ -253,6 +408,7 @@ test("every evidence driver starts and refuses a missing flag by name", async ()
       args: ["--check-ms", "0"],
       expected: /--out <dir> is required/u,
     },
+    { driver: "round-host.ts", args: [], expected: /--store is required/u },
   ];
   for (const { driver, args, expected } of cases) {
     const result = await runDriver(driver, args);
@@ -265,7 +421,7 @@ test("the board drivers run the protocol end to end through the daemon that serv
   const directory = scratchDirectory();
   const store = join(directory, "scratch.sqlite");
   const channel = "evidence-driver-smoke";
-  const host = await serveRoundStore(store);
+  const host = await startHost(store);
   try {
     const expiresAt = new Date(Date.now() + 3_600_000).toISOString();
     // Directed, so the channel's single outstanding serial slot cannot block the second entry.
@@ -377,7 +533,7 @@ test("the board drivers run the protocol end to end through the daemon that serv
       { verdict: "accepted", judgedBy: "smoke-reviewer", verified: true },
     );
   } finally {
-    await host.close();
+    await host.stop();
   }
 });
 
@@ -393,7 +549,7 @@ test("the worker claims, runs the named suite and delivers its digest", async ()
     "utf8",
   );
   const out = join(directory, "worker-output.txt");
-  const host = await serveRoundStore(store);
+  const host = await startHost(store);
   try {
     const setup = await runDriver("board-worker.ts", [
       "--daemon",
@@ -441,7 +597,7 @@ test("the worker claims, runs the named suite and delivers its digest", async ()
     assert.equal(report.artifactBytes, readFileSync(out).byteLength);
     assert.equal(report.digest, digestOf(out));
   } finally {
-    await host.close();
+    await host.stop();
   }
 });
 
