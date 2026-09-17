@@ -108,6 +108,13 @@ renamed from `C`. The legibility half alone cannot run the arms.
   `installB`, `patchVerifier`, `casesTail`, and the `let a / let b` flow), while the claim-submit-verify
   core `runTask` is already task-id-parameterised. F2b and F3 run first; the evidence for the split is
   then how much of that core the research driver actually had to duplicate.
+- **The driver names no task, and that is checked two ways.** The A/B/C coupling this record is about
+  cannot come back through the driver: it contains no `"A"`/`"B"`/`"C"` literal (the case in
+  `plan-driver.test.ts` reads the driver's own source and fails on one, and the registered mutant
+  `the-driver-falls-back-to-a-named-task` introduces one to prove it), and behaviourally the same plan
+  under other ids (`gamma`, `alpha-2`, `zz`, `join`) runs identically in the plan's declared order —
+  which also fails if the driver ever sorts ids. The ids in the test fixtures are labels for the arms'
+  units, not roles: they live in the spec, and `ooo-cycle.ts` keeps the only fixed roles.
 
 ## What building the driver measured: the C arm has no mechanism yet (2026-09-17)
 

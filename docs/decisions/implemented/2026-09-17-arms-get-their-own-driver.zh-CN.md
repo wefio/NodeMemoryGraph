@@ -84,6 +84,8 @@ in the plan` 失败；把汇合点从 `C` 改名也同样失败。可读性那�
 - **重复永久消除**：任何将来需要默认计划的地方都读 `DEFAULT_ROUND_PLAN`。
 - **操作者决定推迟、而不是忘掉：轮次的“角色”与“机制”是否该剥开。** 直接删掉 `runCycle` 会同时删掉 S4 的仪器、它的五个回归套件、账本 D7/D10 的证据、乱序派发唯一的端到端载体，而且四个共享类型就住在这个文件里（`Requirement`、`CaseRule`、`CycleWorker`、`WorkerMetrics`）。这个选择的实测形状是：**角色层**约 54 处引用、~150 行（`aInstruction`/`bInstruction`/`aEditable`/`bEditable`、`Record<"A"|"B">` 各表、`installA`、`installB`、`patchVerifier`、`casesTail`，以及 `let a / let b` 的流程），而“认领—提交—验证”的核心 `runTask` 已经是按 task id 参数化的。先做 F2b 与 F3；判断是否剥开的证据，就是研究驱动器实际不得不复制多少那段核心。
 
+- **驱动器不给任何任务起名字，而且这一点有两重检查。** 本记录所谈的 A/B/C 耦合无法从驱动器回流：源码里没有任何 `"A"`/`"B"`/`"C"` 字面量（`plan-driver.test.ts` 的那条用例直接读驱动器源码，出现即失败；已注册突变体 `the-driver-falls-back-to-a-named-task` 故意引入一个来证明该检查有牙齿），行为上同一计划换个 id（`gamma`、`alpha-2`、`zz`、`join`）运行完全相同、且按计划声明的位置顺序（一旦按 id 排序也会失败）。测试夹具里的 id 只是各臂单元的标签而非角色：它们住在 spec 里，唯一还固定角色的地方是 `ooo-cycle.ts`。
+
 ## 建造驱动器时实测到的：C 臂目前没有机制（2026-09-17）
 
 驱动器已按声明建好，离线可跑 B 臂（单槽、取合法集合的队首、逐单元跑到验收）与 A 臂（单单元计划）。它
