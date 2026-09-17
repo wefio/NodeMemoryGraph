@@ -84,6 +84,29 @@ in the plan` 失败；把汇合点从 `C` 改名也同样失败。可读性那�
 - **重复永久消除**：任何将来需要默认计划的地方都读 `DEFAULT_ROUND_PLAN`。
 - **操作者决定推迟、而不是忘掉：轮次的“角色”与“机制”是否该剥开。** 直接删掉 `runCycle` 会同时删掉 S4 的仪器、它的五个回归套件、账本 D7/D10 的证据、乱序派发唯一的端到端载体，而且四个共享类型就住在这个文件里（`Requirement`、`CaseRule`、`CycleWorker`、`WorkerMetrics`）。这个选择的实测形状是：**角色层**约 54 处引用、~150 行（`aInstruction`/`bInstruction`/`aEditable`/`bEditable`、`Record<"A"|"B">` 各表、`installA`、`installB`、`patchVerifier`、`casesTail`，以及 `let a / let b` 的流程），而“认领—提交—验证”的核心 `runTask` 已经是按 task id 参数化的。先做 F2b 与 F3；判断是否剥开的证据，就是研究驱动器实际不得不复制多少那段核心。
 
+## 建造驱动器时实测到的：C 臂目前没有机制（2026-09-17）
+
+驱动器已按声明建好，离线可跑 B 臂（单槽、取合法集合的队首、逐单元跑到验收）与 A 臂（单单元计划）。它
+**跑不了** C 臂，而这是实测结论，不是未完成的切片：
+
+- `BoardAdmission.candidates()` 返回有序合法集合——两个独立单元时是 `["first","second"]`——但其中
+  一个被认领的瞬间它就返回 `[]`，此后 `claim("second")` 抛 `no published handoff for this task`。第一个
+  单元被接受之后，`candidates()` 又返回 `["second"]`，认领成功。串行执行此外不受影响：四个单元、四次宿主
+  检查、父验收通过。
+- 产生这一结果的三条规则各有其家，且都已记录：`selectableTasks`（`src/integration/ooo-execution.ts`）
+  在任何未接受任务被认领期间返回 `[]`——由已注册突变体 `a-live-claim-does-not-block-selection` 钉住——
+  `publishReady` 只为被选中的任务发布 handoff，`claimableRow` 拒绝一切不是 `next()` 的目标。
+- 设计要求槽数是 B 与 C 之间**唯一**的差别（“C 同一细计划、多槽 | 仅改变执行槽数/合法顺序”），所以两条
+  不需改共享层的替代方案都不满足它：同一 store 上并发 N 个 **run** 可行（实测：同一数据库上的两个
+  `BoardAdmission` 实例各自持有一个认领），但它改变了 channel 与计划；而“不认领先生成候选”与设计自己的
+  规则直接矛盾——原子认领才是授予执行权的东西。
+
+因此驱动器每次运行都报告 `slotsRequested`、`slotsUsed` 与 `slotRefusal`；只要请求的槽数没达成，
+`comparePlanSlots` 就把 `comparable` 置为 `false`，拒绝给出时间结论。回退运行无论墙钟多快都不能被当作 C
+臂。由此产生的决策属于操作者，本记录不做：要么为声明的槽数放宽“单 run 串行化”（`selectableTasks` 上方
+的注释已经描述的是一条**邻居**规则，比代码里“任一认领即阻塞选择”更窄），要么把 F3 做成 A 对 B，并记录
+“确定并发在该接缝上不可达”。在此之前 C 臂的状态是**受阻**，不是“未开始”。
+
 ## 验证
 
 - `evals/ooo-execution/round-plan.test.ts` —— 6 条：日志记录它被赋予的计划（把日志改回字面量

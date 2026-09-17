@@ -109,6 +109,36 @@ renamed from `C`. The legibility half alone cannot run the arms.
   core `runTask` is already task-id-parameterised. F2b and F3 run first; the evidence for the split is
   then how much of that core the research driver actually had to duplicate.
 
+## What building the driver measured: the C arm has no mechanism yet (2026-09-17)
+
+The driver was built as declared and it can run the B arm (one slot, the legal set's head, each unit to
+acceptance) and the A arm (a plan of one unit) offline. It **cannot** run the C arm, and that is a
+measurement rather than an unfinished slice:
+
+- `BoardAdmission.candidates()` returns the ordered legal set — `["first","second"]` for two
+  independent units — but it returns `[]` the moment one of them is claimed, and `claim("second")`
+  then raises `no published handoff for this task`. After the first unit is accepted, `candidates()`
+  returns `["second"]` and the claim succeeds. Sequential execution is otherwise unaffected: four
+  units, four host checks, the parent accepted.
+- The rules that produce it live in three places, each already documented: `selectableTasks`
+  (`src/integration/ooo-execution.ts`) returns `[]` while any unaccepted task is claimed — pinned by
+  the registered mutant `a-live-claim-does-not-block-selection` — `publishReady` publishes a handoff
+  for the selected task only, and `claimableRow` refuses anything that is not `next()`.
+- The design asks for the slot count to be the _only_ difference between B and C ("C 同一细计划、多槽 |
+  仅改变执行槽数/合法顺序"), so the two alternatives that need no shared-layer change do not satisfy it:
+  N concurrent **runs** on one store works (measured: two `BoardAdmission` instances on one database
+  each held a claim at once) but changes the channel and the plan; and generating a candidate without
+  a claim contradicts the design's own rule that the atomic claim is what grants execution authority.
+
+So the driver reports `slotsRequested`, `slotsUsed` and `slotRefusal` on every run, and
+`comparePlanSlots` sets `comparable: false` — refusing a time verdict — whenever a requested slot count
+was not reached. A fallback run cannot be reported as the C arm, whatever the wall clock says. The
+decision that follows is the operator's and is not taken here: either relax the per-run serialization
+for a declared slot count (the comment above `selectableTasks` already describes a _neighbour_ rule,
+which is narrower than the code's "any claim blocks selection"), or run F3 as A against B and record
+that deterministic concurrency is unreachable through this seam. Until then the C arm is **blocked**,
+not "not started".
+
 ## Verification
 
 - `evals/ooo-execution/round-plan.test.ts` — 6 cases: the log names the plan it was given (checked by
