@@ -15,6 +15,9 @@
 //     before the semantics are settled, so the arms get their own research-side driver instead.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ProbePlan } from "../../src/integration/ooo-board.ts";
 import { DEFAULT_ROUND_PLAN, openRoundStore, runCycle } from "../../src/integration/ooo-cycle.ts";
 import { cycleOptionsFor, planFor } from "./round-runner.ts";
@@ -98,19 +101,24 @@ test("one plan value reaches both the store and the round", () => {
     worker: { kind: "replay", log: "recorded.jsonl" },
   });
   const shared = planFor(spec);
-  assert.equal(
-    cycleOptionsFor({
-      spec,
-      repository: process.cwd(),
-      revision: "0".repeat(40),
-      baseline,
-      worker: async () => ({ artifact: "", metrics: {} }),
-      runDirectory: ".",
-    }).plan,
-    shared,
-    "the round reads the same plan value the store is opened with, not an equal copy",
-  );
-  assert.equal(shared, DEFAULT_ROUND_PLAN, "and with no plan declared that value is the default");
+  const runDirectory = mkdtempSync(join(tmpdir(), "ooo-plan-"));
+  try {
+    assert.equal(
+      cycleOptionsFor({
+        spec,
+        repository: process.cwd(),
+        revision: "0".repeat(40),
+        baseline,
+        worker: async () => ({ artifact: "", metrics: {} }),
+        runDirectory,
+      }).plan,
+      shared,
+      "the round reads the same plan value the store is opened with, not an equal copy",
+    );
+    assert.equal(shared, DEFAULT_ROUND_PLAN, "and with no plan declared that value is the default");
+  } finally {
+    rmSync(runDirectory, { recursive: true, force: true });
+  }
 });
 
 test("the runner takes the spec's plan, and the default is the round's own", () => {
