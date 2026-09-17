@@ -85,7 +85,18 @@ export interface DispatchTask {
 
 /** Input order and declarations belong to the coordinator, never the worker.
  * This checks eligibility, not whether arbitrary worker code is actually safe. */
-export function nextTask(plan: readonly DispatchTask[]): string | null {
+/**
+ * The candidates the shared rules make selectable, in the rule policy's order; `nextTask` returns its
+ * head.
+ *
+ * Legality lives in the rules below and nowhere else: an ordering step may rank this set, and nothing
+ * may widen it. Two of the rules are legality conditions rather than preferences, and an ordering must
+ * not skip them: a task whose earlier neighbour is still claimed blocks selection, and a task whose
+ * earlier neighbour is blocked by a stale input or an undeclared dependency is not selectable either -
+ * that block is not an external wait license. An earlier neighbour that *declares* an external wait is
+ * different: the wait is what the plan licenses, so the tasks after it stay selectable.
+ */
+export function selectableTasks(plan: readonly DispatchTask[]): readonly string[] {
   const byId = new Map(plan.map((task) => [task.id, task]));
   if (byId.size !== plan.length) throw new Error("duplicate task");
   const current = (task: DispatchTask) =>
@@ -110,11 +121,16 @@ export function nextTask(plan: readonly DispatchTask[]): string | null {
   const selectable = plan.filter((task) => task.accepted || !task.delivered);
   const pending = selectable.filter((task) => !valid(task.id));
   // ponytail: scan the bounded experiment plan; no learned priorities or preemption.
-  if (pending.some((task) => task.claimed) || pending.filter(waiting).length > 1) return null;
+  if (pending.some((task) => task.claimed) || pending.filter(waiting).length > 1) return [];
   const first = pending[0];
-  if (!first) return null;
-  if (ready(first)) return first.id;
+  if (!first) return [];
+  const ids = (tasks: readonly DispatchTask[]) => tasks.filter(ready).map((task) => task.id);
+  if (ready(first)) return ids(pending);
   // A stale/missing input or undeclared dependency is not an external wait license.
-  if (!current(first) || !waiting(first)) return null;
-  return pending.slice(1).find(ready)?.id ?? null;
+  if (!current(first) || !waiting(first)) return [];
+  return ids(pending.slice(1));
+}
+
+export function nextTask(plan: readonly DispatchTask[]): string | null {
+  return selectableTasks(plan)[0] ?? null;
 }

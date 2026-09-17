@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { NmgStore } from "../../src/core/store.ts";
 import type { TransactionPort } from "../../src/core/store/base.ts";
-import { acceptedFact } from "./task-semantics.ts";
+import { acceptedFact, deriveStatus } from "./task-semantics.ts";
 import { checkResultValid, sameCheck, type CheckTicket, type CheckResult } from "./ooo-check.ts";
 import {
   patchCandidate,
@@ -32,8 +32,15 @@ export interface PatchTaskSpec {
   limits?: PatchLimits;
   verify: (submission: PatchSubmission) => Promise<"accept" | "reject" | "undecidable">;
 }
-import { nextTask, snapshotAnswer, type SnapshotWork } from "./ooo-execution.ts";
+import { selectableTasks, snapshotAnswer, type SnapshotWork } from "./ooo-execution.ts";
 import { compileTaskUnits, dispatchTasks, type RecordedFacts } from "./task-semantics.ts";
+import {
+  orderCandidates,
+  revalidateSuggestion,
+  type AdviceOutcome,
+  type SuggestionSource,
+} from "./task-advisers.ts";
+import type { Refusal } from "./task-semantics.ts";
 
 export type ProbePlan = readonly (readonly [
   string,
@@ -227,8 +234,48 @@ export function openRoundQuery(
   };
 }
 
+/**
+ * Advisers are optional. When one is given, the scope its scores are attributed to must be given too:
+ * a suggestion nobody can attribute to a session and a projection version is not adoptable, and
+ * discovering that later would mean a decision was made with an unattributable score.
+ *
+ * This lives outside the constructor so the admission's own branch budget stays what it was; the check
+ * is about the options, not about building an admission.
+ */
+function admissionAdvice(options: BoardAdmissionOptions): {
+  advisers: readonly SuggestionSource[];
+  scope: BoardAdmissionOptions["adviceScope"];
+} {
+  const advisers = options.advisers ?? [];
+  if (advisers.length > 0 && !options.adviceScope)
+    throw new Error(
+      "advisers need an advice scope: a score nobody can attribute to a session and a projection " +
+        "version is not a suggestion the shared layer can adopt",
+    );
+  return { advisers, scope: options.adviceScope };
+}
+
 export interface BoardAdmissionOptions {
   runId?: string;
+  /**
+   * Optional suggestion sources, ordered. Absent is the rule policy, not a degraded mode: the same
+   * code path answers with the rule order, and the outcome records that nothing was adopted.
+   *
+   * This is the seam the design fixes (shared semantics computes the legal set, an optional HA/MGR
+   * source may rank inside it, the shared policy orders, the claim re-checks). Passing a source here
+   * does not enable one: no HA or MGR implementation is wired by default, and nothing about their
+   * gates changes. See `src/integration/task-advisers.ts`.
+   */
+  advisers?: readonly SuggestionSource[];
+  /** The projection identities a suggestion is scored against. Required when advisers are given. */
+  adviceScope?: {
+    sessionId: string;
+    branchId: string;
+    parametersVersion: string;
+    projectionVersion: string;
+    observationOrder?: readonly string[];
+    initialState?: string;
+  };
 }
 
 /** Experiment-only authority. Uses the real board store, not a second queue.
@@ -244,6 +291,11 @@ export class BoardAdmission extends NmgStore {
   /** The declared plan, kept because the shared compiler needs it and the store only keeps the
    *  rows it was expanded into. */
   private readonly plan: ProbePlan;
+  private readonly advisers: readonly SuggestionSource[];
+  private readonly adviceScope: BoardAdmissionOptions["adviceScope"];
+  /** What the last `next()` decided and why, for the run record. Never a second source of truth:
+   *  the decision itself is the returned task, and this only says how it was reached. */
+  private lastAdvice: AdviceOutcome | null = null;
 
   constructor(
     database: string,
@@ -254,6 +306,9 @@ export class BoardAdmission extends NmgStore {
     super(database);
     this.patchTasks = patchTasks;
     this.plan = plan;
+    const advice = admissionAdvice(options);
+    this.advisers = advice.advisers;
+    this.adviceScope = advice.scope;
     // A snapshot task can never carry host patch definitions. The opposite
     // direction is checked at claim time, because a round may install a task's
     // frozen envelope after construction but before it becomes claimable.
@@ -792,7 +847,10 @@ export class BoardAdmission extends NmgStore {
   next(): string | null {
     // A cancelled round selects nothing: the successor is not "the next task", it is
     // the explicit terminal decision the caller asked for.
-    if (this.cancelled() !== null) return null;
+    if (this.cancelled() !== null) {
+      this.lastAdvice = null;
+      return null;
+    }
     const rows = this.db
       .prepare("SELECT * FROM ooo_probe_task_view WHERE run_id=? ORDER BY position")
       .all(this.runId) as unknown as Row[];
@@ -809,7 +867,56 @@ export class BoardAdmission extends NmgStore {
           `first is ${String(first?.task)}/${String(first?.field)}: ${String(first?.reason)}`,
       );
     }
-    return nextTask(dispatchTasks(compiled.units, this.recordedFacts(rows)));
+    const dispatch = dispatchTasks(compiled.units, this.recordedFacts(rows));
+    const legal = selectableTasks(dispatch);
+    if (this.advisers.length === 0) {
+      // No source: the rule policy, which is the head of the legal set. This is the path a run
+      // without HA/MGR takes, and it is identical to the rule alone.
+      this.lastAdvice = null;
+      return legal[0] ?? null;
+    }
+    const scope = this.adviceScope!;
+    const status = deriveStatus(compiled.units, this.recordedFacts(rows));
+    const outcome = orderCandidates(
+      legal,
+      {
+        sessionId: scope.sessionId,
+        branchId: scope.branchId,
+        parametersVersion: scope.parametersVersion,
+        projectionVersion: scope.projectionVersion,
+        observationOrder: scope.observationOrder,
+        initialState: scope.initialState,
+        ready: status.ready,
+        accepted: status.accepted,
+        blocked: Object.fromEntries(status.blocked.map((entry) => [entry.id, entry.waitingFor])),
+      },
+      this.advisers,
+    );
+    this.lastAdvice = outcome;
+    return outcome.order[0] ?? null;
+  }
+
+  /**
+   * What the last `next()` adopted, refused, fell back on or had to re-score.
+   *
+   * Kept for the run record: the decision is the returned task, and this says how a source's score
+   * entered it - including the case where nothing did. A source that proposed an action outside the
+   * legal set, claimed a different session's score, or could not name the inputs of its own score
+   * leaves evidence here rather than disappearing silently.
+   */
+  lastAdviceOutcome(): AdviceOutcome | null {
+    return this.lastAdvice;
+  }
+
+  /**
+   * The claim-side check the design names: an adopted ranking is not a write licence.
+   *
+   * The caller computes the legal set again at the moment it writes the claim, and this refuses a
+   * ranking whose task left it in between (accepted, cancelled, claimed by someone else).
+   */
+  refuseStaleRanking(taskId: string, legalNow: readonly string[]): Refusal | null {
+    const adopted = this.lastAdvice?.adopted.find((entry) => entry.taskId === taskId);
+    return adopted ? revalidateSuggestion(adopted, legalNow) : null;
   }
 
   /** What the store recorded, in the shape the shared compiler reads. Acceptance comes from the

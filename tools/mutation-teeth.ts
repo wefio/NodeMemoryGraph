@@ -435,6 +435,7 @@ const TARGETS: readonly Target[] = [
     suites: [
       "tests/integration/ooo-ordinary-failure.test.ts",
       "tests/integration/ooo-publication-invariants.test.ts",
+      "tests/integration/ooo-advisers.test.ts",
       "evals/ooo-execution/patch-cycle.test.ts",
     ],
     mutants: [
@@ -442,21 +443,21 @@ const TARGETS: readonly Target[] = [
         // A cancellation is a fact about the task, so it gates dispatch the way a rejection gates
         // a dependent. This is the half acceptance already had and eligibility did not.
         name: "a-cancelled-task-is-still-dispatched",
-        ast: { within: "nextTask" },
+        ast: { within: "selectableTasks" },
         from: "    current(task) &&\n    !task.cancelled &&",
         to: "    current(task) &&",
         expect: "a cancelled task is not dispatched, and nothing reads one as a closed input",
       },
       {
         name: "the-dispatch-does-not-require-a-cancelled-input-to-be-closed",
-        ast: { within: "nextTask" },
+        ast: { within: "selectableTasks" },
         from: "    if (!task || !task.accepted || task.cancelled || !current(task) || visiting.has(id))",
         to: "    if (!task || !task.accepted || !current(task) || visiting.has(id))",
         expect: "nextTask refuses a task marked cancelled, whatever else the caller set",
       },
       {
         name: "selection-ignores-a-withdrawn-acceptance",
-        ast: { within: "nextTask" },
+        ast: { within: "selectableTasks" },
         from: "  const selectable = plan.filter((task) => task.accepted || !task.delivered);",
         to: "  const selectable = plan;",
         expect:
@@ -464,10 +465,29 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "a-live-claim-does-not-block-selection",
-        ast: { within: "nextTask" },
-        from: "  if (pending.some((task) => task.claimed) || pending.filter(waiting).length > 1) return null;",
-        to: "  if (pending.filter(waiting).length > 1) return null;",
+        ast: { within: "selectableTasks" },
+        from: "  if (pending.some((task) => task.claimed) || pending.filter(waiting).length > 1) return [];",
+        to: "  if (pending.filter(waiting).length > 1) return [];",
         expect: "with no fusion point the plan falls back to its declared order",
+      },
+      {
+        // The head rule is a legality condition, not a preference: a head blocked by a stale input
+        // is not skipped in favour of a later ready task. This is the rule an ordering step is most
+        // likely to bypass by accident, so it has its own tooth.
+        name: "a-head-blocked-by-a-stale-input-is-skipped",
+        ast: { within: "selectableTasks" },
+        from: "  if (!current(first) || !waiting(first)) return [];",
+        to: "    if (false) return [];",
+        expect: "the round's own answer is the shared rule's answer, not an ordering's",
+      },
+      {
+        // `nextTask` returns the head of what it decided, so an ordering cannot disagree with the
+        // shared rule about what may be selected: dropping the head moves both.
+        name: "next-task-is-not-the-head-of-the-legal-set",
+        ast: { within: "nextTask" },
+        from: "  return selectableTasks(plan)[0] ?? null;",
+        to: "  return selectableTasks(plan)[1] ?? null;",
+        expect: "the round's own answer is the shared rule's answer, not an ordering's",
       },
     ],
   },
@@ -630,6 +650,73 @@ const TARGETS: readonly Target[] = [
         from: "  lease.release();",
         to: "  // lease.release();",
         expect: "a host releases its lease when it stops, so the next host can take the store",
+      },
+    ],
+  },
+  {
+    // The advice seam: an optional HA/MGR source may rank inside the legal set. Each mutant removes
+    // one of the refusals, so the case that fails names the obligation that stopped being enforced.
+    // The soft-premise rule has no line of its own to mutate: a suggestion type with no field for a
+    // dependency and no read of `assumptions` is what enforces it, and the out-of-set refusal is the
+    // layer a mutant can reach - which is why the first mutant's `expect` is the case that asserts
+    // both an out-of-set task and a soft premise claiming the dependency is satisfied.
+    target: "src/integration/task-advisers.ts",
+    suites: ["tests/integration/ooo-advisers.test.ts"],
+    mutants: [
+      {
+        name: "a-suggestion-outside-the-legal-set-is-scored",
+        from: "  if (!legalSet.has(suggestion.taskId)) {",
+        to: "  if (false && !legalSet.has(suggestion.taskId)) {",
+        expect: "a suggestion outside the legal set is refused, however high it scores",
+      },
+      {
+        name: "the-ordering-adds-a-task-to-the-set",
+        from: "  return [...legal].sort((left, right) => {",
+        to: "  return [...legal, ...best.keys()].sort((left, right) => {",
+        expect: "a suggestion outside the legal set is refused, however high it scores",
+      },
+      {
+        name: "an-unmodelled-action-is-scored",
+        from: '  if (suggestion.action !== "next") {',
+        to: "  if (false) {",
+        expect: "an unmodelled action is refused rather than scored",
+      },
+      {
+        name: "a-disabled-source-is-asked-anyway",
+        from: "    if (source.enabled === false) {",
+        to: "    if (false && source.enabled === false) {",
+        expect: "a disabled or failing source falls back to the rule policy, and says why",
+      },
+      {
+        name: "a-failing-source-takes-the-decision-with-it",
+        from: "    } catch (error) {",
+        to: "    } catch (error) {\n      throw error;",
+        expect: "a disabled or failing source falls back to the rule policy, and says why",
+      },
+      {
+        name: "a-score-from-another-scope-is-reused",
+        from: "  if (\n    provenance.sessionId !== projection.sessionId ||\n    provenance.branchId !== projection.branchId\n  ) {",
+        to: "  if (false) {",
+        expect: "a score from another session or branch is not reused",
+      },
+      {
+        name: "a-version-mismatch-still-counts-as-the-same-reading",
+        from: "  if (provenance.parametersVersion !== projection.parametersVersion)\n    missing.push(`parametersVersion=${provenance.parametersVersion}`);",
+        to: "  if (false) missing.push(`parametersVersion=${provenance.parametersVersion}`);",
+        expect: "a changed parameter or projection version makes an old score a new one",
+      },
+      {
+        name: "a-score-with-no-recorded-history-counts-as-a-reproduction",
+        from: '  if (!provenance.observationOrder?.length) missing.push("observationOrder");\n  else if (!sameOrder(provenance.observationOrder, projection.observationOrder))\n    missing.push(`observationOrder=${provenance.observationOrder.join(",")}`);',
+        to: "",
+        expect:
+          "a score that cannot name its own history is re-scored, never reported as a reproduction",
+      },
+      {
+        name: "a-ranking-survives-into-the-claim",
+        from: "  return legalNow.includes(adopted.taskId)",
+        to: "  return true",
+        expect: "an adopted ranking is re-checked where the write happens",
       },
     ],
   },

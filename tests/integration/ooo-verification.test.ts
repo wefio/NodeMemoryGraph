@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
 import {
   ARTIFACT_TOOL,
   artifactEnvelope,
@@ -11,7 +10,8 @@ import {
   snapshotText,
 } from "../../.pi/extensions/nmg/ooo-execution.ts";
 import { patchPrompt, preparePatchWork } from "../../src/integration/ooo-patch.ts";
-import { expectedRename, verifyRenameCandidate } from "../../src/integration/ooo-verifier.ts";
+import { verifyRenameCandidate } from "../../src/integration/ooo-verifier.ts";
+import { expectedRenameOf, renameSource } from "../../evals/ooo-execution/rename-probe.ts";
 import { mutate } from "../../src/integration/ooo-mutation.ts";
 
 const patchWorkFields = () => ({
@@ -142,40 +142,39 @@ test("contract: the worker's check budget is host-limited, not model-chosen", ()
 });
 
 test("contract: candidate directory check reports a real terminal event without modifying source", async () => {
-  const path = new URL("../../src/integration/ooo-execution.ts", import.meta.url);
-  const source = readFileSync(path, "utf8");
-  const result = await verifyRenameCandidate(source, expectedRename(source));
+  // The probe's frozen target rather than a live product file: the oracle needs a file whose shape it
+  // requires (one exported `nextTask`, the `byId` map inside it, no further export), and freezing it
+  // keeps this test's own bounds from moving with a file it does not test. See `rename-probe.ts`.
+  const source = renameSource();
+  const result = await verifyRenameCandidate(source, expectedRenameOf(source));
   assert.equal(result.verdict, "accept");
   assert.ok(result.checkId);
   assert.ok(result.startedAt && result.finishedAt && result.finishedAt >= result.startedAt);
-  assert.equal(readFileSync(path, "utf8"), source);
+  assert.equal(renameSource(), source, "the frozen target is not modified by a candidate check");
   assert.equal(
-    (await verifyRenameCandidate(source, expectedRename(source) + "\n//extra")).verdict,
+    (await verifyRenameCandidate(source, expectedRenameOf(source) + "\n//extra")).verdict,
     "reject",
   );
   const invalid = source + "\nfunction broken( {";
-  assert.equal((await verifyRenameCandidate(invalid, expectedRename(invalid))).verdict, "reject");
+  assert.equal((await verifyRenameCandidate(invalid, expectedRenameOf(invalid))).verdict, "reject");
 });
 
 test("safety: rename oracle rejects unrelated changes which passed the old substring check", () => {
-  const source = readFileSync(
-    new URL("../../src/integration/ooo-execution.ts", import.meta.url),
-    "utf8",
-  );
-  const expected = expectedRename(source);
+  const source = renameSource();
+  const expected = expectedRenameOf(source);
   assert.notEqual(expected, source);
   for (const candidate of [
     expected + "\n// unrelated",
     expected.replace("return null;", "return 'unsafe';"),
-    expected.replace("export interface SnapshotWork", "interface SnapshotWork"),
+    expected.replace("export interface FrozenDispatchTask", "interface FrozenDispatchTask"),
   ]) {
     assert.ok(candidate.includes("planIndex") && !candidate.includes("byId"));
     assert.notEqual(candidate, expected);
   }
   const prefix = "// byId outside the target stays unchanged\n";
-  assert.equal(expectedRename(prefix + source), prefix + expected);
-  assert.throws(() => expectedRename("missing function"));
-  assert.throws(() => expectedRename(expected));
+  assert.equal(expectedRenameOf(prefix + source), prefix + expected);
+  assert.throws(() => expectedRenameOf("missing function"));
+  assert.throws(() => expectedRenameOf(expected));
   assert.throws(() => expectedRename(source + "\nexport const another = 1;"));
 });
 
