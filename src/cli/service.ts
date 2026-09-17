@@ -82,7 +82,16 @@ import {
 } from "../core/relevance-gate.ts";
 import { readRelevanceModel } from "../lab/relevance-model.ts";
 import { normalizeRecallTriggers } from "../core/recall-triggers.ts";
-import { coordinatedEntryWrite } from "../integration/task-coordinator.ts";
+import {
+  bindRunEntry,
+  cancelRun,
+  coordinatedEntryWrite,
+  createBoundEntry,
+  freezeRunPlan,
+  registerRun,
+  taskRunStatus,
+  type RunPlanTaskInput,
+} from "../integration/task-coordinator.ts";
 import { searchMemoryContext } from "../integration/search.ts";
 import { simhash64, simhashToHex, simhashFromHex, hammingDistance } from "../core/simhash.ts";
 import { ControllerPolicyChannel } from "../integration/controller-channel.ts";
@@ -155,6 +164,7 @@ import {
   type NmgSyncStgParams,
   type NmgStgPurgeSessionParams,
   type NmgTaskBoardParams,
+  type NmgTaskRunParams,
   type NmgTopologyProposalParams,
 } from "./protocol.ts";
 import { resolveNmgDataDir } from "./data-path.ts";
@@ -497,6 +507,10 @@ export class NmgService {
         case "taskBoard": {
           const parsed = parseTaskBoardParams(params);
           return taskBoardHandlers[parsed.action](this.#getStore(), parsed) as NmgMethodResult[M];
+        }
+        case "taskRun": {
+          const parsed = parseTaskRunParams(params);
+          return taskRunHandlers[parsed.action](this.#getStore(), parsed) as NmgMethodResult[M];
         }
         case "chainCreate":
           return this.#chainCreate(parseChainCreateParams(params)) as NmgMethodResult[M];
@@ -2820,6 +2834,7 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
       to: optionalString(params, "to"),
       ttlSeconds,
       expiresAt,
+      adopt: optionalAdoption(params.adopt),
     };
   }
   if (TASK_BOARD_READ_STYLE.has(action)) {
@@ -2888,6 +2903,103 @@ function parseEntryStyleTaskBoardParams(
   return null;
 }
 
+/** The adoption request when the caller sent one, or undefined. The branch lives here rather than in
+ *  the put expression so an optional field does not decide points for the whole board parser. */
+function optionalAdoption(
+  value: unknown,
+): { runId: string; taskId: string; attempt?: number } | undefined {
+  return value === undefined ? undefined : parseAdoption(value);
+}
+
+/** A board put's adoption request, or the shape it must have to be one. */
+function parseAdoption(value: unknown): { runId: string; taskId: string; attempt?: number } {
+  const params = objectParams(value);
+  return {
+    runId: requiredString(params, "runId"),
+    taskId: requiredString(params, "taskId"),
+    attempt: optionalInteger(params, "attempt", 1, 1_000_000),
+  };
+}
+
+/** Request bounds, not semantics: a plan's meaning is the coordinator's and the compiler's, this
+ *  only keeps one call from being unbounded. */
+const TASK_RUN_PLAN_LIMIT = 200;
+const TASK_RUN_DEPENDENCY_LIMIT = 64;
+
+/**
+ * The run surface's parameters. Every field is validated here so the coordinator and the store can
+ * treat their inputs as well-formed: a wire type that admits a value the layer below cannot hold is
+ * a validation gap, not a caller's mistake.
+ */
+function parseTaskRunParams(value: unknown): NmgTaskRunParams {
+  const params = objectParams(value);
+  const action = requiredEnum(params, "action", [
+    "register",
+    "freeze",
+    "bind",
+    "cancel",
+    "status",
+  ] as const);
+  const runId = requiredString(params, "runId");
+  if (action === "register") {
+    return {
+      action,
+      runId,
+      planDigest: requiredString(params, "planDigest"),
+      policy: requiredString(params, "policy"),
+      revision: requiredString(params, "revision"),
+      retention: requiredString(params, "retention"),
+    };
+  }
+  if (action === "freeze") {
+    const tasks = params.tasks;
+    if (!Array.isArray(tasks) || tasks.length === 0 || tasks.length > TASK_RUN_PLAN_LIMIT) {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        `tasks must be an array of 1..${TASK_RUN_PLAN_LIMIT} tasks`,
+      );
+    }
+    return { action, runId, tasks: tasks.map((task) => parseRunPlanTask(task)) };
+  }
+  if (action === "bind") {
+    return {
+      action,
+      runId,
+      taskId: requiredString(params, "taskId"),
+      boardTaskId: requiredString(params, "boardTaskId"),
+      entryId: requiredString(params, "entryId"),
+      attempt: optionalInteger(params, "attempt", 1, 1_000_000),
+    };
+  }
+  if (action === "cancel") {
+    return {
+      action,
+      runId,
+      taskId: optionalString(params, "taskId"),
+      reason: optionalString(params, "reason"),
+    };
+  }
+  return { action: "status", runId };
+}
+
+/** One task of a freeze request. It carries no position: the array order is the plan order, and
+ *  turning that order into positions is the coordinator's, so a caller cannot contradict it. */
+function parseRunPlanTask(value: unknown): RunPlanTaskInput {
+  const params = objectParams(value);
+  return {
+    taskId: requiredString(params, "taskId"),
+    revision: requiredString(params, "revision"),
+    input: requiredString(params, "input"),
+    dependencies: requiredStringArray(params, "dependencies", 0, TASK_RUN_DEPENDENCY_LIMIT),
+    effect: requiredString(params, "effect"),
+    waitEvent: optionalString(params, "waitEvent"),
+    operation: optionalString(params, "operation"),
+    kind: optionalString(params, "kind"),
+    patchFiles: optionalStringArray(params, "patchFiles"),
+    patchEditable: optionalStringArray(params, "patchEditable"),
+  };
+}
+
 type TaskBoardParamsOf<A extends NmgTaskBoardParams["action"]> = Extract<
   NmgTaskBoardParams,
   { action: A }
@@ -2905,18 +3017,20 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
     const p = parsed as TaskBoardParamsOf<"put">;
     const expiresAt =
       p.expiresAt ?? new Date(Date.now() + (p.ttlSeconds ?? 86_400) * 1_000).toISOString();
-    return {
-      action: "put",
-      entry: store.putTaskBoardEntry({
-        taskId: p.taskId,
-        agentId: p.agentId,
-        sourceSessionId: p.sourceSessionId,
-        kind: p.kind ?? "note",
-        content: p.content,
-        expiresAt,
-        to: p.to,
-      }),
+    const entry = {
+      taskId: p.taskId,
+      agentId: p.agentId,
+      sourceSessionId: p.sourceSessionId,
+      kind: p.kind ?? "note",
+      content: p.content,
+      expiresAt,
+      to: p.to,
     };
+    // Adoption is part of creating the entry, not a second call after it: an entry that exists
+    // without its binding is exactly the unmanaged hole the run fence exists to close, and a crash
+    // between two calls would leave one. An unadopted put takes the path it always took.
+    if (!p.adopt) return { action: "put", entry: store.putTaskBoardEntry(entry) };
+    return { action: "put", ...createBoundEntry(store, { entry, ...p.adopt }) };
   },
   read: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"read">;
@@ -3094,6 +3208,46 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
         apply: () => store.resolveTaskBoardEntry(p),
       }),
     };
+  },
+};
+
+type TaskRunParamsOf<A extends NmgTaskRunParams["action"]> = Extract<
+  NmgTaskRunParams,
+  { action: A }
+>;
+type TaskRunHandler = (store: NmgStore, parsed: NmgTaskRunParams) => NmgMethodResult["taskRun"];
+
+/** Table-driven run-surface dispatch, for the same reason as `taskBoardHandlers`: the transition
+ *  rules live in the coordinator, and every branch here is one call into it. */
+const taskRunHandlers: Record<NmgTaskRunParams["action"], TaskRunHandler> = {
+  register: (store, parsed) => {
+    const p = parsed as TaskRunParamsOf<"register">;
+    return { action: "register", ...registerRun(store, p) };
+  },
+  freeze: (store, parsed) => {
+    const p = parsed as TaskRunParamsOf<"freeze">;
+    return { action: "freeze", ...freezeRunPlan(store, { runId: p.runId, tasks: p.tasks }) };
+  },
+  bind: (store, parsed) => {
+    const p = parsed as TaskRunParamsOf<"bind">;
+    return {
+      action: "bind",
+      ...bindRunEntry(store, {
+        runId: p.runId,
+        taskId: p.taskId,
+        boardTaskId: p.boardTaskId,
+        entryId: p.entryId,
+        attempt: p.attempt,
+      }),
+    };
+  },
+  cancel: (store, parsed) => {
+    const p = parsed as TaskRunParamsOf<"cancel">;
+    return { action: "cancel", ...cancelRun(store, p) };
+  },
+  status: (store, parsed) => {
+    const p = parsed as TaskRunParamsOf<"status">;
+    return { action: "status", status: taskRunStatus(store, p.runId) };
   },
 };
 

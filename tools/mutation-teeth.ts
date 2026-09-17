@@ -583,6 +583,7 @@ const TARGETS: readonly Target[] = [
     suites: [
       "tests/integration/ooo-managed-write.test.ts",
       "tests/integration/ooo-managed-adopt.test.ts",
+      "tests/cli/task-run-surface.test.ts",
     ],
     mutants: [
       {
@@ -648,11 +649,103 @@ const TARGETS: readonly Target[] = [
         to: "    if (false && binding.runId !== request.runId)",
         expect: "a coordinated write refuses an entry that is not this run's",
       },
+      {
+        // The run surface's transitions: a plan the run cannot satisfy is refused while it is still
+        // a proposal rather than frozen into a task that can never be ready.
+        name: "the-plan-may-freeze-a-dangling-dependency",
+        from: "      if (!known.has(dependency))",
+        to: "      if (false && !known.has(dependency))",
+        expect: "a freeze cannot dangle, repeat a task, or lean on itself",
+      },
+      {
+        // A task that waits for itself is a task that is never ready, and the freeze is the last
+        // point at which that is still only a proposal.
+        name: "a-task-may-depend-on-itself",
+        from: "      if (dependency === task.taskId)",
+        to: "      if (false && dependency === task.taskId)",
+        expect: "a freeze cannot dangle, repeat a task, or lean on itself",
+      },
+      {
+        // Freezing is one transition: a batch where the store refuses one task must not leave the
+        // earlier ones frozen, or a plan exists that no caller ever proposed.
+        name: "the-plan-freezes-one-task-per-transaction",
+        from: "  return store.coordinateRunWrite(request.runId, (port) => {\n    // The array order is the plan order: the position comes from here, not from the request.\n    request.tasks.forEach((task, position) =>\n      store.freezeTaskRunTask({ ...task, runId: request.runId, position }, port),\n    );\n    return { runId: request.runId, frozen: request.tasks.length };\n  });",
+        to: "  request.tasks.forEach((task, position) =>\n    store.freezeTaskRunTask({ ...task, runId: request.runId, position }),\n  );\n  return { runId: request.runId, frozen: request.tasks.length };",
+        expect: "a refused freeze leaves the plan exactly as it was",
+      },
+      {
+        // The plan order is the array order: the position comes from that loop, so freezing every
+        // task at zero would leave the stored plan's order to the task ids.
+        name: "every-task-is-frozen-at-position-zero",
+        from: "    request.tasks.forEach((task, position) =>\n      store.freezeTaskRunTask({ ...task, runId: request.runId, position }, port),\n    );",
+        to: "    request.tasks.forEach((task) =>\n      store.freezeTaskRunTask({ ...task, runId: request.runId, position: 0 }, port),\n    );",
+        expect: "a run registers, freezes a plan, adopts entries, and reads it all back",
+      },
+      {
+        // A cancelled run is closed: its plan is not extended behind the cancellation that every
+        // other rule in this file already honours.
+        name: "a-cancelled-run-takes-a-new-plan",
+        from: "  const refusal = managedWriteRefusal(store, request.runId);\n  if (refusal) throw new Error(refusal);",
+        to: "  const refusal: string | null = null;\n  if (refusal) throw new Error(refusal);",
+        ast: { within: "freezeRunPlan" },
+        expect: "a cancelled run takes no further plan",
+      },
+      {
+        // The binding records which channel carries the entry, which is what lets a status reader
+        // resolve it without searching every channel.
+        name: "a-binding-does-not-record-its-channel",
+        from: "        payload: JSON.stringify({ boardTaskId: request.boardTaskId }),",
+        to: "        payload: null,",
+        expect: "a run registers, freezes a plan, adopts entries, and reads it all back",
+      },
+      {
+        // Creating the entry and adopting it are one transition. Two calls would leave an unmanaged
+        // entry behind when the binding is refused - the hole the run fence exists to close.
+        name: "the-entry-is-created-before-its-binding-is-checked",
+        from: "  return store.writeTransaction((port) => {\n    const entry = store.putTaskBoardEntry(request.entry, port);",
+        to: "  return store.writeTransaction(() => {\n    const entry = store.putTaskBoardEntry(request.entry);",
+        expect:
+          "adoption is part of the transition that creates the entry, so a refusal leaves no entry",
+      },
+      {
+        // A run-level cancellation is the run's fact, not a task's: the schema's empty task id is
+        // what keeps it from colliding with a task that has no name.
+        name: "a-run-cancellation-names-a-task",
+        from: '        taskId: request.taskId ?? "",',
+        to: '        taskId: request.taskId ?? "-",',
+        expect: "cancelling a run is recorded once, stops its managed writes, and is readable",
+      },
+      {
+        // Cancelling a task the plan never froze would name nothing while reading as a fact about
+        // the run.
+        name: "a-cancellation-ignores-whether-the-task-was-frozen",
+        from: "  if (request.taskId !== undefined && !isFrozen(store, request.runId, request.taskId))",
+        to: "  if (false && request.taskId !== undefined && !isFrozen(store, request.runId, request.taskId))",
+        expect: "cancelling one task names it, and a task the plan never froze cannot be cancelled",
+      },
+      {
+        // There is nothing to cancel in a run this store cannot name, and the refusal says so
+        // rather than leaving it to the transaction's own message.
+        name: "an-unknown-run-can-be-cancelled",
+        from: "  if (!store.taskRunManifest(request.runId))",
+        to: "  if (false && !store.taskRunManifest(request.runId))",
+        expect:
+          "status is a read: an unknown run has no manifest and is not registered by being asked",
+      },
+      {
+        // A status read registers and appends nothing: a view that repaired what it could not find
+        // would make its own answer true.
+        name: "status-registers-the-run-it-cannot-find",
+        from: "    manifest: store.taskRunManifest(runId),",
+        to: '    manifest: (store.registerTaskRun({ runId, planDigest: "", policy: "", revision: "", retention: "" }), store.taskRunManifest(runId)),',
+        expect:
+          "status is a read: an unknown run has no manifest and is not registered by being asked",
+      },
     ],
   },
   {
     target: "src/cli/service.ts",
-    suites: ["tests/integration/ooo-managed-write.test.ts"],
+    suites: ["tests/integration/ooo-managed-write.test.ts", "tests/cli/task-run-surface.test.ts"],
     mutants: [
       {
         // The routing is what keeps the daemon's verbs out of the store's refusal: a managed entry
@@ -663,6 +756,15 @@ const TARGETS: readonly Target[] = [
         from: '      entry: coordinatedEntryWrite(store, {\n        verb: "claim",\n        entryId: p.entryId,\n        actorId: p.agentId,\n        apply: () => store.claimTaskBoardEntry(p),\n      }),',
         to: "      entry: store.claimTaskBoardEntry(p),",
         expect: "a daemon board verb routes a managed entry through the run's transition",
+      },
+      {
+        // The wire drops an adoption request: the entry is created, the caller is told the put
+        // succeeded, and no run manages it - the silent divergence the epoch rule exists for.
+        name: "the-wire-drops-an-adoption-request",
+        from: "      adopt: optionalAdoption(params.adopt),",
+        to: "      adopt: undefined,",
+        expect:
+          "adoption is part of the transition that creates the entry, so a refusal leaves no entry",
       },
     ],
   },
