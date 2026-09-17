@@ -311,7 +311,7 @@ board TTL 需要显式的运行保留关系：运行记录引用的交付/判定
 
 ### 当前实现与接入前置条件
 
-当前 [round-runner](../../evals/ooo-execution/round-runner.ts)为每轮建立私有 store；[BoardAdmission](../../src/integration/ooo-board.ts)在该库里同时建 OoO 表并使用通用 board 表，另一进程的 status/cancel 也会打开该文件。这是每轮同库，不是上面选定的共享 daemon 模式；其 meta 单行、taskId 主键和固定 channel 也不能原样搬入多轮共享库。
+当前 [round-runner](../../evals/ooo-execution/round-runner.ts)为每轮建立私有 store；[BoardAdmission](../../src/integration/ooo-board.ts)在该库里同时建 OoO 表并使用通用 board 表。这是每轮同库，不是上面选定的共享 daemon 模式；其 meta 单行、taskId 主键和固定 channel 也不能原样搬入多轮共享库。三个证据驱动（[board-worker](../../evals/ooo-execution/board-worker.ts)、[board-deliver](../../evals/ooo-execution/board-deliver.ts)、[board-judge](../../evals/ooo-execution/board-judge.ts)）已经不再打开该文件：它们经 [round-client](../../evals/ooo-execution/round-client.ts) 调用服务该 store 的 daemon，无 daemon 时按名字拒绝（[round-host](../../evals/ooo-execution/round-host.ts) 是把它服务起来的宿主）；仍未接入的是 runner 自身——它既创建 store、又构造 `BoardAdmission`，所以研究轮次自己的计划/候选/探针状态还在私有 schema 里，而不在上文选定的运行命名空间。
 
 当前 `accepted()` 联查 board verdict 与 digest，而部分依赖路径依据 artifact 存在；board 被 TTL 清除可能使两种观察分离。接入前必须统一派生函数并实现保留关系。现有 `ooo_probe_tasks` 混合了不可变输入、候选字节和可派生状态，不能整表复制为新权威。现有 [RoundLog](../../src/integration/ooo-round-log.ts)是 JSONL 记录，不能宣称已经具备同库原子历史。
 
