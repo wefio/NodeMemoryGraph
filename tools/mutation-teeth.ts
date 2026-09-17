@@ -574,7 +574,31 @@ const TARGETS: readonly Target[] = [
         name: "judge-may-judge-its-own-delivery",
         from: "  if (entry.deliveredBy === agentId) {",
         to: "  if (false && entry.deliveredBy === agentId) {",
-        expect: "the board drivers run the protocol end to end on a scratch store",
+        expect:
+          "the board drivers run the protocol end to end through the daemon that serves the store",
+      },
+      {
+        // The whole boundary is that a driver reaches the board through the daemon. A convenience
+        // import of the store is how that boundary rots, and the structural check is what catches it
+        // rather than a later round discovering a second writer.
+        name: "a-driver-falls-back-to-opening-the-store",
+        from: "const state = roundDaemon(resolve(values.daemon));",
+        to: 'const state = roundDaemon(resolve(values.daemon));\nconst store = (await import("../../src/core/store/base.ts")).NmgStoreBase;',
+        expect: "a driver refuses without a daemon, and no driver opens a database of its own",
+      },
+    ],
+  },
+  {
+    // The adapter is the only thing between a driver and the file it must not open: without its
+    // refusal, a missing daemon reads as a store the driver is free to open itself.
+    target: "evals/ooo-execution/round-client.ts",
+    suites: ["tests/integration/ooo-evidence-drivers.test.ts"],
+    mutants: [
+      {
+        name: "the-round-client-does-not-require-a-daemon",
+        from: '  if (!state || state.transport !== "http" || !state.host || !state.port || !state.token) {',
+        to: '  if (false && (!state || state.transport !== "http" || !state.host || !state.port || !state.token)) {',
+        expect: "a driver refuses without a daemon, and no driver opens a database of its own",
       },
     ],
   },

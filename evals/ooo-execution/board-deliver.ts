@@ -1,20 +1,22 @@
 /**
  * Evidence driver: deliver an artifact to an entry through the board protocol, from the
  * process that holds the claim. Refuses if the claim is not this agent's, and
- * asserts that the store recorded exactly the digest this process computed.
+ * asserts that the daemon recorded exactly the digest this process computed.
+ *
+ * It reaches the board through the daemon that serves the round's store (`--daemon <store path>`),
+ * as a client: the drivers do not open a database of their own.
  *
  * Usage:
  *   node --experimental-strip-types evals/ooo-execution/board-deliver.ts \
- *     --channel <taskId> --entry <id> --agent <holder> --digest <sha256> \
- *     [--ref <path-or-url>] [--summary <text>] [--store <path>]
+ *     --daemon <round store path> --channel <taskId> --entry <id> --agent <holder> \
+ *     --digest <sha256> [--ref <path-or-url>] [--summary <text>]
  */
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-const { NmgStoreBase } = await import("../../src/core/store/base.ts");
+import { boardCall, roundDaemon } from "./round-client.ts";
 
 // node:util owns flag parsing; an unknown flag or a repeated one is an error rather
 // than something this script silently ignores.
@@ -22,7 +24,7 @@ const { values } = parseArgs({
   options: {
     channel: { type: "string" },
     entry: { type: "string" },
-    store: { type: "string" },
+    daemon: { type: "string" },
     agent: { type: "string" },
     ref: { type: "string" },
     digest: { type: "string" },
@@ -37,15 +39,15 @@ const ref = values.ref;
 for (const [name, value] of Object.entries({ channel, entry: entryId, agent: agentId })) {
   if (!value) throw new Error(`--${name} is required`);
 }
+if (!values.daemon) {
+  throw new Error("--daemon is required: the store path whose daemon serves this round's board");
+}
 
-const storePath = resolve(
-  values.store ?? join(process.env.NMG_DATA_DIR ?? join(homedir(), ".nmg"), "nmg.sqlite"),
-);
-const store = new NmgStoreBase(storePath);
-try {
-  const entry = store
-    .readTaskBoard({ taskId: channel!, limit: 200 })
-    .entries.find((candidate) => candidate.id === entryId);
+const state = roundDaemon(resolve(values.daemon));
+{
+  const read = await boardCall(state, { action: "read", taskId: channel!, agentId, limit: 200 });
+  if (read.action !== "read") throw new Error("the board did not answer a read with entries");
+  const entry = read.entries.find((candidate) => candidate.id === entryId);
   if (!entry) throw new Error(`no entry ${entryId} in ${channel}`);
   if (entry.status !== "open") throw new Error(`entry ${entryId} is ${entry.status}`);
   if (entry.claimedBy !== agentId) {
@@ -64,7 +66,8 @@ try {
     throw new Error(`--digest does not match the bytes at ${ref} (${digest})`);
   }
 
-  const delivered = store.deliverTaskBoardEntry({
+  const result = await boardCall(state, {
+    action: "deliver",
     taskId: channel!,
     entryId: entryId!,
     agentId: agentId!,
@@ -72,8 +75,10 @@ try {
     ref,
     summary: values.summary,
   });
+  if (result.action !== "deliver") throw new Error("the board did not answer a delivery");
+  const delivered = result.entry;
   if (delivered.deliverableDigest !== digest) {
-    throw new Error(`store recorded ${delivered.deliverableDigest}, computed ${digest}`);
+    throw new Error(`the daemon recorded ${delivered.deliverableDigest}, computed ${digest}`);
   }
   console.log(
     JSON.stringify({
@@ -87,6 +92,4 @@ try {
       delivererPid: process.pid,
     }),
   );
-} finally {
-  store.close();
 }
