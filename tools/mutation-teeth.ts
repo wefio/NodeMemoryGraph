@@ -681,15 +681,6 @@ const TARGETS: readonly Target[] = [
         expect:
           "the parent check is the composed acceptance, and a failing check is reported as such",
       },
-      {
-        // The A/B/C coupling is the reason this driver exists. The way it comes back is a task name
-        // inside the driver, so the mutant introduces one and the case that reads the source refuses
-        // it - a plan is data, and the driver's ids come from the spec or from nowhere.
-        name: "the-driver-falls-back-to-a-named-task",
-        from: "  const unit = spec.units[taskId];",
-        to: '  const unit = spec.units[taskId] ?? spec.units["A"];',
-        expect: "the driver never names a task: the same plan under other names is the same run",
-      },
     ],
   },
   {

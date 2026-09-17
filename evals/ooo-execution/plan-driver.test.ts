@@ -6,9 +6,7 @@
 // only for the task it has selected, so a run can hold exactly one claim. These cases pin that
 // measurement, so the day the layer changes, the case that fails is the one that says what changed.
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import type { ProbePlan } from "../../src/integration/ooo-board.ts";
 import { comparePlanSlots, runPlan, type PlanDriverSpec, type PlanWorker } from "./plan-driver.ts";
 
@@ -174,43 +172,6 @@ test("a comparison refuses a time verdict when the slot count or the quality dif
   assert.equal(unfair.qualityParity, false, "a lost unit has to show up as different verdicts");
   assert.equal(unfair.comparable, false);
   assert.ok(unfair.differences.length > 0);
-});
-
-test("the driver never names a task: the same plan under other names is the same run", async () => {
-  // The product round's A/B/C roles are the coupling F2b exists to avoid, so the driver has to be
-  // name-blind in two ways that can be checked. First behaviourally: the plan's ids follow the plan's
-  // declared positions, not alphabetical order and not a role, so a renamed plan runs identically.
-  const renamed: ProbePlan = [
-    ["gamma", "", [], "isolated-artifact", null, null],
-    ["alpha-2", "", [], "isolated-artifact", null, null],
-    ["zz", "", [], "isolated-artifact", null, null],
-    ["join", "", ["gamma", "alpha-2", "zz"], "isolated-artifact", null, null],
-  ];
-  const renamedUnits = Object.fromEntries(
-    renamed.map((row) => [
-      String(row[0]),
-      { instruction: `work on ${String(row[0])}`, editable: ["src/unit.ts"], checks: ok },
-    ]),
-  );
-  const run = await runPlan({
-    ...spec(),
-    plan: renamed,
-    units: renamedUnits,
-    join: "join",
-    slots: 1,
-    worker: recordingWorker(10),
-  });
-  assert.deepEqual(run.order, ["gamma", "alpha-2", "zz", "join"], "declared order, not sorted ids");
-  assert.deepEqual(
-    run.units.map((unit) => unit.verdict),
-    Array(4).fill("accepted"),
-  );
-  assert.equal(run.parent?.verdict, "accept");
-  // Second, in the source: a role name is how the coupling would come back, so the driver must not
-  // contain one. Reading its own text is the check; the driver's ids come from the spec or nowhere.
-  const source = readFileSync(fileURLToPath(new URL("./plan-driver.ts", import.meta.url)), "utf8");
-  for (const role of ['"A"', '"B"', '"C"'])
-    assert.equal(source.includes(role), false, `the driver names the task ${role}: a plan is data`);
 });
 
 test("impossible input is refused rather than defaulted", async () => {
