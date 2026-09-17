@@ -12,6 +12,7 @@ import { isAbsolute, join } from "node:path";
 import { BoardAdmission, openRoundQuery, type ProbePlan } from "../../src/integration/ooo-board.ts";
 import { verifyCandidate } from "../../src/integration/ooo-candidate.ts";
 import {
+  DEFAULT_ROUND_PLAN,
   runCycle,
   type CycleOptions,
   type CycleResult,
@@ -26,13 +27,11 @@ import {
 } from "../../src/integration/ooo-round-log.ts";
 import type { RoundSpec, SpecWorker } from "./round-spec.ts";
 
-/** The plan the round runs under, written into the run directory so a *different* process can
- *  open the same store and cancel the same round. */
-export const ROUND_PLAN: ProbePlan = [
-  ["A", "", [], "isolated-artifact", "protocol-regression", null],
-  ["B", "", [], "isolated-artifact", null, null],
-  ["C", "", ["A", "B"], "isolated-artifact", null, null],
-];
+/** The runner's plan for a spec: the one the spec declares, or the round's own default. There is no
+ *  second copy of that default here - the byte-identical `ROUND_PLAN` this file used to carry is
+ *  gone, because a copy that drifted would let another process fence a round whose plan is not the
+ *  one it runs. */
+export const planFor = (spec: RoundSpec): ProbePlan => spec.plan ?? DEFAULT_ROUND_PLAN;
 
 export interface RunRecord {
   specDigest: string;
@@ -64,16 +63,19 @@ export function readRecord(runDir: string): RunRecord | null {
 
 /** The store the running round owns, opened by another process for `status` / `cancel`.
  *  Reading never creates one: a directory with no store has no round to report. */
-export function openRoundStore(runDir: string): BoardAdmission {
+export function openRoundStore(
+  runDir: string,
+  plan: ProbePlan = DEFAULT_ROUND_PLAN,
+): BoardAdmission {
   if (!existsSync(storePath(runDir))) throw new Error(`no round store in ${runDir}`);
-  return new BoardAdmission(storePath(runDir), ROUND_PLAN, {});
+  return new BoardAdmission(storePath(runDir), plan, {});
 }
 
 /** The round's own store, created if this is the round's first moment. The runner needs it
  *  before `runCycle` starts, because that is the channel an operator's `cancel` arrives on. */
-function ensureRoundStore(runDir: string): BoardAdmission {
+function ensureRoundStore(runDir: string, plan: ProbePlan = DEFAULT_ROUND_PLAN): BoardAdmission {
   mkdirSync(runDir, { recursive: true });
-  return new BoardAdmission(storePath(runDir), ROUND_PLAN, {});
+  return new BoardAdmission(storePath(runDir), plan, {});
 }
 
 export interface RoundInputs {
@@ -175,6 +177,7 @@ export function cycleOptionsFor(options: {
     checks: spec.checks,
     worker: options.worker,
     mode: options.mode ?? "ooo",
+    plan: planFor(spec),
     aInstruction: spec.a.instruction,
     bInstruction: spec.b.instruction,
     aEditable: spec.a.editable,
@@ -216,11 +219,12 @@ export async function runSpecifiedRound(options: {
     revision: options.revision,
   };
   writeFileSync(recordPath(options.runDir), JSON.stringify(started, null, 2), "utf8");
-  const store = ensureRoundStore(options.runDir);
+  const store = ensureRoundStore(options.runDir, planFor(options.spec));
   try {
     // The host owns the store: it opens it, the round borrows it, and this closes it once the
-    // round has returned.
-    const owned = openCycleRoundStore(storePath(options.runDir));
+    // round has returned. Both the store and the round are given the same plan value, so the
+    // channel an operator cancels on is the channel the round is actually running.
+    const owned = openCycleRoundStore(storePath(options.runDir), planFor(options.spec));
     const result = await runCycle({
       ...cycleOptionsFor({
         spec: options.spec,

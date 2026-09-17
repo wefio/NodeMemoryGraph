@@ -11,8 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { BoardAdmission } from "../../src/integration/ooo-board.ts";
+import { DEFAULT_ROUND_PLAN } from "../../src/integration/ooo-cycle.ts";
 import {
-  ROUND_PLAN,
   cancelRun,
   describeRun,
   logPath,
@@ -214,7 +214,7 @@ test(
     // The cancellation is written by another process, before the round starts: the round polls
     // the store, and must not spend a worker call after it.
     mkdirSync(runDir, { recursive: true });
-    const prepared = new BoardAdmission(storePath(runDir), ROUND_PLAN, {});
+    const prepared = new BoardAdmission(storePath(runDir), DEFAULT_ROUND_PLAN, {});
     prepared.cancel("stopped before dispatch");
     prepared.close();
 

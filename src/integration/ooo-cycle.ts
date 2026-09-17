@@ -95,9 +95,20 @@ export interface CycleOptions {
   watchCancellation?: () => string | null;
   /** Dispatch order. `ooo` (default) runs the independent task while the waiting task's check
    *  is outstanding, which is the design under test; `sequential` waits for the check first and
-   *  then runs the fixed plan in order. Same plan, inputs, checks and acceptance rules — only
+   *  then runs the fixed plan in order. Same plan, inputs, checks and acceptance rules - only
    *  the order differs, which is what an S4 comparison needs. */
   mode?: "ooo" | "sequential";
+  /** The plan this round runs. Omission is `DEFAULT_ROUND_PLAN`.
+   *
+   *  This is the plan's legibility half only, and deliberately not a general scheduler: the driver
+   *  below is written around the A/B roles the external-window experiment needs (issue A's check,
+   *  run B while it is outstanding, then repair A), and the two task instructions stay
+   *  `aInstruction` / `bInstruction`. A round whose plan has four units therefore cannot be driven
+   *  by this function yet - that needs a driver that dispatches an arbitrary plan, which is a
+   *  separate slice with its own decision record. What this field does buy is that the plan the
+   *  round runs and the plan a *second* process reads are the same value, and that the round's own
+   *  log names the plan it actually ran. */
+  plan?: ProbePlan;
   /** Independently reviewed, task-specific no-change claims, fixed before the round.
    *  Omission disables no-change acceptance; test names alone are not coverage proof. */
   noChangeCases?: Partial<Record<"A" | "B", readonly CaseRule[]>>;
@@ -156,7 +167,7 @@ export interface CycleResult {
   cancelled?: string;
 }
 
-const plan: ProbePlan = [
+export const DEFAULT_ROUND_PLAN: ProbePlan = [
   ["A", "", [], "isolated-artifact", "protocol-regression", null],
   ["B", "", [], "isolated-artifact", null, null],
   ["C", "", ["A", "B"], "isolated-artifact", null, null],
@@ -191,7 +202,10 @@ export type OooRoundOperations = Pick<
 /** Opens the store a round runs on. Whoever calls this owns it and closes it; the round borrows the
  *  connection. No argument means an in-memory store, which is what the deterministic round tests
  *  use: they own nothing that has to outlive them. */
-export function openRoundStore(databasePath = ":memory:"): BoardAdmission {
+export function openRoundStore(
+  databasePath = ":memory:",
+  plan: ProbePlan = DEFAULT_ROUND_PLAN,
+): BoardAdmission {
   return new BoardAdmission(databasePath, plan, {});
 }
 
@@ -270,6 +284,10 @@ function logContractError(
 }
 
 export async function runCycle(options: CycleOptions): Promise<CycleResult> {
+  // The round's plan, named once: the log records the plan it actually ran rather than a literal
+  // list that would keep claiming A/B/C after a caller passed something else.
+  const roundPlan = options.plan ?? DEFAULT_ROUND_PLAN;
+  const planTaskIds = roundPlan.map((row) => String(row[0]));
   const roundLog = options.roundLog ?? new RoundLog();
   const trace = (event: RoundEventInput) =>
     roundLog.append({ ...event, at: new Date().toISOString() } as RoundEvent);
@@ -770,7 +788,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
     };
     trace({
       kind: "plan",
-      tasks: ["A", "B", "C"],
+      tasks: planTaskIds,
       checks: options.checks.map((check) => check.label),
       revision: options.revision,
       checkDigest: checksDigest(options.checks),
@@ -844,7 +862,7 @@ export async function runCycle(options: CycleOptions): Promise<CycleResult> {
   try {
     trace({
       kind: "plan",
-      tasks: ["A", "B", "C"],
+      tasks: planTaskIds,
       checks: options.checks.map((check) => check.label),
       revision: options.revision,
       checkDigest: checksDigest(options.checks),

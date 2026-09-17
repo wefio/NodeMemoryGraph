@@ -8,6 +8,7 @@
 // field. A spec that is half-understood would run a round nobody declared.
 import type { CandidateCheck } from "../../src/integration/ooo-candidate.ts";
 import type { ConclusionKind } from "../../src/integration/ooo-patch.ts";
+import type { ProbeOperation, ProbePlan } from "../../src/integration/ooo-board.ts";
 import type { CaseRule, Requirement } from "../../src/integration/ooo-cycle.ts";
 import type { Mutation } from "../../src/integration/ooo-mutation.ts";
 
@@ -23,6 +24,20 @@ export interface RoundSpec {
   a: { instruction: string; editable: readonly string[]; visible?: readonly string[] };
   b: { instruction: string; editable: readonly string[]; visible?: readonly string[] };
   worker: SpecWorker;
+  /** The plan the round runs. Omission is the round's default plan.
+   *
+   *  The shape is the round's row, written as an object so a spec can name a plan without
+   *  positional punctuation. What a plan may *contain* is not decided here: the shared compiler owns
+   *  duplicate ids, unknown dependencies, self-dependencies and cycles, and the round refuses a
+   *  plan it refuses - so this parser checks shape only, in one home. */
+  plan?: readonly {
+    id: string;
+    revision?: string;
+    dependencies?: readonly string[];
+    effect: string;
+    waitEvent?: string | null;
+    operation?: ProbeOperation | null;
+  }[];
   noChangeCases?: Partial<Record<"A" | "B", readonly CaseRule[]>>;
   mutations?: Partial<Record<"A" | "B", readonly Mutation[]>>;
   visible?: Partial<Record<"A" | "B" | "C", readonly string[]>>;
@@ -41,6 +56,7 @@ const KEYS = [
   "a",
   "b",
   "worker",
+  "plan",
   "noChangeCases",
   "mutations",
   "visible",
@@ -126,6 +142,34 @@ function parseTask(value: unknown, field: string) {
   };
 }
 
+function parsePlan(value: unknown): ProbePlan {
+  if (!Array.isArray(value) || !value.length) throw new Error("plan must be a non-empty array");
+  return value.map((item, index) => {
+    const row = object(item, `plan[${index}]`);
+    rejectUnknown(
+      row,
+      ["id", "revision", "dependencies", "effect", "waitEvent", "operation"],
+      `plan[${index}]`,
+    );
+    return [
+      stringField(row.id, `plan[${index}].id`),
+      row.revision === undefined ? "" : stringField(row.revision, `plan[${index}].revision`),
+      row.dependencies === undefined
+        ? []
+        : (row.dependencies as unknown[]).map((dependency, position) =>
+            stringField(dependency, `plan[${index}].dependencies[${position}]`),
+          ),
+      stringField(row.effect, `plan[${index}].effect`),
+      row.waitEvent === undefined || row.waitEvent === null
+        ? null
+        : stringField(row.waitEvent, `plan[${index}].waitEvent`),
+      row.operation === undefined || row.operation === null
+        ? null
+        : (stringField(row.operation, `plan[${index}].operation`) as ProbeOperation),
+    ] as unknown as ProbePlan[number];
+  });
+}
+
 function parseChecks(value: unknown): CandidateCheck[] {
   if (!Array.isArray(value) || !value.length) throw new Error("checks must be a non-empty array");
   return value.map((item, index) => {
@@ -203,6 +247,28 @@ function parseRequirements(value: unknown, key: string): readonly Requirement[] 
   });
 }
 
+/** The per-task option maps a spec may declare, in one home so `parseRoundSpec` stays a shape check
+ *  rather than a pile of conditionals. Each is absent when the spec does not mention it. */
+function perTaskOptions(spec: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...(spec.noChangeCases === undefined
+      ? {}
+      : { noChangeCases: perTask(spec.noChangeCases, "noChangeCases", parseCases) }),
+    ...(spec.mutations === undefined
+      ? {}
+      : { mutations: perTask(spec.mutations, "mutations", parseMutations) }),
+    ...(spec.visible === undefined
+      ? {}
+      : { visible: perTask(spec.visible, "visible", (item, key) => paths(item, key, true)) }),
+    ...(spec.admitted === undefined
+      ? {}
+      : { admitted: perTask(spec.admitted, "admitted", parseAdmitted) }),
+    ...(spec.requires === undefined
+      ? {}
+      : { requires: perTask(spec.requires, "requires", parseRequirements) }),
+  };
+}
+
 /** Parses a round spec, refusing anything it does not fully understand. */
 export function parseRoundSpec(value: unknown): RoundSpec {
   const spec = object(value, "spec");
@@ -218,23 +284,8 @@ export function parseRoundSpec(value: unknown): RoundSpec {
     a: parseTask(spec.a, "a"),
     b: parseTask(spec.b, "b"),
     worker: parseWorker(spec.worker),
-    ...(spec.noChangeCases === undefined
-      ? {}
-      : { noChangeCases: perTask(spec.noChangeCases, "noChangeCases", parseCases) }),
-    ...(spec.mutations === undefined
-      ? {}
-      : { mutations: perTask(spec.mutations, "mutations", parseMutations) }),
-    ...(spec.visible === undefined
-      ? {}
-      : {
-          visible: perTask(spec.visible, "visible", (item, key) => paths(item, key, true)),
-        }),
-    ...(spec.admitted === undefined
-      ? {}
-      : { admitted: perTask(spec.admitted, "admitted", parseAdmitted) }),
-    ...(spec.requires === undefined
-      ? {}
-      : { requires: perTask(spec.requires, "requires", parseRequirements) }),
+    ...(spec.plan === undefined ? {} : { plan: parsePlan(spec.plan) }),
+    ...perTaskOptions(spec),
     ...(budget
       ? {
           budget: {
