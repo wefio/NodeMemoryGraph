@@ -3,12 +3,13 @@
 **Authority:** living ledger for `docs/design/task-unit-semantics.md` — each row is one
 obligation from that design; progress is counted in rows moved to `proven`, not in edits made.
 
-Counts at this revision, computed from the rows below rather than from memory: **A** 5 proven, 0 partly, 0 owed (5 rows); **B** 9 proven, 0 partly, 0 owed (9 rows, B7 nothing to fail); **C** 4 proven, 0 partly, 0 owed (4 rows); **D** 14 proven, 0 partly, 0 owed (14 rows); **E** 9 proven as a seam with offline proofs and no source wired (9 rows); **G** 7 proven, 0 partly, 0 owed (7 rows). **F** not started. This pass landed E: `src/integration/task-advisers.ts` is the port a source may speak to and the rules it cannot break, `selectableTasks` is the legal set the shared rules already decided (with `nextTask` as its head), and `BoardAdmission` takes optional advisers whose absence is the rule policy - nine obligations proven offline with nine registered mutants, no gate changed and no HA or MGR implementation wired. Before it, D14 gave the drivers a daemon to be clients of and made that client boundary pessimistic (a bounded, named call, and no client calling the endpoint it serves).
+Counts at this revision, computed from the rows below rather than from memory: **A** 5 proven, 0 partly, 0 owed (5 rows); **B** 9 proven, 0 partly, 0 owed (9 rows, B7 nothing to fail); **C** 4 proven, 0 partly, 0 owed (4 rows); **D** 14 proven, 0 partly, 0 owed (14 rows); **E** 9 proven as a seam with offline proofs and no source wired (9 rows); **G** 7 proven, 0 partly, 0 owed (7 rows). **F** in progress: its offline layer landed, its paid arms have not started. This pass landed F1, the advisory cost model the design orders before any paid call (`evals/ooo-execution/cost-model.ts`, derived plan graphs, self-checks, no quality term) and recorded its sweep in [the experiment record](../experiments/execution/ooo-cost-model-2026-09-17.md); the sweep says one slot buys nothing (so B is predicted worse than A on cost), a chain or a two-unit refinement loses at every granularity, and the host check queue is what caps fine granularity. Before it, E landed: `src/integration/task-advisers.ts` is the port a source may speak to and the rules it cannot break, `selectableTasks` is the legal set the shared rules already decided (with `nextTask` as its head), and `BoardAdmission` takes optional advisers whose absence is the rule policy - nine obligations proven offline with nine registered mutants, no gate changed and no HA or MGR implementation wired. Before it, D14 gave the drivers a daemon to be clients of and made that client boundary pessimistic (a bounded, named call, and no client calling the endpoint it serves).
 
 Verification commands, run in the worktree that holds this branch, with the values they returned at this
 revision (re-run them rather than trusting the numbers; the harness writes no log file):
 
-- `node --experimental-strip-types --test --test-concurrency=4 "evals/ooo-execution/"*.test.ts` -> 90 pass, 0 fail, exit 0
+- `node --experimental-strip-types --test evals/ooo-execution/cost-model.test.ts` -> 8 pass, 0 fail, exit 0 (F1: the model's properties, including that a quality term cannot be added)
+- `node --experimental-strip-types --test --test-concurrency=4 "evals/ooo-execution/"*.test.ts` -> 98 pass, 0 fail, exit 0
 - `npm run test:product` -> 1430 pass, 0 fail, exit 0 (one full run first reported `remember from a board source attaches a board_origin marker` failing under parallel load; the file passes 47/47 alone and the next full run was clean, so this is recorded as flaky, not fixed - the same as the earlier `promoteMemory triggers a consolidation event visible via consolidationEvents`)
 - `npm run mutation:teeth` -> 96 of 96 caught by the named test, 16 of 16 targets restored byte-identically, exit 0
 - `npm run complexity:gate` -> exit 0. It caught this pass's first version: adding the advisers option pushed `BoardAdmission`'s constructor to 17, so the options check moved into `admissionAdvice()` rather than the threshold being raised.
@@ -134,9 +135,24 @@ board kind.
 
 ## F. Later phase: the experiment arms
 
-The design's A–E arms and its stopping conditions are `not started`. They need a real model, budgets
-and repetitions, and the design forbids claiming a speedup without equal parent quality. Nothing in
-this ledger may be reported as a result from them.
+The design's A–E arms and its stopping conditions are **in progress, offline so far**. The design
+orders the offline layer first ("离线模型先覆盖不同粒度、依赖密度、共享上下文、事实命中率及验证成本；它只能
+发现逻辑错误和成本转折点，不能预测真实模型质量"), and the repository had none: this pass built it.
+
+| Step                                                                       | State           | Evidence                                                                                                                                                                                  |
+| -------------------------------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1: advisory offline cost model                                            | landed          | `evals/ooo-execution/cost-model.ts` (`--sweep`, derived graphs, self-checks) + `cost-model.test.ts` (8 cases) + [the sweep record](../experiments/execution/ooo-cost-model-2026-09-17.md) |
+| F2: pick the parent task from the model's turning point                    | ready           | the record's consequence section: several units, density well under 0.5, per-unit checks not dominating; nothing picked yet                                                               |
+| F3: real-model pilot (A 3 / B 3 / C 2, current pi model, directional only) | **not started** | needs a separately fixed model, budget and repetitions, as the design requires                                                                                                            |
+
+The offline layer already fixed three expectations for F3: one slot buys nothing, so **B is predicted
+worse than A on cost**; a chain or a two-unit refinement is predicted to lose at every granularity;
+and a saving in the B arm would contradict the sweep, so the instrument would be checked before the
+finding is believed. It fixes no model, budget or repetition, and it spends nothing: the record's
+caveat is that the model has no quality term at all, and its test fails if one is ever added.
+
+Nothing in this ledger may be reported as a result from a paid arm. The design's rule stands: a
+speedup may not be claimed without equal parent quality.
 
 ## What the D7 attempt found
 
