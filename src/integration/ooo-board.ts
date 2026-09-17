@@ -845,11 +845,24 @@ export class BoardAdmission extends NmgStore {
   }
 
   next(): string | null {
+    return this.candidates()[0] ?? null;
+  }
+
+  /**
+   * The ordered legal set: every task the rules allow right now, in the order the shared policy
+   * would dispatch them. `next()` is its head, so a caller that starts more than one at a time
+   * cannot disagree with a caller that starts one - which is the difference between the two arms of
+   * the granularity comparison, and the reason this is exposed rather than re-derived by a driver.
+   *
+   * The rules are the shared semantics' and the ordering is the shared policy's; both live here,
+   * once.
+   */
+  candidates(): readonly string[] {
     // A cancelled round selects nothing: the successor is not "the next task", it is
     // the explicit terminal decision the caller asked for.
     if (this.cancelled() !== null) {
       this.lastAdvice = null;
-      return null;
+      return [];
     }
     const rows = this.db
       .prepare("SELECT * FROM ooo_probe_task_view WHERE run_id=? ORDER BY position")
@@ -870,10 +883,10 @@ export class BoardAdmission extends NmgStore {
     const dispatch = dispatchTasks(compiled.units, this.recordedFacts(rows));
     const legal = selectableTasks(dispatch);
     if (this.advisers.length === 0) {
-      // No source: the rule policy, which is the head of the legal set. This is the path a run
+      // No source: the rule policy, which is the legal set in its own order. This is the path a run
       // without HA/MGR takes, and it is identical to the rule alone.
       this.lastAdvice = null;
-      return legal[0] ?? null;
+      return legal;
     }
     const scope = this.adviceScope!;
     const status = deriveStatus(compiled.units, this.recordedFacts(rows));
@@ -893,7 +906,7 @@ export class BoardAdmission extends NmgStore {
       this.advisers,
     );
     this.lastAdvice = outcome;
-    return outcome.order[0] ?? null;
+    return outcome.order;
   }
 
   /**

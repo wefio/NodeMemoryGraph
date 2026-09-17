@@ -428,6 +428,17 @@ const TARGETS: readonly Target[] = [
         to: '        .prepare("UPDATE ooo_probe_runs SET cancel_reason=NULL, cancelled_at=? WHERE run_id=?")\n        .run(reason.slice(0, 1_000), new Date(this.now).toISOString(), this.runId);',
         expect: "the terminal decision outlives the host that made it, and still refuses new work",
       },
+      {
+        // Selection and ranking must not be able to disagree with each other. `next()` is the head of
+        // `candidates()`, so a caller that starts one unit and a caller that starts several read the
+        // same order - and a mutant that moves the head by one breaks the round's dispatch.
+        name: "next-is-not-the-head-of-the-ordered-candidates",
+        ast: { within: "next" },
+        from: "    return this.candidates()[0] ?? null;",
+        to: "    return this.candidates()[1] ?? null;",
+        expect:
+          "contract: a verified patch candidate is what dependents bind to, and only acceptance releases them",
+      },
     ],
   },
   {
@@ -635,6 +646,40 @@ const TARGETS: readonly Target[] = [
         from: "    return await httpCall(state, method, params, { timeoutMs });",
         to: "    return await httpCall(state, method, params, {});",
         expect: "a call to a host that never answers gives up in seconds and names the reason",
+      },
+    ],
+  },
+  {
+    // The arms' driver: it decides only *how many* of the legal set to start at once, so each mutant
+    // removes one of its four jobs - the batch width, the single dispatch of a unit, the failure
+    // report, and the parent check - and the case that fails names the job.
+    target: "evals/ooo-execution/plan-driver.ts",
+    suites: ["evals/ooo-execution/plan-driver.test.ts"],
+    mutants: [
+      {
+        name: "the-driver-ignores-the-slot-count",
+        from: "    const batch = legal.slice(0, spec.slots);",
+        to: "    const batch = legal.slice(0, 1);",
+        expect: "the requested slot count is not reached, and the run says so instead of faking it",
+      },
+      {
+        name: "a-unit-is-dispatched-twice-in-one-batch",
+        from: "    const batch = legal.slice(0, spec.slots);",
+        to: "    const batch = [...legal, ...legal].slice(0, spec.slots);",
+        expect: "one slot runs the units in plan order, each to acceptance",
+      },
+      {
+        name: "a-failed-worker-is-reported-as-a-run-that-finished",
+        from: "  if (result.failure !== undefined || result.artifact === undefined)",
+        to: "  if (false && (result.failure !== undefined || result.artifact === undefined))",
+        expect: "a failed worker is recorded as incomplete rather than silently skipped",
+      },
+      {
+        name: "the-parent-check-ignores-its-own-verdict",
+        from: "  return {\n    verdict: verified.verdict,",
+        to: '  return {\n    verdict: "accept",',
+        expect:
+          "the parent check is the composed acceptance, and a failing check is reported as such",
       },
     ],
   },

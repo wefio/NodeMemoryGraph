@@ -1,0 +1,551 @@
+// The granularity arms' driver: run one legal plan, with a chosen number of execution slots.
+//
+// Why this exists beside `src/integration/ooo-cycle.ts` rather than inside it: that round is a named
+// experiment (issue A's check, run B while it is outstanding, repair A), it installs its two patch
+// tasks by name, and it is written around those roles. The arms need the opposite - the same parent
+// task at two granularities - which is a different driver, not a parameter. The decision, with the
+// couplings measured behind it, is
+// `docs/decisions/implemented/2026-09-17-arms-get-their-own-driver.md`.
+//
+// What it does **not** duplicate: the rules and the ordering. `BoardAdmission.candidates()` is the
+// ordered legal set from the shared semantics, and this driver only decides how *many* of them to
+// start at once:
+//
+//   - `slots: 1`  - one legal unit at a time, each to acceptance: the B arm.
+//   - `slots: N`  - every legal unit at once, up to N in flight: the C arm.
+//
+// Everything else is the shared layer's: the claim/attempt/fact writes, the candidate verification a
+// unit's own `verify` performs, the accepted-artifact identity a dependent binds to. The driver adds
+// only the dispatch policy, the timing, and the parent check at the end.
+//
+// Usage:
+//   node --experimental-strip-types evals/ooo-execution/plan-driver.ts run --spec <spec.json> \
+//     --slots <n> --out <file> [--live]
+//   node --experimental-strip-types evals/ooo-execution/plan-driver.ts compare --spec <spec.json> \
+//     --out <file> [--live]
+
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
+import {
+  BoardAdmission,
+  type PatchTaskSpec,
+  type ProbePlan,
+} from "../../src/integration/ooo-board.ts";
+import { verifyCandidate } from "../../src/integration/ooo-candidate.ts";
+import {
+  preparePatchWork,
+  type FrozenPatchWork,
+  type PatchSubmission,
+} from "../../src/integration/ooo-patch.ts";
+import type { CandidateCheck } from "../../src/integration/ooo-candidate.ts";
+import type { WorkerMetrics } from "../../src/integration/ooo-cycle.ts";
+
+/** What a worker returns for one unit. A failure is a recorded attempt, not a crashed run. */
+export type PlanWorkerResult =
+  string | { artifact?: string; metrics?: WorkerMetrics; failure?: string };
+
+export type PlanWorker = (
+  taskId: string,
+  frozen: FrozenPatchWork,
+  dependencies: Readonly<Record<string, string>>,
+) => Promise<PlanWorkerResult>;
+
+/** One unit of the plan: what it is asked for, what it may edit, and what its own candidate must
+ *  pass. The last one is the unit's acceptance; the parent check is separate and fixed. */
+export interface PlanUnit {
+  instruction: string;
+  editable: readonly string[];
+  visible?: readonly string[];
+  checks: readonly CandidateCheck[];
+}
+
+export interface PlanDriverSpec {
+  plan: ProbePlan;
+  units: Readonly<Record<string, PlanUnit>>;
+  worker: PlanWorker;
+  repository: string;
+  revision: string;
+  baseline: Readonly<Record<string, string>>;
+  /** The parent check: what the composed artifacts must pass, run once at the end. Omission means
+   *  the arms are comparing cost only, which the report must say. */
+  parentChecks?: readonly CandidateCheck[];
+  /** The unit whose acceptance stands for the parent's composed result. Omission: every accepted
+   *  unit contributes to the parent's files. */
+  join?: string;
+  databasePath?: string;
+  slots: number;
+  budget?: { perFile: number; output: number };
+  limits?: { turns: number; reads: number; timeoutMs: number };
+}
+
+export interface UnitRun {
+  taskId: string;
+  verdict: string;
+  /** Claim to return: the worker's own time, which is what parallelism can overlap. */
+  workerMs: number;
+  /** The host's check for this unit's candidate. Host time is serial in every arm. */
+  hostMs: number;
+  tokens: number;
+  attempt: number;
+}
+
+export interface PlanRun {
+  plan: readonly string[];
+  /** Start order, which is the evidence for the slot count: with one slot it is the legal order. */
+  order: readonly string[];
+  units: readonly UnitRun[];
+  accepted: Readonly<Record<string, string>>;
+  /** Wall time from the first claim to the last verdict. */
+  wallMs: number;
+  /** Sum of the host's candidate checks. */
+  hostMs: number;
+  hostChecks: number;
+  /** The slot count the caller asked for, and what the shared admission layer actually allowed.
+   *  They differ today, and the difference is the finding: see `slotRefusal`. */
+  slotsRequested: number;
+  slotsUsed: number;
+  /** Set when the requested slot count could not be used, with the board's own reason. A run that
+   *  wanted N slots and got one must say so, or its wall time is read as the C arm's. */
+  slotRefusal?: string;
+  tokens: number;
+  failures: number;
+  /** The parent check's verdict, when the spec declares one. */
+  parent?: { verdict: string; files: readonly string[]; ms: number };
+  /** Set when a worker failed or a unit was never accepted: a comparison of such runs must say so
+   *  rather than compare times. */
+  incomplete: readonly string[];
+}
+
+/** A unit's acceptance: its own candidate check, run by the store through the spec it was given. */
+function unitVerifier(spec: PlanDriverSpec, unit: PlanUnit) {
+  return async (submission: PatchSubmission): Promise<"accept" | "reject" | "undecidable"> => {
+    if (submission.kind !== "patch") return "reject";
+    const result = await verifyCandidate({
+      repository: spec.repository,
+      revision: spec.revision,
+      files: { ...spec.baseline, ...submission.files },
+      checks: [...unit.checks],
+    });
+    return result.verdict === "accept"
+      ? "accept"
+      : result.verdict === "reject"
+        ? "reject"
+        : "undecidable";
+  };
+}
+
+/** One unit through the board: claim, run the worker, put the result on the channel, submit. The
+ *  store decides the verdict; the driver never reads a worker's claim about itself. */
+async function runOneUnit(
+  spec: PlanDriverSpec,
+  gate: BoardAdmission,
+  taskId: string,
+): Promise<UnitRun | { failure: string }> {
+  const unit = spec.units[taskId];
+  if (!unit) return { failure: `${taskId}: the plan selected it, but no spec describes it` };
+  const claimedAt = Date.now();
+  let ticket: ReturnType<BoardAdmission["claim"]>;
+  try {
+    ticket = gate.claim(taskId, `plan-driver:${taskId}`);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    // The board publishes a handoff only for the task it has selected, so while one unit is claimed
+    // no other unit is claimable. That is the boundary the C arm needs and does not have; it is
+    // reported as a refusal to use the slot count, never as a failed unit.
+    if (/no published handoff|not selected by narrow dispatch/.test(reason))
+      return { refused: reason };
+    return { failure: `${taskId}: ${reason}` };
+  }
+  if (!ticket.patch) return { failure: `${taskId}: not a patch task` };
+  const frozen = preparePatchWork({
+    taskId: ticket.patch.taskId,
+    attempt: ticket.attempt,
+    instruction: ticket.patch.instruction,
+    files: ticket.patch.files,
+    editable: ticket.patch.editable,
+    visible: ticket.patch.visible,
+    admittedConclusions: ticket.patch.admittedConclusions,
+    budget: ticket.patch.budget,
+    limits: ticket.patch.limits,
+  });
+  let produced: PlanWorkerResult;
+  try {
+    produced = await spec.worker(taskId, frozen, ticket.dependencies);
+  } catch (error) {
+    return { failure: `${taskId}: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const workerMs = Date.now() - claimedAt;
+  const result = typeof produced === "string" ? { artifact: produced } : produced;
+  const tokens = result.metrics?.tokens ?? 0;
+  if (result.failure !== undefined || result.artifact === undefined)
+    return { failure: `${taskId}: ${result.failure ?? "the worker returned no artifact"}` };
+  const entry = gate.putTaskBoardEntry({
+    taskId: gate.channel,
+    agentId: `plan-driver:${taskId}`,
+    kind: "result",
+    content: JSON.stringify({ ticket, artifact: result.artifact }),
+    expiresAt: new Date(gate.now + 86_400_000).toISOString(),
+  });
+  const checkStartedAt = Date.now();
+  const verdict = await gate.submit(entry.id);
+  return {
+    taskId,
+    verdict,
+    workerMs,
+    hostMs: Date.now() - checkStartedAt,
+    tokens,
+    attempt: ticket.attempt,
+  };
+}
+
+/** The parent check: the fixed acceptance over the composed artifacts, run once at the end. */
+async function runParentCheck(
+  spec: PlanDriverSpec,
+  accepted: Readonly<Record<string, string>>,
+  planIds: readonly string[],
+): Promise<PlanRun["parent"]> {
+  if (!spec.parentChecks?.length) return undefined;
+  const startedAt = Date.now();
+  const files: Record<string, string> = { ...spec.baseline };
+  const acceptedIds = spec.join ? [spec.join] : planIds;
+  for (const id of acceptedIds) {
+    const artifact = accepted[id];
+    if (!artifact) continue;
+    const submission = JSON.parse(artifact) as PatchSubmission;
+    if (submission.kind === "patch") Object.assign(files, submission.files);
+  }
+  const verified = await verifyCandidate({
+    repository: spec.repository,
+    revision: spec.revision,
+    files,
+    checks: [...spec.parentChecks],
+  });
+  return {
+    verdict: verified.verdict,
+    files: acceptedIds.filter((id) => accepted[id] !== undefined),
+    ms: Date.now() - startedAt,
+  };
+}
+
+export async function runPlan(spec: PlanDriverSpec): Promise<PlanRun> {
+  if (!Number.isInteger(spec.slots) || spec.slots < 1)
+    throw new Error(`slots must be a positive integer, got ${spec.slots}`);
+  const planIds = spec.plan.map((row) => String(row[0]));
+  for (const id of Object.keys(spec.units))
+    if (!planIds.includes(id))
+      throw new Error(`unit ${id} has a spec but is not in the plan; the plan is the authority`);
+  const gate = new BoardAdmission(spec.databasePath ?? ":memory:", spec.plan, {});
+  const startedAt = Date.now();
+  const units: UnitRun[] = [];
+  const order: string[] = [];
+  const failures: string[] = [];
+  const slotRefusals: string[] = [];
+
+  for (const [taskId, unit] of Object.entries(spec.units)) {
+    const patch: PatchTaskSpec = {
+      instruction: unit.instruction,
+      files: spec.baseline,
+      editable: unit.editable,
+      ...(unit.visible ? { visible: unit.visible } : {}),
+      ...(spec.budget ? { budget: spec.budget } : {}),
+      ...(spec.limits ? { limits: spec.limits } : {}),
+      verify: unitVerifier(spec, unit),
+    };
+    gate.installPatchTask(taskId, patch);
+  }
+  const dispatch = async (taskId: string): Promise<boolean> => {
+    order.push(taskId);
+    const result = await runOneUnit(spec, gate, taskId);
+    if ("refused" in result) {
+      slotRefusals.push(result.refused);
+      order.pop();
+      return false;
+    }
+    if ("failure" in result) failures.push(result.failure);
+    else units.push(result);
+    return true;
+  };
+  /** The most units ever claimed at the same time: requested slots are a wish, this is the fact. */
+  let widestHeld = 0;
+  for (;;) {
+    const legal = gate.candidates();
+    if (!legal.length) break;
+    const batch = legal.slice(0, spec.slots);
+    const held = await Promise.all(batch.map(dispatch));
+    widestHeld = Math.max(widestHeld, held.filter(Boolean).length);
+  }
+  const wallMs = Date.now() - startedAt;
+  const accepted = gate.accepted();
+  const incomplete = [
+    ...failures,
+    ...planIds.filter(
+      (id) => accepted[id] === undefined && units.some((unit) => unit.taskId === id),
+    ),
+  ];
+
+  const parent = await runParentCheck(spec, accepted, planIds);
+  gate.close();
+  return {
+    plan: planIds,
+    order,
+    units,
+    accepted,
+    wallMs,
+    slotsRequested: spec.slots,
+    slotsUsed: Math.max(1, widestHeld),
+    ...(slotRefusals.length
+      ? { slotRefusal: `wanted ${spec.slots} slots, the board allowed one: ${slotRefusals[0]}` }
+      : {}),
+    hostMs: units.reduce((total, unit) => total + unit.hostMs, 0),
+    hostChecks: units.filter((unit) => unit.verdict !== "worker-failed").length,
+    tokens: units.reduce((total, unit) => total + unit.tokens, 0),
+    failures: failures.length,
+    ...(parent ? { parent } : {}),
+    incomplete,
+  };
+}
+
+export interface PlanComparison {
+  plan: readonly string[];
+  runs: number;
+  arms: { slots: number; runs: PlanRun[] }[];
+  /** True when every run of every arm accepted the same units and reached the same parent verdict.
+   *  A comparison with different verdicts is not a comparison, and the report says so. */
+  qualityParity: boolean;
+  differences: string[];
+  caveat: string;
+  /** Every run whose requested slot count the board did not allow, with its reason. */
+  slotShortfalls: string[];
+  /** False when a time difference must not be read as an arm's result. */
+  comparable: boolean;
+}
+
+/** Runs the same spec at two slot counts. The slot count is the only difference: same plan, same
+ *  units, same checks, same parent acceptance - which is what the B/C arms require. */
+export async function comparePlanSlots(
+  spec: PlanDriverSpec,
+  options: { runs: number; arms?: readonly number[] },
+): Promise<PlanComparison> {
+  if (!Number.isInteger(options.runs) || options.runs < 1)
+    throw new Error(`runs must be a positive integer, got ${options.runs}`);
+  const arms = options.arms ?? [1, spec.slots];
+  const results: PlanComparison["arms"] = [];
+  for (const slots of arms) {
+    const runs: PlanRun[] = [];
+    for (let index = 0; index < options.runs; index += 1)
+      runs.push(await runPlan({ ...spec, plan: [...spec.plan], slots }));
+    results.push({ slots, runs });
+  }
+  const differences: string[] = [];
+  const slotShortfalls: string[] = [];
+  const shape = (run: PlanRun) =>
+    JSON.stringify({
+      order: [...run.order].sort(),
+      verdicts: run.units.map((unit) => `${unit.taskId}:${unit.verdict}`).sort(),
+      ...(run.parent ? { parent: run.parent.verdict } : {}),
+    });
+  const first = results[0]!.runs[0]!;
+  for (const arm of results)
+    for (const run of arm.runs) {
+      if (shape(run) !== shape(first))
+        differences.push(
+          `slots=${arm.slots} disagreed with the first run: ${shape(run)} vs ${shape(first)}`,
+        );
+      if (run.slotsUsed < run.slotsRequested)
+        slotShortfalls.push(
+          `slots=${arm.slots} ran with ${run.slotsUsed}: ${run.slotRefusal ?? "no reason recorded"}`,
+        );
+    }
+  return {
+    plan: first.plan,
+    runs: options.runs,
+    arms: results,
+    qualityParity: differences.length === 0,
+    differences,
+    slotShortfalls,
+    /** A slot count that was never reached makes the two arms the same experiment, so the time
+     *  comparison is refused rather than reported as "no gain". */
+    comparable: differences.length === 0 && slotShortfalls.length === 0,
+    caveat:
+      "cost and scheduling only where the slot counts were actually reached and quality matches: " +
+      "with different verdicts, or with a slot count the board refused, these are not a faster and " +
+      "a slower run of one experiment.",
+  };
+}
+
+const USAGE = `usage:
+  plan-driver.ts run --spec <spec.json> --slots <n> --out <file> [--live]
+  plan-driver.ts compare --spec <spec.json> --out <file> [--runs <n>] [--live]
+
+A spec is JSON:
+  baseline:  repository-relative paths read at the round's revision
+  plan:      the units, each { id, revision?, dependencies?, effect, operation? }
+  units:     per unit id { instruction, editable, visible? }
+  checks:    the unit's own candidate check, [{ label, command, args }]
+  parentChecks: the fixed parent acceptance, run once over the composed artifacts
+  worker:    { kind: "stub", latencyMs, fail? } | { kind: "pi", provider, model }`;
+
+/** The spec file's shape: JSON, with `worker` naming how an artifact is produced. */
+interface SpecFile {
+  baseline: readonly string[];
+  revision?: string;
+  plan: readonly {
+    id: string;
+    revision?: string;
+    dependencies?: readonly string[];
+    effect: string;
+    operation?: string | null;
+  }[];
+  units: Readonly<Record<string, { instruction: string; editable: string[]; visible?: string[] }>>;
+  checks: readonly { label: string; command: string; args: string[] }[];
+  parentChecks?: readonly { label: string; command: string; args: string[] }[];
+  join?: string;
+  worker:
+    | { kind: "stub"; latencyMs: number; fail?: readonly string[] }
+    | { kind: "pi"; provider: string; model: string };
+}
+
+function checkList(
+  raw: readonly { label: string; command: string; args: readonly string[] }[],
+): CandidateCheck[] {
+  if (!raw.length) throw new Error("a check list may not be empty");
+  return raw.map((check) => ({
+    label: check.label,
+    command: check.command,
+    args: [...check.args],
+  }));
+}
+
+function readSpecFile(path: string): SpecFile {
+  const file = JSON.parse(readFileSync(path, "utf8")) as SpecFile;
+  if (!Array.isArray(file.plan) || !file.plan.length)
+    throw new Error("spec.plan must be non-empty");
+  if (!Array.isArray(file.baseline) || !file.baseline.length)
+    throw new Error("spec.baseline must name at least one file");
+  if (!file.units || Object.keys(file.units).length === 0)
+    throw new Error("spec.units must describe at least one unit");
+  const planIds = new Set(file.plan.map((row) => row.id));
+  for (const id of Object.keys(file.units))
+    if (!planIds.has(id))
+      throw new Error(`spec.units.${id} is not in the plan; the plan is the authority`);
+  return file;
+}
+
+function planOf(file: SpecFile): ProbePlan {
+  return file.plan.map((row) => [
+    row.id,
+    row.revision ?? "",
+    [...(row.dependencies ?? [])],
+    row.effect,
+    null,
+    row.operation ?? null,
+  ]) as unknown as ProbePlan;
+}
+
+function baselineOf(file: SpecFile, repository: string): Record<string, string> {
+  return Object.fromEntries(
+    file.baseline.map((path) => [path, readFileSync(resolve(repository, path), "utf8")]),
+  );
+}
+
+/** The stub worker answers by leaving its editable files as they are, so acceptance depends on the
+ *  unit's own check and the run measures the driver rather than a model. `fail` names units that
+ *  must fail, which is how the driver's failure path is exercised without a model. */
+function stubWorker(worker: { latencyMs: number; fail?: readonly string[] }): PlanWorker {
+  return async (taskId, frozen) => {
+    await new Promise((done) => setTimeout(done, worker.latencyMs));
+    if (worker.fail?.includes(taskId)) return { failure: `stub worker: ${taskId} fails` };
+    const files = Object.fromEntries(
+      Object.entries(frozen.work.files).filter(([path]) => frozen.work.editable.includes(path)),
+    );
+    return {
+      artifact: JSON.stringify({ digest: frozen.digest, files }),
+      metrics: { tokens: 0, turns: 0, checks: 0 },
+    };
+  };
+}
+
+function piWorker(worker: { provider: string; model: string }, live: boolean): PlanWorker {
+  if (!live)
+    throw new Error(
+      "refusing a live model run without --live: the spec names the provider, the operator " +
+        "authorizes the spend",
+    );
+  return async (taskId, frozen) => {
+    const { executePiPatch } = await import("../../.pi/extensions/nmg/ooo-execution.ts");
+    const run = await executePiPatch(frozen, worker.provider, worker.model);
+    if (!run.artifact) return { failure: `${taskId}: the worker returned no artifact` };
+    return {
+      artifact: run.artifact,
+      metrics: { tokens: run.tokens, turns: run.turns, checks: run.checks },
+    };
+  };
+}
+
+function specFrom(file: SpecFile, worker: PlanWorker, slots: number): PlanDriverSpec {
+  const repository = process.cwd();
+  const checks = checkList(file.checks);
+  return {
+    plan: planOf(file),
+    units: Object.fromEntries(
+      Object.entries(file.units).map(([id, unit]) => [
+        id,
+        {
+          instruction: unit.instruction,
+          editable: unit.editable,
+          ...(unit.visible ? { visible: unit.visible } : {}),
+          checks,
+        },
+      ]),
+    ),
+    worker,
+    repository,
+    revision: file.revision ?? "HEAD",
+    baseline: baselineOf(file, repository),
+    ...(file.parentChecks ? { parentChecks: checkList(file.parentChecks) } : {}),
+    ...(file.join ? { join: file.join } : {}),
+    slots,
+  };
+}
+
+async function main(): Promise<void> {
+  const [command, ...rest] = process.argv.slice(2);
+  if (command !== "run" && command !== "compare") throw new Error(USAGE);
+  const { values } = parseArgs({
+    args: rest,
+    options: {
+      spec: { type: "string" },
+      slots: { type: "string" },
+      runs: { type: "string" },
+      out: { type: "string" },
+      live: { type: "boolean" },
+    },
+    allowPositionals: false,
+  });
+  if (!values.spec || !values.out) throw new Error(USAGE);
+  const file = readSpecFile(values.spec);
+  const slots = values.slots === undefined ? 2 : Number(values.slots);
+  const worker =
+    file.worker.kind === "stub"
+      ? stubWorker(file.worker)
+      : piWorker(file.worker, values.live === true);
+  const spec = specFrom(file, worker, slots);
+  const report =
+    command === "run"
+      ? await runPlan(spec)
+      : await comparePlanSlots(spec, { runs: values.runs === undefined ? 3 : Number(values.runs) });
+  const out = resolve(values.out);
+  mkdirSync(dirname(out), { recursive: true });
+  writeFileSync(
+    out,
+    `${JSON.stringify({ measuredAt: new Date().toISOString(), spec: values.spec, report }, null, 2)}\n`,
+  );
+  console.log(JSON.stringify(report, null, 2));
+}
+
+const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
+if (invokedPath === fileURLToPath(import.meta.url)) await main();
+
+export { USAGE };
