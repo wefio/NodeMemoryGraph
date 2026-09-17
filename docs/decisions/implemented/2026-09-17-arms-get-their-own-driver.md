@@ -99,6 +99,15 @@ renamed from `C`. The legibility half alone cannot run the arms.
   them deliberately rather than discovering the coupling in a paid round.
 - **The duplication is gone for good**: any future need for the default plan reads
   `DEFAULT_ROUND_PLAN`.
+- **Deferred by the operator, not forgotten: whether the round's roles should be split from its
+  mechanism.** Deleting `runCycle` outright would remove S4's instrument, its five regression suites,
+  the ledger's D7/D10 evidence and the only end-to-end carrier of the out-of-order dispatch — and
+  four shared types live in the file (`Requirement`, `CaseRule`, `CycleWorker`, `WorkerMetrics`). The
+  measured shape of the choice is that the **role layer** is about 54 references in ~150 lines
+  (`aInstruction`/`bInstruction`/`aEditable`/`bEditable`, the `Record<"A"|"B">` maps, `installA`,
+  `installB`, `patchVerifier`, `casesTail`, and the `let a / let b` flow), while the claim-submit-verify
+  core `runTask` is already task-id-parameterised. F2b and F3 run first; the evidence for the split is
+  then how much of that core the research driver actually had to duplicate.
 
 ## Verification
 
