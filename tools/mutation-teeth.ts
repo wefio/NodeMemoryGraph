@@ -284,6 +284,7 @@ const TARGETS: readonly Target[] = [
     target: "src/integration/ooo-board.ts",
     suites: [
       "evals/ooo-execution/patch-cycle.test.ts",
+      "evals/ooo-execution/board-slots.test.ts",
       "tests/integration/ooo-run-namespace.test.ts",
       "tests/integration/ooo-task-tables.test.ts",
       "tests/integration/ooo-transition-atomicity.test.ts",
@@ -448,6 +449,58 @@ const TARGETS: readonly Target[] = [
         expect:
           "contract: a verified patch candidate is what dependents bind to, and only acceptance releases them",
       },
+      {
+        // The licence is the budget's part of the ordered set, not its head: with two declared slots a
+        // second task is claimable, and with one it is not. Narrowing it back to the head is exactly
+        // the rule the C arm could not cross.
+        name: "the-licence-is-the-head-whatever-the-budget",
+        ast: { within: "claimableRow" },
+        from: '    if (!this.startable().includes(id)) throw new Error("task not selected by narrow dispatch");',
+        to: '    if (this.next() !== id) throw new Error("task not selected by narrow dispatch");',
+        expect:
+          "a declared budget holds two claims at once, and the store is why each handoff is directed",
+      },
+      {
+        // A budget above one is unusable without a target, because the store queues a second
+        // un-directed actionable entry behind the first. Accepting it silently would report two slots
+        // and deliver one.
+        name: "a-second-slot-is-declared-without-a-target",
+        ast: { within: "admissionSlots" },
+        from: "  if (slots > 1 && !options.handoffTarget)",
+        to: "  if (false && slots > 1 && !options.handoffTarget)",
+        expect:
+          "a declared budget holds two claims at once, and the store is why each handoff is directed",
+      },
+      {
+        // Every startable task gets its handoff, not only the head: publishing one is what makes the
+        // other slots claims rather than a promise.
+        name: "only-the-heads-handoff-is-published",
+        ast: { within: "publishReady" },
+        from: "      if (!startable.includes(row.id)) continue;",
+        to: "      if (row.id !== startable[0]) continue;",
+        expect:
+          "a declared budget holds two claims at once, and the store is why each handoff is directed",
+      },
+      {
+        // A startable handoff is not retired just because it is not the head: retiring it would
+        // withdraw the second slot's offer right after publishing it.
+        name: "a-startable-handoff-is-retired-as-unselected",
+        ast: { within: "publishReady" },
+        from: "      if (startable.includes(row.id) || this.live(row)) continue;",
+        to: "      if (row.id === startable[0] || this.live(row)) continue;",
+        expect:
+          "a declared budget holds two claims at once, and the store is why each handoff is directed",
+      },
+      {
+        // The store's serialization is why a multi-slot run directs its handoffs. Publishing them
+        // un-directed leaves the second one queued as `pending`, and its claim is refused.
+        name: "a-multi-slot-handoff-is-published-un-directed",
+        ast: { within: "publishReady" },
+        from: "        this.slots > 1 ? this.handoffTarget!(row.id) : undefined,",
+        to: "        undefined,",
+        expect:
+          "a declared budget holds two claims at once, and the store is why each handoff is directed",
+      },
     ],
   },
   {
@@ -514,7 +567,7 @@ const TARGETS: readonly Target[] = [
       {
         // Zero or half a slot is not a smaller budget, and rounding it would hide the caller's typo.
         name: "half-a-slot-is-a-smaller-budget",
-        ast: { within: "checkSlots" },
+        ast: { within: "checkedSlots" },
         from: '  if (!Number.isSafeInteger(slots) || slots < 1) throw new Error("slots must be a positive integer");',
         to: '  if (!Number.isSafeInteger(slots)) throw new Error("slots must be a positive integer");',
         expect: "a claim in flight does not release a dependent, and half a slot is not a budget",
@@ -698,7 +751,15 @@ const TARGETS: readonly Target[] = [
         name: "the-driver-ignores-the-slot-count",
         from: "    const batch = legal.slice(0, spec.slots);",
         to: "    const batch = legal.slice(0, 1);",
-        expect: "the requested slot count is not reached, and the run says so instead of faking it",
+        expect: "a declared slot count is reached, and the claims overlap in time",
+      },
+      {
+        // The budget is declared to the admission layer, not only reported by the driver: a driver
+        // that asks the layer for one slot while promising the spec's count cannot overlap claims.
+        name: "the-driver-declares-one-slot-whatever-the-spec-says",
+        from: "    slots: spec.slots,",
+        to: "    slots: 1,",
+        expect: "a declared slot count is reached, and the claims overlap in time",
       },
       {
         name: "a-unit-is-dispatched-twice-in-one-batch",

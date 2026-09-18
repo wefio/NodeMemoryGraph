@@ -90,7 +90,7 @@ export interface DispatchTask {
  * slot or none: a zero or fractional count is not a smaller budget, it is an unusable one, and
  * rounding it silently would hide the caller's mistake.
  */
-function checkSlots(slots: number): number {
+export function checkedSlots(slots: number): number {
   if (!Number.isSafeInteger(slots) || slots < 1)
     throw new Error("slots must be a positive integer");
   return slots;
@@ -135,6 +135,16 @@ export function startableTasks(plan: readonly DispatchTask[], slots = 1): readon
   return legal.slice(0, room);
 }
 
+/**
+ * How many claims a run with this budget may still start, over the same pending set the rule counts.
+ *
+ * A caller that has its own order - an ordering step's answer, for instance - cuts that order with this
+ * number instead of re-deriving which tasks are pending, so the budget cannot come to mean two things.
+ */
+export function remainingSlots(plan: readonly DispatchTask[], slots = 1): number {
+  return selection(plan, slots).room;
+}
+
 export function nextTask(plan: readonly DispatchTask[], slots = 1): string | null {
   return selectableTasks(plan, slots)[0] ?? null;
 }
@@ -145,7 +155,7 @@ function selection(
   plan: readonly DispatchTask[],
   slots: number,
 ): { legal: readonly string[]; room: number } {
-  checkSlots(slots);
+  checkedSlots(slots);
   const byId = new Map(plan.map((task) => [task.id, task]));
   if (byId.size !== plan.length) throw new Error("duplicate task");
   const current = (task: DispatchTask) =>

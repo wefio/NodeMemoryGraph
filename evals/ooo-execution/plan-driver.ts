@@ -136,6 +136,11 @@ function unitVerifier(spec: PlanDriverSpec, unit: PlanUnit) {
   };
 }
 
+/** Who a unit's handoff is offered to, and who therefore claims it. One name, one home: the board
+ *  directs the handoff to it and the claim names it, so a run that declares more than one slot cannot
+ *  offer work to one name and claim it as another. */
+export const ownerOf = (taskId: string): string => `plan-driver:${taskId}`;
+
 /** One unit through the board: claim, run the worker, put the result on the channel, submit. The
  *  store decides the verdict; the driver never reads a worker's claim about itself. */
 async function runOneUnit(
@@ -148,7 +153,7 @@ async function runOneUnit(
   const claimedAt = Date.now();
   let ticket: ReturnType<BoardAdmission["claim"]>;
   try {
-    ticket = gate.claim(taskId, `plan-driver:${taskId}`);
+    ticket = gate.claim(taskId, ownerOf(taskId));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     // The board publishes a handoff only for the task it has selected, so while one unit is claimed
@@ -183,7 +188,7 @@ async function runOneUnit(
     return { failure: `${taskId}: ${result.failure ?? "the worker returned no artifact"}` };
   const entry = gate.putTaskBoardEntry({
     taskId: gate.channel,
-    agentId: `plan-driver:${taskId}`,
+    agentId: ownerOf(taskId),
     kind: "result",
     content: JSON.stringify({ ticket, artifact: result.artifact }),
     expiresAt: new Date(gate.now + 86_400_000).toISOString(),
@@ -236,7 +241,17 @@ export async function runPlan(spec: PlanDriverSpec): Promise<PlanRun> {
   for (const id of Object.keys(spec.units))
     if (!planIds.includes(id))
       throw new Error(`unit ${id} has a spec but is not in the plan; the plan is the authority`);
-  const gate = new BoardAdmission(spec.databasePath ?? ":memory:", spec.plan, {});
+  const gate = new BoardAdmission(
+    spec.databasePath ?? ":memory:",
+    spec.plan,
+    {},
+    {
+      slots: spec.slots,
+      // Each slot's work is offered point-to-point, because the store queues a second un-directed
+      // actionable behind the first: without a target the second claim is refused, not parallel.
+      handoffTarget: ownerOf,
+    },
+  );
   const startedAt = Date.now();
   const units: UnitRun[] = [];
   const order: string[] = [];
@@ -355,7 +370,8 @@ export async function comparePlanSlots(
         );
       if (run.slotsUsed < run.slotsRequested)
         slotShortfalls.push(
-          `slots=${arm.slots} ran with ${run.slotsUsed}: ${run.slotRefusal ?? "no reason recorded"}`,
+          `slots=${arm.slots} ran with ${run.slotsUsed}: ` +
+            (run.slotRefusal ?? "the plan had no more startable units"),
         );
     }
   return {

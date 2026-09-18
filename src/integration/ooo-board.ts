@@ -32,7 +32,13 @@ export interface PatchTaskSpec {
   limits?: PatchLimits;
   verify: (submission: PatchSubmission) => Promise<"accept" | "reject" | "undecidable">;
 }
-import { selectableTasks, snapshotAnswer, type SnapshotWork } from "./ooo-execution.ts";
+import {
+  checkedSlots,
+  remainingSlots,
+  selectableTasks,
+  snapshotAnswer,
+  type SnapshotWork,
+} from "./ooo-execution.ts";
 import { compileTaskUnits, dispatchTasks, type RecordedFacts } from "./task-semantics.ts";
 import {
   orderCandidates,
@@ -255,6 +261,27 @@ function admissionAdvice(options: BoardAdmissionOptions): {
   return { advisers, scope: options.adviceScope };
 }
 
+/**
+ * A run that declares more than one claim must name who each handoff is offered to.
+ *
+ * The store keeps one outstanding un-directed actionable entry per channel and queues the next one as
+ * `pending`, so a second slot's handoff would be refused at claim time. A directed entry is exempt from
+ * that queue, which is why the target is required rather than optional - and why declaring a second slot
+ * does not change the store's own serialization.
+ */
+function admissionSlots(options: BoardAdmissionOptions): {
+  slots: number;
+  handoffTarget: ((taskId: string) => string) | undefined;
+} {
+  const slots = checkedSlots(options.slots ?? 1);
+  if (slots > 1 && !options.handoffTarget)
+    throw new Error(
+      "a run with more than one slot must name each handoff's target: the board queues a second " +
+        "un-directed actionable behind the first, so the claim for it would be refused",
+    );
+  return { slots, handoffTarget: options.handoffTarget };
+}
+
 export interface BoardAdmissionOptions {
   runId?: string;
   /**
@@ -276,6 +303,15 @@ export interface BoardAdmissionOptions {
     observationOrder?: readonly string[];
     initialState?: string;
   };
+  /**
+   * How many claims this run may hold at once - the slot count the C arm varies, default `1`, which is
+   * the rule the repository already had. A claim spends one, the ordered legal set is cut to what is
+   * left, and the claim licence names only that part. Declaring more does not relax anything else: no
+   * dependency, no wait rule, no acceptance predicate and no store serialization changes.
+   */
+  slots?: number;
+  /** Who each handoff is offered to, by task. Required when `slots > 1` (see `admissionSlots`). */
+  handoffTarget?: (taskId: string) => string;
 }
 
 /** Experiment-only authority. Uses the real board store, not a second queue.
@@ -293,6 +329,9 @@ export class BoardAdmission extends NmgStore {
   private readonly plan: ProbePlan;
   private readonly advisers: readonly SuggestionSource[];
   private readonly adviceScope: BoardAdmissionOptions["adviceScope"];
+  /** The declared claim budget and who a handoff is offered to; both are the run's, not a task's. */
+  private readonly slots: number;
+  private readonly handoffTarget: ((taskId: string) => string) | undefined;
   /** What the last `next()` decided and why, for the run record. Never a second source of truth:
    *  the decision itself is the returned task, and this only says how it was reached. */
   private lastAdvice: AdviceOutcome | null = null;
@@ -303,12 +342,17 @@ export class BoardAdmission extends NmgStore {
     patchTasks: Readonly<Record<string, PatchTaskSpec>> = {},
     options: BoardAdmissionOptions = {},
   ) {
+    // The options are checked before the store is opened: a misdeclared budget or an unattributable
+    // suggestion is refused without creating or opening a database for it.
+    const advice = admissionAdvice(options);
+    const budget = admissionSlots(options);
     super(database);
     this.patchTasks = patchTasks;
     this.plan = plan;
-    const advice = admissionAdvice(options);
     this.advisers = advice.advisers;
     this.adviceScope = advice.scope;
+    this.slots = budget.slots;
+    this.handoffTarget = budget.handoffTarget;
     // A snapshot task can never carry host patch definitions. The opposite
     // direction is checked at claim time, because a round may install a task's
     // frozen envelope after construction but before it becomes claimable.
@@ -606,7 +650,12 @@ export class BoardAdmission extends NmgStore {
    * Without one it opens its own boundary, which is why a caller inside a transition must pass it:
    * a second BEGIN is refused rather than nested.
    */
-  private publish(kind: "handoff" | "decision", content: string, port?: TransactionPort): string {
+  private publish(
+    kind: "handoff" | "decision",
+    content: string,
+    port?: TransactionPort,
+    to?: string,
+  ): string {
     // The real board put owns its transaction. Recover a post-put/pre-link crash by adopting
     // the existing publication instead of creating another message — but only while it is still
     // open: a *resolved* publication with the same content is a finished handoff, and adopting
@@ -623,6 +672,7 @@ export class BoardAdmission extends NmgStore {
         agentId: "coordinator",
         kind,
         content,
+        to,
         expiresAt: new Date(this.now + 86_400_000).toISOString(),
       },
       port,
@@ -643,18 +693,18 @@ export class BoardAdmission extends NmgStore {
         JSON.stringify({ id: row.id, attempt: row.attempt, artifact: row.artifact }),
         port,
       );
-    // A published handoff for a task that is no longer the selected one must give the board's
-    // serial slot back. The plan can move past it (a waiting task became ready first, which is
-    // exactly what ordered execution does), and an unclaimed, unselected handoff would then
-    // block every later claim in the round. Nothing is fenced here: no ticket exists for a task
-    // nobody claimed, so only the publication is retired.
-    const selected = this.next();
+    // A published handoff for a task that is no longer startable must give the board's serial
+    // slot back. The plan can move past it (a waiting task became ready first, which is exactly
+    // what ordered execution does), and an unclaimed, unstartable handoff would then block later
+    // claims in the round. With more than one declared slot the startable set has more than one
+    // member, and each of them keeps its handoff while it is startable or live.
+    const startable = this.startable();
     for (const row of this.db
       .prepare(
         "SELECT * FROM ooo_probe_task_view WHERE run_id=? AND entry_id IS NOT NULL ORDER BY id",
       )
       .all(this.runId) as unknown as Row[]) {
-      if (row.id === selected || this.live(row)) continue;
+      if (startable.includes(row.id) || this.live(row)) continue;
       try {
         this.resolveTaskBoardEntry({
           taskId: this.channel,
@@ -683,8 +733,9 @@ export class BoardAdmission extends NmgStore {
       .all(this.runId) as unknown as Row[];
     const accepted = this.acceptedArtifacts();
     for (const row of rows) {
-      // Do not occupy the board's serial outstanding slot with a waiting task.
-      if (row.id !== selected) continue;
+      // Do not occupy the board's serial outstanding slot with a waiting task, and (at more than one
+      // slot) do not offer a handoff for a task the run may not start yet.
+      if (!startable.includes(row.id)) continue;
       if ((JSON.parse(row.dependencies) as string[]).some((id) => !Object.hasOwn(accepted, id)))
         continue;
       const entryId = this.publish(
@@ -699,6 +750,10 @@ export class BoardAdmission extends NmgStore {
           input: row.input,
         }),
         port,
+        // Un-directed at the default budget, which is the broadcast handoff the round has always
+        // published. A declared budget above 1 offers each one point-to-point, because the store
+        // queues a second un-directed actionable entry behind the first.
+        this.slots > 1 ? this.handoffTarget!(row.id) : undefined,
       );
       this.db
         .prepare("UPDATE ooo_probe_facts SET entry_id=? WHERE run_id=? AND id=?")
@@ -855,14 +910,29 @@ export class BoardAdmission extends NmgStore {
    * the granularity comparison, and the reason this is exposed rather than re-derived by a driver.
    *
    * The rules are the shared semantics' and the ordering is the shared policy's; both live here,
-   * once.
+   * once. This is the whole legal set, not the part a run may start: `startable()` is that part.
    */
   candidates(): readonly string[] {
+    return this.ordered().order;
+  }
+
+  /**
+   * The part of the ordered candidate set this run may start now, which is the licence a claim is
+   * checked against: the ordered set cut to the budget that is left (`slots` minus the claims in
+   * flight). At the default one slot that is the head - the rule the claim always had - and the cut is
+   * applied after ordering, so an ordering step still decides which legal task comes first.
+   */
+  startable(): readonly string[] {
+    const { order, room } = this.ordered();
+    return order.slice(0, room);
+  }
+
+  private ordered(): { order: readonly string[]; room: number } {
     // A cancelled round selects nothing: the successor is not "the next task", it is
     // the explicit terminal decision the caller asked for.
     if (this.cancelled() !== null) {
       this.lastAdvice = null;
-      return [];
+      return { order: [], room: 0 };
     }
     const rows = this.db
       .prepare("SELECT * FROM ooo_probe_task_view WHERE run_id=? ORDER BY position")
@@ -881,15 +951,16 @@ export class BoardAdmission extends NmgStore {
       );
     }
     const dispatch = dispatchTasks(compiled.units, this.recordedFacts(rows));
-    const legal = selectableTasks(dispatch);
+    const legal = selectableTasks(dispatch, this.slots);
+    const room = remainingSlots(dispatch, this.slots);
     if (this.advisers.length === 0) {
       // No source: the rule policy, which is the legal set in its own order. This is the path a run
       // without HA/MGR takes, and it is identical to the rule alone.
       this.lastAdvice = null;
-      return legal;
+      return { order: legal, room };
     }
     const scope = this.adviceScope!;
-    const status = deriveStatus(compiled.units, this.recordedFacts(rows));
+    const status = deriveStatus(compiled.units, this.recordedFacts(rows), this.slots);
     const outcome = orderCandidates(
       legal,
       {
@@ -906,7 +977,7 @@ export class BoardAdmission extends NmgStore {
       this.advisers,
     );
     this.lastAdvice = outcome;
-    return outcome.order;
+    return { order: outcome.order, room };
   }
 
   /**
@@ -1041,7 +1112,10 @@ export class BoardAdmission extends NmgStore {
       throw new Error("unfulfilled dependencies");
     if (!row.entry_id) throw new Error("no published handoff for this task");
     if (this.live(row)) throw new Error("task already claimed");
-    if (this.next() !== id) throw new Error("task not selected by narrow dispatch");
+    // The licence is the startable part of the ordered set: the head at the default budget, and as
+    // many as the run has slots for when it declared more. The message keeps its name because a
+    // caller refuses this claim for the same reason either way - the run is not allowed to start it.
+    if (!this.startable().includes(id)) throw new Error("task not selected by narrow dispatch");
     return row;
   }
 

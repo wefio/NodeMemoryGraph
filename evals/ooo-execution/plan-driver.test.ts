@@ -1,10 +1,10 @@
 // The granularity driver's own properties, offline and deterministic.
 //
 // The arms compare two slot counts on the same plan, so the driver has exactly two jobs: start only
-// what the rules allow, and start as many of those as the slot count says at once. The second job
-// measured something this repository did not know: the shared admission layer publishes a handoff
-// only for the task it has selected, so a run can hold exactly one claim. These cases pin that
-// measurement, so the day the layer changes, the case that fails is the one that says what changed.
+// what the rules allow, and start as many of those as the slot count says at once. The second job was
+// once unreachable - the shared admission layer published a handoff only for the task it had selected,
+// so a run could hold exactly one claim - and these cases pin the mechanism that made it reachable (a
+// declared slot budget, with each handoff directed at its own claimant) from the driver's side.
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ProbePlan } from "../../src/integration/ooo-board.ts";
@@ -77,16 +77,33 @@ test("one slot runs the units in plan order, each to acceptance", async () => {
   assert.deepEqual(run.incomplete, []);
 });
 
-test("the requested slot count is not reached, and the run says so instead of faking it", async () => {
-  const run = await runPlan(spec({ slots: 4, worker: recordingWorker(20) }));
+test("a declared slot count is reached, and the claims overlap in time", async () => {
+  const log: string[] = [];
+  let inFlight = 0;
+  let peak = 0;
+  const inner = recordingWorker(60, log);
+  const worker: PlanWorker = async (taskId, frozen) => {
+    inFlight += 1;
+    peak = Math.max(peak, inFlight);
+    try {
+      return await inner(taskId, frozen);
+    } finally {
+      inFlight -= 1;
+    }
+  };
+  const run = await runPlan(spec({ slots: 4, worker }));
   assert.equal(run.slotsRequested, 4);
-  assert.equal(run.slotsUsed, 1, `attempted a second claim and got: ${String(run.slotRefusal)}`);
-  assert.match(String(run.slotRefusal), /no published handoff|not selected by narrow dispatch/);
-  // Same plan, same units, same verdicts: the missing slot is the only difference, which is why the
-  // comparison below may not report a time.
+  assert.equal(
+    run.slotsUsed,
+    3,
+    "three units are independent, and the summary waits for all three",
+  );
+  assert.equal(run.slotRefusal, undefined, "the board allowed every claim it was asked for");
+  assert.equal(peak, 3, `the worker saw the claims overlap: ${log.join(",")}`);
   assert.deepEqual(
     run.units.map((unit) => unit.verdict),
     Array(4).fill("accepted"),
+    "the same verdicts as the one-slot run, which is what makes the two arms one experiment",
   );
   assert.deepEqual(run.incomplete, []);
 });
@@ -140,7 +157,11 @@ test("a comparison refuses a time verdict when the slot count or the quality dif
     [1, 4],
   );
   assert.equal(oneSlot.qualityParity, true, JSON.stringify(oneSlot.differences));
-  assert.equal(oneSlot.slotShortfalls.length, 2, "both four-slot runs fell back to one");
+  assert.equal(
+    oneSlot.slotShortfalls.length,
+    2,
+    "both four-slot runs reached three of four: the plan has three independent units",
+  );
   assert.equal(
     oneSlot.comparable,
     false,
