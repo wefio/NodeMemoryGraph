@@ -245,6 +245,32 @@ test("an unsatisfied external wait keeps a unit out of ready", () => {
   assert.deepEqual(ready.ready, ["W"]);
 });
 
+test("a run that declares more slots reports the tasks it may start, not just the head", () => {
+  // Two independent read-only units, nothing claimed: one slot sees one, a declared budget sees both.
+  const two = compileTaskUnits(
+    input({
+      plan: [
+        ["W", "1", [], "read-only", "check-event", null],
+        ["X", "1", [], "read-only", "check-event", null],
+      ] as unknown as ProbePlan,
+      specs: {},
+    }),
+  );
+  const facts = { externalReady: ["W", "X"] };
+  assert.deepEqual(deriveStatus(two.units, facts).ready, ["W"], "the default budget is one task");
+  assert.deepEqual(deriveStatus(two.units, facts, 2).ready, ["W", "X"]);
+  // A claim in flight spends a slot, and the claimed unit leaves `ready` with it.
+  assert.deepEqual(deriveStatus(two.units, { ...facts, claimed: ["W"] }, 2).ready, ["X"]);
+  assert.deepEqual(deriveStatus(two.units, { ...facts, claimed: ["W"] }, 1).ready, []);
+  const spent = deriveStatus(two.units, { ...facts, claimed: ["W", "X"] }, 2);
+  assert.deepEqual(spent.ready, [], "a spent budget is an empty answer, not a blocked one");
+  assert.deepEqual(
+    spent.blocked.map((entry) => entry.id).sort(),
+    ["W", "X"],
+    "a claimed unit is still not accepted, so it is reported where it is not ready",
+  );
+});
+
 test("a refinement must carry every parent obligation and may not widen the write set", () => {
   const parent = compileTaskUnits(input()).units.find((unit) => unit.id === "P")!;
   const parts = compileTaskUnits(

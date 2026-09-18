@@ -17,7 +17,7 @@
  *    kind gets a refusal naming the task and the field.
  */
 import { createHash } from "node:crypto";
-import { nextTask, type DispatchTask } from "./ooo-execution.ts";
+import { startableTasks, type DispatchTask } from "./ooo-execution.ts";
 import {
   CONCLUSION_KINDS,
   MAX_PATCH_BUDGET,
@@ -522,11 +522,13 @@ export function dispatchTasks(units: readonly TaskUnit[], facts: RecordedFacts):
   }));
 }
 
-/** Status and dependency release share the derived dispatch state and the existing
- *  `nextTask` eligibility rule; neither gets its own notion of "accepted". */
+/** Status and dependency release share the derived dispatch state and the existing eligibility rule;
+ *  neither gets its own notion of "accepted". `ready` is what a run may start now: one task at the
+ *  default budget, and the run's remaining claim budget's worth when it declared more. */
 export function deriveStatus(
   units: readonly TaskUnit[],
   facts: RecordedFacts,
+  slots = 1,
 ): {
   ready: readonly string[];
   blocked: readonly { id: string; waitingFor: readonly string[] }[];
@@ -534,15 +536,15 @@ export function deriveStatus(
 } {
   const accepted = units.filter((unit) => isAccepted(unit, facts)).map((unit) => unit.id);
   const acceptedIds = new Set(accepted);
-  const candidate = nextTask(dispatchTasks(units, facts));
+  const ready = startableTasks(dispatchTasks(units, facts), slots);
   const blocked = units
     .filter((unit) => !isAccepted(unit, facts))
     .map((unit) => ({
       id: unit.id,
       waitingFor: unit.inputs.dependencies.filter((dependency) => !acceptedIds.has(dependency)),
     }))
-    .filter((entry) => entry.waitingFor.length > 0 || entry.id !== candidate);
-  return { ready: candidate ? [candidate] : [], blocked, accepted };
+    .filter((entry) => entry.waitingFor.length > 0 || !ready.includes(entry.id));
+  return { ready, blocked, accepted };
 }
 
 /** Actions this slice can derive. Fusion and speculative preparation are named but

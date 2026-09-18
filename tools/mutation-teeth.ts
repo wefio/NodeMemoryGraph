@@ -130,6 +130,15 @@ const TARGETS: readonly Target[] = [
         expect:
           "case 2: a lost obligation or a widened permission is refused, and an assumption cannot stand in for a dependency",
       },
+      {
+        // The status query is the same rule read back: if it kept asking with a one-task budget it
+        // would report a ready set narrower than what the run declared, and the two answers would differ.
+        name: "the-status-query-ignores-the-declared-budget",
+        ast: { within: "deriveStatus" },
+        from: "  const ready = startableTasks(dispatchTasks(units, facts), slots);",
+        to: "  const ready = startableTasks(dispatchTasks(units, facts), 1);",
+        expect: "a run that declares more slots reports the tasks it may start, not just the head",
+      },
     ],
   },
   {
@@ -448,47 +457,76 @@ const TARGETS: readonly Target[] = [
       "tests/integration/ooo-publication-invariants.test.ts",
       "tests/integration/ooo-advisers.test.ts",
       "evals/ooo-execution/patch-cycle.test.ts",
+      "evals/ooo-execution/narrow-dispatch.test.ts",
     ],
     mutants: [
       {
         // A cancellation is a fact about the task, so it gates dispatch the way a rejection gates
         // a dependent. This is the half acceptance already had and eligibility did not.
         name: "a-cancelled-task-is-still-dispatched",
-        ast: { within: "selectableTasks" },
+        ast: { within: "selection" },
         from: "    current(task) &&\n    !task.cancelled &&",
         to: "    current(task) &&",
         expect: "a cancelled task is not dispatched, and nothing reads one as a closed input",
       },
       {
         name: "the-dispatch-does-not-require-a-cancelled-input-to-be-closed",
-        ast: { within: "selectableTasks" },
+        ast: { within: "selection" },
         from: "    if (!task || !task.accepted || task.cancelled || !current(task) || visiting.has(id))",
         to: "    if (!task || !task.accepted || !current(task) || visiting.has(id))",
         expect: "nextTask refuses a task marked cancelled, whatever else the caller set",
       },
       {
         name: "selection-ignores-a-withdrawn-acceptance",
-        ast: { within: "selectableTasks" },
+        ast: { within: "selection" },
         from: "  const selectable = plan.filter((task) => task.accepted || !task.delivered);",
         to: "  const selectable = plan;",
         expect:
           "an outside rejection withdraws the release of a dependent, and the round fails closed",
       },
       {
+        // The budget is what a claim spends, so a spent budget is an empty set. Nothing else may
+        // decide whether selection is open: this is the rule the C arm's slot count was once absent from.
         name: "a-live-claim-does-not-block-selection",
-        ast: { within: "selectableTasks" },
-        from: "  if (pending.some((task) => task.claimed) || pending.filter(waiting).length > 1) return [];",
-        to: "  if (pending.filter(waiting).length > 1) return [];",
+        ast: { within: "selection" },
+        from: "  if (room < 1 || pending.filter(waiting).length > 1) return none;",
+        to: "  if (pending.filter(waiting).length > 1) return none;",
         expect: "with no fusion point the plan falls back to its declared order",
+      },
+      {
+        // A task someone is working is not on offer, whatever the budget. Without this, a run with
+        // slots to spare would hand the same task to a second worker.
+        name: "a-claimed-task-stays-on-offer",
+        ast: { within: "selection" },
+        from: "    tasks.filter((task) => !task.claimed && ready(task)).map((task) => task.id);",
+        to: "    tasks.filter((task) => ready(task)).map((task) => task.id);",
+        expect: "a declared budget is spent by claims in flight, not by the next task's rank",
+      },
+      {
+        // The cut is the whole point of declaring slots: without it the budget is a comment, and a
+        // run that asked for two would start the whole legal set.
+        name: "the-budget-is-not-cut-from-the-startable-set",
+        ast: { within: "startableTasks" },
+        from: "  return legal.slice(0, room);",
+        to: "  return legal;",
+        expect: "a declared budget is spent by claims in flight, not by the next task's rank",
+      },
+      {
+        // Zero or half a slot is not a smaller budget, and rounding it would hide the caller's typo.
+        name: "half-a-slot-is-a-smaller-budget",
+        ast: { within: "checkSlots" },
+        from: '  if (!Number.isSafeInteger(slots) || slots < 1) throw new Error("slots must be a positive integer");',
+        to: '  if (!Number.isSafeInteger(slots)) throw new Error("slots must be a positive integer");',
+        expect: "a claim in flight does not release a dependent, and half a slot is not a budget",
       },
       {
         // The head rule is a legality condition, not a preference: a head blocked by a stale input
         // is not skipped in favour of a later ready task. This is the rule an ordering step is most
         // likely to bypass by accident, so it has its own tooth.
         name: "a-head-blocked-by-a-stale-input-is-skipped",
-        ast: { within: "selectableTasks" },
-        from: "  if (!current(first) || !waiting(first)) return [];",
-        to: "    if (false) return [];",
+        ast: { within: "selection" },
+        from: "  if (!current(first) || !waiting(first)) return none;",
+        to: "    if (false) return none;",
         expect: "the round's own answer is the shared rule's answer, not an ordering's",
       },
       {
@@ -496,8 +534,8 @@ const TARGETS: readonly Target[] = [
         // shared rule about what may be selected: dropping the head moves both.
         name: "next-task-is-not-the-head-of-the-legal-set",
         ast: { within: "nextTask" },
-        from: "  return selectableTasks(plan)[0] ?? null;",
-        to: "  return selectableTasks(plan)[1] ?? null;",
+        from: "  return selectableTasks(plan, slots)[0] ?? null;",
+        to: "  return selectableTasks(plan, slots)[1] ?? null;",
         expect: "the round's own answer is the shared rule's answer, not an ordering's",
       },
     ],

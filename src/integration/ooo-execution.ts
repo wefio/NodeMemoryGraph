@@ -86,17 +86,66 @@ export interface DispatchTask {
 /** Input order and declarations belong to the coordinator, never the worker.
  * This checks eligibility, not whether arbitrary worker code is actually safe. */
 /**
+ * The in-flight claim budget `slots` is declared by the run, and a plan may not be read with half a
+ * slot or none: a zero or fractional count is not a smaller budget, it is an unusable one, and
+ * rounding it silently would hide the caller's mistake.
+ */
+function checkSlots(slots: number): number {
+  if (!Number.isSafeInteger(slots) || slots < 1)
+    throw new Error("slots must be a positive integer");
+  return slots;
+}
+
+/**
  * The candidates the shared rules make selectable, in the rule policy's order; `nextTask` returns its
- * head.
+ * head and `startableTasks` is the part of it this run may start right now.
  *
  * Legality lives in the rules below and nowhere else: an ordering step may rank this set, and nothing
  * may widen it. Two of the rules are legality conditions rather than preferences, and an ordering must
- * not skip them: a task whose earlier neighbour is still claimed blocks selection, and a task whose
- * earlier neighbour is blocked by a stale input or an undeclared dependency is not selectable either -
+ * not skip them: a task blocked by a stale input or an undeclared dependency is not selectable, and
  * that block is not an external wait license. An earlier neighbour that *declares* an external wait is
  * different: the wait is what the plan licenses, so the tasks after it stay selectable.
+ *
+ * `slots` bounds how many claims one run may hold at once, so a run that has spent its budget gets an
+ * empty set. A claimed task is out of the set either way. What keeps a dependent from starting early is
+ * its own dependency, which is still unaccepted while the claim is in flight - not the claim count.
+ * The count is over tasks that are still pending (see `pending` below): a delivered task nothing may
+ * claim again is not in the plan to be counted, and `openRound`/`reopen` owns recovering it.
  */
-export function selectableTasks(plan: readonly DispatchTask[]): readonly string[] {
+export function selectableTasks(plan: readonly DispatchTask[], slots = 1): readonly string[] {
+  return selection(plan, slots).legal;
+}
+
+/** Claims one run already holds, over the same pending set the budget is spent on. A claim is in
+ *  flight until its task is accepted, which is what takes the task out of `pending`. */
+function claimedInFlight(pending: readonly DispatchTask[]): number {
+  return pending.filter((task) => task.claimed).length;
+}
+
+/**
+ * The legal set cut to the run's remaining claim budget: this is the part a caller may actually start,
+ * so it is the only part a claim licence may name. It is narrower than the legal set while earlier
+ * claims are in flight, and equal to it when the set is small enough to fit.
+ *
+ * The cut is applied after ordering (the caller orders `selectableTasks`), not to it: a budget that cut
+ * the candidate set first would let the rule's own order choose the pool a source is allowed to rank.
+ */
+export function startableTasks(plan: readonly DispatchTask[], slots = 1): readonly string[] {
+  const { legal, room } = selection(plan, slots);
+  return legal.slice(0, room);
+}
+
+export function nextTask(plan: readonly DispatchTask[], slots = 1): string | null {
+  return selectableTasks(plan, slots)[0] ?? null;
+}
+
+/** The one implementation both readings share, so the budget cannot come to mean two things: `legal` is
+ *  the ordered candidate set, and `room` is how much of it the run's remaining budget pays for. */
+function selection(
+  plan: readonly DispatchTask[],
+  slots: number,
+): { legal: readonly string[]; room: number } {
+  checkSlots(slots);
   const byId = new Map(plan.map((task) => [task.id, task]));
   if (byId.size !== plan.length) throw new Error("duplicate task");
   const current = (task: DispatchTask) =>
@@ -120,17 +169,16 @@ export function selectableTasks(plan: readonly DispatchTask[]): readonly string[
   // is for. Selecting it would publish a handoff no reader could take.
   const selectable = plan.filter((task) => task.accepted || !task.delivered);
   const pending = selectable.filter((task) => !valid(task.id));
+  const room = slots - claimedInFlight(pending);
+  const none = { legal: [], room: 0 } as const;
   // ponytail: scan the bounded experiment plan; no learned priorities or preemption.
-  if (pending.some((task) => task.claimed) || pending.filter(waiting).length > 1) return [];
+  if (room < 1 || pending.filter(waiting).length > 1) return none;
   const first = pending[0];
-  if (!first) return [];
-  const ids = (tasks: readonly DispatchTask[]) => tasks.filter(ready).map((task) => task.id);
-  if (ready(first)) return ids(pending);
+  if (!first) return none;
+  const ids = (tasks: readonly DispatchTask[]) =>
+    tasks.filter((task) => !task.claimed && ready(task)).map((task) => task.id);
+  if (ready(first)) return { legal: ids(pending), room };
   // A stale/missing input or undeclared dependency is not an external wait license.
-  if (!current(first) || !waiting(first)) return [];
-  return ids(pending.slice(1));
-}
-
-export function nextTask(plan: readonly DispatchTask[]): string | null {
-  return selectableTasks(plan)[0] ?? null;
+  if (!current(first) || !waiting(first)) return none;
+  return { legal: ids(pending.slice(1)), room };
 }
