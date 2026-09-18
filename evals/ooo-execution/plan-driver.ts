@@ -147,7 +147,7 @@ async function runOneUnit(
   spec: PlanDriverSpec,
   gate: BoardAdmission,
   taskId: string,
-): Promise<UnitRun | { failure: string }> {
+): Promise<UnitRun | { failure: string } | { refused: string }> {
   const unit = spec.units[taskId];
   if (!unit) return { failure: `${taskId}: the plan selected it, but no spec describes it` };
   const claimedAt = Date.now();
@@ -219,7 +219,12 @@ async function runParentCheck(
     const artifact = accepted[id];
     if (!artifact) continue;
     const submission = JSON.parse(artifact) as PatchSubmission;
-    if (submission.kind === "patch") Object.assign(files, submission.files);
+    // A submitted patch carries the unit's whole frozen view, so merging it wholesale would put the
+    // last unit's untouched copies of its siblings' files - the stubs it was frozen with - over the
+    // work they actually did. Only what the unit changed is its work; the rest stays as the baseline.
+    if (submission.kind === "patch")
+      for (const [path, content] of Object.entries(submission.files))
+        if (spec.baseline[path] !== content) files[path] = content;
   }
   const verified = await verifyCandidate({
     repository: spec.repository,
@@ -398,15 +403,21 @@ const USAGE = `usage:
 A spec is JSON:
   baseline:  repository-relative paths read at the round's revision
   plan:      the units, each { id, revision?, dependencies?, effect, operation? }
-  units:     per unit id { instruction, editable, visible? }
+  units:     per unit id { instruction, editable, visible?, checks?, canned? }
+             checks: this unit's own candidate check; without it the global list is used
+             canned: only for worker.kind "canned": editable path -> file holding the answer
   checks:    the unit's own candidate check, [{ label, command, args }]
   parentChecks: the fixed parent acceptance, run once over the composed artifacts
-  worker:    { kind: "stub", latencyMs, fail? } | { kind: "pi", provider, model }`;
+  worker:    { kind: "stub", latencyMs, fail? } | { kind: "canned" } | { kind: "pi", provider, model }`;
 
 /** The spec file's shape: JSON, with `worker` naming how an artifact is produced. */
-interface SpecFile {
+export interface SpecFile {
   baseline: readonly string[];
   revision?: string;
+  /** The frozen envelope's fixed budget and limits. Optional because a run that does not name them
+   *  takes the host's own defaults; a paid run fixes them so two arms differ only in the plan. */
+  budget?: { perFile: number; output: number };
+  limits?: { turns: number; reads: number; timeoutMs: number };
   plan: readonly {
     id: string;
     revision?: string;
@@ -414,13 +425,30 @@ interface SpecFile {
     effect: string;
     operation?: string | null;
   }[];
-  units: Readonly<Record<string, { instruction: string; editable: string[]; visible?: string[] }>>;
-  checks: readonly { label: string; command: string; args: string[] }[];
+  units: Readonly<Record<string, SpecUnit>>;
+  /** The fallback check list: a unit that declares none of its own is checked by this. A file that
+   *  declares neither is refused, because a unit nothing checks is not a unit. */
+  checks?: readonly { label: string; command: string; args: string[] }[];
   parentChecks?: readonly { label: string; command: string; args: string[] }[];
   join?: string;
   worker:
     | { kind: "stub"; latencyMs: number; fail?: readonly string[] }
+    | { kind: "canned" }
     | { kind: "pi"; provider: string; model: string };
+}
+
+/** One unit's work: what to ask for, which files it may write, what its candidate is checked by, and
+ *  (for the canned worker) where the instrument's own answer is read from. */
+interface SpecUnit {
+  instruction: string;
+  editable: string[];
+  visible?: string[];
+  /** This unit's own checks. Without them every unit is checked by the whole list, which a fine plan
+   *  cannot use: a unit whose siblings are still unimplemented would never pass its own candidate. */
+  checks?: readonly { label: string; command: string; args: string[] }[];
+  /** The instrument's answer, as editable path -> the file holding the content to return. A canned
+   *  run is how the task family is shown to accept a correct submission without paying a model. */
+  canned?: Readonly<Record<string, string>>;
 }
 
 function checkList(
@@ -473,9 +501,10 @@ function stubWorker(worker: { latencyMs: number; fail?: readonly string[] }): Pl
   return async (taskId, frozen) => {
     await new Promise((done) => setTimeout(done, worker.latencyMs));
     if (worker.fail?.includes(taskId)) return { failure: `stub worker: ${taskId} fails` };
-    const files = Object.fromEntries(
-      Object.entries(frozen.work.files).filter(([path]) => frozen.work.editable.includes(path)),
-    );
+    // The protocol's patch shape is a list of whole-file replacements, and the store checks that each
+    // one really differs from the frozen input: an object map (or an unchanged file) is not a proposal
+    // the host can compare, so a stub that sent one would be rejected for the wrong reason.
+    const files = frozen.work.editable.map((path) => ({ path, content: frozen.work.files[path] ?? "" }));
     return {
       artifact: JSON.stringify({ digest: frozen.digest, files }),
       metrics: { tokens: 0, turns: 0, checks: 0 },
@@ -483,7 +512,37 @@ function stubWorker(worker: { latencyMs: number; fail?: readonly string[] }): Pl
   };
 }
 
-function piWorker(worker: { provider: string; model: string }, live: boolean): PlanWorker {
+/** The canned worker: the instrument's own answer, read from the paths the spec names. It exists so
+ *  that the task family's acceptance is checked offline - and so that a canned answer which is wrong
+ *  is rejected - before any model is asked to write one. */
+export function cannedWorker(file: SpecFile): PlanWorker {
+  const answers = new Map<string, Readonly<Record<string, string>>>();
+  for (const [id, unit] of Object.entries(file.units)) {
+    if (!unit.canned)
+      throw new Error(
+        `the canned worker needs an answer for every unit: ${id} has none, ` +
+          "and an instrument cannot be checked by a unit that answers nothing",
+      );
+    answers.set(id, unit.canned);
+  }
+  return async (taskId, frozen) => {
+    const answer = answers.get(taskId);
+    if (!answer) return { failure: `${taskId}: the canned worker has no answer for it` };
+    // The protocol's patch shape: whole-file replacements that differ from the frozen input.
+    const files: { path: string; content: string }[] = [];
+    for (const path of frozen.work.editable) {
+      const source = answer[path];
+      if (!source) return { failure: `${taskId}: the canned answer has no content for ${path}` };
+      files.push({ path, content: readFileSync(resolve(process.cwd(), source), "utf8") });
+    }
+    return {
+      artifact: JSON.stringify({ digest: frozen.digest, files }),
+      metrics: { tokens: 0, turns: 0, checks: 0 },
+    };
+  };
+}
+
+export function piWorker(worker: { provider: string; model: string }, live: boolean): PlanWorker {
   if (!live)
     throw new Error(
       "refusing a live model run without --live: the spec names the provider, the operator " +
@@ -500,21 +559,28 @@ function piWorker(worker: { provider: string; model: string }, live: boolean): P
   };
 }
 
-function specFrom(file: SpecFile, worker: PlanWorker, slots: number): PlanDriverSpec {
+export function specFrom(file: SpecFile, worker: PlanWorker, slots: number): PlanDriverSpec {
   const repository = process.cwd();
-  const checks = checkList(file.checks);
+  const fallback = file.checks ? checkList(file.checks) : undefined;
   return {
     plan: planOf(file),
     units: Object.fromEntries(
-      Object.entries(file.units).map(([id, unit]) => [
-        id,
-        {
-          instruction: unit.instruction,
-          editable: unit.editable,
-          ...(unit.visible ? { visible: unit.visible } : {}),
-          checks,
-        },
-      ]),
+      Object.entries(file.units).map(([id, unit]) => {
+        const checks = unit.checks ? checkList(unit.checks) : fallback;
+        if (!checks)
+          throw new Error(
+            `${id}: no checks - a unit is checked by what it declares, or by the spec's own list`,
+          );
+        return [
+          id,
+          {
+            instruction: unit.instruction,
+            editable: unit.editable,
+            ...(unit.visible ? { visible: unit.visible } : {}),
+            checks,
+          },
+        ];
+      }),
     ),
     worker,
     repository,
@@ -522,6 +588,8 @@ function specFrom(file: SpecFile, worker: PlanWorker, slots: number): PlanDriver
     baseline: baselineOf(file, repository),
     ...(file.parentChecks ? { parentChecks: checkList(file.parentChecks) } : {}),
     ...(file.join ? { join: file.join } : {}),
+    ...(file.budget ? { budget: file.budget } : {}),
+    ...(file.limits ? { limits: file.limits } : {}),
     slots,
   };
 }
@@ -546,7 +614,9 @@ async function main(): Promise<void> {
   const worker =
     file.worker.kind === "stub"
       ? stubWorker(file.worker)
-      : piWorker(file.worker, values.live === true);
+      : file.worker.kind === "canned"
+        ? cannedWorker(file)
+        : piWorker(file.worker, values.live === true);
   const spec = specFrom(file, worker, slots);
   const report =
     command === "run"

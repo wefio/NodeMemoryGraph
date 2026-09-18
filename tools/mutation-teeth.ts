@@ -598,6 +598,31 @@ const TARGETS: readonly Target[] = [
     suites: ["tests/integration/ooo-publication-invariants.test.ts"],
     mutants: [
       {
+        // Every declared budget publishes its own set, and the ones a one-slot run cannot offer are
+        // the whole point of declaring more. Deriving every prefix at one slot hides them.
+        name: "every-budget-is-walked-at-one-slot",
+        ast: { within: "budgetViews" },
+        from: "  for (const budget of budgets) {",
+        to: "  for (const budget of budgets.slice(0, 1)) {",
+        expect: "a declared budget publishes more than one slot can, and never a claimed task",
+      },
+      {
+        // A task someone is working is not offered to a second worker, at any budget.
+        name: "the-budget-offers-a-claimed-task",
+        from: "    if (input.claimed.includes(unit))",
+        to: "    if (false && input.claimed.includes(unit))",
+        expect:
+          "the budget properties fire on a hand-built view, so deleting them cannot pass quietly",
+      },
+      {
+        // A bigger budget adds candidates; it may not drop one a smaller budget offered.
+        name: "a-bigger-budget-may-drop-a-candidate",
+        from: "    if (!input.ready.includes(unit))",
+        to: "    if (false && !input.ready.includes(unit))",
+        expect:
+          "the budget properties fire on a hand-built view, so deleting them cannot pass quietly",
+      },
+      {
         // Every condition in the checker is deleted once, and the case that names it has to fail:
         // a condition no case can reach is a comment, not a check.
         name: "the-completion-does-not-bind-the-verdict-to-the-bytes",
@@ -742,10 +767,14 @@ const TARGETS: readonly Target[] = [
   },
   {
     // The arms' driver: it decides only *how many* of the legal set to start at once, so each mutant
-    // removes one of its four jobs - the batch width, the single dispatch of a unit, the failure
-    // report, and the parent check - and the case that fails names the job.
+    // removes one of its jobs - the batch width, the single dispatch of a unit, the failure report,
+    // the parent check, and the way each unit's work reaches that composition - and the case that
+    // fails names the job.
     target: "evals/ooo-execution/plan-driver.ts",
-    suites: ["evals/ooo-execution/plan-driver.test.ts"],
+    suites: [
+      "evals/ooo-execution/plan-driver.test.ts",
+      "evals/ooo-execution/families.test.ts",
+    ],
     mutants: [
       {
         name: "the-driver-ignores-the-slot-count",
@@ -779,6 +808,27 @@ const TARGETS: readonly Target[] = [
         to: '  return {\n    verdict: "accept",',
         expect:
           "the parent check is the composed acceptance, and a failing check is reported as such",
+      },
+      {
+        // A submitted patch carries the unit's whole frozen view, so composing by overwriting the
+        // candidate with each accepted submission puts the *last* unit's untouched copies of its
+        // siblings over the work they did. Only the files a unit changed are its work.
+        name: "the-parent-takes-the-last-units-whole-view",
+        from: "        if (spec.baseline[path] !== content) files[path] = content;",
+        to: "        files[path] = content;",
+        expect: "report: both plans accept the instrument's answers, and the same composed ones",
+      },
+      {
+        name: "a-unit-ignores-the-checks-it-declares",
+        from: "        const checks = unit.checks ? checkList(unit.checks) : fallback;",
+        to: "        const checks = fallback;",
+        expect: "report: both plans accept the instrument's answers, and the same composed ones",
+      },
+      {
+        name: "a-unit-nothing-checks-is-still-a-unit",
+        from: "        if (!checks)\n          throw new Error(\n            `${id}: no checks",
+        to: "        if (!checks && false)\n          throw new Error(\n            `${id}: no checks",
+        expect: "a unit nothing checks is refused rather than accepted on nothing",
       },
     ],
   },

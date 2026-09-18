@@ -108,7 +108,7 @@ export function planEdges(shape: PlanShape): [number, number][] {
   return edges;
 }
 
-function unitCost(shape: PlanShape, params: CostParams, withContext: boolean): number {
+function unitCost(params: CostParams, withContext: boolean): number {
   return (
     params.workMs +
     (1 - params.hitRate) * params.rederiveMs +
@@ -131,7 +131,7 @@ function schedule(
   unusedSlotMs: number;
   slotUtilisation: number;
 } {
-  const perUnit = unitCost(shape, params, true);
+  const perUnit = unitCost(params, true);
   const prerequisites = new Map<number, number[]>();
   for (const [from, to] of edges) prerequisites.set(to, [...(prerequisites.get(to) ?? []), from]);
 
@@ -217,7 +217,7 @@ function criticalPathMs(
 ): number {
   // Each unit on the chain costs its model work plus its own check: checks are serial and a
   // dependent waits for an accepted artifact. Adding every check here would count them twice.
-  const perUnit = unitCost(shape, params, true) + params.verifyMs;
+  const perUnit = unitCost(params, true) + params.verifyMs;
   const longest = Array.from({ length: shape.units }, () => perUnit);
   for (const [from, to] of edges) longest[to] = Math.max(longest[to]!, longest[from]! + perUnit);
   return Math.max(...longest);
@@ -255,7 +255,7 @@ export function simulatePlan(shape: PlanShape, params: CostParams): Simulated {
 export function assertModelProperties(params: CostParams): void {
   const independent: PlanShape = { units: 4, density: 0, seed: 7 };
   const chain: PlanShape = { units: 4, density: 1, seed: 7 };
-  const perUnit = unitCost(independent, params, true);
+  const perUnit = unitCost(params, true);
 
   const one = simulatePlan(independent, { ...params, slots: 1 });
   const wide = simulatePlan(independent, { ...params, slots: 4 });

@@ -82,11 +82,11 @@ test("a declared slot count is reached, and the claims overlap in time", async (
   let inFlight = 0;
   let peak = 0;
   const inner = recordingWorker(60, log);
-  const worker: PlanWorker = async (taskId, frozen) => {
+  const worker: PlanWorker = async (taskId, frozen, dependencies) => {
     inFlight += 1;
     peak = Math.max(peak, inFlight);
     try {
-      return await inner(taskId, frozen);
+      return await inner(taskId, frozen, dependencies);
     } finally {
       inFlight -= 1;
     }
@@ -176,7 +176,7 @@ test("a comparison refuses a time verdict when the slot count or the quality dif
   assert.deepEqual(twoArms.slotShortfalls, []);
 
   let calls = 0;
-  const flaky: PlanWorker = async (taskId, frozen) => {
+  const flaky: PlanWorker = async (_taskId, frozen) => {
     calls += 1;
     if (calls === 1) return { failure: "stub: the first call fails" };
     return {

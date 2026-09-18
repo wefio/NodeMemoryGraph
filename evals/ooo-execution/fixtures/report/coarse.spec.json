@@ -1,0 +1,77 @@
+{
+  "baseline": [
+    "evals/ooo-execution/fixtures/report/interface.ts",
+    "evals/ooo-execution/fixtures/report/alpha.ts",
+    "evals/ooo-execution/fixtures/report/beta.ts",
+    "evals/ooo-execution/fixtures/report/gamma.ts",
+    "evals/ooo-execution/fixtures/report/summary.ts",
+    "evals/ooo-execution/fixtures/report/alpha.test.ts",
+    "evals/ooo-execution/fixtures/report/beta.test.ts",
+    "evals/ooo-execution/fixtures/report/gamma.test.ts",
+    "evals/ooo-execution/fixtures/report/summary.test.ts",
+    "evals/ooo-execution/fixtures/report/report.test.ts"
+  ],
+  "plan": [
+    { "id": "report", "effect": "isolated-artifact" }
+  ],
+  "units": {
+    "report": {
+      "instruction": "Implement the three section builders and the summary in this directory so that all five frozen test files pass. The interface file is frozen: do not change its shape. alphaSection drops blank rows and sorts the rest. betaSection numbers the rows from one in the order given. gammaSection upper-cases the rows and keeps the first of a duplicate. summarySection lists one line per section, in the order it was given, each as '- ' plus that section's title, and describes itself with id \"summary\" and title \"Summary\".",
+      "editable": [
+        "evals/ooo-execution/fixtures/report/alpha.ts",
+        "evals/ooo-execution/fixtures/report/beta.ts",
+        "evals/ooo-execution/fixtures/report/gamma.ts",
+        "evals/ooo-execution/fixtures/report/summary.ts"
+      ],
+      "canned": {
+        "evals/ooo-execution/fixtures/report/alpha.ts": "evals/ooo-execution/fixtures/report/alpha.canned.ts",
+        "evals/ooo-execution/fixtures/report/beta.ts": "evals/ooo-execution/fixtures/report/beta.canned.ts",
+        "evals/ooo-execution/fixtures/report/gamma.ts": "evals/ooo-execution/fixtures/report/gamma.canned.ts",
+        "evals/ooo-execution/fixtures/report/summary.ts": "evals/ooo-execution/fixtures/report/summary.canned.ts"
+      }
+    }
+  },
+  "checks": [
+    {
+      "label": "alpha",
+      "command": "node",
+      "args": ["--experimental-strip-types", "--test", "evals/ooo-execution/fixtures/report/alpha.test.ts"]
+    },
+    {
+      "label": "beta",
+      "command": "node",
+      "args": ["--experimental-strip-types", "--test", "evals/ooo-execution/fixtures/report/beta.test.ts"]
+    },
+    {
+      "label": "gamma",
+      "command": "node",
+      "args": ["--experimental-strip-types", "--test", "evals/ooo-execution/fixtures/report/gamma.test.ts"]
+    },
+    {
+      "label": "summary",
+      "command": "node",
+      "args": ["--experimental-strip-types", "--test", "evals/ooo-execution/fixtures/report/summary.test.ts"]
+    },
+    {
+      "label": "report",
+      "command": "node",
+      "args": ["--experimental-strip-types", "--test", "evals/ooo-execution/fixtures/report/report.test.ts"]
+    }
+  ],
+  "parentChecks": [
+    {
+      "label": "composed report",
+      "command": "node",
+      "args": [
+        "--experimental-strip-types",
+        "--test",
+        "evals/ooo-execution/fixtures/report/alpha.test.ts",
+        "evals/ooo-execution/fixtures/report/beta.test.ts",
+        "evals/ooo-execution/fixtures/report/gamma.test.ts",
+        "evals/ooo-execution/fixtures/report/summary.test.ts",
+        "evals/ooo-execution/fixtures/report/report.test.ts"
+      ]
+    }
+  ],
+  "worker": { "kind": "canned" }
+}
