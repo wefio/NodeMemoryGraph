@@ -36,7 +36,7 @@ Keep the workflow small, evidence-based, and friendly to concurrent Agents.
   that silently swallows another Agent's working tree is a coordination failure,
   not a merge. When the change lands or is abandoned, remove the dedicated
   worktree and its branch (`git worktree remove <path>` then `git branch -D
-  <name>`) so used-up worktrees do not accumulate.
+<name>`) so used-up worktrees do not accumulate.
 
 ## Before editing
 
@@ -102,18 +102,53 @@ or remove it when its exit criteria are met.
    In a shared dirty worktree, pass `-- <owned-path>` so unrelated changes
    stay outside the plan. Use `--include-advisory` only when research or chaos cost
    is intentional.
-4. Use `npm run test:research` only for research adapters; use `npm run test:chaos` for explicit lifecycle
+4. Run long checks detached and collect them before the commit. The cheap decisive
+   checks — LSP diagnostics on touched files, format, lint, `complexity:gate`,
+   `docs:check` — stay synchronous; the expensive three — full `mutation:teeth`,
+   `test:product`, the `evals/**` suites — are launched as soon as the code they measure
+   is final, while the documentation and the cheap lane are written:
+
+   ```bash
+   { echo "started=$(date +Is)"; echo "snapshot=$(git rev-parse HEAD)"; } > .temp/x.state
+   (npm run X > .temp/x.log 2>&1; echo "exit=$?" >> .temp/x.state) &
+   echo "pid=$!" >> .temp/x.state
+   ```
+
+   Each launch is its own statement, header in the foreground: `A && B &` backgrounds the
+   whole list, which truncates the state file after its `pid=` line — the one state that
+   cannot be read.
+
+   A launch returns immediately and is never followed by a wait — no `sleep`, no poll loop,
+   no peeking to see whether the state is worth reading yet: the collector reads it at the
+   next natural checkpoint while the time goes to the rest of the change. With nothing else
+   to do, run the check synchronously instead.
+
+   **Read a detached run's state as three outcomes, not two.** _Finished:_ the state file
+   carries `exit=<code>`, and that code is the result. _Still running:_ no `exit=` yet and
+   the recorded pid is alive (`kill -0 <pid>` from a later shell); elapsed time is not a
+   state, so a long runtime is never read as a failure, and telling working from wedged uses
+   the check's own progress (one log line per test, one per mutant) rather than the clock.
+   _Died:_ no `exit=` and the pid is gone, so nothing wrote a code — the run was killed, and
+   it may have left a mutant in the tree, so `git diff` the target first.
+
+   A detached run records the tree it measured, and the collector compares that with the
+   current one: a code change means re-run. Never edit or stage a file a mutation run is
+   rewriting, and scoped `--targets=` runs during a change and one full run before a push
+   answer different questions. The measured costs and traps are in
+   [the decision](../../docs/decisions/implemented/2026-09-18-detached-long-checks.md).
+
+5. Use `npm run test:research` only for research adapters; use `npm run test:chaos` for explicit lifecycle
    fault testing. Neither substitutes for product tests.
-5. For CI, packaging, or generated-output changes, validate from a clean checkout
+6. For CI, packaging, or generated-output changes, validate from a clean checkout
    or use `--require-clean` in an equivalent clean tree. CI automatically runs the
    named `verify:*` package contracts on push and pull request.
-6. Commit one coherent change with only owned files. Leave unrelated user or Agent work untouched.
+7. Commit one coherent change with only owned files. Leave unrelated user or Agent work untouched.
    Commit messages follow the repository's conventional style
    (`type(scope): summary` + a body that says what changed and why, one change
    per commit). A commit is a proposal, not a proof: the verification evidence
    (targeted test + `agent:verify`) is what makes it hold, so do not claim a
    check passed in the message unless it ran.
-7. When opening a pull request, read `.github/pull_request_template.md` and
+8. When opening a pull request, read `.github/pull_request_template.md` and
    follow it as the PR prompt: fill the three description blocks (What / Why /
    Changes) from the change plus `未验证项`, which names the surface the change did
    not exercise — a route that did not run, a platform or environment that was not
@@ -125,7 +160,7 @@ or remove it when its exit criteria are met.
    CI enforces, and it catches locally what a CI round-trip would cost. Draft
    PRs and CI status are owned by the forge; the template checklist is the
    submitter's own pre-flight, not a substitute for `All checks passed`.
-8. Resolve the in-flight goal after the task is completed or deliberately
+9. Resolve the in-flight goal after the task is completed or deliberately
    abandoned. The board records that work is active, not a step-by-step history;
    Git and verification evidence remain the source of actual implementation state.
 
