@@ -79,11 +79,13 @@ separately per the design: latency, extra cost (including the wasted candidate),
 against the fixed checks.
 
 **Budget request.** From F3's measured per-run costs, twelve runs of this shape are ≈ 350-400 k tokens
-and ≈ 4-6 minutes of model time (F3: 8 runs / 23 calls / 188 k tokens). The ceiling is the operator's
-call, and no call is made before it is recorded here. Refusals declared in advance: if the family's
-checks cannot fail on the fused/speculated path, the run reports cost and latency only and the family is
-replaced before any further spend; if the fused arm cannot even reach its checks (a mechanism failure
-rather than a cost result), the pilot stops and the result is "the mechanism is not ready".
+and ≈ 4-6 minutes of model time (F3: 8 runs / 23 calls / 188 k tokens). **Approved ceiling: 1 000 k
+tokens** (operator, 2026-09-18, with "尽量别都花完" - do not spend it all), against a planned spend of
+about 400 k: the pilot stops as soon as a measurement is decisive, and adds no repetition for marginal
+precision. Refusals declared in advance: if the family's checks cannot fail on the fused/speculated
+path, the run reports cost and latency only and the family is replaced before any further spend; if the
+fused arm cannot even reach its checks (a mechanism failure rather than a cost result), the pilot stops
+and the result is "the mechanism is not ready".
 
 ## Alternatives considered
 
@@ -110,9 +112,9 @@ rather than a cost result), the pilot stops and the result is "the mechanism is 
 3. F5's lifecycle case: a false assumption discards exactly the candidate, accounts its cost separately,
    and leaves the real path to re-execute under a new ticket; a candidate on a data input or a
    permission precondition is refused by name.
-4. F6 runs only after the operator's ceiling is recorded here, reports latency, extra cost and quality
-   separately, and states which of the two refusals above fired if the family or the mechanism was not
-   ready.
+4. F6 runs only after the operator's ceiling is recorded here (1 000 k tokens, approved 2026-09-18),
+   reports latency, extra cost and quality separately, and states which of the two refusals above fired
+   if the family or the mechanism was not ready.
 5. The ledger gains the arms as rows (F4, F5, F6) with the evidence each one has, and the hidden-feature
    registry gains the new research entry points in the same change.
 
