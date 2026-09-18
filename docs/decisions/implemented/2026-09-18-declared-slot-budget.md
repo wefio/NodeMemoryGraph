@@ -89,10 +89,29 @@ main question has a concurrency half, so that would leave it unanswered while th
 
 ## Implementation state
 
-- **Landed**: the rule layer and the status read (`selectableTasks`, `startableTasks`, `nextTask`,
-  `deriveStatus`), two new cases in `evals/ooo-execution/narrow-dispatch.test.ts` (6 cases total) and one in
-  `tests/integration/task-semantics.test.ts`, plus the four mutants above. No caller passes a count other
-  than the default, so no gate or switch changed with this record.
-- **Next, same decision**: `BoardAdmission`'s declared count, publishing a handoff per startable task and
-  directing it at that task's claimant, the claim licence naming any startable task, and the driver's real N
-  slots. Then the spec pair for F2c and F3.
+The rule layer and the board layer are in, and no caller other than the arms' driver passes a count
+other than the default, so no gate or switch changed for the product path.
+
+- **Rules and status read**: `selectableTasks(plan, slots)`, `startableTasks(plan, slots)`,
+  `nextTask(plan, slots)`, `remainingSlots(plan, slots)` and `deriveStatus(units, facts, slots)` in
+  `src/integration/ooo-execution.ts` and `src/integration/task-semantics.ts`.
+- **Admission**: `BoardAdmissionOptions.slots` (default 1, checked before the store is opened) and
+  `handoffTarget`; a count above 1 without a target is refused by name. `publishReady` publishes a
+  handoff for every startable task and keeps it across a republish, and the claim licence is
+  `startable()`. With the default the publication is the un-directed broadcast handoff it was.
+- **Driver**: `evals/ooo-execution/plan-driver.ts` declares the spec's slot count to the admission
+  layer and names each unit's claimant with one function (`ownerOf`), so the offer and the claim
+  cannot disagree. Its batch loop needed no other change, and it still reports a count it did not
+  reach instead of reporting a time.
+- **Evidence**: `evals/ooo-execution/board-slots.test.ts` (3 cases: two claims held at once and the
+  store's own `serialState`/`to` as the reason they can be, the default licence being the head, and a
+  claim's acceptance freeing a dependent while the other slot is held); `plan-driver.test.ts` replaces
+  its "the requested slot count is not reached" case with one that reaches it and measures the
+  overlap; `narrow-dispatch.test.ts` (6) and `tests/integration/task-semantics.test.ts` cover the rule.
+- **Teeth**: 111 of 111 mutants caught by the named test, 17 of 17 targets restored. The new ones are
+  the budget and claim-window mutants in `src/integration/ooo-execution.ts`, the
+  licence/publication/target mutants in `src/integration/ooo-board.ts`, and the driver's declared
+  budget.
+
+The measured arm comparison is still owed: the spec pair for F2c and the paid pilot for F3 (a
+separately fixed model, budget and repetitions).

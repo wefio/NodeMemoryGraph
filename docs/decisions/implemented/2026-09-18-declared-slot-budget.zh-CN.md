@@ -72,8 +72,23 @@ C 臂需要 N 个认领共存，所以必须回答存储的按 channel 串行化
 
 ## 实现状态
 
-- **已落地**：规则层与状态读（`selectableTasks`、`startableTasks`、`nextTask`、`deriveStatus`），
-  `evals/ooo-execution/narrow-dispatch.test.ts` 新增两条用例（共 6 条）、`tests/integration/task-semantics.test.ts`
-  新增一条，加上上述四个突变体。没有任何调用方传非默认值，所以本记录没有改动任何开关或入口。
-- **下一步，同一决策**：`BoardAdmission` 的声明槽数、为每个可启动任务发布 handoff 并定向给它的认领者、认领许可点名
-  任一可启动任务、驱动器的真实 N 槽。之后是 F2c 的规格对与 F3。
+规则层与板子层都已落地；除了实验臂的驱动器，没有任何调用方传非默认值，所以产品路径没有改动任何开关或入口。
+
+- **规则与状态读**：`src/integration/ooo-execution.ts` 与 `src/integration/task-semantics.ts` 中的
+  `selectableTasks(plan, slots)`、`startableTasks(plan, slots)`、`nextTask(plan, slots)`、
+  `remainingSlots(plan, slots)` 与 `deriveStatus(units, facts, slots)`。
+- **准入层**：`BoardAdmissionOptions.slots`（默认 1，在打开存储之前校验）与 `handoffTarget`；声明大于 1
+  却不给目标会被按名字拒绝。`publishReady` 为每个可启动任务发布 handoff，并在重发布时保留它，认领许可就是
+  `startable()`。默认值下发布的仍是无定向的广播 handoff。
+- **驱动器**：`evals/ooo-execution/plan-driver.ts` 把 spec 的槽数声明给准入层，并用同一个函数（`ownerOf`）
+  命名每个单元的认领者，因此"提供给谁"与"谁来认领"不可能不一致；它的批处理循环不需其它改动，且在未达到请求槽数时
+  依旧如实报告，而不是给出时间结论。
+- **证据**：`evals/ooo-execution/board-slots.test.ts`（3 条用例：两个认领同时持有、以及用存储自己的
+  `serialState`/`to` 说明为何能做到；默认预算下许可仍是队首；一个认领被接受后在其另一槽仍被持有时释放依赖方）；
+  `plan-driver.test.ts` 把"未达到请求槽数"那条换成达到它并测量重叠的用例；`narrow-dispatch.test.ts`（6 条）与
+  `tests/integration/task-semantics.test.ts` 覆盖规则本身。
+- **牙齿**：111/111 突变体被点名的用例抓住，17/17 目标逐字节恢复。新增的是
+  `src/integration/ooo-execution.ts` 的预算与可启动集合突变体、`src/integration/ooo-board.ts` 的
+  许可/发布/目标突变体，以及驱动器声明预算那条。
+
+仍欠的是实测臂对比：F2c 的规格对与 F3 的付费试点（需另行固定模型、预算与重复次数）。
