@@ -18,10 +18,12 @@ import {
   DESIGN_SCRIPT_SETS,
   MAX_INTERLEAVING_EVENTS,
   MAX_INTERLEAVING_UNITS,
+  checkBudget,
   checkPublications,
   enumerateInterleavings,
   enumerateTable,
   type InterleavingEventKind,
+  type UnitScript,
 } from "../../src/integration/task-semantics-interleavings.ts";
 import {
   compileTaskUnits,
@@ -67,6 +69,66 @@ test("no publication over the design's interleavings is unsupported by its own f
     [],
     "every publication is supported by the recorded facts",
   );
+  assert.deepEqual(
+    report.budgetFindings.map(
+      (finding) => `${finding.property}:${finding.budget}:${finding.unit}`,
+    ),
+    [],
+    "every declared budget published a view its own budget allows",
+  );
+  assert.deepEqual(report.budgets, [1, 2], "the design's shapes are walked at one slot and at two");
+});
+
+test("a declared budget publishes more than one slot can, and never a claimed task", () => {
+  // Two independent units plus a dependent: the second slot is what a one-slot run cannot offer.
+  const wide: CompileInput["plan"] = [
+    ["P", "rev-1", [], "isolated-artifact", null, null],
+    ["Q", "rev-1", [], "isolated-artifact", null, null],
+    ["D", "rev-1", ["P"], "read-only", null, null],
+  ];
+  const scripts: readonly UnitScript[] = [
+    { unit: "P", events: ["claim"] },
+    { unit: "Q", events: ["deliver", "judge-accept"] },
+  ];
+  const report = enumerateInterleavings({ plan: wide, specs: { P: spec() }, scripts });
+  assert.equal(report.refused, undefined);
+  assert.deepEqual(report.budgetFindings, [], "no budget offered a claimed task or dropped a candidate");
+  assert.ok(
+    report.widened > 0,
+    "the two-slot view published a task the one-slot view did not, which is what the budget buys",
+  );
+  assert.deepEqual(
+    report.findings.map((finding) => `${finding.unit}:${finding.obligation}`),
+    [],
+    "and what it published is still supported by the recorded facts",
+  );
+  // The claimed unit is never one of them: at the prefix where P is claimed, only Q is on offer.
+  const oneSlot = enumerateInterleavings({
+    plan: wide,
+    specs: { P: spec() },
+    scripts,
+    budgets: [1],
+  });
+  assert.equal(oneSlot.widened, 0, "a single budget has nothing to widen against");
+  assert.ok(report.dispatches > oneSlot.dispatches, "the second budget really published something");
+});
+
+test("the budget properties fire on a hand-built view, so deleting them cannot pass quietly", () => {
+  const claimed = checkBudget({ budget: 2, ready: ["P", "Q"], claimed: ["P"], atStep: 3 });
+  assert.deepEqual(
+    claimed.map((finding) => `${finding.property}:${finding.unit}:${finding.atStep}`),
+    ["claimed-task-is-not-startable:P:3"],
+    "a claimed task in the startable set is the property a second worker would break",
+  );
+  const dropped = checkBudget({ budget: 2, ready: [], claimed: [], smallerReady: ["Q"] });
+  assert.deepEqual(
+    dropped.map((finding) => `${finding.property}:${finding.unit}`),
+    ["a-bigger-budget-keeps-the-smaller-candidates:Q"],
+    "a bigger budget adds candidates, it does not replace them",
+  );
+  assert.deepEqual(checkBudget({ budget: 2, ready: ["Q"], claimed: ["P"], smallerReady: [] }), []);
+  const refused = enumerateInterleavings({ plan: DESIGN_PLAN, specs: { P: spec() }, scripts: [], budgets: [0] });
+  assert.match(refused.refused!, /budget 0 is not a positive integer/);
 });
 
 test("the merge enumerates every legal order, not one of them", () => {

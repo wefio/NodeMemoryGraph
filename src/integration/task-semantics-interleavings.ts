@@ -36,10 +36,16 @@ import {
   type RecordedFacts,
   type TaskUnit,
 } from "./task-semantics.ts";
+import { checkedSlots } from "./ooo-execution.ts";
 import { acceptedClosure } from "./task-semantics-model.ts";
 
 /** The design's cap for the enumeration. Above it this refuses rather than grows. */
 export const MAX_INTERLEAVING_UNITS = 4;
+
+/** The budgets every enumeration checks by default: one slot, the rule the repository had, and two,
+ *  the smallest declared budget that lets two claims coexist - which is what the C arm varies. A
+ *  caller may declare others; each must be a positive integer. */
+export const DEFAULT_BUDGETS: readonly number[] = [1, 2];
 /** Events per enumerated interleaving. This cap is what keeps the enumeration finite: four units of
  *  three events each already merge 369,600 ways, so six is where "枚举合法交错" stays a check a test
  *  runs rather than a tool nobody runs. */
@@ -85,15 +91,44 @@ export interface InterleavingFinding extends PublicationViolation {
   interleaving: readonly InterleavingEvent[];
 }
 
+/** A property a declared claim budget must have, checked on a view the budget produced. These are
+ *  not the unit obligations: a budget is a property of the run, not of a task. */
+export interface BudgetViolation {
+  property: BudgetProperty;
+  /** The budget whose view broke it. */
+  budget: number;
+  unit: string;
+  atStep: number;
+  reason: string;
+}
+
+export type BudgetProperty =
+  /** A task someone is working is not offered to a second worker, whatever the budget. */
+  | "claimed-task-is-not-startable"
+  /** A smaller budget's candidates stay candidates: a bigger budget adds, it does not replace. */
+  | "a-bigger-budget-keeps-the-smaller-candidates";
+
+export interface BudgetFinding extends BudgetViolation {
+  interleaving: readonly InterleavingEvent[];
+}
+
 export interface InterleavingReport {
   units: readonly string[];
   interleavings: number;
   steps: number;
+  /** Publications checked, summed over the declared budgets: each budget publishes its own set. */
   dispatches: number;
   completions: number;
+  /** The declared budgets this report walked. */
+  budgets: readonly number[];
+  /** How often a bigger budget published a task a smaller one did not: the count that makes the
+   *  budget's own effect on the model visible rather than assumed. */
+  widened: number;
   /** Refusal, when the input cannot be enumerated at all. */
   refused?: string;
   findings: readonly InterleavingFinding[];
+  /** What a declared budget did to the view that the declared budgets may not do. */
+  budgetFindings: readonly BudgetFinding[];
 }
 
 const bytes = (unit: string, generation = 0): string => `${unit}-artifact-v${generation}`;
@@ -338,21 +373,115 @@ function refusal(units: readonly string[], refused: string): InterleavingReport 
     steps: 0,
     dispatches: 0,
     completions: 0,
+    budgets: [],
+    widened: 0,
     refused,
     findings: [],
+    budgetFindings: [],
   };
+}
+
+/**
+ * What a declared budget must not do to the view it produced, given the publications themselves.
+ *
+ * The publications are given rather than derived, so a hand-built violation can be handed in: that is
+ * what lets a deleted condition here be caught by its own case instead of only by luck.
+ */
+export function checkBudget(input: {
+  budget: number;
+  ready: readonly string[];
+  claimed: readonly string[];
+  /** What the next smaller declared budget published, when there is one. */
+  smallerReady?: readonly string[];
+  atStep?: number;
+}): BudgetViolation[] {
+  const atStep = input.atStep ?? 0;
+  const out: BudgetViolation[] = [];
+  for (const unit of input.ready)
+    if (input.claimed.includes(unit))
+      out.push({
+        property: "claimed-task-is-not-startable",
+        budget: input.budget,
+        unit,
+        atStep,
+        reason: `the ${input.budget}-slot view offers ${unit} although it is already claimed`,
+      });
+  for (const unit of input.smallerReady ?? [])
+    if (!input.ready.includes(unit))
+      out.push({
+        property: "a-bigger-budget-keeps-the-smaller-candidates",
+        budget: input.budget,
+        unit,
+        atStep,
+        reason: `the ${input.budget}-slot view dropped ${unit}, which a smaller budget published`,
+      });
+  return out;
+}
+
+/**
+ * One prefix as every declared budget sees it: what each budget publishes, and the violations of the
+ * budget's own obligations. Returned rather than pushed, so the walk over budgets and the walk over
+ * interleavings each stay one loop deep - and the dependency-closed accepted set, which no budget
+ * changes, is computed once per prefix rather than once per budget.
+ */
+function budgetViews(
+  compiled: ReturnType<typeof compileTaskUnits>,
+  facts: RecordedFacts,
+  budgets: readonly number[],
+  step: number,
+): {
+  published: string[][];
+  accepted: readonly string[];
+  findings: PublicationViolation[];
+  budgetFindings: BudgetViolation[];
+  widened: number;
+} {
+  const published: string[][] = [];
+  const findings: PublicationViolation[] = [];
+  const budgetFindings: BudgetViolation[] = [];
+  // A run's completions are the dependency-closed accepted set: the same closure the dispatch rule
+  // computes, over the one acceptance predicate.
+  const accepted = [...acceptedClosure(compiled.units, (unit) => isAccepted(unit, facts))];
+  let widened = 0;
+  let smaller: readonly string[] | undefined;
+  for (const budget of budgets) {
+    const ready = [...deriveStatus(compiled.units, facts, budget).ready];
+    if (smaller) widened += ready.filter((id) => !smaller!.includes(id)).length;
+    for (const violation of checkPublications(
+      compiled.units,
+      facts,
+      { dispatches: ready, completions: accepted },
+      step,
+    ))
+      findings.push(violation);
+    for (const violation of checkBudget({
+      budget,
+      ready,
+      claimed: facts.claimed ?? [],
+      ...(smaller ? { smallerReady: smaller } : {}),
+      atStep: step,
+    }))
+      budgetFindings.push(violation);
+    published.push(ready);
+    smaller = ready;
+  }
+  return { published, accepted, findings, budgetFindings, widened };
 }
 
 /**
  * Enumerate every legal interleaving of one script set and check every publication at every prefix.
  * A prefix is checked rather than only the final state, because "published earlier and voided later"
  * is exactly the interleaving this exists for.
+ *
+ * Every prefix is walked once per declared budget: a run that admits N claims publishes a set the
+ * one-slot run does not, and that set has to satisfy the same obligations plus the budget's own.
  */
 export function enumerateInterleavings(input: {
   plan: CompileInput["plan"];
   specs?: CompileInput["specs"];
   requires?: CompileInput["requires"];
   scripts: readonly UnitScript[];
+  budgets?: readonly number[];
 }): InterleavingReport {
   const compiled = compileTaskUnits({
     plan: input.plan,
@@ -393,29 +522,32 @@ export function enumerateInterleavings(input: {
     );
 
   const findings: InterleavingFinding[] = [];
+  const budgetFindings: BudgetFinding[] = [];
+  const budgets = [...(input.budgets ?? DEFAULT_BUDGETS)];
+  for (const budget of budgets) {
+    try {
+      checkedSlots(budget);
+    } catch {
+      return refusal(ids, `refused: budget ${String(budget)} is not a positive integer`);
+    }
+  }
   let steps = 0;
   let dispatches = 0;
   let completions = 0;
+  let widened = 0;
   const enumerated = interleavings(input.scripts);
   for (const interleaving of enumerated) {
     const facts = emptyFacts();
     for (const [step, event] of interleaving.entries()) {
       recordEvent(facts, event);
       steps += 1;
-      const view = deriveStatus(compiled.units, facts);
-      const ready = [...view.ready];
-      // A run's completions are the dependency-closed accepted set: the same closure the dispatch
-      // rule computes, over the one acceptance predicate.
-      const accepted = [...acceptedClosure(compiled.units, (unit) => isAccepted(unit, facts))];
-      dispatches += ready.length;
-      completions += accepted.length;
-      for (const violation of checkPublications(
-        compiled.units,
-        facts,
-        { dispatches: ready, completions: accepted },
-        step,
-      ))
-        findings.push({ ...violation, interleaving });
+      const views = budgetViews(compiled, facts, budgets, step);
+      for (const ready of views.published) dispatches += ready.length;
+      completions += views.accepted.length;
+      widened += views.widened;
+      for (const violation of views.findings) findings.push({ ...violation, interleaving });
+      for (const violation of views.budgetFindings)
+        budgetFindings.push({ ...violation, interleaving });
     }
   }
   return {
@@ -424,7 +556,10 @@ export function enumerateInterleavings(input: {
     steps,
     dispatches,
     completions,
+    budgets,
+    widened,
     findings,
+    budgetFindings,
   };
 }
 
@@ -440,6 +575,7 @@ export function enumerateTable(input: {
   specs?: CompileInput["specs"];
   requires?: CompileInput["requires"];
   sets: readonly (readonly UnitScript[])[];
+  budgets?: readonly number[];
 }): TableReport {
   const perSet = input.sets.map((scripts) =>
     enumerateInterleavings({
@@ -447,6 +583,7 @@ export function enumerateTable(input: {
       specs: input.specs,
       requires: input.requires,
       scripts,
+      ...(input.budgets ? { budgets: input.budgets } : {}),
     }),
   );
   const refused = perSet.find((report) => report.refused);
@@ -458,7 +595,10 @@ export function enumerateTable(input: {
     steps: perSet.reduce((sum, report) => sum + report.steps, 0),
     dispatches: perSet.reduce((sum, report) => sum + report.dispatches, 0),
     completions: perSet.reduce((sum, report) => sum + report.completions, 0),
+    budgets: perSet[0]?.budgets ?? [],
+    widened: perSet.reduce((sum, report) => sum + report.widened, 0),
     findings: perSet.flatMap((report) => report.findings),
+    budgetFindings: perSet.flatMap((report) => report.budgetFindings),
     ...(refused?.refused ? { refused: refused.refused } : {}),
   };
 }
