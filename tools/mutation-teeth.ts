@@ -783,6 +783,15 @@ const TARGETS: readonly Target[] = [
         expect: "a declared slot count is reached, and the claims overlap in time",
       },
       {
+        // The batch is the unit of overlap, and the overlap that matters is a unit's *check* beside
+        // another unit's work: awaiting each unit in turn keeps a batch's claims from ever running
+        // beside each other, which is the property the C arm buys.
+        name: "the-driver-awaits-each-unit-instead-of-the-batch",
+        from: "    const held = await Promise.all(batch.map(dispatch));",
+        to: "    const held: boolean[] = [];\n    for (const id of batch) held.push(await dispatch(id));",
+        expect: "a unit's check is outstanding while an independent unit's worker runs",
+      },
+      {
         // The budget is declared to the admission layer, not only reported by the driver: a driver
         // that asks the layer for one slot while promising the spec's count cannot overlap claims.
         name: "the-driver-declares-one-slot-whatever-the-spec-says",

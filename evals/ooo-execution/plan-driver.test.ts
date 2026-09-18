@@ -206,3 +206,68 @@ test("impossible input is refused rather than defaulted", async () => {
     /runs must be a positive integer/,
   );
 });
+
+/** The out-of-order property the design is about, carried by this driver and not by roles: an
+ *  independent unit's worker runs while another unit's check is still outstanding. The retired round
+ *  (`docs/decisions/implemented/2026-09-18-retire-the-round-instrument.md`) was the only end-to-end
+ *  carrier of it before this case; if the batch loop ever stops overlapping units, this fails. */
+test("a unit's check is outstanding while an independent unit's worker runs", async () => {
+  const slowCheckMs = 1500;
+  const windows: Record<string, { start: number; end: number }> = {};
+  const worker: PlanWorker = async (taskId, frozen) => {
+    const window = { start: Date.now(), end: 0 };
+    windows[taskId] = window;
+    // The second unit's work is shorter than the first unit's check, so "inside it" is a fact about
+    // the dispatch policy rather than about the two durations.
+    if (taskId === "second") await new Promise((done) => setTimeout(done, 700));
+    window.end = Date.now();
+    return {
+      artifact: JSON.stringify({
+        digest: frozen.digest,
+        files: frozen.work.editable.map((path) => ({
+          path,
+          content: `${frozen.work.files[path] ?? ""}// ${taskId}\n`,
+        })),
+      }),
+      metrics: { tokens: 1, turns: 1, checks: 0 },
+    };
+  };
+  const slow = [
+    {
+      label: "slow",
+      command: process.execPath,
+      args: ["-e", `setTimeout(() => {}, ${slowCheckMs})`],
+    },
+  ];
+  const twoUnits: ProbePlan = [
+    ["first", "", [], "isolated-artifact", null, null],
+    ["second", "", [], "isolated-artifact", null, null],
+  ];
+  const run = await runPlan({
+    plan: twoUnits,
+    units: {
+      first: { instruction: "work on first", editable: ["src/unit.ts"], checks: slow },
+      second: { instruction: "work on second", editable: ["src/unit.ts"], checks: ok },
+    },
+    worker,
+    repository: process.cwd(),
+    revision: "HEAD",
+    baseline,
+    slots: 2,
+  });
+  const first = run.units.find((unit) => unit.taskId === "first");
+  assert.ok(first, "the first unit ran");
+  assert.equal(run.slotsUsed, 2, `two slots were declared and used: ${run.slotRefusal ?? ""}`);
+  assert.ok(
+    first.hostMs >= slowCheckMs,
+    `the first unit's check is the slow one; measured ${first.hostMs} ms`,
+  );
+  const firstWindow = windows.first!;
+  const secondWindow = windows.second!;
+  assert.ok(
+    secondWindow.start >= firstWindow.end && secondWindow.end <= firstWindow.end + first.hostMs,
+    "the second unit's worker must run entirely inside the first unit's check window: " +
+      `first=${firstWindow.start}-${firstWindow.end}, check=${first.hostMs}ms, second=${secondWindow.start}-${secondWindow.end}`,
+  );
+  assert.equal(run.failures, 0, "both units are accepted, so the overlap is not a failure path");
+});

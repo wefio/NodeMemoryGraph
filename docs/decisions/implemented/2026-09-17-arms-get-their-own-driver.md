@@ -100,6 +100,7 @@ renamed from `C`. The legibility half alone cannot run the arms.
 - **The duplication is gone for good**: any future need for the default plan reads
   `DEFAULT_ROUND_PLAN`.
 - **Deferred by the operator, not forgotten: whether the round's roles should be split from its
+- **Resolved 2026-09-18:** the operator chose distribution plus deletion over splitting the roles from their mechanism; the question this bullet deferred is answered, with the measurements, in [the retirement decision](2026-09-18-retire-the-round-instrument.md).
   mechanism.** Deleting `runCycle` outright would remove S4's instrument, its five regression suites,
   the ledger's D7/D10 evidence and the only end-to-end carrier of the out-of-order dispatch — and
   four shared types live in the file (`Requirement`, `CaseRule`, `CycleWorker`, `WorkerMetrics`). The

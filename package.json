@@ -125,7 +125,6 @@
     "agent:context:check": "node --experimental-strip-types tools/repo-context.ts --check",
     "agent:verify": "node --experimental-strip-types tools/agent-verify.ts",
     "ci:uncovered-tests": "node --experimental-strip-types tools/ci-uncovered-tests.ts --check",
-    "ooo:round": "node --experimental-strip-types evals/ooo-execution/round-cli.ts",
     "complexity:gate": "node --experimental-strip-types tools/complexity-gate.ts",
     "mutation:teeth": "node --experimental-strip-types tools/mutation-teeth.ts",
     "verify:packages": "node --experimental-strip-types tools/verify-packages.ts",

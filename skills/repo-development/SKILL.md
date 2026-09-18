@@ -135,8 +135,10 @@ or remove it when its exit criteria are met.
 
    A detached run records the tree it measured, and the collector compares that with the
    current one: a code change means re-run. Never edit or stage a file a mutation run is
-   rewriting, and scoped `--targets=` runs during a change and one full run before a push
-   answer different questions. The measured costs and traps are in
+   rewriting — a running run shows its current target as modified in `git status`, holding a
+   live mutant, and anything staged then is the mutant, not the work — and scoped `--targets=`
+   runs during a change and one full run before a push answer different questions. The measured
+   costs and traps are in
    [the decision](../../docs/decisions/implemented/2026-09-18-detached-long-checks.md).
 
 5. Use `npm run test:research` only for research adapters; use `npm run test:chaos` for explicit lifecycle

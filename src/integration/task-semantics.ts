@@ -28,7 +28,13 @@ import {
   type PatchLimits,
 } from "./ooo-patch.ts";
 import type { PatchTaskSpec, ProbePlan, ProbeOperation } from "./ooo-board.ts";
-import type { Requirement } from "./ooo-cycle.ts";
+
+/** A declared precondition on a dependency's accepted artifact. The host evaluates
+ *  these mechanically, so a downstream pushback is a checkable fact and not a mood. */
+export type Requirement =
+  | { kind: "verified"; task: string }
+  | { kind: "mutant-killed"; task: string; id: string }
+  | { kind: "test-title"; task: string; token: string };
 
 /** The obligations a legal unit must satisfy (design §最小合法任务单元). */
 export const OBLIGATIONS = [

@@ -123,7 +123,10 @@ handed by a flag.
   collector has to compare the tree rather than trust the log.
 - An abandoned run is a working-tree hazard, not only a lost measurement (Decision 6),
   which keeps the pre-commit formatting hook and a `git diff` review necessary even when
-  every log says `exit=0`.
+  every log says `exit=0`. Measured 2026-09-18: a _running_ `mutation:teeth` holds its current
+  target as a live mutant, so `git status` showed `src/integration/ooo-board.ts` modified with
+  `digest` rewritten to `"%"` while the run was in progress; anything staged in that window is
+  the mutant rather than the work, which is why the staging follows the collected result.
 - The rule lives in [`skills/repo-development/SKILL.md`](../../../skills/repo-development/SKILL.md);
   the costs that justify the split live here. Each may change without rewriting the other.
 

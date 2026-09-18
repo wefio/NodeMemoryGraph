@@ -38,7 +38,7 @@ const plan: ProbePlan = [
 ];
 
 function fixture(t: TestContext, verify: PatchTaskSpec["verify"] = verifyRename) {
-  const dir = mkdtempSync(join(tmpdir(), "ooo-cycle-"));
+  const dir = mkdtempSync(join(tmpdir(), "ooo-patch-cycle-"));
   const gate = new BoardAdmission(join(dir, "store.sqlite"), plan, {
     P: {
       instruction: "Rename byId to planIndex in nextTask only.",

@@ -1184,10 +1184,10 @@ export class BoardAdmission extends NmgStore {
     return this.notificationFailure;
   }
 
-  /** The round freezes its tasks from its own options, not from the store the host opened, so it has
-   *  to install them on that store explicitly - and `openRoundStore` cannot know them. This used to
-   *  happen by handing the constructor an object literal and then filling that same object in, which
-   *  worked only while the round also created the store. */
+  /** A host freezes its tasks from its own options, not from the store it opened, so it has to
+   *  install them on that store explicitly - a factory that opens the store cannot know them. This
+   *  used to happen by handing the constructor an object literal and then filling that same object
+   *  in, which worked only while the caller also created the store. */
   installPatchTask(id: string, spec: PatchTaskSpec): void {
     (this.patchTasks as Record<string, PatchTaskSpec>)[id] = spec;
   }

@@ -1,11 +1,11 @@
 // The granularity arms' driver: run one legal plan, with a chosen number of execution slots.
 //
-// Why this exists beside `src/integration/ooo-cycle.ts` rather than inside it: that round is a named
-// experiment (issue A's check, run B while it is outstanding, repair A), it installs its two patch
-// tasks by name, and it is written around those roles. The arms need the opposite - the same parent
-// task at two granularities - which is a different driver, not a parameter. The decision, with the
-// couplings measured behind it, is
-// `docs/decisions/implemented/2026-09-17-arms-get-their-own-driver.md`.
+// Why this driver exists at all: the arms need the same parent task at two granularities, which is
+// its own driver and not a parameter of some other one. The decision, with the couplings measured
+// behind it, is `docs/decisions/implemented/2026-09-17-arms-get-their-own-driver.md`; the round this
+// header used to be written beside was retired in
+// `docs/decisions/implemented/2026-09-18-retire-the-round-instrument.md`, which is also where the
+// interleaving this driver carries (a unit's check outstanding while another unit works) is pinned.
 //
 // What it does **not** duplicate: the rules and the ordering. `BoardAdmission.candidates()` is the
 // ordered legal set from the shared semantics, and this driver only decides how *many* of them to
@@ -40,7 +40,16 @@ import {
   type PatchSubmission,
 } from "../../src/integration/ooo-patch.ts";
 import type { CandidateCheck } from "../../src/integration/ooo-candidate.ts";
-import type { WorkerMetrics } from "../../src/integration/ooo-cycle.ts";
+
+/** What a worker reports about its own run. The product's run surface records no worker metrics
+ *  today, so this shape lives with its only consumer rather than in `src/`. */
+export type WorkerMetrics = {
+  tokens?: number;
+  turns?: number;
+  checks?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+};
 
 /** What a worker returns for one unit. A failure is a recorded attempt, not a crashed run. */
 export type PlanWorkerResult =

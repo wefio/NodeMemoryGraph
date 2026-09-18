@@ -90,7 +90,9 @@ harness 的 shell 调用是同步的、也不给完成通知，所以"后台跑�
   时间就**等于那一刻手上还有的别的活**；所以没有别的活可写的改动从异步得不到好处，应当同步跑。
 - 一个结果的好坏取决于它所对的树快照，所以收集时必须比对树，而不是相信日志。
 - 被放弃的跑是**工作树**风险，不只是丢了一次测量（决策 6）；因此即便每个日志都写 `exit=0`，
-  pre-commit 格式化钩子和 `git diff` 复查仍然必要。
+  pre-commit 格式化钩子和 `git diff` 复查仍然必要。2026-09-18 实测：**正在跑**的 `mutation:teeth`
+  会把当前目标以活变异形式留在树里——`git status` 显示 `src/integration/ooo-board.ts` 被改、
+  `digest` 被换成 `"%"`；在那个窗口里 stage 到的就是 mutant 而不是成果，所以 staging 要在收集结果之后。
 - 规则的家是 [`skills/repo-development/SKILL.md`](../../../skills/repo-development/SKILL.md)，
   支撑它的实测数据在本记录里；两者可以各自修改。
 

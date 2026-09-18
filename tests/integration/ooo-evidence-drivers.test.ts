@@ -2,8 +2,8 @@
  * Smoke tests for the OoO evidence drivers in evals/ooo-execution/.
  *
  * They exist because those files are *not* tests: tsc and eslint skip evals/, and nothing in CI ran
- * them, so one of them quietly rotted — probe-check-duration.ts still imported round-log.ts from the
- * directory that file had left. Moving them into the repository made them reviewable but not safe;
+ * them, so one of them quietly rotted — `probe-check-duration.ts`, since retired with the round, still
+ * imported `round-log.ts` from the directory that file had left. Moving them into the repository made them reviewable but not safe;
  * this file is what makes an edit that breaks them fail a gate.
  *
  * Each driver is invoked the way a reviewer would invoke it, against a scratch store, and the
@@ -403,11 +403,6 @@ test("every evidence driver starts and refuses a missing flag by name", async ()
     },
     { driver: "board-judge.ts", args: ["--channel", "c"], expected: /--entry is required/u },
     { driver: "board-deliver.ts", args: ["--channel", "c"], expected: /--entry is required/u },
-    {
-      driver: "probe-check-duration.ts",
-      args: ["--check-ms", "0"],
-      expected: /--out <dir> is required/u,
-    },
     { driver: "round-host.ts", args: [], expected: /--store is required/u },
   ];
   for (const { driver, args, expected } of cases) {
@@ -601,25 +596,7 @@ test("the worker claims, runs the named suite and delivers its digest", async ()
   }
 });
 
-test("the duration probe runs a grid and records what it measured", async () => {
-  const directory = scratchDirectory();
-  const result = await runDriver("probe-check-duration.ts", [
-    "--out",
-    directory,
-    "--check-ms",
-    "0",
-    "--worker-ms",
-    "0",
-  ]);
-  assert.equal(result.status, 0, result.out);
-  assert.match(result.out, /check ms \| worker ms \| ooo wall ms/u);
-  assert.match(result.out, /verdicts identical across the grid: true/u);
-  const recorded = JSON.parse(readFileSync(join(directory, "check-duration.json"), "utf8")) as {
-    points: Array<{ checkMs: number; hiddenShare: number }>;
-  };
-  assert.ok(recorded.points.length > 0, "the probe records the points it measured");
-  assert.ok(
-    recorded.points.every((point) => Number.isFinite(point.hiddenShare)),
-    "every recorded share is a number rather than a silent zero",
-  );
-});
+// The duration probe's grid case is gone with its subject: `probe-check-duration.ts` read the round's
+// log, and both were retired in
+// `docs/decisions/implemented/2026-09-18-retire-the-round-instrument.md`. The arms' own timing lives in
+// `plan-driver.ts`'s `PlanRun` (wall, host and per-unit millis), which its suite pins.

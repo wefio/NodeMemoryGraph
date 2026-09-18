@@ -83,6 +83,7 @@ in the plan` 失败；把汇合点从 `C` 改名也同样失败。可读性那�
   泛化驱动器的人会看到这两条用例翻转，并有意识地修改它们，而不是在一次付费轮次里才发现这层耦合。
 - **重复永久消除**：任何将来需要默认计划的地方都读 `DEFAULT_ROUND_PLAN`。
 - **操作者决定推迟、而不是忘掉：轮次的“角色”与“机制”是否该剥开。** 直接删掉 `runCycle` 会同时删掉 S4 的仪器、它的五个回归套件、账本 D7/D10 的证据、乱序派发唯一的端到端载体，而且四个共享类型就住在这个文件里（`Requirement`、`CaseRule`、`CycleWorker`、`WorkerMetrics`）。这个选择的实测形状是：**角色层**约 54 处引用、~150 行（`aInstruction`/`bInstruction`/`aEditable`/`bEditable`、`Record<"A"|"B">` 各表、`installA`、`installB`、`patchVerifier`、`casesTail`，以及 `let a / let b` 的流程），而“认领—提交—验证”的核心 `runTask` 已经是按 task id 参数化的。先做 F2b 与 F3；判断是否剥开的证据，就是研究驱动器实际不得不复制多少那段核心。
+- **2026-09-18 已解决：** 操作者选择分发 + 删除，而不是把角色与机制剥开；本条目推迟的问题已在[退役决策](2026-09-18-retire-the-round-instrument.zh-CN.md)中带测量结果回答。
 
 ## 建造驱动器时实测到的：C 臂目前没有机制（2026-09-17）
 
