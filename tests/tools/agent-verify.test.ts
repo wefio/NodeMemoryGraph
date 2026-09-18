@@ -197,6 +197,9 @@ test("a route that declines the shared checks plans only its own tests", () => {
   // ignore rules lives (`tests/tools/complexity-gate-base.test.ts`).
   const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
   const root = fileURLToPath(new URL("../..", import.meta.url));
+  // Evidence goes to a temp path: this case roots the CLI at the repository itself, and a
+  // test must not overwrite the evidence a real verification left in `.nmg/verification`.
+  const evidence = join(mkdtempSync(join(tmpdir(), "nmg-agent-verify-plan-")), "plan.json");
   const result = spawnSync(
     process.execPath,
     [
@@ -207,6 +210,8 @@ test("a route that declines the shared checks plans only its own tests", () => {
       "--scope",
       ".gitignore",
       "--dry-run",
+      "--output",
+      evidence,
       "--json",
     ],
     { encoding: "utf8", windowsHide: true },
@@ -770,4 +775,56 @@ test("route tests that are only skipped do not pass", () => {
   // and without the counts the reader is sent looking for a broken test instead.
   assert.match(check?.reason ?? "", /skipped 1/);
   assert.match(check?.reason ?? "", /plugin ok/);
+});
+
+test("a failed check restates its own last lines and names the evidence file", () => {
+  const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-quiet-failure-"));
+  mkdirSync(join(root, "docs"), { recursive: true });
+  writeFileSync(join(root, "docs", "owner.md"), "# Owner\n");
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({
+      name: "fixture",
+      version: "1.0.0",
+      scripts: {
+        boom: `node -e "for (let i = 1; i <= 14; i++) console.log('check output line ' + i); console.error('the detail that matters'); process.exit(3)"`,
+      },
+    }),
+  );
+  writeFileSync(
+    join(root, "agent-context.yaml"),
+    "version: 1\nroutes:\n  - id: fixture\n    paths: [src/**]\n    owners: [docs/owner.md]\n    tests: []\n    verify:\n      blocking: [boom]\n      advisory: []\n",
+  );
+
+  const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--scope", "src/file.ts"],
+    { encoding: "utf8", windowsHide: true },
+  );
+  assert.notEqual(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /npm run boom: failed/);
+  // The summary restates the failing command's own words, so a reader who lost the streamed
+  // output above it (scrolled away, or piped through a filter) still sees them in one place.
+  assert.match(result.stdout, /^ {2}\| the detail that matters$/m);
+  assert.match(result.stdout, /^ {2}\| check output line 14$/m);
+  // ...bounded: a failing check cannot flood the summary.
+  assert.doesNotMatch(result.stdout, /^ {2}\| check output line 1$/m);
+  assert.match(result.stdout, /last 10 lines; full output in the evidence file/);
+  assert.match(result.stdout, /Evidence: .*\.nmg[\\/]verification[\\/]latest\.json/);
+});
+
+test("narrow mode restates the failing check's last lines too", () => {
+  const root = narrowFixture({ failRouteTest: true });
+  const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--changed"],
+    { encoding: "utf8", windowsHide: true },
+  );
+  assert.notEqual(result.status, 0, result.stderr || result.stdout);
+  // The failing test's own TAP summary is what the reader needs, under its own check.
+  assert.match(result.stdout, /^ {2}\| # fail 1$/m);
+  assert.match(result.stdout, /^ {2}\| # tests 1$/m);
+  assert.match(result.stdout, /Evidence: .*\.nmg[\\/]verification[\\/]latest\.json/);
 });

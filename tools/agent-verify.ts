@@ -161,10 +161,37 @@ function persistEvidence(path: string, evidence: unknown): void {
   renameSync(temporary, path);
 }
 
+/** How much of a failing check's own output the summary restates. The runner already
+ *  streams it while the check runs; this keeps the reason next to the verdict, bounded,
+ *  so it survives a scrollback loss or a pipe filter. The full text stays in the
+ *  evidence file the summary names. */
+const FAILURE_TAIL_LINES = 10;
+const FAILURE_LINE_LIMIT = 300;
+
+function failureTail(output: string | undefined): string[] {
+  if (!output) return [];
+  const lines = output
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((line) => line.trim() !== "");
+  const shown = lines
+    .slice(-FAILURE_TAIL_LINES)
+    .map((line) =>
+      line.length > FAILURE_LINE_LIMIT
+        ? `  | ${line.slice(0, FAILURE_LINE_LIMIT)}…`
+        : `  | ${line}`,
+    );
+  if (lines.length > FAILURE_TAIL_LINES) {
+    shown.push(`  | …(last ${FAILURE_TAIL_LINES} lines; full output in the evidence file)`);
+  }
+  return shown;
+}
+
 function formatResult(
   report: AgentContextReport,
   result: VerificationRunResult,
-  rcp?: RcpEvidence,
+  rcp: RcpEvidence | undefined,
+  evidencePath: string,
 ): string {
   const lines = [
     `Verification scopes: ${report.scopes.join(", ") || "none"}`,
@@ -175,12 +202,14 @@ function formatResult(
     lines.push(
       `- [${item.classification}] npm run ${item.command}: ${item.status}${detail} <- ${item.routes.join(", ")}`,
     );
+    if (item.status === "failed") lines.push(...failureTail(item.output));
   }
   for (const warning of report.warnings) lines.push(`warning: ${warning}`);
   if (rcp) {
     lines.push(`RCP: ${rcp.contractId} ${rcp.status}`);
     if (rcp.receiptPath) lines.push(`RCP receipt: ${rcp.receiptPath}`);
   }
+  lines.push(`Evidence: ${evidencePath}`);
   return `${lines.join("\n")}\n`;
 }
 
@@ -536,7 +565,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     process.stdout.write(
       options.json
         ? `${JSON.stringify({ report, ...result, rcp, evidencePath: options.output }, null, 2)}\n`
-        : formatResult(report, result, rcp),
+        : formatResult(report, result, rcp, options.output),
     );
     if (!result.ok) process.exitCode = 1;
   } catch (error) {
