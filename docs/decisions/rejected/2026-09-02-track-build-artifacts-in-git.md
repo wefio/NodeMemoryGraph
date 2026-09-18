@@ -58,6 +58,6 @@ clone and the tree permanently clean.
   `.nmg-search-scope` are untracked and ignored.
 - Fresh consumers of `dsh/dsh-nmg` must run `pnpm install --frozen-lockfile &&
 pnpm run build` before the package is usable (see
-  `skills/repo-development/SKILL.md`).
+  `skills/repo-development/references/builds.md`).
 - CI verifies subpackage buildability from a clean checkout via
   `verify:packages`, so artifact exclusion cannot silently rot the build.

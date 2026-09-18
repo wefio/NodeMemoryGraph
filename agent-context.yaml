@@ -145,6 +145,7 @@ routes:
     owners:
       - docs/design/ci-cd-and-quality.md
       - docs/design/design.md
+      - skills/repo-development/references/builds.md
     tests: [tests/extensions/pi-dependency-boundary.test.ts]
     verify:
       blocking: [build, package:check]
@@ -169,6 +170,7 @@ routes:
     owners:
       - docs/design/ci-cd-and-quality.md
       - docs/decisions/implemented/2026-08-29-repository-control-plane.md
+      - skills/repo-development/references/control-plane.md
     tests: [tests/rcp/**]
     verify:
       blocking: [check, test:product, build, package:check]

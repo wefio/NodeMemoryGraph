@@ -24,6 +24,8 @@ Keep the workflow small, evidence-based, and friendly to concurrent Agents.
   Automatically remove only generated, cached, or explicitly expiring material;
   propose reviewable candidates before deleting source, history, public
   interfaces, issues, or pull requests.
+- Keep the repository's spending bounded: never invoke live LLM, embedding, or
+  full benchmark workloads unless the task explicitly calls for them.
 - Keep one authoritative writer for each fact. Observe or reference GitHub,
   Contracts, repository state, verification receipts, and NMG memory through
   their owning interfaces rather than mirroring them into a competing store.
@@ -109,7 +111,7 @@ or remove it when its exit criteria are met.
    is final, while the documentation and the cheap lane are written:
 
    ```bash
-   { echo "started=$(date +Is)"; echo "snapshot=$(git rev-parse HEAD)"; } > .temp/x.state
+   { echo "started=$(date -Is)"; echo "snapshot=$(git rev-parse HEAD)"; } > .temp/x.state
    (npm run X > .temp/x.log 2>&1; echo "exit=$?" >> .temp/x.state) &
    echo "pid=$!" >> .temp/x.state
    ```
@@ -139,7 +141,8 @@ or remove it when its exit criteria are met.
 
 5. Use `npm run test:research` only for research adapters; use `npm run test:chaos` for explicit lifecycle
    fault testing. Neither substitutes for product tests.
-6. For CI, packaging, or generated-output changes, validate from a clean checkout
+6. For CI, packaging, or generated-output changes (see
+   [builds and generated artifacts](references/builds.md)), validate from a clean checkout
    or use `--require-clean` in an equivalent clean tree. CI automatically runs the
    named `verify:*` package contracts on push and pull request.
 7. Commit one coherent change with only owned files. Leave unrelated user or Agent work untouched.
@@ -164,81 +167,13 @@ or remove it when its exit criteria are met.
    abandoned. The board records that work is active, not a step-by-step history;
    Git and verification evidence remain the source of actual implementation state.
 
-## Repository Control Plane beyond agent:verify
+## When to read the manual
 
-`npm run agent:verify` auto-discovers the contract that uniquely covers the
-current scope and runs the equivalent reconcile — that is the default for
-ordinary changes (see [`ci-cd-and-quality.md` §7.11](../../docs/design/ci-cd-and-quality.md)).
-Use the standalone `nmg-rcp` CLI (`node bin/nmg-rcp.mjs`, contract path first)
-only in the scenarios `agent:verify` does not cover:
+Everything above is the path an ordinary change walks. Two subjects are only needed
+for a specific kind of change:
 
-- **Check CI state without opening the browser:** `nmg-rcp forge-status --pr <n>`
-  reads the forge's status-check rollup (`checks[]` with name/conclusion). Use
-  it before claiming "checks pass" or deciding a PR is mergeable.
-- **Review what a reconcile would do before running it:**
-  `nmg-rcp plan <contract>` (and `nmg-rcp compile <contract>` when the contract
-  itself changed).
-- **Inspect verification evidence:** `nmg-rcp receipt-list` /
-  `nmg-rcp receipt-verify <receipt>` / `nmg-rcp receipt-scan` — receipts live
-  under `.rcp/receipts/` and are append-only.
-- **Retry after a failed reconcile, or run an explicit workspace-ready pass:**
-  `nmg-rcp reconcile <contract> --apply --workspace-ready [--recover-attempt]`.
-- **Bind a PR or create a draft PR through the forge provider:**
-  `nmg-rcp forge-bind <contract> --pr <n>` / `nmg-rcp forge-create <contract> --base main --head <branch>`.
-
-`--apply` never runs by default; reconcile plans unless `--apply` is explicit.
-When a Contract's status or verification drift from the design doc, update the
-owning document (this SKILL, `ci-cd-and-quality.md`, the RCP decision) in the
-same change — an improved tool that stays undocumented is a tool agents will
-not reach for.
-
-**Do not recursively scan oversized directories by default.** This is an
-Agent operating rule for searches, inventories, size estimation, and repository
-observation—not a claim that the runtime enforces a size-based rejection.
-Avoid known large dataset, benchmark, virtual-environment, and generated trees
-unless the task explicitly requires them. Start with named files or narrow
-paths; do not walk an entire large tree merely to estimate whether it is large.
-When a large-tree scan is genuinely needed, obtain explicit authorization for
-the paths and bound the scan to that scope. A broad wildcard alone is not a
-substitute for that authorization.
-
-For RCP, choose narrow contract includes before observing. Directory pruning
-only avoids include-unreachable subtrees; it is not a size guard, and broad
-patterns may still reach large trees. Never silently omit in-scope files to
-reduce cost, since that would change observation/digest semantics. Runtime
-observation behavior is owned by
-[`ci-cd-and-quality.md` §7.2](../../docs/design/ci-cd-and-quality.md#72-真相域).
-
-## Builds and generated artifacts
-
-Configure the formatting hook once per clone: `git config core.hooksPath .githooks`.
-The pre-commit hook runs Prettier on staged `.ts` files.
-
-Regenerable outputs are **not** tracked (see the rejected decision
-[Track build artifacts in version control](../../docs/decisions/rejected/2026-09-02-track-build-artifacts-in-git.md)):
-
-- `dist/` (root tsc build), `dsh/dsh-nmg/lib/` (tsdown), and
-  `src/prompts/nmg-prompts.generated.ts` (from `nmg-prompts.yaml`) are
-  gitignored; the tree stays clean only if you never `git add` them.
-- A change to `src/` that feeds a generated output is verified by
-  regeneration, not by committing the output.
-
-Reproduce locally, in this order:
-
-1. Root package: `npm ci` (or `npm install` when adding a dependency), then
-   `npm run build` — regenerates `src/prompts/nmg-prompts.generated.ts` and
-   `dist/`.
-2. Subpackages with their own lockfile (currently `dsh/dsh-nmg`, pnpm):
-   `cd dsh/dsh-nmg && pnpm install --frozen-lockfile && pnpm run build` —
-   regenerates `lib/`. `npm run verify:packages` runs every subpackage from a
-   frozen lockfile automatically.
-   Before starting a linked DSH web profile, also follow the adapter's
-   [startup prerequisites](../../dsh/dsh-nmg/README.md#启动前构建).
-3. `npm run check:lock` fails when the root `package-lock.json` drifted from
-   `package.json`; fix with `npm install --package-lock-only`.
-
-When a change touches a subpackage's `src/`, `package.json`, or its lockfile,
-`npm run agent:verify` covers it through `verify:static` →
-`verify:packages`/`check:lock`.
-
-Never invoke live LLM, embedding, or full benchmark workloads unless the task explicitly calls for them.
+- For RCP operations `agent:verify` does not cover (forge status, plan/compile,
+  receipts, an explicit reconcile, PR binding), and for the rule against scanning
+  oversized trees by default: [control plane](references/control-plane.md)
+- For building this repository, regenerating outputs, subpackage installs, or
+  lockfile drift: [builds and generated artifacts](references/builds.md)
