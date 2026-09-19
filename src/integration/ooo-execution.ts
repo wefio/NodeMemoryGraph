@@ -149,6 +149,35 @@ export function nextTask(plan: readonly DispatchTask[], slots = 1): string | nul
   return selectableTasks(plan, slots)[0] ?? null;
 }
 
+/** The plan indexed by id, refusing a duplicate: the one reading every rule in this module shares,
+ *  so the legality of a candidate cannot come to mean two things. */
+export function taskIndex(plan: readonly DispatchTask[]): Map<string, DispatchTask> {
+  const byId = new Map(plan.map((task) => [task.id, task]));
+  if (byId.size !== plan.length) throw new Error("duplicate task");
+  return byId;
+}
+
+/** Whether a task's own inputs are the ones the plan declared: a task read from a stale input is not a
+ *  candidate, and nothing may read it as one. */
+function current(task: DispatchTask): boolean {
+  return !!task.sourceVersion && task.sourceVersion === task.observedVersion;
+}
+
+/** Whether a task counts as an *accepted* dependency: accepted, not cancelled, its own inputs
+ *  current, and the same for what it depends on. Acceptance here is the whole fact - a delivered
+ *  artifact whose verdict is not in is not a satisfied dependency, which is what keeps an unverified
+ *  answer from scheduling anything (see `sharedSessionLegal`). */
+function acceptedDependency(
+  byId: ReadonlyMap<string, DispatchTask>,
+  id: string,
+  visiting = new Set<string>(),
+): boolean {
+  const task = byId.get(id);
+  if (!task || !task.accepted || task.cancelled || !current(task) || visiting.has(id)) return false;
+  const path = new Set(visiting).add(id);
+  return task.dependencies.every((dependency) => acceptedDependency(byId, dependency, path));
+}
+
 /** The one implementation both readings share, so the budget cannot come to mean two things: `legal` is
  *  the ordered candidate set, and `room` is how much of it the run's remaining budget pays for. */
 function selection(
@@ -156,17 +185,9 @@ function selection(
   slots: number,
 ): { legal: readonly string[]; room: number } {
   checkedSlots(slots);
-  const byId = new Map(plan.map((task) => [task.id, task]));
-  if (byId.size !== plan.length) throw new Error("duplicate task");
-  const current = (task: DispatchTask) =>
-    !!task.sourceVersion && task.sourceVersion === task.observedVersion;
-  const valid = (id: string, visiting = new Set<string>()): boolean => {
-    const task = byId.get(id);
-    if (!task || !task.accepted || task.cancelled || !current(task) || visiting.has(id))
-      return false;
-    const path = new Set(visiting).add(id);
-    return task.dependencies.every((dependency) => valid(dependency, path));
-  };
+  const byId = taskIndex(plan);
+  const valid = (id: string, visiting = new Set<string>()) =>
+    acceptedDependency(byId, id, visiting);
   const waiting = (task: DispatchTask) => !!task.externalEvent && !task.externalReady;
   const ready = (task: DispatchTask) =>
     current(task) &&
@@ -191,4 +212,98 @@ function selection(
   // A stale/missing input or undeclared dependency is not an external wait license.
   if (!current(first) || !waiting(first)) return none;
   return { legal: ids(pending.slice(1)), room };
+}
+
+/** What fusion legality needs and a `DispatchTask` does not carry: which executor may run a unit and
+ *  which authority it acts under. `visible` is the unit's own declaration, never a pair's union -
+ *  sharing a session may not widen what a unit can read. */
+export interface SessionDeclaration {
+  capability: string;
+  authority: string;
+  visible: readonly string[];
+}
+
+/** The runtime facts fusion reads: the same task view the selection rules use, each unit's session
+ *  declaration, and the facts a speculation branch is still pending on. */
+export interface SessionPlan {
+  tasks: readonly DispatchTask[];
+  declarations: Readonly<Record<string, SessionDeclaration>>;
+  pendingBranches?: readonly string[];
+}
+
+function subset(inner: readonly string[], outer: readonly string[]): boolean {
+  return inner.every((name) => outer.includes(name));
+}
+
+/** Condition 1: capability, authority and data visibility are compatible, and reuse never widens what a
+ *  unit may read. */
+function compatibleDeclarations(first: SessionDeclaration, next: SessionDeclaration): boolean {
+  return (
+    first.capability === next.capability &&
+    first.authority === next.authority &&
+    subset(next.visible, first.visible)
+  );
+}
+
+/** Condition 3: a cancelled unit is neither executed nor carried as a session's next unit. */
+function neitherCancelled(first: DispatchTask, next: DispatchTask): boolean {
+  return !first.cancelled && !next.cancelled;
+}
+
+/** Condition 5: the history is never reused across a fact whose branch is still pending - a rejected
+ *  proposal does not make the model forget it, so the answer there is a new session. */
+function acrossAPendingBranch(before: string, after: string, pending: readonly string[]): boolean {
+  return pending.includes(before) || pending.includes(after);
+}
+
+/**
+ * Whether `after` may continue `before`'s session - execution fusion, which reuses the execution
+ * resource and keeps every logical task: each unit still takes its own ticket, delivers its own
+ * artifact and crosses the host boundary on its own.
+ *
+ * The five conditions are the design's, and each is one line below so a violation has one name:
+ *
+ * 1. capability, authority and data visibility are compatible, and reuse never widens a read scope.
+ * 2. the successor's dependencies are accepted, and so is the unit that just ran: an unverified answer
+ *    from the same Agent is not a satisfied dependency, it is the reason the session must end here.
+ * 3. a cancelled unit is neither executed nor carried as a session's next unit - identity, deadline,
+ *    cancellation, verdict and cost stay per-unit facts, and this predicate only refuses to move.
+ * 4. a declared external wait that is not ready is the host yield boundary: the session ends there so
+ *    the accepted prefix survives and the rest is rescheduled.
+ * 5. the history is never reused across a fact whose branch is still pending: a rejected proposal does
+ *    not make the model forget it, so condition 5's answer is a new session, not a cleared one.
+ *
+ * Legality lives here and nowhere else; a ranking step orders the legal pairs and nothing widens them.
+ */
+export function sharedSessionLegal(before: string, after: string, plan: SessionPlan): boolean {
+  const byId = taskIndex(plan.tasks);
+  const first = byId.get(before);
+  const next = byId.get(after);
+  const firstDeclaration = plan.declarations[before];
+  const nextDeclaration = plan.declarations[after];
+  if (!first || !next || !firstDeclaration || !nextDeclaration) return false;
+  if (before === after) return false;
+  if (!compatibleDeclarations(firstDeclaration, nextDeclaration)) return false;
+  if (!first.accepted) return false;
+  if (next.dependencies.some((id) => !acceptedDependency(byId, id))) return false;
+  if (!neitherCancelled(first, next)) return false;
+  if (!!first.externalEvent && !first.externalReady) return false;
+  if (acrossAPendingBranch(before, after, plan.pendingBranches ?? [])) return false;
+  return true;
+}
+
+/** The units that may continue one unit's session, in plan order. A chain is built one legal pair at a
+ *  time, so "short ready chains, not a greedy swallow of the DAG" is a bound the caller sets - it is a
+ *  policy, not a rule that would belong here. */
+export function fusionSuccessors(before: string, plan: SessionPlan): readonly string[] {
+  return plan.tasks
+    .map((task) => task.id)
+    .filter((after) => sharedSessionLegal(before, after, plan));
+}
+
+/** Every legal pair, in plan order: the candidate set a ranking policy chooses from. */
+export function fusionCandidates(plan: SessionPlan): readonly (readonly [string, string])[] {
+  return plan.tasks.flatMap((before) =>
+    fusionSuccessors(before.id, plan).map((after) => [before.id, after] as const),
+  );
 }

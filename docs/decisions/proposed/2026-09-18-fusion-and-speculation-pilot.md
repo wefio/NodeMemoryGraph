@@ -11,6 +11,16 @@
 [the cost model record](../../experiments/execution/ooo-cost-model-2026-09-17.md),
 [the older speculation proposal](2026-09-11-ooo-speculation.md)
 
+> **Updated 2026-09-18: F4's offline half has landed, and the live half is blocked by a measured harness fact.**
+> The rules, the accounting and the driver policy are in
+> [fusion legality is a pair predicate](../implemented/2026-09-18-fusion-legality-and-accounting.md)
+> (12 product cases / 8 mutants, 12 cost-model cases / 4 mutants, 15 driver cases / 12 mutants).
+> The paid D arm cannot run as specified: `executePiPatch` creates a session per call, so a live worker
+> cannot continue one, and its only expressible form is the design's named fallback (a new session seeded
+> with the accepted prefix) - sequential handoff, not fusion. F5 (the speculation lifecycle) stays unrun
+> because the design orders E after D's evidence, and F6's D half has no mechanism to spend on until an
+> extension can hold a session across calls. No paid call has been made.
+
 ## Problem
 
 The design's arm programme has five arms and only three have run. A, B and C ran in

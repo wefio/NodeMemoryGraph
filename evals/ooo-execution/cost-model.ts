@@ -60,6 +60,15 @@ export interface CostParams {
   /** How much the parent's single session saves by not paying that boundary per unit.
    *  `assumed`: the coarse arm is not free either, and this is the term an operator must justify. */
   coarseContextSaving: number;
+  /** The cost one session pays once, however many units it runs: process and frozen-prompt startup.
+   *  `assumed`: no run has measured it yet. */
+  sessionStartMs: number;
+  /** Declared provenance of `sessionStartMs`, not a fitted constant. Until a run has measured it,
+   *  fusion's difference is reported as unmeasured rather than read as a gain (`fusionVerdict`). */
+  sessionStartMeasured: boolean;
+  /** How many units may share one session. Declared, not derived: the bound is the runtime's policy
+   *  (short ready chains, not a greedy swallow of the DAG), and this model only prices the bound. */
+  unitsPerSession: number;
   slots: number;
 }
 
@@ -72,6 +81,14 @@ export interface Simulated {
   serialMs: number;
   /** Wall time of the coarse arm (one session doing the same work) on the same vector. */
   coarseMs: number;
+  /** The fine plan's makespan with execution fusion: the same units and the same checks, less the
+   *  boundaries fusion removes, plus the shared startup each session pays. */
+  fusedMs: number;
+  /** What the removed session boundaries are worth, on the measured boundary term. Its own line. */
+  fusionSavedMs: number;
+  /** The shared session startup, booked once per session and never amortised into a unit. Its own
+   *  line, so the two can never be collapsed into one number that hides which term answered. */
+  sharedStartupMs: number;
   /** Host time spent checking candidates. Serial by construction. */
   hostMs: number;
   /** What concurrency bought: `serialMs - makespanMs`, and it is zero for a chain. */
@@ -203,9 +220,11 @@ function checkParams(params: CostParams): void {
     ["rederive-ms", params.rederiveMs],
     ["verify-ms", params.verifyMs],
     ["context-ms", params.contextMsPerUnit],
+    ["session-start-ms", params.sessionStartMs],
   ] as const)
     if (!(value >= 0) || !Number.isFinite(value))
       throw new Error(`${name} must be a finite non-negative number, got ${value}`);
+  checkedFusionUnits(params.unitsPerSession);
 }
 
 /** The longest chain through the plan, by unit index (every edge points forward). This is the floor
@@ -223,6 +242,47 @@ function criticalPathMs(
   return Math.max(...longest);
 }
 
+/** Fusion's two lines, kept apart by construction: what the removed boundaries are worth, and what
+ *  the shared session startup costs instead. One net number would hide which of the two the answer
+ *  came from, and booking the startup per unit is the double booking the design forbids. */
+export interface Fusion {
+  unitsPerSession: number;
+  sessions: number;
+  boundarySavedMs: number;
+  sharedStartupMs: number;
+}
+
+/** The fusion bound is a policy, and a policy of half a unit is not a smaller bound: it is an unusable
+ *  one, and rounding it silently would hide the caller's mistake. */
+function checkedFusionUnits(unitsPerSession: number): number {
+  if (!Number.isSafeInteger(unitsPerSession) || unitsPerSession < 1)
+    throw new Error(`unitsPerSession must be a positive integer, got ${unitsPerSession}`);
+  return unitsPerSession;
+}
+
+export function fusionAccounting(shape: PlanShape, params: CostParams): Fusion {
+  const per = checkedFusionUnits(params.unitsPerSession);
+  const sessions = Math.ceil(shape.units / per);
+  return {
+    unitsPerSession: per,
+    sessions,
+    boundarySavedMs: (shape.units - sessions) * params.contextMsPerUnit,
+    sharedStartupMs: sessions * params.sessionStartMs,
+  };
+}
+
+/** A net gain is a finding only out of a term with a measurement behind it. Until a run has measured
+ *  the session startup, fusion's difference is `unmeasured` - the two lines are reported, and no
+ *  threshold is read out of a guess - and a bound of one unit fuses nothing at all. */
+export function fusionVerdict(
+  fusion: Fusion,
+  params: CostParams,
+): "none" | "unmeasured" | "gain" | "cost" {
+  if (fusion.unitsPerSession === 1) return "none";
+  if (!params.sessionStartMeasured) return "unmeasured";
+  return fusion.sharedStartupMs < fusion.boundarySavedMs ? "gain" : "cost";
+}
+
 export function simulatePlan(shape: PlanShape, params: CostParams): Simulated {
   checkParams(params);
   const edges = planEdges(shape);
@@ -236,12 +296,16 @@ export function simulatePlan(shape: PlanShape, params: CostParams): Simulated {
         (1 - params.hitRate) * params.rederiveMs -
         params.contextMsPerUnit * params.coarseContextSaving) +
     shape.units * params.verifyMs;
+  const fusion = fusionAccounting(shape, params);
   return {
     units: shape.units,
     edges: edges.length,
     makespanMs: fine.makespanMs,
     serialMs: serial.makespanMs,
     coarseMs,
+    fusedMs: fine.makespanMs - fusion.boundarySavedMs + fusion.sharedStartupMs,
+    fusionSavedMs: fusion.boundarySavedMs,
+    sharedStartupMs: fusion.sharedStartupMs,
     hostMs: fine.hostMs,
     savedMs: serial.makespanMs - fine.makespanMs,
     criticalPathMs: criticalPathMs(shape, params, edges),
@@ -292,6 +356,32 @@ export function assertModelProperties(params: CostParams): void {
       throw new Error(`slot utilisation above 1 at density ${density}: ${plan.slotUtilisation}`);
     previous = plan.savedMs;
   }
+
+  // Fusion's accounting has two ways to be wrong that a report would not show: booking the shared
+  // startup per unit (the double booking the design forbids), and pretending a bound that fuses
+  // nothing is free. The bound is set here rather than taken from `params`, so the property is about
+  // the accounting and not about whichever bound the caller declared.
+  const perSession = fusionAccounting(
+    { units: 4, density: 0, seed: 7 },
+    { ...params, unitsPerSession: 4 },
+  );
+  if (perSession.sessions !== 1 || perSession.sharedStartupMs !== params.sessionStartMs)
+    throw new Error(
+      `one session of four units pays its startup once, got ${perSession.sharedStartupMs} for ${perSession.sessions} session(s)`,
+    );
+  if (perSession.boundarySavedMs !== 3 * params.contextMsPerUnit)
+    throw new Error(
+      `one session of four units removes three boundaries, got ${perSession.boundarySavedMs}`,
+    );
+  const nothingFused = simulatePlan(independent, { ...params, unitsPerSession: 1 });
+  if (nothingFused.fusionSavedMs !== 0)
+    throw new Error(
+      `a bound of one unit removed ${nothingFused.fusionSavedMs}ms of boundaries; there are none to remove`,
+    );
+  if (nothingFused.fusedMs < nothingFused.makespanMs)
+    throw new Error(
+      "a bound that fuses nothing reported a fused plan cheaper than the unfused one: it still pays the startup",
+    );
 }
 
 const USAGE = `usage:
@@ -318,6 +408,9 @@ const SWEEP_BASE: CostParams = {
   verifyMs: 1_500,
   contextMsPerUnit: 1_200,
   coarseContextSaving: 0.5,
+  sessionStartMs: 1_500,
+  sessionStartMeasured: false,
+  unitsPerSession: 2,
   slots: 4,
 };
 
@@ -332,6 +425,9 @@ function run(): void {
       "hit-rate": { type: "string" },
       "verify-ms": { type: "string" },
       "context-ms": { type: "string" },
+      "session-start-ms": { type: "string" },
+      "session-start-measured": { type: "boolean" },
+      "units-per-session": { type: "string" },
       "coarse-context-saving": { type: "string" },
       slots: { type: "string" },
       sweep: { type: "boolean" },
@@ -374,6 +470,31 @@ function run(): void {
     output.paysFrom = rows
       .filter((row) => Number(row.gainVsCoarseMs) > 0)
       .map((row) => `units=${row.units} density=${row.density}`);
+    // Fusion's turning point, swept on both sides because neither term is measured: the boundary a
+    // session removes is priced by the pilot, the startup it pays is still an assumption. Every row
+    // therefore says `unmeasured`, and the thresholds below are what an experiment would test - not a
+    // verdict this model is entitled to give.
+    const fusionRows: Record<string, unknown>[] = [];
+    for (const sessionStartMs of [0, 600, 1_500]) {
+      for (const unitsPerSession of [1, 2, 4]) {
+        const swept: CostParams = { ...SWEEP_BASE, sessionStartMs, unitsPerSession };
+        const fusion = fusionAccounting({ units: 8, density: 0.25, seed: 7 }, swept);
+        fusionRows.push({
+          units: 8,
+          unitsPerSession,
+          sessions: fusion.sessions,
+          sessionStartMs,
+          boundarySavedMs: Math.round(fusion.boundarySavedMs),
+          sharedStartupMs: Math.round(fusion.sharedStartupMs),
+          netMs: Math.round(fusion.sharedStartupMs - fusion.boundarySavedMs),
+          verdict: fusionVerdict(fusion, swept),
+        });
+      }
+    }
+    output.fusionRows = fusionRows;
+    output.fusionThresholds = fusionRows
+      .filter((row) => Number(row.netMs) < 0)
+      .map((row) => `unitsPerSession=${row.unitsPerSession} sessionStartMs=${row.sessionStartMs}`);
   } else {
     const params: CostParams = {
       workMs: number(values, "work-ms"),
@@ -382,6 +503,9 @@ function run(): void {
       verifyMs: number(values, "verify-ms"),
       contextMsPerUnit: number(values, "context-ms"),
       coarseContextSaving: number(values, "coarse-context-saving"),
+      sessionStartMs: number(values, "session-start-ms"),
+      sessionStartMeasured: values["session-start-measured"] === true,
+      unitsPerSession: number(values, "units-per-session"),
       slots: number(values, "slots"),
     };
     const shape: PlanShape = {
@@ -390,9 +514,11 @@ function run(): void {
       seed: values.seed === undefined ? 7 : number(values, "seed"),
     };
     assertModelProperties(params);
+    const fusion = fusionAccounting(shape, params);
     output.params = params;
     output.shape = shape;
     output.result = simulatePlan(shape, params);
+    output.fusion = { ...fusion, verdict: fusionVerdict(fusion, params) };
   }
   output.caveat =
     "cost only: this model has no quality term, so it can show a cost turning point and cannot " +

@@ -11,6 +11,15 @@
 [成本模型记录](../../experiments/execution/ooo-cost-model-2026-09-17.md)、
 [更早的推测提案](2026-09-11-ooo-speculation.md)
 
+> **2026-09-18 更新：F4 的离线部分已落地，live 部分被一项实测的 harness 事实阻断。**
+> 规则、记账与驱动器策略见
+> [融合合法性是一个成对谓词](../implemented/2026-09-18-fusion-legality-and-accounting.md)
+> （产品 12 用例 / 8 mutant，成本模型 12 用例 / 4 mutant，驱动器 15 用例 / 12 mutant）。
+> 付费的 D 臂无法按规格运行：`executePiPatch` 每次调用都新建会话，因此 live worker 无法接续会话，
+> 唯一能表达的形式是设计点名的兜底（用已接受前缀作种子的新会话）——那是顺序交接，不是融合。F5
+> （推测生命周期）仍未跑，因为设计规定 E 晚于 D 的证据；在扩展能跨调用持有会话之前，F6 的 D 半边没有
+> 可花钱的机制。至今未发生任何付费调用。
+
 ## 问题
 
 设计的实验臂有五条，只跑过三条。A、B、C 在[试点](../../experiments/execution/ooo-arms-pilot-2026-09-18.md)里跑过

@@ -10,6 +10,8 @@ import test from "node:test";
 import {
   assertModelProperties,
   type CostParams,
+  fusionAccounting,
+  fusionVerdict,
   type PlanShape,
   planEdges,
   simulatePlan,
@@ -22,6 +24,9 @@ const base: CostParams = {
   verifyMs: 1_500,
   contextMsPerUnit: 1_200,
   coarseContextSaving: 0.5,
+  sessionStartMs: 1_500,
+  sessionStartMeasured: false,
+  unitsPerSession: 2,
   slots: 4,
 };
 
@@ -92,6 +97,46 @@ test("impossible input is refused rather than defaulted", () => {
   assert.throws(() => simulatePlan(shape, { ...base, verifyMs: -1 }), /verify-ms/);
   assert.throws(() => planEdges({ units: 0, density: 0, seed: 1 }), /units/);
   assert.throws(() => planEdges({ units: 4, density: 2, seed: 1 }), /density/);
+  assert.throws(() => simulatePlan(shape, { ...base, unitsPerSession: 0 }), /unitsPerSession/);
+  assert.throws(() => simulatePlan(shape, { ...base, unitsPerSession: 1.5 }), /unitsPerSession/);
+});
+
+test("fusion books the shared startup once per session, not once per unit", () => {
+  const shape: PlanShape = { units: 4, density: 0, seed: 7 };
+  const fused = simulatePlan(shape, { ...base, unitsPerSession: 4 });
+  const plain = simulatePlan(shape, base);
+  assert.equal(fused.sharedStartupMs, base.sessionStartMs, "one session pays its startup once");
+  assert.equal(
+    fused.fusionSavedMs,
+    3 * base.contextMsPerUnit,
+    "four units in one session drop three boundaries",
+  );
+  assert.equal(fused.fusedMs, plain.makespanMs - 3 * base.contextMsPerUnit + base.sessionStartMs);
+  // The same plan with a bound of two: two sessions, each paying its own startup and dropping one
+  // boundary, and the two lines never collapse into one number.
+  const pairs = simulatePlan(shape, { ...base, unitsPerSession: 2 });
+  assert.equal(pairs.sharedStartupMs, 2 * base.sessionStartMs);
+  assert.equal(pairs.fusionSavedMs, 2 * base.contextMsPerUnit);
+});
+
+test("a fusion bound of one unit removes no boundary and still pays the startup", () => {
+  const shape: PlanShape = { units: 4, density: 0, seed: 7 };
+  const none = simulatePlan(shape, { ...base, unitsPerSession: 1 });
+  assert.equal(none.fusionSavedMs, 0, "a unit per session has no boundary to remove");
+  assert.equal(none.fusedMs, none.makespanMs + 4 * base.sessionStartMs);
+  assert.equal(
+    fusionVerdict(fusionAccounting(shape, { ...base, unitsPerSession: 1 }), base),
+    "none",
+  );
+});
+
+test("an assumed session startup never reads as a gain", () => {
+  const shape: PlanShape = { units: 4, density: 0, seed: 7 };
+  const fusion = fusionAccounting(shape, { ...base, unitsPerSession: 4 });
+  assert.equal(fusionVerdict(fusion, base), "unmeasured", "no run has priced the startup");
+  assert.equal(fusionVerdict(fusion, { ...base, sessionStartMeasured: true }), "gain");
+  const costly = fusionAccounting(shape, { ...base, unitsPerSession: 2, sessionStartMs: 9_000 });
+  assert.equal(fusionVerdict(costly, { ...base, sessionStartMeasured: true }), "cost");
 });
 
 test("the model has no quality term: a simulated pass rate is not available to report", () => {

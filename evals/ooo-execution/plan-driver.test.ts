@@ -8,7 +8,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ProbePlan } from "../../src/integration/ooo-board.ts";
-import { comparePlanSlots, runPlan, type PlanDriverSpec, type PlanWorker } from "./plan-driver.ts";
+import {
+  comparePlanSlots,
+  piWorker,
+  runPlan,
+  type PlanDriverSpec,
+  type PlanWorker,
+} from "./plan-driver.ts";
 
 const baseline = { "src/unit.ts": "export const value = 1;\n" };
 const ok = [{ label: "unit check", command: process.execPath, args: ["-e", "process.exit(0)"] }];
@@ -61,6 +67,129 @@ function recordingWorker(latencyMs = 60, log: string[] = []): PlanWorker {
     };
   };
 }
+
+/** The session a fused run must actually reuse: this worker echoes the session it was handed, so a
+ *  chain that only *looked* fused - a fresh session per unit - would show up as distinct ids. */
+function sessionWorker(latencyMs = 20): PlanWorker {
+  return async (taskId, frozen, dependencies, session) => {
+    const produced = await recordingWorker(latencyMs)(taskId, frozen, dependencies);
+    if (typeof produced === "string" || !session) return produced;
+    return { ...produced, metrics: { ...produced.metrics, sessionId: session.id } };
+  };
+}
+
+test("a fused run runs several units in one session, each with its own ticket and verdict", async () => {
+  const run = await runPlan(
+    spec({ slots: 1, fusion: { unitsPerSession: 2 }, worker: sessionWorker(10) }),
+  );
+  // One session of two units, then a yield boundary and a second session: `summary` becomes a
+  // candidate only once `third` is accepted, so the chain continues into it.
+  assert.deepEqual(run.sessions, [
+    ["first", "second"],
+    ["third", "summary"],
+  ]);
+  for (const unit of run.units)
+    assert.equal(
+      unit.sessionId,
+      `session:${["first", "second"].includes(unit.taskId) ? "first" : "third"}`,
+      `${unit.taskId} must name the session it really ran in`,
+    );
+  // Fusion changes the execution resource, never the acceptance facts: each unit keeps its own
+  // claim, verdict, attempt and token count.
+  assert.equal(run.units.length, 4);
+  assert.deepEqual(
+    run.units.map((unit) => unit.verdict),
+    Array(4).fill("accepted"),
+  );
+  assert.equal(run.hostChecks, 4, "every fused unit still crosses the host boundary on its own");
+  assert.deepEqual(
+    run.units.map((unit) => unit.attempt),
+    [1, 1, 1, 1],
+  );
+});
+
+test("a fused session ends where the next unit needs another capability", async () => {
+  const run = await runPlan(
+    spec({
+      slots: 1,
+      fusion: { unitsPerSession: 4, declarations: { third: { capability: "other" } } },
+      worker: sessionWorker(10),
+    }),
+  );
+  // `third` is not a legal successor of `second`, and `summary` is not one of `third`: the run keeps
+  // each of them in its own session rather than widening what one session may do.
+  assert.deepEqual(run.sessions, [["first", "second"], ["third"], ["summary"]]);
+});
+
+test("a fused chain stops at the declared bound and does not swallow the plan", async () => {
+  const run = await runPlan(
+    spec({ slots: 1, fusion: { unitsPerSession: 1 }, worker: sessionWorker(10) }),
+  );
+  // A bound of one is the control arm: fusion is on, and every session is one unit.
+  assert.deepEqual(run.sessions, [["first"], ["second"], ["third"], ["summary"]]);
+});
+
+test("a unit with no verdict ends the session it was running in", async () => {
+  const worker: PlanWorker = async (taskId, frozen, dependencies, session) => {
+    if (taskId === "second") return { failure: "gave up on the second unit" };
+    const produced = await sessionWorker(10)(taskId, frozen, dependencies, session);
+    return produced;
+  };
+  const run = await runPlan(spec({ slots: 1, fusion: { unitsPerSession: 4 }, worker }));
+  assert.equal(run.failures, 1);
+  assert.ok(run.incomplete.some((entry) => entry.includes("second")));
+  assert.deepEqual(run.sessions, [["first"]], "the session ended at the unit with no verdict");
+  assert.equal(run.accepted["summary"], undefined, "the summary cannot be accepted on a failure");
+});
+
+test("a fused session does not continue from a unit the host rejected", async () => {
+  // A verdict is not a failure: the unit ran, the host looked at it and refused. The session must end
+  // there all the same, because the next unit would be working on top of an unverified answer.
+  const bad = [{ label: "unit check", command: process.execPath, args: ["-e", "process.exit(1)"] }];
+  const base = spec({ slots: 1, fusion: { unitsPerSession: 4 }, worker: sessionWorker(10) });
+  const run = await runPlan({
+    ...base,
+    units: { ...base.units, second: { ...base.units["second"]!, checks: bad } },
+  });
+  assert.equal(run.units.find((unit) => unit.taskId === "second")?.verdict, "rejected");
+  assert.deepEqual(
+    run.sessions.find((chain) => chain.includes("second")),
+    ["first", "second"],
+    "the session ended at the rejected unit, not after it",
+  );
+  assert.ok(
+    !run.units.some(
+      (unit) =>
+        unit.taskId === "third" &&
+        unit.sessionId === run.units.find((x) => x.taskId === "second")?.sessionId,
+    ),
+    `no unit may run on top of a rejected answer: ${JSON.stringify(run.sessions)}`,
+  );
+});
+
+test("a worker that starts its own session is not reported as fusion", async () => {
+  // `recordingWorker` never echoes a session, which is what a worker that opens a fresh session per
+  // unit looks like from the driver's side. The run must report boundaries, not fusion.
+  const run = await runPlan(
+    spec({ slots: 1, fusion: { unitsPerSession: 4 }, worker: recordingWorker(10) }),
+  );
+  assert.deepEqual(run.sessions, [["first"], ["second"], ["third"], ["summary"]]);
+  assert.ok(
+    run.units.every((unit) => unit.sessionId === undefined),
+    "no unit claims a session the worker never reported",
+  );
+});
+
+test("the live worker refuses to continue a session it cannot hold, and spends nothing", async () => {
+  const worker = piWorker({ provider: "deepseek", model: "deepseek-v4-flash" }, true);
+  const result = await worker("second", {} as never, {}, { id: "session:first", units: ["first"] });
+  assert.ok(typeof result !== "string");
+  assert.match(
+    String(result.failure),
+    /cannot continue session session:first \(it has run first\)/,
+    "a continuation the harness cannot hold is refused by name, not answered with a new session",
+  );
+});
 
 test("one slot runs the units in plan order, each to acceptance", async () => {
   const run = await runPlan(spec({ slots: 1, worker: recordingWorker(20) }));
