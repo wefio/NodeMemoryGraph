@@ -2,8 +2,11 @@
 
 [English](2026-09-19-fusion-session-mechanism.md)
 
-**Status:** proposed
+**Status:** implemented
+**Approved:** explicit
 **Relates to:** [pilot 与其上限](2026-09-18-fusion-and-speculation-pilot.zh-CN.md)、[融合合法性与其记账](../implemented/2026-09-18-fusion-legality-and-accounting.zh-CN.md)
+
+实现证据：`.pi/extensions/nmg/ooo-execution.ts` 的 `createPiSessionRunner` 与 `patchSessionInput` 通过 `UnitState` 盒子让每次运行持有一个会话，`executePiInputWith` 委托给它，扩展因此只保留一套 tool surface，`evals/ooo-execution/plan-driver.ts` 的 `piSessionWorker` 每个 session id 持有一个 runner。冒烟结果显示两个单元同处一个会话（`sessions: [["alpha","summary"]]`，21k tokens）。仍未完成的不再是机制：产品侧还没有调用方去决定复用会话。
 
 ## Problem
 
@@ -12,7 +15,7 @@ F4 落了融合的**策略半**（`PlanDriverSpec.fusion`、`PlanSession`/`PlanR
 **阻塞**——那等于把一个缺失的机制说成了设计的属性，并且让已批准的预算躺在那里没花。它是缺失的机制，而设计
 已经写明它该是什么。
 
-## Proposal
+## Decision
 
 `.pi/extensions/nmg/ooo-execution.ts` 每次调用创建 `ModelRuntime`、一个内存会话、一套工具、一个 prompt，
 然后销毁会话。三个事实让它无需新的 SDK 能力就能复用：
@@ -47,7 +50,9 @@ F4 落了融合的**策略半**（`PlanDriverSpec.fusion`、`PlanSession`/`PlanR
   artifact 通道）出现两份必然漂移，而漂移的那一份是没人 review 的。
 - **在 driver 里把采纳或融合变成强制。** 拒绝：策略半已经落地且诚实；缺的是执行，不是调度。
 
-## Acceptance criteria
+## Consequences
+
+机制落地时三条验收标准均已满足：扩展只保留一套 tool surface 并委托给 runner；冒烟里两个单元同处一个会话；随后各付费臂按记录跑完。
 
 1. `executePiInput` 委托给 runner，且 extension 里只有**一套**工具面；`npm run lint` 与 `npm run check` 通过，
    并且所有既有活体路径（适配器、F3 的 pilot）仍走同一条路。

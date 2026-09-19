@@ -2,7 +2,10 @@
 
 [中文](2026-09-09-ooo-bootstrap.zh-CN.md)
 
-**Status:** proposed
+**Status:** implemented
+**Approved:** explicit
+
+Implementation evidence: the seed and the cycle live in `src/integration/ooo-{board,candidate,cycle,mutation,round-log,verifier}.ts` with their drivers and product cases, and the bootstrap cycle's records are in `docs/experiments/execution/`.
 
 ## Problem
 
@@ -12,7 +15,7 @@ platform before using it would defer that feedback and encourage speculative
 features. The [probe evidence](../../experiments/ooo-admission-2026-09-08.md)
 remains evidence of a restricted experiment, not production readiness.
 
-## Proposal
+## Decision
 
 Use a minimal conventional seed, then develop the next version through the
 previous frozen version. The [draft design](../../design/ooo-execution-bootstrap.md)
@@ -36,7 +39,9 @@ normal-session scheduling.
 - Continue only ordinary sequential development: retain this as explicit recovery,
   not the preferred path once the minimal seed works.
 
-## Acceptance criteria
+## Consequences
+
+The criteria this record set are met; the evidence line at the top of this file names what implements them. Anything still owed stays written down in the design or pilot document this record links to.
 
 Apply the draft's S0–S4 gates. In particular, a real external wait must permit an
 independent development task to run; a useful OoO change must be independently

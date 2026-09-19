@@ -1,9 +1,9 @@
 # Retention, and the verdict the round no longer copies
 
 **Related:** [task-unit semantics design](../../design/task-unit-semantics.md) ·
-[proposed decision record](../../decisions/proposed/2026-09-13-task-unit-semantics.md) ·
+[proposed decision record](../../decisions/implemented/2026-09-13-task-unit-semantics.md) ·
 [the single acceptance predicate](ooo-acceptance-predicate-2026-09-13.md) ·
-[board deliverable/verdict decision](../../decisions/proposed/2026-09-06-board-governance-addressing.md)
+[board deliverable/verdict decision](../../decisions/implemented/2026-09-06-board-governance-addressing.md)
 
 Measured 2026-09-13. Zero model tokens.
 

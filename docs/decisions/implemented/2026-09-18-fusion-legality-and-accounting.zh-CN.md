@@ -6,7 +6,7 @@
 **Approved:** explicit
 **Relates to:** [任务单元语义设计](../../design/task-unit-semantics.md)（§融合）、
 [其义务台账](../../design/task-unit-semantics-obligations.md)（行 F4）、
-[融合与推测试点提案](../proposed/2026-09-18-fusion-and-speculation-pilot.md)、
+[融合与推测试点提案](../implemented/2026-09-18-fusion-and-speculation-pilot.md)、
 [成本模型记录](../../experiments/execution/ooo-cost-model-2026-09-17.md)、
 [实验臂试点](../../experiments/execution/ooo-arms-pilot-2026-09-18.md)
 

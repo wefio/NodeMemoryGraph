@@ -2,7 +2,7 @@
 
 **Status:** draft
 **Updated:** 2026-09-18
-**Related:** [选择理由](../decisions/proposed/2026-09-09-ooo-bootstrap.zh-CN.md)、[实验依据](../experiments/ooo-admission-2026-09-08.md)
+**Related:** [选择理由](../decisions/implemented/2026-09-09-ooo-bootstrap.zh-CN.md)、[实验依据](../experiments/ooo-admission-2026-09-08.md)
 
 > **2026-09-18 更新：** 轮次仪器（`round-cli.ts`、`round-runner.ts`、`round-spec.ts`、`round-compare.ts`、`ooo-round-log.ts`、`src/integration/ooo-cycle.ts`）已退役，研究侧入口改为实验臂驱动器 `evals/ooo-execution/plan-driver.ts`（[决策](../decisions/implemented/2026-09-18-retire-the-round-instrument.md)）。下面 S3/S4 行与 S2 说明保留为当时的记录。
 
@@ -150,7 +150,7 @@ S2 的退出条件“故障注入后无重复完成、错误解锁或无限等�
 
 ### 推测的落点（规则由决策记录拥有，本节只列可落地的位置）
 
-是否启用、以及启用条件，由[推测盈亏平衡决策](../decisions/proposed/2026-09-11-ooo-speculation.md)拥有；本节只回答“哪些点适合”。该决策仍为 proposed，所以上面“不推测”的现行规则继续有效，直到它进入 implemented。按**猜错花掉什么**分三类，这一点决定了一切。
+是否启用、以及启用条件，由[推测盈亏平衡决策](../decisions/implemented/2026-09-11-ooo-speculation.md)拥有；本节只回答“哪些点适合”。该决策仍为 proposed，所以上面“不推测”的现行规则继续有效，直到它进入 implemented。按**猜错花掉什么**分三类，这一点决定了一切。
 
 **已有前提**。安全推测需要的三件事已经就位：（a）错误的推测产物必须能丢弃且不得生效——补丁契约只允许产出提案、由宿主应用，worker 没有不可逆副作用，所以 squash 无需回滚任何状态；（b）提交点必须能廉价判定猜测对错——真实检查终态带检查身份与 digest，正好是那个判定点；（c）提交顺序不变。`inputDigest` 会把假设绑定进输入，因此**猜错的产物自动失效**（fenced）而不是被误接受：这正是 ROB 保证精确状态的那件事在我们这里的对应物。
 

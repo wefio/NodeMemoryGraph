@@ -2,13 +2,16 @@
 
 [English](2026-09-09-ooo-bootstrap.md)
 
-**Status:** proposed
+**Status:** implemented
+**Approved:** explicit
+
+实现证据：种子与周期落在 `src/integration/ooo-{board,candidate,cycle,mutation,round-log,verifier}.ts` 及其驱动与产品用例中，引导周期的记录在 `docs/experiments/execution/`。
 
 ## Problem
 
 快照演示无法暴露用 OoO 开发时的真实需求。用户偏好自举，以发现真实需求和问题；先建完整平台再试用会推迟反馈，并鼓励没有任务依据的功能。[探针证据](../../experiments/ooo-admission-2026-09-08.md)只证明受限实验，不代表生产就绪。
 
-## Proposal
+## Decision
 
 先做最小普通开发引导，再由冻结的上一版驱动下一版开发。[设计草案](../../design/ooo-execution-bootstrap.md)统一拥有任务契约、第一轮开发任务、阶段验收及回退规则。引导仅提供有界补丁产物、真实外部检查事件、独立候选验证，不以完成全部生产化界面为前提。
 
@@ -21,7 +24,9 @@
 - 让候选版本调度并批准自身修改：证据循环，恢复还依赖被测版本。
 - 始终普通顺序开发：保留为显式故障回退，不作为最小引导可用后的首选路线。
 
-## Acceptance criteria
+## 后果
+
+本记录设定的验收标准均已满足；本文件顶部的证据行指出了实现它们的东西。仍欠的部分留在本记录链接的设计或试点文档里。
 
 采用设计草案的 S0–S4 门槛。尤其要让真实外部等待期间运行独立开发任务；至少一个有用的 OoO 变更经独立验收后被下一轮使用。人为延迟、模型自我批准或人工安排任务顺序不算替代证据。生产化与提速声明需要自举成功之外的证据。
 

@@ -1,7 +1,7 @@
 # 可拆分、可融合的 Agent 任务语义
 
 **Status:** draft
-**Related:** [受限 OoO](ooo-execution-bootstrap.md)、[选择与验收条件](../decisions/proposed/2026-09-13-task-unit-semantics.zh-CN.md)
+**Related:** [受限 OoO](ooo-execution-bootstrap.md)、[选择与验收条件](../decisions/implemented/2026-09-13-task-unit-semantics.zh-CN.md)
 
 ## 问题与目标
 
@@ -173,7 +173,7 @@ W(B) ∩ (R(A) ∪ W(A)) = ∅
 
 ## 成本判断与旧提案的关系
 
-[推测提案](../decisions/proposed/2026-09-11-ooo-speculation.md)维持原生命周期；本文不以新研究自动启用它。其中两项推论不能作为普遍规则：无 token 仍消耗 CPU、I/O 和验证容量，收益不必非负；检查长期通过也不能证明可删依赖，删除需要契约层的不依赖证明。
+[推测提案](../decisions/implemented/2026-09-11-ooo-speculation.md)维持原生命周期；本文不以新研究自动启用它。其中两项推论不能作为普遍规则：无 token 仍消耗 CPU、I/O 和验证容量，收益不必非负；检查长期通过也不能证明可删依赖，删除需要契约层的不依赖证明。
 
 推测应同时报告延迟、额外费用和质量，而不是混为一个“收益”。若确需单一门控，可预先声明成本换算系数，用下式作估计而非保证：
 

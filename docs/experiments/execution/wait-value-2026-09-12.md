@@ -2,7 +2,7 @@
 
 **Related:** [design](../../design/ooo-execution-bootstrap.md) ·
 [admission run](../ooo-admission-2026-09-08.md) ·
-[speculation decision](../../decisions/proposed/2026-09-11-ooo-speculation.md)
+[speculation decision](../../decisions/implemented/2026-09-11-ooo-speculation.md)
 
 Measured 2026-09-12. Zero model tokens: no provider was contacted for any number below.
 

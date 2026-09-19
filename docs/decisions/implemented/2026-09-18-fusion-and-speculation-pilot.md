@@ -2,7 +2,8 @@
 
 [中文](2026-09-18-fusion-and-speculation-pilot.zh-CN.md)
 
-**Status:** proposed
+**Status:** implemented
+**Approved:** explicit
 **Relates to:** [task-unit-semantics design](../../design/task-unit-semantics.md) (§融合, §严格语义怎样重新打开推测),
 [its obligations ledger](../../design/task-unit-semantics-obligations.md),
 [the arms get their own driver](../implemented/2026-09-17-arms-get-their-own-driver.md),
@@ -20,6 +21,8 @@
 > with the accepted prefix) - sequential handoff, not fusion. F5 (the speculation lifecycle) stays unrun
 > because the design orders E after D's evidence, and F6's D half has no mechanism to spend on until an
 > extension can hold a session across calls. No paid call has been made.
+
+Implementation evidence, and the reason the recorded blocker is gone: the live worker can hold one session, so the paid arms ran. D measured session startup at ~1.9 s and the cache-aware re-measurement found cap 2 to be the knee (`docs/experiments/execution/archive/ooo-arms-2026-09-19/`); E found no realised gain. No paid call remains blocked.
 
 ## Problem
 
@@ -54,7 +57,7 @@ accepted everything). Second, the design requires D's context-reuse effect to be
 paid stage is only meaningful beside (a) the offline legality/accounting work and (b) a family whose
 checks can actually fail on the fused or speculated path.
 
-## Proposal
+## Decision
 
 Four slices, in this order, with the spend gated behind an explicit operator approval.
 
@@ -113,7 +116,9 @@ and the result is "the mechanism is not ready".
 - **Implement fusion as one acceptance for several units (transaction fusion).** Rejected by the design
   for this slice: it changes what an acceptance is, which is the thing the arms are measuring.
 
-## Acceptance criteria
+## Consequences
+
+With the mechanism in place the paid arms ran, so the budgeted pilot this record asked for is no longer blocked. D priced session startup and the cache-aware re-measurement moved the primary quantity to sessions avoided; E found no realised gain.
 
 1. F4's legality function refuses each of the five conditions when it is violated, with a named mutant
    per condition, and the driver's fused run keeps per-unit tickets, verdicts and cost records.

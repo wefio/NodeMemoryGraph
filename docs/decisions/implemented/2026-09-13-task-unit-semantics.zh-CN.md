@@ -2,14 +2,17 @@
 
 [English](2026-09-13-task-unit-semantics.md)
 
-**Status:** proposed
+**Status:** implemented
+**Approved:** explicit
 **Relates to:** [OoO 自举](2026-09-09-ooo-bootstrap.zh-CN.md)、[推测](2026-09-11-ooo-speculation.zh-CN.md)
+
+实现证据：它所评估的设计以 [task-unit-semantics.md](../../design/task-unit-semantics.md) 为规范；其切片已落地——成对谓词（`sharedSessionLegal`）、让被引证据保持可读的保留机制（`retainTaskBoardEntry`）、宿主、驱动，以及黑板的认领/尝试/交付/裁定记录。
 
 ## Problem
 
 固定 A/B/C 实验不能表达任务拆分后是否保留了全部义务。每个碎片单独派 Agent 会增加交接与上下文成本；无契约融合则可能隐藏依赖和验收边界。已有等待测量没有建立融合或推测收益。
 
-## Proposal
+## Decision
 
 检验[任务单元语义](../../design/task-unit-semantics.md)：用输入、产物、效果及验收义务描述逻辑单元，把执行分配另行处理。首个实现切片是共享层纯数据编译器与有限离线执行模型，不启用调度器或付费推测调用。
 
@@ -52,7 +55,9 @@ status 通过 owner 提供的查询端口复用 daemon 现有连接；离线宿�
 - 在初始化类 BoardAdmission 上增加 view 模式，或将共享连接设为 query_only：会耦合查询与初始化，或阻止合法写入；选择窄借用查询端口和独立的 owner 离线打开路径。
 - 保留独立 OoO 工具或改名为黑板 round 包装：仍保留竞争的流程与状态模型；选择能力归入既有 owner，普通黑板路径验证后退出兼容入口。
 
-## Acceptance criteria
+## Consequences
+
+这条记录点名的切片已落地：成对谓词、让被引证据保持可读的保留机制、宿主、驱动，以及黑板的认领/尝试/交付/裁定记录。它刻意没有启用的部分——调度器与付费推测调用——至今仍未启用。
 
 设计草案明确单元与拆分义务、保守并发、逐单元融合、假设验证、上下文作废和受控评估顺序。实现接入前须通过设计列出的有限模型反例及成本记账检查。文档验证仅检查结构，不证明任务语义或性能收益。
 

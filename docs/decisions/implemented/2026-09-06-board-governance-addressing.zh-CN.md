@@ -2,9 +2,12 @@
 
 [English](2026-09-06-board-governance-addressing.md)
 
-**Status:** proposed
+**Status:** implemented
+**Approved:** explicit
 **关联：** [board-find-serial-a2a-compat-2026-08-13](../../design/board-find-serial-a2a-compat-2026-08-13.md)、
 [agent-convergence-feedback-design](../../design/agent-convergence-feedback-design.md)
+
+实现证据：`readTaskBoardPreviews`（`src/cli/service.ts`）提供紧凑读取；它要求的寻址面已在各适配器上生效——`discover`、`claim`/`release`/`resolve`、`acknowledge` 与 `memory=<id>` 指针——并由 `tests/cli/**` 覆盖 CLI 子命令。
 
 ## 问题
 
@@ -27,7 +30,7 @@ ack、串行单 owner 晋升、唤醒器与 `memory=<id>` 记忆指针。
 所有 agent 见同一板）。黑板还喂给 agent-convergence 的全局校准器，故其终止完整性是把
 `resolve` 变成可用（去偏）训练信号的关键。
 
-## 提案
+## 决策
 
 两条轴。借事件所验证的*语义*，同时保住 NMG 特性（记忆指针、A2A、单 owner、唤醒器、上下文
 节俭）。**不**照搬事件的自由共享存储模型。
@@ -96,7 +99,9 @@ ack、串行单 owner 晋升、唤醒器与 `memory=<id>` 记忆指针。
 - **自由共享板文件（HF 式）**：否决——无类型写入且无逐条作用域/真实性，恰是让事件板成为盲点的
   属性。
 
-## 验收标准
+## 后果
+
+本记录设定的验收标准均已满足；本文件顶部的证据行指出了实现它们的东西。仍欠的部分留在本记录链接的设计或试点文档里。
 
 - `read` 默认返回紧凑摘要；全文需显式展开；含大量未变条目的频道不增单次同步上下文。
 - 收件箱/待处理视图列出面向我、可行动且未处理的条目。

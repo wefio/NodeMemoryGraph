@@ -2,8 +2,11 @@
 
 [中文](2026-09-19-fusion-session-mechanism.zh-CN.md)
 
-**Status:** proposed
+**Status:** implemented
+**Approved:** explicit
 **Relates to:** [the pilot and its ceiling](2026-09-18-fusion-and-speculation-pilot.md), [fusion legality and accounting](../implemented/2026-09-18-fusion-legality-and-accounting.md)
+
+Implementation evidence: `createPiSessionRunner` and `patchSessionInput` in `.pi/extensions/nmg/ooo-execution.ts` hold one session per run behind the `UnitState` box, `executePiInputWith` delegates to it so the extension keeps exactly one tool surface, and `piSessionWorker` in `evals/ooo-execution/plan-driver.ts` holds one runner per session id. The smoke reported both units in one session (`sessions: [["alpha","summary"]]`, 21k tokens). What remains is not mechanism: no product-side caller yet decides to reuse a session.
 
 ## Problem
 
@@ -13,7 +16,7 @@ creates a session per call, so a fused live arm had nothing to reuse. The pilot 
 as a blocker, which framed a missing mechanism as a property of the design and left an approved budget
 unspent. It is a missing mechanism, and the design says what it must be.
 
-## Proposal
+## Decision
 
 `.pi/extensions/nmg/ooo-execution.ts` creates a `ModelRuntime`, one in-memory session, one tool set and
 one prompt per call, then disposes the session. Three facts make reuse possible without new SDK
@@ -59,7 +62,9 @@ Two consequences decided here rather than discovered later:
 - **Make adoption or fusion mandatory in the driver.** Rejected: the policy half is landed and honest;
   what is missing is execution, not scheduling.
 
-## Acceptance criteria
+## Consequences
+
+All three criteria were met once the mechanism landed: the extension keeps one tool surface and delegates to the runner, the smoke ran two units in one session, and the paid arms then ran as recorded.
 
 1. `executePiInput` delegates to the runner and the extension keeps exactly one tool surface; `npm run
    lint` and `npm run check` pass, and every existing live path (the adapters, F3's pilot) still runs

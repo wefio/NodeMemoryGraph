@@ -6,7 +6,7 @@
 **Approved:** explicit
 **Relates to:** [task-unit-semantics design](../../design/task-unit-semantics.md) (§融合),
 [its obligations ledger](../../design/task-unit-semantics-obligations.md) (row F4),
-[the fusion and speculation pilot proposal](../proposed/2026-09-18-fusion-and-speculation-pilot.md),
+[the fusion and speculation pilot proposal](../implemented/2026-09-18-fusion-and-speculation-pilot.md),
 [the cost model record](../../experiments/execution/ooo-cost-model-2026-09-17.md),
 [the arms pilot](../../experiments/execution/ooo-arms-pilot-2026-09-18.md)
 

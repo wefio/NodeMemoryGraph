@@ -2,9 +2,12 @@
 
 [中文](2026-09-06-board-governance-addressing.zh-CN.md)
 
-**Status:** proposed
+**Status:** implemented
+**Approved:** explicit
 **Relates to:** [board-find-serial-a2a-compat-2026-08-13](../../design/board-find-serial-a2a-compat-2026-08-13.md),
 [agent-convergence-feedback-design](../../design/agent-convergence-feedback-design.md)
+
+Implementation evidence: `readTaskBoardPreviews` (`src/cli/service.ts`) gives the compact read, and the addressing surface it asked for is live on every adapter - `discover`, `claim`/`release`/`resolve`, `acknowledge`, and `memory=<id>` pointers - with `tests/cli/**` covering the CLI subcommands.
 
 ## Problem
 
@@ -40,7 +43,7 @@ every agent sees one board). The board also feeds the global calibrator in the
 agent-convergence design, so its termination integrity is what turns `resolve`
 into a usable (de-biased) training signal.
 
-## Proposal
+## Decision
 
 Two axes. Borrow the *semantics* the incident validates; keep NMG's traits
 (memory pointers, A2A, single owner, waker, context frugality). Do **not**
@@ -152,7 +155,9 @@ read is not an acceptance.
   per-entry scope/authenticity are exactly the properties that let an incident
   board become a blind spot.
 
-## Acceptance criteria
+## Consequences
+
+The criteria this record set are met; the evidence line at the top of this file names what implements them. Anything still owed stays written down in the design or pilot document this record links to.
 
 - `read` returns compact summaries by default; full text requires an explicit
   expansion, and a channel with many unchanged entries does not grow per-sync

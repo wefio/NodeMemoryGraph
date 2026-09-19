@@ -2,8 +2,11 @@
 
 [中文](2026-09-11-ooo-speculation.zh-CN.md)
 
-**Status:** proposed
+**Status:** implemented
+**Approved:** explicit
 **Relates to:** [Bootstrap restricted OoO through real development](2026-09-09-ooo-bootstrap.md)
+
+Implementation evidence: the free class is implemented as `SpeculationAssumption`/`ResolvedPredicate`/`speculationOutcome` in `src/integration/ooo-execution.ts` (9 cases, 5 mutants). The measured payoff is nil: the E arm published 0 of 3 candidates from speculation (`docs/experiments/execution/archive/ooo-arms-2026-09-19/`), so the rule stands and the gate the record asked for holds.
 
 ## Problem
 
@@ -18,7 +21,7 @@ hides a stall. Two questions follow, and they have different answers here. Does
 this system have points where a wrong guess is free? And is hiding a long wait by
 guessing its outcome a real opportunity?
 
-## Proposal
+## Decision
 
 Adopt the free class, refuse the wait-hiding class, and keep the mechanism that
 makes a guess explicit and reversible.
@@ -74,7 +77,9 @@ whole dependency chain), guessing which tasks exist, and preemption.
   correctness, which is the false-positive basin this project already measured in
   an earlier round. An advisor may say no; only the host may say yes.
 
-## Acceptance criteria
+## Consequences
+
+The criteria this record set are met; the evidence line at the top of this file names what implements them. Anything still owed stays written down in the design or pilot document this record links to.
 
 - Each round records worker tokens, per-step wall time, and any squashed
   speculation with its cost; without these numbers no payoff claim is checkable.

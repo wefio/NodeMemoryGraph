@@ -2,14 +2,17 @@
 
 [中文](2026-09-13-task-unit-semantics.zh-CN.md)
 
-**Status:** proposed
+**Status:** implemented
+**Approved:** explicit
 **Relates to:** [OoO bootstrap](2026-09-09-ooo-bootstrap.md), [speculation](2026-09-11-ooo-speculation.md)
+
+Implementation evidence: the design it evaluates is normative at [task-unit-semantics.md](../../design/task-unit-semantics.md), and its slices landed - the pair predicate (`sharedSessionLegal`), the retention that keeps referenced evidence readable (`retainTaskBoardEntry`), the host, the driver, and the board's claim/attempt/delivery/judgement records.
 
 ## Problem
 
 The fixed A/B/C experiment does not express when a task can be decomposed without losing its obligations. Making every fragment a separate Agent adds handoff and context cost; combining fragments without a contract can hide dependencies and acceptance boundaries. Existing wait measurements establish neither fusion gains nor profitable speculation.
 
-## Proposal
+## Decision
 
 Evaluate the [task-unit semantics](../../design/task-unit-semantics.md): explicit inputs, artifacts, effects and acceptance obligations, separate from execution placement. The first implementation slice is a shared pure-data compiler and finite offline execution model. It does not enable a scheduler or paid speculative calls.
 
@@ -52,7 +55,9 @@ The user confirms that the primary evaluation concerns granularity, concurrency 
 - A view mode on the initializing BoardAdmission class, or query_only on the shared connection: couples observation to initialization or disables legitimate writers; use a narrow borrowed query port and a separate owner-only offline opening path.
 - Retain a standalone OoO tool or rename it to a board round wrapper: preserves a competing workflow and state model; absorb capabilities into existing owners and retire the compatibility entry after an ordinary board path is verified.
 
-## Acceptance criteria
+## Consequences
+
+The slices this record named landed: the pair predicate, the retention that keeps referenced evidence readable, the host, the driver, and the board's claim/attempt/delivery/judgement records. What it deliberately did not enable - a scheduler and paid speculative calls - is still not enabled.
 
 The draft defines checkable unit and refinement obligations, conservative concurrency, per-unit fusion, assumption validation, context invalidation, and a controlled evaluation sequence. Implementation must demonstrate the finite-model counterexamples and cost accounting described there before integration. Document validation checks structure only; it does not prove these semantics or any performance claim.
 
