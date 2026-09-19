@@ -155,3 +155,37 @@ second-unit saving is real; what n = 6 at one plan shape and one model cannot sa
 ```
 node .temp/run-darm.mjs   # 6 paid runs (3 per bound); writes .temp/darm/*.json + aggregate
 ```
+
+## E arm: bounded speculation (first run, 2026-09-19)
+
+The E arm adds one declared fact to the D arm's machinery: whether this round needs the unit at all -
+the case the design names as legitimate speculation, because the fact decides whether the work happens
+rather than what the work reads. The instrument is `evals/ooo-execution/speculation-pilot.ts`: the
+candidate is prepared before the fact, and the shared layer's `speculationOutcome` decides what happens
+to it. A published candidate is still verified by the host with the unit's own frozen check, which is the
+quality term; a discarded one closes its branch session.
+
+| Arm         | Fact   | Runs | Tokens  | Work ms | Post-fact ms | Quality    |
+| ----------- | ------ | ---- | ------- | ------- | ------------ | ---------- |
+| baseline    | holds  | 2    | 13 544  | 10 358  | 10 358       | false ×2   |
+| speculation | holds  | 2    | 17 151  | 15 066  | 186          | false ×2   |
+| baseline    | absent | 2    | 0       | 0       | 0            | n/a        |
+| speculation | absent | 2    | 12 543  | 15 577  | 0            | n/a        |
+
+**No speedup may be claimed.** The quality term is false in all four verified candidates: each submitted
+patch failed the unit's own frozen check. The design's rule is that latency and cost may not be reported
+without equal quality, so the shape below is what the arm *would* measure, not a result.
+
+**What the shape is.** Speculation always pays for the unit - 12 543 tokens when the fact turned out
+false, which is the whole point of measuring the waste - and buys the work's latency back when it holds:
+186 ms of post-fact verification against 10 358 ms of work in the control. The arm's economics therefore
+turn on the hit rate, which is what the design's utility formula says and what this sample cannot yet
+price.
+
+**Two defects the first run found.** The extension accepted an artifact the host refuses: one candidate
+carried `digest, kind, conclusion, summary, evidence, citations` and no `files`, which
+`artifactEnvelope` admitted and `patchCandidate` then refused as "invalid patch structure" - a
+submission the adapter can accept that the board can never accept. And the instrument's own quality
+harness deleted the candidate tree on failure, so the first run could not say why every check failed;
+it now keeps the tree, and the control rows record the check's own output.
+
