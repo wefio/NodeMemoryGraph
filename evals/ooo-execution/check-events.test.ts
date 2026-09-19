@@ -4,14 +4,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BoardAdmission } from "../../src/integration/ooo-board.ts";
-import { verifyRenameCandidate } from "../../src/integration/ooo-verifier.ts";
+import { verifyRenameCandidate } from "../../src/integration/check-runner.ts";
 import { expectedRenameOf, renameSource } from "./rename-probe.ts";
 import {
   checkResultValid,
   sameCheck,
   type CheckResult,
   type CheckTicket,
-} from "../../src/integration/ooo-check.ts";
+} from "../../src/integration/check-ticket.ts";
 
 test("contract: real syntax-check terminal identity is admitted by the board coordinator", async (t) => {
   const { gate } = fixture(t);

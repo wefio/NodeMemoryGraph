@@ -10,7 +10,7 @@ import {
   snapshotText,
 } from "../../.pi/extensions/nmg/ooo-execution.ts";
 import { patchCandidate, patchPrompt, preparePatchWork } from "../../src/integration/ooo-patch.ts";
-import { verifyRenameCandidate } from "../../src/integration/ooo-verifier.ts";
+import { verifyRenameCandidate } from "../../src/integration/check-runner.ts";
 import { expectedRenameOf, renameSource } from "../../evals/ooo-execution/rename-probe.ts";
 import { mutate } from "../../src/integration/ooo-mutation.ts";
 
@@ -98,7 +98,7 @@ test("safety: the worker's check tool validates proposed files through the share
     "src/check.test.ts": "new\n",
   });
   for (const files of [
-    [{ path: "src/integration/ooo-check.ts", content: "injected\n" }],
+    [{ path: "src/integration/check-ticket.ts", content: "injected\n" }],
     [{ path: "../outside.ts", content: "injected\n" }],
     [{ path: "src/check.test.ts", content: "old\n" }],
     [],
@@ -175,7 +175,7 @@ test("safety: rename oracle rejects unrelated changes which passed the old subst
   assert.equal(expectedRenameOf(prefix + source), prefix + expected);
   assert.throws(() => expectedRenameOf("missing function"));
   assert.throws(() => expectedRenameOf(expected));
-  assert.throws(() => expectedRename(source + "\nexport const another = 1;"));
+  assert.throws(() => expectedRenameOf(source + "\nexport const another = 1;"));
 });
 
 test("scope: the snapshot carries the readable subset only, and names what is hidden", () => {
@@ -184,17 +184,17 @@ test("scope: the snapshot carries the readable subset only, and names what is hi
     attempt: 1,
     instruction: "Repair the check.",
     files: {
-      "src/integration/ooo-check.ts": "export const a = 1;\n",
+      "src/integration/check-ticket.ts": "export const a = 1;\n",
       "src/integration/ooo-patch.ts": "export const big = 1;\n",
     },
-    editable: ["src/integration/ooo-check.ts"],
-    visible: ["src/integration/ooo-check.ts"],
+    editable: ["src/integration/check-ticket.ts"],
+    visible: ["src/integration/check-ticket.ts"],
   });
   const snapshot = JSON.parse(snapshotText(frozen)) as {
     files: Record<string, string>;
     hidden?: string[];
   };
-  assert.deepEqual(Object.keys(snapshot.files), ["src/integration/ooo-check.ts"]);
+  assert.deepEqual(Object.keys(snapshot.files), ["src/integration/check-ticket.ts"]);
   assert.deepEqual(snapshot.hidden, ["src/integration/ooo-patch.ts"]);
   const prompt = patchPrompt(frozen, ARTIFACT_TOOL);
   // What is frozen but not shown is stated, so narrowing the view is never a hidden rule.
@@ -205,8 +205,8 @@ test("scope: the snapshot carries the readable subset only, and names what is hi
     taskId: "run-1:B",
     attempt: 1,
     instruction: "Add a regression.",
-    files: { "src/integration/ooo-check.ts": "export const a = 1;\n" },
-    editable: ["src/integration/ooo-check.ts"],
+    files: { "src/integration/check-ticket.ts": "export const a = 1;\n" },
+    editable: ["src/integration/check-ticket.ts"],
   });
   assert.ok(!patchPrompt(whole, ARTIFACT_TOOL).includes("Frozen but not shown"));
   assert.ok(snapshotText(whole).includes('"hidden"') === false);

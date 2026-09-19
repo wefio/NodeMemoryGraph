@@ -8,7 +8,7 @@ import { mutate, type Mutation } from "../../src/integration/ooo-mutation.ts";
 
 const repository = process.cwd();
 const revision = process.env.MUTATION_REVISION ?? "HEAD";
-const impl = "src/integration/ooo-check.ts";
+const impl = "src/integration/check-ticket.ts";
 const defaultPaths = [
   impl,
   "evals/ooo-execution/check-events.test.ts",

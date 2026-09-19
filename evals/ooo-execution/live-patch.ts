@@ -5,7 +5,7 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { patchCandidate, preparePatchWork } from "../../src/integration/ooo-patch.ts";
 import { executePiPatch } from "../../.pi/extensions/nmg/ooo-execution.ts";
-import { verifyRenameCandidate } from "../../src/integration/ooo-verifier.ts";
+import { verifyRenameCandidate } from "../../src/integration/check-runner.ts";
 import { expectedRenameOf, RENAME_TARGET, renameSource } from "./rename-probe.ts";
 import { randomUUID } from "node:crypto";
 

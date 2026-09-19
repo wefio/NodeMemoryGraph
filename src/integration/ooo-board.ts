@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { NmgStore } from "../../src/core/store.ts";
 import type { TransactionPort } from "../../src/core/store/base.ts";
 import { acceptedFact, deriveStatus } from "./task-semantics.ts";
-import { checkResultValid, sameCheck, type CheckTicket, type CheckResult } from "./ooo-check.ts";
+import { checkResultValid, sameCheck, type CheckTicket, type CheckResult } from "./check-ticket.ts";
 import {
   patchCandidate,
   patchSubmission,

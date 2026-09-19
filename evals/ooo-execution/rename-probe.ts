@@ -10,7 +10,7 @@
  */
 import { readFileSync } from "node:fs";
 
-import { expectedRename } from "../../src/integration/ooo-verifier.ts";
+import { expectedRename } from "../../src/integration/check-runner.ts";
 
 /** The path the probe's spec, artifact and verify all agree on. */
 export const RENAME_TARGET = "fixtures/rename-baseline.ts";
