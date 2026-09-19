@@ -209,6 +209,7 @@ routes:
       - src/integration/ooo-patch.ts
       - src/integration/check-ticket.ts
       - src/integration/check-runner.ts
+      - src/integration/ooo-session-facts.ts
       - src/integration/task-advisers.ts
       - src/integration/task-coordinator.ts
       - src/integration/task-semantics-interleavings.ts
