@@ -174,19 +174,23 @@ resolve the effect - which is a fact about the sample, not about fusion.
 2. **A third rep on cap 4 (+55 k).** The knee claim (cap 2 rather than cap 4) still rests on two reps:
    1 090 ms of extra wall clock for about 18 k more tokens than cap 2 - and the token columns are the ones
    that did not survive three reps elsewhere, so the knee's wall half is the part a rep would settle.
-3. **A (coarse, 1 unit) and C (fine, slots 2) through the driver (~41 k: 11 k + 30 k).** The arms record
-   ran A/B/C through `pilot.ts`, which supplies the worker itself; the fixture, plans, limits and model
-   match, the entry point does not. Without these two cells any A-D table mixes instruments, and a table
-   that mixes them has to say so in the same sentence as its numbers.
-4. **A priced comparison - no runs, an instrumentation change.** The per-run records carry `tokens`,
-   `cacheRead` and `cacheWrite` per unit, never output tokens separately, so `tokens - cacheRead` mixes
-   output into input and is not a price. Recording the three apart is the cheaper half of resolving the
-   token question, and it removes the reason to buy more reps for it.
-5. **Recording the instrument with the run (free, and the reason this section needed prose).** The reports
-   carry the spec, the worker, the model, the envelope and the session grouping, but not the commit or a
-   prompt digest, so "the same spec" had to be argued about instead of checked. The driver should write its
-   own commit and a digest of the prompt its session was given; until it does, every comparison here says
-   which runs share an instrument version.
+3. **Done, 2026-09-19: A, B and C on the plain path (69 654 tokens: 9 018 + 29 962 + 30 674).** These
+   turned out to be three cells rather than the two planned, because reading the driver showed that all
+   three cap specs declare `fusion` and therefore run the **chain surface** at every bound: `cap 1` is the
+   fused arms' same-surface control, not the plain B cell. A (coarse, 1 unit), B (fine, slots 1) and C
+   (fine, slots 2) now exist on the plain path with the same fixture, worker, envelope and parent check as
+   the cap cells, and they are the first reports that name their own commit and per-unit prompt digest. See
+   [the granularity cells](../execution/archive/ooo-arms-2026-09-19/README.md#granularity-abc---the-a-b-and-c-cells-on-the-plain-path-2026-09-19).
+4. **A priced comparison - the instrumentation is done, the run is not.** The reports now carry
+   `inputTokens`, `outputTokens`, `cacheRead`, `cacheWrite` and the provider's own `cost` per unit
+   ([the split landed 2026-09-19](../../design/ooo-fusion-planning.md)), and A/B/C are priced: 0.000773,
+   0.002206 and 0.002076. The fused cells' reports predate the split, so the fused-vs-plain price is the
+   remaining purchase (see the stop rule below).
+5. **Recording the instrument with the run (done 2026-09-19, in the same pass as the split).** The reports
+   now carry `instrument.commit`, read from git at run time, and a `promptDigest` per unit; the A/B/C cells
+   are the first that name their own code, and the cap cells recorded earlier the same day name no commit
+   at all, which is exactly the gap this closed. The review's other half of this item - that a comparison
+   should say which runs share an instrument version - is now a field rather than a paragraph.
 
 **What the third rep settled, and what it cost.** The saving is a rate rather than one lucky pair: the
 two-rep pair alone already separates, and the third rep narrows both cells without changing the direction.
@@ -199,18 +203,43 @@ was guessed from the usage line: without `--session-runner` the driver refuses a
 name, spends only the first unit's tokens and records the refusal in `incomplete` - the guard working, and
 the refusal is archived rather than deleted.
 
+**The A-D table, as far as it is measured.** One parent task (the four-unit pipeline fixture, or the same
+work as one unit for A), one worker, one envelope, one parent check. Two surfaces, and the difference
+matters: the plain cells vary granularity and slots, the chain cells vary fusion only.
+
+| arm  | surface | shape          | slots | reps | wall               | tokens | cost     |
+| ---- | ------- | -------------- | ----- | ---- | ------------------ | ------ | -------- |
+| A    | plain   | coarse, 1 unit | 1     | 1    | 9 726 ms           | 9 018  | 0.000773 |
+| B    | plain   | fine, 4 units  | 1     | 1    | 21 885 ms          | 29 962 | 0.002206 |
+| C    | plain   | fine, 4 units  | 2     | 1    | 18 565 ms          | 30 674 | 0.002076 |
+| cap1 | chain   | fine, 4 units  | 1     | 3    | 26 186 ms (median) | 45 482 | -        |
+| cap2 | chain   | fine, 4 units  | 1     | 3    | 17 735 ms (median) | 37 693 | -        |
+| cap4 | chain   | fine, 4 units  | 1     | 2    | 16 645 ms (median) | 55 286 | -        |
+
+Four things this now measures that no earlier reading of the arms did. The split (granularity) pays on
+wall clock but not on the parent check's queue: A is 9 726 ms against B's 21 885 ms, so the coarse arm is
+still far cheaper even though both accept. A second slot buys C 3 320 ms over B, which is the slot
+question rather than the fusion one. Declaring fusion at bound 1 - fusing nothing - costs 4 301 ms and
+15 520 tokens more than the plain path does for the same plan, so the chain surface is not free. And
+fusion still wins against both baselines: cap 2 is 4 150 ms below plain B and 8 451 ms below cap 1, while
+spending 7 731 tokens more than B.
+
 **A/B/C's samples are not in the repository.** The arms record quotes A 33 677, B 94 601 and C 59 830
 tokens with per-run times, but only the D and E arms and the cap experiments were rescued, and searching
 the repository for those totals finds the record's own table and nothing else. So a same-task A-D table
 cannot be assembled from what is stored: for the coarse and slot arms there is a summary, not a sample.
 That is a reason to re-run those cells rather than to compare against them.
 
-**Ceiling and stop rule.** No cell above may be paid for until the user names a ceiling for this step. One
-purchase has been made under that rule (item 1, 80 404 tokens, named before it started); what remains is
-items 2, 3 and 4, and of those only item 4 makes a policy sentence decidable, because a wall-clock saving
-with no price beside it cannot decide a policy. A run that fails is reported as a failure and not retried;
-the round stops at the ceiling rather than stretching it. A fused spec is never run as an unfused control -
-the driver refuses it - so every cell above stays self-identifying in the archive.
+**Ceiling and stop rule.** No cell above may be paid for until the user names a ceiling for this step. Two
+purchases have been made under that rule - the cap cells' third reps (80 404 tokens) and A/B/C (69 654) -
+and the one purchase left is a priced fusion arm: **one `cap 2`-shaped run through the new instrumentation,
+so the fused arm's `input`/`output`/`cost` exist beside plain B's** (about 40 k). Nothing cheaper settles
+it, because no stored cap report carries the split; and nothing settles it for less than a rep, because a
+single priced pair is one run and not a rate. Items 2 and 5 stay as they were: the knee's wall half is not
+worth a rep until a policy is being declared, and the driver change is free. A run that fails is reported
+as a failure and not retried; the round stops at the ceiling rather than stretching it. A fused spec is
+never run as an unfused control - the driver refuses it - so every cell above stays self-identifying, and a
+plain cell cannot be read as a fused one.
 
 ## P4 - Retention, kept light (free)
 

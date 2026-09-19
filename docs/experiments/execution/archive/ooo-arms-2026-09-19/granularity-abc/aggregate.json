@@ -1,0 +1,120 @@
+{
+  "note": "One object per cell, values recomputed from the report files, medians over the reps stored. The plain cells (A, B, C) and the chain cells (cap1, cap2, cap4) are two surfaces: only the cap cells vary fusion, and only the plain cells vary granularity and slots.",
+  "plain": [
+    {
+      "arm": "A",
+      "surface": "plain",
+      "shape": "coarse, 1 unit",
+      "slots": 1,
+      "reps": 1,
+      "units": 1,
+      "sessions": 0,
+      "wallMs": 9726,
+      "tokens": 9018,
+      "inputTokens": 2377,
+      "outputTokens": 1521,
+      "cacheRead": 5120,
+      "cost": 0.000772996,
+      "instrument": "f1583087656383c56f90c9288b9ec0d60eb17cf8",
+      "promptDigests": [
+        "5225e08972cf"
+      ]
+    },
+    {
+      "arm": "B",
+      "surface": "plain",
+      "shape": "fine, 4 units",
+      "slots": 1,
+      "reps": 1,
+      "units": 4,
+      "sessions": 0,
+      "wallMs": 21885,
+      "tokens": 29962,
+      "inputTokens": 8940,
+      "outputTokens": 3230,
+      "cacheRead": 17792,
+      "cost": 0.0022058176,
+      "instrument": "f1583087656383c56f90c9288b9ec0d60eb17cf8",
+      "promptDigests": [
+        "ee07ef9bc304",
+        "5ae57b6b32ab",
+        "2d9bd580985e",
+        "a6a56d4de56f"
+      ]
+    },
+    {
+      "arm": "C",
+      "surface": "plain",
+      "shape": "fine, 4 units",
+      "slots": 2,
+      "reps": 1,
+      "units": 4,
+      "sessions": 0,
+      "wallMs": 18565,
+      "tokens": 30674,
+      "inputTokens": 7238,
+      "outputTokens": 3596,
+      "cacheRead": 19840,
+      "cost": 0.002075752,
+      "instrument": "f1583087656383c56f90c9288b9ec0d60eb17cf8",
+      "promptDigests": [
+        "5ae57b6b32ab",
+        "ee07ef9bc304",
+        "2d9bd580985e",
+        "a6a56d4de56f"
+      ]
+    }
+  ],
+  "chain": [
+    {
+      "arm": "cap1",
+      "surface": "chain",
+      "shape": "fine, 4 units",
+      "slots": 1,
+      "reps": 3,
+      "units": 4,
+      "wallMsMedian": 26186,
+      "tokensMedian": 45482,
+      "cacheReadMedian": 36992,
+      "wallMs": [
+        25270,
+        26186,
+        27053
+      ],
+      "note": "the cap reports predate the usage split, so input/output/cost are absent for them"
+    },
+    {
+      "arm": "cap2",
+      "surface": "chain",
+      "shape": "fine, 4 units",
+      "slots": 1,
+      "reps": 3,
+      "units": 4,
+      "wallMsMedian": 17735,
+      "tokensMedian": 37693,
+      "cacheReadMedian": 30080,
+      "wallMs": [
+        17427,
+        17735,
+        17998
+      ],
+      "note": "the cap reports predate the usage split, so input/output/cost are absent for them"
+    },
+    {
+      "arm": "cap4",
+      "surface": "chain",
+      "shape": "fine, 4 units",
+      "slots": 1,
+      "reps": 2,
+      "units": 4,
+      "wallMsMedian": 16645.0,
+      "tokensMedian": 55286.0,
+      "cacheReadMedian": 46144.0,
+      "wallMs": [
+        16480,
+        16810
+      ],
+      "note": "the cap reports predate the usage split, so input/output/cost are absent for them"
+    }
+  ]
+}

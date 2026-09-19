@@ -82,12 +82,15 @@ The gap between the two is the honest answer to "how much is fusion worth": the 
 could save at best, and the list-scheduling result is what the current rule actually gets. Reported
 against the measured startup, the difference is milliseconds saved.
 
-Not modelled by the ceiling, and not priced by any run yet: the union tool surface's extra turn (about
-0.7 k tokens on a chain's first unit, measured on the D arm's plan) and the tokens a longer chain spends
-carrying its context. The cap experiment's token columns do not settle the second: with three reps, cap 1's
-own token spread (11 946) is wider than its median gap to cap 2 (7 789), and the cache-read share of a
-cell's tokens runs from 0.607 to 0.847. So the ceiling stays a wall-clock ceiling, and the cost of fusing
-is unmeasured rather than small - pricing it needs uncached input, cache reads and output recorded apart.
+Not modelled by the ceiling, and now measured in two pieces: the union tool surface's extra turn (about
+0.7 k tokens on a chain's first unit, measured on the D arm's plan) and what the chain **surface** costs even
+when it fuses nothing. On the four-unit fine plan, the chain surface at bound 1 spends 4 301 ms and 15 520
+tokens more than the plain path spends for the same plan, slots and parent check (26 186 ms and 45 482
+tokens against 21 885 ms and 29 962), and most of that token difference is cache reads - so the surface
+re-sends and re-reads its context on every turn. What is still not priced is the fused cell itself: its
+reports predate the usage split that now exists
+([the A-D cells](../experiments/execution/archive/ooo-arms-2026-09-19/README.md)), which is why the ceiling
+stays a wall-clock ceiling for now and why the cost of fusing is unmeasured rather than small.
 
 ## What the ceiling says today
 
@@ -149,10 +152,14 @@ document's earlier readings:
   cell (0.847 in another run of the same cell), and per-cell token spreads - 11 946 in cap 1 - are wider
   than the median gaps they would be compared across. So no token-direction claim is supported by these
   runs: the 1.3-1.9x that an unpaired token median once suggested is not replaced by a better number, it is
-  unresolved. Resolving it needs either many more reps or the three prices recorded apart, and the second
-  is cheaper than the first. The last column is **not a price**: `tokens` counts input and output together,
-  so the subtraction leaves the tokens not served from cache - uncached input plus every output token - and
-  the reports do not say whether the cache figure nests inside the total at all.
+  unresolved. Resolving it needs either many more reps or the prices recorded apart, and the second is
+  cheaper than the first - so the reports now record them: `inputTokens`, `outputTokens`, `cacheRead`,
+  `cacheWrite` and the provider's own `cost`, per unit, with the A, B and C cells the first runs to carry
+  them (their totals decompose exactly, and the provider's price comes with them). The cap cells in the
+  table above predate that and cannot be repriced. The ratio column beside them is **not** a price either:
+  `tokens` counts input and output together, so subtracting cache reads leaves the tokens not served from
+  cache - uncached input plus every output token - and the reports do not say whether the cache figure nests
+  inside the total at all.
 - **Cap 2 is still the knee in this sample, at two reps.** It takes 8 451 ms of the 9 541 ms available
   while sending the _fewest_ tokens of the three (median 37 693), and cap 4 buys the last 1 090 ms. Two
   runs per cell is not enough to fix a policy, and fewer sessions is not the same quantity as a shorter
