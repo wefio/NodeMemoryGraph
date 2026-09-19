@@ -307,3 +307,107 @@ export function fusionCandidates(plan: SessionPlan): readonly (readonly [string,
     fusionSuccessors(before.id, plan).map((after) => [before.id, after] as const),
   );
 }
+
+/** A guess about one declared, finite-valued fact: which predicate is being guessed, which version of it,
+ *  and the value the candidate was prepared for. This is the design's
+ *  `assumptions=[{predicateId, version, expected}]`, and it is a *declaration*: the summary binds to the
+ *  assumption and never discovers for itself that the assumption was false. */
+export interface SpeculationAssumption {
+  predicateId: string;
+  version: string;
+  expected: string;
+}
+
+/** What the authoritative evidence says about one predicate. `authoritative` is not a courtesy: an
+ *  unattested reading is not evidence, and the design refuses to let one stand in for the fact. */
+export interface ResolvedPredicate {
+  predicateId: string;
+  version: string;
+  value: string;
+  authoritative: boolean;
+}
+
+/** One candidate prepared ahead of the fact it guesses, plus what was prepared *from* the guess. */
+export interface SpeculationCandidate {
+  taskId: string;
+  assumptions: readonly SpeculationAssumption[];
+  /** Units prepared to continue the branch. The first experiment allows none. */
+  speculativeSuccessors: readonly string[];
+  /** Irreversible external operations taken on the strength of the guess. The first experiment allows
+   *  none: a wrong guess may cost tokens, never a write nobody can take back. */
+  irreversibleOperations: readonly string[];
+}
+
+/** Whether this is the bounded speculation the design's first experiment permits: exactly one pending
+ *  fact, and nothing prepared from it beyond the one candidate. Returns false rather than throwing so a
+ *  caller can tell "not this shape" from the three outcomes. */
+export function isBoundedSpeculation(candidate: SpeculationCandidate): boolean {
+  return (
+    candidate.assumptions.length === 1 &&
+    candidate.speculativeSuccessors.length === 0 &&
+    candidate.irreversibleOperations.length === 0
+  );
+}
+
+export type SpeculationOutcome = "publish" | "wait" | "discard";
+
+/** What the host must do about one bounded speculation candidate, and whether the session that prepared
+ *  it may be reused for the real path. */
+export interface SpeculationDecision {
+  outcome: SpeculationOutcome;
+  /** A discarded branch's session may not be reused: the model has already seen the guess, and an answer
+   *  taken from there is not an answer to the real question (design: "失效会话不能复用到真实路径"). */
+  sessionReusable: boolean;
+  reason: string;
+}
+
+/**
+ * The design's three outcomes, read from authoritative evidence at the publish boundary:
+ *
+ * - **true**: the evidence is the guessed value at the guessed version - the candidate may be published.
+ * - **false**: the evidence contradicts the guess - the candidate is discarded and its branch session is
+ *   closed; the real path runs again under a new ticket, never from this session.
+ * - **unknown**: no authoritative evidence, or evidence about another version - the candidate stays
+ *   unaccepted and the host waits. Waiting is not a failure, and it is not permission to publish: the
+ *   design's "不确定就等待或 undecidable" is why a missing reading never becomes a silent true.
+ *
+ * Asking about a candidate that is not the bounded shape is a caller error, not an outcome, so it is
+ * refused by name instead of being folded into one of the three. */
+export function speculationOutcome(
+  candidate: SpeculationCandidate,
+  resolved: readonly ResolvedPredicate[],
+): SpeculationDecision {
+  if (!isBoundedSpeculation(candidate))
+    throw new Error(`${candidate.taskId}: not a bounded speculation candidate`);
+  const assumption = candidate.assumptions[0]!;
+  const fact = resolved.find((item) => item.predicateId === assumption.predicateId);
+  if (!fact)
+    return {
+      outcome: "wait",
+      sessionReusable: true,
+      reason: `no evidence for ${assumption.predicateId}`,
+    };
+  if (!fact.authoritative)
+    return {
+      outcome: "wait",
+      sessionReusable: true,
+      reason: `${assumption.predicateId}: not authoritative`,
+    };
+  if (fact.version !== assumption.version)
+    return {
+      outcome: "wait",
+      sessionReusable: true,
+      reason: `${assumption.predicateId}: evidence is about ${fact.version}, not ${assumption.version}`,
+    };
+  if (fact.value === assumption.expected)
+    return {
+      outcome: "publish",
+      sessionReusable: true,
+      reason: `${assumption.predicateId}: holds`,
+    };
+  return {
+    outcome: "discard",
+    sessionReusable: false,
+    reason: `${assumption.predicateId}: ${fact.value}, not ${assumption.expected}`,
+  };
+}

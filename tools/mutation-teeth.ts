@@ -517,6 +517,7 @@ const TARGETS: readonly Target[] = [
       "tests/integration/ooo-advisers.test.ts",
       "evals/ooo-execution/patch-cycle.test.ts",
       "evals/ooo-execution/narrow-dispatch.test.ts",
+      "tests/integration/ooo-speculation.test.ts",
     ],
     mutants: [
       {
@@ -596,6 +597,49 @@ const TARGETS: readonly Target[] = [
         from: "  return selectableTasks(plan, slots)[0] ?? null;",
         to: "  return selectableTasks(plan, slots)[1] ?? null;",
         expect: "the round's own answer is the shared rule's answer, not an ordering's",
+      },
+      {
+        // The design's first experiment allows exactly one pending fact. This lets a candidate guess
+        // two at once, which is the boundary the design says to prove before widening.
+        name: "speculation-guesses-several-facts-at-once",
+        ast: { within: "isBoundedSpeculation" },
+        from: "    candidate.assumptions.length === 1 &&",
+        to: "    candidate.assumptions.length >= 1 &&",
+        expect: "the first experiment allows one pending fact, and a second is refused by name",
+      },
+      {
+        // A missing reading is not permission to publish: the design's "不确定就等待" is the whole
+        // reason the outcome has three states instead of two.
+        name: "a-guess-with-no-evidence-publishes",
+        ast: { within: "speculationOutcome" },
+        from:
+          '      outcome: "wait",\n      sessionReusable: true,\n' +
+          "      reason: `no evidence for ${assumption.predicateId}`,",
+        to: '      outcome: "publish",\n      sessionReusable: true,\n      reason: "assumed",',
+        expect: "no evidence waits: an unknown fact never becomes a silent publish",
+      },
+      {
+        name: "an-unattested-reading-counts-as-evidence",
+        ast: { within: "speculationOutcome" },
+        from: "  if (!fact.authoritative)",
+        to: "  if (false)",
+        expect: "a reading nobody attested is not evidence",
+      },
+      {
+        name: "evidence-about-another-version-is-the-same-fact",
+        ast: { within: "speculationOutcome" },
+        from: "  if (fact.version !== assumption.version)",
+        to: "  if (false)",
+        expect: "evidence about another version is not evidence about this fact",
+      },
+      {
+        // The invalidation rule: a contradicted guess closes its branch session, so the real path
+        // cannot take an answer from a model that has already been told the guess.
+        name: "a-contradicted-guess-keeps-its-session",
+        ast: { within: "speculationOutcome" },
+        from: '    outcome: "discard",\n    sessionReusable: false,',
+        to: '    outcome: "discard",\n    sessionReusable: true,',
+        expect: "a guess the evidence contradicts is discarded, and its branch session is closed",
       },
     ],
   },
