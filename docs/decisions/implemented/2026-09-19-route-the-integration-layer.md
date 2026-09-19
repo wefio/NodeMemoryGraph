@@ -66,13 +66,14 @@ instead of reporting that nothing matched. The layer's `desiredRevision` changes
 so the next verification run is required before routing reads clean again.
 
 Because the routes list files, a new file in the layer would be claimed by nobody
-and nothing would complain. `tests/tools/repo-context.test.ts` therefore asserts
-that the union of the two routes' paths, together with the four enrichment files
-named below, is exactly the directory listing - a new file fails that test until
-it is claimed.
+and nothing would complain. `tests/tools/repo-context.test.ts` therefore asserts that
+the union of the routes' paths, together with a list of knowingly unrouted files, is
+exactly the directory listing - a new file fails that test until it is claimed, and
+that list is empty today.
 
-Still uncovered, and deliberately not folded in here: the retrieval-index
-enrichment files (`leaf-summarizer.ts`, `node-summarizer.ts`, `summary-drain.ts`,
-`openai-completion.ts`) belong to neither half - an external LLM writes index
-text that the store then persists - and need their own route and owner document.
-They are named in that test so the gap stays visible rather than forgotten.
+The four retrieval-index enrichment files (`leaf-summarizer.ts`,
+`node-summarizer.ts`, `summary-drain.ts`, `openai-completion.ts`) turned out to be a
+third part of the layer rather than part of either half - an external LLM writes
+index text that the store then persists - so they have their own `retrieval-enrichment`
+route, owned by `docs/design/design.md` and
+`docs/design/tiered-disclosure-design.md`.

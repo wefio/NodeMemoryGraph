@@ -222,3 +222,20 @@ routes:
     verify:
       blocking: [check, test:product, build]
       advisory: []
+
+  # The third thing under this layer: retrieval-index text that an external LLM writes and the
+  # LLM-free store persists. It is neither the Agent Surface nor the execution orchestra, so it owns
+  # a route instead of borrowing either owner's documents.
+  - id: retrieval-enrichment
+    paths:
+      - src/integration/leaf-summarizer.ts
+      - src/integration/node-summarizer.ts
+      - src/integration/summary-drain.ts
+      - src/integration/openai-completion.ts
+    owners:
+      - docs/design/design.md
+      - docs/design/tiered-disclosure-design.md
+    tests: [tests/integration/leaf-summarizer.test.ts, tests/integration/summary-drain.test.ts, tests/core/store/node-summaries.test.ts]
+    verify:
+      blocking: [check, test:product, build]
+      advisory: []

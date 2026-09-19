@@ -501,17 +501,14 @@ test("manual scope survives unavailable Git and reports the inspection failure",
   );
 });
 
-/** The integration layer is split across two routes by owner document, so its files are claimed
- *  one by one: `matches()` reads the first `*` in a pattern as a directory prefix, so a mid-name
- *  pattern such as `src/integration/ooo-*.ts` selects nothing. A list rots silently - a new file
- *  would belong to no route and nothing would complain - so this keeps the declaration exactly as
- *  wide as the directory, and names the files that are knowingly left unrouted. */
-const INTEGRATION_FILES_WITHOUT_A_ROUTE = [
-  "leaf-summarizer.ts",
-  "node-summarizer.ts",
-  "summary-drain.ts",
-  "openai-completion.ts",
-];
+/** The integration layer is split across three routes by owner document - the Agent Surface, the
+ *  OoO/task execution orchestra, and the retrieval-index enrichment - so its files are claimed one
+ *  by one: `matches()` reads the first `*` in a pattern as a directory prefix, so a mid-name pattern
+ *  such as `src/integration/ooo-*.ts` selects nothing. A list rots silently - a new file would belong
+ *  to no route and nothing would complain - so this keeps the declaration exactly as wide as the
+ *  directory. The list of knowingly unrouted files is now empty: a file added here either gets a
+ *  route or is named below on purpose. */
+const INTEGRATION_FILES_WITHOUT_A_ROUTE: string[] = [];
 
 test("the integration layer's routes claim exactly its files", () => {
   const root = fileURLToPath(new URL("../../", import.meta.url));

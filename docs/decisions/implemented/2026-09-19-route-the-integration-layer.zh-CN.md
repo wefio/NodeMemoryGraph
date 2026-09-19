@@ -32,6 +32,6 @@
 
 `src/integration` 下的改动现在有路由了：`agent:context` 会说出拥有它的 route 与拥有文档，`agent:verify` 会跑该 route 的阻塞检查，而不再回答"什么都没匹配"。这一层的 `desiredRevision` 因此改变，路由读数要重新变干净，需要先跑一次验证。
 
-因为 route 逐文件列举，这一层里新增的文件会**没有 route 认领、且没人抱怨**。所以 `tests/tools/repo-context.test.ts` 断言：两条 route 的路径并集，加上下面点名的四个富化文件，恰好等于目录清单——新增文件会让该测试失败，直到它被认领。
+因为 route 逐文件列举，这一层里新增的文件会**没有 route 认领、且没人抱怨**。所以 `tests/tools/repo-context.test.ts` 断言：各 route 的路径并集，加上一份“已知未认领文件”清单，恰好等于目录清单——新增文件会让该测试失败，直到它被认领；而那份清单今天是空的。
 
-仍然未被覆盖、且刻意不在这里顺手塞进来的：检索索引富化那几个文件（`leaf-summarizer.ts`、`node-summarizer.ts`、`summary-drain.ts`、`openai-completion.ts`）不属于任何一半——外部 LLM 写索引文本、存储层再持久化——它们需要自己的 route 与拥有文档。它们被写在那条测试里，好让这个缺口可见而不是被忘掉。
+那四个检索索引富化文件（`leaf-summarizer.ts`、`node-summarizer.ts`、`summary-drain.ts`、`openai-completion.ts`）其实是这一层的**第三部分**，并不属于任何一半——外部 LLM 写索引文本、存储层再持久化——因此它们有自己的 `retrieval-enrichment` route，拥有文档是 `docs/design/design.md` 与 `docs/design/tiered-disclosure-design.md`。
