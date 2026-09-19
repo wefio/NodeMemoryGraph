@@ -57,10 +57,11 @@ Split fusion planning into two clocks, and write down neither as a plan.
   the floor, and milliseconds saved against the measured startup.
 - The union tool surface's extra turn and the context a longer chain resends are *not* modelled; they
   are named in the design so a chain is never assumed free.
-- The cap-4 prediction was tested live on `fixtures/pipeline/fine.spec.json` (4 units, `--slots 1`, 2 reps per bound): bound 1 ran 4 sessions at 24 258 / 22 280 ms and 45 158 / 41 673 tokens, bound 4 ran 1 session at 19 431 / 15 515 ms and 83 865 / 55 143 tokens. Medians save **5 796 ms against a predicted 5 700 ms**, so the ceiling is calibrated against two independent measurements; tokens go up 1.3-1.9x, because a chain's context grows with each unit it carries.
+- The cap experiment was re-run with cache accounting recorded (same four-unit plan, `--slots 1`, 2 reps per bound, bounds 1, 2 and 4): medians were 26 620 / 17 867 / 16 645 ms and 45 685 / 39 750 / 55 286 tokens, with 80-84 % of every arm's tokens being **cache reads**. Fusion saves at least as much wall clock as predicted - cap 1 to cap 2 saves 8 753 ms against a predicted 3 800 ms, so the startup constant is plan-dependent and `sessions avoided` is the ceiling's honest primary quantity - and the extra tokens are mostly cache reads, leaving fresh input nearly flat at 7 925 / 7 942 / 9 142. **Cap 2 is the knee**: it takes 8 753 ms of the 9 975 ms available at the fewest tokens, while cap 4 buys the last 1 222 ms for 39 % more. The earlier 1.3-1.9x token multiplier came from unpaired medians and does not survive the cache-aware reading.
 - The ceiling reproduces the one paid measurement: for the D arm's own plan it predicts 1 900 ms saved at cap 2, and the arm measured 12 948 ms against 11 048 ms. On the two multi-unit fixtures it reports a floor of 1 session and 3.8 s saved at cap 2, 5.7 s at cap 4 - and says cap 3 buys nothing over cap 2 on those shapes, so the money is in reaching four units per session.
 - The relation is not a partial order on its own: two independent units with compatible declarations may each follow the other, so the offline graph is restricted to plan order before a chain cover can be computed.
 - If the structural relation is not transitive on a real plan, the floor does not apply and the
   measurement says so; the list-scheduling bound stands on its own.
 - A move must be recorded with the facts it used, or "baseline" is unfalsifiable.
 - Speculation and caching stay unbuilt, and nothing in this change widens `sharedSessionLegal`.
+

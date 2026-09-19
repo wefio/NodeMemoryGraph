@@ -51,3 +51,12 @@ Entry point: `aggregate.json` (per-bound medians and the measured saving); the f
 `bound{1,4}-rep{1,2}.json` and the two specs are `spec-{1,4}.json`, built from
 `evals/ooo-execution/fixtures/pipeline/fine.spec.json` with the canned answers stripped, so the units
 really run. Measured: 5 796 ms saved against the predicted 5 700 ms, with tokens up 1.3-1.9x.
+
+## cap-cache/ - the cap experiment with cache accounting (2026-09-19)
+
+Re-runs the cap experiment recording cache reads beside tokens, because a chain carries its context
+forward and most of what it resends is served from cache. Entry point: `aggregate.json`.
+Measured: cap 1 to cap 2 saves 8 753 ms (predicted 3 800 ms, so the startup constant is plan-dependent),
+fresh input stays flat at 7 925 / 7 942 / 9 142 tokens, and cap 2 is the knee - it takes most of the
+available wall clock at the fewest tokens. The earlier `cap4-darm/` reading of a 1.3-1.9x token
+multiplier came from unpaired medians and is superseded.

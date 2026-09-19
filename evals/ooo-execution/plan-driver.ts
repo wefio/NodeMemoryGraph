@@ -120,6 +120,11 @@ export interface UnitRun {
   /** The host's check for this unit's candidate. Host time is serial in every arm. */
   hostMs: number;
   tokens: number;
+  /** Cache accounting for this unit's own turns. Recorded beside tokens because a chain carries its
+   *  context forward, so a later unit's input is mostly a cache read - a different price, and the
+   *  reason a token count alone cannot be read as a cost. */
+  cacheRead: number;
+  cacheWrite: number;
   attempt: number;
   /** The session the worker reported for this unit. A fused run's evidence is that two units name
    *  the same session; a worker that quietly starts a new one is not fusing, and its unit says so. */
@@ -145,6 +150,8 @@ export interface PlanRun {
    *  wanted N slots and got one must say so, or its wall time is read as the C arm's. */
   slotRefusal?: string;
   tokens: number;
+  cacheRead: number;
+  cacheWrite: number;
   failures: number;
   /** Each session's units, in the order one session ran them. One entry per session: a fused run's
    *  cost claim rests on these, and a session of one unit is a yield boundary, not fusion. */
@@ -184,6 +191,20 @@ export const ownerOf = (taskId: string): string => `plan-driver:${taskId}`;
 function reportedSession(result: { metrics?: WorkerMetrics }): { sessionId?: string } {
   const sessionId = result.metrics?.sessionId;
   return sessionId === undefined ? {} : { sessionId };
+}
+
+/** The cache accounting a worker reports, summed over its own turns. It is recorded beside tokens
+ *  because the two are not the same currency: a chain carries its context forward, so most of what a
+ *  later unit sends is a cache read, which is priced far below a fresh input token. Without these two
+ *  fields a token count cannot be turned into a cost. */
+function reportedCache(result: { metrics?: WorkerMetrics }): {
+  cacheRead: number;
+  cacheWrite: number;
+} {
+  return {
+    cacheRead: result.metrics?.cacheRead ?? 0,
+    cacheWrite: result.metrics?.cacheWrite ?? 0,
+  };
 }
 
 /** One unit through the board: claim, run the worker, put the result on the channel, submit. The
@@ -248,6 +269,7 @@ async function runOneUnit(
     hostMs: Date.now() - checkStartedAt,
     tokens,
     attempt: ticket.attempt,
+    ...reportedCache(result),
     ...reportedSession(result),
   };
 }
@@ -383,7 +405,10 @@ export async function runPlan(spec: PlanDriverSpec): Promise<PlanRun> {
    *  accepted. A unit that fails, or a successor that is not legal at the boundary, ends the session
    *  there - which is the yield boundary the design asks for, and why the accepted prefix survives. */
   const runChain = async (first: string, chains: string[][]): Promise<boolean> => {
-    const session: PlanSession = { id: `session:${first}`, units: [] };
+    // The session's units are this driver's own array, handed out under a readonly view: a session's
+    // shape is a fact consumers read, and the driver is the one place that grows it.
+    const sessionUnits: string[] = [];
+    const session: PlanSession = { id: `session:${first}`, units: sessionUnits };
     /** The units the worker reported running in this session. Fusion's evidence: the driver asking for
      *  a session is not the fact - the worker's own report is. */
     const fused: string[] = [];
@@ -396,7 +421,7 @@ export async function runPlan(spec: PlanDriverSpec): Promise<PlanRun> {
       // A worker that failed recorded no unit: the session ends with the units that did run.
       const unit = units.length > before ? units[before] : undefined;
       if (!unit) break;
-      session.units.push(id);
+      sessionUnits.push(id);
       started = true;
       if (unit?.sessionId !== session.id) {
         // It ran somewhere of its own: that is a session of one, reported as one, and the chain ends.
@@ -458,6 +483,8 @@ export async function runPlan(spec: PlanDriverSpec): Promise<PlanRun> {
     hostMs: units.reduce((total, unit) => total + unit.hostMs, 0),
     hostChecks: units.filter((unit) => unit.verdict !== "worker-failed").length,
     tokens: units.reduce((total, unit) => total + unit.tokens, 0),
+    cacheRead: units.reduce((total, unit) => total + unit.cacheRead, 0),
+    cacheWrite: units.reduce((total, unit) => total + unit.cacheWrite, 0),
     failures: failures.length,
     ...(parent ? { parent } : {}),
     incomplete,
@@ -716,6 +743,8 @@ export function piWorker(worker: { provider: string; model: string }, live: bool
         tokens: run.tokens,
         turns: run.turns,
         checks: run.checks,
+        cacheRead: run.cacheRead,
+        cacheWrite: run.cacheWrite,
         ...(session ? { sessionId: session.id } : {}),
       },
     };
@@ -765,6 +794,8 @@ export function piSessionWorker(
         tokens: run.tokens,
         turns: run.turns,
         checks: run.checks,
+        cacheRead: run.cacheRead,
+        cacheWrite: run.cacheWrite,
         // The driver's name for the session it asked for, reported only because this runner is the one
         // held under that name: a worker that answered with a session of its own reports a different id
         // and the driver ends the chain, which is how a fused run is told from a wish.
@@ -849,7 +880,7 @@ async function main(): Promise<void> {
         ? cannedWorker(file)
         : (sessions?.worker ?? piWorker(file.worker, values.live === true));
   const spec = specFrom(file, worker, slots);
-  let report: Awaited<ReturnType<typeof runPlan>>;
+  let report: Awaited<ReturnType<typeof runPlan>> | PlanComparison;
   try {
     report =
       command === "run"

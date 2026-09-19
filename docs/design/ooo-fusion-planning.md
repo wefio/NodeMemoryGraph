@@ -80,8 +80,9 @@ against the measured startup, the difference is milliseconds saved.
 
 Not modelled by the ceiling, and now measured rather than merely named: the union tool surface's extra
 turn (about 0.7 k tokens on a chain's first unit), and the tokens a longer chain spends carrying its
-context - the cap experiment above prices the second at 1.3-1.9x the tokens of one unit per session. The
-ceiling remains a wall-clock ceiling, and its number must be read next to that token cost.
+context. The cap experiment above prices the second at about 15 % more *fresh* input per four units -
+most of a chain's extra tokens are cache reads - so the ceiling stays a wall-clock ceiling, and the
+cost of fusing is real but far smaller than a raw token count suggests.
 
 ## What the ceiling says today
 
@@ -104,23 +105,32 @@ one notch.
 
 ### The cap experiment, measured (2026-09-19)
 
-The ceiling's prediction for a four-unit plan was tested on `fixtures/pipeline/fine.spec.json` - the
-same shape as the report fixture, three independent units and one that joins them - live, `--slots 1`,
-two reps per bound, the `canned` answers stripped so the units really run:
+The ceiling's prediction for a four-unit plan was tested on `fixtures/pipeline/fine.spec.json` - three
+independent units and one that joins them, the shape of the report fixture - live, `--slots 1`, with
+the spec's canned answers stripped so the units really run. The second run below records cache
+accounting beside tokens, because that is what turns a token count into a cost.
 
-| bound | sessions | wall (reps) | tokens (reps) |
-|---|---|---|---|
-| 1 | 4 | 24 258 / 22 280 ms | 45 158 / 41 673 |
-| 4 | 1 | 19 431 / 15 515 ms | 83 865 / 55 143 |
+| bound | sessions | wall (medians of 2) | tokens | cache read | tokens - cache read |
+|---|---|---|---|---|---|
+| 1 | 4 | 26 620 ms | 45 685 | 37 760 | 7 925 |
+| 2 | 2 | 17 867 ms | 39 750 | 31 808 | 7 942 |
+| 4 | 1 | 16 645 ms | 55 286 | 46 144 | 9 142 |
 
-Both units of the prediction hold in direction, and the wall clock matches in size: medians 23 269 ms
-against 17 473 ms is **5 796 ms saved, where the ceiling predicted 5 700 ms**. Tokens however go **up,
-never down** - 1.3x in the cheaper rep, 1.9x in the dearer one - because a chain's context grows with
-every unit it carries (measured per-unit: 11.4 k, 10.1 k, 14.5 k, 19.1 k in the second rep, monotone).
+Three things, and the second one corrects this document's first reading of the same experiment:
 
-So the honest reading of a cap is not "5.7 s saved" but "**about 5.8 s saved for 1.3-1.9x the tokens**".
-The ceiling prices wall clock only, and this measurement is what says how far that is from the whole
-bill.
+- **Fusion saves wall clock, and more than the constant predicted.** Cap 1 to cap 2 saves 8 753 ms and
+  to cap 4 saves 9 975 ms, against 3 800 ms and 5 700 ms predicted from the D arm's 1 900 ms. So the
+  startup term is **plan-dependent** (about 2.9-3.3 s here), and the ceiling's primary quantity should
+  be *sessions avoided* - exact and model-free - with milliseconds as an estimate that names its
+  constant.
+- **The token multiplier was a count multiplier.** Every arm spends 80-84 % of its tokens on **cache
+  reads**, and the tokens that are not cache reads - the part that is priced like fresh input - are
+  nearly flat: 7 925, 7 942, 9 142. Fusing four units into one session costs about **15 % more fresh
+  input**, not the 1.3-1.9x an unpaired token median suggested earlier. A chain carries its context
+  forward, and the provider serves most of that from cache.
+- **Cap 2 is the knee.** It takes 8 753 ms of the 9 975 ms available while sending the *fewest* tokens
+  of the three (39 750), and cap 4 buys the last 1 222 ms for 39 % more tokens. The policy worth
+  declaring is therefore two units per session, not four.
 
 ## Why this shape, and what it is not
 
