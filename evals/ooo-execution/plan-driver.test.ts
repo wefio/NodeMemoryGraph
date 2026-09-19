@@ -423,7 +423,8 @@ test("a spec file's fusion block reaches the run it describes", () => {
     { unitsPerSession: 2 },
     "a spec that asked for fusion must not be run as the control arm",
   );
-  const { fusion: _omitted, ...without } = file;
+  const without: Record<string, unknown> = { ...file };
+  delete without.fusion;
   assert.equal(
     specFrom(without, recordingWorker(), 1).fusion,
     undefined,

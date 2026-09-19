@@ -71,9 +71,18 @@ minimal valid one, one with extra keys, one whose digest is wrong) against the t
 **Decisive.** The test fails on the current code and passes after the fix, and a named mutant that
 loosens the extension's reader back is caught by it.
 
-## P4 - Retention, mechanised (free; needs a decision)
+## P1 and P2: answered (2026-09-19)
 
-The rule above is prose, and prose has failed twice here. The mechanical version: a paid-run record's own
-README must name a tracked data directory, and `docs:check` refuses the record when it does not. That is
-a change to a standing convention, so it is its own decision record, with its alternatives - including
-"no check, keep it a review habit", which is what has now failed twice.
+The diagnosis is in the archive's README and the arms record: eight of nine attempts produced a
+conclusion artifact, the one patch failed on `rows` against `lines`, and no envelope defect existed -
+the instrument read by the wrong reader. The economics are measured: cost real, gain unrealised
+(0 of 3 holding reps published), the candidate's admissibility the binding constraint.
+
+## P4 - Retention, kept light (free)
+
+The user's reading, recorded here because it is the rule to follow: a run's evidence is needed *while the
+work is being done*, so it is written to a marked scratch directory (`.temp/.../CLEANABLE.md`) and may be
+deleted later - the failure was never that scratch existed, it was deleting the data before the record
+that needed it was written. The instrument now writes every artifact, candidate tree and check output,
+marks the directory cleanable, and copies the run into the tracked archive when a record quotes it. No
+`docs:check` rule: this needs a place to keep things, not a gate.

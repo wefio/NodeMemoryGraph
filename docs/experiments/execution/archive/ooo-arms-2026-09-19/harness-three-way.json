@@ -1,0 +1,38 @@
+[
+  {
+    "unit": "beta",
+    "input": "stub (frozen)",
+    "checkPassed": false,
+    "detail": " at Test.run (node:internal/test_runner/test:1382:25) at Test.start (node:internal/test_runner/test:1242:17) at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) "
+  },
+  {
+    "unit": "beta",
+    "input": "canned (known good)",
+    "checkPassed": true,
+    "detail": ""
+  },
+  {
+    "unit": "beta",
+    "input": "wrong canned",
+    "checkPassed": false,
+    "detail": " todo 0 ℹ duration_ms 104.01 ✖ failing tests: test at .temp\\p1-harness\\beta-wrong-canned-6a0c18\\beta.test.ts:1:1 ✖ .temp\\p1-harness\\beta-wrong-canned-6a0c18\\beta.test.ts (98.2447ms) 'test failed' "
+  },
+  {
+    "unit": "alpha",
+    "input": "stub (frozen)",
+    "checkPassed": false,
+    "detail": " at Test.run (node:internal/test_runner/test:1382:25) at Test.start (node:internal/test_runner/test:1242:17) at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) "
+  },
+  {
+    "unit": "alpha",
+    "input": "canned (known good)",
+    "checkPassed": true,
+    "detail": ""
+  },
+  {
+    "unit": "alpha",
+    "input": "wrong canned",
+    "checkPassed": false,
+    "detail": ", actual: { id: 'alpha', title: 'Alpha', lines: [ 'b=2', 'a=1' ] }, expected: { id: 'alpha', title: 'Alpha', lines: [ 'a=1', 'b=2' ] }, operator: 'deepStrictEqual', diff: 'simple' } "
+  }
+]

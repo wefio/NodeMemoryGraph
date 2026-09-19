@@ -191,3 +191,35 @@ submission the adapter can accept that the board can never accept. And the instr
 harness deleted the candidate tree on failure, so the first run could not say why every check failed;
 it now keeps the tree, and the control rows record the check's own output.
 
+## E arm: second run, with evidence (2026-09-19)
+
+The first E-arm run reported quality failures it could not explain, because it kept no bytes. This run
+keeps everything (artifacts, candidate trees, the check's own output, one row per attempt) and answers
+both the diagnosis and the economics question. Three reps per condition, 9 paid units, ~62 k tokens.
+
+| Arm         | Fact   | Tokens (3 reps, total) | Work ms | Post-fact ms | Quality           |
+| ----------- | ------ | ---------------------- | ------- | ------------ | ----------------- |
+| baseline    | holds  | 18 183                 | 19 200  | 19 200       | 0 of 3 passed     |
+| speculation | holds  | 18 602                 | 19 506  | 175          | 0 of 3 passed     |
+| baseline    | absent | 0                      | 0       | 0            | n/a               |
+| speculation | absent | 20 332                 | 23 920  | 0            | n/a               |
+
+**Diagnosis first (P1).** The harness's check path was validated offline before any of this was read:
+the frozen stub fails, the fixture's own canned answer passes, and a wrong answer fails, for both
+units - so a failing check means what it says. What the *first* run could not see is that eight of nine
+attempts answered with a **conclusion** artifact ("no change needed"), which is legitimate for a task
+whose rule admits one, carries no files, and therefore cannot pass this unit's check - the board would
+refuse it for the same reason. The single patch attempt failed on a real mistake: it wrote
+`rows: [...]` where the frozen interface requires `lines: [...]`. Nothing here was an envelope
+defect; the earlier claim that the extension was laxer than the host was wrong, and it is corrected in
+the archive's README.
+
+**Economics (P2).** The mechanism works and its shape is the design's: when the fact holds, the
+post-fact cost drops from the work itself (~6.2 s median) to verification of an already-prepared
+candidate (175 ms in the one rep that produced one); when the fact is absent, the whole spend is waste -
+20 332 tokens, more than doing the work when needed. **No benefit is claimed, and none is available:**
+the prepared candidate was publishable in 0 of 3 reps where the fact held, so the latency term never
+became real. In this shape - this model, this unit's instruction, this fact - bounded speculation has a
+real cost and no realised gain, and the binding constraint is the candidate's admissibility rather than
+the mechanism's speed.
+

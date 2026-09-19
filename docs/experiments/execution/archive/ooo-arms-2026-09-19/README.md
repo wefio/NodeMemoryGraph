@@ -20,6 +20,8 @@ Every run's own report is kept verbatim; nothing here was edited after the fact.
 | `smoke/`                     | `plan-driver.ts run --session-runner`    | 4    | The mechanism smoke: two units in one session, and the runs that failed first |
 | `speculation-earm/`          | `evals/ooo-execution/speculation-pilot.ts --live` | 8 | E arm: baseline against speculation, fact true and false, 2 reps each  |
 | `speculation-earm/aggregate.json` | —                                   | —    | The eight runs plus per-(arm, fact) totals                                    |
+| `speculation-earm/run2-2026-09-19T05-40-04/` | `evals/ooo-execution/speculation-pilot.ts --live` (3 reps) | 9 | Second E-arm run: every attempt's artifact bytes, the candidate tree its check ran in, the check's own output, one row per run, the aggregate, and a `CLEANABLE.md` saying the directory is scratch |
+| `harness-three-way.json`     | `node .temp/p1-harness.mjs`              | 6    | The harness validation that had to come first: frozen stub, the fixture's canned answer and a wrong answer, through the same check |
 
 **What is missing, and why that is now a plan item.** The E arm's first run stored no artifact bytes:
 `speculation-pilot.ts` returned each candidate's verdict but deleted the candidate tree on failure, so
@@ -32,3 +34,12 @@ next paid run is diagnosable without paying twice.
 **The rule this directory exists to keep.** A run's evidence is written where git tracks it, in the same
 change that reports its numbers, and no run deletes its own evidence. Scratch under `.temp/` is for
 working copies; a result that a sentence in a record depends on is not scratch.
+
+**Correction (2026-09-19, after the second run's evidence).** The paragraph above recorded a defect
+that was not one. `artifactEnvelope` builds two legitimate shapes - a patch (`digest, files`) and a
+conclusion (`digest, kind, conclusion, summary, evidence, citations`) - and the E arm's first harness
+fed *every* artifact to `patchCandidate`, which reads patches only. The run's quality failures were
+therefore reported through the wrong reader: eight of nine attempts in the second run answered with a
+conclusion, which this unit's check cannot pass and the board would refuse, and the one attempt that
+submitted a patch failed for a real reason (it wrote `rows: [...]` where the frozen interface requires
+`lines: [...]`). The instrument now reads an artifact by its kind and records which reader was used.

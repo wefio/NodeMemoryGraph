@@ -14,6 +14,7 @@
 // A published candidate is verified by running the unit's own frozen check against it, in a copy of the
 // fixture directory, so the quality term is a real check result and not the model's own claim.
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
@@ -53,6 +54,27 @@ const INSTRUCTION =
 const PREDICATE = "this-round-needs-beta";
 
 mkdirSync(outDir, { recursive: true });
+/** Everything this run produced, kept whether or not the run goes well. Marked cleanable rather than
+ *  thrown away: scratch is fine, forgetting is not. */
+const runId = new Date().toISOString().replace(/[:.]/g, "-");
+const evidenceDir = `${outDir}/evidence/${runId}`;
+mkdirSync(evidenceDir, { recursive: true });
+writeFileSync(
+  `${evidenceDir}/CLEANABLE-scratch-${runId.slice(0, 10)}.md`,
+  [
+    "# Scratch - cleanable",
+    "",
+    "This directory holds one paid run's own evidence: every attempt's artifact bytes, the candidate",
+    "tree each check ran in, and the check's output.",
+    "",
+    "It is scratch and may be deleted once a record quotes its numbers - the run's report is copied",
+    "into `docs/experiments/execution/archive/ooo-arms-2026-09-19/speculation-earm/` when it is",
+    "quoted. It is *not* deleted at the end of the run: that is what made an earlier run's quality",
+    "failures unexplainable.",
+  ].join("\n") + "\n",
+);
+const digestOf = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
+const interfaceDigest = digestOf(readFileSync(`${FIXTURE}/interface.ts`, "utf8"));
 
 /** The frozen work for one attempt, always under a fresh ticket: a discarded branch's ticket is never
  *  the real path's ticket, which is the design's "真实路径在新票据下重新执行". */
@@ -75,9 +97,25 @@ function verify(
   frozen: ReturnType<typeof frozenFor>,
   artifact: string,
   label: string,
-): { ok: boolean; detail: string } {
+): {
+  ok: boolean;
+  kind: string;
+  detail: string;
+  candidatePath?: string;
+  checkMs?: number;
+} {
   // A candidate that does not even parse as this work's envelope is a failed attempt with a reason,
   // which is the same rule the adapter applies: the pilot records it instead of crashing on it.
+  const parsed = JSON.parse(artifact) as { kind?: string };
+  if (parsed.kind === "conclusion")
+    // A conclusion is a legitimate artifact for a task whose rule admits one, and this unit's check
+    // cannot pass without files - which is also what the board would decide. Reported as its own kind
+    // rather than as a reader's complaint, which is what the first run of this arm got wrong.
+    return {
+      ok: false,
+      kind: "conclusion",
+      detail: "a conclusion carries no files: the unit's check cannot pass on it",
+    };
   let candidate: Readonly<Record<string, string>>;
   try {
     candidate = patchCandidate(frozen, artifact);
@@ -88,11 +126,18 @@ function verify(
     } catch {
       keys = "not json";
     }
-    return { ok: false, detail: `${(error as Error).message} (artifact keys: ${keys})` };
+    return {
+      ok: false,
+      kind: "unreadable",
+      detail: `${(error as Error).message} (artifact keys: ${keys})`,
+    };
   }
   const text = candidate[TARGET];
-  if (text === undefined) return { ok: false, detail: "the artifact names no editable file" };
-  const dir = `${outDir}/candidate-${label}-${randomUUID().slice(0, 8)}`;
+  if (text === undefined)
+    return { ok: false, kind: "patch", detail: "the artifact names no editable file" };
+  const dir = `${evidenceDir}/candidate-${label}-${randomUUID().slice(0, 8)}`;
+  const checkStartedAt = Date.now();
+  const checkMs = () => Date.now() - checkStartedAt;
   cpSync(FIXTURE, dir, { recursive: true });
   writeFileSync(`${dir}/beta.ts`, text);
   try {
@@ -101,10 +146,22 @@ function verify(
       ["--experimental-strip-types", "--test", `${dir}/beta.test.ts`],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
-    return { ok: true, detail: "the unit's own check passed" };
+    return {
+      ok: true,
+      kind: "patch",
+      detail: "the unit's own check passed",
+      candidatePath: dir,
+      checkMs: checkMs(),
+    };
   } catch (error) {
     const failure = error as { stdout?: string; stderr?: string };
-    return { ok: false, detail: `${failure.stdout ?? ""}${failure.stderr ?? ""}`.slice(-2000) };
+    return {
+      ok: false,
+      kind: "patch",
+      candidatePath: dir,
+      checkMs: checkMs(),
+      detail: `${failure.stdout ?? ""}${failure.stderr ?? ""}`.slice(-2000),
+    };
   } finally {
     // The candidate tree is kept on purpose: a failed check is the evidence for why the quality term is
     // false, and the first run of this arm deleted it and could not say what went wrong.
@@ -113,10 +170,14 @@ function verify(
 
 async function attempt(label: string): Promise<{
   frozen: ReturnType<typeof frozenFor>;
+  frozenDigest: string;
+  interfaceDigest: string;
+  kind: string | undefined;
   tokens: number;
   turns: number;
   workMs: number;
   artifact?: string;
+  artifactPath?: string;
   failure?: string;
 }> {
   const frozen = frozenFor(label);
@@ -129,18 +190,32 @@ async function attempt(label: string): Promise<{
   });
   try {
     const run = await runner.runUnit(patchSessionInput(frozen));
+    const artifactPath = `${evidenceDir}/${label}-artifact.json`;
+    if (run.artifact) writeFileSync(artifactPath, run.artifact);
+    const kind = run.artifact
+      ? ((JSON.parse(run.artifact) as { kind?: string; files?: unknown[] }).kind ??
+        (Array.isArray((JSON.parse(run.artifact) as { files?: unknown[] }).files)
+          ? "patch"
+          : "unknown"))
+      : undefined;
     return {
       frozen,
+      frozenDigest: frozen.digest,
+      interfaceDigest,
+      kind,
       tokens: run.tokens,
       turns: run.turns,
       workMs: Date.now() - startedAt,
-      ...(run.artifact ? { artifact: run.artifact } : { failure: "no artifact" }),
+      ...(run.artifact ? { artifact: run.artifact, artifactPath } : { failure: "no artifact" }),
     };
   } catch (error) {
     // One attempt that misses its bounded contract is a recorded outcome of this arm, not a reason to
     // abandon the run: the design asks what a wrong guess costs, and a failed attempt is part of that.
     return {
       frozen,
+      frozenDigest: frozen.digest,
+      interfaceDigest,
+      kind: undefined,
       tokens: 0,
       turns: 0,
       workMs: Date.now() - startedAt,
@@ -156,23 +231,33 @@ for (const factHolds of [true, false]) {
   for (let rep = 1; rep <= reps; rep += 1) {
     // baseline: the fact first, so nothing is prepared for a round that does not need the unit.
     const baseline = factHolds ? await attempt(`baseline-${rep}`) : undefined;
+    const baselineChecked =
+      baseline?.artifact && baseline.frozen
+        ? verify(baseline.frozen, baseline.artifact, `baseline-${rep}`)
+        : null;
     const baselineRow = {
       arm: "baseline",
       fact: factHolds,
       rep,
+      runId,
       tokens: baseline?.tokens ?? 0,
+      turns: baseline?.turns ?? 0,
       workMs: baseline?.workMs ?? 0,
       postFactMs: baseline?.workMs ?? 0,
-      ...(() => {
-        const checked =
-          baseline?.artifact && baseline.frozen
-            ? verify(baseline.frozen, baseline.artifact, `baseline-${rep}`)
-            : null;
-        return {
-          quality: checked?.ok ?? null,
-          ...(checked && !checked.ok ? { qualityDetail: checked.detail } : {}),
-        };
-      })(),
+      ...(baseline
+        ? {
+            frozenDigest: baseline.frozenDigest,
+            interfaceDigest: baseline.interfaceDigest,
+            artifactKind: baseline.kind ?? null,
+            ...(baseline.artifactPath ? { artifactPath: baseline.artifactPath } : {}),
+          }
+        : {}),
+      quality: baselineChecked?.ok ?? null,
+      qualityKind: baselineChecked?.kind ?? null,
+      ...(baselineChecked?.candidatePath ? { candidatePath: baselineChecked.candidatePath } : {}),
+      ...(baselineChecked?.checkMs !== undefined ? { checkMs: baselineChecked.checkMs } : {}),
+      ...(baselineChecked && !baselineChecked.ok ? { qualityDetail: baselineChecked.detail } : {}),
+      ...(baseline?.failure ? { failure: baseline.failure } : {}),
     };
 
     // speculation: the candidate first, then the shared rule decides what the fact means for it.
@@ -198,20 +283,30 @@ for (const factHolds of [true, false]) {
       arm: "speculation",
       fact: factHolds,
       rep,
+      runId,
       outcome: decision.outcome,
       sessionReusable: decision.sessionReusable,
+      ticketId: assumption.taskId,
       tokens: prepared.tokens,
+      turns: prepared.turns,
       workMs: prepared.workMs,
+      frozenDigest: prepared.frozenDigest,
+      interfaceDigest: prepared.interfaceDigest,
+      artifactKind: prepared.kind ?? null,
+      ...(prepared.artifactPath ? { artifactPath: prepared.artifactPath } : {}),
       // What is left after the fact is decided: a published candidate still has to be verified, and a
       // discarded one has nothing left to do because the round does not need the unit.
       postFactMs,
       quality: quality?.ok ?? null,
+      qualityKind: quality?.kind ?? null,
+      ...(quality?.candidatePath ? { candidatePath: quality.candidatePath } : {}),
+      ...(quality?.checkMs !== undefined ? { checkMs: quality.checkMs } : {}),
       ...(quality && !quality.ok ? { qualityDetail: quality.detail } : {}),
       ...(prepared.failure ? { failure: prepared.failure } : {}),
     };
     for (const row of [baselineRow, speculationRow]) {
       runs.push(row);
-      writeFileSync(`${outDir}/run-${runs.length}.json`, `${JSON.stringify(row)}\n`);
+      writeFileSync(`${evidenceDir}/row-${runs.length}.json`, `${JSON.stringify(row)}\n`);
       console.log(JSON.stringify(row));
     }
   }
@@ -236,8 +331,14 @@ const aggregate = [true, false].flatMap((fact) => [
   summarise("speculation", fact),
 ]);
 writeFileSync(
-  `${outDir}/aggregate.json`,
+  `${evidenceDir}/aggregate.json`,
   `${JSON.stringify({ provider, model, aggregate }, null, 2)}\n`,
 );
+try {
+  cpSync(evidenceDir, `${outDir}/published`, { recursive: true });
+} catch {
+  // The copy is a convenience for the record, not part of the measurement.
+}
+console.log(`evidence: ${evidenceDir}`);
 console.log("AGGREGATE");
 console.log(JSON.stringify(aggregate, null, 2));
