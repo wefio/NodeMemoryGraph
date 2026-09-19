@@ -31,13 +31,11 @@ interface LsmLikeStore {
 ```
 
 **当前 NmgStore 已经有的：**
-
 - `#markIndexDelta` ≈ `write`
 - `rebuildDueNodes` ≈ `selectForCompaction` + `compact`
 - `acknowledgeIndexDelta` ≈ 确认删除已 compaction 的 delta
 
 **缺少的、按 LSM 模型自然该有的：**
-
 - `maybeStall` — 当前没有背压机制，delta 无限增长时查询越来越慢但没有信号
 - `levelStats` — 不知道各 node 的 delta 积压情况
 
@@ -66,12 +64,10 @@ interface RedirectResolver {
 ```
 
 **当前 NmgStore 已经有的：**
-
 - `upsertNode` 里做了 redirect 追踪 ≈ `resolve`
 - 检测多 target 报错 ≈ `splitTargets` 的语义
 
 **缺少的、按 U-F 模型自然该有的：**
-
 - 路径压缩。当前每次 `resolve` 都从头走 redirect 链，O(k) 而非 O(α(N))
 - `compress` 可以是一个后台 job，不需要每次查询时实时压缩
 
@@ -124,12 +120,10 @@ interface VersionedState {
 ```
 
 **当前 NmgStore 已经有的：**
-
 - `remember` 的 automaticPrevious + supersedesId ≈ `put`
 - 查询时 `status = 'active'` 过滤 ≈ `getCurrent`
 
 **缺少的、按 MVCC 模型自然该有的：**
-
 - `getAtTime` — "我上周用的是哪个版本？"
 - `getHistory` — 看某个 state 的完整演变链
 - `diff` — 在两个 session 之间哪些 state 变了
@@ -163,12 +157,10 @@ interface AssociationAnalyzer {
 ```
 
 **当前 NmgStore 已经有的：**
-
 - `node_pair_signals` 表存了 co_retrieval_count + useful_count
 - `proposeTopologyChanges` 用了 minObservations 和 estimatedGain
 
 **缺少的、按关联规则模型自然该有的：**
-
 - **`lift`**。当前 `estimatedGain = useful_count / max(queries)`，
   没有排除 popularity bias。一个热门 node 几乎和所有 node 都有高 co-retrieval，
   但 lift 能区分"真的关联"和"因为都热门所以一起出现"。
@@ -198,12 +190,10 @@ interface RetrievalEnsemble {
 ```
 
 **当前 NmgStore 已经有的：**
-
 - `hybridScore(lexical, vector, route)` ≈ `combinedScore`
 - 各信道独立打分 ≈ `channelScores`（分散在各处）
 
 **缺少的、按 ensemble 模型自然该有的：**
-
 - **`fitWeights`**。当前权重硬编码。有了 labeled trace（useful/unuseful），
   这就是一个标准的 logistic regression fit。不需要写新的优化代码，随便一个
   statistical library（甚至手写 IRLS 几十行）就能算。
@@ -237,13 +227,11 @@ interface EquivalenceClassStore {
 ```
 
 **当前 NmgStore 已经有的：**
-
 - `splitNode` ≈ `refine`
 - `mergeNodes` ≈ `coarsen`
 - `candidatePartitions` ≈ 作用等同于 `shouldRefine` 的候选生成
 
 **缺少的、按聚类模型自然该有的：**
-
 - **`compactness` / `separation`**。Silhouette score 或 Davies-Bouldin index
   给出了 split/merge 的定量判据：紧致度低 → split，分离度低 → merge。
   这比当前的 `memory_type | scope` 分组更通用。
@@ -277,12 +265,10 @@ interface VectorCache {
 ```
 
 **当前 Float32VectorCache 已经有的：**
-
 - `upsert` ≈ `load`（但是追加，不逐出）
 - `score` ≈ 使用 cache 做检索
 
 **缺少的、按 cache 模型自然该有的：**
-
 - **按需加载 + LRU 逐出**。当前是全量加载全部 node embedding。
   百万级 memory 时 OOM。`load` + `evictLru` 是最经典且足够好的方案。
 - **`invalidate(id)` 而非 `invalidateAll(kind)`。** 当前一次 merge 扔掉了
@@ -322,12 +308,10 @@ interface WriteRule {
 ```
 
 **当前 write-policy.ts 已经有的：**
-
 - `assessMemoryWrite` ≈ `assess`
 - 三组硬编码 pattern ≡ 三条内置规则
 
 **缺少的、按 IDS 模型自然该有的：**
-
 - **可配置规则**。当前规则硬编码在源码中。抽成 JSON 配置或 SQLite 表后，
   用户可以在不修改 NMG 源码的情况下添加自定义规则（如特定 API key 格式、
   公司内部的项目代号过滤）。
@@ -354,21 +338,19 @@ interface GraphDiffusion {
 }
 
 interface DiffusionConfig {
-  maxGenerations: number; // 传播代数上限
-  transmissionProb: number; // 每条边传播概率 (0..1]
-  minActivation: number; // 低于此阈值的节点不激活
-  decay: number; // 每代衰减因子
+  maxGenerations: number;         // 传播代数上限
+  transmissionProb: number;       // 每条边传播概率 (0..1]
+  minActivation: number;          // 低于此阈值的节点不激活
+  decay: number;                  // 每代衰减因子
 }
 ```
 
 **当前 `getRelations` 已经有的：**
-
 - `maxHops` ≈ `maxGenerations`
 - `visitedSet` ≈ `immuneSet`
 - 等权 BFS ≈ `transmissionProb = 1.0`, `decay = 1.0`
 
 **缺少的、按扩散模型自然该有的：**
-
 - **传播概率**。`transmissionProb < 1.0` 让扩散在每一跳以概率停止。
   效果上等价于 PageRank 的重启概率：离起点越远越不可能到达。
 - **衰减因子**。`decay < 1.0` 让远程节点的权重自然下降，
@@ -392,7 +374,6 @@ magic numbers 集中到一个可读的配置对象中。
 ```
 
 结果：
-
 - 函数名不需要自己发明（`compact`, `resolve`, `lift`, `fitWeights`, `evictLru` 都是现成的）
 - 输入输出是明确的（X 的教科书/论文/SOTA 库已经定义好了）
 - 边界条件被 X 的理论分析过（"什么时候 compact？""什么情况下 U-F 退化？"）

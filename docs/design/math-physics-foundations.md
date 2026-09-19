@@ -7,7 +7,6 @@
 实际上 NMG 目前只有极少数组件是**从数学出发构建的**，其余是工程直觉。
 
 本文档诚实区分三类状态：
-
 - **已有**：代码里确实在算这个，有显式的数学结构
 - **可补**：此处可以放一个数学框架，放了之后能给出设计判据或可证明的界，目前没有
 - **不必补**：工程直觉够用，加数学只是装饰
@@ -77,7 +76,6 @@ FTS5 使用了 BM25 排序。BM25 来自概率信息检索理论（Robertson & S
 
 design.md §8 用了信息论的词汇来描述系统架构。但这停留在**设计文档层面**，
 没有进入代码：
-
 - 没有 rate-distortion 函数被计算
 - 没有 distortion measure 被量化
 - progressive disclosure 各阶段的信息量没有被度量
@@ -91,14 +89,14 @@ design.md §8 用了信息论的词汇来描述系统架构。但这停留在**�
 
 以下组件常被误认为有数学基础，但实际上只是工程实践：
 
-| 组件                    | 看起来像                       | 实际情况                                                                                                        |
-| ----------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| HashingVectorEmbedder   | Johnson-Lindenstrauss 随机投影 | FNV-1a 哈希 + n-gram feature extraction，没有任何 J-L guarantee。维度 256 是拍脑袋的，不是由 ε, δ, N 推导出来的 |
-| OnlineNodeRouter        | 在线凸优化 / 梯度下降          | 就是 EMA w ← (1-η)w + η·x。没有 regret analysis，没有 convergence proof，没有损失函数定义                       |
-| Gate regex patterns     | 假设检验 / 分类器              | 就是正则匹配。没有 sensitivity/specificity 分析，没有 ROC，没有 error rate modeling                             |
-| Multi-channel retrieval | 信道编码 / 冗余                | 三个信号加权求和。没有学过信道独立性，没有学过最优融合权重，没有纠错码结构                                      |
-| Progressive disclosure  | Successive refinement          | 分阶段加载是好的 UX 设计。没有证明每阶段是最优的，没有量化过信息增量                                            |
-| Write policy regex      | 形式语言 / 安全性质            | 就是禁止模式黑名单。没有形式化过 safety property，不是 finite-state monitor                                     |
+| 组件 | 看起来像 | 实际情况 |
+|---|---|---|
+| HashingVectorEmbedder | Johnson-Lindenstrauss 随机投影 | FNV-1a 哈希 + n-gram feature extraction，没有任何 J-L guarantee。维度 256 是拍脑袋的，不是由 ε, δ, N 推导出来的 |
+| OnlineNodeRouter | 在线凸优化 / 梯度下降 | 就是 EMA w ← (1-η)w + η·x。没有 regret analysis，没有 convergence proof，没有损失函数定义 |
+| Gate regex patterns | 假设检验 / 分类器 | 就是正则匹配。没有 sensitivity/specificity 分析，没有 ROC，没有 error rate modeling |
+| Multi-channel retrieval | 信道编码 / 冗余 | 三个信号加权求和。没有学过信道独立性，没有学过最优融合权重，没有纠错码结构 |
+| Progressive disclosure | Successive refinement | 分阶段加载是好的 UX 设计。没有证明每阶段是最优的，没有量化过信息增量 |
+| Write policy regex | 形式语言 / 安全性质 | 就是禁止模式黑名单。没有形式化过 safety property，不是 finite-state monitor |
 
 ---
 
@@ -113,11 +111,9 @@ design.md §8 用了信息论的词汇来描述系统架构。但这停留在**�
 
 **可补**：如果有 labeled retrieval traces（哪些检索到的 memory 最终被用上了），
 可以直接 fit 一个 logistic regression：
-
 ```
 log P(useful | memory, query) = β₀ + β₁·lexicalScore + β₂·vectorScore + β₃·routeScore + β₄·tier
 ```
-
 模型的系数就是最优权重。还可以加 interaction term 检测信道是否独立。
 
 **投入产出**：低投入（已有 retrieval traces 的 usefulMemoryIds 字段），
@@ -136,7 +132,6 @@ log P(useful | memory, query) = β₀ + β₁·lexicalScore + β₂·vectorScore
 而 EMA 做不到这个 guarantee。
 
 PA 更新规则（仅比 EMA 多一个条件）：
-
 ```
 if margin < 1:  w ← w + η·(1 - margin)·x_t / ‖x_t‖²
 ```
@@ -150,15 +145,12 @@ if margin < 1:  w ← w + η·(1 - margin)·x_t / ‖x_t‖²
 
 **可补**：Personalized PageRank (PPR) 从 query-matched nodes 出发做带重启的
 随机游走：
-
 ```
 p = α·e_s + (1-α)·A^T D^{-1}·p
 ```
-
 其中重启概率 α 控制游走局部性。
 
 PPR 的数学优势：
-
 - **衰减自然**：距离越远的节点权重越小，不需要硬截断
 - **参数可解释**：α 接近 1 = 只看直接邻居；α 接近 0 = 全局 PageRank
 - **可高效近似**：push-forward 算法在稀疏图上 O(|E|/ε) 达到 ε 精度
@@ -173,11 +165,9 @@ PPR 的数学优势：
 
 **可补**：在 node 内构建 memory-memory 相似度矩阵（用 cosine similarity），
 计算 Laplacian 的前几个 eigenvector，用"谱间隙"自动确定分几组：
-
 ```
 k* = argmax_k (λ_k - λ_{k+1})
 ```
-
 然后用第 2 到 k+1 个 eigenvectors 的行向量做 k-means，得到 partition。
 
 **投入产出**：中投入。需要存储 node 内所有 memory embeddings（当前已可获取）。
@@ -200,12 +190,10 @@ recall benchmark（如现有的 LongMemEval）。
 **当前状态**：block size = 32，是经验参数。
 
 **可补**：建模 block 编码的 rate-distortion trade-off：
-
 ```
 total cost = cost_index(B) + cost_scan(B) + cost_distortion(B)
            = c₁·|M|/B + c₂·B + λ·E[distortion(B)]
 ```
-
 找到最小化 total cost 的 B*。
 
 但 `distortion(B)` 很难建模（block 内搜索精度如何随 B 变化？），
@@ -220,14 +208,14 @@ total cost = cost_index(B) + cost_scan(B) + cost_distortion(B)
 
 按"补了之后真能改变设计决策"排序：
 
-| 优先级 | 条目                              | 理由                                         |
-| ------ | --------------------------------- | -------------------------------------------- |
-| **P0** | 检索混合权重的贝叶斯/逻辑回归拟合 | 已有数据，立即产出最优权重                   |
-| **P1** | Router 加 regret/mistake bound    | 从"能跑"到"能证明收敛"，且只需改 update 规则 |
-| **P2** | PPR 替代 BFS graph expansion      | 提升 relation 检索质量，有可解释参数         |
-| **P3** | 谱聚类指导 node split             | 自动发现语义分化而非等用户手动拆分           |
-| —      | Leaf block rate-distortion        | 数学上好看，但 32 可能已经够好               |
-| —      | 检索统计 guarantee                | 太依赖分布假设，empirical benchmark 更可靠   |
+| 优先级 | 条目 | 理由 |
+|---|---|---|
+| **P0** | 检索混合权重的贝叶斯/逻辑回归拟合 | 已有数据，立即产出最优权重 |
+| **P1** | Router 加 regret/mistake bound | 从"能跑"到"能证明收敛"，且只需改 update 规则 |
+| **P2** | PPR 替代 BFS graph expansion | 提升 relation 检索质量，有可解释参数 |
+| **P3** | 谱聚类指导 node split | 自动发现语义分化而非等用户手动拆分 |
+| — | Leaf block rate-distortion | 数学上好看，但 32 可能已经够好 |
+| — | 检索统计 guarantee | 太依赖分布假设，empirical benchmark 更可靠 |
 
 ---
 

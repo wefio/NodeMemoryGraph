@@ -39,17 +39,16 @@ C = Top1 + τ_v·variance + w_ic·intentCoverage + w_rh·reasonHealth
 
 **三信号按失败模式正交选取**（推导依据，非拍脑袋）：
 
-| 分量             | 检测的失败形态                                 | 评测佐证                          |
-| ---------------- | ---------------------------------------------- | --------------------------------- |
-| `Top1`           | 一条强匹配都没有                               | 无证据→7.45%，检索没捞到东西      |
-| `variance`       | 分布扁平、无清晰赢家（NQC 族信号，非 raw max） | 部分证据→16.67%，匹配是噪声填充   |
-| `intentCoverage` | 捞到了但类型错（要 preference，全是 fact）     | preference 0.16 / assistant 0.29  |
-| `reasonHealth`   | 匹配是假的（三路全 ≤0 的兜底塞入）             | hybrid_match 是 recallReason 红灯 |
+| 分量 | 检测的失败形态 | 评测佐证 |
+|---|---|---|
+| `Top1` | 一条强匹配都没有 | 无证据→7.45%，检索没捞到东西 |
+| `variance` | 分布扁平、无清晰赢家（NQC 族信号，非 raw max） | 部分证据→16.67%，匹配是噪声填充 |
+| `intentCoverage` | 捞到了但类型错（要 preference，全是 fact） | preference 0.16 / assistant 0.29 |
+| `reasonHealth` | 匹配是假的（三路全 ≤0 的兜底塞入） | hybrid_match 是 recallReason 红灯 |
 
 权重排序依据：`Top1` 最 informative（单信号即可否决触发）；`variance` 是 NQC 族核心、抓"分布形状"；`intentCoverage` 抓 `Top1` 盲区（高分但类型错）故独立值钱；`reasonHealth` 权重最低。**关于 reasonHealth 冗余性**：它捕获"direct 里多少比例是真匹配（reason≠hybrid_match）"，与 `Top1`（只看最强）**互补不冗余**——可能 Top1 高但 reasonHealth 低（1 强 + 多兜底）。但实测 LongMemEval 非空题 reasonHealth 恒 1.0（返回的都真），**实践可能近常数、低区分度**；标定时须做 Top1×reasonHealth 相关性分析确认其边际贡献（见 §2 标定流程）。**具体数值靠学，非手设**：Stage 1 贝叶斯优化，Stage 2 DC 梯度。
 
 **分量精确口径**（从 `trace.selections` 算，即过预算后存活的 top-K——LLM 实际所见）：
-
 - `Top1` = `max(clamp(strength,0,1))`，`strength = hybridScore(scores.lexical, scores.vector, scores.route)`（重算，非 combinedScore）。hybridScore 恒 [0,1]，跨路径一致。
 - `variance` = `clamp(stdev(strength)*2, 0, 1)`（strength∈[0,1] 故 stdev≤0.5，*2 映射 [0,1]）。高方差双解——清晰赢家 vs 噪声离群——标定时用 Top1−Top2 差值作辅助/替代（见 §2）。
 - `intentCoverage`：3 族意图正则→期望类型（`search-ranking.ts:9-23`：`list/count`→derived/event/fact/state；`recommend/suggest/preference`→preference+constraint；`assistant/you said/previous`→conversation_evidence）；coverage = 命中族中"期望类型确实出现在 top-K"的比例；**不命中任何正则→取中性 0.5**（不冤枉单跳事实题，不能取 0）。0.5 贡献 `0.5·w_ic=0.15`，偏置有界且小；标定时对"未命中正则"查询单独看分布，若系统性偏，改用 `avg(intentCoverage)` 作中性。
@@ -63,7 +62,6 @@ C = Top1 + τ_v·variance + w_ic·intentCoverage + w_rh·reasonHealth
 **Stage 0 — Fibonacci progressive re-selection + guardrail floor（已落地）**
 searchContext 仍一次性过采样候选池（`min(50, max(20, limit*3))`），但不再因
 top-K 截断而直接把全部扩展结果暴露给模型：
-
 1. 可微控制器的 evidence budget head 根据 Top-1 probe、QPP 分量和查询意图预测首个
    Fibonacci 档位；
 2. 从预测档位（`1/2/3/5/8/...`）完整加载结果并计算二重 QPP；
@@ -74,7 +72,6 @@ top-K 截断而直接把全部扩展结果暴露给模型：
 中几乎每次查询都扩大上下文。
 
 guardrail 必触发条件（绝对地板，免标定）：
-
 - `totalCount === 0`（空）→ `guardrail_empty`
 - `directCount > 0 && reasonHealth === 0`（全 hybrid_match 兜底）→ `guardrail_all_fallback`
 - `Top1 < QPP_TOP1_FLOOR(=0.2)`（基本没真匹配）→ `guardrail_low_top1`
@@ -84,7 +81,6 @@ guardrail 必触发条件（绝对地板，免标定）：
 
 **Stage 1 — rolling τ auto-calibration（无感自动标定，非 eval）**
 Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**——让 `below_threshold`（τ）触发更 selective（省检索），非激活前提。
-
 - **数据边界**：`agent_end` 的答案重合只写入
   `attributed_memory_ids`，用于覆盖率诊断和选择待用户复核的 retrieval；API
   模型/供应商行为会漂移，因此它不是 useful 正负标签，也不进入 τ、DC、边稳定度或
@@ -97,7 +93,6 @@ Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**�
 **τ 标定方法**：起点 τ=`DEFAULT_QPP_THRESHOLD`(0.55) 占位（Stage 0 truncation/guardrail 已免标定覆盖触发，τ 仅影响 below_threshold 选择性）；rolling worker 用自然任务的显式 QPP 结果标签自适应。**不在 eval 数据集上标定**（作弊）——eval 只作离线 sanity（audit 脚本看分量 gradation/区分度，不调参）。
 
 **标定/分析流程**：
-
 1. **离线 audit**（`evals/omnimemeval/audit-qpp-signal.ts`）：从历史 trace 重算 qpp（hybridScore，离线纯函数）+ join outcome，看分量 gradation/区分度——**只诊断，不调参**（不作弊）。
 2. **rolling worker**（生产）：采近期 N 条带明确
    `expansionUseful/evidenceSufficient` 的 trace；比较高低 QPP 分段的显式结果率。缺标签保持
@@ -112,7 +107,6 @@ Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**�
 阈值本身可微学化（Gumbel-Sigmoid 松弛 0/1 硬开关，梯度回传）；`Loss = 生成Loss + λ·搜索成本惩罚`；DC 出 shadow，**取代**（非并发）Stage 1 的 rolling τ，warm-start 自其值。**暴露范围**：默认只把 composite `qpp` 喂 DC globalFeatures → Stage 2 只学阈值，简单、小 eval N(≈500) 不易过拟合；数据足够时再暴露各分量让 DC 隐式再加权。Soft-Hard（REALM/可微 RAG，softmax top-k→注意力→与生成向量融合）太侵入（改 retrieval→gen 接口，NMG 返回 context 非融合向量），列替代不主推。
 
 ### 3. 接入计算图本体（落点已就绪，近乎免造）
-
 - `differentiable-controller.ts:14` 已内置 `ControllerAction="expand"|"stop"`，`:3-11` 有 `CONTROLLER_BUDGET_DIMENSIONS`。
 - `controller-runtime.ts:107-148` `allocate()` 在 `action==="expand"` 时解锁 `expandedMaximum` 预算信封（独立预算、有上限）。
 - `ControllerRuntime` 已通过 `ControllerPolicyChannel` 接入 Pi 检索控制边界。QPP1/QPP2/
@@ -126,7 +120,6 @@ Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**�
 - 把 `qpp` 作为新 feature 喂 `globalFeatures`（`controller-protocol.ts:19-52` 加 `qpp`，协议版本 1→2）；DC 过 gate 后从 globalFeatures 学化阈值取代手工/黑盒阈值。**默认只暴露 composite `qpp`**（Stage 2 只学阈值，见 §2）；数据足够时再暴露 `top1 / score_variance / intent_coverage / reason_health` 让 DC 隐式再加权。`globalFeatures` 全是标量统计量（`:140-173`），DC 在其上学习——梯度停在特征层，不穿过 ANN top-K 回传 embedder。
 
 ### 4. 预算与池
-
 - Stage 0 不另起搜索——从首趟过采样池（`min(50, max(20, limit*3))`）按 `expandActiveGraphBudget`（2x evidence/nodes/tokens +1 graphHop，有上限）重选。零二次检索、零额外 LLM。
 - 重选后的结果即统一池；**provenance 留系统侧，LLM 不该知道"这是扩来的"**。
 - 候选步按置信度自适应省 token 须保守（证据审计：部分证据→16.67% 崩，收缩仅在全证据时才缩）。
@@ -142,12 +135,12 @@ Stage 0 pool-based 已免标定可用（上）。Stage 1 是**选择性优化**�
 
 针对多跳查询的召回充分性判别，调研 4 个学术方向，逐一对 NMG 现状给判断：
 
-| 方向                                                          | NMG 现状                                                                                                                                                         | 判断                                                                                                                                  |
-| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| aspect-aware QPP（拆子主题分别评）                            | `intentCoverage` 已是粗版（query→3 意图族→期望类型→覆盖）                                                                                                        | 不追细版——query decomposition 需 LLM/复杂规则，破坏 QPP"纯检索信号、无 LLM"设计；若未来要做，是独立 query-decomposer 模块，不混进 qpp |
-| compositional sufficiency（证据链组合完整）                   | `graph_expansion` + `reasonHealth` 已是间接代理（expansion 存在=多跳链、reasonHealth<1=有 expansion 补）                                                         | Stage 2+ 候选；真正的"链完整性"需 outcome 标签（隐式反馈已有），当前不优先                                                            |
-| LLM sufficiency discriminator（轻量 LLM 读摘要判充分性）      | 无                                                                                                                                                               | 明确不追——与"纯检索、免 LLM、免 API"哲学冲突；弱 reader 不该把稀缺 LLM 调用花在判充分性上（与"模型不积极用工具、要自动"的诉求反了）   |
-| intra-list consistency / 二重 qpp（在结果里二次检索看一致性） | `graph_expansion` 已是一次"二重"（在 direct 上扩关联节点），但当前 qpp 把 expansion 标 `isDirect=false` 排除在 score 信号外——丢了"多跳题靠 expansion 拼证据"信号 | 有增量，见下                                                                                                                          |
+| 方向 | NMG 现状 | 判断 |
+|---|---|---|
+| aspect-aware QPP（拆子主题分别评）| `intentCoverage` 已是粗版（query→3 意图族→期望类型→覆盖）| 不追细版——query decomposition 需 LLM/复杂规则，破坏 QPP"纯检索信号、无 LLM"设计；若未来要做，是独立 query-decomposer 模块，不混进 qpp |
+| compositional sufficiency（证据链组合完整）| `graph_expansion` + `reasonHealth` 已是间接代理（expansion 存在=多跳链、reasonHealth<1=有 expansion 补）| Stage 2+ 候选；真正的"链完整性"需 outcome 标签（隐式反馈已有），当前不优先 |
+| LLM sufficiency discriminator（轻量 LLM 读摘要判充分性）| 无 | 明确不追——与"纯检索、免 LLM、免 API"哲学冲突；弱 reader 不该把稀缺 LLM 调用花在判充分性上（与"模型不积极用工具、要自动"的诉求反了）|
+| intra-list consistency / 二重 qpp（在结果里二次检索看一致性）| `graph_expansion` 已是一次"二重"（在 direct 上扩关联节点），但当前 qpp 把 expansion 标 `isDirect=false` 排除在 score 信号外——丢了"多跳题靠 expansion 拼证据"信号 | 有增量，见下 |
 
 **已实现为 shadow 分量**：`expansionDependence = expansions / totalCount`，并记录交互项 `(1 − Top1) × expansionDependence`。它们不参与当前硬 QPP 分数：多跳题靠 expansion 是**正常**的（高 dependence ≠ 召回差）。该交互项只表达 direct 弱且局部证据高度依赖扩展，供自然 outcome 校准后判断是否值得补强 direct。
 

@@ -25,7 +25,6 @@
 ## 1. 核心判断与设计原则
 
 MiniMind 对 NMG 的价值不在于"现在是好向量模型"，而在于：
-
 - 足够小（可反复消融实验）
 - 结构透明（causal → bidirectional，LM head → embedding heads）
 - 完整训练链路（pretrain → SFT → RL 全流程代码）
@@ -59,11 +58,10 @@ MiniMind 对 NMG 的价值不在于"现在是好向量模型"，而在于：
 ```
 
 适配层保留的原因：
-
 ```ts
 // 一次 backward 同时更新适配层和 controller
-L_total = L_retrieval + λ * L_contrastive;
-loss.backward(); // 同一个 UOp DAG
+L_total = L_retrieval + λ * L_contrastive
+loss.backward();          // 同一个 UOp DAG
 gradientStep(embedderParams, lr_e);
 gradientStep(controllerParams, lr_c);
 ```
@@ -97,13 +95,13 @@ gradientStep(controllerParams, lr_c);
 
 ### 3.1 Attention 最终选择：双向 Full Attention
 
-| 方案                    | 判定          | 原因                                                     |
-| ----------------------- | ------------- | -------------------------------------------------------- |
-| **双向 Full Attention** | ✅ 选定       | 每条 token 看全序列，ONNX 友好，Flash Attention 原生支持 |
-| KDA 式状态化            | ❌            | 跨节点状态 = MGR gate biases + h₁ EMA 职责，冗余且冲突   |
-| MLA 式压缩              | ❌（Phase 6） | 存储压缩的价值在百万节点后才明显，先做正确再做省         |
-| 稀疏 Attention          | ❌            | 编码器输出单一向量，不需要 token 级稀疏选择              |
-| causal Attention        | ❌            | 生成模型的遗产，对编码是纯负债（前向 token 看不到后文）  |
+| 方案 | 判定 | 原因 |
+|------|------|------|
+| **双向 Full Attention** | ✅ 选定 | 每条 token 看全序列，ONNX 友好，Flash Attention 原生支持 |
+| KDA 式状态化 | ❌ | 跨节点状态 = MGR gate biases + h₁ EMA 职责，冗余且冲突 |
+| MLA 式压缩 | ❌（Phase 6） | 存储压缩的价值在百万节点后才明显，先做正确再做省 |
+| 稀疏 Attention | ❌ | 编码器输出单一向量，不需要 token 级稀疏选择 |
+| causal Attention | ❌ | 生成模型的遗产，对编码是纯负债（前向 token 看不到后文） |
 
 ### 3.2 真实数据分布（4 个 benchmark, 5732 条消息）
 
@@ -156,19 +154,18 @@ max_length： 2048 tokens
 
 MoE 的价值在于长文本（≥500 tokens）上不同 expert 可能按文本类型/长度分化。
 Phase 2 在 Dense 基线稳定后做对比实验：
-
 - 测试数据：benchmark 中长文本子集
 - 决策指标：长文本 recall 提升 > 10% 且 batch=1 延迟 < 3ms → 选 MoE
 - 风险：routing collapse、ONNX 导出兼容性
 
 ### 4.3 可选档位
 
-| 档位      | 层数  | hidden  | 类型      | 参数量          | 用途              |
-| --------- | ----- | ------- | --------- | --------------- | ----------------- |
-| Tiny      | 4     | 384     | Dense     | ~15M            | 粗召回 / 极低延迟 |
-| **Small** | **6** | **512** | **Dense** | **~30M**        | **Phase 1 基线**  |
-| Small-MoE | 6     | 512     | 4 experts | ~45M/18M active | Phase 2 对比      |
-| Medium    | 8     | 512     | Dense     | ~55M            | 质量兜底          |
+| 档位 | 层数 | hidden | 类型 | 参数量 | 用途 |
+|------|------|--------|------|--------|------|
+| Tiny | 4 | 384 | Dense | ~15M | 粗召回 / 极低延迟 |
+| **Small** | **6** | **512** | **Dense** | **~30M** | **Phase 1 基线** |
+| Small-MoE | 6 | 512 | 4 experts | ~45M/18M active | Phase 2 对比 |
+| Medium | 8 | 512 | Dense | ~55M | 质量兜底 |
 
 ### 4.4 完整结构
 
@@ -231,19 +228,19 @@ no bias  — Qwen3 风格，参数更少
 
 ## 6. Tokenizer 策略
 
-| 阶段    | 方案                | 词表    | 说明                           |
-| ------- | ------------------- | ------- | ------------------------------ |
-| Phase 1 | 完整 Qwen tokenizer | ~152k   | 最快验证蒸馏效果               |
-| Phase 2 | Qwen 兼容裁剪       | 24k-32k | 统计 NMG 语料 token 频率后裁剪 |
+| 阶段 | 方案 | 词表 | 说明 |
+|------|------|------|------|
+| Phase 1 | 完整 Qwen tokenizer | ~152k | 最快验证蒸馏效果 |
+| Phase 2 | Qwen 兼容裁剪 | 24k-32k | 统计 NMG 语料 token 频率后裁剪 |
 
 不同规模的代价（hidden=512, FP16）：
 
-| 词表             | Embedding 参数 | 约占内存 |
-| ---------------- | -------------- | -------- |
-| 6,400 (MiniMind) | 3.3M           | 6.5 MB   |
-| 24,000           | 12.3M          | 24 MB    |
-| 32,000           | 16.4M          | 32 MB    |
-| 152,064 (Qwen)   | 77.9M          | 156 MB   |
+| 词表 | Embedding 参数 | 约占内存 |
+|------|--------------|---------|
+| 6,400 (MiniMind) | 3.3M | 6.5 MB |
+| 24,000 | 12.3M | 24 MB |
+| 32,000 | 16.4M | 32 MB |
+| 152,064 (Qwen) | 77.9M | 156 MB |
 
 Tokenizer 与模型分开部署——ONNX 只收 `input_ids` + `attention_mask`。
 
@@ -289,12 +286,12 @@ L_behavior:    交叉熵（预测"是否被使用"）
 
 ### 7.5 消融实验矩阵
 
-| 版本 | Attention     | 层数 | 输出 | 目的         |
-| ---- | ------------- | ---- | ---- | ------------ |
-| A    | causal        | 8    | 256  | 最小修改基线 |
-| B    | bidirectional | 8    | 256  | 测双向收益   |
-| C    | bidirectional | 6    | 256  | 测缩小后质量 |
-| D    | bidirectional | 4    | 128  | 测极限轻量   |
+| 版本 | Attention | 层数 | 输出 | 目的 |
+|------|-----------|------|------|------|
+| A | causal | 8 | 256 | 最小修改基线 |
+| B | bidirectional | 8 | 256 | 测双向收益 |
+| C | bidirectional | 6 | 256 | 测缩小后质量 |
+| D | bidirectional | 4 | 128 | 测极限轻量 |
 
 ## 8. 部署：ONNX Runtime Node.js
 
@@ -305,12 +302,11 @@ L_behavior:    交叉熵（预测"是否被使用"）
 import { OnnxMiniMindEmbedder } from "../src/core/onnx-minimind-embedder.ts";
 const e = await OnnxMiniMindEmbedder.create(modelPath, mappingPath);
 // Token IDs（由外部 tokenizer 产生）→ L2 向量
-const emb = await e.embed(tokenIds, masks); // Float32Array[batch*dim]
+const emb = await e.embed(tokenIds, masks);  // Float32Array[batch*dim]
 // 加载 ~370ms, 推理 ~7ms/text (batch=5, seq=64, RTX 3060)
 ```
 
 关键决策：**Tokenizer 与 ONNX 分离**
-
 - Tokenizer 薄层（Python / WASM / 预 tokenize），不跟 ONNX runtime 耦合
 - ONNX 进程内 `onnxruntime-node`，Float32Array 零拷贝
 - 已验证：Node.js vs Python ONNX 输出 bit-exact 一致 (max diff = 0)
@@ -338,7 +334,7 @@ torch.onnx.export(
 const encoded = tokenizer.encodeBatch(texts);
 const outputs = await session.run({
   input_ids: encoded.inputIds,
-  attention_mask: encoded.attentionMask,
+  attention_mask: encoded.attentionMask
 });
 
 // 适配层投影 → 图空间
@@ -350,11 +346,11 @@ const graphVector = adapter.project(outputs.embedding);
 
 ```ts
 class DifferentiableAdapter {
-  readonly inputDim: number; // 256（编码器输出）
-  readonly outputDim: number; // 128（图空间）
+  readonly inputDim: number;   // 256（编码器输出）
+  readonly outputDim: number;  // 128（图空间）
 
-  readonly #projection: Tensor; // [128, 256]
-  readonly #bias: Tensor; // [128]
+  readonly #projection: Tensor;  // [128, 256]
+  readonly #bias: Tensor;        // [128]
 
   project(encoderOutput: Float32Array): Float32Array;
   // → Linear(256→128) → L2 normalize → Float32Array(128)
@@ -380,11 +376,11 @@ FP16 作为生产默认：
   FP32 → FP16 质量损失通常可忽略，ONNX Runtime 一行转换
 ```
 
-| 精度      | 总大小    | 每层       | L3 适配  | 说明           |
-| --------- | --------- | ---------- | -------- | -------------- |
-| FP32      | 120 MB    | ~20 MB     | 勉强     | 可能跨层 evict |
-| **FP16**  | **60 MB** | **~10 MB** | **舒适** | 生产默认       |
-| INT8 动态 | ~35 MB    | ~5 MB      | 绰绰有余 | 需验证质量     |
+| 精度 | 总大小 | 每层 | L3 适配 | 说明 |
+|------|--------|------|---------|------|
+| FP32 | 120 MB | ~20 MB | 勉强 | 可能跨层 evict |
+| **FP16** | **60 MB** | **~10 MB** | **舒适** | 生产默认 |
+| INT8 动态 | ~35 MB | ~5 MB | 绰绰有余 | 需验证质量 |
 
 ### 8.5 性能优化顺序
 
@@ -432,7 +428,6 @@ gradientStep([adapter.#projection, adapter.#bias], lr);     // 只更新适配�
 ### 8.7 批处理策略
 
 Agent 单轮常见场景：
-
 ```
 batch=1:  当前 query (~1-3ms)
 batch=4:  query + 3 个候选节点
@@ -459,13 +454,13 @@ AG 最终有效节点召回率
 
 ## 10. MiniMind 变体取舍
 
-| 变体           | 取什么                                                | 舍什么                        |
-| -------------- | ----------------------------------------------------- | ----------------------------- |
-| **dLM**        | 双向 attention、mask corruption 训练、AR→dLM 权重迁移 | 多步去噪、扩散生成            |
-| **主线 Dense** | RMSNorm、RoPE、GQA、SwiGLU、完整训练链路              | causal mask、LM head、CE loss |
-| **V (视觉)**   | Projector 思想：不同模态→统一隐空间                   | 视觉编码器                    |
-| **O (Omni)**   | 共享主干+多头、中间层桥接                             | 语音/视觉模块                 |
-| **Linear**     | 长序列/流式状态（Phase 6 考虑）                       | 不用于当前节点编码            |
+| 变体 | 取什么 | 舍什么 |
+|------|--------|--------|
+| **dLM** | 双向 attention、mask corruption 训练、AR→dLM 权重迁移 | 多步去噪、扩散生成 |
+| **主线 Dense** | RMSNorm、RoPE、GQA、SwiGLU、完整训练链路 | causal mask、LM head、CE loss |
+| **V (视觉)** | Projector 思想：不同模态→统一隐空间 | 视觉编码器 |
+| **O (Omni)** | 共享主干+多头、中间层桥接 | 语音/视觉模块 |
+| **Linear** | 长序列/流式状态（Phase 6 考虑） | 不用于当前节点编码 |
 
 ## 11. 与现有系统的对接
 
