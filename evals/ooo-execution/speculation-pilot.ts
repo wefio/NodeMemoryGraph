@@ -24,10 +24,8 @@ import {
   type ResolvedPredicate,
   type SpeculationCandidate,
 } from "../../src/integration/ooo-execution.ts";
-import {
-  createPiSessionRunner,
-  patchSessionInput,
-} from "../../.pi/extensions/nmg/ooo-execution.ts";
+import { createPiSessionRunner } from "../../.pi/extensions/nmg/ooo-execution.ts";
+import { patchSessionInput } from "../../src/integration/ooo-session-mechanism.ts";
 
 /** A named provider and model, refused by name rather than defaulted: the operator names the spend. */
 function required(name: string): string {

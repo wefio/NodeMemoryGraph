@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { resourceLoader } from "../../.pi/extensions/nmg/ooo-execution.ts";
 import {
   ARTIFACT_TOOL,
   artifactEnvelope,
   artifactFromText,
   checkToolCandidate,
-  resourceLoader,
   piCompletionAllowed,
   snapshotText,
-} from "../../.pi/extensions/nmg/ooo-execution.ts";
+} from "../../src/integration/ooo-session-mechanism.ts";
 import { patchCandidate, patchPrompt, preparePatchWork } from "../../src/integration/ooo-patch.ts";
 import { verifyRenameCandidate } from "../../src/integration/check-runner.ts";
 import { expectedRenameOf, renameSource } from "../../evals/ooo-execution/rename-probe.ts";
