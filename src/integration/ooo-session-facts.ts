@@ -13,7 +13,7 @@
  */
 import type { NmgStore } from "../core/store.ts";
 import { nextSessionMove, type SessionMove, type SessionMoveInput } from "./ooo-fusion-plan.ts";
-import { RUN_CANCELLED_FACT } from "./task-coordinator.ts";
+import { RUN_CANCELLED_FACT, taskCancellation } from "./task-coordinator.ts";
 
 /** The fact kind that records one session move. Declared next to its one write. */
 export const SESSION_MOVE_FACT = "session-move";
@@ -141,11 +141,17 @@ export interface SessionDecision {
  * when it decided to write.
  */
 export function decideSessionMove(store: NmgStore, boundary: SessionBoundary): SessionDecision {
-  const cancelled = store
-    .taskRunFacts(boundary.runId)
-    .find((fact) => fact.kind === RUN_CANCELLED_FACT);
+  // A cancelled run admits nothing further, whatever the plan says. The question is scoped to this
+  // unit's task through the one reader the fence uses too: cancelling one task of a run must not end
+  // the sessions of the others, which is what a bare kind lookup did.
+  const cancelled = taskCancellation(store, boundary.runId, boundary.taskId);
   const move: SessionMove = cancelled
-    ? { kind: "close", reason: `the run was cancelled at sequence ${cancelled.sequence}` }
+    ? {
+        kind: "close",
+        reason: `${
+          cancelled.taskId ? `task ${cancelled.taskId}` : `the run`
+        } was cancelled at sequence ${cancelled.sequence}`,
+      }
     : nextSessionMove({
         plan: boundary.plan,
         current: boundary.current,

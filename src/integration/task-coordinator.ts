@@ -32,16 +32,43 @@ export function managedTransitionKind(verb: string): string {
   return `board-${verb}`;
 }
 
-/** Why this run refuses a managed write at this moment, or null when it accepts one. The two
- *  reasons are facts about the run's own log, so both are re-read inside the transition rather
- *  than remembered from when the caller decided to write. */
-export function managedWriteRefusal(store: NmgStore, runId: string): string | null {
+/** One row of a run's own log, as the store returns it. */
+type RunFact = ReturnType<NmgStore["taskRunFacts"]>[number];
+
+/**
+ * The cancellation that applies to one task of this run, or null.
+ *
+ * A run-level cancellation carries the schema's empty task id and closes the whole run; a task-level
+ * one closes that task alone. Reading it here is what keeps the fence, the binding and the session
+ * decision agreeing. It used to be a bare `kind === RUN_CANCELLED_FACT` lookup, which made cancelling
+ * one task refuse every other task's lifecycle writes in the same run - a defect derivable from the
+ * code, and the reason this question now has one home instead of three copies of the same predicate.
+ *
+ * A caller that names no task asks only about the run: a task-level cancellation is not its business.
+ */
+export function taskCancellation(store: NmgStore, runId: string, taskId?: string): RunFact | null {
+  const cancels = store.taskRunFacts(runId).filter((fact) => fact.kind === RUN_CANCELLED_FACT);
+  const runLevel = cancels.find((fact) => !fact.taskId);
+  if (runLevel) return runLevel;
+  if (taskId === undefined || taskId === "") return null;
+  return cancels.find((fact) => fact.taskId === taskId) ?? null;
+}
+
+/** Why this run refuses a managed write at this moment, or null when it accepts one. The reasons are
+ *  facts about the run's own log, so they are re-read inside the transition rather than remembered from
+ *  when the caller decided to write. A write that names the task it belongs to is refused by that task's
+ *  cancellation; one that names no task is refused only by a run-level cancellation. */
+export function managedWriteRefusal(
+  store: NmgStore,
+  runId: string,
+  taskId?: string,
+): string | null {
   if (!store.taskRunManifest(runId))
     return `run ${runId} is not registered; a managed write needs the run it belongs to`;
-  const cancelled = store.taskRunFacts(runId).find((fact) => fact.kind === RUN_CANCELLED_FACT);
-  if (cancelled)
-    return `run ${runId} was cancelled at sequence ${cancelled.sequence}; its managed entries take no further lifecycle writes`;
-  return null;
+  const cancelled = taskCancellation(store, runId, taskId);
+  if (!cancelled) return null;
+  const subject = cancelled.taskId ? `task ${cancelled.taskId}` : `run ${runId}`;
+  return `${subject} was cancelled at sequence ${cancelled.sequence}; its managed entries take no further lifecycle writes`;
 }
 
 export interface ManagedWriteRequest<T> {
@@ -102,9 +129,12 @@ export function coordinatedBoardWrite<T>(
   request: ManagedWriteRequest<T>,
 ): ManagedWriteOutcome<T> {
   return store.coordinateRunWrite(request.runId, (port) => {
-    const refusal = managedWriteRefusal(store, request.runId);
-    if (refusal) throw new Error(refusal);
     const binding = store.taskRunForEntry(request.entryId);
+    // The refusal is scoped to the task this entry carries, so one task's cancellation cannot close
+    // the run's other tasks. An entry with no binding has no task to ask about, and the error below
+    // says so.
+    const refusal = managedWriteRefusal(store, request.runId, binding?.taskId);
+    if (refusal) throw new Error(refusal);
     if (!binding)
       throw new Error(
         `entry ${request.entryId} is not adopted by a run, so there is nothing to coordinate it with`,
@@ -164,7 +194,7 @@ export function bindRunEntry(
 ): { sequence: number; recorded: boolean } {
   const attempt = request.attempt ?? 1;
   const work = (inner: TransactionPort): { sequence: number; recorded: boolean } => {
-    const refusal = managedWriteRefusal(store, request.runId);
+    const refusal = managedWriteRefusal(store, request.runId, request.taskId);
     if (refusal) throw new Error(refusal);
     if (!isFrozen(store, request.runId, request.taskId))
       throw new Error(

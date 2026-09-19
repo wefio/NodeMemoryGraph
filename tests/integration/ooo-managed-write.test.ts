@@ -204,8 +204,8 @@ test("a cancelled run takes no further lifecycle writes on what it adopted", () 
     adopt(store, "run-1", "T1", entryId);
     store.appendTaskRunFact({ runId: "run-1", kind: RUN_CANCELLED_FACT, taskId: "T1" });
 
-    const refusal = managedWriteRefusal(store, "run-1");
-    assert.match(refusal!, /was cancelled at sequence 2/);
+    const refusal = managedWriteRefusal(store, "run-1", "T1");
+    assert.match(refusal!, /task T1 was cancelled at sequence 2/);
 
     assert.throws(
       () =>
@@ -223,6 +223,77 @@ test("a cancelled run takes no further lifecycle writes on what it adopted", () 
       { kind: "entry-bound", sequence: 1 },
       { kind: RUN_CANCELLED_FACT, sequence: 2 },
     ]);
+  });
+});
+
+/**
+ * A task-level cancellation closes that task, not the run.
+ *
+ * The refusal used to match the cancellation fact by kind alone, so cancelling one task refused every
+ * other task's lifecycle writes in the same run - a defect derivable from the code, and the reason the
+ * predicate has one home now instead of three copies of it.
+ */
+test("cancelling one task leaves the run's other tasks writable", () => {
+  withStore((store) => {
+    const first = publish(store, "first");
+    // A second handoff in the same channel waits for the first, so the run's other task carries an
+    // entry in a channel of its own; the run does not care which channel its entries live in.
+    const second = publish(store, "second", "other");
+    adopt(store, "run-1", "T1", first);
+    // The same run's second task, at its own position, carrying its own entry.
+    store.freezeTaskRunTask({
+      runId: "run-1",
+      taskId: "T2",
+      position: 1,
+      revision: "v1",
+      input: "T2 input",
+      dependencies: [],
+      effect: "isolated-artifact",
+    });
+    store.appendTaskRunFact({ runId: "run-1", kind: "entry-bound", taskId: "T2", entryId: second });
+
+    store.appendTaskRunFact({ runId: "run-1", kind: RUN_CANCELLED_FACT, taskId: "T1" });
+
+    // The cancelled task takes no further lifecycle write, and says which task it was.
+    assert.match(managedWriteRefusal(store, "run-1", "T1")!, /task T1 was cancelled at sequence 3/);
+    assert.throws(
+      () =>
+        coordinatedBoardWrite(store, {
+          runId: "run-1",
+          entryId: first,
+          verb: "claim",
+          actorId: "worker-one",
+          apply: () => claim(store, first),
+        }),
+      /task T1 was cancelled at sequence 3; its managed entries take no further lifecycle writes/,
+    );
+
+    // Neither of these is the run's cancellation, so the run's other task still moves.
+    assert.equal(managedWriteRefusal(store, "run-1", "T2"), null);
+    assert.equal(managedWriteRefusal(store, "run-1"), null);
+    coordinatedBoardWrite(store, {
+      runId: "run-1",
+      entryId: second,
+      verb: "claim",
+      actorId: "worker-two",
+      apply: () => claim(store, second, "worker-two", "other"),
+    });
+    assert.equal(store.getTaskBoardEntryById("other", second)!.claimedBy, "worker-two");
+
+    // A run-level cancellation is the one that closes everything: it carries the schema's empty task id.
+    store.appendTaskRunFact({ runId: "run-1", kind: RUN_CANCELLED_FACT, taskId: "" });
+    assert.match(managedWriteRefusal(store, "run-1", "T2")!, /run run-1 was cancelled at sequence/);
+    assert.throws(
+      () =>
+        coordinatedBoardWrite(store, {
+          runId: "run-1",
+          entryId: second,
+          verb: "claim",
+          actorId: "worker-three",
+          apply: () => claim(store, second, "worker-three", "other"),
+        }),
+      /run run-1 was cancelled at sequence 5; its managed entries take no further lifecycle writes/,
+    );
   });
 });
 

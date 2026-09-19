@@ -201,6 +201,36 @@ test("a cancelled run admits nothing further, whatever the plan says", () => {
 });
 
 /**
+ * The cancellation is scoped to a task, so one cancelled task must not end the sessions of the others.
+ * This module and the managed-write fence read the same predicate for exactly that reason: they were two
+ * copies of `kind === RUN_CANCELLED_FACT`, and both closed everything a run had.
+ */
+test("a cancellation closes the cancelled unit's session, and only that one", () => {
+  withStore((store) => {
+    register(store, "run-10");
+    const boundary = {
+      runId: "run-10",
+      plan: linearPlan(),
+      current: "one",
+      size: 1,
+      bound: 4,
+      onOffer: ["two"],
+      taskId: "one",
+      attempt: 1,
+    };
+    // Another task of the same run is cancelled first: this unit's session carries on.
+    store.appendTaskRunFact({ runId: "run-10", kind: RUN_CANCELLED_FACT, taskId: "other" });
+    assert.deepEqual(decideSessionMove(store, boundary).move, { kind: "admit", unit: "two" });
+
+    store.appendTaskRunFact({ runId: "run-10", kind: RUN_CANCELLED_FACT, taskId: "one" });
+    assert.deepEqual(decideSessionMove(store, { ...boundary, attempt: 2 }).move, {
+      kind: "close",
+      reason: "task one was cancelled at sequence 3",
+    });
+  });
+});
+
+/**
  * A move belongs to a boundary, and a boundary is a unit and an attempt - which is also the fact
  * identity the store keys on. So one boundary is one move however often the caller asks, and the
  * second answer is the first one rather than a second fact. A caller that decides again after the
