@@ -31,17 +31,19 @@ column.
 - **Use.** A runner is held per board session, not per spec field: when the host or driver runs
   another unit of the same board session, it reuses that session's runner, which is what makes the
   later unit's token delta the quantity fusion is claimed to reduce.
-- **The declaration rides in-band, as parameters rather than a tool.** A board entry may already
-  carry `memory=<id>` pointers, which a reader recognises by their prefix and expands only when
-  asked. The same way, an entry may carry one fenced `nmg:` block whose body is JSON - the
-  parameters of the call that wrote it. A reader that does not understand the block reads the prose
-  exactly as it does today, and rendering the block is optional: the default output is unchanged and
-  a reader asks for the layout the way it asks for a pointer to be expanded.
-- **A deterministic pass, not a model.** Reading those blocks out of the entries and producing the
-  session grouping together with the next move is a compiler-like pass over the board: source text
-  in, layout out, prose passed through untouched, no model call, recomputed at each boundary rather
-  than cached - the same reason no plan cache exists. The pass lives beside the board on the daemon
-  side, so the CLI, the extension and a driver all see one layout rather than three.
+- **The declaration is a parameter, and the result is a run fact.** The call that already exists
+  carries one dedicated JSON field for this - a set of specific parameters, not a tool - so nothing
+  has to be parsed out of prose and no convention inside the entry text is invented. The computed
+  decision is then written as a **run fact** in the table that already exists for exactly this kind
+  of thing (`task_run_facts`, whose only two kinds today are `entry-bound` and `run-cancelled`).
+  That gives the decision a sequence number, and the existing read takes facts as of a sequence, so
+  a decision can be replayed rather than reconstructed.
+- **A deterministic pass, not a model.** Reading those facts and the columns, and producing the
+  session grouping together with the next move, is a compiler-like pass: facts in, layout out, no
+  model call, recomputed at each boundary rather than cached - the same reason no plan cache exists.
+  The pass lives beside the board on the daemon side, so the CLI, the extension and a driver all see
+  one layout rather than three. An entry's prose stays for people; a reader that wants the decision
+  reads the fact, and showing it in an output is optional.
 - **Recording.** The move - admit the next unit, or close the session naming the condition that
   closed it - is written to the board, which is exactly the obligation the fusion design already
   states: a move decided online must be recorded with the facts it used, or "baseline" is
