@@ -397,6 +397,32 @@ function resolveRouteTestInputs(
   return { testFiles };
 }
 
+/** The TAP summary the rule reads, for the reason only. The verdict stays in `testOutputPassed`,
+ *  which the trusted verifier owns; this exists so a rejection names the count that rejected it.
+ *  "route tests did not pass the TAP acceptance rule" alone sent readers to the wrong file: a run
+ *  whose only defect was one declared skip reads like a broken test. */
+function tapCounts(output: string): string {
+  const count = (name: string): number => {
+    const matches = [...output.matchAll(new RegExp(`^# ${name} (\\d+)\\r?$`, "gm"))];
+    return matches.length === 1 ? Number(matches[0]![1]) : Number.NaN;
+  };
+  if (Number.isNaN(count("tests"))) return "no TAP summary in the output";
+  return (["tests", "pass", "fail", "cancelled", "skipped", "todo"] as const)
+    .map((name) => `${name} ${count(name)}`)
+    .join(", ");
+}
+
+/** The skipped and todo cases the rule rejects. A green summary hides them, and they are usually
+ *  not the change's fault - an optional dependency that is not installed skips by design - so the
+ *  reason names them instead of leaving the reader to rerun the group and search. */
+function tapSkippedCases(output: string): string[] {
+  return output
+    .split("\n")
+    .filter((line) => /^ok \d+ - .* # (SKIP|TODO)( |$)/u.test(line))
+    .map((line) => line.replace(/^ok \d+ - /u, ""))
+    .slice(0, 2);
+}
+
 function routeTestCheckResult(
   name: string,
   routeId: string,
@@ -408,11 +434,15 @@ function routeTestCheckResult(
   const exitFailed = Boolean(result.error || result.signal || result.status !== 0);
   // Same acceptance rule as the trusted baseline: TAP must report tests > 0,
   // pass == tests, and no fail/cancelled/skipped/todo. A run that executed
-  // nothing, or only skipped tests, is not a pass.
+  // nothing, or only skipped tests, is not a pass. The rule is deliberate and
+  // stays as it is; only the reason it reports is made readable here.
   const tapFailed = !exitFailed && !testOutputPassed(stdout);
   const failed = exitFailed || tapFailed;
+  const skipped = tapSkippedCases(stdout);
   const reason = tapFailed
-    ? `route tests did not pass the TAP acceptance rule: ${routeId}`
+    ? `route tests did not pass the TAP acceptance rule: ${routeId} (${tapCounts(stdout)}${
+        skipped.length > 0 ? `; rejected on: ${skipped.join(" | ")}` : ""
+      })`
     : testFailureReason(result, exitFailed);
   return {
     name,

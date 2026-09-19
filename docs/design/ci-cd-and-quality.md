@@ -209,7 +209,7 @@ Repository Observer 按 contract include 做保守目录剪枝：仅跳过可证
 当前 `observedBytes` 累计成功读取的普通文件的 stat 大小，超过默认 256MiB 时在
 观察完成后附加非阻塞诊断；它不是扫描前估计或大小硬门禁。文本 plan 展示观察完成后的
 文件数、字节数和诊断；JSON plan 保留 observation 字段。两者均不是读取前预警。
-Agent 默认不扫描超大目录的操作规则由 `skills/repo-development/SKILL.md` 维护；
+Agent 默认不扫描超大目录的操作规则由 `skills/repo-development/references/control-plane.md` 维护；
 运行时仍须完整观察 scope 内文件，不可静默跳过。是否尊重 `.gitignore` 是独立的
 摘要语义决策，不在本次剪枝范围内。
 
@@ -527,8 +527,9 @@ Agent 的误改、自报完成和检查削弱，不防同权限恶意进程、�
 `npm run agent:verify` 的默认 gate 由改动归属决定。当每个改动 scope 恰好被一个路由拥有，
 且没有任何 scope 落在共享 / 横切根（`src/`、`tests/`、`scripts/`、`tools/`、`.github/`、
 `package.json`、`package-lock.json`、`tsconfig.json`、`tsconfig.build.json`、
-`agent-context.yaml`、`AGENTS.md`）之下时走 narrow：运行常驻共享不变量 `check`、
-`docs:check`、`format:check`、`lint`、`package:check`，加上属主路由自己的测试文件
+`agent-context.yaml`、`AGENTS.md`）之下时走 narrow：运行常驻共享不变量
+（`NARROW_SHARED_CHECKS`：`check`、`docs:check`、`format:check`、`glossary:check`、`lint`、
+`package:check`、`rtm:check`），加上属主路由自己的测试文件
 （由路由 `tests:` 模式解析为具体文件，排除被匹配到的目录；零匹配时 fail-closed），
 合成为 `node-test:<routeId>` 检查；该子进程不继承父进程的 `NODE_TEST_CONTEXT`，
 否则 node 会跳过执行并把空过记为通过；路由测试采用与可信基线相同的 TAP 接受规则
@@ -542,6 +543,14 @@ contract 覆盖时合成一个内存 contract，不存在旁路执行路径。re
 （`narrow`/`full`）、可选 `reason` 与 `fullGateRun`（narrow 恒为 `false`），使“这次没有跑
 完整 gate”成为机器可读的可审计事实，而非推断。`validateReceipt` 拒绝 `fullGateRun` 与
 `mode` 矛盾的 receipt；`nmg-rcp receipt-verify` / `agent:verify --receipt <id>` 可独立复核。
+
+路由可以声明**常驻共享检查不适用于它自己拥有的表面**：`verify.sharedChecks: none`（默认
+`always`）。它只在本路由独占一个改动时生效，生效时 narrow 计划只跑该路由自己的测试；
+它**不能**让共享/横切根免于升级（那些 scope 仍然升级为路由声明的 blocking 集），而且
+路由未声明自己的测试时在配置加载期就被拒绝（否则计划会一个检查都不执行，而验证工具
+绝不能把“什么都没跑”报成通过）。receipt 的 `gate.reason` 会写明这条声明，使它不是靠数
+检查条数才能发现的事实。理由与替代方案见
+[decision](../decisions/implemented/2026-09-16-route-declines-shared-checks.md)。
 
 narrow 只减少运行的检查面，不削弱绑定：结果仍绑定候选 / 基线 / 验证器 / 策略 / 调用摘要，
 不复用历史证据，缺检查、跳过、超时、空报告、快照变动或依赖变化一律 fail-closed。

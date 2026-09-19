@@ -31,6 +31,7 @@ import type {
   NmgSplitNodeParams,
   NmgSyncStgParams,
   NmgTaskBoardParams,
+  NmgTaskRunParams,
   NmgTopologyProposalParams,
 } from "./protocol.ts";
 
@@ -789,6 +790,38 @@ export const NMG_CLI_COMMANDS: readonly CliCommandSpec[] = [
         reason: requiredOption(values, "reason"),
       }) as unknown as NmgTaskBoardParams;
     },
+  },
+  {
+    // The run surface's operator-facing half. A run registers, freezes its plan and adopts its
+    // entries from the runner that owns it (the daemon client is one client of those transitions,
+    // not the only one); asking what a run holds and stopping it are the two a person does, which is
+    // the same subset the board's own commands expose.
+    method: "taskRun",
+    words: ["run", "status"],
+    usageLine: "nmg run status RUN_ID [--json]",
+    options: [],
+    flags: [],
+    buildParams: (values): NmgTaskRunParams => ({
+      action: "status",
+      runId: singlePositional(values, "run status"),
+    }),
+  },
+  {
+    method: "taskRun",
+    words: ["run", "cancel"],
+    usageLine: "nmg run cancel RUN_ID [--task TASK_ID] [--reason TEXT] [--json]",
+    options: ["task", "reason"],
+    flags: [],
+    usageDetail: `Run cancel options:
+  --task ID                  Cancel that task of the run's plan instead of the whole run
+  --reason TEXT              Why it was cancelled (recorded as the fact's payload)`,
+    buildParams: (values): NmgTaskRunParams =>
+      compactObject({
+        action: "cancel",
+        runId: singlePositional(values, "run cancel"),
+        taskId: firstOption(values, "task"),
+        reason: firstOption(values, "reason"),
+      }) as unknown as NmgTaskRunParams,
   },
   {
     method: "syncStg",

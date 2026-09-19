@@ -13,6 +13,7 @@ import type { Constructor } from "./store-ctor.ts";
 import { randomUUID } from "node:crypto";
 import { extractEventWindow } from "./advanced-query.ts";
 import { applyRelevanceGate } from "../relevance-gate.ts";
+import { notExpired } from "./clock.ts";
 import { applyLearnedGate, rerankByRelevance } from "../learned-gate.ts";
 import { nowMs, PerfTimer, SECTION } from "../perf.ts";
 import type { PerfSnapshot } from "../perf.ts";
@@ -2093,7 +2094,7 @@ export function withRetrieval<TBase extends Constructor>(Base: TBase) {
            AND (? IS NULL OR m.source_actor = ?)
            AND (? = 1 OR m.status IN ('active', 'disputed', 'superseded'))
            AND ((? IS NOT NULL AND (m.session_id IS NULL OR m.session_id = ?)) OR (? IS NULL AND m.session_id IS NULL))
-           AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+           AND ${notExpired("m")}
            AND (? IS NULL OR m.event_time >= ?)
            AND (? IS NULL OR m.event_time <= ?)
            ${scopeClause}

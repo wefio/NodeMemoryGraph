@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
 import {
   ARTIFACT_TOOL,
   artifactEnvelope,
@@ -10,8 +9,9 @@ import {
   piCompletionAllowed,
   snapshotText,
 } from "../../.pi/extensions/nmg/ooo-execution.ts";
-import { patchPrompt, preparePatchWork } from "../../src/integration/ooo-patch.ts";
-import { expectedRename, verifyRenameCandidate } from "../../src/integration/ooo-verifier.ts";
+import { patchCandidate, patchPrompt, preparePatchWork } from "../../src/integration/ooo-patch.ts";
+import { verifyRenameCandidate } from "../../src/integration/check-runner.ts";
+import { expectedRenameOf, renameSource } from "../../evals/ooo-execution/rename-probe.ts";
 import { mutate } from "../../src/integration/ooo-mutation.ts";
 
 const patchWorkFields = () => ({
@@ -98,7 +98,7 @@ test("safety: the worker's check tool validates proposed files through the share
     "src/check.test.ts": "new\n",
   });
   for (const files of [
-    [{ path: "src/integration/ooo-check.ts", content: "injected\n" }],
+    [{ path: "src/integration/check-ticket.ts", content: "injected\n" }],
     [{ path: "../outside.ts", content: "injected\n" }],
     [{ path: "src/check.test.ts", content: "old\n" }],
     [],
@@ -142,41 +142,40 @@ test("contract: the worker's check budget is host-limited, not model-chosen", ()
 });
 
 test("contract: candidate directory check reports a real terminal event without modifying source", async () => {
-  const path = new URL("../../src/integration/ooo-execution.ts", import.meta.url);
-  const source = readFileSync(path, "utf8");
-  const result = await verifyRenameCandidate(source, expectedRename(source));
+  // The probe's frozen target rather than a live product file: the oracle needs a file whose shape it
+  // requires (one exported `nextTask`, the `byId` map inside it, no further export), and freezing it
+  // keeps this test's own bounds from moving with a file it does not test. See `rename-probe.ts`.
+  const source = renameSource();
+  const result = await verifyRenameCandidate(source, expectedRenameOf(source));
   assert.equal(result.verdict, "accept");
   assert.ok(result.checkId);
   assert.ok(result.startedAt && result.finishedAt && result.finishedAt >= result.startedAt);
-  assert.equal(readFileSync(path, "utf8"), source);
+  assert.equal(renameSource(), source, "the frozen target is not modified by a candidate check");
   assert.equal(
-    (await verifyRenameCandidate(source, expectedRename(source) + "\n//extra")).verdict,
+    (await verifyRenameCandidate(source, expectedRenameOf(source) + "\n//extra")).verdict,
     "reject",
   );
   const invalid = source + "\nfunction broken( {";
-  assert.equal((await verifyRenameCandidate(invalid, expectedRename(invalid))).verdict, "reject");
+  assert.equal((await verifyRenameCandidate(invalid, expectedRenameOf(invalid))).verdict, "reject");
 });
 
 test("safety: rename oracle rejects unrelated changes which passed the old substring check", () => {
-  const source = readFileSync(
-    new URL("../../src/integration/ooo-execution.ts", import.meta.url),
-    "utf8",
-  );
-  const expected = expectedRename(source);
+  const source = renameSource();
+  const expected = expectedRenameOf(source);
   assert.notEqual(expected, source);
   for (const candidate of [
     expected + "\n// unrelated",
     expected.replace("return null;", "return 'unsafe';"),
-    expected.replace("export interface SnapshotWork", "interface SnapshotWork"),
+    expected.replace("export interface FrozenDispatchTask", "interface FrozenDispatchTask"),
   ]) {
     assert.ok(candidate.includes("planIndex") && !candidate.includes("byId"));
     assert.notEqual(candidate, expected);
   }
   const prefix = "// byId outside the target stays unchanged\n";
-  assert.equal(expectedRename(prefix + source), prefix + expected);
-  assert.throws(() => expectedRename("missing function"));
-  assert.throws(() => expectedRename(expected));
-  assert.throws(() => expectedRename(source + "\nexport const another = 1;"));
+  assert.equal(expectedRenameOf(prefix + source), prefix + expected);
+  assert.throws(() => expectedRenameOf("missing function"));
+  assert.throws(() => expectedRenameOf(expected));
+  assert.throws(() => expectedRenameOf(source + "\nexport const another = 1;"));
 });
 
 test("scope: the snapshot carries the readable subset only, and names what is hidden", () => {
@@ -185,17 +184,17 @@ test("scope: the snapshot carries the readable subset only, and names what is hi
     attempt: 1,
     instruction: "Repair the check.",
     files: {
-      "src/integration/ooo-check.ts": "export const a = 1;\n",
+      "src/integration/check-ticket.ts": "export const a = 1;\n",
       "src/integration/ooo-patch.ts": "export const big = 1;\n",
     },
-    editable: ["src/integration/ooo-check.ts"],
-    visible: ["src/integration/ooo-check.ts"],
+    editable: ["src/integration/check-ticket.ts"],
+    visible: ["src/integration/check-ticket.ts"],
   });
   const snapshot = JSON.parse(snapshotText(frozen)) as {
     files: Record<string, string>;
     hidden?: string[];
   };
-  assert.deepEqual(Object.keys(snapshot.files), ["src/integration/ooo-check.ts"]);
+  assert.deepEqual(Object.keys(snapshot.files), ["src/integration/check-ticket.ts"]);
   assert.deepEqual(snapshot.hidden, ["src/integration/ooo-patch.ts"]);
   const prompt = patchPrompt(frozen, ARTIFACT_TOOL);
   // What is frozen but not shown is stated, so narrowing the view is never a hidden rule.
@@ -206,8 +205,8 @@ test("scope: the snapshot carries the readable subset only, and names what is hi
     taskId: "run-1:B",
     attempt: 1,
     instruction: "Add a regression.",
-    files: { "src/integration/ooo-check.ts": "export const a = 1;\n" },
-    editable: ["src/integration/ooo-check.ts"],
+    files: { "src/integration/check-ticket.ts": "export const a = 1;\n" },
+    editable: ["src/integration/check-ticket.ts"],
   });
   assert.ok(!patchPrompt(whole, ARTIFACT_TOOL).includes("Frozen but not shown"));
   assert.ok(snapshotText(whole).includes('"hidden"') === false);
@@ -320,4 +319,27 @@ test("contract: a patch attempt is told to answer through the artifact tool, not
   // The snapshot task has no envelope and keeps the JSON-in-text instruction.
   const snapshotMode = resourceLoader(false).getSystemPrompt() ?? "";
   assert.match(snapshotMode, /must begin with '\{'/);
+});
+
+test("contract: an artifact is read by its kind, and the patch reader refuses a conclusion", () => {
+  const frozen = patchWork();
+  const conclusion = artifactEnvelope(frozen, {
+    digest: frozen.digest,
+    conclusion: "no-change-needed",
+    summary: "already covered",
+    evidence: "cited title exists",
+  });
+  assert.equal(
+    conclusion.ok,
+    true,
+    "a conclusion is a legitimate artifact for a task whose rule admits one",
+  );
+  // Two readers exist and the kind decides which one may read the bytes. A harness that fed a
+  // conclusion to the patch reader would report the reader's complaint as the candidate's quality,
+  // which is exactly what the E arm's first run did (see the arms record).
+  assert.throws(
+    () => patchCandidate(frozen, conclusion.ok ? conclusion.json : "{}"),
+    /invalid patch structure/,
+    "the patch reader must refuse a conclusion by name rather than reading half of it",
+  );
 });

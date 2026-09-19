@@ -5,10 +5,17 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
 import { digestRepositoryPaths, observeGitWorktree } from "../src/rcp/repository.ts";
+import { mutationHazard } from "./mutation-lock.ts";
 
 export interface VerificationConfig {
   blocking: string[];
   advisory: string[];
+  /** Whether the always-run shared checks (the narrow plan's floor) apply when this route solely
+   *  owns a change. `"none"` is a declaration the route's owner makes about its own surface, not
+   *  an inference: it is only honoured on the narrow path, it never covers a shared/cross-cutting
+   *  path, and it is refused when the route declares no tests - the plan would then execute
+   *  nothing, which is the one outcome a verification tool must never report as a pass. */
+  sharedChecks?: "always" | "none";
 }
 
 export interface RouteConfig {
@@ -160,21 +167,36 @@ function readConfig(root: string): AgentContextConfig {
         throw new Error(`${route.id}: ${field} must be a string array`);
       }
     }
-    if (
-      !route.verify ||
-      !isStringArray(route.verify.blocking) ||
-      !isStringArray(route.verify.advisory)
-    ) {
-      throw new Error(`${route.id}: verify must declare blocking and advisory script arrays`);
-    }
-    const overlap = route.verify.blocking.find((command) =>
-      route.verify.advisory.includes(command),
-    );
-    if (overlap) {
-      throw new Error(`${route.id}: npm script ${overlap} cannot be both blocking and advisory`);
-    }
+    validateRouteVerify(route);
   }
   return parsed as AgentContextConfig;
+}
+
+/** One route's verification declaration. Kept out of `readConfig` because that function is already
+ *  above the complexity gate's limit: a new rule must not ratchet it. */
+function validateRouteVerify(route: RouteConfig): void {
+  if (
+    !route.verify ||
+    !isStringArray(route.verify.blocking) ||
+    !isStringArray(route.verify.advisory)
+  ) {
+    throw new Error(`${route.id}: verify must declare blocking and advisory script arrays`);
+  }
+  const overlap = route.verify.blocking.find((command) => route.verify.advisory.includes(command));
+  if (overlap) {
+    throw new Error(`${route.id}: npm script ${overlap} cannot be both blocking and advisory`);
+  }
+  const sharedChecks = route.verify.sharedChecks;
+  if (sharedChecks !== undefined && sharedChecks !== "always" && sharedChecks !== "none") {
+    throw new Error(
+      `${route.id}: verify.sharedChecks must be "always" or "none", not ${JSON.stringify(sharedChecks)}`,
+    );
+  }
+  if (sharedChecks === "none" && !route.tests.length) {
+    throw new Error(
+      `${route.id}: a route that declines the shared checks must declare its own tests, or a narrow run would execute nothing`,
+    );
+  }
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -555,6 +577,18 @@ export function validateAgentContext(root: string): string[] {
   ];
 }
 
+/** The reconciliation section says so when a sweep holds the tree (post-mortem 0003): every check ordered
+ *  from here would read the mutant. Returned as lines rather than pushed in place, because
+ *  `formatAgentContext` is already above the complexity limit and this must not add a branch to it.
+ *
+ *  The root is the report's own, never `process.cwd()`: the warning is about the tree the report
+ *  describes, and reading the caller's directory made the same report differ depending on where it was
+ *  rendered from - which a suite comparing exact output caught. */
+function mutationHazardLines(root: string): string[] {
+  const hazard = mutationHazard(root);
+  return hazard ? [`- Warning: ${hazard} - checks would read the mutant`] : [];
+}
+
 export function formatAgentContext(report: AgentContextReport): string {
   const lines = [
     `# Repository context: ${report.project}@${report.version}`,
@@ -575,6 +609,8 @@ export function formatAgentContext(report: AgentContextReport): string {
   lines.push(`- TODO: ${report.canonical.todo}`);
   lines.push("", "## Reconciliation");
   lines.push(`- Status: ${report.reconciliation.status}`);
+  // The first command a session runs is the place to say that the tree is mid-mutation (post-mortem 0003).
+  lines.push(...mutationHazardLines(report.root));
   lines.push(`- Desired revision: ${report.state.desiredRevision.slice(0, 12)}`);
   lines.push(`- Observed revision: ${report.state.observedRevision.slice(0, 12)}`);
   for (const condition of report.reconciliation.conditions) {

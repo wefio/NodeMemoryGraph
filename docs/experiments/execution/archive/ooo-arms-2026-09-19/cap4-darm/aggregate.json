@@ -1,0 +1,110 @@
+{
+  "aggregate": {
+    "runs": 4,
+    "perBound": [
+      {
+        "bound": 1,
+        "reps": 2,
+        "medianWallMs": 24258,
+        "medianTokens": 45158,
+        "sessions": [
+          4,
+          4
+        ],
+        "accepted": [
+          0,
+          0
+        ]
+      },
+      {
+        "bound": 4,
+        "reps": 2,
+        "medianWallMs": 19431,
+        "medianTokens": 83865,
+        "sessions": [
+          1,
+          1
+        ],
+        "accepted": [
+          0,
+          0
+        ]
+      }
+    ],
+    "measuredSavingMs": 4827,
+    "predictedSavingMs": 5700,
+    "note": "predicted saving is the offline ceiling for this plan: 4 sessions at cap 1 against 1 at cap 4, at the D arm's measured ~1 900 ms startup"
+  },
+  "runs": [
+    {
+      "bound": 1,
+      "rep": 1,
+      "wallMs": 24258,
+      "tokens": 45158,
+      "failures": 0,
+      "sessions": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "units": [
+        "normalize:accepted:11413t",
+        "scale:accepted:11557t",
+        "total:accepted:10683t",
+        "summarize:accepted:11505t"
+      ]
+    },
+    {
+      "bound": 4,
+      "rep": 1,
+      "wallMs": 19431,
+      "tokens": 83865,
+      "failures": 0,
+      "sessions": [
+        4
+      ],
+      "units": [
+        "normalize:accepted:11741t",
+        "scale:accepted:16827t",
+        "total:accepted:23958t",
+        "summarize:accepted:31339t"
+      ]
+    },
+    {
+      "bound": 1,
+      "rep": 2,
+      "wallMs": 22280,
+      "tokens": 41673,
+      "failures": 0,
+      "sessions": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "units": [
+        "normalize:accepted:11277t",
+        "scale:accepted:7751t",
+        "total:accepted:10689t",
+        "summarize:accepted:11956t"
+      ]
+    },
+    {
+      "bound": 4,
+      "rep": 2,
+      "wallMs": 15515,
+      "tokens": 55143,
+      "failures": 0,
+      "sessions": [
+        4
+      ],
+      "units": [
+        "normalize:accepted:11406t",
+        "scale:accepted:10102t",
+        "total:accepted:14526t",
+        "summarize:accepted:19109t"
+      ]
+    }
+  ]
+}

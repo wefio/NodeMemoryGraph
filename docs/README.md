@@ -118,3 +118,10 @@ rules and must not invent additional policy.
 An error means the repository's documented public or normative interface is
 broken in a mechanically reproducible way. A warning is maintenance input for an
 Agent or reviewer and must not fail CI.
+
+The byte budget covers the always-read entry of a Skill, not every file under it.
+When an entry approaches its ceiling, route its occasionally-needed sections into
+`skills/<name>/references/` and name each trigger in the entry ([
+decision](decisions/implemented/2026-09-18-skill-grows-by-routing.md)), rather
+than raising the ceiling or compressing a rule until it loses the facts it
+depends on.

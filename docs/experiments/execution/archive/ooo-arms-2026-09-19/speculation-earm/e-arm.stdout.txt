@@ -1,0 +1,59 @@
+{"arm":"baseline","fact":true,"rep":1,"tokens":9362,"workMs":6957,"postFactMs":6957,"quality":false}
+{"arm":"speculation","fact":true,"rep":1,"outcome":"publish","sessionReusable":true,"tokens":10636,"workMs":8442,"postFactMs":186,"quality":false,"qualityDetail":"2:25)\n      at Test.start (node:internal/test_runner/test:1242:17)\n      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: { id: 'beta', title: 'Beta', rows: [ '1. x', '2. y' ] },\n    expected: { id: 'beta', title: 'Beta', lines: [ '1. x', '2. y' ] },\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n"}
+{"arm":"baseline","fact":true,"rep":2,"tokens":4182,"workMs":3401,"postFactMs":3401,"quality":false}
+{"arm":"speculation","fact":true,"rep":2,"outcome":"publish","sessionReusable":true,"tokens":6515,"workMs":6624,"postFactMs":0,"quality":false,"qualityDetail":"invalid patch structure (artifact keys: digest,kind,conclusion,summary,evidence,citations)"}
+{"arm":"baseline","fact":false,"rep":1,"tokens":0,"workMs":0,"postFactMs":0,"quality":null}
+{"arm":"speculation","fact":false,"rep":1,"outcome":"discard","sessionReusable":false,"tokens":7677,"workMs":8070,"postFactMs":0,"quality":null}
+{"arm":"baseline","fact":false,"rep":2,"tokens":0,"workMs":0,"postFactMs":0,"quality":null}
+{"arm":"speculation","fact":false,"rep":2,"outcome":"discard","sessionReusable":false,"tokens":4866,"workMs":7507,"postFactMs":0,"quality":null}
+AGGREGATE
+[
+  {
+    "arm": "baseline",
+    "fact": true,
+    "runs": 2,
+    "tokens": 13544,
+    "workMs": 10358,
+    "postFactMs": 10358,
+    "quality": [
+      false,
+      false
+    ]
+  },
+  {
+    "arm": "speculation",
+    "fact": true,
+    "runs": 2,
+    "tokens": 17151,
+    "workMs": 15066,
+    "postFactMs": 186,
+    "quality": [
+      false,
+      false
+    ]
+  },
+  {
+    "arm": "baseline",
+    "fact": false,
+    "runs": 2,
+    "tokens": 0,
+    "workMs": 0,
+    "postFactMs": 0,
+    "quality": [
+      null,
+      null
+    ]
+  },
+  {
+    "arm": "speculation",
+    "fact": false,
+    "runs": 2,
+    "tokens": 12543,
+    "workMs": 15577,
+    "postFactMs": 0,
+    "quality": [
+      null,
+      null
+    ]
+  }
+]

@@ -1,0 +1,58 @@
+{
+  "provider": "deepseek",
+  "model": "deepseek-v4-flash",
+  "aggregate": [
+    {
+      "arm": "baseline",
+      "fact": true,
+      "runs": 3,
+      "tokens": 18183,
+      "workMs": 19200,
+      "postFactMs": 19200,
+      "quality": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "arm": "speculation",
+      "fact": true,
+      "runs": 3,
+      "tokens": 18602,
+      "workMs": 19506,
+      "postFactMs": 175,
+      "quality": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "arm": "baseline",
+      "fact": false,
+      "runs": 3,
+      "tokens": 0,
+      "workMs": 0,
+      "postFactMs": 0,
+      "quality": [
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "arm": "speculation",
+      "fact": false,
+      "runs": 3,
+      "tokens": 20332,
+      "workMs": 23920,
+      "postFactMs": 0,
+      "quality": [
+        null,
+        null,
+        null
+      ]
+    }
+  ]
+}

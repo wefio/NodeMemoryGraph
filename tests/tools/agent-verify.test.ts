@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,7 @@ import {
   buildVerificationPlan,
   discoverApplicableRcpContract,
   executeVerificationPlan,
+  narrowReason,
   type VerificationCommandResult,
 } from "../../tools/agent-verify.ts";
 import type { AgentContextReport } from "../../tools/repo-context.ts";
@@ -188,6 +189,117 @@ test("CLI dry-run emits a machine-readable plan without running checks", () => {
       { command: "node --test (documentation)", status: "skipped", reason: "dry run" },
     ],
   );
+});
+
+test("a route that declines the shared checks plans only its own tests", () => {
+  // `.gitignore` is the surface the repository-tooling route declares the always-run shared checks
+  // not applicable to; its own tests still run, and they are where the one assertion that reads
+  // ignore rules lives (`tests/tools/complexity-gate-base.test.ts`).
+  const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
+  const root = fileURLToPath(new URL("../..", import.meta.url));
+  // Evidence goes to a temp path: this case roots the CLI at the repository itself, and a
+  // test must not overwrite the evidence a real verification left in `.nmg/verification`.
+  const evidence = join(mkdtempSync(join(tmpdir(), "nmg-agent-verify-plan-")), "plan.json");
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      script,
+      "--root",
+      root,
+      "--scope",
+      ".gitignore",
+      "--dry-run",
+      "--output",
+      evidence,
+      "--json",
+    ],
+    { encoding: "utf8", windowsHide: true },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout) as {
+    ok: boolean;
+    results: VerificationCommandResult[];
+  };
+  assert.equal(payload.ok, true);
+  assert.deepEqual(
+    payload.results.map(({ command, status }) => ({ command, status })),
+    [{ command: "node --test (repository-tooling)", status: "skipped" }],
+  );
+});
+
+test("a declining route's narrow run verifies on its own tests and nothing else", () => {
+  // The dry-run case above reads the printed plan; this one runs the whole path, so the claim is
+  // about what executed. The fixture declares no shared script at all, so a run that touched the
+  // floor would fail on a missing script rather than quietly pass, and the receipt is asserted to
+  // record the declaration, which is the auditable half of it.
+  const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-declined-"));
+  mkdirSync(join(root, "docs"), { recursive: true });
+  mkdirSync(join(root, "tests"), { recursive: true });
+  writeFileSync(join(root, "docs", "owner.md"), "# Owner\n");
+  writeFileSync(
+    join(root, "tests", "fixture.test.ts"),
+    'import test from "node:test";\ntest("the route can check its own surface", () => {});\n',
+  );
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({ name: "fixture", version: "1.0.0", scripts: {} }),
+  );
+  writeFileSync(
+    join(root, "agent-context.yaml"),
+    [
+      "version: 1",
+      "routes:",
+      "  - id: fixture",
+      "    paths: [docs/**]",
+      "    owners: [docs/owner.md]",
+      "    tests: [tests/fixture.test.ts]",
+      "    verify:",
+      "      blocking: [check]",
+      "      advisory: []",
+      "      sharedChecks: none",
+      "",
+    ].join("\n"),
+  );
+  const git = (args: string[]) =>
+    spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
+  assert.equal(git(["init", "--quiet"]).status, 0);
+  assert.equal(git(["config", "user.email", "verify@example.invalid"]).status, 0);
+  assert.equal(git(["config", "user.name", "Verify Test"]).status, 0);
+  assert.equal(git(["add", "."]).status, 0);
+  assert.equal(git(["commit", "--quiet", "-m", "fixture"]).status, 0);
+  writeFileSync(join(root, "docs", "owner.md"), "# Owner\n\nChanged.\n");
+
+  const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--json"],
+    { encoding: "utf8", windowsHide: true },
+  );
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout) as {
+    ok: boolean;
+    results: VerificationCommandResult[];
+    rcp?: { status: string; receiptPath?: string };
+  };
+  assert.equal(payload.ok, true);
+  assert.equal(payload.rcp?.status, "verified");
+  assert.deepEqual(
+    payload.results.map(({ command, status }) => ({ command, status })),
+    [{ command: "node-test:fixture", status: "passed" }],
+    "the route's own tests ran, and the always-run shared checks did not",
+  );
+  const receipt = JSON.parse(readFileSync(payload.rcp!.receiptPath!, "utf8")) as {
+    gate: { mode: string; reason?: string };
+  };
+  assert.equal(receipt.gate.mode, "narrow");
+  assert.match(receipt.gate.reason!, /declares the always-run shared checks not applicable/);
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+});
+
+test("the receipt reason records a route's decision to decline the shared checks", () => {
+  assert.match(narrowReason("repository-tooling", 0), /declares the always-run shared checks/);
+  assert.equal(narrowReason("documentation", 7), "cleanly owned by route documentation");
 });
 
 test("CLI executes npm scripts through a cross-platform child process", () => {
@@ -659,4 +771,113 @@ test("route tests that are only skipped do not pass", () => {
   const check = receipt.checks.find((entry) => entry.name === "node-test:plugin");
   assert.equal(check?.status, "failed");
   assert.match(check?.reason ?? "", /TAP acceptance rule/);
+  // The reason has to name what the rule rejected. This run's only defect is one declared skip,
+  // and without the counts the reader is sent looking for a broken test instead.
+  assert.match(check?.reason ?? "", /skipped 1/);
+  assert.match(check?.reason ?? "", /plugin ok/);
+});
+
+test("a failed check restates its own last lines and names the evidence file", () => {
+  const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-quiet-failure-"));
+  mkdirSync(join(root, "docs"), { recursive: true });
+  writeFileSync(join(root, "docs", "owner.md"), "# Owner\n");
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({
+      name: "fixture",
+      version: "1.0.0",
+      scripts: {
+        boom: `node -e "for (let i = 1; i <= 14; i++) console.log('check output line ' + i); console.error('the detail that matters'); process.exit(3)"`,
+      },
+    }),
+  );
+  writeFileSync(
+    join(root, "agent-context.yaml"),
+    "version: 1\nroutes:\n  - id: fixture\n    paths: [src/**]\n    owners: [docs/owner.md]\n    tests: []\n    verify:\n      blocking: [boom]\n      advisory: []\n",
+  );
+
+  const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--scope", "src/file.ts"],
+    { encoding: "utf8", windowsHide: true },
+  );
+  assert.notEqual(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /npm run boom: failed/);
+  // The summary restates the failing command's own words, so a reader who lost the streamed
+  // output above it (scrolled away, or piped through a filter) still sees them in one place.
+  assert.match(result.stdout, /^ {2}\| the detail that matters$/m);
+  assert.match(result.stdout, /^ {2}\| check output line 14$/m);
+  // ...bounded: a failing check cannot flood the summary.
+  assert.doesNotMatch(result.stdout, /^ {2}\| check output line 1$/m);
+  assert.match(result.stdout, /last 10 lines; full output in the evidence file/);
+  assert.match(result.stdout, /Evidence: .*\.nmg[\\/]verification[\\/]latest\.json/);
+});
+
+test("narrow mode restates the failing check's last lines too", () => {
+  const root = narrowFixture({ failRouteTest: true });
+  const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--changed"],
+    { encoding: "utf8", windowsHide: true },
+  );
+  assert.notEqual(result.status, 0, result.stderr || result.stdout);
+  // The failing test's own TAP summary is what the reader needs, under its own check.
+  assert.match(result.stdout, /^ {2}\| # fail 1$/m);
+  assert.match(result.stdout, /^ {2}\| # tests 1$/m);
+  assert.match(result.stdout, /Evidence: .*\.nmg[\\/]verification[\\/]latest\.json/);
+});
+
+test("a live mutation sweep makes the verifier refuse instead of reading the mutant", () => {
+  const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-sweep-"));
+  mkdirSync(join(root, "docs"), { recursive: true });
+  mkdirSync(join(root, "src"), { recursive: true });
+  writeFileSync(join(root, "docs", "owner.md"), "# Owner\n");
+  writeFileSync(join(root, "src", "file.ts"), "export const value = 1;\n");
+  writeFileSync(join(root, "package.json"), JSON.stringify({ name: "fixture", version: "1.0.0" }));
+  writeFileSync(
+    join(root, "agent-context.yaml"),
+    "version: 1\nroutes:\n  - id: fixture\n    paths: [src/**]\n    owners: [docs/owner.md]\n    tests: []\n    verify:\n      blocking: []\n      advisory: []\n",
+  );
+  const lockPath = join(root, ".temp", "mutation-lock.json");
+  mkdirSync(join(root, ".temp"), { recursive: true });
+  // The test's own pid is alive, so the lock is honoured as live; a lock whose owner is gone is ignored.
+  writeFileSync(
+    lockPath,
+    JSON.stringify({
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      target: "src/integration/ooo-execution.ts",
+      live: true,
+    }),
+  );
+
+  const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
+  const run = () =>
+    spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        script,
+        "--root",
+        root,
+        // A scope, so the plan does not fall back to changed-file discovery and need a Git worktree...
+        "--scope",
+        "src/file.ts",
+        // ...and no `--dry-run`: a dry run plans from the route config, so it is deliberately exempt from
+        // the refusal (what it reads cannot be a mutant). The refusal guards a run that would record a
+        // verdict, which is why this case exercises one.
+        "--json",
+      ],
+      { encoding: "utf8", windowsHide: true },
+    );
+
+  const refused = run();
+  assert.notEqual(refused.status, 0, refused.stdout);
+  assert.match(refused.stderr, /refusing to verify/);
+  assert.match(refused.stderr, /src\/integration\/ooo-execution\.ts/);
+
+  rmSync(lockPath);
+  assert.equal(run().status, 0, "a quiet tree verifies again");
 });

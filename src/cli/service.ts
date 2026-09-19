@@ -82,6 +82,16 @@ import {
 } from "../core/relevance-gate.ts";
 import { readRelevanceModel } from "../lab/relevance-model.ts";
 import { normalizeRecallTriggers } from "../core/recall-triggers.ts";
+import {
+  bindRunEntry,
+  cancelRun,
+  coordinatedEntryWrite,
+  createBoundEntry,
+  freezeRunPlan,
+  registerRun,
+  taskRunStatus,
+  type RunPlanTaskInput,
+} from "../integration/task-coordinator.ts";
 import { searchMemoryContext } from "../integration/search.ts";
 import { simhash64, simhashToHex, simhashFromHex, hammingDistance } from "../core/simhash.ts";
 import { ControllerPolicyChannel } from "../integration/controller-channel.ts";
@@ -154,6 +164,7 @@ import {
   type NmgSyncStgParams,
   type NmgStgPurgeSessionParams,
   type NmgTaskBoardParams,
+  type NmgTaskRunParams,
   type NmgTopologyProposalParams,
 } from "./protocol.ts";
 import { resolveNmgDataDir } from "./data-path.ts";
@@ -209,6 +220,10 @@ export class NmgService {
   readonly #tesseraBackfillRoots = new Set<string>();
   readonly #stgSyncTimes = new WeakMap<NmgStore, Map<string, number>>();
   #shutdownRequested = false;
+  /** Set by close(). New work is refused after this, so a shutdown cannot race a fresh request. */
+  #closing = false;
+  /** Calls accepted and not yet answered; see drain(). */
+  #inFlight = 0;
   /** Lazily loaded learned relevance gate; undefined until first read, null when
    *  no model is configured or it fails to load. */
   #relevanceModel: RelevanceModelLike | null | undefined;
@@ -305,194 +320,250 @@ export class NmgService {
     return this.#onlineLearner;
   }
 
-  async invoke<M extends NmgMethod>(method: M, params?: unknown): Promise<NmgMethodResult[M]> {
-    switch (method) {
-      case "hello":
-        return this.#hello() as NmgMethodResult[M];
-      case "status":
-        return this.#status() as NmgMethodResult[M];
-      case "remember":
-        return this.#remember(parseRememberParams(params)) as NmgMethodResult[M];
-      case "rememberBatch":
-        return this.#rememberBatch(parseRememberBatchParams(params)) as NmgMethodResult[M];
-      case "resolveRemember":
-        return this.#resolveRemember(parseResolveRememberParams(params)) as NmgMethodResult[M];
-      case "recordClaimOutcomes":
-        return this.#recordClaimOutcomes(
-          parseRecordClaimOutcomesParams(params),
-        ) as NmgMethodResult[M];
-      case "recordFeedback":
-        return this.#recordFeedback(parseRecordFeedbackParams(params)) as NmgMethodResult[M];
-      case "search":
-        return (await this.#search(parseSearchParams(params))) as NmgMethodResult[M];
-      case "get":
-        return this.#get(parseGetParams(params)) as NmgMethodResult[M];
-      case "recordActiveGraphAttribution":
-        return this.#recordActiveGraphAttribution(
-          parseRecordActiveGraphAttributionParams(params),
-        ) as NmgMethodResult[M];
-      case "retentionCandidates":
-        return {
-          candidates: this.#getStore().retentionCandidates(parseRetentionCandidatesParams(params)),
-        } as NmgMethodResult[M];
-      case "perfAggregates":
-        return this.#getStore().perfAggregates() as NmgMethodResult[M];
-      case "pruneRetrievalTraces":
-        return {
-          pruned: this.#getStore().pruneRetrievalTraces(parsePerfPruneParams(params)),
-        } as NmgMethodResult[M];
-      case "setStorageState": {
-        const parsed = parseSetStorageStateParams(params);
-        return {
-          memoryId: parsed.memoryId,
-          storageState: this.#getStore().setMemoryStorageState(
-            parsed.memoryId,
-            parsed.storageState,
-            parsed.recoveryDays,
-          ),
-        } as NmgMethodResult[M];
-      }
-      case "deleteMemory": {
-        const parsed = parseDeleteMemoryParams(params);
-        const memory = this.#getStore().deleteMemory(parsed.memoryId);
-        return { deleted: memory !== null, memory } as NmgMethodResult[M];
-      }
-      case "exportMemories":
-        return this.#getStore().exportMemories(
-          parseExportMemoriesParams(params),
-        ) as NmgMethodResult[M];
-      case "mergeNodes":
-        return this.#getStore().mergeNodes(parseMergeNodesParams(params)) as NmgMethodResult[M];
-      case "rollbackNodeTransform":
-        return this.#getStore().rollbackNodeTransform(
-          parseRollbackNodeTransformParams(params).transformId,
-        ) as NmgMethodResult[M];
-      case "splitNode":
-        return this.#getStore().splitNode(parseSplitNodeParams(params)) as NmgMethodResult[M];
-      case "topologyProposal": {
-        const parsed = parseTopologyProposalParams(params);
-        if (parsed.action === "list") {
-          return {
-            action: "list",
-            proposals: this.#getStore().topologyProposals(parsed.status),
-          } as NmgMethodResult[M];
-        }
-        if (parsed.action === "assess") {
-          return {
-            action: "assess",
-            assessment: this.#getStore().assessAutomaticMergeProposal(parsed.proposalId, {
-              minimumObservations: parsed.minimumObservations,
-              minimumEstimatedGain: parsed.minimumEstimatedGain,
-              minimumEvidenceMemories: parsed.minimumEvidenceMemories,
-            }),
-          } as NmgMethodResult[M];
-        }
-        if (parsed.action === "review") {
-          return {
-            action: "review",
-            proposal: this.#getStore().reviewTopologyProposal(parsed.proposalId, parsed.decision),
-          } as NmgMethodResult[M];
-        }
-        return {
-          action: "actuate",
-          transform: this.#getStore().actuateAutomaticMergeProposal(parsed.proposalId),
-        } as NmgMethodResult[M];
-      }
-      case "memoryMaintenanceProposal": {
-        const parsed = parseMemoryMaintenanceProposalParams(params);
-        if (parsed.action === "list") {
-          return {
-            action: "list",
-            proposals: this.#getStore().memoryMaintenanceProposals(parsed.status),
-          } as NmgMethodResult[M];
-        }
-        if (parsed.action === "review") {
-          return {
-            action: "review",
-            proposal: this.#getStore().reviewMemoryMaintenanceProposal(
-              parsed.proposalId,
-              parsed.decision,
-              parsed.reason,
-            ),
-          } as NmgMethodResult[M];
-        }
-        return {
-          action: "propose",
-          proposal: this.#getStore().createMemoryMaintenanceProposal({
-            defectType: parsed.defectType,
-            action: parsed.maintenanceAction,
-            targetMemoryIds: parsed.targetMemoryIds,
-            evidenceMemoryIds: parsed.evidenceMemoryIds,
-            evidenceTraceIds: parsed.evidenceTraceIds,
-            proposedStatement: parsed.proposedStatement,
-            proposedScope: parsed.proposedScope,
-            policy: parsed.policy,
-            longHorizonScore: parsed.longHorizonScore,
-            evaluationKind: parsed.evaluationKind,
-            evaluationRef: parsed.evaluationRef,
-          }),
-        } as NmgMethodResult[M];
-      }
-      case "syncStg": {
-        const parsed = parseSyncStgParams(params);
-        return {
-          copied: copyLtgSubsetToStg(
-            this.#getStore(),
-            this.#getStgStore(parsed.projectDir, parsed.sessionId),
-            parsed,
-          ),
-          projectDir: parsed.projectDir,
-        } as NmgMethodResult[M];
-      }
-      case "stgPurgeSession": {
-        const parsed = parseStgPurgeSessionParams(params);
-        const purged = purgeSessionFromStg(
-          this.#getStgStore(parsed.projectDir, parsed.sessionId),
-          parsed.sessionId,
-        );
-        return { purged, projectDir: parsed.projectDir } as NmgMethodResult[M];
-      }
-      case "taskBoard": {
-        const parsed = parseTaskBoardParams(params);
-        return taskBoardHandlers[parsed.action](this.#getStore(), parsed) as NmgMethodResult[M];
-      }
-      case "chainCreate":
-        return this.#chainCreate(parseChainCreateParams(params)) as NmgMethodResult[M];
-      case "chainAdd":
-        return this.#chainAdd(parseChainAddParams(params)) as NmgMethodResult[M];
-      case "chainRemove":
-        return this.#chainRemove(parseChainRemoveParams(params)) as NmgMethodResult[M];
-      case "chainEdgeAdd":
-        return this.#chainEdgeAdd(parseChainEdgeAddParams(params)) as NmgMethodResult[M];
-      case "chainEdgeRemove":
-        return this.#chainEdgeRemove(parseChainEdgeRemoveParams(params)) as NmgMethodResult[M];
-      case "chainGet":
-        return this.#chainGet(parseChainGetParams(params)) as NmgMethodResult[M];
-      case "chainList":
-        return this.#chainList(parseChainListParams(params)) as NmgMethodResult[M];
-      case "lab":
-        return this.#lab(parseLabParams(params)) as NmgMethodResult[M];
-      case "sessionActiveGraph":
-        return this.#sessionActiveGraph(
-          parseSessionActiveGraphParams(params),
-        ) as NmgMethodResult[M];
-      case "shutdown":
-        this.#shutdownRequested = true;
-        return { shuttingDown: true } as NmgMethodResult[M];
-      default:
-        throw new NmgProtocolError("METHOD_NOT_FOUND", `unknown method: ${String(method)}`);
+  /** A call the daemon has accepted and not yet answered. Counted here rather than inferred from
+   *  the store, because it is the service, not the database, that a shutdown has to fence. */
+  get inFlight(): number {
+    return this.#inFlight;
+  }
+
+  /** Let the calls already accepted finish. Shutdown is a sequence - stop new work, then let the
+   *  work in flight finish, then close once - and the middle step needs an await, which a
+   *  synchronous close() does not have. So close() requires that this has happened, instead of
+   *  pretending it can fence a call it cannot see. */
+  async drain(timeoutMs = 5_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (this.#inFlight > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    if (this.#inFlight > 0) {
+      throw new NmgProtocolError(
+        "DRAINING",
+        `${this.#inFlight} calls were still in flight after ${timeoutMs}ms`,
+      );
     }
   }
 
+  /** The four topology actions share one parameter parse and three mutually exclusive branches;
+   *  keeping them in the dispatch switch made that switch the largest decision point in the file. */
+  #topologyProposal(params: unknown): unknown {
+    const parsed = parseTopologyProposalParams(params);
+    if (parsed.action === "list") {
+      return {
+        action: "list",
+        proposals: this.#getStore().topologyProposals(parsed.status),
+      };
+    }
+    if (parsed.action === "assess") {
+      return {
+        action: "assess",
+        assessment: this.#getStore().assessAutomaticMergeProposal(parsed.proposalId, {
+          minimumObservations: parsed.minimumObservations,
+          minimumEstimatedGain: parsed.minimumEstimatedGain,
+          minimumEvidenceMemories: parsed.minimumEvidenceMemories,
+        }),
+      };
+    }
+    if (parsed.action === "review") {
+      return {
+        action: "review",
+        proposal: this.#getStore().reviewTopologyProposal(parsed.proposalId, parsed.decision),
+      };
+    }
+    return {
+      action: "actuate",
+      transform: this.#getStore().actuateAutomaticMergeProposal(parsed.proposalId),
+    };
+  }
+
+  async invoke<M extends NmgMethod>(method: M, params?: unknown): Promise<NmgMethodResult[M]> {
+    if (this.#closing)
+      throw new NmgProtocolError("SHUTTING_DOWN", "the service is closing and takes no new work");
+    // The counter has to be the method callers use and the switch has to run inside it: splitting
+    // them into two methods only hid the same switch behind a new name, which the complexity gate
+    // counts as new code.
+    this.#inFlight += 1;
+    try {
+      switch (method) {
+        case "hello":
+          return this.#hello() as NmgMethodResult[M];
+        case "status":
+          return this.#status() as NmgMethodResult[M];
+        case "remember":
+          return this.#remember(parseRememberParams(params)) as NmgMethodResult[M];
+        case "rememberBatch":
+          return this.#rememberBatch(parseRememberBatchParams(params)) as NmgMethodResult[M];
+        case "resolveRemember":
+          return this.#resolveRemember(parseResolveRememberParams(params)) as NmgMethodResult[M];
+        case "recordClaimOutcomes":
+          return this.#recordClaimOutcomes(
+            parseRecordClaimOutcomesParams(params),
+          ) as NmgMethodResult[M];
+        case "recordFeedback":
+          return this.#recordFeedback(parseRecordFeedbackParams(params)) as NmgMethodResult[M];
+        case "search":
+          return (await this.#search(parseSearchParams(params))) as NmgMethodResult[M];
+        case "get":
+          return this.#get(parseGetParams(params)) as NmgMethodResult[M];
+        case "recordActiveGraphAttribution":
+          return this.#recordActiveGraphAttribution(
+            parseRecordActiveGraphAttributionParams(params),
+          ) as NmgMethodResult[M];
+        case "retentionCandidates":
+          return {
+            candidates: this.#getStore().retentionCandidates(
+              parseRetentionCandidatesParams(params),
+            ),
+          } as NmgMethodResult[M];
+        case "perfAggregates":
+          return this.#getStore().perfAggregates() as NmgMethodResult[M];
+        case "pruneRetrievalTraces":
+          return {
+            pruned: this.#getStore().pruneRetrievalTraces(parsePerfPruneParams(params)),
+          } as NmgMethodResult[M];
+        case "setStorageState": {
+          const parsed = parseSetStorageStateParams(params);
+          return {
+            memoryId: parsed.memoryId,
+            storageState: this.#getStore().setMemoryStorageState(
+              parsed.memoryId,
+              parsed.storageState,
+              parsed.recoveryDays,
+            ),
+          } as NmgMethodResult[M];
+        }
+        case "deleteMemory": {
+          const parsed = parseDeleteMemoryParams(params);
+          const memory = this.#getStore().deleteMemory(parsed.memoryId);
+          return { deleted: memory !== null, memory } as NmgMethodResult[M];
+        }
+        case "exportMemories":
+          return this.#getStore().exportMemories(
+            parseExportMemoriesParams(params),
+          ) as NmgMethodResult[M];
+        case "mergeNodes":
+          return this.#getStore().mergeNodes(parseMergeNodesParams(params)) as NmgMethodResult[M];
+        case "rollbackNodeTransform":
+          return this.#getStore().rollbackNodeTransform(
+            parseRollbackNodeTransformParams(params).transformId,
+          ) as NmgMethodResult[M];
+        case "splitNode":
+          return this.#getStore().splitNode(parseSplitNodeParams(params)) as NmgMethodResult[M];
+        case "topologyProposal":
+          return this.#topologyProposal(params) as NmgMethodResult[M];
+        case "memoryMaintenanceProposal": {
+          const parsed = parseMemoryMaintenanceProposalParams(params);
+          if (parsed.action === "list") {
+            return {
+              action: "list",
+              proposals: this.#getStore().memoryMaintenanceProposals(parsed.status),
+            } as NmgMethodResult[M];
+          }
+          if (parsed.action === "review") {
+            return {
+              action: "review",
+              proposal: this.#getStore().reviewMemoryMaintenanceProposal(
+                parsed.proposalId,
+                parsed.decision,
+                parsed.reason,
+              ),
+            } as NmgMethodResult[M];
+          }
+          return {
+            action: "propose",
+            proposal: this.#getStore().createMemoryMaintenanceProposal({
+              defectType: parsed.defectType,
+              action: parsed.maintenanceAction,
+              targetMemoryIds: parsed.targetMemoryIds,
+              evidenceMemoryIds: parsed.evidenceMemoryIds,
+              evidenceTraceIds: parsed.evidenceTraceIds,
+              proposedStatement: parsed.proposedStatement,
+              proposedScope: parsed.proposedScope,
+              policy: parsed.policy,
+              longHorizonScore: parsed.longHorizonScore,
+              evaluationKind: parsed.evaluationKind,
+              evaluationRef: parsed.evaluationRef,
+            }),
+          } as NmgMethodResult[M];
+        }
+        case "syncStg": {
+          const parsed = parseSyncStgParams(params);
+          return {
+            copied: copyLtgSubsetToStg(
+              this.#getStore(),
+              this.#getStgStore(parsed.projectDir, parsed.sessionId),
+              parsed,
+            ),
+            projectDir: parsed.projectDir,
+          } as NmgMethodResult[M];
+        }
+        case "stgPurgeSession": {
+          const parsed = parseStgPurgeSessionParams(params);
+          const purged = purgeSessionFromStg(
+            this.#getStgStore(parsed.projectDir, parsed.sessionId),
+            parsed.sessionId,
+          );
+          return { purged, projectDir: parsed.projectDir } as NmgMethodResult[M];
+        }
+        case "taskBoard": {
+          const parsed = parseTaskBoardParams(params);
+          return taskBoardHandlers[parsed.action](this.#getStore(), parsed) as NmgMethodResult[M];
+        }
+        case "taskRun": {
+          const parsed = parseTaskRunParams(params);
+          return taskRunHandlers[parsed.action](this.#getStore(), parsed) as NmgMethodResult[M];
+        }
+        case "chainCreate":
+          return this.#chainCreate(parseChainCreateParams(params)) as NmgMethodResult[M];
+        case "chainAdd":
+          return this.#chainAdd(parseChainAddParams(params)) as NmgMethodResult[M];
+        case "chainRemove":
+          return this.#chainRemove(parseChainRemoveParams(params)) as NmgMethodResult[M];
+        case "chainEdgeAdd":
+          return this.#chainEdgeAdd(parseChainEdgeAddParams(params)) as NmgMethodResult[M];
+        case "chainEdgeRemove":
+          return this.#chainEdgeRemove(parseChainEdgeRemoveParams(params)) as NmgMethodResult[M];
+        case "chainGet":
+          return this.#chainGet(parseChainGetParams(params)) as NmgMethodResult[M];
+        case "chainList":
+          return this.#chainList(parseChainListParams(params)) as NmgMethodResult[M];
+        case "lab":
+          return this.#lab(parseLabParams(params)) as NmgMethodResult[M];
+        case "sessionActiveGraph":
+          return this.#sessionActiveGraph(
+            parseSessionActiveGraphParams(params),
+          ) as NmgMethodResult[M];
+        case "shutdown":
+          this.#shutdownRequested = true;
+          return { shuttingDown: true } as NmgMethodResult[M];
+        default:
+          throw new NmgProtocolError("METHOD_NOT_FOUND", `unknown method: ${String(method)}`);
+      }
+    } finally {
+      this.#inFlight -= 1;
+    }
+  }
+
+  /** Closes in the order the design asks for: stop taking new work, revoke the timers and signals
+   *  that could start more of it, then close each store exactly once. A second call is a no-op, so
+   *  a shutdown path that runs twice cannot close a store out from under a live reader. */
   close(): void {
+    // A close that silently drops calls already accepted would lose writes that were answered as
+    // accepted; the sequence is drain() first, and this refuses rather than pretending.
+    if (this.#inFlight > 0) {
+      throw new NmgProtocolError(
+        "DRAINING",
+        `${this.#inFlight} calls were still in flight; drain before closing`,
+      );
+    }
+    this.#closing = true;
     for (const job of this.#maintenanceJobs.values()) clearImmediate(job);
     this.#maintenanceJobs.clear();
     this.#maintenanceSignals.clear();
-    this.#store?.close();
+    const stores = [this.#store, ...this.#stgStores.values()];
     this.#store = undefined;
-    for (const store of this.#stgStores.values()) store.close();
     this.#stgStores.clear();
     this.#sessionActiveGraphs.clear();
+    for (const store of stores) if (store) store.close();
   }
 
   #hello(): NmgHelloResult {
@@ -2763,6 +2834,7 @@ function parseTaskBoardParams(value: unknown): NmgTaskBoardParams {
       to: optionalString(params, "to"),
       ttlSeconds,
       expiresAt,
+      adopt: optionalAdoption(params.adopt),
     };
   }
   if (TASK_BOARD_READ_STYLE.has(action)) {
@@ -2831,6 +2903,103 @@ function parseEntryStyleTaskBoardParams(
   return null;
 }
 
+/** The adoption request when the caller sent one, or undefined. The branch lives here rather than in
+ *  the put expression so an optional field does not decide points for the whole board parser. */
+function optionalAdoption(
+  value: unknown,
+): { runId: string; taskId: string; attempt?: number } | undefined {
+  return value === undefined ? undefined : parseAdoption(value);
+}
+
+/** A board put's adoption request, or the shape it must have to be one. */
+function parseAdoption(value: unknown): { runId: string; taskId: string; attempt?: number } {
+  const params = objectParams(value);
+  return {
+    runId: requiredString(params, "runId"),
+    taskId: requiredString(params, "taskId"),
+    attempt: optionalInteger(params, "attempt", 1, 1_000_000),
+  };
+}
+
+/** Request bounds, not semantics: a plan's meaning is the coordinator's and the compiler's, this
+ *  only keeps one call from being unbounded. */
+const TASK_RUN_PLAN_LIMIT = 200;
+const TASK_RUN_DEPENDENCY_LIMIT = 64;
+
+/**
+ * The run surface's parameters. Every field is validated here so the coordinator and the store can
+ * treat their inputs as well-formed: a wire type that admits a value the layer below cannot hold is
+ * a validation gap, not a caller's mistake.
+ */
+function parseTaskRunParams(value: unknown): NmgTaskRunParams {
+  const params = objectParams(value);
+  const action = requiredEnum(params, "action", [
+    "register",
+    "freeze",
+    "bind",
+    "cancel",
+    "status",
+  ] as const);
+  const runId = requiredString(params, "runId");
+  if (action === "register") {
+    return {
+      action,
+      runId,
+      planDigest: requiredString(params, "planDigest"),
+      policy: requiredString(params, "policy"),
+      revision: requiredString(params, "revision"),
+      retention: requiredString(params, "retention"),
+    };
+  }
+  if (action === "freeze") {
+    const tasks = params.tasks;
+    if (!Array.isArray(tasks) || tasks.length === 0 || tasks.length > TASK_RUN_PLAN_LIMIT) {
+      throw new NmgProtocolError(
+        "INVALID_PARAMS",
+        `tasks must be an array of 1..${TASK_RUN_PLAN_LIMIT} tasks`,
+      );
+    }
+    return { action, runId, tasks: tasks.map((task) => parseRunPlanTask(task)) };
+  }
+  if (action === "bind") {
+    return {
+      action,
+      runId,
+      taskId: requiredString(params, "taskId"),
+      boardTaskId: requiredString(params, "boardTaskId"),
+      entryId: requiredString(params, "entryId"),
+      attempt: optionalInteger(params, "attempt", 1, 1_000_000),
+    };
+  }
+  if (action === "cancel") {
+    return {
+      action,
+      runId,
+      taskId: optionalString(params, "taskId"),
+      reason: optionalString(params, "reason"),
+    };
+  }
+  return { action: "status", runId };
+}
+
+/** One task of a freeze request. It carries no position: the array order is the plan order, and
+ *  turning that order into positions is the coordinator's, so a caller cannot contradict it. */
+function parseRunPlanTask(value: unknown): RunPlanTaskInput {
+  const params = objectParams(value);
+  return {
+    taskId: requiredString(params, "taskId"),
+    revision: requiredString(params, "revision"),
+    input: requiredString(params, "input"),
+    dependencies: requiredStringArray(params, "dependencies", 0, TASK_RUN_DEPENDENCY_LIMIT),
+    effect: requiredString(params, "effect"),
+    waitEvent: optionalString(params, "waitEvent"),
+    operation: optionalString(params, "operation"),
+    kind: optionalString(params, "kind"),
+    patchFiles: optionalStringArray(params, "patchFiles"),
+    patchEditable: optionalStringArray(params, "patchEditable"),
+  };
+}
+
 type TaskBoardParamsOf<A extends NmgTaskBoardParams["action"]> = Extract<
   NmgTaskBoardParams,
   { action: A }
@@ -2848,18 +3017,20 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
     const p = parsed as TaskBoardParamsOf<"put">;
     const expiresAt =
       p.expiresAt ?? new Date(Date.now() + (p.ttlSeconds ?? 86_400) * 1_000).toISOString();
-    return {
-      action: "put",
-      entry: store.putTaskBoardEntry({
-        taskId: p.taskId,
-        agentId: p.agentId,
-        sourceSessionId: p.sourceSessionId,
-        kind: p.kind ?? "note",
-        content: p.content,
-        expiresAt,
-        to: p.to,
-      }),
+    const entry = {
+      taskId: p.taskId,
+      agentId: p.agentId,
+      sourceSessionId: p.sourceSessionId,
+      kind: p.kind ?? "note",
+      content: p.content,
+      expiresAt,
+      to: p.to,
     };
+    // Adoption is part of creating the entry, not a second call after it: an entry that exists
+    // without its binding is exactly the unmanaged hole the run fence exists to close, and a crash
+    // between two calls would leave one. An unadopted put takes the path it always took.
+    if (!p.adopt) return { action: "put", entry: store.putTaskBoardEntry(entry) };
+    return { action: "put", ...createBoundEntry(store, { entry, ...p.adopt }) };
   },
   read: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"read">;
@@ -2880,11 +3051,27 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
   list: (store) => ({ action: "list", boards: store.listTaskBoards() }),
   claim: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"claim">;
-    return { action: "claim", entry: store.claimTaskBoardEntry(p) };
+    return {
+      action: "claim",
+      entry: coordinatedEntryWrite(store, {
+        verb: "claim",
+        entryId: p.entryId,
+        actorId: p.agentId,
+        apply: () => store.claimTaskBoardEntry(p),
+      }),
+    };
   },
   release: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"release">;
-    return { action: "release", entry: store.releaseTaskBoardEntry(p) };
+    return {
+      action: "release",
+      entry: coordinatedEntryWrite(store, {
+        verb: "release",
+        entryId: p.entryId,
+        actorId: p.agentId,
+        apply: () => store.releaseTaskBoardEntry(p),
+      }),
+    };
   },
   deliveryCheck: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"deliveryCheck">;
@@ -2908,7 +3095,17 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
   },
   acknowledge: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"acknowledge">;
-    store.acknowledgeTaskBoardEntry({ entryId: p.entryId, agentId: p.agentId, reason: p.reason });
+    coordinatedEntryWrite(store, {
+      verb: "acknowledge",
+      entryId: p.entryId,
+      actorId: p.agentId,
+      apply: () =>
+        store.acknowledgeTaskBoardEntry({
+          entryId: p.entryId,
+          agentId: p.agentId,
+          reason: p.reason,
+        }),
+    });
     return {
       action: "acknowledge",
       entry: store.getTaskBoardEntryById(p.taskId, p.entryId)!,
@@ -2916,15 +3113,39 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
   },
   veto: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"veto">;
-    return { action: "veto", entry: store.vetoTaskBoardEntry(p) };
+    return {
+      action: "veto",
+      entry: coordinatedEntryWrite(store, {
+        verb: "veto",
+        entryId: p.entryId,
+        actorId: p.agentId,
+        apply: () => store.vetoTaskBoardEntry(p),
+      }),
+    };
   },
   deliver: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"deliver">;
-    return { action: "deliver", entry: store.deliverTaskBoardEntry(p) };
+    return {
+      action: "deliver",
+      entry: coordinatedEntryWrite(store, {
+        verb: "deliver",
+        entryId: p.entryId,
+        actorId: p.agentId,
+        apply: () => store.deliverTaskBoardEntry(p),
+      }),
+    };
   },
   judge: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"judge">;
-    return { action: "judge", entry: store.judgeTaskBoardEntry(p) };
+    return {
+      action: "judge",
+      entry: coordinatedEntryWrite(store, {
+        verb: "judge",
+        entryId: p.entryId,
+        actorId: p.agentId,
+        apply: () => store.judgeTaskBoardEntry(p),
+      }),
+    };
   },
   unsubscribe: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"unsubscribe">;
@@ -2978,7 +3199,55 @@ const taskBoardHandlers: Record<NmgTaskBoardParams["action"], TaskBoardHandler> 
   },
   resolve: (store, parsed) => {
     const p = parsed as TaskBoardParamsOf<"resolve">;
-    return { action: "resolve", entry: store.resolveTaskBoardEntry(p) };
+    return {
+      action: "resolve",
+      entry: coordinatedEntryWrite(store, {
+        verb: "resolve",
+        entryId: p.entryId,
+        actorId: p.agentId,
+        apply: () => store.resolveTaskBoardEntry(p),
+      }),
+    };
+  },
+};
+
+type TaskRunParamsOf<A extends NmgTaskRunParams["action"]> = Extract<
+  NmgTaskRunParams,
+  { action: A }
+>;
+type TaskRunHandler = (store: NmgStore, parsed: NmgTaskRunParams) => NmgMethodResult["taskRun"];
+
+/** Table-driven run-surface dispatch, for the same reason as `taskBoardHandlers`: the transition
+ *  rules live in the coordinator, and every branch here is one call into it. */
+const taskRunHandlers: Record<NmgTaskRunParams["action"], TaskRunHandler> = {
+  register: (store, parsed) => {
+    const p = parsed as TaskRunParamsOf<"register">;
+    return { action: "register", ...registerRun(store, p) };
+  },
+  freeze: (store, parsed) => {
+    const p = parsed as TaskRunParamsOf<"freeze">;
+    return { action: "freeze", ...freezeRunPlan(store, { runId: p.runId, tasks: p.tasks }) };
+  },
+  bind: (store, parsed) => {
+    const p = parsed as TaskRunParamsOf<"bind">;
+    return {
+      action: "bind",
+      ...bindRunEntry(store, {
+        runId: p.runId,
+        taskId: p.taskId,
+        boardTaskId: p.boardTaskId,
+        entryId: p.entryId,
+        attempt: p.attempt,
+      }),
+    };
+  },
+  cancel: (store, parsed) => {
+    const p = parsed as TaskRunParamsOf<"cancel">;
+    return { action: "cancel", ...cancelRun(store, p) };
+  },
+  status: (store, parsed) => {
+    const p = parsed as TaskRunParamsOf<"status">;
+    return { action: "status", status: taskRunStatus(store, p.runId) };
   },
 };
 

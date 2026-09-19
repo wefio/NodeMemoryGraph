@@ -29,5 +29,5 @@
 ## Consequences
 
 - `dsh/dsh-nmg/lib/`、`src/prompts/nmg-prompts.generated.ts`、`.nmg-search-scope` 不再跟踪并被忽略。
-- `dsh/dsh-nmg` 的新消费者必须先运行 `pnpm install --frozen-lockfile && pnpm run build` 才能使用该包（见 `skills/repo-development/SKILL.md`）。
+- `dsh/dsh-nmg` 的新消费者必须先运行 `pnpm install --frozen-lockfile && pnpm run build` 才能使用该包（见 `skills/repo-development/references/builds.md`）。
 - CI 通过 `verify:packages` 在干净 checkout 上验证子包可构建性，因此产物排除不会悄然腐蚀构建。

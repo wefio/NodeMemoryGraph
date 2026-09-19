@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { collectAgentContext, type AgentContextReport } from "./repo-context.ts";
+import { mutationHazard } from "./mutation-lock.ts";
 import { planNarrowVerify } from "./narrow-verify.ts";
 import { digestCanonical } from "../src/rcp/canonical.ts";
 import { compileContractFile } from "../src/rcp/contract.ts";
@@ -15,7 +16,6 @@ import {
   FileReceiptSink,
   LocalNpmVerifierProvider,
   NarrowVerifierProvider,
-  NARROW_SHARED_CHECKS,
   nodeTestCheckName,
 } from "../src/rcp/providers.ts";
 import { reconcileOnce } from "../src/rcp/reconcile.ts";
@@ -162,10 +162,37 @@ function persistEvidence(path: string, evidence: unknown): void {
   renameSync(temporary, path);
 }
 
+/** How much of a failing check's own output the summary restates. The runner already
+ *  streams it while the check runs; this keeps the reason next to the verdict, bounded,
+ *  so it survives a scrollback loss or a pipe filter. The full text stays in the
+ *  evidence file the summary names. */
+const FAILURE_TAIL_LINES = 10;
+const FAILURE_LINE_LIMIT = 300;
+
+function failureTail(output: string | undefined): string[] {
+  if (!output) return [];
+  const lines = output
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((line) => line.trim() !== "");
+  const shown = lines
+    .slice(-FAILURE_TAIL_LINES)
+    .map((line) =>
+      line.length > FAILURE_LINE_LIMIT
+        ? `  | ${line.slice(0, FAILURE_LINE_LIMIT)}…`
+        : `  | ${line}`,
+    );
+  if (lines.length > FAILURE_TAIL_LINES) {
+    shown.push(`  | …(last ${FAILURE_TAIL_LINES} lines; full output in the evidence file)`);
+  }
+  return shown;
+}
+
 function formatResult(
   report: AgentContextReport,
   result: VerificationRunResult,
-  rcp?: RcpEvidence,
+  rcp: RcpEvidence | undefined,
+  evidencePath: string,
 ): string {
   const lines = [
     `Verification scopes: ${report.scopes.join(", ") || "none"}`,
@@ -176,12 +203,14 @@ function formatResult(
     lines.push(
       `- [${item.classification}] npm run ${item.command}: ${item.status}${detail} <- ${item.routes.join(", ")}`,
     );
+    if (item.status === "failed") lines.push(...failureTail(item.output));
   }
   for (const warning of report.warnings) lines.push(`warning: ${warning}`);
   if (rcp) {
     lines.push(`RCP: ${rcp.contractId} ${rcp.status}`);
     if (rcp.receiptPath) lines.push(`RCP receipt: ${rcp.receiptPath}`);
   }
+  lines.push(`Evidence: ${evidencePath}`);
   return `${lines.join("\n")}\n`;
 }
 
@@ -338,6 +367,17 @@ const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
 
 /** Run an arbitrary command (npm script or node --test globs) and shape the
  *  result like the rest of the verification plan. */
+/** The receipt's `gate.reason`: why this change runs the narrow surface it runs. The one thing a
+ *  reader cannot infer from `mode` is that the owning route declared the always-run shared checks
+ *  not applicable to its own surface, so the reason says so instead of leaving it to be discovered
+ *  by counting checks. Exported because the receipt this produces is the auditable half of the
+ *  declaration. */
+export function narrowReason(routeId: string, sharedChecks: number): string {
+  return sharedChecks === 0
+    ? `cleanly owned by route ${routeId}; the route declares the always-run shared checks not applicable`
+    : `cleanly owned by route ${routeId}`;
+}
+
 function runCommand(
   label: string,
   argv: string[],
@@ -436,6 +476,20 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
       process.exit(0);
     }
     const startedAt = new Date().toISOString();
+    // A verification is a claim about a tree, and a tree with a live mutant in it is not the tree the
+    // change produced (post-mortem 0003). Refuse rather than report: a passing lane read in that window
+    // is evidence about code that never existed, and that is the reading nobody investigates.
+    //
+    // A `--dry-run` is exempt, and the reason is what it reads: the plan comes from the route config and
+    // the change list, not from the target file, so a dry run cannot report on a mutant - while refusing
+    // it would make "what would you run?" unanswerable exactly when a session needs it. A run that would
+    // record a verdict is the one that must not.
+    const sweeping = options.dryRun ? "" : mutationHazard(options.root);
+    if (sweeping)
+      throw new Error(
+        `refusing to verify: ${sweeping}; the reading would describe the mutant, not the change ` +
+          `(docs/postmortem/0003-checks-read-a-live-mutant.md)`,
+      );
     const report = collectAgentContext(options.root, options.scopes, {
       changed: options.changed,
     });
@@ -460,8 +514,10 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     const narrowPlan = planNarrowVerify(report.routes, report.scopes);
     const route = narrowPlan.route;
     const wantNarrow = !options.full && (options.narrow || narrowPlan.narrow);
+    // One home for the check list: the plan decides, including whether the owning route declared
+    // the shared checks not applicable to its own surface.
     const narrowChecks = route
-      ? [...NARROW_SHARED_CHECKS, ...(route.tests.length ? [nodeTestCheckName(route.id)] : [])]
+      ? [...narrowPlan.shared, ...(route.tests.length ? [nodeTestCheckName(route.id)] : [])]
       : [];
     let execution:
       | Awaited<ReturnType<typeof executeRcpVerification>>
@@ -482,7 +538,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
               json: options.json,
               routeId: route.id,
               checks: narrowChecks,
-              reason: `cleanly owned by route ${route.id}`,
+              reason: narrowReason(route.id, narrowPlan.shared.length),
             },
           );
     } else {
@@ -524,7 +580,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     process.stdout.write(
       options.json
         ? `${JSON.stringify({ report, ...result, rcp, evidencePath: options.output }, null, 2)}\n`
-        : formatResult(report, result, rcp),
+        : formatResult(report, result, rcp, options.output),
     );
     if (!result.ok) process.exitCode = 1;
   } catch (error) {

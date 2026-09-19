@@ -367,6 +367,33 @@ test("CLI board put exposes directed delivery", () => {
   );
 });
 
+test("CLI exposes the run surface's operator half", () => {
+  const status = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "run status")!;
+  assert.equal(status.method, "taskRun");
+  assert.deepEqual(
+    status.buildParams({ flags: new Set(), options: new Map(), positionals: ["run-1"] }),
+    { action: "status", runId: "run-1" },
+  );
+  const cancel = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "run cancel")!;
+  assert.equal(cancel.method, "taskRun");
+  assert.deepEqual(
+    cancel.buildParams({
+      flags: new Set(),
+      options: new Map([
+        ["task", ["P"]],
+        ["reason", ["budget"]],
+      ]),
+      positionals: ["run-1"],
+    }),
+    { action: "cancel", runId: "run-1", taskId: "P", reason: "budget" },
+  );
+  // Cancelling the whole run omits the task, which is what makes the fact a run-level one.
+  assert.deepEqual(
+    cancel.buildParams({ flags: new Set(), options: new Map(), positionals: ["run-1"] }),
+    { action: "cancel", runId: "run-1" },
+  );
+});
+
 test("CLI board discover exposes the system-layer agent roster", () => {
   const command = NMG_CLI_COMMANDS.find((spec) => spec.words.join(" ") === "board discover")!;
   assert.deepEqual(

@@ -1,25 +1,25 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BoardAdmission } from "../../src/integration/ooo-board.ts";
-import { expectedRename, verifyRenameCandidate } from "../../src/integration/ooo-verifier.ts";
+import { verifyRenameCandidate } from "../../src/integration/check-runner.ts";
+import { expectedRenameOf, renameSource } from "./rename-probe.ts";
 import {
   checkResultValid,
   sameCheck,
   type CheckResult,
   type CheckTicket,
-} from "../../src/integration/ooo-check.ts";
+} from "../../src/integration/check-ticket.ts";
 
 test("contract: real syntax-check terminal identity is admitted by the board coordinator", async (t) => {
   const { gate } = fixture(t);
   const ticket = gate.issueCheck("A", "syntax-host");
-  const source = readFileSync(
-    new URL("../../src/integration/ooo-execution.ts", import.meta.url),
-    "utf8",
-  );
-  const check = await verifyRenameCandidate(source, expectedRename(source), ticket.checkId);
+  // The probe's frozen target, not the live file: the same reason the patch probe gives (the
+  // candidate is the whole file, and the shared work contract bounds what a dependency may carry).
+  const source = renameSource();
+  const check = await verifyRenameCandidate(source, expectedRenameOf(source), ticket.checkId);
   assert.equal(check.checkId, ticket.checkId);
   assert.equal(check.verdict, "accept");
   gate.now = Date.now();
@@ -232,7 +232,7 @@ test("safety: an artifact submitted under a ticket from another run is stale, no
   // B is the selected task while A waits on its external event, so it is claimable.
   const ticket = gate.claim("B", "worker-1");
   const entry = gate.putTaskBoardEntry({
-    taskId: "ooo-process-probe",
+    taskId: gate.channel,
     agentId: ticket.owner,
     kind: "result",
     content: JSON.stringify({ ticket: { ...ticket, runId: "some-other-run" }, artifact: "6" }),

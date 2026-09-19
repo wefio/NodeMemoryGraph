@@ -58,6 +58,8 @@ interface Task {
   parent: Case[];
 }
 
+const throws = (name: string, call: Case["call"]): Case => ({ name, call, expected: "throws" });
+
 /** Five tasks, one shape: a frozen contract, a part-1 slice, and edge cases behind the boundary. */
 const TASKS: Task[] = [
   {
@@ -111,12 +113,8 @@ const TASKS: Task[] = [
       },
       { name: "empty input", call: (m) => m.chunk([] as never, 3 as never), expected: [] },
       { name: "size one", call: (m) => m.chunk([7] as never, 1 as never), expected: [[7]] },
-      { name: "size zero", call: (m) => m.chunk([1] as never, 0 as never), expected: "throws" },
-      {
-        name: "fractional size",
-        call: (m) => m.chunk([1] as never, 1.5 as never),
-        expected: "throws",
-      },
+      throws("size zero", (m) => m.chunk([1] as never, 0 as never)),
+      throws("fractional size", (m) => m.chunk([1] as never, 1.5 as never)),
     ],
   },
   {
@@ -271,16 +269,8 @@ const TASKS: Task[] = [
         expected: [],
       },
       { name: "empty input", call: (m) => m.movingAverage([] as never, 3 as never), expected: [] },
-      {
-        name: "window zero",
-        call: (m) => m.movingAverage([1] as never, 0 as never),
-        expected: "throws",
-      },
-      {
-        name: "window not an integer",
-        call: (m) => m.movingAverage([1] as never, 1.5 as never),
-        expected: "throws",
-      },
+      throws("window zero", (m) => m.movingAverage([1] as never, 0 as never)),
+      throws("window not an integer", (m) => m.movingAverage([1] as never, 1.5 as never)),
     ],
   },
   {
@@ -577,6 +567,8 @@ if (role === "part1" || role === "part2") {
           writeFileSync(keptPath, execution.artifact, "utf8");
           throw new Error(
             `${message} (conclusion=${conclusionKind ?? "none"}, submitted artifact kept at ${keptPath})`,
+            // The message quotes the failure; the failure itself stays reachable as data, so a
+            // reader that needs the original (or its own cause) is not left parsing prose.
             { cause: error },
           );
         }

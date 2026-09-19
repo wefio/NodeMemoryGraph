@@ -53,6 +53,7 @@ import type {
   LabScope,
 } from "../integration/lab-capabilities.ts";
 import type { ContextFeedbackLabels } from "../lab/context-reward.ts";
+import type { RunPlanTask, RunStatus } from "../integration/task-coordinator.ts";
 
 // This is a compatibility epoch, not a feature revision. Additive RPCs,
 // optional fields, and capabilities remain within the same epoch and are
@@ -140,6 +141,7 @@ const RPC_DESCRIPTOR_SOURCE = {
   syncStg: {},
   stgPurgeSession: {},
   taskBoard: {},
+  taskRun: {},
   chainCreate: {},
   chainAdd: {},
   chainRemove: {},
@@ -524,6 +526,14 @@ export interface NmgTaskBoardPutParams extends NmgTaskBoardBase {
    * agent name, never sessionId (session changes on reload). Omit = ordinary
    * broadcast to subscribers. */
   to?: string;
+  /** Adopt this entry into a run's task in the same transition that creates it. The binding is a run
+   *  fact, so creating the entry and binding it have to stand or fall together: an entry that exists
+   *  without its binding would be an unmanaged hole a later direct write could move.
+   *
+   *  A client gates this field on the daemon advertising the `taskRun` method (see protocol.ts's
+   *  descriptor for it): an older same-epoch daemon would ignore it and create an entry that the
+   *  caller believes the run manages. */
+  adopt?: { runId: string; taskId: string; attempt?: number };
 }
 
 export interface NmgTaskBoardReadParams extends NmgTaskBoardBase {
@@ -729,6 +739,42 @@ export type NmgTaskBoardParams =
   | NmgTaskBoardRenameParams
   | NmgTaskBoardDiscoverParams;
 
+/** The run surface: the transitions a run goes through, reachable by any process that can reach the
+ *  daemon. Registering a run and freezing its plan are the run's own record; `bind` adopts a board
+ *  entry that already exists, while `taskBoard put` with `adopt` creates and adopts in one
+ *  transition. `status` is a read of the same record. */
+export type NmgTaskRunParams =
+  | {
+      action: "register";
+      runId: string;
+      planDigest: string;
+      policy: string;
+      revision: string;
+      retention: string;
+    }
+  | {
+      action: "freeze";
+      runId: string;
+      /** The array order is the plan order, so the caller cannot send an order that disagrees with
+       *  the positions. */
+      tasks: Array<Omit<RunPlanTask, "position">>;
+    }
+  | {
+      action: "bind";
+      runId: string;
+      taskId: string;
+      boardTaskId: string;
+      entryId: string;
+      attempt?: number;
+    }
+  | {
+      action: "cancel";
+      runId: string;
+      /** Omit to cancel the run; name a task to cancel that task. */ taskId?: string;
+      reason?: string;
+    }
+  | { action: "status"; runId: string };
+
 export interface NmgRetentionCandidatesParams {
   dormantAfterDays?: number;
   quarantineAfterDays?: number;
@@ -921,8 +967,13 @@ export type NmgMethodResult = {
   stgPurgeSession: { purged: number; projectDir: string };
   taskBoard:
     | {
-        action:
-          "put" | "resolve" | "claim" | "release" | "acknowledge" | "veto" | "deliver" | "judge";
+        action: "put";
+        entry: TaskBoardEntry;
+        /** Present when the put adopted the entry: the binding fact of that same transition. */
+        bound?: { sequence: number; recorded: boolean };
+      }
+    | {
+        action: "resolve" | "claim" | "release" | "acknowledge" | "veto" | "deliver" | "judge";
         entry: TaskBoardEntry;
       }
     | { action: "read"; entries: TaskBoardEntry[]; nextCursor: string | null }
@@ -957,6 +1008,12 @@ export type NmgMethodResult = {
         }>;
       };
   shutdown: { shuttingDown: true };
+  taskRun:
+    | { action: "register"; runId: string }
+    | { action: "freeze"; runId: string; frozen: number }
+    | { action: "bind"; sequence: number; recorded: boolean }
+    | { action: "cancel"; sequence: number; recorded: boolean }
+    | { action: "status"; status: RunStatus };
 };
 
 export class NmgProtocolError extends Error {

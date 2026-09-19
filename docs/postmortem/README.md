@@ -137,6 +137,10 @@ nothing catches yet, which is the point of writing it down.
 
 | Class                   | Canonical case | Rule it produced |
 | ----------------------- | -------------- | ---------------- |
+| unchecked tooling       | 0001           |                  |
+| wrong-tree verification | 0002           |                  |
+| mutant-in-tree reading  | 0003           | the sweep's lock: `agent:verify` refuses to report, and a new sweep refuses to start, while one holds the tree (`tools/mutation-lock.ts`) |
+| mislabelled flake       | 0004           | an intermittent failure is recorded with its reproduction attempt and rate, or left open - never as "flaky" (`skills/repo-development/SKILL.md`) |
 | -----                   | -------------- | ---------------- |
 
 A class name is a short noun phrase, not a sentence, and it is not invented before
@@ -146,5 +150,9 @@ one place to read the whole taxonomy.
 
 ## Index
 
-| #    | Record                                                                    | Failure class           |
-| ---- | ------------------------------------------------------------------------- | ----------------------- |
+| #    | Record                                                                                        | Failure class           |
+| ---- | --------------------------------------------------------------------------------------------- | ----------------------- |
+| 0001 | [The tool that checks the others is not itself checked](0001-tools-outside-the-type-check.md) | unchecked tooling       |
+| 0002 | [The tree I verified was not the tree I pushed](0002-wrong-tree-verification.md)              | wrong-tree verification  |
+| 0003 | [The checks I read were reading a mutant](0003-checks-read-a-live-mutant.md)                  | mutant-in-tree reading   |
+| 0004 | ["Flaky" was a clock boundary](0004-flaky-was-a-clock-boundary.md)                            | mislabelled flake        |

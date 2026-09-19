@@ -296,7 +296,7 @@ work. Read replicas or a worker-thread database queue remain performance options
 only if measurements show the event-loop writer exceeds its latency budget.
 
 Protocol compatibility epoch `nmg.v9` exposes the typed lifecycle, memory,
-retrieval, maintenance, STG-sync, memory-chain, Task Board, Lab, and
+retrieval, maintenance, STG-sync, memory-chain, Task Board, run-record, Lab, and
 session-Active-Graph methods declared in `protocol.ts` over JSON-RPC 2.0. HTTP is
 the only resident protocol;
 NMG does not maintain a parallel NDJSON or platform-specific socket API.
@@ -345,7 +345,13 @@ ids from persisted retrieval-trace ids to immutable runtime projection ids. A v8
 daemon cannot preserve that ownership or feedback identity, so the epoch change
 is intentionally incompatible. Further additive features remain within v9 and
 negotiate by capability unless they alter established semantics, ownership,
-security, or durable interpretation.
+security, or durable interpretation. An additive method carrying an optional
+field that an older same-epoch daemon would silently ignore is admissible only
+when the field's availability is discoverable from the hello method set and
+clients gate on it: the run surface (`taskRun`, plus the optional `adopt` a
+board put may carry) is the case that rule covers - a v9 daemon rejects the
+method by name and would otherwise create an entry the caller believes its run
+manages.
 
 ### 4.2 Modular harness adapters
 
@@ -699,18 +705,18 @@ Relation type alone does not grant write authority. The establishment policy is
 defined by whether the edge is mechanically entailed by the transaction that
 creates it:
 
-| Relation family | Immediate source | Otherwise |
-| --- | --- | --- |
-| provenance (`derived_from`) | Core derivation transaction with exact source memory IDs | Reject; a model assertion is not provenance |
-| lifecycle (`supersedes`) | Validated same-domain state transition with an acyclic predecessor chain | Keep both states and request explicit resolution |
-| transform structure (`is_a`, redirects) | Reviewed merge/split transaction and rollback journal | Store a topology proposal, not a consolidated edge |
-| explicit domain attachment (`applies_to`, `part_of`) | Harness/tool supplies stable IDs and attributable evidence for both endpoints | Proposal or STG observation |
-| regulatory (`contradicts`, `exception_to`, `distinct_from`) | Explicit attributable judgement after scope/time compatibility checks | Proposal; never infer from retrieval co-occurrence alone |
-| identity/refinement (`same_as`, `refines`) | Reviewed topology proposal; `same_as` still requires the separate reversible merge actuator to canonicalize identity | Keep nodes separate |
-| causal/dependency/support (`causes`, `depends_on`, `supports`) | Explicit attributable evidence or reviewed proposal | STG observation until independently supported |
-| associative (`related_to`) | Stability consolidation from independent verified outcomes, or an explicit administrative relation | Co-retrieval remains an observation only |
+| Relation family                                                | Immediate source                                                                                                     | Otherwise                                                |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| provenance (`derived_from`)                                    | Core derivation transaction with exact source memory IDs                                                             | Reject; a model assertion is not provenance              |
+| lifecycle (`supersedes`)                                       | Validated same-domain state transition with an acyclic predecessor chain                                             | Keep both states and request explicit resolution         |
+| transform structure (`is_a`, redirects)                        | Reviewed merge/split transaction and rollback journal                                                                | Store a topology proposal, not a consolidated edge       |
+| explicit domain attachment (`applies_to`, `part_of`)           | Harness/tool supplies stable IDs and attributable evidence for both endpoints                                        | Proposal or STG observation                              |
+| regulatory (`contradicts`, `exception_to`, `distinct_from`)    | Explicit attributable judgement after scope/time compatibility checks                                                | Proposal; never infer from retrieval co-occurrence alone |
+| identity/refinement (`same_as`, `refines`)                     | Reviewed topology proposal; `same_as` still requires the separate reversible merge actuator to canonicalize identity | Keep nodes separate                                      |
+| causal/dependency/support (`causes`, `depends_on`, `supports`) | Explicit attributable evidence or reviewed proposal                                                                  | STG observation until independently supported            |
+| associative (`related_to`)                                     | Stability consolidation from independent verified outcomes, or an explicit administrative relation                   | Co-retrieval remains an observation only                 |
 
-“Immediate” therefore means *entailed by a governed operation*, not “a model
+“Immediate” therefore means _entailed by a governed operation_, not “a model
 chose a relation label with high confidence.” Core methods may materialize such
 edges inside the same transaction; model-facing `remember(action="relate")`
 creates a pending proposal. Administrative `linkNodes` remains an explicit trust
@@ -1524,8 +1530,8 @@ silently acquiring user authority before Core admission and consolidation.
 `remember` is the deliberate LLM intervention point between semantic judgment
 and deterministic storage. The two sides have different responsibilities:
 
-| LLM / Agent                                                                                                                                                                                                   | NMG core                                                                                                                                                                  |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| LLM / Agent                                                                                                                                                                                                                                                                                           | NMG core                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Extract a self-contained statement; assign type, actor, time, scope, and importance; optionally provide a few short phrases by which the same fact is likely to be recalled; decide whether a returned candidate is the same meaning, a genuinely replaced old value, a related concept, or distinct. | Enforce admission policy, stable IDs, exact deduplication, scope/state invariants, provenance, transactions, trigger limits, index deltas, version history, and reversible graph changes. |
 
 `recallTriggers` are optional retrieval metadata on the same governed write, not
@@ -1800,7 +1806,7 @@ from both storage tiers and the STG/LTG lifecycle:
    prompt as a history query.
 3. **Agent-directed recall layer:** compact headers/cues that let the model call
    `nmg_search`, inspect costs, and expand the AG with exact details through
-    `nmg_get`.
+   `nmg_get`.
 
 Automatic recall and Agent-directed recall share the same indexed records.
 Explicit recall triggers may improve candidate nomination in either layer, but
@@ -2216,13 +2222,13 @@ from the traversal path.
 
 ### Relationship to HierarchicalActivation
 
-|                 | HA                        | MGR                            |
-| --------------- | ------------------------- | ------------------------------ |
-| Node role       | passive data, scored      | active operator, transforms    |
-| Scoring         | 7-way similarity blend    | single gate + local relevance  |
+|                 | HA                        | MGR                                           |
+| --------------- | ------------------------- | --------------------------------------------- |
+| Node role       | passive data, scored      | active operator, transforms                   |
+| Scoring         | 7-way similarity blend    | single gate + local relevance                 |
 | Graph structure | fixed candidate hierarchy | global seed, then optional directed neighbors |
-| Parameters      | 9 global                  | 2/node + 1 global              |
-| Best for        | batch ranking over pool   | multi-step path reasoning      |
+| Parameters      | 9 global                  | 2/node + 1 global                             |
+| Best for        | batch ranking over pool   | multi-step path reasoning                     |
 
 They remain separately gated engines but share the proposed session AG runtime:
 HA selects and maintains the active working set; MGR optionally transforms a

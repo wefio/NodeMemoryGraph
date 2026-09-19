@@ -88,14 +88,22 @@
 
 索引把每篇记录的类别写成自由文本。本表是分类体系：一类失败有一个典型案例——读者应先读的那篇记录——和它产生的规则时，就占一行。规则列空着，就意味着这一类目前没有任何东西拦住它，而把它写下来正是意义所在。
 
-| 类别                    | 典型案例                                     | 它产生的规则 |
-| ----------------------- | -------------------------------------------- | ------------ |
-| ----                    | --------                                     | ------------ |
+| 类别                    | 典型案例 | 它产生的规则 |
+| ----------------------- | -------- | ------------ |
+| unchecked tooling       | 0001     |              |
+| wrong-tree verification | 0002     |              |
+| mutant-in-tree reading  | 0003     | the sweep's lock: `agent:verify` refuses, and a new sweep refuses to start, while a sweep holds the tree (`tools/mutation-lock.ts`) |
+| mislabelled flake       | 0004     | an intermittent failure is recorded with its reproduction attempt and rate, or left open - never as "flaky" (`skills/repo-development/SKILL.md`) |
+| -----                   | -------- | ------------ |
 
 类别名是简短名词短语，不是句子；在没有案例可指之前不凭空发明：第一篇记录命名它，第二篇确认它。记录的类别只写在索引里，不写在记录里，所以整个分类体系只有一处可读。
 
 ## 索引
 
-| #    | 记录                                                                      | Failure class           |
-| ---- | ------------------------------------------------------------------------- | ----------------------- |
-| ---  | ----                                                                      | -------------           |
+| #    | 记录                                                                       | Failure class           |
+| ---- | -------------------------------------------------------------------------- | ----------------------- |
+| 0001 | [检查别人的工具，自己没被检查](0001-tools-outside-the-type-check.zh-CN.md) | unchecked tooling       |
+| 0002 | [我验证的树，不是我推送的树](0002-wrong-tree-verification.zh-CN.md)        | wrong-tree verification |
+| 0003 | [我读到的检查，读的是 mutant](0003-checks-read-a-live-mutant.zh-CN.md)   | mutant-in-tree reading  |
+| 0004 | ["flaky" 其实是一个时钟边界](0004-flaky-was-a-clock-boundary.zh-CN.md)  | mislabelled flake       |
+| ---  | ----                                                                       | -------------           |

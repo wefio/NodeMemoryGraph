@@ -1,0 +1,110 @@
+{
+  "baseline": [
+    "evals/ooo-execution/fixtures/report/interface.ts",
+    "evals/ooo-execution/fixtures/report/alpha.ts",
+    "evals/ooo-execution/fixtures/report/beta.ts",
+    "evals/ooo-execution/fixtures/report/gamma.ts",
+    "evals/ooo-execution/fixtures/report/summary.ts",
+    "evals/ooo-execution/fixtures/report/alpha.test.ts",
+    "evals/ooo-execution/fixtures/report/beta.test.ts",
+    "evals/ooo-execution/fixtures/report/gamma.test.ts",
+    "evals/ooo-execution/fixtures/report/summary.test.ts",
+    "evals/ooo-execution/fixtures/report/report.test.ts"
+  ],
+  "plan": [
+    { "id": "alpha", "effect": "isolated-artifact" },
+    { "id": "beta", "effect": "isolated-artifact" },
+    { "id": "gamma", "effect": "isolated-artifact" },
+    { "id": "summary", "effect": "isolated-artifact", "dependencies": ["alpha", "beta", "gamma"] }
+  ],
+  "units": {
+    "alpha": {
+      "instruction": "Implement alphaSection in this directory so that alpha.test.ts passes. It drops blank rows and sorts the rest, and describes itself with id \"alpha\" and title \"Alpha\". The interface file is frozen: do not change its shape, and do not edit any other file.",
+      "editable": ["evals/ooo-execution/fixtures/report/alpha.ts"],
+      "canned": {
+        "evals/ooo-execution/fixtures/report/alpha.ts": "evals/ooo-execution/fixtures/report/alpha.canned.ts"
+      },
+      "checks": [
+        {
+          "label": "alpha",
+          "command": "node",
+          "args": [
+            "--experimental-strip-types",
+            "--test",
+            "evals/ooo-execution/fixtures/report/alpha.test.ts"
+          ]
+        }
+      ]
+    },
+    "beta": {
+      "instruction": "Implement betaSection in this directory so that beta.test.ts passes. It numbers the rows from one in the order given, and describes itself with id \"beta\" and title \"Beta\". The interface file is frozen: do not change its shape, and do not edit any other file.",
+      "editable": ["evals/ooo-execution/fixtures/report/beta.ts"],
+      "canned": {
+        "evals/ooo-execution/fixtures/report/beta.ts": "evals/ooo-execution/fixtures/report/beta.canned.ts"
+      },
+      "checks": [
+        {
+          "label": "beta",
+          "command": "node",
+          "args": [
+            "--experimental-strip-types",
+            "--test",
+            "evals/ooo-execution/fixtures/report/beta.test.ts"
+          ]
+        }
+      ]
+    },
+    "gamma": {
+      "instruction": "Implement gammaSection in this directory so that gamma.test.ts passes. It upper-cases the rows and keeps the first of a duplicate, and describes itself with id \"gamma\" and title \"Gamma\". The interface file is frozen: do not change its shape, and do not edit any other file.",
+      "editable": ["evals/ooo-execution/fixtures/report/gamma.ts"],
+      "canned": {
+        "evals/ooo-execution/fixtures/report/gamma.ts": "evals/ooo-execution/fixtures/report/gamma.canned.ts"
+      },
+      "checks": [
+        {
+          "label": "gamma",
+          "command": "node",
+          "args": [
+            "--experimental-strip-types",
+            "--test",
+            "evals/ooo-execution/fixtures/report/gamma.test.ts"
+          ]
+        }
+      ]
+    },
+    "summary": {
+      "instruction": "Implement summarySection in this directory so that summary.test.ts passes. It lists one line per section, in the order it was given, each as '- ' plus that section's title, and describes itself with id \"summary\" and title \"Summary\". The three sections it is handed are already accepted; the interface file is frozen: do not change its shape, and do not edit any other file.",
+      "editable": ["evals/ooo-execution/fixtures/report/summary.ts"],
+      "canned": {
+        "evals/ooo-execution/fixtures/report/summary.ts": "evals/ooo-execution/fixtures/report/summary.canned.ts"
+      },
+      "checks": [
+        {
+          "label": "summary",
+          "command": "node",
+          "args": [
+            "--experimental-strip-types",
+            "--test",
+            "evals/ooo-execution/fixtures/report/summary.test.ts"
+          ]
+        }
+      ]
+    }
+  },
+  "parentChecks": [
+    {
+      "label": "composed report",
+      "command": "node",
+      "args": [
+        "--experimental-strip-types",
+        "--test",
+        "evals/ooo-execution/fixtures/report/alpha.test.ts",
+        "evals/ooo-execution/fixtures/report/beta.test.ts",
+        "evals/ooo-execution/fixtures/report/gamma.test.ts",
+        "evals/ooo-execution/fixtures/report/summary.test.ts",
+        "evals/ooo-execution/fixtures/report/report.test.ts"
+      ]
+    }
+  ],
+  "worker": { "kind": "canned" }
+}

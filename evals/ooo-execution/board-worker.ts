@@ -4,23 +4,27 @@
  *
  * It deliberately does not judge its own delivery: judging is a different agent's act.
  *
+ * It reaches the board through the daemon that serves the round's store (`--daemon <store path>`),
+ * as a client: the drivers do not open a database of their own, because a second writer is what the
+ * run's coordinated transition exists to prevent.
+ *
  * Usage:
  *   node --experimental-strip-types evals/ooo-execution/board-worker.ts \
- *     --channel ooo-process-probe --out .nmg/board/worker-output.txt [--entry <id>]
- *     [--store <path>] [--lease 1800] [--agent worker-ooo-<pid>] [--suites a.test.ts,b.test.ts]
+ *     --daemon <round store path> --channel ooo-probe:<runId> \
+ *     --out .nmg/board/worker-output.txt [--entry <id>]
+ *     [--lease 1800] [--agent worker-ooo-<pid>] [--suites a.test.ts,b.test.ts]
  *
- * Refuses to run without a channel and an output path. Asserts that it holds the claim,
- * that the artifact file exists and is non-empty, that the digest recomputes, and that
- * the store recorded exactly the digest it reported.
+ * Refuses to run without a channel, an output path and a daemon that serves the store. Asserts that
+ * it holds the claim, that the artifact file exists and is non-empty, that the digest recomputes,
+ * and that the daemon recorded exactly the digest it reported.
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { homedir } from "node:os";
 import { parseArgs } from "node:util";
 
-const { NmgStoreBase } = await import("../../src/core/store/base.ts");
+import { boardCall, roundDaemon } from "./round-client.ts";
 
 const DEFAULT_SUITES = [
   "tests/core/task-board-deliverable.test.ts",
@@ -36,7 +40,7 @@ const { values } = parseArgs({
     channel: { type: "string" },
     entry: { type: "string" },
     out: { type: "string" },
-    store: { type: "string" },
+    daemon: { type: "string" },
     agent: { type: "string" },
     lease: { type: "string" },
     suites: { type: "string" },
@@ -47,36 +51,42 @@ const channel = values.channel;
 const out = values.out;
 if (!channel) throw new Error("--channel is required: a taskId is the board's only boundary");
 if (!out) throw new Error("--out is required: an artifact the deliverer can point at");
+if (!values.daemon) {
+  throw new Error("--daemon is required: the store path whose daemon serves this round's board");
+}
 
-const storePath = resolve(
-  values.store ?? join(process.env.NMG_DATA_DIR ?? join(homedir(), ".nmg"), "nmg.sqlite"),
-);
+const state = roundDaemon(resolve(values.daemon));
 const agentId = values.agent ?? `worker-ooo-${process.pid}`;
 const leaseSeconds = Number(values.lease ?? 1800);
 const suites = (values.suites ?? DEFAULT_SUITES.join(",")).split(",").filter(Boolean);
 
-const store = new NmgStoreBase(storePath);
-try {
+{
   // 1. Find the ready handoff: open, actionable, and not already held by someone alive.
-  const open = () => store.readTaskBoard({ taskId: channel!, limit: 200 }).entries;
+  const open = async () => {
+    const read = await boardCall(state, { action: "read", taskId: channel, agentId, limit: 200 });
+    if (read.action !== "read") throw new Error("the board did not answer a read with entries");
+    return read.entries;
+  };
+  const entries = await open();
   const candidate = values.entry
-    ? open().find((entry) => entry.id === values.entry)
-    : open()
-        .filter((entry) => entry.kind === "handoff" && entry.status === "open")
-        .at(-1);
-  if (!candidate) throw new Error(`no open handoff in ${channel} (store: ${storePath})`);
+    ? entries.find((entry) => entry.id === values.entry)
+    : entries.filter((entry) => entry.kind === "handoff" && entry.status === "open").at(-1);
+  if (!candidate) throw new Error(`no open handoff in ${channel} (daemon: ${state.port})`);
   if (candidate.status !== "open") {
     throw new Error(`entry ${candidate.id} is ${candidate.status}; nothing to claim`);
   }
 
   // 2. Claim it. The store refuses a pending serial entry, a finalised one, and a claim
-  //    held by a live peer — so a throw here means the work is genuinely mine to do.
-  const claimed = store.claimTaskBoardEntry({
+  //    held by a live peer - so a throw here means the work is genuinely mine to do.
+  const claimResult = await boardCall(state, {
+    action: "claim",
     taskId: channel,
     entryId: candidate.id,
     agentId,
     leaseSeconds,
   });
+  if (claimResult.action !== "claim") throw new Error("the board did not answer a claim");
+  const claimed = claimResult.entry;
   if (claimed.claimedBy !== agentId) {
     throw new Error(`claim did not land: holder is ${claimed.claimedBy ?? "none"}`);
   }
@@ -118,7 +128,12 @@ try {
   const fail = count("fail");
   if (![tests, pass, fail].every(Number.isFinite) || tests === 0) {
     try {
-      store.releaseTaskBoardEntry({ taskId: channel, entryId: candidate.id, agentId });
+      await boardCall(state, {
+        action: "release",
+        taskId: channel,
+        entryId: candidate.id,
+        agentId,
+      });
     } catch {
       // Releasing is courtesy; the lease expiring is the guarantee.
     }
@@ -135,7 +150,8 @@ try {
     (failures.length ? ` failures=[${failures.join("; ")}]` : "");
 
   // 5. Deliver. Only the live claim holder can do this; the store re-checks under CAS.
-  const delivered = store.deliverTaskBoardEntry({
+  const deliverResult = await boardCall(state, {
+    action: "deliver",
     taskId: channel,
     entryId: candidate.id,
     agentId,
@@ -143,8 +159,10 @@ try {
     ref: out,
     summary,
   });
+  if (deliverResult.action !== "deliver") throw new Error("the board did not answer a delivery");
+  const delivered = deliverResult.entry;
   if (delivered.deliverableDigest !== digest) {
-    throw new Error(`store recorded ${delivered.deliverableDigest}, I computed ${digest}`);
+    throw new Error(`the daemon recorded ${delivered.deliverableDigest}, I computed ${digest}`);
   }
   console.log(
     JSON.stringify({
@@ -158,6 +176,4 @@ try {
       verdict: delivered.verdict ?? null,
     }),
   );
-} finally {
-  store.close();
 }

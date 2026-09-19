@@ -150,7 +150,7 @@ test("a delivered and judged entry renders its deliverable and verdict, not just
         },
       ],
     },
-    { taskId: "ooo-process-probe" },
+    { taskId: "ooo-probe:agent-surface" },
   );
 
   assert.match(rendered, /\[claimed by worker-7\]/u);

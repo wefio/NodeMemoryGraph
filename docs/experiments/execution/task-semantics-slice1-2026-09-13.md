@@ -1,7 +1,7 @@
 # The design's first slice: a shared pure-data compiler and a finite offline model
 
 **Related:** [task-unit semantics design](../../design/task-unit-semantics.md) ·
-[proposed decision record](../../decisions/proposed/2026-09-13-task-unit-semantics.md) ·
+[proposed decision record](../../decisions/implemented/2026-09-13-task-unit-semantics.md) ·
 [OoO bootstrap design](../../design/ooo-execution-bootstrap.md) ·
 [what the wait is worth](wait-value-2026-09-12.md)
 

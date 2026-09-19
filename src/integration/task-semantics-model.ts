@@ -60,19 +60,21 @@ function permutations(ids: readonly string[]): string[][] {
 }
 
 /** Dependency closure: a unit is accepted only if it was accepted itself and none of
- *  the units it read from was rejected or undecidable. */
-function acceptedClosure(
+ *  the units it read from was rejected or undecidable. It takes the unit-level predicate
+ *  rather than a table of declared outcomes, because the closure is asked about two
+ *  different authorities - the model's declared outcomes and a run's recorded facts -
+ *  and both must resolve "accepted" through the one acceptance predicate. */
+export function acceptedClosure(
   units: readonly TaskUnit[],
-  outcomes: ModelInput["outcomes"],
+  own: (unit: TaskUnit) => boolean,
 ): Set<string> {
   const accepted = new Set<string>();
-  const own = (id: string) => (outcomes[id] ?? "undecidable") === "accepted";
   let changed = true;
   while (changed) {
     changed = false;
     for (const unit of units) {
       const ok =
-        own(unit.id) && unit.inputs.dependencies.every((dependency) => accepted.has(dependency));
+        own(unit) && unit.inputs.dependencies.every((dependency) => accepted.has(dependency));
       if (ok && !accepted.has(unit.id)) {
         accepted.add(unit.id);
         changed = true;
@@ -116,7 +118,12 @@ function run(
     waits,
     rollbacks,
     retries,
-    accepted: [...acceptedClosure(units, input.outcomes)].sort(),
+    accepted: [
+      ...acceptedClosure(
+        units,
+        (unit) => (input.outcomes[unit.id] ?? "undecidable") === "accepted",
+      ),
+    ].sort(),
   };
 }
 

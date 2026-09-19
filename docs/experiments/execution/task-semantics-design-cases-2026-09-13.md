@@ -1,7 +1,7 @@
 # The design's enumerated cases, made executable
 
 **Related:** [task-unit semantics design](../../design/task-unit-semantics.md) ·
-[proposed decision record](../../decisions/proposed/2026-09-13-task-unit-semantics.md) ·
+[proposed decision record](../../decisions/implemented/2026-09-13-task-unit-semantics.md) ·
 [slice 1: compiler and model](task-semantics-slice1-2026-09-13.md) ·
 [one acceptance predicate](ooo-acceptance-predicate-2026-09-13.md)
 

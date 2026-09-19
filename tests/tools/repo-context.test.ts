@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { parse as parseYaml } from "yaml";
 
 import {
   collectAgentContext,
@@ -190,6 +191,48 @@ test("route schema rejects duplicate ids and commands with conflicting classific
     () => validateAgentContext(root),
     /duplicate: npm script check cannot be both blocking and advisory/,
   );
+});
+
+test("verify.sharedChecks must be a known declaration, and declining needs its own tests", () => {
+  const root = fixture();
+  const write = (verify: string[]) =>
+    writeFileSync(
+      join(root, "agent-context.yaml"),
+      [
+        "version: 1",
+        "routes:",
+        "  - id: repository-tooling",
+        "    paths: [.gitignore]",
+        "    owners: []",
+        `    tests: ${verify[1]}`,
+        "    verify:",
+        "      blocking: [check]",
+        `      advisory: []`,
+        `      sharedChecks: ${verify[0]}`,
+        "",
+      ].join("\n"),
+    );
+
+  // A typo must not silently mean "always" (or silently mean "none").
+  write(["sometimes", "[tests/tools/**]"]);
+  assert.throws(
+    () => validateAgentContext(root),
+    /verify\.sharedChecks must be "always" or "none", not "sometimes"/,
+  );
+
+  // A route that declines the always-run shared checks and declares no tests of its own would leave
+  // a narrow plan with nothing to execute; a verification tool must never report that as a pass.
+  write(["none", "[]"]);
+  assert.throws(
+    () => validateAgentContext(root),
+    /a route that declines the shared checks must declare its own tests/,
+  );
+
+  // Declining with its own tests is a valid declaration, and so is the explicit default.
+  write(["none", "[tests/tools/**]"]);
+  assert.doesNotThrow(() => validateAgentContext(root));
+  write(["always", "[]"]);
+  assert.doesNotThrow(() => validateAgentContext(root));
 });
 
 test("markdown output remains a concise navigation surface", () => {
@@ -455,5 +498,46 @@ test("manual scope survives unavailable Git and reports the inspection failure",
   assert.deepEqual(
     report.routes.map((route) => route.id),
     ["store"],
+  );
+});
+
+/** The integration layer is split across three routes by owner document - the Agent Surface, the
+ *  OoO/task execution orchestra, and the retrieval-index enrichment - so its files are claimed one
+ *  by one: `matches()` reads the first `*` in a pattern as a directory prefix, so a mid-name pattern
+ *  such as `src/integration/ooo-*.ts` selects nothing. A list rots silently - a new file would belong
+ *  to no route and nothing would complain - so this keeps the declaration exactly as wide as the
+ *  directory. The list of knowingly unrouted files is now empty: a file added here either gets a
+ *  route or is named below on purpose. */
+const INTEGRATION_FILES_WITHOUT_A_ROUTE: string[] = [];
+
+test("the integration layer's routes claim exactly its files", () => {
+  const root = fileURLToPath(new URL("../../", import.meta.url));
+  const config = parseYaml(readFileSync(join(root, "agent-context.yaml"), "utf8")) as {
+    routes: { id: string; paths: string[] }[];
+  };
+  const claimingRoutes = new Map<string, string[]>();
+  for (const route of config.routes) {
+    for (const path of route.paths) {
+      if (!path.startsWith("src/integration/")) continue;
+      claimingRoutes.set(path, [...(claimingRoutes.get(path) ?? []), route.id]);
+    }
+  }
+  const files = readdirSync(join(root, "src/integration"))
+    .filter((name) => name.endsWith(".ts"))
+    .map((name) => `src/integration/${name}`);
+  const claimedBySeveral = files.filter((file) => (claimingRoutes.get(file)?.length ?? 0) > 1);
+  assert.deepEqual(
+    claimedBySeveral,
+    [],
+    "a file claimed by two routes has two owner documents, which is one home too many",
+  );
+  const declared = [
+    ...files.filter((file) => claimingRoutes.has(file)),
+    ...INTEGRATION_FILES_WITHOUT_A_ROUTE.map((name) => `src/integration/${name}`),
+  ];
+  assert.deepEqual(
+    declared.sort(),
+    files.sort(),
+    "every integration file is either claimed by one route or named as a known gap",
   );
 });

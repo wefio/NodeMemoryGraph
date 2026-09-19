@@ -1,0 +1,123 @@
+{
+  "aggregate": [
+    {
+      "bound": 1,
+      "arm": "unfused (one unit per session)",
+      "sessions": [
+        "1/1",
+        "1/1",
+        "1/1"
+      ],
+      "medianTokens": 22498,
+      "medianWallMs": 12948,
+      "failures": 0
+    },
+    {
+      "bound": 2,
+      "arm": "fused (two units one session)",
+      "sessions": [
+        "2",
+        "2",
+        "2"
+      ],
+      "medianTokens": 22533,
+      "medianWallMs": 11048,
+      "failures": 0
+    }
+  ],
+  "runs": [
+    {
+      "bound": 1,
+      "rep": 1,
+      "elapsedMs": 13178,
+      "wallMs": 11902,
+      "tokens": 22498,
+      "failures": 0,
+      "sessions": [
+        1,
+        1
+      ],
+      "units": [
+        "alpha:accepted:11211t",
+        "summary:accepted:11287t"
+      ]
+    },
+    {
+      "bound": 1,
+      "rep": 2,
+      "elapsedMs": 14212,
+      "wallMs": 12948,
+      "tokens": 22435,
+      "failures": 0,
+      "sessions": [
+        1,
+        1
+      ],
+      "units": [
+        "alpha:accepted:10714t",
+        "summary:accepted:11721t"
+      ]
+    },
+    {
+      "bound": 1,
+      "rep": 3,
+      "elapsedMs": 15328,
+      "wallMs": 14066,
+      "tokens": 22922,
+      "failures": 0,
+      "sessions": [
+        1,
+        1
+      ],
+      "units": [
+        "alpha:accepted:11297t",
+        "summary:accepted:11625t"
+      ]
+    },
+    {
+      "bound": 2,
+      "rep": 1,
+      "elapsedMs": 13099,
+      "wallMs": 11812,
+      "tokens": 22533,
+      "failures": 0,
+      "sessions": [
+        2
+      ],
+      "units": [
+        "alpha:accepted:11828t",
+        "summary:accepted:10705t"
+      ]
+    },
+    {
+      "bound": 2,
+      "rep": 2,
+      "elapsedMs": 10801,
+      "wallMs": 9584,
+      "tokens": 17592,
+      "failures": 0,
+      "sessions": [
+        2
+      ],
+      "units": [
+        "alpha:accepted:7903t",
+        "summary:accepted:9689t"
+      ]
+    },
+    {
+      "bound": 2,
+      "rep": 3,
+      "elapsedMs": 12266,
+      "wallMs": 11048,
+      "tokens": 26299,
+      "failures": 0,
+      "sessions": [
+        2
+      ],
+      "units": [
+        "alpha:accepted:15502t",
+        "summary:accepted:10797t"
+      ]
+    }
+  ]
+}

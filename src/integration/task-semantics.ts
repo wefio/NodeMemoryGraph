@@ -3,7 +3,7 @@
  * exist (PatchTaskSpec, FrozenPatchTask, BoardTicket, cycle requirements, board
  * verdicts). It adds no schema, opens no database, calls no model, and publishes
  * nothing — see docs/design/task-unit-semantics.md and the proposed decision
- * record docs/decisions/proposed/2026-09-13-task-unit-semantics.md.
+ * record docs/decisions/implemented/2026-09-13-task-unit-semantics.md.
  *
  * Two rules from that design are enforced here rather than left to convention:
  *
@@ -17,7 +17,7 @@
  *    kind gets a refusal naming the task and the field.
  */
 import { createHash } from "node:crypto";
-import { nextTask, type DispatchTask } from "./ooo-execution.ts";
+import { startableTasks, type DispatchTask } from "./ooo-execution.ts";
 import {
   CONCLUSION_KINDS,
   MAX_PATCH_BUDGET,
@@ -28,7 +28,13 @@ import {
   type PatchLimits,
 } from "./ooo-patch.ts";
 import type { PatchTaskSpec, ProbePlan, ProbeOperation } from "./ooo-board.ts";
-import type { Requirement } from "./ooo-cycle.ts";
+
+/** A declared precondition on a dependency's accepted artifact. The host evaluates
+ *  these mechanically, so a downstream pushback is a checkable fact and not a mood. */
+export type Requirement =
+  | { kind: "verified"; task: string }
+  | { kind: "mutant-killed"; task: string; id: string }
+  | { kind: "test-title"; task: string; token: string };
 
 /** The obligations a legal unit must satisfy (design §最小合法任务单元). */
 export const OBLIGATIONS = [
@@ -444,6 +450,15 @@ export interface RecordedFacts {
   cancellations?: readonly string[];
   /** External waits that have actually become ready. */
   externalReady?: readonly string[];
+  /** Tasks with a live lease. A claim is a recorded fact about the run, not a property of the
+   *  artifact: the store owns it (claim owner, lease, attempt) and eligibility has to see it, or a
+   *  task already being worked on becomes selectable again. */
+  claimed?: readonly string[];
+  /** The revision each unit's input was declared at, as the store recorded it. A unit carries its
+   *  own declared revision, but "is this input still current" is a fact about the run: the store's
+   *  source revision is the identity of the plan the work was admitted under, and it is not the
+   *  same string as a task's declared revision. */
+  sourceRevisions?: Readonly<Record<string, string>>;
 }
 
 /** The facts a run records about one artifact. Delivery and acceptance are different
@@ -484,7 +499,13 @@ export function isAccepted(unit: Pick<TaskUnit, "id" | "revision">, facts: Recor
     digest: artifact,
     verdict: recorded?.verdict ?? null,
     judgedDigest: recorded?.digest ?? null,
-    currentRevision: recordedRevision === undefined || recordedRevision === unit.revision,
+    // The revision comparison is between two facts the store recorded: the revision the input was
+    // admitted under and the one observed since. A unit's own declared revision is the compiler's
+    // view of the plan and stands in only when no source revision was recorded - comparing a plan's
+    // declared revision against an observed one asks two different questions.
+    currentRevision:
+      recordedRevision === undefined ||
+      recordedRevision === (facts.sourceRevisions?.[unit.id] ?? unit.revision),
     cancelled: facts.cancellations?.includes(unit.id) ?? false,
   });
 }
@@ -493,21 +514,27 @@ export function dispatchTasks(units: readonly TaskUnit[], facts: RecordedFacts):
   return units.map((unit) => ({
     id: unit.id,
     effect: unit.effects.effect,
-    sourceVersion: unit.revision,
+    sourceVersion: facts.sourceRevisions?.[unit.id] ?? unit.revision,
     observedVersion: facts.revisions?.[unit.id] ?? unit.revision,
     dependencies: [...unit.inputs.dependencies],
     accepted: isAccepted(unit, facts),
-    claimed: false,
+    claimed: facts.claimed?.includes(unit.id) ?? false,
     externalEvent: unit.waitEvent ?? undefined,
     externalReady: facts.externalReady?.includes(unit.id) ?? false,
+    delivered: facts.artifacts?.[unit.id] !== undefined,
+    // The same recorded fact the acceptance predicate reads, carried to the eligibility rule: a
+    // cancellation is not a property of the artifact, and both rules have to see it.
+    cancelled: facts.cancellations?.includes(unit.id) ?? false,
   }));
 }
 
-/** Status and dependency release share the derived dispatch state and the existing
- *  `nextTask` eligibility rule; neither gets its own notion of "accepted". */
+/** Status and dependency release share the derived dispatch state and the existing eligibility rule;
+ *  neither gets its own notion of "accepted". `ready` is what a run may start now: one task at the
+ *  default budget, and the run's remaining claim budget's worth when it declared more. */
 export function deriveStatus(
   units: readonly TaskUnit[],
   facts: RecordedFacts,
+  slots = 1,
 ): {
   ready: readonly string[];
   blocked: readonly { id: string; waitingFor: readonly string[] }[];
@@ -515,15 +542,15 @@ export function deriveStatus(
 } {
   const accepted = units.filter((unit) => isAccepted(unit, facts)).map((unit) => unit.id);
   const acceptedIds = new Set(accepted);
-  const candidate = nextTask(dispatchTasks(units, facts));
+  const ready = startableTasks(dispatchTasks(units, facts), slots);
   const blocked = units
     .filter((unit) => !isAccepted(unit, facts))
     .map((unit) => ({
       id: unit.id,
       waitingFor: unit.inputs.dependencies.filter((dependency) => !acceptedIds.has(dependency)),
     }))
-    .filter((entry) => entry.waitingFor.length > 0 || entry.id !== candidate);
-  return { ready: candidate ? [candidate] : [], blocked, accepted };
+    .filter((entry) => entry.waitingFor.length > 0 || !ready.includes(entry.id));
+  return { ready, blocked, accepted };
 }
 
 /** Actions this slice can derive. Fusion and speculative preparation are named but

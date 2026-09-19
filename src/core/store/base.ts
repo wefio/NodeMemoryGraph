@@ -37,6 +37,7 @@ import type {
   VectorEmbedder,
 } from "../types.ts";
 import { TASK_BOARD_VERDICTS, WORLD_BOARD_ID } from "../types.ts";
+import { currentlyValid, notExpired } from "./clock.ts";
 import { histogramAdd } from "../perf.ts";
 import { Router } from "../router.ts";
 import { cosineSimilarity, HashingVectorEmbedder } from "../vector.ts";
@@ -68,13 +69,52 @@ import {
   mapSearchResult,
 } from "./rows.ts";
 
+export interface TransactionPort {
+  /** Which transition this port belongs to; the store matches it against the open one. */
+  readonly generation: number;
+}
+
+/** A callback that would keep a transaction open across an await is refused where it is handed in. */
+function refuseThenable(value: unknown, message: string): void {
+  const thenable =
+    value !== null &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof (value as { then?: unknown }).then === "function";
+  if (thenable) throw new Error(message);
+}
+
 export class NmgStoreBase {
+  /** True when this store came from the read-only factory rather than a shared connection. */
+  protected readOnly = false;
   protected db: DatabaseSync;
   protected embedder: VectorEmbedder;
   protected router: Router;
   protected vectorCaches = new Map<string, Float32VectorCache>();
   protected scopeWriteIndexes = new Map<string, ScopeWriteIndex>();
   protected scopeWriteIndexEnabled: boolean;
+  /** The open write transaction, if any. A port is the only way to join it. */
+  private openTransaction: { port: TransactionPort; rollbackOnly: boolean } | null = null;
+  /** The run whose coordinated write scope is open, if any: the store's own state, set only by
+   *  `coordinateRunWrite` while its callback runs. */
+  private coordinatedRun: string | null = null;
+  private transactionGeneration = 0;
+  /** Set when ROLLBACK itself failed: the connection's state is unknown, so it takes no more work. */
+  private connectionQuarantined = false;
+
+  /** A read-only factory neither creates the file nor migrates an old one. Both refusals are named
+   *  here rather than surfacing as a driver-level "unable to open database file" with no reason, and
+   *  the decisions live here so the constructor is not the file's largest decision point. */
+  #refuseUnusableReadOnlyOpen(databasePath: string): void {
+    if (!this.readOnly) return;
+    if (!existsSync(databasePath))
+      throw new Error("this store does not exist; a read-only open does not create one");
+  }
+
+  #refuseUnrecognisableReadOnlyOpen(): void {
+    if (!this.readOnly) return;
+    if (this.hasSchema()) return;
+    throw new Error("this store has no recognisable schema; a read-only open does not migrate it");
+  }
 
   constructor(
     databasePath: string,
@@ -82,21 +122,38 @@ export class NmgStoreBase {
     options: NmgStoreOptions = {},
   ) {
     mkdirSync(dirname(databasePath), { recursive: true });
-    this.db = new DatabaseSync(databasePath);
+    // A read-only open is a different factory, not a mode of the shared connection: it gets a
+    // handle that cannot write, and it neither migrates nor checkpoints.
+    this.readOnly = options.readOnly === true;
+    // A read-only factory neither creates the file nor migrates an old one, so both refusals happen
+    // here rather than surfacing as a driver-level "unable to open database file" with no reason.
+    this.#refuseUnusableReadOnlyOpen(databasePath);
+    this.db = new DatabaseSync(databasePath, readOnlyOpenOptions(this.readOnly));
     this.embedder = embedder;
     this.router = new Router(embedder);
     this.scopeWriteIndexEnabled = options.scopeWriteIndex ?? false;
     try {
-      this.db.exec(`
-        PRAGMA foreign_keys = ON;
-        PRAGMA journal_mode = WAL;
-        PRAGMA synchronous = NORMAL;
-        PRAGMA cache_size = -64000;
-        PRAGMA temp_store = MEMORY;
-        PRAGMA mmap_size = 268435456;
-        PRAGMA busy_timeout = 5000;
-      `);
-      migrate(this.db);
+      // `journal_mode` rewrites the database header, so a read-only handle must not set it; the
+      // remaining pragmas are connection-local and harmless.
+      this.db.exec(
+        this.readOnly
+          ? `PRAGMA foreign_keys = ON;
+             PRAGMA cache_size = -64000;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA mmap_size = 268435456;
+             PRAGMA busy_timeout = 5000;`
+          : `PRAGMA foreign_keys = ON;
+             PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA cache_size = -64000;
+             PRAGMA temp_store = MEMORY;
+             PRAGMA mmap_size = 268435456;
+             PRAGMA busy_timeout = 5000;`,
+      );
+      if (!this.readOnly) migrate(this.db);
+      // An existing file with no recognisable schema is not an empty store: reporting it as one would
+      // hide an unknown format behind default empties.
+      this.#refuseUnrecognisableReadOnlyOpen();
       // checkpoint-on-open: fold any -wal left behind by a force-exit shutdown
       // (where close() never ran) into the main DB and truncate it, so WAL can
       // never accumulate across restarts. SQLite auto-recovers WAL frames on
@@ -104,7 +161,7 @@ export class NmgStoreBase {
       // checkpoints, so the common open path skips the blocking TRUNCATE
       // (stg-v2 review ③a; wal_checkpoint is synchronous disk I/O that stalls
       // the event loop when the WAL is large).
-      if (existsSync(`${databasePath}-wal`)) {
+      if (!this.readOnly && existsSync(`${databasePath}-wal`)) {
         try {
           if (statSync(`${databasePath}-wal`).size > 0) {
             this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
@@ -126,15 +183,25 @@ export class NmgStoreBase {
     }
   }
 
+  /** The core schema's marker table: present means this file was written by a version this code reads. */
+  private hasSchema(): boolean {
+    return (
+      this.db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_nodes'")
+        .get() !== undefined
+    );
+  }
+
   close(): void {
     // WAL checkpoint before close: without this the daemon's force-exit
     // shutdown leaves -wal files behind (v1 measured ~1.5G across 1681
     // session STG stores). TRUNCATE folds WAL into the main DB then resets it.
-    try {
-      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-    } catch {
-      // ignore — closing anyway
-    }
+    if (!this.readOnly)
+      try {
+        this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+      } catch {
+        // ignore — closing anyway
+      }
     this.db.close();
   }
 
@@ -195,21 +262,146 @@ export class NmgStoreBase {
     if (scopeJson) this.scopeWriteIndexes.delete(scopeJson);
     else this.scopeWriteIndexes.clear();
   }
-  putTaskBoardEntry(input: {
+  /**
+   * Run one coordinated transition for a run: exactly one write transaction, and inside it the
+   * scope that lets the run's own managed entries be written. It is deliberately not a way to wrap
+   * a whole round or an asynchronous RPC in a database transaction - the callback is synchronous
+   * and the boundary closes with it - and it refuses a run this store cannot name, so a scope can
+   * never authorize writes for a run state that does not exist.
+   */
+  coordinateRunWrite<T>(runId: string, work: (port: TransactionPort) => T): T {
+    if (!this.taskRunManifestExists(runId))
+      throw new Error(
+        `run ${runId} is not registered; a managed write needs the run it belongs to`,
+      );
+    return this.writeTransaction((port) => {
+      const previous = this.coordinatedRun;
+      this.coordinatedRun = runId;
+      try {
+        return work(port);
+      } finally {
+        this.coordinatedRun = previous;
+      }
+    });
+  }
+
+  /**
+   * A board write on an entry a run manages belongs to that run's coordinated scope, and the
+   * scope is the store's own state rather than the caller's claim - so a direct call on a managed
+   * entry is refused instead of applied beside the run. An entry no run manages returns here
+   * without a transaction: the ordinary board path is unchanged, including its cost.
+   */
+  private requireManagedWriteScope(entryId: string): void {
+    const binding = this.taskRunForEntry(entryId);
+    if (!binding) return;
+    if (this.coordinatedRun === binding.runId) return;
+    throw new Error(
+      `entry ${entryId} is managed by run ${binding.runId}: its lifecycle writes go through the run's coordinated transition, not the board verb directly`,
+    );
+  }
+
+  /**
+   * The store owns the transaction boundary: this is the only place that runs BEGIN/COMMIT. A
+   * caller already inside a transition must join it with the port this issued rather than open a
+   * second one, and a write entry reached inside a live transaction without that port is refused
+   * instead of guessed at — `openTransaction` is the store's own state, never the caller's claim.
+   */
+  writeTransaction<T>(callback: (port: TransactionPort) => T): T {
+    if (this.openTransaction)
+      throw new Error("a write transaction is already open: join it with the port it issued");
+    if (this.connectionQuarantined)
+      throw new Error("this connection is quarantined after a failed rollback");
+    this.db.exec("BEGIN IMMEDIATE");
+    const port: TransactionPort = { generation: ++this.transactionGeneration };
+    this.openTransaction = { port, rollbackOnly: false };
+    let value: T;
+    try {
+      value = callback(port);
+      refuseThenable(value, "a write transaction callback must be synchronous");
+    } catch (error) {
+      this.openTransaction = null;
+      this.rollback();
+      // The original failure is what the caller needs to see, whether ROLLBACK worked or not.
+      throw error;
+    }
+    const state = this.openTransaction;
+    this.openTransaction = null;
+    if (state?.rollbackOnly) {
+      this.rollback();
+      throw new Error("the transaction was marked rollback-only by a failing operation");
+    }
+    try {
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.rollback();
+      throw error;
+    }
+    return value;
+  }
+
+  /**
+   * Join the transition a port was issued for, synchronously and only while its callback runs. A
+   * port from another store, a port whose callback has returned, and a second BEGIN are all
+   * refused: nothing here infers authority from a flag or a depth counter.
+   */
+  withPort<T>(port: TransactionPort, work: () => T): T {
+    const state = this.openTransaction;
+    if (!state || state.port !== port)
+      throw new Error("this port is not the store's live transaction scope");
+    try {
+      const value = work();
+      refuseThenable(value, "work inside a transaction must be synchronous");
+      return value;
+    } catch (error) {
+      // Even if the caller catches this, the work up to the failure already happened. Only the
+      // outermost decides whether anything commits, and it will not.
+      state.rollbackOnly = true;
+      throw error;
+    }
+  }
+
+  private rollback(): void {
+    try {
+      this.db.exec("ROLLBACK");
+    } catch {
+      this.connectionQuarantined = true;
+    }
+  }
+
+  putTaskBoardEntry(
+    input: {
+      taskId: string;
+      agentId: string;
+      sourceSessionId?: string;
+      kind: TaskBoardKind;
+      content: string;
+      expiresAt: string;
+      /** Directed delivery: stable agent_name to wake for this entry. */
+      to?: string;
+    },
+    port?: TransactionPort,
+  ): TaskBoardEntry {
+    // Standalone and composed writes share this implementation: outside a transition this opens
+    // one, and inside one it joins the open transition instead of running a second BEGIN.
+    return port
+      ? this.withPort(port, () => this.insertTaskBoardEntry(input))
+      : this.writeTransaction(() => this.insertTaskBoardEntry(input));
+  }
+
+  /** The write itself, owning no boundary: whichever transaction is open decides whether it lands. */
+  private insertTaskBoardEntry(input: {
     taskId: string;
     agentId: string;
     sourceSessionId?: string;
     kind: TaskBoardKind;
     content: string;
     expiresAt: string;
-    /** Directed delivery: stable agent_name to wake for this entry. */
     to?: string;
   }): TaskBoardEntry {
     const now = new Date().toISOString();
     this.pruneExpiredTaskBoardEntries(now, input.taskId);
     let id: string;
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    {
       // Global monotonic counter (single row, never recycled). The id =
       // <createdAtMs>_<counter> is time-sortable, insertion-ordered for
       // same-millisecond entries, and globally unique across all channels.
@@ -261,10 +453,6 @@ export class NmgStoreBase {
           input.to ?? null,
           serialState,
         );
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
     }
     return this.taskBoardEntry(id)!;
   }
@@ -413,6 +601,7 @@ export class NmgStoreBase {
     agentId: string;
     resolution?: string;
   }): TaskBoardEntry {
+    this.requireManagedWriteScope(input.entryId);
     const existing = this.taskBoardEntry(input.entryId);
     if (!existing || existing.taskId !== input.taskId) {
       throw new Error(`task board entry not found in task ${input.taskId}`);
@@ -449,6 +638,7 @@ export class NmgStoreBase {
     agentId: string;
     reason?: string;
   }): TaskBoardEntry {
+    this.requireManagedWriteScope(input.entryId);
     const existing = this.taskBoardEntry(input.entryId);
     if (!existing || existing.taskId !== input.taskId) {
       throw new Error(`task board entry not found in task ${input.taskId}`);
@@ -484,6 +674,7 @@ export class NmgStoreBase {
     summary?: string;
     now?: string;
   }): TaskBoardEntry {
+    this.requireManagedWriteScope(input.entryId);
     const now = input.now ?? new Date().toISOString();
     const existing = this.taskBoardEntry(input.entryId);
     if (!existing || existing.taskId !== input.taskId) {
@@ -539,6 +730,7 @@ export class NmgStoreBase {
     reason?: string;
     now?: string;
   }): TaskBoardEntry {
+    this.requireManagedWriteScope(input.entryId);
     const now = input.now ?? new Date().toISOString();
     const existing = this.taskBoardEntry(input.entryId);
     if (!existing || existing.taskId !== input.taskId) {
@@ -627,6 +819,7 @@ export class NmgStoreBase {
     leaseSeconds?: number;
     now?: string;
   }): TaskBoardEntry {
+    this.requireManagedWriteScope(input.entryId);
     const now = input.now ?? new Date().toISOString();
     this.pruneExpiredTaskBoardEntries(now, input.taskId);
     const existing = this.taskBoardEntry(input.entryId);
@@ -702,6 +895,7 @@ export class NmgStoreBase {
     entryId: string;
     agentId: string;
   }): TaskBoardEntry {
+    this.requireManagedWriteScope(input.entryId);
     const result = this.db
       .prepare(
         `UPDATE task_board_entries
@@ -854,6 +1048,7 @@ export class NmgStoreBase {
     reason?: string;
     now?: string;
   }): void {
+    this.requireManagedWriteScope(input.entryId);
     this.db
       .prepare(
         `INSERT INTO task_board_acks (id, entry_id, agent_id, acknowledged_at, reason)
@@ -1147,8 +1342,7 @@ export class NmgStoreBase {
 
   /** Remove a memory reference from a chain. */
   removeMemoryFromChain(input: { chainId: string; memoryId: string }): boolean {
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    return this.writeTransaction(() => {
       this.db
         .prepare(
           `DELETE FROM memory_chain_edges
@@ -1158,12 +1352,8 @@ export class NmgStoreBase {
       const result = this.db
         .prepare("DELETE FROM memory_chain_members WHERE chain_id = ? AND memory_id = ?")
         .run(input.chainId, input.memoryId);
-      this.db.exec("COMMIT");
       return result.changes > 0;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   // ── memory-chain DAG edges (pointers) ──
@@ -1362,6 +1552,7 @@ export class NmgStoreBase {
     retainedUntil?: string | null;
     now?: string;
   }): boolean {
+    this.requireManagedWriteScope(input.entryId);
     const { taskId, entryId, owner, reason } = input;
     if (!taskId || !entryId) throw new Error("retention requires a channel and an entry");
     if (!owner.trim()) throw new Error("retention owner required");
@@ -1385,6 +1576,7 @@ export class NmgStoreBase {
   /** Release this owner's pin. Other owners' pins on the same entry are untouched, and
    *  the entry becomes prunable only when the last of them is gone. */
   releaseTaskBoardRetention(input: { taskId: string; entryId: string; owner: string }): boolean {
+    this.requireManagedWriteScope(input.entryId);
     if (!input.taskId || !input.entryId)
       throw new Error("retention requires a channel and an entry");
     if (!input.owner.trim()) throw new Error("retention owner required");
@@ -1540,6 +1732,318 @@ export class NmgStoreBase {
     entry.ackedBy = this.taskBoardAckMap([entry.id]).get(entry.id) ?? [];
     return entry;
   }
+
+  // ---- Task run records. The writable half of the run namespace: a run's frozen manifest, its
+  // frozen task plan, and the facts it appends. Each write takes an optional port, so a caller
+  // that already holds the store's transaction joins it instead of opening a second one - the
+  // board write and the run fact of one transition have to land together or not at all. Nothing
+  // here creates a table or a connection: the schema owns both (src/core/store/schema.ts).
+
+  /** Register a run's frozen identity. A retry after a lost response is a no-op; a second
+   *  registration that names a different plan or policy is refused, because a run cannot be
+   *  re-opened onto a different plan without becoming a different run. */
+  registerTaskRun(
+    input: {
+      runId: string;
+      planDigest: string;
+      policy: string;
+      revision: string;
+      retention: string;
+    },
+    port?: TransactionPort,
+  ): void {
+    return port
+      ? this.withPort(port, () => this.insertTaskRunManifest(input))
+      : this.writeTransaction(() => this.insertTaskRunManifest(input));
+  }
+
+  private insertTaskRunManifest(input: {
+    runId: string;
+    planDigest: string;
+    policy: string;
+    revision: string;
+    retention: string;
+  }): void {
+    const existing = this.db
+      .prepare("SELECT plan_digest, policy FROM task_run_manifest WHERE run_id = ?")
+      .get(input.runId) as Row | undefined;
+    if (existing) {
+      if (
+        String(existing.plan_digest) !== input.planDigest ||
+        String(existing.policy) !== input.policy
+      )
+        throw new Error(
+          `run ${input.runId} already froze a different plan; a new plan is a new run, not an overwrite`,
+        );
+      return;
+    }
+    this.db
+      .prepare(
+        "INSERT INTO task_run_manifest (run_id, plan_digest, policy, revision, retention, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        input.runId,
+        input.planDigest,
+        input.policy,
+        input.revision,
+        input.retention,
+        new Date().toISOString(),
+      );
+  }
+
+  /** Freeze one task of a run's plan. Frozen means frozen: the same task id with a different
+   *  input, position or operation is refused rather than replaced, since the plan is the thing
+   *  every later decision is read against. */
+  freezeTaskRunTask(
+    input: {
+      runId: string;
+      taskId: string;
+      position: number;
+      revision: string;
+      input: string;
+      dependencies: readonly string[];
+      effect: string;
+      waitEvent?: string | null;
+      operation?: string;
+      kind?: string;
+      patchFiles?: readonly string[] | null;
+      patchEditable?: readonly string[] | null;
+    },
+    port?: TransactionPort,
+  ): void {
+    return port
+      ? this.withPort(port, () => this.insertTaskRunTask(input))
+      : this.writeTransaction(() => this.insertTaskRunTask(input));
+  }
+
+  private insertTaskRunTask(input: {
+    runId: string;
+    taskId: string;
+    position: number;
+    revision: string;
+    input: string;
+    dependencies: readonly string[];
+    effect: string;
+    waitEvent?: string | null;
+    operation?: string;
+    kind?: string;
+    patchFiles?: readonly string[] | null;
+    patchEditable?: readonly string[] | null;
+  }): void {
+    if (!this.taskRunManifestExists(input.runId))
+      throw new Error(`run ${input.runId} is not registered; a task cannot be frozen into it`);
+    const dependencies = JSON.stringify(input.dependencies);
+    const existing = this.db
+      .prepare(
+        "SELECT input, dependencies, position, operation FROM task_run_tasks WHERE run_id = ? AND task_id = ?",
+      )
+      .get(input.runId, input.taskId) as Row | undefined;
+    if (existing) {
+      const same =
+        String(existing.input) === input.input &&
+        String(existing.dependencies) === dependencies &&
+        Number(existing.position) === input.position &&
+        String(existing.operation) === (input.operation ?? "");
+      if (!same)
+        throw new Error(
+          `run ${input.runId} already froze task ${input.taskId} with a different definition`,
+        );
+      return;
+    }
+    this.db
+      .prepare(
+        "INSERT INTO task_run_tasks (run_id, task_id, position, revision, input, dependencies, effect, wait_event, operation, kind, patch_files, patch_editable) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        input.runId,
+        input.taskId,
+        input.position,
+        input.revision,
+        input.input,
+        dependencies,
+        input.effect,
+        input.waitEvent ?? null,
+        input.operation ?? "",
+        input.kind ?? "snapshot",
+        input.patchFiles ? JSON.stringify(input.patchFiles) : null,
+        input.patchEditable ? JSON.stringify(input.patchEditable) : null,
+      );
+  }
+
+  /** Append one run fact, if it is not already there. The fact's own identity (run, kind, task,
+   *  attempt) is the duplicate key, which is what makes a retry after a lost response append once
+   *  instead of twice; `recorded: false` says the fact was already known, and is not a failure. */
+  appendTaskRunFact(
+    input: {
+      runId: string;
+      kind: string;
+      taskId?: string;
+      attempt?: number;
+      entryId?: string | null;
+      payload?: string | null;
+    },
+    port?: TransactionPort,
+  ): { sequence: number; recorded: boolean } {
+    return port
+      ? this.withPort(port, () => this.insertTaskRunFact(input))
+      : this.writeTransaction(() => this.insertTaskRunFact(input));
+  }
+
+  private insertTaskRunFact(input: {
+    runId: string;
+    kind: string;
+    taskId?: string;
+    attempt?: number;
+    entryId?: string | null;
+    payload?: string | null;
+  }): { sequence: number; recorded: boolean } {
+    const taskId = input.taskId ?? "";
+    const attempt = input.attempt ?? 0;
+    const known = this.db
+      .prepare(
+        "SELECT sequence FROM task_run_facts WHERE run_id = ? AND kind = ? AND task_id = ? AND attempt = ?",
+      )
+      .get(input.runId, input.kind, taskId, attempt) as Row | undefined;
+    if (known) return { sequence: Number(known.sequence), recorded: false };
+    if (!this.taskRunManifestExists(input.runId))
+      throw new Error(`run ${input.runId} is not registered; a fact cannot be appended to it`);
+    const next = this.db
+      .prepare("SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM task_run_facts WHERE run_id = ?")
+      .get(input.runId) as Row;
+    const sequence = Number(next.next);
+    this.db
+      .prepare(
+        "INSERT INTO task_run_facts (run_id, sequence, kind, task_id, attempt, entry_id, payload, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        input.runId,
+        sequence,
+        input.kind,
+        taskId,
+        attempt,
+        input.entryId ?? null,
+        input.payload ?? null,
+        new Date().toISOString(),
+      );
+    return { sequence, recorded: true };
+  }
+
+  /** The run's frozen identity, or null when this store holds no such run. A read: it registers
+   *  nothing and appends nothing, which is what lets a query path use it. */
+  taskRunManifest(runId: string): {
+    runId: string;
+    planDigest: string;
+    policy: string;
+    revision: string;
+    retention: string;
+    createdAt: string;
+  } | null {
+    const row = this.db.prepare("SELECT * FROM task_run_manifest WHERE run_id = ?").get(runId) as
+      Row | undefined;
+    if (!row) return null;
+    return {
+      runId: String(row.run_id),
+      planDigest: String(row.plan_digest),
+      policy: String(row.policy),
+      revision: String(row.revision),
+      retention: String(row.retention),
+      createdAt: String(row.created_at),
+    };
+  }
+
+  /** The tasks the run froze, in plan order. */
+  taskRunTasks(runId: string): {
+    taskId: string;
+    position: number;
+    revision: string;
+    input: string;
+    dependencies: string[];
+    effect: string;
+    waitEvent: string | null;
+    operation: string;
+    kind: string;
+    patchFiles: string[] | null;
+    patchEditable: string[] | null;
+  }[] {
+    const rows = this.db
+      .prepare("SELECT * FROM task_run_tasks WHERE run_id = ? ORDER BY position, task_id")
+      .all(runId) as Row[];
+    return rows.map((row) => ({
+      taskId: String(row.task_id),
+      position: Number(row.position),
+      revision: String(row.revision),
+      input: String(row.input),
+      dependencies: JSON.parse(String(row.dependencies)) as string[],
+      effect: String(row.effect),
+      waitEvent: row.wait_event === null ? null : String(row.wait_event),
+      operation: String(row.operation),
+      kind: String(row.kind),
+      patchFiles:
+        row.patch_files === null ? null : (JSON.parse(String(row.patch_files)) as string[]),
+      patchEditable:
+        row.patch_editable === null ? null : (JSON.parse(String(row.patch_editable)) as string[]),
+    }));
+  }
+
+  /** The run's appended facts in sequence order. `through` is how a caller asks for the facts as of
+   *  one point in the log, which is what a replay or a re-derivation needs. */
+  taskRunFacts(
+    runId: string,
+    through?: number,
+  ): {
+    sequence: number;
+    kind: string;
+    taskId: string;
+    attempt: number;
+    entryId: string | null;
+    payload: string | null;
+    recordedAt: string;
+  }[] {
+    const rows = this.db
+      .prepare("SELECT * FROM task_run_facts WHERE run_id = ? AND sequence <= ? ORDER BY sequence")
+      .all(runId, through ?? Number.MAX_SAFE_INTEGER) as Row[];
+    return rows.map((row) => ({
+      sequence: Number(row.sequence),
+      kind: String(row.kind),
+      taskId: String(row.task_id),
+      attempt: Number(row.attempt),
+      entryId: row.entry_id === null ? null : String(row.entry_id),
+      payload: row.payload === null ? null : String(row.payload),
+      recordedAt: String(row.recorded_at),
+    }));
+  }
+
+  /** Which run a board entry is bound to, or null when nothing here manages it. This is the one
+   *  question a caller holding only an entry id can ask: an entry bound by two runs is refused
+   *  rather than answered with one of them. */
+  taskRunForEntry(
+    entryId: string,
+  ): { runId: string; kind: string; taskId: string; attempt: number } | null {
+    const rows = this.db
+      .prepare(
+        "SELECT run_id, kind, task_id, attempt FROM task_run_facts WHERE entry_id = ? ORDER BY sequence",
+      )
+      .all(entryId) as Row[];
+    if (rows.length === 0) return null;
+    const runs = new Set(rows.map((row) => String(row.run_id)));
+    if (runs.size > 1)
+      throw new Error(
+        `entry ${entryId} is bound by ${runs.size} runs; a managed entry belongs to one`,
+      );
+    const first = rows[0]!;
+    return {
+      runId: String(first.run_id),
+      kind: String(first.kind),
+      taskId: String(first.task_id),
+      attempt: Number(first.attempt),
+    };
+  }
+
+  private taskRunManifestExists(runId: string): boolean {
+    return (
+      this.db.prepare("SELECT 1 FROM task_run_manifest WHERE run_id = ?").get(runId) !== undefined
+    );
+  }
   cascadeDerivedMemories(sourceMemoryId: string): void {
     const derivations = this.db
       .prepare("SELECT derived_memory_id FROM memory_derivations WHERE source_memory_id = ?")
@@ -1679,8 +2183,9 @@ export class NmgStoreBase {
          updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    // The store owns the boundary. The cache refresh stays outside it, so a batch whose
+    // transaction did not commit cannot warm the cache either.
+    this.writeTransaction(() => {
       for (const item of embeddings) {
         upsert.run(
           item.nodeId,
@@ -1691,15 +2196,11 @@ export class NmgStoreBase {
           now,
         );
       }
-      this.db.exec("COMMIT");
-      for (const item of embeddings) {
-        this.updateVectorCache("node", model, item.nodeId, item.vector);
-      }
-      return embeddings.length;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
+    });
+    for (const item of embeddings) {
+      this.updateVectorCache("node", model, item.nodeId, item.vector);
     }
+    return embeddings.length;
   }
   storedNodeEmbeddings(model: string, afterNodeId = "", limit = 256): ExternalNodeEmbedding[] {
     const rows = this.db
@@ -1759,8 +2260,8 @@ export class NmgStoreBase {
          updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    // As above: the boundary is the store's, and the cache is warmed only after it commits.
+    this.writeTransaction(() => {
       for (const item of embeddings) {
         upsert.run(
           item.blockId,
@@ -1771,15 +2272,11 @@ export class NmgStoreBase {
           now,
         );
       }
-      this.db.exec("COMMIT");
-      for (const item of embeddings) {
-        this.updateVectorCache("leaf", model, item.blockId, item.vector);
-      }
-      return embeddings.length;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
+    });
+    for (const item of embeddings) {
+      this.updateVectorCache("leaf", model, item.blockId, item.vector);
     }
+    return embeddings.length;
   }
   storedLeafEmbeddings(model: string, afterBlockId = "", limit = 256): ExternalLeafEmbedding[] {
     const rows = this.db
@@ -1837,8 +2334,7 @@ export class NmgStoreBase {
          updated_at = excluded.updated_at`,
     );
     const now = new Date().toISOString();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    this.writeTransaction(() => {
       for (const item of embeddings) {
         upsert.run(
           item.memoryId,
@@ -1849,12 +2345,8 @@ export class NmgStoreBase {
           now,
         );
       }
-      this.db.exec("COMMIT");
-      return embeddings.length;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
+    return embeddings.length;
   }
   storedEmbeddings(model: string, afterMemoryId = "", limit = 256): ExternalEmbedding[] {
     const rows = this.db
@@ -2505,11 +2997,8 @@ export class NmgStoreBase {
            OR (? IS NULL AND m.session_id IS NULL)))
          AND m.status IN ('active', 'disputed', 'superseded')
          AND (? = 1 OR m.status IN ('active', 'disputed'))
-         AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         AND (? = 1 OR (
-           (m.valid_from IS NULL OR m.valid_from <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-           AND (m.valid_until IS NULL OR m.valid_until > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         ))
+         AND ${notExpired("m")}
+         AND (? = 1 OR ${currentlyValid("m")})
        ORDER BY m.tier ASC, m.importance DESC, m.created_at DESC
        LIMIT ?`,
       )
@@ -2597,4 +3086,10 @@ function mapTaskBoardEntry(row: Row): TaskBoardEntry {
  *  and an absent nullable column has no value to invent. */
 function optionalText(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value);
+}
+
+/** The handle options for one open: a read-only factory gets a handle that cannot write, which is a
+ *  different factory rather than a mode of the shared connection. */
+function readOnlyOpenOptions(readOnly: boolean): { readOnly?: true } {
+  return readOnly ? { readOnly: true } : {};
 }

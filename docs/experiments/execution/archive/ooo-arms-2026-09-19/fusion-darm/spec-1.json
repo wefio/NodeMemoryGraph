@@ -1,0 +1,100 @@
+{
+  "baseline": [
+    "evals/ooo-execution/fixtures/report/interface.ts",
+    "evals/ooo-execution/fixtures/report/alpha.ts",
+    "evals/ooo-execution/fixtures/report/beta.ts",
+    "evals/ooo-execution/fixtures/report/gamma.ts",
+    "evals/ooo-execution/fixtures/report/summary.ts",
+    "evals/ooo-execution/fixtures/report/alpha.test.ts",
+    "evals/ooo-execution/fixtures/report/beta.test.ts",
+    "evals/ooo-execution/fixtures/report/gamma.test.ts",
+    "evals/ooo-execution/fixtures/report/summary.test.ts",
+    "evals/ooo-execution/fixtures/report/report.test.ts"
+  ],
+  "plan": [
+    {
+      "id": "alpha",
+      "effect": "isolated-artifact"
+    },
+    {
+      "id": "summary",
+      "effect": "isolated-artifact",
+      "dependencies": [
+        "alpha"
+      ]
+    }
+  ],
+  "units": {
+    "alpha": {
+      "instruction": "Implement alphaSection in this directory so that alpha.test.ts passes. It drops blank rows and sorts the rest, and describes itself with id \"alpha\" and title \"Alpha\". The interface file is frozen: do not change its shape, and do not edit any other file.",
+      "editable": [
+        "evals/ooo-execution/fixtures/report/alpha.ts"
+      ],
+      "canned": {
+        "evals/ooo-execution/fixtures/report/alpha.ts": "evals/ooo-execution/fixtures/report/alpha.canned.ts"
+      },
+      "checks": [
+        {
+          "label": "alpha",
+          "command": "node",
+          "args": [
+            "--experimental-strip-types",
+            "--test",
+            "evals/ooo-execution/fixtures/report/alpha.test.ts"
+          ]
+        }
+      ]
+    },
+    "summary": {
+      "instruction": "Implement summarySection in this directory so that summary.test.ts passes. It lists one line per section, in the order it was given, each as '- ' plus that section's title, and describes itself with id \"summary\" and title \"Summary\". The three sections it is handed are already accepted; the interface file is frozen: do not change its shape, and do not edit any other file.",
+      "editable": [
+        "evals/ooo-execution/fixtures/report/summary.ts"
+      ],
+      "canned": {
+        "evals/ooo-execution/fixtures/report/summary.ts": "evals/ooo-execution/fixtures/report/summary.canned.ts"
+      },
+      "checks": [
+        {
+          "label": "summary",
+          "command": "node",
+          "args": [
+            "--experimental-strip-types",
+            "--test",
+            "evals/ooo-execution/fixtures/report/summary.test.ts"
+          ]
+        }
+      ],
+      "dependencies": [
+        "alpha"
+      ]
+    }
+  },
+  "parentChecks": [
+    {
+      "label": "composed report",
+      "command": "node",
+      "args": [
+        "--experimental-strip-types",
+        "--test",
+        "evals/ooo-execution/fixtures/report/alpha.test.ts",
+        "evals/ooo-execution/fixtures/report/beta.test.ts",
+        "evals/ooo-execution/fixtures/report/gamma.test.ts",
+        "evals/ooo-execution/fixtures/report/summary.test.ts",
+        "evals/ooo-execution/fixtures/report/report.test.ts"
+      ]
+    }
+  ],
+  "worker": {
+    "kind": "pi",
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash"
+  },
+  "fusion": {
+    "unitsPerSession": 1
+  },
+  "limits": {
+    "turns": 6,
+    "reads": 3,
+    "timeoutMs": 180000
+  }
+}

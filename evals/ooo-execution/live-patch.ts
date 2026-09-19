@@ -2,10 +2,11 @@
 // Requires PI_PROVIDER and PI_MODEL. Shared source files are never modified.
 // Host verifies the exact rename and parses it in a disposable candidate directory.
 // This is S0 evidence only: check-event admission and A/B/C integration remain open.
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 import { patchCandidate, preparePatchWork } from "../../src/integration/ooo-patch.ts";
 import { executePiPatch } from "../../.pi/extensions/nmg/ooo-execution.ts";
-import { expectedRename, verifyRenameCandidate } from "../../src/integration/ooo-verifier.ts";
+import { verifyRenameCandidate } from "../../src/integration/check-runner.ts";
+import { expectedRenameOf, RENAME_TARGET, renameSource } from "./rename-probe.ts";
 import { randomUUID } from "node:crypto";
 
 const provider = process.env.PI_PROVIDER;
@@ -14,9 +15,11 @@ if (!process.argv.includes("--live"))
   throw new Error("pass --live explicitly: this calls the configured model");
 if (!provider || !model) throw new Error("Set PI_PROVIDER and PI_MODEL explicitly");
 
-const path = "src/integration/ooo-execution.ts";
-const source = readFileSync(path, "utf8");
-const expected = expectedRename(source);
+// The probe's frozen target, not a live product file: the candidate is the whole file and a
+// dependent task carries it inside a snapshot, where the shared work contract bounds it.
+const path = RENAME_TARGET;
+const source = renameSource();
+const expected = expectedRenameOf(source);
 const startedAt = new Date().toISOString();
 const frozen = preparePatchWork({
   taskId: `s0-patch-probe:${randomUUID()}`,

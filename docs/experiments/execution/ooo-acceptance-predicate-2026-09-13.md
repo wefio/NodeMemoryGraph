@@ -1,9 +1,9 @@
 # One acceptance predicate, adopted by the round
 
 **Related:** [task-unit semantics design](../../design/task-unit-semantics.md) ·
-[proposed decision record](../../decisions/proposed/2026-09-13-task-unit-semantics.md) ·
+[proposed decision record](../../decisions/implemented/2026-09-13-task-unit-semantics.md) ·
 [slice 1: compiler and model](task-semantics-slice1-2026-09-13.md) ·
-[board deliverable/verdict decision](../../decisions/proposed/2026-09-06-board-governance-addressing.md)
+[board deliverable/verdict decision](../../decisions/implemented/2026-09-06-board-governance-addressing.md)
 
 Measured 2026-09-13. Zero model tokens: every number below comes from the deterministic round
 suites and the mutation teeth, with no provider contacted.
