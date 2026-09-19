@@ -43,3 +43,11 @@ therefore reported through the wrong reader: eight of nine attempts in the secon
 conclusion, which this unit's check cannot pass and the board would refuse, and the one attempt that
 submitted a patch failed for a real reason (it wrote `rows: [...]` where the frozen interface requires
 `lines: [...]`). The instrument now reads an artifact by its kind and records which reader was used.
+
+## cap4-darm/ - the cap experiment (2026-09-19)
+
+Tests the offline ceiling's prediction that one session carrying four units saves about 5 700 ms.
+Entry point: `aggregate.json` (per-bound medians and the measured saving); the four runs are
+`bound{1,4}-rep{1,2}.json` and the two specs are `spec-{1,4}.json`, built from
+`evals/ooo-execution/fixtures/pipeline/fine.spec.json` with the canned answers stripped, so the units
+really run. Measured: 5 796 ms saved against the predicted 5 700 ms, with tokens up 1.3-1.9x.

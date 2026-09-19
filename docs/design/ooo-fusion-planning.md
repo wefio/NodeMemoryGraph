@@ -78,9 +78,10 @@ The gap between the two is the honest answer to "how much is fusion worth": the 
 could save at best, and the list-scheduling result is what the current rule actually gets. Reported
 against the measured startup, the difference is milliseconds saved.
 
-Not modelled by the ceiling, and named so it is not mistaken for free: the union tool surface's extra
-turn (measured at about 0.7 k tokens on a chain's first unit), and the tokens a longer chain spends
-resending context.
+Not modelled by the ceiling, and now measured rather than merely named: the union tool surface's extra
+turn (about 0.7 k tokens on a chain's first unit), and the tokens a longer chain spends carrying its
+context - the cap experiment above prices the second at 1.3-1.9x the tokens of one unit per session. The
+ceiling remains a wall-clock ceiling, and its number must be read next to that token cost.
 
 ## What the ceiling says today
 
@@ -100,6 +101,26 @@ plan. Two things the table also says: the floor is 1 for both multi-unit fixture
 fusible in principle; and cap 3 buys nothing over cap 2 on these shapes, because the fourth unit has
 to wait for the first three - the money is in reaching 4 units per session, not in raising the bound
 one notch.
+
+### The cap experiment, measured (2026-09-19)
+
+The ceiling's prediction for a four-unit plan was tested on `fixtures/pipeline/fine.spec.json` - the
+same shape as the report fixture, three independent units and one that joins them - live, `--slots 1`,
+two reps per bound, the `canned` answers stripped so the units really run:
+
+| bound | sessions | wall (reps) | tokens (reps) |
+|---|---|---|---|
+| 1 | 4 | 24 258 / 22 280 ms | 45 158 / 41 673 |
+| 4 | 1 | 19 431 / 15 515 ms | 83 865 / 55 143 |
+
+Both units of the prediction hold in direction, and the wall clock matches in size: medians 23 269 ms
+against 17 473 ms is **5 796 ms saved, where the ceiling predicted 5 700 ms**. Tokens however go **up,
+never down** - 1.3x in the cheaper rep, 1.9x in the dearer one - because a chain's context grows with
+every unit it carries (measured per-unit: 11.4 k, 10.1 k, 14.5 k, 19.1 k in the second rep, monotone).
+
+So the honest reading of a cap is not "5.7 s saved" but "**about 5.8 s saved for 1.3-1.9x the tokens**".
+The ceiling prices wall clock only, and this measurement is what says how far that is from the whole
+bill.
 
 ## Why this shape, and what it is not
 

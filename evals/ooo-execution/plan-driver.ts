@@ -40,7 +40,8 @@ import {
   type PatchSubmission,
 } from "../../src/integration/ooo-patch.ts";
 import type { CandidateCheck } from "../../src/integration/ooo-candidate.ts";
-import { fusionSuccessors, type SessionPlan } from "../../src/integration/ooo-execution.ts";
+import type { SessionPlan } from "../../src/integration/ooo-execution.ts";
+import { nextSessionMove } from "../../src/integration/ooo-fusion-plan.ts";
 
 /** What a worker reports about its own run. The product's run surface records no worker metrics
  *  today, so this shape lives with its only consumer rather than in `src/`. */
@@ -364,13 +365,19 @@ export async function runPlan(spec: PlanDriverSpec): Promise<PlanRun> {
       ...(pendingBranches.length ? { pendingBranches } : {}),
     };
   };
-  /** The next unit that may continue this session: legal by the shared rule, still on offer by the
-   *  board, and inside the declared bound. A bound is what keeps a fused run from swallowing the plan. */
+  /** The next unit that may continue this session, asked of the one owner of the move: legal by the
+   *  shared rule, still on offer by the board, and inside the declared bound. A bound is what keeps a
+   *  fused run from swallowing the plan, and the move is repair-first - it either admits the next
+   *  legal successor or closes the session, which is the irreversible commitment the design describes. */
   const nextInChain = (current: string, session: PlanSession): string | undefined => {
-    const bound = spec.fusion?.unitsPerSession ?? 1;
-    if (session.units.length >= bound) return undefined;
-    const onOffer = gate.candidates();
-    return fusionSuccessors(current, sessionPlan([])).find((id) => onOffer.includes(id));
+    const move = nextSessionMove({
+      plan: sessionPlan([]),
+      current,
+      size: session.units.length,
+      bound: spec.fusion?.unitsPerSession ?? 1,
+      onOffer: gate.candidates(),
+    });
+    return move.kind === "admit" ? move.unit : undefined;
   };
   /** One session: claim and check each unit in turn, and continue only from a unit the host has
    *  accepted. A unit that fails, or a successor that is not legal at the boundary, ends the session
