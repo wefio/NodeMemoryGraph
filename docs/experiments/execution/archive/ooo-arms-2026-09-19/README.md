@@ -121,6 +121,11 @@ same day), which is why the runs here are read as dated measurements rather than
 
 ## granularity-abc/ - the A, B and C cells on the plain path (2026-09-19)
 
+How every cell here is compared - one declared field per pair, the grade a reading gets, and when a
+spread means the sample cannot resolve an effect - has one home: [the measurement
+plan](../../ooo-arm-plan-2026-09-19.md#p6---the-measurement-plan-every-cell-what-it-is-for-and-how-cells-are-compared).
+The computed reading of each cell, pairs included, is stored as [`matrix.json`](matrix.json).
+
 Bought to finish the same-parent comparison the review asked for, after the cap experiment's own cells
 turned out not to be the B cell: all three cap specs declare `fusion` (bounds 1, 2, 4), so every cap cell
 runs the **chain surface** - one session per slot, the loosened artifact schema, the chain prompt - even

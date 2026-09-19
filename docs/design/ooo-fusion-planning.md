@@ -152,11 +152,14 @@ document's earlier readings:
   cell (0.847 in another run of the same cell), and per-cell token spreads - 11 946 in cap 1 - are wider
   than the median gaps they would be compared across. So no token-direction claim is supported by these
   runs: the 1.3-1.9x that an unpaired token median once suggested is not replaced by a better number, it is
-  unresolved. Resolving it needs either many more reps or the prices recorded apart, and the second is
-  cheaper than the first - so the reports now record them: `inputTokens`, `outputTokens`, `cacheRead`,
-  `cacheWrite` and the provider's own `cost`, per unit, with the A, B and C cells the first runs to carry
-  them (their totals decompose exactly, and the provider's price comes with them). The cap cells in the
-  table above predate that and cannot be repriced. The ratio column beside them is **not** a price either:
+  unresolved, and the measurement phase is closed with it that way: resolving it needs either many more
+  reps or the prices recorded apart, and the second is cheaper than the first - so the reports now record
+  them: `inputTokens`, `outputTokens`, `cacheRead`, `cacheWrite` and the provider's own `cost`, per unit,
+  with the A, B and C cells the first runs to carry them (their totals decompose exactly, and the
+  provider's price comes with them). The cap cells in the table above predate that and cannot be repriced,
+  and no further fused run was bought to reprice them: one rep of the shape that failed at three would not
+  settle it. So the cost of fusing stays **unpriced**, and this document says measured where it is measured
+  and unpriced where it is unpriced. The ratio column beside them is **not** a price either:
   `tokens` counts input and output together, so subtracting cache reads leaves the tokens not served from
   cache - uncached input plus every output token - and the reports do not say whether the cache figure nests
   inside the total at all.
