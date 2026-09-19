@@ -4,12 +4,12 @@
 
 ## 分工：nmg 只做确定性的部分
 
-| 层 | 做什么 | 谁 |
-|---|---|---|
-| 候选检测 | 找"可能是旧值的同 scope 记忆" | **nmg 核心**（文本/结构信号） |
-| 语义判断 | 哪个候选真的是被取代的旧值 | **外部 judge**（LLM，由调用方提供） |
-| 应用 | 标记 superseded + 指针 + valid_until | **nmg 核心** |
-| 检索 | 过滤 superseded + 带出后继新值 | **nmg 核心** |
+| 层       | 做什么                               | 谁                                  |
+| -------- | ------------------------------------ | ----------------------------------- |
+| 候选检测 | 找"可能是旧值的同 scope 记忆"        | **nmg 核心**（文本/结构信号）       |
+| 语义判断 | 哪个候选真的是被取代的旧值           | **外部 judge**（LLM，由调用方提供） |
+| 应用     | 标记 superseded + 指针 + valid_until | **nmg 核心**                        |
+| 检索     | 过滤 superseded + 带出后继新值       | **nmg 核心**                        |
 
 nmg 不内置任何 LLM 调用（同嵌入 provider 的原则：nmg 不带模型）。judge 是**调用方注入**的——插件借 agent 的 LLM、评测借评测的 LLM、daemon 自主运行时可配独立端点。
 
@@ -20,14 +20,14 @@ nmg 不内置任何 LLM 调用（同嵌入 provider 的原则：nmg 不带模型
 ```ts
 // remember 返回的候选（文本启发式，非语义）
 interface RememberResult {
-  supersedeCandidates?: DuplicateCandidate[];  // { memoryId, statement, eventTime, similarity }
+  supersedeCandidates?: DuplicateCandidate[]; // { memoryId, statement, eventTime, similarity }
 }
 
 // judge 的返回（外部 LLM 判定）
 interface DuplicateJudgement {
-  merge: boolean;               // 与某候选是重复 → 走合并
-  supersede?: boolean;          // 新语句是新值，取代某旧值
-  supersededMemoryId?: string;  // 被取代的旧值候选 id
+  merge: boolean; // 与某候选是重复 → 走合并
+  supersede?: boolean; // 新语句是新值，取代某旧值
+  supersededMemoryId?: string; // 被取代的旧值候选 id
 }
 
 // remember 的扩展点：调用方注入 judge 回调（同步）

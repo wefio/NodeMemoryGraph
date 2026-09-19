@@ -8,7 +8,7 @@
 
 **External content is perception, not memory.** Search results and file
 contents are the world's state, not the user's history. NMG stores memory
-*about* the user and their experience; external content enters memory only as
+_about_ the user and their experience; external content enters memory only as
 **marked, unverified evidence** — never as first-class memory content, and
 never through a background re-verification pipeline.
 
@@ -19,13 +19,13 @@ re-fetch, no freshness crawler.
 
 ## 2. Why marking, not re-verification
 
-| | Marked + agent re-checks (chosen) | Background re-verification (rejected) |
-| --- | --- | --- |
-| Cost | validation only when memory is used | perpetual re-fetch of mostly-unused memory |
-| Context | agent knows how critical this fact is to the current task | timer knows nothing about task context |
-| Auditability | marker is a deterministic fact written at write time | freshness state depends on scheduler |
-| Boundary | no background channel, no new maintenance component | new always-on subsystem, violates Lite |
-| Failure mode | agent may use stale fact (visible via marker) | agent may use stale fact (invisible — false freshness) |
+|              | Marked + agent re-checks (chosen)                         | Background re-verification (rejected)                  |
+| ------------ | --------------------------------------------------------- | ------------------------------------------------------ |
+| Cost         | validation only when memory is used                       | perpetual re-fetch of mostly-unused memory             |
+| Context      | agent knows how critical this fact is to the current task | timer knows nothing about task context                 |
+| Auditability | marker is a deterministic fact written at write time      | freshness state depends on scheduler                   |
+| Boundary     | no background channel, no new maintenance component       | new always-on subsystem, violates Lite                 |
+| Failure mode | agent may use stale fact (visible via marker)             | agent may use stale fact (invisible — false freshness) |
 
 The last row is the decisive one: a background re-verifier that fails to run
 **lies** (the memory looks fresh when it is not), while a marker can never
@@ -43,17 +43,21 @@ External provenance reuses the existing open `MemoryMarker` mechanism
 work. No new schema, no new memory type.
 
 ```json
-{ "kind": "external_source",
-  "attributes": { "source": "web:https://example.com/page",
-                  "retrievedAt": "2026-07-31",
-                  "hash": "a3f2c9..." } }
+{
+  "kind": "external_source",
+  "attributes": {
+    "source": "web:https://example.com/page",
+    "retrievedAt": "2026-07-31",
+    "hash": "a3f2c9..."
+  }
+}
 ```
 
-| Attribute | File (`file:`) | Web (`web:`) | Notes |
-| --- | --- | --- | --- |
-| `source` | `file:src/core/store.ts` | `web:https://example.com` | path / URL; the `file:`/`web:` prefix separates domains |
-| `retrievedAt` | import / read time | search time | ISO date; lets the agent judge staleness |
-| `hash` | content hash (optional) | page hash (optional) | agent compares on re-check; local files make this a one-line diff |
+| Attribute     | File (`file:`)           | Web (`web:`)              | Notes                                                             |
+| ------------- | ------------------------ | ------------------------- | ----------------------------------------------------------------- |
+| `source`      | `file:src/core/store.ts` | `web:https://example.com` | path / URL; the `file:`/`web:` prefix separates domains           |
+| `retrievedAt` | import / read time       | search time               | ISO date; lets the agent judge staleness                          |
+| `hash`        | content hash (optional)  | page hash (optional)      | agent compares on re-check; local files make this a one-line diff |
 
 `normalizeMarkers` (store.ts:4311) already deduplicates and validates
 attributes. The resident protocol accepts bounded scalar marker attributes;
@@ -62,13 +66,13 @@ exposes the typed `externalSource` write field.
 
 ## 4. Three orthogonal dimensions
 
-| Dimension | Mechanism | Content |
-| --- | --- | --- |
-| Provenance | marker `external_source` | which file/URL + when; static, written at write time |
-| Trust | `truthStatus: "unverified"` | external facts default to unverified; user confirmation upgrades to verified |
-| Rendering | adapter renders `[external]` at model boundary | the agent sees the flag and may re-check |
+| Dimension  | Mechanism                                      | Content                                                                      |
+| ---------- | ---------------------------------------------- | ---------------------------------------------------------------------------- |
+| Provenance | marker `external_source`                       | which file/URL + when; static, written at write time                         |
+| Trust      | `truthStatus: "unverified"`                    | external facts default to unverified; user confirmation upgrades to verified |
+| Rendering  | adapter renders `[external]` at model boundary | the agent sees the flag and may re-check                                     |
 
-`truthStatus` and the marker are independent: a *user-confirmed* fact that
+`truthStatus` and the marker are independent: a _user-confirmed_ fact that
 came from a URL still carries `external_source` provenance (the marker never
 drops), while its trust level rises. Rendering is adapter-side, like the
 existing `[forget]` marker — core stores the marker, adapters decide how to
@@ -107,7 +111,7 @@ markers:     [external_source web:...]
 
 ### 5.2 File content
 
-The same rule: file contents are not memory; *statements about* files are.
+The same rule: file contents are not memory; _statements about_ files are.
 Reading a file is a tool output. Confirmed facts from a file carry
 `external_source file:path` and optional `hash` so the agent can detect
 changes on re-check (local diff, cheaper than web).
@@ -122,13 +126,13 @@ changes on re-check (local diff, cheaper than web).
 
 ## 6. Interaction with existing mechanisms
 
-| Mechanism | Interaction |
-| --- | --- |
-| Retention candidates (store.ts:296) | `external_source` is **not** in the protected kinds (`critical`, `pinned`, `protected`, `safety_constraint`, `user_defined`); external memories are normally retainable. If a kind needs protection later, the existing allowlist already works |
-| `sourceRef` (HistoryRecord) | stays as-is; marker is the structured extension. A future pass may upgrade `sourceRef` to structured refs, but the marker works today |
-| Confidence posterior (design.md §5c) | external facts start from a lower prior; outcome votes update them normally — a web fact that repeatedly helps in verified tasks can earn confidence, without losing its `external_source` provenance |
-| File/Web as node kinds | a `kind: "file"` node is possible later (file = stable alias, merge-friendly, per the project-folder intuition); the marker works without it |
-| Tiered disclosure | external memories follow normal tiers; the marker is orthogonal to tier |
+| Mechanism                            | Interaction                                                                                                                                                                                                                                     |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Retention candidates (store.ts:296)  | `external_source` is **not** in the protected kinds (`critical`, `pinned`, `protected`, `safety_constraint`, `user_defined`); external memories are normally retainable. If a kind needs protection later, the existing allowlist already works |
+| `sourceRef` (HistoryRecord)          | stays as-is; marker is the structured extension. A future pass may upgrade `sourceRef` to structured refs, but the marker works today                                                                                                           |
+| Confidence posterior (design.md §5c) | external facts start from a lower prior; outcome votes update them normally — a web fact that repeatedly helps in verified tasks can earn confidence, without losing its `external_source` provenance                                           |
+| File/Web as node kinds               | a `kind: "file"` node is possible later (file = stable alias, merge-friendly, per the project-folder intuition); the marker works without it                                                                                                    |
+| Tiered disclosure                    | external memories follow normal tiers; the marker is orthogonal to tier                                                                                                                                                                         |
 
 ## 7. Explicit non-goals
 

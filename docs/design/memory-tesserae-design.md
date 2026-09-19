@@ -9,8 +9,8 @@ This document supersedes the file-content-source design
 redesign reached through an extended design discussion (surveyed 2026-09-02).
 
 > **Terminology note.** This design originally called its bookmarks "anchors"
-> and shipped under that name. The implementation was renamed to *tesserae*
-> (singular *tessera*; from the Latin tessera hospitalis — a token broken in two
+> and shipped under that name. The implementation was renamed to _tesserae_
+> (singular _tessera_; from the Latin tessera hospitalis — a token broken in two
 > so that matching the halves proves identity) because "anchor" already named an
 > unrelated retrieval concept in the codebase (`surface anchors`: explicit
 > quoted phrases/paths/IDs indexed for exact-match retrieval). This document
@@ -21,8 +21,8 @@ redesign reached through an extended design discussion (surveyed 2026-09-02).
 ## 1. Problem
 
 The Agent repeatedly "searches around" for things it already knows exist. NMG
-memory stores *long-lived, low-churn* facts — "there is a budget mechanism". But
-memory does not say *where* that mechanism lives in the current file tree, so
+memory stores _long-lived, low-churn_ facts — "there is a budget mechanism". But
+memory does not say _where_ that mechanism lives in the current file tree, so
 every session re-discovers file locations by hand (`grep` / `read` / `glob`).
 
 The previous answer was a **file content index**: passively scan files, index
@@ -45,8 +45,8 @@ file    (content host)           — the actual bytes
 ```
 
 The Agent does **not** need to remember which file, at which line, holds which
-content — that is high-churn, fragile knowledge. It needs to remember *that the
-thing exists* (memory) and have a cheap, objective way to reach *its content*
+content — that is high-churn, fragile knowledge. It needs to remember _that the
+thing exists_ (memory) and have a cheap, objective way to reach _its content_
 (tessera → file). The tessera is the bridge; it is an **external buffer layer**,
 not memory content and not a file-content replica.
 
@@ -62,7 +62,7 @@ replace).
 
 Rationale: maintaining a file index is expensive and its marginal value over
 tesserae + direct tool access is low. The file is the content host; NMG only
-needs *pointers into it*.
+needs _pointers into it_.
 
 The design declared the drop; the **code removal is ticket 8** (the original
 tesserae PR shipped with `file-index.ts` still live — every search still
@@ -73,7 +73,7 @@ tolerance below: tesserae need a file fingerprint, not a file index.
 
 A **tessera** (a bookmark) is a first-class row, not a field glued onto a
 memory. Tesserae live in their own store and are **searched alongside memory** —
-a single query returns memory hits *and* tessera hits.
+a single query returns memory hits _and_ tessera hits.
 
 ```text
 nmg search "budget"
@@ -83,13 +83,13 @@ nmg search "budget"
 
 A tessera row carries:
 
-| field       | meaning                                                        |
-| ----------- | -------------------------------------------------------------- |
-| `path`      | file the tessera points into (project-relative)                |
-| `snippet`   | short content excerpt used for *relocation*, not line          |
-| `label`     | Agent-written one-liner (searchable)                           |
-| `kind`      | e.g. `code`, `doc`, `note` (optional)                          |
-| `memory_id` | optional back-pointer to the memory that raised it             |
+| field       | meaning                                               |
+| ----------- | ----------------------------------------------------- |
+| `path`      | file the tessera points into (project-relative)       |
+| `snippet`   | short content excerpt used for _relocation_, not line |
+| `label`     | Agent-written one-liner (searchable)                  |
+| `kind`      | e.g. `code`, `doc`, `note` (optional)                 |
+| `memory_id` | optional back-pointer to the memory that raised it    |
 
 Tesserae are searchable independently: even with no matching memory (or after a
 memory is superseded), a matching tessera is still found.
@@ -120,7 +120,7 @@ time). Relocation is two-stage:
    ≤ 6 cleanly separates (100% recall / 0.24% false positive), while short
    memory/snippet text has no such signal and is never fingerprinted this way.
 
-The fingerprint finds a *candidate file*; the snippet match confirms the exact
+The fingerprint finds a _candidate file_; the snippet match confirms the exact
 position. The tessera row is never auto-rewritten — the caller decides whether
 to update `path` after confirmation.
 
@@ -141,7 +141,7 @@ markers: [{
 }]
 ```
 
-The marker is a *pointer*; the tessera row is the *content*. This keeps the
+The marker is a _pointer_; the tessera row is the _content_. This keeps the
 schema untouched (no migration) and gives RAII for free: markers follow their
 memory through supersede/delete.
 
@@ -149,7 +149,7 @@ memory through supersede/delete.
 
 - **Write (active):** when the Agent records a memory that refers to a file
   location, it optionally supplies a tessera (`nmg remember … --tessera
-  PATH::SNIPPET`, or a dedicated `nmg tessera` action). Writing memory is
+PATH::SNIPPET`, or a dedicated `nmg tessera` action). Writing memory is
   already an active act; adding a tessera is the same act, one extra field. No
   observer, no auto-extraction.
 - **Recall (active + passive):** active search queries both sources; passive
@@ -210,10 +210,10 @@ target file (§3.3) — a drift detector, not an index.
 
 ## 8. Research basis (surveyed 2026-09-02)
 
-| Reference | What it validates |
-| --- | --- |
-| [haido DESIGN.md](https://github.com/lebac-svg/haido/blob/HEAD/docs/DESIGN.md) | Anchored memory with objective staleness (`hash_at_link`), not TTLs or LLM self-reflection; anchors drift/missing/moved; recall ranks anchors before full text. Closest full implementation to this design. |
-| [gptme `_anchored.py`](https://github.com/gptme/gptme/blob/ae707fc8233e77d4da97fc74f94db1eaff1e381a/gptme/tools/_anchored.py) | Hash-anchored, content-based editing — content anchors survive edits, line numbers do not. |
-| [agentic-bookmarks](https://github.com/super-mega-lab/agentic-bookmarks) | Durable bookmarks with self-healing anchors that survive refactors. |
-| [ai-memory ARCHITECTURE](https://github.com/akitaonrails/ai-memory/blob/v1.8.0/docs/ARCHITECTURE.md) | Markdown wiki as source of truth, SQLite as derived index — validates "pointers, not replicas". |
-| [quote-anchored citations ADR](https://zby.github.io/commonplace/reference/adr/023-quote-anchored-citations-for-code-grounded-reviews/) | Cite by quoted content, not line number, for code-grounded references. |
+| Reference                                                                                                                               | What it validates                                                                                                                                                                                           |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [haido DESIGN.md](https://github.com/lebac-svg/haido/blob/HEAD/docs/DESIGN.md)                                                          | Anchored memory with objective staleness (`hash_at_link`), not TTLs or LLM self-reflection; anchors drift/missing/moved; recall ranks anchors before full text. Closest full implementation to this design. |
+| [gptme `_anchored.py`](https://github.com/gptme/gptme/blob/ae707fc8233e77d4da97fc74f94db1eaff1e381a/gptme/tools/_anchored.py)           | Hash-anchored, content-based editing — content anchors survive edits, line numbers do not.                                                                                                                  |
+| [agentic-bookmarks](https://github.com/super-mega-lab/agentic-bookmarks)                                                                | Durable bookmarks with self-healing anchors that survive refactors.                                                                                                                                         |
+| [ai-memory ARCHITECTURE](https://github.com/akitaonrails/ai-memory/blob/v1.8.0/docs/ARCHITECTURE.md)                                    | Markdown wiki as source of truth, SQLite as derived index — validates "pointers, not replicas".                                                                                                             |
+| [quote-anchored citations ADR](https://zby.github.io/commonplace/reference/adr/023-quote-anchored-citations-for-code-grounded-reviews/) | Cite by quoted content, not line number, for code-grounded references.                                                                                                                                      |

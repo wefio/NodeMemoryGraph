@@ -13,6 +13,7 @@ coverage/
 graph.html
 /output/
 /design/
+/.temp/
 evals/topology/results/
 evals/scale/.tmp/
 evals/hierarchy-scale/.tmp/

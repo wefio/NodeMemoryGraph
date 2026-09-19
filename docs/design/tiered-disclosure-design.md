@@ -34,7 +34,7 @@ Key rules:
 - **A deeper tier is opened only if** the current tier's evidence is
   insufficient (budget not exhausted but coverage weak), AND the deeper tier
   is worth its cost.
-- **Opening is monotone**: once tier *k* is opened, tiers 0..k stay open for
+- **Opening is monotone**: once tier _k_ is opened, tiers 0..k stay open for
   the rest of the query. We never close a tier mid-query.
 - **Deep tiers have a per-query access counter** that feeds the maintenance
   loop: if a deep tier is never opened in N queries, it is a candidate for
@@ -95,15 +95,15 @@ deep-evidence budget rather than independent per-tier quotas.
 
 ### 2.4 Interaction with existing mechanisms
 
-| Mechanism | Interaction |
-| --- | --- |
-| `maxLocalTier` (existing) | becomes the **hard ceiling** of the gate; the gate opens only up to it |
-| `maxTier` option (store.ts:1419) | explicit caller override: `maxTier=0` disables deep tiers entirely |
-| QPP second pass (Fibonacci) | operates **within** the currently opened tiers; never opens a new tier itself. Tier opening and Fibonacci expansion are orthogonal axes |
-| `blockTiers` (hierarchy.ts:28) | unchanged — still produces the tier assignment from access-weighted Huffman depths |
-| rebalance tiers (store.ts:1365) | now also driven by "deep tier opened count" signal (§2.1 third bullet) |
-| Active Graph ledger | records `deepestTier` (already exists) plus new `tiersOpened: number` |
-| retention (L4/L5) | unchanged: deep-tier access counters feed the same candidates |
+| Mechanism                        | Interaction                                                                                                                             |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxLocalTier` (existing)        | becomes the **hard ceiling** of the gate; the gate opens only up to it                                                                  |
+| `maxTier` option (store.ts:1419) | explicit caller override: `maxTier=0` disables deep tiers entirely                                                                      |
+| QPP second pass (Fibonacci)      | operates **within** the currently opened tiers; never opens a new tier itself. Tier opening and Fibonacci expansion are orthogonal axes |
+| `blockTiers` (hierarchy.ts:28)   | unchanged — still produces the tier assignment from access-weighted Huffman depths                                                      |
+| rebalance tiers (store.ts:1365)  | now also driven by "deep tier opened count" signal (§2.1 third bullet)                                                                  |
+| Active Graph ledger              | records `deepestTier` (already exists) plus new `tiersOpened: number`                                                                   |
+| retention (L4/L5)                | unchanged: deep-tier access counters feed the same candidates                                                                           |
 
 ### 2.5 Progressive model exposure (beyond retrieval)
 
@@ -128,7 +128,7 @@ function* openTiers(maxTier: MemoryTier): Generator<MemoryTier> {
 // in searchContext:
 const opened: MemoryTier[] = [];
 for (const tier of openTiers(hardCeiling)) {
-  const result = searchTier(query, tier, {...options, maxTier: tier});
+  const result = searchTier(query, tier, { ...options, maxTier: tier });
   opened.push(tier);
   if (sufficient(result, budget) || exhausted(budget)) break;
 }
@@ -149,7 +149,7 @@ tiersOpened: number;
 deepEvidence: number;
 
 // ActiveGraphBudgetDimension
-"tiersOpened" | "deepEvidence"
+"tiersOpened" | "deepEvidence";
 ```
 
 `deepEvidence` is the consumable dimension governed by `maxTierBudget`;
@@ -196,12 +196,12 @@ baseline (benchmark discipline §"Always run the matched no-memory baseline").
 
 ## 5. Rollout
 
-| Phase | Scope | Evidence gate |
-| --- | --- | --- |
-| 0 | **Implemented:** `maxTierBudget`, `tiersOpened`, `deepEvidence`, and ledger fields | unit tests cover the hard envelope |
-| 1 | **Implemented, opt-in:** `nmg_search --tiered-disclosure` opens L0→L3 with deterministic QPP | targeted shallow-stop/deep-open tests pass; scale/recall benchmark pending |
-| 2 | **Implemented:** Pi automatic recall enables sequential opening | adapter integration tests pass; matched LongMemEval run pending |
-| 3 | **Implemented:** search headers expose only bounded candidates and continuation availability; `nmg_get` remains the exact unlock | agent utility evaluation pending |
+| Phase | Scope                                                                                                                            | Evidence gate                                                              |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| 0     | **Implemented:** `maxTierBudget`, `tiersOpened`, `deepEvidence`, and ledger fields                                               | unit tests cover the hard envelope                                         |
+| 1     | **Implemented, opt-in:** `nmg_search --tiered-disclosure` opens L0→L3 with deterministic QPP                                     | targeted shallow-stop/deep-open tests pass; scale/recall benchmark pending |
+| 2     | **Implemented:** Pi automatic recall enables sequential opening                                                                  | adapter integration tests pass; matched LongMemEval run pending            |
+| 3     | **Implemented:** search headers expose only bounded candidates and continuation availability; `nmg_get` remains the exact unlock | agent utility evaluation pending                                           |
 
 The runtime intentionally does not claim SPRT: QPP scores are not calibrated
 likelihoods yet. It follows §2.2's required fallback and uses the deterministic

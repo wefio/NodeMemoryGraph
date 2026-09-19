@@ -11,6 +11,7 @@
 3. **广播噪音打穿 LLM**：广播/交接直接 wake 每个 agent 的 LLM，身份信息（谁在线/谁能做）也占用 LLM 上下文。
 
 设计原则（延续既有纪律）：
+
 - **系统层身份，LLM 零打扰**：身份注册和心跳不进 LLM 上下文；串行放行采用可审计的 claim/resolve/expiry，不把“已投递”误当作“已接手”。
 - **广播找人 → 定向做事**：先广播发现"谁在线/谁能做"（不 wake 任何 LLM），再 `to=<agent>` 定向唤醒指定 LLM。
 - **命名操作非意外默认**：`to=` 是显式指定，不猜谁该收；串行是机制默认但定向天然豁免。
@@ -21,12 +22,14 @@
 A2A（Agent2Agent，Google 发起、Linux Foundation）用于**跨网络/跨厂商 agent 互操作**。核心三件套：
 
 ### 2.1 Agent Card（agent 自描述名片）
+
 - 托管于 `/.well-known/agent-card.json`，HTTP GET 发现。
 - 必填：`name`（<60 字符）、`description`、`version`（semver）、`url`（A2A JSON-RPC endpoint）。
 - 可选：`capabilities`（对象）、`skills`（数组，每个 skill 有 `id`/`name`/`description`/`tags`、`input`/`output_modes`、`security_requirements`）、`supportedInterfaces`（列表，首项客户端优先）。
 - Agent Registry 收录时 payload <10KB。
 
 ### 2.2 Message / Part（通信回合）
+
 - **Message** = 一次通信回合：`role`（user/agent）、唯一 `messageId`、一个或多个 `Part`。
 - **Part** = 最小内容单元，v1.0 oneof 判别：
   - `Text`：string
@@ -35,28 +38,31 @@ A2A（Agent2Agent，Google 发起、Linux Foundation）用于**跨网络/跨厂�
   - 可选 `metadata` / `filename` / `mediaType`。
 
 ### 2.3 Task（长时任务生命周期）
+
 - 状态机：非终态 `submitted / working / input-required`；终态 `completed / canceled / failed / rejected`。
 - Task 含 `id`、`status`、`messages[]`、`artifacts[]`。
 
 ### 2.4 操作与绑定
+
 - 6 核心操作：Send Message、Send Streaming Message、Get Task、List Tasks、Cancel Task、Get Agent Card。
 - 三层架构：Data Model（Task/Message/AgentCard/Part/Artifact/Extension）、Operations、Protocol Bindings。
 - Bindings：JSON-RPC 2.0（我们 daemon 已是 JSON-RPC 2.0，天然同构）、gRPC、HTTP/REST。
 
 ### 2.5 结论
+
 A2A 解决跨网络互操作，**没有**黑板语义（订阅成员制/live claim/静默 kind/串行/定向/ack）。完整引入 = 每 agent 挂 HTTP server + 重写核心结构，纯开销。**取 A2A 的"名片与发现"设计，保留黑板"协作"语义。**
 
 ## 3. 兼容策略：借名片，不借邮局
 
-| A2A 设计 | 本地兼容版 | 兼容方式 |
-|---|---|---|
-| Agent Card（name/description/version/url/skills/capabilities/supportedInterfaces） | `task_board_agents` 表 | **字段直接对齐**（照搬 Agent Card schema） |
-| discovery（按 Agent Card skills 匹配） | `discover` 找人（按 capabilities 匹配） | 语义一致 |
-| task-status（submitted/working/completed/canceled/failed/rejected） | entry（open/claimed/resolved + ack） | **语义映射**，不强改核心表 |
-| Message/Part（role/messageId/Text/File/Data） | 黑板 entry（content + kind + 附件字段） | 语义映射（kind≈role 意图） |
-| JSON-RPC 2.0 | daemon RpcClient | 天然一致 |
-| HTTP/SSE 传输 + `.well-known` 托管 | 本地 daemon SQLite | **不采用**（本地不需要网络层） |
-| 完整 task/message 结构 | 黑板 entry 保持（kind/claim/receipt 更丰富） | **不替换** |
+| A2A 设计                                                                           | 本地兼容版                                   | 兼容方式                                   |
+| ---------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------ |
+| Agent Card（name/description/version/url/skills/capabilities/supportedInterfaces） | `task_board_agents` 表                       | **字段直接对齐**（照搬 Agent Card schema） |
+| discovery（按 Agent Card skills 匹配）                                             | `discover` 找人（按 capabilities 匹配）      | 语义一致                                   |
+| task-status（submitted/working/completed/canceled/failed/rejected）                | entry（open/claimed/resolved + ack）         | **语义映射**，不强改核心表                 |
+| Message/Part（role/messageId/Text/File/Data）                                      | 黑板 entry（content + kind + 附件字段）      | 语义映射（kind≈role 意图）                 |
+| JSON-RPC 2.0                                                                       | daemon RpcClient                             | 天然一致                                   |
+| HTTP/SSE 传输 + `.well-known` 托管                                                 | 本地 daemon SQLite                           | **不采用**（本地不需要网络层）             |
+| 完整 task/message 结构                                                             | 黑板 entry 保持（kind/claim/receipt 更丰富） | **不替换**                                 |
 
 **未来 A2A 迁移路径**：字段已对齐 → 若接入外部 agent（另一机器/厂商），只需加 HTTP 网关做格式转换，数据模型零改动。
 
@@ -129,13 +135,13 @@ nmg_board put taskId="..." kind="handoff" content="..." to="codex"
 
 ## 6. 数据模型变更
 
-| 变更 | 位置 | 说明 |
-|---|---|---|
-| 新表 `task_board_agents` | `src/core/store/schema.ts`（现 435 task_board_entries / 704 task_board_acks 旁） | Agent Card 本地版 |
-| `task_board_entries` 加列 `to TEXT` | `schema.ts` migration | 定向投递目标 |
-| `task_board_entries` 加列 `serial_state TEXT`（outstanding/pending/stale/null） | `schema.ts` migration | 串行队列状态 |
-| `task_board_acks` 加 `auto INTEGER` | `schema.ts` | 区分系统自动 ack / 显式 ack |
-| daemon RPC：`agent/register`、`agent/heartbeat`、`board/discover` | `src/cli/protocol.ts` + `src/cli/service.ts` | 身份注册 + 找人 |
+| 变更                                                                            | 位置                                                                             | 说明                        |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------- |
+| 新表 `task_board_agents`                                                        | `src/core/store/schema.ts`（现 435 task_board_entries / 704 task_board_acks 旁） | Agent Card 本地版           |
+| `task_board_entries` 加列 `to TEXT`                                             | `schema.ts` migration                                                            | 定向投递目标                |
+| `task_board_entries` 加列 `serial_state TEXT`（outstanding/pending/stale/null） | `schema.ts` migration                                                            | 串行队列状态                |
+| `task_board_acks` 加 `auto INTEGER`                                             | `schema.ts`                                                                      | 区分系统自动 ack / 显式 ack |
+| daemon RPC：`agent/register`、`agent/heartbeat`、`board/discover`               | `src/cli/protocol.ts` + `src/cli/service.ts`                                     | 身份注册 + 找人             |
 
 ## 7. 实现计划（分步）
 

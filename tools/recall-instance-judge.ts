@@ -11,6 +11,7 @@ import {
   summarizeLabels,
   type RecallInstance,
   type RecallLabel,
+  type RecallLabelEntry,
 } from "../src/lab/recall-instance.ts";
 
 /**
@@ -90,6 +91,42 @@ export async function chatClassifier(
   };
 }
 
+/** Reading view for the agent-as-judge: one block per instance with the
+ *  trigger, candidates, and the label already on record (if any). */
+export function formatInstanceList(
+  instances: RecallInstance[],
+  labels: RecallLabelEntry[],
+): string {
+  const byGraph = new Map(labels.map((entry) => [entry.activeGraphId, entry.label]));
+  return instances
+    .map((instance, index) => {
+      const candidates = instance.candidates
+        .map(
+          (candidate, position) =>
+            `      [${position + 1}] ${candidate.statement.replace(/\s+/gu, " ").slice(0, 160)}`,
+        )
+        .join("\n");
+      return [
+        `#${index + 1} graph=${instance.activeGraphId} label=${byGraph.get(instance.activeGraphId) ?? "-"} kind=${instance.kind}`,
+        `   trigger=${JSON.stringify(instance.trigger)}`,
+        candidates,
+      ].join("\n");
+    })
+    .join("\n");
+}
+
+/** Record one agent judgement. Invalid labels are rejected, never guessed. */
+export function recordLabel(directory: string, graphId: string, label: string): boolean {
+  if (!(RECALL_LABELS as readonly string[]).includes(label)) return false;
+  appendRecallLabel(directory, {
+    activeGraphId: graphId,
+    label: label as RecallLabel,
+    source: "judge",
+    at: new Date().toISOString(),
+  });
+  return true;
+}
+
 function aggregate(instances: RecallInstance[]): string {
   const summary = summarizeLabels(instances);
   const lines = [
@@ -105,6 +142,8 @@ interface JudgeCliOptions {
   dir?: string;
   limit?: number;
   json?: boolean;
+  list?: boolean;
+  set?: string[];
 }
 
 function parseArgs(argv: string[]): JudgeCliOptions {
@@ -114,6 +153,8 @@ function parseArgs(argv: string[]): JudgeCliOptions {
     if (argument === "--dir") options.dir = argv[++index];
     else if (argument === "--limit") options.limit = Number(argv[++index]);
     else if (argument === "--json") options.json = true;
+    else if (argument === "--list") options.list = true;
+    else if (argument === "--set") (options.set ??= []).push(argv[++index] ?? "");
   }
   return options;
 }
@@ -147,13 +188,50 @@ async function labelBatch(
   return newlyLabeled;
 }
 
+function applyExplicitLabels(directory: string, specs: string[]): number {
+  const known = new Set(
+    readRecallInstances(recallInstancesPath(directory)).map(
+      (instance) => instance.activeGraphId,
+    ),
+  );
+  let written = 0;
+  for (const spec of specs) {
+    const split = spec.indexOf("=");
+    const graphId = split > 0 ? spec.slice(0, split) : "";
+    const label = split > 0 ? spec.slice(split + 1) : "";
+    if (!graphId || !known.has(graphId)) {
+      process.stderr.write(`skip ${spec}: unknown instance\n`);
+      continue;
+    }
+    if (!recordLabel(directory, graphId, label)) {
+      process.stderr.write(`skip ${spec}: invalid label\n`);
+      continue;
+    }
+    written += 1;
+  }
+  return written;
+}
+
 async function main(argv: string[]): Promise<number> {
   const options = parseArgs(argv);
   if (!options.dir) {
-    process.stderr.write("usage: recall-instance-judge --dir <dataDir> [--limit N] [--json]\n");
+    process.stderr.write(
+      "usage: recall-instance-judge --dir <dataDir> [--list] [--set <graphId>=<label>]... [--limit N] [--json]\n",
+    );
     return 2;
   }
   const directory = resolve(options.dir);
+  if (options.set?.length) {
+    const written = applyExplicitLabels(directory, options.set);
+    process.stdout.write(`labeled=${written}\n`);
+    if (!options.list) return 0;
+  }
+  if (options.list) {
+    const all = readRecallInstances(recallInstancesPath(directory));
+    const labels = readRecallLabels(recallLabelsPath(directory));
+    process.stdout.write(`${formatInstanceList(all, labels)}\n`);
+    return 0;
+  }
   const all = readRecallInstances(recallInstancesPath(directory));
   const existing = readRecallLabels(recallLabelsPath(directory));
   const instances = options.limit ? all.slice(0, options.limit) : all;

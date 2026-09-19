@@ -110,15 +110,15 @@ never gate convergence, because nothing external ever validated them.
 
 ### 2.2 Three regimes, decided by a ratio, not by step count
 
-Let *calibration rate* be the frequency of external verification and *drift
-rate* the accumulation of uncalibrated self-generated movement. The ratio of
+Let _calibration rate_ be the frequency of external verification and _drift
+rate_ the accumulation of uncalibrated self-generated movement. The ratio of
 the two decides the regime:
 
-| Regime | Condition | More steps | Converges to |
-| --- | --- | --- | --- |
-| Converging | calibration/drift above a critical ratio | helps | near the external target |
-| Critical | ratio near the threshold | oscillates | indeterminate |
-| Diverging / ossifying | calibration sparse, drift dominates | **hurts** | the model's own fixed point |
+| Regime                | Condition                                | More steps | Converges to                |
+| --------------------- | ---------------------------------------- | ---------- | --------------------------- |
+| Converging            | calibration/drift above a critical ratio | helps      | near the external target    |
+| Critical              | ratio near the threshold                 | oscillates | indeterminate               |
+| Diverging / ossifying | calibration sparse, drift dominates      | **hurts**  | the model's own fixed point |
 
 Steps are a double-edged sword in any stateful process: each additional step
 adds one correction opportunity **and** one drift opportunity. Only in the
@@ -177,8 +177,8 @@ failed. I_t is the available information pool, f_t the current focus, e_t the
 current event. (The name borrows the RPG sense — an adventurer accepts a
 bounded commission, advances it, and completes it — because that usage is
 stable across the model's corpus: "quest" names a bounded, judgeable unit of
-commissioned work, not a promise or a mood. The Latin root is *quaesta* ←
-*quaerere*, "to seek", the same lineage as *tessera*'s token vocabulary.)
+commissioned work, not a promise or a mood. The Latin root is _quaesta_ ←
+_quaerere_, "to seek", the same lineage as _tessera_'s token vocabulary.)
 
 ### 3.2 Completion is the local supervision signal
 
@@ -231,11 +231,11 @@ already gated to prune rather than rank, per the biased-gradient rule of §2.1.
 τ_t is not prompt-local scratchpad text. The objects that carry it already
 exist, and their lifecycle events are the completion signal:
 
-| Quest | Object | Completed / failed by |
-| --- | --- | --- |
-| "this task must be done" | board entry (ticket, goal kind) | resolve / expiry |
-| "this evidence lives here" | bookmark (tessera) | relocation success / stale |
-| "this content should hold" | document (design doc, contract) | commit / reconcile pass |
+| Quest                      | Object                          | Completed / failed by      |
+| -------------------------- | ------------------------------- | -------------------------- |
+| "this task must be done"   | board entry (ticket, goal kind) | resolve / expiry           |
+| "this evidence lives here" | bookmark (tessera)              | relocation success / stale |
+| "this content should hold" | document (design doc, contract) | commit / reconcile pass    |
 
 Completion read from an object lifecycle is an external fact, not model
 self-assessment. Where no object exists and the agent merely declares "done",
@@ -282,12 +282,12 @@ approximation. The correct theoretical frame is the **bias/variance structure
 of gradient estimates**: SGD convergence only requires `E[ĝ] = ∇L`, so the
 admission test for a signal source is unbiasedness, not purity.
 
-| Gradient source | Mechanism | Bias | In ∇L? |
-| --- | --- | --- | --- |
-| Bookmark SimHash distance | SimHash computes; no agent involvement | unbiased, continuous | yes — dense |
-| Document git commit | git fact | unbiased | yes — sparse |
-| RCP reconcile | independent observation | unbiased | yes — rarest, most expensive |
-| Board resolve | the agent's own action | **biased** — the agent has an incentive to report completion; systematic optimism, not random noise | no, unless debiased |
+| Gradient source           | Mechanism                              | Bias                                                                                                | In ∇L?                       |
+| ------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------- |
+| Bookmark SimHash distance | SimHash computes; no agent involvement | unbiased, continuous                                                                                | yes — dense                  |
+| Document git commit       | git fact                               | unbiased                                                                                            | yes — sparse                 |
+| RCP reconcile             | independent observation                | unbiased                                                                                            | yes — rarest, most expensive |
+| Board resolve             | the agent's own action                 | **biased** — the agent has an incentive to report completion; systematic optimism, not random noise | no, unless debiased          |
 
 A biased source is not handled by down-weighting (stratification); it is
 handled one of two ways:
@@ -415,9 +415,9 @@ feedback. A cost penalty never authorizes exceeding a hard limit.
 
 #### Architecture and parameter budget
 
-| Candidate | Mapping (biases included) | Trainable parameters |
-| --- | --- | ---: |
-| Initial baseline | `Q(x) = Wx + b`, `32 → 4` | `4×32 + 4 = 132` |
+| Candidate                     | Mapping (biases included)                          |          Trainable parameters |
+| ----------------------------- | -------------------------------------------------- | ----------------------------: |
+| Initial baseline              | `Q(x) = Wx + b`, `32 → 4`                          |              `4×32 + 4 = 132` |
 | Optional nonlinear comparison | `Q(x) = W2 sigmoid(W1 x + b1) + b2`, `32 → 16 → 4` | `16×32 + 16 + 4×16 + 4 = 596` |
 
 These are starting configurations, not empirically optimal sizes. Outputs are
@@ -490,16 +490,16 @@ part of this documentation candidate.
 Each claim below has direct empirical or theoretical backing; the survey was
 run 2026-09-03 and is a cross-check, not a requirements source.
 
-| Claim | Work |
-| --- | --- |
-| Introspection without external feedback does not improve (and can hurt) reasoning | [Huang et al., *Large Language Models Cannot Self-Correct Reasoning Yet*, ICLR 2024](https://mlanthology.org/iclr/2024/huang2024iclr-large/) |
-| Purely self-generated loops do not converge | [*The Mirror Loop: Recursive Non-Convergence in Generative Reasoning Systems*](https://browse-export.arxiv.org/pdf/2510.21861) |
-| Dense per-step feedback beats sparse final feedback | [Setlur et al., *Rewarding Progress: Scaling Automated Process Verifiers*, ICLR 2025](https://mlanthology.org/iclr/2025/setlur2025iclr-rewarding/); process-reward-model line (OpenAI *Let's Verify Step by Step*) |
-| Reliability comes from verification loops, not single-step ability | [*Where Does Agent Reliability Come From? A Cross-Benchmark Decomposition of Verification Loops, Specialist Models, and Scaffolding*](https://huggingface.co/papers/2607.17044) |
-| Long trajectories are constrained by a self-conditioning effect | [Sinha et al. (2605.02572)](https://huggingface.co/buckets/huggingchat/papers-content/tree/2605/2605.02572.md) |
-| Step count is non-monotonic over long horizons | [*The Illusion of Diminishing Returns: Measuring Long Horizon Execution in LLMs*, NeurIPS 2025](https://neurips.cc/virtual/2025/loc/san-diego/127973) |
-| External feedback rescues; internal-only reflection underperforms multi-perspective contrast | [Reflexion (2303.11366)](https://arxiv.org/abs/2303.11366); [SWE-agent](https://arxiv.org/abs/2405.15793); [Self-Contrast, ACL 2024](https://aclanthology.cn/2024.acl-long.197/) |
-| Unverified segments are the structural failure source of long tasks | [*The Horizon Gap* (2608.06663)](https://arxiv.org/abs/2608.06663) |
+| Claim                                                                                        | Work                                                                                                                                                                                                               |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Introspection without external feedback does not improve (and can hurt) reasoning            | [Huang et al., _Large Language Models Cannot Self-Correct Reasoning Yet_, ICLR 2024](https://mlanthology.org/iclr/2024/huang2024iclr-large/)                                                                       |
+| Purely self-generated loops do not converge                                                  | [_The Mirror Loop: Recursive Non-Convergence in Generative Reasoning Systems_](https://browse-export.arxiv.org/pdf/2510.21861)                                                                                     |
+| Dense per-step feedback beats sparse final feedback                                          | [Setlur et al., _Rewarding Progress: Scaling Automated Process Verifiers_, ICLR 2025](https://mlanthology.org/iclr/2025/setlur2025iclr-rewarding/); process-reward-model line (OpenAI _Let's Verify Step by Step_) |
+| Reliability comes from verification loops, not single-step ability                           | [_Where Does Agent Reliability Come From? A Cross-Benchmark Decomposition of Verification Loops, Specialist Models, and Scaffolding_](https://huggingface.co/papers/2607.17044)                                    |
+| Long trajectories are constrained by a self-conditioning effect                              | [Sinha et al. (2605.02572)](https://huggingface.co/buckets/huggingchat/papers-content/tree/2605/2605.02572.md)                                                                                                     |
+| Step count is non-monotonic over long horizons                                               | [_The Illusion of Diminishing Returns: Measuring Long Horizon Execution in LLMs_, NeurIPS 2025](https://neurips.cc/virtual/2025/loc/san-diego/127973)                                                              |
+| External feedback rescues; internal-only reflection underperforms multi-perspective contrast | [Reflexion (2303.11366)](https://arxiv.org/abs/2303.11366); [SWE-agent](https://arxiv.org/abs/2405.15793); [Self-Contrast, ACL 2024](https://aclanthology.cn/2024.acl-long.197/)                                   |
+| Unverified segments are the structural failure source of long tasks                          | [_The Horizon Gap_ (2608.06663)](https://arxiv.org/abs/2608.06663)                                                                                                                                                 |
 
 **Open gap:** no single authoritative work unifies these into a testable law of
 the form "a critical calibration/drift ratio separates converging from
@@ -602,11 +602,11 @@ existing capabilities plus one wire:
 
 Metric choice follows the shape of the ingested target:
 
-| Target shape | Drift metric | Cost/frequency |
-| --- | --- | --- |
-| Form ("final content should approximate this shape") | SimHash distance | O(n), local, high-frequency |
-| Sub-fragment ("should contain / relocate this fragment") | snippet location / diff | medium |
-| Behavior ("should pass tests / lint / contract") | execution verifier (RCP checks) | expensive, sparse, final |
+| Target shape                                             | Drift metric                    | Cost/frequency              |
+| -------------------------------------------------------- | ------------------------------- | --------------------------- |
+| Form ("final content should approximate this shape")     | SimHash distance                | O(n), local, high-frequency |
+| Sub-fragment ("should contain / relocate this fragment") | snippet location / diff         | medium                      |
+| Behavior ("should pass tests / lint / contract")         | execution verifier (RCP checks) | expensive, sparse, final    |
 
 A SimHash-style metric needs the target and current content comparable at
 document scale (measured: no signal below document scale), and gives magnitude
@@ -726,21 +726,21 @@ not evidence of either whole-task failure or permission to widen scope.
 is `(0,1)`; observed zero is `(0,0)`. Ratios are in `[0,1]`, previous verified
 reward in `[-1,1]`. The three counts saturate at 32 and divide by 32.
 
-| Index | Feature | Encoding |
-| --- | --- | --- |
-| 0 | contextOccupancy | used / hard context capacity |
-| 1 | remainingTokenRatio | remaining / initial token budget |
-| 2 | remainingToolRatio | remaining / initial tool-call budget |
-| 3 | topCandidateScore | bounded score under a versioned retrieval procedure |
-| 4 | candidateScoreGap | first minus second bounded score |
-| 5 | candidateCount | count / 32, saturated |
-| 6 | candidateRedundancy | duplicate fraction under fixed identity rules |
-| 7 | candidateFreshness | fraction whose source version remains current |
-| 8 | stepsSinceVerification | count / 32, saturated |
-| 9 | consecutiveFailures | count / 32, saturated |
-| 10 | returnedFromInterruption | observed 0 or 1 |
-| 11–14 | previousNone/Cue/Resurface/Retrieve | previous executed action one-hot |
-| 15 | previousReward | earlier independently verified window only |
+| Index | Feature                             | Encoding                                            |
+| ----- | ----------------------------------- | --------------------------------------------------- |
+| 0     | contextOccupancy                    | used / hard context capacity                        |
+| 1     | remainingTokenRatio                 | remaining / initial token budget                    |
+| 2     | remainingToolRatio                  | remaining / initial tool-call budget                |
+| 3     | topCandidateScore                   | bounded score under a versioned retrieval procedure |
+| 4     | candidateScoreGap                   | first minus second bounded score                    |
+| 5     | candidateCount                      | count / 32, saturated                               |
+| 6     | candidateRedundancy                 | duplicate fraction under fixed identity rules       |
+| 7     | candidateFreshness                  | fraction whose source version remains current       |
+| 8     | stepsSinceVerification              | count / 32, saturated                               |
+| 9     | consecutiveFailures                 | count / 32, saturated                               |
+| 10    | returnedFromInterruption            | observed 0 or 1                                     |
+| 11–14 | previousNone/Cue/Resurface/Retrieve | previous executed action one-hot                    |
+| 15    | previousReward                      | earlier independently verified window only          |
 
 Unavailable measurements stay missing, never guessed by an LLM. Empty or zero
 initial budgets yield missing ratios plus hard action denial, not division by
@@ -832,15 +832,15 @@ policy globally.
 
 ### 9.6 Remaining integration acceptance
 
-| Integration | Required acceptance before calling it complete |
-| --- | --- |
-| Lifecycle producers | source IDs, replay dedup, task/frame isolation and failure receipts reach AG without becoming rewards |
-| Bookmarked fragments | exact source/version checks, external text treated as data, total AG budget enforced, stale/missing source remains explicit |
-| Long-lived quests | existing governed memory stores externally approved target/version/evidence; resume revalidates it, not trusts board resolve |
-| Model exposure | captured projection matches actual injected context; cancelled/non-exposed actions cannot become executed-model samples |
-| Production journal | local duplicate/replay protection exists; cross-journal recovery, task serialization and late-reopen invalidation of dependent deployed artifacts remain required |
-| Outcome admission | independent source adapters verify score, identity, window and costs; unverified self-report remains excluded |
-| Efficacy | matched held-out main-model tasks beat or meet predeclared fallback quality/cost gates; component tests do not substitute |
+| Integration          | Required acceptance before calling it complete                                                                                                                    |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Lifecycle producers  | source IDs, replay dedup, task/frame isolation and failure receipts reach AG without becoming rewards                                                             |
+| Bookmarked fragments | exact source/version checks, external text treated as data, total AG budget enforced, stale/missing source remains explicit                                       |
+| Long-lived quests    | existing governed memory stores externally approved target/version/evidence; resume revalidates it, not trusts board resolve                                      |
+| Model exposure       | captured projection matches actual injected context; cancelled/non-exposed actions cannot become executed-model samples                                           |
+| Production journal   | local duplicate/replay protection exists; cross-journal recovery, task serialization and late-reopen invalidation of dependent deployed artifacts remain required |
+| Outcome admission    | independent source adapters verify score, identity, window and costs; unverified self-report remains excluded                                                     |
+| Efficacy             | matched held-out main-model tasks beat or meet predeclared fallback quality/cost gates; component tests do not substitute                                         |
 
 These gates distinguish a specified design from an implemented system and an
 implemented system from an empirically useful default. No overall completion

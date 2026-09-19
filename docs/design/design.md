@@ -699,18 +699,18 @@ Relation type alone does not grant write authority. The establishment policy is
 defined by whether the edge is mechanically entailed by the transaction that
 creates it:
 
-| Relation family | Immediate source | Otherwise |
-| --- | --- | --- |
-| provenance (`derived_from`) | Core derivation transaction with exact source memory IDs | Reject; a model assertion is not provenance |
-| lifecycle (`supersedes`) | Validated same-domain state transition with an acyclic predecessor chain | Keep both states and request explicit resolution |
-| transform structure (`is_a`, redirects) | Reviewed merge/split transaction and rollback journal | Store a topology proposal, not a consolidated edge |
-| explicit domain attachment (`applies_to`, `part_of`) | Harness/tool supplies stable IDs and attributable evidence for both endpoints | Proposal or STG observation |
-| regulatory (`contradicts`, `exception_to`, `distinct_from`) | Explicit attributable judgement after scope/time compatibility checks | Proposal; never infer from retrieval co-occurrence alone |
-| identity/refinement (`same_as`, `refines`) | Reviewed topology proposal; `same_as` still requires the separate reversible merge actuator to canonicalize identity | Keep nodes separate |
-| causal/dependency/support (`causes`, `depends_on`, `supports`) | Explicit attributable evidence or reviewed proposal | STG observation until independently supported |
-| associative (`related_to`) | Stability consolidation from independent verified outcomes, or an explicit administrative relation | Co-retrieval remains an observation only |
+| Relation family                                                | Immediate source                                                                                                     | Otherwise                                                |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| provenance (`derived_from`)                                    | Core derivation transaction with exact source memory IDs                                                             | Reject; a model assertion is not provenance              |
+| lifecycle (`supersedes`)                                       | Validated same-domain state transition with an acyclic predecessor chain                                             | Keep both states and request explicit resolution         |
+| transform structure (`is_a`, redirects)                        | Reviewed merge/split transaction and rollback journal                                                                | Store a topology proposal, not a consolidated edge       |
+| explicit domain attachment (`applies_to`, `part_of`)           | Harness/tool supplies stable IDs and attributable evidence for both endpoints                                        | Proposal or STG observation                              |
+| regulatory (`contradicts`, `exception_to`, `distinct_from`)    | Explicit attributable judgement after scope/time compatibility checks                                                | Proposal; never infer from retrieval co-occurrence alone |
+| identity/refinement (`same_as`, `refines`)                     | Reviewed topology proposal; `same_as` still requires the separate reversible merge actuator to canonicalize identity | Keep nodes separate                                      |
+| causal/dependency/support (`causes`, `depends_on`, `supports`) | Explicit attributable evidence or reviewed proposal                                                                  | STG observation until independently supported            |
+| associative (`related_to`)                                     | Stability consolidation from independent verified outcomes, or an explicit administrative relation                   | Co-retrieval remains an observation only                 |
 
-“Immediate” therefore means *entailed by a governed operation*, not “a model
+“Immediate” therefore means _entailed by a governed operation_, not “a model
 chose a relation label with high confidence.” Core methods may materialize such
 edges inside the same transaction; model-facing `remember(action="relate")`
 creates a pending proposal. Administrative `linkNodes` remains an explicit trust
@@ -1524,8 +1524,8 @@ silently acquiring user authority before Core admission and consolidation.
 `remember` is the deliberate LLM intervention point between semantic judgment
 and deterministic storage. The two sides have different responsibilities:
 
-| LLM / Agent                                                                                                                                                                                                   | NMG core                                                                                                                                                                  |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| LLM / Agent                                                                                                                                                                                                                                                                                           | NMG core                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Extract a self-contained statement; assign type, actor, time, scope, and importance; optionally provide a few short phrases by which the same fact is likely to be recalled; decide whether a returned candidate is the same meaning, a genuinely replaced old value, a related concept, or distinct. | Enforce admission policy, stable IDs, exact deduplication, scope/state invariants, provenance, transactions, trigger limits, index deltas, version history, and reversible graph changes. |
 
 `recallTriggers` are optional retrieval metadata on the same governed write, not
@@ -1800,7 +1800,7 @@ from both storage tiers and the STG/LTG lifecycle:
    prompt as a history query.
 3. **Agent-directed recall layer:** compact headers/cues that let the model call
    `nmg_search`, inspect costs, and expand the AG with exact details through
-    `nmg_get`.
+   `nmg_get`.
 
 Automatic recall and Agent-directed recall share the same indexed records.
 Explicit recall triggers may improve candidate nomination in either layer, but
@@ -1972,12 +1972,15 @@ product choice rather than an automatic calibration promotion.
 
 All ordinary clients resolve the shadow log and database through one data-path
 contract: explicit `NMG_DATA_DIR` wins, otherwise the user-level `~/.nmg` store
-is used. Controlled/headless evaluations pass a project-local `.nmg` fallback or
-set `NMG_DATA_DIR` explicitly. The Pi extension, daemon client, CLI service,
-shadow exporter, and non-Pi adapter share this resolver. **Implemented and
-covered by path-contract tests.** This distinction prevents ordinary long-term
-memory from fragmenting by working directory while keeping benchmark state
-isolated.
+is used. An explicit database path (`--db`) also pins the data directory to that
+database's directory, so a test or evaluation daemon given only a temporary
+`--db` never writes its recall corpus, router state, or shadow log into the
+shared `~/.nmg`. Controlled/headless evaluations pass a project-local `.nmg`
+fallback or set `NMG_DATA_DIR` explicitly. The Pi extension, daemon client, CLI
+service, shadow exporter, and non-Pi adapter share this resolver. **Implemented
+and covered by path-contract tests.** This distinction prevents ordinary
+long-term memory from fragmenting by working directory while keeping benchmark
+state isolated.
 
 Because answer-quality labels only become observable after an Agent turn, the
 Pi bridge keeps completed retrievals whose evidence was actually disclosed and
@@ -2216,13 +2219,13 @@ from the traversal path.
 
 ### Relationship to HierarchicalActivation
 
-|                 | HA                        | MGR                            |
-| --------------- | ------------------------- | ------------------------------ |
-| Node role       | passive data, scored      | active operator, transforms    |
-| Scoring         | 7-way similarity blend    | single gate + local relevance  |
+|                 | HA                        | MGR                                           |
+| --------------- | ------------------------- | --------------------------------------------- |
+| Node role       | passive data, scored      | active operator, transforms                   |
+| Scoring         | 7-way similarity blend    | single gate + local relevance                 |
 | Graph structure | fixed candidate hierarchy | global seed, then optional directed neighbors |
-| Parameters      | 9 global                  | 2/node + 1 global              |
-| Best for        | batch ranking over pool   | multi-step path reasoning      |
+| Parameters      | 9 global                  | 2/node + 1 global                             |
+| Best for        | batch ranking over pool   | multi-step path reasoning                     |
 
 They remain separately gated engines but share the proposed session AG runtime:
 HA selects and maintains the active working set; MGR optionally transforms a

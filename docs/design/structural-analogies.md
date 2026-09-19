@@ -6,6 +6,7 @@
 不是"用数学推导出设计"，而是"做出来的东西恰好和某种已知结构长得一模一样"。
 
 每个条目标注**相似深度**：
+
 - **同构**：可以逐元素对应，改个名字就是一个东西
 - **强相似**：整体结构和关键性质对应，但细节有差异
 - **弱相似**：共享抽象模式但具体机制不同
@@ -29,12 +30,14 @@ acknowledgeIndexDelta → 清理     …
 ```
 
 **相似点**：
+
 - 写入先到快速层（Delta / MemTable），立即可查
 - 累积到阈值后，触发本地重写（单 node block rebuild / compaction）
 - 旧数据在新数据写完后才清理
 - 读写路径不阻塞（除事务锁外）
 
 **差异**：
+
 - LSM 的 compaction 按 key range 合并多个 SSTable，NMG 按 node 重建 block
 - LSM 有多层（L0 → L1 → …），NMG 只有 Delta → Block 一层
 - NMG 没有 Bloom filter 加速点查
@@ -64,16 +67,19 @@ node_redirects: C → E           —
 ```
 
 **相似点**：
+
 - 旧节点不会消失，redirect 链保留
 - `upsertNode` 追踪 redirect 链直到 active 节点
 - 检测到多个 redirect 目标时拒绝（split 后歧义）
 
 **差异**：
+
 - Union-Find 有路径压缩（摊还 O(α(N))），NMG 不压缩 redirect 链
 - NMG 支持 split（一对多），Union-Find 只有 merge（多对一）
 - NMG 保留每条 redirect 的历史 transform ID，Union-Find 不保留
 
 **与垃圾回收的相似**：
+
 - `node_redirects` 等价于 Cheney 复制回收中的 forwarding pointer
 - 旧节点 (`status = 'merged'/'split'`) 等价于 from-space 中的已复制对象
 
@@ -99,11 +105,13 @@ rebuild 时：旧 ID = 新 ID →       rebuild 时：相同 hash → 命中缓�
 ```
 
 **相似点**：
+
 - 恒等式：相同内容 → 相同 ID（幂等性）
 - 增量更新：只重算变化了的 block 的 embedding
 - 旧 block 显式删除，新 block 显式写入
 
 **差异**：
+
 - Git 的 object graph 是 DAG，NMG 的 block 集合是扁平的（per-node list）
 - Git 用 content hash 做 dedup 和 delta compression，NMG 只用它做缓存键
 - NMG 没有 Merkle 树：node → block → memory 的哈希链不存在，block ID 仅依赖内容
@@ -131,16 +139,19 @@ validFrom / validUntil → 时间窗口 事务 ID 范围 → 可见性判断
 ```
 
 **相似点**：
+
 - 旧值不删除，标记为不可见
 - 新旧之间有显式链接（supersedesId / version chain）
 - 时间维度（validFrom/validUntil）建模
 
 **差异**：
+
 - MVCC 的可见性由事务 ID 决定（并发控制），NMG 用 status = 'active'
 - MVCC 有 vacuum（清理死元组），NMG 没有等效机制
 - NMG 的 supersedesId 链是单向链表，MVCC 的 version chain 也是
 
 **与 Event Sourcing 的相似**：
+
 - HistoryRecord（不可变事件流）→ MemoryRecord（投影/状态）
 - 新事件 → 新投影覆盖旧投影，事件本身保留
 - 这就是标准的 CQRS/Event Sourcing 模式
@@ -172,16 +183,19 @@ confidence(A→B) = useful_count(A,B) / query_count(A)
 ```
 
 **相似点**：
+
 - 计数逻辑与 Apriori 算法的第一步完全一致
 - `node_pair_signals` 就是关联规则挖掘的 2-itemset 频率表
 - proposal 生成时的 minObservations 阈值 = minimum support
 
 **差异**：
+
 - 不做 upward closure pruning（没有 >2 项的 itemset）
 - 没有 lift / conviction 等更高级的 interestingness measure
 - useful_count 作为质量过滤（比纯 support 多一层筛选）
 
 **与 Hebbian 学习的相似**：
+
 > "Neurons that fire together, wire together."
 
 - node = neuron
@@ -213,16 +227,19 @@ combinedScore =                  Meta-learner:
 ```
 
 **相似点**：
+
 - 多个独立信号（base learners）各自打分
 - 线性组合（meta-learner）产生最终排序
 - 各信号可以独立失效（FTS 找不到、向量有噪声），融合后鲁棒
 
 **差异**：
+
 - 真正的 stacking 的 meta-learner 是用 held-out data 训练的
 - NMG 的组合权重是硬编码的，没有从数据学习
 - 真正的 ensemble 会有 diversity measure，NMG 没有检验信道独立性
 
 **与 Sensor Fusion 的相似（Kalman filter 的特例）**：
+
 - 多个 noisy sensor 各自给出观察
 - 加权融合：高精度 sensor 权重更大
 - 如果三个信号独立且各自有 noise variance σ²ᵢ，最优权重 ∝ 1/σ²ᵢ
@@ -237,6 +254,7 @@ combinedScore =                  Meta-learner:
 **位置**：`types.ts` — `MemoryNode`, `MemoryRecord.nodeId`; `design.md §7`
 
 **设计文档原文**：
+
 > "A node represents an observational equivalence class under current evidence:
 > records stay together while the system lacks reliable information to
 > distinguish their use."
@@ -255,16 +273,19 @@ merge = 发现语义重叠 → ∼ 变粗 → 多个等价类合并为一个
 ```
 
 **相似点**：
+
 - 这就是商集 (quotient set) 的构造，一字不差
 - Split / merge 对应等价关系的细化/粗化（refinement/coarsening）
 - `node_redirects` 保存了等价类的历史演化
 
 **与统计学中 Identifiability 的相似**：
+
 - "两个参数在给定观测下不可区分" ↔ "两条 memory 在给定证据下不应拆开"
 - 新的 query 行为 / 新的 memory → 新观测 → 可区分 → split
 - 这就是参数 identifiability 的动态版本
 
 **与聚类分析的相似**：
+
 - MemoryNode = cluster
 - canonicalName + summary = cluster centroid
 - split = 增加 k（cluster 数）
@@ -293,6 +314,7 @@ Davies-Bouldin index）来评估 node 的"紧致度"，决定是否应该 split�
 ```
 
 **标准摊还分析**：
+
 - 每次扩容成本 = O(N·d)（N 是当前 entries 数，d 是 dimensions）
 - 几何增长（×2）→ 摊还每次插入 = O(d)
 - 这与 `std::vector`、`ArrayList`、`StringBuilder` 的机制完全一致
@@ -319,11 +341,13 @@ Float32VectorCache = L1/L2       CPU Cache = 芯片缓存
 ```
 
 **相似点**：
+
 - SQLite 是 authoritative source（类似主存是 truth）
 - Cache 是 disposable（丢弃后可从 SQLite 重建）
 - 全量加载而非按需（当前实现是一次 load all）
 
 **差异**：
+
 - CPU cache 按 cache line 粒度（64B），NMG 按整个 kind（node/leaf）
 - CPU cache 有替换策略（LRU/PLRU），NMG 不做逐出
 - CPU cache 是硬件自动的，NMG 是显式调用的
@@ -354,11 +378,13 @@ assessMemoryWrite(text) =         detect(packet) =
 ```
 
 **相似点**：
+
 - 基于已知模式的签名匹配
 - 黑名单模型（默认通过，只拦截已知威胁）
 - 正则作为 detection language
 
 **差异**：
+
 - IDS 有 anomaly-based detection（统计模型），NMG 没有
 - IDS 规则有 severity、category、reference，NMG 的 pattern 是扁平的
 - IDS 可以更新规则库而不改代码，NMG 的 pattern 硬编码
@@ -385,11 +411,13 @@ maxHops = 传播代数上限             无（SIR 由 β, γ 决定终点）
 ```
 
 **相似点**：
+
 - BFS 的逐层扩散与传染病的世代传播结构同构
 - visited set 相当于 recovered/immune（不再参与传播）
 - 限定的 hop 数相当于有限传播代数
 
 **差异**：
+
 - SIR 的传播概率 β 是随机的（每人以概率 β 感染邻居），BFS 是确定性的
 - SIR 有恢复率 γ，BFS 没有"恢复"概念
 - SIR 的终点由 β, γ 和网络拓扑共同决定（可能未达全连通），BFS 访问所有 ≤h hops 的节点
@@ -401,16 +429,16 @@ maxHops = 传播代数上限             无（SIR 由 β, γ 决定终点）
 
 ## 12. 全览表
 
-| NMG 组件 | 相似结构 | 深度 | 设计启发 |
-|---|---|---|---|
-| Delta + compaction | LSM Tree | 同构 | 分层 Delta 防止 write stall |
-| Node redirects | Union-Find / GC forwarding pointer | 同构 | 路径压缩加速长链 |
-| Leaf block 内容 ID | Content-addressable storage (Git/IPFS) | 同构 | Node 级哈希链检测结构变化 |
-| State supersession | MVCC / Event Sourcing | 同构 | 双层时间（valid + transaction time） |
-| Co-retrieval signals | 关联规则挖掘 / Hebbian 学习 | 同构 | Lift 等度量替代 estimatedGain |
-| Multi-channel fusion | Ensemble Stacking / Sensor Fusion | 强相似 | 自适应权重 based on noise variance |
-| MemoryNode | 商集 / 等价类 | 同构 | 聚类有效性指标判断 split |
-| VectorCache 扩容 | 动态数组摊还分析 | 同构 | —（标准做法） |
-| VectorCache 架构 | CPU Cache 层级 | 强相似 | LRU 逐出替代全量加载 |
-| Write policy | 签名式 IDS | 同构 | 可配置规则库 |
-| Graph expansion BFS | SIR 传染病模型 | 强相似 | 概率传播 → PPR |
+| NMG 组件             | 相似结构                               | 深度   | 设计启发                             |
+| -------------------- | -------------------------------------- | ------ | ------------------------------------ |
+| Delta + compaction   | LSM Tree                               | 同构   | 分层 Delta 防止 write stall          |
+| Node redirects       | Union-Find / GC forwarding pointer     | 同构   | 路径压缩加速长链                     |
+| Leaf block 内容 ID   | Content-addressable storage (Git/IPFS) | 同构   | Node 级哈希链检测结构变化            |
+| State supersession   | MVCC / Event Sourcing                  | 同构   | 双层时间（valid + transaction time） |
+| Co-retrieval signals | 关联规则挖掘 / Hebbian 学习            | 同构   | Lift 等度量替代 estimatedGain        |
+| Multi-channel fusion | Ensemble Stacking / Sensor Fusion      | 强相似 | 自适应权重 based on noise variance   |
+| MemoryNode           | 商集 / 等价类                          | 同构   | 聚类有效性指标判断 split             |
+| VectorCache 扩容     | 动态数组摊还分析                       | 同构   | —（标准做法）                        |
+| VectorCache 架构     | CPU Cache 层级                         | 强相似 | LRU 逐出替代全量加载                 |
+| Write policy         | 签名式 IDS                             | 同构   | 可配置规则库                         |
+| Graph expansion BFS  | SIR 传染病模型                         | 强相似 | 概率传播 → PPR                       |
