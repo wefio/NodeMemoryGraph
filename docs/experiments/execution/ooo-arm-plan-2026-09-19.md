@@ -229,7 +229,13 @@ taken from the second pair and not from a fused cell against a plain one.
 
 The plan is complete when every question above is either answered at the grade its decision needs, or
 closed with its reason on the record. That is the state as of 2026-09-19, and it is closed rather than
-pending:
+pending - the operator closed the programme the same day, on the classification these cells support: on
+this task shape the coarse arm is fastest, fine granularity adds overhead and the second slot and fusion
+each recover part of it (observed); within the chain path bound 2 beats bound 1 (replicated, at rate
+grade); the chain path's own cost, the default bound and any general cost-against-benefit statement stay
+undetermined; and the evidence is enough to guide the next step, so no further sample is bought. The rule
+that uses this - when a run may enter the chain path at all - is
+[decided here](../../decisions/implemented/2026-09-19-when-the-chain-path-may-be-entered.md).
 
 - **Answered.** Q1 (12 853 ms against a threshold of 6 940 ms, at single-observation grade), Q2 (3 628 ms
   against 2 776 ms at pair grade - and C's median price is _lower_ than B's, 0.001826 against 0.002106, so

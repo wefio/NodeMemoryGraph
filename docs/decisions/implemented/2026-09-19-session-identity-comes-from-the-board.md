@@ -2,8 +2,9 @@
 
 [中文](2026-09-19-session-identity-comes-from-the-board.zh-CN.md)
 
-**Status:** proposed
-**Relates to:** [The fusion session mechanism](../implemented/2026-09-19-fusion-session-mechanism.md)
+**Status:** implemented
+**Approved:** explicit
+**Relates to:** [The fusion session mechanism](2026-09-19-fusion-session-mechanism.md), [When the chain path may be entered](2026-09-19-when-the-chain-path-may-be-entered.md)
 
 ## Problem
 
@@ -14,7 +15,7 @@ the live arm's `piSessionWorker`, and it keys its runners off the spec's own `se
 is an eval artifact. A second caller must not invent a parallel notion of "session", and it must
 not add a tool: the product's agent-facing surface is already the board.
 
-## Proposal
+## Decision
 
 Session identity for a unit is read from, and written to, the board. No new tool, no new store
 column.
@@ -76,7 +77,7 @@ The field trial follows from this shape: two real units in one board session, pe
 the recorded move, and wall clock, tokens and cache reads beside the same work done in two fresh
 sessions - measured through the product path rather than through the eval driver alone.
 
-## Acceptance criteria
+## What the criteria resolved to
 
 1. A second unit of one board session resolves to the session id the board already records for the
    first unit, with no new tool registered and no new store column.
@@ -88,7 +89,16 @@ sessions - measured through the product path rather than through the eval driver
 4. The field trial measures two real units in one board session against the same work in two fresh
    sessions, reporting per-unit verdict, session id, tokens, cache reads and wall clock.
 
-## Risks
+**All four are met**, which is why this note is implemented rather than open. Criteria 1–3 are pinned by
+`tests/integration/ooo-session-facts.test.ts` (resolution returns the board's session, a cancel closes the
+cancelled unit's session and only that one, and a re-read returns the recorded move with its facts) and by
+`tests/integration/ooo-session-chain-contract.test.ts` (a chain drives the same work through one runner,
+per-unit tokens reported beside the session total); criterion 4 is the field trial recorded in
+[the fusion trial](../../experiments/execution/ooo-fusion-trial-2026-09-19/README.md), which ran both arms
+on the product path. The permission rule that governs _when_ a run may take this path - and the economics
+this note deliberately leaves open - are [decided here](2026-09-19-when-the-chain-path-may-be-entered.md).
+
+## What could still go wrong
 
 - The board's session id is also the wake loop's identity. A host that reuses one session for
   unrelated work would record a chain that is not a plan chain; the move is written per unit, so

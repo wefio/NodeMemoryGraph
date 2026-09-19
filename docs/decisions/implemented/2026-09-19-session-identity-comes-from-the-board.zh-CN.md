@@ -2,14 +2,15 @@
 
 [English](2026-09-19-session-identity-comes-from-the-board.md)
 
-**Status:** proposed
-**Relates to:** [融合的会话机制](../implemented/2026-09-19-fusion-session-mechanism.zh-CN.md)
+**Status:** implemented
+**Approved:** explicit
+**Relates to:** [融合的会话机制](2026-09-19-fusion-session-mechanism.zh-CN.md)、[何时允许进入链式路径](2026-09-19-when-the-chain-path-may-be-entered.zh-CN.md)
 
 ## 问题
 
 融合机制已经落地并有测试——每个 run 一个 `createPiSessionRunner`、藏在 `UnitState` 盒子后面、扩展只留一套 tool surface、每个单元的 token 增量与整段会话总量并列——但**产品侧没有任何东西会决定复用会话**。今天唯一的调用方是 live arm 里的 `piSessionWorker`，而它的 runner 是按 spec 自己的 `session.id` 取的，那是测量产物。第二个调用方不该另发明一套"会话"概念，也不该再加工具：产品面向 Agent 的面本来就是黑板。
 
-## 提案
+## 决策
 
 单元的会话身份**从黑板读取、也写回黑板**。不加工具，不加存储列。
 
@@ -34,14 +35,16 @@
 
 实地试验也随之成形：同一个黑板会话里的两个真实单元——每单元裁定、被记录的动作，以及墙钟、tokens、cache 读取，与"两个全新会话做同样的工作"并列对比——并且是**走产品路径**测，而不是只走 eval 驱动。
 
-## 验收标准
+## 验收标准的落点
 
 1. 同一黑板会话的第二个单元，解析出的会话 id 就是黑板已经为第一个单元记下的那个；**不注册新工具**、**不加存储列**。
 2. 那个动作——接纳，或关闭并指出条件——写回黑板，且读回黑板能连同它依据的事实一起取回。
 3. 用测试两瑞都钉住：对条目上带会话的单元，解析返回该单元的会话 id；同一黑板会话里紧接前一个单元跑的那个单元，从产生它的 runner 报告同一个会话 id。
 4. 实地试验测"同一黑板会话里的两个真实单元"对"两个全新会话做同样的工作"，报告每单元裁定、会话 id、tokens、cache 读取与墙钟。
 
-## 风险
+**四条全部满足**，这也是本记录从提案转为已实施的原因。第 1–3 条由 `tests/integration/ooo-session-facts.test.ts`（解析返回黑板上的会话；取消只关闭被取消单元自己的会话；重读能连同动作所依据的事实取回）与 `tests/integration/ooo-session-chain-contract.test.ts`（同一条链经由一个 runner 驱动同样的工作，每单元 token 与会话总量并列报告）钉住；第 4 条是记录在 [融合实地试验](../../experiments/execution/ooo-fusion-trial-2026-09-19/README.md) 里的实地试验，两个臂都走产品路径。**何时**允许走上这条路径的许可规则——以及本记录有意留空的经济性——[在此决定](2026-09-19-when-the-chain-path-may-be-entered.zh-CN.md)。
+
+## 仍可能出错的地方
 
 - 黑板的会话 id 同时也是唤醒循环的身份。若某个宿主拿同一个会话去做无关的工作，就会记下一条并非计划链的链；而动作是**逐单元**记录的，所以这种链可读、可归因，而不是隐形。
 - 复用会话意味着保留合并后的 tool surface，它会给第一个单元多花约 0.7k token（已测），所以很短的链上融合可能多花 token；cap 实验看到的"每会话两个单元"这个拐点每格只有两次运行，它是留给"同一父任务上的 A–D 对比"去验证的假设，不是已定的策略。

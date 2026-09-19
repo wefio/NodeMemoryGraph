@@ -93,6 +93,16 @@ its reports predate the usage split that now exists
 ([the A-D cells](../experiments/execution/archive/ooo-arms-2026-09-19/README.md)), which is why the ceiling
 stays a wall-clock ceiling for now and why the cost of fusing is unmeasured rather than small.
 
+## When the chain path may be entered
+
+The permission rule is a decision, not a paragraph here:
+[when the chain path may be entered](../decisions/implemented/2026-09-19-when-the-chain-path-may-be-entered.md)
+states the three conditions (the semantics allow it, a continuable task exists, the host supports session
+reuse), that the shared runtime decides while the adapter only supplies capability, and that fusion may not
+relax per-task permission, input-version, cancellation or acceptance checks - nor the parent's joint
+acceptance. What that record does **not** declare is economics: this document measures a wall-clock effect
+and leaves the cost of fusing unpriced, and the two must not be read as one claim.
+
 ## What the ceiling says today
 
 Run against the fixtures and against the D arm's own spec
