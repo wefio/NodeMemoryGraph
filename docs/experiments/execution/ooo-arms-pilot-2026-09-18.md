@@ -1,6 +1,6 @@
 # The granularity arms against a real model - 2026-09-18
 
-**Status:** paid measurement, 8 runs and 23 model calls, one model, two task families, one of them held
+**Status:** paid measurement, 14 runs and 29 model calls, one model, two task families, one of them held
 out of the instrument. **Directional only**: the sample cannot resolve a small difference, and no
 quality difference appeared to resolve.
 **Related:** [task-unit semantics design](../../design/task-unit-semantics.md) ·
@@ -33,7 +33,8 @@ a plan whose acceptance cannot be shown offline would not be worth paying for.
 `node --experimental-strip-types evals/ooo-execution/pilot.ts --live --out <results.json>`, 8 runs,
 23 model calls, all 8 runs complete (no failure, no timeout, no retry, no refused submission).
 Results merged with `pilot.ts --report a.json,b.json`, which makes no model call and refuses to merge
-two different instruments.
+two different instruments. The D arm (fusion, 6 more runs and 6 more model calls) was added on
+2026-09-19 and is reported in its own section below.
 
 | Arm | Plan           | Slots | Runs | Accepted units | Parent    | Wall total (median) | Host total | Tokens |
 | --- | -------------- | ----- | ---- | -------------- | --------- | ------------------- | ---------- | ------ |
@@ -118,4 +119,39 @@ node --experimental-strip-types --test evals/ooo-execution/families.test.ts
 node --experimental-strip-types evals/ooo-execution/pilot.ts --live --out .temp/pilot/pilot.json
 node --experimental-strip-types evals/ooo-execution/pilot.ts --report .temp/pilot/pilot.json \
   --out .temp/pilot/pilot-summary.json
+```
+
+## D arm: fusion (added 2026-09-19)
+
+The D arm asks whether one session running two units in a row is cheaper than two sessions running one
+each - the design's `fusion` bound - and it needed a mechanism the extension did not have: a session
+held across units. `--session-runner` supplies it (one Pi session per driver session, re-pointed per
+unit). The only difference between the two arms is `fusion.unitsPerSession`: 1 is the control the
+driver already described, 2 is fused. Everything else is identical - the same spec, the same envelope
+(`turns: 6`, `reads: 3`, `timeoutMs: 120 000`), `--slots 1`, the same model, and three reps each.
+
+| Arm     | Bound | Sessions per run | Accepted units | Median tokens | Median wall | Failures |
+| ------- | ----- | ---------------- | -------------- | ------------- | ----------- | -------- |
+| unfused | 1     | `1/1` ×3         | 2/2 ×3         | 22 498        | 12 948 ms   | 0        |
+| fused   | 2     | `2` ×3           | 2/2 ×3         | 22 533        | 11 048 ms   | 0        |
+
+**What this sample carries.** Quality parity holds - every unit was accepted in every run of both arms,
+so the wall-time comparison is admissible - and the fused arm was ~1.9 s faster per run, consistently:
+11.8 / 9.6 / 11.0 s against 11.9 / 12.9 / 14.1 s. That is about 15 % of the unfused wall and wider than
+either arm's own spread, and it prices the session-startup term the cost model carried as `unmeasured`:
+one fused session removes exactly one startup, so the term is ~1.9 s at this model and plan size.
+
+**What it does not carry.** Tokens did not fall: 22 498 against 22 533 is 0.2 %, and the fused arm's own
+spread (17.6k - 26.3k) is wider than the difference. Per unit the saving is real and smaller than
+predicted - the second unit cost ~10.8k fused against ~11.6k unfused, about 8 % - and the first unit
+cost ~0.7k more, which cancels it. The reason is a mechanism cost rather than noise: a chain's tool
+surface is the union of its units' capabilities, because a session's surface is fixed when it is
+created, so a unit can be offered a tool it has no use for and spend a turn on the refusal. Two units
+is also where the design expected the saving to be smallest.
+
+**Rejected:** reading the token tie as "fusion does not pay". The two terms are separable and the
+second-unit saving is real; what n = 6 at one plan shape and one model cannot say is how either scales.
+
+```
+node .temp/run-darm.mjs   # 6 paid runs (3 per bound); writes .temp/darm/*.json + aggregate
 ```
