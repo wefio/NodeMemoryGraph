@@ -159,16 +159,26 @@ export function patchSessionInput(
     ? `\nIf what you received cannot satisfy one of these declared requirements, call report_dependency_failure with the exact task and requirement instead of finishing the work: ` +
       JSON.stringify(pushback.requirements)
     : "";
-  // The one rule a loosened surface cannot carry. Naming the kinds here is not the prompt repeating the
-  // schema - it is the prompt carrying what the schema was forced to drop, so a chain's unit is not
-  // asked to guess a kind and pay a turn for a wrong guess.
-  const conclusionNote = options.looseConclusion
-    ? `\nIf you answer with a conclusion instead of files, its kind must be one of ${JSON.stringify(
+  // What a fixed surface costs, said in the one place that can say it. A chain registers the tools of
+  // every unit it will run, so this unit is shown tools it cannot use, and its artifact schema had to
+  // loosen the conclusion to a string. Both rules are the prompt's now, because the surface cannot
+  // shrink per unit and the schema can no longer name the kinds. Measured, not assumed: without this,
+  // a live fused unit spent its turn budget on a run_check it has no check for and on a submission
+  // that carried files and a conclusion at once, which the envelope refuses.
+  const looseNote = options.looseConclusion
+    ? `\nThis session exposes the tools of every unit it will run, and this unit has ${
+        check ? `the check ${check.label}` : "no check"
+      } and ${
+        pushback?.requirements.length ? "a declared requirement" : "no declared requirement"
+      }, so call only read_snapshot${check ? ", run_check" : ""}${
+        pushback?.requirements.length ? ", report_dependency_failure" : ""
+      } and ${ARTIFACT_TOOL}.\n` +
+      `Answer with files, or with a conclusion whose kind is one of ${JSON.stringify(
         frozen.work.admittedConclusions,
-      )}, exactly as written; a kind outside that list is refused.`
+      )}, exactly as written - never both, and a kind outside that list is refused.`
     : "";
   return {
-    prompt: patchPrompt(frozen, ARTIFACT_TOOL) + note + pushbackNote + conclusionNote,
+    prompt: patchPrompt(frozen, ARTIFACT_TOOL) + note + pushbackNote + looseNote,
     snapshot: snapshotText(frozen),
     maxArtifact: frozen.work.budget.output,
     limits: frozen.work.limits,
@@ -234,7 +244,14 @@ export interface UnitState {
   reads: { value: number };
   runs: { value: number };
   turns: number;
+  /** The tools this unit actually called, in order. What fills a turn budget is a fact worth reading:
+   *  a chain registers a tool its current unit cannot use, and only the calls say whether that cost a
+   *  turn - the counters for reads and checks do not move when a tool refuses the call. */
+  calls: string[];
   artifact: string | null;
+  /** Why the last submission was refused, when it was: the envelope's own words. A unit that ran out of
+   *  turns after submitting has its reason here, and without it the only visible symptom is "no artifact". */
+  artifactError: string | null;
   report: PushbackReport | null;
   /** Ends the current unit's attempt; re-pointed per unit by a chain. */
   abort: () => void;

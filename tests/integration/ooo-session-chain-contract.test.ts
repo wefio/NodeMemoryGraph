@@ -12,8 +12,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createPiSessionRunner } from "../../.pi/extensions/nmg/ooo-execution.ts";
-import { preparePatchWork } from "../../src/integration/ooo-patch.ts";
-import { patchSessionInput } from "../../src/integration/ooo-session-mechanism.ts";
+import { patchPrompt, preparePatchWork } from "../../src/integration/ooo-patch.ts";
+import { ARTIFACT_TOOL, patchSessionInput } from "../../src/integration/ooo-session-mechanism.ts";
 
 function patchWork() {
   return preparePatchWork({
@@ -25,18 +25,18 @@ function patchWork() {
   });
 }
 
-test("a single-unit input leaves the conclusion kinds to the schema that carries them", () => {
+test("a single-unit input is exactly the schema-carrying prompt, so a control arm is untouched", () => {
   const frozen = patchWork();
   const input = patchSessionInput(frozen);
   assert.equal(input.looseConclusion, false);
   assert.equal(
-    input.prompt.includes(JSON.stringify(frozen.work.admittedConclusions)),
-    false,
-    "the strict surface must not also name the kinds in the prompt",
+    input.prompt,
+    patchPrompt(frozen, ARTIFACT_TOOL),
+    "the strict path must not gain a note, or a recorded control arm stops describing this code",
   );
 });
 
-test("a chain input names the admitted conclusion kinds, because its schema cannot", () => {
+test("a chain input names the admitted kinds and the tools this unit may use", () => {
   const frozen = patchWork();
   const input = patchSessionInput(frozen, { looseConclusion: true });
   assert.equal(input.looseConclusion, true);
@@ -49,6 +49,22 @@ test("a chain input names the admitted conclusion kinds, because its schema cann
     "a loosened surface must name the kinds it can no longer show",
   );
   assert.match(input.prompt, /a kind outside that list is refused/);
+  // The envelope refuses a submission that carries both channels, and no schema can say that.
+  assert.match(input.prompt, /never both/);
+  // This unit has no check and no declared requirement, while the session exposes both tools.
+  assert.match(input.prompt, /this unit has no check/);
+  assert.match(input.prompt, /call only read_snapshot and submit_artifact/);
+});
+
+/** A unit that does have a check keeps it, and the note must say so rather than denying it. */
+test("a chain input names the check when the unit has one", () => {
+  const frozen = patchWork();
+  const input = patchSessionInput(frozen, {
+    looseConclusion: true,
+    check: { label: "the unit check", maxRuns: 1, run: async () => ({ ok: true, output: "" }) },
+  });
+  assert.match(input.prompt, /the check the unit check/);
+  assert.match(input.prompt, /call only read_snapshot, run_check and submit_artifact/);
 });
 
 test("the runner refuses a chain session whose inputs were not built for one", async () => {

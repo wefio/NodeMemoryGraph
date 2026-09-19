@@ -71,6 +71,7 @@ function readSnapshotTool(box: UnitState) {
       "Read this task's immutable input and accepted dependency values only (bounded at admission). No paths or commands are accepted.",
     parameters: Type.Object({}, { additionalProperties: false }),
     execute: async () => {
+      box.calls.push("read_snapshot");
       if (++box.reads.value > box.limits.reads) throw new Error("snapshot read budget exceeded");
       return { content: [{ type: "text" as const, text: box.snapshot }], details: {} };
     },
@@ -92,6 +93,7 @@ function runCheckTool(box: UnitState) {
       { additionalProperties: false },
     ),
     execute: async (_id, args) => {
+      box.calls.push("run_check");
       const { check, frozen } = box;
       // A chain's surface is fixed at session creation, so a unit without a check gets this tool and
       // is told so, instead of the surface being rebuilt (which a session does not allow).
@@ -144,6 +146,7 @@ function reportPushbackTool(box: UnitState) {
       { additionalProperties: false },
     ),
     execute: async (_id, args) => {
+      box.calls.push("report_dependency_failure");
       const { pushback, report } = box;
       if (
         !report ||
@@ -246,6 +249,7 @@ function artifactTool(box: UnitState, looseConclusion = false) {
     ),
     constrainedSampling: { type: "json_schema", strict: "prefer" },
     execute: async (_id, args) => {
+      box.calls.push("submit_artifact");
       const frozen = box.frozen;
       if (!frozen)
         return {
@@ -254,7 +258,10 @@ function artifactTool(box: UnitState, looseConclusion = false) {
           isError: true,
         };
       const built = artifactEnvelope(frozen, args as ArtifactParams);
-      if (!built.ok)
+      if (!built.ok) {
+        // Kept, not just returned: the model's own correction is the reason the attempt continued, and
+        // the run's failure line has to carry it or "no artifact" is all anyone can see.
+        box.artifactError = built.error;
         return {
           content: [
             {
@@ -265,9 +272,11 @@ function artifactTool(box: UnitState, looseConclusion = false) {
           details: {},
           isError: true,
         };
+      }
       // A recorded artifact ends the attempt: further text would only spend tokens and
       // could contradict the submission, which the host never reads as an answer.
       box.artifact = built.json;
+      box.artifactError = null;
       box.abort();
       return { content: [{ type: "text" as const, text: "artifact recorded" }], details: {} };
     },
@@ -335,7 +344,9 @@ export async function createPiSessionRunner(options: {
     reads: { value: 0 },
     runs: { value: 0 },
     turns: 0,
+    calls: [],
     artifact: null,
+    artifactError: null,
     report: null,
     abort: () => {},
   };
@@ -347,7 +358,9 @@ export async function createPiSessionRunner(options: {
     box.reads = { value: 0 };
     box.runs = { value: 0 };
     box.turns = 0;
+    box.calls = [];
     box.artifact = null;
+    box.artifactError = null;
     box.report = null;
     delete box.frozen;
     delete box.check;
@@ -450,7 +463,9 @@ export async function createPiSessionRunner(options: {
           `Pi snapshot task did not finish within its bounded contract: ` +
             `stopReason=${message?.stopReason}, turns=${box.turns}/${box.limits.turns}, ` +
             `reads=${box.reads.value}/${box.limits.reads}, ` +
+            `calls=${box.calls.join(",") || "none"}, ` +
             `artifact=${built.ok ? "ok" : built.error}` +
+            (box.artifactError ? `, last refusal: ${box.artifactError}` : "") +
             (timedOut ? " (timed out)" : ""),
         );
       return done(built.json);
