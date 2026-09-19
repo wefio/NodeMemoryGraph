@@ -6,6 +6,8 @@ description: Modify, test, and commit this repository safely. Use for any NMG co
 # Repository development
 
 Keep the workflow small, evidence-based, and friendly to concurrent Agents.
+The code and logic should be easy to maintain.
+Complexity must be kept within a limit of 15.
 
 ## Repository governance
 

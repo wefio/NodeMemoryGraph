@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { verifyCandidate } from "./candidate.ts";
+import { verifyCandidate } from "../../src/integration/ooo-candidate.ts";
 
 const repository = new URL("../..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const revision = execFileSync("git", ["rev-parse", "HEAD"], {

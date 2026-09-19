@@ -6,10 +6,10 @@
 // Parsing is fail-closed: an unknown key, a missing required key, an absolute or escaping
 // path, or a worker kind that is not supported is a named error, never a silently ignored
 // field. A spec that is half-understood would run a round nobody declared.
-import type { CandidateCheck } from "./candidate.ts";
+import type { CandidateCheck } from "../../src/integration/ooo-candidate.ts";
 import type { ConclusionKind } from "../../src/integration/ooo-patch.ts";
-import type { CaseRule, Requirement } from "./cycle.ts";
-import type { Mutation } from "./mutation.ts";
+import type { CaseRule, Requirement } from "../../src/integration/ooo-cycle.ts";
+import type { Mutation } from "../../src/integration/ooo-mutation.ts";
 
 export type SpecWorker =
   | { kind: "pi"; provider: string; model: string }

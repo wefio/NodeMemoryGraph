@@ -10,7 +10,12 @@ import test from "node:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runCycle, type CheckRunner, type CycleOptions, type CycleResult } from "./cycle.ts";
+import {
+  runCycle,
+  type CheckRunner,
+  type CycleOptions,
+  type CycleResult,
+} from "../../src/integration/ooo-cycle.ts";
 import {
   RoundLog,
   compareFrozen,
@@ -19,7 +24,7 @@ import {
   recordedPlan,
   recordedWorker,
   terminalEvent,
-} from "./round-log.ts";
+} from "../../src/integration/ooo-round-log.ts";
 
 /** A deterministic round: the same three tasks the live cycle runs, with the host check
  *  replaced by a function so the test needs no worktrees. */

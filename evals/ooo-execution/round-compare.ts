@@ -13,8 +13,8 @@
 //     cost. That spends money in both arms, so it is an explicit operator decision.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type CycleResult, type CycleWorker, runCycle } from "./cycle.ts";
-import { readRoundLog, terminalEvent } from "./round-log.ts";
+import { type CycleResult, type CycleWorker, runCycle } from "../../src/integration/ooo-cycle.ts";
+import { readRoundLog, terminalEvent } from "../../src/integration/ooo-round-log.ts";
 import { cycleOptionsFor, readBaseline, specDigest, specWorker } from "./round-runner.ts";
 import type { RoundSpec } from "./round-spec.ts";
 
@@ -27,7 +27,8 @@ export interface Arm {
   /** Host verification: the cost this design adds, and the term that dominates every round. */
   hostMs: number;
   hostChecks: number;
-  /** The part of the external wait the independent task covered: zero for the control. */
+  /** The part of the external wait the independent task's own work covered (its claim-to-return
+   *  window, not its later verification): zero for the control. */
   hiddenWaitMs: number;
   tokens: number;
   cacheRead: number;

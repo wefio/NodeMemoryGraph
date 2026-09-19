@@ -8,6 +8,7 @@ Owner: supersession 候选召回（写路径），与 `supersession-design.md` �
 ## 1. 问题
 
 `supersedeCandidates`（写路径的候选召回）目前用：
+
 - **instr 子串预过滤**（lower(statement) 匹配 token）
 - **token 规范化**（小写 + 去标点）
 - **转换结构检测**（`transitionFromTokens`）
@@ -15,11 +16,11 @@ Owner: supersession 候选召回（写路径），与 `supersession-design.md` �
 
 **盲区**：所有词法判定都是**词级精确匹配**。词形变化与拼写变体导致召回为 0：
 
-| 已有表述 | 新写入 | 词级判定 | 语义上是同一物？ |
-|---|---|---|---|
-| "用户偏好 Chinese explanations" | "用户偏好 Chinese explanation" | instr 匹配（explanation ⊂ explanations 前缀？否，词边界）→ 漏 | 是 |
-| "embedding 配置" | "embeddings 配置" | token "embedding" vs "embeddings" 不同词 → 漏 | 是 |
-| "colour scheme" | "color scheme" | 拼写变体 → 漏 | 是 |
+| 已有表述                        | 新写入                         | 词级判定                                                      | 语义上是同一物？ |
+| ------------------------------- | ------------------------------ | ------------------------------------------------------------- | ---------------- |
+| "用户偏好 Chinese explanations" | "用户偏好 Chinese explanation" | instr 匹配（explanation ⊂ explanations 前缀？否，词边界）→ 漏 | 是               |
+| "embedding 配置"                | "embeddings 配置"              | token "embedding" vs "embeddings" 不同词 → 漏                 | 是               |
+| "colour scheme"                 | "color scheme"                 | 拼写变体 → 漏                                                 | 是               |
 
 这些变体是真实的（用户在 2026-08-12 的 supersede 链实测中见到 "Employed" ≡ "employed" 靠 token 规范化救回，但**复数/拼写/派生词形**仍漏）。
 
@@ -28,6 +29,7 @@ Owner: supersession 候选召回（写路径），与 `supersession-design.md` �
 **目标**：用确定性词法指纹（Feature Hashing / SimHash）补上"词形/拼写变体"的近重复候选召回——让变体重复能进 judge 候选池，而不是被词级精确匹配挡住。
 
 **边界（明确不做）**：
+
 - 不判语义、不替代 judge——只负责**召回候选**
 - 不碰搜索排序（检索路径的 hashing 语义混合已被 rejected，见
   `docs/decisions/rejected/2026-09-03-hashing-vector-retrieval-fallback.md`）
@@ -57,6 +59,7 @@ Hamming ≤ 3 召回近重复、每千条 < 1KB 索引）。
 ### 3.3 召回落点（候选检测内）
 
 在 `supersedeCandidates` 现有 instr 预过滤之后、排序之前，加一个**指纹召回通道**：
+
 - 新 statement → simhash
 - `Hamming(new_simhash, old.simhash) ≤ 3` 且**词级判定未命中**的记录进候选
 - 与现有候选合并、去重，仍走 `SUPERSEDE_CANDIDATE_MAX = 10` 上限

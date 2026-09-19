@@ -5,7 +5,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { patchCandidate, preparePatchWork } from "../../src/integration/ooo-patch.ts";
 import { executePiPatch } from "../../.pi/extensions/nmg/ooo-execution.ts";
-import { expectedRename, verifyRenameCandidate } from "./patch-verifier.ts";
+import { expectedRename, verifyRenameCandidate } from "../../src/integration/ooo-verifier.ts";
 import { randomUUID } from "node:crypto";
 
 const provider = process.env.PI_PROVIDER;

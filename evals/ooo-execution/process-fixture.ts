@@ -6,7 +6,7 @@ import { snapshotAnswer } from "../../src/integration/ooo-execution.ts";
 import { httpCall } from "../../src/cli/http-client.ts";
 import type { ServerState } from "../../src/cli/lifecycle.ts";
 import type { TaskBoardEntry } from "../../src/core/types.ts";
-import type { BoardTicket, BoardAdmission } from "./board-admission.ts";
+import type { BoardTicket, BoardAdmission } from "../../src/integration/ooo-board.ts";
 
 const channel = "ooo-process-probe";
 type Command = { id: string; action: string; args: Record<string, unknown> };
@@ -53,7 +53,7 @@ const liveDaemon = process.argv[2] === "daemon-live";
 if (process.argv[2] === "daemon" || liveDaemon) {
   const { NmgService } = await import("../../src/cli/service.ts");
   const { httpHandler } = await import("../../src/cli/http-server.ts");
-  const { BoardAdmission } = await import("./board-admission.ts");
+  const { BoardAdmission } = await import("../../src/integration/ooo-board.ts");
   const database = process.argv[3]!;
   const snapshot = (path: string) =>
     readFileSync(resolve(import.meta.dirname, "../..", path), "utf8").slice(0, 16_000);

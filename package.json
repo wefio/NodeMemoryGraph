@@ -20,6 +20,7 @@
   "files": [
     ".pi/extensions/nmg/controller-shadow.ts",
     ".pi/extensions/nmg/index.ts",
+    ".pi/extensions/nmg/ooo-round.ts",
     "bin/nmg-rcp.mjs",
     "bin/nmg.mjs",
     "dist/",
@@ -123,7 +124,6 @@
     "agent:context": "node --experimental-strip-types tools/repo-context.ts",
     "agent:context:check": "node --experimental-strip-types tools/repo-context.ts --check",
     "agent:verify": "node --experimental-strip-types tools/agent-verify.ts",
-    "ooo:round": "node --experimental-strip-types evals/ooo-execution/round-cli.ts",
     "complexity:gate": "node --experimental-strip-types tools/complexity-gate.ts",
     "verify:packages": "node --experimental-strip-types tools/verify-packages.ts",
     "check:lock": "node --experimental-strip-types tools/check-lock.ts",
@@ -170,6 +170,7 @@
     "usearch": "2.26.0"
   },
   "dependencies": {
+    "@deepseek-ai/dsh": "^0.1.5-rc.1",
     "@earendil-works/pi-tui": "^0.84.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "node-domexception": "^1.0.0",

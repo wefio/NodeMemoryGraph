@@ -16,18 +16,18 @@ impact rather than priority.
 
 The detailed notes below preserve the problem history. Current status is:
 
-| # | Area | Current status |
-| --- | --- | --- |
-| 1 | Store decomposition | **Resolved for the current architecture.** `store.ts` is an eight-line mixin façade; base, graph, retrieval, writes, maintenance, schema, ranking, Active Graph, row parsing, and vector concerns are separate modules with boundary tests. Revisit only when a measured module boundary becomes a maintenance problem. |
-| 2 | Vector-cache invalidation | **Resolved for the stated mechanism.** `Float32VectorCache.remove(id)` and targeted invalidation tests exist. Revisit only if measured rebuild latency regresses. |
-| 3 | Router expressiveness | **Mechanism and causal engineering comparison complete; promotion rejected.** The custom autodiff controller learns node, memory, edge, control, and budget heads. A frozen candidate actuates bounded node reranking, allocation, and folding in matched Pi runs, with typed action telemetry and fail-closed official scoring. A fixed 14-question, seven-category development comparison improved answers and official evidence recall, but increased tokens and latency enough to fail the product gate; the separate LoCoMo retrieval gate also failed. Natural matched evidence and acceptable product costs remain required before promotion. |
-| 4 | Privacy deletion | **Product surface partial.** Logical withdrawal and versioned user-memory export exist in CLI/RPC/Pi, with FTS/embedding/evidence/leaf/claim/proposal/AG cleanup and unsupported-derived-memory cascade. Physical history erasure, non-subtractable learned aggregate reset, adapter hooks, and erasure receipts remain open. |
-| 5 | Regex-only recall gate | **Open.** English/Chinese deterministic coverage is tested; multilingual semantic gating and measured false-positive/false-negative rates are not. |
-| 6 | Test coverage | **Substantially improved.** The listed Chinese, graph, split, cache, deletion, QPP mode/recommendation/folding, and controller-actuation paths have deterministic coverage. Real Pi schema drift and natural topology adaptation remain important gaps. |
-| 7 | ANN recall | **Deferred by evidence.** Exact local scan remains the default; the current ANN path must not be promoted without a recall/latency crossover. |
-| 8 | Concurrency model | **Resolved for the current daemon architecture.** One resident daemon is the application-level authority; synchronous SQLite phases are serialized while external calls may overlap without holding transactions. |
-| 9 | Session serialization | **Partial.** Capture is automatic and idempotent; Pi projection has a fail-closed `pi.branch.v1` shape contract and tests, but it is still hand-validated from `unknown` rather than negotiated with an upstream schema. |
-| 10 | Topology acceptance | **Intentionally Lab/manual.** Proposal creation and explicit review work; unattended mutation lacks a precision gate. |
+| #   | Area                      | Current status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Store decomposition       | **Resolved for the current architecture.** `store.ts` is an eight-line mixin façade; base, graph, retrieval, writes, maintenance, schema, ranking, Active Graph, row parsing, and vector concerns are separate modules with boundary tests. Revisit only when a measured module boundary becomes a maintenance problem.                                                                                                                                                                                                                                                                                                                              |
+| 2   | Vector-cache invalidation | **Resolved for the stated mechanism.** `Float32VectorCache.remove(id)` and targeted invalidation tests exist. Revisit only if measured rebuild latency regresses.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 3   | Router expressiveness     | **Mechanism and causal engineering comparison complete; promotion rejected.** The custom autodiff controller learns node, memory, edge, control, and budget heads. A frozen candidate actuates bounded node reranking, allocation, and folding in matched Pi runs, with typed action telemetry and fail-closed official scoring. A fixed 14-question, seven-category development comparison improved answers and official evidence recall, but increased tokens and latency enough to fail the product gate; the separate LoCoMo retrieval gate also failed. Natural matched evidence and acceptable product costs remain required before promotion. |
+| 4   | Privacy deletion          | **Product surface partial.** Logical withdrawal and versioned user-memory export exist in CLI/RPC/Pi, with FTS/embedding/evidence/leaf/claim/proposal/AG cleanup and unsupported-derived-memory cascade. Physical history erasure, non-subtractable learned aggregate reset, adapter hooks, and erasure receipts remain open.                                                                                                                                                                                                                                                                                                                        |
+| 5   | Regex-only recall gate    | **Open.** English/Chinese deterministic coverage is tested; multilingual semantic gating and measured false-positive/false-negative rates are not.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 6   | Test coverage             | **Substantially improved.** The listed Chinese, graph, split, cache, deletion, QPP mode/recommendation/folding, and controller-actuation paths have deterministic coverage. Real Pi schema drift and natural topology adaptation remain important gaps.                                                                                                                                                                                                                                                                                                                                                                                              |
+| 7   | ANN recall                | **Deferred by evidence.** Exact local scan remains the default; the current ANN path must not be promoted without a recall/latency crossover.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 8   | Concurrency model         | **Resolved for the current daemon architecture.** One resident daemon is the application-level authority; synchronous SQLite phases are serialized while external calls may overlap without holding transactions.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 9   | Session serialization     | **Partial.** Capture is automatic and idempotent; Pi projection has a fail-closed `pi.branch.v1` shape contract and tests, but it is still hand-validated from `unknown` rather than negotiated with an upstream schema.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 10  | Topology acceptance       | **Intentionally Lab/manual.** Proposal creation and explicit review work; unattended mutation lacks a precision gate.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 ---
 
@@ -125,19 +125,19 @@ relations, stale embeddings, and misleading search results.
 
 **What must be cleaned up when deleting a `MemoryRecord`:**
 
-| Artifact | Action |
-|---|---|
-| `memory_records` row | Mark deleted or remove |
-| `memory_evidence_links` | Remove rows referencing this memory |
-| `memory_derivations` | Decide: cascade-delete derived memories or re-justify them |
-| `memory_fts` / `memory_fts_registry` | Remove FTS entry |
-| `memory_embeddings` | Remove embedding row |
-| `memory_leaf_members` | Remove from leaf blocks; mark blocks dirty |
-| `memory_index_delta` | Remove delta entry |
-| `retrieval_traces` | Purge references in JSON arrays |
-| `topology_proposals` | Purge references in partitioned memory IDs |
-| `node_retrieval_signals` / `node_pair_signals` | No direct reference, but counts may become stale |
-| Vector caches | Invalidate affected IDs |
+| Artifact                                       | Action                                                     |
+| ---------------------------------------------- | ---------------------------------------------------------- |
+| `memory_records` row                           | Mark deleted or remove                                     |
+| `memory_evidence_links`                        | Remove rows referencing this memory                        |
+| `memory_derivations`                           | Decide: cascade-delete derived memories or re-justify them |
+| `memory_fts` / `memory_fts_registry`           | Remove FTS entry                                           |
+| `memory_embeddings`                            | Remove embedding row                                       |
+| `memory_leaf_members`                          | Remove from leaf blocks; mark blocks dirty                 |
+| `memory_index_delta`                           | Remove delta entry                                         |
+| `retrieval_traces`                             | Purge references in JSON arrays                            |
+| `topology_proposals`                           | Purge references in partitioned memory IDs                 |
+| `node_retrieval_signals` / `node_pair_signals` | No direct reference, but counts may become stale           |
+| Vector caches                                  | Invalidate affected IDs                                    |
 
 **Approaches:**
 
@@ -203,15 +203,15 @@ end-to-end relation traversal are under-tested.
 
 **Specific gaps:**
 
-| Area | Risk | Suggested test |
-|---|---|---|
-| Chinese gate patterns | A regex typo silently breaks Chinese recall detection | Feed each Chinese pattern a matching and non-matching prompt; assert `mode` |
-| Non-English gate | Unknown false-negative rate for unsupported languages | Run gate on a fixed multilingual prompt set and report the mode distribution |
-| `searchContext` graph expansion | Related-node results may duplicate, miss, or incorrectly score | Insert two related nodes with known memories; assert result set after `searchContext` |
-| `deriveMemory` with missing source | Error handling for deleted/absent source memories | Attempt derivation with a nonexistent source ID; assert error message |
-| `mergeNodes` redirect integrity | Redirect chains longer than 1 hop may not resolve correctly | Merge A→B, then B→C; assert `upsertNode("A")` returns C |
-| `splitNode` partition validation | Edge cases in the "must assign every memory exactly once" check | Split with overlapping partitions, missing IDs, and extra IDs; assert each is rejected |
-| `Float32VectorCache` capacity growth | Geometric growth may allocate more than needed at very small initial capacities | Upsert more items than initial capacity; assert no error and correct scores |
+| Area                                 | Risk                                                                            | Suggested test                                                                         |
+| ------------------------------------ | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Chinese gate patterns                | A regex typo silently breaks Chinese recall detection                           | Feed each Chinese pattern a matching and non-matching prompt; assert `mode`            |
+| Non-English gate                     | Unknown false-negative rate for unsupported languages                           | Run gate on a fixed multilingual prompt set and report the mode distribution           |
+| `searchContext` graph expansion      | Related-node results may duplicate, miss, or incorrectly score                  | Insert two related nodes with known memories; assert result set after `searchContext`  |
+| `deriveMemory` with missing source   | Error handling for deleted/absent source memories                               | Attempt derivation with a nonexistent source ID; assert error message                  |
+| `mergeNodes` redirect integrity      | Redirect chains longer than 1 hop may not resolve correctly                     | Merge A→B, then B→C; assert `upsertNode("A")` returns C                                |
+| `splitNode` partition validation     | Edge cases in the "must assign every memory exactly once" check                 | Split with overlapping partitions, missing IDs, and extra IDs; assert each is rejected |
+| `Float32VectorCache` capacity growth | Geometric growth may allocate more than needed at very small initial capacities | Upsert more items than initial capacity; assert no error and correct scores            |
 
 **Approach:** Add these as focused `node:test` cases. They are deterministic
 and fast; no model or Pi process needed.
@@ -309,18 +309,18 @@ Pending non-identity links and splits still require explicit review.
 
 ## Summary
 
-| # | Area | Severity | Effort |
-|---|---|---|---|
-| 1 | Store file decomposition | Resolved | Reopen on measured maintenance cost |
-| 2 | Coarse cache invalidation | Resolved | Reopen on measured rebuild cost |
-| 3 | Router promotion | Open, gated | Natural matched evidence |
-| 4 | Physical privacy erasure | Deferred product work | High |
-| 5 | Regex-only gate calibration | Open | Measured multilingual set |
-| 6 | Natural/integration coverage | Open | Ongoing |
-| 7 | ANN recall quality | Deferred | Recall/latency crossover |
-| 8 | Concurrency model | Resolved | Reopen on measured contention |
-| 9 | Upstream Pi schema negotiation | Partial | Upstream contract dependent |
-| 10 | Topology auto-acceptance promotion | Open, gated | Natural-data gate |
+| #   | Area                               | Severity              | Effort                              |
+| --- | ---------------------------------- | --------------------- | ----------------------------------- |
+| 1   | Store file decomposition           | Resolved              | Reopen on measured maintenance cost |
+| 2   | Coarse cache invalidation          | Resolved              | Reopen on measured rebuild cost     |
+| 3   | Router promotion                   | Open, gated           | Natural matched evidence            |
+| 4   | Physical privacy erasure           | Deferred product work | High                                |
+| 5   | Regex-only gate calibration        | Open                  | Measured multilingual set           |
+| 6   | Natural/integration coverage       | Open                  | Ongoing                             |
+| 7   | ANN recall quality                 | Deferred              | Recall/latency crossover            |
+| 8   | Concurrency model                  | Resolved              | Reopen on measured contention       |
+| 9   | Upstream Pi schema negotiation     | Partial               | Upstream contract dependent         |
+| 10  | Topology auto-acceptance promotion | Open, gated           | Natural-data gate                   |
 
 None of the open items blocks the current opt-in prototype. The next actionable
 work is evidence collection for controller/topology promotion and measured gate

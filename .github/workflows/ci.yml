@@ -32,6 +32,8 @@ jobs:
         run: |
           corepack enable
           pnpm --version
+      - name: Every test suite is run by a CI job, or acknowledged
+        run: npm run ci:uncovered-tests
       - name: Shared static verification contract
         run: npm run verify:static
       - name: Dependency audit
@@ -53,9 +55,13 @@ jobs:
 
   research-tests:
     name: Research characterization (non-blocking)
+    # Deliberately not aggregated by `all-checks-passed`, so a failure here never blocks a merge.
+    # It used to also carry `continue-on-error`, which made the job look green whatever happened:
+    # a track that cannot be told apart from "never ran" is the failure mode this repository
+    # forbids. Non-blocking is a branch-protection property, so the job now reports its real
+    # result (a visible red check on the pull request) while the required aggregate stays green.
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6

@@ -27,6 +27,7 @@ import {
   type DaemonConnection,
 } from "../../../src/cli/daemon-client.ts";
 import { resolveNmgDataDir } from "../../../src/cli/data-path.ts";
+import { describeStart, shortRound, startRound, type OooRoundAction } from "./ooo-round.ts";
 import {
   archiveOrStage,
   archiveNodeName,
@@ -1025,6 +1026,51 @@ export default function nmgExtension(pi: ExtensionAPI): void {
         input: params.input,
       });
       return toolResult(result, JSON.stringify(result, null, 2));
+    },
+  });
+
+  // The restricted out-of-order round, registered by default like the other NMG tools: a
+  // consumer that has to be switched on is not one. The cost boundary is per call: `live` spends
+  // tokens, while the default replays recorded answers and spends nothing.
+  pi.registerTool({
+    name: "ooo_round",
+    label: "Restricted OoO round",
+    description:
+      "Drive one restricted out-of-order round. " +
+      "action=submit starts the round detached from a spec JSON and returns immediately (a live " +
+      "round takes minutes and spends tokens); action=status reads the round's own run directory " +
+      "from another process; action=cancel records an operator decision that survives a restart. " +
+      "The coordinator, not this tool, decides acceptance.",
+    parameters: Type.Object({
+      action: Type.Union([Type.Literal("submit"), Type.Literal("status"), Type.Literal("cancel")]),
+      specPath: Type.Optional(
+        Type.String({ description: "submit only: path to the round spec JSON" }),
+      ),
+      runDir: Type.Optional(
+        Type.String({ description: "the round's own directory; required for every action" }),
+      ),
+      reason: Type.Optional(Type.String({ description: "cancel only: why the round was stopped" })),
+      live: Type.Optional(
+        Type.Boolean({
+          description:
+            "submit only: use real model calls (costs tokens); absent means recorded answers",
+        }),
+      ),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      const request = {
+        action: params.action as OooRoundAction,
+        specPath: params.specPath,
+        runDir: params.runDir,
+        reason: params.reason,
+        live: params.live,
+      };
+      if (request.action === "submit") {
+        const started = startRound(projectDirectory(), request);
+        return toolResult(started, describeStart(request, started));
+      }
+      const reply = await shortRound(projectDirectory(), request);
+      return toolResult(reply, `round ${reply.action}: exit ${reply.code}\n${reply.output}`);
     },
   });
 

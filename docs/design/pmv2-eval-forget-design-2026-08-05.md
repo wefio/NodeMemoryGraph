@@ -21,12 +21,12 @@ npm run benchmark:omni -- personamem-v2
 早期原型 `run-pmv2-quick.sh` 曾通过临时截断 CSV 固化以下基础设施坑；
 它已被统一 runner 淘汰，以下内容只保留为历史问题记录：
 
-| 坑 | 现象 | 修复 |
-|---|---|---|
-| GBK 控制台崩溃 | rich 进度条 `•` 触发 UnicodeEncodeError，200/200 后崩 | `export PYTHONUTF8=1 PYTHONIOENCODING=utf-8`（**必须在 python 启动前**——env 文件里设太晚，解释器已启动） |
-| 全量误跑 | 非流式模式 `--end-idx` 不生效 → 跑全部 47 万行/5000 问 | 截断 `benchmark.csv`（**按问题切分**——每问跨 ~94 行 JSON 引号字段，必须用 Python csv 库；`head -N` 会切断 JSON 导致 Loaded 0/1）`trap` 保证退出/中断时恢复） |
-| WinError 5（os.replace） | `atomic_json_dump` 的 `os.replace` 被 Defender/索引器短暂锁住（实测 3200 次并发 ~0.4% 概率） | 失败自动重跑（计算 ~1 分钟/次，重跑比修锁便宜；脚本自带 checkpoint resume 兜底） |
-| 缺 `--lib` 参数 | `Error: --lib is required in normal mode` | 显式 `--lib nmg`（默认 version 变为 `nmg-omnimemeval_<date>`） |
+| 坑                       | 现象                                                                                         | 修复                                                                                                                                                         |
+| ------------------------ | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GBK 控制台崩溃           | rich 进度条 `•` 触发 UnicodeEncodeError，200/200 后崩                                        | `export PYTHONUTF8=1 PYTHONIOENCODING=utf-8`（**必须在 python 启动前**——env 文件里设太晚，解释器已启动）                                                     |
+| 全量误跑                 | 非流式模式 `--end-idx` 不生效 → 跑全部 47 万行/5000 问                                       | 截断 `benchmark.csv`（**按问题切分**——每问跨 ~94 行 JSON 引号字段，必须用 Python csv 库；`head -N` 会切断 JSON 导致 Loaded 0/1）`trap` 保证退出/中断时恢复） |
+| WinError 5（os.replace） | `atomic_json_dump` 的 `os.replace` 被 Defender/索引器短暂锁住（实测 3200 次并发 ~0.4% 概率） | 失败自动重跑（计算 ~1 分钟/次，重跑比修锁便宜；脚本自带 checkpoint resume 兜底）                                                                             |
+| 缺 `--lib` 参数          | `Error: --lib is required in normal mode`                                                    | 显式 `--lib nmg`（默认 version 变为 `nmg-omnimemeval_<date>`）                                                                                               |
 
 ### 关键事实
 
@@ -69,11 +69,11 @@ preview=[forget] (content withdrawn)
 
 ### 验证结论（pmv2 60 问，三次独立 run）
 
-| 渲染 | run | ask_to_forget 泄漏（连续短语重叠法） | 总体 acc |
-|---|---|---|---|
-| 原文 + 标记 | 155659 | 4/11 | 0.300 |
-| 脱敏（content withdrawn） | 165251 | 4/11 | 0.267 |
-| 元数据 + 脱敏（定案） | omnimemeval_20260805 | **0/11** | 0.317 |
+| 渲染                      | run                  | ask_to_forget 泄漏（连续短语重叠法） | 总体 acc |
+| ------------------------- | -------------------- | ------------------------------------ | -------- |
+| 原文 + 标记               | 155659               | 4/11                                 | 0.300    |
+| 脱敏（content withdrawn） | 165251               | 4/11                                 | 0.267    |
+| 元数据 + 脱敏（定案）     | omnimemeval_20260805 | **0/11**                             | 0.317    |
 
 - **输入层脱敏确认生效**：脱敏 run 11/11 条 context 无原文（全部 `[forget] (content withdrawn)`）。
 - **但泄漏指标不可靠（0-4/11 波动）+ 与渲染无关**：

@@ -13,34 +13,34 @@ deliberately closed.
 ## 1. Implement the session Active Graph runtime
 
 - [x] Introduce a bounded memory-resident, session-owned AG registry with
-  deterministic cleanup and immutable projection revisions.
+      deterministic cleanup and immutable projection revisions.
 - [x] Separate `agId`, `taskFrameId`, `projectionId`, retrieval `traceIds`, and
-  `boardChannelId`; route disclosure, attribution and claim outcomes through the
-  projection-to-trace registry.
+      `boardChannelId`; route disclosure, attribution and claim outcomes through the
+      projection-to-trace registry.
 - [x] Add explicit branch ownership, bounded task-frame cooling/task return, and
-  one runtime item/character budget across semantic/tool/reasoning items.
+      one runtime item/character budget across semantic/tool/reasoning items.
 - [x] Represent semantic references, tool observations, and hypothetical
-  reasoning artifacts as typed AG items with provenance and TTL.
+      reasoning artifacts as typed AG items with provenance and TTL.
 - [ ] Replace query-derived frame IDs with a validated automatic semantic
-  task-frame classifier, including false-switch behavior.
+      task-frame classifier, including false-switch behavior.
 - [ ] Unify retrieval's multidimensional token/node/edge ledger with runtime
-  observation/reasoning admission; the current runtime item/character cap is not
-  yet the full design-wide budget `B`.
+      observation/reasoning admission; the current runtime item/character cap is not
+      yet the full design-wide budget `B`.
 - [x] Replace Pi `SessionRuntimeAg` with thin tool/Task Board event ingestion to
-  the daemon-owned AG; all daemon search consumers receive projection revisions.
+      the daemon-owned AG; all daemon search consumers receive projection revisions.
 - [x] Move Pi, DSH, WorkBuddy and MCP disclosure windows into one host-neutral,
-  bounded AG ledger; clear it on compaction and release it with the session.
+      bounded AG ledger; clear it on compaction and release it with the session.
 - [x] Isolate HA fast state by session and clear it on session release.
 - [ ] Use HA for admission, cooling,
-  task return, redundancy-aware retention, and budget proposals without
-  changing semantic confidence.
+      task return, redundancy-aware retention, and budget proposals without
+      changing semantic confidence.
 - [x] Require explicitly enabled MGR to consume a session-owned bounded AG
-  projection and label its result non-persistent/hypothetical.
+      projection and label its result non-persistent/hypothetical.
 - [ ] Materialize MGR derivations as provenance-carrying TTL AG artifacts and
-  add the optional HA rescore loop; never auto-write them to STG/LTG.
+      add the optional HA rescore loop; never auto-write them to STG/LTG.
 - [ ] Add behavior tests for task continuation, A→B, A→B→A, shared constraints,
-  false switches, compaction, projection replay, concurrent branches, budget
-  exhaustion, and session cleanup.
+      false switches, compaction, projection replay, concurrent branches, budget
+      exhaustion, and session cleanup.
 
 **Available mechanism:** current query-scoped AG budgets and ledgers,
 retrieval/disclosure traces, Pi runtime tool capture, HA, MGR, controller hard
@@ -59,11 +59,11 @@ MGR can be enabled independently without bypassing provenance or hard budgets.
 ## 2. Collect trustworthy verified-evidence supervision
 
 - [ ] Accumulate materially independent Pi+NMG tasks with retrieval, exact
-  `get` disclosure, expansion depth, user/tool-verified evidence,
-  outcome/correction, injected tokens, tool rounds, and end-to-end latency.
+      `get` disclosure, expansion depth, user/tool-verified evidence,
+      outcome/correction, injected tokens, tool rounds, and end-to-end latency.
 - [ ] Label evidence sufficiency, expansion usefulness, excessive noise, and
-  no-memory-needed separately. Silence or an uncorrected answer remains
-  `unknown`, not success.
+      no-memory-needed separately. Silence or an uncorrected answer remains
+      `unknown`, not success.
 
 **Available mechanism:** session ownership, provenance, chronological task
 splits, disclosure capture, claim outcomes, compact readiness reports, and the
@@ -83,16 +83,16 @@ below without relying on controlled or API-only diagnostics.
 ## 3. Calibrate retrieval and the differentiable controller
 
 - [ ] Compare the frozen heuristic with a frozen shadow candidate on semantic
-  task and time splits; persist feature version, data window, effective
-  configuration, metrics, candidate identity, and rollback target.
+      task and time splits; persist feature version, data window, effective
+      configuration, metrics, candidate identity, and rollback target.
 - [ ] Add distinct next-tier and search-recommendation labels only when natural
-  traces reliably distinguish them from generic expansion.
+      traces reliably distinguish them from generic expansion.
 - [ ] Optimize evidence/answer sufficiency together with explicit token,
-  tool-call, depth, and latency costs. Keep hard safety and budget limits outside
-  the differentiable graph.
+      tool-call, depth, and latency costs. Keep hard safety and budget limits outside
+      the differentiable graph.
 - [ ] Promote only low-risk decisions after a matched natural evaluation. Do not
-  add contextual-bandit or long-horizon-RL machinery without logged propensities
-  or a demonstrated sequential credit-assignment problem.
+      add contextual-bandit or long-horizon-RL machinery without logged propensities
+      or a demonstrated sequential credit-assignment problem.
 
 **Available mechanism:** QPP1, QPP2, search recommendation, a framework-free
 autodiff controller, frozen candidates, typed actuation telemetry, chronological
@@ -111,10 +111,10 @@ tool-round, depth, latency, and rollback gates.
 ## 4. Validate unattended memory maintenance
 
 - [ ] Measure STG-to-LTG consolidation precision and reversibility on natural
-  outcomes before enabling unattended promotion by default.
+      outcomes before enabling unattended promotion by default.
 - [ ] Evaluate automatic node-merge proposals on natural data, including false
-  merges, scope conflicts, aliases, temporal identity, source-actor identity,
-  `distinct_from`/`contradicts` evidence, and rollback.
+      merges, scope conflicts, aliases, temporal identity, source-actor identity,
+      `distinct_from`/`contradicts` evidence, and rollback.
 
 **Available mechanism:** deterministic consolidation and identity gates,
 provenance-aware claim outcomes, reversible transforms, read-only maintenance
@@ -131,10 +131,10 @@ rollback with acceptable precision and recovery cost.
 ## 5. Remove the per-client OmniMemEval bridge process
 
 - [ ] Move the official-adapter transport to one runner-owned NMG daemon while
-  keeping corpus mapping, judge metadata, forget semantics, and benchmark
-  rendering in the adapter rather than adding benchmark RPCs to Core.
+      keeping corpus mapping, judge metadata, forget semantics, and benchmark
+      rendering in the adapter rather than adding benchmark RPCs to Core.
 - [ ] Define and test benchmark namespace cleanup over the generic scope/store
-  lifecycle before deleting the NDJSON bridge compatibility path.
+      lifecycle before deleting the NDJSON bridge compatibility path.
 
 **Available mechanism:** the daemon already exposes generic JSON-RPC over HTTP;
 the Python `NmgClient` owns the official benchmark API; Core already supports
@@ -163,39 +163,39 @@ back to lexical while the operator believed embedding was on
 did build 96 vectors on 2026-09-01 and then never ran again.
 
 - [x] Trigger a bounded embedding drain on every remember/search (no
-  writeThreshold/accessThreshold batching): each operation tops up one small
-  batch of missing vectors in the background, so low-activity stores still
-  converge and a 429 just queues the rest for the next operation.
-  (`syncEmbeddingTarget` `maxBatches`, `#drainEmbeddings` fires on every
-  `#signalMaintenance` from remember/search with `{ maxBatches: 1 }`.)
-- [x] Treat provider rate-limit / transient failures as *pause, not fail*: a
-  429/5xx must not set the whole index to `failed` (which permanently disables
-  hybrid until a full rebuild); record `last_failed_at` + reason and resume on
-  the next drain. Only persistent (non-rate-limit) failure degrades.
-  (Search now serves hybrid from a *partial* index — `LEFT JOIN` keeps lexical
-  results while indexed records get the vector lift — so a failed/429'd index
-  is never a dead end; the drain retries on later operations. Provider
-  failures additionally start a 30s cooldown so a down provider cannot hang
-  every query; search reports `degraded: true` with the reason.)
+      writeThreshold/accessThreshold batching): each operation tops up one small
+      batch of missing vectors in the background, so low-activity stores still
+      converge and a 429 just queues the rest for the next operation.
+      (`syncEmbeddingTarget` `maxBatches`, `#drainEmbeddings` fires on every
+      `#signalMaintenance` from remember/search with `{ maxBatches: 1 }`.)
+- [x] Treat provider rate-limit / transient failures as _pause, not fail_: a
+      429/5xx must not set the whole index to `failed` (which permanently disables
+      hybrid until a full rebuild); record `last_failed_at` + reason and resume on
+      the next drain. Only persistent (non-rate-limit) failure degrades.
+      (Search now serves hybrid from a _partial_ index — `LEFT JOIN` keeps lexical
+      results while indexed records get the vector lift — so a failed/429'd index
+      is never a dead end; the drain retries on later operations. Provider
+      failures additionally start a 30s cooldown so a down provider cannot hang
+      every query; search reports `degraded: true` with the reason.)
 - [x] Retrieve with a local-hashing degrade when no external vector exists —
-  **evaluated and closed: not doing.** The current fallback degrades to plain
-  lexical with `degraded: true` + reason, which is the intended end state. A
-  local-hashing blend was measured and rejected: on the real store, 256-d
-  `nmg-hashing-v1` blended retrieval is byte-identical to pure lexical
-  (self-recall 45/154 both arms; vector scores ≈ 0), matching the published
-  dimensionality bottleneck for low-dimensional hashing vectors. The known
-  fix — NUMEN-style very high dimensions (16K–32K) that beat BM25 — costs
-  enormous fixed memory per vector, which is not acceptable for a local,
-  SQLite-backed store. Feature-hashing/SimHash are word-level tools
-  (spelling, near-dedup), not semantic retrieval. See the rejected decision
-  record (2026-09-03-hashing-vector-retrieval-fallback).
+      **evaluated and closed: not doing.** The current fallback degrades to plain
+      lexical with `degraded: true` + reason, which is the intended end state. A
+      local-hashing blend was measured and rejected: on the real store, 256-d
+      `nmg-hashing-v1` blended retrieval is byte-identical to pure lexical
+      (self-recall 45/154 both arms; vector scores ≈ 0), matching the published
+      dimensionality bottleneck for low-dimensional hashing vectors. The known
+      fix — NUMEN-style very high dimensions (16K–32K) that beat BM25 — costs
+      enormous fixed memory per vector, which is not acceptable for a local,
+      SQLite-backed store. Feature-hashing/SimHash are word-level tools
+      (spelling, near-dedup), not semantic retrieval. See the rejected decision
+      record (2026-09-03-hashing-vector-retrieval-fallback).
 - [x] Drop the `NMG_EMBED_AUTO_SYNC` gate: presence of a configured provider
-  (+key) implies auto-sync. Keep the env as an explicit *disable* switch.
+      (+key) implies auto-sync. Keep the env as an explicit _disable_ switch.
 - [x] Persist embedding configuration at the deployment layer (User-level env /
-  documented daemon launch) so a restart keeps provider + key; document this in
-  the owning guide/ADR rather than inventing a new config-file mechanism.
-  (User env set 2026-09-03; daemon restart keeps `provider: gemini` +
-  `indexId` ready.)
+      documented daemon launch) so a restart keeps provider + key; document this in
+      the owning guide/ADR rather than inventing a new config-file mechanism.
+      (User env set 2026-09-03; daemon restart keeps `provider: gemini` +
+      `indexId` ready.)
 
 **Available mechanism:** write and access paths already `signalMaintenance`
 (`src/cli/service.ts` #remember/#search); `#drainEmbeddings` already runs
@@ -212,7 +212,7 @@ the index `failed` and there is no pause-and-resume; and without the env the
 configured provider silently disappears on daemon restart (operator's real
 incident). Industry practice confirms the direction: async post-write
 embedding with background queue and automatic semantic-search upgrade
-(mcp-memory-ts), and a provider lifecycle that degrades only on *persistent*
+(mcp-memory-ts), and a provider lifecycle that degrades only on _persistent_
 failure with an unavailable-reason + fallback path (openclaw #94240/#101272).
 
 **Done when:** with a configured provider, a fresh `remember` produces a
@@ -232,14 +232,14 @@ this ticket scopes the candidate
 design: [simhash-lexical-complement-design.md](simhash-lexical-complement-design.md).
 
 - [ ] Evaluate whether `statementSimilarity` (word-set Jaccard) misses
-  near-duplicates whose spelling or word form differs ("embedding" vs
-  "embeddings", typos), and whether a stored 64-bit SimHash fingerprint
-  (Hamming ≤ 3) recalls candidates the Jaccard path cannot.
+      near-duplicates whose spelling or word form differs ("embedding" vs
+      "embeddings", typos), and whether a stored 64-bit SimHash fingerprint
+      (Hamming ≤ 3) recalls candidates the Jaccard path cannot.
 - [ ] Decide where it plugs in: supersede / near-dup candidate recall on the
-  write path — NOT search ranking, NOT the rejected semantic-retrieval blend.
+      write path — NOT search ranking, NOT the rejected semantic-retrieval blend.
 - [ ] If adopted, keep the store small and offline: one integer column per
-  memory, in-memory index under ~KB per thousand entries, no external
-  dependency.
+      memory, in-memory index under ~KB per thousand entries, no external
+      dependency.
 
 **Available mechanism:** `statementSimilarity` (word-level Jaccard) exists and
 NMG acts only on exact normalized equality; surface anchors already give

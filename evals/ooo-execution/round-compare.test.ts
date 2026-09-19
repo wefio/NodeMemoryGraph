@@ -2,7 +2,7 @@
 // that make it meaningful — the arms are the same round (quality parity), and the control
 // really does not overlap the wait.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -108,6 +108,25 @@ test(
       !lines.some((line) => /significant|proven|better design/i.test(line)),
       "the report must not claim a result the data does not carry",
     );
+
+    // A reader of the CI transcript gets the measurements, not only the assertions that they
+    // exist: `--test-reporter=tap` then carries both arms' numbers out of the run. When the
+    // on-demand workflow asks for artifact output, the same bytes it asserted on are copied out
+    // of the test's temporary directory, so the uploaded compare.json is not a re-derivation.
+    // The accepted bodies are long and are already in the copied arm logs; a transcript is for
+    // reading, so only the measuring lines are printed.
+    for (const line of lines)
+      if (!line.includes(": accepted ")) console.log(`[ooo-compare] ${line}`);
+    const artifactDirectory = process.env["NMG_OOO_ARTIFACT_DIR"];
+    if (artifactDirectory) {
+      mkdirSync(artifactDirectory, { recursive: true });
+      copyFileSync(join(directory, "compare.json"), join(artifactDirectory, "compare.json"));
+      for (const entry of comparison.arms)
+        copyFileSync(
+          join(directory, `${entry.mode}-${entry.run}`, "round.jsonl"),
+          join(artifactDirectory, `${entry.mode}-${entry.run}.jsonl`),
+        );
+    }
 
     // Every arm keeps its own store, log and record: a failure sample has to be pointable-at.
     for (const entry of comparison.arms) {

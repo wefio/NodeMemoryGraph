@@ -48,6 +48,7 @@ limit：硬上限 = min(调用方原始 limit, expand 后 maxEvidence)，不再 
 ```
 
 修复了三个隐藏问题：
+
 - `requestedInitial` 默认从配置的 initialEvidenceTarget 起（不再是 1）——多证据查询
   一次到位，减少消费者模型追加往返；
 - `limit` 入口被 clamp 到原始 `budget.maxEvidence`（`retrieval.ts:114`）→ hardLimit 改用
@@ -57,6 +58,7 @@ limit：硬上限 = min(调用方原始 limit, expand 后 maxEvidence)，不再 
 ### QPP 信号（`qpp.ts`）
 
 新公式 `C = Top1 + 0.5·NQC`，阈值 `DEFAULT_QPP_THRESHOLD = 0.55`：
+
 - `NQC = stdev(top-k)/mean(top-k)`（clamp [0,1]），衡量 top1 相对其余结果的差距（
   NQC 文献：分数高度离散 = 好查询，对应实验 complete AUC 0.667 最佳信号）；
 - 单个候选时 NQC=0 → C 退化为 top1 绝对锚（单条强命中即够，符合"单条证据就 1 条"）；

@@ -16,6 +16,8 @@ function fixture(): string {
     "docs/README.zh-CN.md": "# 文档\n\n[English](README.md)\n",
     "docs/decisions/README.md": "# Decisions\n\n[中文](README.zh-CN.md)\n",
     "docs/decisions/README.zh-CN.md": "# 决策\n\n[English](README.md)\n",
+    "docs/postmortem/README.md": "# Post-mortems\n\n[中文](README.zh-CN.md)\n",
+    "docs/postmortem/README.zh-CN.md": "# 事故复盘\n\n[English](README.md)\n",
   };
   for (const [name, content] of Object.entries(files)) {
     const path = join(root, name);
@@ -382,6 +384,166 @@ test("a current design and an archived superseded design pass", () => {
     join(root, "docs", "design", "archived", "old-design.md"),
     "# Old\n\n**Status:** superseded\n**Superseded by:** [Live](../live-design.md)\n\n## Body\n",
   );
+  const report = verifyDocumentation(root);
+  assert.deepEqual(report.errors, []);
+});
+
+// A post-mortem's sections are the questions the record must answer, and its
+// number is how the incident is referred to. Both are checked; the failure class
+// in the index is what makes the corpus searchable.
+const postmortemBody =
+  "\n## Executive summary\nOne paragraph.\n\n## Summary\nWhat happened.\n\n## Impact\nWho was affected.\n\n" +
+  "## Timeline\n- The order that produced it.\n\n## Root cause\nThe mechanism.\n\n" +
+  "## Guardrails added\n- [the check](../../README.md)\n\n## Lessons\nWhat transfers.\n";
+
+const postmortemBodyChinese =
+  "\n## 执行摘要\n一段话。\n\n## 事件经过\n发生了什么。\n\n## 影响\n谁受影响。\n\n" +
+  "## 时间线\n- 导致结果的那个顺序。\n\n## 根本原因\n机制。\n\n" +
+  "## 新增防护\n- [检查](../../README.md)\n\n## 经验教训\n可迁移的部分。\n";
+
+function postmortemRecord(status: string): string {
+  return `# Post-mortem 0001: silent restore\n\n**Status:** ${status}\n${postmortemBody}`;
+}
+
+function postmortemIndex(rows: string[]): string {
+  return (
+    "# Post-mortems\n\n[中文](README.zh-CN.md)\n\n## Index\n\n" +
+    "| # | Record | Failure class |\n| --- | --- | --- |\n" +
+    rows.map((row) => `${row}\n`).join("")
+  );
+}
+
+test("post-mortem records enforce a numbered name, an exact status, and sections", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "postmortem");
+  writeFileSync(join(directory, "silent-restore.md"), postmortemRecord("resolved"));
+  writeFileSync(join(directory, "0001-bad-status.md"), postmortemRecord("fixed"));
+  writeFileSync(
+    join(directory, "0002-empty-section.md"),
+    `# Post-mortem 0002: empty\n\n**Status:** resolved\n${postmortemBody.replace(
+      "## Guardrails added\n- [the check](../../README.md)\n",
+      "## Guardrails added\n",
+    )}`,
+  );
+  writeFileSync(
+    join(directory, "0003-no-status.md"),
+    `# Post-mortem 0003: no status\n\n**Owner:** someone\n${postmortemBody}`,
+  );
+  const report = verifyDocumentation(root);
+  assert.ok(report.errors.some((error) => error.includes("is named NNNN-kebab-case.md")));
+  assert.ok(report.errors.some((error) => error.includes("'**Status:**' must be one of")));
+  assert.ok(report.errors.some((error) => error.includes("empty section 'Guardrails added'")));
+  assert.ok(report.errors.some((error) => error.includes("unknown header field '**Owner:**'")));
+  assert.ok(
+    report.errors.some((error) => error.includes("missing required header field '**Status:**'")),
+    "a record without a status line fails",
+  );
+});
+
+test("post-mortem numbering is contiguous from 0001 and unique", () => {
+  const gap = fixture();
+  writeFileSync(join(gap, "docs", "postmortem", "0001-first.md"), postmortemRecord("resolved"));
+  writeFileSync(join(gap, "docs", "postmortem", "0003-third.md"), postmortemRecord("open"));
+  const gapReport = verifyDocumentation(gap);
+  assert.ok(gapReport.errors.some((error) => error.includes("0002 is missing")));
+
+  const duplicate = fixture();
+  writeFileSync(
+    join(duplicate, "docs", "postmortem", "0001-first.md"),
+    postmortemRecord("resolved"),
+  );
+  writeFileSync(
+    join(duplicate, "docs", "postmortem", "0001-second.md"),
+    postmortemRecord("resolved"),
+  );
+  const duplicateReport = verifyDocumentation(duplicate);
+  assert.ok(duplicateReport.errors.some((error) => error.includes("number 0001 is used by")));
+});
+
+test("a record and its translation are one record, not two names and not a naming error", () => {
+  // The naming rule asks for `NNNN-slug.md`; the bilingual contract asks for a
+  // `NNNN-slug.zh-CN.md` beside it. The first version of the rule rejected the second —
+  // the one file the policy tells an author to write failed as misnamed, so no record in
+  // this tier could carry the translation the tier's own README asks for. Numbering and
+  // the index still count the English name, so a pair is one record and one row.
+  const root = fixture();
+  const directory = join(root, "docs", "postmortem");
+  writeFileSync(
+    join(directory, "0001-silent-restore.md"),
+    `# Post-mortem 0001: silent restore\n\n**Status:** resolved\n\n[中文](0001-silent-restore.zh-CN.md)\n${postmortemBody}`,
+  );
+  writeFileSync(
+    join(directory, "0001-silent-restore.zh-CN.md"),
+    `# 事故复盘 0001：静默恢复\n\n**Status:** resolved\n\n[English](0001-silent-restore.md)\n${postmortemBodyChinese}`,
+  );
+  writeFileSync(
+    join(directory, "README.md"),
+    postmortemIndex(["| [0001](0001-silent-restore.md) | silent restore | silent degradation |"]),
+  );
+  const report = verifyDocumentation(root);
+  assert.deepEqual(report.errors, []);
+});
+
+test("a translation still has to carry the record's header and sections", () => {
+  // Exempting the translation from the naming rule must not exempt it from the record
+  // contract it mirrors, or `docs/postmortem/` would accumulate Chinese files whose
+  // English originals are complete and whose translations are not.
+  const root = fixture();
+  const directory = join(root, "docs", "postmortem");
+  writeFileSync(
+    join(directory, "0001-silent-restore.zh-CN.md"),
+    `# 事故复盘 0001：静默恢复\n\n[English](0001-silent-restore.md)\n${postmortemBodyChinese.replace(
+      "## 新增防护\n- [检查](../../README.md)\n",
+      "## 新增防护\n",
+    )}`,
+  );
+  const report = verifyDocumentation(root);
+  assert.ok(
+    report.errors.some((error) =>
+      error.includes("0001-silent-restore.zh-CN.md: missing required header field '**Status:**'"),
+    ),
+  );
+  assert.ok(
+    report.errors.some((error) =>
+      error.includes("0001-silent-restore.zh-CN.md: empty section 'Guardrails added'"),
+    ),
+  );
+});
+
+test("a translated header field is reported as the unknown field it is", () => {
+  // `**状态：**` on a full-width colon slipped past the field scan entirely, so the author
+  // was told the English field was missing: true, but it hides the actual mistake, and the
+  // mistake is the one a translator is most likely to make.
+  const root = fixture();
+  const directory = join(root, "docs", "postmortem");
+  writeFileSync(
+    join(directory, "0001-silent-restore.zh-CN.md"),
+    `# 事故复盘 0001：静默恢复\n\n**状态：** open\n\n[English](0001-silent-restore.md)\n${postmortemBodyChinese}`,
+  );
+  const report = verifyDocumentation(root);
+  assert.ok(report.errors.some((error) => error.includes("unknown header field '**状态:**'")));
+  assert.ok(
+    report.errors.some((error) =>
+      error.includes("the field name and its colon stay English in a translation"),
+    ),
+  );
+});
+
+test("the post-mortem index lists every record exactly once", () => {
+  const root = fixture();
+  const directory = join(root, "docs", "postmortem");
+  writeFileSync(join(directory, "0001-silent-restore.md"), postmortemRecord("resolved"));
+
+  writeFileSync(join(directory, "README.md"), postmortemIndex([]));
+  const missing = verifyDocumentation(root);
+  assert.ok(missing.errors.some((error) => error.includes("is not listed in the index")));
+
+  const row = "| [0001](0001-silent-restore.md) | silent restore | silent degradation |";
+  writeFileSync(join(directory, "README.md"), postmortemIndex([row, row]));
+  const duplicated = verifyDocumentation(root);
+  assert.ok(duplicated.errors.some((error) => error.includes("is listed 2 times")));
+
+  writeFileSync(join(directory, "README.md"), postmortemIndex([row]));
   const report = verifyDocumentation(root);
   assert.deepEqual(report.errors, []);
 });

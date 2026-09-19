@@ -3,6 +3,10 @@
 NMG is an Agent-native, local-first memory system. This file is only the stable
 bootstrap; it does not duplicate the repository's changing design or status.
 
+Do not place necessary files in cache folders, including TEMP and tmp.
+Please follow Git best practices when using Git.
+It is essential to write code that is readable, maintainable, and extensible. You can employ appropriate design patterns to achieve this, but avoid using patterns simply for the sake of using them. If a problem can be solved with a simple `if-else` statement, there is no need to implement a combination of Strategy, Factory, and Chain of Responsibility patterns. Cramming too many patterns into a single class often results in over-engineering.
+
 Before modifying the repository, follow `skills/repo-development/SKILL.md`:
 
 1. Run `npm run agent:context -- <target-path>`. Positional paths select routes

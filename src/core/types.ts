@@ -497,6 +497,21 @@ export type RetrievalMode = (typeof RETRIEVAL_MODES)[number];
 export const VECTOR_GRANULARITIES = ["hierarchy", "records", "union"] as const;
 export type VectorGranularity = (typeof VECTOR_GRANULARITIES)[number];
 
+/** A learned relevance scorer (weights + normalisation). Kept structural so
+ *  core never depends on the lab model implementation. */
+export interface RelevanceModelLike {
+  predict(features: readonly number[]): number;
+  /** Embedder identity the head's absolute scores came from, when it declares one. */
+  readonly embedder?: string;
+  /**
+   * May the runtime's embedder feed this head? A head that does not read the
+   * scale-bound feature block is embedder-free and accepts anything; one that
+   * does must match the identity it was trained on. Optional so a minimal test
+   * double stays valid. Omitted = treated as embedder-free.
+   */
+  acceptsEmbedder?(identity: string): boolean;
+}
+
 export interface SearchOptions {
   /** Harness session that owns the resulting Active Graph and retrieval trace. */
   sessionId?: string;
@@ -511,6 +526,23 @@ export interface SearchOptions {
   includeHistorical?: boolean;
   maxTier?: MemoryTier;
   limit?: number;
+  /** Program-side relevance gate floor in [0, 1]. When set, results whose
+   *  bounded relevance is below the floor drop out before disclosure, so a
+   *  recall may return fewer — or zero — results (k is a maximum, not a target).
+   *  Omit for the ungated path. See
+   *  docs/decisions/implemented/2026-09-09-retrieval-relevance-gate.md. */
+  relevanceFloor?: number;
+  /** Per-query relative floor in σ above the query's own mean
+   *  (`NMG_RELEVANCE_MIN_Z`). Optional; scale-free. */
+  relevanceMinZ?: number;
+  /** Flat-list abstain level (`NMG_RELEVANCE_MAX_CV`). Optional; a candidate
+   *  list flatter than this injects nothing. */
+  relevanceMaxCv?: number;
+  /** Learned model gate (in-process; `NMG_RELEVANCE_MODEL`). When set it is
+   *  ANDed after the program gate. */
+  relevanceModel?: RelevanceModelLike;
+  /** Loose probability floor for the model gate; default 0.5. */
+  relevanceModelFloor?: number;
   graphHops?: number;
   retrievalMode?: RetrievalMode;
   /** Post-retrieval chain expansion: when a ranked result is a member of a
@@ -1117,6 +1149,13 @@ export const TASK_BOARD_KINDS = [
 export type TaskBoardKind = (typeof TASK_BOARD_KINDS)[number];
 export type TaskBoardStatus = "open" | "resolved";
 
+/** Independent verdict on a delivered artifact (board-governance P1 slice).
+ * `undecidable` is a first-class outcome and is never collapsed into
+ * `rejected`: "could not measure" and "measured and failed" are different
+ * facts, and only `accepted` is what a dependent may rely on. */
+export const TASK_BOARD_VERDICTS = ["accepted", "rejected", "undecidable"] as const;
+export type TaskBoardVerdict = (typeof TASK_BOARD_VERDICTS)[number];
+
 /** Temporary, task-scoped coordination state. It is never an LTG memory. */
 export interface TaskBoardEntry {
   /** Opaque time-sortable stable identity. The id is derived from the
@@ -1141,6 +1180,30 @@ export interface TaskBoardEntry {
   vetoedBy: string | null;
   vetoedAt: string | null;
   vetoReason: string | null;
+  /** Attempt counter. A claim that does not renew a live claim by the same
+   * agent starts attempt N+1 and fences the previous attempt's deliverable and
+   * verdict, so a stale artifact can never be read as the current one. */
+  attempt: number;
+  /** Deliverable (P1 slice): the claim holder's artifact for the current
+   * attempt, named by a digest. A re-delivery inside one attempt replaces it
+   * and voids any verdict about the previous digest. */
+  deliveredBy: string | null;
+  deliveredAt: string | null;
+  deliverableDigest: string | null;
+  /** Where the artifact can be read (a path or reference, not the bytes: the
+   * board stays a light coordination medium and the digest is the identity). */
+  deliverableRef: string | null;
+  deliverableSummary: string | null;
+  /** Independent verdict. Acceptance is a protocol invariant, not a convention:
+   * the deliverer can never judge its own deliverable, and `judgedDigest` names
+   * the artifact the verdict is about (a verdict cannot be inherited by a
+   * different artifact). Independent of the self-report lifecycle: `resolve`
+   * stays self-reported, the veto stays a contest of that resolve. */
+  judgedBy: string | null;
+  judgedAt: string | null;
+  verdict: TaskBoardVerdict | null;
+  verdictReason: string | null;
+  judgedDigest: string | null;
   /** Lease-based claim: the agent working this entry. A claim is live while
    * claimedBy is set and claimExpiresAt is in the future. */
   claimedBy: string | null;
