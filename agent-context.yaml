@@ -175,3 +175,50 @@ routes:
     verify:
       blocking: [check, test:product, build, package:check]
       advisory: []
+
+  # The integration layer is split by owner document, not by directory: the Agent Surface
+  # presents, and the OoO/task files orchestrate. Both list files because `matches()` in
+  # tools/repo-context.ts reads the first `*` as a directory prefix, so only `dir/**` and exact
+  # paths match - `src/integration/ooo-*.ts` would match nothing and stay silently unrouted.
+  - id: agent-surface
+    paths:
+      - src/integration/agent-surface.ts
+      - src/integration/chain-projection.ts
+      - src/integration/config.ts
+      - src/integration/controller-channel.ts
+      - src/integration/evidence.ts
+      - src/integration/lab-capabilities.ts
+      - src/integration/reasoning-workspaces.ts
+      - src/integration/search-projection.ts
+      - src/integration/search.ts
+      - src/integration/tool-contract.ts
+    owners:
+      - docs/design/design.md
+    tests: [tests/integration/agent-surface.test.ts, tests/integration/chain-projection.test.ts, tests/integration/config.test.ts, tests/integration/controller-channel.test.ts, tests/integration/evidence.test.ts, tests/integration/lab-capabilities.test.ts, tests/integration/tool-contract.test.ts]
+    verify:
+      blocking: [check, test:product, build]
+      advisory: []
+
+  - id: ooo-execution
+    paths:
+      - src/integration/ooo-board.ts
+      - src/integration/ooo-candidate.ts
+      - src/integration/ooo-execution.ts
+      - src/integration/ooo-fusion-plan.ts
+      - src/integration/ooo-mutation.ts
+      - src/integration/ooo-patch.ts
+      - src/integration/check-ticket.ts
+      - src/integration/check-runner.ts
+      - src/integration/task-advisers.ts
+      - src/integration/task-coordinator.ts
+      - src/integration/task-semantics-interleavings.ts
+      - src/integration/task-semantics-model.ts
+      - src/integration/task-semantics.ts
+    owners:
+      - docs/design/ooo-execution-bootstrap.md
+      - docs/design/task-unit-semantics.md
+      - docs/design/ooo-fusion-planning.md
+    tests: [tests/integration/ooo-*.test.ts, tests/integration/task-semantics*.test.ts]
+    verify:
+      blocking: [check, test:product, build]
+      advisory: []

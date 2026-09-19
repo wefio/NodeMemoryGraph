@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { parse as parseYaml } from "yaml";
 
 import {
   collectAgentContext,
@@ -497,5 +498,49 @@ test("manual scope survives unavailable Git and reports the inspection failure",
   assert.deepEqual(
     report.routes.map((route) => route.id),
     ["store"],
+  );
+});
+
+/** The integration layer is split across two routes by owner document, so its files are claimed
+ *  one by one: `matches()` reads the first `*` in a pattern as a directory prefix, so a mid-name
+ *  pattern such as `src/integration/ooo-*.ts` selects nothing. A list rots silently - a new file
+ *  would belong to no route and nothing would complain - so this keeps the declaration exactly as
+ *  wide as the directory, and names the files that are knowingly left unrouted. */
+const INTEGRATION_FILES_WITHOUT_A_ROUTE = [
+  "leaf-summarizer.ts",
+  "node-summarizer.ts",
+  "summary-drain.ts",
+  "openai-completion.ts",
+];
+
+test("the integration layer's routes claim exactly its files", () => {
+  const root = fileURLToPath(new URL("../../", import.meta.url));
+  const config = parseYaml(readFileSync(join(root, "agent-context.yaml"), "utf8")) as {
+    routes: { id: string; paths: string[] }[];
+  };
+  const claimingRoutes = new Map<string, string[]>();
+  for (const route of config.routes) {
+    for (const path of route.paths) {
+      if (!path.startsWith("src/integration/")) continue;
+      claimingRoutes.set(path, [...(claimingRoutes.get(path) ?? []), route.id]);
+    }
+  }
+  const files = readdirSync(join(root, "src/integration"))
+    .filter((name) => name.endsWith(".ts"))
+    .map((name) => `src/integration/${name}`);
+  const claimedBySeveral = files.filter((file) => (claimingRoutes.get(file)?.length ?? 0) > 1);
+  assert.deepEqual(
+    claimedBySeveral,
+    [],
+    "a file claimed by two routes has two owner documents, which is one home too many",
+  );
+  const declared = [
+    ...files.filter((file) => claimingRoutes.has(file)),
+    ...INTEGRATION_FILES_WITHOUT_A_ROUTE.map((name) => `src/integration/${name}`),
+  ];
+  assert.deepEqual(
+    declared.sort(),
+    files.sort(),
+    "every integration file is either claimed by one route or named as a known gap",
   );
 });
