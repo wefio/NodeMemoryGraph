@@ -162,3 +162,26 @@ export function decideSessionMove(store: NmgStore, boundary: SessionBoundary): S
   });
   return { move, sequence: appended.sequence, recorded: appended.recorded };
 }
+
+/**
+ * A unit's session, as the caller needs it: the key to hold its runner under, and the move that
+ * boundary implies. The caller supplies only what only it can know - which run it is in, which
+ * session it is, and where that session stands - so the board decides the rest the same way in any
+ * harness, and the decision is recorded under this module's kind rather than kept in a map.
+ */
+export interface UnitSessionInput extends SessionBoundary {
+  /** The session identity the caller already holds: its own session, or an entry's source session. */
+  readonly sessionId: string;
+}
+
+/** The key a unit's runner is held under, with the decision that put it there. */
+export interface UnitSession extends SessionDecision {
+  readonly key: string;
+}
+
+/** Open the session this unit belongs to: one key, one recorded move. */
+export function openUnitSession(store: NmgStore, input: UnitSessionInput): UnitSession {
+  const key = sessionKey(input.runId, input.sessionId);
+  const decision = decideSessionMove(store, input);
+  return { key, ...decision };
+}

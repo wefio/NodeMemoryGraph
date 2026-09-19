@@ -15,6 +15,7 @@ import { type DispatchTask, type SessionPlan } from "../../src/integration/ooo-e
 import {
   SESSION_MOVE_FACT,
   decideSessionMove,
+  openUnitSession,
   parseSessionMove,
   recordedSessionMoves,
   recordSessionMove,
@@ -248,4 +249,38 @@ test("the session key is a function of the run and the session, and refuses a mi
   assert.notEqual(sessionKey("run-1", "session-a"), sessionKey("run-1", "session-b"));
   assert.throws(() => sessionKey("", "session-a"), /needs the run/);
   assert.throws(() => sessionKey("run-1", "  "), /needs the session/);
+});
+
+/**
+ * One call for the caller: the key its runner is held under, plus the move that boundary implies,
+ * recorded. The caller knows the run, its own session, and where the session stands; everything
+ * else is the board's, so two harnesses holding the same facts hold the same key.
+ */
+test("opening a unit's session yields its key and records the move that put it there", () => {
+  withStore((store) => {
+    register(store, "run-9");
+    const boundary = {
+      runId: "run-9",
+      plan: linearPlan(),
+      current: "one",
+      size: 1,
+      bound: 2,
+      onOffer: ["two"],
+      taskId: "one",
+      attempt: 1,
+    };
+    const opened = openUnitSession(store, { ...boundary, sessionId: "session-a" });
+    assert.equal(opened.key, sessionKey("run-9", "session-a"));
+    assert.deepEqual(opened.move, { kind: "admit", unit: "two" });
+    assert.equal(opened.recorded, true);
+    // A second caller in the same session asks again: same key, and the first answer stands.
+    const again = openUnitSession(store, { ...boundary, sessionId: "session-a" });
+    assert.equal(again.key, opened.key);
+    assert.equal(again.recorded, false);
+    assert.equal(again.sequence, opened.sequence);
+    // A different session is a different runner, and the log tells them apart by sequence.
+    const other = openUnitSession(store, { ...boundary, sessionId: "session-b" });
+    assert.notEqual(other.key, opened.key);
+    assert.equal(recordedSessionMoves(store, "run-9").length, 2);
+  });
 });
