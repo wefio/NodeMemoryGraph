@@ -47,6 +47,15 @@ repository's rule requires. That nearness is what makes the class dangerous rath
 the same mechanism that produced a false failure would have produced a false **pass**, and a green lane
 read during a mutant window is evidence about a tree that never existed.
 
+Building the guardrail then exposed two more faces of the class, both inside the guardrail itself. First, the
+lock's `live` field was never written on substitution - a multi-hunk edit had failed as a whole and only the
+restore half was reapplied - so a running sweep reported `live: false`, and the field lied in the direction that
+makes a wedge look impossible. Second, a sweep started from inside a `node --test` process inherited
+`NODE_TEST_CONTEXT`, and the nested runner then exited 0 **having run no test at all**: the harness read that as
+"the suite passed" and turned every mutant of that target into a false "not caught". Both were found by
+exercising the guardrail instead of trusting it, which is the only reason they are in this record rather than in
+a later reader's debugging session.
+
 ## Impact
 
 No product behaviour was affected and no verification result was published: the contaminated readings
@@ -61,6 +70,11 @@ The second escape cost more than the first: two named mutants ran against a tree
 mutant, so their verdicts described a baseline that never existed, and one mutant could not be located at
 all. Its cost was paid twice - once by the checks that misread, once by the tests that failed on a file
 nobody had touched.
+
+The refusal has one deliberate exemption: `agent:verify --dry-run`. A dry run reads the route config and the
+change list, not the mutated file, so it cannot report on a mutant - while refusing it made "what would you
+run?" unanswerable exactly when a session needs it, and made two of the verifier's own tests fail while a sweep
+held the tree. A run that records a verdict is the one that must not.
 
 What it could **not** do: mutate the commit. Nothing was staged while the sweep ran, and the sweep
 restores each target byte-identically before moving on (`17 of 17` and `1 of 1` restorations on the runs
@@ -128,6 +142,17 @@ The mechanism is now visible in the tree, and the checks read it:
   edits.
 - A case in `tests/tools/agent-verify.test.ts` fails if the refusal stops firing while a lock is present
   (and passes again once the lock is gone).
+- A fourth reading is pinned by running a real (cheap) sweep and watching it: a substituted mutant must be
+  reported as `live: true`, because a field written only on the restore path is a field that lies. The lock root
+  also reads `MUTATION_LOCK_ROOT` in *every* helper rather than in some of them, so a test can point a sweep at
+  its own directory instead of writing into the tree under test.
+- The integration case that watches a sweep waits for it to finish instead of killing it, and then asserts
+  that the run reported `restoredByteIdentically` and left no hazard: its first version killed the child in a
+  `finally`, and that killed sweep left its mutant in `src/core/store/clock.ts` - in the very tree the test was
+  running in. A guardrail that creates the failure it guards against is worse than none, because it arrives with
+  a green check.
+- The harness strips `NODE_TEST_CONTEXT` before running a suite, so a sweep started inside a `node --test`
+  process runs the suites it claims to run.
 - `tests/tools/mutation-lock.test.ts` pins the three readings of a lock: a live owner is a running sweep, a
   dead owner is a stale one, and **a stale one refuses a new sweep** by name.
 
@@ -136,6 +161,8 @@ The mechanism is now visible in the tree, and the checks read it:
 - A verification is a triple - result, command, **object** - and "object" includes *the tree is
   quiescent*. 0002 was this same lesson with a different mechanism: there the object was a working tree
   instead of the commit; here it is a tree mid-substitution instead of the source.
+- A guardrail is code, so it carries the same failure modes as the thing it guards: this one lied in a field, ran
+  no tests when nested, and refused too much. Each was found by exercising it, not by reading it.
 - A process that mutates a shared resource must be recoverable by inspection after it dies. "If it died,
   check the file" is the right instinct and the wrong mechanism: the check is the lock, and it belongs in
   the tree, where the next process finds it without remembering anything.

@@ -479,7 +479,12 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     // A verification is a claim about a tree, and a tree with a live mutant in it is not the tree the
     // change produced (post-mortem 0003). Refuse rather than report: a passing lane read in that window
     // is evidence about code that never existed, and that is the reading nobody investigates.
-    const sweeping = mutationHazard(options.root);
+    //
+    // A `--dry-run` is exempt, and the reason is what it reads: the plan comes from the route config and
+    // the change list, not from the target file, so a dry run cannot report on a mutant - while refusing
+    // it would make "what would you run?" unanswerable exactly when a session needs it. A run that would
+    // record a verdict is the one that must not.
+    const sweeping = options.dryRun ? "" : mutationHazard(options.root);
     if (sweeping)
       throw new Error(
         `refusing to verify: ${sweeping}; the reading would describe the mutant, not the change ` +

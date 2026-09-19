@@ -830,9 +830,6 @@ test("narrow mode restates the failing check's last lines too", () => {
 });
 
 test("a live mutation sweep makes the verifier refuse instead of reading the mutant", () => {
-  // Post-mortem 0003: `mutation:teeth` substitutes a named wrong version into a target file and restores
-  // it afterwards. A check that runs in that window reports on the mutant, and a check that *passes*
-  // there is evidence about code that never existed - so the lane refuses rather than reports.
   const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-sweep-"));
   mkdirSync(join(root, "docs"), { recursive: true });
   mkdirSync(join(root, "src"), { recursive: true });
@@ -865,10 +862,12 @@ test("a live mutation sweep makes the verifier refuse instead of reading the mut
         script,
         "--root",
         root,
-        // A scope, so the plan does not fall back to changed-file discovery and need a Git worktree.
+        // A scope, so the plan does not fall back to changed-file discovery and need a Git worktree...
         "--scope",
         "src/file.ts",
-        "--dry-run",
+        // ...and no `--dry-run`: a dry run plans from the route config, so it is deliberately exempt from
+        // the refusal (what it reads cannot be a mutant). The refusal guards a run that would record a
+        // verdict, which is why this case exercises one.
         "--json",
       ],
       { encoding: "utf8", windowsHide: true },

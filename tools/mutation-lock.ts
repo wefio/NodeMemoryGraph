@@ -32,7 +32,7 @@ function lockRoot(): string {
   return process.env.MUTATION_LOCK_ROOT ?? process.cwd();
 }
 
-export function readMutationLock(root: string = process.cwd()): MutationLock | null {
+export function readMutationLock(root: string = lockRoot()): MutationLock | null {
   const path = mutationLockPath(root);
   if (!existsSync(path)) return null;
   try {
@@ -44,14 +44,14 @@ export function readMutationLock(root: string = process.cwd()): MutationLock | n
   }
 }
 
-export function writeMutationLock(lock: MutationLock, root: string = process.cwd()): void {
+export function writeMutationLock(lock: MutationLock, root: string = lockRoot()): void {
   const path = mutationLockPath(root);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(lock, null, 2)}\n`);
 }
 
 /** Removes the lock only if this process owns it, so a stale-lock takeover cannot delete the live one. */
-export function clearMutationLock(pid: number, root: string = process.cwd()): void {
+export function clearMutationLock(pid: number, root: string = lockRoot()): void {
   const lock = readMutationLock(root);
   if (lock && lock.pid !== pid) return;
   rmSync(mutationLockPath(root), { force: true });

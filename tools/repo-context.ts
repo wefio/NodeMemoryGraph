@@ -579,9 +579,13 @@ export function validateAgentContext(root: string): string[] {
 
 /** The reconciliation section says so when a sweep holds the tree (post-mortem 0003): every check ordered
  *  from here would read the mutant. Returned as lines rather than pushed in place, because
- *  `formatAgentContext` is already above the complexity limit and this must not add a branch to it. */
-function mutationHazardLines(): string[] {
-  const hazard = mutationHazard();
+ *  `formatAgentContext` is already above the complexity limit and this must not add a branch to it.
+ *
+ *  The root is the report's own, never `process.cwd()`: the warning is about the tree the report
+ *  describes, and reading the caller's directory made the same report differ depending on where it was
+ *  rendered from - which a suite comparing exact output caught. */
+function mutationHazardLines(root: string): string[] {
+  const hazard = mutationHazard(root);
   return hazard ? [`- Warning: ${hazard} - checks would read the mutant`] : [];
 }
 
@@ -606,7 +610,7 @@ export function formatAgentContext(report: AgentContextReport): string {
   lines.push("", "## Reconciliation");
   lines.push(`- Status: ${report.reconciliation.status}`);
   // The first command a session runs is the place to say that the tree is mid-mutation (post-mortem 0003).
-  lines.push(...mutationHazardLines());
+  lines.push(...mutationHazardLines(report.root));
   lines.push(`- Desired revision: ${report.state.desiredRevision.slice(0, 12)}`);
   lines.push(`- Observed revision: ${report.state.observedRevision.slice(0, 12)}`);
   for (const condition of report.reconciliation.conditions) {

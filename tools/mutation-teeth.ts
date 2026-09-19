@@ -1447,11 +1447,18 @@ function observedFailures(out: string): string[] {
 }
 
 function runSuites(suites: readonly string[]): { ok: boolean; out: string } {
+  // `NODE_TEST_CONTEXT` is what Node's test runner sets for the file it is running; if a sweep is
+  // started from inside a `node --test` process (a test that drives the harness), inheriting it makes the
+  // nested runner exit 0 without running a single test - and a suite that proves nothing is reported as
+  // "the suite passed", so every mutant of that target reads as *not caught* (post-mortem 0003's class,
+  // one layer deeper). The harness strips it so the suites it runs are really run.
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
   try {
     const out = execFileSync(
       process.execPath,
       ["--experimental-strip-types", "--test", "--test-concurrency=1", ...suites],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env },
     );
     return { ok: true, out };
   } catch (error) {
@@ -1553,6 +1560,8 @@ for (const { target, suites, mutants } of selected) {
       });
       continue;
     }
+    sweep.live = true;
+    writeMutationLock(sweep);
     writeFileSync(target, text.slice(0, site.start) + mutant.to + text.slice(site.end));
     const result = runSuites(present);
     const caught = !result.ok && result.out.includes(mutant.expect);

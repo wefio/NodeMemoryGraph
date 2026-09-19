@@ -92,7 +92,9 @@
 | ----------------------- | -------- | ------------ |
 | unchecked tooling       | 0001     |              |
 | wrong-tree verification | 0002     |              |
-| ----                    | -------- | ------------ |
+| mutant-in-tree reading  | 0003     | the sweep's lock: `agent:verify` refuses, and a new sweep refuses to start, while a sweep holds the tree (`tools/mutation-lock.ts`) |
+| mislabelled flake       | 0004     | an intermittent failure is recorded with its reproduction attempt and rate, or left open - never as "flaky" (`skills/repo-development/SKILL.md`) |
+| -----                   | -------- | ------------ |
 
 类别名是简短名词短语，不是句子；在没有案例可指之前不凭空发明：第一篇记录命名它，第二篇确认它。记录的类别只写在索引里，不写在记录里，所以整个分类体系只有一处可读。
 

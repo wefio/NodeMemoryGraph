@@ -129,9 +129,14 @@ or remove it when its exit criteria are met.
    carries `exit=<code>`, and that code is the result. _Still running:_ no `exit=` yet and
    the recorded pid is alive (`kill -0 <pid>` from a later shell); elapsed time is not a
    state, so a long runtime is never read as a failure, and telling working from wedged uses
-   the check's own progress (one log line per test, one per mutant) rather than the clock.
+   the check's own progress rather than the clock. What that progress *is* depends on the
+   check, and the two are not interchangeable: an npm test lane streams its TAP (one line per
+   test), while `mutation:teeth` writes its summary only at the end — its live signal is the
+   lock file's `target`, which moves as it takes each target, plus the target file's mtime as
+   it substitutes and restores. Measuring progress by the wrong one reads a working sweep as
+   wedged.
    _Died:_ no `exit=` and the pid is gone, so nothing wrote a code — the run was killed, and
-   it may have left a mutant in the tree, so `git diff` the target first.
+   it may have left a mutant in the tree; the lock says which target, and `git diff` it first.
 
    A detached run records the tree it measured, and the collector compares that with the
    current one: a code change means re-run. Never edit or stage a file a mutation run is

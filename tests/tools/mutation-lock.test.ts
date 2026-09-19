@@ -8,8 +8,8 @@
  * is not taken over silently.
  */
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,7 @@ import {
   liveMutationLock,
   mutationHazard,
   mutationLockPath,
+  readMutationLock,
   staleMutationLock,
   type MutationLock,
 } from "../../tools/mutation-lock.ts";
@@ -91,4 +92,68 @@ test("a stale lock refuses a new sweep instead of being taken over", () => {
     assert.match(result.stderr, /refusing to start a mutation sweep/);
     assert.match(result.stderr, /died holding/);
   });
+});
+
+test("a running sweep reports its mutant as live, not only its target", async () => {
+  // The lock's `live` field is what a reader uses to tell "between targets" from "a mutant is on disk",
+  // and it is written by the harness, not by this module - so a missing write leaves a field that lies.
+  // This runs a real (cheap) sweep and watches the lock while it works.
+  const root = mkdtempSync(join(tmpdir(), "nmg-mutation-lock-live-"));
+  const script = fileURLToPath(new URL("../../tools/mutation-teeth.ts", import.meta.url));
+  const repo = fileURLToPath(new URL("../..", import.meta.url));
+  const errPath = join(root, "child.err");
+  const child = spawn(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      script,
+      "--targets",
+      "src/core/store/clock.ts",
+      "--json",
+      join(root, "result.json"),
+    ],
+    {
+      cwd: repo,
+      env: { ...process.env, MUTATION_LOCK_ROOT: root },
+      stdio: ["ignore", "ignore", openSync(errPath, "a")],
+      windowsHide: true,
+    },
+  );
+  try {
+    let live = false;
+    let target = "";
+    const deadline = Date.now() + 240_000;
+    while (Date.now() < deadline && child.exitCode === null) {
+      const lock = readMutationLock(root);
+      if (lock?.live) {
+        live = true;
+        target = lock.target;
+      }
+      if (live) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(
+      live,
+      true,
+      `a substituted mutant is reported as live while the suite runs; child stderr:\n${readFileSync(errPath, "utf8")}`,
+    );
+    assert.equal(target, "src/core/store/clock.ts");
+    // Let it finish rather than killing it: a sweep killed between substitution and restore leaves its mutant
+    // in the tree under test, which is the hazard this whole file is about - and this test would be the one
+    // causing it. Waiting also buys the assertion that the run cleaned up after itself.
+    child.stdin?.end();
+    await new Promise<void>((resolve) => child.on("exit", () => resolve()));
+    const result = JSON.parse(readFileSync(join(root, "result.json"), "utf8")) as {
+      targets: { restoredByteIdentically: boolean; mutants: { caught: boolean }[] }[];
+    };
+    assert.equal(result.targets[0]?.restoredByteIdentically, true);
+    assert.equal(
+      result.targets[0]?.mutants.every((mutant) => mutant.caught),
+      true,
+    );
+    assert.equal(mutationHazard(root), "", "the finished sweep leaves no hazard behind");
+  } finally {
+    if (child.exitCode === null) child.kill();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

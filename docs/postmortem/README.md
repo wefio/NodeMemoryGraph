@@ -139,6 +139,8 @@ nothing catches yet, which is the point of writing it down.
 | ----------------------- | -------------- | ---------------- |
 | unchecked tooling       | 0001           |                  |
 | wrong-tree verification | 0002           |                  |
+| mutant-in-tree reading  | 0003           | the sweep's lock: `agent:verify` refuses to report, and a new sweep refuses to start, while one holds the tree (`tools/mutation-lock.ts`) |
+| mislabelled flake       | 0004           | an intermittent failure is recorded with its reproduction attempt and rate, or left open - never as "flaky" (`skills/repo-development/SKILL.md`) |
 | -----                   | -------------- | ---------------- |
 
 A class name is a short noun phrase, not a sentence, and it is not invented before
