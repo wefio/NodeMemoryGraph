@@ -117,7 +117,12 @@ function conclusionEnvelope(
 export async function executePiSnapshot(work: SnapshotInput, provider: string, modelId: string) {
   const prompt = snapshotPrompt(work);
   const snapshot = JSON.stringify({ input: work.input, dependencies: work.dependencies });
-  return executePiInput(prompt, snapshot, provider, modelId, 8_000, SNAPSHOT_LIMITS);
+  return executePiInputWith(
+    { prompt, snapshot, maxArtifact: 8_000, limits: SNAPSHOT_LIMITS },
+    provider,
+    modelId,
+    false,
+  );
 }
 
 /** What the current task may push back on. A worker may report that a declared
@@ -144,12 +149,13 @@ export interface PatchExecOptions {
 export const ARTIFACT_TOOL = "submit_artifact";
 
 /** Produces an untrusted proposal, never applies files or marks a task accepted. */
-export async function executePiPatch(
+/** The single-unit input `executePiPatch` runs, exposed so a chain can drive the same work through one
+ *  session: the prompt, the snapshot and the bounds are built here once, and both paths read them from
+ *  here rather than each describing the task again. */
+export function patchSessionInput(
   frozen: FrozenPatchWork,
-  provider: string,
-  modelId: string,
   options: PatchExecOptions = {},
-) {
+): SessionRunInput {
   const { check, pushback } = options;
   const note = check
     ? `\nYou may call ${check.label} with your proposed files to run the round's fixed check before answering; at most ${check.maxRuns} calls are allowed. It runs only that check and never writes to the repository.`
@@ -158,17 +164,25 @@ export async function executePiPatch(
     ? `\nIf what you received cannot satisfy one of these declared requirements, call report_dependency_failure with the exact task and requirement instead of finishing the work: ` +
       JSON.stringify(pushback.requirements)
     : "";
-  return executePiInput(
-    patchPrompt(frozen, ARTIFACT_TOOL) + note + pushbackNote,
-    snapshotText(frozen),
-    provider,
-    modelId,
-    frozen.work.budget.output,
-    frozen.work.limits,
-    check,
+  return {
+    prompt: patchPrompt(frozen, ARTIFACT_TOOL) + note + pushbackNote,
+    snapshot: snapshotText(frozen),
+    maxArtifact: frozen.work.budget.output,
+    limits: frozen.work.limits,
+    ...(check !== undefined ? { check } : {}),
     frozen,
-    pushback,
-  );
+    ...(pushback !== undefined ? { pushback } : {}),
+  };
+}
+
+export async function executePiPatch(
+  frozen: FrozenPatchWork,
+  provider: string,
+  modelId: string,
+  options: PatchExecOptions = {},
+) {
+  const input = patchSessionInput(frozen, options);
+  return executePiInputWith(input, provider, modelId, true);
 }
 
 export function piCompletionAllowed(
@@ -204,6 +218,12 @@ export interface PiRun {
    *  look identical in the token total, and the cost question cannot be answered. */
   cacheRead: number;
   cacheWrite: number;
+  /** The session's cumulative totals. In a chain `tokens`/`cacheRead`/`cacheWrite` are this unit's
+   *  own spend and these are the session's, which is what fusion's delta claim is read from; for a
+   *  single-unit runner the two are equal. */
+  sessionTokens?: number;
+  sessionCacheRead?: number;
+  sessionCacheWrite?: number;
 }
 
 /** One unit's mutable state, held by the tool set. The tools read this object at call time rather
@@ -553,41 +573,77 @@ function artifactTool(box: UnitState, looseConclusion = false) {
   });
 }
 
-/** The optional tools for one attempt, present only when the host enabled them (`all` registers the
- *  whole surface, which a chain needs because a session's surface is fixed at creation). */
-function optionalTools(box: UnitState, all = false) {
-  const hasCheck = box.check !== undefined;
-  const hasPushback = (box.pushback?.requirements.length ?? 0) > 0;
-  const hasArtifact = box.frozen !== undefined;
+/** The optional tools for one attempt. The surface is explicit rather than derived from the box,
+ *  because a chain registers its whole surface once, when its box is still empty. */
+function optionalTools(
+  box: UnitState,
+  surface: { check: boolean; pushback: boolean; artifact: boolean; looseConclusion?: boolean },
+) {
   return {
-    runCheck: hasCheck || all ? runCheckTool(box) : undefined,
-    reportPushback: hasPushback || all ? reportPushbackTool(box) : undefined,
-    submitArtifact: hasArtifact || all ? artifactTool(box) : undefined,
+    runCheck: surface.check ? runCheckTool(box) : undefined,
+    reportPushback: surface.pushback ? reportPushbackTool(box) : undefined,
+    submitArtifact: surface.artifact
+      ? artifactTool(box, surface.looseConclusion === true)
+      : undefined,
   };
 }
 
-async function executePiInput(
-  prompt: string,
-  snapshot: string,
-  provider: string,
-  modelId: string,
-  maxArtifact: number,
-  limits: PatchLimits,
-  check?: CheckTool,
-  frozen?: FrozenPatchWork,
-  pushback?: PushbackSpec,
-): Promise<PiRun> {
-  const runtime = await ModelRuntime.create({ signal: AbortSignal.timeout(limits.timeoutMs) });
+/** One unit's input into a session: everything its tools and its completion contract read. */
+export interface SessionRunInput {
+  prompt: string;
+  snapshot: string;
+  maxArtifact: number;
+  limits: PatchLimits;
+  check?: CheckTool;
+  frozen?: FrozenPatchWork;
+  pushback?: PushbackSpec;
+}
+
+/** A session that can run more than one unit: the mechanism fusion's policy half needs.
+ *
+ *  `PiRun.tokens` is the **unit's own** spend (the session's total minus what it was when the unit
+ *  started) and `sessionTokens` the session's cumulative total, because fusion's claim is about the
+ *  delta: a later unit in a warm context should spend less than a fresh session on the same work. A
+ *  single-unit runner reports the same numbers both ways, so nothing that reads `tokens` changes. */
+export interface PiSessionRunner {
+  sessionId: string;
+  runUnit(input: SessionRunInput): Promise<PiRun>;
+  dispose(): void;
+}
+
+/** One session, one tool surface, many units.
+ *
+ *  A chain passes `chain: true`, which registers the union of what its units may need - a unit without
+ *  a check then gets a `run_check` that refuses by name, because a session does not allow rebuilding the
+ *  surface - and loosens the artifact schema's conclusion kind to a string, because a per-unit literal
+ *  union cannot be sampled once the surface exists (`artifactEnvelope` still refuses an invented kind,
+ *  and the host still validates the result). Without `chain` the surface is exactly the first unit's,
+ *  which is what every single-attempt caller has today. */
+export async function createPiSessionRunner(options: {
+  provider: string;
+  modelId: string;
+  patchMode: boolean;
+  first: SessionRunInput;
+  chain?: boolean;
+}): Promise<PiSessionRunner> {
+  const { provider, modelId } = options;
+  const chain = options.chain === true;
+  const surface = chain
+    ? { check: true, pushback: true, artifact: true, looseConclusion: true }
+    : {
+        check: options.first.check !== undefined,
+        pushback: (options.first.pushback?.requirements.length ?? 0) > 0,
+        artifact: options.first.frozen !== undefined,
+      };
+  const controller = new AbortController();
+  const runtime = await ModelRuntime.create({ signal: controller.signal });
   const model = runtime.getModel(provider, modelId);
   if (!model) throw new Error(`Pi model unavailable: ${provider}/${modelId}`);
-  const resources = resourceLoader(frozen !== undefined);
+  const resources = resourceLoader(options.patchMode);
   const box: UnitState = {
-    snapshot,
-    limits,
-    maxArtifact,
-    ...(frozen !== undefined ? { frozen } : {}),
-    ...(check !== undefined ? { check } : {}),
-    ...(pushback !== undefined ? { pushback } : {}),
+    snapshot: options.first.snapshot,
+    limits: options.first.limits,
+    maxArtifact: options.first.maxArtifact,
     reads: { value: 0 },
     runs: { value: 0 },
     turns: 0,
@@ -595,18 +651,37 @@ async function executePiInput(
     report: null,
     abort: () => {},
   };
+  /** Re-points the box at the next unit. The tools hold this object, so nothing is rebuilt. */
+  const point = (input: SessionRunInput): void => {
+    box.snapshot = input.snapshot;
+    box.limits = input.limits;
+    box.maxArtifact = input.maxArtifact;
+    box.reads = { value: 0 };
+    box.runs = { value: 0 };
+    box.turns = 0;
+    box.artifact = null;
+    box.report = null;
+    delete box.frozen;
+    delete box.check;
+    delete box.pushback;
+    if (input.frozen !== undefined) box.frozen = input.frozen;
+    if (input.check !== undefined) box.check = input.check;
+    if (input.pushback !== undefined) box.pushback = input.pushback;
+  };
+  point(options.first);
   const readSnapshot = readSnapshotTool(box);
-  const { runCheck, reportPushback, submitArtifact } = optionalTools(box);
+  const { runCheck, reportPushback, submitArtifact } = optionalTools(box, surface);
+  const expectedTools = toolNames(
+    runCheck !== undefined,
+    reportPushback !== undefined,
+    submitArtifact !== undefined,
+  );
   const { session } = await createAgentSession({
     model,
     modelRuntime: runtime,
     thinkingLevel: "off",
     resourceLoader: resources,
-    tools: toolNames(
-      check !== undefined,
-      reportPushback !== undefined,
-      submitArtifact !== undefined,
-    ),
+    tools: expectedTools,
     customTools: [readSnapshot, runCheck, reportPushback, submitArtifact].filter(
       (tool): tool is NonNullable<typeof tool> => tool !== undefined,
     ),
@@ -617,65 +692,106 @@ async function executePiInput(
     }),
   });
   box.abort = () => void session.abort();
-  const finish = (artifact: string, turnsUsed: number, pushback?: PushbackReport): PiRun => ({
-    artifact,
-    ...(pushback ? { pushback } : {}),
-    sessionId: session.sessionId,
-    provider,
-    model: modelId,
-    reads: box.reads.value,
-    turns: turnsUsed,
-    checks: box.runs.value,
+  const totals = () => ({
     tokens: totalTokens(session.messages),
     ...cacheTotals(session.messages),
   });
-
-  let timedOut = false;
+  const names = expectedTools.join(",");
   const unsubscribe = session.subscribe((event) => {
-    if (event.type === "turn_start" && ++box.turns > limits.turns) void session.abort();
+    if (event.type === "turn_start" && ++box.turns > box.limits.turns) void session.abort();
     const error = turnError(event as Parameters<typeof turnError>[0]);
     if (error) process.stderr.write(error);
   });
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    void session.abort();
-  }, limits.timeoutMs);
-  try {
-    const expectedTools = toolNames(
-      check !== undefined,
-      reportPushback !== undefined,
-      submitArtifact !== undefined,
-    ).join(",");
-    if (session.getActiveToolNames().join(",") !== expectedTools)
-      throw new Error("unexpected Pi tool surface");
-    await session.prompt(prompt, { expandPromptTemplates: false });
-    // A tool-recorded artifact is the completion evidence: it was produced through our
-    // own handler, not claimed by the model. It also wins over any trailing text.
-    if (box.artifact) return finish(box.artifact, box.turns);
-    if (box.report) return finish("", box.turns, box.report);
-    const message = session.messages.findLast((item) => item.role === "assistant");
-    const allowed = piCompletionAllowed(message?.stopReason, timedOut, box.turns, box.reads.value, limits);
-    const text = boundedArtifact(message, maxArtifact);
-    // Both channels of a patch attempt go through the same envelope: an answer that is not a
-    // valid artifact for this frozen work is a failed attempt with its reason, not a
-    // submission the host has to reject later for a defect the adapter could already name.
-    // Without frozen work (the snapshot task) the text *is* the artifact, as before.
-    const built = text
-      ? frozen
-        ? artifactFromText(frozen, text)
-        : ({ ok: true, json: text } as const)
-      : ({ ok: false, error: "no artifact" } as const);
-    if (!allowed || !built.ok)
-      throw new Error(
-        `Pi snapshot task did not finish within its bounded contract: ` +
-          `stopReason=${message?.stopReason}, turns=${box.turns}, reads=${box.reads.value}, ` +
-          `artifact=${built.ok ? "ok" : built.error}` +
-          (timedOut ? " (timed out)" : ""),
+
+  const runUnit = async (input: SessionRunInput): Promise<PiRun> => {
+    point(input);
+    const before = totals();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      void session.abort();
+    }, box.limits.timeoutMs);
+    const done = (artifact: string, pushbackFromTool?: PushbackReport): PiRun => {
+      const after = totals();
+      return {
+        artifact,
+        ...(pushbackFromTool ? { pushback: pushbackFromTool } : {}),
+        sessionId: session.sessionId,
+        provider,
+        model: modelId,
+        reads: box.reads.value,
+        turns: box.turns,
+        checks: box.runs.value,
+        tokens: after.tokens - before.tokens,
+        cacheRead: after.cacheRead - before.cacheRead,
+        cacheWrite: after.cacheWrite - before.cacheWrite,
+        sessionTokens: after.tokens,
+        sessionCacheRead: after.cacheRead,
+        sessionCacheWrite: after.cacheWrite,
+      };
+    };
+    try {
+      if (session.getActiveToolNames().join(",") !== names)
+        throw new Error("unexpected Pi tool surface");
+      await session.prompt(input.prompt, { expandPromptTemplates: false });
+      // A tool-recorded artifact is the completion evidence: it was produced through our
+      // own handler, not claimed by the model. It also wins over any trailing text.
+      if (box.artifact) return done(box.artifact);
+      if (box.report) return done("", box.report);
+      const message = session.messages.findLast((item) => item.role === "assistant");
+      const allowed = piCompletionAllowed(
+        message?.stopReason,
+        timedOut,
+        box.turns,
+        box.reads.value,
+        box.limits,
       );
-    return finish(built.json, box.turns);
+      const text = boundedArtifact(message, box.maxArtifact);
+      // Both channels of a patch attempt go through the same envelope: an answer that is not a
+      // valid artifact for this frozen work is a failed attempt with its reason, not a
+      // submission the host has to reject later for a defect the adapter could already name.
+      // Without frozen work (the snapshot task) the text *is* the artifact, as before.
+      const frozen = box.frozen;
+      const built = text
+        ? frozen
+          ? artifactFromText(frozen, text)
+          : ({ ok: true, json: text } as const)
+        : ({ ok: false, error: "no artifact" } as const);
+      if (!allowed || !built.ok)
+        throw new Error(
+          `Pi snapshot task did not finish within its bounded contract: ` +
+            `stopReason=${message?.stopReason}, turns=${box.turns}, reads=${box.reads.value}, ` +
+            `artifact=${built.ok ? "ok" : built.error}` +
+            (timedOut ? " (timed out)" : ""),
+        );
+      return done(built.json);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  return {
+    sessionId: session.sessionId,
+    runUnit,
+    dispose: () => {
+      unsubscribe();
+      session.dispose();
+      controller.abort();
+    },
+  };
+}
+
+/** One bounded Pi execution through the single-unit path, from an input a chain can also build. */
+async function executePiInputWith(
+  input: SessionRunInput,
+  provider: string,
+  modelId: string,
+  patchMode: boolean,
+): Promise<PiRun> {
+  const runner = await createPiSessionRunner({ provider, modelId, patchMode, first: input });
+  try {
+    return await runner.runUnit(input);
   } finally {
-    clearTimeout(timeout);
-    unsubscribe();
-    session.dispose();
+    runner.dispose();
   }
 }
