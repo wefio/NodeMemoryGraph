@@ -9,7 +9,7 @@ import {
   piCompletionAllowed,
   snapshotText,
 } from "../../.pi/extensions/nmg/ooo-execution.ts";
-import { patchPrompt, preparePatchWork } from "../../src/integration/ooo-patch.ts";
+import { patchCandidate, patchPrompt, preparePatchWork } from "../../src/integration/ooo-patch.ts";
 import { verifyRenameCandidate } from "../../src/integration/ooo-verifier.ts";
 import { expectedRenameOf, renameSource } from "../../evals/ooo-execution/rename-probe.ts";
 import { mutate } from "../../src/integration/ooo-mutation.ts";
@@ -319,4 +319,27 @@ test("contract: a patch attempt is told to answer through the artifact tool, not
   // The snapshot task has no envelope and keeps the JSON-in-text instruction.
   const snapshotMode = resourceLoader(false).getSystemPrompt() ?? "";
   assert.match(snapshotMode, /must begin with '\{'/);
+});
+
+test("contract: an artifact is read by its kind, and the patch reader refuses a conclusion", () => {
+  const frozen = patchWork();
+  const conclusion = artifactEnvelope(frozen, {
+    digest: frozen.digest,
+    conclusion: "no-change-needed",
+    summary: "already covered",
+    evidence: "cited title exists",
+  });
+  assert.equal(
+    conclusion.ok,
+    true,
+    "a conclusion is a legitimate artifact for a task whose rule admits one",
+  );
+  // Two readers exist and the kind decides which one may read the bytes. A harness that fed a
+  // conclusion to the patch reader would report the reader's complaint as the candidate's quality,
+  // which is exactly what the E arm's first run did (see the arms record).
+  assert.throws(
+    () => patchCandidate(frozen, conclusion.ok ? conclusion.json : "{}"),
+    /invalid patch structure/,
+    "the patch reader must refuse a conclusion by name rather than reading half of it",
+  );
 });

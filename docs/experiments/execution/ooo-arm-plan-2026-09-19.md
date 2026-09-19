@@ -57,7 +57,15 @@ feasibility is settled by one cell in which a published candidate *is* verified 
 latency (verification included) is below the control's post-fact work. The hit-rate threshold is the
 analysis, and no further spend is needed to state it.
 
-## P3 - The envelope's two readers must agree (offline, no model)
+## P3 - landed 2026-09-19, one half of it
+
+The rule that matters is now pinned in : an artifact is read
+by its kind, and the patch reader refuses a conclusion by name. The mutant half is not done - the host
+reader lives in , which is not a mutation target, and adding a target is a
+sweep of its own rather than a line in this plan. The claim that the extension was laxer than the host
+was wrong and is corrected in three places (the arms record, the ledger and the archive README).
+
+## P3 (original statement) - The envelope's two readers must agree (offline, no model)
 
 **The defect.** The extension accepted an artifact whose keys were
 `digest, kind, conclusion, summary, evidence, citations` with no `files`; `patchCandidate` refused the
