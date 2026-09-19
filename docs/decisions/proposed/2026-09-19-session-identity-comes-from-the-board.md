@@ -23,14 +23,25 @@ column.
   nothing has to derive: the caller that holds the unit already knows its own session
   (`ctx.sessionManager.getSessionId()` in the extension), the entry it wrote carries
   `source_session_id`, and a managed write is already fenced to a registered run
-  (`coordinateRunWrite`). So "this unit continues the previous unit's session" is simply *the same
-  session*, read from facts the board and the caller already hold - not a grouping to declare and
+  (`coordinateRunWrite`). So "this unit continues the previous unit's session" is simply _the same
+  session_, read from facts the board and the caller already hold - not a grouping to declare and
   not a helper to maintain. The eval arm states the same thing its own way - `sessions: [[...]]` in
   the spec and an id derived as `session:${first}` - and that stays in the spec, where a
   measurement artifact belongs.
 - **Use.** A runner is held per board session, not per spec field: when the host or driver runs
   another unit of the same board session, it reuses that session's runner, which is what makes the
   later unit's token delta the quantity fusion is claimed to reduce.
+- **The declaration rides in-band, as parameters rather than a tool.** A board entry may already
+  carry `memory=<id>` pointers, which a reader recognises by their prefix and expands only when
+  asked. The same way, an entry may carry one fenced `nmg:` block whose body is JSON - the
+  parameters of the call that wrote it. A reader that does not understand the block reads the prose
+  exactly as it does today, and rendering the block is optional: the default output is unchanged and
+  a reader asks for the layout the way it asks for a pointer to be expanded.
+- **A deterministic pass, not a model.** Reading those blocks out of the entries and producing the
+  session grouping together with the next move is a compiler-like pass over the board: source text
+  in, layout out, prose passed through untouched, no model call, recomputed at each boundary rather
+  than cached - the same reason no plan cache exists. The pass lives beside the board on the daemon
+  side, so the CLI, the extension and a driver all see one layout rather than three.
 - **Recording.** The move - admit the next unit, or close the session naming the condition that
   closed it - is written to the board, which is exactly the obligation the fusion design already
   states: a move decided online must be recorded with the facts it used, or "baseline" is
