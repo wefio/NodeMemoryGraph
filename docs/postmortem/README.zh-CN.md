@@ -102,4 +102,6 @@
 | ---- | -------------------------------------------------------------------------- | ----------------------- |
 | 0001 | [检查别人的工具，自己没被检查](0001-tools-outside-the-type-check.zh-CN.md) | unchecked tooling       |
 | 0002 | [我验证的树，不是我推送的树](0002-wrong-tree-verification.zh-CN.md)        | wrong-tree verification |
+| 0003 | [我读到的检查，读的是 mutant](0003-checks-read-a-live-mutant.zh-CN.md)   | mutant-in-tree reading  |
+| 0004 | ["flaky" 其实是一个时钟边界](0004-flaky-was-a-clock-boundary.zh-CN.md)  | mislabelled flake       |
 | ---  | ----                                                                       | -------------           |

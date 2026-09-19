@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 
 import { digestRepositoryPaths, observeGitWorktree } from "../src/rcp/repository.ts";
+import { mutationHazard } from "./mutation-lock.ts";
 
 export interface VerificationConfig {
   blocking: string[];
@@ -576,6 +577,14 @@ export function validateAgentContext(root: string): string[] {
   ];
 }
 
+/** The reconciliation section says so when a sweep holds the tree (post-mortem 0003): every check ordered
+ *  from here would read the mutant. Returned as lines rather than pushed in place, because
+ *  `formatAgentContext` is already above the complexity limit and this must not add a branch to it. */
+function mutationHazardLines(): string[] {
+  const hazard = mutationHazard();
+  return hazard ? [`- Warning: ${hazard} - checks would read the mutant`] : [];
+}
+
 export function formatAgentContext(report: AgentContextReport): string {
   const lines = [
     `# Repository context: ${report.project}@${report.version}`,
@@ -596,6 +605,8 @@ export function formatAgentContext(report: AgentContextReport): string {
   lines.push(`- TODO: ${report.canonical.todo}`);
   lines.push("", "## Reconciliation");
   lines.push(`- Status: ${report.reconciliation.status}`);
+  // The first command a session runs is the place to say that the tree is mid-mutation (post-mortem 0003).
+  lines.push(...mutationHazardLines());
   lines.push(`- Desired revision: ${report.state.desiredRevision.slice(0, 12)}`);
   lines.push(`- Observed revision: ${report.state.observedRevision.slice(0, 12)}`);
   for (const condition of report.reconciliation.conditions) {

@@ -50,6 +50,12 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import ts from "typescript";
 
+import {
+  clearMutationLock,
+  mutationHazard,
+  writeMutationLock,
+  type MutationLock,
+} from "./mutation-lock.ts";
 import { writeJsonAtomic } from "./parts/fs.ts";
 
 interface Mutant {
@@ -524,9 +530,9 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "the-dispatch-does-not-require-a-cancelled-input-to-be-closed",
-        ast: { within: "selection" },
-        from: "    if (!task || !task.accepted || task.cancelled || !current(task) || visiting.has(id))",
-        to: "    if (!task || !task.accepted || !current(task) || visiting.has(id))",
+        ast: { within: "acceptedDependency" },
+        from: "  if (!task || !task.accepted || task.cancelled || !current(task) || visiting.has(id)) return false;",
+        to: "  if (!task || !task.accepted || !current(task) || visiting.has(id)) return false;",
         expect: "nextTask refuses a task marked cancelled, whatever else the caller set",
       },
       {
@@ -771,14 +777,11 @@ const TARGETS: readonly Target[] = [
     // the parent check, and the way each unit's work reaches that composition - and the case that
     // fails names the job.
     target: "evals/ooo-execution/plan-driver.ts",
-    suites: [
-      "evals/ooo-execution/plan-driver.test.ts",
-      "evals/ooo-execution/families.test.ts",
-    ],
+    suites: ["evals/ooo-execution/plan-driver.test.ts", "evals/ooo-execution/families.test.ts"],
     mutants: [
       {
         name: "the-driver-ignores-the-slot-count",
-        from: "    const batch = legal.slice(0, spec.slots);",
+        from: "    const batch = legal.slice(0, fusionDeclared ? 1 : spec.slots);",
         to: "    const batch = legal.slice(0, 1);",
         expect: "a declared slot count is reached, and the claims overlap in time",
       },
@@ -787,8 +790,8 @@ const TARGETS: readonly Target[] = [
         // another unit's work: awaiting each unit in turn keeps a batch's claims from ever running
         // beside each other, which is the property the C arm buys.
         name: "the-driver-awaits-each-unit-instead-of-the-batch",
-        from: "    const held = await Promise.all(batch.map(dispatch));",
-        to: "    const held: boolean[] = [];\n    for (const id of batch) held.push(await dispatch(id));",
+        from: "    const held = await Promise.all(\n      batch.map((id) => (fusionDeclared ? runChain(id, chains) : dispatch(id))),\n    );",
+        to: "    const held: boolean[] = [];\n    for (const id of batch) held.push(await (fusionDeclared ? runChain(id, chains) : dispatch(id)));",
         expect: "a unit's check is outstanding while an independent unit's worker runs",
       },
       {
@@ -801,9 +804,25 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "a-unit-is-dispatched-twice-in-one-batch",
-        from: "    const batch = legal.slice(0, spec.slots);",
+        from: "    const batch = legal.slice(0, fusionDeclared ? 1 : spec.slots);",
         to: "    const batch = [...legal, ...legal].slice(0, spec.slots);",
         expect: "one slot runs the units in plan order, each to acceptance",
+      },
+      {
+        // The bound is what keeps a fused run from swallowing the plan. Without it one session would
+        // run every legal successor in turn.
+        name: "fusion-ignores-the-declared-bound",
+        from: "    if (session.units.length >= bound) return undefined;",
+        to: "    if (false) return undefined;",
+        expect: "a fused chain stops at the declared bound and does not swallow the plan",
+      },
+      {
+        // The evidence of fusion is the session the worker reports, not the session the driver asked
+        // for: a worker that quietly starts its own session must not be reported as fused.
+        name: "fusion-counts-a-session-the-worker-did-not-use",
+        from: "      if (unit?.sessionId !== session.id) {",
+        to: "      if (false && unit?.sessionId !== session.id) {",
+        expect: "a worker that starts its own session is not reported as fusion",
       },
       {
         name: "a-failed-worker-is-reported-as-a-run-that-finished",
@@ -1171,6 +1190,138 @@ const TARGETS: readonly Target[] = [
       },
     ],
   },
+  {
+    // Fusion legality gets its own entry for the same file: the harness reads only the first failures
+    // of a suite run, so a second suite in the existing target pushed that target's own named failures
+    // out of the window and four of its mutants read as uncaught. One mutant per condition the design
+    // puts on reusing a session, so a condition that stops being enforced fails a test by name rather
+    // than quietly widening what a host may run in one session.
+    target: "src/integration/ooo-execution.ts",
+    suites: ["tests/integration/ooo-fusion.test.ts"],
+    mutants: [
+      {
+        name: "fusion-shares-a-session-across-different-capabilities",
+        ast: { within: "compatibleDeclarations" },
+        from: "    first.capability === next.capability &&",
+        to: "    first.capability === first.capability &&",
+        expect: "fusion refuses a unit that needs a different execution capability",
+      },
+      {
+        name: "fusion-shares-a-session-across-different-authorities",
+        ast: { within: "compatibleDeclarations" },
+        from: "    first.authority === next.authority &&",
+        to: "    first.authority === first.authority &&",
+        expect: "fusion refuses a unit acting under a different authority",
+      },
+      {
+        name: "fusion-widens-what-a-unit-may-read",
+        ast: { within: "compatibleDeclarations" },
+        from: "    subset(next.visible, first.visible)",
+        to: "    subset(first.visible, next.visible)",
+        expect: "fusion refuses a successor whose visibility the session would widen",
+      },
+      {
+        name: "fusion-continues-from-an-unverified-answer",
+        ast: { within: "sharedSessionLegal" },
+        from: "  if (!first.accepted) return false;",
+        to: "  if (false && !first.accepted) return false;",
+        expect: "fusion refuses to continue from a unit whose verdict is not accepted",
+      },
+      {
+        name: "fusion-starts-a-successor-whose-dependency-is-not-accepted",
+        ast: { within: "sharedSessionLegal" },
+        from: "  if (next.dependencies.some((id) => !acceptedDependency(byId, id))) return false;",
+        to: "  if (false && next.dependencies.some((id) => !acceptedDependency(byId, id))) return false;",
+        expect: "fusion refuses a successor whose dependency is delivered but not accepted",
+      },
+      {
+        name: "fusion-carries-a-cancelled-unit-into-its-next-unit",
+        ast: { within: "neitherCancelled" },
+        from: "  return !first.cancelled && !next.cancelled;",
+        to: "  return true;",
+        expect: "fusion refuses a cancelled unit, before or after",
+      },
+      {
+        name: "fusion-crosses-a-host-yield-boundary",
+        ast: { within: "sharedSessionLegal" },
+        from: "  if (!!first.externalEvent && !first.externalReady) return false;",
+        to: "  if (false && !!first.externalEvent && !first.externalReady) return false;",
+        expect: "fusion ends the session at a declared external wait that is not ready",
+      },
+      {
+        name: "fusion-reuses-history-across-a-pending-branch",
+        ast: { within: "acrossAPendingBranch" },
+        from: "  return pending.includes(before) || pending.includes(after);",
+        to: "  return false;",
+        expect: "fusion never reuses the history across a fact whose branch is still pending",
+      },
+    ],
+  },
+  {
+    // Fusion's accounting: the two lines must stay two, the shared startup is booked once per session,
+    // and no verdict comes out of the assumed term. Each `from` is one of those rules.
+    target: "evals/ooo-execution/cost-model.ts",
+    suites: ["evals/ooo-execution/cost-model.test.ts"],
+    mutants: [
+      {
+        name: "fusion-books-the-shared-startup-per-unit",
+        from: "    sharedStartupMs: sessions * params.sessionStartMs,",
+        to: "    sharedStartupMs: shape.units * params.sessionStartMs,",
+        expect: "fusion books the shared startup once per session, not once per unit",
+      },
+      {
+        name: "fusion-counts-one-session-per-unit",
+        from: "  const sessions = Math.ceil(shape.units / per);",
+        to: "  const sessions = shape.units;",
+        expect: "fusion books the shared startup once per session, not once per unit",
+      },
+      {
+        name: "fusion-removes-boundaries-that-are-not-there",
+        from: "    boundarySavedMs: (shape.units - sessions) * params.contextMsPerUnit,",
+        to: "    boundarySavedMs: shape.units * params.contextMsPerUnit,",
+        expect: "a fusion bound of one unit removes no boundary and still pays the startup",
+      },
+      {
+        name: "fusion-reads-a-gain-out-of-an-assumed-term",
+        from: '  if (!params.sessionStartMeasured) return "unmeasured";',
+        to: '  if (false) return "unmeasured";',
+        expect: "an assumed session startup never reads as a gain",
+      },
+    ],
+  },
+  {
+    // The current-value window's clock grace. Each mutant is one of the ways the window can stop doing
+    // its job: dropping the grace on a boundary, making it zero, and writing a unit SQLite does not
+    // know (which makes the whole expression NULL and excludes every row instead of failing loudly).
+    target: "src/core/store/clock.ts",
+    suites: ["tests/core/store/current-value-window.test.ts"],
+    mutants: [
+      {
+        name: "the-window-does-not-grace-valid-from",
+        from: '    `((${alias}.valid_from IS NULL OR ${alias}.valid_from <= ${clockNow("later")})` +',
+        to: '    `((${alias}.valid_from IS NULL OR ${alias}.valid_from <= ${clockNow("earlier")})` +',
+        expect: "a value stamped a moment in the future is current, not missing",
+      },
+      {
+        name: "the-window-does-not-grace-expiry",
+        from: '  return `(${alias}.expires_at IS NULL OR ${alias}.expires_at > ${clockNow("earlier")})`;',
+        to: '  return `(${alias}.expires_at IS NULL OR ${alias}.expires_at > ${clockNow("later")})`;',
+        expect: "a value that expired a moment ago is still current",
+      },
+      {
+        name: "the-grace-is-zero",
+        from: "export const CLOCK_GRACE_MS = 50;",
+        to: "export const CLOCK_GRACE_MS = 0;",
+        expect: "a value stamped a moment in the future is current, not missing",
+      },
+      {
+        name: "the-grace-uses-a-unit-sqlite-does-not-know",
+        from: "  return `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${modifier}${seconds} seconds')`;",
+        to: "  return `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${modifier}${CLOCK_GRACE_MS} milliseconds')`;",
+        expect: "a just-written memory is never read as not active",
+      },
+    ],
+  },
 ];
 
 interface MutantOutcome {
@@ -1326,7 +1477,35 @@ const strict = requested.length > 0;
 const outcomes: Outcome[] = [];
 const problems: string[] = [];
 const skipped: string[] = [];
+
+/** Announce the sweep in the tree for as long as it runs (post-mortem 0003): the target file on disk is
+ *  a live mutant between the substitution and the restore, so a check that reads the tree in that window
+ *  reports on the mutant. A second sweep in one worktree is the same hazard with a different reader, and
+ *  a sweep that was *killed* leaves the hazard behind - so any lock at all refuses a start (the reader
+ *  inspects the target and clears it rather than a new sweep taking it over silently). Released on exit. */
+const sweep: MutationLock = {
+  pid: process.pid,
+  startedAt: new Date().toISOString(),
+  target: "",
+  live: false,
+};
+const hazard = mutationHazard();
+if (hazard)
+  throw new Error(
+    `refusing to start a mutation sweep: ${hazard} - the tree is not readable for checks while a mutant ` +
+      `may be live`,
+  );
+writeMutationLock(sweep);
+for (const signal of ["SIGINT", "SIGTERM"] as const)
+  process.on(signal, () => {
+    clearMutationLock(process.pid);
+    process.exit(130);
+  });
+process.on("exit", () => clearMutationLock(process.pid));
+
 for (const { target, suites, mutants } of selected) {
+  sweep.target = target;
+  writeMutationLock(sweep);
   const present = suites.filter((suite) => existsSync(suite));
   const absent = suites.filter((suite) => !existsSync(suite));
   if (absent.length > 0) {
@@ -1392,6 +1571,8 @@ for (const { target, suites, mutants } of selected) {
     }
   }
   writeFileSync(target, original);
+  sweep.live = false;
+  writeMutationLock(sweep);
   const restored = Buffer.compare(original, readFileSync(target)) === 0;
   if (!restored) problems.push(`${target}: restore is not byte-identical`);
   outcomes.push({

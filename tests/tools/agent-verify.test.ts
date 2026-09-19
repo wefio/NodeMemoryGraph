@@ -828,3 +828,57 @@ test("narrow mode restates the failing check's last lines too", () => {
   assert.match(result.stdout, /^ {2}\| # tests 1$/m);
   assert.match(result.stdout, /Evidence: .*\.nmg[\\/]verification[\\/]latest\.json/);
 });
+
+test("a live mutation sweep makes the verifier refuse instead of reading the mutant", () => {
+  // Post-mortem 0003: `mutation:teeth` substitutes a named wrong version into a target file and restores
+  // it afterwards. A check that runs in that window reports on the mutant, and a check that *passes*
+  // there is evidence about code that never existed - so the lane refuses rather than reports.
+  const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-sweep-"));
+  mkdirSync(join(root, "docs"), { recursive: true });
+  mkdirSync(join(root, "src"), { recursive: true });
+  writeFileSync(join(root, "docs", "owner.md"), "# Owner\n");
+  writeFileSync(join(root, "src", "file.ts"), "export const value = 1;\n");
+  writeFileSync(join(root, "package.json"), JSON.stringify({ name: "fixture", version: "1.0.0" }));
+  writeFileSync(
+    join(root, "agent-context.yaml"),
+    "version: 1\nroutes:\n  - id: fixture\n    paths: [src/**]\n    owners: [docs/owner.md]\n    tests: []\n    verify:\n      blocking: []\n      advisory: []\n",
+  );
+  const lockPath = join(root, ".temp", "mutation-lock.json");
+  mkdirSync(join(root, ".temp"), { recursive: true });
+  // The test's own pid is alive, so the lock is honoured as live; a lock whose owner is gone is ignored.
+  writeFileSync(
+    lockPath,
+    JSON.stringify({
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      target: "src/integration/ooo-execution.ts",
+      live: true,
+    }),
+  );
+
+  const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
+  const run = () =>
+    spawnSync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        script,
+        "--root",
+        root,
+        // A scope, so the plan does not fall back to changed-file discovery and need a Git worktree.
+        "--scope",
+        "src/file.ts",
+        "--dry-run",
+        "--json",
+      ],
+      { encoding: "utf8", windowsHide: true },
+    );
+
+  const refused = run();
+  assert.notEqual(refused.status, 0, refused.stdout);
+  assert.match(refused.stderr, /refusing to verify/);
+  assert.match(refused.stderr, /src\/integration\/ooo-execution\.ts/);
+
+  rmSync(lockPath);
+  assert.equal(run().status, 0, "a quiet tree verifies again");
+});

@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { collectAgentContext, type AgentContextReport } from "./repo-context.ts";
+import { mutationHazard } from "./mutation-lock.ts";
 import { planNarrowVerify } from "./narrow-verify.ts";
 import { digestCanonical } from "../src/rcp/canonical.ts";
 import { compileContractFile } from "../src/rcp/contract.ts";
@@ -475,6 +476,15 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
       process.exit(0);
     }
     const startedAt = new Date().toISOString();
+    // A verification is a claim about a tree, and a tree with a live mutant in it is not the tree the
+    // change produced (post-mortem 0003). Refuse rather than report: a passing lane read in that window
+    // is evidence about code that never existed, and that is the reading nobody investigates.
+    const sweeping = mutationHazard(options.root);
+    if (sweeping)
+      throw new Error(
+        `refusing to verify: ${sweeping}; the reading would describe the mutant, not the change ` +
+          `(docs/postmortem/0003-checks-read-a-live-mutant.md)`,
+      );
     const report = collectAgentContext(options.root, options.scopes, {
       changed: options.changed,
     });

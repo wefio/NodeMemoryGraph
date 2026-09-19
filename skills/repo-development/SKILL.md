@@ -141,6 +141,14 @@ or remove it when its exit criteria are met.
    costs and traps are in
    [the decision](../../docs/decisions/implemented/2026-09-18-detached-long-checks.md).
 
+   **A running sweep makes the tree unreadable, not only unwritable.** Between its substitution
+   and its restore the target file **is** the mutant, so `lint`, `complexity:gate` and any other
+   check run in that window report on the mutant — and a check that *passes* there is evidence
+   about code that never existed. The sweep now says so in the tree (`.temp/mutation-lock.json`,
+   `tools/mutation-lock.ts`), `npm run agent:verify` refuses while it is held rather than
+   reporting on a mutant, and `npm run agent:context` prints it. Never re-derive that from memory:
+   the whole failure class is [post-mortem 0003](../../docs/postmortem/0003-checks-read-a-live-mutant.md).
+
 5. Use `npm run test:research` only for research adapters; use `npm run test:chaos` for explicit lifecycle
    fault testing. Neither substitutes for product tests.
 6. For CI, packaging, or generated-output changes (see
@@ -152,7 +160,10 @@ or remove it when its exit criteria are met.
    (`type(scope): summary` + a body that says what changed and why, one change
    per commit). A commit is a proposal, not a proof: the verification evidence
    (targeted test + `agent:verify`) is what makes it hold, so do not claim a
-   check passed in the message unless it ran.
+   check passed in the message unless it ran. Evidence has no third state: a
+   failure that cannot be reproduced is recorded with its reproduction attempt and rate,
+   or left open — never as "flaky", which is a label that closes a question nobody
+   answered ([post-mortem 0004](../../docs/postmortem/0004-flaky-was-a-clock-boundary.md)).
 8. When opening a pull request, read `.github/pull_request_template.md` and
    follow it as the PR prompt: fill the three description blocks (What / Why /
    Changes) from the change plus `未验证项`, which names the surface the change did
