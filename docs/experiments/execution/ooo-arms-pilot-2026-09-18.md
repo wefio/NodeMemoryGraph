@@ -3,6 +3,8 @@
 **Status:** paid measurement, 14 runs and 29 model calls, one model, two task families, one of them held
 out of the instrument. **Directional only**: the sample cannot resolve a small difference, and no
 quality difference appeared to resolve.
+
+The runs behind every number below are kept, unedited, in [the archive](archive/ooo-arms-2026-09-19/README.md) - they were rescued out of  after the fact - and [the plan](ooo-arm-plan-2026-09-19.md) fixes what the next paid run must store before it is allowed to run.
 **Related:** [task-unit semantics design](../../design/task-unit-semantics.md) ·
 [its obligation ledger](../../design/task-unit-semantics-obligations.md) ·
 [the offline sweep that ordered this](./ooo-cost-model-2026-09-17.md)
