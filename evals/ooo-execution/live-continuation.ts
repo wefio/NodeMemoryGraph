@@ -577,6 +577,7 @@ if (role === "part1" || role === "part2") {
           writeFileSync(keptPath, execution.artifact, "utf8");
           throw new Error(
             `${message} (conclusion=${conclusionKind ?? "none"}, submitted artifact kept at ${keptPath})`,
+            { cause: error },
           );
         }
       } else {
