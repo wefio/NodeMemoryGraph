@@ -12,7 +12,8 @@
  * facts. This module only gives that decision a name and a home in the run's log.
  */
 import type { NmgStore } from "../core/store.ts";
-import type { SessionMove } from "./ooo-fusion-plan.ts";
+import { nextSessionMove, type SessionMove, type SessionMoveInput } from "./ooo-fusion-plan.ts";
+import { RUN_CANCELLED_FACT } from "./task-coordinator.ts";
 
 /** The fact kind that records one session move. Declared next to its one write. */
 export const SESSION_MOVE_FACT = "session-move";
@@ -86,4 +87,61 @@ export function recordedSessionMoves(store: NmgStore, runId: string): RecordedSe
     if (move) moves.push({ sequence: fact.sequence, move });
   }
   return moves;
+}
+
+/** What the board and the plan say at one boundary: the plan's order, where the session is now, and
+ *  what is still on offer. Only the two enders below are read from the run's own log. */
+export interface SessionBoundary {
+  readonly runId: string;
+  readonly plan: SessionMoveInput["plan"];
+  /** The unit that just ran in this session. */
+  readonly current: string;
+  /** How many units this session has already carried. */
+  readonly size: number;
+  /** The declared bound on units per session. */
+  readonly bound: number;
+  /** The units the board still has on offer, in plan order. */
+  readonly onOffer: readonly string[];
+  readonly taskId?: string;
+  readonly attempt?: number;
+  readonly entryId?: string | null;
+}
+
+/** One boundary's decision, with where the record of it landed. */
+export interface SessionDecision {
+  readonly move: SessionMove;
+  readonly sequence: number;
+  readonly recorded: boolean;
+}
+
+/**
+ * Decide the next move at a boundary and record it, in that order, once.
+ *
+ * This function decides nothing of its own: the move is `nextSessionMove`'s, and its one added
+ * input is the fact that can end a session early - a cancelled run admits nothing further, whatever
+ * the plan says. That fact is re-read here from the run's own log rather than taken from the caller,
+ * the way the managed-write fence reads its two refusals, because a caller remembers what was true
+ * when it decided to write.
+ */
+export function decideSessionMove(store: NmgStore, boundary: SessionBoundary): SessionDecision {
+  const cancelled = store
+    .taskRunFacts(boundary.runId)
+    .find((fact) => fact.kind === RUN_CANCELLED_FACT);
+  const move: SessionMove = cancelled
+    ? { kind: "close", reason: `the run was cancelled at sequence ${cancelled.sequence}` }
+    : nextSessionMove({
+        plan: boundary.plan,
+        current: boundary.current,
+        size: boundary.size,
+        bound: boundary.bound,
+        onOffer: boundary.onOffer,
+      });
+  const appended = recordSessionMove(store, {
+    runId: boundary.runId,
+    move,
+    taskId: boundary.taskId,
+    attempt: boundary.attempt,
+    entryId: boundary.entryId,
+  });
+  return { move, sequence: appended.sequence, recorded: appended.recorded };
 }
