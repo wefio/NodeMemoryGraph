@@ -86,6 +86,37 @@ conclusion artifact, the one patch failed on `rows` against `lines`, and no enve
 the instrument read by the wrong reader. The economics are measured: cost real, gain unrealised
 (0 of 3 holding reps published), the candidate's admissibility the binding constraint.
 
+## P5 - A measured cost model: tried with autodiff, and the data is what fails (2026-09-19)
+
+The design names autodiff as the reuse target for "cost or action scoring", and the arms need a cost
+model rather than a declared bound, so the terms were fitted to the paid runs with `src/lab/autodiff.ts`:
+one stacked design-matrix matmul over all rows (never a loop of per-run subgraphs - 9.6x in earlier
+work), no compiled tape (its O(graph) compile cost does not amortize for a one-shot fit), standardised
+features and target, plain gradient descent.
+
+**Result: the fit is not a model.** Leave-one-out residuals across the 19 paid runs run to -15 955 and
++11 805 tokens against a mean of 11 184, so it predicts nothing about a row it has not seen. And the
+session-startup term fitted out as **0 ms** where the D arm measured ~1 900 ms directly - which is the
+more useful half of the finding: it says the term is *not identifiable* from these runs, because the
+D arm holds `units` at 2 (bound 1 = 2 sessions, bound 2 = 1 session), leaving `units` collinear with the
+intercept and only three runs per level.
+
+**The blocker is the data, not the optimiser.** What follows is therefore not a better fit but a better
+design matrix, and the cheap half of that is offline:
+
+1. build the design matrix with canned workers (no model calls) over per-session unit counts 1, 2 and 3,
+   so `units` varies instead of being constant - the session term only becomes estimable when both
+   features move independently;
+2. record the features that can carry signal, because the measured spread inside one arm was wider than
+   the difference between arms: the union tool surface's own token count (payable in every turn - the
+   D arm's first unit cost ~0.7 k more), turns, snapshot size, and per-unit tokens;
+3. re-fit with the same autodiff call, and report leave-one-out residuals again. A term enters the
+   planner only when its confidence interval excludes zero.
+
+**Standing constraint.** Autodiff prices *legal* options; it never decides legality. Whether two units
+may share a session stays a predicate over declared facts (`sharedSessionLegal`), and no fitted number
+may widen it.
+
 ## P4 - Retention, kept light (free)
 
 The user's reading, recorded here because it is the rule to follow: a run's evidence is needed *while the
