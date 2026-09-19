@@ -356,17 +356,18 @@ run: it turned up a task-level cancellation the derived view could not see (B9),
 had always refused but eligibility would still hand out. What it does not do is prove any Agent
 program correct, which is the design's own caveat and is quoted in the module.
 
-What that does **not** yet do, and it is the remaining half of step 3 rather than a gap in this one:
-nothing adopts an entry into a run outside the tests, so the research drivers
-(`evals/ooo-execution/board-worker.ts` and friends) still write directly and are not refused. They
-are meant to be refused once the runner and the thin adapters work through the coordinator, which is
-where their writes become the daemon's verbs - and that is now a wiring job with its two ends
-present: the binding exists (D12) and the daemon's verbs already route a bound entry. What it still
-needs is a run surface a _different_ process can reach (register, freeze, bind, status) and the thin
-adapter that uses it, since the research drivers are separate processes and the design forbids them
-a writable database. The public surface deliberately has no run-record or coordinated-write verb
-yet: the daemon's board protocol is the coordination surface, and a second door for the same
-transition would be the bypass this fence exists to remove.
+What that does **not** yet do: nothing adopts an entry into a run outside the tests, so an entry
+nobody adopts keeps taking the path it always took, and a driver that never adopts is not refused -
+by design, because the fence refuses a *managed* entry's verb reached outside its run's scope rather
+than making adoption mandatory. The wiring this paragraph used to call missing has landed since, in
+**D13/D14**: the run surface a different process reaches is the daemon's (`taskRun` over register,
+freeze, bind, cancel and status, with `tests/cli/task-run-surface.test.ts` driving it through
+`service.invoke`, which is the wire a second process uses), and the evidence drivers reach the board
+through the daemon's protocol verbs and open no database of their own, with `round-client` refusing
+by name when nothing serves the store. The public surface still has no coordinated-write verb, and
+that is the fence rather than a gap: the daemon's board protocol is the coordination surface, and a
+second door for the same transition would be the bypass this fence exists to remove. What remains,
+then, is not a missing surface but a caller - a runner that decides to adopt.
 
 Two debts that pass would carry, so that they are not discovered late: **Retired with the round.** `BoardAdmission` kept its own copy of the run tables for the round's private store (the design's "旧私有轮次只读保留作研究证据，
 不与新运行双写" makes them coexisting, not duplicated), and the archived evidence readers have to move
