@@ -65,7 +65,10 @@ the control arm recorded above still describes the code that produced it.
 
 ## What this does not say
 
-One rep per arm. `control.json`, `fusion5.json` (the diagnostic run) and `fusion6.json` (the measured
-one) are the raw results; `--runs` above 1 would make a rate out of them. Nothing here separates the
-cost of a warm context from the cost of running two units under one surface, and the fixture's units
-are small enough that a session's startup may still dominate.
+One rep per arm, so no spread is known here and none of the ratios above is established. The D arm ran
+three reps per arm on another two-unit plan and its per-run token spread was 17.6k - 26.3k, wider than
+the 15 % difference this pair shows, so the direction is a direction. `control.json`, `fusion5.json`
+(the diagnostic run) and `fusion6.json` (the measured one) are the raw results; `--runs` above 1 would
+make a rate out of them. Nothing here separates the cost of a warm context from the cost of running two
+units under one surface, and the fixture's units are small enough that a session's startup may still
+dominate.
