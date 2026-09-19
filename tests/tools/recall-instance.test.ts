@@ -17,7 +17,7 @@ import {
   summarizeLabels,
   type RecallInstance,
 } from "../../src/lab/recall-instance.ts";
-import { parseLabel } from "../../tools/recall-instance-judge.ts";
+import { formatInstanceList, parseLabel, recordLabel } from "../../tools/recall-instance-judge.ts";
 
 function makeDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "recall-inst-"));
@@ -160,4 +160,27 @@ test("summarizeLabels counts remember-settled labels like any label", () => {
   const summary = summarizeLabels(labeled);
   assert.equal(summary.labeled, 1);
   assert.equal(summary.precision, 1);
+});
+
+test("recordLabel writes a valid agent judgement and rejects an invalid one", () => {
+  const dir = makeDir();
+  try {
+    assert.equal(recordLabel(dir, "g1", "noise"), true);
+    assert.equal(recordLabel(dir, "g1", "bogus"), false);
+    const entries = readRecallLabels(recallLabelsPath(dir));
+    assert.deepEqual(entries.map((entry) => entry.label), ["noise"]);
+    assert.equal(entries[0]?.source, "judge");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("formatInstanceList shows the trigger, candidates, and current label", () => {
+  const text = formatInstanceList(
+    [instance("g1")],
+    [{ activeGraphId: "g1", label: "partial", source: "judge", at: "2026-09-07T00:00:00.000Z" }],
+  );
+  assert.match(text, /graph=g1 label=partial/u);
+  assert.match(text, /trigger="how do i check the weather"/u);
+  assert.match(text, /\[1\] curl wttr\.in reports the weather/u);
 });

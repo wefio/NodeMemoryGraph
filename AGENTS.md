@@ -25,6 +25,16 @@ Use current code and owning documents to establish facts; experiments and past
 decisions supply evidence and rationale. Update the existing owner with a behavior
 change rather than adding another summary. Preserve unrelated working-tree edits.
 
+Do not place necessary files in cache folders, including TEMP and tmp. Please
+follow Git best practices when using Git.
+
+It is essential to write code that is readable, maintainable, and extensible. You
+can employ appropriate design patterns to achieve this, but avoid using patterns
+simply for the sake of using them. If a problem can be solved with a simple
+`if-else` statement, there is no need to implement a combination of Strategy,
+Factory, and Chain of Responsibility patterns. Cramming too many patterns into a
+single class often results in over-engineering.
+
 Required knowledge must be recoverable from the shared repository or an explicit
 shared task reference. Local memory, indexes, and prior Agent sessions are optional
 accelerators, never the only source needed to continue work.
