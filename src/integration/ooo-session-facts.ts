@@ -18,6 +18,23 @@ import { RUN_CANCELLED_FACT } from "./task-coordinator.ts";
 /** The fact kind that records one session move. Declared next to its one write. */
 export const SESSION_MOVE_FACT = "session-move";
 
+/**
+ * The key one board session's runner is held under.
+ *
+ * Grouping and reuse are the mechanism, so they live here rather than in the harness that happens to
+ * be running the unit: the key is a function of what the board already holds - the run and the
+ * session that owns its entries - and of nothing else. Two callers that see the same run and the
+ * same session therefore compute the same key and reuse the same runner, whatever they are, and a
+ * replay computes it again rather than remembering it.
+ *
+ * A missing part refuses instead of composing a key that could collide with a real one.
+ */
+export function sessionKey(runId: string, sessionId: string): string {
+  if (!runId.trim()) throw new Error("a session key needs the run it belongs to");
+  if (!sessionId.trim()) throw new Error("a session key needs the session that owns the entries");
+  return `board-session:${runId}:${sessionId}`;
+}
+
 /** One recorded move, with the sequence number the run's log gave it. */
 export interface RecordedSessionMove {
   readonly sequence: number;

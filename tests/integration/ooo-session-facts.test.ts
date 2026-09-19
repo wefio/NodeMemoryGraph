@@ -18,6 +18,7 @@ import {
   parseSessionMove,
   recordedSessionMoves,
   recordSessionMove,
+  sessionKey,
 } from "../../src/integration/ooo-session-facts.ts";
 import { RUN_CANCELLED_FACT } from "../../src/integration/task-coordinator.ts";
 
@@ -233,4 +234,18 @@ test("one boundary is one move, and a new attempt is a new fact", () => {
       ],
     );
   });
+});
+
+/**
+ * The key is what makes reuse a shared mechanism rather than a harness habit: it is computed from
+ * what the board holds, so two callers that see the same run and session agree without talking to
+ * each other, and a missing part refuses rather than composing a key that could collide with a
+ * real one.
+ */
+test("the session key is a function of the run and the session, and refuses a missing part", () => {
+  assert.equal(sessionKey("run-1", "session-a"), sessionKey("run-1", "session-a"));
+  assert.notEqual(sessionKey("run-1", "session-a"), sessionKey("run-2", "session-a"));
+  assert.notEqual(sessionKey("run-1", "session-a"), sessionKey("run-1", "session-b"));
+  assert.throws(() => sessionKey("", "session-a"), /needs the run/);
+  assert.throws(() => sessionKey("run-1", "  "), /needs the session/);
 });
