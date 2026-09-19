@@ -222,12 +222,25 @@ export interface PiRun {
    *  look identical in the token total, and the cost question cannot be answered. */
   cacheRead: number;
   cacheWrite: number;
+  /** The rest of what the provider reports for this unit's own turns: what it did not serve from cache,
+   *  what the model wrote, and the price it put on the turns. Recorded apart from `tokens` because they
+   *  are priced differently and a total cannot be taken apart again. */
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  /** A digest of the input this unit's session was given. The prompt is built from it, so two runs that
+   *  agree on the spec can still differ here - which is what makes an instrument version checkable rather
+   *  than argued about. */
+  promptDigest: string;
   /** The session's cumulative totals. In a chain `tokens`/`cacheRead`/`cacheWrite` are this unit's
    *  own spend and these are the session's, which is what fusion's delta claim is read from; for a
    *  single-unit runner the two are equal. */
   sessionTokens?: number;
   sessionCacheRead?: number;
   sessionCacheWrite?: number;
+  sessionInputTokens?: number;
+  sessionOutputTokens?: number;
+  sessionCost?: number;
 }
 
 /** One unit's mutable state, held by the tool set. The tools read this object at call time rather
@@ -257,27 +270,51 @@ export interface UnitState {
   abort: () => void;
 }
 
-/** Tokens the assistant actually spent in this fresh session. */
-export function totalTokens(
-  messages: readonly { role: string; usage?: { totalTokens: number } }[],
-) {
-  return messages.reduce(
-    (total, item) => total + (item.role === "assistant" ? (item.usage?.totalTokens ?? 0) : 0),
-    0,
-  );
+/** One assistant turn's provider-reported usage, as much of it as the provider fills in. Every field is
+ *  optional because providers differ: what they agree on is the total, and a missing split has to read as
+ *  "not reported" rather than as zero spent. */
+interface TurnUsage {
+  totalTokens?: number;
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  cost?: { total?: number };
 }
 
-export function cacheTotals(
-  messages: readonly { role: string; usage?: { cacheRead?: number; cacheWrite?: number } }[],
-) {
+/** The assistant turns of one session, summed. `input` is what the provider did not serve from cache,
+ *  `output` is what the model wrote, `cacheRead`/`cacheWrite` are the cached halves and `cost` is the
+ *  provider's own price. These are the numbers a cost claim needs: a token total adds them together, and
+ *  a cached input token is not priced like a fresh one, so no arithmetic on the total recovers them. */
+export function usageTotals(messages: readonly { role: string; usage?: TurnUsage }[]) {
+  let total = 0;
+  let input = 0;
+  let output = 0;
   let cacheRead = 0;
   let cacheWrite = 0;
+  let cost = 0;
   for (const item of messages) {
     if (item.role !== "assistant") continue;
-    cacheRead += item.usage?.cacheRead ?? 0;
-    cacheWrite += item.usage?.cacheWrite ?? 0;
+    const usage = item.usage;
+    if (!usage) continue;
+    total += usage.totalTokens ?? 0;
+    input += usage.input ?? 0;
+    output += usage.output ?? 0;
+    cacheRead += usage.cacheRead ?? 0;
+    cacheWrite += usage.cacheWrite ?? 0;
+    cost += usage.cost?.total ?? 0;
   }
-  return { cacheRead, cacheWrite };
+  return { total, input, output, cacheRead, cacheWrite, cost };
+}
+
+/** Tokens the assistant actually spent in this fresh session. */
+export function totalTokens(messages: readonly { role: string; usage?: TurnUsage }[]) {
+  return usageTotals(messages).total;
+}
+
+export function cacheTotals(messages: readonly { role: string; usage?: TurnUsage }[]) {
+  const totals = usageTotals(messages);
+  return { cacheRead: totals.cacheRead, cacheWrite: totals.cacheWrite };
 }
 
 /** The snapshot text: only the readable subset travels, because the whole baseline is

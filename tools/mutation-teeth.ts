@@ -854,10 +854,12 @@ const TARGETS: readonly Target[] = [
       },
       {
         // The bound is what keeps a fused run from swallowing the plan. Without it one session would
-        // run every legal successor in turn.
+        // run every legal successor in turn. The comparison itself moved into `nextSessionMove` (the
+        // shared layer, not a mutation target), so what this mutant breaks is the driver's hand-off of
+        // the declared bound: the invariant is unchanged, its anchor follows the code that carries it.
         name: "fusion-ignores-the-declared-bound",
-        from: "    if (session.units.length >= bound) return undefined;",
-        to: "    if (false) return undefined;",
+        from: "      bound: spec.fusion?.unitsPerSession ?? 1,",
+        to: "      bound: Number.MAX_SAFE_INTEGER,",
         expect: "a fused chain stops at the declared bound and does not swallow the plan",
       },
       {

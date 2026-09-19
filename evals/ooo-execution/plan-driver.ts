@@ -25,6 +25,7 @@
 //     --out <file> [--live]
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -51,6 +52,15 @@ export type WorkerMetrics = {
   checks?: number;
   cacheRead?: number;
   cacheWrite?: number;
+  /** What the provider did not serve from cache, what the model wrote, and the price it reported. They
+   *  are recorded apart from `tokens` because a total cannot be taken apart again and the three are not
+   *  priced alike - which is the whole reason the cap experiment's token column settles nothing. */
+  inputTokens?: number;
+  outputTokens?: number;
+  cost?: number;
+  /** The digest of the input this unit's session was given, when the worker can name it. Two runs that
+   *  agree on the spec can still differ here, so this is what makes an instrument version checkable. */
+  promptDigest?: string;
   /** The session the worker actually ran this unit in. Omitted by a worker that has no session to
    *  report (the stub and canned arms), and the field a fused run is judged on. */
   sessionId?: string;
@@ -125,6 +135,14 @@ export interface UnitRun {
    *  reason a token count alone cannot be read as a cost. */
   cacheRead: number;
   cacheWrite: number;
+  /** The rest of the provider's own split, kept apart from `tokens` for the same reason: `inputTokens`
+   *  was not served from cache, `outputTokens` is what the model wrote, and `cost` is the provider's
+   *  price for the turns. A stub worker reports none of them and they stay zero. */
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  /** The prompt this unit's session was given, as a digest, when the worker reports one. */
+  promptDigest?: string;
   attempt: number;
   /** The session the worker reported for this unit. A fused run's evidence is that two units name
    *  the same session; a worker that quietly starts a new one is not fusing, and its unit says so. */
@@ -152,7 +170,14 @@ export interface PlanRun {
   tokens: number;
   cacheRead: number;
   cacheWrite: number;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
   failures: number;
+  /** The code this run came from. A report that names its own instrument is what lets two runs be
+   *  compared without a prose argument about which version produced them; `unknown` when git cannot
+   *  answer, which is a fact about the run rather than a reason to fail it. */
+  instrument: { commit: string };
   /** Each session's units, in the order one session ran them. One entry per session: a fused run's
    *  cost claim rests on these, and a session of one unit is a yield boundary, not fusion. */
   sessions: readonly (readonly string[])[];
@@ -193,18 +218,37 @@ function reportedSession(result: { metrics?: WorkerMetrics }): { sessionId?: str
   return sessionId === undefined ? {} : { sessionId };
 }
 
-/** The cache accounting a worker reports, summed over its own turns. It is recorded beside tokens
- *  because the two are not the same currency: a chain carries its context forward, so most of what a
- *  later unit sends is a cache read, which is priced far below a fresh input token. Without these two
- *  fields a token count cannot be turned into a cost. */
-function reportedCache(result: { metrics?: WorkerMetrics }): {
+/** The cache, input, output and cost accounting a worker reports, summed over its own turns. They are
+ *  recorded beside tokens because the two are not the same currency: a chain carries its context
+ *  forward, so most of what a later unit sends is a cache read, which is priced far below a fresh input
+ *  token. Without the split a token count cannot be turned into a cost. */
+function reportedUsage(result: { metrics?: WorkerMetrics }): {
   cacheRead: number;
   cacheWrite: number;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  promptDigest?: string;
 } {
+  const metrics = result.metrics;
   return {
-    cacheRead: result.metrics?.cacheRead ?? 0,
-    cacheWrite: result.metrics?.cacheWrite ?? 0,
+    cacheRead: metrics?.cacheRead ?? 0,
+    cacheWrite: metrics?.cacheWrite ?? 0,
+    inputTokens: metrics?.inputTokens ?? 0,
+    outputTokens: metrics?.outputTokens ?? 0,
+    cost: metrics?.cost ?? 0,
+    ...(metrics?.promptDigest === undefined ? {} : { promptDigest: metrics.promptDigest }),
   };
+}
+
+/** The commit this driver ran from. Read rather than remembered: a run's own report is the place its
+ *  instrument belongs, because the alternative is an argument about which code produced a number. */
+function instrumentCommit(): string {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  } catch {
+    return "unknown";
+  }
 }
 
 /** One unit through the board: claim, run the worker, put the result on the channel, submit. The
@@ -269,7 +313,7 @@ async function runOneUnit(
     hostMs: Date.now() - checkStartedAt,
     tokens,
     attempt: ticket.attempt,
-    ...reportedCache(result),
+    ...reportedUsage(result),
     ...reportedSession(result),
   };
 }
@@ -485,6 +529,10 @@ export async function runPlan(spec: PlanDriverSpec): Promise<PlanRun> {
     tokens: units.reduce((total, unit) => total + unit.tokens, 0),
     cacheRead: units.reduce((total, unit) => total + unit.cacheRead, 0),
     cacheWrite: units.reduce((total, unit) => total + unit.cacheWrite, 0),
+    inputTokens: units.reduce((total, unit) => total + unit.inputTokens, 0),
+    outputTokens: units.reduce((total, unit) => total + unit.outputTokens, 0),
+    cost: units.reduce((total, unit) => total + unit.cost, 0),
+    instrument: { commit: instrumentCommit() },
     failures: failures.length,
     ...(parent ? { parent } : {}),
     incomplete,
@@ -745,6 +793,10 @@ export function piWorker(worker: { provider: string; model: string }, live: bool
         checks: run.checks,
         cacheRead: run.cacheRead,
         cacheWrite: run.cacheWrite,
+        inputTokens: run.inputTokens,
+        outputTokens: run.outputTokens,
+        cost: run.cost,
+        promptDigest: run.promptDigest,
         ...(session ? { sessionId: session.id } : {}),
       },
     };
@@ -804,6 +856,10 @@ export function piSessionWorker(
         checks: run.checks,
         cacheRead: run.cacheRead,
         cacheWrite: run.cacheWrite,
+        inputTokens: run.inputTokens,
+        outputTokens: run.outputTokens,
+        cost: run.cost,
+        promptDigest: run.promptDigest,
         // The driver's name for the session it asked for, reported only because this runner is the one
         // held under that name: a worker that answered with a session of its own reports a different id
         // and the driver ends the chain, which is how a fused run is told from a wish.

@@ -7,21 +7,16 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { createHash } from "node:crypto";
 import { Type } from "typebox";
 import { snapshotPrompt, type SnapshotInput } from "../../../src/integration/ooo-execution.ts";
-import {
-  patchCandidate,
-  patchPrompt,
-  type FrozenPatchWork,
-  type PatchLimits,
-} from "../../../src/integration/ooo-patch.ts";
+import type { FrozenPatchWork } from "../../../src/integration/ooo-patch.ts";
 import {
   ARTIFACT_TOOL,
   artifactEnvelope,
   artifactFromText,
   type ArtifactParams,
   boundedArtifact,
-  cacheTotals,
   checkToolCandidate,
   type PatchExecOptions,
   patchSessionInput,
@@ -32,10 +27,17 @@ import {
   type SessionRunInput,
   SNAPSHOT_LIMITS,
   toolNames,
-  totalTokens,
   turnError,
   type UnitState,
+  usageTotals,
 } from "../../../src/integration/ooo-session-mechanism.ts";
+
+/** A digest of the input a unit's session was given. The prompt is built from this object, so two runs
+ *  that agree on the spec can still differ here, and an instrument version stops being a matter of prose:
+ *  the report carries the digest the run actually used. */
+function digestOf(input: SessionRunInput): string {
+  return createHash("sha256").update(JSON.stringify(input)).digest("hex").slice(0, 12);
+}
 
 /** Pi-only execution adapter. Selection, ownership and acceptance are not model decisions.
  * Every invocation has a fresh context and exactly one bounded, data-only tool. */
@@ -393,10 +395,7 @@ export async function createPiSessionRunner(options: {
     }),
   });
   box.abort = () => void session.abort();
-  const totals = () => ({
-    tokens: totalTokens(session.messages),
-    ...cacheTotals(session.messages),
-  });
+  const totals = () => usageTotals(session.messages);
   const names = expectedTools.join(",");
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_start" && ++box.turns > box.limits.turns) void session.abort();
@@ -423,12 +422,19 @@ export async function createPiSessionRunner(options: {
         reads: box.reads.value,
         turns: box.turns,
         checks: box.runs.value,
-        tokens: after.tokens - before.tokens,
+        tokens: after.total - before.total,
         cacheRead: after.cacheRead - before.cacheRead,
         cacheWrite: after.cacheWrite - before.cacheWrite,
-        sessionTokens: after.tokens,
+        inputTokens: after.input - before.input,
+        outputTokens: after.output - before.output,
+        cost: after.cost - before.cost,
+        promptDigest: digestOf(input),
+        sessionTokens: after.total,
         sessionCacheRead: after.cacheRead,
         sessionCacheWrite: after.cacheWrite,
+        sessionInputTokens: after.input,
+        sessionOutputTokens: after.output,
+        sessionCost: after.cost,
       };
     };
     try {

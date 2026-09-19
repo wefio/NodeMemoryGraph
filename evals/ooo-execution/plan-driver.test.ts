@@ -69,6 +69,49 @@ function recordingWorker(latencyMs = 60, log: string[] = []): PlanWorker {
   };
 }
 
+/** A worker that reports the provider's own split, so "the report carries what a price needs" is checked
+ *  rather than assumed. A token total cannot be taken apart again, which is the defect this field set
+ *  exists to avoid - the cap experiment's token column is the measurement that paid for that lesson. */
+function usageWorker(): PlanWorker {
+  return async (taskId, frozen) => {
+    const produced = await recordingWorker(1)(taskId, frozen, {});
+    if (typeof produced === "string" || !produced.metrics)
+      throw new Error("the recording worker changed shape");
+    return {
+      ...produced,
+      metrics: {
+        ...produced.metrics,
+        tokens: 100,
+        cacheRead: 60,
+        cacheWrite: 5,
+        inputTokens: 20,
+        outputTokens: 15,
+        cost: 0.25,
+        promptDigest: `digest-${taskId}`,
+      },
+    };
+  };
+}
+
+test("the report carries the provider's own split, and the code that produced it", async () => {
+  const run = await runPlan(spec({ slots: 1, worker: usageWorker() }));
+  const units = run.units.length;
+  const first = run.units[0]!;
+  assert.deepEqual(
+    [first.inputTokens, first.outputTokens, first.cost, first.promptDigest],
+    [20, 15, 0.25, `digest-${first.taskId}`],
+  );
+  // The totals are sums of the units, so a run's price is not recomputed from a token total.
+  assert.deepEqual(
+    [run.inputTokens, run.outputTokens, run.cost],
+    [20 * units, 15 * units, 0.25 * units],
+  );
+  assert.match(run.instrument.commit, /^[0-9a-f]{7,40}$/, "a run names the code it came from");
+  // A stub that reports no split leaves zeros rather than a guess.
+  const plain = await runPlan(spec({ slots: 1 }));
+  assert.deepEqual([plain.inputTokens, plain.outputTokens, plain.cost], [0, 0, 0]);
+});
+
 /** The session a fused run must actually reuse: this worker echoes the session it was handed, so a
  *  chain that only *looked* fused - a fresh session per unit - would show up as distinct ids. */
 function sessionWorker(latencyMs = 20): PlanWorker {

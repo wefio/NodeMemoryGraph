@@ -13,7 +13,11 @@ import test from "node:test";
 
 import { createPiSessionRunner } from "../../.pi/extensions/nmg/ooo-execution.ts";
 import { patchPrompt, preparePatchWork } from "../../src/integration/ooo-patch.ts";
-import { ARTIFACT_TOOL, patchSessionInput } from "../../src/integration/ooo-session-mechanism.ts";
+import {
+  ARTIFACT_TOOL,
+  patchSessionInput,
+  usageTotals,
+} from "../../src/integration/ooo-session-mechanism.ts";
 
 function patchWork() {
   return preparePatchWork({
@@ -92,4 +96,44 @@ test("the runner refuses a loosened input on a session that is not a chain", asy
     }),
     /this session is not a chain/,
   );
+});
+
+/**
+ * The provider's own split, summed. A token total adds four differently-priced things together and
+ * cannot be taken apart again, so the numbers a cost claim needs have to be read as they arrive.
+ * A split the provider did not report stays absent rather than becoming zero spent.
+ */
+test("the usage split is summed per assistant turn, and a missing field is not a zero", () => {
+  const turns = [
+    { role: "user", usage: undefined },
+    {
+      role: "assistant",
+      usage: {
+        totalTokens: 100,
+        input: 20,
+        output: 15,
+        cacheRead: 60,
+        cacheWrite: 5,
+        cost: { total: 0.25 },
+      },
+    },
+    { role: "assistant", usage: { totalTokens: 10, cacheRead: 10 } },
+  ];
+  assert.deepEqual(usageTotals(turns), {
+    total: 110,
+    input: 20,
+    output: 15,
+    cacheRead: 70,
+    cacheWrite: 5,
+    cost: 0.25,
+  });
+  // Only assistant turns count: a user turn's usage is not the model's spend.
+  assert.deepEqual(usageTotals([turns[0]!]), {
+    total: 0,
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cost: 0,
+  });
 });

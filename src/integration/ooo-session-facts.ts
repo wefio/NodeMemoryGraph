@@ -13,7 +13,7 @@
  */
 import type { NmgStore } from "../core/store.ts";
 import { nextSessionMove, type SessionMove, type SessionMoveInput } from "./ooo-fusion-plan.ts";
-import { RUN_CANCELLED_FACT, taskCancellation } from "./task-coordinator.ts";
+import { taskCancellation } from "./task-coordinator.ts";
 
 /** The fact kind that records one session move. Declared next to its one write. */
 export const SESSION_MOVE_FACT = "session-move";
