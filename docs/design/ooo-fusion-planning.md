@@ -9,10 +9,13 @@ is measured offline instead. The legality rule itself is not here - it lives in
 Fusion saves a session's startup by running several units in one session. The bound on how many
 units one session may carry is the only fusion policy the repository had, and a bound is not a
 decision: it does not say which successors to take, and it cannot say whether fusion is worth taking
-at all. The measured shape is narrow - the D arm found ~1 900 ms of startup saved per avoided
-session with tokens flat, against a union tool surface that cost the first unit about 0.7 k extra
-tokens - so the useful question is _how many sessions a plan can be compressed into_, not whether
-fusion is a good idea in general.
+at all. The measured shape is narrow in plan terms and positive in the one quantity it measures: on the
+four-unit fine plan, cap 1 to cap 2 saves 8 451 ms of wall clock against within-cell spreads of 1 783 ms
+and 571 ms - 4.2 s per avoided session - while the ceiling's constant of 1.9 s, taken from the D arm's
+two-unit plan where the two-rep spread was as wide as the effect, under-predicts it by about a factor of
+two. What the running surface costs is still one number from that arm (about 0.7 k tokens on a chain's
+first unit), and the token side of fusion is not resolved by any of these runs. So the useful question is
+_how many sessions a plan can be compressed into_, not whether fusion is a good idea in general.
 
 ## Two clocks
 
@@ -79,11 +82,12 @@ The gap between the two is the honest answer to "how much is fusion worth": the 
 could save at best, and the list-scheduling result is what the current rule actually gets. Reported
 against the measured startup, the difference is milliseconds saved.
 
-Not modelled by the ceiling, and now measured rather than merely named: the union tool surface's extra
-turn (about 0.7 k tokens on a chain's first unit), and the tokens a longer chain spends carrying its
-context. The cap experiment above prices the second at about 15 % more _fresh_ input per four units -
-most of a chain's extra tokens are cache reads - so the ceiling stays a wall-clock ceiling, and the
-cost of fusing is real but far smaller than a raw token count suggests.
+Not modelled by the ceiling, and not priced by any run yet: the union tool surface's extra turn (about
+0.7 k tokens on a chain's first unit, measured on the D arm's plan) and the tokens a longer chain spends
+carrying its context. The cap experiment's token columns do not settle the second: with three reps, cap 1's
+own token spread (11 946) is wider than its median gap to cap 2 (7 789), and the cache-read share of a
+cell's tokens runs from 0.607 to 0.847. So the ceiling stays a wall-clock ceiling, and the cost of fusing
+is unmeasured rather than small - pricing it needs uncached input, cache reads and output recorded apart.
 
 ## What the ceiling says today
 
@@ -96,10 +100,13 @@ Run against the fixtures and against the D arm's own spec
 | `fixtures/pipeline/fine.spec.json` | 4     | 1     | 4 sessions | 2 (3.8 s)     | 2 (3.8 s) | 1 (5.7 s) |
 | the D arm's `spec-2.json`          | 2     | 1     | 2 sessions | 1 (**1.9 s**) |           |           |
 
-The third row is the check that makes the method credible rather than decorative: the ceiling predicts
-1 900 ms saved at cap 2 for the plan the D arm actually ran, and the arm measured 12 948 ms at bound 1
-against 11 048 ms at bound 2 - the same 1 900 ms, from a tool that calls no model and reads only the
-plan. Two things the table also says: the floor is 1 for both multi-unit fixtures, so a plan is fully
+The third row is an arithmetic check, not an independent prediction: the ceiling's per-session constant
+was fitted from the D arm's own runs, so re-deriving 1 900 ms for that arm's plan - which measured
+12 948 ms at bound 1 against 11 048 ms at bound 2 - shows that the tool reads a plan the way the arm ran
+it, and nothing more than that. The independent evidence is the fine plan below, where the same tool
+predicts 3 800 ms saved at cap 2 while the runs measure 8 451 ms: a disagreement of about a factor of two,
+which is the useful result, because it says the startup term is plan-dependent rather than a constant.
+Two things the table also says: the floor is 1 for both multi-unit fixtures, so a plan is fully
 fusible in principle; and cap 3 buys nothing over cap 2 on these shapes, because the fourth unit has
 to wait for the first three - the money is in reaching 4 units per session, not in raising the bound
 one notch.
@@ -111,32 +118,41 @@ independent units and one that joins them, the shape of the report fixture - liv
 the spec's canned answers stripped so the units really run. Cache accounting is recorded beside tokens
 because a token count is not a cost on its own.
 
-| bound | sessions | reps | wall (all reps)             | tokens (all reps)        | cache read / tokens   |
-| ----- | -------- | ---- | --------------------------- | ------------------------ | --------------------- |
-| 1     | 4        | 3    | 25 270 / 26 186 / 27 053 ms | 33 941 / 45 482 / 45 887 | 0.607 / 0.806 / 0.847 |
-| 2     | 2        | 3    | 17 427 / 17 735 / 17 998 ms | 35 444 / 37 693 / 41 806 | 0.690 / 0.798 / 0.802 |
-| 4     | 1        | 2    | 16 480 / 16 810 ms          | 54 834 / 55 738          | 0.834 / 0.836         |
+| bound | sessions | rep | wall      | tokens | cache read / tokens |
+| ----- | -------- | --- | --------- | ------ | ------------------- |
+| 1     | 4        | 1   | 26 186 ms | 45 482 | 0.847               |
+| 1     | 4        | 2   | 27 053 ms | 45 887 | 0.806               |
+| 1     | 4        | 3   | 25 270 ms | 33 941 | 0.607               |
+| 2     | 2        | 1   | 17 735 ms | 41 806 | 0.802               |
+| 2     | 2        | 2   | 17 998 ms | 37 693 | 0.798               |
+| 2     | 2        | 3   | 17 427 ms | 35 444 | 0.690               |
+| 4     | 1        | 1   | 16 480 ms | 54 834 | 0.836               |
+| 4     | 1        | 2   | 16 810 ms | 55 738 | 0.834               |
 
-Bounds 1 and 2 carry a third rep because the two-rep reading of this table was quoted as a policy; every
-value above is recomputed from the stored reports into the archive's `aggregate-3rep.json`. Three things,
-and the second one replaces this document's first two readings of the same experiment. The last column is
-**not a price**: `tokens` counts input and output together, so the subtraction leaves the tokens that were
-not served from cache - uncached input plus every output token - and the reports do not say whether the
-cache figure is nested inside the total at all. Pricing needs the three recorded separately, which this
-experiment did not do.
+One row per run, so no column has to be read positionally against another; the medians and the saving are
+recomputed from the stored reports into the archive's `aggregate-3rep.json`. Bounds 1 and 2 carry a third
+rep because the two-rep reading of this table was quoted as a policy, and the third rep is read as a later
+observation of the same spec rather than as a third point of the same instrument version - the fused
+cell's third run used a chain prompt that changed earlier the same day, and the reports record the spec,
+the worker and the envelope but not the instrument's commit. Three things, and the second replaces this
+document's earlier readings:
 
 - **Fusion saves wall clock, and more than the constant predicted.** Cap 1 to cap 2 saves 8 451 ms and to
   cap 4 saves 9 541 ms on the medians, against 3 800 ms and 5 700 ms predicted from the D arm's 1 900 ms.
   The within-cell spreads are 1 783 ms and 571 ms, so the saving is about five times the larger one and it
-  survives the third rep. The startup term is **plan-dependent** (about 2.9-3.2 s here), and the ceiling's
-  primary quantity should be _sessions avoided_ - exact and model-free - with milliseconds as an estimate
-  that names its constant.
-- **The token count settles nothing, at any rep count affordable here.** A two-rep reading had every arm
-  spending 80-84 % of its tokens on **cache reads** and the remainder nearly flat. The third rep puts that
-  share at 0.607 in one cell (0.847 in another of the same cell), and per-cell token spreads - 11 946 in
-  cap 1 - are wider than the median gaps they would be compared across. So no token-direction claim
-  survives: the 1.3-1.9x that an unpaired token median once suggested is not replaced by a better number,
-  it is unresolved, and the cache column is why counts recorded this way cannot resolve it.
+  survives the third rep. That is 4.2 s of wall clock per avoided session at cap 2 and 3.2 s at cap 4, so
+  the term is **plan-dependent** and the ceiling's constant should be read per plan; the ceiling's primary
+  quantity stays _sessions avoided_ - exact and model-free - with milliseconds as an estimate that names
+  its constant.
+- **The token count settles nothing at three reps.** A two-rep reading had every arm spending 80-84 % of
+  its tokens on **cache reads** and the remainder nearly flat. The third rep puts that share at 0.607 in one
+  cell (0.847 in another run of the same cell), and per-cell token spreads - 11 946 in cap 1 - are wider
+  than the median gaps they would be compared across. So no token-direction claim is supported by these
+  runs: the 1.3-1.9x that an unpaired token median once suggested is not replaced by a better number, it is
+  unresolved. Resolving it needs either many more reps or the three prices recorded apart, and the second
+  is cheaper than the first. The last column is **not a price**: `tokens` counts input and output together,
+  so the subtraction leaves the tokens not served from cache - uncached input plus every output token - and
+  the reports do not say whether the cache figure nests inside the total at all.
 - **Cap 2 is still the knee in this sample, at two reps.** It takes 8 451 ms of the 9 541 ms available
   while sending the _fewest_ tokens of the three (median 37 693), and cap 4 buys the last 1 090 ms. Two
   runs per cell is not enough to fix a policy, and fewer sessions is not the same quantity as a shorter
@@ -145,9 +161,10 @@ experiment did not do.
   settle, not a strategy this document declares.
 
 **A spread wider than a difference is not the same as no difference.** The D arm's two-rep spreads
-(2.2 s in both arms) exceed its 1.9 s median gap, and that says the sample cannot resolve the effect - not
-that fusion does not save wall clock. Deciding which of the two it is needs reps, and the A-D plan names
-them ([the arm plan](../experiments/execution/ooo-arm-plan-2026-09-19.md)).
+(2.2 s in both arms) exceed its 1.9 s median gap, and that says _that sample_ cannot resolve the effect -
+not that fusion does not save wall clock. The fine-plan cells above settle it for this shape: their two-rep
+ranges (26.2-27.1 s against 17.7-18.0 s) do not overlap, so the saving is not something the third rep's
+newer prompt introduced, and the third rep narrows both cells rather than creating the difference.
 
 ## Why this shape, and what it is not
 

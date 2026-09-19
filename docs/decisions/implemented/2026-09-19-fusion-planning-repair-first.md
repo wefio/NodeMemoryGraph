@@ -11,9 +11,19 @@ The design this implements is [docs/design/ooo-fusion-planning.md](../../design/
 
 Fusion had one policy knob - how many units one session may carry - and a bound is not a decision: it
 does not choose among legal successors, and it cannot say whether fusing is worth taking. The measured
-shape is narrow (the D arm: about 1 900 ms of session startup saved per avoided session, tokens flat,
-against a union tool surface that costs a chain's first unit about 0.7 k extra tokens), so what was
+shape is narrow (the D arm: about 1 900 ms of session startup saved per avoided session on its two-unit
+plan, against a union tool surface that costs a chain's first unit about 0.7 k extra tokens), so what was
 missing was an offline ceiling that prices fusion, and a statement of what the online move actually is.
+
+**Correction, 2026-09-19.** Two readings of that sentence have since been withdrawn and are kept here only
+so the record is not read as current: "tokens flat" was a two-rep reading of a difference that the same
+arm's spread covered, and the 1 900 ms is not a session-startup constant - on the four-unit fine plan the
+same cap experiment measures 3.2-4.2 s per avoided session, so the ceiling under-predicts by about a factor
+of two there and its constant has to be read per plan. What stands is the direction: this plan shape saves
+wall clock (8 451 ms from cap 1 to cap 2, five times the larger within-cell spread), and what fusing costs
+is unmeasured because the runs did not record uncached input, cache reads and output apart. See
+[the fusion planning document](../../design/ooo-fusion-planning.md) and P6 of
+[the arm plan](../../experiments/execution/ooo-arm-plan-2026-09-19.md).
 
 ## Decision
 

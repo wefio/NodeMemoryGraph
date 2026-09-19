@@ -71,9 +71,11 @@ is what was rescued. It does not cover the A, B and C arms: the arms record quot
 94 601, 59 830 tokens) and those per-run files are not in the repository, in this directory or anywhere
 else. For the coarse and slot arms there is a summary, not a sample.
 
-**"Fresh input" was a misnomer.** `tokens - cacheRead` is the tokens not served from cache: it still
-contains every output token, and the reports do not say whether the cache figure is nested inside the
-total at all. It is a reading of counts, not a price; pricing needs uncached input, cache reads and
+**"Fresh input" was a misnomer, and "stays flat" was not measured.** `tokens - cacheRead` is the tokens
+not served from cache: it still contains every output token, and the reports do not say whether the cache
+figure is nested inside the total at all. The third rep for caps 1 and 2 also puts that cell's token
+spread (11 946) wider than the gap it was being compared across, so the flatness in the sentence above is
+a two-rep reading rather than a measurement. It is a reading of counts, not a price; pricing needs uncached input, cache reads and
 output recorded apart. `cap-cache/aggregate.json` already carries this caveat in its own note, and the
 live reading of the column is corrected in
 [the fusion planning document](../../../../design/ooo-fusion-planning.md).
@@ -94,6 +96,21 @@ than a two-point gap: one more rep for bound 1 and one for bound 2 of the cap ex
   cap 4 still at two, nothing copied from a sentence). It is the entry point for the current numbers;
   `aggregate.json` keeps the original two-rep reading, whose medians (26 620 / 17 867 ms) are 26 186 /
   17 735 ms once the third reps are in.
+
+**Provenance, and what the reports do not record.** The report carries the spec, the worker, the model,
+the envelope limits and the session grouping; it does not carry the instrument's commit or a prompt digest.
+What can be established from outside is the timing:
+
+| runs                                    | `measuredAt` (UTC)  | instrument                                                                                               |
+| --------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------- |
+| caps 1, 2, 4 rep 1 and rep 2            | 06:54:14 - 06:56:06 | not recorded; earlier the same day than the chain-prompt fix, whose commit `7004f971` is dated 12:11:24Z |
+| caps 1 and 2 rep 3, and the refused run | 12:32:22 - 12:33:06 | a clean tree at `4b0ba09a`, after that fix                                                               |
+
+So the first two reps of each cell are a controlled pair - same spec, same day, minutes apart, one declared
+variable - and the third rep is a later observation of the same spec under a changed prompt. The saving is
+not an artefact of that change: the two-rep pair alone separates (26.2-27.1 s at cap 1 against 17.7-18.0 s
+at cap 2). Recording the commit and the prompt digest with each run would remove the need for this table;
+until the driver does that, comparisons say which runs share an instrument version.
 
 **What the third rep changed.** The wall saving is 8 451 ms against within-cell spreads of 1 783 ms and
 571 ms, so it is a rate. The token and cache columns are not: cap 1's own token spread (11 946) is wider

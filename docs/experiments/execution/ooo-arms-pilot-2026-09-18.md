@@ -148,6 +148,12 @@ not "wider than either arm's own spread". The startup term stays what the cost m
 unmeasured parameter - until the cap experiment below measures it, and that experiment finds it
 plan-dependent rather than a constant.
 
+**Fusion is not what this arm failed to resolve.** The cap experiment runs the same comparison on the
+four-unit fine plan and measures a positive effect there: cap 1 to cap 2 saves 8 451 ms on the medians
+against within-cell spreads of 1 783 ms and 571 ms, and its two-rep cells alone do not overlap (26.2-27.1 s
+against 17.7-18.0 s). What stays unresolved on this axis is what fusing _costs_, since the token columns
+at three reps are wider than the gaps they would be compared across - not whether it saves wall clock.
+
 **What it does not carry.** Tokens did not fall: 22 498 against 22 533 is 0.2 %, and the fused arm's own
 spread (17.6k - 26.3k) is wider than the difference. The per-unit numbers are read the same way, as
 directions rather than savings: the second unit cost ~10.8k fused against ~11.6k unfused (about 8 %),
