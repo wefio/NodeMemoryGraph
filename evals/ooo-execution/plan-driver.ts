@@ -766,15 +766,17 @@ export function piSessionWorker(
     );
   const runners = new Map<
     string,
-    import("../../.pi/extensions/nmg/ooo-execution.ts").PiSessionRunner
+    import("../../src/integration/ooo-session-mechanism.ts").PiSessionRunner
   >();
   const planWorker: PlanWorker = async (taskId, frozen, _dependencies, session) => {
     const key = session?.id ?? `unit:${taskId}`;
-    const { createPiSessionRunner, patchSessionInput } =
-      await import("../../.pi/extensions/nmg/ooo-execution.ts");
+    // The mechanism is shared and the adapter is thin: the runner comes from the harness that can
+    // open a pi session, while the session input it is fed is built by the shared layer.
+    const { createPiSessionRunner } = await import("../../.pi/extensions/nmg/ooo-execution.ts");
+    const sessionMechanism = await import("../../src/integration/ooo-session-mechanism.ts");
     let runner = runners.get(key);
     if (!runner) {
-      const input = patchSessionInput(frozen);
+      const input = sessionMechanism.patchSessionInput(frozen);
       runner = await createPiSessionRunner({
         provider: worker.provider,
         modelId: worker.model,
@@ -786,7 +788,7 @@ export function piSessionWorker(
       });
       runners.set(key, runner);
     }
-    const run = await runner.runUnit(patchSessionInput(frozen));
+    const run = await runner.runUnit(sessionMechanism.patchSessionInput(frozen));
     if (!run.artifact) return { failure: `${taskId}: the worker returned no artifact` };
     return {
       artifact: run.artifact,
