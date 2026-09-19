@@ -94,7 +94,7 @@ sessions - measured through the product path rather than through the eval driver
   unrelated work would record a chain that is not a plan chain; the move is written per unit, so
   such a chain is readable and attributable rather than invisible.
 - Reusing a session keeps the union tool surface, whose first unit costs about 0.7 k extra tokens
-  (measured), so fusion can spend more fresh input than it saves on a very short chain; the cap
+  (measured), so fusion can spend more tokens than it saves on a very short chain; the cap
   experiment's knee at two units per session is two runs per cell, a hypothesis for the A-D
   comparison on one parent task rather than a settled policy.
 - A unit with no board entry has no session to continue, so it cannot be fused and falls back to a

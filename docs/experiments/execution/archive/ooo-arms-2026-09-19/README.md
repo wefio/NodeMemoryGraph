@@ -11,21 +11,21 @@ row G7, and the lesson did not survive the session it was learned in. Every samp
 **What was run.** Provider `deepseek`, model `deepseek-v4-flash`, `--live` required in both entry points.
 Every run's own report is kept verbatim; nothing here was edited after the fact.
 
-| Directory                    | Entry point                              | Runs | What it is                                                                    |
-| ---------------------------- | ---------------------------------------- | ---- | ----------------------------------------------------------------------------- |
-| `fusion-darm/`               | `plan-driver.ts run --session-runner`    | 6    | D arm: `fusion.unitsPerSession` 1 (control) against 2 (fused), 3 reps each    |
-| `fusion-darm/spec-1.json`    | —                                        | —    | The spec the control arm ran (bound 1), frozen envelope limits included       |
-| `fusion-darm/spec-2.json`    | —                                        | —    | The spec the fused arm ran (bound 2); `spec-1` differs only in that bound     |
-| `fusion-darm/aggregate.json` | `node .temp/run-darm.mjs`                | —    | The six runs plus per-arm medians, which is what the record quotes            |
-| `smoke/`                     | `plan-driver.ts run --session-runner`    | 4    | The mechanism smoke: two units in one session, and the runs that failed first |
-| `speculation-earm/`          | `evals/ooo-execution/speculation-pilot.ts --live` | 8 | E arm: baseline against speculation, fact true and false, 2 reps each  |
-| `speculation-earm/aggregate.json` | —                                   | —    | The eight runs plus per-(arm, fact) totals                                    |
-| `speculation-earm/run2-2026-09-19T05-40-04/` | `evals/ooo-execution/speculation-pilot.ts --live` (3 reps) | 9 | Second E-arm run: every attempt's artifact bytes, the candidate tree its check ran in, the check's own output, one row per run, the aggregate, and a `CLEANABLE.md` saying the directory is scratch |
-| `harness-three-way.json`     | `node .temp/p1-harness.mjs`              | 6    | The harness validation that had to come first: frozen stub, the fixture's canned answer and a wrong answer, through the same check |
+| Directory                                    | Entry point                                                | Runs | What it is                                                                                                                                                                                          |
+| -------------------------------------------- | ---------------------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fusion-darm/`                               | `plan-driver.ts run --session-runner`                      | 6    | D arm: `fusion.unitsPerSession` 1 (control) against 2 (fused), 3 reps each                                                                                                                          |
+| `fusion-darm/spec-1.json`                    | —                                                          | —    | The spec the control arm ran (bound 1), frozen envelope limits included                                                                                                                             |
+| `fusion-darm/spec-2.json`                    | —                                                          | —    | The spec the fused arm ran (bound 2); `spec-1` differs only in that bound                                                                                                                           |
+| `fusion-darm/aggregate.json`                 | `node .temp/run-darm.mjs`                                  | —    | The six runs plus per-arm medians, which is what the record quotes                                                                                                                                  |
+| `smoke/`                                     | `plan-driver.ts run --session-runner`                      | 4    | The mechanism smoke: two units in one session, and the runs that failed first                                                                                                                       |
+| `speculation-earm/`                          | `evals/ooo-execution/speculation-pilot.ts --live`          | 8    | E arm: baseline against speculation, fact true and false, 2 reps each                                                                                                                               |
+| `speculation-earm/aggregate.json`            | —                                                          | —    | The eight runs plus per-(arm, fact) totals                                                                                                                                                          |
+| `speculation-earm/run2-2026-09-19T05-40-04/` | `evals/ooo-execution/speculation-pilot.ts --live` (3 reps) | 9    | Second E-arm run: every attempt's artifact bytes, the candidate tree its check ran in, the check's own output, one row per run, the aggregate, and a `CLEANABLE.md` saying the directory is scratch |
+| `harness-three-way.json`                     | `node .temp/p1-harness.mjs`                                | 6    | The harness validation that had to come first: frozen stub, the fixture's canned answer and a wrong answer, through the same check                                                                  |
 
 **What is missing, and why that is now a plan item.** The E arm's first run stored no artifact bytes:
 `speculation-pilot.ts` returned each candidate's verdict but deleted the candidate tree on failure, so
-the run that reported "quality false in all four verified candidates" cannot be asked *why*. The
+the run that reported "quality false in all four verified candidates" cannot be asked _why_. The
 instrument no longer deletes a tree, and
 `docs/experiments/execution/ooo-arm-plan-2026-09-19.md` fixes the fields every later run must write
 before it is allowed to run - artifact bytes, check output, exit code and the frozen digest - so the
@@ -38,7 +38,7 @@ working copies; a result that a sentence in a record depends on is not scratch.
 **Correction (2026-09-19, after the second run's evidence).** The paragraph above recorded a defect
 that was not one. `artifactEnvelope` builds two legitimate shapes - a patch (`digest, files`) and a
 conclusion (`digest, kind, conclusion, summary, evidence, citations`) - and the E arm's first harness
-fed *every* artifact to `patchCandidate`, which reads patches only. The run's quality failures were
+fed _every_ artifact to `patchCandidate`, which reads patches only. The run's quality failures were
 therefore reported through the wrong reader: eight of nine attempts in the second run answered with a
 conclusion, which this unit's check cannot pass and the board would refuse, and the one attempt that
 submitted a patch failed for a real reason (it wrote `rows: [...]` where the frozen interface requires
@@ -60,3 +60,20 @@ Measured: cap 1 to cap 2 saves 8 753 ms (predicted 3 800 ms, so the startup cons
 fresh input stays flat at 7 925 / 7 942 / 9 142 tokens, and cap 2 is the knee - it takes most of the
 available wall clock at the fewest tokens. The earlier `cap4-darm/` reading of a 1.3-1.9x token
 multiplier came from unpaired medians and is superseded.
+
+## Later note (2026-09-19, after this archive was written)
+
+Two corrections to the text above, both found while planning the A-D comparison
+([the arm plan](../../ooo-arm-plan-2026-09-19.md), P6). Neither changes a stored report.
+
+**The scope of "every sample".** The claim above covers the D and E arms and the cap experiments, which
+is what was rescued. It does not cover the A, B and C arms: the arms record quotes their totals (33 677,
+94 601, 59 830 tokens) and those per-run files are not in the repository, in this directory or anywhere
+else. For the coarse and slot arms there is a summary, not a sample.
+
+**"Fresh input" was a misnomer.** `tokens - cacheRead` is the tokens not served from cache: it still
+contains every output token, and the reports do not say whether the cache figure is nested inside the
+total at all. It is a reading of counts, not a price; pricing needs uncached input, cache reads and
+output recorded apart. `cap-cache/aggregate.json` already carries this caveat in its own note, and the
+live reading of the column is corrected in
+[the fusion planning document](../../../../design/ooo-fusion-planning.md).

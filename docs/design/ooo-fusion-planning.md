@@ -111,16 +111,19 @@ independent units and one that joins them, the shape of the report fixture - liv
 the spec's canned answers stripped so the units really run. The second run below records cache
 accounting beside tokens, because that is what turns a token count into a cost.
 
-| bound | sessions | wall (medians of 2) | tokens | cache read | tokens - cache read |
-| ----- | -------- | ------------------- | ------ | ---------- | ------------------- |
-| 1     | 4        | 26 620 ms           | 45 685 | 37 760     | 7 925               |
-| 2     | 2        | 17 867 ms           | 39 750 | 31 808     | 7 942               |
-| 4     | 1        | 16 645 ms           | 55 286 | 46 144     | 9 142               |
+| bound | sessions | wall (medians of 2) | tokens | cache read | not-cache-read tokens |
+| ----- | -------- | ------------------- | ------ | ---------- | --------------------- |
+| 1     | 4        | 26 620 ms           | 45 685 | 37 760     | 7 925                 |
+| 2     | 2        | 17 867 ms           | 39 750 | 31 808     | 7 942                 |
+| 4     | 1        | 16 645 ms           | 55 286 | 46 144     | 9 142                 |
 
 Three things, and the second one corrects this document's first reading of the same experiment. Every
-cell is two runs, so none of these is a rate; `tokens - cache read` is a lower bound on what the
-provider prices as fresh input, because output tokens are billed too and no subtraction of cache reads
-can remove them.
+cell is two runs, so none of these is a rate, and the last column is **not a price**. `tokens` counts
+input and output together, so subtracting cache reads leaves the tokens that were not served from
+cache - uncached input plus every output token - and the reports do not say whether the cache figure is
+nested inside the total at all. Pricing needs the three separately (uncached input, cache read,
+output), which this experiment did not record; the column is a reading aid for the direction of the
+change, nothing more.
 
 - **Fusion saves wall clock, and more than the constant predicted.** Cap 1 to cap 2 saves 8 753 ms and
   to cap 4 saves 9 975 ms, against 3 800 ms and 5 700 ms predicted from the D arm's 1 900 ms. So the
@@ -129,15 +132,21 @@ can remove them.
   constant.
 - **The token multiplier was a count multiplier.** Every arm spends 80-84 % of its tokens on **cache
   reads**, and what is left after that subtraction is nearly flat: 7 925, 7 942, 9 142. That is a
-  direction rather than a measurement - two runs per cell, and the remainder still contains every output
-  token - but it argues against the 1.3-1.9x that an unpaired token median suggested earlier: a chain
-  carries its context forward, and the provider serves most of that from cache.
+  direction rather than a measurement - two runs per cell, the remainder still contains every output
+  token, and a column that mixes output into input cannot be read as a price at all. It argues against
+  the 1.3-1.9x that an unpaired token median suggested earlier, because a chain carries its context
+  forward and the provider serves most of that from cache.
 - **Cap 2 is the knee in this sample.** It takes 8 753 ms of the 9 975 ms available while sending the
   _fewest_ tokens of the three (39 750), and cap 4 buys the last 1 222 ms for 39 % more tokens. Two runs
   per cell is not enough to fix a policy, and fewer sessions is not the same quantity as a shorter parent
   task: with more than one slot, fusing units into fewer sessions removes parallelism the plan could have
   used. Two units per session is therefore a hypothesis for the A-D comparison on one parent task to
   settle, not a strategy this document declares.
+
+**A spread wider than a difference is not the same as no difference.** The D arm's two-rep spreads
+(2.2 s in both arms) exceed its 1.9 s median gap, and that says the sample cannot resolve the effect - not
+that fusion does not save wall clock. Deciding which of the two it is needs reps, and the A-D plan names
+them ([the arm plan](../experiments/execution/ooo-arm-plan-2026-09-19.md)).
 
 ## Why this shape, and what it is not
 

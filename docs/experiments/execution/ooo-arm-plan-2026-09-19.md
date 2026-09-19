@@ -11,7 +11,7 @@ was either deleted or never written: the numbers in
 ## The rule this plan exists to keep
 
 A step below may run only once its data list is fixed: which fields, where they are written, and what is
-read off them. A field a claim needs is written *before* the claim, into
+read off them. A field a claim needs is written _before_ the claim, into
 `docs/experiments/execution/archive/<run>/`, which git tracks. No run deletes its own evidence; `.temp/`
 holds working copies only, and a result a sentence depends on is not a working copy.
 
@@ -37,7 +37,7 @@ the stub.
 
 **Decisive.** The table itself. Canned passes and the model's fails: `quality: false` is a result about
 the model's work - an unverified guess produced a bad patch - and the arm's next question is about
-verification, not about the harness. If the *canned* answer also fails, the harness is broken and nothing
+verification, not about the harness. If the _canned_ answer also fails, the harness is broken and nothing
 else may be concluded from the first run.
 
 ## P2 - The E arm's economics (paid; at most 150 k tokens, 3 reps per condition)
@@ -53,7 +53,7 @@ tokens wasted when it did not, and the quality term for every published candidat
 
 **Decisive.** Quality parity inside the compared cells is a precondition, not a result: if a published
 candidate fails its check, the arm reports that as its outcome and claims no speedup. Otherwise
-feasibility is settled by one cell in which a published candidate *is* verified and its post-fact
+feasibility is settled by one cell in which a published candidate _is_ verified and its post-fact
 latency (verification included) is below the control's post-fact work. The hit-rate threshold is the
 analysis, and no further spend is needed to state it.
 
@@ -97,7 +97,7 @@ features and target, plain gradient descent.
 **Result: the fit is not a model.** Leave-one-out residuals across the 19 paid runs run to -15 955 and
 +11 805 tokens against a mean of 11 184, so it predicts nothing about a row it has not seen. And the
 session-startup term fitted out as **0 ms** where the D arm measured ~1 900 ms directly - which is the
-more useful half of the finding: it says the term is *not identifiable* from these runs, because the
+more useful half of the finding: it says the term is _not identifiable_ from these runs, because the
 D arm holds `units` at 2 (bound 1 = 2 sessions, bound 2 = 1 session), leaving `units` collinear with the
 intercept and only three runs per level.
 
@@ -113,14 +113,66 @@ design matrix, and the cheap half of that is offline:
 3. re-fit with the same autodiff call, and report leave-one-out residuals again. A term enters the
    planner only when its confidence interval excludes zero.
 
-**Standing constraint.** Autodiff prices *legal* options; it never decides legality. Whether two units
+**Standing constraint.** Autodiff prices _legal_ options; it never decides legality. Whether two units
 may share a session stays a predicate over declared facts (`sharedSessionLegal`), and no fitted number
 may widen it.
 
+## P6 - The A-D comparison on one parent task (paid; no run may start before its budget is named)
+
+**Question.** The review asks for A-D on one parent task before any fusion policy is declared. Which
+cells of that comparison are already stored, and which would have to be run?
+
+**What already exists, and it is a controlled comparison.** `archive/ooo-arms-2026-09-19/cap-cache/`
+holds the four-unit fine plan at `--slots 1`, the same worker (`pi`, `deepseek-v4-flash`), the same envelope
+limits (`turns: 6`, `reads: 3`, `timeoutMs: 120 000`), the same parent check and two reps per cell. The
+three specs differ by **exactly one field** - `fusion.unitsPerSession` 1, 2, 4 - which was checked by
+diffing them, so fusion is the only variable and all six runs come from one instrument
+(`plan-driver.ts run`). The per-run values, which no earlier reading of this experiment published:
+
+| `unitsPerSession` | wall (two reps)    | tokens (two reps) | cache reads     |
+| ----------------- | ------------------ | ----------------- | --------------- |
+| 1                 | 26 186 / 27 053 ms | 45 482 / 45 887   | 38 528 / 36 992 |
+| 2                 | 17 735 / 17 998 ms | 41 806 / 37 693   | 33 536 / 30 080 |
+| 4                 | 16 480 / 16 810 ms | 54 834 / 55 738   | 45 824 / 46 464 |
+
+So on this plan the wall-clock effect is real and larger than the noise: the cap1-to-cap2 gap is
+8.2-9.1 s against spreads of 0.9 s and 0.3 s inside the cells. That is why the 2-unit D arm's weak result
+and this experiment's strong one are both true - they are different plan shapes, and the D arm's spreads
+(1.2 s each) exceeded its 1.9 s median gap. `cap4-darm/` repeats the bounds 1 and 4 pair and agrees.
+
+**What is missing, and the hypothesis each cell would distinguish.**
+
+1. **A third rep on cap 1 and cap 2 (~85 k: 45 k + 40 k).** Turns the 8-9 s saving from a two-point gap
+   into a median with a range, which is the smallest step that lets a policy sentence carry a number.
+   Distinguishes _the saving is a rate_ from _the saving is one pair_.
+2. **A third rep on cap 4 too (+55 k).** The knee claim (cap 2 rather than cap 4) rests on 1.2 s of
+   extra wall for 15 k more tokens, measured twice.
+3. **A (coarse, 1 unit) and C (fine, slots 2) through the driver (~41 k: 11 k + 30 k).** The arms record
+   ran A/B/C through `pilot.ts`, which supplies the worker itself; the fixture, plans, limits and model
+   match, the entry point does not. Without these two cells any A-D table mixes instruments, and a table
+   that mixes them has to say so in the same sentence as its numbers.
+4. **A priced comparison - no runs, an instrumentation change.** The per-run records carry `tokens`,
+   `cacheRead` and `cacheWrite` per unit, never output tokens separately, so `tokens - cacheRead` mixes
+   output into input and is not a price. Cost needs the three recorded apart; more reps of the same cells
+   would not fix it.
+
+**A/B/C's samples are not in the repository.** The arms record quotes A 33 677, B 94 601 and C 59 830
+tokens with per-run times, but only the D and E arms and the cap experiments were rescued, and searching
+the repository for those totals finds the record's own table and nothing else. So a same-task A-D table
+cannot be assembled from what is stored: for the coarse and slot arms there is a summary, not a sample.
+That is a reason to re-run those cells rather than to compare against them.
+
+**Ceiling and stop rule.** No cell above may be paid for until the user names a ceiling for this step; the
+only recommended purchase is the first one (~85 k), and it is worth paying only after the priced-
+comparison gap is closed, because a wall-clock saving with no price beside it cannot decide a policy. A
+run that fails is reported as a failure and not retried; the round stops at the ceiling rather than
+stretching it. A fused spec is never run as an unfused control - the driver refuses it - so every cell
+below stays self-identifying in the archive.
+
 ## P4 - Retention, kept light (free)
 
-The user's reading, recorded here because it is the rule to follow: a run's evidence is needed *while the
-work is being done*, so it is written to a marked scratch directory (`.temp/.../CLEANABLE.md`) and may be
+The user's reading, recorded here because it is the rule to follow: a run's evidence is needed _while the
+work is being done_, so it is written to a marked scratch directory (`.temp/.../CLEANABLE.md`) and may be
 deleted later - the failure was never that scratch existed, it was deleting the data before the record
 that needed it was written. The instrument now writes every artifact, candidate tree and check output,
 marks the directory cleanable, and copies the run into the tracked archive when a record quotes it. No
