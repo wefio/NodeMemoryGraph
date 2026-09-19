@@ -77,3 +77,27 @@ total at all. It is a reading of counts, not a price; pricing needs uncached inp
 output recorded apart. `cap-cache/aggregate.json` already carries this caveat in its own note, and the
 live reading of the column is corrected in
 [the fusion planning document](../../../../design/ooo-fusion-planning.md).
+
+## cap-cache/, third rep (2026-09-19, later the same day)
+
+Bought because [the arm plan](../../ooo-arm-plan-2026-09-19.md) needed the A-D cells to carry a range rather
+than a two-point gap: one more rep for bound 1 and one for bound 2 of the cap experiment.
+
+- `bound1-rep3.json` - 4/4 accepted, parent accept, wall 25 270 ms, tokens 33 941, cacheRead 20 608.
+- `bound2-rep3.json` - 4/4 accepted, parent accept, wall 17 427 ms, tokens 35 444, cacheRead 24 448, two
+  sessions. Run with `--session-runner`, which `spec-2.json` requires: a fused live continuation is refused
+  without it.
+- `bound2-rep3-without-session-runner.json` - that refusal, kept as evidence. The driver named the session
+  it could not continue, recorded it in `incomplete` and stopped after the first unit, so guessing the
+  command from the usage line cost 11 019 tokens instead of producing a wrong measurement.
+- `aggregate-3rep.json` - both cells recomputed over all their stored reports (caps 1 and 2 at three reps,
+  cap 4 still at two, nothing copied from a sentence). It is the entry point for the current numbers;
+  `aggregate.json` keeps the original two-rep reading, whose medians (26 620 / 17 867 ms) are 26 186 /
+  17 735 ms once the third reps are in.
+
+**What the third rep changed.** The wall saving is 8 451 ms against within-cell spreads of 1 783 ms and
+571 ms, so it is a rate. The token and cache columns are not: cap 1's own token spread (11 946) is wider
+than its median gap to cap 2 (7 789), and the cache-read share of tokens runs from 0.607 to 0.847 inside a
+single cell - so "80-84 % of tokens are cache reads" was a two-rep artefact. The fused cell's third rep also
+ran with a newer chain prompt than its first two (the exclusivity and admitted-tools lines added earlier the
+same day), which is why the runs here are read as dated measurements rather than as one instrument version.

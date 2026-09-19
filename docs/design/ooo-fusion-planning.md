@@ -108,39 +108,40 @@ one notch.
 
 The ceiling's prediction for a four-unit plan was tested on `fixtures/pipeline/fine.spec.json` - three
 independent units and one that joins them, the shape of the report fixture - live, `--slots 1`, with
-the spec's canned answers stripped so the units really run. The second run below records cache
-accounting beside tokens, because that is what turns a token count into a cost.
+the spec's canned answers stripped so the units really run. Cache accounting is recorded beside tokens
+because a token count is not a cost on its own.
 
-| bound | sessions | wall (medians of 2) | tokens | cache read | not-cache-read tokens |
-| ----- | -------- | ------------------- | ------ | ---------- | --------------------- |
-| 1     | 4        | 26 620 ms           | 45 685 | 37 760     | 7 925                 |
-| 2     | 2        | 17 867 ms           | 39 750 | 31 808     | 7 942                 |
-| 4     | 1        | 16 645 ms           | 55 286 | 46 144     | 9 142                 |
+| bound | sessions | reps | wall (all reps)             | tokens (all reps)        | cache read / tokens   |
+| ----- | -------- | ---- | --------------------------- | ------------------------ | --------------------- |
+| 1     | 4        | 3    | 25 270 / 26 186 / 27 053 ms | 33 941 / 45 482 / 45 887 | 0.607 / 0.806 / 0.847 |
+| 2     | 2        | 3    | 17 427 / 17 735 / 17 998 ms | 35 444 / 37 693 / 41 806 | 0.690 / 0.798 / 0.802 |
+| 4     | 1        | 2    | 16 480 / 16 810 ms          | 54 834 / 55 738          | 0.834 / 0.836         |
 
-Three things, and the second one corrects this document's first reading of the same experiment. Every
-cell is two runs, so none of these is a rate, and the last column is **not a price**. `tokens` counts
-input and output together, so subtracting cache reads leaves the tokens that were not served from
-cache - uncached input plus every output token - and the reports do not say whether the cache figure is
-nested inside the total at all. Pricing needs the three separately (uncached input, cache read,
-output), which this experiment did not record; the column is a reading aid for the direction of the
-change, nothing more.
+Bounds 1 and 2 carry a third rep because the two-rep reading of this table was quoted as a policy; every
+value above is recomputed from the stored reports into the archive's `aggregate-3rep.json`. Three things,
+and the second one replaces this document's first two readings of the same experiment. The last column is
+**not a price**: `tokens` counts input and output together, so the subtraction leaves the tokens that were
+not served from cache - uncached input plus every output token - and the reports do not say whether the
+cache figure is nested inside the total at all. Pricing needs the three recorded separately, which this
+experiment did not do.
 
-- **Fusion saves wall clock, and more than the constant predicted.** Cap 1 to cap 2 saves 8 753 ms and
-  to cap 4 saves 9 975 ms, against 3 800 ms and 5 700 ms predicted from the D arm's 1 900 ms. So the
-  startup term is **plan-dependent** (about 2.9-3.3 s here), and the ceiling's primary quantity should
-  be _sessions avoided_ - exact and model-free - with milliseconds as an estimate that names its
-  constant.
-- **The token multiplier was a count multiplier.** Every arm spends 80-84 % of its tokens on **cache
-  reads**, and what is left after that subtraction is nearly flat: 7 925, 7 942, 9 142. That is a
-  direction rather than a measurement - two runs per cell, the remainder still contains every output
-  token, and a column that mixes output into input cannot be read as a price at all. It argues against
-  the 1.3-1.9x that an unpaired token median suggested earlier, because a chain carries its context
-  forward and the provider serves most of that from cache.
-- **Cap 2 is the knee in this sample.** It takes 8 753 ms of the 9 975 ms available while sending the
-  _fewest_ tokens of the three (39 750), and cap 4 buys the last 1 222 ms for 39 % more tokens. Two runs
-  per cell is not enough to fix a policy, and fewer sessions is not the same quantity as a shorter parent
-  task: with more than one slot, fusing units into fewer sessions removes parallelism the plan could have
-  used. Two units per session is therefore a hypothesis for the A-D comparison on one parent task to
+- **Fusion saves wall clock, and more than the constant predicted.** Cap 1 to cap 2 saves 8 451 ms and to
+  cap 4 saves 9 541 ms on the medians, against 3 800 ms and 5 700 ms predicted from the D arm's 1 900 ms.
+  The within-cell spreads are 1 783 ms and 571 ms, so the saving is about five times the larger one and it
+  survives the third rep. The startup term is **plan-dependent** (about 2.9-3.2 s here), and the ceiling's
+  primary quantity should be _sessions avoided_ - exact and model-free - with milliseconds as an estimate
+  that names its constant.
+- **The token count settles nothing, at any rep count affordable here.** A two-rep reading had every arm
+  spending 80-84 % of its tokens on **cache reads** and the remainder nearly flat. The third rep puts that
+  share at 0.607 in one cell (0.847 in another of the same cell), and per-cell token spreads - 11 946 in
+  cap 1 - are wider than the median gaps they would be compared across. So no token-direction claim
+  survives: the 1.3-1.9x that an unpaired token median once suggested is not replaced by a better number,
+  it is unresolved, and the cache column is why counts recorded this way cannot resolve it.
+- **Cap 2 is still the knee in this sample, at two reps.** It takes 8 451 ms of the 9 541 ms available
+  while sending the _fewest_ tokens of the three (median 37 693), and cap 4 buys the last 1 090 ms. Two
+  runs per cell is not enough to fix a policy, and fewer sessions is not the same quantity as a shorter
+  parent task: with more than one slot, fusing units into fewer sessions removes parallelism the plan could
+  have used. Two units per session is therefore a hypothesis for the A-D comparison on one parent task to
   settle, not a strategy this document declares.
 
 **A spread wider than a difference is not the same as no difference.** The D arm's two-rep spreads

@@ -1,0 +1,255 @@
+{
+  "note": "Medians over the stored reps; every value is recomputed from the report files beside this one, never copied from a sentence. tokens counts input and output together and cacheRead is not nested-known, so neither column is a price.",
+  "cells": [
+    {
+      "bound": 1,
+      "reps": 3,
+      "sessionsPerRun": [
+        4
+      ],
+      "wallMs": [
+        25270,
+        26186,
+        27053
+      ],
+      "medianWallMs": 26186,
+      "tokens": [
+        33941,
+        45482,
+        45887
+      ],
+      "medianTokens": 45482,
+      "cacheRead": [
+        20608,
+        36992,
+        38528
+      ],
+      "medianCacheRead": 36992,
+      "cacheReadShareOfTokens": [
+        0.607,
+        0.806,
+        0.847
+      ],
+      "perUnitTokens": [
+        7105,
+        7441,
+        7718,
+        10890,
+        11300,
+        11374,
+        11493,
+        11499,
+        11521,
+        11570,
+        11677,
+        11722
+      ]
+    },
+    {
+      "bound": 2,
+      "reps": 3,
+      "sessionsPerRun": [
+        2
+      ],
+      "wallMs": [
+        17427,
+        17735,
+        17998
+      ],
+      "medianWallMs": 17735,
+      "tokens": [
+        35444,
+        37693,
+        41806
+      ],
+      "medianTokens": 37693,
+      "cacheRead": [
+        24448,
+        30080,
+        33536
+      ],
+      "medianCacheRead": 30080,
+      "cacheReadShareOfTokens": [
+        0.69,
+        0.798,
+        0.802
+      ],
+      "perUnitTokens": [
+        7402,
+        7679,
+        8153,
+        9160,
+        9588,
+        9822,
+        9885,
+        9897,
+        10024,
+        10915,
+        11172,
+        11246
+      ]
+    },
+    {
+      "bound": 4,
+      "reps": 2,
+      "sessionsPerRun": [
+        1
+      ],
+      "wallMs": [
+        16480,
+        16810
+      ],
+      "medianWallMs": 16645.0,
+      "tokens": [
+        54834,
+        55738
+      ],
+      "medianTokens": 55286.0,
+      "cacheRead": [
+        45824,
+        46464
+      ],
+      "medianCacheRead": 46144.0,
+      "cacheReadShareOfTokens": [
+        0.834,
+        0.836
+      ],
+      "perUnitTokens": [
+        10046,
+        10293,
+        11314,
+        11632,
+        14457,
+        14650,
+        19017,
+        19163
+      ]
+    }
+  ],
+  "savingMs": {
+    "1->2": 8451,
+    "1->4": 9541.0
+  },
+  "runs": [
+    {
+      "bound": 1,
+      "rep": 1,
+      "wallMs": 26186,
+      "tokens": 45482,
+      "cacheRead": 38528,
+      "cacheWrite": 0,
+      "sessions": 4,
+      "units": [
+        "normalize:11722t/9728c",
+        "scale:11300t/9472c",
+        "total:10890t/9344c",
+        "summarize:11570t/9984c"
+      ]
+    },
+    {
+      "bound": 1,
+      "rep": 2,
+      "wallMs": 27053,
+      "tokens": 45887,
+      "cacheRead": 36992,
+      "cacheWrite": 0,
+      "sessions": 4,
+      "units": [
+        "normalize:11521t/8064c",
+        "scale:11499t/9600c",
+        "total:11374t/9472c",
+        "summarize:11493t/9856c"
+      ]
+    },
+    {
+      "bound": 1,
+      "rep": 3,
+      "wallMs": 25270,
+      "tokens": 33941,
+      "cacheRead": 20608,
+      "cacheWrite": 0,
+      "sessions": 4,
+      "units": [
+        "normalize:7441t/4224c",
+        "scale:11677t/7808c",
+        "total:7105t/4096c",
+        "summarize:7718t/4480c"
+      ]
+    },
+    {
+      "bound": 2,
+      "rep": 1,
+      "wallMs": 17735,
+      "tokens": 41806,
+      "cacheRead": 33536,
+      "cacheWrite": 0,
+      "sessions": 2,
+      "units": [
+        "normalize:11172t/9344c",
+        "scale:9897t/7424c",
+        "total:10915t/9344c",
+        "summarize:9822t/7424c"
+      ]
+    },
+    {
+      "bound": 2,
+      "rep": 2,
+      "wallMs": 17998,
+      "tokens": 37693,
+      "cacheRead": 30080,
+      "cacheWrite": 0,
+      "sessions": 2,
+      "units": [
+        "normalize:11246t/9472c",
+        "scale:9885t/7680c",
+        "total:7402t/6272c",
+        "summarize:9160t/6656c"
+      ]
+    },
+    {
+      "bound": 2,
+      "rep": 3,
+      "wallMs": 17427,
+      "tokens": 35444,
+      "cacheRead": 24448,
+      "cacheWrite": 0,
+      "sessions": 2,
+      "units": [
+        "normalize:8153t/5120c",
+        "scale:10024t/7552c",
+        "total:7679t/4736c",
+        "summarize:9588t/7040c"
+      ]
+    },
+    {
+      "bound": 4,
+      "rep": 1,
+      "wallMs": 16480,
+      "tokens": 54834,
+      "cacheRead": 45824,
+      "cacheWrite": 0,
+      "sessions": 1,
+      "units": [
+        "normalize:11314t/9472c",
+        "scale:10046t/7680c",
+        "total:14457t/12032c",
+        "summarize:19017t/16640c"
+      ]
+    },
+    {
+      "bound": 4,
+      "rep": 2,
+      "wallMs": 16810,
+      "tokens": 55738,
+      "cacheRead": 46464,
+      "cacheWrite": 0,
+      "sessions": 1,
+      "units": [
+        "normalize:11632t/9600c",
+        "scale:10293t/7936c",
+        "total:14650t/12288c",
+        "summarize:19163t/16640c"
+      ]
+    }
+  ]
+}
