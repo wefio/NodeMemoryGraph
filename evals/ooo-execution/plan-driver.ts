@@ -561,6 +561,13 @@ export interface SpecFile {
   checks?: readonly { label: string; command: string; args: string[] }[];
   parentChecks?: readonly { label: string; command: string; args: string[] }[];
   join?: string;
+  /** Execution fusion, declared in the spec file the same way the driver's own spec declares it. It is
+   *  copied through by `specFrom`: a spec that asked for fusion and silently got none would be read as
+   *  the control arm. */
+  fusion?: {
+    unitsPerSession: number;
+    declarations?: Readonly<Record<string, { capability?: string; authority?: string }>>;
+  };
   worker:
     | { kind: "stub"; latencyMs: number; fail?: readonly string[] }
     | { kind: "canned" }
@@ -708,6 +715,65 @@ export function piWorker(worker: { provider: string; model: string }, live: bool
   };
 }
 
+/** The live worker that can honour a continuation: one runner per session id, created on that
+ *  session's first unit and re-pointed for the rest. `piWorker` cannot do this - the extension it calls
+ *  creates a session per call - so a fused live arm uses this one, and its `sessionId` is read from the
+ *  session the unit actually ran in. `close()` disposes them; a run should call it once. */
+export function piSessionWorker(
+  worker: { provider: string; model: string },
+  live: boolean,
+): { worker: PlanWorker; close: () => void } {
+  if (!live)
+    throw new Error(
+      "refusing a live model run without --live: the spec names the provider, the operator " +
+        "authorizes the spend",
+    );
+  const runners = new Map<
+    string,
+    import("../../.pi/extensions/nmg/ooo-execution.ts").PiSessionRunner
+  >();
+  const planWorker: PlanWorker = async (taskId, frozen, _dependencies, session) => {
+    const key = session?.id ?? `unit:${taskId}`;
+    const { createPiSessionRunner, patchSessionInput } =
+      await import("../../.pi/extensions/nmg/ooo-execution.ts");
+    let runner = runners.get(key);
+    if (!runner) {
+      const input = patchSessionInput(frozen);
+      runner = await createPiSessionRunner({
+        provider: worker.provider,
+        modelId: worker.model,
+        patchMode: true,
+        first: input,
+        // A chain's surface is fixed when the session is created, so it registers the union of what
+        // its units may need rather than the first unit's subset.
+        chain: session !== undefined,
+      });
+      runners.set(key, runner);
+    }
+    const run = await runner.runUnit(patchSessionInput(frozen));
+    if (!run.artifact) return { failure: `${taskId}: the worker returned no artifact` };
+    return {
+      artifact: run.artifact,
+      metrics: {
+        tokens: run.tokens,
+        turns: run.turns,
+        checks: run.checks,
+        // The driver's name for the session it asked for, reported only because this runner is the one
+        // held under that name: a worker that answered with a session of its own reports a different id
+        // and the driver ends the chain, which is how a fused run is told from a wish.
+        ...(session ? { sessionId: session.id } : {}),
+      },
+    };
+  };
+  return {
+    worker: planWorker,
+    close: () => {
+      for (const runner of runners.values()) runner.dispose();
+      runners.clear();
+    },
+  };
+}
+
 export function specFrom(file: SpecFile, worker: PlanWorker, slots: number): PlanDriverSpec {
   const repository = process.cwd();
   const fallback = file.checks ? checkList(file.checks) : undefined;
@@ -739,6 +805,7 @@ export function specFrom(file: SpecFile, worker: PlanWorker, slots: number): Pla
     ...(file.join ? { join: file.join } : {}),
     ...(file.budget ? { budget: file.budget } : {}),
     ...(file.limits ? { limits: file.limits } : {}),
+    ...(file.fusion ? { fusion: file.fusion } : {}),
     slots,
   };
 }
@@ -754,23 +821,38 @@ async function main(): Promise<void> {
       runs: { type: "string" },
       out: { type: "string" },
       live: { type: "boolean" },
+      // Holds one Pi session across a chain's units. Off by default: the flag is what makes a fused
+      // live arm possible, and a spec naming `pi` without it keeps the per-call worker (and its
+      // refusal to continue a session) as the recorded behaviour.
+      "session-runner": { type: "boolean" },
     },
     allowPositionals: false,
   });
   if (!values.spec || !values.out) throw new Error(USAGE);
   const file = readSpecFile(values.spec);
   const slots = values.slots === undefined ? 2 : Number(values.slots);
+  const sessions =
+    file.worker.kind === "pi" && values["session-runner"] === true
+      ? piSessionWorker(file.worker, values.live === true)
+      : undefined;
   const worker =
     file.worker.kind === "stub"
       ? stubWorker(file.worker)
       : file.worker.kind === "canned"
         ? cannedWorker(file)
-        : piWorker(file.worker, values.live === true);
+        : (sessions?.worker ?? piWorker(file.worker, values.live === true));
   const spec = specFrom(file, worker, slots);
-  const report =
-    command === "run"
-      ? await runPlan(spec)
-      : await comparePlanSlots(spec, { runs: values.runs === undefined ? 3 : Number(values.runs) });
+  let report: Awaited<ReturnType<typeof runPlan>>;
+  try {
+    report =
+      command === "run"
+        ? await runPlan(spec)
+        : await comparePlanSlots(spec, {
+            runs: values.runs === undefined ? 3 : Number(values.runs),
+          });
+  } finally {
+    sessions?.close();
+  }
   const out = resolve(values.out);
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(

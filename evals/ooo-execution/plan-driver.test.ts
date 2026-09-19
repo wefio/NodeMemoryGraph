@@ -12,6 +12,7 @@ import {
   comparePlanSlots,
   piWorker,
   runPlan,
+  specFrom,
   type PlanDriverSpec,
   type PlanWorker,
 } from "./plan-driver.ts";
@@ -399,4 +400,33 @@ test("a unit's check is outstanding while an independent unit's worker runs", as
       `first=${firstWindow.start}-${firstWindow.end}, check=${first.hostMs}ms, second=${secondWindow.start}-${secondWindow.end}`,
   );
   assert.equal(run.failures, 0, "both units are accepted, so the overlap is not a failure path");
+});
+
+test("a spec file's fusion block reaches the run it describes", () => {
+  const target = "evals/ooo-execution/fixtures/report/alpha.ts";
+  const file = {
+    baseline: [target],
+    plan: [{ id: "first", effect: "isolated-artifact" }],
+    units: {
+      first: {
+        instruction: "work on first",
+        editable: [target],
+        checks: [{ label: "ok", command: "node", args: ["-e", "process.exit(0)"] }],
+      },
+    },
+    worker: { kind: "stub" as const, latencyMs: 1 },
+    fusion: { unitsPerSession: 2 },
+  };
+  const declared = specFrom(file, recordingWorker(), 1);
+  assert.deepEqual(
+    declared.fusion,
+    { unitsPerSession: 2 },
+    "a spec that asked for fusion must not be run as the control arm",
+  );
+  const { fusion: _omitted, ...without } = file;
+  assert.equal(
+    specFrom(without, recordingWorker(), 1).fusion,
+    undefined,
+    "a spec that declared none has none: the two readings must not be the same run",
+  );
 });
