@@ -3,7 +3,7 @@
  * exist (PatchTaskSpec, FrozenPatchTask, BoardTicket, cycle requirements, board
  * verdicts). It adds no schema, opens no database, calls no model, and publishes
  * nothing — see docs/design/task-unit-semantics.md and the proposed decision
- * record docs/decisions/proposed/2026-09-13-task-unit-semantics.md.
+ * record docs/decisions/implemented/2026-09-13-task-unit-semantics.md.
  *
  * Two rules from that design are enforced here rather than left to convention:
  *
