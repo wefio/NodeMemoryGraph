@@ -206,10 +206,30 @@ export interface PiRun {
   cacheWrite: number;
 }
 
+/** One unit's mutable state, held by the tool set. The tools read this object at call time rather
+ *  than closing over its values, which is what lets a fused chain keep one session and one tool surface
+ *  while each unit gets its own snapshot, check, budget and counters. The single-unit path builds one
+ *  box and never re-points it, so both paths are the same code. */
+export interface UnitState {
+  snapshot: string;
+  limits: PatchLimits;
+  maxArtifact: number;
+  frozen?: FrozenPatchWork;
+  check?: CheckTool;
+  pushback?: PushbackSpec;
+  reads: { value: number };
+  runs: { value: number };
+  turns: number;
+  artifact: string | null;
+  report: PushbackReport | null;
+  /** Ends the current unit's attempt; re-pointed per unit by a chain. */
+  abort: () => void;
+}
+
 /** Tool surface for one patch attempt. Each tool is bounded, parameter-free where it
  *  must be, and reads only host-owned state: the worker cannot choose a command, a path
  *  outside the frozen editable list, or a requirement that was not declared to it. */
-function readSnapshotTool(snapshot: string, limits: PatchLimits, reads: { value: number }) {
+function readSnapshotTool(box: UnitState) {
   return defineTool({
     name: "read_snapshot",
     label: "Read frozen task snapshot",
@@ -217,17 +237,13 @@ function readSnapshotTool(snapshot: string, limits: PatchLimits, reads: { value:
       "Read this task's immutable input and accepted dependency values only (bounded at admission). No paths or commands are accepted.",
     parameters: Type.Object({}, { additionalProperties: false }),
     execute: async () => {
-      if (++reads.value > limits.reads) throw new Error("snapshot read budget exceeded");
-      return { content: [{ type: "text" as const, text: snapshot }], details: {} };
+      if (++box.reads.value > box.limits.reads) throw new Error("snapshot read budget exceeded");
+      return { content: [{ type: "text" as const, text: box.snapshot }], details: {} };
     },
   });
 }
 
-function runCheckTool(
-  frozen: FrozenPatchWork | undefined,
-  check: CheckTool,
-  runs: { value: number },
-) {
+function runCheckTool(box: UnitState) {
   return defineTool({
     name: "run_check",
     label: "Run the round's fixed check",
@@ -242,7 +258,16 @@ function runCheckTool(
       { additionalProperties: false },
     ),
     execute: async (_id, args) => {
-      if (++runs.value > check.maxRuns) throw new Error("check budget exceeded");
+      const { check, frozen } = box;
+      // A chain's surface is fixed at session creation, so a unit without a check gets this tool and
+      // is told so, instead of the surface being rebuilt (which a session does not allow).
+      if (!check)
+        return {
+          content: [{ type: "text" as const, text: "this unit has no check; answer without one" }],
+          details: {},
+          isError: true,
+        };
+      if (++box.runs.value > check.maxRuns) throw new Error("check budget exceeded");
       try {
         if (!frozen) throw new Error("no frozen envelope for validation");
         checkToolCandidate(frozen, args.files);
@@ -274,10 +299,7 @@ function runCheckTool(
   });
 }
 
-function reportPushbackTool(
-  pushback: PushbackSpec,
-  state: { report: PushbackReport | null; abort: () => void },
-) {
+function reportPushbackTool(box: UnitState) {
   return defineTool({
     name: "report_dependency_failure",
     label: "Report that a dependency cannot satisfy a requirement",
@@ -288,9 +310,11 @@ function reportPushbackTool(
       { additionalProperties: false },
     ),
     execute: async (_id, args) => {
-      const declared = pushback.requirements;
+      const { pushback, report } = box;
       if (
-        !declared.some(
+        !report ||
+        pushback === undefined ||
+        !pushback.requirements.some(
           (item) => item.task === args.dependency && item.requirement === args.requirement,
         )
       )
@@ -298,7 +322,10 @@ function reportPushbackTool(
           content: [
             {
               type: "text" as const,
-              text: `not a declared requirement. Declared: ${JSON.stringify(declared)}`,
+              text:
+                box.pushback === undefined
+                  ? "this unit declared no dependency requirements"
+                  : `not a declared requirement. Declared: ${JSON.stringify(box.pushback.requirements)}`,
             },
           ],
           details: {},
@@ -306,12 +333,12 @@ function reportPushbackTool(
         };
       // The claim is not completed by this report: the host decides whether to reopen
       // the dependency, and the attempt ends here without an artifact.
-      state.report = {
+      box.report = {
         dependency: args.dependency,
         requirement: args.requirement,
         evidence: String(args.evidence).slice(0, 2_000),
       };
-      state.abort();
+      box.abort();
       return {
         content: [
           { type: "text" as const, text: "recorded; this attempt ends and the host decides" },
@@ -466,10 +493,7 @@ function turnError(event: {
 /** Tool the artifact is delivered through. Structural prevention of prose: the schema is
  *  the contract and the parameters are validated by this module, so a text answer can
  *  never be mistaken for a submission. */
-function artifactTool(
-  frozen: FrozenPatchWork,
-  state: { artifact: string | null; abort: () => void },
-) {
+function artifactTool(box: UnitState, looseConclusion = false) {
   return defineTool({
     name: ARTIFACT_TOOL,
     label: "Submit the artifact",
@@ -485,7 +509,11 @@ function artifactTool(
         // cannot offer a kind this task would be rejected for, and an invented value
         // cannot be sampled at all.
         conclusion: Type.Optional(
-          Type.Union(frozen.work.admittedConclusions.map((kind) => Type.Literal(kind))),
+          // A chain registers its surface once, so a unit's own literal union cannot be sampled there;
+          // `artifactEnvelope` still refuses an invented kind, and the host still validates the result.
+          looseConclusion
+            ? Type.String()
+            : Type.Union(box.frozen!.work.admittedConclusions.map((kind) => Type.Literal(kind))),
         ),
         summary: Type.Optional(Type.String()),
         evidence: Type.Optional(Type.String()),
@@ -497,6 +525,13 @@ function artifactTool(
     ),
     constrainedSampling: { type: "json_schema", strict: "prefer" },
     execute: async (_id, args) => {
+      const frozen = box.frozen;
+      if (!frozen)
+        return {
+          content: [{ type: "text" as const, text: "this unit has no frozen envelope" }],
+          details: {},
+          isError: true,
+        };
       const built = artifactEnvelope(frozen, args as ArtifactParams);
       if (!built.ok)
         return {
@@ -511,27 +546,23 @@ function artifactTool(
         };
       // A recorded artifact ends the attempt: further text would only spend tokens and
       // could contradict the submission, which the host never reads as an answer.
-      state.artifact = built.json;
-      state.abort();
+      box.artifact = built.json;
+      box.abort();
       return { content: [{ type: "text" as const, text: "artifact recorded" }], details: {} };
     },
   });
 }
 
-/** The optional tools for one attempt, present only when the host enabled them. */
-function optionalTools(
-  frozen: FrozenPatchWork | undefined,
-  check: CheckTool | undefined,
-  runs: { value: number },
-  pushback: PushbackSpec | undefined,
-  state: { report: PushbackReport | null; abort: () => void },
-  artifact: { artifact: string | null; abort: () => void } | undefined,
-) {
+/** The optional tools for one attempt, present only when the host enabled them (`all` registers the
+ *  whole surface, which a chain needs because a session's surface is fixed at creation). */
+function optionalTools(box: UnitState, all = false) {
+  const hasCheck = box.check !== undefined;
+  const hasPushback = (box.pushback?.requirements.length ?? 0) > 0;
+  const hasArtifact = box.frozen !== undefined;
   return {
-    runCheck: check ? runCheckTool(frozen, check, runs) : undefined,
-    reportPushback:
-      pushback && pushback.requirements.length ? reportPushbackTool(pushback, state) : undefined,
-    submitArtifact: frozen && artifact ? artifactTool(frozen, artifact) : undefined,
+    runCheck: hasCheck || all ? runCheckTool(box) : undefined,
+    reportPushback: hasPushback || all ? reportPushbackTool(box) : undefined,
+    submitArtifact: hasArtifact || all ? artifactTool(box) : undefined,
   };
 }
 
@@ -550,25 +581,22 @@ async function executePiInput(
   const model = runtime.getModel(provider, modelId);
   if (!model) throw new Error(`Pi model unavailable: ${provider}/${modelId}`);
   const resources = resourceLoader(frozen !== undefined);
-  const reads = { value: 0 };
-  const runs = { value: 0 };
-  const pushbackState: { report: PushbackReport | null; abort: () => void } = {
+  const box: UnitState = {
+    snapshot,
+    limits,
+    maxArtifact,
+    ...(frozen !== undefined ? { frozen } : {}),
+    ...(check !== undefined ? { check } : {}),
+    ...(pushback !== undefined ? { pushback } : {}),
+    reads: { value: 0 },
+    runs: { value: 0 },
+    turns: 0,
+    artifact: null,
     report: null,
     abort: () => {},
   };
-  const artifactState: { artifact: string | null; abort: () => void } = {
-    artifact: null,
-    abort: () => {},
-  };
-  const readSnapshot = readSnapshotTool(snapshot, limits, reads);
-  const { runCheck, reportPushback, submitArtifact } = optionalTools(
-    frozen,
-    check,
-    runs,
-    pushback,
-    pushbackState,
-    artifactState,
-  );
+  const readSnapshot = readSnapshotTool(box);
+  const { runCheck, reportPushback, submitArtifact } = optionalTools(box);
   const { session } = await createAgentSession({
     model,
     modelRuntime: runtime,
@@ -588,25 +616,23 @@ async function executePiInput(
       retry: { enabled: false },
     }),
   });
-  pushbackState.abort = () => void session.abort();
-  artifactState.abort = () => void session.abort();
+  box.abort = () => void session.abort();
   const finish = (artifact: string, turnsUsed: number, pushback?: PushbackReport): PiRun => ({
     artifact,
     ...(pushback ? { pushback } : {}),
     sessionId: session.sessionId,
     provider,
     model: modelId,
-    reads: reads.value,
+    reads: box.reads.value,
     turns: turnsUsed,
-    checks: runs.value,
+    checks: box.runs.value,
     tokens: totalTokens(session.messages),
     ...cacheTotals(session.messages),
   });
 
-  let turns = 0;
   let timedOut = false;
   const unsubscribe = session.subscribe((event) => {
-    if (event.type === "turn_start" && ++turns > limits.turns) void session.abort();
+    if (event.type === "turn_start" && ++box.turns > limits.turns) void session.abort();
     const error = turnError(event as Parameters<typeof turnError>[0]);
     if (error) process.stderr.write(error);
   });
@@ -625,10 +651,10 @@ async function executePiInput(
     await session.prompt(prompt, { expandPromptTemplates: false });
     // A tool-recorded artifact is the completion evidence: it was produced through our
     // own handler, not claimed by the model. It also wins over any trailing text.
-    if (artifactState.artifact) return finish(artifactState.artifact, turns);
-    if (pushbackState.report) return finish("", turns, pushbackState.report);
+    if (box.artifact) return finish(box.artifact, box.turns);
+    if (box.report) return finish("", box.turns, box.report);
     const message = session.messages.findLast((item) => item.role === "assistant");
-    const allowed = piCompletionAllowed(message?.stopReason, timedOut, turns, reads.value, limits);
+    const allowed = piCompletionAllowed(message?.stopReason, timedOut, box.turns, box.reads.value, limits);
     const text = boundedArtifact(message, maxArtifact);
     // Both channels of a patch attempt go through the same envelope: an answer that is not a
     // valid artifact for this frozen work is a failed attempt with its reason, not a
@@ -642,11 +668,11 @@ async function executePiInput(
     if (!allowed || !built.ok)
       throw new Error(
         `Pi snapshot task did not finish within its bounded contract: ` +
-          `stopReason=${message?.stopReason}, turns=${turns}, reads=${reads.value}, ` +
+          `stopReason=${message?.stopReason}, turns=${box.turns}, reads=${box.reads.value}, ` +
           `artifact=${built.ok ? "ok" : built.error}` +
           (timedOut ? " (timed out)" : ""),
       );
-    return finish(built.json, turns);
+    return finish(built.json, box.turns);
   } finally {
     clearTimeout(timeout);
     unsubscribe();
