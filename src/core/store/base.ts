@@ -37,6 +37,7 @@ import type {
   VectorEmbedder,
 } from "../types.ts";
 import { TASK_BOARD_VERDICTS, WORLD_BOARD_ID } from "../types.ts";
+import { currentlyValid, notExpired } from "./clock.ts";
 import { histogramAdd } from "../perf.ts";
 import { Router } from "../router.ts";
 import { cosineSimilarity, HashingVectorEmbedder } from "../vector.ts";
@@ -2996,11 +2997,8 @@ export class NmgStoreBase {
            OR (? IS NULL AND m.session_id IS NULL)))
          AND m.status IN ('active', 'disputed', 'superseded')
          AND (? = 1 OR m.status IN ('active', 'disputed'))
-         AND (m.expires_at IS NULL OR m.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         AND (? = 1 OR (
-           (m.valid_from IS NULL OR m.valid_from <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-           AND (m.valid_until IS NULL OR m.valid_until > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         ))
+         AND ${notExpired("m")}
+         AND (? = 1 OR ${currentlyValid("m")})
        ORDER BY m.tier ASC, m.importance DESC, m.created_at DESC
        LIMIT ?`,
       )
