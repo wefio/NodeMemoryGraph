@@ -770,13 +770,17 @@ export function piSessionWorker(
   >();
   const planWorker: PlanWorker = async (taskId, frozen, _dependencies, session) => {
     const key = session?.id ?? `unit:${taskId}`;
+    // A fused session fixes its tool surface when it is created, which loosens the artifact schema's
+    // conclusion to a string, so the input that feeds it must name the admitted kinds in the prompt.
+    // Both flags come from this one decision, because the runner refuses them disagreeing.
+    const chain = session !== undefined;
     // The mechanism is shared and the adapter is thin: the runner comes from the harness that can
     // open a pi session, while the session input it is fed is built by the shared layer.
     const { createPiSessionRunner } = await import("../../.pi/extensions/nmg/ooo-execution.ts");
     const sessionMechanism = await import("../../src/integration/ooo-session-mechanism.ts");
     let runner = runners.get(key);
     if (!runner) {
-      const input = sessionMechanism.patchSessionInput(frozen);
+      const input = sessionMechanism.patchSessionInput(frozen, { looseConclusion: chain });
       runner = await createPiSessionRunner({
         provider: worker.provider,
         modelId: worker.model,
@@ -784,11 +788,13 @@ export function piSessionWorker(
         first: input,
         // A chain's surface is fixed when the session is created, so it registers the union of what
         // its units may need rather than the first unit's subset.
-        chain: session !== undefined,
+        chain,
       });
       runners.set(key, runner);
     }
-    const run = await runner.runUnit(sessionMechanism.patchSessionInput(frozen));
+    const run = await runner.runUnit(
+      sessionMechanism.patchSessionInput(frozen, { looseConclusion: chain }),
+    );
     if (!run.artifact) return { failure: `${taskId}: the worker returned no artifact` };
     return {
       artifact: run.artifact,

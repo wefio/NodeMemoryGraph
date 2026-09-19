@@ -306,6 +306,16 @@ export async function createPiSessionRunner(options: {
 }): Promise<PiSessionRunner> {
   const { provider, modelId } = options;
   const chain = options.chain === true;
+  // The surface decides whether the artifact schema can carry the admitted conclusion kinds. A
+  // loosened surface needs inputs built to name them in the prompt, and a strict one must not carry a
+  // note about a choice it does not have. A caller that loosens one without the other is caught here,
+  // before any model call, because the cost of the mismatch is a wrong guess per unit, paid silently.
+  if ((options.first.looseConclusion === true) !== chain)
+    throw new Error(
+      chain
+        ? "a chain session needs inputs built with looseConclusion, so the prompt names the admitted conclusion kinds"
+        : "this session is not a chain, so its inputs must not be built with looseConclusion",
+    );
   const surface = chain
     ? { check: true, pushback: true, artifact: true, looseConclusion: true }
     : {
@@ -438,7 +448,8 @@ export async function createPiSessionRunner(options: {
       if (!allowed || !built.ok)
         throw new Error(
           `Pi snapshot task did not finish within its bounded contract: ` +
-            `stopReason=${message?.stopReason}, turns=${box.turns}, reads=${box.reads.value}, ` +
+            `stopReason=${message?.stopReason}, turns=${box.turns}/${box.limits.turns}, ` +
+            `reads=${box.reads.value}/${box.limits.reads}, ` +
             `artifact=${built.ok ? "ok" : built.error}` +
             (timedOut ? " (timed out)" : ""),
         );

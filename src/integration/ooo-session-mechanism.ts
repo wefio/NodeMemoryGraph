@@ -130,6 +130,12 @@ export interface PushbackReport {
 export interface PatchExecOptions {
   check?: CheckTool;
   pushback?: PushbackSpec;
+  /**
+   * Set by a caller whose session loosened the artifact schema's conclusion to a plain string. A chain
+   * fixes its tool surface when the session is created, so a per-unit literal union cannot be sampled
+   * there; the admitted kinds then have to be named in the prompt, because the schema no longer can.
+   */
+  looseConclusion?: boolean;
 }
 
 /** Tool the artifact is delivered through. Structural prevention of prose: the schema
@@ -153,11 +159,20 @@ export function patchSessionInput(
     ? `\nIf what you received cannot satisfy one of these declared requirements, call report_dependency_failure with the exact task and requirement instead of finishing the work: ` +
       JSON.stringify(pushback.requirements)
     : "";
+  // The one rule a loosened surface cannot carry. Naming the kinds here is not the prompt repeating the
+  // schema - it is the prompt carrying what the schema was forced to drop, so a chain's unit is not
+  // asked to guess a kind and pay a turn for a wrong guess.
+  const conclusionNote = options.looseConclusion
+    ? `\nIf you answer with a conclusion instead of files, its kind must be one of ${JSON.stringify(
+        frozen.work.admittedConclusions,
+      )}, exactly as written; a kind outside that list is refused.`
+    : "";
   return {
-    prompt: patchPrompt(frozen, ARTIFACT_TOOL) + note + pushbackNote,
+    prompt: patchPrompt(frozen, ARTIFACT_TOOL) + note + pushbackNote + conclusionNote,
     snapshot: snapshotText(frozen),
     maxArtifact: frozen.work.budget.output,
     limits: frozen.work.limits,
+    looseConclusion: options.looseConclusion === true,
     ...(check !== undefined ? { check } : {}),
     frozen,
     ...(pushback !== undefined ? { pushback } : {}),
@@ -346,6 +361,9 @@ export interface SessionRunInput {
   snapshot: string;
   maxArtifact: number;
   limits: PatchLimits;
+  /** Whether this input was built for a session whose artifact schema is loosened, so the prompt had to
+   *  name the admitted conclusion kinds. The runner checks it against its own mode. */
+  looseConclusion?: boolean;
   check?: CheckTool;
   frozen?: FrozenPatchWork;
   pushback?: PushbackSpec;
