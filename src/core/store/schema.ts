@@ -1013,39 +1013,6 @@ export function ensureTaskBoardColumns(db: DatabaseSync): void {
         "CHECK (serial_state IN ('outstanding', 'pending', 'stale'))",
     );
   }
-  // Attempt fencing (board-governance P1 slice): a claim that does not renew a
-  // live claim by the same agent starts a new attempt, and the previous
-  // attempt's deliverable and verdict are cleared with it. Nullable/0 on
-  // legacy rows; additive, no lifecycle change.
-  if (!existing.has("attempt")) {
-    db.exec("ALTER TABLE task_board_entries ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0");
-  }
-  for (const column of [
-    "delivered_by",
-    "delivered_at",
-    "deliverable_digest",
-    "deliverable_ref",
-    "deliverable_summary",
-    "judged_by",
-    "judged_at",
-    "verdict_reason",
-    "judged_digest",
-  ]) {
-    if (!existing.has(column)) {
-      db.exec(`ALTER TABLE task_board_entries ADD COLUMN ${column} TEXT`);
-    }
-  }
-  // Deliverable (P1 slice): the claim holder's artifact, bound to a digest.
-  // Deliverable, verdict, and veto are three distinct things: the holder's
-  // artifact, an independent judgement of it, and a contest of the holder's own
-  // resolve. This column set adds the first two; `resolve`/veto are untouched.
-  // `undecidable` is a first-class verdict, never a softer `rejected`.
-  if (!existing.has("verdict")) {
-    db.exec(
-      "ALTER TABLE task_board_entries ADD COLUMN verdict TEXT " +
-        "CHECK (verdict IN ('accepted', 'rejected', 'undecidable'))",
-    );
-  }
   // Reviewable finalize (P1 veto, board-governance): an independent reviewer
   // (not the resolver) can mark a self-reported resolve as contested, so the
   // resolve is not accepted downstream as validated completion (de-biases

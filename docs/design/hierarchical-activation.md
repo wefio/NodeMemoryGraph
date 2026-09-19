@@ -29,21 +29,21 @@ query → g₁(候选池上下文) → g₂(邻域上下文) → g₃(全图上�
 
 每一层不是简单地"多加几个聚合值"，而是**在激活维度上引入新的抽象层级**。
 
-| 节点   | 输入               | 产出               | 类比         |
-| ------ | ------------------ | ------------------ | ------------ |
+| 节点 | 输入 | 产出 | 类比 |
+|------|------|------|------|
 | **g₁** | query + 候选节点池 | 候选池的全局上下文 | 局部模式识别 |
-| **g₂** | g₁ + 邻域扩展节点  | 邻域的全局上下文   | 中层抽象     |
-| **g₃** | g₁ + g₂ + 图状态   | 全图上下文         | 全局语义     |
+| **g₂** | g₁ + 邻域扩展节点 | 邻域的全局上下文 | 中层抽象 |
+| **g₃** | g₁ + g₂ + 图状态 | 全图上下文 | 全局语义 |
 
 ### 2.2 时间全局节点（h₁, h₂, h₃）
 
 对应 NMG 已有的三种记忆时间尺度：
 
-| 节点   | 时间尺度 | 对应 NMG 概念          | 更新频率              |
-| ------ | -------- | ---------------------- | --------------------- |
-| **h₁** | 短期     | 当前 session AG 快状态 | 每次 AG 更新          |
-| **h₂** | 中期     | 当前 task frame / STG  | task frame 切换或结束 |
-| **h₃** | 长期     | LTG 稳定节点           | consolidation 时      |
+| 节点 | 时间尺度 | 对应 NMG 概念 | 更新频率 |
+|------|----------|-------------|----------|
+| **h₁** | 短期 | 当前 session AG 快状态 | 每次 AG 更新 |
+| **h₂** | 中期 | 当前 task frame / STG | task frame 切换或结束 |
+| **h₃** | 长期 | LTG 稳定节点 | consolidation 时 |
 
 **关键设计原则：h₁/h₂/h₃ 是 NMG 图状态的可微投影，不是独立的编码器记忆。** `h₁` 的快速运行态属于会话 AG，并按 session/branch 隔离；`h₂` 从 task frame/STG 投影，`h₃` 从 LTG 投影。可训练慢参数属于版本化 controller/Lab state，而不是 AG。HA 不得拥有第二套不可见语义记忆。
 
@@ -80,36 +80,36 @@ query → g₁(候选池上下文) → g₂(邻域上下文) → g₃(全图上�
 /** 单个节点的激活输入 */
 interface NodeActivationInput {
   nodeId: string;
-  vector: Float32Array; // L2 向量 [d]
-  lexicalScore: number; // FTS 分数
-  initialSimilarity: number; // 与 query 的余弦相似度
-  tier: number; // 0-3
-  activeCount: number; // 历史激活次数
+  vector: Float32Array;        // L2 向量 [d]
+  lexicalScore: number;        // FTS 分数
+  initialSimilarity: number;   // 与 query 的余弦相似度
+  tier: number;                // 0-3
+  activeCount: number;         // 历史激活次数
   lastActivatedAt: string | null;
 }
 
 /** 空间全局节点的输出 */
 interface GlobalContext {
-  vector: Float32Array; // 聚合后的 L2 向量 [d]
+  vector: Float32Array;        // 聚合后的 L2 向量 [d]
   attentionWeights: Float32Array; // 对每个输入节点的注意力权重
-  entropy: number; // 注意力熵（衡量信息集中度）
+  entropy: number;             // 注意力熵（衡量信息集中度）
 }
 
 /** 时间状态投影 */
 interface TemporalProjection {
-  shortTerm: Float32Array; // h₁ 投影 [d]
-  mediumTerm: Float32Array; // h₂ 投影 [d]
-  longTerm: Float32Array; // h₃ 投影 [d]
+  shortTerm: Float32Array;     // h₁ 投影 [d]
+  mediumTerm: Float32Array;    // h₂ 投影 [d]
+  longTerm: Float32Array;      // h₃ 投影 [d]
 }
 
 /** 层次化激活传播的完整输出 */
 interface HierarchicalActivationOutput {
   candidates: NodeActivationInput[];
-  g1: GlobalContext; // 候选池上下文
-  g2: GlobalContext; // 邻域上下文
-  g3: GlobalContext; // 全图上下文
+  g1: GlobalContext;           // 候选池上下文
+  g2: GlobalContext;           // 邻域上下文
+  g3: GlobalContext;           // 全图上下文
   temporalProjection: TemporalProjection;
-  nodeScores: Float32Array; // 每个节点的最终激活分数
+  nodeScores: Float32Array;    // 每个节点的最终激活分数
   globalSummary: Float32Array; // 压缩后的全局摘要向量（供 AG 使用）
 }
 ```
@@ -121,12 +121,12 @@ class HierarchicalActivation {
   readonly dimensions: number;
 
   // 可训练参数（UOp autodiff）
-  readonly #g1QueryProjection: Tensor; // 查询→g₁ 空间的投影
-  readonly #g1FusionWeights: Tensor; // g₁ 融合权重
-  readonly #g2FusionWeights: Tensor; // g₂ 融合权重（g₁ + 邻域）
-  readonly #g3FusionWeights: Tensor; // g₃ 融合权重（g₁ + g₂ + 图状态）
-  readonly #temporalGate: Tensor; // 时间尺度门控
-  readonly #scoringProjection: Tensor; // 最终评分投影
+  readonly #g1QueryProjection: Tensor;   // 查询→g₁ 空间的投影
+  readonly #g1FusionWeights: Tensor;      // g₁ 融合权重
+  readonly #g2FusionWeights: Tensor;      // g₂ 融合权重（g₁ + 邻域）
+  readonly #g3FusionWeights: Tensor;      // g₃ 融合权重（g₁ + g₂ + 图状态）
+  readonly #temporalGate: Tensor;         // 时间尺度门控
+  readonly #scoringProjection: Tensor;     // 最终评分投影
 
   constructor(dimensions: number);
 
@@ -196,15 +196,15 @@ propagate(queryVector, candidates, neighborhood, graphState, prevTemporal)
 
 ```ts
 // 伪代码：UOp 链
-const q = constant(queryVector); // UOp [d, 1]
-const C = stack(candidates.map((c) => constant(c.vector))); // UOp [d, n]
+const q = constant(queryVector);                    // UOp [d, 1]
+const C = stack(candidates.map(c => constant(c.vector))); // UOp [d, n]
 
 // g₁: cross-attention(Q, C)
-const scores_g1 = softmax(matmul(transpose(q), C) / sqrt(d)); // UOp [1, n]
-const g1_vec = matmul(C, transpose(scores_g1)); // UOp [d, 1]
+const scores_g1 = softmax(matmul(transpose(q), C) / sqrt(d));  // UOp [1, n]
+const g1_vec = matmul(C, transpose(scores_g1));                // UOp [d, 1]
 
 // g₂: cross-attention(g₁, N)
-const N = stack(neighborhood.map((n) => constant(n.vector)));
+const N = stack(neighborhood.map(n => constant(n.vector)));
 const scores_g2 = softmax(matmul(transpose(g1_vec), N) / sqrt(d));
 const g2_vec = matmul(N, transpose(scores_g2));
 
@@ -213,8 +213,11 @@ const g3_raw = add(
   multiply(g1_vec, g3Weights[0]),
   add(
     multiply(g2_vec, g3Weights[1]),
-    add(multiply(h1, g3Weights[2]), add(multiply(h2, g3Weights[3]), multiply(h3, g3Weights[4]))),
-  ),
+    add(
+      multiply(h1, g3Weights[2]),
+      add(multiply(h2, g3Weights[3]), multiply(h3, g3Weights[4]))
+    )
+  )
 );
 const g3_vec = l2Normalize(g3_raw);
 
@@ -229,19 +232,19 @@ const nodeScores = candidates.map((c, i) => {
 
 // 损失
 const loss = contrastiveLoss(nodeScores, labels);
-loss.backward(); // 梯度流过所有 Tensor 参数
+loss.backward();  // 梯度流过所有 Tensor 参数
 ```
 
 ### 4.2 可训练参数清单
 
-| 参数                | 形状     | 用途                                                           |
-| ------------------- | -------- | -------------------------------------------------------------- |
-| `g1FusionWeights`   | `[d]`    | g₁ 聚合时 query vs candidate 的权重                            |
-| `g2FusionWeights`   | `[d]`    | g₂ 聚合时 g₁ vs neighborhood 的权重                            |
-| `g3FusionWeights`   | `[5, d]` | g₃ 融合 g₁/g₂/h₁/h₂/h₃ 的权重                                  |
-| `temporalGate`      | `[2]`    | α（短期更新速率）和 β（中期更新速率）                          |
-| `scoringWeights`    | `[6]`    | sim_q / sim_g1 / sim_g2 / sim_g3 / timeBias / graphBias 的权重 |
-| `scoringProjection` | `[d, d]` | g₃ → globalSummary 的投影                                      |
+| 参数 | 形状 | 用途 |
+|------|------|------|
+| `g1FusionWeights` | `[d]` | g₁ 聚合时 query vs candidate 的权重 |
+| `g2FusionWeights` | `[d]` | g₂ 聚合时 g₁ vs neighborhood 的权重 |
+| `g3FusionWeights` | `[5, d]` | g₃ 融合 g₁/g₂/h₁/h₂/h₃ 的权重 |
+| `temporalGate` | `[2]` | α（短期更新速率）和 β（中期更新速率） |
+| `scoringWeights` | `[6]` | sim_q / sim_g1 / sim_g2 / sim_g3 / timeBias / graphBias 的权重 |
+| `scoringProjection` | `[d, d]` | g₃ → globalSummary 的投影 |
 
 总计约 `d² + 4d + 8` 个参数，对 d=128 约 17K 参数——和现有的 DifferentiableController 同级。
 
@@ -260,7 +263,6 @@ ProjectionRevision       ← 不可变模型可见面
 ```
 
 职责明确：
-
 - HierarchicalActivation：**哪些节点应该进入、留在或返回工作集**；
 - Session AG：**拥有内存态工作状态与硬预算**；
 - MGR：**在选定子图上生成临时推演**；
@@ -334,12 +336,12 @@ interface ActivationTrainingSample {
 L = L_contrastive + λ₁·L_entropy + λ₂·L_temporal_consistency + λ₃·L_graph_smoothness
 ```
 
-| 损失                     | 含义                                                    |
-| ------------------------ | ------------------------------------------------------- |
-| `L_contrastive`          | used nodes 分数 > unused nodes 分数（InfoNCE）          |
-| `L_entropy`              | g₁/g₂ 的 attention entropy 不应极端（避免只看一个节点） |
-| `L_temporal_consistency` | h₁/h₂ 更新不应剧烈震荡                                  |
-| `L_graph_smoothness`     | 相邻节点（有稳定边）的分数不应差太多                    |
+| 损失 | 含义 |
+|------|------|
+| `L_contrastive` | used nodes 分数 > unused nodes 分数（InfoNCE） |
+| `L_entropy` | g₁/g₂ 的 attention entropy 不应极端（避免只看一个节点） |
+| `L_temporal_consistency` | h₁/h₂ 更新不应剧烈震荡 |
+| `L_graph_smoothness` | 相邻节点（有稳定边）的分数不应差太多 |
 
 ## 7. 分阶段实施
 
@@ -376,23 +378,23 @@ A→B→A 返回是否提升，并验证不同 session/branch 不互相污染。
 
 ## 8. 与现有代码的对接点
 
-| 现有文件                               | 改动                                                        |
-| -------------------------------------- | ----------------------------------------------------------- |
-| `src/core/router.ts`                   | 用 g₁ 加权替代或增强纯 cosineSimilarity                     |
-| `src/lab/differentiable-controller.ts` | 接收 hierarchical scores 而非纯特征向量                     |
-| session AG runtime（待实现）           | 拥有按 session/branch 隔离的 h₁ 快状态、task frame 和总预算 |
-| `.pi/extensions/nmg/index.ts`          | 只转发宿主事件；不再拥有独立工作记忆策略                    |
-| `src/lab/autodiff.ts`                  | 不变（只用现有的 matmul/softmax/sigmoid/add）               |
+| 现有文件 | 改动 |
+|----------|------|
+| `src/core/router.ts` | 用 g₁ 加权替代或增强纯 cosineSimilarity |
+| `src/lab/differentiable-controller.ts` | 接收 hierarchical scores 而非纯特征向量 |
+| session AG runtime（待实现） | 拥有按 session/branch 隔离的 h₁ 快状态、task frame 和总预算 |
+| `.pi/extensions/nmg/index.ts` | 只转发宿主事件；不再拥有独立工作记忆策略 |
+| `src/lab/autodiff.ts` | 不变（只用现有的 matmul/softmax/sigmoid/add） |
 
 ## 9. 为什么不在编码器里做
 
-|          | 编码器内部                           | NMG 图侧（本文档）                  |
-| -------- | ------------------------------------ | ----------------------------------- |
-| 序列长度 | 32-256 tokens，双向 attention 已覆盖 | N/A                                 |
-| 节点数量 | N/A                                  | 20-200 候选节点，需要显式多尺度聚合 |
-| 图结构   | 看不到边和邻域                       | 天然可访问候选池+邻域+全图          |
-| 时序状态 | 无（每次独立编码）                   | 有 STG/LTG/AG 时间尺度              |
-| 部署     | ONNX 不支持动态状态                  | TypeScript autodiff 天然支持        |
-| 联合训练 | 无法与 Controller 联合               | 同一个 UOp DAG                      |
+| | 编码器内部 | NMG 图侧（本文档） |
+|---|---|---|
+| 序列长度 | 32-256 tokens，双向 attention 已覆盖 | N/A |
+| 节点数量 | N/A | 20-200 候选节点，需要显式多尺度聚合 |
+| 图结构 | 看不到边和邻域 | 天然可访问候选池+邻域+全图 |
+| 时序状态 | 无（每次独立编码） | 有 STG/LTG/AG 时间尺度 |
+| 部署 | ONNX 不支持动态状态 | TypeScript autodiff 天然支持 |
+| 联合训练 | 无法与 Controller 联合 | 同一个 UOp DAG |
 
 **全局节点的价值在"图结构的层次化聚合"，不在"短文本编码"。**

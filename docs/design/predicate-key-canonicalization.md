@@ -48,7 +48,7 @@ fuzzy work happens before it, at canonicalization time, not query time.
 
 Canonical form: `{subject}_{verb_lemma}[_{object_head_lemma}]`.
 
-- **verb** is the main _lexical_ verb. Aspectuals and modals
+- **verb** is the main *lexical* verb. Aspectuals and modals
   (`try`, `want`, `need`, `start`, `begin`, `manage`, `used`, `going`,
   `plan`, `hope`) are transparent: the predicate is their infinitival
   complement (`xcomp`), recursively.
@@ -155,9 +155,8 @@ BEAM conv 1 has exactly two `contradiction_resolution` probing questions.
 The record-level pipeline caught only Q1 (Flask routes); Q2 (Flask-Login)
 was invisible because its evidence lives INSIDE one 4,776-char message
 (msg-66) that packs "integrating Flask-Login" + "completed login modules"
-
-- "never written Flask routes" — one record, one polarity, so the
-  intra-message contradiction could not exist at record granularity.
++ "never written Flask routes" — one record, one polarity, so the
+intra-message contradiction could not exist at record granularity.
 
 The fix adopts the chat.completions content-parts model: a record is the
 evidence unit and carries a `claims_json` array of atomic claims, each

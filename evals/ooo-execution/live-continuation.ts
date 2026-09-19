@@ -58,8 +58,6 @@ interface Task {
   parent: Case[];
 }
 
-const throws = (name: string, call: Case["call"]): Case => ({ name, call, expected: "throws" });
-
 /** Five tasks, one shape: a frozen contract, a part-1 slice, and edge cases behind the boundary. */
 const TASKS: Task[] = [
   {

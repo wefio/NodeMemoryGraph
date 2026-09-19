@@ -28,11 +28,11 @@ v2:  <project>/.nmg/stg.sqlite                           (每项目一文件)
 
 `<project>/.nmg/sessions/` 目录：
 
-| 项               | 数量    | 大小     | 说明                                                      |
-| ---------------- | ------- | -------- | --------------------------------------------------------- |
-| `stg.sqlite`     | 1765    | 42MB     | 平均 23KB；**1677 个是 4KB 空库**                         |
-| `stg.sqlite-wal` | 1681    | **1.5G** | 平均 ~900KB；从不 checkpoint，连接未干净关闭              |
-| schema/FTS 骨架  | 1765 份 | ~900MB   | 每库建库即初始化十几个表 + FTS 虚拟表（4-580KB 固定开销） |
+| 项 | 数量 | 大小 | 说明 |
+| --- | --- | --- | --- |
+| `stg.sqlite` | 1765 | 42MB | 平均 23KB；**1677 个是 4KB 空库** |
+| `stg.sqlite-wal` | 1681 | **1.5G** | 平均 ~900KB；从不 checkpoint，连接未干净关闭 |
+| schema/FTS 骨架 | 1765 份 | ~900MB | 每库建库即初始化十几个表 + FTS 虚拟表（4-580KB 固定开销） |
 
 语义内容（`memory_records`）抽样：**全 0 行**。即：`memory_records` 数据量极小，磁盘几乎全部被"每会话一份的文件系统开销"吃掉。
 
@@ -52,11 +52,11 @@ v2:  <project>/.nmg/stg.sqlite                           (每项目一文件)
 
 多租户数据隔离三种标准架构（电科金仓 / Propelius / 数据库行业共识）：
 
-| 架构                            | 特征                  | 成本 | 扩展性 | NMG 对应    |
-| ------------------------------- | --------------------- | ---- | ------ | ----------- |
-| ① 独立库 per-tenant             | 每租户一文件/一库     | 最贵 | <50    | **v1 现状** |
-| ② Schema-per-tenant             | 共享实例、独立 schema | 中   | 50-500 | —           |
-| ③ 共享表 + tenant_id + 行级过滤 | 同一张表，行级过滤    | 最低 | 500+   | **v2 目标** |
+| 架构 | 特征 | 成本 | 扩展性 | NMG 对应 |
+| --- | --- | --- | --- | --- |
+| ① 独立库 per-tenant | 每租户一文件/一库 | 最贵 | <50 | **v1 现状** |
+| ② Schema-per-tenant | 共享实例、独立 schema | 中 | 50-500 | — |
+| ③ 共享表 + tenant_id + 行级过滤 | 同一张表，行级过滤 | 最低 | 500+ | **v2 目标** |
 
 关键结论（与 NMG 直接相关）：
 
@@ -101,13 +101,13 @@ history/trace 已有 `assertTraceOwner(row, sessionId)`：owner 非空且不等�
 
 ### 3.3 生命周期
 
-| 事件                           | 动作                                                                                     |
-| ------------------------------ | ---------------------------------------------------------------------------------------- |
-| 会话写 provisional             | `INSERT ... session_id = <session>`                                                      |
-| LTG 缓存拷贝                   | `INSERT ... session_id = NULL`（幂等，sourceMemoryId 去重）                              |
+| 事件 | 动作 |
+| --- | --- |
+| 会话写 provisional | `INSERT ... session_id = <session>` |
+| LTG 缓存拷贝 | `INSERT ... session_id = NULL`（幂等，sourceMemoryId 去重） |
 | 会话结束（`session_shutdown`） | daemon 方法 `DELETE FROM memory_records WHERE session_id = ?`（连同关联 rows）；文件保留 |
-| store 关闭                     | `PRAGMA wal_checkpoint(TRUNCATE)`，删除 `-wal`/`-shm`                                    |
-| 长期无活跃会话                 | 保留文件（单文件，无数量膨胀）                                                           |
+| store 关闭 | `PRAGMA wal_checkpoint(TRUNCATE)`，删除 `-wal`/`-shm` |
+| 长期无活跃会话 | 保留文件（单文件，无数量膨胀） |
 
 ### 3.4 并发
 
@@ -166,15 +166,15 @@ CREATE INDEX IF NOT EXISTS idx_memory_records_session ON memory_records(session_
 
 ## 5. 实现落点
 
-| 文件                          | 改动                                                                                                                                                                                                                          |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/core/stg.ts`             | `stgStorePath` → `<project>/.nmg/stg.sqlite`；`createStgStore(projectDir)` 去掉 session 路径；`searchStgFirst` 增加 sessionId 过滤参数；`copyLtgSubsetToStg` 写 `session_id=NULL`；新增 `purgeSessionFromStg(stg, sessionId)` |
-| `src/core/store/schema.ts`    | `memory_records` 加 `session_id` 列 + 索引（migrate 幂等）                                                                                                                                                                    |
-| `src/core/store/base.ts`      | `remember` 写 `session_id`；search/query 支持 session 过滤（`session_id IS NULL OR session_id = ?`）；`close()` 时 `wal_checkpoint(TRUNCATE)`                                                                                 |
-| `src/core/types.ts`           | `MemoryRecord` + `RememberInput` 加 `sessionId?: string`                                                                                                                                                                      |
-| `src/cli/service.ts`          | `#getStgStore(projectDir)` 单 store（去掉 session key）；STG remember/search 传 sessionId 过滤；新增 daemon 方法 `stg_purge_session`；关闭时 checkpoint                                                                       |
-| `.pi/extensions/nmg/index.ts` | `session_shutdown` 调 `stg_purge_session` + 触发 daemon checkpoint                                                                                                                                                            |
-| 测试                          | `tests/core/stg.test.ts`（隔离/共享/清理/并发串行）                                                                                                                                                                           |
+| 文件 | 改动 |
+| --- | --- |
+| `src/core/stg.ts` | `stgStorePath` → `<project>/.nmg/stg.sqlite`；`createStgStore(projectDir)` 去掉 session 路径；`searchStgFirst` 增加 sessionId 过滤参数；`copyLtgSubsetToStg` 写 `session_id=NULL`；新增 `purgeSessionFromStg(stg, sessionId)` |
+| `src/core/store/schema.ts` | `memory_records` 加 `session_id` 列 + 索引（migrate 幂等） |
+| `src/core/store/base.ts` | `remember` 写 `session_id`；search/query 支持 session 过滤（`session_id IS NULL OR session_id = ?`）；`close()` 时 `wal_checkpoint(TRUNCATE)` |
+| `src/core/types.ts` | `MemoryRecord` + `RememberInput` 加 `sessionId?: string` |
+| `src/cli/service.ts` | `#getStgStore(projectDir)` 单 store（去掉 session key）；STG remember/search 传 sessionId 过滤；新增 daemon 方法 `stg_purge_session`；关闭时 checkpoint |
+| `.pi/extensions/nmg/index.ts` | `session_shutdown` 调 `stg_purge_session` + 触发 daemon checkpoint |
+| 测试 | `tests/core/stg.test.ts`（隔离/共享/清理/并发串行） |
 
 ### 5.1 数据分类规则（写入时判定）
 
@@ -199,15 +199,15 @@ v1 的 1765 个 `stg.sqlite` 处理（评审修正：provisional 合并**不可�
 
 ## 7. 风险与对策
 
-| 风险                           | 对策                                                                                                                                   | 状态                 |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| SQLite 无 RLS，"漏 WHERE"      | daemon 唯一守门人；过滤收敛到统一入口（searchWithVector/getMemory/getContext SQL 谓词）；测试覆盖越权访问（B 查不到 A 的 provisional） | ✅ 已实现            |
-| 信任模型过度表述               | 改为"信任调用方 + 统一入口"（不声称 daemon 认证）；blast radius 明确化                                                                 | ✅ 文档已修          |
-| **WAL 泄漏复发（force-exit）** | **close() checkpoint + 启动时 checkpoint-on-open**（open 折叠上次残留 WAL）                                                            | ✅ 已实现（base.ts） |
-| **purge 级联**                 | purgeSession 走 deleteMemory 全级联（FTS/embeddings/traces/proposals）+ 物理删行                                                       | ✅ 已实现            |
-| **黑板表共存**                 | 黑板在 LTG 主库（#getStore），与 STG memory_records 异隔离策略；purge 不碰 task_board 表；测试覆盖                                     | ✅ 已实现            |
-| 单文件写竞争                   | 单 daemon 单进程单写者；`DatabaseSync` 同步；远低于 <50 并发边界                                                                       | ✅                   |
-| 迁移丢数据                     | cached 丢弃安全（可重建）；provisional 量≈0 一律丢弃；迁移脚本 dry-run + 全量统计                                                      | ✅ 方案定            |
+| 风险 | 对策 | 状态 |
+| --- | --- | --- |
+| SQLite 无 RLS，"漏 WHERE" | daemon 唯一守门人；过滤收敛到统一入口（searchWithVector/getMemory/getContext SQL 谓词）；测试覆盖越权访问（B 查不到 A 的 provisional） | ✅ 已实现 |
+| 信任模型过度表述 | 改为"信任调用方 + 统一入口"（不声称 daemon 认证）；blast radius 明确化 | ✅ 文档已修 |
+| **WAL 泄漏复发（force-exit）** | **close() checkpoint + 启动时 checkpoint-on-open**（open 折叠上次残留 WAL） | ✅ 已实现（base.ts） |
+| **purge 级联** | purgeSession 走 deleteMemory 全级联（FTS/embeddings/traces/proposals）+ 物理删行 | ✅ 已实现 |
+| **黑板表共存** | 黑板在 LTG 主库（#getStore），与 STG memory_records 异隔离策略；purge 不碰 task_board 表；测试覆盖 | ✅ 已实现 |
+| 单文件写竞争 | 单 daemon 单进程单写者；`DatabaseSync` 同步；远低于 <50 并发边界 | ✅ |
+| 迁移丢数据 | cached 丢弃安全（可重建）；provisional 量≈0 一律丢弃；迁移脚本 dry-run + 全量统计 | ✅ 方案定 |
 
 ---
 

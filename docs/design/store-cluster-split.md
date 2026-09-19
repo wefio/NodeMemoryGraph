@@ -32,26 +32,25 @@ src/core/store/maintenance.ts 1238 行 29 方法
 
 ```ts
 export function withRetrieval<TBase extends Constructor>(Base: TBase) {
-  return class extends Base {
-    /* 方法体原样，this. 直接可用 */
-  };
+  return class extends Base { /* 方法体原样，this. 直接可用 */ };
 }
 
-export class NmgStore extends withGraph(withRetrieval(withWrites(withMaintenance(NmgStoreBase)))) {}
+export class NmgStore
+  extends withGraph(withRetrieval(withWrites(withMaintenance(NmgStoreBase)))) {}
 ```
 
 `this` 类型自动正确（继承而非结构赋值），无转发器，方法体逐字节保留。
 
 ### 2.2 关键约束（均为实证）
 
-| 约束                                                         | 原因                                                                                                                                                                                                                                                                    |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Constructor` 必须 `new (...args: any[])`                    | `never[]` 触发 TS2545（mixin 构造器须 `...args: any[]` rest 透传）                                                                                                                                                                                                      |
-| 基类用 **stub**（签名 + `throw`）而非 `abstract`             | 测试用 `node --experimental-strip-types` 直接跑源码，而 strip-types 不支持 abstract 方法（须 abstract class，不可实例化）                                                                                                                                               |
-| 字段 `#private` → `protected`                                | `#` 跨文件类不可访问；mixin 不能声明 protected 属性但可访问基类 protected 字段（Phase 0 已剥离 422 处）                                                                                                                                                                 |
-| ~~基类调簇方法处声明 stub~~（2026-08-03 已消除）             | 原 3 处反向调用（现名 `recordActiveGraphAttributionInner`→recordUsage/trainRouter、`searchWithVector`→routeNodes、`redirectRelations`→linkNodes）的根因是 helper 放错了层；已分别上移到唯一消费簇（maintenance / retrieval / graph），stub 全部删除，基类不再依赖簇方法 |
-| mixin 链顺序 graph ⊃ retrieval ⊃ writes ⊃ maintenance ⊃ Base | 依赖图无环（graph→maintenance；retrieval→graph,maintenance；writes→maintenance,graph；maintenance→∅），跨簇调用走原型链                                                                                                                                                 |
-| 簇文件不 import store.ts / base.ts / 兄弟簇                  | 模块图保持 DAG，只 import 类型/工具模块                                                                                                                                                                                                                                 |
+| 约束 | 原因 |
+| --- | --- |
+| `Constructor` 必须 `new (...args: any[])` | `never[]` 触发 TS2545（mixin 构造器须 `...args: any[]` rest 透传） |
+| 基类用 **stub**（签名 + `throw`）而非 `abstract` | 测试用 `node --experimental-strip-types` 直接跑源码，而 strip-types 不支持 abstract 方法（须 abstract class，不可实例化） |
+| 字段 `#private` → `protected` | `#` 跨文件类不可访问；mixin 不能声明 protected 属性但可访问基类 protected 字段（Phase 0 已剥离 422 处） |
+| ~~基类调簇方法处声明 stub~~（2026-08-03 已消除） | 原 3 处反向调用（现名 `recordActiveGraphAttributionInner`→recordUsage/trainRouter、`searchWithVector`→routeNodes、`redirectRelations`→linkNodes）的根因是 helper 放错了层；已分别上移到唯一消费簇（maintenance / retrieval / graph），stub 全部删除，基类不再依赖簇方法 |
+| mixin 链顺序 graph ⊃ retrieval ⊃ writes ⊃ maintenance ⊃ Base | 依赖图无环（graph→maintenance；retrieval→graph,maintenance；writes→maintenance,graph；maintenance→∅），跨簇调用走原型链 |
+| 簇文件不 import store.ts / base.ts / 兄弟簇 | 模块图保持 DAG，只 import 类型/工具模块 |
 
 ### 2.3 方法分配（单一事实源：tests/core/store/cluster-dag.test.ts 的 CLUSTERS）
 

@@ -17,21 +17,20 @@
 
 ### 1.2 替代方案对比
 
-| 方案              | JOIN     | 全文搜索       | 事务     | 嵌入式       | 适合吗                                                                |
-| ----------------- | -------- | -------------- | -------- | ------------ | --------------------------------------------------------------------- |
-| **SQLite**        | ✓        | ✓ FTS5         | ✓        | ✓            | **是**                                                                |
-| LevelDB / RocksDB | ✗ 无 SQL | ✗              | ✗ 单 key | ✓            | 否。NMG 查 memory 要 JOIN node 和 evidence，用 KV 得在应用层手动 join |
-| LMDB              | ✗ 无 SQL | ✗              | ✓        | ✓            | 否。同 KV 问题                                                        |
-| DuckDB            | ✓        | ✓              | ✗ OLAP   | ✓            | 否。分析引擎，不适合高频小事务 OLTP                                   |
-| PostgreSQL        | ✓        | ✓ GIN/tsvector | ✓        | ✗ 需独立进程 | 否。违反 "local-first, zero-config" 原则                              |
-| 纯 JSON 文件      | ✗        | ✗              | ✗        | ✓            | 否。每次检索要全量载入解析                                            |
+| 方案 | JOIN | 全文搜索 | 事务 | 嵌入式 | 适合吗 |
+|---|---|---|---|---|---|
+| **SQLite** | ✓ | ✓ FTS5 | ✓ | ✓ | **是** |
+| LevelDB / RocksDB | ✗ 无 SQL | ✗ | ✗ 单 key | ✓ | 否。NMG 查 memory 要 JOIN node 和 evidence，用 KV 得在应用层手动 join |
+| LMDB | ✗ 无 SQL | ✗ | ✓ | ✓ | 否。同 KV 问题 |
+| DuckDB | ✓ | ✓ | ✗ OLAP | ✓ | 否。分析引擎，不适合高频小事务 OLTP |
+| PostgreSQL | ✓ | ✓ GIN/tsvector | ✓ | ✗ 需独立进程 | 否。违反 "local-first, zero-config" 原则 |
+| 纯 JSON 文件 | ✗ | ✗ | ✗ | ✓ | 否。每次检索要全量载入解析 |
 
 **结论：SQLite 是正确的选择。** NMG 的数据模型（memory → node → evidence，多对多，有 FTS）天然是关系型的。换成 KV 或文档存储会在应用层重新发明 SQLite 已经做好的东西。
 
 ### 1.3 唯一的真实替代场景
 
 当 NMG 需要**多进程并发读写**时（例如多个 Pi agent 共享一份记忆），SQLite 的 WAL 模式支持一写多读，但不是为高并发写的。这个场景下可以考虑：
-
 - **LiteFS**（分布式 SQLite，基于 FUSE）：保持 SQLite API，复制到多节点
 - **Turso**（libSQL，SQLite 兼容但有远程同步）
 - **PostgreSQL**：仅当部署模式从嵌入式变成服务化时
@@ -202,13 +201,13 @@ get #searchStatement(): StatementSync {
 
 ## 3. 总结
 
-| 优化                        | 效果           | 风险                           | 动作                    |
-| --------------------------- | -------------- | ------------------------------ | ----------------------- |
-| `synchronous = NORMAL`      | 写入速度 ↑     | WAL 保护下极低                 | 立即加                  |
-| `cache_size = 64MB`         | 检索延迟 ↓     | 多用 64MB 内存                 | 立即加                  |
-| `mmap_size = 256MB`         | 读延迟 ↓       | 虚拟地址空间（不影响物理内存） | 立即加                  |
-| `temp_store = MEMORY`       | 临时操作加速   | 大排序可能 OOM                 | 立即加                  |
-| `PRAGMA optimize`           | 查询计划质量   | 零                             | 周期性执行              |
-| `idx_memory_records_status` | 可能改善检索   | 写入微微变慢                   | 加索引后用 EXPLAIN 验证 |
-| Prepared statement 缓存     | CPU 开销 ↓     | 无                             | 低优先级                |
-| 临时表替代大 IN             | 大量候选时加速 | 需要 benchmark                 | 有需要时做              |
+| 优化 | 效果 | 风险 | 动作 |
+|---|---|---|---|
+| `synchronous = NORMAL` | 写入速度 ↑ | WAL 保护下极低 | 立即加 |
+| `cache_size = 64MB` | 检索延迟 ↓ | 多用 64MB 内存 | 立即加 |
+| `mmap_size = 256MB` | 读延迟 ↓ | 虚拟地址空间（不影响物理内存） | 立即加 |
+| `temp_store = MEMORY` | 临时操作加速 | 大排序可能 OOM | 立即加 |
+| `PRAGMA optimize` | 查询计划质量 | 零 | 周期性执行 |
+| `idx_memory_records_status` | 可能改善检索 | 写入微微变慢 | 加索引后用 EXPLAIN 验证 |
+| Prepared statement 缓存 | CPU 开销 ↓ | 无 | 低优先级 |
+| 临时表替代大 IN | 大量候选时加速 | 需要 benchmark | 有需要时做 |

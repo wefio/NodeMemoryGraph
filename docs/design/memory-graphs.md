@@ -18,11 +18,11 @@ state.
 
 ## 1. The three graphs
 
-| Graph   | Ownership                    | Content                                                                                                                               | Lifetime                             |
-| ------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| **STG** | private to one Agent session | new, provisional, task-local, or not-yet-consolidated semantic information                                                            | session; expiry is a policy decision |
-| **LTG** | the only shared graph        | durable atomic memories and consolidated semantic structure                                                                           | persistent                           |
-| **AG**  | private to one Agent session | mutable, budget-constrained runtime graph over STG/LTG references, task frames, tool observations, activation and temporary reasoning | session; memory-resident only        |
+| Graph   | Ownership                      | Content                                                                                                                         | Lifetime                             |
+| ------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| **STG** | private to one Agent session   | new, provisional, task-local, or not-yet-consolidated semantic information                                                      | session; expiry is a policy decision |
+| **LTG** | the only shared graph          | durable atomic memories and consolidated semantic structure                                                                     | persistent                           |
+| **AG**  | private to one Agent session   | mutable, budget-constrained runtime graph over STG/LTG references, task frames, tool observations, activation and temporary reasoning | session; memory-resident only        |
 
 AG is **not** a third authoritative or shared memory graph. It is the private
 working graph owned by one model session and must remain in memory. Agents never

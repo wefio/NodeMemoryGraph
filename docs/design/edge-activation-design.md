@@ -37,15 +37,15 @@ A_e(u,v) = σ( w_uv · φ(a_u, a_v) )
 
 with per-type `φ`:
 
-| Type                                      | φ                                  | Semantics                                          |
-| ----------------------------------------- | ---------------------------------- | -------------------------------------------------- |
-| `related_to`, `supports`, `applies_to`    | `a_u · a_v` (normalized)           | weak link; both ends must be alive                 |
-| `causes`, `depends_on`, `is_a`, `part_of` | `w · a_u` (directed, from trigger) | bell → salivation; direction is learned, see §3.2  |
-| `derived_from`                            | `w · a_v` (from source)            | provenance, always available if source is active   |
-| `contradicts`                             | `w ·                               | a_u − a_v                                          | `   | contradiction is visible when activation differs |
-| `supersedes`                              | gate: `w · a_new · (1 − a_old)`    | mutual exclusion, not summation                    |
-| `exception_to`                            | `w · a_u · (1 − a_base)`           | exception is relevant when base is not active      |
-| `constraint`                              | constant (resident)                | independent of query, exempt from fan-out dilution |
+| Type | φ | Semantics |
+| --- | --- | --- |
+| `related_to`, `supports`, `applies_to` | `a_u · a_v` (normalized) | weak link; both ends must be alive |
+| `causes`, `depends_on`, `is_a`, `part_of` | `w · a_u` (directed, from trigger) | bell → salivation; direction is learned, see §3.2 |
+| `derived_from` | `w · a_v` (from source) | provenance, always available if source is active |
+| `contradicts` | `w · |a_u − a_v|` | contradiction is visible when activation differs |
+| `supersedes` | gate: `w · a_new · (1 − a_old)` | mutual exclusion, not summation |
+| `exception_to` | `w · a_u · (1 − a_base)` | exception is relevant when base is not active |
+| `constraint` | constant (resident) | independent of query, exempt from fan-out dilution |
 
 Note: `σ` may be identity or sigmoid depending on whether the edge competes in
 a softmax pool (see §2.3).
@@ -109,16 +109,16 @@ where `V_total = Σ active edges predicting the same outcome`. Consequences:
 is not a duplicate — it is a different axis, following the spaced-repetition
 three-strength model (FSRS; stability / retrievability / difficulty):
 
-| Axis                          | Meaning                                        | NMG field                                             | Update signal                             |
-| ----------------------------- | ---------------------------------------------- | ----------------------------------------------------- | ----------------------------------------- |
-| **strength (retrievability)** | how easily the edge is retrieved/activated now | new `strength` (RW `V`, point estimate)               | every activation, prediction-error update |
-| **stability**                 | how persistently the edge survives             | existing `stability` (Beta posterior, design.md §7.3) | consolidation passes, outcome attribution |
-| **difficulty**                | intrinsic complexity of the association        | (no NMG field today)                                  | —                                         |
+| Axis | Meaning | NMG field | Update signal |
+| --- | --- | --- | --- |
+| **strength (retrievability)** | how easily the edge is retrieved/activated now | new `strength` (RW `V`, point estimate) | every activation, prediction-error update |
+| **stability** | how persistently the edge survives | existing `stability` (Beta posterior, design.md §7.3) | consolidation passes, outcome attribution |
+| **difficulty** | intrinsic complexity of the association | (no NMG field today) | — |
 
 So: strength changes fast (per-query activation), stability changes slowly
 (consolidation), and the two feed different decisions — strength controls
-_when an edge fires_ in the AG, stability controls _whether the edge
-persists_ in the LTG. A strongly-activated but low-stability edge is a
+*when an edge fires* in the AG, stability controls *whether the edge
+persists* in the LTG. A strongly-activated but low-stability edge is a
 candidate for review, not for consolidation.
 
 ### 3.2 Direction: conditional probability, not symmetric weight
@@ -216,7 +216,6 @@ evaluation shows gain beyond the deterministic runtime projection.
 
 When `w_uv` saturates and `P(u|v) ≈ P(v|u) ≈ 1` (1:1 fixed activation), the
 edge is behaviourally a single unit. Merging them is then:
-
 - **alias resolution** (identity) or
 - **compression** (one node's records serve both addresses, redirect retained)
 
@@ -231,33 +230,33 @@ per-node query behaviour splits) reopens the edge.
 Alias merge and compression merge are different operations with different
 triggers, costs, and rollback difficulty:
 
-|                | Alias merge                                        | Compression merge                                  |
-| -------------- | -------------------------------------------------- | -------------------------------------------------- |
-| Trigger        | identity evidence (Fellegi–Sunter, design.md §7.5) | co-activation statistics (`I(U;V)` high, lift ≈ 1) |
-| Meaning        | the two names name the same thing                  | the two nodes behave as one unit                   |
-| Confidence bar | high (false merge is destructive)                  | higher still — statistics can be spurious          |
-| Rollback       | redirect preserved                                 | redirect + divergence signal reopens edge          |
+| | Alias merge | Compression merge |
+| --- | --- | --- |
+| Trigger | identity evidence (Fellegi–Sunter, design.md §7.5) | co-activation statistics (`I(U;V)` high, lift ≈ 1) |
+| Meaning | the two names name the same thing | the two nodes behave as one unit |
+| Confidence bar | high (false merge is destructive) | higher still — statistics can be spurious |
+| Rollback | redirect preserved | redirect + divergence signal reopens edge |
 
 Compression merge is the weaker decision and must be more conservative:
 it is an optimization of the retrieval index, never a claim about identity.
-**Formal Concept Analysis (FCA, Wille 1982) supplies the _where_ of merge,
-not the _when_:** the concept lattice organizes objects by shared attributes
+**Formal Concept Analysis (FCA, Wille 1982) supplies the *where* of merge,
+not the *when*:** the concept lattice organizes objects by shared attributes
 into a hierarchy — once a merge is accepted, FCA-style shared-attribute
 structure decides the merged node's position in the concept lattice, while
-the _trigger_ remains the two signals above (candidate status; the lattice
+the *trigger* remains the two signals above (candidate status; the lattice
 itself is not yet part of the NMG data model).
 
 ## 5. Budgets and invariants
 
-| Invariant                                                         | Enforced by                                            |
-| ----------------------------------------------------------------- | ------------------------------------------------------ |
-| Edge activation derived, never stored as relation state           | runtime computes from `a` + `w`; traces are audit-only |
-| Edge strength persists; updates only via RW/TD/contrastive passes | write path gates                                       |
-| Fan dilution always applied                                       | §2.2 in edge layer                                     |
-| Diffusion bounded: max hops, threshold, decay                     | §2.3 / §4.3 stop rule                                  |
-| Contradiction/supersedes edges never summed with conductive       | §2.3 dual channel                                      |
-| Merge only from statistics, reversible via redirect               | §4.4                                                   |
-| Confidence/evidence unchanged by activation                       | activation never writes evidence                       |
+| Invariant | Enforced by |
+| --- | --- |
+| Edge activation derived, never stored as relation state | runtime computes from `a` + `w`; traces are audit-only |
+| Edge strength persists; updates only via RW/TD/contrastive passes | write path gates |
+| Fan dilution always applied | §2.2 in edge layer |
+| Diffusion bounded: max hops, threshold, decay | §2.3 / §4.3 stop rule |
+| Contradiction/supersedes edges never summed with conductive | §2.3 dual channel |
+| Merge only from statistics, reversible via redirect | §4.4 |
+| Confidence/evidence unchanged by activation | activation never writes evidence |
 
 ## 6. Open questions
 
