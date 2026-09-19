@@ -154,16 +154,16 @@ one worker call per unit, a chain cell runs a session whose worker submits artif
 | D1   | Q4 (the pilot's own shape) | plain   | pilot, 2 units | 1     | -                       |
 | D2   | Q4 (the pilot's own shape) | chain   | pilot, 2 units | 1     | 2                       |
 
-| cell | surface | shape          | slots | bound | reps | wall per rep (ms)     | wall median | tokens per rep        | tokens median | cost per rep | accepted | instrument |
-| ---- | ------- | -------------- | ----- | ----- | ---- | --------------------- | ----------- | --------------------- | ------------- | ------------ | -------- | ---------- |
-| A    | plain   | coarse, 1 unit | 1     | -     | 1    | 9726                  | 9726        | 9018                  | 9018          | 0.000773     | all      | f1583087   |
-| B    | plain   | fine, 4 units  | 1     | -     | 1    | 21885                 | 21885       | 29962                 | 29962         | 0.002206     | all      | f1583087   |
-| C    | plain   | fine, 4 units  | 2     | -     | 1    | 18565                 | 18565       | 30674                 | 30674         | 0.002076     | all      | f1583087   |
-| cap1 | chain   | fine, 4 units  | 1     | 1     | 3    | 26186 / 27053 / 25270 | 26186       | 45482 / 45887 / 33941 | 45482         | n/a n/a n/a  | all      | none       |
-| cap2 | chain   | fine, 4 units  | 1     | 2     | 3    | 17735 / 17998 / 17427 | 17735       | 41806 / 37693 / 35444 | 37693         | n/a n/a n/a  | all      | none       |
-| cap4 | chain   | fine, 4 units  | 1     | 4     | 2    | 16480 / 16810         | 16645       | 54834 / 55738         | 55286         | n/a n/a      | all      | none       |
-| D1   | plain   | pilot, slots 1 | 1     | -     | 3    | 11902 / 12948 / 14066 | 12948       | 22498 / 22435 / 22922 | 22498         | n/a n/a n/a  | all      | none       |
-| D2   | chain   | pilot, slots 1 | 1     | 2     | 3    | 11812 / 9584 / 11048  | 11048       | 22533 / 17592 / 26299 | 22533         | n/a n/a n/a  | all      | none       |
+| cell | surface | shape          | slots | bound | reps | wall per rep (ms)     | wall median | tokens per rep        | tokens median | cost per rep      | accepted | instrument         |
+| ---- | ------- | -------------- | ----- | ----- | ---- | --------------------- | ----------- | --------------------- | ------------- | ----------------- | -------- | ------------------ |
+| A    | plain   | coarse, 1 unit | 1     | -     | 1    | 9726                  | 9726        | 9018                  | 9018          | 0.000773          | all      | f1583087           |
+| B    | plain   | fine, 4 units  | 1     | -     | 2    | 21885 / 23273         | 22579       | 29962 / 30178         | 30070         | 0.002206 0.002006 | all      | 19dbc721, f1583087 |
+| C    | plain   | fine, 4 units  | 2     | -     | 2    | 18565 / 19336         | 18950       | 30674 / 30472         | 30573         | 0.002076 0.001576 | all      | 19dbc721, f1583087 |
+| cap1 | chain   | fine, 4 units  | 1     | 1     | 3    | 26186 / 27053 / 25270 | 26186       | 45482 / 45887 / 33941 | 45482         | n/a n/a n/a       | all      | none               |
+| cap2 | chain   | fine, 4 units  | 1     | 2     | 3    | 17735 / 17998 / 17427 | 17735       | 41806 / 37693 / 35444 | 37693         | n/a n/a n/a       | all      | none               |
+| cap4 | chain   | fine, 4 units  | 1     | 4     | 2    | 16480 / 16810         | 16645       | 54834 / 55738         | 55286         | n/a n/a           | all      | none               |
+| D1   | plain   | pilot, slots 1 | 1     | -     | 3    | 11902 / 12948 / 14066 | 12948       | 22498 / 22435 / 22922 | 22498         | n/a n/a n/a       | all      | none               |
+| D2   | chain   | pilot, slots 1 | 1     | 2     | 3    | 11812 / 9584 / 11048  | 11048       | 22533 / 17592 / 26299 | 22533         | n/a n/a n/a       | all      | none               |
 
 ### The pairs, and the reading each one carries
 
@@ -171,14 +171,14 @@ A pair differs in exactly one declared field. `cap1` is on the chain surface, so
 surface while `cap1 vs cap2` varies fusion _on the same surface_ - which is why the fusion reading is
 taken from the second pair and not from a fused cell against a plain one.
 
-| pair         | one differing field                | wall: rep values, then median                                                  | median gap | larger spread | separates                                            |
-| ------------ | ---------------------------------- | ------------------------------------------------------------------------------ | ---------- | ------------- | ---------------------------------------------------- |
-| A vs B       | plan shape (1 unit vs 4)           | A 9726 (med 9726); B 21885 (med 21885)                                         | 12159 ms   | 0 ms          | graded single observation: below the three-rep floor |
-| B vs C       | slots (1 vs 2)                     | B 21885 (med 21885); C 18565 (med 18565)                                       | 3320 ms    | 0 ms          | graded single observation: below the three-rep floor |
-| B vs cap1    | surface (plain vs chain, bound 1)  | B 21885 (med 21885); cap1 26186 / 27053 / 25270 (med 26186)                    | 4301 ms    | 1783 ms       | graded single observation: below the three-rep floor |
-| cap1 vs cap2 | fusion bound (1 vs 2)              | cap1 26186 / 27053 / 25270 (med 26186); cap2 17735 / 17998 / 17427 (med 17735) | 8451 ms    | 1783 ms       | separates                                            |
-| cap2 vs cap4 | fusion bound (2 vs 4)              | cap2 17735 / 17998 / 17427 (med 17735); cap4 16480 / 16810 (med 16645)         | 1090 ms    | 571 ms        | graded pair: below the three-rep floor               |
-| D1 vs D2     | fusion bound (1 vs 2), pilot shape | D1 11902 / 12948 / 14066 (med 12948); D2 11812 / 9584 / 11048 (med 11048)      | 1900 ms    | 2228 ms       | no - cannot resolve                                  |
+| pair         | one differing field                | wall rep values                                        | wall median gap | wall spread | wall grade         | token median gap | token spread | cost median (left / right) | verdict                                                                                   |
+| ------------ | ---------------------------------- | ------------------------------------------------------ | --------------- | ----------- | ------------------ | ---------------- | ------------ | -------------------------- | ----------------------------------------------------------------------------------------- |
+| A vs B       | plan shape (1 unit vs 4)           | A 9726; B 21885 / 23273                                | 12853 ms        | 1388 ms     | single observation | 21052            | 216          | 0.000773 / 0.002106        | wall single observation: separates (needs more than 5 x 1388 = 6940 ms); tokens separates |
+| B vs C       | slots (1 vs 2)                     | B 21885 / 23273; C 18565 / 19336                       | 3628 ms         | 1388 ms     | pair               | 503              | 216          | 0.002106 / 0.001826        | wall pair: separates (needs more than 2 x 1388 = 2776 ms); tokens separates               |
+| B vs cap1    | surface (plain vs chain, bound 1)  | B 21885 / 23273; cap1 26186 / 27053 / 25270            | 3607 ms         | 1783 ms     | pair               | 15412            | 11946        | n/a                        | wall pair: separates (needs more than 2 x 1783 = 3566 ms); tokens cannot resolve          |
+| cap1 vs cap2 | fusion bound (1 vs 2)              | cap1 26186 / 27053 / 25270; cap2 17735 / 17998 / 17427 | 8451 ms         | 1783 ms     | rate               | 7789             | 11946        | n/a                        | wall rate: separates (needs more than 1 x 1783 = 1783 ms); tokens cannot resolve          |
+| cap2 vs cap4 | fusion bound (2 vs 4)              | cap2 17735 / 17998 / 17427; cap4 16480 / 16810         | 1090 ms         | 571 ms      | pair               | 17593            | 6362         | n/a                        | wall pair: cannot resolve (needs more than 2 x 571 = 1142 ms); tokens separates           |
+| D1 vs D2     | fusion bound (1 vs 2), pilot shape | D1 11902 / 12948 / 14066; D2 11812 / 9584 / 11048      | 1900 ms         | 2228 ms     | rate               | 35               | 8707         | n/a                        | wall rate: cannot resolve (needs more than 1 x 2228 = 2228 ms); tokens cannot resolve     |
 
 ### How cells are compared: the rules
 
@@ -205,6 +205,12 @@ taken from the second pair and not from a fused cell against a plain one.
    as soon as that was noticed.
 8. **Aggregates pair per rep.** Sorted arrays exist only to compute a median; wall, tokens and cache reads
    are never sorted independently and read by position.
+9. **A run owes the gates nothing; a code change owes them everything.** These runs change no code, so they
+   start from a clean tree and the plan needs no test pass afterwards - the whole guard is that the tree is
+   clean (so the report's commit names the code that ran) plus the recorded instrument, which is what rule 2
+   reads. Editing the driver or the shared mechanism is a different step: that one runs the route's
+   blocking checks before the next comparison, because a stale reading of the wrong tree is a failure mode
+   this programme has already recorded once.
 
 ### What is deliberately not a cell, and why
 
@@ -225,24 +231,30 @@ The plan is complete when every question above is either answered at the grade i
 closed with its reason on the record. That is the state as of 2026-09-19, and it is closed rather than
 pending:
 
-- **Answered.** Q1 (12 159 ms, far beyond the programme's widest observed spread of 2 228 ms), Q3 (4 301 ms
-  against a 1 783 ms spread, on the same plan and slot count), Q4 (8 451 ms at three reps each, the one
-  reading at rate grade), Q5 as a hypothesis (1 090 ms against 571 ms at two reps - a pair, and no policy
-  turns on it).
+- **Answered.** Q1 (12 853 ms against a threshold of 6 940 ms, at single-observation grade), Q2 (3 628 ms
+  against 2 776 ms at pair grade - and C's median price is _lower_ than B's, 0.001826 against 0.002106, so
+  the second slot was both faster and cheaper in this pair), Q3 (3 607 ms against a 3 566 ms threshold, on
+  the same plan and slot count; the margin is 41 ms, and that it is marginal is part of the reading), Q4
+  (8 451 ms at rate grade, the one pair whose cells both have three reps).
+- **A hypothesis, not a policy.** Q5: 1 090 ms against a 1 142 ms threshold at pair grade, so the rule says
+  this pair cannot resolve it, and no decision turns on those milliseconds. Its token column does clear the
+  threshold (17 593 against 12 724) on two reps, in the very cells whose token spread reached 11 946 - which
+  is why it is recorded and not acted on.
 - **Closed unmeasured, with the reason.** Q6: no stored cap report carries the price split, and one rep of
   the shape that failed at three would not price it, so the cost of fusing stays qualitative and every
   document says `unpriced` where that is the state. Q7: the E arm's instrument ran one shape, its measured
   outcome was cost without gain, and no further shape is scheduled.
-- **Optional, priced, and not a to-do.** Q2 and Q3 are single observations because their plain cells have
-  one rep each while their chain cells have three. Buying two more plain runs - `B` and `C` again, about
-  60 k tokens at the prices above - would lift both to pair grade. Nothing in the design turns on that
-  conversion today; it is written here so the decision is a decision, not a drift.
+- **Nothing pending.** The pair-grade confirmation listed here as an option was bought the same day for
+  60 650 tokens - B's second rep (30 178) and C's (30 472) - and it settled Q1, Q2 and Q3 as above. No cell
+  of this plan is left un-run, and the next step for any of these numbers is a _decision_ (a policy to
+  declare), not a measurement.
 
 ### Spending
 
 Three purchases were made under one rule - no cell is paid for until the user names a ceiling for that
 step - and no further cell is bought from this plan without the same. The cap cells' third reps cost
-80 404 tokens, A/B/C cost 69 654; earlier, the fusion pilot cost about 75 k and the E arm about 43 k. A
+80 404 tokens, A/B/C cost 69 654, and the pair-grade confirmation cost 60 650 - 210 708 for this programme;
+earlier, the fusion pilot cost about 75 k and the E arm about 43 k. A
 run that fails is reported as a failure, not retried, and a fused spec is never run as an unfused control
 because the driver refuses it.
 

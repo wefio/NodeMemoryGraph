@@ -140,15 +140,20 @@ cap experiment's worker and envelope substituted: `pi`/`deepseek-v4-flash`, `tur
 already declares fusion, a missing provider or model, an existing spec file, and a cell whose unit count is
 not the one the comparison needs.
 
-| arm | shape          | slots | wall      | tokens | input | output | cache read | cost (provider) | sessions |
-| --- | -------------- | ----- | --------- | ------ | ----- | ------ | ---------- | --------------- | -------- |
-| A   | coarse, 1 unit | 1     | 9 726 ms  | 9 018  | 2 377 | 1 521  | 5 120      | 0.000773        | 0        |
-| B   | fine, 4 units  | 1     | 21 885 ms | 29 962 | 8 940 | 3 230  | 17 792     | 0.002206        | 0        |
-| C   | fine, 4 units  | 2     | 18 565 ms | 30 674 | 7 238 | 3 596  | 19 840     | 0.002076        | 0        |
+A and B/C were then repeated once each on 2026-09-19 (`b-rep2.json`, `c-rep2.json`, 30 178 and 30 472
+tokens) to lift the two plain cells from a single observation to a pair, which is what the plan's grade
+rule needed for Q2 and Q3. One rep per run; the medians below are over the two reps where there are two.
+
+| arm | shape          | slots | reps | wall            | wall median | tokens          | tokens median | input         | output        | cache read      | cost (provider)     |
+| --- | -------------- | ----- | ---- | --------------- | ----------- | --------------- | ------------- | ------------- | ------------- | --------------- | ------------------- |
+| A   | coarse, 1 unit | 1     | 1    | 9 726 ms        | 9 726 ms    | 9 018           | 9 018         | 2 377         | 1 521         | 5 120           | 0.000773            |
+| B   | fine, 4 units  | 1     | 2    | 21 885 / 23 273 | 22 579 ms   | 29 962 / 30 178 | 30 070        | 8 940 / 7 248 | 3 230 / 3 346 | 17 792 / 19 584 | 0.002206 / 0.002006 |
+| C   | fine, 4 units  | 2     | 2    | 18 565 / 19 336 | 18 950 ms   | 30 674 / 30 472 | 30 573        | 7 238 / 3 813 | 3 596 / 3 491 | 19 840 / 23 168 | 0.002076 / 0.001576 |
 
 Every unit was accepted, every parent check accepted, `slotsUsed` was the slot count asked for, and the
-reports are `a-rep1.json`, `b-rep1.json`, `c-rep1.json` beside `aggregate.json`, which recomputes this
-table from them. These are the first runs whose report carries the usage split and the instrument:
+reports are `a-rep1.json`, `b-rep1.json`, `b-rep2.json`, `c-rep1.json`, `c-rep2.json` beside
+`aggregate.json` and the computed [`matrix.json`](matrix.json). These are the first runs whose report
+carries the usage split and the instrument:
 
 - `tokens` is exactly `input + output + cacheRead + cacheWrite` (A: 2 377 + 1 521 + 5 120 = 9 018), so the
   column that the cap experiment could only argue about is now decomposable, with the provider's own
@@ -156,14 +161,22 @@ table from them. These are the first runs whose report carries the usage split a
 - `promptDigest` is recorded per unit: A's single unit and each of B's four carry their own digest, which
   is the evidence that the plain path gives every unit a fresh strict prompt (and the reason a chain has to
   be argued about differently).
-- `instrument.commit` is `f1583087656383c56f90c9288b9ec0d60eb17cf8` for all three, so these cells cannot be
-  confused with the cap cells recorded earlier in the day, which name no commit at all.
+- `instrument.commit` is `f1583087656383c56f90c9288b9ec0d60eb17cf8` for the first three runs - the
+  instrumentation was written but not yet committed, so HEAD was still the previous commit - and
+  `19dbc72199ff54588554fcbf5527cc9cc086ceab` for the two later ones. That gap is one command wide, and it is
+  the whole of it: `git diff --stat f1583087..19dbc721 -- evals/ooo-execution/plan-driver.ts
+src/integration/ooo-session-mechanism.ts .pi/extensions/nmg/ooo-execution.ts` reports 135 insertions and
+  36 deletions, exactly the instrument commit `9803ce7a` and nothing else, so the two reps of one cell ran
+  the same execution code. The cap cells recorded earlier the same day name no commit at all.
 
 **What the two surfaces cost, measured.** B and `cap 1` are the same plan at the same slot count, one on
-each surface: B is 21 885 ms against cap 1's 26 186 ms median, and 29 962 tokens against 45 482 - a
-difference of 4 301 ms and 15 520 tokens, of which 19 200 are cache reads. Declaring fusion at a bound of
-one, which fuses nothing, is therefore not free: the chain surface re-sends and re-reads its context on
-every turn. And fusion still wins against both baselines: `cap 2`'s 17 735 ms median is 4 150 ms below
-plain B and 8 451 ms below cap 1, while spending 7 731 tokens more than B. That last comparison is the one
-the next purchase would price - no stored cap report carries `input`/`output`/`cost`, because they were
-recorded before the split existed.
+each surface: B's 22 579 ms median against cap 1's 26 186 ms, and 30 070 tokens against 45 482 - a
+difference of 3 607 ms and 15 412 tokens. Under the plan's grade rule that wall difference separates at
+pair grade (3 607 ms against a threshold of 2 x 1 783 ms) by 41 ms, which is worth saying out loud: it is
+the narrowest reading in the matrix. Declaring fusion at a bound of one, which fuses nothing, is therefore
+not free - the chain surface re-sends and re-reads its context on every turn - and the token side of that
+difference does not separate (15 412 against a spread of 11 946), because the cap cells have no usage split.
+And fusion still wins against both baselines: `cap 2`'s 17 735 ms median is 4 844 ms below plain B and
+8 451 ms below cap 1, while spending 7 623 tokens more than B. That last comparison is the one this
+programme left unpriced - no stored cap report carries `input`/`output`/`cost`, because they were recorded
+before the split existed, and one rep of the shape that failed at three would not price it.

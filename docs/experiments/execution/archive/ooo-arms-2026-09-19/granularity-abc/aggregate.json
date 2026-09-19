@@ -7,6 +7,14 @@
       "shape": "coarse, 1 unit",
       "slots": 1,
       "reps": 1,
+      "wallMsMedian": 9726,
+      "tokensMedian": 9018,
+      "wallMsAllReps": [
+        9726
+      ],
+      "tokensAllReps": [
+        9018
+      ],
       "units": 1,
       "sessions": 0,
       "wallMs": 9726,
@@ -25,7 +33,17 @@
       "surface": "plain",
       "shape": "fine, 4 units",
       "slots": 1,
-      "reps": 1,
+      "reps": 2,
+      "wallMsMedian": 22579.0,
+      "tokensMedian": 30070.0,
+      "wallMsAllReps": [
+        21885,
+        23273
+      ],
+      "tokensAllReps": [
+        29962,
+        30178
+      ],
       "units": 4,
       "sessions": 0,
       "wallMs": 21885,
@@ -47,7 +65,17 @@
       "surface": "plain",
       "shape": "fine, 4 units",
       "slots": 2,
-      "reps": 1,
+      "reps": 2,
+      "wallMsMedian": 18950.5,
+      "tokensMedian": 30573.0,
+      "wallMsAllReps": [
+        18565,
+        19336
+      ],
+      "tokensAllReps": [
+        30674,
+        30472
+      ],
       "units": 4,
       "sessions": 0,
       "wallMs": 18565,

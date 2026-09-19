@@ -84,11 +84,12 @@ against the measured startup, the difference is milliseconds saved.
 
 Not modelled by the ceiling, and now measured in two pieces: the union tool surface's extra turn (about
 0.7 k tokens on a chain's first unit, measured on the D arm's plan) and what the chain **surface** costs even
-when it fuses nothing. On the four-unit fine plan, the chain surface at bound 1 spends 4 301 ms and 15 520
-tokens more than the plain path spends for the same plan, slots and parent check (26 186 ms and 45 482
-tokens against 21 885 ms and 29 962), and most of that token difference is cache reads - so the surface
-re-sends and re-reads its context on every turn. What is still not priced is the fused cell itself: its
-reports predate the usage split that now exists
+when it fuses nothing. On the four-unit fine plan, the chain surface at bound 1 spends 3 607 ms more
+than the plain path does for the same plan, slots and parent check - 26 186 ms against a 22 579 ms median
+over two reps - and the token side of that difference (15 412) does not separate, because those cap reports
+predate the split; the plain cells' split shows what the extra turns cost instead (the two-slot rep spends
+3 813 input tokens where the one-slot rep spends 7 248). What is still not priced is the fused cell itself:
+its reports predate the usage split that now exists
 ([the A-D cells](../experiments/execution/archive/ooo-arms-2026-09-19/README.md)), which is why the ceiling
 stays a wall-clock ceiling for now and why the cost of fusing is unmeasured rather than small.
 
