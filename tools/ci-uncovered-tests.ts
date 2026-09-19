@@ -10,8 +10,10 @@
 //
 // The acknowledged root is a deliberate decision, not an accident of naming: research harnesses
 // under `evals/` drive real worktrees, real child processes and (for live rounds) a paid provider,
-// which is why they are opt-in rather than required checks. Anything *else* that falls out of CI
-// has to be acknowledged here on purpose.
+// which is why they are opt-in rather than required checks. Archived run directories are the
+// second case: a finished run's candidate tree holds the `.test.ts` files it was judged on as
+// evidence of that run, not as suites anyone maintains, so scanning them is a false positive.
+// Anything *else* that falls out of CI has to be acknowledged here on purpose.
 import { execFileSync } from "node:child_process";
 import { globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -20,7 +22,7 @@ import { join } from "node:path";
 const CI_ENTRY_POINTS = ["verify:product-ci", "verify:research", "verify:chaos"];
 
 /** Unreached suites that may stay out of the required checks, with the reason they may. */
-const ACKNOWLEDGED_ROOTS = ["evals/"];
+const ACKNOWLEDGED_ROOTS = ["evals/", "docs/experiments/execution/archive/"];
 
 type Scripts = Record<string, string>;
 
