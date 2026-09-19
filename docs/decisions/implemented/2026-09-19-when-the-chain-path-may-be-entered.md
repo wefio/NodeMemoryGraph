@@ -91,9 +91,15 @@ no claim is made that fusing is more economical, in tokens or in money (see Defe
 
 ## Deferred
 
-- **The product-side entry.** The callers that hold a session today are the adapter's live path and the
-  arms' driver; a board-side caller that enters the chain path is not wired. This record therefore
-  announces permission and the conditions on it, not a product behaviour.
+- **The product-side entry, and the executor it would need.** The product has no loop that runs a unit:
+  `src/integration/ooo-execution.ts` holds the legality and selection decisions as pure functions, the
+  coordinator governs runs (register, freeze, bind, adopt, cancel, status) and the extension offers the
+  worker's tool surface, but nothing in the product decides "admit the next unit or close the session",
+  obtains a runner and runs the unit. Every caller of `decideSessionMove` and `openUnitSession` today is a
+  test, and every caller of a session runner is the arms' driver or the extension's own live path - both
+  reached from `evals/`. So this record announces permission and the conditions on it, _not_ a product
+  behaviour: the rule is enforced where the decision is made, and nothing in the product reaches it yet.
+  Wiring it is therefore not one call site but a product-side executor, which is its own decision.
 - **The default bound.** Nothing is declared beyond "one unit per session unless the caller declares
   otherwise".
 - **The price of fusing.** A priced comparison needs reps of both surfaces under one instrument and its own
