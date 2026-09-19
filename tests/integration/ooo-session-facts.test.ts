@@ -278,9 +278,21 @@ test("opening a unit's session yields its key and records the move that put it t
     assert.equal(again.key, opened.key);
     assert.equal(again.recorded, false);
     assert.equal(again.sequence, opened.sequence);
-    // A different session is a different runner, and the log tells them apart by sequence.
+    // A different session is a different runner - and the move is a fact about the boundary, not
+    // about the session that asked: a move is keyed on (run, unit, attempt), so a second session
+    // asking about the same boundary is the same fact and gets the first answer. A unit belongs to
+    // one session; a caller that would decide one boundary again must say it is a new attempt.
     const other = openUnitSession(store, { ...boundary, sessionId: "session-b" });
     assert.notEqual(other.key, opened.key);
+    assert.equal(other.recorded, false);
+    assert.equal(other.sequence, opened.sequence);
+    assert.equal(recordedSessionMoves(store, "run-9").length, 1);
+    const nextAttempt = openUnitSession(store, {
+      ...boundary,
+      attempt: 2,
+      sessionId: "session-b",
+    });
+    assert.equal(nextAttempt.recorded, true);
     assert.equal(recordedSessionMoves(store, "run-9").length, 2);
   });
 });
