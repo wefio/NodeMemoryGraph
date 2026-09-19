@@ -19,10 +19,15 @@ not add a tool: the product's agent-facing surface is already the board.
 Session identity for a unit is read from, and written to, the board. No new tool, no new store
 column.
 
-- **Resolution.** A unit worked by an agent is a board entry, and an entry already records the
-  session that wrote it (`source_session_id`; delivery receipts are unique on
-  `(entry_id, session_id)`). So "this unit continues the previous unit's session" resolves to *the
-  same board session* - the fact already exists, it is not declared again.
+- **Resolution is a read, not a module.** The identity already exists, in three places that
+  nothing has to derive: the caller that holds the unit already knows its own session
+  (`ctx.sessionManager.getSessionId()` in the extension), the entry it wrote carries
+  `source_session_id`, and a managed write is already fenced to a registered run
+  (`coordinateRunWrite`). So "this unit continues the previous unit's session" is simply *the same
+  session*, read from facts the board and the caller already hold - not a grouping to declare and
+  not a helper to maintain. The eval arm states the same thing its own way - `sessions: [[...]]` in
+  the spec and an id derived as `session:${first}` - and that stays in the spec, where a
+  measurement artifact belongs.
 - **Use.** A runner is held per board session, not per spec field: when the host or driver runs
   another unit of the same board session, it reuses that session's runner, which is what makes the
   later unit's token delta the quantity fusion is claimed to reduce.
@@ -46,9 +51,9 @@ column.
 
 ## Consequences
 
-The resolution costs one board read, and the session identity becomes the same one the wake loop,
-the delivery receipts and the managed-write fence already use, so a unit cannot end up in a
-session the board does not know about.
+No resolution step is added: the session identity is the caller's own, which is also the one the
+wake loop, the delivery receipts and the managed-write fence already use, so a unit cannot end up in
+a session the board does not know about.
 
 The extension's live path can then run a second unit of one board session without a fresh session
 startup, and the per-unit verdict, the session id and the token delta are read from the runner
