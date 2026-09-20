@@ -5,7 +5,12 @@
  * arms that differ in one field are the only way the comparison means anything, so the script
  * refuses a fixture that already declares fusion, and it refuses to guess the provider or model.
  *
- * Usage: node .temp/make-trial-specs.mjs <unitsPerSession>
+ * Usage: node evals/ooo-execution/make-fusion-trial-specs.mjs <unitsPerSession>
+ *
+ * It lives with the harness it builds specs for, not beside the trial's markdown: a runnable
+ * generator reports through stdout, and every `files:` block of the eslint config has to be anchored
+ * in a directory `npm run lint` scans, so a script under docs/ would be read as an unexplained
+ * console warning instead of the tool it is.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 

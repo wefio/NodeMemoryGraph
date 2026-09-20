@@ -16,14 +16,16 @@ with the composed pipeline as the fixed parent acceptance. Provider `deepseek`, 
 | control | `control.spec.json` | nothing (the fixture as it is)   | four, one unit each                  |
 | fusion  | `fusion.spec.json`  | `fusion: { unitsPerSession: 2 }` | two, two units each (`fusion6.json`) |
 
-`make-specs.mjs` builds both from the offline fixture, refuses a fixture that already declares
+`evals/ooo-execution/make-fusion-trial-specs.mjs` builds both from the offline fixture, refuses a
+fixture that already declares
 fusion, refuses to guess the provider or model, and refuses a pair that differs in anything other
 than the arm's id and the fusion declaration.
 
 The two stored spec files are the trial's inputs as they were recorded, and they carry the check
 declaration of their day (`{label, command, args}`). The arms' driver now declares a check as the
 fixture test file it runs (`{label, test}`) and refuses the older form by type, so re-running this
-plan means regenerating the pair with `make-specs.mjs` from the current fixture
+plan means regenerating the pair with `evals/ooo-execution/make-fusion-trial-specs.mjs` from the
+current fixture
 ([decision](../../../decisions/implemented/2026-09-20-tests-need-no-filesystem.md)).
 
 ## Result
