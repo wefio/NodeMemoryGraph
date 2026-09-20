@@ -3,7 +3,7 @@
 [中文](2026-09-20-the-program-answers-legality.zh-CN.md)
 
 **Status:** proposed
-**Relates to:** [Name the collaboration protocol and its task-unit sub-protocol](../implemented/2026-09-20-name-the-collaboration-protocol.md), [Task unit semantics](../../design/task-unit-semantics.md), [The contract's obligations](../../design/task-unit-semantics-obligations.md)
+**Relates to:** [Board governance and capability addressing](../implemented/2026-09-06-board-governance-addressing.md), [Name the collaboration protocol and its task-unit sub-protocol](../implemented/2026-09-20-name-the-collaboration-protocol.md), [Task unit semantics](../../design/task-unit-semantics.md), [The contract's obligations](../../design/task-unit-semantics-obligations.md)
 
 ## Problem
 
@@ -18,7 +18,10 @@ ordering.
 
 [The obligations ledger](../../design/task-unit-semantics-obligations.md) says where the boundary must
 not move - no second task body, no dedicated tool, no dedicated channel - but it does not say what the
-program's answer is.
+program's answer is. Neither does the board's correctness line - reviewable finalize, authentic
+content, scope isolation, capability addressing ([board governance and capability
+addressing](../implemented/2026-09-06-board-governance-addressing.md)) - which governs how an entry is
+treated once it exists, not who decides what happens next.
 
 ## Proposal
 

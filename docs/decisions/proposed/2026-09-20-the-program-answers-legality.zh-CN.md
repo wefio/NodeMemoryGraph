@@ -3,13 +3,13 @@
 [English](2026-09-20-the-program-answers-legality.md)
 
 **Status:** proposed
-**Relates to:** [给协作协议及其任务单元子协议命名](../implemented/2026-09-20-name-the-collaboration-protocol.zh-CN.md)、[任务单元语义](../../design/task-unit-semantics.md)、[契约的义务](../../design/task-unit-semantics-obligations.md)
+**Relates to:** [黑板治理与能力寻址](../implemented/2026-09-06-board-governance-addressing.zh-CN.md)、[给协作协议及其任务单元子协议命名](../implemented/2026-09-20-name-the-collaboration-protocol.zh-CN.md)、[任务单元语义](../../design/task-unit-semantics.md)、[契约的义务](../../design/task-unit-semantics-obligations.md)
 
 ## 问题
 
 元语有了名字，共享层也已经能算出合法集合：有序合法集合、按声明槽位预算切一刀、认领被拒时给出每个单元的理由。但**没有任何一份文档在说"每一步是谁的决定"**。这个缺口有可观察的代价：任何想驱动一次 run 的调用者都得自己重新划一遍边界，于是两种已被记录在案的失败模式都回来了——程序顺手替 agent 挑人（也就是命名决策里记为"这个模型刻意没有变成"的那个词：调度器），以及 agent 不知道程序到底给什么保证，只能用唯一能用的说法去要它真正需要的东西：更多槽位、更怪的顺序。
 
-[义务台账](../../design/task-unit-semantics-obligations.md)写明了边界不能往哪边动——不得再有第二个任务体、专用工具、专用频道——但它没有回答程序给出的那个答案是什么。
+[义务台账](../../design/task-unit-semantics-obligations.md)写明了边界不能往哪边动——不得再有第二个任务体、专用工具、专用频道——但它没有回答程序给出的那个答案是什么。黑板那条正确性线也没有：可复核的终结、内容真实性、作用域隔离、能力寻址（[黑板治理与能力寻址](../implemented/2026-09-06-board-governance-addressing.zh-CN.md)）管的是一个条目在存在之后怎么被对待，不是下一步该由谁定。
 
 ## 提案
 
