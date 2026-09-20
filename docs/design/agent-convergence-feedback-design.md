@@ -849,6 +849,6 @@ claim is authorized while these integrations remain open.
 ## 10. Related documents
 
 - [`docs/design/session-active-graph-runtime-design.md`](session-active-graph-runtime-design.md) — AG runtime blueprint (§4 gap surfaces)
-- [`docs/decisions/proposed/2026-08-29-session-active-graph-runtime.md`](../decisions/proposed/2026-08-29-session-active-graph-runtime.md)
+- [`docs/decisions/implemented/2026-08-29-session-active-graph-runtime.md`](../decisions/implemented/2026-08-29-session-active-graph-runtime.md)
 - [`docs/design/memory-tesserae-design.md`](memory-tesserae-design.md) — tesserae SimHash drift (§4.4)
 - [`docs/decisions/implemented/2026-08-29-repository-control-plane.md`](../decisions/implemented/2026-08-29-repository-control-plane.md) — RCP (§4.2)
