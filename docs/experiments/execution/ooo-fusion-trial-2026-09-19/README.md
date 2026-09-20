@@ -20,6 +20,12 @@ with the composed pipeline as the fixed parent acceptance. Provider `deepseek`, 
 fusion, refuses to guess the provider or model, and refuses a pair that differs in anything other
 than the arm's id and the fusion declaration.
 
+The two stored spec files are the trial's inputs as they were recorded, and they carry the check
+declaration of their day (`{label, command, args}`). The arms' driver now declares a check as the
+fixture test file it runs (`{label, test}`) and refuses the older form by type, so re-running this
+plan means regenerating the pair with `make-specs.mjs` from the current fixture
+([decision](../../../decisions/implemented/2026-09-20-tests-need-no-filesystem.md)).
+
 ## Result
 
 Both arms accepted all four units and the composed parent; neither produced a rejected unit, so this
