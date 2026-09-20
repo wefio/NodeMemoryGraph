@@ -105,7 +105,10 @@ The compiler requires `domain` and `assumes`; `assumes` ids resolve to
 `docs/design/assumptions.yaml`. `strength` says what the evidence buys:
 `decision` for a procedure that decides P for every x in D, `witness` for a
 sample that passed — which is what most `node-test:` evidence is, and why
-`rtm:check` reports `bound`, never `verified`.
+`rtm:check` reports `bound`, never `verified`. That count is inventory: the gate decides each
+assertion's standing from recorded execution evidence (current, at this revision, command passed) and
+judges each risk class and each cross-module contract on its own
+([the decision](../../docs/decisions/implemented/2026-09-20-rtm-evidence-aggregation.md)).
 
 A domain that is vague passes the check. The instrument that catches it is
 mutation testing: a surviving mutant whose change lies outside the stated domain
