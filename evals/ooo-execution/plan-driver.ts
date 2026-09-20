@@ -35,55 +35,22 @@ import {
   type ProbePlan,
 } from "../../src/integration/ooo-board.ts";
 import { verifyCandidate } from "../../src/integration/ooo-candidate.ts";
-import {
-  preparePatchWork,
-  type FrozenPatchWork,
-  type PatchSubmission,
-} from "../../src/integration/ooo-patch.ts";
+import type { PatchSubmission } from "../../src/integration/ooo-patch.ts";
 import type { CandidateCheck } from "../../src/integration/ooo-candidate.ts";
 import type { SessionPlan } from "../../src/integration/ooo-execution.ts";
-import { nextSessionMove } from "../../src/integration/ooo-fusion-plan.ts";
+import { dispatchPlan, type DispatchedUnit } from "../../src/integration/ooo-dispatch.ts";
 
-/** What a worker reports about its own run. The product's run surface records no worker metrics
- *  today, so this shape lives with its only consumer rather than in `src/`. */
-export type WorkerMetrics = {
-  tokens?: number;
-  turns?: number;
-  checks?: number;
-  cacheRead?: number;
-  cacheWrite?: number;
-  /** What the provider did not serve from cache, what the model wrote, and the price it reported. They
-   *  are recorded apart from `tokens` because a total cannot be taken apart again and the three are not
-   *  priced alike - which is the whole reason the cap experiment's token column settles nothing. */
-  inputTokens?: number;
-  outputTokens?: number;
-  cost?: number;
-  /** The digest of the input this unit's session was given, when the worker can name it. Two runs that
-   *  agree on the spec can still differ here, so this is what makes an instrument version checkable. */
-  promptDigest?: string;
-  /** The session the worker actually ran this unit in. Omitted by a worker that has no session to
-   *  report (the stub and canned arms), and the field a fused run is judged on. */
-  sessionId?: string;
-};
-
-/** What a worker returns for one unit. A failure is a recorded attempt, not a crashed run. */
-export type PlanWorkerResult =
-  string | { artifact?: string; metrics?: WorkerMetrics; failure?: string };
-
-export type PlanWorker = (
-  taskId: string,
-  frozen: FrozenPatchWork,
-  dependencies: Readonly<Record<string, string>>,
-  session?: PlanSession,
-) => Promise<PlanWorkerResult>;
-
-/** The execution resource a fused run reuses across units. `id` names the session, and `units` is what
- *  it has already run - so a worker can refuse a continuation it cannot honour instead of quietly
- *  starting a new session and having the run call that fusion. */
-export interface PlanSession {
-  id: string;
-  units: readonly string[];
-}
+// The port and the session handle are the shared loop's; imported for this file's own signatures and
+// re-exported so this driver's callers (its tests, the pilot, the family checks) keep importing them
+// from where they read the driver. A re-export alone makes no local binding, and this file annotates
+// with these names itself.
+import type {
+  WorkerMetrics,
+  PlanWorkerResult,
+  PlanWorker,
+  PlanSession,
+} from "../../src/integration/ooo-dispatch.ts";
+export type { WorkerMetrics, PlanWorkerResult, PlanWorker, PlanSession };
 
 /** One unit of the plan: what it is asked for, what it may edit, and what its own candidate must
  *  pass. The last one is the unit's acceptance; the parent check is separate and fixed. */
@@ -122,32 +89,8 @@ export interface PlanDriverSpec {
   limits?: { turns: number; reads: number; timeoutMs: number };
 }
 
-export interface UnitRun {
-  taskId: string;
-  verdict: string;
-  /** Claim to return: the worker's own time, which is what parallelism can overlap. */
-  workerMs: number;
-  /** The host's check for this unit's candidate. Host time is serial in every arm. */
-  hostMs: number;
-  tokens: number;
-  /** Cache accounting for this unit's own turns. Recorded beside tokens because a chain carries its
-   *  context forward, so a later unit's input is mostly a cache read - a different price, and the
-   *  reason a token count alone cannot be read as a cost. */
-  cacheRead: number;
-  cacheWrite: number;
-  /** The rest of the provider's own split, kept apart from `tokens` for the same reason: `inputTokens`
-   *  was not served from cache, `outputTokens` is what the model wrote, and `cost` is the provider's
-   *  price for the turns. A stub worker reports none of them and they stay zero. */
-  inputTokens: number;
-  outputTokens: number;
-  cost: number;
-  /** The prompt this unit's session was given, as a digest, when the worker reports one. */
-  promptDigest?: string;
-  attempt: number;
-  /** The session the worker reported for this unit. A fused run's evidence is that two units name
-   *  the same session; a worker that quietly starts a new one is not fusing, and its unit says so. */
-  sessionId?: string;
-}
+// What one dispatched unit reports, as the shared loop returns it.
+export type UnitRun = DispatchedUnit;
 
 export interface PlanRun {
   plan: readonly string[];
@@ -211,36 +154,6 @@ function unitVerifier(spec: PlanDriverSpec, unit: PlanUnit) {
  *  offer work to one name and claim it as another. */
 export const ownerOf = (taskId: string): string => `plan-driver:${taskId}`;
 
-/** One unit's own record of the session it ran in: absent when the worker reported none, so a fused run
- *  is judged on a session the worker named rather than on the one the driver asked for. */
-function reportedSession(result: { metrics?: WorkerMetrics }): { sessionId?: string } {
-  const sessionId = result.metrics?.sessionId;
-  return sessionId === undefined ? {} : { sessionId };
-}
-
-/** The cache, input, output and cost accounting a worker reports, summed over its own turns. They are
- *  recorded beside tokens because the two are not the same currency: a chain carries its context
- *  forward, so most of what a later unit sends is a cache read, which is priced far below a fresh input
- *  token. Without the split a token count cannot be turned into a cost. */
-function reportedUsage(result: { metrics?: WorkerMetrics }): {
-  cacheRead: number;
-  cacheWrite: number;
-  inputTokens: number;
-  outputTokens: number;
-  cost: number;
-  promptDigest?: string;
-} {
-  const metrics = result.metrics;
-  return {
-    cacheRead: metrics?.cacheRead ?? 0,
-    cacheWrite: metrics?.cacheWrite ?? 0,
-    inputTokens: metrics?.inputTokens ?? 0,
-    outputTokens: metrics?.outputTokens ?? 0,
-    cost: metrics?.cost ?? 0,
-    ...(metrics?.promptDigest === undefined ? {} : { promptDigest: metrics.promptDigest }),
-  };
-}
-
 /** The commit this driver ran from. Read rather than remembered: a run's own report is the place its
  *  instrument belongs, because the alternative is an argument about which code produced a number. */
 function instrumentCommit(): string {
@@ -249,73 +162,6 @@ function instrumentCommit(): string {
   } catch {
     return "unknown";
   }
-}
-
-/** One unit through the board: claim, run the worker, put the result on the channel, submit. The
- *  store decides the verdict; the driver never reads a worker's claim about itself. */
-async function runOneUnit(
-  spec: PlanDriverSpec,
-  gate: BoardAdmission,
-  taskId: string,
-  session?: PlanSession,
-): Promise<UnitRun | { failure: string } | { refused: string }> {
-  const unit = spec.units[taskId];
-  if (!unit) return { failure: `${taskId}: the plan selected it, but no spec describes it` };
-  const claimedAt = Date.now();
-  let ticket: ReturnType<BoardAdmission["claim"]>;
-  try {
-    ticket = gate.claim(taskId, ownerOf(taskId));
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    // The board publishes a handoff only for the task it has selected, so while one unit is claimed
-    // no other unit is claimable. That is the boundary the C arm needs and does not have; it is
-    // reported as a refusal to use the slot count, never as a failed unit.
-    if (/no published handoff|not selected by narrow dispatch/.test(reason))
-      return { refused: reason };
-    return { failure: `${taskId}: ${reason}` };
-  }
-  if (!ticket.patch) return { failure: `${taskId}: not a patch task` };
-  const frozen = preparePatchWork({
-    taskId: ticket.patch.taskId,
-    attempt: ticket.attempt,
-    instruction: ticket.patch.instruction,
-    files: ticket.patch.files,
-    editable: ticket.patch.editable,
-    visible: ticket.patch.visible,
-    admittedConclusions: ticket.patch.admittedConclusions,
-    budget: ticket.patch.budget,
-    limits: ticket.patch.limits,
-  });
-  let produced: PlanWorkerResult;
-  try {
-    produced = await spec.worker(taskId, frozen, ticket.dependencies, session);
-  } catch (error) {
-    return { failure: `${taskId}: ${error instanceof Error ? error.message : String(error)}` };
-  }
-  const workerMs = Date.now() - claimedAt;
-  const result = typeof produced === "string" ? { artifact: produced } : produced;
-  const tokens = result.metrics?.tokens ?? 0;
-  if (result.failure !== undefined || result.artifact === undefined)
-    return { failure: `${taskId}: ${result.failure ?? "the worker returned no artifact"}` };
-  const entry = gate.putTaskBoardEntry({
-    taskId: gate.channel,
-    agentId: ownerOf(taskId),
-    kind: "result",
-    content: JSON.stringify({ ticket, artifact: result.artifact }),
-    expiresAt: new Date(gate.now + 86_400_000).toISOString(),
-  });
-  const checkStartedAt = Date.now();
-  const verdict = await gate.submit(entry.id);
-  return {
-    taskId,
-    verdict,
-    workerMs,
-    hostMs: Date.now() - checkStartedAt,
-    tokens,
-    attempt: ticket.attempt,
-    ...reportedUsage(result),
-    ...reportedSession(result),
-  };
 }
 
 /** The parent check: the fixed acceptance over the composed artifacts, run once at the end. */
@@ -371,10 +217,6 @@ export async function runPlan(spec: PlanDriverSpec): Promise<PlanRun> {
     },
   );
   const startedAt = Date.now();
-  const units: UnitRun[] = [];
-  const order: string[] = [];
-  const failures: string[] = [];
-  const slotRefusals: string[] = [];
 
   for (const [taskId, unit] of Object.entries(spec.units)) {
     const patch: PatchTaskSpec = {
@@ -388,18 +230,6 @@ export async function runPlan(spec: PlanDriverSpec): Promise<PlanRun> {
     };
     gate.installPatchTask(taskId, patch);
   }
-  const dispatch = async (taskId: string, session?: PlanSession): Promise<boolean> => {
-    order.push(taskId);
-    const result = await runOneUnit(spec, gate, taskId, session);
-    if ("refused" in result) {
-      slotRefusals.push(result.refused);
-      order.pop();
-      return false;
-    }
-    if ("failure" in result) failures.push(result.failure);
-    else units.push(result);
-    return true;
-  };
   /** What a unit's session declaration is when the spec declares no bound for it: one capability and
    *  one authority for the whole run, and only the unit's own visibility decides. */
   const declarationOf = (id: string) => ({
@@ -431,78 +261,38 @@ export async function runPlan(spec: PlanDriverSpec): Promise<PlanRun> {
       ...(pendingBranches.length ? { pendingBranches } : {}),
     };
   };
-  /** The next unit that may continue this session, asked of the one owner of the move: legal by the
-   *  shared rule, still on offer by the board, and inside the declared bound. A bound is what keeps a
-   *  fused run from swallowing the plan, and the move is repair-first - it either admits the next
-   *  legal successor or closes the session, which is the irreversible commitment the design describes. */
-  const nextInChain = (current: string, session: PlanSession): string | undefined => {
-    const move = nextSessionMove({
-      plan: sessionPlan([]),
-      current,
-      size: session.units.length,
-      bound: spec.fusion?.unitsPerSession ?? 1,
-      onOffer: gate.candidates(),
-    });
-    return move.kind === "admit" ? move.unit : undefined;
-  };
-  /** One session: claim and check each unit in turn, and continue only from a unit the host has
-   *  accepted. A unit that fails, or a successor that is not legal at the boundary, ends the session
-   *  there - which is the yield boundary the design asks for, and why the accepted prefix survives. */
-  const runChain = async (first: string, chains: string[][]): Promise<boolean> => {
-    // The session's units are this driver's own array, handed out under a readonly view: a session's
-    // shape is a fact consumers read, and the driver is the one place that grows it.
-    const sessionUnits: string[] = [];
-    const session: PlanSession = { id: `session:${first}`, units: sessionUnits };
-    /** The units the worker reported running in this session. Fusion's evidence: the driver asking for
-     *  a session is not the fact - the worker's own report is. */
-    const fused: string[] = [];
-    let started = false;
-    for (let current: string | undefined = first; current !== undefined;) {
-      const id = current;
-      const before = units.length;
-      const ok = await dispatch(id, session);
-      if (!ok) break;
-      // A worker that failed recorded no unit: the session ends with the units that did run.
-      const unit = units.length > before ? units[before] : undefined;
-      if (!unit) break;
-      sessionUnits.push(id);
-      started = true;
-      if (unit?.sessionId !== session.id) {
-        // It ran somewhere of its own: that is a session of one, reported as one, and the chain ends.
-        chains.push([id]);
-        break;
-      }
-      fused.push(id);
-      // Continuing is the shared rule's decision, not a second copy of it: `fusionSuccessors` already
-      // requires the unit that just ran to be *accepted*, so a rejected or undecidable verdict ends the
-      // session through the same predicate that guards every other boundary.
-      current = nextInChain(id, session);
-    }
-    // One entry per session, whatever its length: a session of one unit is a yield boundary, and a run
-    // whose sessions are all singletons did not fuse anything. A chain that could not start is not a
-    // session at all - that refusal is reported as a refusal, not as an empty session.
-    if (fused.length) chains.push(fused);
-    return started;
-  };
-  /** Fusion is on when the spec declares a bound, and a bound of one is the control arm: the same
-   *  accounting with no session reuse, so a fused run is compared against the same code path. */
-  const fusionDeclared = spec.fusion !== undefined;
-  /** The most units ever claimed at the same time: requested slots are a wish, this is the fact. */
-  let widestHeld = 0;
-  const chains: string[][] = [];
-  for (;;) {
-    const legal = gate.candidates();
-    if (!legal.length) break;
-    // A fused run holds one session per slot: the bound decides how far a session goes, and the slot
-    // count decides how many sessions are open at once.
-    const batch = legal.slice(0, fusionDeclared ? 1 : spec.slots);
-    const held = await Promise.all(
-      batch.map((id) => (fusionDeclared ? runChain(id, chains) : dispatch(id))),
-    );
-    widestHeld = Math.max(widestHeld, held.filter(Boolean).length);
-  }
+
+  // The loop is the shared one: this driver supplies what only it knows - the plan, each task's spec,
+  // the declared bound, the legality view, the worker, and the session identity its measurements are
+  // keyed by - and the shared layer owns the order of operations (claim, freeze, worker, result,
+  // verdict, and the session decision at each boundary).
+  const outcome = await dispatchPlan({
+    board: gate,
+    plan: planIds,
+    slots: spec.slots,
+    // This driver's own session identity, kept here because a fused cell's evidence is read by it: the
+    // arms declare the key, the shared loop only carries it. No run to append facts to: the board is
+    // the instrument's own store, which holds no run manifest for one.
+    ...(spec.fusion
+      ? {
+          sessions: {
+            bound: spec.fusion.unitsPerSession ?? 1,
+            identity: (first: string) => `session:${first}`,
+          },
+        }
+      : {}),
+    legality: sessionPlan,
+    worker: spec.worker,
+    ownerOf,
+  });
+  const units = outcome.units;
+  const accepted = outcome.accepted;
+  const order = outcome.order;
+  const failures = outcome.failures;
+  const slotRefusals = outcome.slotRefusals;
+  const chains = outcome.sessions;
+  const widestHeld = outcome.slotsUsed;
   const wallMs = Date.now() - startedAt;
-  const accepted = gate.accepted();
   const incomplete = [
     ...failures,
     ...planIds.filter(
@@ -519,7 +309,7 @@ export async function runPlan(spec: PlanDriverSpec): Promise<PlanRun> {
     accepted,
     wallMs,
     slotsRequested: spec.slots,
-    slotsUsed: Math.max(1, widestHeld),
+    slotsUsed: widestHeld,
     sessions: chains,
     ...(slotRefusals.length
       ? { slotRefusal: `wanted ${spec.slots} slots, the board allowed one: ${slotRefusals[0]}` }

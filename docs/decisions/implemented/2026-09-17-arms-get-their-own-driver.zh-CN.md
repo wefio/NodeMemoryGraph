@@ -2,6 +2,7 @@
 
 **Status:** implemented
 **Approved:** explicit
+**Superseded by:** [派发循环是共享的](2026-09-19-dispatch-loop-is-shared.zh-CN.md)
 Date: 2026-09-17
 Branch: feat/ooo-run-namespace
 **Relates to:** [task-unit 语义设计](../../design/task-unit-semantics.md)、
@@ -114,3 +115,7 @@ in the plan` 失败；把汇合点从 `C` 改名也同样失败。可读性那�
   `["A","B","C"]` 会令其失败）、上述两种拒绝、一个计划值同时到达 store 与轮次、spec 映射及其默认值、
   以及解析器的拒绝。
 - `evals/ooo-execution/cycle.test.ts` —— 23 条，未改动且全绿：驱动器行为被保留。
+
+## 这次部分取代之后仍然成立的
+
+取代是部分的，范围写在后一条记录里：被搬动的是**执行一份给定计划的循环住在哪**。本记录其余内容全部成立——臂保留自己的驱动、spec 声明与测量记录；产品仍不拥有规划平台；`src/integration/ooo-cycle.ts` 仍是它那个特定的外部等待窗口实验。
