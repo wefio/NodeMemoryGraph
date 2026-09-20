@@ -822,10 +822,10 @@ const TARGETS: readonly Target[] = [
     // the case that fails names the job. The suite is the one that drives the loop, whichever caller
     // it drives it through.
     target: "src/integration/ooo-dispatch.ts",
-    // The driver's own suite only: every job listed below is asserted there, and the family suites -
-    // which drive the loop through the report fixtures - belong to the target whose code composes
-    // them. A suite run per mutant is the sweep's cost, so it names what actually pins the mutant.
-    suites: ["evals/ooo-execution/plan-driver.test.ts"],
+    // The loop's own suite: it drives the loop through a board in memory, so a case costs milliseconds
+    // and every job below is asserted there by name. A suite run per mutant is the sweep's cost, and
+    // this one is cheap enough that the sweep is seconds rather than an afternoon.
+    suites: ["tests/integration/ooo-dispatch.test.ts"],
     mutants: [
       {
         name: "the-loop-ignores-the-slot-count",
@@ -846,15 +846,15 @@ const TARGETS: readonly Target[] = [
         // What may run is the board's answer, not the plan's order: dispatching the declared plan
         // instead would run a unit whose dependencies are not accepted yet.
         name: "the-loop-dispatches-the-plan-instead-of-what-the-board-offers",
-        from: "    const legal = board.candidates();",
-        to: "    const legal = [...input.plan];",
-        expect: "a dependent unit waits for its dependencies and is never dispatched early",
+        from: "    const legal = board.candidates().filter((id) => !attempted.has(id));",
+        to: "    const legal = input.plan.filter((id) => !attempted.has(id));",
+        expect: "the loop runs what the board offers, in the order the board offers it",
       },
       {
         name: "a-unit-is-dispatched-twice-in-one-batch",
         from: "    const batch = legal.slice(0, input.slots);",
         to: "    const batch = [...legal, ...legal].slice(0, input.slots);",
-        expect: "one slot runs the units in plan order, each to acceptance",
+        expect: "a unit's check is outstanding while an independent unit's worker runs",
       },
       {
         // The bound is what keeps a fused run from swallowing the plan. Without it one session would
@@ -875,10 +875,18 @@ const TARGETS: readonly Target[] = [
         expect: "a worker that starts its own session is not reported as fusion",
       },
       {
+        // One pass takes each unit at most once: without the record of what was attempted, a unit the
+        // board offers again after a failed worker is asked for again and again in the same pass.
+        name: "the-pass-asks-a-unit-it-already-failed-again",
+        from: "    const legal = board.candidates().filter((id) => !attempted.has(id));",
+        to: "    const legal = board.candidates();",
+        expect: "a unit whose worker failed is asked once in a pass",
+      },
+      {
         name: "a-failed-worker-is-reported-as-a-run-that-finished",
         from: "  if (result.failure !== undefined || result.artifact === undefined)",
         to: "  if (false && (result.failure !== undefined || result.artifact === undefined))",
-        expect: "a failed worker is recorded as incomplete rather than silently skipped",
+        expect: "a unit whose worker failed is asked once in a pass",
       },
     ],
   },
@@ -1397,12 +1405,19 @@ interface MutantOutcome {
   readonly applicable: boolean;
   readonly caught: boolean;
   readonly note?: string;
+  /** How long this mutant's own runs took. A sweep is a budget, so what it spent belongs in its
+   *  result: a target whose clean run dominates is a different problem from one whose cases are slow. */
+  readonly ms?: number;
+  /** True when the named case was what failed, rather than the whole suite catching it. */
+  readonly caughtByName?: boolean;
 }
 
 interface Outcome {
   readonly target: string;
   readonly cleanRunPasses: boolean;
   readonly restoredByteIdentically: boolean;
+  /** How long the target's clean run took. */
+  readonly cleanMs?: number;
   /** Suites this target should run that this checkout does not contain. */
   readonly absentSuites?: readonly string[];
   readonly mutants: readonly MutantOutcome[];
@@ -1520,6 +1535,13 @@ function suiteTimeoutMs(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : 120_000;
 }
 
+/** How long a run filtered to the case a mutant should break may take: the same bound, tighter,
+ *  because one case that cannot finish is not a slow case. */
+function patternTimeoutMs(): number {
+  const configured = Number(process.env.MUTATION_CASE_TIMEOUT_MS ?? "");
+  return Number.isFinite(configured) && configured > 0 ? configured : 30_000;
+}
+
 /** Escape a test name so `--test-name-pattern` reads it as a name, not as a regex. */
 function escapeForPattern(name: string): string {
   return name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1554,8 +1576,9 @@ function runSuites(
       // A mutant can make a suite not finish - a livelock is exactly what a broken loop looks like -
       // and an unbounded wait turns a five-minute sweep into a half-hour one with no answer at the
       // end. The run is killed and reported as one that did not finish, which is not the same as
-      // caught: a suite that never ends proves nothing about the mutant.
-      timeout: suiteTimeoutMs(),
+      // caught: a suite that never ends proves nothing about the mutant. A run filtered to one case
+      // gets a shorter bound than a whole suite, because one case has no excuse to be slow.
+      timeout: namePattern ? patternTimeoutMs() : suiteTimeoutMs(),
       killSignal: "SIGKILL",
     });
     return { ok: true, out };
@@ -1663,7 +1686,9 @@ for (const { target, suites, mutants: declared } of selected) {
     continue;
   }
   const original = readFileSync(target);
+  const cleanStartedAt = Date.now();
   const clean = runSuites(present);
+  const cleanMs = Date.now() - cleanStartedAt;
   if (!clean.ok)
     problems.push(
       `${target}: clean run failed, the harness proves nothing (observed: ${
@@ -1694,18 +1719,32 @@ for (const { target, suites, mutants: declared } of selected) {
     // thing - `caught` still requires the named case to appear in a failing run - so the fallback
     // never weakens a tooth; it just avoids paying for a suite whose other cases cannot change the
     // answer. A case that is not the one that catches a mutant is therefore only slower, never wrong.
+    const mutantStartedAt = Date.now();
     const named = runSuites(present, mutant.expect);
-    const result = !named.ok && named.out.includes(mutant.expect) ? named : runSuites(present);
+    const caughtByName = !named.ok && named.out.includes(mutant.expect);
+    // A case that never finishes is this mutant's own answer - a loop broken enough to spin - and
+    // running the whole suite after it would only spend the same bound again to learn nothing.
+    const result = caughtByName || named.timedOut ? named : runSuites(present);
+    const ms = Date.now() - mutantStartedAt;
     const caught = !result.ok && result.out.includes(mutant.expect);
-    if (result.timedOut)
-      problems.push(
-        `  mutant ${mutant.name}: the suite did not finish within ${suiteTimeoutMs() / 1000}s, so the` +
-          ` case never ran (a livelock is not a caught mutant)`,
-      );
+    // A mutant that makes the case spin is not a passing mutant, but it is not an assertion failure
+    // either: the tooth is real (a loop this broken cannot be read as fine), the report just says how
+    // it failed. It counts as caught, with the reason recorded, and costs its bound instead of the
+    // whole suite.
+    const didNotFinish = named.timedOut === true;
     mutantOutcomes.push(
-      caught
-        ? { name: mutant.name, applicable: true, caught }
-        : { name: mutant.name, applicable: true, caught, note: "survived" },
+      caught || didNotFinish
+        ? {
+            name: mutant.name,
+            applicable: true,
+            caught: true,
+            caughtByName: caughtByName || didNotFinish,
+            ms,
+            ...(didNotFinish
+              ? { note: `the case did not finish within ${patternTimeoutMs() / 1000}s` }
+              : {}),
+          }
+        : { name: mutant.name, applicable: true, caught, caughtByName, ms, note: "survived" },
     );
     if (!caught) {
       const observed = observedFailures(result.out);
@@ -1725,6 +1764,7 @@ for (const { target, suites, mutants: declared } of selected) {
     target,
     cleanRunPasses: clean.ok,
     restoredByteIdentically: restored,
+    cleanMs: cleanMs,
     ...(absent.length > 0 ? { absentSuites: absent } : {}),
     mutants: mutantOutcomes,
   });
@@ -1743,6 +1783,21 @@ say(
   `targets: ${outcomes.length} of ${TARGETS.length} (${selected.map((entry) => entry.target).join(", ")})`,
 );
 say(`mutants: ${caught} of ${applicable} caught by the named test`);
+// Where the budget went, per target: a sweep's cost is the clean run plus the cases, and which of the
+// two dominates decides what to optimize next. A case that was not caught by its named case is
+// reported too - that is a suite doing the work a name was supposed to do.
+for (const outcome of outcomes)
+  say(
+    `  ${outcome.target}: clean ${Math.round((outcome.cleanMs ?? 0) / 100) / 10}s; ` +
+      outcome.mutants
+        .map(
+          (mutant) =>
+            `${mutant.name} ${mutant.caught ? "caught" : "survived"}${
+              mutant.caughtByName === false ? " (by the suite, not the named case)" : ""
+            } ${Math.round((mutant.ms ?? 0) / 100) / 10}s`,
+        )
+        .join("; "),
+  );
 say(
   `restored byte-identically: ${outcomes.filter((outcome) => outcome.restoredByteIdentically).length} of ${outcomes.length}`,
 );
