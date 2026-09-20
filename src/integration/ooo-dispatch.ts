@@ -324,6 +324,11 @@ export async function dispatchPlan(input: DispatchPlanInput): Promise<DispatchOu
   /** How many claims the board has accepted. A round that adds none made no progress, and asking
    *  again would repeat the same answer forever. */
   let claims = 0;
+  /** The units this pass has already taken a claim on. One pass takes each unit at most once: a unit
+   *  the board did not accept is reported (`failures`, `incomplete`), and asking for it again in the
+   *  same pass cannot change that - a retry is the caller's next call, which is where a retry policy
+   *  belongs. Without this a refusal-shaped or failure-shaped answer repeats forever. */
+  const attempted = new Set<string>();
   /** The entries the results landed in, by unit: the fact a session decision is attributed to. */
   const entryOf = new Map<string, string>();
 
@@ -332,7 +337,10 @@ export async function dispatchPlan(input: DispatchPlanInput): Promise<DispatchOu
     const attempt = await dispatchUnit(input, taskId, session);
     // A refusal is the only outcome that did not claim anything: the board would answer the same way
     // next round, so the loop counts this and stops when a whole round adds nothing.
-    if (!("refused" in attempt)) claims += 1;
+    if (!("refused" in attempt)) {
+      claims += 1;
+      attempted.add(taskId);
+    }
     if ("unit" in attempt) {
       units.push(attempt.unit);
       entryOf.set(taskId, attempt.entryId);
@@ -419,7 +427,7 @@ export async function dispatchPlan(input: DispatchPlanInput): Promise<DispatchOu
   // own session - the same loop, one session each, which is the control a fused run is read against.
   const chainPath = input.sessions !== undefined;
   for (;;) {
-    const legal = board.candidates();
+    const legal = board.candidates().filter((id) => !attempted.has(id));
     if (!legal.length) break;
     // A declared slot count is how many sessions may be open at once, in both paths. It is not cut to
     // one when sessions are declared: a fused run of two sessions is two chains running, and a loop
