@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ProbePlan } from "../../src/integration/ooo-board.ts";
+import type { DataCheck, DataCheckResult } from "../../src/integration/ooo-candidate.ts";
 import {
   comparePlanSlots,
   piWorker,
@@ -15,10 +16,18 @@ import {
   specFrom,
   type PlanDriverSpec,
   type PlanWorker,
+  type SpecFile,
 } from "./plan-driver.ts";
 
 const baseline = { "src/unit.ts": "export const value = 1;\n" };
-const ok = [{ label: "unit check", command: process.execPath, args: ["-e", "process.exit(0)"] }];
+/** The arms' checks are data checks: they answer a verdict over the candidate's files, so a case about
+ *  the loop declares one and needs no process, no directory and no worktree. The stubs here are the
+ *  declarations these cases are about, and the real ones are the fixture test files. */
+const dataCheck = (label: string, answer: DataCheckResult): DataCheck => ({
+  label,
+  verify: () => answer,
+});
+const ok: readonly DataCheck[] = [dataCheck("unit check", { status: "passed" })];
 /** Four units that share a frozen interface, and a summary over three of them: the shape the arms
  *  use, and one whose independence is real rather than a relabelling of test groups. */
 const plan: ProbePlan = [
@@ -39,7 +48,6 @@ function spec(overrides: Partial<PlanDriverSpec> = {}): PlanDriverSpec {
     plan,
     units,
     worker: recordingWorker(),
-    repository: process.cwd(),
     revision: "HEAD",
     baseline,
     parentChecks: ok,
@@ -68,6 +76,49 @@ function recordingWorker(latencyMs = 60, log: string[] = []): PlanWorker {
     };
   };
 }
+
+/** A worker that reports the provider's own split, so "the report carries what a price needs" is checked
+ *  rather than assumed. A token total cannot be taken apart again, which is the defect this field set
+ *  exists to avoid - the cap experiment's token column is the measurement that paid for that lesson. */
+function usageWorker(): PlanWorker {
+  return async (taskId, frozen) => {
+    const produced = await recordingWorker(1)(taskId, frozen, {});
+    if (typeof produced === "string" || !produced.metrics)
+      throw new Error("the recording worker changed shape");
+    return {
+      ...produced,
+      metrics: {
+        ...produced.metrics,
+        tokens: 100,
+        cacheRead: 60,
+        cacheWrite: 5,
+        inputTokens: 20,
+        outputTokens: 15,
+        cost: 0.25,
+        promptDigest: `digest-${taskId}`,
+      },
+    };
+  };
+}
+
+test("the report carries the provider's own split, and the code that produced it", async () => {
+  const run = await runPlan(spec({ slots: 1, worker: usageWorker() }));
+  const units = run.units.length;
+  const first = run.units[0]!;
+  assert.deepEqual(
+    [first.inputTokens, first.outputTokens, first.cost, first.promptDigest],
+    [20, 15, 0.25, `digest-${first.taskId}`],
+  );
+  // The totals are sums of the units, so a run's price is not recomputed from a token total.
+  assert.deepEqual(
+    [run.inputTokens, run.outputTokens, run.cost],
+    [20 * units, 15 * units, 0.25 * units],
+  );
+  assert.match(run.instrument.commit, /^[0-9a-f]{7,40}$/, "a run names the code it came from");
+  // A stub that reports no split leaves zeros rather than a guess.
+  const plain = await runPlan(spec({ slots: 1 }));
+  assert.deepEqual([plain.inputTokens, plain.outputTokens, plain.cost], [0, 0, 0]);
+});
 
 /** The session a fused run must actually reuse: this worker echoes the session it was handed, so a
  *  chain that only *looked* fused - a fresh session per unit - would show up as distinct ids. */
@@ -146,7 +197,9 @@ test("a unit with no verdict ends the session it was running in", async () => {
 test("a fused session does not continue from a unit the host rejected", async () => {
   // A verdict is not a failure: the unit ran, the host looked at it and refused. The session must end
   // there all the same, because the next unit would be working on top of an unverified answer.
-  const bad = [{ label: "unit check", command: process.execPath, args: ["-e", "process.exit(1)"] }];
+  const bad: readonly DataCheck[] = [
+    dataCheck("unit check", { status: "failed", log: "the host refused this answer" }),
+  ];
   const base = spec({ slots: 1, fusion: { unitsPerSession: 4 }, worker: sessionWorker(10) });
   const run = await runPlan({
     ...base,
@@ -266,8 +319,8 @@ test("a failed worker is recorded as incomplete rather than silently skipped", a
 });
 
 test("the parent check is the composed acceptance, and a failing check is reported as such", async () => {
-  const failing = [
-    { label: "parent check", command: process.execPath, args: ["-e", "process.exit(1)"] },
+  const failing: readonly DataCheck[] = [
+    dataCheck("parent check", { status: "failed", log: "the composition is wrong" }),
   ];
   const run = await runPlan(spec({ slots: 1, worker: recordingWorker(10), parentChecks: failing }));
   assert.equal(run.parent?.verdict, "reject");
@@ -362,11 +415,13 @@ test("a unit's check is outstanding while an independent unit's worker runs", as
       metrics: { tokens: 1, turns: 1, checks: 0 },
     };
   };
-  const slow = [
+  const slow: readonly DataCheck[] = [
     {
       label: "slow",
-      command: process.execPath,
-      args: ["-e", `setTimeout(() => {}, ${slowCheckMs})`],
+      verify: async () => {
+        await new Promise((done) => setTimeout(done, slowCheckMs));
+        return { status: "passed" as const };
+      },
     },
   ];
   const twoUnits: ProbePlan = [
@@ -380,7 +435,6 @@ test("a unit's check is outstanding while an independent unit's worker runs", as
       second: { instruction: "work on second", editable: ["src/unit.ts"], checks: ok },
     },
     worker,
-    repository: process.cwd(),
     revision: "HEAD",
     baseline,
     slots: 2,
@@ -411,7 +465,7 @@ test("a spec file's fusion block reaches the run it describes", () => {
       first: {
         instruction: "work on first",
         editable: [target],
-        checks: [{ label: "ok", command: "node", args: ["-e", "process.exit(0)"] }],
+        checks: [{ label: "ok", test: "evals/ooo-execution/fixtures/report/alpha.test.ts" }],
       },
     },
     worker: { kind: "stub" as const, latencyMs: 1 },
@@ -423,7 +477,7 @@ test("a spec file's fusion block reaches the run it describes", () => {
     { unitsPerSession: 2 },
     "a spec that asked for fusion must not be run as the control arm",
   );
-  const without: Record<string, unknown> = { ...file };
+  const without: SpecFile = { ...file };
   delete without.fusion;
   assert.equal(
     specFrom(without, recordingWorker(), 1).fusion,

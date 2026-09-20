@@ -4,7 +4,7 @@
 out of the instrument. **Directional only**: the sample cannot resolve a small difference, and no
 quality difference appeared to resolve.
 
-The runs behind every number below are kept, unedited, in [the archive](archive/ooo-arms-2026-09-19/README.md) - they were rescued out of  after the fact - and [the plan](ooo-arm-plan-2026-09-19.md) fixes what the next paid run must store before it is allowed to run.
+The runs behind every number below are kept, unedited, in [the archive](archive/ooo-arms-2026-09-19/README.md) - they were rescued out of after the fact - and [the plan](ooo-arm-plan-2026-09-19.md) fixes what the next paid run must store before it is allowed to run.
 **Related:** [task-unit semantics design](../../design/task-unit-semantics.md) ·
 [its obligation ledger](../../design/task-unit-semantics-obligations.md) ·
 [the offline sweep that ordered this](./ooo-cost-model-2026-09-17.md)
@@ -138,18 +138,30 @@ driver already described, 2 is fused. Everything else is identical - the same sp
 | fused   | 2     | `2` ×3           | 2/2 ×3         | 22 533        | 11 048 ms   | 0        |
 
 **What this sample carries.** Quality parity holds - every unit was accepted in every run of both arms,
-so the wall-time comparison is admissible - and the fused arm was ~1.9 s faster per run, consistently:
-11.8 / 9.6 / 11.0 s against 11.9 / 12.9 / 14.1 s. That is about 15 % of the unfused wall and wider than
-either arm's own spread, and it prices the session-startup term the cost model carried as `unmeasured`:
-one fused session removes exactly one startup, so the term is ~1.9 s at this model and plan size.
+so the wall-time comparison is admissible - and the fused arm's median run was ~1.9 s faster:
+11.8 / 9.6 / 11.0 s against 11.9 / 12.9 / 14.1 s, about 15 % of the unfused median.
+
+**What the 1.9 s does not carry.** The same numbers deny the reading this section first gave them: the
+gap between the medians (1.9 s) is _smaller_ than each arm's own spread (2.2 s in both), so two reps per
+arm do not separate the session-startup term from ordinary run-to-run model time, and the difference is
+not "wider than either arm's own spread". The startup term stays what the cost model recorded - an
+unmeasured parameter - until the cap experiment below measures it, and that experiment finds it
+plan-dependent rather than a constant.
+
+**Fusion is not what this arm failed to resolve.** The cap experiment runs the same comparison on the
+four-unit fine plan and measures a positive effect there: cap 1 to cap 2 saves 8 451 ms on the medians
+against within-cell spreads of 1 783 ms and 571 ms, and its two-rep cells alone do not overlap (26.2-27.1 s
+against 17.7-18.0 s). What stays unresolved on this axis is what fusing _costs_, since the token columns
+at three reps are wider than the gaps they would be compared across - not whether it saves wall clock.
 
 **What it does not carry.** Tokens did not fall: 22 498 against 22 533 is 0.2 %, and the fused arm's own
-spread (17.6k - 26.3k) is wider than the difference. Per unit the saving is real and smaller than
-predicted - the second unit cost ~10.8k fused against ~11.6k unfused, about 8 % - and the first unit
-cost ~0.7k more, which cancels it. The reason is a mechanism cost rather than noise: a chain's tool
-surface is the union of its units' capabilities, because a session's surface is fixed when it is
-created, so a unit can be offered a tool it has no use for and spend a turn on the refusal. Two units
-is also where the design expected the saving to be smallest.
+spread (17.6k - 26.3k) is wider than the difference. The per-unit numbers are read the same way, as
+directions rather than savings: the second unit cost ~10.8k fused against ~11.6k unfused (about 8 %),
+which is inside that spread, and the first unit cost ~0.7k more, which cancels it. The mechanism offered
+below is a hypothesis this sample does not test, and part of it was repaired on 2026-09-19 - a chain no
+longer offers a unit a tool that unit has no use for
+([the fusion trial](./ooo-fusion-trial-2026-09-19/README.md)) - so a re-run should not be expected to
+reproduce that term.
 
 **Rejected:** reading the token tie as "fusion does not pay". The two terms are separable and the
 second-unit saving is real; what n = 6 at one plan shape and one model cannot say is how either scales.
@@ -167,16 +179,16 @@ candidate is prepared before the fact, and the shared layer's `speculationOutcom
 to it. A published candidate is still verified by the host with the unit's own frozen check, which is the
 quality term; a discarded one closes its branch session.
 
-| Arm         | Fact   | Runs | Tokens  | Work ms | Post-fact ms | Quality    |
-| ----------- | ------ | ---- | ------- | ------- | ------------ | ---------- |
-| baseline    | holds  | 2    | 13 544  | 10 358  | 10 358       | false ×2   |
-| speculation | holds  | 2    | 17 151  | 15 066  | 186          | false ×2   |
-| baseline    | absent | 2    | 0       | 0       | 0            | n/a        |
-| speculation | absent | 2    | 12 543  | 15 577  | 0            | n/a        |
+| Arm         | Fact   | Runs | Tokens | Work ms | Post-fact ms | Quality  |
+| ----------- | ------ | ---- | ------ | ------- | ------------ | -------- |
+| baseline    | holds  | 2    | 13 544 | 10 358  | 10 358       | false ×2 |
+| speculation | holds  | 2    | 17 151 | 15 066  | 186          | false ×2 |
+| baseline    | absent | 2    | 0      | 0       | 0            | n/a      |
+| speculation | absent | 2    | 12 543 | 15 577  | 0            | n/a      |
 
 **No speedup may be claimed.** The quality term is false in all four verified candidates: each submitted
 patch failed the unit's own frozen check. The design's rule is that latency and cost may not be reported
-without equal quality, so the shape below is what the arm *would* measure, not a result.
+without equal quality, so the shape below is what the arm _would_ measure, not a result.
 
 **What the shape is.** Speculation always pays for the unit - 12 543 tokens when the fact turned out
 false, which is the whole point of measuring the waste - and buys the work's latency back when it holds:
@@ -197,16 +209,16 @@ The first E-arm run reported quality failures it could not explain, because it k
 keeps everything (artifacts, candidate trees, the check's own output, one row per attempt) and answers
 both the diagnosis and the economics question. Three reps per condition, 9 paid units, ~62 k tokens.
 
-| Arm         | Fact   | Tokens (3 reps, total) | Work ms | Post-fact ms | Quality           |
-| ----------- | ------ | ---------------------- | ------- | ------------ | ----------------- |
-| baseline    | holds  | 18 183                 | 19 200  | 19 200       | 0 of 3 passed     |
-| speculation | holds  | 18 602                 | 19 506  | 175          | 0 of 3 passed     |
-| baseline    | absent | 0                      | 0       | 0            | n/a               |
-| speculation | absent | 20 332                 | 23 920  | 0            | n/a               |
+| Arm         | Fact   | Tokens (3 reps, total) | Work ms | Post-fact ms | Quality       |
+| ----------- | ------ | ---------------------- | ------- | ------------ | ------------- |
+| baseline    | holds  | 18 183                 | 19 200  | 19 200       | 0 of 3 passed |
+| speculation | holds  | 18 602                 | 19 506  | 175          | 0 of 3 passed |
+| baseline    | absent | 0                      | 0       | 0            | n/a           |
+| speculation | absent | 20 332                 | 23 920  | 0            | n/a           |
 
 **Diagnosis first (P1).** The harness's check path was validated offline before any of this was read:
 the frozen stub fails, the fixture's own canned answer passes, and a wrong answer fails, for both
-units - so a failing check means what it says. What the *first* run could not see is that eight of nine
+units - so a failing check means what it says. What the _first_ run could not see is that eight of nine
 attempts answered with a **conclusion** artifact ("no change needed"), which is legitimate for a task
 whose rule admits one, carries no files, and therefore cannot pass this unit's check - the board would
 refuse it for the same reason. The single patch attempt failed on a real mistake: it wrote
@@ -222,4 +234,3 @@ the prepared candidate was publishable in 0 of 3 reps where the fact held, so th
 became real. In this shape - this model, this unit's instruction, this fact - bounded speculation has a
 real cost and no realised gain, and the binding constraint is the candidate's admissibility rather than
 the mechanism's speed.
-

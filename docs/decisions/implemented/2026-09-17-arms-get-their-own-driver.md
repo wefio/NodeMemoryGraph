@@ -2,6 +2,7 @@
 
 **Status:** implemented
 **Approved:** explicit
+**Superseded by:** [The dispatch loop is shared](2026-09-19-dispatch-loop-is-shared.md)
 Date: 2026-09-17
 Branch: feat/ooo-run-namespace
 **Relates to:** [task-unit semantics design](../../design/task-unit-semantics.md),
@@ -148,3 +149,10 @@ not "not started".
   refusals.
 - `evals/ooo-execution/cycle.test.ts` — 23 cases, unchanged and green: the driver's behaviour is
   preserved.
+
+## What the later supersession leaves standing
+
+The supersession is partial and the later record states its scope: what it moves is where the loop that
+executes a given plan lives. Everything else here stands - the arms keep their own driver, their spec
+declarations and their measurement record, the product still does not own a planning platform, and
+`src/integration/ooo-cycle.ts` stays the specific external-window experiment it is.

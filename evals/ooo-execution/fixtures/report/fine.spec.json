@@ -12,10 +12,23 @@
     "evals/ooo-execution/fixtures/report/report.test.ts"
   ],
   "plan": [
-    { "id": "alpha", "effect": "isolated-artifact" },
-    { "id": "beta", "effect": "isolated-artifact" },
-    { "id": "gamma", "effect": "isolated-artifact" },
-    { "id": "summary", "effect": "isolated-artifact", "dependencies": ["alpha", "beta", "gamma"] }
+    {
+      "id": "alpha",
+      "effect": "isolated-artifact"
+    },
+    {
+      "id": "beta",
+      "effect": "isolated-artifact"
+    },
+    {
+      "id": "gamma",
+      "effect": "isolated-artifact"
+    },
+    {
+      "id": "summary",
+      "effect": "isolated-artifact",
+      "dependencies": ["alpha", "beta", "gamma"]
+    }
   ],
   "units": {
     "alpha": {
@@ -27,12 +40,7 @@
       "checks": [
         {
           "label": "alpha",
-          "command": "node",
-          "args": [
-            "--experimental-strip-types",
-            "--test",
-            "evals/ooo-execution/fixtures/report/alpha.test.ts"
-          ]
+          "test": "evals/ooo-execution/fixtures/report/alpha.test.ts"
         }
       ]
     },
@@ -45,12 +53,7 @@
       "checks": [
         {
           "label": "beta",
-          "command": "node",
-          "args": [
-            "--experimental-strip-types",
-            "--test",
-            "evals/ooo-execution/fixtures/report/beta.test.ts"
-          ]
+          "test": "evals/ooo-execution/fixtures/report/beta.test.ts"
         }
       ]
     },
@@ -63,12 +66,7 @@
       "checks": [
         {
           "label": "gamma",
-          "command": "node",
-          "args": [
-            "--experimental-strip-types",
-            "--test",
-            "evals/ooo-execution/fixtures/report/gamma.test.ts"
-          ]
+          "test": "evals/ooo-execution/fixtures/report/gamma.test.ts"
         }
       ]
     },
@@ -81,12 +79,7 @@
       "checks": [
         {
           "label": "summary",
-          "command": "node",
-          "args": [
-            "--experimental-strip-types",
-            "--test",
-            "evals/ooo-execution/fixtures/report/summary.test.ts"
-          ]
+          "test": "evals/ooo-execution/fixtures/report/summary.test.ts"
         }
       ]
     }
@@ -94,17 +87,10 @@
   "parentChecks": [
     {
       "label": "composed report",
-      "command": "node",
-      "args": [
-        "--experimental-strip-types",
-        "--test",
-        "evals/ooo-execution/fixtures/report/alpha.test.ts",
-        "evals/ooo-execution/fixtures/report/beta.test.ts",
-        "evals/ooo-execution/fixtures/report/gamma.test.ts",
-        "evals/ooo-execution/fixtures/report/summary.test.ts",
-        "evals/ooo-execution/fixtures/report/report.test.ts"
-      ]
+      "test": "evals/ooo-execution/fixtures/report/alpha.test.ts"
     }
   ],
-  "worker": { "kind": "canned" }
+  "worker": {
+    "kind": "canned"
+  }
 }

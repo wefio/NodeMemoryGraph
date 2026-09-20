@@ -194,7 +194,16 @@ routes:
       - src/integration/tool-contract.ts
     owners:
       - docs/design/design.md
-    tests: [tests/integration/agent-surface.test.ts, tests/integration/chain-projection.test.ts, tests/integration/config.test.ts, tests/integration/controller-channel.test.ts, tests/integration/evidence.test.ts, tests/integration/lab-capabilities.test.ts, tests/integration/tool-contract.test.ts]
+    tests:
+      [
+        tests/integration/agent-surface.test.ts,
+        tests/integration/chain-projection.test.ts,
+        tests/integration/config.test.ts,
+        tests/integration/controller-channel.test.ts,
+        tests/integration/evidence.test.ts,
+        tests/integration/lab-capabilities.test.ts,
+        tests/integration/tool-contract.test.ts,
+      ]
     verify:
       blocking: [check, test:product, build]
       advisory: []
@@ -203,12 +212,15 @@ routes:
     paths:
       - src/integration/ooo-board.ts
       - src/integration/ooo-candidate.ts
+      - src/integration/ooo-dispatch.ts
       - src/integration/ooo-execution.ts
       - src/integration/ooo-fusion-plan.ts
       - src/integration/ooo-mutation.ts
       - src/integration/ooo-patch.ts
       - src/integration/check-ticket.ts
       - src/integration/check-runner.ts
+      - src/integration/ooo-session-facts.ts
+      - src/integration/ooo-session-mechanism.ts
       - src/integration/task-advisers.ts
       - src/integration/task-coordinator.ts
       - src/integration/task-semantics-interleavings.ts
@@ -235,7 +247,12 @@ routes:
     owners:
       - docs/design/design.md
       - docs/design/tiered-disclosure-design.md
-    tests: [tests/integration/leaf-summarizer.test.ts, tests/integration/summary-drain.test.ts, tests/core/store/node-summaries.test.ts]
+    tests:
+      [
+        tests/integration/leaf-summarizer.test.ts,
+        tests/integration/summary-drain.test.ts,
+        tests/core/store/node-summaries.test.ts,
+      ]
     verify:
       blocking: [check, test:product, build]
       advisory: []

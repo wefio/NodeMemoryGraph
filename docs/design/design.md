@@ -29,8 +29,8 @@ with its owning session; durable truth and provenance remain in STG/LTG. Agents
 never write a shared AG or STG: durable collaboration occurs through admitted
 LTG memories; temporary coordination occurs through the separate Task Board
 and is projected into each caller's private AG. The rationale and migration
-contract are recorded in the proposed
-[session Active Graph decision](../decisions/proposed/2026-08-29-session-active-graph-runtime.md).
+contract are recorded in the implemented
+[session Active Graph decision](../decisions/implemented/2026-08-29-session-active-graph-runtime.md).
 
 > **Standalone reference:** the STG/LTG/AG model, its theoretical lineage
 > (Atkinson–Shiffrin 1968, Complementary Learning Systems 1995, ACT-R/SOAR,

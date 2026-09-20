@@ -246,7 +246,7 @@ spec:
   extensions: {}
 ```
 
-每条 assertion 必须解析到 `check`——package.json script、`node-test:<route>`（route 级证据），或 `node-test:<route>#<测试名>`（指向一条具名测试，`rtm:check` 会在该 route 的测试文件里核实名字真实存在）——或显式标为 `documentedOnly: true`；两者都无则编译失败。`rtm:check` 在 `verify:static`、窄化共享检查与两份 contract 中阻塞运行，并打印一行覆盖率统计（断言数、已验证、仅文档、未覆盖、孤儿）。**收据目前只记录每个检查的通过/失败与摘要绑定，不记录覆盖率数字**：evidence 只在检查失败时写入。矩阵全绿只说明「声明的断言被检查过了」，不说明设计正确。
+每条 assertion 必须解析到 `check`——package.json script、`node-test:<route>`（route 级证据），或 `node-test:<route>#<测试名>`（指向一条具名测试，`rtm:check` 会在该 route 的测试文件里核实名字真实存在）——或显式标为 `documentedOnly: true`；两者都无则编译失败。`rtm:check` 在 `verify:static`、窄化共享检查与两份 contract 中阻塞运行，并打印一份**证据报告**（[决策](../decisions/implemented/2026-09-20-rtm-evidence-aggregation.md)）：清单（断言数、可解析的检查数、仅文档、未覆盖、孤儿）**只是计数，不参与判定**；每条断言另有自己的成立等级，由 `agent:verify` 写进 `.nmg/verification/latest.json` 的执行证据决定——`executed`（承载它的命令通过，且证据是当前版本）、`historical`（在另一个版本上通过，不算执行）、`not-run`（本轮记为 skipped 或 failed 并带原因；**只有当前轮次的失败**让闸门失败）、`not-recorded`（没有记录、没有命令承载它，或没有证据文件）、`documented-only`、`uncovered`。风险类别（强度/种类/阶段）与作用域跨多个 route 的契约各自单独判，未决项列进反例，报告结尾明说「没有总判定」——计数是清单，不是结论。收据抓取的就是这份打印出来的报告；evidence 只在检查失败时写入。
 
 编译后的 IR 规范化默认值、路径、source locations、diagnostics、extension namespace
 和 `contractDigest`。语法升级不得改变稳定 `metadata.id`；未知必需字段失败关闭，未知

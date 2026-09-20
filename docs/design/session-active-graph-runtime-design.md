@@ -6,7 +6,7 @@
 This topic document is the implementation blueprint for the session-owned Active
 Graph (AG) runtime. It refines the normative model in [design.md](design.md) §7
 and the decision in
-[`docs/decisions/proposed/2026-08-29-session-active-graph-runtime.md`](../decisions/proposed/2026-08-29-session-active-graph-runtime.md).
+[`docs/decisions/implemented/2026-08-29-session-active-graph-runtime.md`](../decisions/implemented/2026-08-29-session-active-graph-runtime.md).
 It exists so a future Agent can see what the runtime is, what remains, and how
 each acceptance criterion maps to code — without re-deriving the design.
 
@@ -60,7 +60,7 @@ behavior tests added in the current change).
 The AG runtime design in this document is **not derived from** the work below.
 It comes from NMG's own design corpus: the four-identity model and
 working-memory framing in [design.md](design.md) §7.1, the task-frame/cooling/
-budget definitions in the [AG runtime decision](../decisions/proposed/2026-08-29-session-active-graph-runtime.md),
+budget definitions in the [AG runtime decision](../decisions/implemented/2026-08-29-session-active-graph-runtime.md),
 and the STG/LTG/AG model in [memory-graphs.md](memory-graphs.md). The survey
 below is a **post-hoc cross-check only**: it confirms NMG's independent design
 has no obvious blind spot relative to current agent-memory research and
@@ -109,7 +109,7 @@ The decision's acceptance criteria and their current status:
 
 ### 4.1 Task-frame lifecycle
 
-Design intent (design.md §7.1, decision §Proposal): AG keeps **one active task
+Design intent (design.md §7.1, decision §Decision): AG keeps **one active task
 frame and a small bounded cooling set** so a task switch does not destroy state
 and a return does not reconstruct everything from the transcript.
 
@@ -126,7 +126,7 @@ Concrete model:
 - Returning to a cooled frame resumes its own parent chain (the next projection's
   `parentProjectionId` is that frame's latest, not the other frame's).
 
-Acceptance mapping (decision §Acceptance): "Task-switch tests cover continuation,
+Acceptance mapping (decision §Decision): "Task-switch tests cover continuation,
 A-to-B switch, A-to-B-to-A return, shared constraints, false switches, compaction,
 and session cleanup."
 
@@ -142,7 +142,7 @@ A task frame may branch (A→B→A return, or concurrent sub-goals). Branch rule
 
 ### 4.3 Unified semantic + tool + reasoning budget
 
-Design intent (decision §Proposal): `B` is a **hard total budget** over nodes,
+Design intent (decision §Decision): `B` is a **hard total budget** over nodes,
 edges, evidence, tokens, graph depth, temporary observations, reasoning steps,
 task frames, and latency.
 
@@ -160,7 +160,7 @@ retrieval selections consume.
 
 ### 4.4 TTL/provenance for reasoning artifacts
 
-Design intent (decision §Proposal): MGR results are **hypothetical, attributed,
+Design intent (decision §Decision): MGR results are **hypothetical, attributed,
 TTL-bound**; they can reach STG/LTG only through a separate verified or explicit
 `remember` path.
 
@@ -174,7 +174,7 @@ TTL-bound**; they can reach STG/LTG only through a separate verified or explicit
 
 ### 4.5 Host-neutral disclosure ledger
 
-Design intent (design.md §7.1, decision §Proposal): the Pi injection window moves
+Design intent (design.md §7.1, decision §Decision): the Pi injection window moves
 into the AG disclosure ledger so every adapter exposes model context through the
 same immutable projection mechanism.
 

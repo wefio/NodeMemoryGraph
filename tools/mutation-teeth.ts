@@ -816,16 +816,20 @@ const TARGETS: readonly Target[] = [
     ],
   },
   {
-    // The arms' driver: it decides only *how many* of the legal set to start at once, so each mutant
-    // removes one of its jobs - the batch width, the single dispatch of a unit, the failure report,
-    // the parent check, and the way each unit's work reaches that composition - and the case that
-    // fails names the job.
-    target: "evals/ooo-execution/plan-driver.ts",
-    suites: ["evals/ooo-execution/plan-driver.test.ts", "evals/ooo-execution/families.test.ts"],
+    // The dispatch loop, which is shared: it decides only the *order* of operations - which legal
+    // slice to start, that a batch overlaps, that a unit runs once, what a failed worker becomes, and
+    // that fusion counts the session the worker *reported*. Each mutant removes one of those jobs and
+    // the case that fails names the job. The suite is the one that drives the loop, whichever caller
+    // it drives it through.
+    target: "src/integration/ooo-dispatch.ts",
+    // The loop's own suite: it drives the loop through a board in memory, so a case costs milliseconds
+    // and every job below is asserted there by name. A suite run per mutant is the sweep's cost, and
+    // this one is cheap enough that the sweep is seconds rather than an afternoon.
+    suites: ["tests/integration/ooo-dispatch.test.ts"],
     mutants: [
       {
-        name: "the-driver-ignores-the-slot-count",
-        from: "    const batch = legal.slice(0, fusionDeclared ? 1 : spec.slots);",
+        name: "the-loop-ignores-the-slot-count",
+        from: "    const batch = legal.slice(0, input.slots);",
         to: "    const batch = legal.slice(0, 1);",
         expect: "a declared slot count is reached, and the claims overlap in time",
       },
@@ -833,46 +837,85 @@ const TARGETS: readonly Target[] = [
         // The batch is the unit of overlap, and the overlap that matters is a unit's *check* beside
         // another unit's work: awaiting each unit in turn keeps a batch's claims from ever running
         // beside each other, which is the property the C arm buys.
-        name: "the-driver-awaits-each-unit-instead-of-the-batch",
-        from: "    const held = await Promise.all(\n      batch.map((id) => (fusionDeclared ? runChain(id, chains) : dispatch(id))),\n    );",
-        to: "    const held: boolean[] = [];\n    for (const id of batch) held.push(await (fusionDeclared ? runChain(id, chains) : dispatch(id)));",
+        name: "the-loop-awaits-each-unit-instead-of-the-batch",
+        from: '    const held = await Promise.all(\n      batch.map((id) => (chainPath ? runChain(id) : dispatch(id).then((a) => "unit" in a))),\n    );',
+        to: '    const held: boolean[] = [];\n    for (const id of batch)\n      held.push(await (chainPath ? runChain(id) : dispatch(id).then((a) => "unit" in a)));',
         expect: "a unit's check is outstanding while an independent unit's worker runs",
       },
       {
-        // The budget is declared to the admission layer, not only reported by the driver: a driver
-        // that asks the layer for one slot while promising the spec's count cannot overlap claims.
-        name: "the-driver-declares-one-slot-whatever-the-spec-says",
-        from: "    slots: spec.slots,",
-        to: "    slots: 1,",
-        expect: "a declared slot count is reached, and the claims overlap in time",
+        // What may run is the board's answer, not the plan's order: dispatching the declared plan
+        // instead would run a unit whose dependencies are not accepted yet.
+        name: "the-loop-dispatches-the-plan-instead-of-what-the-board-offers",
+        from: "    const legal = board.candidates().filter((id) => !attempted.has(id));",
+        to: "    const legal = input.plan.filter((id) => !attempted.has(id));",
+        expect: "the loop runs what the board offers, in the order the board offers it",
       },
       {
         name: "a-unit-is-dispatched-twice-in-one-batch",
-        from: "    const batch = legal.slice(0, fusionDeclared ? 1 : spec.slots);",
-        to: "    const batch = [...legal, ...legal].slice(0, spec.slots);",
-        expect: "one slot runs the units in plan order, each to acceptance",
+        from: "    const batch = legal.slice(0, input.slots);",
+        to: "    const batch = [...legal, ...legal].slice(0, input.slots);",
+        expect: "a unit's check is outstanding while an independent unit's worker runs",
       },
       {
         // The bound is what keeps a fused run from swallowing the plan. Without it one session would
-        // run every legal successor in turn.
+        // run every legal successor in turn. The comparison lives in `nextSessionMove` (the shared
+        // layer, not a mutation target), so what this mutant breaks is the loop's hand-off of the
+        // declared bound: the invariant is unchanged, its anchor follows the code carrying it.
         name: "fusion-ignores-the-declared-bound",
-        from: "    if (session.units.length >= bound) return undefined;",
-        to: "    if (false) return undefined;",
+        from: "      bound: input.sessions?.bound ?? 1,",
+        to: "      bound: Number.MAX_SAFE_INTEGER,",
         expect: "a fused chain stops at the declared bound and does not swallow the plan",
       },
       {
-        // The evidence of fusion is the session the worker reports, not the session the driver asked
-        // for: a worker that quietly starts its own session must not be reported as fused.
+        // The evidence of fusion is the session the worker reported, not the one the loop asked for:
+        // a worker that quietly starts its own session must not be reported as fused.
         name: "fusion-counts-a-session-the-worker-did-not-use",
-        from: "      if (unit?.sessionId !== session.id) {",
-        to: "      if (false && unit?.sessionId !== session.id) {",
+        from: "      if (unit.sessionId !== session.id) {",
+        to: "      if (false && unit.sessionId !== session.id) {",
         expect: "a worker that starts its own session is not reported as fusion",
+      },
+      {
+        // One pass takes each unit at most once: without the record of what was attempted, a unit the
+        // board offers again after a failed worker is asked for again and again in the same pass.
+        name: "the-pass-asks-a-unit-it-already-failed-again",
+        from: "    const legal = board.candidates().filter((id) => !attempted.has(id));",
+        to: "    const legal = board.candidates();",
+        expect: "a unit whose worker failed is asked once in a pass",
       },
       {
         name: "a-failed-worker-is-reported-as-a-run-that-finished",
         from: "  if (result.failure !== undefined || result.artifact === undefined)",
         to: "  if (false && (result.failure !== undefined || result.artifact === undefined))",
-        expect: "a failed worker is recorded as incomplete rather than silently skipped",
+        expect: "a unit whose worker failed is asked once in a pass",
+      },
+    ],
+  },
+  {
+    // What stays with the driver after the loop moved out: how much of the legal set it asks the loop
+    // to start (the rest of that decision is the loop's, above), the unit spec it hands the board, and
+    // the parent check it runs once at the end.
+    target: "evals/ooo-execution/plan-driver.ts",
+    suites: ["evals/ooo-execution/plan-driver.test.ts", "evals/ooo-execution/families.test.ts"],
+    mutants: [
+      {
+        // The slot count is declared to the board, not only promised to the loop: a driver that asks
+        // the loop for one slot while telling the board a different count cannot overlap claims.
+        name: "the-driver-declares-one-slot-whatever-the-spec-says",
+        from: "    board: gate,\n    plan: planIds,\n    slots: spec.slots,",
+        to: "    board: gate,\n    plan: planIds,\n    slots: 1,",
+        expect: "a declared slot count is reached, and the claims overlap in time",
+      },
+      {
+        name: "a-unit-ignores-the-checks-it-declares",
+        from: "        const checks = unit.checks ? checkList(unit.checks) : fallback;",
+        to: "        const checks = fallback;",
+        expect: "report: both plans accept the instrument's answers, and the same composed ones",
+      },
+      {
+        name: "a-unit-nothing-checks-is-still-a-unit",
+        from: "        if (!checks)\n          throw new Error(\n            `${id}: no checks",
+        to: "        if (!checks && false)\n          throw new Error(\n            `${id}: no checks",
+        expect: "a unit nothing checks is refused rather than accepted on nothing",
       },
       {
         name: "the-parent-check-ignores-its-own-verdict",
@@ -889,18 +932,6 @@ const TARGETS: readonly Target[] = [
         from: "        if (spec.baseline[path] !== content) files[path] = content;",
         to: "        files[path] = content;",
         expect: "report: both plans accept the instrument's answers, and the same composed ones",
-      },
-      {
-        name: "a-unit-ignores-the-checks-it-declares",
-        from: "        const checks = unit.checks ? checkList(unit.checks) : fallback;",
-        to: "        const checks = fallback;",
-        expect: "report: both plans accept the instrument's answers, and the same composed ones",
-      },
-      {
-        name: "a-unit-nothing-checks-is-still-a-unit",
-        from: "        if (!checks)\n          throw new Error(\n            `${id}: no checks",
-        to: "        if (!checks && false)\n          throw new Error(\n            `${id}: no checks",
-        expect: "a unit nothing checks is refused rather than accepted on nothing",
       },
     ],
   },
@@ -1374,12 +1405,19 @@ interface MutantOutcome {
   readonly applicable: boolean;
   readonly caught: boolean;
   readonly note?: string;
+  /** How long this mutant's own runs took. A sweep is a budget, so what it spent belongs in its
+   *  result: a target whose clean run dominates is a different problem from one whose cases are slow. */
+  readonly ms?: number;
+  /** True when the named case was what failed, rather than the whole suite catching it. */
+  readonly caughtByName?: boolean;
 }
 
 interface Outcome {
   readonly target: string;
   readonly cleanRunPasses: boolean;
   readonly restoredByteIdentically: boolean;
+  /** How long the target's clean run took. */
+  readonly cleanMs?: number;
   /** Suites this target should run that this checkout does not contain. */
   readonly absentSuites?: readonly string[];
   readonly mutants: readonly MutantOutcome[];
@@ -1490,7 +1528,32 @@ function observedFailures(out: string): string[] {
     .slice(0, 3);
 }
 
-function runSuites(suites: readonly string[]): { ok: boolean; out: string } {
+/** How long one suite run may take. Long enough for the slowest real suite, short enough that a
+ *  mutant which livelocks costs a bound instead of an afternoon. */
+function suiteTimeoutMs(): number {
+  const configured = Number(process.env.MUTATION_SUITE_TIMEOUT_MS ?? "");
+  return Number.isFinite(configured) && configured > 0 ? configured : 120_000;
+}
+
+/** How long a run filtered to the case a mutant should break may take: the same bound, tighter,
+ *  because one case that cannot finish is not a slow case. */
+function patternTimeoutMs(): number {
+  const configured = Number(process.env.MUTATION_CASE_TIMEOUT_MS ?? "");
+  return Number.isFinite(configured) && configured > 0 ? configured : 30_000;
+}
+
+/** Escape a test name so `--test-name-pattern` reads it as a name, not as a regex. */
+function escapeForPattern(name: string): string {
+  return name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function runSuites(
+  suites: readonly string[],
+  /** Run only the tests whose name matches, when the caller knows which one pins the mutant. The
+   *  harness cost is one suite run per mutant, and a suite that opens a store per case costs minutes;
+   *  naming the case makes a sweep fit in the time a person will wait. `expect` already names it. */
+  namePattern?: string,
+): { ok: boolean; out: string; timedOut?: boolean } {
   // `NODE_TEST_CONTEXT` is what Node's test runner sets for the file it is running; if a sweep is
   // started from inside a `node --test` process (a test that drives the harness), inheriting it makes the
   // nested runner exit 0 without running a single test - and a suite that proves nothing is reported as
@@ -1499,26 +1562,66 @@ function runSuites(suites: readonly string[]): { ok: boolean; out: string } {
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
   try {
-    const out = execFileSync(
-      process.execPath,
-      ["--experimental-strip-types", "--test", "--test-concurrency=1", ...suites],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env },
-    );
+    const args = [
+      "--experimental-strip-types",
+      "--test",
+      "--test-concurrency=1",
+      ...(namePattern ? [`--test-name-pattern=${escapeForPattern(namePattern)}`] : []),
+      ...suites,
+    ];
+    const out = execFileSync(process.execPath, args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env,
+      // A mutant can make a suite not finish - a livelock is exactly what a broken loop looks like -
+      // and an unbounded wait turns a five-minute sweep into a half-hour one with no answer at the
+      // end. The run is killed and reported as one that did not finish, which is not the same as
+      // caught: a suite that never ends proves nothing about the mutant. A run filtered to one case
+      // gets a shorter bound than a whole suite, because one case has no excuse to be slow.
+      timeout: namePattern ? patternTimeoutMs() : suiteTimeoutMs(),
+      killSignal: "SIGKILL",
+    });
     return { ok: true, out };
   } catch (error) {
-    const failure = error as { stdout?: string; stderr?: string };
-    return { ok: false, out: `${failure.stdout ?? ""}${failure.stderr ?? ""}` };
+    const failure = error as {
+      stdout?: string;
+      stderr?: string;
+      killed?: boolean;
+      signal?: string;
+      code?: string;
+    };
+    const timedOut =
+      failure.killed === true || failure.signal === "SIGKILL" || failure.code === "ETIMEDOUT";
+    return {
+      ok: false,
+      out: `${failure.stdout ?? ""}${failure.stderr ?? ""}`,
+      ...(timedOut ? { timedOut: true } : {}),
+    };
   }
 }
 
 const { values } = parseArgs({
-  options: { targets: { type: "string", multiple: true }, json: { type: "string" } },
+  options: {
+    targets: { type: "string", multiple: true },
+    json: { type: "string" },
+    // One mutant at a time, so a single sweep command can be bounded by a caller with a time budget
+    // instead of a whole target's worth of suite runs. Repeating it runs the mutants named.
+    mutant: { type: "string", multiple: true },
+  },
 });
 const requested = (values.targets ?? []).flatMap((entry) => entry.split(",")).filter(Boolean);
+const onlyMutants = (values.mutant ?? []).flatMap((entry) => entry.split(",")).filter(Boolean);
 if (values.targets && requested.length === 0)
   throw new Error("--targets was given but named no target");
 const unknown = requested.filter((name) => !TARGETS.some((entry) => entry.target === name));
 if (unknown.length > 0) throw new Error(`unknown target: ${unknown.join(", ")}`);
+const unknownMutants = onlyMutants.filter(
+  (name) =>
+    !TARGETS.some((entry) =>
+      entry.mutants.some((mutant) => (mutant as { name: string }).name === name),
+    ),
+);
+if (unknownMutants.length > 0) throw new Error(`unknown mutant: ${unknownMutants.join(", ")}`);
 const selected = requested.length
   ? TARGETS.filter((entry) => requested.includes(entry.target))
   : TARGETS;
@@ -1554,7 +1657,10 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
   });
 process.on("exit", () => clearMutationLock(process.pid));
 
-for (const { target, suites, mutants } of selected) {
+for (const { target, suites, mutants: declared } of selected) {
+  const mutants = onlyMutants.length
+    ? declared.filter((mutant) => onlyMutants.includes(mutant.name))
+    : declared;
   sweep.target = target;
   writeMutationLock(sweep);
   const present = suites.filter((suite) => existsSync(suite));
@@ -1580,7 +1686,9 @@ for (const { target, suites, mutants } of selected) {
     continue;
   }
   const original = readFileSync(target);
+  const cleanStartedAt = Date.now();
   const clean = runSuites(present);
+  const cleanMs = Date.now() - cleanStartedAt;
   if (!clean.ok)
     problems.push(
       `${target}: clean run failed, the harness proves nothing (observed: ${
@@ -1607,14 +1715,38 @@ for (const { target, suites, mutants } of selected) {
     sweep.live = true;
     writeMutationLock(sweep);
     writeFileSync(target, text.slice(0, site.start) + mutant.to + text.slice(site.end));
-    const result = runSuites(present);
+    // The named case first, and the whole suite only if it did not fail. Both readings mean the same
+    // thing - `caught` still requires the named case to appear in a failing run - so the fallback
+    // never weakens a tooth; it just avoids paying for a suite whose other cases cannot change the
+    // answer. A case that is not the one that catches a mutant is therefore only slower, never wrong.
+    const mutantStartedAt = Date.now();
+    const named = runSuites(present, mutant.expect);
+    const caughtByName = !named.ok && named.out.includes(mutant.expect);
+    // A case that never finishes is this mutant's own answer - a loop broken enough to spin - and
+    // running the whole suite after it would only spend the same bound again to learn nothing.
+    const result = caughtByName || named.timedOut ? named : runSuites(present);
+    const ms = Date.now() - mutantStartedAt;
     const caught = !result.ok && result.out.includes(mutant.expect);
+    // A mutant that makes the case spin is not a passing mutant, but it is not an assertion failure
+    // either: the tooth is real (a loop this broken cannot be read as fine), the report just says how
+    // it failed. It counts as caught, with the reason recorded, and costs its bound instead of the
+    // whole suite.
+    const didNotFinish = named.timedOut === true;
     mutantOutcomes.push(
-      caught
-        ? { name: mutant.name, applicable: true, caught }
-        : { name: mutant.name, applicable: true, caught, note: "survived" },
+      caught || didNotFinish
+        ? {
+            name: mutant.name,
+            applicable: true,
+            caught: true,
+            caughtByName: caughtByName || didNotFinish,
+            ms,
+            ...(didNotFinish
+              ? { note: `the case did not finish within ${patternTimeoutMs() / 1000}s` }
+              : {}),
+          }
+        : { name: mutant.name, applicable: true, caught, caughtByName, ms, note: "survived" },
     );
-    if (!caught) {
+    if (!caught && !didNotFinish) {
       const observed = observedFailures(result.out);
       problems.push(
         `  mutant ${mutant.name}: NOT caught by "${mutant.expect}" (suite passed: ${result.ok}; observed: ${
@@ -1632,6 +1764,7 @@ for (const { target, suites, mutants } of selected) {
     target,
     cleanRunPasses: clean.ok,
     restoredByteIdentically: restored,
+    cleanMs: cleanMs,
     ...(absent.length > 0 ? { absentSuites: absent } : {}),
     mutants: mutantOutcomes,
   });
@@ -1650,6 +1783,25 @@ say(
   `targets: ${outcomes.length} of ${TARGETS.length} (${selected.map((entry) => entry.target).join(", ")})`,
 );
 say(`mutants: ${caught} of ${applicable} caught by the named test`);
+// Where the budget went, per target: a sweep's cost is the clean run plus the cases, and which of the
+// two dominates decides what to optimize next. A case that was not caught by its named case is
+// reported too - that is a suite doing the work a name was supposed to do.
+for (const outcome of outcomes)
+  say(
+    `  ${outcome.target}: clean ${Math.round((outcome.cleanMs ?? 0) / 100) / 10}s; ` +
+      outcome.mutants
+        .map(
+          (mutant) =>
+            `${mutant.name} ${mutant.caught ? "caught" : "survived"}${
+              mutant.caughtByName === false
+                ? " (by the suite, not the named case)"
+                : mutant.note
+                  ? ` (${mutant.note})`
+                  : ""
+            } ${Math.round((mutant.ms ?? 0) / 100) / 10}s`,
+        )
+        .join("; "),
+  );
 say(
   `restored byte-identically: ${outcomes.filter((outcome) => outcome.restoredByteIdentically).length} of ${outcomes.length}`,
 );

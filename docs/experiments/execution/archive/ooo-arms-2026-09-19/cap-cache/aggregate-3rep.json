@@ -1,0 +1,413 @@
+{
+  "note": "One object per rep, so no column has to be read positionally against another. Every value is recomputed from the report files beside this one and never copied from a sentence. tokens counts input and output together and the reports do not say whether cacheRead nests inside it, so neither column is a price.",
+  "cells": [
+    {
+      "unitsPerSession": 1,
+      "reps": [
+        {
+          "rep": 1,
+          "measuredAt": "2026-09-19T06:54:14.863Z",
+          "wallMs": 26186,
+          "tokens": 45482,
+          "cacheRead": 38528,
+          "cacheWrite": 0,
+          "cacheReadShareOfTokens": 0.847,
+          "sessions": [
+            [
+              "normalize"
+            ],
+            [
+              "scale"
+            ],
+            [
+              "total"
+            ],
+            [
+              "summarize"
+            ]
+          ],
+          "units": [
+            {
+              "taskId": "normalize",
+              "tokens": 11722,
+              "cacheRead": 9728
+            },
+            {
+              "taskId": "scale",
+              "tokens": 11300,
+              "cacheRead": 9472
+            },
+            {
+              "taskId": "total",
+              "tokens": 10890,
+              "cacheRead": 9344
+            },
+            {
+              "taskId": "summarize",
+              "tokens": 11570,
+              "cacheRead": 9984
+            }
+          ]
+        },
+        {
+          "rep": 2,
+          "measuredAt": "2026-09-19T06:55:29.010Z",
+          "wallMs": 27053,
+          "tokens": 45887,
+          "cacheRead": 36992,
+          "cacheWrite": 0,
+          "cacheReadShareOfTokens": 0.806,
+          "sessions": [
+            [
+              "normalize"
+            ],
+            [
+              "scale"
+            ],
+            [
+              "total"
+            ],
+            [
+              "summarize"
+            ]
+          ],
+          "units": [
+            {
+              "taskId": "normalize",
+              "tokens": 11521,
+              "cacheRead": 8064
+            },
+            {
+              "taskId": "scale",
+              "tokens": 11499,
+              "cacheRead": 9600
+            },
+            {
+              "taskId": "total",
+              "tokens": 11374,
+              "cacheRead": 9472
+            },
+            {
+              "taskId": "summarize",
+              "tokens": 11493,
+              "cacheRead": 9856
+            }
+          ]
+        },
+        {
+          "rep": 3,
+          "measuredAt": "2026-09-19T12:32:22.683Z",
+          "wallMs": 25270,
+          "tokens": 33941,
+          "cacheRead": 20608,
+          "cacheWrite": 0,
+          "cacheReadShareOfTokens": 0.607,
+          "sessions": [
+            [
+              "normalize"
+            ],
+            [
+              "scale"
+            ],
+            [
+              "total"
+            ],
+            [
+              "summarize"
+            ]
+          ],
+          "units": [
+            {
+              "taskId": "normalize",
+              "tokens": 7441,
+              "cacheRead": 4224
+            },
+            {
+              "taskId": "scale",
+              "tokens": 11677,
+              "cacheRead": 7808
+            },
+            {
+              "taskId": "total",
+              "tokens": 7105,
+              "cacheRead": 4096
+            },
+            {
+              "taskId": "summarize",
+              "tokens": 7718,
+              "cacheRead": 4480
+            }
+          ]
+        }
+      ],
+      "medians": {
+        "wallMs": 26186,
+        "tokens": 45482,
+        "cacheRead": 36992
+      },
+      "sorted": {
+        "wallMs": [
+          25270,
+          26186,
+          27053
+        ],
+        "tokens": [
+          33941,
+          45482,
+          45887
+        ]
+      }
+    },
+    {
+      "unitsPerSession": 2,
+      "reps": [
+        {
+          "rep": 1,
+          "measuredAt": "2026-09-19T06:54:33.934Z",
+          "wallMs": 17735,
+          "tokens": 41806,
+          "cacheRead": 33536,
+          "cacheWrite": 0,
+          "cacheReadShareOfTokens": 0.802,
+          "sessions": [
+            [
+              "normalize",
+              "scale"
+            ],
+            [
+              "total",
+              "summarize"
+            ]
+          ],
+          "units": [
+            {
+              "taskId": "normalize",
+              "tokens": 11172,
+              "cacheRead": 9344
+            },
+            {
+              "taskId": "scale",
+              "tokens": 9897,
+              "cacheRead": 7424
+            },
+            {
+              "taskId": "total",
+              "tokens": 10915,
+              "cacheRead": 9344
+            },
+            {
+              "taskId": "summarize",
+              "tokens": 9822,
+              "cacheRead": 7424
+            }
+          ]
+        },
+        {
+          "rep": 2,
+          "measuredAt": "2026-09-19T06:55:48.331Z",
+          "wallMs": 17998,
+          "tokens": 37693,
+          "cacheRead": 30080,
+          "cacheWrite": 0,
+          "cacheReadShareOfTokens": 0.798,
+          "sessions": [
+            [
+              "normalize",
+              "scale"
+            ],
+            [
+              "total",
+              "summarize"
+            ]
+          ],
+          "units": [
+            {
+              "taskId": "normalize",
+              "tokens": 11246,
+              "cacheRead": 9472
+            },
+            {
+              "taskId": "scale",
+              "tokens": 9885,
+              "cacheRead": 7680
+            },
+            {
+              "taskId": "total",
+              "tokens": 7402,
+              "cacheRead": 6272
+            },
+            {
+              "taskId": "summarize",
+              "tokens": 9160,
+              "cacheRead": 6656
+            }
+          ]
+        },
+        {
+          "rep": 3,
+          "measuredAt": "2026-09-19T12:33:06.545Z",
+          "wallMs": 17427,
+          "tokens": 35444,
+          "cacheRead": 24448,
+          "cacheWrite": 0,
+          "cacheReadShareOfTokens": 0.69,
+          "sessions": [
+            [
+              "normalize",
+              "scale"
+            ],
+            [
+              "total",
+              "summarize"
+            ]
+          ],
+          "units": [
+            {
+              "taskId": "normalize",
+              "tokens": 8153,
+              "cacheRead": 5120
+            },
+            {
+              "taskId": "scale",
+              "tokens": 10024,
+              "cacheRead": 7552
+            },
+            {
+              "taskId": "total",
+              "tokens": 7679,
+              "cacheRead": 4736
+            },
+            {
+              "taskId": "summarize",
+              "tokens": 9588,
+              "cacheRead": 7040
+            }
+          ]
+        }
+      ],
+      "medians": {
+        "wallMs": 17735,
+        "tokens": 37693,
+        "cacheRead": 30080
+      },
+      "sorted": {
+        "wallMs": [
+          17427,
+          17735,
+          17998
+        ],
+        "tokens": [
+          35444,
+          37693,
+          41806
+        ]
+      }
+    },
+    {
+      "unitsPerSession": 4,
+      "reps": [
+        {
+          "rep": 1,
+          "measuredAt": "2026-09-19T06:54:52.694Z",
+          "wallMs": 16480,
+          "tokens": 54834,
+          "cacheRead": 45824,
+          "cacheWrite": 0,
+          "cacheReadShareOfTokens": 0.836,
+          "sessions": [
+            [
+              "normalize",
+              "scale",
+              "total",
+              "summarize"
+            ]
+          ],
+          "units": [
+            {
+              "taskId": "normalize",
+              "tokens": 11314,
+              "cacheRead": 9472
+            },
+            {
+              "taskId": "scale",
+              "tokens": 10046,
+              "cacheRead": 7680
+            },
+            {
+              "taskId": "total",
+              "tokens": 14457,
+              "cacheRead": 12032
+            },
+            {
+              "taskId": "summarize",
+              "tokens": 19017,
+              "cacheRead": 16640
+            }
+          ]
+        },
+        {
+          "rep": 2,
+          "measuredAt": "2026-09-19T06:56:06.485Z",
+          "wallMs": 16810,
+          "tokens": 55738,
+          "cacheRead": 46464,
+          "cacheWrite": 0,
+          "cacheReadShareOfTokens": 0.834,
+          "sessions": [
+            [
+              "normalize",
+              "scale",
+              "total",
+              "summarize"
+            ]
+          ],
+          "units": [
+            {
+              "taskId": "normalize",
+              "tokens": 11632,
+              "cacheRead": 9600
+            },
+            {
+              "taskId": "scale",
+              "tokens": 10293,
+              "cacheRead": 7936
+            },
+            {
+              "taskId": "total",
+              "tokens": 14650,
+              "cacheRead": 12288
+            },
+            {
+              "taskId": "summarize",
+              "tokens": 19163,
+              "cacheRead": 16640
+            }
+          ]
+        }
+      ],
+      "medians": {
+        "wallMs": 16645.0,
+        "tokens": 55286.0,
+        "cacheRead": 46144.0
+      },
+      "sorted": {
+        "wallMs": [
+          16480,
+          16810
+        ],
+        "tokens": [
+          54834,
+          55738
+        ]
+      }
+    }
+  ],
+  "savingMs": {
+    "1->2": 8451,
+    "1->4": 9541.0
+  },
+  "perAvoidedSessionMs": {
+    "1->2": 4225.5,
+    "1->4": 3180.3
+  }
+}

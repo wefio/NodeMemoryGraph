@@ -1,0 +1,35 @@
+{
+  "measuredAt": "2026-09-19T11:51:46.242Z",
+  "spec": ".temp/trial/fusion.spec.json",
+  "report": {
+    "plan": [
+      "normalize",
+      "scale",
+      "total",
+      "summarize"
+    ],
+    "order": [
+      "normalize"
+    ],
+    "units": [],
+    "accepted": {},
+    "wallMs": 5888,
+    "slotsRequested": 1,
+    "slotsUsed": 1,
+    "sessions": [],
+    "hostMs": 0,
+    "hostChecks": 0,
+    "tokens": 0,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "failures": 1,
+    "parent": {
+      "verdict": "reject",
+      "files": [],
+      "ms": 990
+    },
+    "incomplete": [
+      "normalize: Pi snapshot task did not finish within its bounded contract: stopReason=error, turns=4, reads=1, artifact=no artifact"
+    ]
+  }
+}

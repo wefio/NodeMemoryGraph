@@ -2,7 +2,11 @@
 // Run: node --experimental-strip-types evals/ooo-execution/mutation-probe.ts
 // Point MUTATION_SPEC at a JSON {paths?, checks?, mutants} file to probe a candidate
 // fault class before a round declares it; without it the built-in list is used.
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { verifyCandidate, type CandidateCheck } from "../../src/integration/ooo-candidate.ts";
 import { mutate, type Mutation } from "../../src/integration/ooo-mutation.ts";
 
@@ -42,6 +46,22 @@ const spec: Spec | null = external ? (JSON.parse(readFileSync(external, "utf8"))
 const paths = spec?.paths ?? defaultPaths;
 const checks = spec?.checks ?? defaultChecks;
 const files = Object.fromEntries(paths.map((path) => [path, readFileSync(path, "utf8")]));
+
+// This probe runs the real checks in a real workspace, so it prepares one itself: the host prepares
+// nothing on a caller's behalf, and a caller that needs a workspace owns it (the decision is
+// `docs/decisions/implemented/2026-09-20-tests-need-no-filesystem.md`).
+const parent = await mkdtemp(join(tmpdir(), "nmg-probe-"));
+const workspace = join(parent, "worktree");
+execFileSync("git", ["worktree", "add", "--detach", workspace, revision], {
+  cwd: repository,
+  stdio: "inherit",
+});
+await symlink(join(repository, "node_modules"), join(workspace, "node_modules"), "junction");
+
+/** Puts the workspace back at the frozen revision, so the next mutant starts from the same tree. */
+function resetWorkspace(path: string): void {
+  execFileSync("git", ["reset", "--hard", revision], { cwd: path, stdio: "inherit" });
+}
 
 export const mutants: readonly Mutation[] = spec
   ? [...spec.mutants]
@@ -84,12 +104,14 @@ export const mutants: readonly Mutation[] = spec
       },
     ];
 
-const baseline = await verifyCandidate({ repository, revision, files, checks });
+const baseline = await verifyCandidate({ workspace, files, checks });
 console.log(`baseline: ${baseline.verdict}`);
 for (const mutation of mutants) {
+  // One workspace, reset between mutants: a probe that measured the second mutant against the
+  // first's files would report a premise it did not test.
+  resetWorkspace(workspace);
   const result = await verifyCandidate({
-    repository,
-    revision,
+    workspace,
     files: mutate(files, mutation),
     checks,
   });
@@ -98,3 +120,4 @@ for (const mutation of mutants) {
       `(${result.outcomes.map((item) => `${item.label}=${item.status}`).join(", ")})`,
   );
 }
+await rm(parent, { recursive: true, force: true });

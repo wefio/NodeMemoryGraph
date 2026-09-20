@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Actor } from "./process-driver.ts";
 import type { BoardTicket } from "../../src/integration/ooo-board.ts";
-import type { PiRun } from "../../.pi/extensions/nmg/ooo-execution.ts";
+import type { PiRun } from "../../src/integration/ooo-session-mechanism.ts";
 
 /** What a `solve` command returns: the run's own measurements plus the host verdict. */
 type Solved = PiRun & { verdict: string; workerPid: number; taskId: string };
