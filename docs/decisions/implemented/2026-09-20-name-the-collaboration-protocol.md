@@ -92,6 +92,10 @@ decomposition is the part a task's semantics had to supply. It also explains the
 rejected above: a scheduler is what this model deliberately did not become, OoO is the borrowing's own
 name, and fusion is one measured mechanism inside it rather than the whole.
 
+The umbrella's parts are inventoried separately - which sub-protocols exist, which are complete, which
+are still missing, and which of them already have a name in distributed systems:
+[protocol-governed collaboration](../../design/protocol-governed-collaboration.md).
+
 ## Alternatives considered
 
 - **Keep saying OoO.** Rejected as the umbrella: `ooo` is the project's own name for the scheduling
