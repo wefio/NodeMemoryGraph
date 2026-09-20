@@ -30,6 +30,40 @@ entry）** 是条目被某次 run 治理之后的状态；**run** 是计划、�
 **adopt（收编）** 是把条目绑到一次 run 的那次转移。唯一没有名字的是"决定收编的调用方"，本记录叫它
 **收编者（adopter）**。
 
+## 命名一览
+
+这是索引，不是第二份规范：每个名字一行含义加一个指针，行与 owner 冲突时 owner 胜。它存在的原因是这些定义
+原本只能把设计文档、义务台账和几条决策记录摊在一起才看得全。
+
+两个层次与它们的组成：
+
+| 名字               | 一句话含义                                                                                           | 契约 owner                                                                                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 协议化协作         | agent 通过一份公开协议协商，机制与拍板留在程序侧                                                     | 本记录；[概念图](../../guides/concept-map.zh-CN.md)                                                                                                     |
+| 任务单元协议       | 把任务声明为单元，并规定它被收编、认领、交付、裁决的方式以及运行时拥有哪些事实                       | [task-unit-semantics.md](../../design/task-unit-semantics.md)、[义务台账](../../design/task-unit-semantics-obligations.md)                              |
+| 任务单元           | 可以交接、验证和独立作废的工作，由输入、依赖、验收、能力与预算声明                                   | [task-unit-semantics.md](../../design/task-unit-semantics.md)                                                                                           |
+| 黑板（Task Board） | 位于语义记忆之外、有归因、有过期时间的任务级协作区                                                   | [memory-graphs.md §2](../../design/memory-graphs.md#shared-task-board-cross-agent-coordination-not-a-memory-graph)                                      |
+| 条目 entry         | 一条黑板项（goal / question / handoff / blocker / result / note / decision），带认领租约、交付与裁决 | [board-find-serial-a2a-compat](../../design/board-find-serial-a2a-compat-2026-08-13.md)                                                                 |
+| 唤醒 wake          | 定向条目通知那个 agent 的会话；黑板只负责把人叫到，不决定谁干活                                      | [board-find-serial-a2a-compat](../../design/board-find-serial-a2a-compat-2026-08-13.md)                                                                 |
+| 串行通道           | 同一时刻只推送一条未定向的 actionable；它被认领或关闭时晋升下一条                                    | [board-find-serial-a2a-compat](../../design/board-find-serial-a2a-compat-2026-08-13.md)                                                                 |
+| 认领 / 释放 / 关闭 | 租约动词：同一时刻一个持有者，过期回池，关闭即结束                                                   | [黑板治理与能力寻址](2026-09-06-board-governance-addressing.zh-CN.md)                                                                                   |
+| 交付 / 裁决        | 认领以 digest 绑定的交付物收尾，由另一个 agent 裁决（accepted / rejected / undecidable）             | [黑板治理与能力寻址](2026-09-06-board-governance-addressing.zh-CN.md)                                                                                   |
+| 受管条目           | 已被某次 run 收编的条目：在 run 的协调范围之外，它的生命周期动词被拒                                 | [义务台账 B6](../../design/task-unit-semantics-obligations.md)                                                                                          |
+| run（运行）        | 冻结的对象：已注册的 run、一份冻结计划、绑定的条目与事实日志，经 `taskRun` 到达                      | [义务台账 D11、D13](../../design/task-unit-semantics-obligations.md)                                                                                    |
+| adopt（收编）      | 把黑板条目绑到一次 run 的那次转移，记为运行事实 `entry-bound`                                        | [义务台账 D12](../../design/task-unit-semantics-obligations.md)                                                                                         |
+| 收编者 adopter     | 决定收编的调用方；本表里唯一还没有产品实现的名字                                                     | 本记录；[义务台账“还剩什么”](../../design/task-unit-semantics-obligations.md)                                                                           |
+| 运行事实 run fact  | 一次已记录的运行转移：`entry-bound`、`board-claim`、`board-deliver`、`board-judge`、`run-cancelled`  | `src/integration/task-coordinator.ts`                                                                                                                   |
+| 合法动作集合       | 确定性算出的、来源只能在其中排序的集合，按声明的槽预算切分                                           | [声明的槽预算](2026-09-18-declared-slot-budget.zh-CN.md)、`src/integration/ooo-execution.ts`                                                            |
+| 派发循环           | 共享的顺序循环，逐单元驱动一份计划，黑板在端口之后                                                   | [派发循环是共享的](2026-09-19-dispatch-loop-is-shared.zh-CN.md)                                                                                         |
+| 会话 / 融合        | 单元的会话按黑板取键而非按 harness；融合是多单元共享一个会话——一个机制，不是本协议的名字             | [会话身份来自黑板](2026-09-19-session-identity-comes-from-the-board.zh-CN.md)、[融合的合法性与记账](2026-09-18-fusion-legality-and-accounting.zh-CN.md) |
+
+刻意不用的两个词：
+
+| 词               | 为什么不用                                                                         | 真实含义的 owner                                                   |
+| ---------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| 调度器 scheduler | 语义层刻意不启用：排序是合法集合上的确定性规则加声明的预算                         | [任务单元语义](2026-09-13-task-unit-semantics.zh-CN.md)            |
+| OoO、`ooo-`      | 项目给自己实现的调度模型起的名字，也是文件前缀；它指的是模型，不是“谁讨论、谁拍板” | [ooo-execution-bootstrap](../../design/ooo-execution-bootstrap.md) |
+
 ## 考虑过的替代方案
 
 - **继续叫 OoO。** 作为大类被拒：`ooo` 是项目给自己实现的调度模型起的名字、在 100 多份文档里承重，
