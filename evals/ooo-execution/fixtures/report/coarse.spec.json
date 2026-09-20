@@ -12,7 +12,10 @@
     "evals/ooo-execution/fixtures/report/report.test.ts"
   ],
   "plan": [
-    { "id": "report", "effect": "isolated-artifact" }
+    {
+      "id": "report",
+      "effect": "isolated-artifact"
+    }
   ],
   "units": {
     "report": {
@@ -34,44 +37,32 @@
   "checks": [
     {
       "label": "alpha",
-      "command": "node",
-      "args": ["--experimental-strip-types", "--test", "evals/ooo-execution/fixtures/report/alpha.test.ts"]
+      "test": "evals/ooo-execution/fixtures/report/alpha.test.ts"
     },
     {
       "label": "beta",
-      "command": "node",
-      "args": ["--experimental-strip-types", "--test", "evals/ooo-execution/fixtures/report/beta.test.ts"]
+      "test": "evals/ooo-execution/fixtures/report/beta.test.ts"
     },
     {
       "label": "gamma",
-      "command": "node",
-      "args": ["--experimental-strip-types", "--test", "evals/ooo-execution/fixtures/report/gamma.test.ts"]
+      "test": "evals/ooo-execution/fixtures/report/gamma.test.ts"
     },
     {
       "label": "summary",
-      "command": "node",
-      "args": ["--experimental-strip-types", "--test", "evals/ooo-execution/fixtures/report/summary.test.ts"]
+      "test": "evals/ooo-execution/fixtures/report/summary.test.ts"
     },
     {
       "label": "report",
-      "command": "node",
-      "args": ["--experimental-strip-types", "--test", "evals/ooo-execution/fixtures/report/report.test.ts"]
+      "test": "evals/ooo-execution/fixtures/report/report.test.ts"
     }
   ],
   "parentChecks": [
     {
       "label": "composed report",
-      "command": "node",
-      "args": [
-        "--experimental-strip-types",
-        "--test",
-        "evals/ooo-execution/fixtures/report/alpha.test.ts",
-        "evals/ooo-execution/fixtures/report/beta.test.ts",
-        "evals/ooo-execution/fixtures/report/gamma.test.ts",
-        "evals/ooo-execution/fixtures/report/summary.test.ts",
-        "evals/ooo-execution/fixtures/report/report.test.ts"
-      ]
+      "test": "evals/ooo-execution/fixtures/report/alpha.test.ts"
     }
   ],
-  "worker": { "kind": "canned" }
+  "worker": {
+    "kind": "canned"
+  }
 }

@@ -1,6 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export interface CandidateCheck {
@@ -22,7 +21,41 @@ export interface CheckOutcome {
 export interface CandidateResult {
   verdict: "accept" | "reject" | "undecidable";
   outcomes: CheckOutcome[];
-  worktree: string;
+  /** Where the checks ran. A command check runs in the workspace its caller prepared; a data check
+   *  runs over the data and has none. */
+  workspace?: string;
+}
+
+/** One check's answer, in the check's own words. */
+export interface DataCheckResult {
+  status: "passed" | "failed" | "undecidable";
+  log?: string;
+}
+
+/** A check whose input is data and whose output is a verdict.
+ *
+ *  The host creates nothing for a check of this kind: no directory, no worktree, no link. There is
+ *  therefore nothing to prepare, nothing to clean up, and nothing a killed run leaves behind. A check
+ *  that must run in a workspace says so by being a command check, and its caller prepares that
+ *  workspace and hands it over - the host does not prepare an environment on a caller's behalf. */
+export interface DataCheck {
+  label: string;
+  verify(input: {
+    /** What the candidate changed: the unit's work. */
+    files: Readonly<Record<string, string>>;
+    /** The frozen view the candidate was built on, which is also where its own checks live. */
+    frozen: Readonly<Record<string, string>>;
+    signal?: AbortSignal;
+  }): Promise<DataCheckResult> | DataCheckResult;
+}
+
+/** The verdict rule both kinds of check share, so that they cannot disagree by accident. */
+function verdictOf(outcomes: readonly CheckOutcome[]): CandidateResult["verdict"] {
+  return outcomes.some((outcome) => outcome.status === "failed")
+    ? "reject"
+    : outcomes.some((outcome) => outcome.status === "undecidable")
+      ? "undecidable"
+      : "accept";
 }
 
 const MAX_LOG = 4_000;
@@ -136,12 +169,6 @@ function run(
   });
 }
 
-/** Git calls are never cancelled: cleanup has to run even when the round was cancelled,
- *  or the cancelled round leaks its worktree. */
-function git(repository: string, args: readonly string[], timeoutMs: number) {
-  return run("git", args, repository, timeoutMs);
-}
-
 function safeRelative(path: string): boolean {
   return (
     !!path &&
@@ -152,35 +179,17 @@ function safeRelative(path: string): boolean {
   );
 }
 
-/** Creates the candidate worktree, retrying a failure that is not a verdict.
+/** Runs the caller's fixed checks against candidate files in the workspace the caller prepared.
  *
- *  Two verifications can legitimately run at once (the round's own check waits while the
- *  premise matrix measures mutants), and concurrent `git worktree add` calls in one
- *  repository intermittently fail on repository metadata. That failure is infrastructure,
- *  not evidence: one round recorded it as "the mutant is already detected" in 76 ms, which
- *  is a false premise reported as a measured one. The retry is bounded and its exhaustion
- *  is reported as `undecidable` rather than silently folded into either verdict. */
-async function addWorktree(
-  repository: string,
-  worktree: string,
-  revision: string,
-): Promise<{ ok: boolean; exitCode: number | null; log: string }> {
-  let last = await git(repository, ["worktree", "remove", "--force", worktree], 60_000);
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    last = await git(repository, ["worktree", "add", "--detach", worktree, revision], 60_000);
-    if (last.ok) return last;
-    await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-  }
-  return last;
-}
-
-/** Applies candidate files into an isolated git worktree of the frozen revision
- *  and runs the host's fixed checks there. Runs candidate code: this bounds
- *  accidental damage and absent context, not a hostile-code sandbox. */
+ *  Writes candidate files and nothing else: no directory, no worktree, no `node_modules` link, and no
+ *  cleanup. Which working tree the checks run in, and whether it is clean, is the caller's business -
+ *  a check that finds its environment wrong reports that, and tidying up after it is not this
+ *  function's job. Runs candidate code: this bounds accidental damage and absent context, not a
+ *  hostile-code sandbox. */
 export async function verifyCandidate(options: {
-  repository: string;
+  /** An existing directory the caller prepared at the revision under test. */
+  workspace: string;
   files: Readonly<Record<string, string>>;
-  revision: string;
   checks: readonly CandidateCheck[];
   timeoutMs?: number;
   /** Operator cancellation: in-flight checks are killed with their process tree. */
@@ -192,48 +201,76 @@ export async function verifyCandidate(options: {
     throw new Error("candidate paths must be relative and non-empty");
   if (!options.checks.length) throw new Error("no fixed checks supplied");
 
-  const parent = await mkdtemp(join(tmpdir(), "nmg-candidate-"));
-  const worktree = join(parent, "worktree");
   const outcomes: CheckOutcome[] = [];
-  try {
-    const added = await addWorktree(options.repository, worktree, options.revision);
-    if (!added.ok)
-      return {
-        verdict: "undecidable",
-        outcomes: [
-          { label: "worktree", status: "undecidable", exitCode: added.exitCode, log: added.log },
-        ],
-        worktree,
-      };
-    await symlink(
-      join(options.repository, "node_modules"),
-      join(worktree, "node_modules"),
-      "junction",
+  for (const [path, content] of Object.entries(options.files)) {
+    const target = join(options.workspace, path);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, content, "utf8");
+  }
+  for (const check of options.checks) {
+    const result = await run(
+      check.command,
+      check.args,
+      options.workspace,
+      timeoutMs,
+      options.signal,
     );
-    for (const [path, content] of Object.entries(options.files)) {
-      const target = join(worktree, path);
-      await mkdir(dirname(target), { recursive: true });
-      await writeFile(target, content, "utf8");
-    }
-    for (const check of options.checks) {
-      const result = await run(check.command, check.args, worktree, timeoutMs, options.signal);
+    outcomes.push({
+      label: check.label,
+      status: result.ok ? "passed" : result.undecidable ? "undecidable" : "failed",
+      exitCode: result.exitCode,
+      log: result.log,
+      ...(result.aborted ? { aborted: true } : {}),
+    });
+    if (result.aborted) break;
+  }
+  return { verdict: verdictOf(outcomes), outcomes, workspace: options.workspace };
+}
+
+/** Runs the caller's data checks over a candidate and the frozen view it was built on.
+ *
+ *  Nothing is created and nothing is written: a data check is a function over the data, so two
+ *  candidates cannot see each other's leftovers and an interrupted run has nothing to leak. */
+export async function verifyDataChecks(options: {
+  files: Readonly<Record<string, string>>;
+  frozen: Readonly<Record<string, string>>;
+  checks: readonly DataCheck[];
+  signal?: AbortSignal;
+}): Promise<CandidateResult> {
+  if (!options.checks.length) throw new Error("no data checks supplied");
+  const outcomes: CheckOutcome[] = [];
+  for (const check of options.checks) {
+    if (options.signal?.aborted) {
       outcomes.push({
         label: check.label,
-        status: result.ok ? "passed" : result.undecidable ? "undecidable" : "failed",
-        exitCode: result.exitCode,
-        log: result.log,
-        ...(result.aborted ? { aborted: true } : {}),
+        status: "undecidable",
+        exitCode: null,
+        log: "cancelled before start",
+        aborted: true,
       });
-      if (result.aborted) break;
+      break;
     }
-  } finally {
-    await git(options.repository, ["worktree", "remove", "--force", worktree], 60_000);
-    await rm(parent, { recursive: true, force: true });
+    let answer: DataCheckResult;
+    try {
+      answer = await check.verify({
+        files: options.files,
+        frozen: options.frozen,
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+    } catch (error) {
+      // A check that throws has not answered, and that is inconclusive rather than a rejection: the
+      // candidate is not on trial for the check's own defect.
+      answer = {
+        status: "undecidable",
+        log: error instanceof Error ? error.message : String(error),
+      };
+    }
+    outcomes.push({
+      label: check.label,
+      status: answer.status,
+      exitCode: null,
+      log: (answer.log ?? "").slice(-MAX_LOG),
+    });
   }
-  const verdict = outcomes.some((outcome) => outcome.status === "failed")
-    ? "reject"
-    : outcomes.some((outcome) => outcome.status === "undecidable")
-      ? "undecidable"
-      : "accept";
-  return { verdict, outcomes, worktree };
+  return { verdict: verdictOf(outcomes), outcomes };
 }

@@ -12,9 +12,18 @@
     "evals/ooo-execution/fixtures/pipeline/pipeline.test.ts"
   ],
   "plan": [
-    { "id": "normalize", "effect": "isolated-artifact" },
-    { "id": "scale", "effect": "isolated-artifact" },
-    { "id": "total", "effect": "isolated-artifact" },
+    {
+      "id": "normalize",
+      "effect": "isolated-artifact"
+    },
+    {
+      "id": "scale",
+      "effect": "isolated-artifact"
+    },
+    {
+      "id": "total",
+      "effect": "isolated-artifact"
+    },
     {
       "id": "summarize",
       "effect": "isolated-artifact",
@@ -31,12 +40,7 @@
       "checks": [
         {
           "label": "normalize",
-          "command": "node",
-          "args": [
-            "--experimental-strip-types",
-            "--test",
-            "evals/ooo-execution/fixtures/pipeline/normalize.test.ts"
-          ]
+          "test": "evals/ooo-execution/fixtures/pipeline/normalize.test.ts"
         }
       ]
     },
@@ -49,12 +53,7 @@
       "checks": [
         {
           "label": "scale",
-          "command": "node",
-          "args": [
-            "--experimental-strip-types",
-            "--test",
-            "evals/ooo-execution/fixtures/pipeline/scale.test.ts"
-          ]
+          "test": "evals/ooo-execution/fixtures/pipeline/scale.test.ts"
         }
       ]
     },
@@ -67,12 +66,7 @@
       "checks": [
         {
           "label": "total",
-          "command": "node",
-          "args": [
-            "--experimental-strip-types",
-            "--test",
-            "evals/ooo-execution/fixtures/pipeline/total.test.ts"
-          ]
+          "test": "evals/ooo-execution/fixtures/pipeline/total.test.ts"
         }
       ]
     },
@@ -85,12 +79,7 @@
       "checks": [
         {
           "label": "summarize",
-          "command": "node",
-          "args": [
-            "--experimental-strip-types",
-            "--test",
-            "evals/ooo-execution/fixtures/pipeline/summarize.test.ts"
-          ]
+          "test": "evals/ooo-execution/fixtures/pipeline/summarize.test.ts"
         }
       ]
     }
@@ -98,17 +87,10 @@
   "parentChecks": [
     {
       "label": "composed pipeline",
-      "command": "node",
-      "args": [
-        "--experimental-strip-types",
-        "--test",
-        "evals/ooo-execution/fixtures/pipeline/normalize.test.ts",
-        "evals/ooo-execution/fixtures/pipeline/scale.test.ts",
-        "evals/ooo-execution/fixtures/pipeline/total.test.ts",
-        "evals/ooo-execution/fixtures/pipeline/summarize.test.ts",
-        "evals/ooo-execution/fixtures/pipeline/pipeline.test.ts"
-      ]
+      "test": "evals/ooo-execution/fixtures/pipeline/normalize.test.ts"
     }
   ],
-  "worker": { "kind": "canned" }
+  "worker": {
+    "kind": "canned"
+  }
 }

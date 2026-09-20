@@ -1746,7 +1746,7 @@ for (const { target, suites, mutants: declared } of selected) {
           }
         : { name: mutant.name, applicable: true, caught, caughtByName, ms, note: "survived" },
     );
-    if (!caught) {
+    if (!caught && !didNotFinish) {
       const observed = observedFailures(result.out);
       problems.push(
         `  mutant ${mutant.name}: NOT caught by "${mutant.expect}" (suite passed: ${result.ok}; observed: ${
@@ -1793,7 +1793,11 @@ for (const outcome of outcomes)
         .map(
           (mutant) =>
             `${mutant.name} ${mutant.caught ? "caught" : "survived"}${
-              mutant.caughtByName === false ? " (by the suite, not the named case)" : ""
+              mutant.caughtByName === false
+                ? " (by the suite, not the named case)"
+                : mutant.note
+                  ? ` (${mutant.note})`
+                  : ""
             } ${Math.round((mutant.ms ?? 0) / 100) / 10}s`,
         )
         .join("; "),

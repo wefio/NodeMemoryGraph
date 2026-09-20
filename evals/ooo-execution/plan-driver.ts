@@ -34,9 +34,10 @@ import {
   type PatchTaskSpec,
   type ProbePlan,
 } from "../../src/integration/ooo-board.ts";
-import { verifyCandidate } from "../../src/integration/ooo-candidate.ts";
+import { verifyDataChecks } from "../../src/integration/ooo-candidate.ts";
 import type { PatchSubmission } from "../../src/integration/ooo-patch.ts";
-import type { CandidateCheck } from "../../src/integration/ooo-candidate.ts";
+import type { DataCheck } from "../../src/integration/ooo-candidate.ts";
+import { testFileCheck } from "./data-check-runner.ts";
 import type { SessionPlan } from "../../src/integration/ooo-execution.ts";
 import { dispatchPlan, type DispatchedUnit } from "../../src/integration/ooo-dispatch.ts";
 
@@ -53,24 +54,24 @@ import type {
 export type { WorkerMetrics, PlanWorkerResult, PlanWorker, PlanSession };
 
 /** One unit of the plan: what it is asked for, what it may edit, and what its own candidate must
- *  pass. The last one is the unit's acceptance; the parent check is separate and fixed. */
+ *  pass. The last one is the unit's acceptance; the parent check is separate and fixed. Both are
+ *  data checks: the arms' acceptance is read from the candidate's files, and needs no workspace. */
 export interface PlanUnit {
   instruction: string;
   editable: readonly string[];
   visible?: readonly string[];
-  checks: readonly CandidateCheck[];
+  checks: readonly DataCheck[];
 }
 
 export interface PlanDriverSpec {
   plan: ProbePlan;
   units: Readonly<Record<string, PlanUnit>>;
   worker: PlanWorker;
-  repository: string;
   revision: string;
   baseline: Readonly<Record<string, string>>;
   /** The parent check: what the composed artifacts must pass, run once at the end. Omission means
    *  the arms are comparing cost only, which the report must say. */
-  parentChecks?: readonly CandidateCheck[];
+  parentChecks?: readonly DataCheck[];
   /** The unit whose acceptance stands for the parent's composed result. Omission: every accepted
    *  unit contributes to the parent's files. */
   join?: string;
@@ -131,21 +132,16 @@ export interface PlanRun {
   incomplete: readonly string[];
 }
 
-/** A unit's acceptance: its own candidate check, run by the store through the spec it was given. */
+/** A unit's acceptance: its own data check, run by the store through the spec it was given. */
 function unitVerifier(spec: PlanDriverSpec, unit: PlanUnit) {
   return async (submission: PatchSubmission): Promise<"accept" | "reject" | "undecidable"> => {
     if (submission.kind !== "patch") return "reject";
-    const result = await verifyCandidate({
-      repository: spec.repository,
-      revision: spec.revision,
-      files: { ...spec.baseline, ...submission.files },
+    const result = await verifyDataChecks({
+      files: submission.files,
+      frozen: spec.baseline,
       checks: [...unit.checks],
     });
-    return result.verdict === "accept"
-      ? "accept"
-      : result.verdict === "reject"
-        ? "reject"
-        : "undecidable";
+    return result.verdict;
   };
 }
 
@@ -185,10 +181,9 @@ async function runParentCheck(
       for (const [path, content] of Object.entries(submission.files))
         if (spec.baseline[path] !== content) files[path] = content;
   }
-  const verified = await verifyCandidate({
-    repository: spec.repository,
-    revision: spec.revision,
+  const verified = await verifyDataChecks({
     files,
+    frozen: spec.baseline,
     checks: [...spec.parentChecks],
   });
   return {
@@ -429,9 +424,10 @@ export interface SpecFile {
   }[];
   units: Readonly<Record<string, SpecUnit>>;
   /** The fallback check list: a unit that declares none of its own is checked by this. A file that
-   *  declares neither is refused, because a unit nothing checks is not a unit. */
-  checks?: readonly { label: string; command: string; args: string[] }[];
-  parentChecks?: readonly { label: string; command: string; args: string[] }[];
+   *  declares neither is refused, because a unit nothing checks is not a unit. A check names the
+   *  fixture test file that is its acceptance; the arms run it over the candidate's files as data. */
+  checks?: readonly { label: string; test: string }[];
+  parentChecks?: readonly { label: string; test: string }[];
   join?: string;
   /** Execution fusion, declared in the spec file the same way the driver's own spec declares it. It is
    *  copied through by `specFrom`: a spec that asked for fusion and silently got none would be read as
@@ -454,21 +450,15 @@ interface SpecUnit {
   visible?: string[];
   /** This unit's own checks. Without them every unit is checked by the whole list, which a fine plan
    *  cannot use: a unit whose siblings are still unimplemented would never pass its own candidate. */
-  checks?: readonly { label: string; command: string; args: string[] }[];
+  checks?: readonly { label: string; test: string }[];
   /** The instrument's answer, as editable path -> the file holding the content to return. A canned
    *  run is how the task family is shown to accept a correct submission without paying a model. */
   canned?: Readonly<Record<string, string>>;
 }
 
-function checkList(
-  raw: readonly { label: string; command: string; args: readonly string[] }[],
-): CandidateCheck[] {
+function checkList(raw: readonly { label: string; test: string }[]): DataCheck[] {
   if (!raw.length) throw new Error("a check list may not be empty");
-  return raw.map((check) => ({
-    label: check.label,
-    command: check.command,
-    args: [...check.args],
-  }));
+  return raw.map((check) => testFileCheck(check.label, check.test));
 }
 
 function readSpecFile(path: string): SpecFile {
@@ -690,7 +680,6 @@ export function specFrom(file: SpecFile, worker: PlanWorker, slots: number): Pla
       }),
     ),
     worker,
-    repository,
     revision: file.revision ?? "HEAD",
     baseline: baselineOf(file, repository),
     ...(file.parentChecks ? { parentChecks: checkList(file.parentChecks) } : {}),
