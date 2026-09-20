@@ -41,6 +41,8 @@ flowchart LR
 | QPP | 可选的检索广度与充分性预测 | 渐进式回忆需要决定停止、扩展或折叠噪声 | [检索置信度控制器](../design/retrieval-confidence-controller.md) |
 | Memory chain | 对现有 memory ID 的有界有序视图 | 时间顺序和显式依赖不应复制证据 | [design.md §7.6](../design/design.md#76-static-temporal-and-logical-memory-chains) |
 | Task Board | 位于语义记忆之外、有归因、有过期时间的任务级协作区 | 私有 AG 不能直接完成跨 Agent 通讯 | [memory-graphs.md §2.1](../design/memory-graphs.md#21-task-board-outside-the-three-memory-graphs) |
+| 协议化协作 | agent 通过一份公开协议协商，机制与拍板留在程序侧 | 协作需要一个把“谁讨论、谁拍板”分开的名字 | [命名决策](../decisions/implemented/2026-09-20-name-the-collaboration-protocol.zh-CN.md) |
+| 任务单元协议 | 任务被声明为单元并收编进一次 run，在其中被认领、交付与独立裁决 | 黑板自己说不清一个单元的输入、依赖与验收是什么 | [task-unit-semantics.md](../design/task-unit-semantics.md) |
 | 维护与巩固 | 确定性索引维护，加上有证据门控的语义晋升或拓扑 proposal | 写入成本必须有界，重复检索不能制造“事实” | [design.md §10](../design/design.md#10-incremental-storage-and-index-maintenance) |
 | 可学习控制器 | 在硬预算内可选地学习 allocate、fold 和 rerank 的数值策略 | 可利用自然结果改进控制，但无需让记忆图本身可微 | [design.md §12](../design/design.md#12-learnable-routing-and-minimal-differentiable-query-graphs) |
 | Lab | 通过显式 lease 使用的 reasoning workspace、graph reasoner 等可选能力 | 实验机制可以被使用，但不能静默成为默认行为 | [design.md §12ter](../design/design.md#12ter-session-reasoning-workspace-and-compaction-checkpoint) |
