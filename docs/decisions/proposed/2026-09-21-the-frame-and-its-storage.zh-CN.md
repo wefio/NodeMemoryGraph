@@ -3,7 +3,7 @@
 [English](2026-09-21-the-frame-and-its-storage.md)
 
 **Status:** proposed
-**Relates to:** [程序只回答合法性](2026-09-20-the-program-answers-legality.zh-CN.md)、[给协作协议及其任务单元子协议命名](../implemented/2026-09-20-name-the-collaboration-protocol.zh-CN.md)、[协议化协作：组成部分与空缺](../../design/protocol-governed-collaboration.zh-CN.md)、[黑板治理与能力寻址](../implemented/2026-09-06-board-governance-addressing.zh-CN.md)、[任务单元语义](../../design/task-unit-semantics.md)
+**Relates to:** [机制，不是策略](2026-09-21-mechanism-not-policy.zh-CN.md)、[程序只回答合法性](2026-09-20-the-program-answers-legality.zh-CN.md)、[给协作协议及其任务单元子协议命名](../implemented/2026-09-20-name-the-collaboration-protocol.zh-CN.md)、[协议化协作：组成部分与空缺](../../design/protocol-governed-collaboration.zh-CN.md)、[黑板治理与能力寻址](../implemented/2026-09-06-board-governance-addressing.zh-CN.md)、[任务单元语义](../../design/task-unit-semantics.md)
 
 ## 问题
 

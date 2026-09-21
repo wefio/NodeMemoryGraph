@@ -3,7 +3,7 @@
 [中文](2026-09-21-the-frame-and-its-storage.zh-CN.md)
 
 **Status:** proposed
-**Relates to:** [The program answers legality](2026-09-20-the-program-answers-legality.md), [Name the collaboration protocol and its task-unit sub-protocol](../implemented/2026-09-20-name-the-collaboration-protocol.md), [Protocol-governed collaboration: the parts, the gaps](../../design/protocol-governed-collaboration.md), [Board governance and capability addressing](../implemented/2026-09-06-board-governance-addressing.md), [Task unit semantics](../../design/task-unit-semantics.md)
+**Relates to:** [Mechanism, not policy](2026-09-21-mechanism-not-policy.md), [The program answers legality](2026-09-20-the-program-answers-legality.md), [Name the collaboration protocol and its task-unit sub-protocol](../implemented/2026-09-20-name-the-collaboration-protocol.md), [Protocol-governed collaboration: the parts, the gaps](../../design/protocol-governed-collaboration.md), [Board governance and capability addressing](../implemented/2026-09-06-board-governance-addressing.md), [Task unit semantics](../../design/task-unit-semantics.md)
 
 ## Problem
 

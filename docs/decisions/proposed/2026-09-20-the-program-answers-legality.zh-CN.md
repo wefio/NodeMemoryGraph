@@ -3,7 +3,7 @@
 [English](2026-09-20-the-program-answers-legality.md)
 
 **Status:** proposed
-**Relates to:** [黑板治理与能力寻址](../implemented/2026-09-06-board-governance-addressing.zh-CN.md)、[给协作协议及其任务单元子协议命名](../implemented/2026-09-20-name-the-collaboration-protocol.zh-CN.md)、[任务单元语义](../../design/task-unit-semantics.md)、[契约的义务](../../design/task-unit-semantics-obligations.md)
+**Relates to:** [机制，不是策略](2026-09-21-mechanism-not-policy.zh-CN.md)、[黑板治理与能力寻址](../implemented/2026-09-06-board-governance-addressing.zh-CN.md)、[给协作协议及其任务单元子协议命名](../implemented/2026-09-20-name-the-collaboration-protocol.zh-CN.md)、[任务单元语义](../../design/task-unit-semantics.md)、[契约的义务](../../design/task-unit-semantics-obligations.md)
 
 ## 问题
 

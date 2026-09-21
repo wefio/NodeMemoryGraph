@@ -3,7 +3,7 @@
 [中文](2026-09-20-the-program-answers-legality.zh-CN.md)
 
 **Status:** proposed
-**Relates to:** [Board governance and capability addressing](../implemented/2026-09-06-board-governance-addressing.md), [Name the collaboration protocol and its task-unit sub-protocol](../implemented/2026-09-20-name-the-collaboration-protocol.md), [Task unit semantics](../../design/task-unit-semantics.md), [The contract's obligations](../../design/task-unit-semantics-obligations.md)
+**Relates to:** [Mechanism, not policy](2026-09-21-mechanism-not-policy.md), [Board governance and capability addressing](../implemented/2026-09-06-board-governance-addressing.md), [Name the collaboration protocol and its task-unit sub-protocol](../implemented/2026-09-20-name-the-collaboration-protocol.md), [Task unit semantics](../../design/task-unit-semantics.md), [The contract's obligations](../../design/task-unit-semantics-obligations.md)
 
 ## Problem
 
