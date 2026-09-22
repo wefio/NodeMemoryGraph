@@ -9,12 +9,12 @@
 
 一条绘图流水线有四段，我们也是。
 
-| 段      | 它做什么                                                   | 我们这边的对应                                                                            | 今天在哪                                                                               |
-| ------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| 生产者  | 把某样东西变成缓冲                                         | 工作形态适配器：校验声明、准备输入、跑、提交                                              | `ooo-patch.ts`、`ooo-session-mechanism.ts`、`evals/ooo-execution/data-check-runner.ts` |
-| surface | 共享的、不透明的交换物：role、commit、release、帧回调      | 黑板条目：`payload` 加判别位与摘要；交付是 commit，resolve 与过期是 release，唤醒是帧回调 | `task_board_entries` 及其追加列                                                        |
-| 合成器  | 堆叠、遮挡、混合、时序、剔除、以及拥有者不在场时替它演快照 | 板子与程序：认领、租约、围栏、串行与唤醒、过期与回收、合法集                              | `src/integration/ooo-board.ts`、`src/integration/ooo-dispatch.ts`、`task-semantics.ts` |
-| 显示器  | 模式、刷新率、色彩空间、缩放——同一帧在不同设备上呈现不同   | 呈现端：T0–T3 分层、扁平行、紧凑读、agent 读到的工具描述                                  | `taskBoardPreview`、分层渲染、`src/prompts/nmg-prompts.yaml`                           |
+| 段      | 它做什么                                                   | 我们这边的对应                                                                            | 今天在哪                                                                                                                                             |
+| ------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 生产者  | 把某样东西变成缓冲                                         | 工作形态适配器：校验声明、准备输入、跑、提交                                              | `ooo-patch.ts`、`ooo-session-mechanism.ts`、`evals/ooo-execution/data-check-runner.ts`                                                               |
+| surface | 共享的、不透明的交换物：role、commit、release、帧回调      | 黑板条目：`payload` 加判别位与摘要；交付是 commit，resolve 与过期是 release，唤醒是帧回调 | `task_board_entries` 及其追加列                                                                                                                      |
+| 合成器  | 堆叠、遮挡、混合、时序、剔除、以及拥有者不在场时替它演快照 | 板子与程序：认领、租约、围栏、串行与唤醒、过期与回收、合法集                              | `src/integration/ooo-board.ts`、`src/integration/ooo-dispatch.ts`、`task-semantics.ts`                                                               |
+| 显示器  | 模式、刷新率、色彩空间、缩放——同一帧在不同设备上呈现不同   | 呈现端：读者被展示到什么                                                                  | 黑板条目的呈现只有一种——`taskBoardPreview`，200 字符，加原始字段——被六个站点消费；分层的词汇只活在记忆那一侧（`tieredDisclosure`），从不用于黑板条目 |
 
 由这条流水线出来三类归属，而它们才是模型真正的内容：
 
@@ -62,4 +62,14 @@
 
 ## 结果
 
-待填。
+**（a）中间层里的策略词。** 预测十五处以上。实测六个文件里共 195 处：`patch` 106、`files` 39、`checks` 23、`editable` 14、`instruction` 12、`repair-first` 1。集中处与预测一致：`src/integration/ooo-board.ts` 带 53 处 `patch`，`src/integration/task-semantics.ts` 27 处 `patch` 与 9 处 `editable`，`src/core/store/base.ts` 13 处 `patch`。
+
+测量迫使两条修正。**第一，原始计数高估了情况**——而这正是写这条检查时要带上的那个前提：`src/core/store/writes.ts` 与 `src/core/store/retrieval.ts` 里的 `files` 是机制词（存储里的路径），`src/integration/ooo-candidate.ts` 里的 `checks` 指的是检查的**运行器**，也是机制。所以词表应**去掉 `files` 与 `checks`**，只留 `patch`、`editable`、`instruction`。**第二，剩下的仍有约 120 处**，所以「中间层是无策略的」作为**今天的描述**是假的，而且超出一个数量级。模型拿到的是**方向性支持**：泄漏真实、量大、集中在三个文件里——那正是接上一条缝要拿掉的东西。
+
+**（b）两端。** 生产端预测「集中且可分」，实测三到六个函数散在三个文件：`src/integration/ooo-patch.ts` 里的 `preparePatchWork`、`patchPrompt`、`patchCandidate`、`patchSubmission`，`src/integration/ooo-session-mechanism.ts` 里的 `snapshotText`，`evals/ooo-execution/data-check-runner.ts` 里的 `runTestFile`。预测成立。呈现端预测「散落、没有缝」，实测六个站点：`src/core/store/base.ts` 的预览文本、`src/core/types.ts` 的条目与预览类型、`src/cli/protocol.ts` 的线上形状、`src/cli/service.ts` 的服务、`.pi/extensions/nmg/index.ts` 里面向 agent 的渲染、以及由 `src/prompts/nmg-prompts.yaml` 生成的工具描述。这条预测也成立，但有**一处对本文的修正**——见上表「显示器」一行：黑板条目只有一种呈现，所以第四段比表里最初写的更薄，而它里面的分层词汇是从记忆那一侧**借**来的，不是黑板这一侧**找到**的。
+
+**（c）第二个形态。** 还没跑。
+
+## 这两条检查对变小测试说了什么
+
+现在还什么都没变小，而检查指出了变小只能从哪里来：中间层三个文件里约 120 处策略语义命中，以及六个站点共同呈现一个黑板条目、彼此之间没有归属者。今天唯一可取的变小是中间层那三个文件；它是否值得，由检查（c）测。这次清点两次证明了它的价值：它产出了散文说不出的「词 + 路径」规则，并且抓出本文把另一个子系统的词汇当黑板自己的用。
