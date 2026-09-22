@@ -37,6 +37,7 @@ import type {
   VectorEmbedder,
 } from "../types.ts";
 import { TASK_BOARD_VERDICTS, WORLD_BOARD_ID } from "../types.ts";
+import { boardEntryView } from "../board-entry-view.ts";
 import { currentlyValid, notExpired } from "./clock.ts";
 import { histogramAdd } from "../perf.ts";
 import { Router } from "../router.ts";
@@ -591,7 +592,7 @@ export class NmgStoreBase {
       ackCount: entry.ackedBy.length,
       createdAt: entry.createdAt,
       resolvedAt: entry.resolvedAt,
-      preview: taskBoardPreview(entry.content),
+      preview: boardEntryView(entry.content),
     }));
     return { previews, nextCursor };
   }
@@ -3032,16 +3033,6 @@ export class NmgStoreBase {
       return row ? [mapHistory(row)] : [];
     });
   }
-}
-
-/** Bounded preview used by the compact read (readTaskBoardPreviews): a lone
- * memory pointer is already the intended low-context form and is returned whole;
- * anything longer is collapsed to a single bounded line so a sync never carries
- * a full body it did not ask for. */
-function taskBoardPreview(content: string, max = 200): string {
-  if (content.trim().startsWith("memory=")) return content.trim();
-  const single = content.replace(/\s+/g, " ").trim();
-  return single.length <= max ? single : `${single.slice(0, max - 1)}…`;
 }
 
 function mapTaskBoardEntry(row: Row): TaskBoardEntry {

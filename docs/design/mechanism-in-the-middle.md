@@ -2,62 +2,93 @@
 
 **Status:** draft
 **Created:** 2026-09-21
+**Updated:** 2026-09-21
 
-A layered model of the collaboration protocol, and the checks that decide whether the model earns a place in
-the records. This document owns the model, the boundary test, and the checks. It does not restate the parts
-inventory, which lives in [protocol-governed-collaboration.md](protocol-governed-collaboration.md), nor the
-decisions, which live in three proposed records: [mechanism, not policy](../decisions/proposed/2026-09-21-mechanism-not-policy.md),
+A model of how a board entry travels, and the checks that decide whether the model earns a place in the
+records. This document owns the model, the rule that says when a boundary earns a seam, and the checks. It
+does not restate the parts inventory, which lives in [protocol-governed-collaboration.md](protocol-governed-collaboration.md),
+nor the decisions, which live in three proposed records: [mechanism, not policy](../decisions/proposed/2026-09-21-mechanism-not-policy.md),
 [the frame and its storage](../decisions/proposed/2026-09-21-the-frame-and-its-storage.md), and
 [the program answers legality](../decisions/proposed/2026-09-20-the-program-answers-legality.md).
 
 ## The model
 
-A drawing pipeline has four stages, and so does ours.
+A board entry is a medium with two faces, and the roles around it are three.
 
-| Stage      | What it does                                                                                  | What it is here                                                                                                                             | Where it lives today                                                                                                                                                                                           |
-| ---------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Producer   | turns something into a buffer                                                                 | a work-shape adapter: validate the declaration, prepare the inputs, run, submit                                                             | `ooo-patch.ts`, `ooo-session-mechanism.ts`, `evals/ooo-execution/data-check-runner.ts`                                                                                                                         |
-| Surface    | the shared, opaque exchange object with a role, commit, release and frame callbacks           | the board entry: `payload` plus a discriminator and a digest, delivery as commit, resolve and expiry as release, wake as the frame callback | `task_board_entries` with its added columns                                                                                                                                                                    |
-| Compositor | stacking, occlusion, blending, timing, culling, and playing a snapshot when the owner is away | the board and the program: claim, lease, fence, serial and wake, expiry and reaping, the legal set                                          | `src/integration/ooo-board.ts`, `src/integration/ooo-dispatch.ts`, `task-semantics.ts`                                                                                                                         |
-| Display    | mode, refresh rate, colour space, scaling - the same frame presented differently per device   | the presentation end: what a reader is shown                                                                                                | one presentation of a board entry exists - `taskBoardPreview`, 200 characters, plus raw fields - at six sites; the tier vocabulary lives only on the memory side (`tieredDisclosure`), never for board entries |
+```
+   producer ──[ producer-side interface · write ]──┐        ┌──[ presentation interface · read ]──▶ reader
+                                                    ▼        ▲
+                                     ┌────────────────────────────────────┐
+                                     │  board entry (the medium)          │
+                                     │    write face        read face     │
+                                     └────────────────────────────────────┘
+                                                    │        ▲
+                                       Task-Unit Protocol ──▶ compositor
+```
 
-Three ownership classes follow, and they are the model's real content:
+| Edge           | What it is                            | Where it lives today                                   | State                                                                                       |
+| -------------- | ------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| the write face | what a producer puts on the medium    | `put` and `deliver`; a body arrives as `content`       | three fillers - a patch artifact, a human broadcast, a `memory=<id>` pointer - and no shape |
+| the read face  | what a reader is shown                | `boardEntryView` in `src/core/board-entry-view.ts`     | one rule, one home, one test                                                                |
+| the middle     | the compositor, brought by a protocol | `ooo-board.ts`, `ooo-dispatch.ts`, `task-semantics.ts` | one protocol brings it: the Task-Unit Protocol                                              |
 
-1. **Content and semantics** belong to the owner and are semantically opaque to the middle. The compositor
-   reads pixels to blur or to know an occlusion shape, but it cannot read what a button means; for meaning it
-   asks the owner. Our board may read declared structure and never reads payload semantics.
-2. **Description** is the owner's obligation: geometry, level and parent relationships, shape and opaque and
-   dirty regions, the terminal state of an animation, an identity for restoration, and a snapshot able to
-   stand in for the owner. Ours is the discriminator, the digest, dependencies, scope and need, and the
-   projection a protocol supplies.
-3. **Arbitration** is only the middle's, because only the middle has the global view: stacking and occlusion
-   are global properties, and so are visibility, focus, capture permission, timing and reaping. Ours is the
-   legal set, claim and lease, wake, expiry.
+Three facts about the shape, each measured rather than assumed.
 
-The boundary test that replaces a slogan:
+1. **The middle comes from a protocol, not from the board.** The board offers two faces and nothing else; a
+   protocol names the constraints that put a compositor between them, and the Task-Unit Protocol is the one
+   that brings ours. That is why "the program only answers legality" says the same thing: no declared
+   legality, no judgement. Of the seven entry kinds, only `handoff` and `result` are ever claimed, delivered
+   and judged - a note, a goal and a question travel from the write face straight to the read face.
+2. **The roles are not files.** `src/core/store/base.ts` is the medium (columns and transactions), the
+   compositor (the lease-based claim compare-and-set and the clock) and the reader's rule at once, and
+   `src/cli/service.ts` is both the wire face and a formatter. So this is a map of roles, and a check can sit
+   only on the artifacts that cross an edge, never on module imports.
+3. **Feedback is a replay, not a reversal.** A reader becomes the next writer and enters through the write
+   face again; the middle is never traversed backwards. The broadcast path in `.pi/extensions/nmg/index.ts`
+   (it reads an entry, then writes a new one) is a place where two roles live side by side, and rejection
+   followed by re-issue moves forward as well - the middle writes a new declaration onto the medium and the
+   producer reads it from the write face.
 
-- the middle does not need to reason about the object, so the object stays opaque and belongs to its owner;
-- the middle needs structure, so the owner must supply a description and the middle reads the description
-  but not the semantics;
-- the judgement is global, so only the middle can make it - which requires the description to be cheap and
-  fresh, and requires staleness to have a meaning (an expired lease is a suspicion, not a death certificate).
+## Which boundary earns a seam
 
-Two consequences are already load-bearing elsewhere. The middle must compose in a form that is independent
-of how it will be shown, so it never learns a reader's format. And presentation is not verifiable - a display
-applies its own colour, crop and scaling - so an acceptance can only ever rest on the artifact and its digest,
-never on how it was shown.
+**A boundary is built when it has a second implementation; with one, it is only declared.** The rule needs no
+taste, only a count.
+
+| Boundary       | Implementations today                                                                                             | Consequence                                                                  |
+| -------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| the write face | three fillers for one body                                                                                        | declared: a type is worth writing when a fourth filler appears               |
+| the read face  | three truncation rules - 200 characters collapsing, a generic helper, and a bare 140 slice that collapsed nothing | **built**: one rule, one home, one test                                      |
+| the middle     | one protocol                                                                                                      | declared only: a seam is built when a second protocol brings a second middle |
+
+The alternative - building every seam now, each against a single implementation - is the mistake this
+document already made once by stacking analogies. A seam designed against one shape is a seam designed
+against an imagined second shape, and the imagined one is the one that gets built wrong.
+
+## What landed with this document
+
+- **The read face has one home.** `src/core/board-entry-view.ts` owns the rule: a lone `memory=<id>` pointer
+  is returned whole, anything longer is collapsed to one bounded line, and the bound belongs to the caller,
+  because how much of a body fits is the reader's decision. The store's compact read and the host adapter's
+  broadcast both call it; the store's private copy and the adapter's bare slice are gone. One of the three
+  rules was also wrong rather than merely duplicated: the 140-character slice in `.pi/extensions/nmg/index.ts`
+  did not collapse whitespace, so a multi-line body reached a broadcast as a multi-line broadcast.
+  `tests/core/task-board.test.ts` pins the rule directly. The adapter's `excerpt` helper stays for memory
+  results, which are not board entries and keep their own rule.
+- **The write face's type did not land.** The three fillers are three kinds of entry rather than one shape
+  drawn three ways, so the trigger for a type is a fourth filler.
+- **The middle's seam did not land.** Check (c) says why.
 
 ## Why this is a draft and not a record
 
-- It was reached by stacking analogies, and each analogy was already partly overruled by a fuller view: first
-  a kernel split, then a window split into frame and content, now four stages. The analogies are doing the
-  reasoning, and that is the smell this section exists to record.
-- One of the four stages is a name and nothing else. The presentation end has no seam, no owner and no tests;
-  it is a description of scattered code.
+- The pipeline form of this document - four stages borrowed from a drawing pipeline - was reached by stacking
+  analogies and was **retired on 2026-09-21** in favour of the two-faces model above, which came from
+  measurement instead: roles cohabit files, feedback replays rather than reverses, and a protocol is what
+  brings the middle.
 - The only measurable claim made in this arc - that the mechanism/policy seam was narrow - was falsified by a
   grep within a minute: the patch assumption sits in six places, one of them a legality rule.
-- Nothing has got smaller. No code changed, no concept was removed, and three prose records were added. On
-  today's evidence the model is strictly more concepts than the thing it describes.
+- One thing has got smaller: the read face's three rules are now one, in one home, with one test. The middle's
+  hundred-and-twenty policy-sense hits and the write face's unshaped body have not.
+- The model is still more concepts than the code it describes, so it stays a draft.
 
 ## The eligibility rule
 
@@ -125,16 +156,36 @@ scattered with no seam, and measured six sites: the preview text in `src/core/st
 preview types in `src/core/types.ts`, the wire shape in `src/cli/protocol.ts`, the service in
 `src/cli/service.ts`, the agent-facing renderer in `.pi/extensions/nmg/index.ts`, and the generated tool
 descriptions from `src/prompts/nmg-prompts.yaml`. That prediction held too, with one correction against this
-document - see the display row above. A board entry has exactly one presentation, so the fourth stage is
-thinner than the table first claimed, and the tier vocabulary in it had been borrowed from the memory side
-rather than found on the board side.
+document: a board entry has exactly one presentation, and the tier vocabulary in the old table had been
+borrowed from the memory side rather than found on the board side. A later pass over the same sites found
+what the count alone could not: the six sites are a chain, not six formatters, and the duplication sits in
+three of them - the store's preview rule, the adapter's generic helper, and a bare slice in the adapter's
+broadcast path.
 
-**(c) A second shape.** Not run yet.
+**(c) A second shape.** The prediction was five or more files. The change was made on a throwaway branch and
+then reverted: the loop was made shape-agnostic by replacing `DispatchTicket.patch?: PatchWork` with an opaque
+`declaration?: {shape, digest, frozen}`, pointing `PlanWorker` at that declaration, and deleting the
+`preparePatchWork` call from the unit dispatcher - one file, fifteen insertions and eighteen deletions. Two
+results followed, and neither was the result the prediction was aiming at.
 
-## What the two checks say about the reduction test
+- `tsc --noEmit` reported **zero errors**. The coupling is invisible to the compiler: the field is optional,
+  and structural typing still lets the board's ticket, which carries `patch`, satisfy the port, so the change
+  produced no compile-time signal at all.
+- The suite reported **25 failing tests**, every one with the same cause - "the claim admits no work". A second
+  shape today would not fail as a new shape; it would refuse every unit.
 
-Nothing has got smaller yet, and the checks say where a reduction would have to come from: three files in the
-middle hold about a hundred and twenty policy-sense hits, and six sites present a board entry with no owner
-between them. The reduction available today is in the middle's three files; whether it pays is what check (c)
-measures. The counting earned its keep twice: it produced the word-and-path rule that the earlier prose could
-not state, and it caught this document borrowing another subsystem's vocabulary as if it were the board's.
+The coupling's surface, counted by grep: three source files name the frozen patch work (`ooo-dispatch.ts`,
+`ooo-patch.ts`, `ooo-session-mechanism.ts`, the last with about ten uses), the board must change although it
+never reads the field, seven test files read `ticket.patch` directly, and the worker side couples through the
+`PlanWorker` type, which breaks the driver's three worker kinds. The prediction held and then some, and the
+decision it forced is the opposite of building: the seam is prepaid cost, deferred with a named trigger - the
+first non-patch unit an adopter declares - rather than built now against a single shape.
+
+## What the checks say about the reduction test
+
+One thing is smaller: three rules for showing a board entry became one rule in one home with one test, and the
+rule that disappeared was the wrong one. Everything else stands. The middle's three files still hold about a
+hundred and twenty policy-sense hits, and the write face's body still has no shape. The counting earned its
+keep three times: it produced the word-and-path rule that the earlier prose could not state, it caught this
+document borrowing another subsystem's vocabulary as if it were the board's, and it turned "should the seam
+exist" from a matter of taste into a measured file count.

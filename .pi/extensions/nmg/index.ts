@@ -38,6 +38,7 @@ import { loadPrompts, renderDisclosure } from "../../../src/prompts/load.ts";
 import { memoryDisclosureEntries } from "../../../src/integration/search-projection.ts";
 import { PI_BOARD_ACTIONS, PI_REMEMBER_ACTIONS } from "../../../src/integration/tool-contract.ts";
 import { TASK_BOARD_VERDICTS } from "../../../src/core/types.ts";
+import { boardEntryView } from "../../../src/core/board-entry-view.ts";
 import { resolveSkillOptPolicyChannels } from "../../../src/lab/skillopt-policy.ts";
 import type {
   ActiveGraphBudget,
@@ -2998,7 +2999,7 @@ export async function maybeBroadcastToWorld(input: {
     entryIds: [entry.id],
   })) as { delivered: string[]; suppressed: boolean };
   if (worldCheck.delivered.includes(entry.id)) return false;
-  const excerpt = entry.content.length > 140 ? `${entry.content.slice(0, 140)}…` : entry.content;
+  const excerpt = boardEntryView(entry.content, 140);
   const label = kindLabel(entry.kind);
   const broadcast = `[NMG board 协作广播] 频道 ${entry.taskId} 有 #${entry.id} 未认领的${label}（open）：${excerpt}。有空的 agent 可用 nmg_board read taskId=${entry.taskId} 查看详情、claim 认领处理。`;
   await invoke("taskBoard", {

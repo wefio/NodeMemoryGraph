@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { NmgStore } from "../../src/core/store.ts";
+import { boardEntryView } from "../../src/core/board-entry-view.ts";
 
 function withStore(run: (store: NmgStore) => void): void {
   const directory = mkdtempSync(join(tmpdir(), "nmg-task-board-"));
@@ -101,6 +102,17 @@ test("task board supports cursor reads, cross-agent resolution, and expiry", () 
       2,
     );
   });
+});
+
+test("the read face has one rule for a board entry's body", () => {
+  // A pointer is already the low-context form the reader wants, so it is returned whole and never cut.
+  assert.equal(boardEntryView("memory=abc123"), "memory=abc123");
+  // Anything else becomes one bounded line, so a read never carries a body it did not ask for.
+  assert.equal(boardEntryView("first line\n\nsecond   line"), "first line second line");
+  assert.equal(boardEntryView("x".repeat(10), 10), "x".repeat(10));
+  const bounded = boardEntryView("y".repeat(11), 10);
+  assert.equal(bounded.length, 10);
+  assert.equal(bounded, `${"y".repeat(9)}…`);
 });
 
 test("compact preview read omits long bodies but keeps ordering and cursor", () => {
