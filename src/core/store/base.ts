@@ -775,7 +775,7 @@ export class NmgStoreBase {
   }
   /** True when a board entry carries a live claim (holder set, lease not expired). */
   private taskBoardClaimLive(entry: TaskBoardEntry, now: string): boolean {
-    return entry.claimedBy !== null && entry.claimExpiresAt !== null && entry.claimExpiresAt > now;
+    return taskBoardClaimIsLive(entry, now);
   }
   /**
    * Reply-gated serial handoff: promote the earliest pending actionable to
@@ -3033,6 +3033,13 @@ export class NmgStoreBase {
       return row ? [mapHistory(row)] : [];
     });
   }
+}
+
+/** True when a board entry carries a live claim (holder set, lease not expired). One home for the
+ *  predicate: eligibility outside this module reads it too, so a second copy of it would be a second
+ *  opinion about whether a task is already being worked on. */
+export function taskBoardClaimIsLive(entry: TaskBoardEntry, now: string): boolean {
+  return entry.claimedBy !== null && entry.claimExpiresAt !== null && entry.claimExpiresAt > now;
 }
 
 function mapTaskBoardEntry(row: Row): TaskBoardEntry {

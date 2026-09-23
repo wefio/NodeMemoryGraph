@@ -77,6 +77,22 @@ against an imagined second shape, and the imagined one is the one that gets buil
 - **The write face's type did not land.** The three fillers are three kinds of entry rather than one shape
   drawn three ways, so the trigger for a type is a fourth filler.
 - **The middle's seam did not land.** Check (c) says why.
+- **The port has a third implementation, and it is the product's.** `src/integration/ooo-runner.ts` is the
+  store's own board: it projects the run's frozen table and its board entries into the facts the shared
+  rules read, and it carries no legality rule of its own. Three implementations satisfy `DispatchBoard` now
+  - the probe board, the dispatch test's stub, and this one - and only the projection differs between them,
+    which is the abstraction working rather than a claim that it does.
+- **The projection has one contract that is easy to get wrong.** The shared acceptance rule binds a verdict
+  to the artifact a run carries: it compares the verdict's digest against the artifact value, so a verdict
+  about a different artifact cannot pass as acceptance. Reporting the store's own deliverable hash in that
+  field instead makes every accepted unit read as unaccepted, and the symptom is silent - the next unit is
+  never released and nothing reports an error. Both identities are legitimate; only the artifact value
+  belongs in that field.
+- **Where the port's verbs meet the product's lifecycle.** A product run keeps a deliverable on the entry a
+  unit was claimed on, so the port's "put a result" is that delivery and its "submit" is the judgement of
+  it: one entry per unit, not two, because a second result entry would be a record nothing reads. The unit
+  is resolved from the claim the loop has just taken rather than from the body, because a body's shape
+  belongs to its owner while a claim is the board's own fact.
 
 ## Why this is a draft and not a record
 

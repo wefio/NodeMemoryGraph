@@ -217,6 +217,7 @@ routes:
       - src/integration/ooo-fusion-plan.ts
       - src/integration/ooo-mutation.ts
       - src/integration/ooo-patch.ts
+      - src/integration/ooo-runner.ts
       - src/integration/check-ticket.ts
       - src/integration/check-runner.ts
       - src/integration/ooo-session-facts.ts
