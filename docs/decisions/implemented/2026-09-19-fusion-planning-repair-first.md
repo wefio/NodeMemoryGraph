@@ -32,9 +32,12 @@ Split fusion planning into two clocks, and write down neither as a plan.
 - **Online** is one move about the current session: _admit_ the next legal successor or _close_ the
   session, naming the condition that closed it. A fused session is irreversible, so no move may
   rewrite it.
-- **Repair-first**: the default is to continue; only a declared change (rejected verdict, cancellation,
-  an unmet dependency, a declared external wait that is not ready) may end a session early. Repairing
-  keeps every commitment intact and decides only about what has not run.
+- **Repair-first**: continuing is a constraint the plan declares rather than this design's default - a
+  plan that enables nothing runs one unit per session ([the program answers
+  legality](2026-09-20-the-program-answers-legality.md), step 3, landed 2026-09-23) - and, once enabled,
+  only a declared change (rejected verdict, cancellation, an unmet dependency, a declared external wait
+  that is not ready) may end a session early. Repairing keeps every commitment intact and decides only
+  about what has not run.
 - **Baseline**: a move is not revisited while its facts hold, and the same plan plus the same facts
   yield the same move, ties broken by plan order. Without determinism two runs of one plan are not
   comparable, which is what the arms need.

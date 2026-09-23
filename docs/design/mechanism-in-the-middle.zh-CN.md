@@ -4,7 +4,7 @@
 **Created:** 2026-09-21
 **Updated:** 2026-09-21
 
-一个黑板条目怎么走，以及决定这个模型有没有资格进记录的那几项检查。本文拥有模型、"一条边界什么时候够资格建缝"的那条规则、以及这些检查。它不复述大类清单（那在 [protocol-governed-collaboration.md](protocol-governed-collaboration.zh-CN.md)），也不复述决策（那在三份提案里：[机制，不是策略](../decisions/proposed/2026-09-21-mechanism-not-policy.zh-CN.md)、[帧、它的数据格式与它的存储](../decisions/proposed/2026-09-21-the-frame-and-its-storage.zh-CN.md)、[程序只回答合法性](../decisions/proposed/2026-09-20-the-program-answers-legality.zh-CN.md)）。
+一个黑板条目怎么走，以及决定这个模型有没有资格进记录的那几项检查。本文拥有模型、"一条边界什么时候够资格建缝"的那条规则、以及这些检查。它不复述大类清单（那在 [protocol-governed-collaboration.md](protocol-governed-collaboration.zh-CN.md)），也不复述决策（那在三份记录里：[机制，不是策略](../decisions/proposed/2026-09-21-mechanism-not-policy.zh-CN.md)、[帧、它的数据格式与它的存储](../decisions/proposed/2026-09-21-the-frame-and-its-storage.zh-CN.md)、[程序只回答合法性](../decisions/implemented/2026-09-20-the-program-answers-legality.zh-CN.md)）。
 
 ## 模型
 

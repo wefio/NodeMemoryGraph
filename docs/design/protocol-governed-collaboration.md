@@ -21,8 +21,8 @@ document and an owner disagree, the owner wins.
 | Scope and visibility            | An entry targets an authorized agent subset, so boards are not all-to-all                                                                                                   | Complete                                                               | [board governance and capability addressing](../decisions/implemented/2026-09-06-board-governance-addressing.md)                                                                                       |
 | Truth versus coordination state | The board is a temporary coordination medium; durable memory is the truth store; `memory=<id>` pointers                                                                     | Complete                                                               | [board governance](../decisions/implemented/2026-09-06-board-governance-addressing.md), [memory graphs](memory-graphs.md)                                                                              |
 | The task unit                   | A unit declared by inputs, dependencies, acceptance, capability and budget; decomposition; the internal compile view; the run, its adoption, and the facts the runtime owns | Complete                                                               | [task unit semantics](task-unit-semantics.md), [the obligations ledger](task-unit-semantics-obligations.md)                                                                                            |
-| Legality and admission          | The ordered legal set, the cut to the declared slot budget, the reason each unit is or is not legal                                                                         | Mechanism complete; the readable answer is missing                     | `src/integration/ooo-board.ts`, [the program answers legality](../decisions/proposed/2026-09-20-the-program-answers-legality.md)                                                                       |
-| Ordering and constraints        | Determinism (one plan plus one set of facts yields one answer), repair-first, tie-breaking by plan order                                                                    | Mechanism complete; the declaration is missing                         | [fusion planning: repair-first](../decisions/implemented/2026-09-19-fusion-planning-repair-first.md), [the program answers legality](../decisions/proposed/2026-09-20-the-program-answers-legality.md) |
+| Legality and admission          | The ordered legal set, the cut to the declared slot budget, the reason each unit is or is not legal                                                                         | Complete                     | `src/integration/ooo-board.ts`, [the program answers legality](../decisions/implemented/2026-09-20-the-program-answers-legality.md)                                                                       |
+| Ordering and constraints        | Determinism (one plan plus one set of facts yields one answer), repair-first, tie-breaking by plan order                                                                    | Complete                         | [fusion planning: repair-first](../decisions/implemented/2026-09-19-fusion-planning-repair-first.md), [the program answers legality](../decisions/implemented/2026-09-20-the-program-answers-legality.md) |
 | Budget and accounting           | Declared slot budget, token and cache accounting, the offline cost ceiling                                                                                                  | Complete                                                               | [declared slot budget](../decisions/implemented/2026-09-18-declared-slot-budget.md), [the cost model](../experiments/execution/ooo-cost-model-2026-09-17.md)                                           |
 | Cancellation and fencing        | Explicit cancellation, no orphan worker or check after it, late artifacts fenced                                                                                            | Complete                                                               | [long checks run detached](../decisions/implemented/2026-09-18-detached-long-checks.md), [the bootstrap design](ooo-execution-bootstrap.md)                                                            |
 | Recovery and replay             | Log plus replay of a round, the transactional outbox drained after commit and on restart, no stealing another's work after a crash                                          | Complete inside the arms; the product side is not wired                | [the bootstrap design](ooo-execution-bootstrap.md)                                                                                                                                                     |
@@ -46,9 +46,12 @@ rows above are the ones a given piece of work cannot do without.
    missing is the asker without a workspace: a plan is compiled from the caller's files, so a process that
    holds only the store cannot compute the answer. The concepts are unchanged; the gap now narrows to where
    the plan lives.
-3. **Constraints have no declaration.** Repair-first currently lives as policy inside shared planning
-   code. Making preferences named constraints a plan enables is **declarative policy**, and the
-   requirement that one plan plus one set of facts yields one answer is **deterministic replay**.
+3. **Constraints now have a declaration; what a constraint may change is still unwritten.**
+   `repair-first` is a named constraint a plan enables, the shared planner reads that declaration
+   instead of holding the preference itself, and a plan that enables nothing runs one unit per session.
+   What has no clause yet is who may enable a constraint, and what a constraint is allowed to change:
+   this one orders a session, and a name that changed which units are *legal* would be a different kind
+   of answer. The concepts are **declarative policy** and **deterministic replay**.
 4. **Read guarantees are unwritten.** Board reads are cursor-based and may lag; nothing states whether a
    reader may assume monotonic reads or read-your-writes. The concepts are **monotonic reads**,
    **read-your-writes** and, across one agent's own sequence of sessions, **causal consistency**.
@@ -89,8 +92,9 @@ rows above are the ones a given piece of work cannot do without.
 
 ## What would make this inventory complete
 
-Row 9's readable answer landed on 2026-09-23 as the board port's own read - see [The program answers
-legality](../decisions/proposed/2026-09-20-the-program-answers-legality.md), whose step 3 is the row 10 it
-still owes. Rows 1, 4, 5, 6 and 7 are gaps with no owner yet. Until each gap either gets a clause or
-is written down as deliberately absent, "complete" for this umbrella means the parts that have owners,
-not the parts a task needs.
+Row 9's readable answer landed on 2026-09-23 as the board port's own read, and row 10's declaration
+landed the same day: a plan enables `repair-first` and the planner reads the declaration rather than
+assuming it - see [The program answers
+legality](../decisions/implemented/2026-09-20-the-program-answers-legality.md). Rows 1, 4, 5, 6 and 7 are
+gaps with no owner yet. Until each gap either gets a clause or is written down as deliberately absent,
+"complete" for this umbrella means the parts that have owners, not the parts a task needs.

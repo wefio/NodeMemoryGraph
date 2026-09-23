@@ -184,6 +184,9 @@ function legality(
     declarations: Object.fromEntries(
       order.map((id) => [id, { capability: "patch", authority: "host", visible: [] }]),
     ),
+    // The cases that declare sessions here expect the chain to continue, so the plan enables the
+    // constraint that allows it. A case with no sessions never reaches the move at all.
+    constraints: ["repair-first"],
   };
 }
 

@@ -320,6 +320,11 @@ export interface SessionPlan {
   tasks: readonly DispatchTask[];
   declarations: Readonly<Record<string, SessionDeclaration>>;
   pendingBranches?: readonly string[];
+  /** The constraints this plan enables, by the protocol's names - the vocabulary is
+   *  `PLAN_CONSTRAINTS` in `ooo-fusion-plan.ts`, and the move that reads them lives there too.
+   *  Absent means none: a plan that declares nothing gets the baseline (one unit per session, in
+   *  plan order) rather than whatever the planner happens to prefer. */
+  constraints?: readonly string[];
 }
 
 function subset(inner: readonly string[], outer: readonly string[]): boolean {

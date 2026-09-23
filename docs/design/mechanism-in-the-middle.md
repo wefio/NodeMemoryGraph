@@ -7,9 +7,9 @@
 A model of how a board entry travels, and the checks that decide whether the model earns a place in the
 records. This document owns the model, the rule that says when a boundary earns a seam, and the checks. It
 does not restate the parts inventory, which lives in [protocol-governed-collaboration.md](protocol-governed-collaboration.md),
-nor the decisions, which live in three proposed records: [mechanism, not policy](../decisions/proposed/2026-09-21-mechanism-not-policy.md),
+nor the decisions, which live in three records: [mechanism, not policy](../decisions/proposed/2026-09-21-mechanism-not-policy.md),
 [the frame and its storage](../decisions/proposed/2026-09-21-the-frame-and-its-storage.md), and
-[the program answers legality](../decisions/proposed/2026-09-20-the-program-answers-legality.md).
+[the program answers legality](../decisions/implemented/2026-09-20-the-program-answers-legality.md).
 
 ## The model
 

@@ -42,6 +42,7 @@ export function optimisticPlan(plan: SessionPlan): SessionPlan {
       externalReady: true,
     })),
     declarations: plan.declarations,
+    ...(plan.constraints ? { constraints: plan.constraints } : {}),
   };
 }
 
@@ -201,13 +202,48 @@ export type SessionMove =
   | { readonly kind: "close"; readonly reason: string };
 
 /**
- * Repair-first: the default is to continue the session that is already running, and a close carries
- * the condition that closed it. Only facts may end a session early - a rejected verdict shows up as
+ * The constraints the protocol defines, by name. This is the whole list: a preference that is not on it
+ * is not a constraint a plan may enable, and a plan that names one is refused rather than read.
+ *
+ * `repair-first` is the one the arms measured - continue the session that is already running instead of
+ * starting a fresh one at every unit boundary. It used to be this module's unstated default, which is
+ * what made a plan's meaning depend on which planner read it; now it is a name the plan declares, and a
+ * plan that declares nothing runs one unit per session.
+ */
+export const PLAN_CONSTRAINTS = ["repair-first"] as const;
+
+/**
+ * The constraints a plan enables, validated. A name outside `PLAN_CONSTRAINTS` is refused by name
+ * instead of ignored: a plan that enables a constraint the program does not know is asking for something
+ * nobody implements, and reading it as "nothing was asked" would make the declaration decoration.
+ */
+export function enabledConstraints(
+  plan: SessionPlan,
+): readonly (typeof PLAN_CONSTRAINTS)[number][] {
+  const named = plan.constraints ?? [];
+  const unknown = named.filter((name) => !(PLAN_CONSTRAINTS as readonly string[]).includes(name));
+  if (unknown.length > 0)
+    throw new Error(
+      `unknown constraint ${unknown.join(", ")}; the protocol defines ${PLAN_CONSTRAINTS.join(", ")}`,
+    );
+  return named as readonly (typeof PLAN_CONSTRAINTS)[number][];
+}
+
+/**
+ * The move at a session boundary, computed under the plan's enabled constraints. A close carries the
+ * condition that closed it; only facts may end a session early - a rejected verdict shows up as
  * `current` not being accepted, a cancellation and an unmet dependency as `sharedSessionLegal`, and a
  * declared external wait as condition 4 - so this is a pure function of the plan and its facts, with
  * plan order breaking ties. Numeric optimisation belongs to the offline half and is not read here.
  */
 export function nextSessionMove(input: SessionMoveInput): SessionMove {
+  // The continuation is a declared constraint rather than this function's default. Without it the plan
+  // runs one unit per session, which is the baseline the arms' control cells measure.
+  if (!enabledConstraints(input.plan).includes("repair-first"))
+    return {
+      kind: "close",
+      reason: "repair-first is not enabled, so this plan runs one unit per session",
+    };
   if (input.size >= input.bound) return { kind: "close", reason: "the declared bound is reached" };
   const successor = fusionSuccessors(input.current, input.plan).find((id) =>
     input.onOffer.includes(id),

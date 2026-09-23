@@ -3,7 +3,7 @@
 [中文](2026-09-21-mechanism-not-policy.zh-CN.md)
 
 **Status:** proposed
-**Relates to:** [The program answers legality](2026-09-20-the-program-answers-legality.md), [The frame, its data format, and its storage](2026-09-21-the-frame-and-its-storage.md), [Board governance and capability addressing](../implemented/2026-09-06-board-governance-addressing.md), [Protocol-governed collaboration: the parts, the gaps](../../design/protocol-governed-collaboration.md), [Task unit semantics](../../design/task-unit-semantics.md)
+**Relates to:** [The program answers legality](../implemented/2026-09-20-the-program-answers-legality.md), [The frame, its data format, and its storage](2026-09-21-the-frame-and-its-storage.md), [Board governance and capability addressing](../implemented/2026-09-06-board-governance-addressing.md), [Protocol-governed collaboration: the parts, the gaps](../../design/protocol-governed-collaboration.md), [Task unit semantics](../../design/task-unit-semantics.md)
 
 ## Problem
 
@@ -76,8 +76,8 @@ follows.
 The legality rule found today is the clearest case of the refinement this record adds: its check belongs to
 the program, while permission closure's name and enablement belong to a declaration. The fix is therefore not
 to move the check out of the program but to stop hard-wiring the rule in the kernel's vocabulary - the same
-shape of fix as plan step 3 of the legality record, where repair-first becomes a declared constraint rather
-than shared planning policy. Two independent fixes taking the same shape is evidence that the classification
+shape of fix as step 3 of the legality record, which landed on 2026-09-23: repair-first became a declared
+constraint rather than shared planning policy. Two independent fixes taking the same shape is evidence that the classification
 is the right one.
 
 ## Alternatives considered

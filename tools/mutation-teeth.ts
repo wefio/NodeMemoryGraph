@@ -666,6 +666,31 @@ const TARGETS: readonly Target[] = [
     ],
   },
   {
+    target: "src/integration/ooo-fusion-plan.ts",
+    suites: ["tests/integration/ooo-fusion-plan.test.ts"],
+    mutants: [
+      {
+        // The continuation is a constraint the plan declares rather than this planner's default.
+        // Dropping the declaration restores a preference no plan enabled, which is what made a plan's
+        // meaning depend on which planner read it.
+        name: "the-continuation-is-not-declared",
+        ast: { within: "nextSessionMove" },
+        from: '  if (!enabledConstraints(input.plan).includes("repair-first"))',
+        to: "    if (false)",
+        expect: "the continuation is a declared constraint, not the planner's default",
+      },
+      {
+        // A name the protocol does not define is refused by name; reading it as "nothing was asked"
+        // is what would make the declaration decoration.
+        name: "an-unknown-constraint-is-ignored",
+        ast: { within: "enabledConstraints" },
+        from: "  const unknown = named.filter((name) => !(PLAN_CONSTRAINTS as readonly string[]).includes(name));",
+        to: "  const unknown: readonly string[] = [];",
+        expect: "a constraint the protocol does not define is refused by name, never ignored",
+      },
+    ],
+  },
+  {
     target: "src/integration/task-semantics-interleavings.ts",
     suites: ["tests/integration/ooo-publication-invariants.test.ts"],
     mutants: [

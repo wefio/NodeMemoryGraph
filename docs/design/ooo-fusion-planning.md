@@ -39,12 +39,16 @@ So the online decision is not a plan, it is one move about the _current_ session
 
 Three properties make that move safe to make repeatedly:
 
-- **Repair-first.** The default is to continue the current session; a re-decision may only _end_ it, on
-  a declared change: a rejected verdict, a cancellation, a dependency that did not become accepted, or
-  a declared external wait that is not ready. Repairing instead of re-planning is the documented
-  trade: reusing a plan saves work but risks acting on a stale one, and re-planning from scratch churns
-  (`plan repair versus full replanning`). Repair-first is the middle: keep what is committed, decide
-  only about what has not run.
+- **Repair-first.** Continuing the current session is a constraint **the plan declares**, not this
+  design's default: a plan that enables `repair-first` continues the session, and a plan that enables
+  nothing runs one unit per session and closes at every unit boundary. Once enabled, a re-decision may
+  only _end_ the session, on a declared change: a rejected verdict, a cancellation, a dependency that
+  did not become accepted, or a declared external wait that is not ready. Repairing instead of
+  re-planning is the documented trade: reusing a plan saves work but risks acting on a stale one, and
+  re-planning from scratch churns (`plan repair versus full replanning`). Repair-first is the middle:
+  keep what is committed, decide only about what has not run. The names the protocol defines are a
+  closed list (`PLAN_CONSTRAINTS`), and a plan naming one outside it is refused by name rather than
+  read as having asked for nothing.
 - **Baseline.** A move, once made, is not revisited while its facts hold. Facts arrive at boundaries;
   between boundaries there is nothing to re-decide, so an unchanged fact set yields an unchanged set of
   moves. This is Oracle SQL Plan Management's plan-baseline idea: constrain the plan to accepted

@@ -3,7 +3,7 @@
 [English](2026-09-21-mechanism-not-policy.md)
 
 **Status:** proposed
-**Relates to:** [程序只回答合法性](2026-09-20-the-program-answers-legality.zh-CN.md)、[帧、它的数据格式与它的存储](2026-09-21-the-frame-and-its-storage.zh-CN.md)、[黑板治理与能力寻址](../implemented/2026-09-06-board-governance-addressing.zh-CN.md)、[协议化协作：组成部分与空缺](../../design/protocol-governed-collaboration.zh-CN.md)、[任务单元语义](../../design/task-unit-semantics.md)
+**Relates to:** [程序只回答合法性](../implemented/2026-09-20-the-program-answers-legality.zh-CN.md)、[帧、它的数据格式与它的存储](2026-09-21-the-frame-and-its-storage.zh-CN.md)、[黑板治理与能力寻址](../implemented/2026-09-06-board-governance-addressing.zh-CN.md)、[协议化协作：组成部分与空缺](../../design/protocol-governed-collaboration.zh-CN.md)、[任务单元语义](../../design/task-unit-semantics.md)
 
 ## 问题
 
@@ -55,7 +55,7 @@
 | `task_run_tasks.patch_files` / `patch_editable`（store 里解析）        | 策略进了 schema              | 该进载荷文档；机制部分是 run、task、revision、input、dependencies、operation 那几列 |
 | 驱动断言 `ticket.patch!.digest`                                        | 策略断言                     | 机制断言是：声明带摘要、认领绑 attempt、交付绑摘要                                  |
 
-今天那条合法性规则正是本文新增的那点修正的最清楚的例子：**它的检查属于程序，而 permission closure 的名字与启用属于声明。** 所以修法不是把检查搬出程序，而是**别再用核心的词汇硬编码这条规则**——这与合法性记录计划第 3 步（把 repair-first 从共享规划策略变成声明的约束）是**同一形状的修法**。两处各自独立的修法落在同一形状上，是"这个分类是对的"的证据。
+今天那条合法性规则正是本文新增的那点修正的最清楚的例子：**它的检查属于程序，而 permission closure 的名字与启用属于声明。** 所以修法不是把检查搬出程序，而是**别再用核心的词汇硬编码这条规则**——这与合法性记录第 3 步（把 repair-first 从共享规划策略变成由计划声明的约束，2026-09-23 已落地）是**同一形状的修法**。两处各自独立的修法落在同一形状上，是"这个分类是对的"的证据。
 
 ## 考虑过的替代方案
 

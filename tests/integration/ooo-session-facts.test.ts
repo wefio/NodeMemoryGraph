@@ -127,6 +127,9 @@ function linearPlan(): SessionPlan {
         { capability: "patch", authority: "host", visible: ["src/a.ts"] },
       ]),
     ),
+    // Every case in this file asks about a boundary of a session that continues, so the plan enables
+    // the constraint that lets it: the decision, not the plan's declarations, is what is under test.
+    constraints: ["repair-first"],
   };
 }
 
