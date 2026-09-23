@@ -16,7 +16,12 @@
  *    (execution limits re-expressed as wall clock), or an unknown requirement
  *    kind gets a refusal naming the task and the field.
  */
-import { startableTasks, type DispatchTask } from "./ooo-execution.ts";
+import {
+  startableTasks,
+  unitLegality,
+  type DispatchCause,
+  type DispatchTask,
+} from "./ooo-execution.ts";
 import { workDigestOf } from "./work-identity.ts";
 import {
   CONCLUSION_KINDS,
@@ -526,24 +531,35 @@ export function dispatchTasks(units: readonly TaskUnit[], facts: RecordedFacts):
 
 /** Status and dependency release share the derived dispatch state and the existing eligibility rule;
  *  neither gets its own notion of "accepted". `ready` is what a run may start now: one task at the
- *  default budget, and the run's remaining claim budget's worth when it declared more. */
+ *  default budget, and the run's remaining claim budget's worth when it declared more.
+ *
+ *  A blocked unit carries the rule's own causes beside the declared dependencies it is waiting on
+ *  (`waitingFor`, direct; the causes are transitive where the rule is), so "why is this not offered"
+ *  is answered by the same `selection` that decided it rather than by a reader's guess. */
 export function deriveStatus(
   units: readonly TaskUnit[],
   facts: RecordedFacts,
   slots = 1,
 ): {
   ready: readonly string[];
-  blocked: readonly { id: string; waitingFor: readonly string[] }[];
+  blocked: readonly {
+    id: string;
+    waitingFor: readonly string[];
+    reasons: readonly DispatchCause[];
+  }[];
   accepted: readonly string[];
 } {
   const accepted = units.filter((unit) => isAccepted(unit, facts)).map((unit) => unit.id);
   const acceptedIds = new Set(accepted);
-  const ready = startableTasks(dispatchTasks(units, facts), slots);
+  const tasks = dispatchTasks(units, facts);
+  const ready = startableTasks(tasks, slots);
+  const legality = new Map(unitLegality(tasks, slots).units.map((unit) => [unit.id, unit.reasons]));
   const blocked = units
     .filter((unit) => !isAccepted(unit, facts))
     .map((unit) => ({
       id: unit.id,
       waitingFor: unit.inputs.dependencies.filter((dependency) => !acceptedIds.has(dependency)),
+      reasons: legality.get(unit.id) ?? [],
     }))
     .filter((entry) => entry.waitingFor.length > 0 || !ready.includes(entry.id));
   return { ready, blocked, accepted };

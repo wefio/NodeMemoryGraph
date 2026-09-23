@@ -549,9 +549,10 @@ const TARGETS: readonly Target[] = [
         // decide whether selection is open: this is the rule the C arm's slot count was once absent from.
         name: "a-live-claim-does-not-block-selection",
         ast: { within: "selection" },
-        from: "  if (room < 1 || pending.filter(waiting).length > 1) return none;",
-        to: "  if (pending.filter(waiting).length > 1) return none;",
-        expect: "with no fusion point the plan falls back to its declared order",
+        from: '  if (spent || severalWaits) return answer([], 0, spent ? "budget-spent" : "several-waits-pending");',
+        to: '  if (severalWaits) return answer([], 0, spent ? "budget-spent" : "several-waits-pending");',
+        expect:
+          "the answer names the gate a unit was refused through, and the gates are the rule's own",
       },
       {
         // A task someone is working is not on offer, whatever the budget. Without this, a run with
@@ -585,9 +586,30 @@ const TARGETS: readonly Target[] = [
         // likely to bypass by accident, so it has its own tooth.
         name: "a-head-blocked-by-a-stale-input-is-skipped",
         ast: { within: "selection" },
-        from: "  if (!current(first) || !waiting(first)) return none;",
-        to: "    if (false) return none;",
+        from: '  if (!current(first) || !waiting(first)) return answer([], 0, "earlier-unit-blocked");',
+        to: '    if (false) return answer([], 0, "earlier-unit-blocked");',
         expect: "the round's own answer is the shared rule's answer, not an ordering's",
+      },
+      {
+        // The answer a caller asks for carries the rule's own reasoning, so a refused unit that has
+        // no cause of its own is still named by the plan-level gate that held it back. This mutant
+        // silences every refusal at once: an empty legal set with no reasons is exactly the answer
+        // the design says a caller cannot be given.
+        name: "a-refused-unit-is-silent",
+        ast: { within: "selection" },
+        from: "      causes.set(task.id, own.length > 0 ? own : held ? [held] : []);",
+        to: "      causes.set(task.id, []);",
+        expect: "no refusal in the answer is silent, over the flags a plan's facts can carry",
+      },
+      {
+        // A cause names the gate; it never restates the condition. Dropping one leaves a refusal
+        // whose reason the rule can no longer give, even when another gate would still be true.
+        name: "a-stale-input-is-not-named",
+        ast: { within: "selection" },
+        from: '    if (!current(task)) causes.push("stale-input");',
+        to: '    if (false) causes.push("stale-input");',
+        expect:
+          "the answer names the gate a unit was refused through, and the gates are the rule's own",
       },
       {
         // `nextTask` returns the head of what it decided, so an ordering cannot disagree with the
