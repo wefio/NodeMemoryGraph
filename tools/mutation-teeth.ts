@@ -141,8 +141,8 @@ const TARGETS: readonly Target[] = [
         // would report a ready set narrower than what the run declared, and the two answers would differ.
         name: "the-status-query-ignores-the-declared-budget",
         ast: { within: "deriveStatus" },
-        from: "  const ready = startableTasks(dispatchTasks(units, facts), slots);",
-        to: "  const ready = startableTasks(dispatchTasks(units, facts), 1);",
+        from: "  const ready = startableTasks(tasks, slots);",
+        to: "  const ready = startableTasks(tasks, 1);",
         expect: "a run that declares more slots reports the tasks it may start, not just the head",
       },
     ],
@@ -1124,8 +1124,9 @@ const TARGETS: readonly Target[] = [
         // A cancelled run is the end of its managed entries' lifecycle, and the fence is the only
         // thing that says so.
         name: "a-cancelled-run-still-accepts-writes",
-        from: "  if (cancelled)\n    return `run ${runId} was cancelled at sequence ${cancelled.sequence}; its managed entries take no further lifecycle writes`;",
-        to: "  if (cancelled && false)\n    return `run ${runId} was cancelled at sequence ${cancelled.sequence}; its managed entries take no further lifecycle writes`;",
+        ast: { within: "managedWriteRefusal" },
+        from: "  if (!cancelled) return null;",
+        to: "  if (cancelled) return null;",
         expect: "a cancelled run takes no further lifecycle writes on what it adopted",
       },
       {
