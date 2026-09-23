@@ -112,7 +112,11 @@ async function startHost(
           // Ask rather than kill, so the host's release path is what runs: a host that died holding
           // its lease would leave the next host on this store with a lease it cannot take.
           try {
-            await httpCall(readServerState(serverStatePath(storePath)) ?? { pid: 0 }, "shutdown");
+            // The state file names no server when it is gone, and the value passed here says exactly that:
+            // a pid of zero and no start time. The call is expected to fail, and the catch below is the
+            // path a dead host takes.
+            const state = readServerState(serverStatePath(storePath)) ?? { pid: 0, startedAt: "" };
+            await httpCall(state, "shutdown");
           } catch {
             // Already gone; the wait below still applies.
           }
