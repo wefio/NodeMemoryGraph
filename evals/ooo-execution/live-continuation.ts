@@ -484,8 +484,10 @@ if (role === "part1" || role === "part2") {
   const store = openStore();
   // Declared outside the try so a failure can still report what the call cost: a failing attempt
   // that leaves no cost behind biases exactly the comparison this check exists to make.
-  let execution: { tokens?: number; turns?: number; reads?: number; sessionId?: string } | null =
-    null;
+  // The declared type follows the call that produces it: the metrics fields are read from here too, and
+  // an inline shape that lists only them made `artifact` - the thing a continuation actually continues
+  // from - a property this file did not have.
+  let execution: Awaited<ReturnType<typeof executePiPatch>> | null = null;
   let entryId: string | undefined;
   let startedAt = 0;
   try {

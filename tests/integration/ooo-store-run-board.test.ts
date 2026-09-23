@@ -18,7 +18,11 @@ import { NmgStore } from "../../src/core/store.ts";
 import { dispatchPlan, type PlanWorker } from "../../src/integration/ooo-dispatch.ts";
 import type { SessionPlan } from "../../src/integration/ooo-execution.ts";
 import { StoreRunBoard, type AcceptanceAnswer } from "../../src/integration/ooo-runner.ts";
-import type { PatchSubmission } from "../../src/integration/ooo-patch.ts";
+import {
+  preparePatchWork,
+  type FrozenPatchWork,
+  type PatchSubmission,
+} from "../../src/integration/ooo-patch.ts";
 import {
   coordinatedBoardWrite,
   createBoundEntry,
@@ -29,7 +33,7 @@ import {
 const RUN = "run-1";
 const CHANNEL = "run-1-board";
 const FILE = "src/work.ts";
-const baseline = { [FILE]: "export const value = 1;\n" };
+const baseline: Readonly<Record<string, string>> = { [FILE]: "export const value = 1;\n" };
 
 /** Two units of one plan, the second depending on the first, both patch work. */
 function tasks() {
@@ -91,12 +95,15 @@ function workspace(_taskId: string, files: readonly string[]): Readonly<Record<s
   return Object.fromEntries(files.map((path) => [path, baseline[path] ?? ""]));
 }
 
-/** The artifact a worker produces: the wire shape the host validates, with this task's own marker. */
-const worker: PlanWorker = async (taskId, frozen) =>
-  JSON.stringify({
+/** The artifact a task's worker produces: the wire shape the host validates, with the task's marker. */
+function artifactFor(taskId: string, frozen: FrozenPatchWork): string {
+  return JSON.stringify({
     digest: frozen.digest,
     files: [{ path: FILE, content: `${baseline[FILE]}// ${taskId}\n` }],
   });
+}
+
+const worker: PlanWorker = async (taskId, frozen) => artifactFor(taskId, frozen);
 
 /** The acceptance reads the submission and answers; its name is not the deliverer's. */
 const acceptance = {
@@ -166,7 +173,7 @@ test("one plan runs through the product's own board, judged by someone other tha
     assert.deepEqual(Object.keys(accepted).sort(), ["P", "T"]);
     assert.match(accepted.P!, /\/\/ P/u);
     for (const taskId of ["P", "T"]) {
-      const entry = store.taskBoardEntry(bindingEntry(store, taskId));
+      const entry = store.getTaskBoardEntryById(CHANNEL, bindingEntry(store, taskId));
       assert.ok(entry, `task ${taskId} has an entry`);
       assert.equal(entry.verdict, "accepted");
       assert.equal(entry.judgedBy, acceptance.agentId);
@@ -188,10 +195,11 @@ test("the deliverer cannot judge its own delivery, so a run cannot self-accept",
     });
     const entryId = bindingEntry(store, "P");
     const ticket = board.claim("P", "worker:P");
-    const artifact = JSON.stringify({
-      digest: ticket.patch!.digest,
-      files: [{ path: FILE, content: `${baseline[FILE]}// P\n` }],
-    });
+    // The artifact the loop would have delivered, frozen the way the loop freezes it. Reading a digest
+    // off the ticket wrote an artifact with no digest at all, and the store took it: a delivery is a
+    // digest and a reference, and the wire shape is the host's check rather than the board's.
+    const frozen = preparePatchWork({ ...ticket.patch!, attempt: ticket.attempt });
+    const artifact = artifactFor("P", frozen);
     coordinatedBoardWrite(store, {
       runId: RUN,
       entryId,

@@ -31,21 +31,18 @@ const { values } = parseArgs({
   },
 });
 
-const channel = values.channel;
-const entryId = values.entry;
-const agentId = values.agent;
-const verdict = values.verdict as "accepted" | "rejected" | "undecidable" | undefined;
-const reason = values.reason;
-for (const [name, value] of Object.entries({
-  channel,
-  entry: entryId,
-  agent: agentId,
-  verdict,
-  reason,
-})) {
+const channel = flag("channel", values.channel);
+const entryId = flag("entry", values.entry);
+const agentId = flag("agent", values.agent);
+const verdict = flag("verdict", values.verdict) as "accepted" | "rejected" | "undecidable";
+const reason = flag("reason", values.reason);
+/** One required flag, refused by name. A loop over an object of them cannot narrow any of them, which is
+ *  why this returns the value it checked instead of only rejecting a missing one. */
+function flag(name: string, value: string | undefined): string {
   if (!value) throw new Error(`--${name} is required`);
+  return value;
 }
-if (!["accepted", "rejected", "undecidable"].includes(verdict!)) {
+if (!["accepted", "rejected", "undecidable"].includes(verdict)) {
   throw new Error(`--verdict must be accepted | rejected | undecidable, got ${verdict}`);
 }
 if (!values.daemon) {
@@ -54,7 +51,7 @@ if (!values.daemon) {
 
 const state = roundDaemon(resolve(values.daemon));
 {
-  const read = await boardCall(state, { action: "read", taskId: channel!, agentId, limit: 200 });
+  const read = await boardCall(state, { action: "read", taskId: channel, agentId, limit: 200 });
   if (read.action !== "read") throw new Error("the board did not answer a read with entries");
   const entry = read.entries.find((candidate) => candidate.id === entryId);
   if (!entry) throw new Error(`no entry ${entryId} in ${channel}`);

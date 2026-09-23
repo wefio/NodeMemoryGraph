@@ -32,12 +32,15 @@ const { values } = parseArgs({
   },
 });
 
-const channel = values.channel;
-const entryId = values.entry;
-const agentId = values.agent;
+const channel = flag("channel", values.channel);
+const entryId = flag("entry", values.entry);
+const agentId = flag("agent", values.agent);
 const ref = values.ref;
-for (const [name, value] of Object.entries({ channel, entry: entryId, agent: agentId })) {
+/** One required flag, refused by name. A loop over an object of them cannot narrow any of them, which is
+ *  why this returns the value it checked instead of only rejecting a missing one. */
+function flag(name: string, value: string | undefined): string {
   if (!value) throw new Error(`--${name} is required`);
+  return value;
 }
 if (!values.daemon) {
   throw new Error("--daemon is required: the store path whose daemon serves this round's board");
