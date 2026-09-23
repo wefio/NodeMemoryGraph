@@ -9,8 +9,15 @@
  * named grace on both boundaries and never narrowed, and a value dated well into the future is still
  * excluded, because that is what the comparison is for.
  *
- * Every boundary below is stamped **in SQL**, so the stamp and the read share one clock source and the
- * expectation does not depend on how long the test takes.
+ * Every boundary below is stamped **in SQL**, so the stamp and the read share one clock source: no read
+ * here compares JavaScript's clock against SQLite's. Sharing a clock *source* is not the same as sharing
+ * one clock *read*, though, and that difference cost this file a case. "An expiry a moment ago is still
+ * current" stamped a boundary half a grace in the past in one statement and read it in another, so it
+ * asserted that the read happens within the half that is left - measured, a delay of 20 ms after the
+ * store was reopened already answered "not active", while 0 and 10 ms answered "current". It failed on a
+ * loaded CI runner and not once in 30 local runs. A row's boundary is stamped by one statement and
+ * compared by another, so that case cannot be asked at row level at all; it is asked below as a relation,
+ * where the boundary and the predicate share one `'now'` in one statement.
  */
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -70,13 +77,35 @@ test("a value dated well into the future is still not current", () => {
   });
 });
 
-test("a value that expired a moment ago is still current", () => {
-  withStamped(
-    `expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-${half} seconds')`,
-    (store, id) => {
-      assert.equal(store.demoteMemory(id, "expired a clock tick ago").residence, "stg");
-    },
-  );
+test("the freshness half widens one grace into the past and no further", () => {
+  // One statement, one clock read, and the store's own predicate rather than a copy of it: this pins the
+  // widening itself instead of a stopwatch, and it pins the boundary - at exactly one grace an expiry is
+  // already excluded. Every assertion holds whether or not SQLite hands out the same `'now'` twice inside
+  // one statement: the two boundaries that could disagree with it are a whole grace apart.
+  const raw = new DatabaseSync(":memory:");
+  const isCurrent = (offsetSeconds: number): boolean => {
+    const boundary = `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '${offsetSeconds.toFixed(3)} seconds')`;
+    const row = raw
+      .prepare(`SELECT ${notExpired("r")} AS is_current FROM (SELECT ${boundary} AS expires_at) r`)
+      .get() as { is_current: number };
+    return row.is_current === 1;
+  };
+  try {
+    assert.equal(isCurrent(0), true, "an expiry stamped now is current");
+    assert.equal(
+      isCurrent(-(CLOCK_GRACE_MS / 2000)),
+      true,
+      "an expiry inside the grace is current",
+    );
+    assert.equal(
+      isCurrent(-(CLOCK_GRACE_MS / 1000)),
+      false,
+      "at exactly the grace it is not current",
+    );
+    assert.equal(isCurrent(-60), false, "an expiry a minute ago is not current");
+  } finally {
+    raw.close();
+  }
 });
 
 test("a value that expired a minute ago is not current", () => {

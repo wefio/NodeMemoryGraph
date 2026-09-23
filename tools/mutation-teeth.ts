@@ -1381,7 +1381,7 @@ const TARGETS: readonly Target[] = [
         name: "the-window-does-not-grace-expiry",
         from: '  return `(${alias}.expires_at IS NULL OR ${alias}.expires_at > ${clockNow("earlier")})`;',
         to: '  return `(${alias}.expires_at IS NULL OR ${alias}.expires_at > ${clockNow("later")})`;',
-        expect: "a value that expired a moment ago is still current",
+        expect: "the freshness half widens one grace into the past and no further",
       },
       {
         name: "the-grace-is-zero",
