@@ -38,6 +38,8 @@ import {
   remainingSlots,
   selectableTasks,
   snapshotAnswer,
+  unitLegality,
+  type LegalityAnswer,
   type SnapshotWork,
 } from "./ooo-execution.ts";
 import { compileTaskUnits, dispatchTasks, type RecordedFacts } from "./task-semantics.ts";
@@ -927,13 +929,27 @@ export class BoardAdmission extends NmgStore {
     return order.slice(0, room);
   }
 
-  private ordered(): { order: readonly string[]; room: number } {
-    // A cancelled round selects nothing: the successor is not "the next task", it is
-    // the explicit terminal decision the caller asked for.
-    if (this.cancelled() !== null) {
-      this.lastAdvice = null;
-      return { order: [], room: 0 };
-    }
+  /**
+   * The legality answer: the ordered legal set, the room left, and a cause for every unit the rules
+   * do not have on offer. A read - it claims nothing, publishes nothing and wakes nobody - and it
+   * comes from the same projection `candidates()` and `next()` do, so a caller can ask why a unit is
+   * not on offer instead of inferring it from the refusals it collects.
+   */
+  legality(): LegalityAnswer {
+    return unitLegality(this.projection().dispatch, this.slots);
+  }
+
+  /**
+   * The shared reading of this board's plan and its recorded facts, computed in one place so the
+   * ordered set, the budget and the legality answer cannot come to different conclusions about the
+   * same plan. A plan the compiler refuses is refused here by name, not scheduled on a hand-rolled
+   * reading of the same rows.
+   */
+  private projection(): {
+    compiled: ReturnType<typeof compileTaskUnits>;
+    dispatch: ReturnType<typeof dispatchTasks>;
+    rows: readonly Row[];
+  } {
     const rows = this.db
       .prepare("SELECT * FROM ooo_probe_task_view WHERE run_id=? ORDER BY position")
       .all(this.runId) as unknown as Row[];
@@ -950,7 +966,17 @@ export class BoardAdmission extends NmgStore {
           `first is ${String(first?.task)}/${String(first?.field)}: ${String(first?.reason)}`,
       );
     }
-    const dispatch = dispatchTasks(compiled.units, this.recordedFacts(rows));
+    return { compiled, dispatch: dispatchTasks(compiled.units, this.recordedFacts(rows)), rows };
+  }
+
+  private ordered(): { order: readonly string[]; room: number } {
+    // A cancelled round selects nothing: the successor is not "the next task", it is
+    // the explicit terminal decision the caller asked for.
+    if (this.cancelled() !== null) {
+      this.lastAdvice = null;
+      return { order: [], room: 0 };
+    }
+    const { compiled, rows, dispatch } = this.projection();
     const legal = selectableTasks(dispatch, this.slots);
     const room = remainingSlots(dispatch, this.slots);
     if (this.advisers.length === 0) {

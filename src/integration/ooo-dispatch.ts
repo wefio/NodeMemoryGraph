@@ -11,10 +11,10 @@
  *
  * Two things are deliberately *not* decided here.
  *
- * The board is a port (`DispatchBoard`) of operations - candidates, accepted, claim, put, submit -
- * and not a class. The product's board satisfies it by being one; the research instrument's board
- * satisfies it structurally too. Naming either here is what would make the shared layer depend on
- * one of them, and a shared loop that only the instrument can call is not shared.
+ * The board is a port (`DispatchBoard`) of operations - candidates, legality, accepted, claim, put,
+ * submit - and not a class. The product's board satisfies it by being one; the research instrument's
+ * board satisfies it structurally too. Naming either here is what would make the shared layer depend
+ * on one of them, and a shared loop that only the instrument can call is not shared.
  *
  * The worker is a port for the same reason, plus one of its own: only the caller knows how a
  * candidate is produced. The arms supply a live model or a recorded one; a host supplies the session
@@ -28,7 +28,7 @@
  */
 import type { PatchWork, FrozenPatchWork } from "./ooo-patch.ts";
 import { preparePatchWork } from "./ooo-patch.ts";
-import type { SessionPlan } from "./ooo-execution.ts";
+import type { LegalityAnswer, SessionPlan } from "./ooo-execution.ts";
 import { nextSessionMove } from "./ooo-fusion-plan.ts";
 import { decideSessionMove } from "./ooo-session-facts.ts";
 import type { NmgStore } from "../core/store.ts";
@@ -104,6 +104,11 @@ export interface DispatchBoard {
   readonly now: number;
   /** Which of the plan's tasks may be claimed right now, in the order they should run. */
   candidates(): readonly string[];
+  /** The same reading, and why: the ordered legal set, the room the run has left, and a cause for
+   *  every unit the rules do not have on offer. A read - it takes no claim, puts no entry, spends no
+   *  budget and wakes nobody - so a caller may ask it as often as it likes instead of inferring the
+   *  rules from refusals. `candidates()` is this answer's `legal`. */
+  legality(): LegalityAnswer;
   /** The accepted artifact per task id: the rule every dependency and every parent check reads. */
   accepted(): Readonly<Record<string, string>>;
   /** Take one unit. The board re-checks legality here, so a stale answer becomes a refusal. */

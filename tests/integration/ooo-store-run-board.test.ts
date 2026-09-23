@@ -237,6 +237,92 @@ test("the deliverer cannot judge its own delivery, so a run cannot self-accept",
   });
 });
 
+test("the board answers what is legal and why, and asking changes nothing", async () => {
+  await withStore(async (store) => {
+    openRun(store);
+    const board = new StoreRunBoard(store, {
+      runId: RUN,
+      channel: CHANNEL,
+      slots: 1,
+      workspace,
+      acceptance,
+    });
+    const entryId = bindingEntry(store, "P");
+    // What the answer reads, so the read can be shown to leave it as it found it.
+    const recorded = () => ({
+      facts: store.taskRunFacts(RUN).length,
+      entry: store.getTaskBoardEntryById(CHANNEL, entryId),
+    });
+
+    const before = recorded();
+    const first = board.legality();
+    assert.deepEqual(
+      board.legality(),
+      first,
+      "asking twice on an unchanged store returns the same answer",
+    );
+    assert.deepEqual(recorded(), before, "the read wrote no run fact and moved no entry");
+
+    // Per unit, in plan order, with the reason on the unit that is not on offer: the dependency gate
+    // is the shared rule's, read through this board's projection.
+    assert.deepEqual(first.legal, ["P"], "the dependent unit is not offered early");
+    assert.equal(first.room, 1, "the declared budget is reported, and asking does not spend it");
+    assert.deepEqual(first.units, [
+      { id: "P", legal: true, reasons: [] },
+      { id: "T", legal: false, reasons: ["dependency-not-accepted"] },
+    ]);
+
+    // The answer names nobody. The store's own refusal names the holder; this read does not, because
+    // who claimed, who delivered and who judged are board facts rather than answer fields.
+    const printed = JSON.stringify(first);
+    for (const name of ["worker", acceptance.agentId, "runner", "repair-first"])
+      assert.ok(!printed.includes(name), `the answer does not name ${name}`);
+
+    // The structural rule in the answer's own terms: a claim takes the unit out of the set and says
+    // which gate did it, while the claim itself stays the store's.
+    board.claim("P", "worker:P");
+    const claimed = board.legality();
+    assert.deepEqual(claimed.legal, [], "the single declared slot is spent");
+    assert.equal(claimed.room, 0, "the claim spent the declared budget");
+    assert.deepEqual(
+      claimed.units.map((unit) => [unit.id, unit.reasons]),
+      [
+        ["P", ["claimed"]],
+        ["T", ["dependency-not-accepted"]],
+      ],
+    );
+    assert.equal(store.getTaskBoardEntryById(CHANNEL, entryId)?.claimedBy, "worker:P");
+    assert.throws(() => board.claim("P", "worker:other"), /already claimed by worker:P/u);
+
+    // Bytes are delivered and nobody has decided the verdict yet, so the unit is still its
+    // claimant's: this board's facts carry acceptance rather than delivery (the probe's carry the
+    // other), which is why the gate named here is the claim. In-doubt work across runs is the
+    // umbrella's own open gap, not something this read may paper over.
+    const ticket = board.claim("P", "worker:P");
+    const frozen = preparePatchWork({ ...ticket.patch!, attempt: ticket.attempt });
+    coordinatedBoardWrite(store, {
+      runId: RUN,
+      entryId,
+      verb: "deliver",
+      actorId: "worker:P",
+      apply: () =>
+        store.deliverTaskBoardEntry({
+          taskId: CHANNEL,
+          entryId,
+          agentId: "worker:P",
+          digest: "d",
+          ref: artifactFor("P", frozen),
+        }),
+    });
+    const delivered = board.legality();
+    assert.deepEqual(delivered.legal, [], "a delivered unit nobody judged is still not on offer");
+    assert.deepEqual(delivered.units.find((unit) => unit.id === "P")!.reasons, ["claimed"]);
+    assert.deepEqual(delivered.units.find((unit) => unit.id === "T")!.reasons, [
+      "dependency-not-accepted",
+    ]);
+  });
+});
+
 /** The entry a task's binding holds, read from the run's own record. */
 function bindingEntry(store: NmgStore, taskId: string): string {
   const fact = store

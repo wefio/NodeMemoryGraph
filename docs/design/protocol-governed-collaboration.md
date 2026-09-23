@@ -40,8 +40,12 @@ rows above are the ones a given piece of work cannot do without.
    promotion, the dispatch loop), the responsibility does not. Distributed systems call the first one a
    **commit boundary** - the single point that makes a discussed arrangement binding - and the second an
    **orphan reaper / restart responsibility**.
-2. **Legality has no readable answer.** A caller can claim and be refused, but cannot ask what is legal
-   and why. That is **admission control** with a **read-only precondition check**.
+2. **Legality's readable answer now exists; asking it from a store alone does not.** The board port
+   answers `legality()` - the ordered legal set, the room left, and a named cause per unit - and that read
+   changes no state, so admission control with a read-only precondition check now has a home. What is still
+   missing is the asker without a workspace: a plan is compiled from the caller's files, so a process that
+   holds only the store cannot compute the answer. The concepts are unchanged; the gap now narrows to where
+   the plan lives.
 3. **Constraints have no declaration.** Repair-first currently lives as policy inside shared planning
    code. Making preferences named constraints a plan enables is **declarative policy**, and the
    requirement that one plan plus one set of facts yields one answer is **deterministic replay**.
@@ -85,7 +89,8 @@ rows above are the ones a given piece of work cannot do without.
 
 ## What would make this inventory complete
 
-Rows 9 and 10 are the interfaces the legality proposal covers: the readable answer and the declared
-constraint set. Rows 1, 4, 5, 6 and 7 are gaps with no owner yet. Until each gap either gets a clause or
+Row 9's readable answer landed on 2026-09-23 as the board port's own read - see [The program answers
+legality](../decisions/proposed/2026-09-20-the-program-answers-legality.md), whose step 3 is the row 10 it
+still owes. Rows 1, 4, 5, 6 and 7 are gaps with no owner yet. Until each gap either gets a clause or
 is written down as deliberately absent, "complete" for this umbrella means the parts that have owners,
 not the parts a task needs.

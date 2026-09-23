@@ -98,6 +98,15 @@ against an imagined second shape, and the imagined one is the one that gets buil
   rules read, and it carries no legality rule of its own. Three implementations satisfy `DispatchBoard` now
   - the probe board, the dispatch test's stub, and this one - and only the projection differs between them,
     which is the abstraction working rather than a claim that it does.
+- **The port's read answers why, not only which.** `legality()` is that read: the ordered legal set, the
+  room the run has left, and a named cause for every unit the rules do not have on offer. The causes are
+  computed inside the rules' own `selection`, so a cause names a gate rather than restating its condition,
+  and a plan-level gate is attached to the units it holds back; `candidates()` is that answer's `legal`, so
+  the two cannot disagree. The answer names nobody - who claimed, delivered or judged stays a board fact -
+  and asking changes nothing: no entry, no claim, no budget, no wake.
+- **Who can be asked.** The process that owns the run's workspace, through its board. A plan is compiled
+  from the caller's files and the daemon holds only their frozen paths, so this read cannot be answered from
+  the store alone; that is a property of where the plan lives, not a surface the daemon is missing.
 - **The projection has one contract that is easy to get wrong.** The shared acceptance rule binds a verdict
   to the artifact a run carries: it compares the verdict's digest against the artifact value, so a verdict
   about a different artifact cannot pass as acceptance. Reporting the store's own deliverable hash in that

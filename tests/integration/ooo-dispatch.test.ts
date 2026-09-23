@@ -27,10 +27,19 @@ import {
   recordedSessionMoves,
 } from "../../src/integration/ooo-session-facts.ts";
 import { registerRun } from "../../src/integration/task-coordinator.ts";
-import type { DispatchTask, SessionPlan } from "../../src/integration/ooo-execution.ts";
+import {
+  unitLegality,
+  type DispatchTask,
+  type LegalityAnswer,
+  type SessionPlan,
+} from "../../src/integration/ooo-execution.ts";
 import type { PlanSession, PlanWorker } from "../../src/integration/ooo-dispatch.ts";
 
 const REMOVE_TEMP_TREE = { recursive: true, force: true, maxRetries: 5, retryDelay: 100 };
+
+/** The revision this stub's plan declares. The stub models the loop's order of operations, not drift,
+ *  so every task's inputs are the ones the plan declared and `current()` always holds. */
+const REVISION = "stub-v1";
 
 type BoardOptions = {
   /** Which legal unit to refuse, as the board does when another claim holds the handoff. */
@@ -68,11 +77,28 @@ class StubBoard implements DispatchBoard {
     this.#options = options;
   }
 
+  /**
+   * The answer the port asks for, from this board's own fields: its order, dependencies, claims and
+   * accepted artifacts are exactly what the shared rules read, so the stub hands them to the shared
+   * reading instead of growing a second set of rules. No budget is declared here - the stub's job is
+   * the loop's order of operations - so the reading runs with a budget that never cuts.
+   */
+  legality(): LegalityAnswer {
+    const tasks = this.#order.map((id) => ({
+      id,
+      effect: "isolated-artifact",
+      sourceVersion: REVISION,
+      observedVersion: REVISION,
+      dependencies: [...(this.#dependencies[id] ?? [])],
+      accepted: this.#accepted[id] !== undefined,
+      claimed: this.#inFlight.has(id),
+      externalReady: false,
+    }));
+    return unitLegality(tasks, Number.MAX_SAFE_INTEGER);
+  }
+
   candidates(): readonly string[] {
-    return this.#order.filter((id) => {
-      if (this.#accepted[id] !== undefined || this.#inFlight.has(id)) return false;
-      return (this.#dependencies[id] ?? []).every((needed) => this.#accepted[needed] !== undefined);
-    });
+    return this.legality().legal;
   }
 
   accepted(): Readonly<Record<string, string>> {

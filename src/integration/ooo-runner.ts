@@ -3,7 +3,7 @@
  *
  * This is the third implementation of `DispatchBoard` - the probe board and the dispatch test's stub
  * are the other two - and it is deliberately the thinnest of the three. No legality rule lives here:
- * the plan is compiled by `compileTaskUnits`, the legal set is `dispatchTasks` and `selectableTasks`,
+ * the plan is compiled by `compileTaskUnits`, the legal set is `dispatchTasks` and `unitLegality`,
  * cancellations are read through the coordinator's own reader, and the verdict belongs to the
  * caller's acceptance. What this module adds is a **projection** from the product's run tables and
  * board entries into the facts those pure functions read, plus the six board operations. A rule that
@@ -27,7 +27,7 @@ import {
   type PatchSubmission,
   type PatchWork,
 } from "./ooo-patch.ts";
-import { selectableTasks } from "./ooo-execution.ts";
+import { unitLegality, type LegalityAnswer } from "./ooo-execution.ts";
 import { compileTaskUnits, dispatchTasks, type RecordedFacts } from "./task-semantics.ts";
 import { coordinatedBoardWrite, taskCancellation, taskRunStatus } from "./task-coordinator.ts";
 
@@ -87,8 +87,18 @@ export class StoreRunBoard implements DispatchBoard {
 
   /** What the loop may claim right now, in the shared rule's own order. */
   candidates(): readonly string[] {
+    return this.legality().legal;
+  }
+
+  /**
+   * The same answer, and why: the ordered legal set, the room the run has left, and a cause for every
+   * unit the rules do not have on offer. It reads the run's recorded facts under the shared rules and
+   * writes nothing, so a caller can ask what is legal instead of inferring it from the refusals it
+   * collects. `candidates()` is that answer's `legal`, which is why it is computed from it.
+   */
+  legality(): LegalityAnswer {
     const { compiled, facts } = this.#projection();
-    return selectableTasks(dispatchTasks(compiled.units, facts), this.#options.slots);
+    return unitLegality(dispatchTasks(compiled.units, facts), this.#options.slots);
   }
 
   /** The accepted artifact per task id: the same map the rules read, so the two cannot disagree. */

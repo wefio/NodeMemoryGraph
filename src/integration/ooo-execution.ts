@@ -275,6 +275,14 @@ function selection(plan: readonly DispatchTask[], slots: number): Selection {
   return answer(ids(pending.slice(1)), room);
 }
 
+/** The answer a caller asks for: the ordered legal set, the budget it left, and one reading per unit
+ *  in plan order. Plain data on purpose - a caller may print two of them and diff them. */
+export interface LegalityAnswer {
+  legal: readonly string[];
+  room: number;
+  units: readonly UnitLegality[];
+}
+
 /**
  * The legality answer: the ordered legal set, the run's remaining claim budget, and a reading per unit
  * in plan order. It is a query - it writes nothing, claims nothing and wakes nobody - and it calls
@@ -283,10 +291,7 @@ function selection(plan: readonly DispatchTask[], slots: number): Selection {
  * The cut to the budget is `startableTasks`'; this answer reports the whole legal set and the room
  * left, so a caller with its own order still cuts the same way instead of re-deriving what is pending.
  */
-export function unitLegality(
-  plan: readonly DispatchTask[],
-  slots = 1,
-): { legal: readonly string[]; room: number; units: readonly UnitLegality[] } {
+export function unitLegality(plan: readonly DispatchTask[], slots = 1): LegalityAnswer {
   const { legal, room, causes } = selection(plan, slots);
   const offered = new Set(legal);
   return {

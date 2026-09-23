@@ -60,6 +60,18 @@ asking a question consume a slot.
 
 Each step is verifiable on its own; none of them requires a driver, a wake, or a new tool.
 
+**Step 2, landed 2026-09-23.** The board port's read is `legality()`: the ordered legal set, the room the
+run has left, and a named cause for every unit the rules do not have on offer, computed inside the rules'
+own `selection` so a cause names a gate rather than restating it - and `candidates()` is that answer's
+`legal`, so the two cannot disagree. The asker is the process that owns the run's workspace: a plan
+compiles from the caller's files while the daemon holds only their frozen paths, so the shared tool
+contract's wording is unchanged, because the read it describes is the same read.
+
+**Step 3 is not built**, which is the one place this proposal is not yet true: the online move that
+prefers continuing a session still lives as the shared planner's own ordering, and the run's recorded
+`policy` is a name the board checks rather than a switch the planner reads, so the answer is computed
+under an implicit constraint.
+
 ## Alternatives considered
 
 - **Let the program select the next unit** (today's `next()` used as policy). Rejected: a bound is not a
