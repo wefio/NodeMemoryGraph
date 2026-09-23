@@ -16,8 +16,8 @@
  *    (execution limits re-expressed as wall clock), or an unknown requirement
  *    kind gets a refusal naming the task and the field.
  */
-import { createHash } from "node:crypto";
 import { startableTasks, type DispatchTask } from "./ooo-execution.ts";
+import { workDigestOf } from "./work-identity.ts";
 import {
   CONCLUSION_KINDS,
   MAX_PATCH_BUDGET,
@@ -127,10 +127,6 @@ const UNIT_OBLIGATIONS = [
   "explicit-acceptance",
   "stoppable-voidable",
 ] as const;
-
-function digestOf(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
-}
 
 function unknownKeys(value: unknown, allowed: ReadonlySet<string>): string[] {
   if (!value || typeof value !== "object") return [];
@@ -435,7 +431,7 @@ export function compileTaskUnits(input: CompileInput): CompiledTasks {
     units,
     refusals,
     legal: refusals.length === 0,
-    digest: digestOf({ plan, requires: input.requires ?? {} }),
+    digest: workDigestOf({ plan, requires: input.requires ?? {} }),
   };
 }
 

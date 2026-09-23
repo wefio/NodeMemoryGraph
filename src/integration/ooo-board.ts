@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { NmgStore } from "../../src/core/store.ts";
@@ -15,6 +15,7 @@ import {
   type PatchLimits,
   type PatchSubmission,
 } from "./ooo-patch.ts";
+import { workDigest, workDigestOf } from "./work-identity.ts";
 
 export type ProbeOperation = SnapshotWork["operation"];
 
@@ -77,10 +78,9 @@ export function roundChannel(runId: string): string {
 const RETENTION_OWNER = "coordinator";
 
 export function artifactDigest(commit: string): string {
-  return createHash("sha256").update(commit).digest("hex");
+  return workDigest(commit);
 }
 const policy = "narrow-snapshot-work/v3";
-const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 interface Row {
   id: string;
@@ -372,7 +372,7 @@ export class BoardAdmission extends NmgStore {
     // that held it. It was a pointer to the entry whose verdict accepted an artifact, and the
     // verdict is looked up by artifact digest now — a migrated store keeps the artifact plus the
     // entries that decide it, and keeps no stale pointer that a reader could mistake for one.
-    const wanted = `${policy}:${digest(plan)}`;
+    const wanted = `${policy}:${workDigestOf(plan)}`;
     const runs = this.db
       .prepare("SELECT run_id, policy FROM ooo_probe_runs ORDER BY created_at")
       .all() as unknown as { run_id: string; policy: string }[];
@@ -635,7 +635,7 @@ export class BoardAdmission extends NmgStore {
 
   private inputDigest(row: Row): string {
     if (this.patchSpec(row)) return this.patchFrozen(row, row.attempt > 0 ? row.attempt : 1).digest;
-    return digest([
+    return workDigestOf([
       policy,
       row.revision,
       row.source_revision,
@@ -826,7 +826,7 @@ export class BoardAdmission extends NmgStore {
         // Deliberately NOT run-scoped: a check id is what a round log records, and a replay runs
         // under a new runId while reproducing the same attempts. Uniqueness in the store is the
         // (run_id, task_id) key, so two runs may share a check id without colliding.
-        checkId: digest([id, attempt]).slice(0, 32),
+        checkId: workDigestOf([id, attempt]).slice(0, 32),
         attempt,
         inputDigest: this.inputDigest(row),
         owner,

@@ -11,12 +11,12 @@
  *     --daemon <round store path> --channel ooo-probe:<runId> --entry <id> --agent coordinator \
  *     --verdict accepted|rejected|undecidable --reason "..."
  */
-import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import { boardCall, roundDaemon } from "./round-client.ts";
+import { workDigest } from "../../src/integration/work-identity.ts";
 
 // node:util owns flag parsing; an unknown flag or a repeated one is an error rather
 // than something this script silently ignores.
@@ -65,7 +65,7 @@ const state = roundDaemon(resolve(values.daemon));
   let observed = "unavailable";
   if (ref) {
     const bytes = statSync(ref).size;
-    observed = createHash("sha256").update(readFileSync(ref)).digest("hex");
+    observed = workDigest(readFileSync(ref));
     console.log(`[judge] ${ref} bytes=${bytes} digest=${observed}`);
   }
   if (verdict === "accepted" && observed !== entry.deliverableDigest) {

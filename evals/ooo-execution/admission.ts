@@ -1,4 +1,6 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+
+import { workDigestOf } from "../../src/integration/work-identity.ts";
 
 export interface Task {
   id: string;
@@ -59,9 +61,7 @@ export function createAdmissionGate(plan: Task[]) {
       if (!dependenciesReady(task)) throw new Error("unfulfilled dependencies");
       const attempt = (attempts.get(taskId)?.attempt ?? 0) + 1;
       if (!Number.isSafeInteger(attempt)) throw new Error("attempt exhausted");
-      const inputDigest = createHash("sha256")
-        .update(JSON.stringify([task.revision, task.input, dependencyResults(task)]))
-        .digest("hex");
+      const inputDigest = workDigestOf([task.revision, task.input, dependencyResults(task)]);
       const ticket = Object.freeze({
         runId,
         taskId,

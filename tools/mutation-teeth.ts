@@ -1397,6 +1397,28 @@ const TARGETS: readonly Target[] = [
       },
     ],
   },
+  {
+    // The identity of work. Each mutant is one of the ways a stored digest can stop naming the bytes a
+    // verdict was about: another encoding (which changes every digest without changing any bytes), and a
+    // different serialisation of the JSON variant. The shortening two callers apply stays out of it - it
+    // is their choice, and a mutant there would be testing a caller rather than the rule.
+    target: "src/integration/work-identity.ts",
+    suites: ["tests/integration/work-identity.test.ts"],
+    mutants: [
+      {
+        name: "the-identity-is-not-hex",
+        from: '  return createHash("sha256").update(bytes).digest("hex");',
+        to: '  return createHash("sha256").update(bytes).digest("base64url");',
+        expect: "the identity of work bytes is sha256 in hex, at full length",
+      },
+      {
+        name: "the-json-variant-does-not-digest-json",
+        from: "  return workDigest(JSON.stringify(value));",
+        to: "  return workDigest(String(value));",
+        expect: "the JSON variant digests JSON text, so key order is the caller's",
+      },
+    ],
+  },
 ];
 
 interface MutantOutcome {

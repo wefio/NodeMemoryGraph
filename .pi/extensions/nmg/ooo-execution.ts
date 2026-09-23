@@ -7,9 +7,9 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { createHash } from "node:crypto";
 import { Type } from "typebox";
 import { snapshotPrompt, type SnapshotInput } from "../../../src/integration/ooo-execution.ts";
+import { workDigestOf } from "../../../src/integration/work-identity.ts";
 import type { FrozenPatchWork } from "../../../src/integration/ooo-patch.ts";
 import {
   ARTIFACT_TOOL,
@@ -36,7 +36,7 @@ import {
  *  that agree on the spec can still differ here, and an instrument version stops being a matter of prose:
  *  the report carries the digest the run actually used. */
 function digestOf(input: SessionRunInput): string {
-  return createHash("sha256").update(JSON.stringify(input)).digest("hex").slice(0, 12);
+  return workDigestOf(input).slice(0, 12);
 }
 
 /** Pi-only execution adapter. Selection, ownership and acceptance are not model decisions.

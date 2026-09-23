@@ -15,8 +15,7 @@
  * preparing the workspace belongs to the patch path's caller) and an acceptance whose identity is
  * independent of the deliverer (the store refuses a deliverer that judges its own delivery).
  */
-import { createHash } from "node:crypto";
-
+import { workDigest } from "./work-identity.ts";
 import type { NmgStore } from "../core/store.ts";
 import { taskBoardClaimIsLive } from "../core/store/base.ts";
 import { TASK_BOARD_VERDICTS } from "../core/types.ts";
@@ -155,7 +154,7 @@ export class StoreRunBoard implements DispatchBoard {
           taskId: this.channel,
           entryId: binding.entryId,
           agentId: input.agentId,
-          digest: createHash("sha256").update(artifact).digest("hex"),
+          digest: workDigest(artifact),
           ref: artifact,
         }),
     });

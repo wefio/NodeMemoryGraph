@@ -75,7 +75,23 @@ against an imagined second shape, and the imagined one is the one that gets buil
   `tests/core/task-board.test.ts` pins the rule directly. The adapter's `excerpt` helper stays for memory
   results, which are not board entries and keep their own rule.
 - **The write face's type did not land.** The three fillers are three kinds of entry rather than one shape
-  drawn three ways, so the trigger for a type is a fourth filler.
+  drawn three ways, so the trigger for a type is a fourth filler. Measured again here: the _artifact_ body
+  inside a result already has a home (`artifactEnvelope` and `artifactFromText` in
+  `src/integration/ooo-session-mechanism.ts`, which is why the worker's tool and its text channel obey one
+  contract), while the _entry_ body that wraps it has one writer and two readers that are two different
+  rules - the probe parses the loop's envelope and binds a verdict to the ticket's digest, and the product
+  board reads the artifact of a body that may be the artifact itself, because an agent that delivers through
+  the board tool writes the bytes it produced. Two rules with one implementation each are not a seam.
+- **The identity of work has one home.** `src/integration/work-identity.ts` owns the rule a verdict binds
+  to: sha256, hex, full length, over exactly the bytes or the JSON text the caller froze. Four modules had
+  written the same two lines - twice as an identical private `digestOf(value)` - and two of those callers
+  had folded their own shortening into it, so a twelve-character report identity and a sixteen-character
+  branch identity read as part of the rule instead of a caller's choice. Canonicalisation stays the caller's
+  and the module says so: JSON key order is whatever the caller built, which is why freezing a patch is what
+  makes its digest stable. Two named mutants make the convention checkable - another encoding, and a JSON
+  variant that does not digest JSON. Sites that differ on purpose (a base64url search content hash, a
+  session id, a protocol-visible `sha256:` prefix) keep their own convention, and the module names them, so
+  a later sweep cannot unify three different rules.
 - **The middle's seam did not land.** Check (c) says why.
 - **The port has a third implementation, and it is the product's.** `src/integration/ooo-runner.ts` is the
   store's own board: it projects the run's frozen table and its board entries into the facts the shared

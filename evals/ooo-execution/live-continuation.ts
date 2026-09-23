@@ -22,11 +22,12 @@
  * Refusals: no --live means no model call; a missing provider, model, run directory or task id is
  * named rather than guessed; a judge refuses to judge its own delivery.
  */
-import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+
+import { workDigest } from "../../src/integration/work-identity.ts";
 
 const { NmgStoreBase } = await import("../../src/core/store/base.ts");
 const { preparePatchWork, patchCandidate } = await import("../../src/integration/ooo-patch.ts");
@@ -356,7 +357,7 @@ function record(entry: Record<string, unknown>): void {
 }
 
 function digestOf(bytes: Buffer | string): string {
-  return createHash("sha256").update(bytes).digest("hex");
+  return workDigest(bytes);
 }
 
 function taskOf(id: string | undefined): Task {

@@ -11,12 +11,12 @@
  *     --daemon <round store path> --channel <taskId> --entry <id> --agent <holder> \
  *     --digest <sha256> [--ref <path-or-url>] [--summary <text>]
  */
-import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 import { boardCall, roundDaemon } from "./round-client.ts";
+import { workDigest } from "../../src/integration/work-identity.ts";
 
 // node:util owns flag parsing; an unknown flag or a repeated one is an error rather
 // than something this script silently ignores.
@@ -62,7 +62,7 @@ const state = roundDaemon(resolve(values.daemon));
   // If the artifact is a readable file, never trust the caller's digest: recompute.
   const digest =
     ref && statSync(ref, { throwIfNoEntry: false })?.isFile()
-      ? createHash("sha256").update(readFileSync(ref)).digest("hex")
+      ? workDigest(readFileSync(ref))
       : values.digest;
   if (!digest) throw new Error("--digest is required when --ref is not a readable file");
   if (values.digest && values.digest !== digest) {
