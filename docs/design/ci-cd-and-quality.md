@@ -43,21 +43,23 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 ## 2. 执行轨道
 
-| 命令                        | 内容                                                   | 用途             |
-| --------------------------- | ------------------------------------------------------ | ---------------- |
-| `npm run test:product`      | core、CLI、adapter、docs、Skill、工具与 test support   | 产品正确性       |
-| `npm run test:coverage`     | 与 product 相同的集合并生成覆盖率                      | 阻塞 CI          |
-| `npm run test:research`     | `tests/benchmarks`、`tests/evals`、`tests/official`    | 非阻塞研究表征   |
-| `npm run test:chaos`        | Windows 故障注入与进程/文件锁生命周期                  | 独立阻塞轨道     |
-| `npm test`                  | 所有 `tests/**/*.test.ts`                              | 本地完整兼容入口 |
-| `npm run verify:static`     | build/package/type/lint/format/docs/context/complexity | 本地与 CI 共用   |
-| `npm run verify:product-ci` | build + product coverage                               | 本地与 CI 共用   |
+| 命令                        | 内容                                                            | 用途             |
+| --------------------------- | --------------------------------------------------------------- | ---------------- |
+| `npm run test:product`      | core、CLI、adapter、docs、Skill、工具与 test support            | 产品正确性       |
+| `npm run test:coverage`     | 与 product 相同的集合并生成覆盖率                               | 阻塞 CI          |
+| `npm run test:research`     | `tests/benchmarks`、`tests/evals`、`tests/official`             | 非阻塞研究表征   |
+| `npm run test:chaos`        | Windows 故障注入与进程/文件锁生命周期                           | 独立阻塞轨道     |
+| `npm test`                  | 所有 `tests/**/*.test.ts`                                       | 本地完整兼容入口 |
+| `npm run verify:static`     | build/package/type/牙齿锚点/lint/format/docs/context/complexity | 本地与 CI 共用   |
+| `npm run verify:product-ci` | build + product coverage                                        | 本地与 CI 共用   |
 
 另有三个命令只用于本地，刻意不作为 CI 轨道：`npm run lint:fix`（与 `lint` 同一 ESLint 范围，加 `--fix`）、`npm run hotspot:modules`（对 store 各方法做静态调用点计数）、`npm run perf:hotspots`（从某个 store 的 `perf_aggregates` 打印分段延迟占比）。
 
 `npm run lint` 的扫描面是 `src/ .pi/extensions/ claude-plugins/ workbuddy-plugin/ tests/ evals/ scripts/ tools/`。两条**活性规则**（`@typescript-eslint/no-unused-vars`、`no-useless-assignment`，都在断言"这个值从未被读取"）在 `tests/`、`evals/`、`scripts/`、`tools/` 上只报告为 `warn`，在 `src/` 上仍为 error：静态工具最容易在这里把活代码判成死的（`tests/core/graph-cycles.test.ts` 的三个"未使用绑定"实际是漏掉的断言），阻塞门禁会把修法推向删掉线索。其余规则对开发面与 `src/` 同标准（决策：[静态覆盖面](../decisions/implemented/2026-09-16-ci-static-coverage.md)）。测试、研究 harness、脚本与仓库工具按设计打印，因此 `no-console` 对这些面关闭。扫描面自身由 `tests/tools/eslint-config-coverage.test.ts` 守住：`lint` 与 `lint:fix` 同面，config 里每个以目录锚定的 `files:` 块都必须落在扫描面内并仍能匹配到文件，且生效 severity 由 ESLint 自己回答（提升某条规则是一次刻意改动）。
 
 `npm run check:tests`（`tsc -p tsconfig.tests.json --noUnusedLocals --noUnusedParameters`，`tests/` 面第一次被类型检查）刻意不进入任何阻塞契约，只在 CI 以 advisory 步骤运行。
+
+`verify:static` 中的 `mutation:anchors`（`tools/mutation-teeth.ts --anchors-only`）只做一件事：把 149 颗具名 mutant 的位置全部解析一遍，不跑任何用例、不写任何字节，在 0.6 秒内回答“每一颗牙是否还瞄着东西”。它进入静态契约是因为**一颗锚点失效时没有别的检查会注意到**：全量 sweep 不跑（`mutation:teeth` 不在任何 CI 作业里），而一颗匹配不到位置的牙在 sweep 报告里只是“不可应用”并被排除出分母——本轮修掉的两颗牙就是这样悄无声息地停摆的。全量 sweep 仍然不进闸门：它是分钟级、要跑用例，属于推送前的常设规则（[决策](../decisions/proposed/2026-09-24-mutants-are-derived-not-anchored.md)）。
 
 `verify:static` 中的 `complexity:gate` 默认以 `git merge-base HEAD origin/main` 为基线（可用 `--base <ref>` 显式覆盖）。基线必须是 merge base 而不是 `HEAD`：后者只比较未提交的工作树，于是已提交到分支的改动完全不可见 —— 在 CI 的干净检出上它永远报“无改动”，等于每个 PR 都没有被这条 gate 检查过。因此每次运行都会**陈述自己用了哪个基线**，并**点名它未能测量的改动文件**（ESLint 拒绝某路径、或文件根本无法解析，都会产出“零发现”，与“量过且干净”无法区分）。
 
@@ -103,11 +105,11 @@ TestRuntime
 
 测试资源按断言需观察的边界分为四类，按需取得最轻且隔离的资源（[决策](../decisions/implemented/2026-09-24-resource-matched-test-fixtures.md)）：
 
-| 断言边界 | 测试资源 | 可省的准备工作 |
-| --- | --- | --- |
-| 纯数据或决策 | 进程内输入 | 工作区、数据库和外部进程 |
-| 单个 SQLite 连接的读写 | 每项独立的 `:memory:` store | 临时数据库文件及其清理 |
-| 重开、旧库迁移、WAL、独立连接或路径 | 每项唯一的文件数据库或工作区 | 与断言无关的额外文件和服务 |
+| 断言边界                                  | 测试资源                                     | 可省的准备工作             |
+| ----------------------------------------- | -------------------------------------------- | -------------------------- |
+| 纯数据或决策                              | 进程内输入                                   | 工作区、数据库和外部进程   |
+| 单个 SQLite 连接的读写                    | 每项独立的 `:memory:` store                  | 临时数据库文件及其清理     |
+| 重开、旧库迁移、WAL、独立连接或路径       | 每项唯一的文件数据库或工作区                 | 与断言无关的额外文件和服务 |
 | CLI、Git、HTTP、daemon lease 或跨进程共享 | 断言这些边界时使用实际进程、端口及所需工作区 | 不参与断言的重复启动和检查 |
 
 观察文件或跨进程语义的测试保留真实边界；只断言控制平面策略、receipt 或 harness 编排时，可以注入固定的 `RepositoryProvider` 观察值，另由真实 Git 集成测试覆盖发现、dirty 范围、提交和 forge 绑定。集成 `testDatabase()` 使用真实文件路径供 daemon 共享。真实 Git fixture 保留 `init/add/commit`，提交身份只传给 `commit`，避免每项再启动两次 `git config`。资源类别只决定 fixture 和可安全减少的准备工作，不改变 Safety/Contract/Guardrail 分类、阻塞地位或 narrow/full 验证范围；后两者由既有 route 与验证契约决定。

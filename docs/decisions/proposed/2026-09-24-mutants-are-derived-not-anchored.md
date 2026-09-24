@@ -110,9 +110,12 @@ severalWaits`, and the prediction made before running it - one dead anchor, seve
    selector was widened to include a variable's initializer; the corrected prediction (only the hand
    anchor dies) then held exactly: `anchors: 148 of 149 resolve`, one failure, and the file restored
    byte-identically.
-3. The anchors-only pass, wired into the static contract with its route and design updates. **Not
-   landed yet:** the pass exists (`--anchors-only`, 149 of 149 resolving in 0.6 s, no suite run, nothing
-   written) but is not yet one of the route's atomic checks.
+3. The anchors-only pass, wired into the static contract with its route and design updates. **Landed:**
+   `npm run mutation:anchors` (`--anchors-only`) is one of `verify:static`'s checks and one of the
+   `ci-and-tests` route's atomic checks, in the same order the route-contract test enforces. Measured
+   on this revision: all 149 anchors resolve in 0.98 s inside a full `npm run agent:verify`, which is
+   112 s end to end - inside its 150-second budget - and a standalone `verify:static` is 41 s. The full
+   sweep stays out of the gate.
 4. Retirement pass over the ~18-20 teeth whose rule already has a relational or enumerative check, and
    over the I/E teeth that can be replaced; the ledger's `proven` sentence updated in the same commit.
    **Not started.**
