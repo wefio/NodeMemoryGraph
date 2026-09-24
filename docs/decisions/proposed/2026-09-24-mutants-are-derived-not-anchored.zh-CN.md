@@ -46,7 +46,9 @@
    - `the-merge-enumerates-one-order`（A5 行）：用例断言多重组合计数（10），而只返回一种顺序的合并会失败。
    - `a-second-entry-rebinds-the-task`（D12 行）：用例断言重试是同一个绑定、且第二条 entry 被按名拒绝。
      退役后实测：`anchors: 144 of 144 resolve`（登记处是 144 颗牙，不是 149），这趟碰到的四个目标 sweep `70 of 70 caught`，5 of 5 逐字节还原。
-     一个要带下去的发见：`a-refused-unit-is-silent` **没有任何**台账行点名它，抓住它的那条用例同样无人认领——一颗孤儿牙，退役它移除的是孤儿，而不是某一行的钉子。**尚未完成：**其余约 18-20 个候选，以及 I/E 牙。
+     一个要带下去的发见：`a-refused-unit-is-silent` **没有任何**台账行点名它，抓住它的那条用例同样无人认领——一颗孤儿牙，退役它移除的是孤儿，而不是某一行的钉子。
+     **第二组已落地（六颗，2026-09-24）：**声明的预算那五条规则——许可的是预算的那一部分而不是表头、预算大于一必须点名目标、每个可开始任务都有一个 handoff、可开始的 handoff 会在重发布中存活、多槽位的 handoff 是被定向的——都由同一条用例陈述：`evals/ooo-execution/board-slots.test.ts` 的 `a declared budget holds two claims at once, and the store is why each handoff is directed`，其断言逐条点名了这些规则（拒绝消息、handoff 计数、`serialState` 为 null、重发布后 id 不变、先认领非表头那个）。这五颗从 F2b-slot 行退役，该行保留七颗。第六颗 `claim-is-not-scoped-to-its-run`（B1 行）是命名空间实验里最初**没被抓住**的那颗牙——用例被加强到能抓住它，实验记录写下了当时必需的"裸行读取"，所以那条用例比这颗牙的名字是更好的证人。退役后实测：`anchors: 138 of 138 resolve`，`--targets=src/integration/ooo-board.ts` sweep `15 of 15 caught`，逐字节还原。
+     **尚未完成：**I/E 牙、store 目标那两颗（`a-retried-run-fact-is-appended-twice`、`a-frozen-task-is-replaced-by-a-different-definition`），以及目前判定为**不可退役**的两颗——`every-task-is-frozen-at-position-zero` 与 `a-binding-does-not-record-its-channel`，它们的点名用例是"注册/冻结/采纳/读回"的往返，弱于要它承担的规则。`next-is-not-the-head-of-the-ordered-candidates` 与 `fusion-continues-from-an-unverified-answer` 的过期 `expect` 仍未处理。
 
 ## 验收标准
 

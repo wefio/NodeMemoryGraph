@@ -137,7 +137,25 @@ severalWaits`, and the prediction made before running it - one dead anchor, seve
      and the four targets the pass touched sweep `70 of 70 caught`, restored byte-identically 5 of 5.
      One finding to carry forward: `a-refused-unit-is-silent` was named by **no** ledger row, and the case
      that catches it is unowned too - an orphan tooth whose retirement removed the orphan rather than a
-     row's pin. **Remaining:** the rest of the ~18-20 candidates, and the I/E teeth.
+     row's pin.
+     **Second group landed (six teeth, 2026-09-24):** the five rules of the declared budget - the licence
+     being the budget's part rather than the head, a budget above one requiring a target, one handoff per
+     startable task, a startable handoff surviving a republish, and a multi-slot handoff being directed -
+     are all stated by one case, `evals/ooo-execution/board-slots.test.ts`'s `a declared budget holds two
+claims at once, and the store is why each handoff is directed`, whose assertions name each rule (the
+     refusal message, the handoff count, the null `serialState`, the identity across a republish, and the
+     non-head claimed first). They were retired from the F2b-slot row, which keeps seven teeth. The sixth,
+     `claim-is-not-scoped-to-its-run` (row B1), is the tooth the namespace experiment first saw survive -
+     the case was strengthened until it caught it, and the record documents the raw-row read that was
+     needed, which makes that case a better witness than the tooth's name. Measured after:
+     `anchors: 138 of 138 resolve`, and `--targets=src/integration/ooo-board.ts` sweeps `15 of 15 caught`,
+     restored byte-identically.
+     **Remaining:** the I/E teeth, the store-target teeth (`a-retried-run-fact-is-appended-twice`,
+     `a-frozen-task-is-replaced-by-a-different-definition`), and the two candidates judged **not**
+     retirable so far - `every-task-is-frozen-at-position-zero` and `a-binding-does-not-record-its-channel`,
+     whose named case is a register/freeze/adopt/read-back round-trip, weaker than the rule it is asked to
+     carry. The stale `expect` on `next-is-not-the-head-of-the-ordered-candidates` and on
+     `fusion-continues-from-an-unverified-answer` is still outstanding.
 
 ## Acceptance criteria
 

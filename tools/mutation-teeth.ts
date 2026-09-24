@@ -301,16 +301,6 @@ const TARGETS: readonly Target[] = [
         expect: "the query port reads a round without migrating, publishing or exposing a write",
       },
       {
-        // The claim is the write that would corrupt a neighbour run: the same task id exists in
-        // every run, so a claim that is not scoped by run claims somebody else's row too.
-        name: "claim-is-not-scoped-to-its-run",
-        ast: { within: "claim" },
-        from: '          "UPDATE ooo_probe_facts SET attempt=?, owner=?, claim_time=? WHERE run_id=? AND id=?",',
-        to: '          "UPDATE ooo_probe_facts SET attempt=?, owner=?, claim_time=? WHERE ? IS NOT NULL AND id=?",',
-        expect:
-          "two runs in one store do not collide, do not see each other, and cancel separately",
-      },
-      {
         // The composed write must join the transition it is called in: a publication that opens its
         // own boundary commits even when the transition around it fails.
         name: "round-publication-opens-its-own-transaction",
@@ -428,58 +418,6 @@ const TARGETS: readonly Target[] = [
         to: "    return this.candidates()[1] ?? null;",
         expect:
           "contract: a verified patch candidate is what dependents bind to, and only acceptance releases them",
-      },
-      {
-        // The licence is the budget's part of the ordered set, not its head: with two declared slots a
-        // second task is claimable, and with one it is not. Narrowing it back to the head is exactly
-        // the rule the C arm could not cross.
-        name: "the-licence-is-the-head-whatever-the-budget",
-        ast: { within: "claimableRow" },
-        from: '    if (!this.startable().includes(id)) throw new Error("task not selected by narrow dispatch");',
-        to: '    if (this.next() !== id) throw new Error("task not selected by narrow dispatch");',
-        expect:
-          "a declared budget holds two claims at once, and the store is why each handoff is directed",
-      },
-      {
-        // A budget above one is unusable without a target, because the store queues a second
-        // un-directed actionable entry behind the first. Accepting it silently would report two slots
-        // and deliver one.
-        name: "a-second-slot-is-declared-without-a-target",
-        ast: { within: "admissionSlots" },
-        from: "  if (slots > 1 && !options.handoffTarget)",
-        to: "  if (false && slots > 1 && !options.handoffTarget)",
-        expect:
-          "a declared budget holds two claims at once, and the store is why each handoff is directed",
-      },
-      {
-        // Every startable task gets its handoff, not only the head: publishing one is what makes the
-        // other slots claims rather than a promise.
-        name: "only-the-heads-handoff-is-published",
-        ast: { within: "publishReady" },
-        from: "      if (!startable.includes(row.id)) continue;",
-        to: "      if (row.id !== startable[0]) continue;",
-        expect:
-          "a declared budget holds two claims at once, and the store is why each handoff is directed",
-      },
-      {
-        // A startable handoff is not retired just because it is not the head: retiring it would
-        // withdraw the second slot's offer right after publishing it.
-        name: "a-startable-handoff-is-retired-as-unselected",
-        ast: { within: "publishReady" },
-        from: "      if (startable.includes(row.id) || this.live(row)) continue;",
-        to: "      if (row.id === startable[0] || this.live(row)) continue;",
-        expect:
-          "a declared budget holds two claims at once, and the store is why each handoff is directed",
-      },
-      {
-        // The store's serialization is why a multi-slot run directs its handoffs. Publishing them
-        // un-directed leaves the second one queued as `pending`, and its claim is refused.
-        name: "a-multi-slot-handoff-is-published-un-directed",
-        ast: { within: "publishReady" },
-        from: "        this.slots > 1 ? this.handoffTarget!(row.id) : undefined,",
-        to: "        undefined,",
-        expect:
-          "a declared budget holds two claims at once, and the store is why each handoff is directed",
       },
     ],
   },
