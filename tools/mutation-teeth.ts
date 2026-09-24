@@ -301,22 +301,6 @@ const TARGETS: readonly Target[] = [
         expect: "the query port reads a round without migrating, publishing or exposing a write",
       },
       {
-        // Located inside the reader: a rename of the call proves the check counts call sites.
-        name: "the-board-read-path-stops-calling-the-predicate",
-        ast: { within: "readAccepted" },
-        from: "acceptedFact({",
-        to: "locallyAccepted({",
-        expect: "acceptance has one home, and both readers reach it",
-      },
-      {
-        // A bypass that still type-checks: the suite must notice the second decision.
-        name: "the-board-decides-acceptance-on-its-own",
-        ast: { within: "readAccepted" },
-        from: "!acceptedFact({",
-        to: '!(recorded?.verdict === "accepted" ? false : true) && !acceptedFact({',
-        expect: "acceptance has one home, and both readers reach it",
-      },
-      {
         // The claim is the write that would corrupt a neighbour run: the same task id exists in
         // every run, so a claim that is not scoped by run claims somebody else's row too.
         name: "claim-is-not-scoped-to-its-run",
@@ -598,16 +582,6 @@ const TARGETS: readonly Target[] = [
         expect: "the round's own answer is the shared rule's answer, not an ordering's",
       },
       {
-        // The answer a caller asks for carries the rule's own reasoning, so a refused unit that has
-        // no cause of its own is still named by the plan-level gate that held it back. This mutant
-        // silences every refusal at once: an empty legal set with no reasons is exactly the answer
-        // the design says a caller cannot be given.
-        name: "a-refused-unit-is-silent",
-        derive: { within: "selection", operator: "replace-argument", call: "causes.set", arg: 1 },
-        to: "[]",
-        expect: "no refusal in the answer is silent, over the flags a plan's facts can carry",
-      },
-      {
         // A cause names the gate; it never restates the condition. Dropping one leaves a refusal
         // whose reason the rule can no longer give, even when another gate would still be true.
         name: "a-stale-input-is-not-named",
@@ -772,15 +746,6 @@ const TARGETS: readonly Target[] = [
         from: '  checkInputs(context, unit, "dispatch");',
         to: "  void checkInputs;",
         expect: "the checker reports a dispatch whose input is not accepted",
-      },
-      {
-        // The enumeration is the other half of the claim: a merge that stops at the first order
-        // checks one interleaving and reports it as all of them.
-        name: "the-merge-enumerates-one-order",
-        ast: { within: "interleavings" },
-        from: "  return out;",
-        to: "  return out.slice(0, 1);",
-        expect: "the merge enumerates every legal order, not one of them",
       },
     ],
   },
@@ -1119,14 +1084,6 @@ const TARGETS: readonly Target[] = [
         from: "    if (bound && (bound.runId !== request.runId || bound.taskId !== request.taskId))",
         to: "    if (false && bound && (bound.runId !== request.runId || bound.taskId !== request.taskId))",
         expect: "a binding refuses what the store does not hold",
-      },
-      {
-        // A second entry for the same task and attempt is a disagreement. The stored fact is keyed
-        // by task and attempt, so accepting it would keep the first binding and report the second.
-        name: "a-second-entry-rebinds-the-task",
-        from: "    if (existing && existing.entryId !== request.entryId)",
-        to: "    if (false && existing && existing.entryId !== request.entryId)",
-        expect: "a binding is idempotent for its task and attempt, and refuses a second entry",
       },
       {
         // The transition is the run's record of what happened to its entry; without it the board

@@ -118,7 +118,26 @@ severalWaits`, and the prediction made before running it - one dead anchor, seve
    sweep stays out of the gate.
 4. Retirement pass over the ~18-20 teeth whose rule already has a relational or enumerative check, and
    over the I/E teeth that can be replaced; the ledger's `proven` sentence updated in the same commit.
-   **Not started.**
+   **First group landed (five teeth, 2026-09-24), and the criterion is the point of it:** a tooth may go
+   when a named case's assertion _fails for exactly the violation the tooth introduces_ and that case's
+   wording states the rule - so the row can name the check instead of the mutant. Applied by reading the
+   assertion and then re-running the target's sweep with the tooth gone.
+   - `the-board-read-path-stops-calling-the-predicate` and `the-board-decides-acceptance-on-its-own`
+     (row B5): the case counts the call sites itself - one definition of the predicate in `src/`, one
+     `acceptedFact({` in each reader, zero `verdict ===` comparisons in `ooo-board.ts` - so both
+     violations fail a count. This is the pair that made the criterion worth writing down: a
+     behavioural differential would not have caught either, a count does.
+   - `a-refused-unit-is-silent`: the case enumerates the 32 flag combinations a plan's facts can carry
+     and asserts every refused unit has a reason.
+   - `the-merge-enumerates-one-order` (row A5): the case asserts the multinomial count (10), which a
+     merge returning one order fails.
+   - `a-second-entry-rebinds-the-task` (row D12): the case asserts a retry is the same binding and a
+     second entry is refused by name.
+     Measured after the retirements: `anchors: 144 of 144 resolve` (the register is 144 teeth, not 149),
+     and the four targets the pass touched sweep `70 of 70 caught`, restored byte-identically 5 of 5.
+     One finding to carry forward: `a-refused-unit-is-silent` was named by **no** ledger row, and the case
+     that catches it is unowned too - an orphan tooth whose retirement removed the orphan rather than a
+     row's pin. **Remaining:** the rest of the ~18-20 candidates, and the I/E teeth.
 
 ## Acceptance criteria
 
