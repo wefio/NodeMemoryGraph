@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { parse as parseYaml } from "yaml";
 
 const packageJson = JSON.parse(
   readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
@@ -60,4 +61,17 @@ test("local and CI verification groups share named package contracts", () => {
   }
   assert.match(packageJson.scripts["verify:static"], /agent:context:check/);
   assert.match(packageJson.scripts["verify:product-ci"], /test:coverage/);
+});
+
+test("agent static checks match the CI contract without nested duplicate execution", () => {
+  const context = parseYaml(
+    readFileSync(new URL("../../agent-context.yaml", import.meta.url), "utf8"),
+  ) as { routes: { id: string; verify: { blocking: string[] } }[] };
+  const route = context.routes.find(({ id }) => id === "ci-and-tests");
+  assert.ok(route);
+  const staticChecks = [...packageJson.scripts["verify:static"]!.matchAll(/npm run ([\w:-]+)/gu)].map(
+    (match) => match[1]!,
+  );
+  assert.deepEqual(route.verify.blocking, [...staticChecks, "test:product"]);
+  assert.equal(new Set(route.verify.blocking).size, route.verify.blocking.length);
 });

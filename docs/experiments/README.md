@@ -24,5 +24,6 @@ when that prefix repeats the directory name. A rolling summary or note uses
 | `store/` | storage: consolidation, scale, and the write path |
 | `runtime/` | embedding backends, autodiff operators, and the controller shadow |
 | `execution/` | restricted out-of-order execution for agents: what the wait is worth, and which measured failure modes the machinery addresses (the earlier admission run stays at the top level) |
+| `verification/` | measured verification planning and coverage experiments |
 
 `benchmark-results.md` stays at the top level because it spans topics.

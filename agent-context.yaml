@@ -137,7 +137,22 @@ routes:
       - skills/repo-development/SKILL.md
     tests: [tests/**]
     verify:
-      blocking: [verify:static, test:product]
+      # Agent verification lists the static contract's atomic checks so a full
+      # plan runs each shared check once. CI still invokes verify:static.
+      blocking:
+        - build
+        - package:check
+        - check
+        - check:lock
+        - lint
+        - format:check
+        - docs:check
+        - agent:context:check
+        - complexity:gate
+        - verify:packages
+        - glossary:check
+        - rtm:check
+        - test:product
       advisory: [verify:research, verify:chaos]
 
   - id: packaging

@@ -41,6 +41,23 @@ export {
 } from "../src/rcp/verification.ts";
 import { requirePositiveInteger } from "./parts/numbers.ts";
 
+// These checks do not rewrite root source or dist after build/package:check.
+// verify:packages writes its own subpackage, and complexity:gate uses isolated
+// probes. The product suite stays behind this batch to avoid sharing those
+// resources or observing generated files mid-write.
+const PARALLEL_STATIC_CHECKS = new Set([
+  "docs:check",
+  "glossary:check",
+  "check",
+  "check:lock",
+  "lint",
+  "format:check",
+  "agent:context:check",
+  "complexity:gate",
+  "verify:packages",
+  "rtm:check",
+]);
+
 export function buildVerificationPlan(report: AgentContextReport) {
   return buildRouteVerificationPlan(report.routes);
 }
@@ -81,7 +98,7 @@ function parseArgs(args: string[]) {
   let requireClean = false;
   let narrow = false;
   let full = false;
-  let timeoutMs = 30 * 60 * 1_000;
+  let timeoutMs = 150_000;
   let output: string | undefined;
   let help = false;
   const scopes: string[] = [];
@@ -149,6 +166,7 @@ automatically runs its workspace-ready reconciliation and records a receipt.
                          the change is cleanly owned.
   --full                 force the declared whole blocking set (no narrowing)
   --include-advisory     run advisory checks in addition to blocking checks
+  --timeout-ms <ms>      whole-run deadline (default: 150000ms)
   --dry-run              print and persist the plan without running checks
   --require-clean        reject a dirty Git worktree
   --root <path>          verify another repository root
@@ -225,7 +243,13 @@ interface RcpEvidence {
 async function executeRcpVerification(
   report: AgentContextReport,
   contract: RepositoryContractIr,
-  options: { root: string; timeoutMs: number; includeAdvisory: boolean; json: boolean },
+  options: {
+    root: string;
+    timeoutMs: number;
+    remainingMs: () => number;
+    includeAdvisory: boolean;
+    json: boolean;
+  },
 ): Promise<{ result: VerificationRunResult; rcp: RcpEvidence }> {
   const reconciliation = await reconcileOnce(
     {
@@ -240,7 +264,7 @@ async function executeRcpVerification(
       repository: new LocalRepositoryProvider(),
       policy: new DefaultPolicyProvider(),
       harness: new ExternalWorkspaceHarnessProvider(),
-      verifier: new LocalNpmVerifierProvider(options.timeoutMs, !options.json),
+      verifier: new LocalNpmVerifierProvider(options.timeoutMs, !options.json, options.remainingMs),
       receipts: new FileReceiptSink(join(options.root, ".rcp", "receipts")),
     },
   );
@@ -260,7 +284,7 @@ async function executeRcpVerification(
     { blocking: [], advisory: plan.advisory },
     {
       includeAdvisory: options.includeAdvisory,
-      run: npmCommandRunner(options.root, options.json, options.timeoutMs),
+      run: npmCommandRunner(options.root, options.json, options.timeoutMs, options.remainingMs),
     },
   );
   const results = [...blocking, ...advisory.results];
@@ -285,6 +309,7 @@ async function executeNarrowVerification(
   options: {
     root: string;
     timeoutMs: number;
+    remainingMs: () => number;
     includeAdvisory: boolean;
     json: boolean;
     routeId: string;
@@ -306,7 +331,7 @@ async function executeNarrowVerification(
       repository: new LocalRepositoryProvider(),
       policy: new DefaultPolicyProvider(),
       harness: new ExternalWorkspaceHarnessProvider(),
-      verifier: new NarrowVerifierProvider(options.timeoutMs, !options.json),
+      verifier: new NarrowVerifierProvider(options.timeoutMs, !options.json, options.remainingMs),
       receipts: new FileReceiptSink(join(options.root, ".rcp", "receipts")),
     },
   );
@@ -476,6 +501,8 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
       process.exit(0);
     }
     const startedAt = new Date().toISOString();
+    const deadlineAt = performance.now() + options.timeoutMs;
+    const remainingMs = () => Math.max(0, Math.floor(deadlineAt - performance.now()));
     // A verification is a claim about a tree, and a tree with a live mutant in it is not the tree the
     // change produced (post-mortem 0003). Refuse rather than report: a passing lane read in that window
     // is evidence about code that never existed, and that is the reading nobody investigates.
@@ -534,6 +561,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
             {
               root: options.root,
               timeoutMs: options.timeoutMs,
+              remainingMs,
               includeAdvisory: options.includeAdvisory,
               json: options.json,
               routeId: route.id,
@@ -546,17 +574,40 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
         report.warnings.push(`narrow escalated to full: ${narrowPlan.escalationReason}`);
       }
       execution = contract
-        ? await executeRcpVerification(report, contract, options)
+        ? await executeRcpVerification(report, contract, { ...options, remainingMs })
         : {
             result: await executeVerificationPlan(buildVerificationPlan(report), {
               includeAdvisory: options.includeAdvisory,
               dryRun: options.dryRun,
-              run: npmCommandRunner(options.root, options.json, options.timeoutMs),
+              parallel: report.routes.some((item) => item.id === "ci-and-tests")
+                ? { commands: PARALLEL_STATIC_CHECKS, concurrency: 3 }
+                : undefined,
+              run: npmCommandRunner(
+                options.root,
+                options.json,
+                options.timeoutMs,
+                remainingMs,
+                PARALLEL_STATIC_CHECKS,
+              ),
             }),
             rcp: undefined,
           };
     }
     const { result, rcp } = execution;
+    if (remainingMs() <= 0) {
+      result.ok = false;
+      if (!result.results.some((item) => item.reason?.includes("overall deadline"))) {
+        result.results.push({
+          command: "agent:verify",
+          classification: "blocking",
+          routes: report.routes.map((item) => item.id),
+          status: "failed",
+          durationMs: 0,
+          reason: `verification exceeded ${options.timeoutMs}ms overall deadline`,
+          errorKind: "timeout",
+        });
+      }
+    }
     const finishedAt = new Date().toISOString();
     const evidence = {
       schemaVersion: 1,

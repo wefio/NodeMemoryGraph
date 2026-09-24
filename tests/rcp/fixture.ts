@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export function repositoryFixture(): string {
+export function repositoryFixture(options: { git?: boolean } = {}): string {
   const root = mkdtempSync(join(tmpdir(), "nmg-rcp-"));
   const files: Record<string, string> = {
     "package.json": JSON.stringify({
@@ -36,11 +36,20 @@ export function repositoryFixture(): string {
     mkdirSync(join(path, ".."), { recursive: true });
     writeFileSync(path, content);
   }
-  git(root, ["init", "--quiet"]);
-  git(root, ["config", "user.email", "rcp@example.invalid"]);
-  git(root, ["config", "user.name", "RCP Test"]);
-  git(root, ["add", "."]);
-  git(root, ["commit", "--quiet", "-m", "fixture"]);
+  if (options.git !== false) {
+    git(root, ["init", "--quiet"]);
+    git(root, ["add", "."]);
+    git(root, [
+      "-c",
+      "user.email=rcp@example.invalid",
+      "-c",
+      "user.name=RCP Test",
+      "commit",
+      "--quiet",
+      "-m",
+      "fixture",
+    ]);
+  }
   return root;
 }
 
