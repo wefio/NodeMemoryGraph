@@ -1,24 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import test from "node:test";
 
 import { NmgStore } from "../../../src/core/store.ts";
 
-function withStore(run: (store: NmgStore) => void): void {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-maintenance-"));
-  const store = new NmgStore(join(directory, "test.sqlite"));
+function withMemoryStore(run: (store: NmgStore) => void): void {
+  const store = new NmgStore(":memory:");
   try {
     run(store);
   } finally {
     store.close();
-    rmSync(directory, { force: true, recursive: true });
   }
 }
 
 test("maintenance proposals enforce attribution, evaluation, and explicit review", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "The deployment region is probably Europe",
       nodeName: "deployment region",
@@ -62,7 +57,7 @@ test("maintenance proposals enforce attribution, evaluation, and explicit review
 });
 
 test("maintenance proposals do not turn retrieval defects into content mutations", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "The user prefers concise explanations",
       nodeName: "response preferences",
@@ -108,7 +103,7 @@ test("maintenance proposals do not turn retrieval defects into content mutations
 // ── deleteMemory cascaded deletion ──
 
 test("deleteMemory: marks record as deleted and returns pre-deletion snapshot", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "user prefers dark mode",
       nodeName: "user preferences",
@@ -123,7 +118,7 @@ test("deleteMemory: marks record as deleted and returns pre-deletion snapshot", 
 });
 
 test("deleteMemory: cleans up FTS, embedding, and leaf membership", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "Atlas uses SQLite for storage",
       nodeName: "Atlas storage",
@@ -140,13 +135,13 @@ test("deleteMemory: cleans up FTS, embedding, and leaf membership", () => {
 });
 
 test("deleteMemory: returns null for unknown ids", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     assert.equal(store.deleteMemory("does-not-exist"), null);
   });
 });
 
 test("deleteMemory: cascade-deletes derived memories with no remaining sources", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const source = store.remember({
       statement: "user needs a standing desk",
       nodeName: "user equipment",
@@ -182,7 +177,7 @@ test("deleteMemory: cascade-deletes derived memories with no remaining sources",
 });
 
 test("deleteMemory: deleted memories are filtered from getContext", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "user is vegan",
       nodeName: "user diet",
@@ -196,7 +191,7 @@ test("deleteMemory: deleted memories are filtered from getContext", () => {
 });
 
 test("deleteMemory: scrubs Active Graph references and rejects dependent pending proposals", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const target = store.remember({
       statement: "Atlas stores an index in SQLite",
       nodeName: "Atlas index",
@@ -239,7 +234,7 @@ test("deleteMemory: scrubs Active Graph references and rejects dependent pending
 // ── promoteMemory / demoteMemory tier migration ──
 
 test("promoteMemory: promotes STG memory to LTG", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "provisional hypothesis",
       nodeName: "test hypothesis",
@@ -256,7 +251,7 @@ test("promoteMemory: promotes STG memory to LTG", () => {
 });
 
 test("promoteMemory: already-LTG memory is returned unchanged", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "long-term project name is Atlas",
       nodeName: "project name",
@@ -271,7 +266,7 @@ test("promoteMemory: already-LTG memory is returned unchanged", () => {
 });
 
 test("demoteMemory: demotes LTG memory to STG", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "permanent project name is Atlas",
       nodeName: "project name",
@@ -286,7 +281,7 @@ test("demoteMemory: demotes LTG memory to STG", () => {
 });
 
 test("demoteMemory: already-STG memory is returned unchanged", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "temp hypothesis",
       nodeName: "hypothesis",
@@ -303,7 +298,7 @@ test("demoteMemory: already-STG memory is returned unchanged", () => {
 // ── retentionCandidates ──
 
 test("retentionCandidates: reports low-importance event for dormant after aging", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const old = store.remember({
       statement: "A disposable historical experiment was attempted",
       nodeName: "historical experiment",
@@ -325,7 +320,7 @@ test("retentionCandidates: reports low-importance event for dormant after aging"
 });
 
 test("retentionCandidates: constraint type is excluded from candidates", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const constraint = store.remember({
       statement: "Never erase the production database",
       nodeName: "production safety",
@@ -346,7 +341,7 @@ test("retentionCandidates: constraint type is excluded from candidates", () => {
 });
 
 test("retentionCandidates: dormant progresses to quarantine", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const old = store.remember({
       statement: "old experiment log entry",
       nodeName: "experiment log",
@@ -366,7 +361,7 @@ test("retentionCandidates: dormant progresses to quarantine", () => {
 });
 
 test("retentionCandidates: returns empty when no memory qualifies", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.remember({
       statement: "fresh constraint",
       nodeName: "fresh node",
@@ -384,7 +379,7 @@ test("retentionCandidates: returns empty when no memory qualifies", () => {
 // ── pruneRetrievalTraces ──
 
 test("pruneRetrievalTraces: prunes traces beyond maxRows", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     for (let i = 0; i < 5; i += 1) {
       store.recordRetrievalTrace({
         query: `query ${i}`,
@@ -402,7 +397,7 @@ test("pruneRetrievalTraces: prunes traces beyond maxRows", () => {
 });
 
 test("pruneRetrievalTraces: no-op when under limits", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.recordRetrievalTrace({
       query: "single query",
       resultMemoryIds: [],
@@ -418,7 +413,7 @@ test("pruneRetrievalTraces: no-op when under limits", () => {
 // ── retrievalTrace / retrievalTracesCount ──
 
 test("retrievalTrace: reads back a recorded trace", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "trace test memory",
       nodeName: "trace node",
@@ -439,7 +434,7 @@ test("retrievalTrace: reads back a recorded trace", () => {
 });
 
 test("retrievalTrace: returns null for unknown id", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     assert.equal(store.retrievalTrace("non-existent-trace-id"), null);
   });
 });
@@ -447,14 +442,14 @@ test("retrievalTrace: returns null for unknown id", () => {
 // ── perfAggregates ──
 
 test("perfAggregates: returns empty array on fresh store", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const aggregates = store.perfAggregates();
     assert.deepEqual(aggregates, []);
   });
 });
 
 test("perfAggregates: hot path records search.direct and trace after a searchContext", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.remember({
       statement: "hot path perf probe",
       nodeName: "hot path",
@@ -478,7 +473,7 @@ test("perfAggregates: hot path records search.direct and trace after a searchCon
 // ── recordActiveGraphAttribution ──
 
 test("recordActiveGraphAttribution: records usage on a trace", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "active graph test memory",
       nodeName: "ag node",
@@ -501,7 +496,7 @@ test("recordActiveGraphAttribution: records usage on a trace", () => {
 });
 
 test("retrieval traces and Active Graph feedback enforce session ownership", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "session-owned active graph memory",
       nodeName: "owned ag node",
@@ -539,7 +534,7 @@ test("retrieval traces and Active Graph feedback enforce session ownership", () 
 });
 
 test("recordActiveGraphAttribution: survives non-existent active graph id gracefully", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "bad graph test",
       nodeName: "bad graph node",
@@ -559,7 +554,7 @@ test("recordActiveGraphAttribution: survives non-existent active graph id gracef
 // ── memoryWriteEvents ──
 
 test("memoryWriteEvents: returns write events for a memory", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "write event test",
       nodeName: "write event node",
@@ -574,7 +569,7 @@ test("memoryWriteEvents: returns write events for a memory", () => {
 });
 
 test("memoryWriteEvents: returns all events when no id is specified", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.remember({
       statement: "event test 1",
       nodeName: "event node 1",
@@ -595,7 +590,7 @@ test("memoryWriteEvents: returns all events when no id is specified", () => {
 // ── setMemoryStorageState ──
 
 test("setMemoryStorageState: moves to dormant and back to indexed", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "Atlas project uses WAL mode",
       nodeName: "Atlas WAL",
@@ -609,7 +604,7 @@ test("setMemoryStorageState: moves to dormant and back to indexed", () => {
 });
 
 test("setMemoryStorageState: rejects STG memories", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const provisional = store.remember({
       statement: "temp hypothesis for this session",
       nodeName: "session hypothesis",
@@ -625,7 +620,7 @@ test("setMemoryStorageState: rejects STG memories", () => {
 });
 
 test("setMemoryStorageState: throws for non-existent memory", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     assert.throws(() => store.setMemoryStorageState("does-not-exist", "dormant"), /does not exist/);
   });
 });
@@ -633,7 +628,7 @@ test("setMemoryStorageState: throws for non-existent memory", () => {
 // ── expireShortTermMemories ──
 
 test("expireShortTermMemories: expires past-due STG memories", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.remember({
       statement: "expiring hypothesis",
       nodeName: "expiring node",
@@ -650,7 +645,7 @@ test("expireShortTermMemories: expires past-due STG memories", () => {
 // ── upsertNode ──
 
 test("upsertNode: creates a new node and returns existing on duplicate", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const node1 = store.upsertNode({
       canonicalName: "unique test node",
       kind: "concept",
@@ -669,7 +664,7 @@ test("upsertNode: creates a new node and returns existing on duplicate", () => {
 // ── rebuildVectorIndex / rebalanceNode / rebuildLeafBlocks ──
 
 test("rebuildVectorIndex: rebuilds embeddings for indexed memories", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.remember({
       statement: "vector index test",
       nodeName: "vector node",
@@ -682,7 +677,7 @@ test("rebuildVectorIndex: rebuilds embeddings for indexed memories", () => {
 });
 
 test("rebalanceNode: returns result with changedMemoryIds and expectedDepth", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "rebalance test memory",
       nodeName: "rebalance node",
@@ -697,7 +692,7 @@ test("rebalanceNode: returns result with changedMemoryIds and expectedDepth", ()
 });
 
 test("rebalanceDueNodes: returns results for nodes above threshold", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.remember({
       statement: "rebalance due test",
       nodeName: "rebalance due node",
@@ -710,7 +705,7 @@ test("rebalanceDueNodes: returns results for nodes above threshold", () => {
 });
 
 test("runDueMaintenance compacts write deltas and rebalances access changes within a node budget", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const writeDue = store.remember({
       statement: "bounded maintenance write",
       nodeName: "bounded write node",
@@ -752,7 +747,7 @@ test("runDueMaintenance compacts write deltas and rebalances access changes with
 });
 
 test("answer-overlap attribution is diagnostic and cannot train graph state", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "API answers may repeat retrieved wording",
       nodeName: "API attribution boundary",
@@ -781,7 +776,7 @@ test("answer-overlap attribution is diagnostic and cannot train graph state", ()
 });
 
 test("runDueMaintenance drains distributed write pressure without requiring one hot node", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     for (let index = 0; index < 16; index += 1) {
       store.remember({
         statement: `distributed write ${index}`,
@@ -808,7 +803,7 @@ test("runDueMaintenance drains distributed write pressure without requiring one 
 });
 
 test("runDueMaintenance drains distributed access pressure without requiring one hot node", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const memories = Array.from({ length: 32 }, (_, index) =>
       store.remember({
         statement: `distributed access ${index}`,
@@ -836,7 +831,7 @@ test("runDueMaintenance drains distributed access pressure without requiring one
 });
 
 test("runSemanticMaintenance expires STG records and keeps topology changes proposal-only", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const expired = store.remember({
       statement: "expired session-local observation",
       nodeName: "expired session node",
@@ -860,7 +855,7 @@ test("runSemanticMaintenance expires STG records and keeps topology changes prop
 });
 
 test("rebuildLeafBlocks: creates leaf blocks for a node", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "leaf block test memory",
       nodeName: "leaf block node",
@@ -875,7 +870,7 @@ test("rebuildLeafBlocks: creates leaf blocks for a node", () => {
 });
 
 test("rebuildLeafBlocks: rebuilds all nodes when no nodeId is given", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.remember({
       statement: "all leaf blocks test 1",
       nodeName: "leaf all node 1",
@@ -896,7 +891,7 @@ test("rebuildLeafBlocks: rebuilds all nodes when no nodeId is given", () => {
 // ── dirtyLeafNodeIds / pendingIndexDelta / acknowledgeIndexDelta ──
 
 test("dirtyLeafNodeIds: returns dirty node ids after delete", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "dirty leaf test",
       nodeName: "dirty leaf node",
@@ -912,7 +907,7 @@ test("dirtyLeafNodeIds: returns dirty node ids after delete", () => {
 });
 
 test("pendingIndexDelta: returns memory ids with pending changes", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.remember({
       statement: "pending delta test",
       nodeName: "pending delta node",
@@ -925,7 +920,7 @@ test("pendingIndexDelta: returns memory ids with pending changes", () => {
 });
 
 test("acknowledgeIndexDelta: clears compacted deltas", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "ack delta test",
       nodeName: "ack delta node",
@@ -942,7 +937,7 @@ test("acknowledgeIndexDelta: clears compacted deltas", () => {
 // ── embedding index lifecycle ──
 
 test("beginEmbeddingIndex / completeEmbeddingIndex / embeddingIndexHealth lifecycle", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.beginEmbeddingIndex({
       indexId: "test-index-1",
       model: "test-model",
@@ -959,7 +954,7 @@ test("beginEmbeddingIndex / completeEmbeddingIndex / embeddingIndexHealth lifecy
 });
 
 test("failEmbeddingIndex: marks index as failed", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.beginEmbeddingIndex({
       indexId: "test-index-fail",
       model: "test-model",
@@ -976,14 +971,14 @@ test("failEmbeddingIndex: marks index as failed", () => {
 // ── contradictionNotes ──
 
 test("contradictionNotes: returns empty map for empty input", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const notes = store.contradictionNotes([]);
     assert.equal(notes.size, 0);
   });
 });
 
 test("contradictionNotes: returns empty map for memories without claims", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "no claims memory",
       nodeName: "no claims node",
@@ -998,7 +993,7 @@ test("contradictionNotes: returns empty map for memories without claims", () => 
 // ── rebuildDueLeafBlocks ──
 
 test("rebuildDueLeafBlocks: rebuilds blocks for nodes with pending deltas", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.remember({
       statement: "due leaf blocks test",
       nodeName: "due leaf node",
@@ -1013,7 +1008,7 @@ test("rebuildDueLeafBlocks: rebuilds blocks for nodes with pending deltas", () =
 // ── recordConsolidationEvent visibility check ──
 
 test("promoteMemory triggers a consolidation event visible via consolidationEvents", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "consolidation event test",
       nodeName: "consolidation node",
@@ -1033,7 +1028,7 @@ test("promoteMemory triggers a consolidation event visible via consolidationEven
 // ── deferred retrieval-pair signals (drainPendingTraceSignals) ──
 
 test("deferred pair signals materialize on drain and stay idempotent", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const alpha = store.remember({ statement: "deferred alpha", nodeName: "defer alpha" });
     const beta = store.remember({ statement: "deferred beta", nodeName: "defer beta" });
     for (let index = 0; index < 3; index += 1) {
@@ -1067,7 +1062,7 @@ test("deferred pair signals materialize on drain and stay idempotent", () => {
 });
 
 test("feedback before drain still records observations and drives consolidation", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const alpha = store.remember({ statement: "fb alpha", nodeName: "fb alpha" });
     const beta = store.remember({ statement: "fb beta", nodeName: "fb beta" });
     const traceId = store.recordRetrievalTrace({
@@ -1092,7 +1087,7 @@ test("feedback before drain still records observations and drives consolidation"
 });
 
 test("drainPendingTraceSignals is bounded by limit and marks processed traces", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const alpha = store.remember({ statement: "bounded alpha", nodeName: "bounded alpha" });
     const beta = store.remember({ statement: "bounded beta", nodeName: "bounded beta" });
     for (let index = 0; index < 5; index += 1) {
@@ -1111,7 +1106,7 @@ test("drainPendingTraceSignals is bounded by limit and marks processed traces", 
 });
 
 test("runSemanticMaintenance drains deferred pair signals before proposing", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const alpha = store.remember({ statement: "sm alpha", nodeName: "sm alpha" });
     const beta = store.remember({ statement: "sm beta", nodeName: "sm beta" });
     for (let index = 0; index < 3; index += 1) {

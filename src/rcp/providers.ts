@@ -207,6 +207,15 @@ export class ProcessHarnessProvider implements HarnessProvider {
   }
 }
 
+function overallDeadlineFailure(name: string, timeoutMs: number): VerificationCheckResult {
+  return {
+    name,
+    status: "failed",
+    durationMs: 0,
+    reason: `verification exceeded ${timeoutMs}ms overall deadline`,
+  };
+}
+
 export class LocalNpmVerifierProvider implements VerifierProvider {
   readonly descriptor: ProviderDescriptor = {
     id: "local-npm-verifier",
@@ -218,10 +227,12 @@ export class LocalNpmVerifierProvider implements VerifierProvider {
 
   readonly timeoutMs: number;
   readonly streamOutput: boolean;
+  readonly remainingMs: () => number;
 
-  constructor(timeoutMs = 30 * 60 * 1_000, streamOutput = false) {
+  constructor(timeoutMs = 30 * 60 * 1_000, streamOutput = false, remainingMs = () => timeoutMs) {
     this.timeoutMs = timeoutMs;
     this.streamOutput = streamOutput;
+    this.remainingMs = remainingMs;
   }
 
   async definitionDigest(request: {
@@ -252,6 +263,11 @@ export class LocalNpmVerifierProvider implements VerifierProvider {
     );
     const checks: VerificationCheckResult[] = [];
     for (const name of request.workOrder.verificationChecks) {
+      const budget = this.remainingMs();
+      if (budget <= 0) {
+        checks.push(overallDeadlineFailure(name, this.timeoutMs));
+        continue;
+      }
       const definition = scripts[name];
       if (!definition) {
         checks.push({
@@ -262,7 +278,7 @@ export class LocalNpmVerifierProvider implements VerifierProvider {
         });
         continue;
       }
-      checks.push(runNpmScriptCheck(request.root, name, this.timeoutMs, this.streamOutput));
+      checks.push(runNpmScriptCheck(request.root, name, budget, this.streamOutput));
     }
     return {
       provider: this.descriptor,
@@ -301,10 +317,12 @@ export class NarrowVerifierProvider implements VerifierProvider {
 
   readonly timeoutMs: number;
   readonly streamOutput: boolean;
+  readonly remainingMs: () => number;
 
-  constructor(timeoutMs = 30 * 60 * 1_000, streamOutput = false) {
+  constructor(timeoutMs = 30 * 60 * 1_000, streamOutput = false, remainingMs = () => timeoutMs) {
     this.timeoutMs = timeoutMs;
     this.streamOutput = streamOutput;
+    this.remainingMs = remainingMs;
   }
 
   async definitionDigest(request: {
@@ -331,10 +349,13 @@ export class NarrowVerifierProvider implements VerifierProvider {
     const routes = readRouteDeclarations(request.root);
     const checks: VerificationCheckResult[] = [];
     for (const name of request.workOrder.verificationChecks) {
+      const budget = this.remainingMs();
+      if (budget <= 0) {
+        checks.push(overallDeadlineFailure(name, this.timeoutMs));
+        continue;
+      }
       if (name.startsWith("node-test:")) {
-        checks.push(
-          runRouteTestsCheck(request.root, name, routes, this.timeoutMs, this.streamOutput),
-        );
+        checks.push(runRouteTestsCheck(request.root, name, routes, budget, this.streamOutput));
         continue;
       }
       const definition = scripts[name];
@@ -347,7 +368,7 @@ export class NarrowVerifierProvider implements VerifierProvider {
         });
         continue;
       }
-      checks.push(runNpmScriptCheck(request.root, name, this.timeoutMs, this.streamOutput));
+      checks.push(runNpmScriptCheck(request.root, name, budget, this.streamOutput));
     }
     return {
       provider: this.descriptor,

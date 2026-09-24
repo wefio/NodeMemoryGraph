@@ -1,7 +1,7 @@
 # 代码质量与 CI/CD
 
 **Created:** 2026-07-20  
-**Updated:** 2026-09-16
+**Updated:** 2026-09-23
 **Authority:** 仓库测试、CI 与 Agent 开发流程契约
 
 NMG 的测试负责阻止可复现错误，不负责冻结尚未验证的设计。产品契约、研究测量与故障注入使用不同执行轨道，避免 benchmark 便利逻辑反向定义产品行为。
@@ -39,6 +39,8 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 `agent:context:check` 会拒绝缺少 `reason`、`review_after` 或 `exit_criteria` 的 active guardrail。满足退出条件后必须删除，或明确晋升为长期 Safety/Contract 测试。
 
+测试资源按断言边界选择，与上述阻塞分类正交：只断言路由测试失败的 narrow verifier fixture 可声明不适用共享检查，同时保留真实 CLI、Git 和路由测试；默认 narrow 的代表测试仍验证共享检查执行（[决策](../decisions/implemented/2026-09-23-route-only-verifier-fixtures.md)）。
+
 ## 2. 执行轨道
 
 | 命令                        | 内容                                                   | 用途             |
@@ -63,7 +65,7 @@ exit_criteria: Replace with a stable contract test or remove after the redesign 
 
 任何启动 daemon / MCP server 的测试在模块顶层调用 `tests/helpers/test-env.ts` 的 `stripProviderEnv()`，清空环境中的 `NMG_EMBED*` / `NMG_SUMMARY*` / `NMG_JUDGE*`。该约定由 `tests/support/test-env-guard.test.ts` 机械检查：扫描 `tests/**/*.test.ts`，凡是 spawn daemon（`connectDaemon(`、`StdioClientTransport`、`bin/nmg.mjs`、tutorial 脚本、pi extension harness）却没有模块顶层调用者一律失败。被测 daemon 继承测试进程环境；存在 ambient provider（如 `NMG_EMBED_PROVIDER=gemini`）时，recall 会依赖外部服务而变得缓慢且不确定。需要 provider 的测试必须显式传入环境，不得依赖 ambient 配置。
 
-覆盖率轨将测试并发限制为 2，避免 c8 插桩与跨进程/SQLite 测试叠加时制造内存峰值和 Windows 文件锁假失败；普通 product 轨仍使用并发 4。
+覆盖率轨将测试并发限制为 2，避免 c8 插桩与跨进程/SQLite 测试叠加时制造内存峰值和 Windows 文件锁假失败；普通 product 轨仍使用并发 4。覆盖率轨还以 c8 的 0.01% 行覆盖率下限检查是否产生非零源码证据；它是活性检查，不是覆盖率质量目标（[决策](../decisions/implemented/2026-09-23-coverage-evidence-liveness.md)）。
 
 ## 3. CI 契约
 
@@ -98,6 +100,17 @@ TestRuntime
 ```
 
 测试通过 `withTestRuntime(...)` 或显式 `dispose()` 获取 RAII 式回收。插件依赖必须显式：database 要求 workspace，daemon 要求 database；缺少依赖时失败，不偷偷创建隐含全局状态。daemon 在进程内使用真实 HTTP JSON-RPC handler，因此能验证协议，同时不会遗留后台进程。
+
+测试资源按断言需观察的边界分为四类，按需取得最轻且隔离的资源（[决策](../decisions/implemented/2026-09-24-resource-matched-test-fixtures.md)）：
+
+| 断言边界 | 测试资源 | 可省的准备工作 |
+| --- | --- | --- |
+| 纯数据或决策 | 进程内输入 | 工作区、数据库和外部进程 |
+| 单个 SQLite 连接的读写 | 每项独立的 `:memory:` store | 临时数据库文件及其清理 |
+| 重开、旧库迁移、WAL、独立连接或路径 | 每项唯一的文件数据库或工作区 | 与断言无关的额外文件和服务 |
+| CLI、Git、HTTP、daemon lease 或跨进程共享 | 断言这些边界时使用实际进程、端口及所需工作区 | 不参与断言的重复启动和检查 |
+
+观察文件或跨进程语义的测试保留真实边界；只断言控制平面策略、receipt 或 harness 编排时，可以注入固定的 `RepositoryProvider` 观察值，另由真实 Git 集成测试覆盖发现、dirty 范围、提交和 forge 绑定。集成 `testDatabase()` 使用真实文件路径供 daemon 共享。真实 Git fixture 保留 `init/add/commit`，提交身份只传给 `commit`，避免每项再启动两次 `git config`。资源类别只决定 fixture 和可安全减少的准备工作，不改变 Safety/Contract/Guardrail 分类、阻塞地位或 narrow/full 验证范围；后两者由既有 route 与验证契约决定。
 
 该层精确锁定 `@deepseek-ai/cordis@4.0.1` 作为 **devDependency**，只借用插件 effect/fiber 生命周期。NMG Core、daemon、Pi adapter 和发布包均不依赖 Cordis；不引入其 loader、HMR 或配置系统。Cordis adapter 与 NMG fixture composition 分离，未来若替换框架只需修改生命周期 adapter。
 
@@ -137,7 +150,7 @@ npm run agent:context -- --scope <目标路径>
 npm run agent:verify
 ```
 
-零参数入口自动读取 Git 变更并选择 route；Git 不可用时失败关闭，不允许空跑后误报成功。共享脏工作树使用 `--scope <本任务路径>` 精确覆盖自动范围。执行器聚合所有命中 route，按首次出现顺序去重，并运行全部 blocking 命令；一个命令退出失败、启动异常、超时或被信号终止，都被归因到该命令且不会阻止后续检查收集证据，最终统一返回失败。默认单命令上限为 30 分钟，可用 `--timeout-ms` 调整。
+零参数入口自动读取 Git 变更并选择 route；Git 不可用时失败关闭，不允许空跑后误报成功。共享脏工作树使用 `--scope <本任务路径>` 精确覆盖自动范围。执行器聚合所有命中 route，按首次出现顺序去重，并运行全部 blocking 命令；`ci-and-tests` route 将 `verify:static` 拆成与 CI contract 一致的原子检查，跨 route 共享的检查在同一计划内只执行一次，同时保留每项的状态和 route 归因。CI 仍运行命名的 `verify:static` contract。非 RCP full 计划在构建、打包等写入屏障后有界并发执行独立静态检查，产品测试等待静态检查完成；结果仍按计划顺序排列。RCP 和 narrow 计划仍串行。一个命令退出失败、启动异常或被信号终止，都被归因到该命令且不会阻止后续检查收集证据，最终统一返回失败。官方 `npm run agent:verify` 入口的整轮验证默认预算为 150 秒，可用 `--timeout-ms` 调整；外层看门进程在超时后返回失败及 `incomplete` 证据。普通执行和 RCP full/narrow 执行也共用从执行器入口开始计算的剩余预算；每个子命令只得到剩余时间。预算用尽时不再启动后续检查，逐项记录为失败，整轮不能报通过。超时意味着验证未完成，需要缩短或重新划分检查后再运行，不能把已通过的局部检查当作整轮通过。
 
 advisory 命令默认只显示、不执行；显式传入 `--include-advisory` 后才运行，且其失败不改变 blocking 结果。`--dry-run` 只生成计划，`--json` 提供机器可读报告，`--require-clean` 为打包/CI 等任务增加干净工作树门槛。每次成功形成报告后会自动覆盖 `.nmg/verification/latest.json`；该文件包含 run ID、起止时间、运行时、Git HEAD、scope、route 和逐命令结果，位于已忽略的 `.nmg/` 下，不形成无限增长的日志历史。
 
