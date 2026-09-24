@@ -32,6 +32,13 @@
  *
  * Where a mutant says where it applies:
  *
+ *   - `derive: { within, operator, ... }` is a **selector plus an operator**: the member is named, a
+ *     fragment inside it is matched (the same matcher as below, so a reflow cannot break it), and the
+ *     bytes to write are computed on every run. This is the form a tooth should have. Its identity is
+ *     the rule and the site it names, never the text that happens to be there today, and it is what
+ *     lets a rename, a reordered condition or a lifted line leave the tooth aimed at the same rule.
+ *     Selectors that match more than one site - or a fragment that fits two conditions - are refused,
+ *     never guessed at.
  *   - `ast: { within: "<member>" }` (or `ast: { call, argCount }`) locates the site through the syntax
  *     tree. Use this in any file that is still being edited. It survives reformatting, and it refuses
  *     when the code it guards has moved out of the member it belongs to - a move that a byte anchor
@@ -41,14 +48,17 @@
  *     printed, so a reflow never retires a tooth without saying so.
  *
  * Usage:
- *   npm run mutation:teeth -- [--targets=<path>[,<path>...]] [--json <out>]
+ *   npm run mutation:teeth -- [--targets=<path>[,<path>...]] [--mutant=<name>[,<name>...]] [--json <out>]
+ *   npm run mutation:teeth -- --anchors-only [--targets=...]
+ * `--anchors-only` resolves every selected mutant and writes nothing: it answers "are the teeth still
+ * aimed at something", in under a second, without running a suite. Run it before a sweep, and in the
+ * static contract, because a dead anchor is otherwise only visible as a tooth that stopped counting.
  * Exit status is non-zero if the clean run fails, any mutant survives, any anchor is missing in a
- * named target, or a restore is not byte-identical.
+ * named target, a restore is not byte-identical, or (in `--anchors-only`) any site no longer applies.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import ts from "typescript";
 
 import {
   clearMutationLock,
@@ -57,27 +67,7 @@ import {
   type MutationLock,
 } from "./mutation-lock.ts";
 import { writeJsonAtomic } from "./parts/fs.ts";
-
-interface Mutant {
-  /** What the wrong version does, in the words of the rule it breaks. */
-  readonly name: string;
-  /** The exact bytes to replace. Omitted when `ast` locates the site instead. */
-  readonly from?: string;
-  /** A format-independent locator: find the site by syntax tree, not by text. Prettier reflows these
-   *  files on every commit, and a text anchor silently stops applying the first time that happens. */
-  readonly ast?: {
-    /** The method or function whose body is searched. The structurally scoped form: it survives
-     *  reflow, and it refuses when the code it guards has moved out of the member it belongs to. */
-    readonly within?: string;
-    /** The call or constructor to locate, by its callee name. */
-    readonly call?: string;
-    /** How many arguments it takes, when the count is what tells the sites apart. */
-    readonly argCount?: number;
-  };
-  readonly to: string;
-  /** The test that must be the one to fail. */
-  readonly expect: string;
-}
+import { locate, type Mutant } from "./mutation-anchor.ts";
 
 interface Target {
   readonly target: string;
@@ -524,16 +514,22 @@ const TARGETS: readonly Target[] = [
         // A cancellation is a fact about the task, so it gates dispatch the way a rejection gates
         // a dependent. This is the half acceptance already had and eligibility did not.
         name: "a-cancelled-task-is-still-dispatched",
-        ast: { within: "selection" },
-        from: "    current(task) &&\n    !task.cancelled &&",
-        to: "    current(task) &&",
+        derive: {
+          within: "selection",
+          operator: "neutralize-term",
+          condition: "!task.cancelled",
+          term: "!task.cancelled",
+        },
         expect: "a cancelled task is not dispatched, and nothing reads one as a closed input",
       },
       {
         name: "the-dispatch-does-not-require-a-cancelled-input-to-be-closed",
-        ast: { within: "acceptedDependency" },
-        from: "  if (!task || !task.accepted || task.cancelled || !current(task) || visiting.has(id)) return false;",
-        to: "  if (!task || !task.accepted || !current(task) || visiting.has(id)) return false;",
+        derive: {
+          within: "acceptedDependency",
+          operator: "neutralize-term",
+          condition: "task.cancelled",
+          term: "task.cancelled",
+        },
         expect: "nextTask refuses a task marked cancelled, whatever else the caller set",
       },
       {
@@ -548,9 +544,12 @@ const TARGETS: readonly Target[] = [
         // The budget is what a claim spends, so a spent budget is an empty set. Nothing else may
         // decide whether selection is open: this is the rule the C arm's slot count was once absent from.
         name: "a-live-claim-does-not-block-selection",
-        ast: { within: "selection" },
-        from: '  if (spent || severalWaits) return answer([], 0, spent ? "budget-spent" : "several-waits-pending");',
-        to: '  if (severalWaits) return answer([], 0, spent ? "budget-spent" : "several-waits-pending");',
+        derive: {
+          within: "selection",
+          operator: "neutralize-term",
+          condition: "spent || severalWaits",
+          term: "spent",
+        },
         expect:
           "the answer names the gate a unit was refused through, and the gates are the rule's own",
       },
@@ -558,9 +557,12 @@ const TARGETS: readonly Target[] = [
         // A task someone is working is not on offer, whatever the budget. Without this, a run with
         // slots to spare would hand the same task to a second worker.
         name: "a-claimed-task-stays-on-offer",
-        ast: { within: "selection" },
-        from: "    tasks.filter((task) => !task.claimed && ready(task)).map((task) => task.id);",
-        to: "    tasks.filter((task) => ready(task)).map((task) => task.id);",
+        derive: {
+          within: "selection",
+          operator: "neutralize-term",
+          condition: "!task.claimed && ready(task)",
+          term: "!task.claimed",
+        },
         expect: "a declared budget is spent by claims in flight, not by the next task's rank",
       },
       {
@@ -575,9 +577,12 @@ const TARGETS: readonly Target[] = [
       {
         // Zero or half a slot is not a smaller budget, and rounding it would hide the caller's typo.
         name: "half-a-slot-is-a-smaller-budget",
-        ast: { within: "checkedSlots" },
-        from: '  if (!Number.isSafeInteger(slots) || slots < 1) throw new Error("slots must be a positive integer");',
-        to: '  if (!Number.isSafeInteger(slots)) throw new Error("slots must be a positive integer");',
+        derive: {
+          within: "checkedSlots",
+          operator: "neutralize-term",
+          condition: "!Number.isSafeInteger(slots) || slots < 1",
+          term: "slots < 1",
+        },
         expect: "a claim in flight does not release a dependent, and half a slot is not a budget",
       },
       {
@@ -585,9 +590,11 @@ const TARGETS: readonly Target[] = [
         // is not skipped in favour of a later ready task. This is the rule an ordering step is most
         // likely to bypass by accident, so it has its own tooth.
         name: "a-head-blocked-by-a-stale-input-is-skipped",
-        ast: { within: "selection" },
-        from: '  if (!current(first) || !waiting(first)) return answer([], 0, "earlier-unit-blocked");',
-        to: '    if (false) return answer([], 0, "earlier-unit-blocked");',
+        derive: {
+          within: "selection",
+          operator: "condition-never",
+          condition: "!current(first) || !waiting(first)",
+        },
         expect: "the round's own answer is the shared rule's answer, not an ordering's",
       },
       {
@@ -596,18 +603,19 @@ const TARGETS: readonly Target[] = [
         // silences every refusal at once: an empty legal set with no reasons is exactly the answer
         // the design says a caller cannot be given.
         name: "a-refused-unit-is-silent",
-        ast: { within: "selection" },
-        from: "      causes.set(task.id, own.length > 0 ? own : held ? [held] : []);",
-        to: "      causes.set(task.id, []);",
+        derive: { within: "selection", operator: "replace-argument", call: "causes.set", arg: 1 },
+        to: "[]",
         expect: "no refusal in the answer is silent, over the flags a plan's facts can carry",
       },
       {
         // A cause names the gate; it never restates the condition. Dropping one leaves a refusal
         // whose reason the rule can no longer give, even when another gate would still be true.
         name: "a-stale-input-is-not-named",
-        ast: { within: "selection" },
-        from: '    if (!current(task)) causes.push("stale-input");',
-        to: '    if (false) causes.push("stale-input");',
+        derive: {
+          within: "selection",
+          operator: "condition-never",
+          condition: "!current(task)",
+        },
         expect:
           "the answer names the gate a unit was refused through, and the gates are the rule's own",
       },
@@ -642,25 +650,33 @@ const TARGETS: readonly Target[] = [
       },
       {
         name: "an-unattested-reading-counts-as-evidence",
-        ast: { within: "speculationOutcome" },
-        from: "  if (!fact.authoritative)",
-        to: "  if (false)",
+        derive: {
+          within: "speculationOutcome",
+          operator: "condition-never",
+          condition: "!fact.authoritative",
+        },
         expect: "a reading nobody attested is not evidence",
       },
       {
         name: "evidence-about-another-version-is-the-same-fact",
-        ast: { within: "speculationOutcome" },
-        from: "  if (fact.version !== assumption.version)",
-        to: "  if (false)",
+        derive: {
+          within: "speculationOutcome",
+          operator: "condition-never",
+          condition: "fact.version !== assumption.version",
+        },
         expect: "evidence about another version is not evidence about this fact",
       },
       {
         // The invalidation rule: a contradicted guess closes its branch session, so the real path
         // cannot take an answer from a model that has already been told the guess.
         name: "a-contradicted-guess-keeps-its-session",
-        ast: { within: "speculationOutcome" },
-        from: '    outcome: "discard",\n    sessionReusable: false,',
-        to: '    outcome: "discard",\n    sessionReusable: true,',
+        derive: {
+          within: "speculationOutcome",
+          operator: "replace-property",
+          property: "sessionReusable",
+          in: 'outcome: "discard"',
+        },
+        to: "true",
         expect: "a guess the evidence contradicts is discarded, and its branch session is closed",
       },
     ],
@@ -1324,58 +1340,77 @@ const TARGETS: readonly Target[] = [
     mutants: [
       {
         name: "fusion-shares-a-session-across-different-capabilities",
-        ast: { within: "compatibleDeclarations" },
-        from: "    first.capability === next.capability &&",
-        to: "    first.capability === first.capability &&",
+        derive: {
+          within: "compatibleDeclarations",
+          operator: "neutralize-term",
+          condition: "next.capability",
+          term: "first.capability === next.capability",
+        },
         expect: "fusion refuses a unit that needs a different execution capability",
       },
       {
         name: "fusion-shares-a-session-across-different-authorities",
-        ast: { within: "compatibleDeclarations" },
-        from: "    first.authority === next.authority &&",
-        to: "    first.authority === first.authority &&",
+        derive: {
+          within: "compatibleDeclarations",
+          operator: "neutralize-term",
+          condition: "next.authority",
+          term: "first.authority === next.authority",
+        },
         expect: "fusion refuses a unit acting under a different authority",
       },
       {
         name: "fusion-widens-what-a-unit-may-read",
-        ast: { within: "compatibleDeclarations" },
-        from: "    subset(next.visible, first.visible)",
-        to: "    subset(first.visible, next.visible)",
+        derive: {
+          within: "compatibleDeclarations",
+          operator: "neutralize-term",
+          condition: "subset(next.visible, first.visible)",
+          term: "subset(next.visible, first.visible)",
+        },
         expect: "fusion refuses a successor whose visibility the session would widen",
       },
       {
         name: "fusion-continues-from-an-unverified-answer",
-        ast: { within: "sharedSessionLegal" },
-        from: "  if (!first.accepted) return false;",
-        to: "  if (false && !first.accepted) return false;",
+        derive: {
+          within: "sharedSessionLegal",
+          operator: "condition-never",
+          condition: "!first.accepted",
+        },
         expect: "fusion refuses to continue from a unit whose verdict is not accepted",
       },
       {
         name: "fusion-starts-a-successor-whose-dependency-is-not-accepted",
-        ast: { within: "sharedSessionLegal" },
-        from: "  if (next.dependencies.some((id) => !acceptedDependency(byId, id))) return false;",
-        to: "  if (false && next.dependencies.some((id) => !acceptedDependency(byId, id))) return false;",
+        derive: {
+          within: "sharedSessionLegal",
+          operator: "condition-never",
+          condition: "next.dependencies.some((id) => !acceptedDependency(byId, id))",
+        },
         expect: "fusion refuses a successor whose dependency is delivered but not accepted",
       },
       {
         name: "fusion-carries-a-cancelled-unit-into-its-next-unit",
-        ast: { within: "neitherCancelled" },
-        from: "  return !first.cancelled && !next.cancelled;",
-        to: "  return true;",
+        derive: {
+          within: "neitherCancelled",
+          operator: "condition-holds",
+          condition: "!first.cancelled && !next.cancelled",
+        },
         expect: "fusion refuses a cancelled unit, before or after",
       },
       {
         name: "fusion-crosses-a-host-yield-boundary",
-        ast: { within: "sharedSessionLegal" },
-        from: "  if (!!first.externalEvent && !first.externalReady) return false;",
-        to: "  if (false && !!first.externalEvent && !first.externalReady) return false;",
+        derive: {
+          within: "sharedSessionLegal",
+          operator: "condition-never",
+          condition: "!!first.externalEvent && !first.externalReady",
+        },
         expect: "fusion ends the session at a declared external wait that is not ready",
       },
       {
         name: "fusion-reuses-history-across-a-pending-branch",
-        ast: { within: "acrossAPendingBranch" },
-        from: "  return pending.includes(before) || pending.includes(after);",
-        to: "  return false;",
+        derive: {
+          within: "acrossAPendingBranch",
+          operator: "condition-never",
+          condition: "pending.includes(before) || pending.includes(after)",
+        },
         expect: "fusion never reuses the history across a fact whose branch is still pending",
       },
     ],
@@ -1493,101 +1528,6 @@ interface Outcome {
   readonly mutants: readonly MutantOutcome[];
 }
 
-/** Whitespace-normalized text search: exact bytes first, then reflowed form.
- *
- *  The commit hook runs prettier, so a reflowed anchor must not retire a tooth. More than one match
- *  is still refused, because replacing the first would leave the rule intact somewhere else. */
-function matchText(
-  haystack: string,
-  anchor: string,
-): { start: number; end: number; retaken: boolean } | { reason: string } {
-  const occurrences = haystack.split(anchor).length - 1;
-  if (occurrences === 1) {
-    const start = haystack.indexOf(anchor);
-    return { start, end: start + anchor.length, retaken: false };
-  }
-  if (occurrences > 1)
-    return { reason: `marker occurs ${occurrences} times, refusing to claim a check` };
-  // Built without a regex literal: one containing `${` confuses Node's type-stripping parser.
-  const special = ".*+?^$()[]{}|\\";
-  const escaped = anchor
-    .trim()
-    .split(/\s+/u)
-    .map((part) => [...part].map((ch) => (special.includes(ch) ? "\\" + ch : ch)).join(""))
-    .join("\\s+");
-  const matches = [...haystack.matchAll(new RegExp(escaped, "gu"))];
-  if (matches.length !== 1)
-    return {
-      reason: `marker not found (${matches.length} matches once whitespace is normalized), refusing to claim a check`,
-    };
-  const match = matches[0]!;
-  return { start: match.index, end: match.index + match[0].length, retaken: true };
-}
-
-/** Where a mutant applies: by syntax tree when it says so, by bytes otherwise.
- *
- *  A site that cannot be located is a failure, not an "not applicable": that verdict is reserved for
- *  a target file that is not on this branch at all. Files that are still being edited should carry an
- *  `ast` locator, because a text anchor in them retires itself the first time the formatter runs. */
-function locate(
-  text: string,
-  mutant: Mutant,
-): { start: number; end: number; retaken: boolean } | { reason: string } {
-  if (mutant.ast) {
-    const source = ts.createSourceFile("mutant.ts", text, ts.ScriptTarget.Latest, true);
-    if (mutant.ast.within !== undefined) {
-      const members: ts.Node[] = [];
-      const visit = (node: ts.Node): void => {
-        const named =
-          (ts.isMethodDeclaration(node) || ts.isFunctionDeclaration(node)) &&
-          node.name?.getText(source) === mutant.ast!.within;
-        if (named) members.push(node);
-        ts.forEachChild(node, visit);
-      };
-      visit(source);
-      if (members.length !== 1)
-        return {
-          reason: `ast scope ${mutant.ast.within} matched ${members.length} members, refusing to claim a check`,
-        };
-      const member = members[0]!;
-      if (mutant.from === undefined)
-        return { reason: "an ast scope needs a from anchor to find inside it" };
-      const inner = matchText(member.getText(source), mutant.from);
-      if ("reason" in inner) return { reason: `inside ${mutant.ast.within}: ${inner.reason}` };
-      const offset = member.getStart(source);
-      return { start: offset + inner.start, end: offset + inner.end, retaken: inner.retaken };
-    }
-    const found: ts.Node[] = [];
-    const walk = (node: ts.Node): void => {
-      if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
-        const args = node.arguments?.length ?? 0;
-        if (
-          node.expression.getText(source) === mutant.ast!.call &&
-          (mutant.ast!.argCount === undefined || args === mutant.ast!.argCount)
-        )
-          found.push(node);
-      }
-      ts.forEachChild(node, walk);
-    };
-    walk(source);
-    if (found.length !== 1)
-      return {
-        reason: `ast locator ${mutant.ast.call} matched ${found.length} sites, refusing to claim a check`,
-      };
-    return { start: found[0]!.getStart(source), end: found[0]!.getEnd(), retaken: false };
-  }
-  if (mutant.from === undefined)
-    return { reason: "mutant has neither an ast locator nor a from anchor" };
-  const found = matchText(text, mutant.from);
-  if ("reason" in found) return found;
-  if (found.retaken)
-    process.stdout.write(
-      `  re-taken anchor: ${mutant.name} (formatting reflowed it; ${String(found.end - found.start)} bytes)
-`,
-    );
-  return found;
-}
-
 /** The failure lines a suite run reported. Used for both verdicts: a surviving mutant
  *  and a clean run that failed. The clean run is the one that proves nothing, so
  *  naming its failing case is what turns "the harness proves nothing" into a fix. */
@@ -1677,6 +1617,10 @@ const { values } = parseArgs({
     // One mutant at a time, so a single sweep command can be bounded by a caller with a time budget
     // instead of a whole target's worth of suite runs. Repeating it runs the mutants named.
     mutant: { type: "string", multiple: true },
+    // Resolve every mutant's site and write nothing: the pass that says whether the teeth still bite
+    // where they are aimed, without running a suite. Cheap enough to sit in the static contract, and
+    // it is the only check that notices a tooth whose anchor stopped matching.
+    "anchors-only": { type: "boolean" },
   },
 });
 const requested = (values.targets ?? []).flatMap((entry) => entry.split(",")).filter(Boolean);
@@ -1697,6 +1641,48 @@ const selected = requested.length
   : TARGETS;
 /** Naming a target is a claim that it can be exercised here; the default list is not. */
 const strict = requested.length > 0;
+
+/**
+ * Resolve every selected mutant and say which sites no longer apply, without running a suite and
+ * without writing a byte. A sweep proves the teeth bite; this proves they are still aimed at something,
+ * which is the reading that was missing when two teeth had silently stopped matching their rule.
+ */
+if (values["anchors-only"]) {
+  const hazard = mutationHazard();
+  if (hazard)
+    throw new Error(
+      `refusing to read anchors: ${hazard} - a target file may hold a live mutant, so the sites on ` +
+        `disk are not the tree's`,
+    );
+  const failures: string[] = [];
+  let claimed = 0;
+  let applicable = 0;
+  for (const { target, mutants } of selected) {
+    if (!existsSync(target)) {
+      failures.push(`${target}: not present in this checkout`);
+      continue;
+    }
+    claimed += mutants.length;
+    const text = readFileSync(target, "utf8");
+    const wanted = onlyMutants.length
+      ? mutants.filter((mutant) => onlyMutants.includes(mutant.name))
+      : mutants;
+    for (const mutant of wanted) {
+      const site = locate(text, mutant);
+      if ("reason" in site) failures.push(`${target} / ${mutant.name}: ${site.reason}`);
+      else applicable += 1;
+    }
+  }
+  process.stdout.write(
+    `anchors: ${String(applicable)} of ${String(claimed)} resolve, over ${String(selected.length)} targets\n`,
+  );
+  for (const failure of failures) process.stderr.write(`${failure}\n`);
+  if (failures.length > 0) {
+    process.stdout.write(`anchors: ${String(failures.length)} sites no longer apply\n`);
+    process.exit(1);
+  }
+  process.exit(0);
+}
 
 const outcomes: Outcome[] = [];
 const problems: string[] = [];
@@ -1784,7 +1770,7 @@ for (const { target, suites, mutants: declared } of selected) {
     }
     sweep.live = true;
     writeMutationLock(sweep);
-    writeFileSync(target, text.slice(0, site.start) + mutant.to + text.slice(site.end));
+    writeFileSync(target, text.slice(0, site.start) + site.replacement + text.slice(site.end));
     // The named case first, and the whole suite only if it did not fail. Both readings mean the same
     // thing - `caught` still requires the named case to appear in a failing run - so the fallback
     // never weakens a tooth; it just avoids paying for a suite whose other cases cannot change the
