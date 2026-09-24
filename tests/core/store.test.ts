@@ -8,19 +8,17 @@ import test from "node:test";
 import { NmgStore } from "../../src/core/store.ts";
 import type { MemoryMarker, VectorEmbedder } from "../../src/core/types.ts";
 
-function withStore(run: (store: NmgStore) => void, embedder?: VectorEmbedder): void {
-  const directory = mkdtempSync(join(tmpdir(), "nmg-test-"));
-  const store = new NmgStore(join(directory, "nmg.sqlite"), embedder);
+function withMemoryStore(run: (store: NmgStore) => void, embedder?: VectorEmbedder): void {
+  const store = new NmgStore(":memory:", embedder);
   try {
     run(store);
   } finally {
     store.close();
-    rmSync(directory, { recursive: true, force: true });
   }
 }
 
 test("remember persists a memory with traceable evidence", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "NMG uses Pi as its agent harness",
       nodeName: "NMG architecture",
@@ -39,7 +37,7 @@ test("remember persists a memory with traceable evidence", () => {
 });
 
 test("memory markers persist as extensible control metadata", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const markers: MemoryMarker[] = [
       { kind: "forget", attributes: { effect: "revoke" } },
       { kind: "future-extension", attributes: { enabled: true, score: 0.8 } },
@@ -60,7 +58,7 @@ test("memory markers persist as extensible control metadata", () => {
 });
 
 test("memory writes retain accepted and privacy-safe rejected policy decisions", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "The user prefers compact technical explanations",
       nodeName: "response preference",
@@ -93,7 +91,7 @@ test("memory writes retain accepted and privacy-safe rejected policy decisions",
 });
 
 test("disposable controller probes do not persist retrieval traces", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.remember({ statement: "Project Atlas stores analytics in DuckDB", nodeName: "Atlas" });
     const context = store.searchContext("Atlas analytics", { persistTrace: false });
     assert.ok(context.activeGraph);
@@ -102,7 +100,7 @@ test("disposable controller probes do not persist retrieval traces", () => {
 });
 
 test("semantic searchContext preserves Active Graph budgets and tracing", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "Project Atlas stores analytics in DuckDB",
       nodeName: "Project Atlas storage",
@@ -156,7 +154,7 @@ test("memory survives closing and reopening the local database", () => {
 });
 
 test("search respects local tier and result budgets", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.remember({
       statement: "Docker is only an optional execution backend",
       nodeName: "sandbox boundary",
@@ -169,7 +167,7 @@ test("search respects local tier and result budgets", () => {
 });
 
 test("the same semantic node is reused without merging evidence", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const first = store.remember({
       statement: "Cloud sync is optional",
       nodeName: "deployment",
@@ -186,7 +184,7 @@ test("the same semantic node is reused without merging evidence", () => {
 });
 
 test("scope filters memories without discarding other scopes", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.remember({
       statement: "The production database is PostgreSQL",
       nodeName: "database",
@@ -208,7 +206,7 @@ test("scope filters memories without discarding other scopes", () => {
 });
 
 test("a newer state supersedes but does not delete the old memory", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const previous = store.remember({
       statement: "Project Atlas uses Python 3.11",
       nodeName: "Project Atlas runtime",
@@ -277,7 +275,7 @@ test("session archives checkpoint changes without entering semantic search", () 
 });
 
 test("stateKey automatically supersedes the active state in the same scope", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const previous = store.remember({
       statement: "Charity 5K personal best is 27:12",
       nodeName: "running personal best",
@@ -307,7 +305,7 @@ test("stateKey automatically supersedes the active state in the same scope", () 
 });
 
 test("semantically equivalent state keys become aliases before supersession", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const previous = store.remember({
       statement: "The charity 5K personal best is 27:12",
       nodeName: "user-5k-personal-best",
@@ -333,7 +331,7 @@ test("semantically equivalent state keys become aliases before supersession", ()
 });
 
 test("state alias repair does not merge a goal with a personal best", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const best = store.remember({
       statement: "The charity 5K personal best is 25:50",
       nodeName: "user-running-5k-personal-best",
@@ -354,7 +352,7 @@ test("state alias repair does not merge a goal with a personal best", () => {
 });
 
 test("events and conversation evidence preserve time, actor, and truth status", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const event = store.remember({
       statement: "User visited MoMA",
       nodeName: "MoMA visit",
@@ -376,7 +374,7 @@ test("events and conversation evidence preserve time, actor, and truth status", 
 });
 
 test("claims are persisted and derive the record-level logical rollup", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "The user has used Flask, but has never used Flask-Login.",
       nodeName: "Flask experience",
@@ -417,7 +415,7 @@ test("claims are persisted and derive the record-level logical rollup", () => {
 });
 
 test("searchContext can restrict evidence to the requested source actor", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const userMemory = store.remember({
       statement: "User requested the Sunday rotation",
       nodeName: "Sunday rotation request",
@@ -446,7 +444,7 @@ test("searchContext can restrict evidence to the requested source actor", () => 
 });
 
 test("derived memories retain every source evidence and graph relation", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const first = store.remember({
       statement: "The blazer must be picked up",
       nodeName: "blazer pickup",
@@ -477,7 +475,7 @@ test("derived memories retain every source evidence and graph relation", () => {
 });
 
 test("searchContext combines matching memories with typed graph edges", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const preference = store.remember({
       statement: "User prefers Adobe Premiere Pro advanced tutorials",
       nodeName: "video editing preference",
@@ -506,7 +504,7 @@ test("searchContext combines matching memories with typed graph edges", () => {
 });
 
 test("getContext expands selected memory IDs without searching", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const wanted = store.remember({
       statement: "The selected memory keeps its exact statement",
       nodeName: "progressive disclosure",
@@ -532,7 +530,7 @@ test("getContext expands selected memory IDs without searching", () => {
 });
 
 test("aggregation context overfetches and prioritizes countable memories", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     for (let index = 0; index < 6; index += 1) {
       store.remember({
         statement: `Assistant gave pickup and return organization tip ${index}`,
@@ -557,7 +555,7 @@ test("aggregation context overfetches and prioritizes countable memories", () =>
 });
 
 test("lexical ranking ignores English question words that crowd out countable evidence", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     for (let index = 0; index < 12; index += 1) {
       store.remember({
         statement: `How many of the ideas are in the guide and what is it for ${index}?`,
@@ -587,7 +585,7 @@ test("lexical ranking ignores English question words that crowd out countable ev
 });
 
 test("recall cues expose a compressed node directory without memory statements", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.remember({
       statement: "The user's detailed editing preference marker is CERULEAN-OWL",
       nodeName: "video editing preference",
@@ -618,7 +616,7 @@ test("recall cues expose a compressed node directory without memory statements",
 });
 
 test("resident kernel is query independent and excludes unverified assistant constraints", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const pinned = store.remember({
       statement: "Never deploy Project Helix without tests",
       nodeName: "Project Helix release constraint",
@@ -644,7 +642,7 @@ test("resident kernel is query independent and excludes unverified assistant con
 });
 
 test("node merge preserves memories, evidence, relations, and redirects", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const first = store.remember({ statement: "Uses TypeScript", nodeName: "NMG language" });
     const second = store.remember({ statement: "Uses SQLite", nodeName: "NMG database" });
     const host = store.remember({ statement: "Pi hosts NMG", nodeName: "Pi host" });
@@ -683,7 +681,7 @@ test("node merge preserves memories, evidence, relations, and redirects", () => 
 });
 
 test("node split requires a complete partition and preserves every memory", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const first = store.remember({ statement: "Python 2 for ROS", nodeName: "Python environment" });
     const second = store.remember({
       statement: "Python 3.12 for Windows",
@@ -722,7 +720,7 @@ test("vector retrieval finds a semantic synonym without lexical overlap", () => 
       return [0, 0, 1];
     },
   };
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "The automobile needs a service",
       nodeName: "vehicle maintenance",
@@ -735,7 +733,7 @@ test("vector retrieval finds a semantic synonym without lexical overlap", () => 
 });
 
 test("learning router changes node ranking from explicit feedback", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const first = store.remember({ statement: "One", nodeName: "first project" });
     store.remember({ statement: "Two", nodeName: "second project" });
     assert.deepEqual(store.routeNodes("alpha signal"), []);
@@ -811,7 +809,7 @@ test("embeddings persist as Float32 blobs and a warm node cache accepts appends"
 });
 
 test("embedding index health tracks pending, success, and retryable failure", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const first = store.remember({ statement: "Alpha memory", nodeName: "Alpha node" });
     store.beginEmbeddingIndex({
       indexId: "provider@index-a",
@@ -855,7 +853,7 @@ test("embedding index health tracks pending, success, and retryable failure", ()
 });
 
 test("Huffman-like block rebalance promotes frequent memory only in batches", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const memories = Array.from({ length: 5 }, (_, index) =>
       store.remember({
         statement: `Shared topic memory ${index}`,
@@ -880,7 +878,7 @@ test("Huffman-like block rebalance promotes frequent memory only in batches", ()
 });
 
 test("appends source messages idempotently within a session", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const input = {
       content: "I prefer concise answers.",
       role: "user" as const,
@@ -901,7 +899,7 @@ test("appends source messages idempotently within a session", () => {
 });
 
 test("binds a semantic memory to an existing exact history message", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const history = store.appendHistory({
       content: "For ROS Melodic keep Python 2, and do not upgrade this project to Python 3.",
       role: "user",
@@ -922,7 +920,7 @@ test("binds a semantic memory to an existing exact history message", () => {
 });
 
 test("FTS5 reaches exact cold evidence outside the hot candidate window", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     for (let index = 0; index < 520; index += 1) {
       store.remember({
         statement: `Routine note ${index}`,
@@ -967,7 +965,7 @@ test("FTS5 reaches exact cold evidence outside the hot candidate window", () => 
 });
 
 test("node vectors route first and node-local search recovers leaf evidence", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const robotics = store.remember({
       statement: "Gazebo started after switching to software rendering",
       nodeName: "ROS rendering",
@@ -1006,7 +1004,7 @@ test("node vectors route first and node-local search recovers leaf evidence", ()
 });
 
 test("node creation automatically reuses punctuation and case variants", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const first = store.upsertNode({ canonicalName: "ROS Melodic", kind: "project" });
     const variant = store.upsertNode({ canonicalName: "ros-melodic", kind: "project" });
     assert.equal(variant.id, first.id);
@@ -1014,7 +1012,7 @@ test("node creation automatically reuses punctuation and case variants", () => {
 });
 
 test("node vector routing is deterministic unless hierarchical activation is explicit", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const alpha = store.remember({ statement: "Alpha memory", nodeName: "Alpha node" });
     const beta = store.remember({ statement: "Beta memory", nodeName: "Beta node" });
     store.upsertExternalNodeEmbeddings("stable-routing", [
@@ -1044,7 +1042,7 @@ test("node vector routing is deterministic unless hierarchical activation is exp
 });
 
 test("leaf summaries preserve distinctions hidden by one broad node summary", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const rendering = store.remember({
       statement: "Gazebo recovered after enabling software rendering",
       nodeName: "ROS project",
@@ -1169,7 +1167,7 @@ test("uncompacted Delta survives restart and participates in hierarchy search", 
 });
 
 test("due leaf rebuild compacts only nodes that cross the Delta threshold", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const first = store.remember({ statement: "Alpha fact one", nodeName: "Alpha" });
     store.remember({ statement: "Beta fact one", nodeName: "Beta" });
     assert.equal(store.rebuildDueLeafBlocks({ deltaThreshold: 2 }).length, 0);
@@ -1187,7 +1185,7 @@ test("due leaf rebuild compacts only nodes that cross the Delta threshold", () =
 });
 
 test("co-retrieval produces delayed link proposals with evidence and cooldown", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const alpha = store.remember({ statement: "Alpha detail", nodeName: "Alpha" });
     const beta = store.remember({ statement: "Beta detail", nodeName: "Beta" });
     for (let index = 0; index < 3; index += 1) {
@@ -1228,7 +1226,7 @@ test("co-retrieval produces delayed link proposals with evidence and cooldown", 
 });
 
 test("repeated ambiguity proposes an evidence-preserving scoped split", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const python = store.remember({
       statement: "ROS uses Python 2",
       nodeName: "Broad project node",
@@ -1323,7 +1321,7 @@ test("topology proposals persist review decisions and ignore weak signals", () =
 });
 
 test("STG and LTG lifecycle preserves IDs, evidence, expiry, and audit history", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const durable = store.remember({
       statement: "Project Helix uses SQLite",
       nodeName: "Project Helix storage",
@@ -1368,7 +1366,7 @@ test("STG and LTG lifecycle preserves IDs, evidence, expiry, and audit history",
 });
 
 test("Active Graph enforces a shared budget and records verified evidence outcomes", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.remember({
       statement: "ORCHID alpha detail",
       nodeName: "ORCHID alpha",
@@ -1433,7 +1431,7 @@ test("Active Graph enforces a shared budget and records verified evidence outcom
 });
 
 test("Active Graph records graph expansion paths separately from selected memories", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const seed = store.remember({ statement: "LANTERN seed detail", nodeName: "LANTERN seed" });
     const related = store.remember({
       statement: "Related implementation uses SQLite",
@@ -1465,7 +1463,7 @@ test("Active Graph records graph expansion paths separately from selected memori
 });
 
 test("edge stability deduplicates tasks and drives auditable reversible consolidation", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const alpha = store.remember({ statement: "Alpha stable evidence", nodeName: "Alpha stable" });
     const beta = store.remember({ statement: "Beta stable evidence", nodeName: "Beta stable" });
     const observe = (taskId: string, contradicted = false) => {
@@ -1561,7 +1559,7 @@ test("P3 schema migrates an existing pre-lifecycle database before creating new 
 });
 
 test("contradictionNotes flags claim pairs with opposite polarity in temporal order", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const earlier = store.remember({
       statement: "user: I'm trying to implement the basic homepage route with Flask",
       nodeName: "beam",
@@ -1723,7 +1721,7 @@ test("contradictionNotes flags claim pairs with opposite polarity in temporal or
 });
 
 test("search defaults to legacy mode: lexical fallback works without matching vectors", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     store.remember({
       statement: "legacy default mode probe statement",
       nodeName: "probe node",
@@ -1745,7 +1743,7 @@ test("search defaults to legacy mode: lexical fallback works without matching ve
 });
 
 test("searchContext falls back to lexical when semantic retrieval is empty", () => {
-  withStore((store) => {
+  withMemoryStore((store) => {
     const saved = store.remember({
       statement: "The retired project codename was silver heron",
       nodeName: "project codename",

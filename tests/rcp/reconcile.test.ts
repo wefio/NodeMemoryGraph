@@ -23,19 +23,48 @@ import type { RepositoryProvider } from "../../src/rcp/repository.ts";
 import type { VerifierProvider } from "../../src/rcp/providers.ts";
 import { contractText, repositoryFixture } from "./fixture.ts";
 
-function setup() {
-  const root = repositoryFixture();
+function fixedRepository(root: string): RepositoryProvider {
+  return {
+    descriptor: {
+      id: "fixed-test-repository",
+      version: "1",
+      capabilities: ["fixed-observation"],
+      operations: ["observe"],
+      authority: ["plan", "apply", "continuous"],
+    },
+    observe: async (request) => {
+      assert.equal(request.root, root);
+      return {
+        root: root.replaceAll("\\", "/"),
+        observedRevision: `sha256:${"0".repeat(64)}`,
+        git: { available: true, commit: "fixed-test-commit", dirtyFiles: [] },
+        files: [],
+        diagnostics: [],
+        observedBytes: 0,
+      };
+    },
+  };
+}
+
+function setup(resource: "git" | "observation" = "git") {
+  const root = repositoryFixture({ git: resource === "git" });
   const compiled = compileContract({ text: contractText(), path: join(root, "contract.yaml") });
   assert.ok(compiled.contract);
-  return { root, contract: compiled.contract, routes: readRouteDeclarations(root) };
+  return {
+    root,
+    contract: compiled.contract,
+    routes: readRouteDeclarations(root),
+    repository: resource === "git" ? undefined : fixedRepository(root),
+  };
 }
 
 function providers(
   root: string,
   harness: HarnessProvider = new ExternalWorkspaceHarnessProvider(),
+  repository: RepositoryProvider = new LocalRepositoryProvider(),
 ) {
   return {
-    repository: new LocalRepositoryProvider(),
+    repository,
     policy: new DefaultPolicyProvider(),
     harness,
     verifier: new LocalNpmVerifierProvider(30_000),
@@ -44,10 +73,10 @@ function providers(
 }
 
 test("plan mode emits a WorkOrder without executing or recording", async () => {
-  const value = setup();
+  const value = setup("observation");
   const result = await reconcileOnce(
     { ...value, requestedMode: "plan", invocationId: "plan" },
-    providers(value.root),
+    providers(value.root, undefined, value.repository),
   );
   assert.equal(result.status, "planned");
   assert.equal(result.receipt, undefined);
@@ -85,10 +114,10 @@ test("apply independently verifies, records an immutable receipt, and reuses ide
 });
 
 test("tampered verified receipt is rejected instead of reused", async () => {
-  const value = setup();
+  const value = setup("observation");
   const first = await reconcileOnce(
     { ...value, requestedMode: "apply", invocationId: "tamper-1", now: fixedClock() },
-    providers(value.root),
+    providers(value.root, undefined, value.repository),
   );
   assert.equal(first.status, "verified");
   const tampered = JSON.parse(readFileSync(first.receiptPath!, "utf8")) as Record<string, unknown>;
@@ -97,15 +126,15 @@ test("tampered verified receipt is rejected instead of reused", async () => {
 
   const second = await reconcileOnce(
     { ...value, requestedMode: "apply", invocationId: "tamper-2" },
-    providers(value.root),
+    providers(value.root, undefined, value.repository),
   );
   assert.equal(second.status, "blocked");
   assert.match(second.conditions.at(-1)?.reason ?? "", /invalid receipt/i);
 });
 
 test("receipt reuse is bound to the current verifier definition", async () => {
-  const value = setup();
-  const base = providers(value.root);
+  const value = setup("observation");
+  const base = providers(value.root, undefined, value.repository);
   const first = await reconcileOnce(
     { ...value, requestedMode: "apply", invocationId: "verifier-v1", now: fixedClock() },
     base,
@@ -235,8 +264,8 @@ test("an implementing harness cannot weaken its verifier during execution", asyn
 });
 
 test("optional NMG failure degrades without changing authority or verified decision", async () => {
-  const value = setup();
-  const base = providers(value.root);
+  const value = setup("observation");
+  const base = providers(value.root, undefined, value.repository);
   const result = await reconcileOnce(
     { ...value, requestedMode: "apply", invocationId: "memory", now: fixedClock() },
     {
@@ -256,10 +285,10 @@ test("optional NMG failure degrades without changing authority or verified decis
 });
 
 test("external and process harnesses consume the same WorkOrder contract", async () => {
-  const value = setup();
+  const value = setup("observation");
   const external = await reconcileOnce(
     { ...value, operationKey: "external", requestedMode: "plan" },
-    providers(value.root, new ExternalWorkspaceHarnessProvider("codex")),
+    providers(value.root, new ExternalWorkspaceHarnessProvider("codex"), value.repository),
   );
   const script = join(value.root, "harness.mjs");
   writeFileSync(
@@ -275,7 +304,7 @@ test("external and process harnesses consume the same WorkOrder contract", async
 });
 
 test("process harness terminates after its configured timeout", async () => {
-  const value = setup();
+  const value = setup("observation");
   const plan = await reconcileOnce(
     {
       ...value,
@@ -283,7 +312,7 @@ test("process harness terminates after its configured timeout", async () => {
       requestedMode: "plan",
       executionTimeoutMs: 50,
     },
-    providers(value.root),
+    providers(value.root, undefined, value.repository),
   );
   const script = join(value.root, "hanging-harness.mjs");
   writeFileSync(script, "process.stdin.resume(); setInterval(() => {}, 1000);\n");
@@ -299,7 +328,7 @@ test("process harness terminates after its configured timeout", async () => {
 });
 
 test("harness exceptions become failed terminal receipts", async () => {
-  const value = setup();
+  const value = setup("observation");
   const harness: HarnessProvider = {
     descriptor: new ExternalWorkspaceHarnessProvider("throwing-harness").descriptor,
     execute: async () => {
@@ -308,7 +337,7 @@ test("harness exceptions become failed terminal receipts", async () => {
   };
   const result = await reconcileOnce(
     { ...value, requestedMode: "apply", invocationId: "throwing", now: fixedClock() },
-    providers(value.root, harness),
+    providers(value.root, harness, value.repository),
   );
   assert.equal(result.status, "failed");
   assert.equal(result.receipt?.decision, "failed");
@@ -317,7 +346,7 @@ test("harness exceptions become failed terminal receipts", async () => {
 });
 
 test("failed attempts remain append-only without preventing a later retry", async () => {
-  const value = setup();
+  const value = setup("observation");
   const failingHarness: HarnessProvider = {
     descriptor: new ExternalWorkspaceHarnessProvider("first-attempt").descriptor,
     execute: async () => ({
@@ -328,12 +357,12 @@ test("failed attempts remain append-only without preventing a later retry", asyn
   };
   const first = await reconcileOnce(
     { ...value, requestedMode: "apply", invocationId: "attempt-1", now: fixedClock() },
-    providers(value.root, failingHarness),
+    providers(value.root, failingHarness, value.repository),
   );
   assert.equal(first.status, "failed");
   const second = await reconcileOnce(
     { ...value, requestedMode: "apply", invocationId: "attempt-2", now: fixedClock() },
-    providers(value.root),
+    providers(value.root, undefined, value.repository),
   );
   assert.equal(second.status, "verified");
   assert.equal(receiptFileCount(value.root), 2);

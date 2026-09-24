@@ -14,6 +14,7 @@ import {
   type VerificationCommandResult,
 } from "../../tools/agent-verify.ts";
 import type { AgentContextReport } from "../../tools/repo-context.ts";
+import { npmCommandRunner } from "../../src/rcp/verification.ts";
 
 function report(): AgentContextReport {
   return {
@@ -95,6 +96,78 @@ test("default execution runs every blocking check and leaves advisory work expli
   assert.equal(results.results.at(-1)?.command, "test:research");
   assert.equal(results.results.at(-1)?.status, "skipped");
   assert.equal(results.results.at(-1)?.reason, "advisory checks require --include-advisory");
+});
+
+test("parallel static checks preserve barriers, result order, and individual failures", async () => {
+  const commands = ["build", "check", "lint", "format:check", "test:product"];
+  const plan = {
+    blocking: commands.map((command) => ({
+      command,
+      classification: "blocking" as const,
+      routes: [],
+    })),
+    advisory: [],
+  };
+  const started: string[] = [];
+  const events: string[] = [];
+  let active = 0;
+  let peak = 0;
+  const result = await executeVerificationPlan(plan, {
+    parallel: { commands: new Set(["check", "lint", "format:check"]), concurrency: 2 },
+    run: async (command, classification, routes) => {
+      started.push(command);
+      events.push(`start:${command}`);
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, command === "check" ? 20 : 5));
+      active -= 1;
+      events.push(`end:${command}`);
+      return {
+        command,
+        classification,
+        routes,
+        status: command === "lint" ? "failed" : "passed",
+        durationMs: 1,
+      };
+    },
+  });
+  assert.equal(peak, 2);
+  assert.deepEqual(started.slice(0, 3), ["build", "check", "lint"]);
+  assert.ok(events.indexOf("end:build") < events.indexOf("start:check"));
+  assert.ok(events.indexOf("end:format:check") < events.indexOf("start:test:product"));
+  assert.equal(started.at(-1), "test:product");
+  assert.deepEqual(
+    result.results.map(({ command }) => command),
+    commands,
+  );
+  assert.equal(result.results.find(({ command }) => command === "lint")?.status, "failed");
+  assert.equal(result.ok, false);
+});
+
+test("asynchronous npm checks attribute their own exit status", async () => {
+  const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-async-"));
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({ scripts: { fail: 'node -e "process.exit(7)"' } }),
+  );
+  const run = npmCommandRunner(root, true, 5_000, () => 5_000, new Set(["fail"]));
+  const result = await run("fail", "blocking", ["fixture"]);
+  assert.equal(result.status, "failed");
+  assert.equal(result.exitCode, 7);
+  assert.equal(result.errorKind, "exit");
+  assert.deepEqual(result.routes, ["fixture"]);
+});
+
+test("asynchronous npm checks respect the shared remaining budget", async () => {
+  const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-async-timeout-"));
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({ scripts: { slow: 'node -e "setTimeout(() => {}, 250)"' } }),
+  );
+  const run = npmCommandRunner(root, true, 50, () => 50, new Set(["slow"]));
+  const result = await run("slow", "blocking", ["fixture"]);
+  assert.equal(result.status, "failed");
+  assert.equal(result.errorKind, "timeout");
 });
 
 test("advisory failures are reported without failing the blocking result", async () => {
@@ -635,8 +708,81 @@ test("CLI attributes command timeout and persists the failure", () => {
   assert.equal(payload.results[0]?.errorKind, "timeout");
 });
 
+test("CLI spends one timeout budget across all blocking checks", () => {
+  const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-total-timeout-"));
+  mkdirSync(join(root, "docs"), { recursive: true });
+  writeFileSync(join(root, "docs", "owner.md"), "# Owner\n");
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({
+      name: "fixture",
+      version: "1.0.0",
+      scripts: {
+        slow: 'node -e "setTimeout(() => {}, 10000)"',
+        after: 'node -e "process.exit(0)"',
+      },
+    }),
+  );
+  writeFileSync(
+    join(root, "agent-context.yaml"),
+    "version: 1\nroutes:\n  - id: fixture\n    paths: [src/**]\n    owners: [docs/owner.md]\n    tests: []\n    verify:\n      blocking: [slow, after]\n      advisory: []\n",
+  );
+
+  const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      script,
+      "--root",
+      root,
+      "--scope",
+      "src/file.ts",
+      "--timeout-ms",
+      "50",
+      "--json",
+    ],
+    { encoding: "utf8", windowsHide: true, timeout: 5_000 },
+  );
+  assert.notEqual(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout) as { results: VerificationCommandResult[] };
+  assert.equal(payload.results.length, 2);
+  assert.equal(payload.results[1]?.status, "failed");
+  assert.equal(payload.results[1]?.durationMs, 0);
+  assert.match(payload.results[1]?.reason ?? "", /overall deadline/);
+});
+
+test("official verifier entry returns an incomplete failure when the worker exceeds its deadline", () => {
+  const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-watchdog-"));
+  const script = fileURLToPath(new URL("../../tools/agent-verify-watchdog.ts", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", script, "--root", root, "--timeout-ms", "1", "--json"],
+    { encoding: "utf8", windowsHide: true, timeout: 5_000 },
+  );
+  assert.notEqual(result.status, 0, result.stderr || result.stdout);
+  const payload = JSON.parse(result.stdout) as {
+    ok: boolean;
+    incomplete: boolean;
+    evidencePath: string;
+  };
+  assert.equal(payload.ok, false);
+  assert.equal(payload.incomplete, true);
+  const evidence = JSON.parse(readFileSync(payload.evidencePath, "utf8")) as {
+    result: { ok: boolean };
+    incomplete: boolean;
+  };
+  assert.equal(evidence.result.ok, false);
+  assert.equal(evidence.incomplete, true);
+});
+
 function narrowFixture(
-  options: { failRouteTest?: boolean; routeTests?: string; skipRouteTest?: boolean } = {},
+  options: {
+    failRouteTest?: boolean;
+    routeTests?: string;
+    skipRouteTest?: boolean;
+    omitSharedChecks?: boolean;
+  } = {},
 ): string {
   const root = mkdtempSync(join(tmpdir(), "nmg-agent-verify-narrow-"));
   mkdirSync(join(root, "plugin"), { recursive: true });
@@ -666,7 +812,7 @@ function narrowFixture(
   );
   writeFileSync(
     join(root, "agent-context.yaml"),
-    `version: 1\nroutes:\n  - id: plugin\n    paths: [plugin/**]\n    owners: []\n    tests: [${options.routeTests ?? "tests/plugin/**"}]\n    verify:\n      blocking: [check, test:product]\n      advisory: []\n`,
+    `version: 1\nroutes:\n  - id: plugin\n    paths: [plugin/**]\n    owners: []\n    tests: [${options.routeTests ?? "tests/plugin/**"}]\n    verify:\n${options.omitSharedChecks ? "      sharedChecks: none\n" : ""}      blocking: [check, test:product]\n      advisory: []\n`,
   );
   const git = (args: string[]) =>
     spawnSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true });
@@ -729,7 +875,7 @@ test("--full forces the declared blocking set instead of narrowing", () => {
 });
 
 test("a failing route test fails the narrow gate instead of passing vacuously", () => {
-  const result = runVerify(narrowFixture({ failRouteTest: true }));
+  const result = runVerify(narrowFixture({ failRouteTest: true, omitSharedChecks: true }));
   assert.notEqual(result.status, 0, result.stderr || result.stdout);
   const payload = JSON.parse(result.stdout) as {
     rcp?: { status: string; receiptPath?: string };
@@ -740,11 +886,12 @@ test("a failing route test fails the narrow gate instead of passing vacuously", 
   const receipt = JSON.parse(readFileSync(payload.rcp!.receiptPath!, "utf8")) as {
     checks: Array<{ name: string; status: string }>;
   };
+  assert.deepEqual(receipt.checks.map((check) => check.name), ["node-test:plugin"]);
   assert.equal(receipt.checks.find((check) => check.name === "node-test:plugin")?.status, "failed");
 });
 
 test("route test patterns that match no files fail closed", () => {
-  const result = runVerify(narrowFixture({ routeTests: "tests/nope/**" }));
+  const result = runVerify(narrowFixture({ routeTests: "tests/nope/**", omitSharedChecks: true }));
   assert.notEqual(result.status, 0, result.stderr || result.stdout);
   const payload = JSON.parse(result.stdout) as {
     rcp?: { status: string; receiptPath?: string };
@@ -759,7 +906,7 @@ test("route test patterns that match no files fail closed", () => {
 });
 
 test("route tests that are only skipped do not pass", () => {
-  const result = runVerify(narrowFixture({ skipRouteTest: true }));
+  const result = runVerify(narrowFixture({ skipRouteTest: true, omitSharedChecks: true }));
   assert.notEqual(result.status, 0, result.stderr || result.stdout);
   const payload = JSON.parse(result.stdout) as {
     rcp?: { status: string; receiptPath?: string };
@@ -815,7 +962,7 @@ test("a failed check restates its own last lines and names the evidence file", (
 });
 
 test("narrow mode restates the failing check's last lines too", () => {
-  const root = narrowFixture({ failRouteTest: true });
+  const root = narrowFixture({ failRouteTest: true, omitSharedChecks: true });
   const script = fileURLToPath(new URL("../../tools/agent-verify.ts", import.meta.url));
   const result = spawnSync(
     process.execPath,
